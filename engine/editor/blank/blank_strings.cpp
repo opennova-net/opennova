@@ -109,13 +109,4 @@ bool make_blank_expansion_table(const BlankRequest &request, std::vector<uint8_t
 	return write_table(table, request, out, error);
 }
 
-// An expansion's version text (version.txt): its only reader takes the checksum of its bytes
-// [orig: Expansion_LoadAssets @ 0x4a4858..0x4a4885]; the project's title on one line, as the shipped
-// one names its expansion.
-bool make_blank_expansion_version(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &) {
-	const std::string title = request.project_title.empty() ? request.logical_name : request.project_title;
-	blank_text_to_bytes(title + "\n", out);
-	return true;
-}
-
 } // namespace opennova::editor

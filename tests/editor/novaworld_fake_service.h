@@ -67,12 +67,13 @@ inline editor::NovaWorldResponse refusal(int status, const char *code) {
 class FakeService : public editor::NovaWorldTransport {
 public:
 	// MOD, the service's own game: its head and its manifests (by revision), whose account owns it
-	// ("" the service) and whether it is public.
+	// ("" the service), whether it is public, and the title it (and EXP, its mod) speaks.
 	int64_t head = 0;
 	std::map<int64_t, std::string> manifests;
 	std::string owner;
 	bool is_public = true;
 	bool retail = false;
+	std::string mod_game = "jo";
 	std::map<std::string, std::string> blobs; // every project's, by SHA-256
 	bool renew_next = false; // the next reply renews the admin's session
 	bool sessions_ended = false; // every signed-in request answered 401 (a session the service ended)
@@ -147,11 +148,11 @@ private:
 
 	bool find(const std::string &key, Ref &out) {
 		if (key == "MOD") {
-			out = { "MOD", "A mod", "game", "jo", "", "", owner, is_public, retail, &head, &manifests };
+			out = { "MOD", "A mod", "game", mod_game, "", "", owner, is_public, retail, &head, &manifests };
 			return true;
 		}
 		if (key == "EXP" && expansion) {
-			out = { "EXP", "An expansion", "expansion", "jo", "MOD", "exp", "", true, false,
+			out = { "EXP", "An expansion", "expansion", mod_game, "MOD", "exp", "", true, false,
 				&expansion_head, &expansion_manifests };
 			return true;
 		}
@@ -196,11 +197,23 @@ private:
 		return reply;
 	}
 
+	// A protocol as the service names it: {code, name, version} (the title's: JO's for jo and
+	// acidgambit, DFX2's for dfx2).
+	static io::JsonValue protocol_json(const std::string &title) {
+		io::JsonValue out = io::JsonValue::make_object();
+		const bool dfx2 = title == "dfx2";
+		out.set("code", io::json_string(dfx2 ? "dfx2" : "jo"));
+		out.set("name", io::json_string(dfx2 ? "DFX2" : "JO"));
+		out.set("version", io::json_string("16"));
+		return out;
+	}
+
 	static io::JsonValue release_json(const Release &r) {
 		io::JsonValue out = io::JsonValue::make_object();
 		out.set("id", io::json_number(double(r.id)));
 		out.set("name", io::json_string(r.key + " " + r.version));
 		out.set("version", io::json_string(r.version));
+		out.set("one_version", io::json_string("0.0.22"));
 		out.set("status", io::json_string(r.status));
 		out.set("review_note", io::json_string(r.note));
 		out.set("error", io::json_string(""));
@@ -234,7 +247,7 @@ private:
 				io::json_string(selected != made.end() && !selected->second.new_lobby_name.empty()
 								? selected->second.new_lobby_name
 								: "Mod lobby"));
-		lobby.set("title", io::json_string(p.game));
+		lobby.set("protocol", protocol_json(p.game));
 		const std::string artifact = "service-generated:" + slug;
 		lobby.set("gate_tag_file",
 				io::json_string(
@@ -249,7 +262,16 @@ private:
 			io::JsonValue row = io::JsonValue::make_object();
 			row.set("id", io::json_number(7));
 			row.set("version", io::json_string(release->second));
+			row.set("one_version", io::json_string("0.0.22"));
 			project.set("release", row);
+		}
+		// An expansion's version.txt as its release build writes it, once a release names its version.
+		if (p.kind == "expansion" && release != published.end()) {
+			const std::string line = p.title + ", V" + release->second + "; English\r\n";
+			project.set("version_file",
+					io::json_string(io::base64_encode(std::vector<uint8_t>(line.begin(), line.end()))));
+		} else {
+			project.set("version_file", io::JsonValue::make_null());
 		}
 		return project;
 	}
@@ -278,7 +300,7 @@ private:
 			m.game = body.get_string("game", "");
 			m.lobby = body.get_string("lobby", "");
 			m.new_lobby_name = body.get_string("new_lobby_name", "");
-			if (m.game != "jo" && m.game != "dfx2")
+			if (m.game != "jo" && m.game != "dfx2" && m.game != "acidgambit")
 				return refusal(400, "invalid_field");
 		} else if (m.kind == "expansion") {
 			m.base = body.get_string("base", "");
@@ -358,13 +380,13 @@ private:
 			io::JsonValue out = io::JsonValue::make_object();
 			out.set("projects", own);
 			out.set("games", games);
-			out.set("titles", io::json_string_array({ "jo", "dfx2" }));
+			out.set("titles", io::json_string_array({ "jo", "dfx2", "acidgambit" }));
 			io::JsonValue lobbies = io::JsonValue::make_array();
 			for (const char *title : { "jo", "dfx2" }) {
 				io::JsonValue lobby = io::JsonValue::make_object();
 				lobby.set("slug", io::json_string(std::string(title) + "_lobby"));
 				lobby.set("display_name", io::json_string(std::string(title) + " lobby"));
-				lobby.set("title", io::json_string(title));
+				lobby.set("protocol", protocol_json(title));
 				lobbies.push(std::move(lobby));
 			}
 			out.set("lobbies", std::move(lobbies));

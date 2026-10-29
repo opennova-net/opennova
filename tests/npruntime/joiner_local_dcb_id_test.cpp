@@ -15,8 +15,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/mission/mission_kernel.h>
@@ -43,7 +42,7 @@ int failures = 0;
 		}                                                                                      \
 	} while (0)
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 constexpr uint32_t kClientKey = 0x0000BEEFu;
 constexpr uint32_t kSessionId = 0x0FE0E112u;
 constexpr uint16_t kSelf = 0x0005; // the own body's wire slot
@@ -66,7 +65,8 @@ struct Harness {
 		kernel->world.registry.configure_pool(0, 16);
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("DcbJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };

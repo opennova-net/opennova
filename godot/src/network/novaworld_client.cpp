@@ -39,7 +39,7 @@
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/ping_sweep.h>
 #include <net/novaworld/proxy_rendezvous.h>
-#include <net/title/title_identity.h> // TitleIdentity::game_id (the hosting leg's cap)
+#include <net/protocol/protocol.h>
 #include <net/npwire/net_ports.h>
 
 #include <cstdio>
@@ -339,13 +339,13 @@ void NovaWorldClient::start() {
 
 	// The title the mounted game speaks and its gate tag (the title's, or the mount's
 	// gt.ssc's): a session without a witnessed identity does not start.
-	std::string title_error;
-	const opennova::TitleIdentity *title = ResourceRoot::session_title(resource_root_, title_error);
-	if (title == nullptr) {
-		enter_state(STATE_ERROR, String("no NovaWorld identity: ") + opennova::to_gd(title_error));
+	std::string protocol_error;
+	const opennova::Protocol *protocol = ResourceRoot::session_protocol(resource_root_, protocol_error);
+	if (protocol == nullptr) {
+		enter_state(STATE_ERROR, String("no NovaWorld identity: ") + opennova::to_gd(protocol_error));
 		return;
 	}
-	lobby_.set_title(title, ResourceRoot::session_gate_tag(resource_root_, *title));
+	lobby_.set_protocol(protocol, ResourceRoot::session_gate_tag(resource_root_, *protocol));
 	// Every NovaWorld menu entry of the process reads the one kept gate response (D-NET-706).
 	lobby_.set_gate_memory(&opennova::process_gate_memory());
 
@@ -929,7 +929,7 @@ TypedArray<NovaWorldServerRow> NovaWorldClient::get_server_rows() const {
 // touch the flow's cookie jar, so NWHANDLE/PCID survive login -> GSB -> join.
 void NovaWorldClient::sync_flow_context() {
 	opennova::LobbyHttpContext ctx;
-	ctx.title = lobby_.title();
+	ctx.protocol = lobby_.protocol();
 	ctx.gate_tag = lobby_.gate_tag();
 	if (server_info_.is_valid()) {
 		ctx.startup_url = opennova::to_std(server_info_->get_startup_url());
@@ -1566,7 +1566,7 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	cfg.server_name = opennova::to_std(options->get_server_name());
 	cfg.max_players = opennova::host_leg_max_players(options->get_max_players(),
 			!options->get_serve_and_play(),
-			lobby_.title() != nullptr ? lobby_.title()->game_id : opennova::gameprofile::GAME_JO);
+			ResourceRoot::session_title(resource_root_));
 	cfg.password = !options->get_server_password().is_empty();
 	cfg.listen_host = options->get_serve_and_play();
 	cfg.lan_only = options->get_server_lan_only();

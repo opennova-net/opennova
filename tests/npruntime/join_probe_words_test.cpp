@@ -13,11 +13,10 @@
 //  @0x51D820)]
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <base/io/le.h>
 #include <net/npwire/ingame_message_id.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h> // ClientProcessState
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/host_session.h>
@@ -86,7 +85,7 @@ void test_probe_words() {
 	CHECK(probe.payload[12] == 0x73u);
 }
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 // One authority mission start over a fresh kernel, a listen host whose process words are
 // `process`, kept standing so its server ticks can run (the role, declared last, goes first).
@@ -108,7 +107,7 @@ std::unique_ptr<HostMission> start_mission(inmatch::ClientProcessState &process,
 	options.game_type = game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "probe_words";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;

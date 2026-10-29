@@ -59,8 +59,8 @@ ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &e
 	const ArchiveSlot kept = recorded(asset, record);
 	if ((by_kind == ExpansionPlace::LanguageArchive || by_kind == ExpansionPlace::Archive) && archive_slot(kept))
 		return kept == ArchiveSlot::Language ? ExpansionPlace::LanguageArchive : ExpansionPlace::Archive;
-	// The expansion's own files where their row puts them (project/expansion_files: <b>.bin, version.txt
-	// and the music banks loose in the folder, the rest by kind).
+	// The expansion's own files where their row puts them (project/expansion_files: <b>.bin and the music
+	// banks loose in the folder, the rest by kind; its version.txt is NovaWorld's, BuildTarget::version_file).
 	if (const ExpansionFileRow *row = expansion_file_for(expansion, asset.logical_name))
 		if (row->placement == ExpansionPlacement::Folder) return ExpansionPlace::Folder;
 	// What the game reads from the expansion's folder by path (gt.ssc, the videos: base/vfs

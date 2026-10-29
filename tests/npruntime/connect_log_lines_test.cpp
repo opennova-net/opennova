@@ -22,7 +22,7 @@
 #include <net/npwire/peer_addr.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/protocol_message.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -58,7 +58,7 @@ int failures = 0;
 		}                                                                            \
 	} while (0)
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 class MemoryFiles final : public inmatch::ServerFileSink {
 public:
@@ -146,7 +146,7 @@ void test_dedicated_host_receive_lines() {
 	const std::string pn = kJo.pn;
 
 	// A probe: answered and taken.
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	const std::vector<uint8_t> probe =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	inmatch::HandleResult r = inmatch::handle_server_datagram(host.ctx, peer, probe.data(), probe.size());
@@ -209,7 +209,7 @@ void test_dedicated_host_receive_lines() {
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 (the socket pass @0x62C323 / @0x62C328);
 	//  the queued pass NapiNPProtocol_PumpRecvQueues @0x6266A0 (@0x6266CA..0x6267B2) after the
 	//  manager's drain]
-	ClientAuth auth = make_title_client_auth(kJo, 1, 0x55AA, 0x1234, "Joiner", "SCRK1");
+	ClientAuth auth = make_protocol_client_auth(kJo, 1, 0x55AA, 0x1234, "Joiner", "SCRK1");
 	const std::vector<uint8_t> join =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 	(void)inmatch::handle_server_datagram(host.ctx, peer, join.data(), join.size());
@@ -267,7 +267,7 @@ void test_listen_host_self_join_lines() {
 	CHECK(own != nullptr);
 	if (own == nullptr) return;
 	CHECK(own->client_ci != 0 && own->client_ck != 0 && !own->client_scrk.empty());
-	const ClientHello id = make_title_client_hello(kJo, own->client_ci);
+	const ClientHello id = make_protocol_client_hello(kJo, own->client_ci);
 	const size_t identity = tlv_str("CO", id.co) + tlv_str("AP", id.ap) + tlv_str("BDAT", id.bdat) +
 			tlv_str("PN", id.pn) + tlv("PG", 16) + tlv_str("PV1", id.pv1) + tlv_str("PV2", id.pv2) +
 			(id.pv3.empty() ? 0 : tlv_str("PV3", id.pv3));
@@ -334,7 +334,7 @@ void test_remote_joiner_client_lines() {
 	const std::string host_at = "10.0.0.1:32786";
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("LogJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);
 	const auto sending = [&](const std::vector<uint8_t> &dg, const char *opcode, int packet) {
@@ -474,7 +474,7 @@ void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
 	const std::string pn = kJo.pn != nullptr ? kJo.pn : "";
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("SplitJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);
 	const auto decode = [](const std::vector<uint8_t> &dg, uint8_t &opcode,
@@ -604,7 +604,7 @@ void test_remote_joiner_duplicate_hellos() {
 				inmatch::SocketMode::Lan, /*host_key=*/0x0FE0E11Au);
 		uint64_t now_ms = 1000;
 		inmatch::ClientRuntime client("DupJoiner", [&now_ms] { return now_ms; });
-		client.set_title(&kJo);
+		client.set_protocol(&kJo);
 		client.set_host_address(host_addr);
 		client.set_connect_log(&log);
 		const std::vector<uint8_t> hello = client.start();
@@ -692,7 +692,7 @@ void test_remote_joiner_destroy_tears_down_the_socket() {
 		log.start(inmatch::ConnectLogHeader{});
 		uint64_t now_ms = 1000;
 		inmatch::ClientRuntime client("TeardownJoiner", [&now_ms] { return now_ms; });
-		client.set_title(&kJo);
+		client.set_protocol(&kJo);
 		client.set_host_address(host_addr);
 		client.set_connect_log(&log);
 		const std::vector<uint8_t> hello = client.start();
@@ -768,7 +768,7 @@ void test_remote_joiner_destroy_drains_the_enumerator() {
 			inmatch::SocketMode::Lan, /*host_key=*/0x0FE0E11Au);
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("DrainJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);
 	const std::vector<uint8_t> hello = client.start();

@@ -6,6 +6,7 @@
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <base/resource_index/resource_index.h>
 #include <editor/preview/preview_units.h>
 #include <formats/def/def.h>
@@ -293,6 +294,9 @@ void WeaponRange::reset_() {
 	if (!ready_ || !tables_) return;
 	world_ = std::make_unique<world::World>();
 	world::World &world = *world_;
+	// The rules its rounds run (world::TitleRules): the default title's; the preview names no
+	// project's game.
+	world.rules.title_rules = &world::title_rules(default_title().code);
 	// The range fires as the game's single player does, out of a session: its rules
 	// word, whose 0x4000 spreads a player's shot by the weapon's ERROR
 	// (world::weapon_spread_rule).

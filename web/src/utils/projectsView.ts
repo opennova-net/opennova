@@ -25,7 +25,7 @@ export const NAME_MAX = 64;
 export const KEY_HINT = 'A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".';
 export const SHORT_NAME_HINT = 'A short name is 1 to 8 lowercase letters and digits.';
 export const NAME_HINT = 'A name is 1 to 64 characters.';
-export const VERSION_HINT = 'A version is one to four numbers between dots, such as 1.0 or 0.2.1.';
+export const VERSION_HINT = 'A game version is one to four numbers between dots, such as 0.2.0 or 1.0.';
 
 // A base game's name by its key, from the games a mod may be for
 // (GET /api/me/projects); the key itself when none has it.
@@ -33,13 +33,13 @@ export function baseName(key: string, games: readonly ProjectGame[]): string {
   return games.find((g) => g.key === key)?.title ?? key;
 }
 
-// "A mod of Joint Operations" or "A game for Joint Operations".
+// "A mod of Joint Operations" or "Runs as Joint Operations".
 export function projectKindLine(project: Project, games: readonly ProjectGame[]): string {
   if (project.kind === 'expansion') {
     if (project.base) return `A mod of ${baseName(project.base, games)}`;
     return project.game ? `A mod of ${titleName(project.game)}` : 'A mod';
   }
-  return project.game ? `A game for ${titleName(project.game)}` : 'A game';
+  return project.game ? `Runs as ${titleName(project.game)}` : 'A game';
 }
 
 export function visibilityLine(visibility: ProjectVisibility): string {

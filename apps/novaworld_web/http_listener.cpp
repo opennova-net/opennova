@@ -544,7 +544,9 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		return res;
 	});
 
-	// Every listing as the lobby stores it: its columns, its roster, and the
+	// Every listing as the lobby stores it: its columns, the protocol of the
+	// lobby it lists in ({code, name, version}, http_json.h protocol_or_null;
+	// null for a listing under no games row's LobbyName), its roster, and the
 	// joiners /NWJoin.dll recorded (each one's handle, account id and address).
 	// Admin only, like GET /api/admin/hosts: no page of the site reads it, and
 	// the joiners' addresses are theirs. Backed by active_hosts + host_players.
@@ -557,6 +559,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 			// One snapshot for the rows and every roster and player list read
 			// below, so no host goes out beside a roster from another commit.
 			db::ReadSnapshot snapshot(*db_conn);
+			const catalog::GameCatalog lobbies = catalog::GameCatalog::load(*db_conn);
 			auto rows = hostdb::list_hosts(*db_conn);
 			entries.reserve(rows.size());
 			// The host's own text comes in its code page (a stock host's cp1252)
@@ -579,7 +582,9 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 				e["country"]      = text(h.country);
 				e["exp"]          = text(h.exp);
 				e["exp_bits"]     = text(h.exp_bits);
-				e["ver1"]         = text(h.ver1);
+				const catalog::GameRow *lobby = lobbies.by_lobby_name(h.game);
+				protocol_or_null(e, "protocol",
+						lobby != nullptr ? protocol_by_code(lobby->protocol) : nullptr);
 				e["time_left"]    = text(h.time_left);
 				e["time_of_day"]  = text(h.time_of_day);
 				e["msg"]          = text(h.msg);
@@ -806,14 +811,13 @@ void HttpListener::register_public_api_routes() {
 			auto db_conn = db_pool_.acquire();
 			for (const auto &g : catalog::available_games(*db_conn)) {
 				crow::json::wvalue e;
-				// camelCase, mirroring the /api/lobbies casing.
+				// camelCase, mirroring the /api/lobbies casing; the protocol its clients
+				// speak as every route answers one (http_json.h protocol_or_null).
 				e["slug"]        = g.slug;
 				e["displayName"] = g.display_name;
 				e["lobbyName"]   = g.lobby_name;
 				e["gateTag"]     = g.gate_tag;
-				e["title"]       = g.title;
-				e["ver1"]        = g.ver1;
-				e["ver2"]        = g.ver2;
+				protocol_or_null(e, "protocol", protocol_by_code(g.protocol));
 				arr.push_back(std::move(e));
 			}
 			out["games"] = std::move(arr);

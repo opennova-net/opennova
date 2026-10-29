@@ -72,7 +72,6 @@
 #include <runtime/world/entity.h> // world::retail_pool_capacity
 #include <runtime/world/world.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_ftol.h> // retail_atol (the VERSIONCRCSTRING the host's check reads)
 #include <base/io/tick_rate.h>
 #include <formats/mission/bms.h>
@@ -85,7 +84,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // the twin joiner's 0x41 / 0x42
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include "common/nwmsg_fixture.h"
 #include "conn_fixture.h"
@@ -593,12 +592,12 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 	}
 
 	// --- the runtime ---
-	const TitleIdentity *title = title_identity(gameprofile::GAME_JO);
+	const Protocol *protocol = title_protocol("jo");
 	const std::shared_ptr<const rep::ItemReplicationCatalog> catalog = authored_catalog();
 	uint64_t now_ms = 1000;
 	auto runtime = std::make_unique<inmatch::ClientRuntime>(
 			"R3L", [&now_ms]() { return now_ms; });
-	runtime->set_title(title);
+	runtime->set_protocol(protocol);
 	runtime->view().set_item_catalog(catalog);
 	runtime->set_integrity_sources(sources);
 	runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0, self.handle,
@@ -718,7 +717,7 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 	// --- decode, per tag through a side reducer fed the same stream ---
 	{
 		auto side = std::make_unique<rep::ClientReplicaPipeline>();
-		side->set_title(title);
+		side->set_protocol(protocol);
 		side->set_item_catalog(catalog);
 		side->set_game_type(game_type);
 		side->set_mp_session(true);
@@ -1130,15 +1129,15 @@ void run_host_twin(const std::string &dir) {
 
 	// --- the twin joiner's 0x41 / 0x42 ---
 	uint32_t host_tick = 1;
-	const TitleIdentity &title = *title_identity(gameprofile::GAME_JO);
+	const Protocol &protocol = *title_protocol("jo");
 	{
 		const std::vector<uint8_t> hello = nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
-				client_hello_to_bytes(make_title_client_hello(title, 1)));
+				client_hello_to_bytes(make_protocol_client_hello(protocol, 1)));
 		(void)inmatch::handle_server_datagram(ctx, kTwinPeer, hello.data(), hello.size(), host_tick);
 	}
 	uint32_t server_sk = 0;
 	{
-		ClientAuth auth = make_title_client_auth(title, 1, kTwinClientKey, kTwinHostKey, "R3L-JOINER",
+		ClientAuth auth = make_protocol_client_auth(protocol, 1, kTwinClientKey, kTwinHostKey, "R3L-JOINER",
 				kTwinClientScrk);
 		add_stock_environment(auth);
 		const std::vector<uint8_t> datagram =

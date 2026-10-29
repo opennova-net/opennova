@@ -10,7 +10,6 @@
 //  Game_ProcessMainFrame @0x5268F1]
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/gamecfg/game_cfg.h>
@@ -25,7 +24,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // client_goodbye_to_bytes, make_disconnect_event
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h> // start_host_session (the process clock's install)
@@ -152,6 +151,7 @@ void test_consoles() {
 	int saves = 0;
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	seams.save_config = [&] { ++saves; };
 	const inmatch::RemoteAdminBinding menus;
 	consoles.bind(menus, seams);
@@ -249,7 +249,7 @@ void test_idle_scene() {
 	       "the menus pump again once the wait is over");
 }
 
-static const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+static const Protocol &kJo = *title_protocol("jo");
 
 // The joiner's dialed socket: what its role writes.
 struct CaptureSocket final : IDatagramSocket {
@@ -300,11 +300,12 @@ void test_joiner_console() {
 	const std::string server_scrk = "SERVER-ADMIN-JOINER-SCRK";
 	uint64_t now = 7000;
 	auto joiner = std::make_unique<inmatch::JoinerRole>();
+	joiner->set_rules(opennova::world::title_rules("jo"));
 	joiner->runtime = std::make_unique<inmatch::ClientRuntime>("AdminJoiner", [&now] { return now; });
 	inmatch::ClientRuntime &client = *joiner->runtime;
 	CaptureSocket socket;
 	joiner->set_socket(&socket, PeerAddr{0x0100007Fu, 32123});
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	joiner->seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
 	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
 	                    /*replay_mode=*/false);
@@ -322,6 +323,7 @@ void test_joiner_console() {
 	block.autobalance_on_recycle_enabled = 1;
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	std::vector<std::string> echoes;
 	seams.chat_echo = [&](const std::string &text) { echoes.push_back(text); };
 	seams.chat_window = [] { return std::vector<std::string>{"Ann: hi", "", "Bob: yo"}; };
@@ -495,6 +497,7 @@ void test_session_destroy_routes() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	seams.game_text = [](std::string_view section, std::string_view key) -> std::string {
 		if (section == "Overlays" && key == "STROVER64") return "Team Deathmatch";
 		if (section == "Overlays" && key == "STROVER29") return "Game Type Zero";
@@ -568,6 +571,7 @@ void test_menus_game_text() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	seams.game_text = inmatch::process_game_text(files, nullptr);
 	expect(static_cast<bool>(seams.game_text), "a mounted gametext answers");
 	consoles.bind(inmatch::RemoteAdminBinding{}, seams);
@@ -627,6 +631,7 @@ void test_joiner_cycle() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	uint64_t now = 1000;
 	inmatch::ClientRuntime client("CycleJoiner", [&now] { return now; });
 	client.seed_session(0x41444D4Eu, 1u, "CLIENT-CYCLE-SCRK", "SERVER-CYCLE-SCRK", 1, 0, 0x0002,
@@ -691,6 +696,7 @@ void test_joiner_cycle_zones() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	uint64_t now = 1000;
 	inmatch::ClientRuntime client("ZoneJoiner", [&now] { return now; });
 	client.seed_session(0x41444D4Eu, 1u, "CLIENT-ZONE-SCRK", "SERVER-ZONE-SCRK", 1, 0, 0x0002,
@@ -744,6 +750,7 @@ void test_authority_round_end_view() {
 		gamecfg::GameCfg block = gamecfg::defaults();
 		inmatch::AdminConsole::Seams seams;
 		seams.config_block = &block;
+		seams.config_title = opennova::title_by_code("jo");
 		inmatch::AdminConsole console(*ctx, std::move(seams));
 		console.set_scene(inmatch::AdminScene::GameLoop);
 		std::vector<std::string> replies;
@@ -765,6 +772,7 @@ void test_listen_host_and_single_player() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 
 	replication::LoopbackChannel host_loop;
 	inmatch::ClientRuntime own(host_loop);
@@ -821,6 +829,7 @@ void test_single_player_cycle() {
 		gamecfg::GameCfg block = gamecfg::defaults();
 		inmatch::AdminConsole::Seams seams;
 		seams.config_block = &block;
+		seams.config_title = opennova::title_by_code("jo");
 		inmatch::AdminConsole console(*ctx, std::move(seams));
 		console.set_scene(inmatch::AdminScene::GameLoop);
 		std::vector<std::string> replies;
@@ -877,6 +886,7 @@ void test_exit_frame_words() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	auto world = std::make_unique<world::World>();
 	auto host = std::make_unique<inmatch::NapiNPServerCtx>();
 	host->world = world.get();
@@ -972,10 +982,11 @@ void test_joiner_set_holds() {
 	auto kernel = std::make_unique<mission::MissionKernel>();
 	kernel->world.registry.configure_pool(0, 16);
 	auto role = std::make_unique<inmatch::JoinerRole>();
+	role->set_rules(opennova::world::title_rules("jo"));
 	role->bind(*kernel);
 	CaptureSocket socket;
 	role->set_socket(&socket, PeerAddr{0x0100007Fu, 32123});
-	role->set_title(&kJo);
+	role->set_protocol(&kJo);
 	role->create_runtime("SetJoiner", inmatch::JoinRole::Player, "", "");
 	role->kit_seams.apply_authoritative = [] {};
 	role->kit_seams.reseed_on_side_change = [] { return false; };
@@ -1003,6 +1014,7 @@ void test_joiner_set_holds() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	inmatch::RemoteAdminBinding joined;
 	joined.client = &client;
 	joined.joiner = role.get();
@@ -1089,7 +1101,7 @@ void test_host_uptime_reads_the_process_clock() {
 	owner->ctx.world = world.get();
 	uint32_t clock = 7000;
 	inmatch::HostConfig cfg;
-	cfg.title = &kJo;
+	cfg.protocol = &kJo;
 	cfg.config.server_name = "Clocked";
 	cfg.config.max_players = 8;
 	cfg.socket_mode = inmatch::SocketMode::Socketless;
@@ -1109,6 +1121,7 @@ void test_host_uptime_reads_the_process_clock() {
 	gamecfg::GameCfg block = gamecfg::defaults();
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	inmatch::RemoteAdminBinding hosted;
 	hosted.host = &ctx;
 	hosted.session = 1;
@@ -1116,7 +1129,7 @@ void test_host_uptime_reads_the_process_clock() {
 	expect(consoles.status_report().find("UP-TIME: 0 00:03:05\r\n") != std::string::npos,
 	       "the status report's UP-TIME reads the process clock");
 	const ServerHello hello =
-			inmatch::host_server_hello(ctx, make_title_client_hello(kJo, 1), PeerAddr{0x0100007Fu, 32110});
+			inmatch::host_server_hello(ctx, make_protocol_client_hello(kJo, 1), PeerAddr{0x0100007Fu, 32110});
 	expect(hello.ut == 185000u, "the 0x81's UT reads the process clock less the start's stamp");
 }
 

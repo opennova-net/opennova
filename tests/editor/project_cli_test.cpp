@@ -108,18 +108,23 @@ static int test_expansion_project() {
 	opennova::editor::Diagnostic error;
 	TEST_EXPECT(opennova::editor::create_project(root, "Mod", "jo", doc, error, opennova::editor::ProjectExpansion{ "jxm", "" }));
 	TEST_EXPECT(run({ "create-missing", root, "--install", install }) == 0);
-	for (const char *role : { "expansion_table", "expansion_version" })
-		TEST_EXPECT(run({ "create-missing", root, "--role", role }) == 0);
+	TEST_EXPECT(run({ "create-missing", root, "--role", "expansion_table" }) == 0);
+	// Its version.txt is NovaWorld's: none without one supplied, the supplied one in its folder.
 	TEST_EXPECT(run({ "build", root }) == 0);
+	const std::string plain = editor_test::last_good_build_dir(root + "/.opennova/build/play");
+	TEST_EXPECT(!plain.empty() && !fs::exists(plain + "/expansion/jxm/version.txt"));
+	const std::string version = dir.file("service/version.txt"), line = "Mod, V0.2.0; English\r\n";
+	TEST_EXPECT(test_io::write_text(version, line));
+	TEST_EXPECT(run({ "build", root, "--version-file", version }) == 0);
 	const std::string built = editor_test::last_good_build_dir(root + "/.opennova/build/play");
 	TEST_EXPECT(!built.empty() && fs::is_regular_file(built + "/expansion/jxm/jxm.pff") &&
 	            fs::is_regular_file(built + "/expansion/jxm/jxmL.pff") && fs::is_regular_file(built + "/expansion/jxm/jxm.bin") &&
-	            fs::is_regular_file(built + "/expansion/jxm/version.txt") && !fs::exists(built + "/language.pff"));
+	            test_io::read_file_text(built + "/expansion/jxm/version.txt") == line && !fs::exists(built + "/language.pff"));
 	TEST_EXPECT(archive_has(built + "/expansion/jxm/jxmL.pff", "gametext.bin") &&
 	            archive_has(built + "/expansion/jxm/jxm.pff", "main.mnu") && !archive_has(built + "/expansion/jxm/jxmL.pff", "jxm.bin"));
-	TEST_EXPECT(run({ "export", root }) == 0);
+	TEST_EXPECT(run({ "export", root, "--version-file", version }) == 0);
 	TEST_EXPECT(fs::is_regular_file(root + "/build/export/expansion/jxm/jxm.pff") &&
-	            fs::is_regular_file(root + "/build/export/expansion/jxm/version.txt") &&
+	            test_io::read_file_text(root + "/build/export/expansion/jxm/version.txt") == line &&
 	            fs::is_regular_file(root + "/build/export/export.json") && !fs::exists(root + "/build/export/language.pff"));
 	return 0;
 }
@@ -159,8 +164,8 @@ static int test_usage_errors() {
 	return 0;
 }
 
-// ADR 0046 S16: a project made as an expansion, its version text and (on the base game) its text table
-// made with it; `new` and `status` say what it builds as; an expansion the game cannot take, or one to
+// ADR 0046 S16: a project made as an expansion, (on the base game) its text table made with it, never a
+// version text (NovaWorld's); `new` and `status` say what it builds as; an expansion the game cannot take, or one to
 // build on with no name of its own, is refused with nothing made.
 static int test_new_expansion() {
 	test_temp::TempDir dir("opennova_editor_project_cli_expansion");
@@ -175,7 +180,7 @@ static int test_new_expansion() {
 	            text.find("--base-project") != std::string::npos && !fs::exists(dir.file("own")));
 	TEST_EXPECT(run_capture(dir.file("new.txt"), {"new", root, "--title", "Mod", "--expansion", "jxm"}, text) == 0 &&
 	            text.find("as the expansion jxm, on the base game") != std::string::npos);
-	TEST_EXPECT(fs::is_regular_file(root + "/version.txt") && fs::is_regular_file(root + "/strings/jxm.bin"));
+	TEST_EXPECT(!fs::exists(root + "/version.txt") && fs::is_regular_file(root + "/strings/jxm.bin"));
 	TEST_EXPECT(run_capture(dir.file("status.txt"), {"status", root}, text) == 0 &&
 	            text.find("expansion: jxm, on the base game") != std::string::npos);
 	opennova::editor::ProjectDocument doc;
@@ -830,6 +835,10 @@ static int test_service_gate_tag_file() {
 	TEST_EXPECT(test_io::read_file_text(root + "/build/export/gt.ssc") == encoded);
 	TEST_EXPECT(test_io::read_file_text(root + "/GT.SSC") == "obsolete authored file");
 	TEST_EXPECT(run({ "export", root, "--gate-tag-file", dir.file("missing.ssc") }) != 0);
+	// A base game has no version.txt: a build that names one is refused.
+	const std::string version = dir.file("service/version.txt"), line = "My mod, V0.1.0; English\r\n";
+	TEST_EXPECT(test_io::write_text(version, line));
+	TEST_EXPECT(run({ "build", root, "--gate-tag-file", supplied, "--version-file", version }) != 0);
 
 	// A linked expansion starts the missing linked base's export in another session. The
 	// worker's artifact must reach both that session and the expansion that resumes after it.
@@ -844,10 +853,13 @@ static int test_service_gate_tag_file() {
 	std::error_code moved;
 	fs::rename(root + "/build/export", root + "/.opennova/previous-export", moved);
 	TEST_EXPECT(!moved && !fs::exists(root + "/build/export"));
-	TEST_EXPECT(run({ "export", mod, "--gate-tag-file", supplied }) == 0);
+	// The expansion's version.txt reaches its own export alone, past the base's export it waits on.
+	TEST_EXPECT(run({ "export", mod, "--gate-tag-file", supplied, "--version-file", version }) == 0);
 	TEST_EXPECT(test_io::read_file_text(root + "/build/export/gt.ssc") == encoded);
 	TEST_EXPECT(test_io::read_file_text(mod + "/build/export/expansion/mymod/gt.ssc") == encoded);
-	TEST_EXPECT(!fs::exists(mod + "/gt.ssc"));
+	TEST_EXPECT(test_io::read_file_text(mod + "/build/export/expansion/mymod/version.txt") == line &&
+	            !fs::exists(root + "/build/export/version.txt"));
+	TEST_EXPECT(!fs::exists(mod + "/gt.ssc") && !fs::exists(mod + "/version.txt"));
 	return 0;
 }
 

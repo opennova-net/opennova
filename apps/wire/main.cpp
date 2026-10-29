@@ -42,9 +42,11 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/wire_capture.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <base/pcapio/pcap_reader.h>
+
+#include <games/games.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -171,17 +173,17 @@ uint32_t g_game_type = 0;
 inline bool gt_is_waypoint() { return game_type::is_waypoint_family(g_game_type); }
 inline bool gt_is_objective() { return game_type::is_objective(g_game_type); }
 
-// The session's title: `--game <code>`, else the PN the capture's first session
-// hello names (wire::handshake_title), else JO's. A DFX2 host's 0x0A objective
+// The session's protocol: `--game <code>`'s, else the one the PN the capture's first
+// session hello names (wire::handshake_protocol), else JO's. A DFX2 host's 0x0A objective
 // body carries the co-op checkpoint after the four values (DFX2-1).
-const TitleIdentity *g_title = nullptr;
-bool g_title_fixed = false; // --game given: the handshake does not override it
+const Protocol *g_protocol = nullptr;
+bool g_protocol_fixed = false; // --game given: the handshake does not override it
 inline FrameObjectiveBody gt_objective_body() {
-	return frame_objective_body(gt_is_objective(), title_in_match(g_title).objective_checkpoint);
+	return frame_objective_body(gt_is_objective(), protocol_in_match(g_protocol).objective_checkpoint);
 }
-void learn_title(const std::vector<uint8_t> &raw) {
-	if (g_title_fixed || g_title != nullptr) return;
-	g_title = wire::handshake_title(raw);
+void learn_protocol(const std::vector<uint8_t> &raw) {
+	if (g_protocol_fixed || g_protocol != nullptr) return;
+	g_protocol = wire::handshake_protocol(raw);
 }
 
 const char *class_name(EntityClass c) {
@@ -1815,6 +1817,7 @@ int run_handshake(const char *path) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	const char *path = nullptr;
 	const char *items_path = nullptr;
 	std::set<int> tag_filter;
@@ -1833,12 +1836,12 @@ int main(int argc, char *argv[]) {
 			items_path = argv[++i];
 		} else if (std::strcmp(a, "--game") == 0 && i + 1 < argc) {
 			std::string why;
-			g_title = resolve_title_identity(argv[++i], why);
-			if (g_title == nullptr) {
+			g_protocol = resolve_title_protocol(argv[++i], why);
+			if (g_protocol == nullptr) {
 				std::fprintf(stderr, "--game: %s\n", why.c_str());
 				return 1;
 			}
-			g_title_fixed = true;
+			g_protocol_fixed = true;
 		} else if (std::strcmp(a, "--hexcap-max") == 0 && i + 1 < argc) {
 			const long v = std::strtol(argv[++i], nullptr, 10);
 			if (v > 0) g_hexcap_max = static_cast<size_t>(v);
@@ -1939,7 +1942,7 @@ int main(int argc, char *argv[]) {
 		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class);
 		auto decode_and_print = [&](const net::PcapDatagram &pk) {
 			frame_timestamps[pk.frame_index] = pk.ts_nanos;
-			learn_title(pk.payload);
+			learn_protocol(pk.payload);
 			opennova::CaptureDatagram cd;
 			cd.frame_index = pk.frame_index;
 			cd.src_port = pk.srcport;
@@ -2005,7 +2008,7 @@ int main(int argc, char *argv[]) {
 		}
 		for (auto &pk : pkts) {
 			frame_timestamps[pk.frame_index] = pk.ts_nanos;
-			learn_title(pk.payload);
+			learn_protocol(pk.payload);
 			Datagram d;
 			d.srcport = pk.srcport;
 			d.dstport = pk.dstport;

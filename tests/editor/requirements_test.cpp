@@ -223,8 +223,8 @@ static int test_words_cover_the_manifest() {
 }
 
 // An expansion's own files (ADR 0046 S16): rows of a project that builds as one, by the names its
-// expansion forms, every one optional and in the manifest's place; none for a standalone project. The
-// blanks make its table and its version text.
+// expansion forms, every one optional and in the manifest's place; none for a standalone project, and
+// none for its version.txt (NovaWorld's). The blank makes its table.
 static int test_expansion_rows() {
 	test_temp::TempDir dir("opennova_editor_requirements_expansion_test");
 	ProjectDocument doc;
@@ -233,13 +233,13 @@ static int test_expansion_rows() {
 	const ProjectPaths paths = ProjectPaths::for_root(dir.file("X"));
 	const AssetScan empty = scan_project_assets(paths, doc);
 	const RequirementReport menu_only = evaluate_requirements(doc, empty);
-	for (const char *name : {"jxm.bin", "version.txt", "Mjxm.sbf", "Mjxm.bin"}) {
+	TEST_EXPECT(!row_named(menu_only, "version.txt"));
+	for (const char *name : {"jxm.bin", "Mjxm.sbf", "Mjxm.bin"}) {
 		const RequirementRow *row = row_named(menu_only, name);
 		TEST_EXPECT(row && !row->required && row->state == RequirementState::Missing && row->resource &&
 		            (row->resource->flags & RES_F_EXPANSION));
 	}
 	TEST_EXPECT(row_named(menu_only, "jxm.bin")->expected_kind == AssetKind::Strings &&
-	            row_named(menu_only, "version.txt")->expected_kind == AssetKind::Text &&
 	            row_named(menu_only, "Mjxm.sbf")->expected_kind == AssetKind::MusicBank &&
 	            row_named(menu_only, "Mjxm.bin")->expected_kind == AssetKind::MusicScript);
 	// The mission phase's (the game music, the banks) with the feature.
@@ -260,17 +260,13 @@ static int test_expansion_rows() {
 	doc.expansion = ProjectExpansion();
 	for (const RequirementRow &row : evaluate_requirements(doc, empty).rows)
 		TEST_EXPECT(!(row.resource->flags & RES_F_EXPANSION));
-	// The blanks: the table names the expansion by the project's title, the version text is a line.
+	// The blank: the table names the expansion by the project's title.
 	doc.expansion = ProjectExpansion{ "jxm", "" };
-	const CreateMissingResult made =
-			create_missing_requirements(paths, doc, empty, menu_only, {"expansion_table", "expansion_version"});
-	TEST_EXPECT(made.diagnostics.empty() && made.created.size() == 2);
+	const CreateMissingResult made = create_missing_requirements(paths, doc, empty, menu_only, {"expansion_table"});
+	TEST_EXPECT(made.diagnostics.empty() && made.created.size() == 1);
 	const RequirementReport after = evaluate_requirements(doc, scan_project_assets(paths, doc));
-	TEST_EXPECT(row_named(after, "jxm.bin")->state == RequirementState::Present &&
-	            row_named(after, "version.txt")->state == RequirementState::Present);
-	std::string text, io_error;
-	TEST_EXPECT(opennova::io::read_file_text(paths.root + "/" + row_named(after, "version.txt")->asset_path, text, io_error) &&
-	            text == "Escalation Two\r\n");
+	TEST_EXPECT(row_named(after, "jxm.bin")->state == RequirementState::Present && !row_named(after, "version.txt"));
+	std::string io_error;
 	std::vector<uint8_t> table;
 	TEST_EXPECT(opennova::io::read_file_bytes(paths.root + "/" + row_named(after, "jxm.bin")->asset_path, table, io_error));
 	opennova::rtxt::File parsed;

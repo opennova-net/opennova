@@ -2,9 +2,9 @@
 #include <runtime/inmatch/host_settings.h> // mission_session_title (the session title)
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h> // the title's version text (the own 0x0B's dword)
 #include <base/io/log.h>
 #include <base/io/perf_clock.h>
+#include <base/version/one_build.h> // the own 0x0B's version dword
 #include <base/vfs/vfs.h> // vfs_country_code (a held player's PLAYER report's GCC)
 #include <formats/mission/bms.h>
 #include <formats/playersav/player_sav.h>
@@ -12,7 +12,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // DisconnectEvent
-#include <net/title/title_identity.h> // title_in_match (the rules word's bits, DFX2-18)
+#include <net/protocol/protocol.h> // protocol_in_match (the rules word's bits, DFX2-18)
 #include <runtime/inmatch/game_config_block.h> // kSinglePlayerMpAttrib
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h> // build_mission_status (the own C2S 0x0B)
@@ -128,18 +128,18 @@ void HostRole::reset_session(bool serve_and_play) {
 //  @0x561C23 (SinglePlayer_StartMission), ahead of GameLoop_Init's Game_StartMission call
 //  @0x526377, which seeds nothing]
 void HostRole::bind_session_world(const inmatch::GameConfig &config, bool serve_and_play,
-		bool in_session, const TitleIdentity *title) {
+		bool in_session, const Protocol *protocol) {
 	mission::MissionKernel &kernel = *kernel_;
 	local_round_reset_seen_ = kernel.local.round_reset_revision;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	ctx.world = &kernel.world;
 	ctx.mission = &kernel.mission;
 	kernel.world.crt_rand = client_process_->crt_rand;
-	apply_rule_words(config, serve_and_play, in_session, title);
+	apply_rule_words(config, serve_and_play, in_session, protocol);
 }
 
 void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play,
-		bool in_session, const TitleIdentity *title) {
+		bool in_session, const Protocol *protocol) {
 	mission::MissionKernel &kernel = *kernel_;
 	// The process's loadout name list, whose first name every body the session spawns takes
 	// as its equipped weapon (world::player_spawn_equipped_default) [orig:
@@ -164,7 +164,7 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// authority then ORs the scope-zero bit 0x10000 into the word, in a session or out
 	// (DFX2-18) [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)].
 	const uint32_t rules_word = (in_session ? config.mp_attributes : GameConfig::kSpRulesWord) |
-			title_in_match(title).rules_word_bits;
+			protocol_in_match(protocol).rules_word_bits;
 	kernel.world.rules.mpattrib = rules_word;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
@@ -274,15 +274,18 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
-	// The title the session speaks: the host's own view reads its loopback bodies by it.
-	state.client_runtime->view().set_title(state.host_owner.ctx.np_protocol.identity);
+	// The title the session speaks and the rules it runs: the host's own view reads its loopback
+	// bodies by them.
+	state.client_runtime->view().set_protocol(state.host_owner.ctx.np_protocol.identity);
+	state.client_runtime->view().set_rules(state.host_owner.ctx.config.rules);
 	if (item_catalog_)
 		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
-GameConfig singleplayer_game_config(uint32_t game_type,
+GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 		const playersav::ProfileRecord *profile) {
 	inmatch::GameConfig config;
+	config.set_title(title);
 	config.server_name = "SINGLEPLAYERGAME";
 	config.mp_attributes = static_cast<uint32_t>(kSinglePlayerMpAttrib);
 	config.max_players = 1;
@@ -318,9 +321,9 @@ GameConfig singleplayer_game_config(uint32_t game_type,
 }
 
 // [orig: SinglePlayer_StartMission @0x561af0]
-void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
+void HostRole::bring_up_singleplayer(const Title &title, const playersav::ProfileRecord *profile) {
 	mission::MissionKernel &kernel = *kernel_;
-	const inmatch::GameConfig config = singleplayer_game_config(
+	const inmatch::GameConfig config = singleplayer_game_config(title,
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags), profile);
 	// The create: the start's round-state init, then the session create, ahead of the Game Loop's
 	// mission start [orig: SinglePlayer_StartMission - Server_InitNewRoundState called @0x561C23,
@@ -448,7 +451,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
 	bind_session_world(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
-			host_cfg.title);
+			host_cfg.protocol);
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (!head_run) {
 		// The authority's mission start steps the process's file-transfer session words, which
@@ -624,7 +627,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.rotation = rotation_;
 	ctx.host_client = nullptr;
 	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
-			host_cfg.title);
+			host_cfg.protocol);
 	// The process's CRT stream the teardown handed back, onto the next mission's World: the
 	// session's one seed runs on (ClientProcessState::crt_rand).
 	kernel.world.crt_rand = client_process_->crt_rand;
@@ -802,7 +805,7 @@ void HostRole::apply_own_world_state_load(mission::MissionKernel &kernel,
 //  NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
 void HostRole::send_own_mission_status() {
 	if (state.host_owner.ctx.is_mp_session_peer == 0 || !state.client_runtime) return;
-	const TitleIdentity *title = state.host_owner.ctx.np_protocol.identity;
+	const Protocol *protocol = state.host_owner.ctx.np_protocol.identity;
 	// In a session the own client's mission start submits its profile's kit twice
 	// ahead of the 0x0B, as a joiner's does: the side block the local team names, its
 	// class byte and the kit page it selects, first with the fixed slot 195, then
@@ -839,7 +842,7 @@ void HostRole::send_own_mission_status() {
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
 						weapons, &kernel.local.inventory, team,
 						kernel.local.inventory.current_slot));
-			if (title_in_match(title).loadout_class_fixed)
+			if (protocol_in_match(protocol).loadout_class_fixed)
 				submit.player_class =
 						kernel.mission.header.mission_type == bms::MissionType::CombatVehicleMission
 						? uint8_t{7}
@@ -851,11 +854,8 @@ void HostRole::send_own_mission_status() {
 		(void)state.client_runtime->queue_host_message(c2s::LOADOUT_SUBMIT,
 				encode_loadout_submit(submit_for(/*alternate=*/true)));
 	}
-	const gameprofile::GameProfile *profile =
-			title != nullptr ? gameprofile::gameprofile_by_id(title->game_id) : nullptr;
 	if (!state.client_runtime->queue_host_message(c2s::MISSION_FILE_STATUS,
-				build_mission_status(std::string_view{},
-						packed_game_version(profile != nullptr ? profile->version_text : nullptr))))
+				build_mission_status(std::string_view{}, one_build().wire_version().packed())))
 		return;
 	state.client_runtime->flush_host_sends();
 }
@@ -1467,7 +1467,7 @@ void HostRole::close() {
 		unstopped.session_name = ctx.np_protocol.session_name;
 		// The one game protocol's name, which the manager's PROTOCOL line prints for a held
 		// node's datagram (receive_unstopped_server).
-		const TitleIdentity *identity = ctx.np_protocol.identity;
+		const Protocol *identity = ctx.np_protocol.identity;
 		unstopped.protocol_name =
 				identity != nullptr && identity->pn != nullptr ? identity->pn : "";
 		// The protocol's words the held hello handler answers from: its identity, its start

@@ -4,8 +4,7 @@
 
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/browser_cache.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 
 #include <net/novaworld/gsb.h>
 #include <net/novacrypto/epask.h>
@@ -22,8 +21,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace nw = opennova;
 
@@ -155,8 +154,8 @@ static std::string posted_plaintext(const std::vector<std::pair<std::string, std
 // Concrete (OpenNova) context: a non-templated startup_url -> login skips NWSTART, base derived from it.
 static nw::LobbyHttpContext concrete_ctx() {
 	nw::LobbyHttpContext c;
-	c.title = &kJo;
-	c.gate_tag = c.title->gate_tag;
+	c.protocol = &kJo;
+	c.gate_tag = c.protocol->gate_tag;
 	c.startup_url = "http://gs.opennova.test:8080/NWStart.dll?prepare=1";
 	c.post_ip = "gs.opennova.test";
 	c.post_port = "8080";
@@ -222,8 +221,8 @@ static bool show_jo_lobby(nw::LobbyHttpFlow &f) {
 static bool test_url_builders() {
 	nw::LobbyHttpFlow f;
 	nw::LobbyHttpContext c;
-	c.title = &kJo;
-	c.gate_tag = c.title->gate_tag;
+	c.protocol = &kJo;
+	c.gate_tag = c.protocol->gate_tag;
 	// Templated startup_url + web_domain.
 	c.startup_url = "http://[domainname]/[VER1]/[VER2]/[CC]/[GT]/start";
 	c.web_domain = "gs.novaworld.net:80";
@@ -241,8 +240,8 @@ static bool test_url_builders() {
 	// [orig: Mission_DeobfuscateDescription @0x4cdaa0 via NapiUtil_ReplaceAllCaseInsensitive].
 	nw::LobbyHttpFlow fm;
 	nw::LobbyHttpContext cm;
-	cm.title = &kJo;
-	cm.gate_tag = cm.title->gate_tag;
+	cm.protocol = &kJo;
+	cm.gate_tag = cm.protocol->gate_tag;
 	cm.startup_url = "http://[DomainName]/[ver1]/[Ver2]/[cc]/[gt]/[ProductCode]/start";
 	cm.web_domain = "gs.novaworld.net:80";
 	cm.locale = "en_GB";
@@ -256,8 +255,8 @@ static bool test_url_builders() {
 		std::fprintf(stderr, "  got: %s\n", fm.http_base().c_str());
 	nw::LobbyHttpFlow fp;
 	nw::LobbyHttpContext cp;
-	cp.title = &kJo;
-	cp.gate_tag = cp.title->gate_tag;
+	cp.protocol = &kJo;
+	cp.gate_tag = cp.protocol->gate_tag;
 	cp.startup_url = "http://static.example/[VER1]/start"; // no [DOMAINNAME]: still a template
 	fp.set_context(cp);
 	expect(fp.resolve_startup_url() == "http://static.example/3/start",
@@ -275,8 +274,8 @@ static bool test_url_builders() {
 	// Fallback to post_ip:post_port when there is no startup_url.
 	nw::LobbyHttpFlow f3;
 	nw::LobbyHttpContext c3;
-	c3.title = &kJo;
-	c3.gate_tag = c3.title->gate_tag;
+	c3.protocol = &kJo;
+	c3.gate_tag = c3.protocol->gate_tag;
 	c3.post_ip = "10.0.0.7";
 	c3.post_port = "28910";
 	f3.set_context(c3);
@@ -397,8 +396,8 @@ static bool test_login_success_concrete() {
 static bool test_login_templated_nwstart() {
 	nw::LobbyHttpFlow f;
 	nw::LobbyHttpContext c;
-	c.title = &kJo;
-	c.gate_tag = c.title->gate_tag;
+	c.protocol = &kJo;
+	c.gate_tag = c.protocol->gate_tag;
 	c.startup_url = "http://[domainname]/[VER1]/[VER2]/[CC]/[GT]/prep";
 	c.web_domain = "gs.novaworld.net";
 	c.locale = "en_US";
@@ -449,8 +448,8 @@ static bool test_login_templated_nwstart() {
 	{
 		nw::LobbyHttpFlow d;
 		nw::LobbyHttpContext dc;
-		dc.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
-		dc.gate_tag = dc.title->gate_tag;
+		dc.protocol = nw::title_protocol("dfx2");
+		dc.gate_tag = dc.protocol->gate_tag;
 		dc.startup_url = "http://[domainname]/nwprepare.dll?gt=[GT]&url=dfx2_0_start.htm";
 		dc.web_domain = "gs.novaworld.net";
 		d.set_context(dc);
@@ -482,8 +481,8 @@ static bool test_login_failures() {
 	{
 		nw::LobbyHttpFlow f;
 		nw::LobbyHttpContext c;
-		c.title = &kJo;
-		c.gate_tag = c.title->gate_tag;
+		c.protocol = &kJo;
+		c.gate_tag = c.protocol->gate_tag;
 		c.startup_url = "http://[domainname]/prep";
 		c.web_domain = "gs.novaworld.net";
 		f.set_context(c);
@@ -1271,8 +1270,8 @@ static bool test_page_template_file() {
 
 static nw::LobbyHttpContext templated_ctx() {
 	nw::LobbyHttpContext c;
-	c.title = &kJo;
-	c.gate_tag = c.title->gate_tag;
+	c.protocol = &kJo;
+	c.gate_tag = c.protocol->gate_tag;
 	c.startup_url = "http://[domainname]/nwprepare.dll?ver1=[VER1]&gt=[GT]&url=jop_2_start.htm";
 	c.web_domain = "gs.novaworld.net";
 	c.locale = "en_US";
@@ -1548,8 +1547,8 @@ static bool test_sign_in_post_is_the_pages_form() {
 
 	// DFX2: the page's charglsvssrequest follows the template's edits.
 	nw::LobbyHttpContext c = concrete_ctx();
-	c.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
-	c.gate_tag = c.title->gate_tag;
+	c.protocol = nw::title_protocol("dfx2");
+	c.gate_tag = c.protocol->gate_tag;
 	nw::LobbyHttpFlow d;
 	d.set_context(c);
 	d.login("p", "s");
@@ -1706,8 +1705,8 @@ static bool test_sign_in_refill_gate_login_flag() {
 	nw::LobbyHttpContext jo = templated_ctx();
 	jo.remember_login = true;
 	nw::LobbyHttpContext dfx2 = jo;
-	dfx2.title = nw::title_identity(nw::gameprofile::GAME_DFX2);
-	dfx2.gate_tag = dfx2.title->gate_tag;
+	dfx2.protocol = nw::title_protocol("dfx2");
+	dfx2.gate_tag = dfx2.protocol->gate_tag;
 	dfx2.startup_url = "http://[domainname]/nwprepare.dll?gt=[GT]&url=dfx2_0_start.htm";
 
 	// JO: the gate never closes; a failed typed login, the page shown again, the fill re-run.

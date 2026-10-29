@@ -45,6 +45,10 @@
         <dl class="card grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 p-4 text-sm">
           <dt class="text-ink-muted">{{ gameName(server) }}</dt>
           <dd>{{ versionText(server.data.base) }}</dd>
+          <template v-if="server.product?.protocol">
+            <dt class="text-ink-muted">Protocol</dt>
+            <dd id="hosted-server-protocol">{{ protocolWords(server.product.protocol) }}</dd>
+          </template>
           <template v-if="server.expansion || server.data.expansion">
             <dt class="text-ink-muted">{{ expansionName }}</dt>
             <dd>{{ versionText(server.data.expansion) }}</dd>
@@ -160,7 +164,7 @@ import { fetchProducts } from '../../api/products';
 import { fetchMyServers, updateHostedServer } from '../../api/hostedServer';
 import { confirmAction } from '../../composables/useConfirm';
 import type { HostedEvent, HostedProduct, HostedServer, PinnedTree } from '../../types/hostedServer';
-import { gameName, serverName } from '../../utils/games';
+import { gameName, protocolWords, serverName } from '../../utils/games';
 import { FIELD_LABELS, sendCadenceText } from '../../utils/hostedSettings';
 import {
   OWNER_START_STEPS,
@@ -250,7 +254,7 @@ const current = computed(() => {
   return versions ? { base: versions.get(productId ?? -1) ?? '', expansion: versions.get(expansionId ?? -1) ?? '' } : null;
 });
 
-// "Joint Operations 1.7.5.9 available" (and the expansion's, when it is the
+// "Joint Operations 1.0.9 available" (and the expansion's, when it is the
 // newer one); without the versions, "Update available".
 const updateText = computed(() => {
   const now = current.value;

@@ -17,3 +17,6 @@ if(WIN32)
   target_link_libraries(opennova_project PRIVATE shell32)
 endif()
 target_compile_features(opennova_project PRIVATE cxx_std_17)
+
+# Every game's titles and protocols, which main.cpp installs at its start (games/games.h).
+target_link_libraries(opennova_project PRIVATE opennova_games)

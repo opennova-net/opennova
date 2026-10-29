@@ -57,7 +57,7 @@ describe('MachineCard', () => {
     );
     expect(card.findAll('.machine-flag').map((f) => f.text())).toEqual([
       'Lost, held by the brake',
-      'Protocol 2 mismatch, held 2 minutes',
+      'Agent protocol 2 mismatch, held 2 minutes',
       'Older than the release: hostd image',
     ]);
     expect(card.text()).toContain('Lost (no reports)');

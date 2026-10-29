@@ -364,8 +364,10 @@ inline bool scale_to(std::vector<File> &files, size_t count, uint64_t bytes, std
 // beside them, the expansion `expansion`'s `expansion_files` into its pair and its folder (route_for_expansion: its
 // language slot's kinds in <e>L.pff, the others in <e>.pff, its own table, version text and music banks loose in
 // expansion/<e>/), each archive's entries in their names' order, each stamped PFF_NEW_ENTRY_TIMESTAMP as a build
-// stamps them (the effect loaders skip an entry of 0, D-VFS-12). A file no build packs (no kind the game reads) is
-// left out. False, with `error`, when a file cannot be written.
+// stamps them (the effect loaders skip an entry of 0, D-VFS-12), and JO:CA's UPDATE.WIZ beside them, naming its
+// JOPTR.CMD (the install is Joint Operations', boot_policy.h folder_product: a folder with no wizard is OP: Acid
+// Gambit's). A file no build packs (no kind the game reads) is left out. False, with `error`, when a file cannot be
+// written.
 inline bool write_install(const std::string &dir, const std::vector<File> &base, const std::string &expansion,
                           const std::vector<File> &expansion_files, std::string &error) {
 	using namespace opennova::editor;
@@ -420,6 +422,10 @@ inline bool write_install(const std::string &dir, const std::vector<File> &base,
 			error = dir + "/" + path + " cannot be written";
 			return false;
 		}
+	if (!test_io::write_text(dir + "/UPDATE.WIZ", "[HEADER]\r\nCMD=JOPTR.CMD\r\nPRODUCT_LOGIN=JOTRqq\r\n")) {
+		error = dir + "/UPDATE.WIZ cannot be written";
+		return false;
+	}
 	return true;
 }
 

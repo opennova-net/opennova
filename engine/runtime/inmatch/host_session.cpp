@@ -24,7 +24,7 @@
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the process's GetTickCount)
 #include <formats/mission/bms.h>
 #include <runtime/mission/promote.h> // mission_availability_pairs (the item_availability chunk)
-#include <net/title/title_identity.h> // title_in_match (the availability values, DFX2-10)
+#include <net/protocol/protocol.h> // protocol_in_match (the availability values, DFX2-10)
 
 #include <algorithm>
 #include <cstddef>
@@ -50,7 +50,7 @@ namespace {
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
-	startup.title = cfg.title;
+	startup.protocol = cfg.protocol;
 	startup.text_override = cfg.text_override;
 	// The host key, from the manager's PRNG (D-NET-524).
 	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the
@@ -663,11 +663,12 @@ namespace {
 // change's World alike.
 void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 	if (owner.ctx.world == nullptr) return;
-	// The rules the session's title runs (world::SessionRules::title): the in-match title
-	// branches read it, the match its built-in score table.
-	owner.ctx.world->rules.title = owner.ctx.config.title;
+	// The rules the session's title runs (world::SessionRules::title_rules): the in-match
+	// knobs read them, the match its built-in score table and its scoring knobs.
+	const world::TitleRules &title_rules = owner.ctx.config.title_rules();
+	owner.ctx.world->rules.title_rules = &title_rules;
 	world::MatchRules match_rules;
-	match_rules.title = owner.ctx.config.title;
+	match_rules.title_rules = &title_rules;
 	match_rules.game_type = owner.ctx.config.game_type;
 	// SET GameTime feeds g_RoundTimeLimitMinutes (GameConfig::round_time_limit_minutes);
 	// KOTHLimit/time_limit_minutes is unrelated.
@@ -737,7 +738,7 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	ctx.weapon_restrictions.clear();
 	if (ctx.world == nullptr) return;
 	const world::WeaponTable &table = ctx.world->tables.weapons;
-	const int32_t armory = title_in_match(ctx.np_protocol.identity).armory_only_availability;
+	const int32_t armory = protocol_in_match(ctx.np_protocol.identity).armory_only_availability;
 	const int32_t mission_value = armory == 2 ? 3 : 2;
 	std::vector<std::pair<std::string, int32_t>> pairs;
 	if (ctx.mission != nullptr) pairs = mission::mission_availability_pairs(*ctx.mission);

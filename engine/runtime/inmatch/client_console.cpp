@@ -288,8 +288,13 @@ bool client_process_local_command(const std::string &line, const ClientLocalComm
 		return true;
 	}
 	if (strutil::starts_with_icase(line, "VERSION")) {
+		// Retail's line is its startup words, "Version " + g_VersionText + "  - " + g_TitleText
+		// [orig: Client_ProcessLocalCommand @0x520BF0 - the VERSION test @0x520D8E, the words
+		//  dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0; Game_ParseCommandLineAndInit
+		//  @0x4A7310 - &g_TitleText @0x4A7CFB, the title sprintf from off_8154D8
+		//  @0x4A7D30..0x4A7D3C]; ours names the game's versions (D-MNU-76).
 		if (seams.version_line)
-			seams.version_line("Version " + seams.version_text + "  - " + seams.title_text);
+			seams.version_line(utf8_to_retail_text(seams.versions));
 		return true;
 	}
 	if (seams.in_session || line.empty()) return false;

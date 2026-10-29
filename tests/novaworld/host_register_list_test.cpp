@@ -132,7 +132,8 @@ int main(int argc, char **argv) {
 	// The GSB projection carries the stored columns and the roster names, and
 	// the parsed blob's player total counts them (the retail browser adds the
 	// row's u16 name count to its total). The host reported no VER1 or
-	// Expbits, so those are its game's (the games row the route passes).
+	// Expbits, so those are its game's (its lobby's protocol's VER1 and its
+	// games row's Expbits, which the route passes).
 	auto entry = opennova::hostdb::gsb_entry_from_host(*row_a, roster, { "3", "3" });
 	TEST_EXPECT(entry.ver1 == "3" && entry.exp_bits == "3");
 	{

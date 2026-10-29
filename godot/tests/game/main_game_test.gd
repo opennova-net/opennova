@@ -11,7 +11,7 @@ const HudHiddenCaptureWitness := preload(
 const STATE_CONFIG_PATH := "user://opennova.cfg"
 static var FIXTURE_DIR := RuntimeFixture.directory()
 const POLICY_FILE := "policy.bin"
-const POLICY_PLAIN := "explicit game profile reached the mounted root"
+const POLICY_PLAIN := "explicit /game title reached the mounted root"
 const SCR_KEY_DEFAULT := 0xabee_face
 
 var _config: TestFs.Snapshot
@@ -389,7 +389,7 @@ func test_runtime_root_honors_the_explicit_game_profile() -> void:
 	assert_not_null(root, "the live menu exposes its mounted runtime root")
 	if root != null:
 		assert_eq(root.read_file(POLICY_FILE).get_string_from_utf8(), POLICY_PLAIN,
-				"the explicit /game profile selects the root's SCR policy")
+				"the explicit /game title selects the root's SCR policy")
 
 
 func test_mission_text_effect_reaches_hud_objective() -> void:

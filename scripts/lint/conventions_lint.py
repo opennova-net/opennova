@@ -39,7 +39,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
-CODE_PREFIXES = ("engine/", "godot/", "apps/", "tests/", "scripts/")
+CODE_PREFIXES = ("engine/", "games/", "godot/", "apps/", "tests/", "scripts/")
 CODE_SUFFIXES = (".cpp", ".cc", ".c", ".h", ".hpp", ".gd", ".tscn", ".tres", ".gdshader",
                  ".gdshaderinc", ".py", ".ps1", ".sh", ".cmake", ".txt", ".json", ".cfg")
 HARD_EXCLUDES = ("third_party/", "godot/addons/", "/build/", "scripts/lint/conventions_lint.py")

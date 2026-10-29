@@ -847,7 +847,7 @@ int main() {
         spawn_marker(w, 6002, {7.0f, 7.0f, 0.0f}); // the solo fallback, outside co-op
         const EntityHandle checkpoint = spawn_marker(w, 6005, {50.0f, 60.0f, 5.0f}, 45);
 
-        w.rules.title = opennova::gameprofile::GAME_DFX2;
+        w.rules.title_rules = &opennova::world::title_rules("dfx2");
         SpawnPointResult r = resolve_player_spawn_pose(
             w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
         CHECK(r.found && approx(r.position.x, 1.0f) && r.heading_bam == placed_heading_bam(90)); // 0xFFFF: none yet
@@ -862,7 +862,7 @@ int main() {
         r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, 0x0u);
         CHECK(r.found && approx(r.position.x, 7.0f)); // deathmatch: no checkpoint arm
 
-        w.rules.title = opennova::gameprofile::GAME_JO;
+        w.rules.title_rules = &opennova::world::title_rules("jo");
         r = resolve_player_spawn_pose(w, EntityHandle{}, EntityHandle{}, 0, 1, 0x10020u);
         CHECK(r.found && approx(r.position.x, 1.0f) && r.heading_bam == placed_heading_bam(90));
     }

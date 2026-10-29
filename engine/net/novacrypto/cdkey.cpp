@@ -133,48 +133,50 @@ void mix_up(std::string &text, std::string_view fingerprint) {
 	mix(text, fingerprint, true);
 }
 
-std::string make_wire_key(std::string_view serial) {
-	return encode_key_chain(bytes_of(serial), kDfx2WireChain);
+std::string make_wire_key(const KeyChains &chains, std::string_view serial) {
+	return encode_key_chain(bytes_of(serial), chains.wire);
 }
 
 // [orig: CDKey_DecodeWireJoinChain @0x411b40 (dfx2.exe): NapiNP_DecodeEncryptedString under
 //  the descriptor's +16 chain @0x411b88]
-bool decode_wire_key(std::string_view wire_key, std::string &serial) {
+bool decode_wire_key(const KeyChains &chains, std::string_view wire_key, std::string &serial) {
 	serial.clear();
 	std::vector<uint8_t> plaintext;
-	if (!decode_key_chain(std::string(wire_key), kDfx2WireChain, plaintext, kDecodeRoom))
+	if (!decode_key_chain(std::string(wire_key), chains.wire, plaintext, kDecodeRoom))
 		return false;
 	serial.assign(plaintext.begin(), plaintext.end());
 	return true;
 }
 
-std::string make_activation(std::string_view wire_key, std::string_view fingerprint) {
-	std::string registry = encode_key_chain(bytes_of(wire_key), kDfx2RegistryChain);
+std::string make_activation(
+		const KeyChains &chains, std::string_view wire_key, std::string_view fingerprint) {
+	std::string registry = encode_key_chain(bytes_of(wire_key), chains.registry);
 	mix_up(registry, fingerprint);
 	return registry;
 }
 
-bool read_activation(std::string_view nwact, std::string_view fingerprint, std::string &wire_key) {
+bool read_activation(const KeyChains &chains, std::string_view nwact, std::string_view fingerprint,
+		std::string &wire_key) {
 	wire_key.clear();
 	std::string registry(nwact);
 	mix_down(registry, fingerprint);
 	// [orig: CDKey_Decode @0x411af0 (dfx2.exe): NapiNP_DecodeEncryptedString under the
 	//  descriptor's +20 chain @0x411b38]
 	std::vector<uint8_t> plaintext;
-	if (!decode_key_chain(registry, kDfx2RegistryChain, plaintext, kDecodeRoom))
+	if (!decode_key_chain(registry, chains.registry, plaintext, kDecodeRoom))
 		return false;
 	wire_key = c_string_of(plaintext);
 	return true;
 }
 
-LanJoinVerdict check_lan_join(
-		const WireKeys &joiner, const WireKeys &host, const std::vector<WireKeys> &others) {
+LanJoinVerdict check_lan_join(const KeyChains &chains, const WireKeys &joiner, const WireKeys &host,
+		const std::vector<WireKeys> &others) {
 	std::vector<uint8_t> plaintext;
 	// [orig: @0x50f3fc..0x50f407 (dfx2.exe): a NULL or empty CDKIID, code 10 @0x50f5ba]
 	if (joiner.cdkiid.empty())
 		return LanJoinVerdict::MissingKey;
 	// [orig: @0x50f40d..0x50f42c (dfx2.exe): CDKey_DecodeWireJoinChain, code 11 @0x50f433]
-	if (!decode_key_chain(joiner.cdkiid, kDfx2WireChain, plaintext, kDecodeRoom))
+	if (!decode_key_chain(joiner.cdkiid, chains.wire, plaintext, kDecodeRoom))
 		return LanJoinVerdict::UndecodableKey;
 	// [orig: @0x50f449..0x50f462 (dfx2.exe): the host's own, when it has one, code 12 @0x50f469]
 	if (!host.cdkiid.empty() && strutil::iequals(host.cdkiid, joiner.cdkiid))
@@ -189,7 +191,7 @@ LanJoinVerdict check_lan_join(
 	if (joiner.exp1.empty())
 		return LanJoinVerdict::Accepted;
 	// [orig: @0x50f4dc..0x50f4fb (dfx2.exe): the decode under off_812F00, code 11]
-	if (!decode_key_chain(joiner.exp1, kDfx2Exp1Chain, plaintext, kDecodeRoom))
+	if (!decode_key_chain(joiner.exp1, chains.exp1, plaintext, kDecodeRoom))
 		return LanJoinVerdict::UndecodableKey;
 	// [orig: @0x50f501..0x50f51a (dfx2.exe): the host's own CDKIIDEXP1, code 12]
 	if (!host.exp1.empty() && strutil::iequals(host.exp1, joiner.exp1))

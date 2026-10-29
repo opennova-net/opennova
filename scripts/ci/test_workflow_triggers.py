@@ -87,14 +87,16 @@ class NovaWorldImagesTrigger(unittest.TestCase):
         # Every program links the engine's groups and the libraries they link.
         for source in ("engine/base/io/le.h", "engine/formats/pff/pff.cpp", "engine/runtime/world/world.cpp",
                        "engine/editor/session/session_core.cpp", "engine/net/update/update_server.cpp",
-                       "engine/net/title/title_identity.h", "apps/common/net_sockets.h", "third_party/miniz/miniz.c",
+                       "engine/net/protocol/protocol.h", "games/games.cpp", "apps/common/net_sockets.h",
+                       "third_party/miniz/miniz.c",
                        "CMakeLists.txt", ".dockerignore"):
             self.assertTrue(covered(source, self.push), f"{source} is in no push path")
 
     def test_a_pull_request_builds_on_what_the_images_alone_build(self):
         # The rest of the engine reaches Linux through ci.yml's test-linux.
         for source in ("apps/project/main.cpp", "apps/update_tool/main.cpp", "engine/net/update/update_wire.cpp",
-                       "engine/net/title/title_identity.h", "apps/common/net_sockets.h", "apps/novaworld_data/main.cpp"):
+                       "engine/net/protocol/protocol.h", "games/jo/jo_protocol.cpp", "apps/common/net_sockets.h",
+                       "apps/novaworld_data/main.cpp"):
             self.assertTrue(covered(source, self.pull_request), f"{source} is in no pull_request path")
 
 

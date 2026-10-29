@@ -8,12 +8,12 @@
 #include <system_error>
 #include <utility>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/model/core_finding.h>
@@ -30,9 +30,9 @@ namespace opennova::editor {
 namespace {
 
 // The archive flavour a build writes: a new archive's, every profile's
-// (gameprofile::GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT, PFF3).
+// (base/title/title.h kNewArchivePffFormat, PFF3).
 constexpr pff::PffFormat kBuildArchiveFormat =
-		static_cast<pff::PffFormat>(gameprofile::GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT);
+		static_cast<pff::PffFormat>(kNewArchivePffFormat);
 
 // The largest single read, write or copy inside a step: a budget spans several.
 constexpr uint64_t kChunkBytes = uint64_t(1) << 20;

@@ -14,6 +14,7 @@
 #include "products/product_repository.h"
 #include "program/server_config.h"
 
+#include <base/title/title.h>
 #include <base/io/cp1252.h>
 #include <net/novaworld/host_repository.h>
 
@@ -179,15 +180,16 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 	out["id"] = d.id;
 	out["display_name"] = d.display_name;
 	out["title"] = d.title;
+	protocol_or_null(out, "protocol", d.title.empty() ? nullptr : title_protocol(d.title));
 	out["version"] = d.version;
 	// Whether a server on it may also list on NovaLogic's NovaWorld (Joint Operations' lobby
 	// alone; the list's novalogic_listing says whether the service offers it at all).
 	out["novalogic_listing"] = novalogic_lists(d);
 	out["missions"] = missions_json(d.missions);
-    out["settings_schema"] = crow::json::wvalue(crow::json::load(io::json_write(hosted_settings_schema(
-            d.title == "dfx2" ? gamecfg::ConfigTable::Dfx2 : gamecfg::ConfigTable::Jo))));
-    out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(d.weapons)));
-	const HostLimits &limits = host_limits_for_title(d.title);
+	out["settings_schema"] = crow::json::wvalue(
+			crow::json::load(io::json_write(hosted_settings_schema(title_config_table(d.title)))));
+	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(d.weapons)));
+	const HostLimits limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;
 	ranges["max_players"] = range_json(limits.max_players);
 	ranges["time_limit"] = range_json(limits.time_limit);
@@ -240,9 +242,10 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	}
 	e["settings"] = settings_json(s.settings);
 	e["settings_revision"] = s.settings_revision;
-	// Its product ({id, key, display_name, title: its gameprofile code}) and
-	// expansion rows (null once a row is gone), the names the site shows, the
-	// trees it is pinned to and whether newer data waits.
+	// Its product ({id, key, display_name, title: its title code, protocol: the
+	// {code, name, version} that title speaks}) and expansion rows (null once a
+	// row is gone), the names the site shows, the trees it is pinned to and
+	// whether newer data waits.
 	const auto base = s.settings.product_id != 0 ? find_product(db, s.settings.product_id) : std::nullopt;
 	const auto expansion = s.settings.expansion_id ? find_product(db, *s.settings.expansion_id) : std::nullopt;
 	if (base) {
@@ -251,6 +254,8 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		d["key"] = base->key;
 		d["display_name"] = base->display_name;
 		d["title"] = base->title;
+		protocol_or_null(
+				d, "protocol", base->title.empty() ? nullptr : title_protocol(base->title));
 		e["product"] = std::move(d);
 	} else {
 		e["product"] = nullptr;

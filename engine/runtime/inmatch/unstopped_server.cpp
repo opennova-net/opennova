@@ -17,7 +17,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h> // the held hello's identity gate
+#include <net/protocol/protocol.h> // the held hello's identity gate
 
 #include <algorithm>
 #include <cstdint>
@@ -267,7 +267,7 @@ bool queue_unstopped_join(UnstoppedServer &server, const PeerAddr &from,
 		std::vector<uint8_t> body) {
 	ClientAuth auth;
 	if (!parse_client_auth(body.data(), body.size(), auth)) return !body.empty();
-	if (server.identity == nullptr || !matches_title_identity(*server.identity, auth))
+	if (server.identity == nullptr || !matches_protocol(*server.identity, auth))
 		return false;
 	server.queue.push_back(UnstoppedPacket{from, SESSION_OPCODE_CLIENT_AUTH, std::move(body)});
 	return true;
@@ -320,7 +320,7 @@ void join_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 		uint32_t now_ms) {
 	ClientAuth auth;
 	if (server.identity == nullptr || !parse_client_auth(body.data(), body.size(), auth) ||
-			!matches_title_identity(*server.identity, auth))
+			!matches_protocol(*server.identity, auth))
 		return;
 	const auto refuse = [&](uint32_t family, uint32_t reason) {
 		const std::vector<uint8_t> datagram = join_rejection_datagram(auth, family, reason);
@@ -331,7 +331,7 @@ void join_unstopped_server(UnstoppedServer &server, const ServerLogs &logs,
 	else if (!server.server_password.empty() &&
 			!strutil::iequals(auth.pw, std::string_view(server.server_password.c_str())))
 		reject = 4;
-	else if (!strutil::iequals(auth.pv2, server.identity->pv2)) reject = 7;
+	else if (!strutil::iequals(auth.pv2, protocol_version(*server.identity))) reject = 7;
 	else if (auth.na.empty()) reject = 5;
 	else if (server.reject_new_connections) reject = 6;
 	if (reject != 0) {

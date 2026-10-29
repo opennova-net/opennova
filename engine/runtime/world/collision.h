@@ -44,7 +44,6 @@
 #include <vector>
 
 #include <runtime/devtools/tick_profile.h>
-#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/collision_model.h> // the model records, the matrix, the terrain helpers
 #include <runtime/world/collision_query.h> // the query records, the wire proxies, the projectile trace
 #include <runtime/world/entity.h>

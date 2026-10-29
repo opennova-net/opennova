@@ -123,7 +123,7 @@ int main() {
 		TEST_EXPECT(block.load());
 		TEST_EXPECT(!block.version_reset());
 		TEST_EXPECT(block.cfg().mp_novaworld_host_lan_only == 1);
-		TEST_EXPECT(host_session_settings(block.cfg()).config.server_lan_only == 1);
+		TEST_EXPECT(host_session_settings(block.cfg(), *opennova::title_by_code("jo")).config.server_lan_only == 1);
 		// A main-menu entry's read takes it too.
 		GameConfigBlock::MenuMount mount;
 		mount.id = "game|";
@@ -366,7 +366,7 @@ int main() {
 		TEST_EXPECT(block.cfg().mpattrib == 14850); // the defaults' 0x3A02
 		block.single_player_mission_start();
 		TEST_EXPECT(block.cfg().mpattrib == 14854);
-		TEST_EXPECT(singleplayer_game_config(0, nullptr).mp_attributes == 14854u);
+		TEST_EXPECT(singleplayer_game_config(*opennova::title_by_code("jo"), 0, nullptr).mp_attributes == 14854u);
 	}
 
 	std::printf("game_config_block: ok\n");

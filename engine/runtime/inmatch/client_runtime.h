@@ -593,8 +593,8 @@ public:
 	// handler runs NETLOG / STAT and echoes the rest back as S2C 0x06, which runs the
 	// client's walk (run_console_echo). An authority that is no peer is a host that
 	// does not play (mode 1), which has no client: its console is AdminConsole's. True
-	// when the line was taken. VERSION's version and title words default to the
-	// title's (gameprofile's version text, g_TitleText) when the embedder sets none.
+	// when the line was taken. VERSION posts the embedder's version line
+	// (ClientLocalCommandSeams::versions).
 	// [orig: Client_ProcessConsoleCommand @0x520E80 - the guard @0x520ea4..0x520ec7,
 	//  Client_ProcessLocalCommand @0x520BF0 (the call @0x520EEC), the peer test @0x520EF8,
 	//  NetPacket_WriteNullableString @0x42A430 and QueueReliableMessage(4, 1, 0) @0x520f29;
@@ -941,12 +941,15 @@ public:
 	void set_host_address(const PeerAddr &host) {
 		if (joiner_) joiner_->set_host_address(host);
 	}
-	// The title identity the joiner speaks (JoinerConnection::set_title), and the
-	// one its view folds the in-match bodies by (ClientReplicaPipeline::set_title).
-	void set_title(const TitleIdentity *title) {
-		view_.set_title(title);
-		if (joiner_) joiner_->set_title(title);
+	// The title's protocol the joiner speaks (JoinerConnection::set_protocol), and the
+	// one its view folds the in-match bodies by (ClientReplicaPipeline::set_protocol).
+	void set_protocol(const Protocol *protocol) {
+		view_.set_protocol(protocol);
+		if (joiner_) joiner_->set_protocol(protocol);
 	}
+	// The rules the title runs, whose joiner-side knobs its view's folds follow
+	// (ClientReplicaPipeline::set_rules).
+	void set_rules(const world::TitleRules *rules) { view_.set_rules(rules); }
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));

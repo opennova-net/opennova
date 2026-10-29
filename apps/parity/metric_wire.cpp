@@ -951,6 +951,13 @@ std::string handshake_field_key(uint8_t opcode, const FlatTlvField &field) {
 			std::string rendered_length = std::to_string(length);
 			if (handshake_cu_masked(opcode, cu_name)) {
 				rendered = "<dynamic>";
+				// A value whose size follows it: the chunk's length and the CU field's size
+				// (handshake.0x42.CU.VERSIONSTRING).
+				static_assert(has_normalization("handshake.0x42.CU.VERSIONSTRING"));
+				if (handshake_cu_size_masked(opcode, cu_name)) {
+					rendered_length = "*";
+					key = name + "|*";
+				}
 			} else if (handshake_cu_low16(opcode, cu_name)) {
 				// The printed decimal's width follows the residue's high word.
 				const std::string low = low16_of_decimal(cu_value);

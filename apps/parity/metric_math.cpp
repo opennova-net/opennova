@@ -78,6 +78,19 @@ std::string stable_body_key(char dir, uint16_t identity, const std::string &raw)
 	if (dir == 'S' && identity == 0x061 && raw.size() == 4 && raw[0] == 0 && raw[1] == 0 &&
 			raw[3] == 0 && (uint8_t(raw[2]) & 1u) != 0)
 		return "0000**00";
+	// C2S 0x0B: the side password, its NUL, the two map checksums and the engine build's packed
+	// version [orig: Game_StartMission @0x524360 - NetPacket_WriteStringAndThreeInts @0x52622e
+	//  over g_SidePassword, the two zeros and g_GameVersionPacked @0x52620e]: the version masked
+	// (initial.C.0x0b.version), the password and the checksums exact; any other body byte for
+	// byte.
+	static_assert(has_normalization("initial.C.0x0b.version"));
+	if (dir == 'C' && identity == 0x00B) {
+		const size_t nul = raw.find('\0');
+		if (nul != std::string::npos && raw.size() == nul + 1 + 12) {
+			const std::string head(raw.begin(), raw.end() - 4);
+			return hex_of(std::vector<uint8_t>(head.begin(), head.end())) + "********";
+		}
+	}
 	const std::string hex = hex_of(std::vector<uint8_t>(raw.begin(), raw.end()));
 	const uint32_t prefix = stable_body_prefix(dir, identity);
 	if (prefix == 0)

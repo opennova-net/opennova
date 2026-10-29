@@ -100,7 +100,7 @@ struct SpMission {
 		options.restart = restart;
 		im::HostRole *host = role.get();
 		options.bringup_net_session = [this, host] {
-			host->bring_up_singleplayer();
+			host->bring_up_singleplayer(*opennova::title_by_code("jo"));
 			if (after_bringup) after_bringup();
 		};
 		std::string error;

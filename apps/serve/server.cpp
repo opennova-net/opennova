@@ -7,18 +7,22 @@
 #include "serve_listing.h"
 
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <base/io/cp1252.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/title/title.h>
+#include <base/version/one_build.h>
+#include <base/version/version_line.h>
 #include <base/vfs/vfs.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/avatars/avatars.h>
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/novaworld/lobby_identity.h> // the NWHWI device reads
-#include <net/title/title_identity.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/loaded_model_list.h> // the S2C 0x68 cursor's wrap
 #include <runtime/inmatch/map_change.h>
@@ -67,7 +71,7 @@ const char kUsage[] =
 		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code: its keying and the title the server speaks\n"
-		"                   (default: the game the folder's UPDATE.WIZ names, else jo)\n"
+		"                   (default: the game the folder's UPDATE.WIZ names, else acidgambit)\n"
 		"  /LAN             every game.cfg read sets mpnovaworldhostlanonly: a NovaWorld\n"
 		"                   listing advertises LAN only (the game's other switches are\n"
 		"                   accepted, and those the server has no use for do nothing)\n"
@@ -360,7 +364,7 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {
 	// The switch every read of the process takes [orig: g_LanSwitch, read by
 	// Game_LoadConfig @0x5514B1].
 	config_.set_lan_switch(options_.lan_switch);
-	// The launch's product and the engine profile it runs as, chosen as the game's launch
+	// The launch's product and the title it runs as, chosen as the game's launch
 	// chooses them: /game when given, else the folder's UPDATE.WIZ, a folder with none being
 	// OpenNova's own (boot_policy.h launch_product, ADR 0067 d2).
 	LaunchFlags flags;
@@ -373,6 +377,14 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {
 	// folder with no /game names no game at all.
 	foreign_folder_ = !flags.game_given && !product.supported;
 	product_command_ = product.command;
+	Versions versions;
+	// A player game's name is its command file's PRODUCT, the page's bytes.
+	versions.game = retail_text_to_utf8(product.name);
+	versions.game_version = launch_product_version(options_.resource_dir, product);
+	versions.one = one_build();
+	// The title the launch runs as: its name where the product has none, the protocol it speaks.
+	title_versions(product.game, versions);
+	version_line_ = opennova::version_line(versions);
 }
 
 Server::~Server() {
@@ -392,10 +404,8 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// The log switches arm at the process start, as retail's command-line
 	// parse arms them (inmatch/server_log_devices.h).
 	{
-		// The title the launch speaks heads it (JO's for an unknown code).
-		std::string title_error;
-		log_devices_.arm(options_.log_switches,
-				inmatch::connect_log_header(resolve_title_identity(game_code_, title_error)));
+		// The title the launch runs as heads it (the default title's for an unknown code).
+		log_devices_.arm(options_.log_switches, inmatch::connect_log_header(game_code_));
 	}
 	// Retail's boot order: game.cfg at Game_Run's start, the subsystems (the
 	// mount, weapon.def and game.cfg again), then the dead /HOST path (the host
@@ -438,7 +448,7 @@ bool Server::start_session(std::string &error) {
 		error = "the server has not begun, or its session already stands";
 		return false;
 	}
-	host_ = inmatch::host_session_settings(config_.cfg());
+	host_ = inmatch::host_session_settings(config_.cfg(), *config_.title());
 	if (!boot_mission(/*next_mission=*/false, error)) {
 		stop();
 		return false;
@@ -530,8 +540,8 @@ bool Server::resolve_title(std::string &error) {
 		return false;
 	}
 	const std::string &code = game_code_;
-	title_ = resolve_title_identity(code, error);
-	if (title_ == nullptr) {
+	protocol_ = resolve_title_protocol(code, error);
+	if (protocol_ == nullptr) {
 		error = "/game " + code + ": " + error;
 		return false;
 	}
@@ -541,18 +551,18 @@ bool Server::resolve_title(std::string &error) {
 	const bool second_logs_in =
 			!options_.also_master_host.empty() && options_.also_credentials.present();
 	if (first_logs_in || second_logs_in) {
-		const std::string refusal = title_identity_refusal(*title_, TitleIdentityPart::WebFlow);
+		const std::string refusal = protocol_refusal(*protocol_, ProtocolPart::WebFlow);
 		if (!refusal.empty()) {
 			error = "/game " + code + " with " +
 					(first_logs_in ? "--credentials" : "--also-credentials") + ": " + refusal;
-			title_ = nullptr;
+			protocol_ = nullptr;
 			return false;
 		}
 	}
-	// The title's cfg table, which every game.cfg read and save walks: dfx2.exe's carries the
-	// mpdfxcategory its host lists print as DFXCATEGORY1 (DFX2-7).
-	config_.set_config_table(title_->host_category_var ? gamecfg::ConfigTable::Dfx2
-	                                                   : gamecfg::ConfigTable::Jo);
+	// The title the server runs as: its cfg table, which every game.cfg read and save walks
+	// (Title::config_table: dfx2.exe's carries the mpdfxcategory its host lists print as
+	// DFXCATEGORY1, DFX2-7), its player caps and its rules (GameConfig::set_title).
+	config_.set_title(*title_by_code(code));
 	return true;
 }
 
@@ -574,7 +584,7 @@ bool Server::mount(std::string &error) {
 	bool mounted = index_.scan_install(options_.resource_dir, flags) ==
 			ResourceIndex::InstallScan::Mounted;
 	if (!mounted && options_.loose_root) {
-		index_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(code.c_str()));
+		index_.set_scr_policy(title_scr_policy_for_code(code.c_str()));
 		mounted = index_.scan(options_.resource_dir, std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll);
 	}
@@ -587,7 +597,7 @@ bool Server::mount(std::string &error) {
 	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion()));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
-	gate_tag_ = title_gate_tag(*title_, &index_);
+	gate_tag_ = protocol_gate_tag(*protocol_, &index_);
 	io::logf(io::LogLevel::kInfo, "opennova-serve: speaking %s, gate tag %s", code.c_str(),
 			gate_tag_.c_str());
 	// The expansion's text-override table, as the boot's Expansion_LoadAssets
@@ -683,7 +693,7 @@ bool Server::read_host_file(std::string &error) {
 				gamecfg::kActiveServerMarkerFileName);
 	config_.cfg().dedicated = 1;
 	(void)save_config();
-	host_ = inmatch::host_session_settings(config_.cfg());
+	host_ = inmatch::host_session_settings(config_.cfg(), *config_.title());
 	novaworld_ = !options_.master_host.empty() && config_.cfg().networkconnecttype == 1;
 	if (options_.master_host.empty() && config_.cfg().networkconnecttype == 1)
 		io::logf(io::LogLevel::kInfo,
@@ -745,7 +755,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		config = stage.config;
 		player_limit = stage.player_limit;
 	} else {
-		config = inmatch::host_screen_from_block(config_.cfg()).config;
+		config = inmatch::host_screen_from_block(config_.cfg(), *config_.title()).config;
 		inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
 		player_limit = static_cast<int32_t>(config.player_slot_limit());
 	}
@@ -807,7 +817,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.session = session_.get();
 	request.role = role_.get();
 	request.host = role_.get();
-	request.host_cfg.title = title_;
+	request.host_cfg.protocol = protocol_;
 	request.host_cfg.config = config;
 	request.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	// A listed server's session runs on the NovaWorld network type, whose
@@ -850,6 +860,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		request.display_width = width;
 	}
 	mission::KernelBootOptions &options = request.boot_options;
+	// The World runs the server's title's rules from its load (the session stamps the same).
+	options.title_rules = &world::title_rules(config_.title()->code);
 	options.playable = false; // Serve Only: no player of the host's own
 	options.mp_session = true;
 	options.terrain = true;
@@ -1089,7 +1101,8 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 
 ListerOptions Server::base_lister_options() const {
 	ListerOptions options;
-	options.title = title_;
+	options.protocol = protocol_;
+	options.game_title = config_.title();
 	options.gate_tag = gate_tag_;
 	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
 	options.allow_public = options_.allow_public;
@@ -1609,7 +1622,10 @@ void Server::open_admin() {
 void Server::bind_admin_console() {
 	rotation_admin_ = std::make_unique<inmatch::HostRotationAdmin>(rotation_, catalog_);
 	inmatch::AdminConsole::Seams seams;
+	// CMD VERSION's line: the one the server logged as it started.
+	seams.versions = version_line_;
 	seams.config_block = &config_.cfg();
+	seams.config_title = config_.title();
 	seams.save_config = [this] { (void)save_config(); };
 	seams.rotation = rotation_admin_.get();
 	seams.game_text = [this](std::string_view section, std::string_view key) {

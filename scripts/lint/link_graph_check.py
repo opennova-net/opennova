@@ -33,7 +33,12 @@ TARGET level are the two structural seams:
      products never reach hosting, billing or the accounts, the gate and the
      lobby reach only the core, the program runtime and the service, and
      hostd never reaches the service or the program runtime (it builds
-     without them).
+     without them). Every game's own code (opennova_games, games/CLAUDE.md) sits
+     ABOVE the engine: no engine group target and not the service links it, and
+     it links neither the editor's core nor the service.
+
+  3. Required edges: each program that installs the games at its start
+     (games::install(), REQUIRED_GAMES) links opennova_games.
 
 PUBLIC vs PRIVATE keywords are deliberately not consulted: a STATIC library's
 PRIVATE deps still propagate onto every downstream link line (as $<LINK_ONLY>
@@ -75,6 +80,7 @@ REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (
     "CMakeLists.txt",
     "engine",
+    "games",
     "apps",
     "tests",
     "tools",
@@ -118,6 +124,7 @@ NW_FLEET = [NW + "fleet", NW + "fleet_core"]
 NW_WORKER = [NW + "worker", NW + "worker_core"]
 NW_DATA = [NW + "data"]
 HOSTD_TARGETS = ["opennova_hostd", "opennova_hostd_core"]
+GAMES_TARGET = "opennova_games"
 # Defined only when the build turns OPENNOVA_NOVAWORLD_SERVICE on (the repo
 # root's option, off by default; opennova_redis, web, the fleet, the worker and
 # the data program with BUILD_NOVAWORLD_HTTP as well; the core and the agents'
@@ -196,7 +203,34 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         [SERVICE_TARGET, NW_PROGRAM],
         set(HOSTD_TARGETS),  # Linux only
     ),
+    (
+        "every game's own code sits ABOVE the engine (games/CLAUDE.md): no engine group "
+        "target and not the service links opennova_games; the programs fill the registries",
+        ["opennova_formats", "opennova_base", "opennova_net", "opennova_runtime",
+         "opennova_editor", SERVICE_TARGET],
+        [GAMES_TARGET],
+        set(),
+    ),
+    (
+        "opennova_games links the engine alone (games/CMakeLists.txt): never the editor's "
+        "core or the NovaWorld service",
+        [GAMES_TARGET],
+        ["opennova_editor", SERVICE_TARGET],
+        set(),
+    ),
 ]
+
+# Rule 3: the programs that call games::install() at their start (include_graph_check.py's
+# REGISTRATION_POINTS), each of which links opennova_games: the game's two GDExtension variants,
+# the command-line programs and the NovaWorld service's programs.
+REQUIRED_GAMES: list[str] = [
+    "opennova", "opennova_editor_gdext",
+    "opennova_serve", "opennova_project", "opennova_wire", "opennova_parity",
+    "opennova_lan_probe", "opennova_extract", "opennova_update",
+    NW + "gate", NW + "lobby", NW + "web", NW + "data", NW + "worker", NW + "fleet",
+]
+# Defined in the godot/src CMake root alone (never in the repo-root build's graphviz dump).
+REQUIRED_GODOT = {"opennova", "opennova_editor_gdext"}
 
 LINK_KEYWORDS = {
     "PUBLIC", "PRIVATE", "INTERFACE",
@@ -416,6 +450,18 @@ def main() -> int:
             print(f"[linkgraph] WARNING: rule target '{name}' not in the "
                   f"{source} graph (renamed? update link_graph_check.py)")
     violations.extend(check_containment(edges))
+
+    for target in REQUIRED_GAMES:
+        gated = (target in SERVICE_GATED or target in REQUIRED_GODOT) and source != "files"
+        if target not in known:
+            if not gated and target not in warned:
+                warned.add(target)
+                print(f"[linkgraph] WARNING: required target '{target}' not in the "
+                      f"{source} graph (renamed? update link_graph_check.py)")
+            continue
+        if find_path(edges, target, {GAMES_TARGET}) is None:
+            violations.append(f"{target} does not reach {GAMES_TARGET}  [a program that calls "
+                              f"games::install() at its start links opennova_games]")
 
     edge_count = sum(len(v) for v in edges.values())
     print(f"[linkgraph] source {source}: {len(known)} targets, {edge_count} edges, "

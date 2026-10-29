@@ -1,5 +1,6 @@
 // The joiner's mission-start submissions (D-NET-531, D-NET-1020): the C2S 0x0B
-// mission status computed from the side password and the build's packed version, and
+// mission status computed from the side password and the engine build's packed version
+// (ONE's), and
 // the C2S 0x2F a joiner with no kit seam submits, the fresh profile's page resolved
 // through the weapon table by name. Synthetic tables only; the oracles are the cited
 // retail arithmetic and the R3 corpus reading (every retail 0x0B in the ASH and 03TR
@@ -7,9 +8,9 @@
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/world/weapon_table.h>
 
-#include <base/gameprofile/gameprofile.h>
+#include <base/version/one_build.h>
 #include <formats/playersav/weapon_sav.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -26,22 +27,19 @@ int failures = 0;
 		if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
 	} while (0)
 
-// The build's packed version dword from its version text: the four numbers in print
-// order, the first in the high byte, as each witnessed binary stores it beside its
-// sprintf [orig: Game_ParseCommandLineAndInit @0x4a7310 - 0x01070507 @0x4a7d86].
-void test_packed_game_version() {
-	CHECK(inmatch::packed_game_version("V1.7.5.7") == 0x01070507u);
-	CHECK(inmatch::packed_game_version("V1.0.0.9") == 0x01000009u); // the JO demo's
-	CHECK(inmatch::packed_game_version("V1.7.1.9") == 0x01070109u); // DFX's
-	CHECK(inmatch::packed_game_version(nullptr) == 0u);
-	CHECK(inmatch::packed_game_version("V1.7.5") == 0u);
-	CHECK(inmatch::packed_game_version("1.7.5.7") == 0u);
-	CHECK(inmatch::packed_game_version("V1.7.5.7x") == 0u);
-	// JO's and DFX2's title profiles carry the same build version.
-	const gameprofile::GameProfile *jo = gameprofile::gameprofile_by_id(gameprofile::GAME_JO);
-	const gameprofile::GameProfile *dfx2 = gameprofile::gameprofile_by_id(gameprofile::GAME_DFX2);
-	CHECK(jo != nullptr && inmatch::packed_game_version(jo->version_text) == 0x01070507u);
-	CHECK(dfx2 != nullptr && inmatch::packed_game_version(dfx2->version_text) == 0x01070507u);
+// The 0x0B's version dword is the engine build's packed version, one byte per part, the
+// first in the high byte: ONE's wire version (0.0.22.0 is 0x00001600) where retail's binary
+// stored its own beside its sprintf, 0x01070507 for JO's and DFX2's 1.7.5.7
+// [orig: Game_ParseCommandLineAndInit @0x4a7310 - 0x01070507 @0x4a7d86].
+void test_mission_status_version_is_one_build() {
+	CHECK((Version{ { 1u, 7u, 5u, 7u }, 4 }).packed() == 0x01070507u);
+	CHECK((Version{ { 0u, 0u, 22u, 0u }, 4 }).packed() == 0x00001600u);
+	const Version wire = one_build().wire_version();
+	CHECK(wire.count == 4 && wire.parts[3] == 0u && wire.packed() != 0u);
+	inmatch::JoinerConnection joiner("Status");
+	const ProtocolMessage status = joiner.mission_start_status();
+	CHECK(status.tag == 0x0B);
+	CHECK(status.payload == inmatch::build_mission_status("", wire.packed()));
 }
 
 // [orig: NetPacket_WriteStringAndThreeInts @0x42a4d0 - the string and its NUL
@@ -117,7 +115,7 @@ void test_fresh_profile_kit_resolves_by_name() {
 } // namespace
 
 int main() {
-	test_packed_game_version();
+	test_mission_status_version_is_one_build();
 	test_mission_status_body();
 	test_fresh_profile_kit_resolves_by_name();
 	if (failures != 0) {

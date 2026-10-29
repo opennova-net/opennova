@@ -2446,7 +2446,7 @@ static int test_prompt_belongs_to_its_project() {
 	const std::string other = project.dir.file("Other");
 	ProjectDocument created;
 	Diagnostic error;
-	TEST_EXPECT(::opennova::editor::create_project(other, "Other", kDefaultTargetGame, created, error));
+	TEST_EXPECT(::opennova::editor::create_project(other, "Other", ::opennova::editor::default_target_game(), created, error));
 	session.handle(request::open_project(other));
 	session.run_operations();
 	TEST_EXPECT(v.project.open && v.project.root == other && !v.dialogs.unsaved_prompt.open);

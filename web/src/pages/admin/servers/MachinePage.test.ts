@@ -77,7 +77,7 @@ describe('MachinePage', () => {
     const facts = page.get('.machine-facts').text();
     expect(facts).toContain('opennova-hostd@sha256:111111111111');
     expect(facts).toContain("Release's");
-    expect(facts).toContain('0.0.20, protocol 3');
+    expect(facts).toContain('0.0.20, agent protocol 3');
     expect(facts).toContain('hostd/hostd/task3');
     expect(page.findAll('.machine-flag')).toHaveLength(0);
     page.unmount();
@@ -109,7 +109,7 @@ describe('MachinePage', () => {
     const trees = page.findAll('tr.machine-tree');
     expect(trees).toHaveLength(2);
     // Tree 10 is server 1's pinned base; tree 12 matches nothing.
-    expect(trees[0].get('th').text()).toBe('Joint Operations 1.7.5.5');
+    expect(trees[0].get('th').text()).toBe('Joint Operations 1.0.5');
     expect(trees[0].text()).toContain('Ready, 1.2 GB');
     expect(trees[1].get('th').text()).toBe('Tree 12');
     expect(trees[1].text()).toContain('Fetching: 300 MB of 600 MB (50 %), try 2');

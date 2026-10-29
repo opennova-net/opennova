@@ -38,7 +38,7 @@ describe('the products view', () => {
     const list = [uploading, release(10, { status: 'draft' }), release(9), runtimeRelease(7)];
     expect(releasesOf(JO_PRODUCT, list).map((r) => r.id)).toEqual([10, 9]);
     expect(releasesOf(RUNTIME_PRODUCT, list).map((r) => r.id)).toEqual([11, 7]);
-    expect(publishedLabel(JO_PRODUCT, list)).toBe('1.7.5.9');
+    expect(publishedLabel(JO_PRODUCT, list)).toBe('1.0.9');
     expect(publishedLabel(RUNTIME_PRODUCT, list)).toBe('v0.0.21');
     expect(publishedLabel(DFX2_PRODUCT, list)).toBe('');
     expect(releasesWorking(list)).toBe(true);

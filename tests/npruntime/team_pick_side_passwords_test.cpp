@@ -86,6 +86,7 @@ bool admin_set(inmatch::NapiNPServerCtx &ctx, const char *line) {
 	opennova::gamecfg::GameCfg block;
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	inmatch::AdminConsole console(ctx, std::move(seams));
 	opennova::AdminSession session;
 	session.user = "admin";

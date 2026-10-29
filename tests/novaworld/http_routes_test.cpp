@@ -25,8 +25,7 @@
 // test thread leases its own for every direct read or write.
 
 #include "admin_tcp_server.h"
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include "accounts/account_jobs.h"
 #include "accounts/auth.h"
 #include "accounts/mailer.h"
@@ -115,8 +114,13 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+static const opennova::cdkey::KeyChains &dfx2_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
+
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -231,7 +235,7 @@ int64_t seed_tree(opennova::db::Database &db, int64_t product_id, const std::str
 	namespace hosted = opennova::novaworld_server::hosted;
 	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "harness");
 	hosted::TreeReady ready;
-	ready.files = { { "resource.pff", 1000 }, { "version.txt", 20 } };
+	ready.files = { { "resource.pff", 1000 }, { "localres.pff", 20 } };
 	for (const std::string &m : missions) ready.missions.push_back({ m, "Map " + m });
 	ready.version_text = version;
 	ready.bytes = 1020;
@@ -2050,6 +2054,11 @@ int test_joiner_routes_admin_only(Harness &h) {
 	for (const auto &e : json["hosts"]) {
 		if (e["rid"].i() != kRid) continue;
 		seen = true;
+		// The protocol of the lobby it lists in (JO's), and no VER1 (a protocol's, never a
+		// version).
+		TEST_EXPECT(!e.has("ver1"));
+		TEST_EXPECT(str(e["protocol"]["code"]) == "jo" && str(e["protocol"]["name"]) == "JO" &&
+				str(e["protocol"]["version"]) == "16");
 		TEST_EXPECT(e["player_list"].size() == 1);
 		const auto &p = e["player_list"][0];
 		TEST_EXPECT(str(p["nwhandle"]) == "joiner_seen");
@@ -2090,9 +2099,11 @@ int test_menu_urls_name_bound_port(Harness &h) {
 	return 0;
 }
 
-// One lobby per title, over HTTP. /api/games lists every games row; each
+// One lobby per gate tag, keyed by protocol, over HTTP. /api/games lists every
+// games row with the protocol its clients speak ({code, name, version}); each
 // row's .gsb route lists the hosts registered under its LobbyName alone, a
-// column they reported nothing for showing the row's VER1 / Expbits; and a
+// column they reported nothing for showing its protocol's VER1 and the row's
+// Expbits; and a
 // retail page's GSB_SERVER is the requesting client's game's: the gate tag
 // /nwprepare.dll carries (and echoes as the GT cookie), else the GT cookie,
 // else the NWPF cookie's product family, else the page's prefix, else JO's.
@@ -2106,8 +2117,14 @@ int test_lobby_per_title(Harness &h) {
 	TEST_EXPECT(str(games["games"][0]["slug"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(str(games["games"][0]["gateTag"]) == "acidgambit:0");
 	TEST_EXPECT(str(games["games"][0]["lobbyName"]) == "acidgambit_0_consumer");
-	TEST_EXPECT(str(games["games"][0]["title"]) == "jo");
-	TEST_EXPECT(str(games["games"][1]["title"]) == "dfx2");
+	const char *const protocols[][2] = { { "jo", "JO" }, { "dfx2", "DFX2" }, { "jo", "JO" } };
+	for (size_t i = 0; i < 3; ++i) {
+		const auto &game = games["games"][i];
+		TEST_EXPECT(!game.has("title") && !game.has("ver1") && !game.has("ver2"));
+		TEST_EXPECT(str(game["protocol"]["code"]) == protocols[i][0] &&
+				str(game["protocol"]["name"]) == protocols[i][1] &&
+				str(game["protocol"]["version"]) == "16");
+	}
 
 	// One host per lobby, none reporting VER1 or Expbits.
 	struct Listed {
@@ -2168,11 +2185,11 @@ int test_lobby_per_title(Harness &h) {
 	// A lobby added since the start, as an account's own game's first publish adds one (OP: Acid
 	// Gambit's columns under its own tag): its .gsb lists its host, its pages name its .gsb.
 	h.pool.acquire()->exec(
-			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
-			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
-			"glsvss_request, glsvss_rims, glsvss_agrms) "
-			"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', title, "
-			"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, pfid, "
+			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, protocol, start_page, "
+			"host_page, gsb_path, join_lan_url, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms) "
+			"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', protocol, "
+			"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, exp_bits, pfid, "
 			"startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
 			"WHERE slug = 'acidgambit_0_consumer';");
 	{
@@ -2404,7 +2421,7 @@ int test_dfx2_client_path(Harness &h) {
 	jar.keep(reply);
 	// An activated copy (dfx2_activation covers one that is not): the wire key its boot read
 	// decoded and its machine's fingerprint, the browser variables its NovaWorld connect set.
-	jar.cookies["NWCDKIID"] = opennova::cdkey::make_wire_key("DFX2-PATH-0001");
+	jar.cookies["NWCDKIID"] = opennova::cdkey::make_wire_key(dfx2_chains(), "DFX2-PATH-0001");
 	jar.cookies["NWCDKIIDEXP1"] = "";
 	jar.cookies["NWPSSK"] = "ABCDEFGHIJKLMNOPQRSTUVW";
 
@@ -2597,8 +2614,8 @@ int test_cd_key_routes(Harness &h) {
 		for (size_t i = 4; i < serial.size(); i += 5)
 			TEST_EXPECT(serial[i] == '-');
 		std::string inner;
-		TEST_EXPECT(str(k["wire_key"]) == cdkey::make_wire_key(serial));
-		TEST_EXPECT(cdkey::decode_wire_key(str(k["wire_key"]), inner) && inner == serial);
+		TEST_EXPECT(str(k["wire_key"]) == cdkey::make_wire_key(dfx2_chains(), serial));
+		TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), str(k["wire_key"]), inner) && inner == serial);
 		TEST_EXPECT(str(k["title"]) == "dfx2" && str(k["state"]) == "unassigned");
 		TEST_EXPECT(k["account"].t() == crow::json::type::Null &&
 				k["assigned_at"].t() == crow::json::type::Null);
@@ -2664,7 +2681,7 @@ int test_cd_key_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 201 && activated && !activated["reactivated"].b());
 	const std::string nwact = str(activated["nwact"]);
 	std::string wire;
-	TEST_EXPECT(cdkey::read_activation(nwact, kMachine, wire) &&
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact, kMachine, wire) &&
 			wire == str(made["keys"][0]["wire_key"]));
 	TEST_EXPECT(activated["key"]["activations"].i() == 1);
 	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
@@ -2908,11 +2925,11 @@ int test_dfx2_activation(Harness &h) {
 			!nwact_a.empty() && minted.size() > 5 && minted.substr(minted.size() - 5) == "|auto");
 	const std::string wire_key = minted.substr(0, minted.size() - 5);
 	std::string recovered;
-	TEST_EXPECT(cdkey::read_activation(nwact_a, kMachineA, recovered) && recovered == wire_key);
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_a, kMachineA, recovered) && recovered == wire_key);
 	std::string serial;
-	TEST_EXPECT(cdkey::decode_wire_key(recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
+	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
 	// Only that machine reads it.
-	TEST_EXPECT(!cdkey::read_activation(nwact_a, kMachineB, recovered));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), nwact_a, kMachineB, recovered));
 
 	// The same machine again: the same NWACT, no second key; another machine its own.
 	login = retail_login(
@@ -2926,7 +2943,7 @@ int test_dfx2_activation(Harness &h) {
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
 	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
-	TEST_EXPECT(cdkey::read_activation(nwact_b, kMachineB, recovered) && recovered == wire_key);
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_b, kMachineB, recovered) && recovered == wire_key);
 	TEST_EXPECT(h.pool.acquire()
 						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
 								"= a.key_id "
@@ -2945,7 +2962,7 @@ int test_dfx2_activation(Harness &h) {
 	// with no key of ours: the login page, no NWACT and nothing minted.
 	const int64_t keyed = make_account(h, "act_keyed", "pw-act-keyed");
 	login = retail_login(minting.bound_port(), "act_keyed", "pw-act-keyed",
-			{ { "NWCDKIID", cdkey::make_wire_key("RETAIL-KEYED-COPY") }, { "NWCDKIIDEXP1", "" },
+			{ { "NWCDKIID", cdkey::make_wire_key(dfx2_chains(), "RETAIL-KEYED-COPY") }, { "NWCDKIIDEXP1", "" },
 					{ "NWPSSK", kMachineB } },
 			true);
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
@@ -3003,7 +3020,7 @@ int test_dfx2_activation(Harness &h) {
 					.code == 200);
 	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
 			unactivated(kMachineB), true);
-	TEST_EXPECT(cdkey::read_activation(
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), 
 			set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
 	TEST_EXPECT(recovered == str(key["keys"][0]["wire_key"]));
 
@@ -6045,7 +6062,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(json["entitlement"]["tier"].t() == crow::json::type::Null && !json["entitlement"]["granted"].b());
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
 	// The products with data, bases by id (Joint Operations first; OpenNova's
-	// has no tree, so it is not offered): each one's id, name, title, version,
+	// has no tree, so it is not offered): each one's id, name, title, protocol, version,
 	// its tree's missions (the site's picker and the default rotation), its
 	// title's limits and its expansions with data.
 	TEST_EXPECT(json.has("products") && json["products"].size() == 2);
@@ -6053,18 +6070,20 @@ int test_hosted_server_routes(Harness &h) {
 		const auto &jo = json["products"][0];
 		const auto &dfx2 = json["products"][1];
 		TEST_EXPECT(jo["id"].i() == h.jo_id && str(jo["display_name"]) == "Joint Operations" &&
-				str(jo["title"]) == "jo" && str(jo["version"]) == "JO V1.7.5.3");
+				str(jo["title"]) == "jo" && str(jo["version"]) == "1.7.5.3");
+		TEST_EXPECT(str(jo["protocol"]["code"]) == "jo" && str(jo["protocol"]["name"]) == "JO" &&
+				str(jo["protocol"]["version"]) == "16");
 		TEST_EXPECT(jo["missions"].size() == 4 && str(jo["missions"][0]["file"]) == "a.bms" &&
 				str(jo["missions"][0]["title"]) == "Map a.bms" && str(jo["missions"][3]["file"]) == "second.bms");
 		TEST_EXPECT(jo["expansions"].size() == 1 && jo["expansions"][0]["id"].i() == h.jox_id &&
 				str(jo["expansions"][0]["code"]) == "jox01" &&
 				str(jo["expansions"][0]["display_name"]) == "Escalation" &&
-				str(jo["expansions"][0]["version"]) == "JOX V1.0" && jo["expansions"][0]["missions"].size() == 1 &&
+				str(jo["expansions"][0]["version"]) == "1.0" && jo["expansions"][0]["missions"].size() == 1 &&
 				str(jo["expansions"][0]["missions"][0]["file"]) == "escal.bms");
 		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 1 && jo["limits"]["max_players"]["max"].i() == 64);
 		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == INT32_MAX && jo["limits"]["start_delay"]["min"].i() == INT32_MIN);
 		TEST_EXPECT(dfx2["id"].i() == h.dfx2_id && str(dfx2["display_name"]) == "Delta Force Xtreme 2" &&
-				str(dfx2["title"]) == "dfx2");
+				str(dfx2["title"]) == "dfx2" && str(dfx2["protocol"]["code"]) == "dfx2");
 		TEST_EXPECT(dfx2["expansions"].size() == 0);
 		TEST_EXPECT(dfx2["missions"].size() == 2 && str(dfx2["missions"][1]["file"]) == "dfx2_b.bms");
 		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == INT32_MAX);
@@ -6378,7 +6397,7 @@ int test_hosted_server_routes(Harness &h) {
 	json = crow::json::load(body_text(one(ana, ana_second)));
 	TEST_EXPECT(!json["server"]["update_requested"].b() && !json["server"]["update_available"].b());
 	TEST_EXPECT(json["server"]["data"]["base"]["tree_id"].i() == h.jo_tree &&
-			str(json["server"]["data"]["base"]["version"]) == "JO V1.7.5.3" &&
+			str(json["server"]["data"]["base"]["version"]) == "1.7.5.3" &&
 			json["server"]["data"]["expansion"]["tree_id"].i() == h.jox_tree);
 	TEST_EXPECT(h.send("POST", "/api/admin/hosted/update-all", { with_session(ana.session), kCsrf }).code == 403);
 	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"product_id\":" + jo + "}");
@@ -7169,9 +7188,11 @@ int test_admin_fleet_routes(Harness &h) {
 		TEST_EXPECT((*r)["players"].i() == 5 && (*r)["listing"]["rid"].i() == static_cast<int64_t>(rid));
 		TEST_EXPECT(str((*r)["listing"]["game_type"]) == "TDM");
 		TEST_EXPECT(str((*r)["state"]) == "running" && (*r)["generation"].i() == 1);
-		// Its game: the product's key and gameprofile title beside its name.
+		// Its game: the product's key, title and the protocol it speaks beside its name.
 		TEST_EXPECT((*r)["product"]["id"].i() == h.jo_id && str((*r)["product"]["key"]) == "JO" &&
 				str((*r)["product"]["title"]) == "jo" &&
+				str((*r)["product"]["protocol"]["code"]) == "jo" &&
+				str((*r)["product"]["protocol"]["version"]) == "16" &&
 				str((*r)["product"]["display_name"]) == "Joint Operations");
 	}
 	const crow::json::rvalue *w = server_in(json["servers"], waiting);
@@ -9732,9 +9753,9 @@ int with_harness(const char *part) {
 			jox_id = product_named(*db, "Escalation");
 			dfx2_id = product_named(*db, "Delta Force Xtreme 2");
 			on_id = product_named(*db, "OP: Acid Gambit");
-			jo_tree = seed_tree(*db, jo_id, "JO V1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
-			jox_tree = seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" });
-			dfx2_tree = seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });
+			jo_tree = seed_tree(*db, jo_id, "1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
+			jox_tree = seed_tree(*db, jox_id, "1.0", { "escal.bms" });
+			dfx2_tree = seed_tree(*db, dfx2_id, "1.0", { "dfx2_a.bms", "dfx2_b.bms" });
 			TEST_EXPECT(jo_id > 0 && jox_id > 0 && dfx2_id > 0 && on_id > 0 && jo_tree > 0 && jox_tree > 0 &&
 					dfx2_tree > 0);
 		}

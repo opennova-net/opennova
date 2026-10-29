@@ -1167,7 +1167,8 @@ void test_dfx2_planar_rate() {
     };
     CHECK((words(0) == std::pair<int, int>{0x93, 0x93}));
     CHECK((words(kEmplacedTurretSlewPerTick) == std::pair<int, int>{122, 81}));
-    CHECK((words(kDfx2EmplacedTurretSoloSlewPerTick) == std::pair<int, int>{49, 33}));
+    CHECK((words(opennova::world::title_rules("dfx2").emplaced_solo_planar_slew) ==
+            std::pair<int, int>{49, 33}));
 }
 
 // The rate's pick: none for Jointops.exe; dfx2.exe's slower one for the local gunner of a gun
@@ -1197,20 +1198,22 @@ void test_dfx2_rate_pick_and_seat_count() {
     const EntityHandle gun_h = w.registry.spawn(1, gun_seed);
     Entity &carrier = *w.registry.get(carrier_h);
     Entity &gun = *w.registry.get(gun_h);
+    w.rules.title_rules = &opennova::world::title_rules("jo");
     CHECK(emplaced_turret_planar_rate(w, gun, true) == 0); // Jointops.exe's
-    w.rules.title = opennova::gameprofile::GAME_DFX2;
+    w.rules.title_rules = &opennova::world::title_rules("dfx2");
+    const int32_t solo = w.rules.title().emplaced_solo_planar_slew;
     CHECK(emplaced_carrier_occupied_seats(w, carrier) == 0);
-    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == solo);
     CHECK(emplaced_turret_planar_rate(w, gun, false) == kEmplacedTurretSlewPerTick);
     carrier.seats[0].occupant = EntityHandle::make(0, 1);
     CHECK(emplaced_carrier_occupied_seats(w, carrier) == 1);
-    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == solo);
     carrier.seats[1].occupant = EntityHandle::make(0, 2);
     CHECK(emplaced_carrier_occupied_seats(w, carrier) == 2);
     CHECK(emplaced_turret_planar_rate(w, gun, true) == kEmplacedTurretSlewPerTick);
     carrier.graphic_model_userpoints = 0; // a model with no userpoint counts 0
     CHECK(emplaced_carrier_occupied_seats(w, carrier) == 0);
-    CHECK(emplaced_turret_planar_rate(w, gun, true) == kDfx2EmplacedTurretSoloSlewPerTick);
+    CHECK(emplaced_turret_planar_rate(w, gun, true) == solo);
     gun.emplacement_parent = EntityHandle{};
     CHECK(emplaced_turret_planar_rate(w, gun, true) == kEmplacedTurretSlewPerTick);
 }
@@ -1257,8 +1260,9 @@ void test_dfx2_counter_rotation_gate() {
     w.tables.weapons.entries[0].valid = true;
     const EntityHandle gun_h = w.registry.spawn(1, gun_seed);
     Entity &gun = *w.registry.get(gun_h);
+    w.rules.title_rules = &opennova::world::title_rules("jo");
     CHECK(!emplaced_counter_rotates(w, gun)); // Jointops.exe's
-    w.rules.title = opennova::gameprofile::GAME_DFX2;
+    w.rules.title_rules = &opennova::world::title_rules("dfx2");
     CHECK(emplaced_counter_rotates(w, gun));
     gun.emplaced_update = false; // the ewep class update's alone
     CHECK(!emplaced_counter_rotates(w, gun));
@@ -1282,7 +1286,7 @@ void test_dfx2_channel_publishes_then_counter_rotates() {
     for (const bool dfx2 : {false, true}) {
         ParentRig pr(/*profile_type=*/2, /*anchor_subobject=*/0, /*parent_attrib=*/0);
         Rig &r = pr.r;
-        if (dfx2) r.w.rules.title = opennova::gameprofile::GAME_DFX2;
+        r.w.rules.title_rules = &opennova::world::title_rules(dfx2 ? "dfx2" : "jo");
         Entity &parent = *r.w.registry.get(pr.parent_h);
         parent.has_item_def = true;
         parent.has_graphic_model = true;

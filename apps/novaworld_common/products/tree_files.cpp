@@ -21,8 +21,8 @@ std::vector<TreeFileRule> tree_file_rules(ProductKind kind, std::string_view exp
 	if (kind == ProductKind::Game) {
 		return { { boot_archive(ArchiveSlot::Resource), true },
 			{ boot_archive(ArchiveSlot::Localres), true },
-			{ boot_archive(ArchiveSlot::Language), true }, { "version.txt", false },
-			{ "score.ini", false }, { "_NSTMOUT.TXT", false }, { "gt.ssc", false } };
+			{ boot_archive(ArchiveSlot::Language), true }, { "score.ini", false },
+			{ "_NSTMOUT.TXT", false }, { "gt.ssc", false } };
 	}
 	const std::string code(expansion_code);
 	return { { vfs_expansion_archive_name(code, false), true },
@@ -51,6 +51,15 @@ std::vector<std::string> missing_tree_files(ProductKind kind, std::string_view e
 			missing.push_back(rule.name);
 	}
 	return missing;
+}
+
+std::string expansion_version_file(const ProductRow &product, std::string_view version) {
+	if (product.kind != ProductKind::Expansion)
+		return std::string();
+	const std::string line = !product.version_file.empty()
+			? product.version_file
+			: product.display_name + ", V" + std::string(version) + "; English";
+	return line + "\r\n";
 }
 
 MissionPair mission_pair_of(ProductKind kind, std::string_view expansion_code) {

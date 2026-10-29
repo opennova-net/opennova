@@ -267,7 +267,8 @@ bool Simulation::apply_local_player_loadout_rows(
 	if (p_submit_joiner_request && runtime_ != nullptr && (host_own_client || joiner_in_match) &&
 			p_player_class >= 0 && p_player_class <= 0xFF) {
 		const opennova::LoadoutSubmit submit = opennova::inmatch::armory_accept_in_session(
-				kernel_->world, kernel_->local, p_kit, static_cast<uint8_t>(p_player_class),
+				kernel_->world, kernel_->local, runtime_->view().protocol(), p_kit,
+				static_cast<uint8_t>(p_player_class),
 				/*authority=*/host_own_client, kernel_->mission.header.mission_type);
 		// The seam re-arms from the new resident kit.
 		push_joiner_loadout_kit();

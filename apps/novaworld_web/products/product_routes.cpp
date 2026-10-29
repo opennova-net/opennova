@@ -11,9 +11,10 @@
 #include "program/catalog_repository.h"
 
 #include <base/io/strutil.h>
+#include <base/title/title.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -63,6 +64,13 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	id_or_null(out, "parent_id", d.parent_id);
 	out["expansion_code"] = d.expansion_code;
 	out["title"] = d.title;
+	// The protocol its title speaks: a game's own, an expansion's its parent game's; null for an
+	// app.
+	std::optional<ProductRow> parent;
+	if (d.kind == ProductKind::Expansion && d.parent_id)
+		parent = find_product(db, *d.parent_id);
+	const std::string &title = parent ? parent->title : d.title;
+	protocol_or_null(out, "protocol", title.empty() ? nullptr : title_protocol(title));
 	out["lobby"] = d.lobby;
 	out["lobby_locked"] = d.lobby_locked && !d.lobby.empty(); // a game with none still takes one
 	out["updater_login"] = d.updater_login;
@@ -95,6 +103,8 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 		out["published_release"]["id"] = published->id;
 		out["published_release"]["name"] = published->name;
 		out["published_release"]["sha256"] = published->sha256;
+		out["published_release"]["version"] = published->version;
+		text_or_null(out["published_release"], "one_version", published->one_version);
 	} else {
 		out["published_release"] = nullptr;
 	}
@@ -117,8 +127,20 @@ bool valid_display_name(std::string_view name) {
 			!has_control_byte(name) && !has_c1_control(name);
 }
 
+std::vector<const char *> game_titles() {
+	std::vector<const char *> out;
+	std::string why;
+	for (size_t i = 0; i < title_count(); ++i)
+		if (resolve_title_protocol(title_at(i)->code, why) != nullptr)
+			out.push_back(title_at(i)->code);
+	return out;
+}
+
 bool valid_title(std::string_view title) {
-	return std::find(kTitles.begin(), kTitles.end(), title) != kTitles.end();
+	for (const char *code : game_titles())
+		if (title == code)
+			return true;
+	return false;
 }
 
 bool valid_expansion_code(std::string_view code) {
@@ -176,15 +198,21 @@ void ProductRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/products — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
-// (what a game may speak), "games" (the lobbies, each {slug, display_name}), "products"}:
-// every product (games, expansions, then apps), each {id, key, display_name, kind, parent_id,
-// expansion_code, title, lobby ("" for none), updater_login, command_file, wizard_login, retail,
-// visibility ("public", "private", or null for an app, which has no project), head (its project's
-// newest revision, 0 before the first push), owner_id and owner (the account whose own project it
-// is, its id and username; null for the service's own), download (its file's name on the
-// downloads host, "" for none), description, current_tree ({id, version, ready_at} or null),
-// published_release ({id, name, sha256} or null), servers_live, servers_outdated, trees (its
-// trees newest first, pruned ones left out, each as tree_json)}.
+// (what a game may run as, game_titles), "protocols" (the protocol each speaks, by its
+// code: {"jo": {code, name, version}, ...}, what a new game's lobbies are chosen by), "games"
+// (the lobbies, each {slug, display_name,
+// protocol}: protocol the {code, name, version} its clients speak, http_json.h
+// protocol_or_null), "products"}: every product (games, expansions, then apps), each {id, key,
+// display_name, kind, parent_id, expansion_code, title (the title a game runs as, "" for an
+// expansion and an app), protocol (its title's, an expansion's its parent game's; null for an
+// app), lobby ("" for none), updater_login, command_file, wizard_login, retail, visibility
+// ("public", "private", or null for an app, which has no project), head (its project's newest
+// revision, 0 before the first push), owner_id and owner (the account whose own project it is,
+// its id and username; null for the service's own), download (its file's name on the downloads
+// host, "" for none), description, current_tree ({id, version, ready_at} or null),
+// published_release ({id, name, sha256, version, one_version (the ONE that built it, null for
+// none)} or null), servers_live, servers_outdated, trees (its trees newest first, pruned ones
+// left out, each as tree_json)}.
 crow::response ProductRoutes::list(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -195,8 +223,10 @@ crow::response ProductRoutes::list(const crow::request &req) {
 	else
 		out["store"] = nullptr;
 	std::vector<crow::json::wvalue> titles;
-	for (const char *title : kTitles)
+	for (const char *title : game_titles()) {
 		titles.push_back(crow::json::wvalue(title));
+		protocol_or_null(out["protocols"], title, title_protocol(title));
+	}
 	out["titles"] = std::move(titles);
 	try {
 		auto db_conn = pool_.acquire();
@@ -207,7 +237,7 @@ crow::response ProductRoutes::list(const crow::request &req) {
 			crow::json::wvalue g;
 			g["slug"] = game.slug;
 			g["display_name"] = game.display_name;
-			g["title"] = game.title;
+			protocol_or_null(g, "protocol", protocol_by_code(game.protocol));
 			games.push_back(std::move(g));
 		}
 		out["games"] = std::move(games);
@@ -288,7 +318,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		if (!title)
 			return field_error(400, "missing_field", "title", "a game speaks a title");
 		if (!valid_title(*title))
-			return field_error(400, "invalid_field", "title", "title is jo or dfx2");
+			return field_error(400, "invalid_field", "title", "title is one a game may run as");
 		if (!lobby)
 			return field_error(
 					400, "missing_field", "lobby", "a game lists in a lobby (a games slug)");

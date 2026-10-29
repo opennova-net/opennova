@@ -14,10 +14,10 @@
 #include <utility>
 #include <vector>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_io.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/install_view.h>
@@ -286,7 +286,7 @@ std::string slot_fault_words(const ParticleSlotFault &fault) {
 // the game is served it, ProjectPaths::files), else the project's folder; false where it does not read.
 bool listed_bytes(const ValidationInput &input, const AssetEntry &asset, std::vector<uint8_t> &out) {
 	std::string error;
-	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
+	const int policy = title_scr_policy_for_code(input.project.target_game.c_str());
 	return (input.paths.files ? input.paths.files->read(asset.logical_name, out)
 	                          : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), out, error)) &&
 	       vfs_decode_payload(out, policy);
@@ -373,7 +373,7 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 		alone_walk.clear();
 	}
 	if (names.empty() && base_walk.empty()) return;
-	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
+	const int policy = title_scr_policy_for_code(input.project.target_game.c_str());
 	// The files in the walk's order, each with what it is read from, which the findings are kept by: read again
 	// only once a stamp, the order or the policy moved (every composition read them all before).
 	struct Read {

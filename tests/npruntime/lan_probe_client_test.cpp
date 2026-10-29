@@ -1,6 +1,5 @@
 #include "lan_probe_client.h"
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
@@ -15,8 +14,8 @@
 #include <vector>
 #include "../common/test_expect.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -50,7 +49,7 @@ int main() {
 		if (!nw_decode_inbound(bytes.data(), static_cast<size_t>(received), opcode, body) ||
 				opcode != SESSION_OPCODE_CLIENT_HELLO ||
 				!parse_client_hello(body.data(), body.size(), client_hello) ||
-				!matches_title_identity(kJo, client_hello)) {
+				!matches_protocol(kJo, client_hello)) {
 			return;
 		}
 		// A stock direct announce names its destination as EIP / EPN (D-NET-520)
@@ -72,7 +71,7 @@ int main() {
 	});
 
 	lan_probe::Options options;
-	options.title = &kJo;
+	options.protocol = &kJo;
 	options.endpoint = {{127, 0, 0, 1}, host_port};
 	options.timeout_ms = 1500;
 	options.retry_interval_ms = 50;

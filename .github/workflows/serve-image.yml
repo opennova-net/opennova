@@ -14,12 +14,13 @@ on:
   push:
     branches: [master]
     # Everything opennova-serve and opennova-hostd link: every engine group
-    # (base, formats, runtime, net), apps/common, the service's core and its
+    # (base, formats, runtime, net), every game's own code (games/), apps/common, the service's core and its
     # agents' protocol (with the CMake file that defines them) and the
     # third-party libs those groups link, plus the CMake root and the build
     # context's ignore list. Master's image so follows every engine change a hosted server runs.
     paths:
       - 'engine/**'
+      - 'games/**'
       - 'apps/serve/**'
       - 'apps/hostd/**'
       - 'apps/common/**'
@@ -32,6 +33,7 @@ on:
       - 'third_party/imgui/**'
       - 'CMakeLists.txt'
       - '.dockerignore'
+      - 'scripts/ci/one_stamp.sh'
       - '.github/workflows/net-linux.yml'
       - '.github/workflows/serve-image.yml'
   # Every pull request, whatever its base (stacked PRs included), that touches
@@ -48,6 +50,7 @@ on:
       - 'apps/novaworld_common/hosted/protocol/**'
       - 'CMakeLists.txt'
       - '.dockerignore'
+      - 'scripts/ci/one_stamp.sh'
       - '.github/workflows/net-linux.yml'
       - '.github/workflows/serve-image.yml'
   workflow_dispatch:
@@ -90,6 +93,16 @@ jobs:
           submodules: recursive
           lfs: false
 
+      # ONE's stamp for the images' build (apps/serve/Dockerfile): the latest tag, and a
+      # pull request's run number (staging), as ci.yml stamps its builds; the commit is
+      # this run's, which the hostd smoke run reads back.
+      - name: The ONE stamp
+        id: one
+        shell: bash
+        env:
+          RUN: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && github.run_number || '' }}
+        run: scripts/ci/one_stamp.sh "$GITHUB_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -103,7 +116,11 @@ jobs:
           context: .
           file: apps/serve/Dockerfile
           target: serve
-          build-args: OPENNOVA_VERSION=${{ github.sha }}
+          build-args: |
+            OPENNOVA_VERSION=${{ steps.one.outputs.version }}
+            OPENNOVA_COMMIT=${{ github.sha }}
+            OPENNOVA_BUILD_TIME=${{ steps.one.outputs.time }}
+            OPENNOVA_STAGING=${{ steps.one.outputs.staging }}
           load: true
           tags: opennova-serve:ci
           cache-from: type=gha,scope=opennova-serve
@@ -115,7 +132,11 @@ jobs:
           context: .
           file: apps/serve/Dockerfile
           target: hostd
-          build-args: OPENNOVA_VERSION=${{ github.sha }}
+          build-args: |
+            OPENNOVA_VERSION=${{ steps.one.outputs.version }}
+            OPENNOVA_COMMIT=${{ github.sha }}
+            OPENNOVA_BUILD_TIME=${{ steps.one.outputs.time }}
+            OPENNOVA_STAGING=${{ steps.one.outputs.staging }}
           load: true
           tags: opennova-hostd:ci
           cache-from: type=gha,scope=opennova-serve
@@ -199,6 +220,16 @@ jobs:
           submodules: recursive
           lfs: false
 
+      # ONE's stamp for the images' build (apps/serve/Dockerfile): the latest tag, and a
+      # pull request's run number (staging), as ci.yml stamps its builds; the commit is
+      # this run's, which the hostd smoke run reads back.
+      - name: The ONE stamp
+        id: one
+        shell: bash
+        env:
+          RUN: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && github.run_number || '' }}
+        run: scripts/ci/one_stamp.sh "$GITHUB_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -225,7 +256,11 @@ jobs:
           context: .
           file: apps/serve/Dockerfile
           target: serve
-          build-args: OPENNOVA_VERSION=${{ github.sha }}
+          build-args: |
+            OPENNOVA_VERSION=${{ steps.one.outputs.version }}
+            OPENNOVA_COMMIT=${{ github.sha }}
+            OPENNOVA_BUILD_TIME=${{ steps.one.outputs.time }}
+            OPENNOVA_STAGING=${{ steps.one.outputs.staging }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -247,7 +282,11 @@ jobs:
           context: .
           file: apps/serve/Dockerfile
           target: hostd
-          build-args: OPENNOVA_VERSION=${{ github.sha }}
+          build-args: |
+            OPENNOVA_VERSION=${{ steps.one.outputs.version }}
+            OPENNOVA_COMMIT=${{ github.sha }}
+            OPENNOVA_BUILD_TIME=${{ steps.one.outputs.time }}
+            OPENNOVA_STAGING=${{ steps.one.outputs.staging }}
           push: true
           tags: ${{ steps.hostd-meta.outputs.tags }}
           labels: ${{ steps.hostd-meta.outputs.labels }}

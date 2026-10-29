@@ -128,7 +128,7 @@ describe('fetchMyServers', () => {
   it('reads the data a server runs on, with defaults for what a reply leaves out', async () => {
     const server = hostedServer(3, {
       expansion: { id: 2, code: 'jox01', display_name: 'Escalation' },
-      data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: { tree_id: 12, version: '1.7.5.5' } },
+      data: { base: { tree_id: 10, version: '1.0.5' }, expansion: { tree_id: 12, version: '1.0.5' } },
       update_available: true,
     });
     get.mockResolvedValue(reply(serversResponse([server])));

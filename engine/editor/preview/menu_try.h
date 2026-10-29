@@ -52,6 +52,8 @@ struct MenuTrySource {
 	// the game runs in), and the expansion running ("" the base game).
 	std::function<std::vector<ExpansionRecord>()> expansions;
 	std::string expansion;
+	// The line the STARTUP screen's VERSION label shows (UTF-8, the editor's: editor_version_line).
+	std::string version_line;
 };
 
 // What the game would have done, which Try says instead: a command the code binds by name (its

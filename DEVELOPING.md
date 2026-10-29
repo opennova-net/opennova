@@ -188,7 +188,9 @@ alone. The OpenNova runtime is the game with no project: Publish
 (`.github/workflows/publish.yml`) ships each CI build to a deployment's downloads host and
 its update service at once (DEPLOY.md, "The downloads host").
 
-The version goes into the package's command file; no version file is read or written.
+The game version goes into the package's command file (`[HEADER] VERSION`); the release
+records the ONE that built it. The one version file is an expansion's `version.txt`, which the
+service writes at the build (ADR 0076); a base game carries none.
 A retail release also carries the removals since the stock install: it is packed from the
 stock revision's export by our own writer to the revision's, every file a row, each into
 the archive the stock install holds it in (a stock install's first update fetches its
@@ -199,7 +201,8 @@ built on publish from that whole package, from empty: the service keeps no stock
 The game product is `/game acidgambit`, `/game jo` or `/game dfx2`. Without `/game`,
 the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,
 `ACIDGAMBIT.CMD`); a folder with no wizard is OpenNova's, and one whose wizard names
-another game is refused (ADR 0067). OpenNova's product uses the JO engine profile. The
+another game is refused (ADR 0067). OP: Acid Gambit runs as its own title, `acidgambit`, whose
+protocol and rules are JO's (ADR 0076). The
 updater refuses a product the folder's wizard does not name, and installs OpenNova
 content only into OpenNova's own folder or an empty one. The selected product
 and its installed expansions update independently of the OpenNova runtime. A retail
@@ -475,8 +478,8 @@ master or whose commit has no green master-push `ci.yml` run (it waits for one s
 running), so the release ships only what every required CI gate already passed; the
 package jobs then build the four apps' plain builds as the run's artifacts (the runtime's
 and the editor's zips, the Blender add-on's and the tools'), the runtime
-and the editor stamped with the tag's version (the exes' file versions), whatever
-`godot/project.godot`'s `config/version` says. Then `release.yml` creates the GitHub release
+and the editor stamped with the tag's version (ONE's build stamp, `engine/base/version/one_build.h`,
+and the exes' file versions), whatever `godot/project.godot`'s `config/version` says. Then `release.yml` creates the GitHub release
 (its generated notes) and starts Publish for prod
 (`.github/workflows/publish.yml` with deployment `prod`, the tag and its own run id; ADR
 0072), which waits for the prod environment's reviewers: prod's service packs and publishes

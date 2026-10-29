@@ -51,8 +51,8 @@ String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_override_table,
 }
 
 bool ConnectionError::refuses_this_install() const {
-	// NCC007 (the PV2 game-version gate), GCC003 (a banned address), and the
-	// game-layer version (GDC002..008, GDC048) and expansion (GDC047) refusals.
+	// NCC007 (the protocol version (PV2) gate), GCC003 (a banned address), and the
+	// join build (GDC002..008) and expansion (GDC047, its version.txt GDC048) refusals.
 	if (absent_) return false;
 	if (record_.connect_error == 7) return true;
 	if (record_.connect_error == 14) return record_.connect_param == 3;

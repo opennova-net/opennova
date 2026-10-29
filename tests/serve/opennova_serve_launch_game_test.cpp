@@ -1,10 +1,12 @@
 // opennova-serve chooses the game it speaks and mounts as the game's launch chooses it
 // (boot_policy.h launch_product, ADR 0067 d2): /game when given, else the folder's UPDATE.WIZ
-// (JOPTR.CMD JO, DFX2.CMD DFX2), a folder with no wizard being OpenNova's own (the JO profile);
+// (JOPTR.CMD JO, DFX2.CMD DFX2), a folder with no wizard being OpenNova's own (its own title);
 // a folder whose wizard names a game OpenNova does not play, with no /game, runs nothing.
 // The folders and their UPDATE.WIZ text are minted here.
 
 #include "server.h"
+
+#include <base/version/one_build.h>
 
 #include <chrono>
 #include <cstdio>
@@ -53,10 +55,10 @@ void the_launch_picks_the_game() {
 	// The folder's wizard names the game when /game does not.
 	CHECK(serve::Server(options_for(jo, "")).game_code() == "jo");
 	CHECK(serve::Server(options_for(dfx2, "")).game_code() == "dfx2");
-	// A folder with no wizard is OpenNova's own, the JO profile.
+	// A folder with no wizard is OpenNova's own, run as its own title.
 	{
 		serve::Server server(options_for(own, ""));
-		CHECK(server.game_code() == "jo" && !server.foreign_folder());
+		CHECK(server.game_code() == "acidgambit" && !server.foreign_folder());
 	}
 	// /game wins over the folder, its case folded.
 	CHECK(serve::Server(options_for(dfx2, "JO")).game_code() == "jo");
@@ -72,6 +74,22 @@ void the_launch_picks_the_game() {
 		serve::Server server(options_for(own, "nosuchgame"));
 		CHECK(!server.foreign_folder() && server.game_code() == "nosuchgame");
 	}
+	// The line it logs as it starts and CMD VERSION posts: the launch's game, the release its
+	// folder holds (its command file's VERSION), ONE's build and the protocol its title speaks; no
+	// release named where the folder holds none, no protocol for a title whose protocol is
+	// unwitnessed.
+	const std::string one = one_build().label();
+	const std::string dot = " \xC2\xB7 ";
+	CHECK(serve::Server(options_for(jo, "")).version_line() ==
+			"Joint Operations" + dot + one + dot + "JO protocol 16");
+	CHECK(serve::Server(options_for(dfx2, "")).version_line() ==
+			"Delta Force Xtreme 2" + dot + one + dot + "DFX2 protocol 16");
+	std::ofstream((fs::path(own) / "ACIDGAMBIT.CMD").string(), std::ios::binary)
+			<< "[HEADER]\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n";
+	CHECK(serve::Server(options_for(own, "")).version_line() ==
+			"OP: Acid Gambit 0.1.4" + dot + one + dot + "JO protocol 16");
+	CHECK(serve::Server(options_for(own, "jodemo")).version_line() ==
+			"Joint Operations (Demo)" + dot + one);
 	std::error_code ec;
 	fs::remove_all(root, ec);
 	std::printf("  /game, else the folder's UPDATE.WIZ, else OpenNova's own; a foreign folder needs /game\n");

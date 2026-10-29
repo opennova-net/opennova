@@ -20,8 +20,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -32,8 +31,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 
@@ -170,7 +169,7 @@ void check_ci_is_the_lobby_protocols_first() {
 	MemorySocket gate;
 	MemorySocket session;
 	NwuLobbySession lobby(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
-	lobby.set_title(&kJo, kJo.gate_tag);
+	lobby.set_protocol(&kJo, kJo.gate_tag);
 	connect(lobby, gate, session);
 	CHECK(lobby.session() != nullptr);
 	CHECK(lobby.client_index() == 1u && hello_ci(session) == 1u);
@@ -191,7 +190,7 @@ void check_keys_draw_from_the_manager_at_the_0x81() {
 	MemorySocket gate;
 	MemorySocket session;
 	NwuLobbySession lobby(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
-	lobby.set_title(&kJo, kJo.gate_tag);
+	lobby.set_protocol(&kJo, kJo.gate_tag);
 	connect(lobby, gate, session);
 	ClientAuth auth;
 	CHECK(answer_hello(lobby, session, auth));
@@ -212,7 +211,7 @@ void check_injected_keys() {
 	MemorySocket gate;
 	MemorySocket session;
 	NwuLobbySession lobby(NwuLobbySession::Hooks{}, env);
-	lobby.set_title(&kJo, kJo.gate_tag);
+	lobby.set_protocol(&kJo, kJo.gate_tag);
 	connect(lobby, gate, session);
 	ClientAuth auth;
 	CHECK(answer_hello(lobby, session, auth));

@@ -6,8 +6,8 @@
 
 namespace opennova {
 
-// How the SCR key is chosen when decoding: the one enum, which each game profile's row names
-// (gameprofile::GameProfile::scr_policy), so a caller holding a profile passes its scr_policy
+// How the SCR key is chosen when decoding: the one enum, which each title names
+// (base/title/title.h Title::scr_policy), so a caller holding a title passes its scr_policy
 // straight through. The version byte alone cannot tell the JO Demo (DEFAULT-keyed) from retail
 // JO/DFX2 (JO_DFX2-keyed) — both stamp version 1 — so a caller that knows the game forces the key
 // with one of the FORCE_* policies.

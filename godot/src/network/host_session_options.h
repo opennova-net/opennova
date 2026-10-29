@@ -50,6 +50,10 @@ protected:
 	static void _bind_methods();
 
 public:
+	// The options run as the game the process was launched as (ResourceRoot::session_title) until
+	// a block seeds them (seed_from_block, the block's title).
+	HostSessionOptions();
+
 	// The config-shaped half (the sim copies the user-facing fields out of it).
 	const opennova::inmatch::GameConfig &config() const { return config_; }
 	void assign_config(const opennova::inmatch::GameConfig &p_config) { config_ = p_config; }

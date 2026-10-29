@@ -1,7 +1,9 @@
 #include "cd_keys.h"
 
 #include <base/os_random/os_random.h>
+#include <base/title/title.h>
 #include <net/novacrypto/cdkey.h>
+#include <net/protocol/protocol.h>
 
 #include <cctype>
 #include <cstdio>
@@ -12,6 +14,16 @@ namespace opennova::novaworld_server::cdkeys {
 namespace {
 
 using db::BindValue;
+
+// The CD-key chains of the protocol `title` speaks (Protocol::cd_key), which every key and
+// activation of the title encodes under. A title with none activates nothing (title_activates),
+// so reaching here with one is a caller's bug.
+const cdkey::KeyChains &chains_of(std::string_view title) {
+	const Protocol *protocol = title_protocol(title);
+	if (protocol == nullptr || protocol->cd_key == nullptr)
+		throw db::Error("cd_keys: the title " + std::string(title) + " has no CD key");
+	return *protocol->cd_key;
+}
 
 // A fresh serial that collides with a stored one is drawn again, this many
 // times at most (64 random bits: never, in practice).
@@ -81,7 +93,7 @@ std::optional<int64_t> insert_key(db::Database &db, std::string_view title,
 		std::optional<int64_t> user_id, const std::string &created_by) {
 	for (int draw = 0; draw < kSerialDraws; ++draw) {
 		const std::string serial = make_serial(title);
-		const std::string wire_key = cdkey::make_wire_key(serial);
+		const std::string wire_key = cdkey::make_wire_key(chains_of(title), serial);
 		const auto inserted = db.query(
 				"INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by, assigned_at) "
 				"VALUES ($1, $2, $3, $4, $5, CASE WHEN $4::bigint IS NULL THEN NULL ELSE now() END) "
@@ -119,7 +131,7 @@ ActivateResult record_activation(db::Database &db, const CdKey &key, const std::
 	};
 	std::optional<std::string> nwact = stored_nwact();
 	if (!nwact) {
-		const std::string made = cdkey::make_activation(key.wire_key, nwpssk);
+		const std::string made = cdkey::make_activation(chains_of(key.title), key.wire_key, nwpssk);
 		db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES ($1, $2, $3) "
 				"ON CONFLICT (key_id, nwpssk) DO NOTHING;",
 				{ BindValue(key.id), BindValue(nwpssk), BindValue(made) });
@@ -141,7 +153,14 @@ ActivateResult record_activation(db::Database &db, const CdKey &key, const std::
 } // namespace
 
 bool title_activates(std::string_view title) {
-	return title == "dfx2";
+	// The title whose LAN host checks the CDKIID its activation decodes to (DFX2-13: its protocol
+	// has a CD key, Protocol::cd_key), which its boot and menus gate on, by its exact code: a key
+	// is stored and found under it (cd_keys.title), so another spelling activates nothing.
+	const Title *row = title_by_code(title);
+	if (row == nullptr || row->code == nullptr || title != row->code)
+		return false;
+	const Protocol *protocol = title_protocol(title);
+	return protocol != nullptr && protocol->cd_key != nullptr;
 }
 
 std::string make_serial(std::string_view title) {
@@ -370,7 +389,7 @@ bool needs_activation(std::string_view title, std::string_view nwcdkiid) {
 	if (!title_activates(title))
 		return false;
 	std::string serial;
-	return !cdkey::decode_wire_key(nwcdkiid, serial);
+	return !cdkey::decode_wire_key(chains_of(title), nwcdkiid, serial);
 }
 
 } // namespace opennova::novaworld_server::cdkeys

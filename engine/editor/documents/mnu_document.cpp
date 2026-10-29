@@ -1,6 +1,5 @@
 #include "mnu_document.h"
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>

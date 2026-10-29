@@ -45,7 +45,7 @@ struct ServerConfig;
 // The reply is the same for every client but its reflected pair:
 // POSTIPADDRESS is this gate, and the web fields name the one web endpoint.
 //
-// One lobby per title: the probe's tag selects its `games` row
+// One lobby per gate tag: the probe's tag selects its `games` row
 // (catalog::GameCatalog::by_gate_tag), which supplies the reply's LobbyName,
 // its startupurl's query and its GLSVSS leg (the configured one standing in
 // for a row with none); a tag no row (nor alias) answers to gets no reply. The
@@ -105,7 +105,7 @@ public:
 
 	// The port start() bound and the receive loop serves (the OS's pick when
 	// the configured port is 0); the gate response advertises it as POSTIPPORT
-	// (but to a title whose live reply is witnessed without the pair: DFX2's).
+	// (but to a protocol whose live reply is witnessed without the pair: DFX2's).
 	uint16_t bound_port() const { return bound_port_; }
 
 	// The games catalogue as the receive thread holds it now (the lobbies the gate answers for).

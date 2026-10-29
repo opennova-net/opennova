@@ -25,7 +25,6 @@
 #include <sys/stat.h>
 #endif
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
@@ -46,7 +45,8 @@
 #include <formats/rtxt/rtxt.h>
 #include <formats/sbf/sbf.h>
 #include <net/novacrypto/pubcrypto.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/protocol.h>
 #include <runtime/renderer/material_texture.h>
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
@@ -527,8 +527,8 @@ static int test_recorded_archives() {
 // ADR 0046 S16: an expansion's routing. The language slot's kinds go to <b>L.pff, the localres and
 // resource slots' to <b>.pff, a loose kind into the expansion's folder where its reader looks there
 // and nowhere where the game reads it from the install's folder alone; the files the game reads by
-// the expansion's name where their kind would put them elsewhere (<b>.bin also loose, version.txt in
-// the folder).
+// the expansion's name where their kind would put them elsewhere (<b>.bin also loose; its version.txt
+// is NovaWorld's, BuildTarget::version_file).
 static int test_expansion_routing() {
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
@@ -550,7 +550,6 @@ static int test_expansion_routing() {
 	TEST_EXPECT(route_for_expansion(AssetKind::NovaWorldScreen) == ExpansionPlace::Archive);
 	TEST_EXPECT(route_for_expansion(entry_of("JXM.bin", AssetKind::Strings), "jxm") == ExpansionPlace::Folder);
 	TEST_EXPECT(route_for_expansion(entry_of("gametext.bin", AssetKind::Strings), "jxm") == ExpansionPlace::LanguageArchive);
-	TEST_EXPECT(route_for_expansion(entry_of("version.txt", AssetKind::Text), "jxm") == ExpansionPlace::Folder);
 	TEST_EXPECT(route_for_expansion(entry_of("gt.ssc", AssetKind::Config), "jxm") == ExpansionPlace::Folder);
 	TEST_EXPECT(route_for_expansion(entry_of("notes.txt", AssetKind::Text), "jxm") == ExpansionPlace::RootOnly);
 	TEST_EXPECT(route_for_expansion(entry_of("nw_error.mnx", AssetKind::NovaWorldScreen), "jxm") == ExpansionPlace::Archive);
@@ -564,9 +563,9 @@ static std::vector<uint8_t> bytes_of(const std::string &text) {
 	return std::vector<uint8_t>(text.begin(), text.end());
 }
 
-// gt.ssc as the game decodes it: `tag` under Joint Operations' key chain (net/title/title_identity.h).
+// gt.ssc as the game decodes it: `tag` under Joint Operations' key chain (net/protocol/protocol.h).
 static std::string gate_tag_file(const std::string &tag) {
-	return opennova::encode_key_chain(bytes_of(tag), opennova::title_identity(opennova::gameprofile::GAME_JO)->gate_tag_keys);
+	return opennova::encode_key_chain(bytes_of(tag), opennova::title_protocol("jo")->gate_tag_keys);
 }
 
 // The project file of the name, wherever the project keeps it ("" for none).
@@ -625,8 +624,8 @@ static BaseInstall make_base(const std::string &root, const Files &language, con
 
 // ADR 0046 S16: the project built as the expansion jxm. Its folder holds its two archives (the
 // language slot's kinds in jxmL.pff, the rest in jxm.pff), its loose files where the game reads them
-// under /exp jxm (a video, its music bank, its version.txt, its jxm.bin; a NovaWorld screen packed
-// alone), nothing at the build's root; a file the game reads only from the install's folder
+// under /exp jxm (a video, its music bank, the version.txt NovaWorld supplied in place of its own, its
+// jxm.bin; a NovaWorld screen packed alone), nothing at the build's root; a file the game reads only from the install's folder
 // left out and said (build.expansion.root_only); the build mounts with /exp jxm and resolves every
 // name; its id is another than the standalone game's of the same files and than another expansion
 // name's.
@@ -650,6 +649,9 @@ static int test_expansion_layout() {
 	target.install = install.root;
 	target.game = "jo";
 	target.gate_tag_file = p.dir.file("generated/gt.ssc");
+	const std::string version = "Synthetic, V1.0; English\r\n";
+	target.version_file = p.dir.file("generated/version.txt");
+	TEST_EXPECT(test_io::write_text(target.version_file, version));
 	const AssetScan scan = scan_project_assets(p.paths, p.doc);
 	AssetGraph graph;
 	ValidationCache cache;
@@ -697,7 +699,8 @@ static int test_expansion_layout() {
 	TEST_EXPECT(root_only);
 	const std::string dir = report.build_dir;
 	TEST_EXPECT(fs::is_regular_file(system_path(dir + "/expansion/jxm/jxmL.pff")) && fs::is_regular_file(system_path(dir + "/expansion/jxm/jxm.pff")));
-	TEST_EXPECT(fs::is_regular_file(system_path(dir + "/expansion/jxm/version.txt")) && fs::is_regular_file(system_path(dir + "/expansion/jxm/jxm.bin")));
+	TEST_EXPECT(test_io::read_file_text(dir + "/expansion/jxm/version.txt") == version &&
+	            fs::is_regular_file(system_path(dir + "/expansion/jxm/jxm.bin")));
 	TEST_EXPECT(test_io::read_file_text(dir + "/expansion/jxm/gt.ssc") == gate_tag_file("jxm:1"));
 	TEST_EXPECT(!fs::exists(system_path(dir + "/language.pff")) && !fs::exists(system_path(dir + "/header.bik")) && !fs::exists(system_path(dir + "/cc.bin")));
 	// S26 C10: the build's list names each loose file where it landed, with its size (they read 0 B).
@@ -1330,56 +1333,28 @@ static int test_export() {
 	return 0;
 }
 
-// The base game's version text (a standalone project's version.txt, its install's root one as a game you own
-// imports it): the game never reads it and the updater reads it alone, loose in the game's folder, its CRC at
-// its start and at its end, then "No Update Needed!" or "Current Version:" and its text [orig:
-// Cupdate2Dlg_OnInitDialog @ 0x4090e0 (UPDATE.EXE); Cupdate2Dlg_ReportResult @ 0x405140 (UPDATE.EXE)]. The
-// build copies it loose beside the archives, never into one; the export carries it there with its bytes,
-// where a release packs it as a loose row of the base's command file. A build of the same project as an
-// expansion puts it in the expansion's folder instead, its own version text.
-static int test_base_version_text_ships_loose_at_the_root() {
-	Project p("opennova_editor_build_base_version_test");
+// An expansion's version.txt is NovaWorld's (project::is_service_managed_file), written as a release builds and
+// cached for Play: a project's own is never built, the base game's nor an expansion's; the one the target supplies
+// lands loose in the expansion's folder (test_expansion_layout), where its one reader takes the checksum of its
+// bytes [orig: Expansion_LoadAssets @ 0x4a4858..0x4a4885]; a base game's build that names one is refused (the game
+// never reads the root's).
+static int test_version_file_is_novaworlds() {
+	Project p("opennova_editor_build_version_file_test");
 	TEST_EXPECT(p.create() && p.fill());
-	const std::string version = "Synthetic Game: Base, V1.0.0.1; English";
-	TEST_EXPECT(test_io::write_text(p.root + "/version.txt", version));
-	const BuildPlan plan = p.plan();
-	for (const Diagnostic &d : plan.diagnostics)
-		std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
-	TEST_EXPECT(plan.ok);
-	size_t loose = 0;
-	for (const BuildEntry &entry : plan.loose)
-		if (entry.logical_name == "version.txt") {
-			++loose;
-			TEST_EXPECT(entry.build_path == "version.txt" && entry.kind == AssetKind::Text);
-		}
-	TEST_EXPECT(loose == 1);
-	for (const BuildArchive &archive : plan.archives)
+	TEST_EXPECT(test_io::write_text(p.root + "/version.txt", "Synthetic Game: Base, V1.0.0.1; English"));
+	const BuildPlan stock = p.plan();
+	for (const Diagnostic &d : stock.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(stock.ok);
+	for (const BuildEntry &entry : stock.loose) TEST_EXPECT(entry.logical_name != "version.txt");
+	for (const BuildArchive &archive : stock.archives)
 		for (const BuildEntry &entry : archive.entries) TEST_EXPECT(entry.logical_name != "version.txt");
-	const AssetEntry asset = entry_of("version.txt", AssetKind::Text);
-	const BuildPlaceWords standalone = build_place_words(asset), expansion = build_place_words(asset, "jxm");
-	TEST_EXPECT(standalone.packed && standalone.words.find("beside the archives") != std::string::npos);
-	TEST_EXPECT(expansion.packed && expansion.words.find("expansion/jxm/version.txt") != std::string::npos);
-
-	const BuildReport build = run_build(plan, p.output_root());
-	for (const Diagnostic &d : build.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
-	TEST_EXPECT(build.ok && test_io::read_file_text(build.build_dir + "/version.txt") == version);
-	TEST_EXPECT(std::find(build.loose_written.begin(), build.loose_written.end(), "version.txt") != build.loose_written.end());
-	ExportRequest request;
-	request.build_dir = build.build_dir;
-	request.build_id = build.build_id;
-	request.export_dir = p.dir.file("shipped/Game");
-	request.project_id = p.doc.project_id;
-	const ExportReport shipped = export_build(request);
-	for (const Diagnostic &d : shipped.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
-	TEST_EXPECT(shipped.ok && std::find(shipped.files.begin(), shipped.files.end(), "version.txt") != shipped.files.end());
-	TEST_EXPECT(test_io::read_file_text(request.export_dir + "/version.txt") == version);
-	// No archive of the export holds it: the game's own mount, archives alone over the boot table, has no such name.
-	{
-		opennova::Vfs vfs;
-		TEST_EXPECT(vfs.mount_game(request.export_dir, std::string(), opennova::VfsMountMode::Packed,
-		                           opennova::VfsArchiveDiscovery::RetailTable));
-		TEST_EXPECT(vfs.has_mounted_archive() && vfs.has_file("main.mnu") && !vfs.has_file("version.txt"));
-	}
+	const BuildPlaceWords words = build_place_words(entry_of("version.txt", AssetKind::Text), "jxm");
+	TEST_EXPECT(!words.packed && words.words.find("NovaWorld") != std::string::npos);
+	BuildTarget target;
+	target.version_file = p.dir.file("generated/version.txt");
+	TEST_EXPECT(test_io::write_text(target.version_file, "Synthetic, V0.2.0; English\r\n"));
+	const BuildPlan base = p.plan(target);
+	TEST_EXPECT(!base.ok && count_code(base.blockers, "build.read") == 1);
 	return 0;
 }
 
@@ -1387,7 +1362,7 @@ static int test_base_version_text_ships_loose_at_the_root() {
 // data, never a player's file: the game only reads it, once at boot, loose first, then from the archives, and
 // nothing writes one [orig: Game_InitSubsystems @0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0]. The build
 // copies it loose beside the archives, the export carries it there with its bytes, and the export mounted as the
-// game mounts it gives the session its tag (title_gate_tag).
+// game mounts it gives the session its tag (protocol_gate_tag).
 static int test_gate_tag_ships_loose_at_the_root() {
 	Project p("opennova_editor_build_gate_tag_test");
 	TEST_EXPECT(p.create() && p.fill());
@@ -1436,11 +1411,11 @@ static int test_gate_tag_ships_loose_at_the_root() {
 	TEST_EXPECT(test_io::read_file_text(request.export_dir + "/gt.ssc") == stored);
 	// The export as the game mounts it (its archives over the boot table, its folder's loose files first): the
 	// session's tag is the file's, over Joint Operations' own.
-	const opennova::TitleIdentity &jo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+	const opennova::Protocol &jo = *opennova::title_protocol("jo");
 	opennova::ResourceIndex index;
 	TEST_EXPECT(index.scan(request.export_dir, std::string(), opennova::VfsMountMode::Packed,
 	                       opennova::VfsArchiveDiscovery::RetailTable));
-	TEST_EXPECT(opennova::title_gate_tag(jo, nullptr) == "jop:cus2" && opennova::title_gate_tag(jo, &index) == "acidgambit:0");
+	TEST_EXPECT(opennova::protocol_gate_tag(jo, nullptr) == "jop:cus2" && opennova::protocol_gate_tag(jo, &index) == "acidgambit:0");
 	// A service lobby change changes the immutable build's identity, even with the same sources.
 	target.gate_tag_file = p.dir.file("another/gt.ssc");
 	TEST_EXPECT(test_io::write_text(target.gate_tag_file, gate_tag_file("another:0")));
@@ -2230,7 +2205,7 @@ int main() {
 	failures += test_expansion_layout();
 	failures += test_expansion_empty_pair();
 	failures += test_export();
-	failures += test_base_version_text_ships_loose_at_the_root();
+	failures += test_version_file_is_novaworlds();
 	failures += test_gate_tag_ships_loose_at_the_root();
 	failures += test_lean_packing();
 	failures += test_base_gate();

@@ -19,15 +19,15 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/entity_wire_bridge.h> // build_player_uplink (the C2S 0x0C body)
 
+#include <net/protocol/protocol.h>
 #include <net/npwire/ingame_decode.h>    // kRoundEventFlag* (the fire-mode byte)
 #include <net/npwire/ingame_encode.h>    // the C2S 0x06 fired-round descriptor pose
 #include <net/npwire/ingame_message_id.h> // s2c::FULL_ENTITY_SPAWN (a 0x18 row's def load)
 #include <net/npwire/wire_handle.h>      // pool()/kPoolItem (the wire handle home)
-#include <net/title/title_identity.h>    // TitleIdentity::game_id (the rules' title)
 #include <net/novaworld/lobby_identity.h> // read_gate_metrics_locale (the join's PING)
 #include <net/novaworld/nwu_lobby_session.h> // send_join_gate_ping_report, process_gate_memory
 
-#include <base/gameprofile/gameprofile.h> // the title's version text (the join's PING)
+#include <base/version/one_build.h> // the join's PING's GV
 #include <base/vfs/vfs.h>                 // vfs_country_code (the join's PING's CC.BIN)
 
 #include <base/io/fixed.h>               // kFp16OneD, fp16_16_to_float
@@ -86,15 +86,24 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	runtime->set_join_request(join_role, spectator_password, server_password, join_password);
 	// The connect's peer: the 0x41's EIP / EPN on a dial, the 0x42's SIP / SPN.
 	runtime->set_host_address(host_addr_);
-	runtime->set_title(title_);
+	runtime->set_protocol(protocol_);
+	runtime->set_rules(rules_);
 	runtime->use_process_state(client_process_);
 	return *runtime;
+}
+
+void JoinerRole::set_rules(const world::TitleRules &rules) {
+	rules_ = &rules;
+	if (kernel_ != nullptr) kernel_->world.rules.title_rules = rules_;
+	if (runtime) runtime->set_rules(rules_);
 }
 
 void JoinerRole::bind(mission::MissionKernel &kernel) {
 	// The previous kernel may already be gone (a load swaps it before the
 	// rebind); only the new one is touched.
 	Role::bind(kernel);
+	// The joiner's World runs its title's rules from its load on (set_rules).
+	if (rules_ != nullptr) kernel.world.rules.title_rules = rules_;
 	// A joiner's world is header-only: every join opens the host's S2C 0x0B header alone
 	// (D-NET-194), and every decoded pool 1..3 row has its materializer-owned twin.
 	kernel.wire_header_world = true;
@@ -363,9 +372,11 @@ void JoinerRole::poll_preload() {
 	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - the NovaWorld test @0x56A4D6,
 	//  Server_SendPingMetricsToGate (the call @0x56A50B) ahead of the JOIN's queue @0x56A53F]
 	if (runtime->take_join_connected() && join_novaworld_ && socket_ != nullptr &&
-			title_ != nullptr) {
+			protocol_ != nullptr) {
 		GateMetricsHost host;
-		host.version = gameprofile::gameprofile_by_id(title_->game_id)->version_text;
+		// GV, g_VersionText: the engine build's, ONE's wire version text (net/novaworld
+		// nwu_host_role.cpp's GV carries the witness).
+		host.version = one_build().wire_version().retail_text();
 		read_gate_metrics_locale(host.locale);
 		send_join_gate_ping_report(*socket_, static_cast<uint32_t>(runtime->join_clock_ms()),
 				process_gate_memory(), process_gate_ping_manager(), std::move(host),
@@ -1106,7 +1117,7 @@ void JoinerRole::pump() {
 	// binds the host's [orig: g_LoadoutWeaponNameList @0x8333F8; PlayerClass_InitEntity
 	//  @0x4B1060 (@0x4B1100..0x4B1116)].
 	world.loadout_weapon_names = &rt.loadout_weapon_names();
-	world.rules.title = title_ != nullptr ? title_->game_id : gameprofile::GAME_JO;
+	if (rules_ != nullptr) world.rules.title_rules = rules_;
 	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*
 	// rows of the world's profile; an inactive profile reads no clock at all.
 	// The wire leg (Client_ProcessNetworkFrame) has its own rows.

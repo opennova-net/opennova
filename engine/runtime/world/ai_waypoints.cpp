@@ -384,11 +384,12 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
     const int32_t py = veh.position.y.q16;
     const int32_t pz = veh.position.z.q16;
     const int32_t self_r = veh.bound_radius.q16; // [orig: entity+0]
-    // dfx2.exe keeps a hull alive for a body within 4 u, not 12, and starts
-    // the write-off past 1860 counts, not 3410; the 3720 kill is the same.
+    // The reach a body keeps a hull alive within and the count the write-off
+    // starts past are the title's: 12 u and 3410 counts, dfx2.exe's 4 u and 1860;
+    // the 3720 kill is the same (TitleRules, DFX2-32).
     // [orig: @0x46532c (0x40000), @0x4653ac (0x744) in the twin @0x4652a0 (dfx2.exe)]
-    const bool dfx2 = world.rules.title == gameprofile::GAME_DFX2;
-    const int32_t near_reach = dfx2 ? 0x40000 : 0xC0000; // [orig: @0x46531c]
+    const TitleRules &title = world.rules.title();
+    const int32_t near_reach = title.ai_vehicle_near_reach; // [orig: @0x46531c]
     if (n > 32) {
         // Anyone alive nearby keeps the hull from being written off: a live,
         // unhidden pool-0 body inside the (both radii + 12 u) box and sphere
@@ -411,7 +412,7 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
             if (di <= r) m.stuck_ticks = 0;            // [orig: @0x46538c]
         });
     }
-    if (m.stuck_ticks <= (dfx2 ? 1860 : 3410)) return; // [orig: @0x4653a6]
+    if (m.stuck_ticks <= title.ai_vehicle_write_off_count) return; // [orig: @0x4653a6]
 	// [orig: AI_CheckVehicleStuckState @0x4653AC..0x46542D]
 	int32_t pose[6] = { veh.spawn_position.x.q16, veh.spawn_position.y.q16,
 		veh.spawn_position.z.q16, 0, 0, 0 };

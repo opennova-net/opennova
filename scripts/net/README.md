@@ -172,7 +172,7 @@ the report says so.
 | Initial stream | edit distance over origin-packet groups (`flags\|tags\|raw/LEN/SKIP`, timer-phase identities left out, gameplay / world-page / fragment lengths `*`; C2S as one record sequence); bodies by position over the common prefix and their count; S2C 0x16 / 0x46 as sets of distinct (decoded) bodies; S2C 0x0C / 0x10 decoded and compared by slot | 0; the count rule for counts | `INITIAL_PACKET_GROUPING`, `INITIAL_BODY_MISMATCH`, `INITIAL_COUNT_MISMATCH`, `INITIAL_RECORD_MISMATCH` |
 | Steady distributions (after the first gameplay packet) | largest share delta over keys of at least 2% share, in units of `max(0.08, RR share / 2)`; a packet groups as its record multiset, a gameplay packet without the S2C 0x57 replies it carries; a side under 13 samples skips the row (`steady.distribution_floor`) | 1 | `GAMEPLAY_GROUP_DISTRIBUTION`, `GAMEPLAY_ORDER_DISTRIBUTION`, `GAMEPLAY_DISTRIBUTION_UNEXERCISED` |
 | Session packet envelope | class presence 0/1; packet and header-only cadence vs RR rate-normalized; header-only flag set; shape distribution | 0; `max(1, ceil 20%)`; 0; 1 | `SESSION_PACKET_CADENCE`, `SESSION_PACKET_HEADER_FLAGS`, `SESSION_PACKET_SHAPE_DISTRIBUTION` |
-| Outer handshake (first 0x41/0x42, 0x81/0x82) | edit distance over field keys, dynamic values masked or reduced (SCRK's size as 62-63, CU CI0/CI1 as the low 16 bits); whether the auth SCRK walks the manager LCG's cycle; each opcode's count | 0 | `HANDSHAKE_MISMATCH`, `HANDSHAKE_MISSING`, `HANDSHAKE_KEY_GENERATOR`, `HANDSHAKE_COUNT_MISMATCH` |
+| Outer handshake (first 0x41/0x42, 0x81/0x82) | edit distance over field keys, dynamic values masked or reduced (SCRK's size as 62-63, CU CI0/CI1 as the low 16 bits, the engine-build slots that carry ONE's build: the joiner's BDAT, PV3 and CU VERSIONSTRING and the host's 0x81 BDAT and PV3); whether the auth SCRK walks the manager LCG's cycle; each opcode's count | 0 | `HANDSHAKE_MISMATCH`, `HANDSHAKE_MISSING`, `HANDSHAKE_KEY_GENERATOR`, `HANDSHAKE_COUNT_MISMATCH` |
 | Requests and replies | C2S 0x3D's length per start both runs answered; RTT pongs echoing no earlier S2C 0x57 ping, pings running backward | 0 | `REPLY_LENGTH_MISMATCH`, `RTT_ECHO_MISMATCH` |
 | Integrity stream | invalid pairs, CRCs off the retail oracle (RR's rows plus RR-aa's of the same `integrity_profile`), unwitnessed rows (none with a retail host that punted nothing), OR/OO host rows (Jaccard), challenges whose family is not the per-boundary toggle's within one mission (`integrity.family_toggle`), challenges without a preceding 0x16, PUNTs; an ammo challenge between a join and the joiner's first C2S 0x0C leaves the rows, the oracle and the unwitnessed rows (`integrity.join_adm`) | 0 | `INTEGRITY_PAIR_INVALID`, `INTEGRITY_CRC_MISMATCH`, `INTEGRITY_ROW_UNWITNESSED`, `HOST_AMMO_ROW_MISMATCH`, `HOST_DYNAMIC_ENTITY_ROW_MISMATCH`, `INTEGRITY_NOT_ALTERNATING`, `INTEGRITY_SCOREBOARD_ORDER`, `INTEGRITY_PUNT` (entity-family variants prefixed `ENTITY_`) |
 | Milestones (handshake, 0x7B, C2S 0x09, S2C 0x2C, 0x08, 0x0B, C2S 0x0B, 0x0F, first 0x0C/0x0A; E2's round-end and next-mission legs) | one-sided milestones; order inversions over the milestones both carry (two rows, each against its own A/A) | 0 | `MILESTONE_MISMATCH`, `MILESTONE_ORDER` |
@@ -195,14 +195,14 @@ pause, and a 0x25 that follows its 0x1D by less than the 2790-tick linger
 The normalization registry (`apps/parity/normalization.h`) lists every field a
 comparison masks, strips or reduces with the nondeterminism source that makes
 that correct: the handshake's dynamic fields and reductions, the initial bodies
-routed to stateful, set or decoded-record checks, S2C 0x0F's live tick, the
-timer-phase identities (0x30/0x31, 0x16, 0x46, 0x79, 0x6E, 0x6F), the grouping
-lengths and the client's send-pump boundaries, the session-local handles, the
-measured fps/CPU bytes and the send counter. The masks are driven from it, a
-mask elsewhere asserts its entry at compile time, and every verdict carries it.
-A mask whose finding is real keeps it visible through another row (the
-scoreboard cadence, the anchor's own offset, the C2S 0x09 / S2C 0x2C milestones,
-the key generator).
+routed to stateful, set or decoded-record checks, the C2S 0x0B's engine-build
+dword, S2C 0x0F's live tick, the timer-phase identities (0x30/0x31, 0x16, 0x46,
+0x79, 0x6E, 0x6F), the grouping lengths and the client's send-pump boundaries,
+the session-local handles, the measured fps/CPU bytes and the send counter. The
+masks are driven from it, a mask elsewhere asserts its entry at compile time,
+and every verdict carries it. A mask whose finding is real keeps it visible
+through another row (the scoreboard cadence, the anchor's own offset, the C2S
+0x09 / S2C 0x2C milestones, the key generator).
 
 Output: `--out` (default `parity-verdict.json`) is an
 `opennova.parity-verdict.v1` document. Its `rows` give each topology,

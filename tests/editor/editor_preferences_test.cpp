@@ -402,7 +402,7 @@ static int test_session_over_a_store() {
 		// The recently placed items shown are the open project's game's (the polish): none with no
 		// project open, a JO project's its own, none again once it closes; the other game's kept.
 		TEST_EXPECT(v.project.recent_items.empty());
-		session.handle(request::new_project(dir.file("jo_project"), "Placed"));
+		session.handle(request::new_project(dir.file("jo_project"), "Placed", "jo"));
 		session.run_operations();
 		TEST_EXPECT(session.project_open() && v.project.recent_items == std::vector<int64_t>({106100, 2044}));
 		session.handle(request::close_project());

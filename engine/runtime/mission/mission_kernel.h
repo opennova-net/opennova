@@ -68,6 +68,10 @@
 namespace opennova::mission {
 
 struct KernelBootOptions {
+	// The rules of the title the mission's World runs as (world::title_rules; its
+	// SessionRules::title_rules) from its load on, the embedder's (the mounted game's, opennova-serve's
+	// /game); null leaves the World's (a role's session stamps its own over it).
+	const world::TitleRules *title_rules = nullptr;
 	// The bare kernel's own player after load (no role installed a round init: a
 	// session's bodies spawn at its round init, MissionKernel::round_init).
 	bool playable = true;

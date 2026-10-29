@@ -70,9 +70,10 @@ struct ClientLocalCommandSeams {
 	// LF); unset: taken, nothing written [orig: Client_ProcessLocalCommand @0x520BF0 (the
 	// SAVENFO test @0x520D4B) -> Entity_DumpUsageStatistics @0x40E620, fopen @0x40E6B2].
 	std::function<void()> save_nfo;
-	// VERSION's line "Version <version>  - <title>" (Chat_AddMessageChannel2(.., -1, 930)).
-	std::string version_text;
-	std::string title_text;
+	// VERSION's line (Chat_AddMessageChannel2(.., -1, 930)): the game's versions, UTF-8
+	// (base/version/version_line.h; the embedder's, as the STARTUP label's), posted in the chat's
+	// cp1252 where retail posted "Version <version>  - <title>".
+	std::string versions;
 	std::function<void(const std::string &text)> version_line;
 	ClientConsoleQueueAction queue_action;
 };

@@ -368,12 +368,12 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 	if (victim_connection != nullptr) {
 		// A normal other-player kill opens the exact 120-second revive
 		// window. Self/environment and knife/headshot cause bits clear it.
-		// dfx2.exe stores 0 on both arms (DFX2-20): no window, so no S2C 0x54
+		// dfx2.exe stores 0 on both arms (DFX2-20, TitleRules::revive_window): no window, so no S2C 0x54
 		// below, and the 0x0A slot-state byte and the 0x46 downed byte stay 0.
 		// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368 (@0x516f4f)]
 		// [orig: GameEvent_PlayerDeath `mov [edi+170h], ebx` @0x51419b, the 0x54
 		//  gate @0x5145cb (dfx2.exe)]
-		const bool revive_window = world.rules.title != gameprofile::GAME_DFX2;
+		const bool revive_window = world.rules.title().revive_window;
 		victim_connection->link.downed_revive_seconds =
 				revive_window && d.killer.valid() && d.killer != d.victim &&
 				(victim_cause_bits & 0xC00u) == 0u

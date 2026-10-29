@@ -56,9 +56,10 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/lan_discovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/datagram_demux.cpp # one socket under the game and NWU protocols
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session_vars.cpp # the session-variable list (0x60 server info)
-    # title — each title's wire and NovaWorld identity (the in-match hello, the lobby
-    # identity, the gate tag and gt.ssc) keyed by gameprofile's GameId
-    ${CMAKE_CURRENT_SOURCE_DIR}/title/title_identity.cpp
+    # protocol — the protocols the titles speak (the in-match identity and its NovaWorld values,
+    # each title's in games/<code>/, games::install()), keyed by title code; the gate tag and gt.ssc
+    ${CMAKE_CURRENT_SOURCE_DIR}/protocol/protocol.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/protocol/gate_tag.cpp
     # update — the updater's wire: UPDATE.EXE's requests to its gateway and update servers and
     # their replies (docs/update/updater-re.md §4, ADR 0061)
     ${CMAKE_CURRENT_SOURCE_DIR}/update/update_wire.cpp

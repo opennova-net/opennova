@@ -437,7 +437,7 @@ int main() {
         t.current = 0;
         WaypointFrameInputs in;
         in.game_type = 0x30020;
-        in.title = opennova::gameprofile::GAME_DFX2;
+        in.title_rules = &opennova::world::title_rules("dfx2");
         t.tick_advance(in); // standing on entry 0, not done: held
         CHECK(t.current == 0);
         t.entries[0].done = true;

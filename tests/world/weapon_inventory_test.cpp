@@ -4,6 +4,7 @@
 // @ 0x542280, Player_SelectWeaponSlot @ 0x4dd680, Player_SwitchToWeaponByHandle
 // @ 0x4e0170, Player_CycleWeaponSlot @ 0x4dfe70, Mission_LoadBMSFile loadout filter
 // @ 0x40f7ae, WeaponDef_BuildItemRestrictionTable @ 0x54ddb0].
+#include <net/protocol/protocol.h>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -603,12 +604,12 @@ void test_cycle() {
 void test_defaults() {
     // The static single-player page blob the double-NUL copy takes whole
     // [orig: 0x833BF8 @ 0x5246be].
-    auto def = weapon_kit_default(opennova::gameprofile::GAME_JO);
+    auto def = weapon_kit_default(opennova::world::title_rules("jo"));
     CHECK(def.size() == 8 && def[0].name == "WPN_M4AUTO" && def[1].name == "WPN_M4" &&
           def[2].name == "WPN_colt45" && def[7].name == "WPN_KNIFE");
     // dfx2.exe's page names WPN_MK23 where JO's names WPN_colt45
     // [orig: the page at 0x832368 @0x52188f (dfx2.exe)].
-    auto dfx2 = weapon_kit_default(opennova::gameprofile::GAME_DFX2);
+    auto dfx2 = weapon_kit_default(opennova::world::title_rules("dfx2"));
     CHECK(dfx2.size() == 8 && dfx2[0].name == "WPN_M4AUTO" && dfx2[1].name == "WPN_M4" &&
           dfx2[2].name == "WPN_MK23" && dfx2[3].name == "WPN_AT4" && dfx2[7].name == "WPN_KNIFE");
     CHECK(def[3].name == "WPN_AT4" && def[3].ammo_primary == -1 && def[3].flags == -1);
@@ -1075,7 +1076,7 @@ void test_an_accept_reset_keeps_the_current_slot() {
     inv.pools[static_cast<size_t>(m4_class)] = 90;
     local->inventory_valid = true;
     (void)opennova::inmatch::armory_accept_in_session(*world, *local,
-            {WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 6, /*authority=*/false,
+            opennova::title_protocol("jo"), {WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 6, /*authority=*/false,
             opennova::bms::MissionType{});
     CHECK(inv.equipped_combo == rifle);
     CHECK(inv.pending_combo == rifle);
@@ -1205,7 +1206,7 @@ void test_a_missed_select_sends_195_raw() {
     };
     auto accept = [&](bool authority) {
         return opennova::inmatch::armory_accept_in_session(*world, *local,
-                {WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 6, authority,
+                opennova::title_protocol("jo"), {WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 6, authority,
                 opennova::bms::MissionType{});
     };
     const std::vector<WeaponKitEntry> no_primary = {{"WPN_KNIFE", -1, -1, -1},

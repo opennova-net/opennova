@@ -20,7 +20,7 @@ struct EntityHandle;
 }
 
 namespace opennova {
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 struct PlayerReplicationState; // net/npwire/replication_model.h
 }
 
@@ -52,14 +52,14 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // nonzero session id are minted once by create_session; callers then retain the
 // returned block for every chunk request. `mp_session_peer` is the host's
 // connection mode (false for a dedicated host, whose own slot +36 drops);
-// `title` the title the session speaks, whose rules-word bits the +44 word
+// `protocol` the protocol the session speaks, whose rules-word bits the +44 word
 // takes (DFX2-18; null: JO's); `session_title` the mission start's session
 // title (NapiNPServerCtx::session_title), whose first 31 bytes +116 carries.
 // [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (g_SessionTitle into +0x74
 // @0x51E983..0x51E989)]
 MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
-		const TitleIdentity *title, const std::string &session_title);
+		const Protocol *protocol, const std::string &session_title);
 
 // The recipient's S2C 0x7B session summary (its name and PCID, the server
 // name, the advertised mission, the map file, the game type, the expansion);
@@ -99,14 +99,14 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 // for the owning connection; callers decide whether it is returned reactively
 // or staged on a transport.
 // `server_log` is the /PROFILE recorder (null = off), which marks the deploy;
-// `title` the title the session speaks (null: JO's), whose deploy writes its
+// `protocol` the protocol the session speaks (null: JO's), whose deploy writes its
 // own state byte (DFX2-11).
 // [orig: Server_DeployPlayer deploy leg @0x517740, its handle argument
 //  tested @0x51786B]
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
 		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
-		ServerLogRecorder *server_log = nullptr, const TitleIdentity *title = nullptr);
+		ServerLogRecorder *server_log = nullptr, const Protocol *protocol = nullptr);
 
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into

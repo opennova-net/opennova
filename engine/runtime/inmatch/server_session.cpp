@@ -10,7 +10,7 @@
 #include <net/npwire/nw_session_framing.h> // next_connection_index, manager_connection_keys
 #include <net/npwire/session_hello.h> // the self-join's 0x41 / 0x42 (their lengths)
 #include <net/npwire/session_keys.h> // SESSION_OPCODE_CLIENT_HELLO / _AUTH
-#include <net/title/title_identity.h> // TitleIdentity::pn (the self-join's PROTOCOL lines)
+#include <net/protocol/protocol.h> // Protocol::pn (the self-join's PROTOCOL lines)
 #include <runtime/inmatch/napi_np_protocol.h> // host_server_hello (the self-join's 0x81)
 #include <runtime/inmatch/server_console.h> // the /INOUT host line
 #include <runtime/inmatch/host_settings.h> // mission_session_title
@@ -44,7 +44,7 @@ io::CrtRand *session_crt_rand(NapiNPServerCtx &ctx) {
 void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	if (!ctx.is_authority) return;
 	NapiNPProtocol &p = ctx.np_protocol;
-	p.identity = startup.title;             // the network init's identity block (the 0x81's, the gates')
+	p.identity = startup.protocol;             // the network init's identity block (the 0x81's, the gates')
 	p.host_key = startup.host_key;          // HK TLV (validated against the client HK on join)
 	p.host_start_tick = startup.host_start_tick; // uptime base
 	p.max_players = ctx.config.max_players; // MP TLV mirror
@@ -100,10 +100,10 @@ void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 
 // The config the session serves from: the resolved send period, the session
 // title (the mount's override table `text_override` answering first), the
-// mission-data block (its rules word the title identity's, `title`; its +0x74
+// mission-data block (its rules word the protocol's, `protocol`; its +0x74
 // the session title), the advertised name and cap.
 void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
-		const TitleIdentity *title, const rtxt::File *text_override) {
+		const Protocol *protocol, const rtxt::File *text_override) {
 	// Resolve the session-selected retail default once at session creation so
 	// every later connection, settings record, and countdown reads the same
 	// concrete period. A caller-supplied override wins verbatim.
@@ -120,7 +120,7 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 	// CNapiGameSession_InitRandomSeedOrRequest @0x5248A7].
 	ctx.session_title = mission_session_title(text_override, config.mission_file);
 	ctx.mission_metadata_blob = build_mission_metadata_blob(
-			ctx.config, ctx.is_mp_session_peer != 0, title, ctx.session_title);
+			ctx.config, ctx.is_mp_session_peer != 0, protocol, ctx.session_title);
 	// The MP TLV (the 0x82 and the LAN discovery 0x81) carries the session's
 	// cap, never the slot limit's dedicated slot [orig: protocol +0x524 =
 	// ctx+0xF28, CNapiGameSession_CreateSession @0x4C9A80;
@@ -246,7 +246,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	}
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
 	// The title the start installs below (start_server) builds the block.
-	resolve_mission_config(ctx, config, startup.title, startup.text_override);
+	resolve_mission_config(ctx, config, startup.protocol, startup.text_override);
 	// The two advertised flag words, the create's: P1 the session's game type and P2 its
 	// BuildFlags word. Only the create and an admin SET of a password write them, so a map
 	// change keeps them; the S2C 0x08 tail calls BuildFlags live (serialize_server_config)
@@ -348,13 +348,13 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		//  called @0x629595); CNapiNPConnection_SendClientJoin @0x61FE20 (the send callback
 		//  @0x6203F0, the SendTo call @0x62040C); NapiNPProtocol_HandleClientJoin @0x62B750 (the
 		//  type-1 create @0x62BF06, the SK's draw @0x62BF5E)]
-		const TitleIdentity *identity = ctx.np_protocol.identity;
+		const Protocol *identity = ctx.np_protocol.identity;
 		const PeerAddr internal{}; // address 0, port 0
 		const uint32_t own_index = next_connection_index();
 		ClientHello hello;
 		ServerHello reply;
 		if (identity != nullptr) {
-			hello = make_title_client_hello(*identity, own_index);
+			hello = make_protocol_client_hello(*identity, own_index);
 			reply = host_server_hello(ctx, hello, internal);
 		}
 		const ConnectionKeys own_keys = manager_connection_keys();
@@ -407,7 +407,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 				const int32_t reply_len =
 						static_cast<int32_t>(server_hello_to_bytes(reply).size() + 1);
 				log.line(napi_got_protocol_text(reply_len, internal, pn));
-				const ClientAuth auth = make_title_client_auth(
+				const ClientAuth auth = make_protocol_client_auth(
 						*identity, own_index, own_keys.key, reply.hk, name, own_keys.scrk);
 				const int32_t join_len =
 						static_cast<int32_t>(client_auth_to_bytes(auth).size() + 1);

@@ -16,11 +16,10 @@
 //  @0x4fcd84..0x4fcd9b, NapiNPClientMsg_0x00A @0x431dee..0x431e62, NapiNPClientMsg_HandleWeaponRestrictions
 //  @0x42f2ac (dfx2.exe)]
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/replica_track.h>
 #include <runtime/replication/client_replica_pipeline.h>
@@ -50,13 +49,14 @@ void expect(bool cond, const char *what) {
 	}
 }
 
-const TitleIdentity *jo() { return title_identity(gameprofile::GAME_JO); }
-const TitleIdentity *dfx2() { return title_identity(gameprofile::GAME_DFX2); }
+const Protocol *jo() { return title_protocol("jo"); }
+const Protocol *dfx2() { return title_protocol("dfx2"); }
 
-// One phase-3 frame of a co-op host (g_GameType 0x30020) speaking `title`, to a remote recipient,
+// One phase-3 frame of a co-op host (g_GameType 0x30020) speaking `protocol`, to a remote recipient,
 // its world's co-op checkpoint at `checkpoint`.
-std::vector<uint8_t> phase3_frame(const TitleIdentity *title, uint16_t checkpoint = 0xFFFF) {
+std::vector<uint8_t> phase3_frame(const Protocol *protocol, uint16_t checkpoint = 0xFFFF) {
 	world::World w;
+	w.rules.title_rules = &world::title_rules("jo");
 	w.script.coop_checkpoint_slot = checkpoint;
 	w.registry.configure_pool(0, 1);
 	world::Entity recipient;
@@ -67,7 +67,7 @@ std::vector<uint8_t> phase3_frame(const TitleIdentity *title, uint16_t checkpoin
 	ns::LoopbackChannel channel;
 	ns::Connection conn{&channel, ns::TransportMode::Loopback, h, 0};
 	conn.s2c_phase = 2; // the next counter value is phase 3
-	(void)ns::emit_connection_s2c(w, conn, ns::snapshot_world(w), 0x30020u, 0, 0, 0, title);
+	(void)ns::emit_connection_s2c(w, conn, ns::snapshot_world(w), 0x30020u, 0, 0, 0, protocol);
 	ns::Datagram dg;
 	expect(channel.client_recv(dg) && dg.tag == s2c::PER_FRAME_UPDATE, "the phase-3 0x0A goes out");
 	return dg.body;
@@ -105,7 +105,8 @@ void host_fan_writes_the_checkpoint() {
 
 void joiner_view_keeps_the_checkpoint() {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
-	view->set_title(dfx2());
+	view->set_protocol(dfx2());
+	view->set_rules(&world::title_rules("dfx2"));
 	view->set_game_type(0x30020u);
 	view->apply(s2c::PER_FRAME_UPDATE, dfx2_wire::coop_objective_frame());
 	expect(view->state().objective_show_win == 2 && view->state().coop_checkpoint == 0xFFFFu &&
@@ -119,7 +120,8 @@ void joiner_view_keeps_the_checkpoint() {
 	view->apply(s2c::PER_FRAME_UPDATE, encode_frame_update(marked));
 	expect(view->state().coop_checkpoint_revision == 1, "the same checkpoint is no change");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
-	jo_view->set_title(jo());
+	jo_view->set_protocol(jo());
+	jo_view->set_rules(&world::title_rules("jo"));
 	jo_view->set_game_type(0x30020u);
 	FrameUpdate jo_frame = dfx2_wire::coop_objective_update();
 	jo_frame.objective.has_coop_checkpoint = false;
@@ -133,13 +135,15 @@ void weapon_restrictions_keep_the_titles_armory_value() {
 	// count 2: index 5 value 3, index 6 value 2
 	const std::vector<uint8_t> body = {2, 5, 3, 6, 2};
 	auto dfx2_view = std::make_unique<ns::ClientReplicaPipeline>();
-	dfx2_view->set_title(dfx2());
+	dfx2_view->set_protocol(dfx2());
+	dfx2_view->set_rules(&world::title_rules("dfx2"));
 	dfx2_view->apply(s2c::WEAPON_RESTRICTIONS, body);
 	expect(dfx2_view->state().weapon_availability[5] == 3 &&
 	               dfx2_view->state().weapon_availability[6] == 1,
 	       "a DFX2 joiner keeps 3 (armory only) and drops 2");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
-	jo_view->set_title(jo());
+	jo_view->set_protocol(jo());
+	jo_view->set_rules(&world::title_rules("jo"));
 	jo_view->apply(s2c::WEAPON_RESTRICTIONS, body);
 	expect(jo_view->state().weapon_availability[5] == 1 &&
 	               jo_view->state().weapon_availability[6] == 2,
@@ -162,7 +166,8 @@ std::vector<uint8_t> coop_world_state_load() {
 void world_state_folds_the_done_records() {
 	const std::vector<uint8_t> body = coop_world_state_load();
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
-	view->set_title(dfx2());
+	view->set_protocol(dfx2());
+	view->set_rules(&world::title_rules("dfx2"));
 	view->set_game_type(0x30020u);
 	view->apply(s2c::WORLD_STATE_LOAD, body);
 	const ns::ClientState &state = view->state();
@@ -172,7 +177,8 @@ void world_state_folds_the_done_records() {
 	expect(state.coop_checkpoint == 5u && state.coop_checkpoint_revision == 0,
 	       "its checkpoint is the last done record's slot, no walk");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
-	jo_view->set_title(jo());
+	jo_view->set_protocol(jo());
+	jo_view->set_rules(&world::title_rules("jo"));
 	jo_view->set_game_type(0x30020u);
 	jo_view->apply(s2c::WORLD_STATE_LOAD, body);
 	expect(jo_view->state().world_state.waypoints.size() == 3 &&
@@ -183,6 +189,7 @@ void world_state_folds_the_done_records() {
 	// The joiner's track legs: the route rebuilt with the done bytes, then a new checkpoint
 	// (slot 6 on the 0x0A) marks the route through it.
 	world::World w;
+	w.rules.title_rules = &world::title_rules("dfx2");
 	inmatch::ReplicaTrackSeen seen;
 	inmatch::apply_replica_track(w, state, 0x30020u, true, seen);
 	const std::vector<world::WaypointEntry> &route = w.script.waypoints.entries;
@@ -199,6 +206,7 @@ void world_state_folds_the_done_records() {
 	expect(route[2].done, "the new checkpoint's marker is marked done");
 
 	world::World jo_world;
+	jo_world.rules.title_rules = &world::title_rules("jo");
 	inmatch::ReplicaTrackSeen jo_seen;
 	inmatch::apply_replica_track(jo_world, jo_view->state(), 0x30020u, true, jo_seen);
 	expect(jo_world.script.waypoints.entries.size() == 3 &&

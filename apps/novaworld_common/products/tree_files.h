@@ -3,11 +3,12 @@
 // The files a product's tree holds, by kind (ADR 0064): what opennova-serve reads from an
 // install and nothing else (ADR 0053 d3's list, split per product). A base game's tree is the
 // retail boot table, resource.pff, localres.pff and language.pff (required: Vfs::mount_game
-// mounts no install without them), with version.txt (the product's version, the updater's
-// precheck file), score.ini and _NSTMOUT.TXT (the two loose root files the server reads) and
-// gt.ssc (the gate tag override, ADR 0055 d3) when the install has them. An expansion's tree
-// is its pair, <code>.pff and <code>L.pff, and its version.txt (the checksum joiners compare,
-// vfs_expansion_version_checksum), required, with gt.ssc when present. A release's apply
+// mounts no install without them), with score.ini and _NSTMOUT.TXT (the two loose root files
+// the server reads) and gt.ssc (the gate tag override, ADR 0055 d3) when the install has them;
+// no version.txt (the game never reads the root one, ADR 0067 d8). An expansion's tree is its
+// pair, <code>.pff and <code>L.pff, and its version.txt (the checksum joiners compare,
+// vfs_expansion_version_checksum, which its release build writes: expansion_version_file),
+// required, with gt.ssc when present. A release's apply
 // (release.apply) keeps only these of what the package's rows leave, under their canonical
 // names, and refuses a tree without a required one. The archives' names are base/vfs's (the
 // boot table, vfs_expansion_archive_name). Service policy, not a port.
@@ -36,6 +37,15 @@ std::string canonical_tree_file(ProductKind kind, std::string_view expansion_cod
 // The required names `names` (canonical spellings) lacks.
 std::vector<std::string> missing_tree_files(ProductKind kind, std::string_view expansion_code,
 		const std::vector<std::string> &names);
+
+// An expansion's version.txt as its release build writes it beside its gt.ssc: one line ending
+// in CRLF, as retail's expansion\jox01\version.txt is (its 49 bytes end "English\r\n"), its only
+// reader the CRC a host compares with its joiners' [orig: Expansion_LoadAssets @ 0x4a4858..0x4a4885].
+// The line is the product's version_file where its row names one (Escalation's retail line, so a
+// retail Escalation host takes our build's checksum), else "<display name>, V<version>; English",
+// `version` the release's as typed ("OP: Nifty Package, V0.2.0; English", retail's shape,
+// docs/update/updater-re.md §2). "" for a game or an app: neither has one.
+std::string expansion_version_file(const ProductRow &product, std::string_view version);
 
 // The two archive names a tree's mission list is read from (mission_catalog's pair walk): a
 // base's localres.pff with language.pff, an expansion's <code>.pff with <code>L.pff.

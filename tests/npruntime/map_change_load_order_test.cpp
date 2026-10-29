@@ -33,7 +33,6 @@
 //     Server_InitAllPlayerEntitiesForRound @0x525BAF past @0x525AC5), so a leg the arm's
 //     pumps read meets the slots before their round init.
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -44,7 +43,7 @@
 #include <net/npwire/peer_addr.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/map_change.h>
@@ -78,7 +77,7 @@ namespace {
 using namespace opennova;
 namespace ns = opennova::replication;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 int failures = 0;
 #define CHECK(c)                                                                     \
@@ -201,7 +200,7 @@ struct DedicatedHost {
 	// The rotation's current map's session config.
 	inmatch::HostConfig current_host_cfg() const {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "Load Order";
 		cfg.config.game_type = rotation.list.map_game_type;
 		cfg.config.mission_file = rotation.list.map_file;
@@ -418,7 +417,7 @@ struct ListenHost {
 
 	bool boot_map(bool next_mission) {
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::AttackAndDefend;
 		mission::sync_counts(r.mission);

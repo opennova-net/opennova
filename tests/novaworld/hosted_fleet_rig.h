@@ -100,9 +100,9 @@ inline SeededData seed_data(Database &db) {
 	d.jo = seeded_product(db, "Joint Operations");
 	d.jox = seeded_product(db, "Escalation");
 	d.dfx2 = seeded_product(db, "Delta Force Xtreme 2");
-	d.jo_tree = seed_tree(db, d.jo, "JO V1.7.5.3", { "second.bms", "SERVETST.BMS", "third.bms" });
-	d.jox_tree = seed_tree(db, d.jox, "JOX V1.0", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
-	d.dfx2_tree = seed_tree(db, d.dfx2, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });
+	d.jo_tree = seed_tree(db, d.jo, "1.7.5.3", { "second.bms", "SERVETST.BMS", "third.bms" });
+	d.jox_tree = seed_tree(db, d.jox, "1.0", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
+	d.dfx2_tree = seed_tree(db, d.dfx2, "1.0", { "dfx2_a.bms", "dfx2_b.bms" });
 	return d;
 }
 

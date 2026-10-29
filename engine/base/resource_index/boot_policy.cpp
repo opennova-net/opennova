@@ -2,11 +2,11 @@
 
 #include <base/resource_index/boot_policy.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/ascii_config.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/file_io.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <formats/update/apply.h>
 #include <formats/update/command_file.h>
@@ -320,9 +320,27 @@ std::string launch_expansion(const LaunchFlags &flags, const std::string &fallba
 }
 
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback) {
-    if (!flags.game.empty()) return flags.game == "acidgambit" ? "jo" : flags.game;
+    if (!flags.game.empty()) return flags.game;
     const std::string fb = strutil::to_lower(strutil::trim(fallback));
-    return fb.empty() || fb == "acidgambit" ? std::string("jo") : fb;
+    return fb.empty() ? std::string(default_title().code) : fb;
+}
+
+WizardProduct wizard_product(const update::UpdateWizard &wizard) {
+    const std::string name = strutil::trim(wizard.cmd);
+    // A stock wizard: the title whose command file its CMD names, run as itself. OpenNova's own
+    // game (no program of its own: the runtime runs it) is native.
+    if (const Title *stock = title_by_command_file(name)) {
+        const std::string code = stock->code;
+        return { code, code, stock->executable == nullptr };
+    }
+    // A player's game: GAME names the title it runs as, one a stock wizard names (a title with a
+    // command file: JO's, DFX2's, OP: Acid Gambit's).
+    const std::string game = strutil::to_lower(strutil::trim(wizard.game));
+    const std::string login = strutil::to_lower(strutil::trim(wizard.product_login));
+    const Title *runs_as = game.empty() ? nullptr : title_by_code(game);
+    if (!name.empty() && !login.empty() && runs_as != nullptr && runs_as->command_file != nullptr)
+        return { login, game, true };
+    return {};
 }
 
 FolderProduct folder_product(const std::string &dir) {
@@ -330,13 +348,13 @@ FolderProduct folder_product(const std::string &dir) {
     std::string text;
     if (!vfs_update_wizard_text(dir, text)) return out;
     const update::UpdateWizard wizard = update::read_update_wizard(text);
-    const update::WizardProduct product = update::wizard_product(wizard);
+    const WizardProduct product = wizard_product(wizard);
     out.command = strutil::trim(wizard.cmd);
     out.foreign = product.product.empty();
     out.product = product.product;
     out.game = product.game;
     // A player's game: the stock products' names are the runtime's own.
-    if (product.native && out.product != "acidgambit") {
+    if (product.native && title_by_code(out.product) == nullptr) {
         std::string bytes, ignored;
         std::optional<update::CommandFile> installed;
         if (update::is_safe_row_name(out.command) &&
@@ -348,38 +366,37 @@ FolderProduct folder_product(const std::string &dir) {
     return out;
 }
 
-namespace {
-
-// The stock products: their /game name, command file and name on the runtime's screens.
-struct StockProduct {
-    const char *product;
-    std::string_view command;
-    const char *name;
-};
-constexpr StockProduct kStockProducts[] = {
-    {"acidgambit", update::kAcidGambitCommandFile, "OP: Acid Gambit"},
-    {"jo", update::kJoCommandFile, "Joint Operations"},
-    {"dfx2", update::kDfx2CommandFile, "Delta Force Xtreme 2"},
-};
-
-} // namespace
-
 LaunchProduct launch_product(const LaunchFlags &flags, const FolderProduct &folder) {
     LaunchProduct out;
     if (flags.game_given) out.product = flags.game;
-    else if (!folder.foreign) out.product = folder.product.empty() ? std::string("acidgambit") : folder.product;
+    else if (!folder.foreign) out.product = folder.product.empty() ? std::string(default_title().code) : folder.product;
     const bool folders = !out.product.empty() && out.product == folder.product;
     if (folders || (folder.foreign && !flags.game_given)) out.command = folder.command;
     if (folders) out.name = folder.name;
     out.supported = folders;
-    for (const StockProduct &stock : kStockProducts) {
-        if (out.product != stock.product) continue;
-        if (out.command.empty()) out.command = stock.command;
-        if (out.name.empty()) out.name = stock.name;
+    // A stock product: a title a stock wizard names (its command file), by its /game name; its
+    // command file and its name on the runtime's screens are the title's.
+    const Title *stock = out.product.empty() ? nullptr : title_by_code(out.product);
+    if (stock != nullptr && stock->command_file != nullptr) {
+        if (out.command.empty()) out.command = stock->command_file;
+        if (out.name.empty()) out.name = stock->display_name;
         out.supported = true;
     }
     out.game = folders ? folder.game : launch_game(flags, out.product);
     return out;
+}
+
+std::optional<Version> launch_product_version(
+		const std::string &dir, const LaunchProduct &product) {
+	// version_mark's read: the command file at its name in the folder, its header's VERSION.
+	std::string bytes, ignored;
+	if (product.command.empty() || !update::is_safe_row_name(product.command) ||
+			!io::read_file_text(boot_path_join(dir, product.command), bytes, ignored))
+		return std::nullopt;
+	const std::optional<update::CommandFile> file = update::read_command_file(bytes);
+	if (!file)
+		return std::nullopt;
+	return Version::parse(file->version);
 }
 
 std::string boot_path_join(const std::string &dir, const std::string &name) {
@@ -390,7 +407,7 @@ std::string boot_path_join(const std::string &dir, const std::string &name) {
 }
 
 bool mount_install(Vfs &vfs, const std::string &root, const LaunchFlags &flags) {
-    vfs.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(launch_game(flags, std::string()).c_str()));
+    vfs.set_scr_policy(title_scr_policy_for_code(launch_game(flags, std::string()).c_str()));
     const VfsMountMode mode =
             flags.loose_override ? VfsMountMode::PackedWithLooseOverride : VfsMountMode::Packed;
     return vfs.mount_game(root, flags.expansion, mode, VfsArchiveDiscovery::RetailTable) &&

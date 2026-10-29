@@ -290,7 +290,8 @@ JoinTicketCheck redeem_join_ticket(db::Database &db, std::string_view ticket, ui
 		const std::string &joiner_ip, const std::string &host_ip);
 
 // What a game's listing shows in a column its host reported nothing for: the
-// game's own values, its `games` row's ver1 and exp_bits
+// game's own values, its lobby's protocol's VER1 (net/protocol/protocol.h
+// Protocol::ver1) and its `games` row's exp_bits
 // (apps/novaworld_common/program/catalog_repository.h), the GSB route serving it
 // passes them.
 struct GsbGameDefaults {

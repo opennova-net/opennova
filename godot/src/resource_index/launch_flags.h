@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -25,8 +26,8 @@ public:
 	static bool loose_override_enabled();
 	// `/exp <name>` (or `/mod`, the last one), else `fallback` ("" the base game).
 	static String expansion(const String &fallback);
-	// The engine profile: `/game`'s, else `fallback`'s, an empty fallback meaning the
-	// launch's product (product()); OpenNova uses JO's compatibility.
+	// The title the launch runs as (a title code): `/game`'s, else `fallback`'s, an empty
+	// fallback meaning the launch product's (boot_policy.h launch_game, LaunchProduct::game).
 	static String game(const String &fallback);
 	// The distribution product: `/game` when given, else the launch directory's
 	// UPDATE.WIZ (boot_policy.h folder_product), a folder with no wizard OpenNova's;
@@ -39,6 +40,15 @@ public:
 	// The product's name on the runtime's screens: a stock game's, a player game's
 	// own (its installed command file's PRODUCT, else its login); "" for none.
 	static String product_name();
+	// The product's installed release: its command file's [HEADER] VERSION in the launch
+	// directory (boot_policy.h launch_product_version, the file the updater's version mark
+	// reads), "0.1.4"; "" when the file is absent or names none. Read once per launch.
+	static String product_version();
+	// The launch's versions on one line (base/version/version_line.h): the product's name and
+	// its installed release, ONE's build (one_build()) and the protocol its title speaks
+	// (net/protocol/protocol.h title_versions), "OP: Acid
+	// Gambit 0.1.4 · ONE 0.0.22 (a1b2c3d) · JO protocol 16"; a part unknown left out.
+	static String version_line();
 	// True when `/game` was passed, even without a value.
 	static bool game_given();
 	static bool no_update();
@@ -127,6 +137,11 @@ private:
 	// constructed at DLL load, before godot-cpp's runtime is bound.
 	static std::vector<std::string> args_override_;
 	static bool args_override_set_;
+	// product_version's read: the command file it read (its folder and name) and its VERSION.
+	static std::string read_version_file_;
+	static std::optional<opennova::Version> read_version_;
+	static bool version_read_;
+	static std::optional<opennova::Version> product_version_of(const opennova::LaunchFlags &flags);
 };
 
 } // namespace godot

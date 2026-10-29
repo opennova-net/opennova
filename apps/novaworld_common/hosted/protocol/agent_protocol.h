@@ -58,7 +58,7 @@
 //                        "cpus": <number>, "memory_mb": <int>, "pids": <int>,
 //                        "log": {"stream": "<server id>/g<generation>"}}],
 //           "trees": {"<tree id>": {"url": "s3://<bucket>/<root>/trees/<id>/" | "file:///...",
-//                                   "version": "<its version.txt's line>",
+//                                   "version": "<its release's game version>",
 //                                   "files": [{"name", "size"}]}}}
 //
 // A tree (ADR 0064) is one immutable version of a product's files in the

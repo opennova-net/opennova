@@ -246,8 +246,7 @@ int main() {
 		std::vector<std::vector<int32_t>> actions;
 		seams.save_keys = [&] { ++keys; };
 		seams.save_nfo = [&] { ++nfo; };
-		seams.version_text = "V1.7.5.7";
-		seams.title_text = "Joint Operations: Typhoon Rising";
+		seams.versions = "Joint Operations \xC2\xB7 ONE 0.0.22 (a1b2c3d) \xC2\xB7 JO protocol 16";
 		seams.version_line = [&](const std::string &text) { version = text; };
 		seams.queue_action = [&](int32_t code, int32_t p1, int32_t p2, int32_t p3) {
 			actions.push_back({code, p1, p2, p3});
@@ -268,8 +267,9 @@ int main() {
 		seams.toggle_overlay = nullptr;
 		check(client_process_local_command("savekeys", seams) && keys == 1, "SAVEKEYS");
 		check(client_process_local_command("SAVENFO now", seams) && nfo == 1, "SAVENFO");
+		// The game's versions, in the chat's cp1252 (the middle dot its 0xB7).
 		check(client_process_local_command("VERSION", seams) &&
-						version == "Version V1.7.5.7  - Joint Operations: Typhoon Rising",
+						version == "Joint Operations \xB7 ONE 0.0.22 (a1b2c3d) \xB7 JO protocol 16",
 				"VERSION's line");
 		const std::string forced = forced_crc_line("x", text_dword("Crou"));
 		check(vfs_version_crc(reinterpret_cast<const uint8_t *>(forced.data()), forced.size()) ==

@@ -7,10 +7,13 @@
 //   serial    the issuer's plaintext (any bytes; NovaLogic's own format is
 //             unwitnessed, the service's is apps/novaworld_web/cd_keys.h's)
 //   wire key  the A-P CDKIID a client sends a LAN host and that host decodes:
-//             encode_key_chain(serial, kDfx2WireChain)
+//             encode_key_chain(serial, chains.wire)
 //   NWACT     the registry CDKIID, bound to one machine: the wire key encoded
-//             under kDfx2RegistryChain, then the hardware mix run backwards
+//             under chains.registry, then the hardware mix run backwards
 //             under the machine's NWPSSK fingerprint
+//
+// The chains are the protocol's (Protocol::cd_key, net/protocol/protocol.h: DFX2's,
+// games/dfx2/dfx2_protocol.cpp); a protocol with none has no CD key to check.
 //
 // The client runs it the other way. The NovaWorld screen reads the NWACT
 // browser variable (a cookie a web reply sets), writes it to the registry
@@ -35,19 +38,17 @@
 
 namespace opennova::cdkey {
 
-// The DFX2 CD-key descriptor, off_812EE8 (dfx2.exe): six chain pointers. +16 is
-// the chain the LAN join check decodes a joiner's CDKIID under (CDKey_DecodeWireJoinChain
-// @0x411b40), +20 the chain the registry value decodes under once mixed (CDKey_Decode
-// @0x411af0); the other four point at the empty string.
-// [orig: off_812EE8 +16 -> @0x7c2620 (dfx2.exe)]
-inline constexpr const char *kDfx2WireChain = "5645236346346245:2345346541242546:4563451326353456";
-// [orig: off_812EE8 +20 -> @0x7c25e8 (dfx2.exe)]
-inline constexpr const char *kDfx2RegistryChain =
-		"928975689:234957945234:24598293879654:2349857982794876";
-// The CDKIIDEXP1 descriptor, off_812F00 (dfx2.exe), the next six pointers, every one
-// at the empty string: a CDKIIDEXP1 decodes under the empty chain, one empty key.
-// [orig: off_812F00 +16 -> @0x7bf886 (dfx2.exe)]
-inline constexpr const char *kDfx2Exp1Chain = "";
+// A protocol's CD-key chains (encode_key_chain's colon-separated keys): the descriptors' chains
+// a client and its LAN host decode under.
+struct KeyChains {
+	// The chain the LAN join check decodes a joiner's CDKIID under, which the wire key is
+	// encoded by (CDKey_DecodeWireJoinChain's).
+	const char *wire = nullptr;
+	// The chain the registry value decodes under once mixed (CDKey_Decode's), the NWACT's.
+	const char *registry = nullptr;
+	// The chain a CDKIIDEXP1 decodes under.
+	const char *exp1 = nullptr;
+};
 
 // The NWPSSK fingerprint the hardware mix is keyed by: 23 characters, each 'A',
 // 'C' or 'E' plus a nibble of the volume serial, name and file system mix, so
@@ -71,23 +72,25 @@ void mix_down(std::string &text, std::string_view fingerprint);
 // UP. mix_down(mix_up(x)) == x for any x and fingerprint.
 void mix_up(std::string &text, std::string_view fingerprint);
 
-// The wire key of `serial`: its CRC-chained A-P encoding under kDfx2WireChain.
-std::string make_wire_key(std::string_view serial);
-// The serial a wire key holds: false when it does not decode under kDfx2WireChain,
+// The wire key of `serial`: its CRC-chained A-P encoding under chains.wire.
+std::string make_wire_key(const KeyChains &chains, std::string_view serial);
+// The serial a wire key holds: false when it does not decode under chains.wire,
 // the LAN join check's code 11 (decode_key_chain's rules: A-P, the keys' CRCs).
-bool decode_wire_key(std::string_view wire_key, std::string &serial);
+bool decode_wire_key(const KeyChains &chains, std::string_view wire_key, std::string &serial);
 
 // The NWACT that activates `wire_key` on the machine `fingerprint` names:
-// mix_up(encode_key_chain(wire_key, kDfx2RegistryChain), fingerprint), A..Z.
+// mix_up(encode_key_chain(wire_key, chains.registry), fingerprint), A..Z.
 // The same inputs always give the same NWACT.
-std::string make_activation(std::string_view wire_key, std::string_view fingerprint);
+std::string make_activation(
+		const KeyChains &chains, std::string_view wire_key, std::string_view fingerprint);
 // The client's reading of an NWACT on its own machine: the mix under its
 // fingerprint, then the registry chain decoded, giving the wire key it keeps.
 // False where the client's decode fails (its status -3).
 // [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe): the fingerprint @0x411ebb,
 //  the copy @0x411eca, NapiNP_EncryptStringWithPRNG @0x411ee9, CDKey_Decode under
 //  off_812EE8 @0x411f0a, the decoded value stored at +16 @0x411f37]
-bool read_activation(std::string_view nwact, std::string_view fingerprint, std::string &wire_key);
+bool read_activation(const KeyChains &chains, std::string_view nwact, std::string_view fingerprint,
+		std::string &wire_key);
 
 // The two CD-key values a player carries: the CDKIID and CDKIIDEXP1 its join
 // sends (player +724 / +728), or the host's own (g_CDKeyInfo +16 / +0x810).
@@ -108,17 +111,17 @@ enum class LanJoinVerdict : int {
 
 // The leg as the rewritten check runs it, in a LAN session only (transport 2;
 // a NovaWorld session runs none of it), after the app-id check (code 9): the
-// joiner's CDKIID must be present (10) and decode under kDfx2WireChain (11),
+// joiner's CDKIID must be present (10) and decode under chains.wire (11),
 // and must equal neither the host's own, when the host has one (12), nor any
 // other player's (13); a CDKIIDEXP1, when the joiner sends one, is checked the
-// same way under kDfx2Exp1Chain. The comparisons are of the values as sent,
+// same way under chains.exp1. The comparisons are of the values as sent,
 // ASCII case-insensitive (Napi_StrCaseEqual). `others` are the players already
 // in the session, the joiner left out.
 // [orig: Server_ValidatePlayerJoinRequest @0x50f1d0 (dfx2.exe), the twin of @ 0x512100:
 //  the LAN test @0x50f3e2..0x50f3f6, code 10 @0x50f3fc..0x50f407 (@0x50f5b5), the decode
 //  @0x50f425 and code 11 @0x50f42e, the host's key @0x50f449..0x50f464 (code 12), the
 //  players @0x50f47f..0x50f4c8 (code 13 @0x50f59a), CDKIIDEXP1 @0x50f4ca..0x50f565]
-LanJoinVerdict check_lan_join(
-		const WireKeys &joiner, const WireKeys &host, const std::vector<WireKeys> &others);
+LanJoinVerdict check_lan_join(const KeyChains &chains, const WireKeys &joiner, const WireKeys &host,
+		const std::vector<WireKeys> &others);
 
 } // namespace opennova::cdkey

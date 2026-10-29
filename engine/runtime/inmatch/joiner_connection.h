@@ -73,20 +73,20 @@ struct WeaponTable;
 namespace opennova::inmatch {
 
 // The C2S 0x0B mission status a joiner's mission start ends with: the side password with
-// its NUL, the two map checksums the stub leaves zero, and the build's packed version dword.
+// its NUL, the two map checksums the stub leaves zero, and the engine build's packed version
+// dword, `version_packed`.
 // [orig: Game_StartMission @0x524360 - Mission_GetMapChecksums @0x6108a0 called @0x526209
 //  (it stores 0 into both outputs @0x6108a8 / @0x6108ae), NetPacket_WriteStringAndThreeInts
 //  @0x52622e over g_SidePassword, the two zeros and g_GameVersionPacked @0x52620e;
 //  NetPacket_WriteStringAndThreeInts @0x42a4d0 - the string and its NUL @0x42a4ef..0x42a501,
 //  three u32 LE @0x42a520 / @0x42a531 / @0x42a547]
-std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32_t version_packed);
-// The build's packed version dword: the four numbers its "V%i.%i.%i.%i" text prints, the
-// first in the high byte (JO and DFX2 V1.7.5.7 -> 0x01070507, the JO demo's V1.0.0.9 ->
-// 0x01000009, DFX's V1.7.1.9 -> 0x01070109, each the dword its binary stores beside the
-// sprintf). 0 for a text that is not four numbers (a title with no witnessed version).
+// Ours sends ONE's wire version packed one byte per part (Version::packed: 0x00001600 for
+// 0.0.22.0) where retail's held its own build's, 0x01070507 in JO and DFX2 alike; the host stores
+// it and never reads it [orig: Server_OnPlayerJoin @0x51A951 (the slot's +96488)].
 // [orig: g_GameVersionPacked @0x829f38 (read @0x52620e); Game_ParseCommandLineAndInit
 //  @0x4a7310 - the dword 0x01070507 @0x4a7d86 beside the sprintf @0x4a7d75..0x4a7d90]
-uint32_t packed_game_version(const char *version_text);
+// [orig: g_GameVersionPacked @0x828e30 (dfx2.exe); the dword 0x01070507 @0x4a7db6 (dfx2.exe)]
+std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32_t version_packed);
 // The C2S 0x2F a joiner with no kit seam submits: the fresh profile's, as retail's builder
 // makes it for a profile weapon.sav never wrote. The side block `team` names (class 8 on both
 // sides of a fresh record) picks the class and its default page; each row's name resolves
@@ -250,11 +250,11 @@ public:
 	// GetTickCount (world::frame_tick_count_ms64, the main loop's clock).
 	JoinerConnection(std::string player_name, MonotonicMilliseconds monotonic_milliseconds);
 
-	// The title identity the connection speaks: its 0x41 and 0x42 carry it and the host's
-	// 0x81 must match it (net/title/title_identity.h; complete, outliving the connection).
+	// The title's protocol the connection speaks: its 0x41 and 0x42 carry it and the host's
+	// 0x81 must match it (net/protocol/protocol.h; complete, outliving the connection).
 	// Configure before start(); a connection with none refuses to start.
-	void set_title(const TitleIdentity *title) { title_ = title; }
-	const TitleIdentity *title() const { return title_; }
+	void set_protocol(const Protocol *protocol) { protocol_ = protocol; }
+	const Protocol *protocol() const { return protocol_; }
 
 	// Begin the join. From a discovered session: nothing (Idle -> Auth; the first pump past the
 	// start sends the ClientAuth, D-NET-850). Without
@@ -1409,7 +1409,7 @@ private:
 	uint32_t client_key_ = 1;
 	NapiPrng *key_prng_ = nullptr;
 	std::string player_name_;
-	const TitleIdentity *title_ = nullptr; // set_title
+	const Protocol *protocol_ = nullptr; // set_protocol
 	cdkey::WireKeys cd_key_ids_; // set_cd_key_ids
 	std::string glsvss_request_; // set_glsvss_request
 	JoinRole join_role_ = JoinRole::Player;

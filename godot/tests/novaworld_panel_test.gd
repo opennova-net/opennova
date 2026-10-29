@@ -796,13 +796,14 @@ func test_sort_rows_text_numeric_and_ping() -> void:
 func test_details_lines_and_roster_seams() -> void:
 	var row := _row({"name": "Bravo", "msg": "Friday night co-op", "mission_name": "G11",
 			"game_type": "COOP", "players": 4, "max_players": 24, "mod": "escalation",
-			"ver1": "1.7.5.7", "dedicated": "Y", "password": "Y",
+			"ver1": "3", "dedicated": "Y", "password": "Y",
 			"player_names": PackedStringArray(["ljim", "walker"])})
 	var text := "\n".join(NovaWorldServerBrowser.details_lines(row))
 	assert_string_contains(text, "Message: Friday night co-op")
 	assert_string_contains(text, "Players: 4/24")
 	assert_string_contains(text, "Password protected")
 	assert_false(text.contains("Region:"), "empty fields are skipped")
+	assert_false(text.contains("Version"), "VER1, the protocol's NovaWorld value, gets no line")
 	assert_eq(row.player_names, PackedStringArray(["ljim", "walker"]),
 			"the roster rides the record")
 

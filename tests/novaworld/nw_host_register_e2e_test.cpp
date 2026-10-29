@@ -13,8 +13,7 @@
 // process that serves it. [orig: CNapiGameSession_SendHostRequest @ 0x4d3700]
 
 #include "nw_udp_listener.h"
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include "program/server_config.h"
 
 #include <net/napi/session.h>            // make_client_host_request, ClientVar
@@ -41,8 +40,8 @@
 #include <vector>
 #include "../npruntime/joiner_receive.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -498,7 +497,7 @@ int main() {
 		// (D-NET-717): the session's next statement is still the lobby's to serve.
 		{
 			opennova::inmatch::JoinerConnection stray("E2EStrayJoHello");
-			stray.set_title(&kJo);
+			stray.set_protocol(&kJo);
 			send(stray.start());
 			service_session(200); // the lobby's 0x81 to it, which the session does not take
 			session.queue_statement(opennova::make_client_host_update(
@@ -996,7 +995,7 @@ int main() {
 		first_jo_client_port = jo_client_port;
 		expect(jo_client.is_valid(), "JO loss-probe UDP socket bound");
 		opennova::inmatch::JoinerConnection joiner("E2ELossProbe");
-		joiner.set_title(&kJo);
+		joiner.set_protocol(&kJo);
 
 		auto send_jo = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
@@ -1136,7 +1135,7 @@ int main() {
 		auto live_client = opennova::net::udp_bind(0, &live_client_port);
 		expect(live_client.is_valid(), "standalone-spawn UDP socket bound");
 		opennova::inmatch::ClientRuntime live_joiner("E2EStandaloneSpawn");
-		live_joiner.set_title(&kJo);
+		live_joiner.set_protocol(&kJo);
 
 		auto send_live = [&](const std::vector<uint8_t> &dg) {
 			if (!dg.empty()) {
@@ -1353,7 +1352,7 @@ int main() {
 		const auto restarted_jo_ep = loopback_ep(listener.embedded_jo_host_port());
 		expect(listener.embedded_jo_host_port() != 0, "the restarted JO host has its own port");
 		opennova::inmatch::JoinerConnection restart_joiner("E2ERestartProbe");
-		restart_joiner.set_title(&kJo);
+		restart_joiner.set_protocol(&kJo);
 		const auto restart_hello = restart_joiner.start();
 		opennova::net::udp_send_to(
 				restart_client, restarted_jo_ep,

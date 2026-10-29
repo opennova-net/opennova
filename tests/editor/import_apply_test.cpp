@@ -1341,26 +1341,30 @@ static int test_apply_install_expansion() {
 	return 0;
 }
 
+// The files NovaWorld generates (project::is_service_managed_file): the lobby's gt.ssc and an expansion's
+// version.txt, loose or archived, are never import choices, and an import named them is refused.
 static int test_service_generated_gate_tags() {
 	Project project("opennova_editor_gate_tag_import");
 	const std::string game = project.dir.file("game");
 	TEST_EXPECT(test_io::write_text(game + "/GT.SSC", "old override"));
+	TEST_EXPECT(test_io::write_text(game + "/VERSION.TXT", "Old Game, V1.0; English\r\n"));
 	const uint8_t bytes[] = { 'x' };
 	const opennova::pff::PffWriteEntry entries[] = { { "Gt.SsC", bytes, sizeof(bytes), 0, 0, 0 },
-		{ "note.txt", bytes, sizeof(bytes), 0, 0, 0 } };
+		{ "Version.txt", bytes, sizeof(bytes), 0, 0, 0 }, { "note.txt", bytes, sizeof(bytes), 0, 0, 0 } };
 	TEST_EXPECT(opennova::pff::pff_write_archive((game + "/localres.pff").c_str(),
-						opennova::pff::PFF_FORMAT_PFF3, entries, 2) == opennova::pff::PFF_WRITE_OK);
+						opennova::pff::PFF_FORMAT_PFF3, entries, 3) == opennova::pff::PFF_WRITE_OK);
 	std::vector<Diagnostic> findings;
-	const auto choices =
-			list_import_choices({ game + "/GT.SSC", game + "/localres.pff" }, findings);
+	const auto choices = list_import_choices(
+			{ game + "/GT.SSC", game + "/VERSION.TXT", game + "/localres.pff" }, findings);
 	TEST_EXPECT(findings.empty() && choices.size() == 1 && choices[0].name() == "note.txt");
 	const auto retail =
 			list_retail_import_choices(game, *project.view().project.document, findings);
 	TEST_EXPECT(findings.empty() && retail.size() == 1 && retail[0].name() == "note.txt");
 	// A caller bypassing the picker still cannot import the file, loose or archived.
 	const ProjectPaths paths = ProjectPaths::for_root(project.root());
-	for (const ImportChoice &choice : std::vector<ImportChoice>{
-				 { game + "/GT.SSC", {} }, { game + "/localres.pff", "Gt.SsC" } }) {
+	for (const ImportChoice &choice : std::vector<ImportChoice>{ { game + "/GT.SSC", {} },
+				 { game + "/localres.pff", "Gt.SsC" }, { game + "/VERSION.TXT", {} },
+				 { game + "/localres.pff", "Version.txt" } }) {
 		const ImportResult result =
 				import_assets({ choice }, paths, *project.view().project.document, true);
 		TEST_EXPECT(result.imported.empty());

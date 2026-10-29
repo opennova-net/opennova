@@ -9,8 +9,8 @@
 // (the CI resolve @0x627533, PN @0x62758b, PG @0x627591, PV1 @0x627639);
 // CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0; NapiNPSession_SendAnnouncePacket @0x61fa00]
 #include <cstddef>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
+#include <base/version/one_build.h>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -28,8 +28,14 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
+
+// JO's PV3 over ONE's build (D-NET-520), where retail wrote its own 1.7.5.7 and build date.
+static std::string one_pv3() {
+	return opennova::protocol_version3(
+			kJo, opennova::one_build().wire_version(), opennova::one_build().date_text());
+}
 
 using namespace opennova;
 
@@ -49,7 +55,7 @@ constexpr uint32_t kBroadcast = 0xFFFFFFFFu;
 std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
                                   uint32_t max_players, uint32_t gametype = 2,
                                   uint32_t ci = kBrowseCi, uint32_t flags = 0x904u) {
-    const ClientHello retail = make_title_client_hello(kJo, 0);
+    const ClientHello retail = make_protocol_client_hello(kJo, 0);
     ServerHello hello;
     hello.ci = ci;
     hello.pn = retail.pn;
@@ -135,7 +141,7 @@ void test_each_port_gets_an_announce_naming_its_destination() {
         CHECK(hello.ci == 9u);
         CHECK(hello.eip == 0xFFFFFFFFu);
         CHECK(hello.epn == static_cast<uint32_t>(port));
-        CHECK(hello.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
+        CHECK(hello.pv3 == one_pv3());
     }
     CHECK(b.probe(32768) != b.probe(32769));
 
@@ -232,7 +238,7 @@ void test_reply_filter_matches_retail_admission() {
     CHECK(!parse_lan_discovery_reply(kJo, ok.data(), ok.size(), 0, out));
     // PN and PV1 compare case-insensitively; PV2 is not a browse gate.
     {
-        const ClientHello retail = make_title_client_hello(kJo, 0);
+        const ClientHello retail = make_protocol_client_hello(kJo, 0);
         ServerHello hello;
         hello.ci = kBrowseCi;
         hello.pn = "jointoperations";
@@ -264,7 +270,7 @@ PeerAddr sender(const std::string &dotted, int port) {
 // A game-server 0x81 carrying `hk` as its HK (and `sf` as its SF).
 std::vector<uint8_t> server_reply_hk(const std::string &name, uint32_t hk, uint32_t players = 1,
                                      uint32_t flags = 0x904u, uint32_t sf = 0) {
-    const ClientHello retail = make_title_client_hello(kJo, 0);
+    const ClientHello retail = make_protocol_client_hello(kJo, 0);
     ServerHello hello;
     hello.ci = kBrowseCi;
     hello.pn = retail.pn;

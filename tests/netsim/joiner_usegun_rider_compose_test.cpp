@@ -13,10 +13,9 @@
 //  Bone_BuildAttachmentMatrix @0x44109D]
 
 #include <base/resource_index/resource_index.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/peer_addr.h>
@@ -48,7 +47,7 @@
 #include "../common/replica_twin.h"
 #include "../common/test_expect.h"
 
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -152,7 +151,8 @@ struct Harness {
 		role.bind(*kernel);
 		kernel->world.load_systems();
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("UsegunJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };

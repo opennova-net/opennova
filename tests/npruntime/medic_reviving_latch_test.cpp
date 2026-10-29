@@ -16,8 +16,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/napi_np_connection.h> // make_jo_game_session_sequencing
@@ -45,7 +44,7 @@ int failures = 0;
 		}                                                                                      \
 	} while (0)
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 const std::string kClientScrk = "CLIENT-BRIDGE-SCRK";
 const std::string kServerScrk = "SERVER-BRIDGE-SCRK";
 constexpr uint32_t kClientKey = 0x0000BEEFu;
@@ -70,7 +69,8 @@ struct Harness {
 		kernel->world.registry.configure_pool(0, 16);
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };

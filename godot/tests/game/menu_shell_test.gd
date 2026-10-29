@@ -193,22 +193,31 @@ func test_boots_into_main_menu_startup() -> void:
 
 
 # The STARTUP screen's activate draws the build's version in its first VERSION
-# static; the copyright line under the same name keeps its text.
+# static, ours the launch's versions (LaunchFlags.version_line: the game and its
+# installed release, ONE's build; D-MNU-76); the copyright line under the same
+# name keeps its text.
 # [orig: UI_OnStartupScreenActivate @0x5557f0 -> UI_FindScreenControl @0x63ae80]
 func test_startup_screen_shows_the_version() -> void:
 	var dir := _make_dir()
+	var command := "[HEADER]\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n"
+	TestFs.write_text(self, dir.path_join("ACIDGAMBIT.CMD"), command)
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
 	var shell = _make_shell(dir)
 	if shell == null:
 		pending("temp resource root unavailable in this environment")
+		LaunchFlags.clear_args_override()
 		_cleanup(dir)
 		return
 	var driver: MenuDriver = shell.get_driver()
 	var version := driver.widget_id("VERSION")
 	assert_gt(version, 0, "the VERSION static exists")
-	assert_eq(driver.get_widget_text(version), "V1.7.5.7",
-			"the first VERSION static shows the build's version")
+	var line := LaunchFlags.version_line()
+	assert_true(line.begins_with("OP: Acid Gambit 0.1.4 · ONE "), line)
+	var shown := driver.get_widget_text(version)
+	assert_eq(shown, line, "the first VERSION static shows the launch's versions")
 	assert_eq(driver.get_widget_text(version + 1), "(c) 2009, NovaLogic, Inc.",
 			"the second keeps its authored text")
+	LaunchFlags.clear_args_override()
 	_cleanup(dir)
 
 

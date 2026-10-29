@@ -11,6 +11,7 @@
 #include <cmath>
 
 #include <base/gameprofile/resource_missing.h>
+#include <base/title/title.h>
 #include <formats/mission/bms_edit.h>
 #include <runtime/inmatch/joiner_role.h> // run_loading_step (the loading steps' periodic update)
 #include <runtime/inmatch/loaded_model_list.h> // avatar_combo_models (the 0x11's avatar loads)
@@ -74,7 +75,8 @@ String GameWorld::resolver_expansion() {
 }
 
 String GameWorld::resolver_game() {
-	return root_resolver_.is_valid() ? root_resolver_->game() : String("jo");
+	return root_resolver_.is_valid() ? root_resolver_->game()
+	                                 : opennova::to_gd(opennova::default_title().code);
 }
 
 // The root a load resolves through: the injected one, else a fresh runtime
@@ -98,7 +100,7 @@ Ref<ResourceRoot> GameWorld::resolve_root(const String &p_dir) {
 // Mount `dir` as the runtime resource root: PFF archives are the packed game
 // data, the `/exp <name>` flag (or persisted setting) layers an expansion over
 // the base, loose files override the archives only under the `/d` dev flag,
-// and the `/game <code>` flag (or persisted setting, default "jo") selects the
+// and the `/game <code>` flag (or persisted setting, default the default title's) selects the
 // SCR decode key so demo data decodes correctly. Emits load_failed and
 // returns null on a bad root.
 // The expansion here is the LOCAL choice, which is only authoritative for

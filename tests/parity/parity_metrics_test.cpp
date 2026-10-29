@@ -385,7 +385,9 @@ wire::ParityTrace scripted(uint32_t seed) {
 	{
 		std::vector<uint8_t> b;
 		tlv_text(b, "NVS", "NAPI NP Version 0.0.1");
+		tlv_text(b, "BDAT", "Jul 21 2009 18:54:42");
 		tlv_text(b, "PN", "JointOperations");
+		tlv_text(b, "PV3", "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
 		tlv_u32(b, "CI", seed * 11);
 		tlv_u32(b, "EIP", 0xFFFFFFFFu); // the LAN browse's broadcast target
 		tlv_u32(b, "EPN", kServerPort); // the enumerated host port
@@ -395,6 +397,8 @@ wire::ParityTrace scripted(uint32_t seed) {
 		std::vector<uint8_t> b;
 		tlv_u32(b, "CI", seed * 11);
 		tlv_text(b, "AP", "JOINTOPS.EXE");
+		tlv_text(b, "BDAT", "Jul 21 2009 18:54:42");
+		tlv_text(b, "PV3", "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
 		tlv_u32(b, "HK", 0x0FE0E112 ^ seed);
 		tlv_text(b, "SN", "Untitled ");
 		tlv_text(b, "SUS1", "GSID-01-" + std::to_string(100000 + seed * 99991));
@@ -402,6 +406,8 @@ wire::ParityTrace scripted(uint32_t seed) {
 	}
 	{
 		std::vector<uint8_t> b;
+		tlv_text(b, "BDAT", "Jul 21 2009 18:54:42");
+		tlv_text(b, "PV3", "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
 		tlv_u32(b, "CI", seed * 11);
 		tlv_u32(b, "HK", 0x0FE0E112 ^ seed);
 		tlv_u32(b, "CK", 0xC0FFEE00 + seed);
@@ -411,6 +417,7 @@ wire::ParityTrace scripted(uint32_t seed) {
 		tlv_cu(b, 2, "Callsign", "ParityJoin");
 		// The u16 character id printed from a stack dword: the high word is residue.
 		tlv_cu(b, 3, "CI0", std::to_string(0x0200u | (seed << 16)));
+		tlv_cu(b, 2, "VERSIONSTRING", "V1.7.5.7");
 		s.handshake(t + 20 * kMs, 0x42, b);
 	}
 	{
@@ -618,6 +625,34 @@ void test_body_masks() {
 	check(stable_body_key('S', 0x064, chunk(140, 0x11, 'A')) ==
 					stable_body_key('S', 0x064, chunk(140, 0x77, 'A')),
 			"0x64: a chunk past the names masks the token by its block offset");
+
+	// C2S 0x0B: the side password, its NUL and three u32, the two map checksums and the engine
+	// build's packed version. The version is masked (initial.C.0x0b.version: retail's
+	// 0x01070507, ONE's 0x00001600); the password and the checksums compare, and a body of
+	// another shape compares whole.
+	auto status = [](const std::string &password, uint32_t checksum, uint32_t version) {
+		std::string body = password;
+		body.push_back('\0');
+		for (const uint32_t v : { checksum, 0u, version })
+			for (int i = 0; i < 4; ++i)
+				body.push_back(char((v >> (8 * i)) & 0xFF));
+		return body;
+	};
+	check(stable_body_key('C', 0x00B, status("ab", 0, 0x01070507u)) ==
+					stable_body_key('C', 0x00B, status("ab", 0, 0x00001600u)),
+			"0x0B: the engine build's version dword is masked");
+	check(stable_body_key('C', 0x00B, status("ab", 0, 0x01070507u)) !=
+					stable_body_key('C', 0x00B, status("ac", 0, 0x01070507u)),
+			"0x0B: the side password compares");
+	check(stable_body_key('C', 0x00B, status("", 0, 0x01070507u)) !=
+					stable_body_key('C', 0x00B, status("", 1, 0x01070507u)),
+			"0x0B: the map checksums compare");
+	check(stable_body_key('C', 0x00B, std::string(1, 'B')) !=
+					stable_body_key('C', 0x00B, std::string(1, 'C')),
+			"0x0B: a body of another shape compares whole");
+	check(stable_body_key('S', 0x00B, status("ab", 0, 0x01070507u)) !=
+					stable_body_key('S', 0x00B, status("ab", 0, 0x00001600u)),
+			"0x0B: only the C2S body is masked");
 }
 
 void test_timestamps() {
@@ -2387,6 +2422,34 @@ void set_cu(wire::ParityHandshake &h, const std::string &cu_name, const std::str
 }
 
 void test_handshake_rules() {
+	{
+		// The engine build's slots (the Versions program): a joiner's BDAT, PV3 and CU
+		// VERSIONSTRING and a host's 0x81 BDAT and PV3 over ONE's build pass against retail's
+		// 1.7.5.7, the VERSIONSTRING a character longer; another CU's value and the 0x81's
+		// session name still compare.
+		wire::ParityTrace one = scripted(3), callsign = scripted(3), host = scripted(3),
+						  named = scripted(3);
+		for (const uint8_t opcode : { uint8_t(0x41), uint8_t(0x42) }) {
+			set_tlv(handshake_of(one, opcode), "BDAT", text_bytes("Oct 28 2026 12:34:56"));
+			set_tlv(handshake_of(one, opcode), "PV3",
+					text_bytes("CONSUMER RELEASE 0.0.22.0 [8165168.8165140] Oct 28 2026 12:34:5"));
+		}
+		set_cu(handshake_of(one, 0x42), "VERSIONSTRING", "V0.0.22.0");
+		set_cu(handshake_of(callsign, 0x42), "Callsign", "ParityJoins");
+		set_tlv(handshake_of(host, 0x81), "BDAT", text_bytes("Oct 28 2026 12:34:56"));
+		set_tlv(handshake_of(host, 0x81), "PV3",
+				text_bytes("CONSUMER RELEASE 0.0.22.0 [8165168.8165140] Oct 28 2026 12:34:5"));
+		set_tlv(handshake_of(named, 0x81), "SN", text_bytes("Titled "));
+		const Case slots = judge_case(scripted(1), scripted(2), one);
+		expect_row(slots, 'C', "handshake", "0x41", "pass");
+		expect_row(slots, 'C', "handshake", "0x42", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), callsign), 'C', "handshake", "0x42", "fail",
+				"HANDSHAKE_MISMATCH");
+		expect_row(judge_case(scripted(1), scripted(2), host, "OR"), 'S', "handshake", "0x81",
+				"pass");
+		expect_row(judge_case(scripted(1), scripted(2), named, "OR"), 'S', "handshake", "0x81",
+				"fail", "HANDSHAKE_MISMATCH");
+	}
 	{
 		// EIP/EPN are the announce's destination: deterministic, so compared.
 		wire::ParityTrace subject = scripted(3);

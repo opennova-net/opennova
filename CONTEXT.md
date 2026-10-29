@@ -296,7 +296,8 @@ _Avoid_: mod browser, workshop, Options > Mods (retail's list of installed mods)
 Code that produces and consumes the exact byte stream the original game uses, so original
 and OpenNova endpoints interoperate: our clients can join original servers, our servers can
 serve original clients, and opennova↔opennova works the same way. The protocol witness
-record is `docs/net/novaworld-net-re.md`.
+record is `docs/net/novaworld-net-re.md`. A game's **protocol** is one of these, versioned by its
+PV2 (the **protocol version**).
 _Avoid_: "our own protocol", custom packet format
 
 **Host / Joiner**:
@@ -663,14 +664,79 @@ egress) and running the containers the reply wants (a local stack's machine runs
 its own processes, `--runtime process`). It decides nothing itself.
 _Avoid_: daemon, node agent, kubelet
 
+**ONE**:
+The OpenNova Engine: `engine/`, the per-game code under `games/` and the programs built from them
+(the runtime `opennova.exe`, the editor's `oneditor.exe` and `onplay.exe`, `opennova-serve`, the
+tools, the NovaWorld service's programs). ONE's **version** is the OpenNova release, the latest
+`vX.Y.Z` tag without its `v` (`0.0.22`); a pull request's CI build adds its run number
+(`0.0.22.123`) and is a staging build. With the commit (`a1b2c3d`) and the commit's time it is
+compiled into one TU (`engine/base/version/one_build.cpp`, `one_build()`) from the CMake cache
+variables the workflows stamp (`scripts/ci/one_stamp.sh`), never read from `project.godot` or a
+settings file, and shown as `ONE 0.0.22 (a1b2c3d)` (`OneBuild::label`). Retail's engine-build wire
+slots carry it as its three parts and a 0 (`V0.0.22.0`) where retail wrote NovaLogic's own engine
+build, `V1.7.5.7` in JO and DFX2 alike, which no peer compares (ADR 0076). A **release** records
+the ONE that built it (`releases.one_version`).
+_Avoid_: the engine (when the version is meant), OpenNova version, build (the editor's Play/Export
+build), 1.7.5.7 (NovaLogic's engine build)
+
+**Game version**:
+A **game**'s **release** version (`0.1.4`, `1.7.5.7`): the command file's `[HEADER] VERSION`,
+typed as the release is built (the editor's Build > Release "Game version") and checked by
+`Version::parse` (one to four numbers between dots). The updater shows it, and the runtime reads
+it once at boot from the launch folder's command file (`launch_product_version`) for the
+**version line**. Shown, never sent: no host checks it. An expansion's `version.txt`, which the
+service writes at the release build, carries it (`<name>, V<game version>; English`), so a joiner
+needs the host's release of a mod (ADR 0076).
+_Avoid_: version (unqualified), release number, protocol version (what a host checks)
+
+**Protocol**:
+The in-match wire protocol a **title** speaks (JO's, DFX2's) with its NovaWorld identity, one
+`Protocol` row (`engine/net/protocol`, each game's in `games/<code>/<code>_protocol.cpp`, which
+`games::install()` registers under its title's code: `title_protocol`, `protocol_by_code`): its
+`code` and `name` (`jo` / `JO`), PN, PG and PV1, its **generation**, its in-match dialect
+(`ProtocolInMatch`) and its NovaWorld values (VER1/VER2, the product code, the default gate tag
+and its `gt.ssc` key chain). OP: Acid Gambit's title speaks JO's: the same object, not a copy. A
+**lobby** belongs to one protocol (`games.protocol`).
+_Avoid_: title (the game run as), wire identity (half of it), title identity (its old name), "our
+own protocol"
+
+**Protocol version**:
+A **protocol**'s PV2, the revision a host checks, refusing a joiner of another with NCC007:
+"JO protocol 16" (`protocol_version`). A game that changes its wire bytes or its joiner-side rules
+gets a Protocol of its own in its `<code>_protocol.cpp`, with its own code and the next PV2, in the
+same change; JO's and DFX2's never bump (pinned to retail).
+_Avoid_: 1.7.5.7 (NovaLogic's engine build), game version, VER1 (a NovaWorld value, not a version)
+
+**Generation**:
+What every executable of one release of NovaLogic's network code compiles in whatever its title:
+the NAPI version (NVS) and company (CO), the **protocol version** (PV2) and the join build a host
+checks (BN, VN, MBN, SOPD). JO and DFX2 share the 2009 generation (`games/novalogic_2009`, PV2
+`16`), which their protocols point at.
+_Avoid_: engine build (`1.7.5.7`, which no peer compares)
+
+**Version line**:
+The one line that names a running game's three versions:
+`OP: Acid Gambit 0.1.4 · ONE 0.0.22 (a1b2c3d) · JO protocol 16` (`engine/base/version/version_line.h`
+`Versions` / `version_line`, the title's parts from `title_versions`). It is the STARTUP screen's
+VERSION label in every run, what the console's and the remote admin's VERSION print, the editor's
+Help and Try, and opennova-serve's startup log. A part that is unknown is left out with its
+separator (`Joint Operations · ONE 0.0.22 · JO protocol 16` with no release installed); a cp1252
+surface takes the middle dot as 0xB7.
+_Avoid_: build label, version string, version text (retail's `V1.7.5.7`)
+
 **Title**:
-A NovaLogic game identity (JO, DFX2, DFX, BHD...): near-identical engines over different data and
-configuration. Titles are in scope as data (ADR 0055): a title is a `gameprofile` game id (`jo`,
-`dfx2`) whose wire and NovaWorld identity is one `TitleIdentity` row in `engine/net/title`. No code
-outside that table hardcodes a title's identity, and an unwitnessed field is refused where it is
-needed, never filled with JO's value.
-_Avoid_: game (when you mean the identity: a **game** is the catalog's product, which speaks a
-title)
+The retail game a **game** runs as, by its code (`jo`, `dfx2`, `acidgambit`; `jodemo`, `dfx` and
+`bhd` are unwitnessed and refused by name): its rules, the **protocol** it speaks and what its
+install carries (its name and title text, its SCR policy, executable, command file and game.cfg
+table). A `Title` row in `engine/base/title`'s registry (`title_by_code`), each game's in
+`games/<code>/<code>_title.cpp`, its rules in `<code>_rules.cpp`; `games::install()` fills the
+registries, and `engine/` holds the types and lookups and names no title (ADR 0076). OP: Acid
+Gambit is its own title, whose protocol and rules are JO's, and the default one: a launch, a
+project or a session that names none runs as it. Titles are in scope as data (ADR 0055); an
+unwitnessed field is refused where it is needed, never filled with JO's value. The editor and the
+site say a game "runs as" its title.
+_Avoid_: game (the catalog's product, which runs as a title), game profile, engine profile,
+`GameId` (the old names), protocol (what the title speaks)
 
 **Product**:
 One row of the NovaWorld service's catalog (ADR 0064, ADR 0071; a `products` row in code), named
@@ -690,22 +756,24 @@ _Avoid_: tool (for the runtime or the editor), program (the NovaWorld service's 
 
 **Game**:
 The one name a user meets for a **product** that is played (ADR 0071): OP: Acid Gambit, OP:
-Nifty Package, Joint Operations, Escalation, Delta Force Xtreme 2. A base game speaks a
-**title** and lists in a lobby; an expansion builds on its base game (Escalation on Joint
-Operations, OP: Nifty Package on OP: Acid Gambit). A game has a **project** (keyed
-`ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**; its published release is what
-players update to and what its hosted servers run. In code a game is a `products` row (the
+Nifty Package, Joint Operations, Escalation, Delta Force Xtreme 2. A base game runs as a
+**title** and lists in a lobby of its title's **protocol**; an expansion builds on its base game
+(Escalation on Joint Operations, OP: Nifty Package on OP: Acid Gambit). A game has a **project**
+(keyed `ACIDGAMBIT`, `NIFTY`, `JO`, `JOX01`, `DFX2`) and **releases**, each with its **game
+version** and the **ONE** that built it; its published release is what players update to and
+what its hosted servers run. In code a game is a `products` row (the
 editor's routes name it `/api/products/<key>`); a `games` row is a lobby, not a game.
 _Avoid_: game data, content (as words a user meets; the store's objects keep their `content/<id>/`
-prefix), lobby (a `games` row), title (the identity a base game speaks), install (where a retail
+prefix), lobby (a `games` row), title (what a base game runs as), install (where a retail
 game's project began), snapshot, slug (a game has a key or an id and a title; its lobby has the slug)
 
 **Player's game**:
 A base **game** an account made and released on NovaWorld (ADR 0074), beside OpenNova's own and
 the retail games. It is an updater product of its own (`KEY`, `KEY.CMD`; its key at most 11
-characters with no `QQ`): its folder's `UPDATE.WIZ` names it and carries `GAME=jo` or
-`GAME=dfx2`, the engine profile it runs as, and `/game` names it by its login in lower case, in
-its own folder alone. At creation it selects an existing compatible **lobby** or creates its own;
+characters with no `QQ`): its folder's `UPDATE.WIZ` names it and carries `GAME=<title>`
+(`jo`, `dfx2`, `acidgambit`: any title with a command file), the **title** it runs as, and
+`/game` names it by its login in lower case, in its own folder alone. At creation it selects an
+existing **lobby** of its title's **protocol** or creates its own;
 the first release build locks that selection. A public one gets
 its own zip (`player-<key>-game-windows.zip`) under Downloads' Players' games.
 _Avoid_: custom game, user game, mod (a mod is an expansion)
@@ -721,9 +789,10 @@ _Avoid_: add-on, plugin, expansion code (in words a user meets: short name)
 
 **Own lobby**:
 A named lobby (a `games` row) a **player's game** can create instead of sharing an existing
-compatible lobby. The service generates its immutable identity from the row ID, independently
-of the project key. System identities are set by migration. Every release receives the selected
-lobby's generated `gt.ssc`; expansions inherit the parent game's selection. Editor imports and
+lobby of its title's **protocol**. The service generates its immutable identity from the row ID,
+independently of the project key, and its protocol is the title's. System identities are set by
+migration. Every release receives the selected lobby's generated `gt.ssc`, and an expansion's
+release its generated `version.txt`; expansions inherit the parent game's selection. Editor imports and
 pushes exclude this file; editor Play receives generated bytes through project metadata.
 Selection locks at the first release build. The gate and web find new lobbies without restarting.
 _Avoid_: lobby (the program), realm
@@ -847,8 +916,10 @@ _Avoid_: properties, details, info panel, References (the card's two lists repla
 What a project builds as and on (ADR 0046 S16, `project.opennova`'s `expansion`): its **expansion
 name**, the folder `expansion\<name>\` its build is, played with `/exp <name>`, and the installed
 expansion it **builds on** (none: the base game). A project with no expansion name is standalone.
-The files the game reads by an expansion's name (`<name>.bin`, `version.txt`, `M<name>.*`, ...) are
-its **expansion files**.
+The files the game reads by an expansion's name (`<name>.bin`, `M<name>.*`, ...) are its
+**expansion files**. Its `version.txt` is no project file: the service generates it at the release
+build (`<name>, V<game version>; English`, a retail expansion's pinned to retail's text) and hands
+it to the editor's Play, as the **own lobby**'s `gt.ssc`.
 _Avoid_: mod for the expansion itself (a **mod** is the NovaWorld product, and New project's
 choice that makes a project building as one; "mod" is the Mods list's word for an installed one),
 base (for the expansion a project builds on: the base game is the install with none)

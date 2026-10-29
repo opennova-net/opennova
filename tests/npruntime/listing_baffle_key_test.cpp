@@ -15,12 +15,11 @@
 //  @0x4FF191..0x4FF196, the key's read @0x4FF1CC; CNapiGameSession_BuildAndCreateSession's call
 //  @0x5695B3]
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_rand.h>
 #include <base/io/tick_rate.h>
 #include <net/napi/session.h>
 #include <net/novaworld/lobby_vars.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_info.h>
@@ -42,7 +41,7 @@ int &failures = test_expect::failures;
 
 using test_expect::expect;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 // One dedicated host's create over a seeded session: the key and the ring the round init draws,
 // the stream after them, the listing's columns and Host-list vars, then the server tick's refresh.
@@ -56,7 +55,7 @@ void check_round_init_draws_the_listing_keys(uint32_t start_tick, uint32_t seed)
 	settings.server_name = "Baffle";
 	settings.max_players = 8;
 	inmatch::SessionStartup startup;
-	startup.title = &kJo;
+	startup.protocol = &kJo;
 	startup.host_key = 0x12345678u;
 	startup.host_start_tick = start_tick;
 	startup.session_seed_id = seed;

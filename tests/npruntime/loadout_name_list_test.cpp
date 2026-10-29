@@ -13,6 +13,7 @@
 //  @0x431AA3]
 // The world and the process words are the test's own.
 
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h> // ClientProcessState
 #include <runtime/inmatch/loadout_submit.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -182,7 +183,7 @@ void test_the_accept_writes_the_list_not_the_resident_kit() {
 		local->loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_M4AUTO", 3, -1, -1}};
 		const std::vector<w::WeaponKitEntry> accepted = {w::WeaponKitEntry{"WPN_AK47AUTO", 4, -1, -1},
 				w::WeaponKitEntry{"WPN_KNIFE", -1, -1, -1}};
-		(void)inmatch::armory_accept_in_session(r.world, *local, accepted, 6, authority,
+		(void)inmatch::armory_accept_in_session(r.world, *local, opennova::title_protocol("jo"), accepted, 6, authority,
 				bms::MissionType{});
 		const w::LoadoutWeaponNameList &names = r.process->loadout_weapon_names;
 		CHECK(names.set && names.entries.size() == 2);
@@ -272,7 +273,7 @@ void test_the_single_players_page_fills_the_spawn_buffer() {
 		empty.single_player.entries.clear();
 		w::LocalPlayerLoadout loadout;
 		CHECK(inmatch::seed_single_player_kit_from_profile(r.world, &empty, loadout));
-		const std::vector<w::WeaponKitEntry> page = w::weapon_kit_default(r.world.rules.title);
+		const std::vector<w::WeaponKitEntry> page = w::weapon_kit_default(r.world.rules.title());
 		CHECK(loadout.spawn_kit().size() == page.size() && !page.empty() &&
 				loadout.spawn_kit()[0].name == "WPN_M4AUTO");
 		w::LocalPlayerLoadout none;
@@ -303,7 +304,7 @@ void test_the_session_weapon_profile_clamps_and_routes_its_seed() {
 	r.world.rules.mp_session = false;
 	w::LocalPlayerLoadout loadout;
 	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, 0, loadout));
-	const std::vector<w::WeaponKitEntry> page = w::weapon_kit_default(r.world.rules.title);
+	const std::vector<w::WeaponKitEntry> page = w::weapon_kit_default(r.world.rules.title());
 	CHECK(loadout.spawn_kit().size() == page.size());
 	playersav::Record current;
 	current.blue.player_class = 12;

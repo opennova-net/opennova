@@ -83,6 +83,7 @@ int main() {
 	std::atomic<int> saves{0};
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &block;
+	seams.config_title = opennova::title_by_code("jo");
 	seams.save_config = [&] { ++saves; };
 	inmatch::AdminConsole console(ctx, std::move(seams));
 	console.set_scene(inmatch::AdminScene::MainMenu);

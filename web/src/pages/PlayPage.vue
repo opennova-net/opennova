@@ -20,6 +20,7 @@
     <div class="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
       <section class="card space-y-5 p-6" aria-labelledby="setup-title">
         <h2 id="setup-title" class="section-heading">{{ active.name }}</h2>
+        <p v-if="releaseFacts" id="setup-release" class="text-sm text-ink-muted">{{ releaseFacts }}</p>
         <ol class="list-decimal space-y-2 pl-5 text-sm text-ink">
           <li v-for="step in active.steps" :key="step">{{ step }}</li>
         </ol>
@@ -45,16 +46,19 @@
 <script setup lang="ts">
 // /play: pick a game (?game=, OP: Acid Gambit by default), its setup in a few
 // steps and its download, and how to play online.
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import PageHeader from '../components/ui/PageHeader.vue';
-import { titleName } from '../utils/games';
+import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest } from '../api/downloads';
+import { protocolWords, titleName } from '../utils/games';
 import { ORIGINAL_GAME_URL } from '../utils/links';
 
 const choices = [
   {
     id: 'opennova',
     name: 'OP: Acid Gambit',
+    // Its product on the downloads host.
+    product: 'ACIDGAMBIT',
     steps: ['Download OpenNova.', 'Unzip it into an empty folder and run opennova.exe.', 'Play alone, in co-op, or online.'],
     download: '/downloads#opennova',
     downloadLabel: 'Download OpenNova',
@@ -62,6 +66,7 @@ const choices = [
   {
     id: 'jointops',
     name: titleName('jo'),
+    product: 'JO',
     steps: [
       'Have your own copy of Joint Operations.',
       'Download the Joint Operations build, unzip it into an empty folder and run opennova.exe.',
@@ -73,6 +78,7 @@ const choices = [
   {
     id: 'dfx2',
     name: titleName('dfx2'),
+    product: 'DFX2',
     steps: [
       'Download the Delta Force Xtreme 2 build.',
       'Unzip it into an empty folder and run opennova.exe.',
@@ -92,4 +98,22 @@ const choice = computed({
   },
 });
 const active = computed(() => choices.find((item) => item.id === choice.value)!);
+
+// The picked game's published release as the downloads host lists it: its game version and the
+// protocol it speaks ("Game version 0.1.4 · JO protocol 16"); nothing on a site with no host.
+const manifest = ref<DownloadsManifest | null>(null);
+const releaseFacts = computed(() => {
+  const product = manifest.value?.products.find((p) => p.key === active.value.product);
+  if (!product?.version) return '';
+  return [`Game version ${product.version}`, protocolWords(product.protocol)].filter(Boolean).join(' · ');
+});
+onMounted(async () => {
+  const host = downloadsBase(window.location.hostname);
+  if (!host) return;
+  try {
+    manifest.value = await fetchDownloadsManifest(host);
+  } catch {
+    manifest.value = null;
+  }
+});
 </script>

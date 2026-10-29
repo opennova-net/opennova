@@ -21,9 +21,9 @@
 #include <utility>
 #include <variant>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/particle_keys.h>
@@ -644,7 +644,7 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
 	if (!extract) return true;
 	// Decoded as the game's loader decodes a stored file (a document decodes its own).
 	std::vector<uint8_t> decoded = bytes;
-	vfs_decode_payload(decoded, gameprofile::gameprofile_scr_policy_for_code(game.c_str()));
+	vfs_decode_payload(decoded, title_scr_policy_for_code(game.c_str()));
 	return extract_native(extract, name, decoded, out, error);
 }
 
