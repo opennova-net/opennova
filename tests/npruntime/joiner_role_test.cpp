@@ -1596,6 +1596,10 @@ bool run_replica_turret_channel() {
  twin.kind = w::EntityKind::Item;
  twin.item_id = 123;
  twin.emplaced_ctrl_publisher = true;
+ // The twin's slot Def, its class init's bind: the window's fallback reads it.
+ world.tables.weapons.entries.resize(2);
+ world.tables.weapons.entries[1].valid = true;
+ twin.primary_weapon_slot_adm = 1;
  auto &state = h.role.runtime->state();
  if (!expect(test_common::materialize_twin(h.role.materializer(), state, world, 1, twin,
      EntityClass::NoNetworkCallback).packed == 0x1000,

@@ -1511,6 +1511,10 @@ void test_replica_gun_window_reads_the_composed_frame() {
         Entity twin_seed;
         twin_seed.kind = EntityKind::Item;
         twin_seed.item_id = 123;
+        // The twin's slot Def, its class init's bind: the fallback window reads it.
+        w.tables.weapons.entries.resize(1);
+        w.tables.weapons.entries[0].valid = true;
+        twin_seed.primary_weapon_slot_adm = 0;
         const EntityHandle twin_h = w.registry.spawn(1, twin_seed);
         const int32_t row_frame = kGunHeading;
         const int32_t composed_frame = bam_add(kGunHeading, 0x08000000);
@@ -1554,6 +1558,54 @@ void test_replica_gun_window_reads_the_composed_frame() {
     }
 }
 
+// The joiner's fallback window reads the gun's slot Def, as the World's window does: a twin no
+// class init bound (a gun neither ewep nor an EWeap aircraft) takes no window from the weapon its
+// def names, whose limits its spec carries, so a gunner past the +-45 degree yaw range keeps its
+// look, as on the host; with the Def bound the same look pins at the window.
+// [orig: Entity_GetWeaponTurretLimits @0x540D70 - the fallback off the slot's def
+//  @0x540E35..0x540E58; WeaponSlot_InitFromEntityDef @0x5466C0, called only by
+//  Entity_InitBoneReferences @0x441482 and Entity_InitAircraftWeaponBones @0x49017B]
+void test_replica_fallback_window_reads_the_twins_slot_def() {
+    using opennova::replication::ClientEntityState;
+    for (const bool bound : {false, true}) {
+        auto wp = std::make_unique<World>();
+        World &w = *wp;
+        w.registry.configure_pool(1, 4);
+        w.tables.weapons.entries.resize(1);
+        w.tables.weapons.entries[0].valid = true;
+        Entity twin_seed;
+        twin_seed.kind = EntityKind::Item;
+        twin_seed.item_id = 123;
+        if (bound) twin_seed.primary_weapon_slot_adm = 0;
+        const EntityHandle twin_h = w.registry.spawn(1, twin_seed);
+        std::vector<opennova::mission::ItemSeatSpec> specs(1);
+        specs[0].type_id = 123;
+        Seat seat;
+        seat.type = SeatType::Gunner;
+        seat.bone_index = 1;
+        specs[0].seats.push_back(seat);
+        specs[0].turret_limits_valid = true;
+        specs[0].turret_yaw_range_bam = 0x20000000;
+        specs[0].turret_pitch_max_bam = 0x40000000;
+        specs[0].turret_pitch_min_bam = 0x40000000;
+        opennova::replication::ClientState state;
+        ClientEntityState &mount = state.upsert(twin_h.packed);
+        mount.type_id = 123;
+        mount.cls = opennova::EntityClass::NoNetworkCallback;
+        mount.heading_bam = kGunHeading;
+        ClientEntityState &gunner = state.upsert(2);
+        gunner.cls = opennova::EntityClass::Player;
+        gunner.carrier_handle = twin_h.packed;
+        gunner.mount_bone = 1;
+        gunner.heading_bam = bam_sub(kGunHeading, 0x30000000);
+        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr,
+                opennova::inmatch::ReplicaGunLeg::Pool1Walk);
+        CHECK(state.find(twin_h.packed)->emplaced_gun_yaw_word == (bound ? 0x2000 : 0x3000));
+        CHECK(state.find(2)->heading_bam ==
+                bam_sub(kGunHeading, bound ? 0x20000000 : 0x30000000));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1564,6 +1616,7 @@ int main() {
     test_dfx2_channel_publishes_then_counter_rotates();
     test_slew_reads_the_frame_before_the_compose();
     test_replica_gun_window_reads_the_composed_frame();
+    test_replica_fallback_window_reads_the_twins_slot_def();
     test_weapon_window_zero_yawrange_locks_traverse();
     test_unoccupied_gun_publishes_held_words_spin_and_heat();
     test_parent_publication_runs_unoccupied_every_tick();
