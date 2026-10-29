@@ -1370,9 +1370,12 @@ bool run_0a_player_record_field_sources() {
 	// default 44, never 0 (the null clip; the v15 flicker) [orig: @0x4b9714] (D-NET-159).
 	if (!expect(rec->player.anim_state_id == 44, "anim-state id is the spawn default 44"))
 		return false;
-	// Pending-wins selection [orig: reads +0x2B8 ?: +0x2BC @0x4c0cc7] + the channel ratio byte.
+	// Pending-wins selection [orig: reads +0x2B8 ?: +0x2BC @0x4c0cc7] + the channel ratio byte,
+	// read off the body's live channel as the record is written: a body 37 ticks into its pass
+	// (no clip source here: the elapsed ticks themselves) [orig: NetPacket_SerializePlayerState
+	// @0x4C0CF2..0x4C0D35].
 	e->net_anim_pending = 11; // a queued crouch-walk commit
-	e->net_anim_phase = 37;
+	ae->inf.clip_phase = 37;
 	ns::test::emit_all(world, conns);
 	if (!expect(ch.client_recv(dg), "second 0x0A frame dequeued")) return false;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),

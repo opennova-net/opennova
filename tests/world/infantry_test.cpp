@@ -1049,7 +1049,8 @@ void test_player_body_health_adjust() {
 // probes the whole frame at entry, so one more inline block overflowed the stack.
 // The movement motor skips a wire-snapped peer, but the anim selection still runs from
 // the REPLICATED MoveOrder byte (bits 0-2 dir, bit 3 moving) + the C2S 0x1D stance bits,
-// and the selected state/phase mirror onto the world Entity the 0x0A record reads.
+// and the selected state mirrors onto the world Entity the 0x0A record reads (its ratio
+// byte is the live channel's at the record's write, wire_anim_ratio).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 — authority gate @0x4b70a3-0x4b70b2,
 //  4th-tick @0x4b70ce, bases @0x4b7183-0x4b7226, idles @0x4b7228-0x4b7293]
 void test_remote_player_body_anim() {
@@ -1088,7 +1089,7 @@ void test_remote_player_body_anim() {
     ent->net_move_input = 0x08;
     run_ticks(ai, w, 0, 8);
     CHECK(ent->net_anim_state == anim_state::kWalkForward);
-    CHECK(ent->net_anim_phase > 0);            // the channel ratio sweeps
+    CHECK(wire_anim_ratio(e->inf, &src) > 0);   // the channel ratio sweeps
     CHECK(ent->net_move_input == 0x08);        // the uplinked byte is NOT overwritten
     // Crouch (the 0x1D stance-change model) lifts the walk to base 11.
     ent->net_stance_bits = 2;

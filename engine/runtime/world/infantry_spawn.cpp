@@ -559,7 +559,6 @@ void reset_spawn_words(Entity &e, int32_t health_ceiling) {
     // [orig: Entity_ResetToSpawnState anim reseed @0x4B9714]
     e.net_anim_state = 44;
     e.net_anim_pending = 0;
-    e.net_anim_phase = 0;
     // No MoveOrder store: the stance bits (net_stance_bits) stay. Only the player deploy
     // clears them, ahead of its call (Server_ReleasePlayerDeployment); a teleport, an NPC
     // respawn and the joiner's respawn arm leave them as they are.

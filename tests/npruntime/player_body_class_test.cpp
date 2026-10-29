@@ -895,9 +895,11 @@ void test_the_plyr_class_init_warms_up_its_channels() {
 			CHECK(ae->inf.anim_pending == 0);
 			CHECK(ae->inf.clip_phase == steps[i]);
 			CHECK(ae->inf.wpn_clip_phase == steps[i]);
+			// The record's ratio byte over the warmed-up channel.
+			CHECK(w::wire_anim_ratio(ae->inf, r.world->ai.root_motion) ==
+			      std::min(steps[i], int32_t{255}));
 		}
 		CHECK(body->position.z.q16 == z);
-		CHECK(body->net_anim_phase == std::min(steps[i], int32_t{255}));
 		std::vector<int> targets;
 		for (const int state : clips.calls)
 			if (state != w::anim_state::kReset) targets.push_back(state);
