@@ -51,6 +51,7 @@ class Snapshot:
 					int(e.get("active2", 0)) != 0)
 			var doors: Array = e.get("doors", [])
 			out[b + Simulation.PF_DOOR_COUNT] = float(doors.size())
+			out[b + Simulation.PF_HUSK] = float(e.get("husk", 0))
 			var destroy: Array = e.get("destroy", [0, 0, 0, 0, 0, 0])
 			for channel in range(6):
 				out[b + Simulation.PF_OBJECT_DESTROY + channel] = float(destroy[channel])
@@ -1516,13 +1517,22 @@ func test_disabling_part_anim_output_releases_all_retained_ctrl_writers() -> voi
 			"freezing the output seam cannot retain its last CTRL frame")
 
 
+# The draw publishes the swap fade only for a model it submits, under the husk
+# bit (engine: world::update_item_destroy_fade carries the witness): a hidden
+# row publishes nothing, a submitted husked row re-asserts its six slots, and a
+# row back intact releases them at its next submission.
 func test_destruction_publication_reclaims_owner_and_releases_only_its_slots() -> void:
 	var model := _model()
 	var pass_ := _make_pass(_index_of({1: model}))
 	var snap := Snapshot.new()
-	snap.entities = [{"bms_id": 1, "hidden": 1, "destroy": [65536, 32768, 1, 0, 0, 0]}]
+	snap.entities = [{"bms_id": 1, "hidden": 1, "husk": 1,
+			"destroy": [65536, 32768, 1, 0, 0, 0]}]
 	_present(pass_, snap)
-	assert_eq(_ctrl(model, "OBJECT_DESTROY"), 65536, "hidden rows retain destruction publication")
+	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY"),
+			"an unsubmitted row publishes no destruction phase")
+	snap.entities[0]["hidden"] = 0
+	_present(pass_, snap)
+	assert_eq(_ctrl(model, "OBJECT_DESTROY"), 65536, "a submitted husked row publishes its phases")
 	model.set_ctrl_override("other", "OBJECT_DESTROY", 65536)
 	_present(pass_, snap)
 	model.clear_ctrl_override("other", "OBJECT_DESTROY")
@@ -1533,3 +1543,16 @@ func test_destruction_publication_reclaims_owner_and_releases_only_its_slots() -
 	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY"), "falling phase releases our slot")
 	assert_eq(_ctrl(model, "OBJECT_DESTROY01"), 99, "stale release preserves a later writer")
 	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY02"))
+	snap.entities[0]["destroy"] = [32768, 0, 0, 0, 0, 0]
+	_present(pass_, snap)
+	snap.entities[0]["husk"] = 0
+	snap.entities[0]["destroy"] = [0, 0, 0, 0, 0, 0]
+	snap.entities[0]["hidden"] = 1
+	_present(pass_, snap)
+	assert_eq(_ctrl(model, "OBJECT_DESTROY"), 32768,
+			"an unsubmitted row keeps its last publication")
+	snap.entities[0]["hidden"] = 0
+	_present(pass_, snap)
+	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY"),
+			"the row's first submission back intact releases its slots")
+	assert_eq(_ctrl(model, "OBJECT_DESTROY01"), 99, "the release stays owner-scoped")

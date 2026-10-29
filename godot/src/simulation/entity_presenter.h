@@ -551,6 +551,8 @@ private:
 		int32_t rhc = -1;
 		int64_t cut_sections = -1;
 		int64_t destroyed_section_mask = -2;
+		// The swap fade's publication edge (stamp_destroy_phases).
+		int32_t destroy_published = -1;
 		bool transform_stamp_valid = false;
 		std::array<float, 6> transform_stamp = {};
 		bool aim_payload_valid = false;
@@ -583,6 +585,7 @@ private:
 		int32_t rhc = -1;
 		int64_t cut_sections = -1;
 		int64_t destroyed_section_mask = -2;
+		int32_t destroy_published = -1; // stamp_destroy_phases' edge
 		// The remote body-transition scalars (re-seeded from the per-handle
 		// cache on every plan build).
 		int32_t anim_state = -2;
@@ -640,7 +643,14 @@ private:
 	// Stance bits gate the MATCHTERRAIN tier (Terrain_RenderSectorEntitiesBySide
 	// @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 	static void stamp_match_terrain(ObjectModel *model, const float *p, int base);
-    void stamp_destroy_phases(ObjectModel *model, const float *p, int base);
+	// The swap fade's six CTRL slots (OBJECT_DESTROY, OBJECT_DESTROY01..05) of a
+	// SUBMITTED row: a husked row (PF_HUSK) re-asserts its six phases at each
+	// submission, a row that published releases them once at its first
+	// submission back intact, and an intact row that never published does no
+	// work. `published` is the row's edge: -1 unknown (a cold row releases),
+	// 0 nothing held, 1 published.
+	void stamp_destroy_phases(ObjectModel *model, const float *p, int base,
+			int32_t &published);
 	// The mounted right-hand collapse rides its own packed field, edge-gated
 	// to the value change; true when the model was written.
 	static bool stamp_right_hand_collapsed(ObjectModel *model, const float *p,

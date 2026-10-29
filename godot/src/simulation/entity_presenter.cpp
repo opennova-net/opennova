@@ -990,26 +990,37 @@ int EntityPresenter::emplaced_apply(Object *node,
 
 // --- The per-row legs both walks share ---------------------------------------
 
-void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base) {
+void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base,
+		int32_t &published) {
+	// The draw publishes the swap fade only for a model it submits, under the
+	// husk bit (engine: world::update_item_destroy_fade carries the witness);
+	// an intact row that holds nothing has no work.
+	const bool husked = field_i(p, base, Simulation::PF_HUSK) != 0;
+	if (!husked && published == 0) {
+		return;
+	}
 	// The swap stage's pending final husk draws right after the same publication, so
 	// its controlled materials read the same six slots (engine:
 	// world::update_husk_swap_stage). Both models ride the entity model itself.
 	ObjectModel *overlay = model->get_final_husk_overlay();
 	if (ObjectModel *husk = model->get_husk_visual()) model = husk;
 	static const std::string owner("present:destruction");
-	// Preserve publication before later culling and owner-scoped zero releases.
-	// Retail's direct six-slot writer and the retained-bus boundary are
-	// documented in docs/threedi/3di-gp-format-re.md (D-3DI-2).
+	// Owner-scoped zero releases: retail's direct six-slot writer and the
+	// retained-bus boundary are documented in docs/threedi/3di-gp-format-re.md
+	// (D-3DI-2).
 	for (ObjectModel *target : {model, overlay}) {
 		if (target == nullptr) continue;
 		target->begin_ctrl_update();
 		for (int i = 0; i < 6; ++i) {
-			const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
+			const int32_t phase = husked
+					? field_i(p, base, Simulation::PF_OBJECT_DESTROY + i)
+					: 0;
 			if (phase != 0) target->set_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i, phase);
 			else target->clear_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i);
 		}
 		target->end_ctrl_update();
 	}
+	published = husked ? 1 : 0;
 }
 
 void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
@@ -1304,7 +1315,6 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			++p_profile->rows;
 		}
 		stamp_match_terrain(model, p, base);
-		stamp_destroy_phases(model, p, base);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
 			// the placement Basis or Transform3D.
@@ -1423,6 +1433,10 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->aim_us += now - profile_phase_start;
 			profile_phase_start = now;
+		}
+		// The swap fade's slots, per submission like every writer below.
+		if (submitted) {
+			stamp_destroy_phases(model, p, base, row.destroy_published);
 		}
 		if (submitted && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
 			const int32_t active1_code =

@@ -1002,7 +1002,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
 			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
 	stamp_match_terrain(model, p, base);
-        stamp_destroy_phases(model, p, base);
+	stamp_destroy_phases(model, p, base, row.destroy_published);
 	const int32_t respawn_revision =
 			wfield_i(p, base, Simulation::PF_RESPAWN_REVISION);
 	const int32_t *seen_revision = wire_respawn_revisions_.getptr(row.handle);
