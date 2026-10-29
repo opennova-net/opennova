@@ -276,6 +276,16 @@ static void test_emplacement_attachments() {
           gun_child->flags == parent->flags);
     CHECK((gun_child->engine_flags & kEntityFlagMatrixBuilt) != 0);
 
+    // The plain child as the ewep class update's row: a resolved def row (the walk
+    // visits it) with its slot Def bound, the one class update that composes a child.
+    // [orig: Entity_UpdatePool1Slot @0x4B8DDD..0x4B8DE8 (the +0x1C gate), @0x4B8E53;
+    //  Entity_UpdateTransformAndTurret @0x440E8E..0x440EA0, the matrix @0x440F04..0x4411BC]
+    plain_child->item_type_index = 2;
+    plain_child->emplaced_update = true;
+    cw->tables.weapons.entries.emplace_back();
+    cw->tables.weapons.entries.back().valid = true;
+    plain_child->primary_weapon_slot_adm =
+            static_cast<uint8_t>(cw->tables.weapons.entries.size() - 1);
     parent->position = {30.f, 40.f, 5.f};
     parent->heading = placed_heading_bam(90);
     cw->run_logic_tick();
@@ -295,8 +305,9 @@ static void test_emplacement_attachments() {
     // The carrier's row destroyed: every child whose def carries EWeap goes with
     // it, as they share its refNum, through the same destroy and without a
     // notify of their own, and the gun's rider is let off. A child without
-    // EWeap keeps its pointer to the freed row and holds its last pose while
-    // the row is free; the next entity allocated in that row carries it.
+    // EWeap keeps its pointer to the freed row and takes that zeroed row's pose
+    // while the row is free (the class update's root copy); the next entity
+    // allocated in that row carries it.
     // [orig: Entity_Destroy @0x43E810 — the refNum walk @0x43E9B6..0x43E9CD ->
     //  EntityReference_DestroyEWeapGroup @0x546F30 (member tests @0x546F8A..0x546FA0,
     //  Entity_Destroy @0x546FA3); Entity_UpdateTransformAndTurret @0x440CBF]
@@ -323,8 +334,8 @@ static void test_emplacement_attachments() {
     CHECK(rider != nullptr && !rider->mounted);
     cw->run_logic_tick();
     plain_child = cw->registry.get(plain_h);
-    CHECK(plain_child != nullptr && plain_child->position.x == 30.f &&
-          plain_child->position.y == 38.f && plain_child->position.z == 6.f);
+    CHECK(plain_child != nullptr && plain_child->position.x == 0.f &&
+          plain_child->position.y == 0.f && plain_child->position.z == 0.f);
     Entity replacement_seed{};
     replacement_seed.kind = EntityKind::Item;
     replacement_seed.item_id = 999;

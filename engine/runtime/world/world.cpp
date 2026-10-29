@@ -22,32 +22,6 @@
 
 namespace opennova::world {
 
-// An attached child the ewep class update did not compose (its matrix leg,
-// compose_emplaced_child) composes on its carrier here, in its own visit, after
-// that update.
-// A carrier's death leaves its attachments in place: the ewep class update
-// hides a dead PlayerControl hull's children and its vehicle block clears
-// that hide when the hull respawns (tick_emplaced_weapon_class_update); a
-// dead carrier of any other kind keeps them riding its wreck. Destroying
-// the carrier's row destroys every child whose def carries EWeap, as the
-// child shares the carrier's refNum (EntityCommands::remove_ssn). A child
-// without EWeap keeps its pointer to the freed row: it takes that zeroed
-// row's pose (the class update's root copy) and rides whatever entity is
-// next allocated there. The pose below is against the row's current
-// occupant.
-// [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1 (the hide),
-//  @0x440EB3 (the clear), the root copy @0x4410EA..0x4411BC; Entity_Destroy
-//  @0x43E810 (the refNum walk @0x43E9CD -> EntityReference_DestroyEWeapGroup @0x546F30,
-//  memset @0x43EA70)]
-static void pose_attached_child(World &world, Entity &child) {
-    if (!child.emplacement_parent.valid()) return;
-    // The mounted-rider refresh (refresh_attached_child_riders) stays
-    // independent.
-    const Entity *parent = world.registry.get(child.emplacement_parent);
-    if (parent == nullptr) return;
-    compose_emplaced_child(world, child, *parent);
-}
-
 // A gunner riding an attached child still sits on the child's last frame: its
 // own body update (the gun channel, its look, its pose) comes later this tick,
 // in the pool-0 walk (finish_entity_update). Refresh only its seat frame on the
@@ -395,14 +369,13 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         vehicles.update_motor(*e, ctx.is_authority);
     }
     if ((e = live()) == nullptr) return;
-    bool composed = false;
     {
-        // The ewep update composes an attached child in its matrix leg, after
-        // the publication and ahead of its spin tail.
+        // The ewep update composes an attached child in its matrix leg, past
+        // its gates (compose_emplaced_child), after the publication and ahead
+        // of its spin tail; no other class update composes one.
         const devtools::ProfileScope ewep_scope(profile, devtools::Slot::SIM_WALK_EWEP);
-        composed = tick_emplaced_weapon_class_update(*this, *e);
+        tick_emplaced_weapon_class_update(*this, *e);
     }
-    if (!composed) pose_attached_child(*this, *e);
     if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
         ai.update_organic(*body, *this, ctx.logic_tick, body_move_row(*this, *body, e));
     // A powerup row's +0x1C4 is its respawn countdown, at its own visit every tick

@@ -116,6 +116,21 @@ void author_arc(Entity &gun) {
     gun.emplacement_up_limit_bam = -10 * kBamPerDegree;
 }
 
+// Only the ewep class update composes an attached gun, behind its slot Def: an
+// ewep row whose slot is bound to a Def with a window that spans every angle.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def exit
+//  @0x440E8E..0x440EA0 ahead of the matrix @0x440F04..0x4411BC]
+void make_composed_ewep(World &w, Entity &gun) {
+    gun.emplaced_update = true;
+    w.tables.weapons.entries.resize(1);
+    WeaponTableEntry &weapon = w.tables.weapons.entries[0];
+    weapon.valid = true;
+    weapon.turret_yaw_range_deg = 180;
+    weapon.turret_pitch_max_deg = 90;
+    weapon.turret_pitch_min_deg = 90;
+    gun.primary_weapon_slot_adm = 0;
+}
+
 // The immediate path (attrib2 IsTurret clear): word322 = (gun.Yaw - occ.Yaw)
 // >> 16, word324 = (gun.Pitch - occ.recoilPitch - occ.Pitch) >> 16, and the
 // publication is those words verbatim. [orig: @0x440b39..0x440b58]
@@ -511,6 +526,7 @@ void test_attached_turret_slews_once_per_world_tick() {
             r.gun().emplacement_parent = parent;
             r.gun().emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
             r.gun().emplacement_pose_metadata_resolved = true;
+            make_composed_ewep(r.w, r.gun());
         }
         const int32_t look = bam_sub(kGunHeading, 30 * kBamPerDegree);
         r.look(look, 0);
@@ -1371,6 +1387,7 @@ void test_slew_reads_the_frame_before_the_compose() {
     r.gun().emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
     r.gun().emplacement_pose_metadata_resolved = true;
     r.gun().emplacement_bone = 1;
+    make_composed_ewep(r.w, r.gun());
     r.look(kGunHeading, 0);
     r.w.run_logic_tick(true);
     CHECK(r.gun().emplaced_gun_yaw_word == 0);
@@ -1394,6 +1411,7 @@ void test_slew_reads_the_frame_before_the_compose() {
     gun.emplacement_parent = hull_h;
     gun.emplacement_bone = 1;
     gun.emplacement_pose_metadata_resolved = true;
+    make_composed_ewep(i.w, gun);
     gun.saved_live_yaw = kGunHeading;
     gun.saved_live_pitch = 0x00400000;
     gun.saved_live_valid = true;
@@ -1408,6 +1426,72 @@ void test_slew_reads_the_frame_before_the_compose() {
     i.tick_channel();
     CHECK(i.gun().emplaced_gun_yaw_word == 0x0200);
     CHECK(i.gun().emplaced_gun_pitch_word == 0);
+    // So does a child whose class update stops ahead of the compose (no slot Def).
+    i.gun().emplacement_pose_metadata_resolved = true;
+    i.gun().emplaced_gun_yaw_word = 0x0100;
+    i.gun().emplaced_gun_pitch_word = 0x0040;
+    i.gun().primary_weapon_slot_adm = kAdmSlotNone;
+    i.tick_channel();
+    CHECK(i.gun().emplaced_gun_yaw_word == 0x0200);
+    CHECK(i.gun().emplaced_gun_pitch_word == 0);
+}
+
+// Only the ewep class update composes an attached child, past its gates: a
+// child whose move function is not ewep, one with no slot Def and one whose
+// carrier is a dead PlayerControl hull all hold their frames on a moved
+// carrier (the hull's child hidden); the ewep child with its slot Def rides.
+// [orig: Entity_UpdatePool1Slot @0x4B8E53 (the row's own +0x1C4);
+//  Entity_UpdateTransformAndTurret @0x440CA0 - the hide and return
+//  @0x440CD7..0x440CE1, the slot Def exit @0x440E8E..0x440EA0, the root copy
+//  @0x4410EA..0x4411BC]
+void test_only_the_ewep_update_composes_a_child() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 8);
+    Entity carrier_seed;
+    carrier_seed.kind = EntityKind::Item;
+    carrier_seed.health = 100;
+    carrier_seed.alive = true;
+    carrier_seed.position = {8.0f, 12.0f, 4.0f};
+    const EntityHandle carrier = w.registry.spawn(1, carrier_seed);
+    Entity hull_seed = carrier_seed;
+    hull_seed.has_item_def = true;
+    hull_seed.item_attrib = kItemAttribPlayerControl;
+    hull_seed.flags = kEntityFlagDead;
+    hull_seed.alive = false;
+    const EntityHandle hull = w.registry.spawn(1, hull_seed);
+    const auto child_on = [&](EntityHandle parent, bool ewep, bool slot_def) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_type_index = 2; // a resolved def row: the walk visits it
+        seed.health = 100;
+        seed.alive = true;
+        seed.emplacement_parent = parent;
+        seed.emplacement_parent_spawn_id = w.registry.get(parent)->registry_spawn_id;
+        seed.ground_target = parent;
+        seed.emplacement_pose_metadata_resolved = true;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        Entity &child = *w.registry.get(h);
+        make_composed_ewep(w, child);
+        child.emplaced_update = ewep;
+        if (!slot_def) child.primary_weapon_slot_adm = kAdmSlotNone;
+        return h;
+    };
+    const EntityHandle ridden = child_on(carrier, true, true);
+    const EntityHandle other_class = child_on(carrier, false, true);
+    const EntityHandle no_def = child_on(carrier, true, false);
+    const EntityHandle on_wreck = child_on(hull, true, true);
+    w.run_logic_tick();
+    const auto at = [&](EntityHandle h, float x, float y, float z) {
+        const Entity *e = w.registry.get(h);
+        return e != nullptr && e->position.x == x && e->position.y == y && e->position.z == z;
+    };
+    CHECK(at(ridden, 8.0f, 12.0f, 4.0f));
+    CHECK(at(other_class, 0.0f, 0.0f, 0.0f));
+    CHECK(at(no_def, 0.0f, 0.0f, 0.0f));
+    CHECK(at(on_wreck, 0.0f, 0.0f, 0.0f));
+    CHECK((w.registry.get(on_wreck)->flags & kEntityFlagCarried) != 0);
+    CHECK((w.registry.get(on_wreck)->engine_flags & kEntityFlagMatrixBuilt) == 0);
 }
 
 // The joiner's remote-gunner leg over a gun its world composes: the slew reads the row's frame
@@ -1490,6 +1574,7 @@ int main() {
     test_vehicle_death_releases_or_destroys_the_eweap_group();
     test_barrel_spin_once_before_weapon_pump();
     test_trail_off_plays_at_the_composed_position();
+    test_only_the_ewep_update_composes_a_child();
     test_barrel_spin_tail_and_class_gate();
     test_attached_turret_slews_once_per_world_tick();
     test_immediate_path_words_and_recoil_term();
