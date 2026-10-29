@@ -362,7 +362,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 void collect_building_verdicts(const world::World &world, const world::CollisionWorld &collision,
 		const world::OcclusionWorld &occlusion, std::vector<BuildingVerdict> &r_out) {
 	r_out.clear();
-	world.registry.for_each([&](const world::Entity &e) {
+	const auto verdict = [&](const world::Entity &e) {
 		if (e.kind != world::EntityKind::Building || e.bms_id == 0) return;
 		if (!world::building_def_row(e)) return;
 		if (!occlusion.has_instance(e.handle) && collision.model_for(world, e.handle) == nullptr)
@@ -374,6 +374,35 @@ void collect_building_verdicts(const world::World &world, const world::Collision
 				occlusion.building_visible(e.handle));
 		v.forced = static_cast<int64_t>(occlusion.forced_section_mask(e.handle));
 		r_out.push_back(v);
+	};
+	// The batch's walk is the static prox table's prefix, rows [0, static_building_count)
+	// as its last Pool2 build listed them (the Building-type defs, pool-2 slot order, at
+	// most kStaticProxCountBound rows), each row's entity read through the row; the
+	// OcclusionWorld's batch (collect_buildings) walks the same rows.
+	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 - g_VisibleBuildingCount zeroed
+	//  @ 0x5c9171, Terrain_CollectVisibleSectorUserpoints called @ 0x5c9183;
+	//  Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60 - the walk to
+	//  g_StaticProxBuildingCount @ 0x5c6b97..0x5c6ba5, g_StaticProxEntity[i] @ 0x5c6c0e,
+	//  the append to g_VisibleBuildingCount @ 0x5c6d13..0x5c6d2f; the table's pass 1,
+	//  Entity_BuildProximityLists_Pool2 @ 0x4b9430 - the 1199 bound @ 0x4b94cb]
+	static thread_local std::vector<uint8_t> walked;
+	walked.assign(world.registry.pool_capacity(2), 0);
+	const int32_t buildings = collision.static_building_count();
+	for (int32_t i = 0; i < buildings; ++i) {
+		const world::CollisionWorld::StaticSlotView row = collision.static_slot(i);
+		const world::Entity *e = world.registry.get(row.h);
+		if (e == nullptr) continue;
+		if (static_cast<size_t>(row.h.slot()) < walked.size())
+			walked[static_cast<size_t>(row.h.slot())] = 1;
+		verdict(*e);
+	}
+	// A Building row the table does not list (spawned since its last build, past its
+	// bound, or with no item type) is in no batch, so no view draws it: its verdict
+	// (never batched, not visible) still goes out, so an embedder hides it, as the
+	// statics' walk drops its own unlisted rows (collect_view_verdicts).
+	world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
+		const size_t slot = static_cast<size_t>(e.handle.slot());
+		if (slot >= walked.size() || walked[slot] == 0) verdict(e);
 	});
 }
 

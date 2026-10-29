@@ -77,9 +77,11 @@ struct BuildingVerdict {
 };
 
 // Every Building-type def row with a placed identity and an occlusion instance
-// or a collision model (every retail building batch member) and its verdict in
-// the selected frame, in registry order; the pool-2 decorations and foliage
-// take the entity collect instead (world::building_def_row carries the split).
+// or a collision model and its verdict in the selected frame: the static prox
+// table's building rows in the batch's walk order (its prefix, as its last Pool2
+// build listed them), then the pool-2 Building rows the table does not list,
+// which no batch holds (not visible). The pool-2 decorations and foliage take
+// the entity collect instead (world::building_def_row carries the split).
 void collect_building_verdicts(const world::World &world, const world::CollisionWorld &collision,
 		const world::OcclusionWorld &occlusion, std::vector<BuildingVerdict> &r_out);
 

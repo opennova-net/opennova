@@ -1727,6 +1727,41 @@ void test_the_mirror_building_verdicts() {
     CHECK(mirror.size() == 1 && building_visibility_visible(mirror[0].packed));
 }
 
+// The building verdicts follow the batch's walk: the static prox table's building
+// rows in its order, then a Building row the table does not list (spawned into a
+// lower slot since its last build), which no batch holds, so its verdict is never
+// visible. [orig: Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60 - the walk to
+// g_StaticProxBuildingCount @ 0x5c6b97..0x5c6ba5, g_StaticProxEntity[i] @ 0x5c6c0e,
+// the append to g_VisibleBuildingCount @ 0x5c6d13..0x5c6d2f]
+void test_building_verdicts_walk_the_table() {
+    Rig rig;
+    Entity placeholder;
+    placeholder.kind = EntityKind::Marker;
+    const EntityHandle hole = rig.world.registry.spawn(2, placeholder);
+    const EntityHandle a =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    const EntityHandle b =
+        rig.add_building(30.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    rig.world.registry.get(a)->bms_id = 71;
+    rig.world.registry.get(b)->bms_id = 72;
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    rig.world.registry.despawn(hole);
+    const EntityHandle c =
+        rig.add_building(25.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    CHECK(c.slot() == hole.slot());
+    rig.world.registry.get(c)->bms_id = 73;
+    const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    rig.ow.build_frame(rig.world, rig.cw, cam);
+    std::vector<opennova::inmatch::BuildingVerdict> verdicts;
+    opennova::inmatch::collect_building_verdicts(rig.world, rig.cw, rig.ow, verdicts);
+    CHECK(verdicts.size() == 3);
+    if (verdicts.size() == 3) {
+        CHECK(verdicts[0].bms_id == 71 && verdicts[1].bms_id == 72 && verdicts[2].bms_id == 73);
+        CHECK(!building_visibility_visible(verdicts[2].packed));
+    }
+}
+
 // The reflected subscene draws from the eye mirrored in the water plane at or
 // above it (yaw kept, pitch and roll negated), from the live eye below it.
 // [orig: Render_MainScene @ 0x5c1240 - the side test @ 0x5c1367..0x5c1370,
@@ -2075,6 +2110,7 @@ int main() {
     test_the_mirror_collect_leaves_the_scene_words();
     test_the_mirror_collect_walks_the_entities_under_its_match();
     test_the_mirror_building_verdicts();
+    test_building_verdicts_walk_the_table();
     test_the_mirror_reflected_view();
     test_round_restart_keeps_the_first_weld();
     test_eye_in_front_of_a_window_keeps_the_exterior();
