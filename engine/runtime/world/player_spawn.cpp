@@ -2,7 +2,6 @@
 
 #include <runtime/world/angle.h>
 #include <runtime/world/ai.h>           // AiSystem, AiEntity
-#include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/geom.h>         // to_fixed
 #include <runtime/world/infantry.h>     // anim_state

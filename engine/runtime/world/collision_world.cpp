@@ -1369,7 +1369,8 @@ void CollisionWorld::rebuild_slices_after_spawn(World &world) {
         return;
     }
     // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - the counter @0x4B8ECA, the fill
-    //  @0x4B8ED0; the spawns' calls @0x43C4EB / @0x4526EB / @0x4529C0]
+    //  @0x4B8ED0; the spawns' calls @0x43C4EB / @0x4526EB / @0x4529C0, the vehicle
+    //  respawn's @0x460133]
     build_candidate_slices(world);
 }
 

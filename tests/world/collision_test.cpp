@@ -1087,8 +1087,9 @@ void test_candidate_range_reads_the_raw_bound_radius() {
 }
 
 // The vehicle respawn rebuilds every source's slice with the vehicle at its
-// respawn point, restarting the 17-tick phase. [orig: Entity_RespawnVehicle
-//  @0x45FF40 - the Entity_BuildProximityListsFromPools call @0x460133]
+// respawn point, restarting the 17-tick phase; a never-built world keeps its
+// fallbacks. [orig: Entity_RespawnVehicle @0x45FF40 - the
+//  Entity_BuildProximityListsFromPools call @0x460133]
 void test_vehicle_respawn_rebuilds_the_candidate_slices() {
     World world;
     world.registry.configure_pool(1, 8);
@@ -1121,6 +1122,18 @@ void test_vehicle_respawn_rebuilds_the_candidate_slices() {
     CHECK(collision.candidate_count(vehicle) == 1);
     collision.build_tick_tables(world);
     CHECK(collision.candidate_count(vehicle) == 0);
+
+    // The respawn's build is the spawns' slice build: a world whose tables were
+    // never built (headless) keeps its registry fallbacks through it, and builds
+    // no slice epoch.
+    auto headless = std::make_unique<World>();
+    headless->registry.configure_pool(1, 8);
+    auto never_built = std::make_unique<CollisionWorld>();
+    headless->ai.collision = never_built.get();
+    const EntityHandle hull = headless->registry.spawn(1, vehicle_seed);
+    headless->vehicles.respawn(*headless->registry.get(hull));
+    CHECK(!never_built->tick_tables_ready());
+    CHECK(!never_built->attach_candidate_slices_authoritative());
 }
 
 // ---------------------------------------------------------------------------

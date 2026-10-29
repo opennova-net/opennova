@@ -320,14 +320,15 @@ public:
     // build_all_tables: no spawn or destroy runs it (a player's add and a lift operation
     // build the slices alone, rebuild_slices_after_spawn; a deployable and a destroy nothing).
     void refresh_after_registry_change(World &world);
-    // A spawn's slice build: every source's slice over the published tables, the 17-tick
-    // phase restarted, no table published (the new row joins the tables at the next
-    // build). A world whose tables were never built keeps its registry fallbacks; one
-    // with tables but no slices yet takes the pre-logic snapshot (build_initial_tables).
+    // A spawn's or a vehicle respawn's slice build: every source's slice over the published
+    // tables, the 17-tick phase restarted, no table published (the new row joins the tables
+    // at the next build). A world whose tables were never built keeps its registry
+    // fallbacks; one with tables but no slices yet takes the pre-logic snapshot
+    // (build_initial_tables).
     // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
     //  Entity_SpawnFromAnimSlotProperty @0x43C4EB, HeliLift_SpawnPickup @0x4526EB,
-    //  HeliLift_SpawnFlyover @0x4529C0; none of them calls Entity_BuildProximityLists_Pool01
-    //  @0x4B9340]
+    //  HeliLift_SpawnFlyover @0x4529C0, Entity_RespawnVehicle @0x460133; none of them calls
+    //  Entity_BuildProximityLists_Pool01 @0x4B9340]
     void rebuild_slices_after_spawn(World &world);
     // Every table: the statics, the pool-0 / pool-1 tables and every slice (or, before the
     // first slices, the pre-logic snapshot). The mission start's local-player block and a
@@ -340,8 +341,8 @@ public:
     void refresh_entity_proximity(World &world, Entity &entity);
     // The candidate-slice build alone, outside the 17-tick cadence (which it
     // restarts): every source's slice over the published pool tables.
-    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
-    //  Entity_RespawnVehicle @0x460133]
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by WacCmd_Tele
+    //  @0x4F2384, Entity_TeleportTeamToSpawn @0x43D502, Entity_ResetToSpawnState @0x4B98EB]
     void rebuild_candidate_slices(World &world);
     // The statics table alone (buildings first, then the rest), outside the instance and
     // registry edges that otherwise rebuild it: the teleport actions' Pool2 calls.
