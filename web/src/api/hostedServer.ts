@@ -15,6 +15,7 @@ import { isAxiosError, type AxiosInstance } from 'axios';
 import { parseServerAddress } from './addresses';
 import { configurationDocument, settingsFromDocument, parseSettingsSchema, parseWeapons, type SavedConfiguration } from '../utils/serverConfiguration';
 import { adminClient, apiClient } from './client';
+import { pickProtocol } from './products';
 import { formatRetryAfter, parseRetryAfter } from './session';
 import type {
   ConsoleLine,
@@ -350,7 +351,11 @@ export function parseHostedServer(value: unknown): HostedServer | null {
     address: parseServerAddress(v.address),
     game_display_name: typeof v.game_display_name === 'string' ? v.game_display_name : '',
     expansion_display_name: typeof v.expansion_display_name === 'string' ? v.expansion_display_name : '',
-    product: parseNamed(v.product, (p) => ({ key: typeof p.key === 'string' ? p.key : '', title: typeof p.title === 'string' ? p.title : '' })),
+    product: parseNamed(v.product, (p) => ({
+      key: typeof p.key === 'string' ? p.key : '',
+      title: typeof p.title === 'string' ? p.title : '',
+      protocol: pickProtocol(p.protocol),
+    })),
     expansion: parseNamed(v.expansion, (e) => ({ code: typeof e.code === 'string' ? e.code : '' })),
     data: parseServerData(v.data),
     update_available: v.update_available === true,
@@ -437,6 +442,7 @@ function parseProduct(value: unknown): HostedProduct | null {
     id: v.id,
     display_name: v.display_name,
     title: typeof v.title === 'string' ? v.title : '',
+    protocol: pickProtocol(v.protocol),
     version: typeof v.version === 'string' ? v.version : '',
     missions: parseMissions(v.missions),
     limits,

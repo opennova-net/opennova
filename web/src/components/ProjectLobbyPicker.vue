@@ -19,7 +19,7 @@
     <div v-else>
       <label :for="`${prefix}-lobby`" class="field-label">Existing lobby</label>
       <select :id="`${prefix}-lobby`" v-model="slug" class="field" :aria-invalid="error ? 'true' : undefined" :aria-describedby="`${prefix}-lobby-hint`">
-        <option value="" disabled>{{ options.length ? 'Pick a lobby' : 'No compatible lobbies available' }}</option>
+        <option value="" disabled>{{ options.length ? 'Pick a lobby' : 'No lobbies for this protocol' }}</option>
         <option v-for="lobby in options" :key="lobby.slug" :value="lobby.slug">{{ lobby.display_name }}</option>
       </select>
     </div>

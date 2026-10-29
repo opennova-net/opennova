@@ -62,6 +62,8 @@ describe('ServerOverviewTab', () => {
     expect(section.textContent).toContain('1.7.5.5');
     expect(section.textContent).toContain('Escalation');
     expect(section.textContent).toContain('No version');
+    // The protocol its game's title speaks.
+    expect(page.get('#hosted-server-protocol').text()).toBe('JO protocol 16');
     expect(page.find('#hosted-server-update').exists()).toBe(false);
   });
 

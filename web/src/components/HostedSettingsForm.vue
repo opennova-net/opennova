@@ -7,7 +7,7 @@
       <RouterLink v-if="alertLinksToTiers" to="/me/billing" class="link ml-1">Billing</RouterLink>
     </Notice>
 
-    <!-- The game the server runs, with the version of its data. -->
+    <!-- The game the server runs, with the game version of its data (the release it runs). -->
     <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('product_id')">
       <legend :id="fieldId('product_id')" tabindex="-1" class="field-label focus:outline-none">{{ FIELD_LABELS.product_id }}</legend>
       <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -22,7 +22,8 @@
           />
           {{ option.display_name }}
         </label>
-        <span :id="hintId('product_id')" class="font-mono text-xs text-ink-muted" title="Version">{{ product?.version }}</span>
+        <span :id="hintId('product_id')" class="font-mono text-xs text-ink-muted" title="Game version">{{ product?.version }}</span>
+        <span v-if="product?.protocol" class="text-xs text-ink-muted" title="The protocol its title speaks">{{ protocolWords(product.protocol) }}</span>
       </div>
       <p v-if="errors.product_id" :id="errorId('product_id')" class="text-xs text-danger">{{ errors.product_id }}</p>
     </fieldset>
@@ -307,6 +308,7 @@ import type {
   SettingRange,
 } from '../types/hostedServer';
 import { cp1252Length } from '../utils/cp1252';
+import { protocolWords } from '../utils/games';
 import { useUnsavedChanges } from '../composables/useUnsavedChanges';
 import {
   allowsExpansion,
@@ -453,7 +455,9 @@ const weapons = computed(() => expansions.value.find((e) => e.id === form.expans
 const freeMachinesLine = computed(() =>
   props.ownMachinesFree === 1 ? 'One of your dedicated machines is free.' : `${props.ownMachinesFree} of your dedicated machines are free.`,
 );
-// The picked expansion's version; players need it installed to join.
+// The picked expansion's version; players need it installed to join (a host checks a joiner's copy
+// of the expansion's version.txt, which carries its release, GDC047/048). A base game's version is
+// no join check: it is the release the server runs alone.
 const expansionHint = computed(() => {
   const picked = expansions.value.find((e) => e.id === form.expansion_id);
   if (!picked) return '';

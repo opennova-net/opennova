@@ -23,6 +23,8 @@ function product(key: string, kind: DownloadsProduct['kind'], name: string, file
     version: published ? '0.0.22.123' : null,
     release: published ? 40 : null,
     published: published ? '2026-10-27T12:00:00Z' : null,
+    // The service's games name the protocol their titles speak.
+    protocol: key === 'JO' || key === 'ACIDGAMBIT' ? { code: 'jo', name: 'JO', version: '16' } : key === 'DFX2' ? { code: 'dfx2', name: 'DFX2', version: '16' } : null,
   };
 }
 
@@ -81,7 +83,8 @@ describe('DownloadsPage', () => {
     expect(wrapper.findAll('[aria-disabled="true"]').map((s) => s.text())).toEqual(['Not published yet', 'Not published yet']);
     // Each card: name, version and size, Download; the file, SHA-256 and publish time under Details.
     const game = wrapper.get('#jointops');
-    expect(game.get('[data-test="facts"]').text()).toBe('v0.0.22.123 · 53 MB');
+    expect(game.get('[data-test="facts"]').text()).toBe('0.0.22.123 · JO protocol 16 · 53 MB');
+    expect(wrapper.get('#oneditor [data-test="facts"]').text()).toBe('v0.0.22.123 · 53 MB');
     expect(game.text()).not.toContain('described');
     const details = game.get('details[data-test="build-jointops-game-windows.zip"]');
     expect(details.get('summary').text()).toBe('Details');
@@ -140,7 +143,7 @@ describe('DownloadsPage', () => {
     expect(cards[1].attributes('id')).toBe('player-jointops');
     expect(wrapper.find('#jointops h3').text()).toBe('Joint Operations');
     expect(cards[0].get('a').attributes('href')).toBe('https://downloads.example.com/player-rangers-game-windows.zip');
-    expect(cards[0].get('[data-test="facts"]').text()).toBe('v1.0 · 53 MB');
+    expect(cards[0].get('[data-test="facts"]').text()).toBe('1.0 · 53 MB');
   });
 
   it("shows no players' games section when the manifest names no owner", async () => {

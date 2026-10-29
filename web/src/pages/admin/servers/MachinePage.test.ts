@@ -77,7 +77,7 @@ describe('MachinePage', () => {
     const facts = page.get('.machine-facts').text();
     expect(facts).toContain('opennova-hostd@sha256:111111111111');
     expect(facts).toContain("Release's");
-    expect(facts).toContain('0.0.20, protocol 3');
+    expect(facts).toContain('0.0.20, agent protocol 3');
     expect(facts).toContain('hostd/hostd/task3');
     expect(page.findAll('.machine-flag')).toHaveLength(0);
     page.unmount();

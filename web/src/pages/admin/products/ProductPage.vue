@@ -11,6 +11,7 @@
     >
       <template v-if="product" #meta>
         <span class="product-kind">{{ kindLine(product, products, data?.games ?? []) }}</span>
+        <span v-if="product.protocol" class="product-protocol">{{ protocolWords(product.protocol) }}</span>
         <span v-if="product.key" class="font-mono">{{ product.key }}</span>
         <span class="product-owner">
           <PlayerLink v-if="product.owner" :id="product.owner_id" :name="product.owner" />
@@ -180,7 +181,7 @@
 
         <form v-if="building" id="product-build-form" class="flex flex-wrap items-end gap-2" novalidate @submit.prevent="confirmBuild">
           <div>
-            <label for="product-build-version" class="field-label">Version</label>
+            <label for="product-build-version" class="field-label">Game version</label>
             <input
               id="product-build-version"
               v-model="buildVersion"
@@ -188,7 +189,7 @@
               autocomplete="off"
               spellcheck="false"
               placeholder="0.2.0"
-              title="One to four numbers between dots"
+              title="One to four numbers between dots (0.2.0)"
               maxlength="32"
               :aria-invalid="versionProblem ? 'true' : undefined"
               class="field w-32 font-mono"
@@ -221,6 +222,7 @@
                 <tr class="product-release">
                   <th scope="row">
                     <span class="product-release-version font-mono">{{ releaseLabel(r) }}</span>
+                    <span v-if="r.one_version" class="product-release-one block text-xs font-normal text-ink-muted">ONE {{ r.one_version }}</span>
                     <span v-if="r.source" class="font-normal text-ink-muted">
                       (r{{ r.source.revision }}<template v-if="r.source.base_revision">, base r{{ r.source.base_revision }}</template>)
                     </span>
@@ -325,6 +327,7 @@ import { usePolling } from '../../../composables/usePolling';
 import { useUnsavedChanges } from '../../../composables/useUnsavedChanges';
 import type { ProductsResponse, ProjectRevision, Release } from '../../../types/products';
 import { formatBytes, formatCount } from '../../../utils/format';
+import { protocolWords } from '../../../utils/games';
 import {
   KEY_RULE,
   VERSION_RULE,
@@ -495,9 +498,10 @@ const editing = ref<EditForm | null>(null);
 const editError = ref('');
 const editLobbies = computed(() => {
   const g = product.value;
-  const options = (data.value?.games ?? []).filter((lobby) => lobby.title === g?.title);
-  return g?.lobby && !options.some((lobby) => lobby.slug === g.lobby)
-    ? [{ slug: g.lobby, display_name: g.lobby, title: g.title }, ...options] : options;
+  // The lobbies of the protocol the game's title speaks, and the one it lists in.
+  const options = (data.value?.games ?? []).filter((lobby) => !!g?.protocol && lobby.protocol.code === g.protocol.code);
+  return g?.lobby && g.protocol && !options.some((lobby) => lobby.slug === g.lobby)
+    ? [{ slug: g.lobby, display_name: g.lobby, protocol: g.protocol }, ...options] : options;
 });
 
 function toggleEdit() {
@@ -629,7 +633,7 @@ const building = ref(false);
 const buildVersion = ref('');
 const buildRevision = ref(0);
 const buildTried = ref(false);
-const versionProblem = computed(() => (buildTried.value && !VERSION_RULE.test(buildVersion.value.trim()) ? 'A version is one to four numbers between dots.' : ''));
+const versionProblem = computed(() => (buildTried.value && !VERSION_RULE.test(buildVersion.value.trim()) ? 'A game version is one to four numbers between dots.' : ''));
 
 useUnsavedChanges(() => {
   const g = product.value;

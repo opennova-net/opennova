@@ -85,7 +85,7 @@ describe('ProjectPage', () => {
   });
 
   it('changes a game lobby before locking, preserving a current lobby outside the available list', async () => {
-    const lobby = { slug: 'on_42_consumer', display_name: 'Private community', title: 'jo', gate_tag_file: 'YWJj' };
+    const lobby = { slug: 'on_42_consumer', display_name: 'Private community', protocol: { code: 'jo', name: 'JO', version: '16' }, gate_tag_file: 'YWJj' };
     const game = project('MYGAME', { title: 'My game', lobby });
     mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [game] }) });
     const page = await mountProject('MYGAME');
@@ -110,7 +110,7 @@ describe('ProjectPage', () => {
   });
 
   it('shows inherited and locked lobbies without offering changes', async () => {
-    const lobby = { slug: 'acidgambit_0_consumer', display_name: 'Acid Gambit', title: 'jo', gate_tag_file: 'YWJj' };
+    const lobby = { slug: 'acidgambit_0_consumer', display_name: 'Acid Gambit', protocol: { code: 'jo', name: 'JO', version: '16' }, gate_tag_file: 'YWJj' };
     mine.mockResolvedValue({ ok: true, value: myProjects({ projects: [{ ...NIGHTOPS_PROJECT, lobby }] }) });
     const page = await mountProject();
     expect(page.get('#project-lobby-settings').text()).toContain('Uses its base game’s lobby.');
@@ -142,7 +142,7 @@ describe('ProjectPage', () => {
     const crumb = page.get('nav[aria-label="Breadcrumb"] a');
     expect([crumb.text(), crumb.attributes('href')]).toEqual(['Projects', '/me/projects']);
     const meta = page.get('.page-meta');
-    expect(meta.findAll(':scope > *').map((e) => e.text())).toEqual(['NIGHTOPS', 'A mod of Joint Operations', 'nightops', 'Public', 'r3', '300 MiB', 'Players get 0.2.0']);
+    expect(meta.findAll(':scope > *').map((e) => e.text())).toEqual(['NIGHTOPS', 'A mod of Joint Operations', 'JO protocol 16', 'nightops', 'Public', 'r3', '300 MiB', 'Players get 0.2.0 (ONE 0.0.22)']);
     expect(page.get('#project-visibility-badge').attributes('title')).toBe('Public: anyone may get it.');
     expect(page.findAll('.page-header button').map((b) => b.text())).toEqual(['Make private', 'Rename', 'Delete']);
 
@@ -299,14 +299,16 @@ describe('ProjectPage', () => {
     });
     const page = await mountProject();
     expect(releases).toHaveBeenCalledWith('NIGHTOPS', expect.anything());
-    expect(page.get('#project-published-line').text()).toBe('Players get 0.2.0');
+    expect(page.get('#project-published-line').text()).toBe('Players get 0.2.0 (ONE 0.0.22)');
     const section = page.get('#project-releases').element.closest('section')!;
     // No intro: the table and its buttons speak.
     expect(section.querySelectorAll(':scope > p')).toHaveLength(0);
-    expect([...section.querySelectorAll('thead th')].map((th) => th.textContent!.trim())).toEqual(['Version', 'Status', 'From', 'Made', 'Size', 'Actions']);
+    expect([...section.querySelectorAll('thead th')].map((th) => th.textContent!.trim())).toEqual(['Game version', 'Status', 'From', 'Made', 'Size', 'Actions']);
 
     const rows = page.findAll('tr.project-release');
     expect(rows.map((r) => r.get('.release-version').text())).toEqual(['0.4.0', '0.3.0', '0.2.0', '0.1.0']);
+    // Each built by the ONE its release names.
+    expect(rows.map((r) => r.get('.release-one').text())).toEqual(['ONE 0.0.22', 'ONE 0.0.22', 'ONE 0.0.22', 'ONE 0.0.22']);
     expect(rows[0].text()).toContain('Building');
     expect(rows[0].findAll('td')[1].text()).toBe('r3 on r2');
     expect(rows[0].findAll('td')[2].text()).toMatch(/ by biggy$/);
@@ -352,7 +354,7 @@ describe('ProjectPage', () => {
     submitForm(page, '#project-build-version');
     await flushPromises();
     expect(build).not.toHaveBeenCalled();
-    expect(page.get('#project-build-hint').text()).toBe('A version is one to four numbers between dots, such as 0.2.0 or 1.0.');
+    expect(page.get('#project-build-hint').text()).toBe('A game version is one to four numbers between dots, such as 0.2.0 or 1.0.');
 
     build.mockResolvedValueOnce({
       ok: false,

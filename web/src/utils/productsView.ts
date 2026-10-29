@@ -71,6 +71,13 @@ export function publishedLabel(product: Product, releases: readonly Release[]): 
   return r ? releaseLabel(r) : published.name || `Release ${published.id}`;
 }
 
+// The ONE that built a product's published release ('0.0.22'), or '' where none is listed.
+export function publishedOneVersion(product: Product, releases: readonly Release[]): string {
+  const published = product.published_release;
+  if (!published) return '';
+  return releases.find((x) => x.id === published.id)?.one_version ?? '';
+}
+
 // "Game Joint Operations, lobby Joint Operations", "Expansion jox01 of Joint
 // Operations", or "App, built by CI".
 export function kindLine(product: Product, products: readonly Product[], lobbies: readonly LobbyOption[]): string {

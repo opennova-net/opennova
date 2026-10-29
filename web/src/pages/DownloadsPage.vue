@@ -62,6 +62,7 @@ import Notice from '../components/ui/Notice.vue';
 import PageHeader from '../components/ui/PageHeader.vue';
 import { downloadsBase, fetchDownloadsManifest, type DownloadsManifest, type DownloadsProduct } from '../api/downloads';
 import { formatBytes, formatUtc, isoTime } from '../utils/format';
+import { protocolWords } from '../utils/games';
 
 const downloadsHost = downloadsBase(window.location.hostname);
 const manifest = ref<DownloadsManifest | null>(null);
@@ -95,11 +96,13 @@ function downloadUrl(product: DownloadsProduct): string | undefined {
   return downloadsHost && product.file && product.sha256 ? `${downloadsHost}/${product.file}` : undefined;
 }
 
-// "v0.0.22 · 53 MB": the published release's version and its file's size.
+// "0.1.4 · JO protocol 16 · 53 MB": a game's game version, the protocol it speaks and its file's
+// size; an app's release is "v0.0.22".
 function facts(product: DownloadsProduct): string {
   if (!product.sha256) return '';
   const size = product.size === null ? '' : formatBytes(product.size);
-  return [product.version ? `v${product.version}` : '', size].filter(Boolean).join(' · ');
+  const version = product.version ? (product.kind === 'app' ? `v${product.version}` : product.version) : '';
+  return [version, protocolWords(product.protocol), size].filter(Boolean).join(' · ');
 }
 
 onMounted(async () => {

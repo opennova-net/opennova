@@ -117,6 +117,7 @@ describe('ProductPage', () => {
     expect(crumbs.findAll('a').map((a) => [a.text(), a.attributes('href')])).toEqual([['Products', '/admin/products']]);
     const meta = page.get('.page-meta');
     expect(meta.get('.product-kind').text()).toBe('Game Joint Operations, lobby Joint Operations');
+    expect(meta.get('.product-protocol').text()).toBe('JO protocol 16');
     expect(meta.text()).toContain('JO');
     expect(meta.get('.product-owner').text()).toBe('OpenNova');
     expect(meta.get('.product-visibility').text()).toBe('Private');
@@ -142,6 +143,7 @@ describe('ProductPage', () => {
     const table = page.get('table');
     expect(table.findAll('thead th').map((th) => th.text())).toEqual(['Release', 'Status', 'Package', 'Made', 'Actions']);
     expect(rows().map((r) => r.get('.product-release-version').text())).toEqual(['1.7.5.10', '1.7.5.9', '1.7.5.8', '1.7.5.7']);
+    expect(rows()[0].get('.product-release-one').text()).toBe('ONE 0.0.22');
     expect(rows()[0].text()).toContain('(r2)');
     expect(rows()[0].text()).toContain('Building');
     expect(rows()[0].text()).toContain('Not packed yet');
@@ -273,7 +275,7 @@ describe('ProductPage', () => {
     submitForm(page, '#product-build-version');
     await flushPromises();
     expect(build).not.toHaveBeenCalled();
-    expect(page.get('#product-build-form').text()).toContain('A version is one to four numbers between dots.');
+    expect(page.get('#product-build-form').text()).toContain('A game version is one to four numbers between dots.');
 
     await page.get('#product-build-version').setValue('1.7.5.12');
     submitForm(page, '#product-build-version');

@@ -103,7 +103,7 @@
           <dt class="text-ink-muted">Instance</dt>
           <dd class="font-mono text-xs">{{ machine.cloud_id || '—' }}</dd>
           <dt class="text-ink-muted">hostd</dt>
-          <dd>{{ machine.agent_version || '—' }}<template v-if="machine.agent_protocol !== null">, protocol {{ machine.agent_protocol }}</template></dd>
+          <dd>{{ machine.agent_version || '—' }}<template v-if="machine.agent_protocol !== null">, agent protocol {{ machine.agent_protocol }}</template></dd>
           <dt class="text-ink-muted">hostd image</dt>
           <dd class="flex min-w-0 flex-wrap items-center gap-2">
             <span class="break-all font-mono text-xs">{{ machine.agent_image ? shortImage(machine.agent_image) : '—' }}</span>

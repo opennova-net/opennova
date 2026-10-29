@@ -4,6 +4,7 @@
 import type { ServerAddress } from './addresses';
 import type { TierNumber } from './billing';
 import type { ServerOptions, ServerSetting, ServerWeapon } from '../utils/serverConfiguration';
+import type { Protocol } from './products';
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
@@ -98,9 +99,10 @@ export interface HostedProduct {
   // The value of HostedSettings.product_id.
   id: number;
   display_name: string;
-  // The title it speaks ('jo', 'dfx2').
+  // The title it runs as ('jo', 'dfx2') and the protocol that title speaks.
   title: string;
-  // Its current tree's version.txt.
+  protocol?: Protocol | null;
+  // Its current tree's game version: the release it was built from ('0.1.4').
   version: string;
   // The missions a rotation may hold (with an expansion's), in catalog order;
   // a start naming none takes all of them.
@@ -122,6 +124,8 @@ export interface HostedServerProduct {
   key: string;
   title: string;
   display_name: string;
+  // The protocol its title speaks.
+  protocol?: Protocol | null;
 }
 
 export interface HostedServerExpansion {

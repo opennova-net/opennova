@@ -122,7 +122,7 @@ describe('NewProjectPage', () => {
     expect((page.get('input[name="new-project-visibility"][value="public"]').element as HTMLInputElement).checked).toBe(true);
     await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
     expect(page.find('#new-project-base').exists()).toBe(false);
-    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations', 'Delta Force Xtreme 2']);
+    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations (JO protocol 16)', 'Delta Force Xtreme 2 (DFX2 protocol 16)']);
     await page.get('#new-project-game').setValue('dfx2');
     await page.get('input[name="new-project-visibility"][value="private"]').setValue(true);
     await page.get('#new-project-name').setValue('Rangers');
@@ -233,7 +233,7 @@ describe('NewProjectPage', () => {
     mine.mockResolvedValue({ ok: true, value: myProjects({ titles: ['jo', 'bhd'] }) });
     const page = await mountPage();
     await page.get('input[name="new-project-kind"][value="game"]').setValue(true);
-    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations', 'BHD']);
+    expect(page.findAll('#new-project-game option').map((o) => o.text())).toEqual(['Joint Operations (JO protocol 16)', 'BHD']);
   });
 
   it('says there is nothing to pick when the service lists no game, and the submit says why', async () => {
