@@ -100,11 +100,10 @@ PackedInt64Array building_visibility_changes_since(opennova::mission::MissionKer
 // MODEL-tier anchors mapped to Godot space for the foliage presenter.
 void collect_view(const opennova::inmatch::PresentRowsContext &p_context,
 		opennova::inmatch::WireOcclusionLatchMap &r_wire_latch,
-		std::vector<opennova::world::EntityHandle> &r_handles,
 		const opennova::world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
 		std::vector<int32_t> &r_culled_wire, PackedVector3Array &r_anchors) {
 	std::vector<opennova::world::Vec3> anchors;
-	opennova::inmatch::collect_view_verdicts(p_context, r_wire_latch, r_handles, cam,
+	opennova::inmatch::collect_view_verdicts(p_context, r_wire_latch, cam,
 			r_culled_bms, r_culled_wire, anchors);
 	r_anchors.clear();
 	for (const opennova::world::Vec3 &a : anchors) r_anchors.push_back(mission_to_godot(a));
@@ -150,9 +149,8 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_h
 			present_.death_piece_draws);
 	collect_view(opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
-			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam,
-			present_.occlusion_culled_bms, present_.occlusion_culled_wire,
-			present_.foliage_mask_anchors);
+			present_.wire_occlusion_latch, cam, present_.occlusion_culled_bms,
+			present_.occlusion_culled_wire, present_.foliage_mask_anchors);
 	if (runtime_profiling_enabled_)
 		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;
 }
@@ -176,8 +174,8 @@ const InsetOcclusionView &Simulation::run_inset_occlusion(const InsetOcclusionRe
 	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam, inset.death_piece_draws);
 	collect_view(opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
-			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam,
-			inset.culled_bms, inset.culled_wire, inset.foliage_mask_anchors);
+			present_.wire_occlusion_latch, cam, inset.culled_bms, inset.culled_wire,
+			inset.foliage_mask_anchors);
 	inset.building_changes = building_visibility_changes_since(*kernel_, inset.building_last);
 	inset.water_visible = kernel_->occlusion.water_visible();
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
@@ -211,7 +209,7 @@ bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_
 	const bool water_visible = opennova::inmatch::collect_mirror_view(
 			opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
-			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam, lists);
+			present_.wire_occlusion_latch, cam, lists);
 	view.culled_bms = std::move(lists.culled_bms);
 	view.culled_wire = std::move(lists.culled_wire);
 	view.foliage_mask_anchors.clear();

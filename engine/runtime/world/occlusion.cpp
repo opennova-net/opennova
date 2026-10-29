@@ -535,12 +535,10 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
     for (int32_t i = 0; i < buildings; ++i) {
         const CollisionWorld::StaticSlotView slot = collision.static_slot(i);
         // Per-axis XY cull against the fog distance on the quantized prox
-        // coords. [orig: @ 0x5c6bcb-0x5c6bff]
-        const int32_t limit = (static_cast<int32_t>(slot.radius) << 16) + cam.fog_dist;
-        const int32_t dx = io::bam_abs(static_slot_coord_q16(slot.x) - cam.pos_fixed[0]);
-        if (dx > limit) continue;
-        const int32_t dy = io::bam_abs(static_slot_coord_q16(slot.y) - cam.pos_fixed[1]);
-        if (dy > limit) continue;
+        // coords. [orig: @ 0x5c6bb0-0x5c6bff]
+        if (!collect_fog_box(cam, static_slot_coord_q16(slot.x), static_slot_coord_q16(slot.y),
+                             static_cast<int32_t>(static_cast<uint32_t>(slot.radius) << 16)))
+            continue;
 
         Entity *e = world.registry.get(slot.h);
         if (e == nullptr) continue;
@@ -1582,20 +1580,52 @@ bool OcclusionWorld::mirror_water_visible(World &world, CollisionWorld &collisio
 // The entity render gates
 // ----------------------------------------------------------------------------
 
+// [orig: Terrain_CollectVisibleEntitiesForTerrain — `mov eax,[edi]; mov ecx,
+// g_EnvFogDistCurrent; add ecx,eax` @ 0x5c8d12..0x5c8d1a, `mov eax,[edi+4]; sub
+// eax,cam.x; cdq; xor; sub; cmp eax,ecx; jg` @ 0x5c8d1c..0x5c8d2c, the +8 twin
+// @ 0x5c8d2e..0x5c8d3e; Terrain_CollectVisibleEntities_0 — `movzx edx,
+// g_StaticProxRadius[esi*2]; shl edx,10h; lea ecx,[edx+eax]` @ 0x5c6f82..0x5c6f92,
+// `movzx eax,g_StaticProxX[esi*2]; shl eax,10h; sub eax,cam.x; cdq; xor; sub;
+// cmp eax,ecx; jg` @ 0x5c6f95..0x5c6fad, the Y twin @ 0x5c6fb3..0x5c6fcb]
+bool OcclusionWorld::collect_fog_box(const OcclusionFrameCamera &cam, int32_t x, int32_t y,
+                                     int32_t radius_q16) {
+    const int32_t limit = static_cast<int32_t>(static_cast<uint32_t>(radius_q16) +
+                                               static_cast<uint32_t>(cam.fog_dist));
+    const auto off = [](int32_t a, int32_t b) {
+        return io::bam_abs(static_cast<int32_t>(static_cast<uint32_t>(a) -
+                                                static_cast<uint32_t>(b)));
+    };
+    return off(x, cam.pos_fixed[0]) <= limit && off(y, cam.pos_fixed[1]) <= limit;
+}
+
 // [orig: the shared per-entity occlusion rules of Terrain_CollectVisibleEntities_0
-// @ 0x5c6f20 and Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 — the entity
-// flag skip, the blink-hits gate, the view cull, and the three-ray latch —
-// then the render waves' render_TOC for an entity in no blink box.]
+// @ 0x5c6f20 and Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 — the XY fog
+// box, the entity flag skip, the Flags match, the blink-hits gate, the view cull,
+// and the three-ray latch — then the render waves' render_TOC for an entity in no
+// blink box.]
 bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
-                                           const OcclusionFrameCamera &cam) {
-    if ((ent.flags & 1u) != 0) return false; // [orig: @ 0x5c6fec]
+                                           const OcclusionFrameCamera &cam,
+                                           const CollisionWorld::StaticSlotView *static_row) {
+    // The statics' collector boxes its prox row's quantized words ahead of every
+    // other test. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f82..0x5c6fcb]
+    if (static_row != nullptr &&
+        !collect_fog_box(cam, static_slot_coord_q16(static_row->x),
+                         static_slot_coord_q16(static_row->y),
+                         static_cast<int32_t>(static_cast<uint32_t>(static_row->radius) << 16)))
+        return false;
+    if ((ent.flags & 1u) != 0) return false; // [orig: @ 0x5c6fec / @ 0x5c8cf4]
     // The walk's Flags match, ahead of the blink-hits gate and the latch.
     // [orig: @ 0x5c6ff2..0x5c7001 / @ 0x5c8d01..0x5c8d10]
     if (!collect_flags_match(cam, entity_flags_word(ent))) return false;
-    if (!blink_hits_render_active(ent.blink_hits)) return false;
-
     int32_t epos[3];
     detail::entity_pos_fixed(ent, epos);
+    // A pool 0 / 1 entity's box: its entity+0 radius about its entity+4 / +8
+    // position, after the Flags match. [orig: Terrain_CollectVisibleEntitiesForTerrain
+    // @ 0x5c8d12..0x5c8d3e]
+    if (static_row == nullptr && !collect_fog_box(cam, epos[0], epos[1], ent.bound_radius.q16))
+        return false;
+    if (!blink_hits_render_active(ent.blink_hits)) return false;
+
     const CollisionModel *cm = collision.model_for(world, ent.handle);
     bool collected = false;
     if (ent.kind == EntityKind::Organic) {

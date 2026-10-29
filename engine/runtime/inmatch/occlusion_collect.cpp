@@ -15,9 +15,8 @@
 namespace opennova::inmatch {
 
 void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
-		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
-		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire,
-		std::vector<world::Vec3> &r_anchors) {
+		const world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
+		std::vector<int32_t> &r_culled_wire, std::vector<world::Vec3> &r_anchors) {
 	mission::MissionKernel &kernel = context.kernel;
 	ClientRuntime *const runtime = context.runtime;
 	const bool joiner = context.joiner;
@@ -48,13 +47,15 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		return !(e.kind == world::EntityKind::Building && world::building_def_row(e)) &&
 				e.kind != world::EntityKind::Marker && e.bms_id != 0;
 	};
-	const auto gate_placed = [&](world::EntityHandle h) {
-		world::Entity *e = kernel.world.registry.get(h);
-		if (e == nullptr) return;
-		if (!kernel.occlusion.entity_render_visible(kernel.world, kernel.collision, *e, cam))
-			r_culled_bms.push_back(e->bms_id);
+	// `static_row` is the static prox table row a static is walked from (the
+	// statics' box reads its words), null for a pool 0 / 1 row.
+	const auto gate_placed = [&](world::Entity &e,
+			const world::CollisionWorld::StaticSlotView *static_row) {
+		if (!kernel.occlusion.entity_render_visible(kernel.world, kernel.collision, e, cam,
+					static_row))
+			r_culled_bms.push_back(e.bms_id);
 		else
-			anchor_entity(*e);
+			anchor_entity(e);
 	};
 	// The decoded rows the wire pass draws — remote organics and runtime
 	// spawns with no placed identity — pass the SAME collector gate: retail's
@@ -126,6 +127,14 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			return;
 		}
 		const int32_t pos[3] = {es.x, es.y, es.z};
+		// The XY fog box over the client-built entity's entity+0 radius and
+		// position, ahead of the blink walk (world/occlusion.h collect_fog_box
+		// carries the witness).
+		if (!world::OcclusionWorld::collect_fog_box(cam, pos[0], pos[1],
+					shape.bound_radius_q16)) {
+			r_culled_wire.push_back(static_cast<int32_t>(handle));
+			return;
+		}
 		// The row's blink quad from the client's own blink walk (the one
 		// the lighting feed runs for a twin-less row): the collector's
 		// blink-hits gate reads it before the legs, and the render waves'
@@ -226,37 +235,28 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	}
 
 	// The walk order is the collectors': the statics first (the static prox
-	// list's tail, the pool-2 rows that are not Building-type defs, in pool-2
+	// table's tail, the pool-2 rows that are not Building-type defs, in pool-2
 	// slot order), then pool 0, then pool 1, each pool in slot order. Every
 	// re-arm draws the one PRNG stream, so the order decides which entity takes
 	// which draw. [orig: Terrain_CollectVisibleEntities @ 0x5c9160 -
 	// Terrain_CollectVisibleEntities_0 @ 0x5c9199, Terrain_CollectVisibleEntitiesForTerrain
 	// pool 0 @ 0x5c91a1, pool 1 @ 0x5c91aa (the push 1 @ 0x5c91a8); the mirror's
 	// Terrain_CollectVisibleEntitiesForReflection @ 0x5c913d / @ 0x5c9145 / @ 0x5c914e;
-	// _0's walk g_StaticProxBuildingCount..g_StaticProxCount @ 0x5c6f48..0x5c721e over
-	// Entity_BuildProximityLists_Pool2 @ 0x4b9430's second pass, pool 2 in slot order
-	// @ 0x4b94e0..0x4b9568 (the type test @ 0x4b9502); ForTerrain's slot walk
-	// @ 0x5c8caa..0x5c8ced]
-	// The list holds the pool-2 rows with an item type and a def, the Building-type
-	// ones first, and counts at most kStaticProxCountBound of them: a static past the
-	// bound is never in the walked tail (world/collision.h static_prox_listed carries
-	// the witness).
-	int32_t listed = 0;
-	kernel.world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
-		if (world::static_prox_listed(e) && e.item_type == world::kItemDefTypeBuilding &&
-				listed < world::kStaticProxCountBound)
-			++listed;
-	});
-	std::vector<world::EntityHandle> &handles = r_handles;
-	handles.clear();
-	kernel.world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
-		if (!world::static_prox_listed(e) || e.item_type == world::kItemDefTypeBuilding ||
-				listed >= world::kStaticProxCountBound)
-			return;
-		++listed;
-		if (placed_row(e)) handles.push_back(e.handle);
-	});
-	for (const world::EntityHandle h : handles) gate_placed(h);
+	// ForTerrain's slot walk @ 0x5c8caa..0x5c8ced]
+	// The statics' walk is the table itself, rows [static_building_count, static_count)
+	// as its last Pool2 build listed them (at most kStaticProxCountBound rows, the
+	// Building-type ones first; world/collision.h static_prox_listed carries the
+	// witness), each row's entity gated with the row, whose quantized words its box reads.
+	// [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 - the walk
+	//  g_StaticProxBuildingCount..g_StaticProxCount @ 0x5c6f48..0x5c721e, the row's box
+	//  @ 0x5c6f82..0x5c6fcb ahead of its entity g_StaticProxEntity[i] @ 0x5c6fd1; the
+	//  table's pass 2, Entity_BuildProximityLists_Pool2 @ 0x4b9430 @ 0x4b94e0..0x4b9568]
+	const int32_t statics = kernel.collision.static_count();
+	for (int32_t i = kernel.collision.static_building_count(); i < statics; ++i) {
+		const world::CollisionWorld::StaticSlotView row = kernel.collision.static_slot(i);
+		world::Entity *e = kernel.world.registry.get(row.h);
+		if (e != nullptr && placed_row(*e)) gate_placed(*e, &row);
+	}
 
 	// Pools 0 and 1: the placed rows, the decoded wire rows and the local player
 	// each at its own pool slot. A wire row's slot is the one its handle names
@@ -311,7 +311,9 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	for (const Visit &v : visits) {
 		switch (v.leg) {
 			case Leg::Placed:
-				gate_placed(world::EntityHandle{static_cast<uint16_t>(v.index)});
+				if (world::Entity *e = kernel.world.registry.get(
+							world::EntityHandle{static_cast<uint16_t>(v.index)}))
+					gate_placed(*e, nullptr);
 				break;
 			case Leg::Wire:
 				gate_wire(runtime->state().entities[v.index]);
@@ -346,12 +348,11 @@ void collect_building_verdicts(const world::World &world, const world::Collision
 }
 
 bool collect_mirror_view(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
-		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
-		MirrorViewLists &r_lists) {
+		const world::OcclusionFrameCamera &cam, MirrorViewLists &r_lists) {
 	mission::MissionKernel &kernel = context.kernel;
 	r_lists.water_visible = kernel.occlusion.mirror_water_visible(kernel.world, kernel.collision,
 			cam, [&](const world::OcclusionFrameCamera &mirror) {
-				collect_view_verdicts(context, r_wire_latch, r_handles, mirror, r_lists.culled_bms,
+				collect_view_verdicts(context, r_wire_latch, mirror, r_lists.culled_bms,
 						r_lists.culled_wire, r_lists.anchors);
 				// The reflected subscene draws the collect's own batch at its own
 				// section masks [orig: Water_RenderReflectedWorldScene @ 0x5c8510 -

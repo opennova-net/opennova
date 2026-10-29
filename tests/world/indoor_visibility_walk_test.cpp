@@ -567,12 +567,11 @@ bool run_frame(testrig::MissionRig &rig, const w::Entity &bldg, const DoorRecord
 		else out.hidden_buildings.insert(e.bms_id);
 	});
 	opennova::inmatch::WireOcclusionLatchMap wire_latch;
-	std::vector<w::EntityHandle> scratch;
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	std::vector<w::Vec3> anchors;
 	opennova::inmatch::collect_view_verdicts(opennova::inmatch::PresentRowsContext{rig, nullptr, false},
-			wire_latch, scratch, cam, culled_bms, culled_wire, anchors);
+			wire_latch, cam, culled_bms, culled_wire, anchors);
 	out.culled.insert(culled_bms.begin(), culled_bms.end());
 	return true;
 }
