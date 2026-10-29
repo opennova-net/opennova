@@ -123,7 +123,7 @@
     X(SIM_WALK_MOUNTED, "pool-1 mounted brains: the seat shortcut and the re-pose") \
     X(SIM_WALK_CLAIMS, "the pool-0 walk's tail for a live body standing on a vehicle: the vehicle's gates, the hold scan, the team / berserk copy and the contact wake (the dead skip and the ground-chain find ahead of it stay walk glue)") \
     /* A joiner's replica legs inside the World's walks (JoinerRole's World hooks, D-NET-196). */ \
-    X(SIM_WALK_REPLICA_ROWS, "joiner: the decoded pool-1 rows' visits at their World slots (World::pool1_slot_leg)") \
+    X(SIM_WALK_REPLICA_ROWS, "joiner: the decoded pool-1 rows' visits at their World slots (World::pool1_slot_leg), each on the walk laps' microsecond clock") \
     X(SIM_WALK_REPLICA_POOL0, "joiner: the replica guns' channels, the remote rows' motion through the own body, the proxies' live words (World::before_pool0_walk)") \
     X(SIM_WALK_REPLICA_GUNS, "joiner: the replica guns' channels (tick_replica_emplaced_channels' pool-1 leg)") \
     X(SIM_WALK_REPLICA_MIDDLE, "joiner: the remote rows' motion through the own body's slot (tick_remote_motion_through_self)") \
