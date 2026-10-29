@@ -93,7 +93,7 @@ struct Harness {
 		kernel->world.load_systems();
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
 		role.create_runtime("FlagsJoiner", inmatch::JoinRole::Player, "", "");
 	}
 

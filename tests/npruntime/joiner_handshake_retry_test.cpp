@@ -111,7 +111,7 @@ bool run_idle_keepalive_waits_while_a_packet_is_held() {
 	const std::string server_scrk = "SERVER-HELD-KEEPALIVE-SCRK";
 	uint64_t now_ms = 1000;
 	inmatch::JoinerConnection joiner("HeldKeepalive", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 	joiner.seed_in_match(kServerKey, kClientKey, client_scrk, server_scrk,
 	                     1, 0, 0x0001, 0x14B9);
 	(void)joiner.pump(0);
@@ -153,7 +153,7 @@ bool run_dropped_hello_and_auth_recover() {
 	inmatch::NapiNPServerCtx host;
 	uint64_t now_ms = 0;
 	inmatch::ClientRuntime client("RetryJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	const std::vector<uint8_t> first_hello = client.start();
 	if (!expect(is_opcode(first_hello, SESSION_OPCODE_CLIENT_HELLO),
 			"start emits retail ClientHello 0x41")) {
@@ -265,7 +265,7 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 			inmatch::SocketMode::Socketless, 0x0FE0E113u);
 	uint64_t now_ms = 5000;
 	inmatch::ClientRuntime client("TimeoutJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	const std::vector<uint8_t> hello = client.start();
 	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
 			host, peer, hello.data(), hello.size(), 0);
@@ -319,7 +319,7 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 bool run_discovered_join_sends_its_0x42_at_the_next_pump() {
 	uint64_t now_ms = 5000;
 	inmatch::JoinerConnection joiner("NextPump", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
 	session.host_key = 0x0FE0E118u;
@@ -359,7 +359,7 @@ bool run_discovered_join_sends_its_0x42_at_the_next_pump() {
 
 	uint64_t early_ms = 0;
 	inmatch::JoinerConnection early("EarlyClock", [&early_ms] { return early_ms; });
-	early.set_title(&kJo);
+	early.set_protocol(&kJo);
 	early.set_discovered_session(session);
 	if (!expect(early.start().empty() && early.pump(0).empty(),
 	            "next pump: a clock at 0 sends nothing at the start"))
@@ -399,7 +399,7 @@ bool run_enumerated_join_sends_its_0x42_a_pass_after_the_0x81() {
 	const PeerAddr quiet_peer{0x0100007Fu, 32774};
 	uint64_t quiet_ms = 9000;
 	inmatch::JoinerConnection quiet("EnumQuiet", [&quiet_ms] { return quiet_ms; });
-	quiet.set_title(&kJo);
+	quiet.set_protocol(&kJo);
 	const std::vector<uint8_t> quiet_hello = quiet.start();
 	const inmatch::HandleResult quiet_reply = inmatch::handle_server_datagram(
 			host, quiet_peer, quiet_hello.data(), quiet_hello.size(), 0);
@@ -415,7 +415,7 @@ bool run_enumerated_join_sends_its_0x42_a_pass_after_the_0x81() {
 
 	uint64_t now_ms = 9000;
 	inmatch::JoinerConnection joiner("EnumPass", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 	const std::vector<uint8_t> hello = joiner.start();
 	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
 			host, peer, hello.data(), hello.size(), 0);
@@ -490,7 +490,7 @@ bool run_discovered_row_join_skips_the_hello() {
 	}
 	uint64_t now_ms = 7000;
 	inmatch::ClientRuntime client("RowJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
 	session.host_key = row.host_key;
@@ -523,7 +523,7 @@ bool run_discovered_row_join_skips_the_hello() {
 		return false;
 	}
 	inmatch::ClientRuntime bare("BareJoiner", [&now_ms] { return now_ms; });
-	bare.set_title(&kJo);
+	bare.set_protocol(&kJo);
 	return expect(is_opcode(bare.start(), SESSION_OPCODE_CLIENT_HELLO),
 	              "a bare dial (no row record) still sends the 0x41 first");
 }
@@ -566,7 +566,7 @@ bool run_connect_writes_pv3_and_its_peer() {
 	std::vector<uint8_t> body;
 
 	inmatch::JoinerConnection dial("DialPeer", [&now_ms] { return now_ms; });
-	dial.set_title(&kJo);
+	dial.set_protocol(&kJo);
 	dial.set_host_address(host_addr);
 	const std::vector<uint8_t> hello_datagram = dial.start();
 	ClientHello hello;
@@ -602,7 +602,7 @@ bool run_connect_writes_pv3_and_its_peer() {
 		return false;
 
 	inmatch::JoinerConnection row("RowPeer", [&now_ms] { return now_ms; });
-	row.set_title(&kJo);
+	row.set_protocol(&kJo);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
 	session.host_key = 0x0FE0E117u;
@@ -619,7 +619,7 @@ bool run_connect_writes_pv3_and_its_peer() {
 		return false;
 
 	inmatch::JoinerConnection socketless("NoPeer", [&now_ms] { return now_ms; });
-	socketless.set_title(&kJo);
+	socketless.set_protocol(&kJo);
 	const std::vector<uint8_t> bare = socketless.start();
 	ClientHello bare_hello;
 	const bool decoded = nw_decode_inbound(bare.data(), bare.size(), opcode, body) &&
@@ -670,7 +670,7 @@ bool run_one_connection_index_per_join() {
 
 	uint64_t now_ms = 0;
 	inmatch::JoinerConnection join("OneConnection", [&now_ms] { return now_ms; });
-	join.set_title(&kJo);
+	join.set_protocol(&kJo);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
 	session.host_key = row.host_key;
@@ -714,7 +714,7 @@ bool run_one_connection_index_per_join() {
 	advance_connection_index(expected);
 	advance_connection_index(expected);
 	inmatch::JoinerConnection dial("FreshConnection", [&now_ms] { return now_ms; });
-	dial.set_title(&kJo);
+	dial.set_protocol(&kJo);
 	const std::vector<uint8_t> hello_datagram = dial.start();
 	ClientHello hello;
 	return expect(nw_decode_inbound(hello_datagram.data(), hello_datagram.size(), opcode, body) &&
@@ -751,7 +751,7 @@ std::vector<uint8_t> without_field(const std::vector<uint8_t> &body, std::string
 bool run_server_hello_needs_no_hk() {
 	uint64_t now_ms = 0;
 	inmatch::JoinerConnection joiner("NoKeyJoiner", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 	const std::vector<uint8_t> first = joiner.start();
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -832,7 +832,7 @@ bool run_client_keys_draw_from_the_manager_lcg() {
 	uint64_t now_ms = 0;
 	NapiPrng prng(0x55u);
 	inmatch::JoinerConnection joiner("LcgJoiner", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 	joiner.set_key_prng(&prng);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
@@ -854,7 +854,7 @@ bool run_client_keys_draw_from_the_manager_lcg() {
 		return false;
 
 	inmatch::JoinerConnection fresh("ManagerJoiner", [&now_ms] { return now_ms; });
-	fresh.set_title(&kJo);
+	fresh.set_protocol(&kJo);
 	fresh.set_discovered_session(session);
 	const std::vector<uint8_t> second = first_join_datagram(fresh, now_ms);
 	ClientAuth fresh_auth;
@@ -898,7 +898,7 @@ bool run_server_auth_acceptance_follows_retail() {
 	};
 
 	inmatch::JoinerConnection rejected("AuthRejected", [&now_ms] { return now_ms; });
-	rejected.set_title(&kJo);
+	rejected.set_protocol(&kJo);
 	ClientAuth auth;
 	if (!expect(connect(rejected, auth), "the joiner is connecting with its 0x42")) return false;
 	const std::vector<uint8_t> foreign_ci =
@@ -921,7 +921,7 @@ bool run_server_auth_acceptance_follows_retail() {
 		return false;
 
 	inmatch::JoinerConnection accepted("AuthAccepted", [&now_ms] { return now_ms; });
-	accepted.set_title(&kJo);
+	accepted.set_protocol(&kJo);
 	if (!expect(connect(accepted, auth), "the second joiner is connecting with its 0x42"))
 		return false;
 	// An accept whose CU walk overruns its bounds (a 65th CU, or one of 2048 bytes) is dropped
@@ -978,7 +978,7 @@ bool run_cs_block_drives_the_joiner_ceiling_and_intervals() {
 			inmatch::SocketMode::Socketless, 0x0FE0E114u, nullptr, config);
 	uint64_t now_ms = 0;
 	inmatch::JoinerConnection joiner("CsJoiner", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 	const std::vector<uint8_t> hello = joiner.start();
 	const inmatch::HandleResult hello_reply = inmatch::handle_server_datagram(
 			host, peer, hello.data(), hello.size(), 0);
@@ -1065,7 +1065,7 @@ bool run_client_active_probe_recovers_join() {
 	const std::string server_scrk = "SERVER-ACTIVE-PROBE-SCRK";
 	uint64_t now_ms = 0;
 	inmatch::JoinerConnection joiner("ClientProbe", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -1239,7 +1239,7 @@ bool run_server_active_probe_recovers_settings() {
 	ScriptedDatagramSocket sock;
 	uint64_t now_ms = 0;
 	inmatch::ClientRuntime client("SettingsProbe", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 
 	sock.inbound.emplace_back(peer, client.start());
 	inmatch::host_session_pump(owner, sock); // tick 0
@@ -1337,7 +1337,7 @@ bool run_idle_keepalive_survives_a_quiet_session() {
 	// A non-zero start so the seeded anchor is distinguishable from "never sent".
 	uint64_t now_ms = 1000;
 	inmatch::JoinerConnection joiner("IdleKeepalive", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 	// Seed a live in-match session with NOTHING retained and nothing queued — the exact
 	// state a joiner parked at the deploy pick (or dead, uplink gate shut) sits in, and
 	// the state the ACTIVE interval deliberately ignores.
@@ -1386,7 +1386,7 @@ bool run_idle_keepalive_survives_a_quiet_session() {
 bool run_join_reject_text_keeps_sixty_three() {
 	uint64_t now_ms = 11000;
 	inmatch::JoinerConnection joiner("RejectText", [&now_ms] { return now_ms; });
-	joiner.set_title(&kJo);
+	joiner.set_protocol(&kJo);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
 	session.host_key = 0x0FE0E116u;

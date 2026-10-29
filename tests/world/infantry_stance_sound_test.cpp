@@ -30,7 +30,7 @@ int main() {
 
     auto kernel = std::make_unique<mission::MissionKernel>();
     inmatch::JoinerRole role;
-    role.set_title(&kJo);
+    role.set_protocol(&kJo);
     role.bind(*kernel);
     role.create_runtime("Stance",inmatch::JoinRole::Player,"","");
     role.poll_preload();

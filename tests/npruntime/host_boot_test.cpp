@@ -156,7 +156,7 @@ struct Host {
 
 	inmatch::HostBootRequest request() {
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = deathmatch_mission();
 		r.mission_basename = "synth";
 		r.files = test_boot::source_over(&files);
@@ -720,7 +720,7 @@ int main() {
 		inmatch::Session session(role);
 		inmatch::HostBoot boot;
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = deathmatch_mission();
 		r.mission_basename = "synth";
 		r.files = test_boot::source_over(&files);

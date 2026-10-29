@@ -174,7 +174,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
-	host_cfg.title = &kJo;
+	host_cfg.protocol = &kJo;
 	host_cfg.config.server_name = "OpenNova self-capture host";
 	host_cfg.config.max_players = 16;
 	// The committed fixture pins message coverage, not retail's LAN subrate.
@@ -192,7 +192,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	// paced wait loops release as they would in real time, whatever the machine's speed.
 	uint64_t client_ms = 1;
 	inmatch::ClientRuntime client("SelfCapture", [&client_ms] { return client_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	// The shell installs the mounted fresh profile; this script has no Avatars.def, so it
 	// installs the stock file's (the witnessed oracle, D-NET-833).
 	client.set_character_join_vars(inmatch::stock_fresh_profile_character_vars());

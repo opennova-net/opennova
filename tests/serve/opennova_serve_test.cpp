@@ -132,7 +132,7 @@ int main() {
 		serve::Server served(dfx2);
 		std::string why;
 		CHECK(served.start(why));
-		CHECK(served.title() == title_protocol("dfx2"));
+		CHECK(served.protocol() == title_protocol("dfx2"));
 		CHECK(served.gate_tag() == "dfx2:0:cus:buffy");
 		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block's
 		// table is dfx2.exe's, so the session config and its World take its title, and the boot's
@@ -174,7 +174,7 @@ int main() {
 	CHECK(started);
 	if (!started) return 1;
 	// No /game: JO's identity, and JO's gate tag (the mount carries no gt.ssc).
-	CHECK(server.title() == title_protocol("jo"));
+	CHECK(server.protocol() == title_protocol("jo"));
 	CHECK(server.gate_tag() == "jop:cus2");
 
 	// The host file reached the session: the name, the message, the cap (8; the
@@ -262,7 +262,7 @@ int main() {
 	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
 	uint32_t tick = 1;
 	inmatch::ClientRuntime client("ServeJoiner", [&tick] { return uint64_t{tick} * 16u; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());
 	};

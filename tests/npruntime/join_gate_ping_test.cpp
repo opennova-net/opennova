@@ -90,7 +90,7 @@ JoinRun run_join(bool novaworld) {
 	inmatch::JoinerRole role;
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
-	role.set_title(&kJo);
+	role.set_protocol(&kJo);
 	role.set_join_novaworld(novaworld);
 	role.kit_seams.apply_authoritative = [] {};
 	role.kit_seams.reseed_on_side_change = [] { return false; };

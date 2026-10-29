@@ -438,7 +438,7 @@ void test_serve_session_capture() {
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	CHECK(joiner_sock.is_valid());
 	inmatch::ClientRuntime client("LogJoiner");
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());
 	};

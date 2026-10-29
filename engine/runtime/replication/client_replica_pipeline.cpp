@@ -889,7 +889,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	decode_frame_update(body.data(), body.size(),
 	                    [this](uint16_t tid) { return classify(tid); }, fu,
 	                    frame_objective_body(game_type::is_objective(game_type_),
-	                            protocol_in_match(title_).objective_checkpoint),
+	                            protocol_in_match(protocol_).objective_checkpoint),
 	                    authority_recipient_);
 
 	state_.anchor_x = fu.anchor_x;

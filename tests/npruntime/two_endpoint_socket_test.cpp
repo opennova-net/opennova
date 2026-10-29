@@ -131,7 +131,7 @@ int main() {
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
-	host_cfg.title = &kJo;
+	host_cfg.protocol = &kJo;
 	host_cfg.config.server_name = "OpenNova";
 	host_cfg.config.max_players = 16;
 	// This test isolates the per-frame UDP round trip. Retail LAN cadence is
@@ -146,7 +146,7 @@ int main() {
 	// ---- joiner: a headless ClientRuntime over the joiner socket ----
 	const std::string kName = "SocketJoiner";
 	inmatch::ClientRuntime client(kName);
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 
 	// ---- capture both directions at the joiner boundary (for the §5.2a order decode; the 0x42/0x82
 	//      handshake is included so decode_capture_to_messages recovers the SCRK). ----

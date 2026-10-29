@@ -85,7 +85,7 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	runtime->set_join_request(join_role, spectator_password, server_password, join_password);
 	// The connect's peer: the 0x41's EIP / EPN on a dial, the 0x42's SIP / SPN.
 	runtime->set_host_address(host_addr_);
-	runtime->set_title(title_);
+	runtime->set_protocol(protocol_);
 	runtime->use_process_state(client_process_);
 	return *runtime;
 }
@@ -362,9 +362,9 @@ void JoinerRole::poll_preload() {
 	// [orig: MultiPlayer_JoinSessionStateMachine @0x56A320 - the NovaWorld test @0x56A4D6,
 	//  Server_SendPingMetricsToGate (the call @0x56A50B) ahead of the JOIN's queue @0x56A53F]
 	if (runtime->take_join_connected() && join_novaworld_ && socket_ != nullptr &&
-			title_ != nullptr) {
+			protocol_ != nullptr) {
 		GateMetricsHost host;
-		host.version = title_->version_text;
+		host.version = protocol_->version_text;
 		read_gate_metrics_locale(host.locale);
 		send_join_gate_ping_report(*socket_, static_cast<uint32_t>(runtime->join_clock_ms()),
 				process_gate_memory(), process_gate_ping_manager(), std::move(host),
@@ -1105,7 +1105,7 @@ void JoinerRole::pump() {
 	// binds the host's [orig: g_LoadoutWeaponNameList @0x8333F8; PlayerClass_InitEntity
 	//  @0x4B1060 (@0x4B1100..0x4B1116)].
 	world.loadout_weapon_names = &rt.loadout_weapon_names();
-	world.rules.title = protocol_game_id(title_);
+	world.rules.title = protocol_game_id(protocol_);
 	// The phase clocks (F3 Stats): each span below laps onto the SIM_CLIENT_*
 	// rows of the world's profile; an inactive profile reads no clock at all.
 	// The wire leg (Client_ProcessNetworkFrame) has its own rows.

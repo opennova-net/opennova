@@ -108,7 +108,7 @@ std::unique_ptr<HostMission> start_mission(inmatch::ClientProcessState &process,
 	options.game_type = game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "probe_words";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;

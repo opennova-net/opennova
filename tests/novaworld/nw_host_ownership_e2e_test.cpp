@@ -160,7 +160,7 @@ struct ListerRun {
 
 opennova::serve::ListerOptions lister_options(const Service &service, bool with_account) {
 	opennova::serve::ListerOptions options;
-	options.title = &kJo;
+	options.protocol = &kJo;
 	options.gate_tag = kJo.gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = service.gate.bound_port();
@@ -177,7 +177,7 @@ opennova::serve::ListerOptions lister_options(const Service &service, bool with_
 std::string fetch_host_key(const Service &service) {
 	opennova::LobbyHttpFlow flow;
 	opennova::LobbyHttpContext ctx;
-	ctx.title = &kJo;
+	ctx.protocol = &kJo;
 	ctx.gate_tag = kJo.gate_tag;
 	ctx.startup_url = "http://127.0.0.1:" + std::to_string(service.http.bound_port()) +
 	                  "/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm";

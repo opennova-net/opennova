@@ -177,7 +177,7 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 						opennova::to_gd(title_error)));
 				join_identity = false;
 			}
-			r_sim->set_title(title);
+			r_sim->set_protocol(title);
 		}
 		if (needs_join_connection && p_options->get_join_character_profile().is_valid()) {
 			r_sim->set_join_character_profile(p_options->get_join_character_profile());
@@ -257,7 +257,7 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 				r_sim.unref();
 				return ERR_UNCONFIGURED;
 			}
-			r_sim->set_title(title);
+			r_sim->set_protocol(title);
 		}
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).

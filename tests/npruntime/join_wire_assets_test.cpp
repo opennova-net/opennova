@@ -98,7 +98,7 @@ struct TerrainFixture {
 	uint32_t tick = 0;
 
 	TerrainFixture() {
-		runtime.set_title(&kJo);
+		runtime.set_protocol(&kJo);
 		runtime.seed_session(
 				0x50607080u, 1u, "CLIENT-TERRAIN-ASSET-SCRK", server_scrk,
 				1u, 0u, 0x0002u, 0x14B9u);
@@ -114,7 +114,7 @@ bool run_exact_bms_header_is_retained_and_reset() {
 	const std::string client_scrk = "CLIENT-WIRE-ASSET-SCRK";
 	const std::string server_scrk = "SERVER-WIRE-ASSET-SCRK";
 	inmatch::ClientRuntime runtime("WireAssetJoiner");
-	runtime.set_title(&kJo);
+	runtime.set_protocol(&kJo);
 	runtime.seed_session(
 			0x10203040u, 1u, client_scrk, server_scrk,
 			1u, 0u, 0x0002u, 0x14B9u);

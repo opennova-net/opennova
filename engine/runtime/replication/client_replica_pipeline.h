@@ -837,8 +837,8 @@ public:
 	// The title the session speaks (net/protocol/protocol.h; null: JO's), whose
 	// edits to the in-match bodies the folds follow: the 0x0A objective body's
 	// co-op checkpoint (DFX2-1) and the 0x66 armory-only value (DFX2-10).
-	void set_title(const Protocol *title) { title_ = title; }
-	const Protocol *title() const { return title_; }
+	void set_protocol(const Protocol *protocol) { protocol_ = protocol; }
+	const Protocol *protocol() const { return protocol_; }
 
 	// The 0x1D header-form discriminator's session half: retail reads
 	// g_NapiNPCtx.is_in_session; a joiner is always in-session, while the
@@ -1115,7 +1115,7 @@ private:
 	std::size_t unknown_tags_ = 0;
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
-	const Protocol *title_ = nullptr; // set_title
+	const Protocol *protocol_ = nullptr; // set_protocol
 	bool game_type_known_ = false;
 	bool mp_session_ = false;
 	bool authority_recipient_ = false;

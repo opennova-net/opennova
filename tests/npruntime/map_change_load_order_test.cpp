@@ -201,7 +201,7 @@ struct DedicatedHost {
 	// The rotation's current map's session config.
 	inmatch::HostConfig current_host_cfg() const {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "Load Order";
 		cfg.config.game_type = rotation.list.map_game_type;
 		cfg.config.mission_file = rotation.list.map_file;
@@ -418,7 +418,7 @@ struct ListenHost {
 
 	bool boot_map(bool next_mission) {
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::AttackAndDefend;
 		mission::sync_counts(r.mission);

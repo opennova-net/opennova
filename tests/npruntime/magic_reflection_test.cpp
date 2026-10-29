@@ -76,7 +76,7 @@ std::unique_ptr<Created> create(inmatch::ConnectionMode mode, inmatch::SocketMod
 	settings.server_name = "Magic";
 	settings.max_players = 8;
 	inmatch::SessionStartup startup;
-	startup.title = &kJo;
+	startup.protocol = &kJo;
 	startup.host_key = 0x12345678u;
 	startup.host_start_tick = kStartTick;
 	startup.session_seed_id = kSeed;
@@ -209,7 +209,7 @@ void test_the_owner_sends_the_answer_to_the_named_address() {
 	auto owner = std::make_unique<inmatch::HostOwner>();
 	owner->ctx.world = world.get();
 	inmatch::HostConfig cfg;
-	cfg.title = &kJo;
+	cfg.protocol = &kJo;
 	cfg.socket_mode = inmatch::SocketMode::NovaWorldSocket;
 	cfg.network_type = inmatch::NetworkType::NovaWorld;
 	cfg.config.max_players = 8;

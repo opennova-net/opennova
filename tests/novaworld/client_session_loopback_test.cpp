@@ -1071,8 +1071,8 @@ void test_client_reads_the_server_hello_as_retail() {
 void test_play_uses_current_http_cookies() {
 	LobbyHttpFlow flow;
 	LobbyHttpContext context;
-	context.title = &kJo;
-	context.gate_tag = context.title->gate_tag;
+	context.protocol = &kJo;
+	context.gate_tag = context.protocol->gate_tag;
 	context.startup_url = "http://gs.opennova.test/NWStart.dll?prepare=1";
 	context.identity_vars = make_lobby_identity_vars(LobbyIdentityParams{});
 	flow.set_context(context);
@@ -2473,7 +2473,7 @@ int main() {
 			// The host leg: the role forwards the command to on_command. The lobby is
 			// constructed and never opened; the Command notice touches neither it nor the phase.
 			NwuLobbySession dormant(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
-			dormant.set_title(&kJo, kJo.gate_tag);
+			dormant.set_protocol(&kJo, kJo.gate_tag);
 			NwuHostRole::Hooks hooks;
 			std::optional<ServerCommand> seen;
 			hooks.on_command = [&seen](const ServerCommand &c) { seen = c; };

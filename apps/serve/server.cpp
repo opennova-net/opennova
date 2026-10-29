@@ -520,8 +520,8 @@ bool Server::resolve_title(std::string &error) {
 		return false;
 	}
 	const std::string &code = game_code_;
-	title_ = resolve_title_protocol(code, error);
-	if (title_ == nullptr) {
+	protocol_ = resolve_title_protocol(code, error);
+	if (protocol_ == nullptr) {
 		error = "/game " + code + ": " + error;
 		return false;
 	}
@@ -531,11 +531,11 @@ bool Server::resolve_title(std::string &error) {
 	const bool second_logs_in =
 			!options_.also_master_host.empty() && options_.also_credentials.present();
 	if (first_logs_in || second_logs_in) {
-		const std::string refusal = protocol_refusal(*title_, ProtocolPart::WebFlow);
+		const std::string refusal = protocol_refusal(*protocol_, ProtocolPart::WebFlow);
 		if (!refusal.empty()) {
 			error = "/game " + code + " with " +
 					(first_logs_in ? "--credentials" : "--also-credentials") + ": " + refusal;
-			title_ = nullptr;
+			protocol_ = nullptr;
 			return false;
 		}
 	}
@@ -576,7 +576,7 @@ bool Server::mount(std::string &error) {
 	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion()));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
-	gate_tag_ = protocol_gate_tag(*title_, &index_);
+	gate_tag_ = protocol_gate_tag(*protocol_, &index_);
 	io::logf(io::LogLevel::kInfo, "opennova-serve: speaking %s, gate tag %s", code.c_str(),
 			gate_tag_.c_str());
 	// The expansion's text-override table, as the boot's Expansion_LoadAssets
@@ -791,7 +791,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.session = session_.get();
 	request.role = role_.get();
 	request.host = role_.get();
-	request.host_cfg.title = title_;
+	request.host_cfg.protocol = protocol_;
 	request.host_cfg.config = config;
 	request.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	// A listed server's session runs on the NovaWorld network type, whose
@@ -1073,7 +1073,7 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 
 ListerOptions Server::base_lister_options() const {
 	ListerOptions options;
-	options.title = title_;
+	options.protocol = protocol_;
 	options.gate_tag = gate_tag_;
 	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
 	options.allow_public = options_.allow_public;

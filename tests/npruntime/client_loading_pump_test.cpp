@@ -163,7 +163,7 @@ struct Harness {
 	// released mission start right after the 0x1A's frame (push_released_mission_start).
 	bool load_declared = false;
 
-	Harness() { client.set_title(&kJo); }
+	Harness() { client.set_protocol(&kJo); }
 
 	// One client frame on the 16 ms clock, with `incoming` delivered first.
 	std::vector<std::vector<uint8_t>> frame(
@@ -867,12 +867,12 @@ struct RoleHarness {
 		kernel->world.load_systems();
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
 		role.create_runtime("LoadingPump", inmatch::JoinRole::Player, "", "");
 		// The role's runtime on the virtual clock, configured as create_runtime does.
 		role.runtime = std::make_unique<inmatch::ClientRuntime>(
 				"LoadingPump", [this] { return now_ms; });
-		role.runtime->set_title(&kJo);
+		role.runtime->set_protocol(&kJo);
 		role.runtime->set_weapon_table(&kernel->world.tables.weapons);
 		return *role.runtime;
 	}

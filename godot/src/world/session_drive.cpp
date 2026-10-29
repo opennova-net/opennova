@@ -194,7 +194,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 				String("join: no identity to join with: ") + opennova::to_gd(title_error));
 		return ERR_UNCONFIGURED;
 	}
-	join_preload_sim_->set_title(title);
+	join_preload_sim_->set_protocol(title);
 	// The process's client words: the 0x4C report count runs on across joins.
 	join_preload_sim_->use_client_process(&world_->client_process_);
 	// The process's log devices: the join's session key closes the connect log.

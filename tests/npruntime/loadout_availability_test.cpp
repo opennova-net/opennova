@@ -240,7 +240,7 @@ void test_the_first_mission_builds_the_table() {
 		owner->ctx.world = world.get();
 		owner->ctx.mission = mission.get();
 		inmatch::HostConfig cfg;
-		cfg.title = opennova::title_protocol("jo");
+		cfg.protocol = opennova::title_protocol("jo");
 		cfg.config.server_name = "availability";
 		cfg.config.max_players = 4;
 		cfg.socket_mode = session ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;

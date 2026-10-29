@@ -50,7 +50,7 @@ namespace {
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
-	startup.title = cfg.title;
+	startup.protocol = cfg.protocol;
 	startup.text_override = cfg.text_override;
 	// The host key, from the manager's PRNG (D-NET-524).
 	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the

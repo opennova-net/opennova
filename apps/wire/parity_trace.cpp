@@ -241,7 +241,7 @@ const Protocol *handshake_title(const std::vector<uint8_t> &raw) {
 
 void ParityTraceBuilder::emit_handshake(
 		int frame, uint64_t ts_ns, int src_port, int dst_port, const std::vector<uint8_t> &raw) {
-	if (const Protocol *title = handshake_title(raw)) title_ = title;
+	if (const Protocol *title = handshake_title(raw)) protocol_ = title;
 	std::vector<uint8_t> stripped(raw.size());
 	size_t stripped_len = 0;
 	if (napi_envelope_decode(
@@ -384,7 +384,7 @@ void ParityTraceBuilder::emit_message(const InGameMessage &message, uint64_t ts_
 	FrameUpdate frame;
 	const bool clean = decode_frame_update(message.payload.data(), message.payload.size(), class_of,
 			frame, frame_objective_body(game_type::is_objective(game_type_),
-					protocol_in_match(title_).objective_checkpoint));
+					protocol_in_match(protocol_).objective_checkpoint));
 	ParityFrameState out;
 	out.frame = message.frame_index;
 	out.ts_ns = ts_ns;

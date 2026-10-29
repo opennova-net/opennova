@@ -242,7 +242,7 @@ public:
 	// (boot_policy.h launch_product_version), ONE's build and the protocol its title speaks.
 	const std::string &version_line() const { return version_line_; }
 	// The title the server speaks and its gate tag (mount): null / empty before the mount.
-	const Protocol *title() const { return title_; }
+	const Protocol *protocol() const { return protocol_; }
 	const std::string &gate_tag() const { return gate_tag_; }
 	const std::string &end_message() const { return end_message_; }
 	bool rotation_ended() const { return rotation_ended_; }
@@ -372,7 +372,7 @@ private:
 	std::string version_line_; // version_line's
 	// The title the server speaks (the launch's: mount) and its gate tag, the
 	// title's or the mount's gt.ssc's (protocol_gate_tag).
-	const Protocol *title_ = nullptr;
+	const Protocol *protocol_ = nullptr;
 	std::string gate_tag_;
 	ResourceIndex index_;
 	// The mount's expansion text-override table, read once at the boot's

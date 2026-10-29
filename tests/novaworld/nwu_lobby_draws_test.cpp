@@ -170,7 +170,7 @@ void check_ci_is_the_lobby_protocols_first() {
 	MemorySocket gate;
 	MemorySocket session;
 	NwuLobbySession lobby(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
-	lobby.set_title(&kJo, kJo.gate_tag);
+	lobby.set_protocol(&kJo, kJo.gate_tag);
 	connect(lobby, gate, session);
 	CHECK(lobby.session() != nullptr);
 	CHECK(lobby.client_index() == 1u && hello_ci(session) == 1u);
@@ -191,7 +191,7 @@ void check_keys_draw_from_the_manager_at_the_0x81() {
 	MemorySocket gate;
 	MemorySocket session;
 	NwuLobbySession lobby(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
-	lobby.set_title(&kJo, kJo.gate_tag);
+	lobby.set_protocol(&kJo, kJo.gate_tag);
 	connect(lobby, gate, session);
 	ClientAuth auth;
 	CHECK(answer_hello(lobby, session, auth));
@@ -212,7 +212,7 @@ void check_injected_keys() {
 	MemorySocket gate;
 	MemorySocket session;
 	NwuLobbySession lobby(NwuLobbySession::Hooks{}, env);
-	lobby.set_title(&kJo, kJo.gate_tag);
+	lobby.set_protocol(&kJo, kJo.gate_tag);
 	connect(lobby, gate, session);
 	ClientAuth auth;
 	CHECK(answer_hello(lobby, session, auth));

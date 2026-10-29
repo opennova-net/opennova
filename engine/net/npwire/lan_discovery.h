@@ -456,7 +456,7 @@ private:
 	std::vector<QueuedReply> queue_;
 	std::vector<LanDiscoveryRow> servers_;
 	std::function<void(const std::string &)> connect_log_;
-	const Protocol *title_ = nullptr;
+	const Protocol *protocol_ = nullptr;
 	ProxyRendezvousConfig proxy_{};
 	uint32_t client_index_ = 0;
 	uint32_t enumerate_ip_ = 0;

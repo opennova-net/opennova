@@ -451,7 +451,7 @@ std::optional<ProtocolMessage> JoinerConnection::take_world_stream_request() {
 }
 
 uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {
-	if (!protocol_in_match(title_).loadout_class_fixed) return profile_class;
+	if (!protocol_in_match(protocol_).loadout_class_fixed) return profile_class;
 	constexpr std::size_t kMissionTypeOffset = offsetof(opennova::bms::Header, mission_type);
 	static_assert(kMissionTypeOffset == 0x22A, "the BMS header's mission type byte");
 	const bool gunner_mission = mission_header_bytes_.size() > kMissionTypeOffset &&
@@ -531,7 +531,7 @@ ProtocolMessage JoinerConnection::mission_start_second_loadout() const {
 
 ProtocolMessage JoinerConnection::mission_start_status() const {
 	return make_protocol_message(0x0B, build_mission_status(mission_status_side_password(),
-			packed_game_version(title_ != nullptr ? title_->version_text : nullptr)));
+			packed_game_version(protocol_ != nullptr ? protocol_->version_text : nullptr)));
 }
 
 std::vector<uint8_t> JoinerConnection::frame_loadout_submit(const LoadoutSubmit &submit) {

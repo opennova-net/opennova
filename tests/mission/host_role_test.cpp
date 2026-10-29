@@ -115,7 +115,7 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		options.mp_session = mode != inmatch::SocketMode::Socketless;
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config = inmatch::singleplayer_game_config(options.game_type, nullptr);
 			cfg.config.allow_sniper_scope_zoom = true;
 			cfg.socket_mode = mode;
@@ -185,7 +185,7 @@ void check_own_world_state_location_names(std::map<std::string, std::string> &fi
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "location_names";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -242,7 +242,7 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "deploy_convert";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -311,7 +311,7 @@ void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::s
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "head_preround";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -368,7 +368,7 @@ void check_listen_host_console_punts_only_through_server(
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "console_punt";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -533,7 +533,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "server_rows";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -674,7 +674,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "server_rows_dedicated";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -752,7 +752,7 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 		inmatch::ClientProcessState process;
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "quality_report_runs_on";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -808,7 +808,7 @@ void check_serve_only_net_quality_indicators(std::map<std::string, std::string> 
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_indicators";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -883,7 +883,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_quality";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -915,7 +915,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_then_listen";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1274,7 +1274,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "listen_host_test";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1448,7 +1448,7 @@ int main() {
 			options.mp_session = true;
 			options.bringup_net_session = [&] {
 				inmatch::HostConfig cfg;
-				cfg.title = &kJo;
+				cfg.protocol = &kJo;
 				cfg.config.server_name = "gunner_walk";
 				cfg.config.max_players = 4;
 				cfg.config.game_type = options.game_type;
@@ -1544,7 +1544,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "fire_gate";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1627,7 +1627,7 @@ int main() {
 				return;
 			}
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "respawn_key";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1830,7 +1830,7 @@ int main() {
 				return;
 			}
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "deploy_hold";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -2046,7 +2046,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "quality_report";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;

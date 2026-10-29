@@ -143,7 +143,7 @@ bool LanDiscoveryBrowser::begin(const Protocol &title, uint32_t client_index,
 	// One identity per browse window: retail keeps its connection identity
 	// across the enumerator's re-announce pumps, so every burst repeats the
 	// same probe bytes.
-	title_ = &title;
+	protocol_ = &title;
 	client_index_ = client_index;
 	enumerate_ip_ = enumerate_ip;
 	connect_type_ = connect_type;
@@ -156,14 +156,14 @@ bool LanDiscoveryBrowser::begin(const Protocol &title, uint32_t client_index,
 }
 
 std::vector<uint8_t> LanDiscoveryBrowser::probe(int port) const {
-	if (title_ == nullptr) return {};
-	return build_lan_discovery_probe(*title_, client_index_, enumerate_ip_,
+	if (protocol_ == nullptr) return {};
+	return build_lan_discovery_probe(*protocol_, client_index_, enumerate_ip_,
 	                                 static_cast<uint32_t>(port < 0 ? 0 : port));
 }
 
 std::vector<LanBurstDatagram> LanDiscoveryBrowser::burst() const {
 	std::vector<LanBurstDatagram> out;
-	if (title_ == nullptr) return out;
+	if (protocol_ == nullptr) return out;
 	if (proxy_.enabled()) {
 		LanBurstDatagram rendezvous;
 		rendezvous.rendezvous = true;
@@ -379,15 +379,15 @@ bool LanDiscoveryBrowser::end_frame() {
 bool LanDiscoveryBrowser::hello_passes(const uint8_t *data, size_t size, const PeerAddr &from,
 		LanDiscoveryServer &out) const {
 	// A reply's source must be routable back: an unspecified address cannot be joined.
-	if (!browsing_ || title_ == nullptr || data == nullptr || size == 0 ||
+	if (!browsing_ || protocol_ == nullptr || data == nullptr || size == 0 ||
 	    static_cast<int>(from.port) < port_min_ || static_cast<int>(from.port) > port_max_ ||
 	    from.ip == 0)
 		return false;
-	return parse_lan_discovery_reply(*title_, data, size, client_index_, out);
+	return parse_lan_discovery_reply(*protocol_, data, size, client_index_, out);
 }
 
 void LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size, const PeerAddr &from) {
-	if (title_ == nullptr || data == nullptr || size == 0) return;
+	if (protocol_ == nullptr || data == nullptr || size == 0) return;
 	connect_log(napi_got_raw_text(static_cast<int32_t>(size), from));
 	if (napi_punkbuster_datagram(data, size)) return;
 	std::vector<uint8_t> unpacked;
@@ -407,7 +407,7 @@ void LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size, const P
 	if (taken)
 		queue_.push_back(QueuedReply{from, std::vector<uint8_t>(data, data + size), unpacked_len});
 	connect_log(taken ? napi_got_protocol_text(unpacked_len, from,
-	                            title_->pn != nullptr ? title_->pn : "")
+	                            protocol_->pn != nullptr ? protocol_->pn : "")
 	                  : napi_tossed_text(unpacked_len, from, NapiTossReason::NoProtocol));
 }
 

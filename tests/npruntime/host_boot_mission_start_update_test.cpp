@@ -155,7 +155,7 @@ struct DedicatedHost {
 		r.session = &session;
 		r.role = &role;
 		r.host = &role;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.host_cfg.config.server_name = map_file == "MAPA.BMS" ? "Start A" : "Start B";
 		r.host_cfg.config.game_type = rotation.list.map_game_type;
 		r.host_cfg.config.mission_file = map_file;

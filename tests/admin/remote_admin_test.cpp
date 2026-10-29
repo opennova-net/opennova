@@ -304,7 +304,7 @@ void test_joiner_console() {
 	inmatch::ClientRuntime &client = *joiner->runtime;
 	CaptureSocket socket;
 	joiner->set_socket(&socket, PeerAddr{0x0100007Fu, 32123});
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	joiner->seed_session(0x41444D4Eu, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
 	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
 	                    /*replay_mode=*/false);
@@ -975,7 +975,7 @@ void test_joiner_set_holds() {
 	role->bind(*kernel);
 	CaptureSocket socket;
 	role->set_socket(&socket, PeerAddr{0x0100007Fu, 32123});
-	role->set_title(&kJo);
+	role->set_protocol(&kJo);
 	role->create_runtime("SetJoiner", inmatch::JoinRole::Player, "", "");
 	role->kit_seams.apply_authoritative = [] {};
 	role->kit_seams.reseed_on_side_change = [] { return false; };
@@ -1089,7 +1089,7 @@ void test_host_uptime_reads_the_process_clock() {
 	owner->ctx.world = world.get();
 	uint32_t clock = 7000;
 	inmatch::HostConfig cfg;
-	cfg.title = &kJo;
+	cfg.protocol = &kJo;
 	cfg.config.server_name = "Clocked";
 	cfg.config.max_players = 8;
 	cfg.socket_mode = inmatch::SocketMode::Socketless;

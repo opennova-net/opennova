@@ -343,7 +343,7 @@ int main() {
 	uint16_t joiner_port = 0;
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	inmatch::ClientRuntime client("ListedJoiner");
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), game_ep, d.data(), d.size());
 	};

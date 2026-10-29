@@ -334,7 +334,7 @@ void test_remote_joiner_client_lines() {
 	const std::string host_at = "10.0.0.1:32786";
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("LogJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);
 	const auto sending = [&](const std::vector<uint8_t> &dg, const char *opcode, int packet) {
@@ -474,7 +474,7 @@ void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
 	const std::string pn = kJo.pn != nullptr ? kJo.pn : "";
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("SplitJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);
 	const auto decode = [](const std::vector<uint8_t> &dg, uint8_t &opcode,
@@ -604,7 +604,7 @@ void test_remote_joiner_duplicate_hellos() {
 				inmatch::SocketMode::Lan, /*host_key=*/0x0FE0E11Au);
 		uint64_t now_ms = 1000;
 		inmatch::ClientRuntime client("DupJoiner", [&now_ms] { return now_ms; });
-		client.set_title(&kJo);
+		client.set_protocol(&kJo);
 		client.set_host_address(host_addr);
 		client.set_connect_log(&log);
 		const std::vector<uint8_t> hello = client.start();
@@ -692,7 +692,7 @@ void test_remote_joiner_destroy_tears_down_the_socket() {
 		log.start(inmatch::ConnectLogHeader{});
 		uint64_t now_ms = 1000;
 		inmatch::ClientRuntime client("TeardownJoiner", [&now_ms] { return now_ms; });
-		client.set_title(&kJo);
+		client.set_protocol(&kJo);
 		client.set_host_address(host_addr);
 		client.set_connect_log(&log);
 		const std::vector<uint8_t> hello = client.start();
@@ -768,7 +768,7 @@ void test_remote_joiner_destroy_drains_the_enumerator() {
 			inmatch::SocketMode::Lan, /*host_key=*/0x0FE0E11Au);
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("DrainJoiner", [&now_ms] { return now_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);
 	const std::vector<uint8_t> hello = client.start();

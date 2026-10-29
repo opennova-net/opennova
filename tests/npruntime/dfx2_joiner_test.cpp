@@ -85,7 +85,7 @@ bool decode_c2s(const std::vector<uint8_t> &datagram, const std::string &client_
 // [orig: NapiNPClientMsg_TeamAssign @0x431910 - the reselect's submit @0x431AAD]
 int resubmit_class(const Protocol *title, uint8_t mission_type) {
 	inmatch::JoinerConnection joiner("Dfx2Loadout");
-	joiner.set_title(title);
+	joiner.set_protocol(title);
 	inmatch::JoinerConnection::LoadoutKit kit;
 	kit.player_class = 5;
 	joiner.set_loadout_kit(kit);
@@ -134,7 +134,7 @@ JoinSent join_of(const Protocol *title, const cdkey::WireKeys &ids, const std::s
 		const std::string &glsvss_request = {}, const std::vector<uint8_t> &cd_cookie = {}) {
 	JoinSent out;
 	inmatch::JoinerConnection joiner("Dfx2Joiner");
-	joiner.set_title(title);
+	joiner.set_protocol(title);
 	joiner.set_cd_key_ids(ids);
 	if (!app_id.empty()) joiner.set_app_id(app_id);
 	joiner.set_glsvss_request(glsvss_request);

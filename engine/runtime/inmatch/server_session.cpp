@@ -44,7 +44,7 @@ io::CrtRand *session_crt_rand(NapiNPServerCtx &ctx) {
 void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	if (!ctx.is_authority) return;
 	NapiNPProtocol &p = ctx.np_protocol;
-	p.identity = startup.title;             // the network init's identity block (the 0x81's, the gates')
+	p.identity = startup.protocol;             // the network init's identity block (the 0x81's, the gates')
 	p.host_key = startup.host_key;          // HK TLV (validated against the client HK on join)
 	p.host_start_tick = startup.host_start_tick; // uptime base
 	p.max_players = ctx.config.max_players; // MP TLV mirror
@@ -246,7 +246,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	}
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
 	// The title the start installs below (start_server) builds the block.
-	resolve_mission_config(ctx, config, startup.title, startup.text_override);
+	resolve_mission_config(ctx, config, startup.protocol, startup.text_override);
 	// The two advertised flag words, the create's: P1 the session's game type and P2 its
 	// BuildFlags word. Only the create and an admin SET of a password write them, so a map
 	// change keeps them; the S2C 0x08 tail calls BuildFlags live (serialize_server_config)

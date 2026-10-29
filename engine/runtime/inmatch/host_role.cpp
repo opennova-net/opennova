@@ -274,7 +274,7 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
 	// The title the session speaks: the host's own view reads its loopback bodies by it.
-	state.client_runtime->view().set_title(state.host_owner.ctx.np_protocol.identity);
+	state.client_runtime->view().set_protocol(state.host_owner.ctx.np_protocol.identity);
 	if (item_catalog_)
 		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
@@ -447,7 +447,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
 	bind_session_world(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
-			host_cfg.title);
+			host_cfg.protocol);
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (!head_run) {
 		// The authority's mission start steps the process's file-transfer session words, which
@@ -623,7 +623,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.rotation = rotation_;
 	ctx.host_client = nullptr;
 	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
-			host_cfg.title);
+			host_cfg.protocol);
 	// The process's CRT stream the teardown handed back, onto the next mission's World: the
 	// session's one seed runs on (ClientProcessState::crt_rand).
 	kernel.world.crt_rand = client_process_->crt_rand;

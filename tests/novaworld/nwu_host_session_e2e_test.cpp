@@ -118,7 +118,7 @@ int main() {
 	};
 	lobby_hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
 	opennova::NwuLobbySession lobby(lobby_hooks, opennova::NwuLobbySession::Environment{});
-	lobby.set_title(&kJo, kJo.gate_tag);
+	lobby.set_protocol(&kJo, kJo.gate_tag);
 	bool hosting = false;
 	std::vector<std::string> host_failures;
 	opennova::NwuHostRole::Hooks role_hooks;

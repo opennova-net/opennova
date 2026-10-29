@@ -98,7 +98,7 @@ struct NapiNPProtocol {
 	// The title's protocol the network init installs: CO +0x18, AP +0x58, BDAT +0x98, PN +0xDC,
 	// PG +0x11C, PV1 +0x12C, PV2 +0x16C, PV3 +0x1AC (net/protocol/protocol.h). The host's 0x81
 	// writes it and its 0x41 / 0x42 gates compare against it. start_server installs the session's
-	// (SessionStartup::title); with none (null), no hello is answered and no join admitted.
+	// (SessionStartup::protocol); with none (null), no hello is answered and no join admitted.
 	// [orig: CNapiNetwork_Init @0x4ca4a0 - the stores @0x4ca72f..0x4ca8c2]
 	const Protocol *identity = nullptr;
 	bool reject_new_connections = false; // [orig: +0x1F7, NapiNPProtocol_HandleClientJoin's JFC6 leg @0x62be8f]

@@ -82,7 +82,7 @@ struct Harness {
 		role.bind(*kernel);
 		kernel->world.load_systems();
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
 		role.create_runtime("TankJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };

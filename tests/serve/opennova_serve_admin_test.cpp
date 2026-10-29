@@ -89,7 +89,7 @@ struct Rig {
 	Rig(serve::Server &s, uint16_t joiner_port) : server(s) {
 		server_ep = net::Endpoint{{127, 0, 0, 1}, server.bound_port()};
 		joiner_sock = net::ScopedSocket(net::udp_bind(joiner_port));
-		client.set_title(&kJo);
+		client.set_protocol(&kJo);
 	}
 	void ship(const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());

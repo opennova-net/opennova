@@ -255,7 +255,7 @@ struct Host {
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = team_mission(map_file == "MAPA.BMS" ? "Map A" : "Map B");
 		r.mission_basename = mission::mission_base_name(map_file);
 		r.files = test_boot::source_over(&files);

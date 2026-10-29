@@ -244,7 +244,7 @@ private:
 	uint32_t game_type_ = 0;
 	// The title the handshake names (handshake_title): a DFX2 host's objective
 	// body carries the co-op checkpoint. Null decodes JO's.
-	const Protocol *title_ = nullptr;
+	const Protocol *protocol_ = nullptr;
 };
 
 // The `opennova-wire --parity-events` line printer.

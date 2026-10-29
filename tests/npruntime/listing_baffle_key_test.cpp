@@ -56,7 +56,7 @@ void check_round_init_draws_the_listing_keys(uint32_t start_tick, uint32_t seed)
 	settings.server_name = "Baffle";
 	settings.max_players = 8;
 	inmatch::SessionStartup startup;
-	startup.title = &kJo;
+	startup.protocol = &kJo;
 	startup.host_key = 0x12345678u;
 	startup.host_start_tick = start_tick;
 	startup.session_seed_id = seed;

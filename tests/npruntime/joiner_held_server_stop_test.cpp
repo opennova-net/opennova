@@ -152,7 +152,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 	inmatch::JoinerRole role;
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
-	role.set_title(&kJo);
+	role.set_protocol(&kJo);
 	role.use_process_state(&process);
 	role.set_server_logs(logs);
 	role.set_local_address(kOwnSocket);
@@ -281,7 +281,7 @@ void test_the_join_attempts_pump_steps_the_held_server() {
 	inmatch::JoinerRole role;
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
-	role.set_title(&kJo);
+	role.set_protocol(&kJo);
 	role.use_process_state(&process);
 	role.set_server_logs(logs);
 	role.kit_seams.apply_authoritative = [] {};
@@ -364,7 +364,7 @@ struct HeldAttempt {
 		kernel->world.registry.configure_pool(0, 16);
 		role.bind(*kernel);
 		role.set_socket(&socket, kHost);
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
 		role.use_process_state(&process);
 		role.set_server_logs(logs);
 		role.kit_seams.apply_authoritative = [] {};

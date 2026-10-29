@@ -154,8 +154,8 @@ int main() {
 
 	MatchSource source(columns("Lister E2E"), { player(0, "Alpha"), player(1, "Bravo") });
 	opennova::serve::ListerOptions options;
-	options.title = &kJo;
-	options.gate_tag = options.title->gate_tag;
+	options.protocol = &kJo;
+	options.gate_tag = options.protocol->gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = gate_port;
 	opennova::serve::Lister lister(options, source, nullptr);

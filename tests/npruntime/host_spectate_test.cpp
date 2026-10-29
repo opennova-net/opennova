@@ -61,7 +61,7 @@ struct Rig {
 		owner->ctx.mission = mission.get();
 		world->registry.configure_pool(0, 4);
 		inmatch::HostConfig cfg;
-		cfg.title = opennova::title_protocol("jo");
+		cfg.protocol = opennova::title_protocol("jo");
 		cfg.config.server_name = "spectate";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = 0x10000u;

@@ -401,7 +401,7 @@ HostRegistration NwuHostRole::host_cfg() const {
 	// The protocol's version pair, and whether its host lists carry DFXCATEGORY1.
 	// [orig: Lobby_UpdateServerInfo @0x4ff3ea / @0x4ff3ff; CNapiGameSession_BuildHostVarLists
 	//  @0x4d0b50]
-	if (const Protocol *protocol = lobby_.title()) {
+	if (const Protocol *protocol = lobby_.protocol()) {
 		cfg.ver1 = protocol->ver1;
 		cfg.ver2 = protocol->ver2;
 		cfg.category_var = protocol->host_category_var;

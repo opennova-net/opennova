@@ -101,7 +101,7 @@ struct QueueFixture {
 		inmatch::GameConfig config;
 		config.max_players = 8;
 		inmatch::SessionStartup startup;
-		startup.title = &kJo;
+		startup.protocol = &kJo;
 		startup.host_key = 0x01020304u;
 		inmatch::create_session(owner->ctx, config, startup, nullptr);
 		if (with_world) {

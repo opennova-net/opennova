@@ -30,7 +30,7 @@ struct ListerOptions {
 	// The title the listing speaks (complete: resolve_title_protocol; it outlives the lister)
 	// and its gate manager's tag (protocol_gate_tag over the mount): the gate probe, the session's
 	// NA, the web flow and the Host list's version pair.
-	const Protocol *title = nullptr;
+	const Protocol *protocol = nullptr;
 	std::string gate_tag;
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;

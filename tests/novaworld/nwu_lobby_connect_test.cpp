@@ -129,7 +129,7 @@ struct Rig {
 
 	explicit Rig(bool command_line_host = false)
 		: lobby(hooks(), environment(command_line_host)) {
-		lobby.set_title(&kJo, kJo.gate_tag);
+		lobby.set_protocol(&kJo, kJo.gate_tag);
 	}
 
 	static NwuLobbySession::Environment environment(bool command_line_host) {

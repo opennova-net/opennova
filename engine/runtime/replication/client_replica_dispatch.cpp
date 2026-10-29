@@ -136,7 +136,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// A DFX2 joiner's checkpoint resets here and follows the route's done
 			// records, the last one's slot kept (DFX2-9).
 			// [orig: NapiNPClientMsg_0x00F @0x42fe82, @0x42ffe7..0x42fffc (dfx2.exe)]
-			ws.waypoint_done_stored = protocol_in_match(title_).objective_checkpoint;
+			ws.waypoint_done_stored = protocol_in_match(protocol_).objective_checkpoint;
 			if (ws.waypoint_done_stored) {
 				state_.coop_checkpoint = kCoopCheckpointNone;
 				for (const WorldStateWaypoint &wp : ws.waypoints)

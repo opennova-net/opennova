@@ -105,7 +105,7 @@ void host_fan_writes_the_checkpoint() {
 
 void joiner_view_keeps_the_checkpoint() {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
-	view->set_title(dfx2());
+	view->set_protocol(dfx2());
 	view->set_game_type(0x30020u);
 	view->apply(s2c::PER_FRAME_UPDATE, dfx2_wire::coop_objective_frame());
 	expect(view->state().objective_show_win == 2 && view->state().coop_checkpoint == 0xFFFFu &&
@@ -119,7 +119,7 @@ void joiner_view_keeps_the_checkpoint() {
 	view->apply(s2c::PER_FRAME_UPDATE, encode_frame_update(marked));
 	expect(view->state().coop_checkpoint_revision == 1, "the same checkpoint is no change");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
-	jo_view->set_title(jo());
+	jo_view->set_protocol(jo());
 	jo_view->set_game_type(0x30020u);
 	FrameUpdate jo_frame = dfx2_wire::coop_objective_update();
 	jo_frame.objective.has_coop_checkpoint = false;
@@ -133,13 +133,13 @@ void weapon_restrictions_keep_the_titles_armory_value() {
 	// count 2: index 5 value 3, index 6 value 2
 	const std::vector<uint8_t> body = {2, 5, 3, 6, 2};
 	auto dfx2_view = std::make_unique<ns::ClientReplicaPipeline>();
-	dfx2_view->set_title(dfx2());
+	dfx2_view->set_protocol(dfx2());
 	dfx2_view->apply(s2c::WEAPON_RESTRICTIONS, body);
 	expect(dfx2_view->state().weapon_availability[5] == 3 &&
 	               dfx2_view->state().weapon_availability[6] == 1,
 	       "a DFX2 joiner keeps 3 (armory only) and drops 2");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
-	jo_view->set_title(jo());
+	jo_view->set_protocol(jo());
 	jo_view->apply(s2c::WEAPON_RESTRICTIONS, body);
 	expect(jo_view->state().weapon_availability[5] == 1 &&
 	               jo_view->state().weapon_availability[6] == 2,
@@ -162,7 +162,7 @@ std::vector<uint8_t> coop_world_state_load() {
 void world_state_folds_the_done_records() {
 	const std::vector<uint8_t> body = coop_world_state_load();
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
-	view->set_title(dfx2());
+	view->set_protocol(dfx2());
 	view->set_game_type(0x30020u);
 	view->apply(s2c::WORLD_STATE_LOAD, body);
 	const ns::ClientState &state = view->state();
@@ -172,7 +172,7 @@ void world_state_folds_the_done_records() {
 	expect(state.coop_checkpoint == 5u && state.coop_checkpoint_revision == 0,
 	       "its checkpoint is the last done record's slot, no walk");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
-	jo_view->set_title(jo());
+	jo_view->set_protocol(jo());
 	jo_view->set_game_type(0x30020u);
 	jo_view->apply(s2c::WORLD_STATE_LOAD, body);
 	expect(jo_view->state().world_state.waypoints.size() == 3 &&

@@ -158,7 +158,7 @@ JoinerConnection::JoinerConnection(std::string player_name,
 }
 
 std::vector<uint8_t> JoinerConnection::start() {
-	if (title_ == nullptr) {
+	if (protocol_ == nullptr) {
 		last_error_ = "no title identity to join with";
 		return {};
 	}
@@ -311,12 +311,12 @@ std::vector<uint8_t> JoinerConnection::build_client_hello() {
 	// into the organic-spawn named organic record by the host.
 	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - @0x61fcf5..0x61fd47;
 	//  CNapiGameSession_InitTransportConnection @0x4c9ec3 (the resolved address)]
-	return build_lan_discovery_probe(*title_, client_index_, host_address_.ip, host_address_.port);
+	return build_lan_discovery_probe(*protocol_, client_index_, host_address_.ip, host_address_.port);
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	ClientAuth auth = make_title_client_auth(
-			*title_, client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
+			*protocol_, client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
 	// The session record's address and port: the host the reply came from.
 	// [orig: CNapiNPConnection_InitFromSession @0x6263ae..0x6263b7]
 	auth.sip = host_address_.ip;
@@ -357,7 +357,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122C3]
 	// The four build values are the title's (JoinBuild: its net config's defaults, which
 	// each title's host checks against its own), the same for JO and DFX2.
-	const JoinBuild &build = protocol_join_build(title_);
+	const JoinBuild &build = protocol_join_build(protocol_);
 	for (const auto &field : {
 			std::pair<const char *, std::string>{"BT", "0"},
 			std::pair<const char *, std::string>{"VN", std::to_string(build.vn)},
@@ -365,7 +365,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			std::pair<const char *, std::string>{"DB", "0"},
 			std::pair<const char *, std::string>{"MBN", std::to_string(build.mbn)},
 			std::pair<const char *, std::string>{"SOPD", std::to_string(build.sopd)},
-			std::pair<const char *, std::string>{"VERSIONSTRING", title_->version_text},
+			std::pair<const char *, std::string>{"VERSIONSTRING", protocol_->version_text},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}
@@ -553,7 +553,7 @@ JoinerConnection::ManagerPass JoinerConnection::manager_receive(const uint8_t *r
 	if (connect_logging())
 		connect_log_line(taken
 				? napi_got_protocol_text(unpacked_len, host_address_,
-						title_ != nullptr && title_->pn != nullptr ? title_->pn : "")
+						protocol_ != nullptr && protocol_->pn != nullptr ? protocol_->pn : "")
 				: napi_tossed_text(unpacked_len, host_address_, NapiTossReason::NoProtocol));
 	return out;
 }
@@ -664,8 +664,8 @@ bool JoinerConnection::server_hello_queues(const std::vector<uint8_t> &body) con
 		return false;
 	ServerHello sh;
 	if (!parse_server_hello(body.data(), body.size(), sh)) return false;
-	if (title_ == nullptr || sh.ci != client_index_) return false;
-	return server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_));
+	if (protocol_ == nullptr || sh.ci != client_index_) return false;
+	return server_hello_matches_identity(sh, make_title_client_hello(*protocol_, client_index_));
 }
 
 bool JoinerConnection::server_auth_queues(const std::vector<uint8_t> &body) const {
@@ -689,8 +689,8 @@ void JoinerConnection::on_server_hello(
 	// Then the host's identity block must be the title's, else the reply is dropped.
 	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533, the identity compares
 	//  @0x62758B / @0x627624 / @0x627643]
-	if (title_ == nullptr || sh.ci != client_index_) return;
-	if (!server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_))) return;
+	if (protocol_ == nullptr || sh.ci != client_index_) return;
+	if (!server_hello_matches_identity(sh, make_title_client_hello(*protocol_, client_index_))) return;
 	// The connect log's client callbacks (while it is on): after the client pump's NET GOT
 	// (pump_client_queue), the queued leg records the enumerated session, whose discovered
 	// callback (the enumerate's own, installed by InitTransportConnection) writes NET SESSION

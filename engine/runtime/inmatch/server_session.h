@@ -39,7 +39,7 @@ void set_transport_mode(NapiNPServerCtx &ctx, SocketMode socket);
 struct SessionStartup {
 	// The title's protocol the host speaks (HostConfig::title), installed on the protocol by
 	// start_server (NapiNPProtocol::identity).
-	const Protocol *title = nullptr;
+	const Protocol *protocol = nullptr;
 	uint32_t host_key = 0;
 	uint32_t host_start_tick = 0;
 	// The session CRT stream's seed (D-NET-115), drawn as NapiNPProtocol_Create draws the

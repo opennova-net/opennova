@@ -732,10 +732,10 @@ std::string LobbyHttpFlow::http_base() const {
 std::string LobbyHttpFlow::resolve_startup_url() const {
 	std::string su = ctx_.startup_url;
 	if (su.empty() || !startup_url_is_templated(su)) return su; // concrete (OpenNova) pass-through
-	if (ctx_.title == nullptr) return std::string();
+	if (ctx_.protocol == nullptr) return std::string();
 	su = replace_all_icase(su, "[DOMAINNAME]", ctx_.web_domain);
-	su = replace_all_icase(su, "[VER1]", ctx_.title->ver1);
-	su = replace_all_icase(su, "[VER2]", ctx_.title->ver2);
+	su = replace_all_icase(su, "[VER1]", ctx_.protocol->ver1);
+	su = replace_all_icase(su, "[VER2]", ctx_.protocol->ver2);
 	std::string cc = "us"; // [CC] = ISO country from the OS locale (injected)
 	const std::size_t us = ctx_.locale.find("_");
 	if (us != std::string::npos) {
@@ -744,7 +744,7 @@ std::string LobbyHttpFlow::resolve_startup_url() const {
 	}
 	su = replace_all_icase(su, "[CC]", cc);
 	su = replace_all_icase(su, "[GT]", ctx_.gate_tag);
-	su = replace_all_icase(su, "[PRODUCTCODE]", ctx_.title->product_code);
+	su = replace_all_icase(su, "[PRODUCTCODE]", ctx_.protocol->product_code);
 	return su;
 }
 
@@ -872,7 +872,7 @@ EnterResult LobbyHttpFlow::enter_request(HttpRequestSpec req) {
 //  @0x5592ED]
 EnterResult LobbyHttpFlow::enter() {
 	if (enter_active()) return enter_fail("the NovaWorld lobby is already opening");
-	if (ctx_.title == nullptr) return enter_fail("no title identity to open the NovaWorld lobby with");
+	if (ctx_.protocol == nullptr) return enter_fail("no title identity to open the NovaWorld lobby with");
 	const std::string url = resolve_startup_url();
 	if (url.empty()) return enter_fail("no gate startup_url yet — connect first");
 	seed_identity_cookies();
@@ -965,8 +965,8 @@ LoginResult LobbyHttpFlow::login_request(HttpRequestSpec req) {
 
 LoginResult LobbyHttpFlow::login(const std::string &username, const std::string &password) {
 	if (login_active()) return login_fail("login already in flight");
-	if (ctx_.title == nullptr) return login_fail("no title identity to log in with");
-	const std::string refusal = protocol_refusal(*ctx_.title, ProtocolPart::WebFlow);
+	if (ctx_.protocol == nullptr) return login_fail("no title identity to log in with");
+	const std::string refusal = protocol_refusal(*ctx_.protocol, ProtocolPart::WebFlow);
 	if (!refusal.empty()) return login_fail(refusal);
 	login_user_ = username;
 	login_pass_ = password;
@@ -999,9 +999,9 @@ LoginResult LobbyHttpFlow::submit_sign_in() {
 }
 
 bool LobbyHttpFlow::sign_in_submit_is_login() const {
-	if (ctx_.title == nullptr)
+	if (ctx_.protocol == nullptr)
 		return false;
-	const char *submit = ctx_.title->sign_in_submit;
+	const char *submit = ctx_.protocol->sign_in_submit;
 	return submit != nullptr && std::string_view(submit) == "LOGIN";
 }
 
@@ -1025,8 +1025,8 @@ LoginResult LobbyHttpFlow::post_shown_sign_in() {
 // remembered name), its empty PASSWORD edit and the rememberlogindata edit (the cookie).
 LoginResult LobbyHttpFlow::login_remembered() {
 	if (login_active()) return login_fail("login already in flight");
-	if (ctx_.title == nullptr) return login_fail("no title identity to log in with");
-	const std::string refusal = protocol_refusal(*ctx_.title, ProtocolPart::WebFlow);
+	if (ctx_.protocol == nullptr) return login_fail("no title identity to log in with");
+	const std::string refusal = protocol_refusal(*ctx_.protocol, ProtocolPart::WebFlow);
 	if (!refusal.empty()) return login_fail(refusal);
 	if (remember_fill_.empty()) return login_fail("no remembered login on the sign-in page");
 	login_user_ = remembered_name_;

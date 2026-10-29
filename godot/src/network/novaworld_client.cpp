@@ -345,7 +345,7 @@ void NovaWorldClient::start() {
 		enter_state(STATE_ERROR, String("no NovaWorld identity: ") + opennova::to_gd(title_error));
 		return;
 	}
-	lobby_.set_title(title, ResourceRoot::session_gate_tag(resource_root_, *title));
+	lobby_.set_protocol(title, ResourceRoot::session_gate_tag(resource_root_, *title));
 	// Every NovaWorld menu entry of the process reads the one kept gate response (D-NET-706).
 	lobby_.set_gate_memory(&opennova::process_gate_memory());
 
@@ -929,7 +929,7 @@ TypedArray<NovaWorldServerRow> NovaWorldClient::get_server_rows() const {
 // touch the flow's cookie jar, so NWHANDLE/PCID survive login -> GSB -> join.
 void NovaWorldClient::sync_flow_context() {
 	opennova::LobbyHttpContext ctx;
-	ctx.title = lobby_.title();
+	ctx.protocol = lobby_.protocol();
 	ctx.gate_tag = lobby_.gate_tag();
 	if (server_info_.is_valid()) {
 		ctx.startup_url = opennova::to_std(server_info_->get_startup_url());
@@ -1566,7 +1566,7 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	cfg.server_name = opennova::to_std(options->get_server_name());
 	cfg.max_players = opennova::host_leg_max_players(options->get_max_players(),
 			!options->get_serve_and_play(),
-			opennova::protocol_game_id(lobby_.title()));
+			opennova::protocol_game_id(lobby_.protocol()));
 	cfg.password = !options->get_server_password().is_empty();
 	cfg.listen_host = options->get_serve_and_play();
 	cfg.lan_only = options->get_server_lan_only();

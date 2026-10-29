@@ -598,7 +598,7 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 	uint64_t now_ms = 1000;
 	auto runtime = std::make_unique<inmatch::ClientRuntime>(
 			"R3L", [&now_ms]() { return now_ms; });
-	runtime->set_title(title);
+	runtime->set_protocol(title);
 	runtime->view().set_item_catalog(catalog);
 	runtime->set_integrity_sources(sources);
 	runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk, 1, 0, self.handle,
@@ -718,7 +718,7 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 	// --- decode, per tag through a side reducer fed the same stream ---
 	{
 		auto side = std::make_unique<rep::ClientReplicaPipeline>();
-		side->set_title(title);
+		side->set_protocol(title);
 		side->set_item_catalog(catalog);
 		side->set_game_type(game_type);
 		side->set_mp_session(true);

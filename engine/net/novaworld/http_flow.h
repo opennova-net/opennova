@@ -120,7 +120,7 @@ struct LobbyHttpContext {
 	// The title the session speaks (complete: resolve_title_protocol) and its gate manager's tag
 	// (protocol_gate_tag), which the start page's [GT] takes; the owner's NWU session's. Without a
 	// title the flow requests nothing.
-	const Protocol *title = nullptr;
+	const Protocol *protocol = nullptr;
 	std::string gate_tag;
 	std::string startup_url;  // gate "UNPS" StartupUrl ("[domainname]/..." templated, or concrete for OpenNova)
 	std::string post_ip;      // gate POST host (fallback http_base)

@@ -253,8 +253,8 @@ public:
 	// The title's protocol the connection speaks: its 0x41 and 0x42 carry it and the host's
 	// 0x81 must match it (net/protocol/protocol.h; complete, outliving the connection).
 	// Configure before start(); a connection with none refuses to start.
-	void set_title(const Protocol *title) { title_ = title; }
-	const Protocol *title() const { return title_; }
+	void set_protocol(const Protocol *protocol) { protocol_ = protocol; }
+	const Protocol *protocol() const { return protocol_; }
 
 	// Begin the join. From a discovered session: nothing (Idle -> Auth; the first pump past the
 	// start sends the ClientAuth, D-NET-850). Without
@@ -1409,7 +1409,7 @@ private:
 	uint32_t client_key_ = 1;
 	NapiPrng *key_prng_ = nullptr;
 	std::string player_name_;
-	const Protocol *title_ = nullptr; // set_title
+	const Protocol *protocol_ = nullptr; // set_protocol
 	cdkey::WireKeys cd_key_ids_; // set_cd_key_ids
 	std::string glsvss_request_; // set_glsvss_request
 	JoinRole join_role_ = JoinRole::Player;

@@ -117,7 +117,7 @@ void run(std::map<std::string, std::string> &files) {
 	CHECK(options.game_type == game_type::kDeathmatch);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "dm_route";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;

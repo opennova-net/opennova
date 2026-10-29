@@ -315,7 +315,7 @@ void joiner_resolves_empty_registry(Assets &assets) {
 	h.boot(false, false);
 	QuietSocket socket;
 	inmatch::JoinerRole role;
-	role.set_title(&kJo);
+	role.set_protocol(&kJo);
 	role.bind(*h.kernel);
 	role.set_socket(&socket, PeerAddr{});
 	role.create_runtime("AnimationTest", inmatch::JoinRole::Player, "", "");

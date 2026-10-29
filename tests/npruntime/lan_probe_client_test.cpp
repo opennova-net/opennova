@@ -72,7 +72,7 @@ int main() {
 	});
 
 	lan_probe::Options options;
-	options.title = &kJo;
+	options.protocol = &kJo;
 	options.endpoint = {{127, 0, 0, 1}, host_port};
 	options.timeout_ms = 1500;
 	options.retry_interval_ms = 50;

@@ -141,8 +141,8 @@ struct SimulationNetState {
 	// loose expansion/<name>/version.txt from (D-NET-166). Empty keeps the
 	// golden "0". Retained across direct-load runtime rebuilds.
 	std::string join_expansion_version_root;
-	// The title the session speaks (set_title); null until the shell names one.
-	const opennova::Protocol *title = nullptr;
+	// The title the session speaks (set_protocol); null until the shell names one.
+	const opennova::Protocol *protocol = nullptr;
 	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
 	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.
 	std::string app_id = "0";

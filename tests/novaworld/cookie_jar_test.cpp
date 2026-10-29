@@ -316,9 +316,9 @@ int test_flow_save_sites() {
 	opennova::MenuBrowserState state;
 	state.create(path, key);
 	opennova::LobbyHttpContext ctx;
-	ctx.title = opennova::title_protocol("jo");
-	TEST_EXPECT(ctx.title != nullptr);
-	ctx.gate_tag = ctx.title->gate_tag;
+	ctx.protocol = opennova::title_protocol("jo");
+	TEST_EXPECT(ctx.protocol != nullptr);
+	ctx.gate_tag = ctx.protocol->gate_tag;
 	ctx.startup_url = "http://gs.opennova.test:8080/NWStart.dll?prepare=1";
 	ctx.post_ip = "gs.opennova.test";
 	ctx.post_port = "8080";
@@ -476,9 +476,9 @@ int test_response_status_rules() {
 // [orig: CGopherWnd_PumpRequests @0x659740 - HTTP_ResponseHandler called @0x6599F3]
 int test_flow_merges_every_answer() {
 	opennova::LobbyHttpContext ctx;
-	ctx.title = opennova::title_protocol("jo");
-	TEST_EXPECT(ctx.title != nullptr);
-	ctx.gate_tag = ctx.title->gate_tag;
+	ctx.protocol = opennova::title_protocol("jo");
+	TEST_EXPECT(ctx.protocol != nullptr);
+	ctx.gate_tag = ctx.protocol->gate_tag;
 	ctx.startup_url = "http://gs.opennova.test:8080/NWStart.dll?prepare=1";
 	ctx.post_ip = "gs.opennova.test";
 	ctx.post_port = "8080";

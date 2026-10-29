@@ -127,7 +127,7 @@ struct ListenHost {
 				static_cast<bms::AttribFlags>(kernel->mission.header.attrib_flags)));
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "close";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;

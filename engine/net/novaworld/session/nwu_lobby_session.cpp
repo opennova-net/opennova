@@ -290,7 +290,7 @@ std::string NwuLobbySession::gate_start_failed() {
 
 void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	if (gate_socket_ == nullptr) return;
-	if (title_ == nullptr) {
+	if (protocol_ == nullptr) {
 		if (hooks_.on_fatal) hooks_.on_fatal("no title identity to probe the gate with");
 		return;
 	}
@@ -315,7 +315,7 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	kept.gate_host = gate_host;
 	kept.gate_port = gate_port;
 	log_gate_service_start();
-	// The gate manager's tag: the title's, or the boot's gt.ssc (set_title).
+	// The gate manager's tag: the title's, or the boot's gt.ssc (set_protocol).
 	// [orig: CNapiGateManager_ProbeThreadProc @0x6339e0 - the tag's bytes @0x633aa1]
 	const std::vector<uint8_t> probe_dg = gate_probe_build(gate_tag_);
 	// The NWU payload rides the LSB-scatter CRC envelope the gate expects: retail's socket
@@ -1009,7 +1009,7 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 	//  index @0x62B282..0x62B296)]
 	uint32_t protocol_connections = 0;
 	client_index_ = advance_connection_index(protocol_connections);
-	ClientSession::Config cfg = ClientSession::Config::lobby(*title_, gate_tag_);
+	ClientSession::Config cfg = ClientSession::Config::lobby(*protocol_, gate_tag_);
 	cfg.client_index = client_index_;
 	cfg.connection_keys = env_.connection_keys;
 	cfg.max_packet_size = env_.max_packet_size;
@@ -1018,7 +1018,7 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - Napi_GetExeBasename called @0x4D4780;
 	//  Game_Run @0x4A7FB0 - _strupr called @0x4A7FCF]
 	cu.application = read_menu_exe_basename().substr(0, kLobbyApplicationChars);
-	cu.build_date_and_time = title_->lobby_bdat;
+	cu.build_date_and_time = protocol_->lobby_bdat;
 	cu.gate_tag = cfg.na;
 	const GateResponse &gate = memory().response;
 	cu.met_tag = gate.met_label;

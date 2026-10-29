@@ -941,11 +941,11 @@ public:
 	void set_host_address(const PeerAddr &host) {
 		if (joiner_) joiner_->set_host_address(host);
 	}
-	// The title's protocol the joiner speaks (JoinerConnection::set_title), and the
-	// one its view folds the in-match bodies by (ClientReplicaPipeline::set_title).
-	void set_title(const Protocol *title) {
-		view_.set_title(title);
-		if (joiner_) joiner_->set_title(title);
+	// The title's protocol the joiner speaks (JoinerConnection::set_protocol), and the
+	// one its view folds the in-match bodies by (ClientReplicaPipeline::set_protocol).
+	void set_protocol(const Protocol *protocol) {
+		view_.set_protocol(protocol);
+		if (joiner_) joiner_->set_protocol(protocol);
 	}
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {

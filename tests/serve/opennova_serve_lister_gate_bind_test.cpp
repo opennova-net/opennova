@@ -95,7 +95,7 @@ int main() {
 	CHECK(held.is_valid() && held_port != 0 && next != 0 && next != held_port);
 	EmptySource source;
 	serve::ListerOptions options;
-	options.title = &jo;
+	options.protocol = &jo;
 	options.gate_tag = jo.gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = free_port();

@@ -313,7 +313,7 @@ void consumers_refuse_without_identity() {
 	CHECK(joiner.start().empty());
 	CHECK(joiner.last_error() == "no title identity to join with");
 	inmatch::JoinerConnection titled("Titled");
-	titled.set_title(&jo);
+	titled.set_protocol(&jo);
 	CHECK(!titled.start().empty());
 
 	const PeerAddr peer{0x0100007Fu, 30740};
@@ -324,7 +324,7 @@ void consumers_refuse_without_identity() {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Lan);
 		inmatch::SessionStartup startup;
-		startup.title = installed;
+		startup.protocol = installed;
 		startup.host_key = 0x5EED;
 		inmatch::GameConfig config;
 		config.max_players = 2;
@@ -354,7 +354,7 @@ void consumers_refuse_without_identity() {
 	NwuLobbySession::Hooks hooks;
 	hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
 	NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
-	CHECK(lobby.title() == nullptr);
+	CHECK(lobby.protocol() == nullptr);
 	SentSocket gate, session;
 	lobby.open(gate, session);
 	lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
@@ -362,7 +362,7 @@ void consumers_refuse_without_identity() {
 	CHECK(fatals.size() == 1 && fatals[0] == "no title identity to probe the gate with");
 	lobby.close();
 	// With the title, the probe carries the gate manager's tag (here gt.ssc's stand-in).
-	lobby.set_title(&jo, "on:cus1");
+	lobby.set_protocol(&jo, "on:cus1");
 	lobby.open(gate, session);
 	lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
 	CHECK(gate.sent.size() == 1);
@@ -381,7 +381,7 @@ void consumers_refuse_without_identity() {
 	flow.set_context(ctx);
 	CHECK(flow.login("user", "pass").kind == LoginResult::Kind::Failed);
 	CHECK(!flow.gsb_request().valid);
-	ctx.title = &jo;
+	ctx.protocol = &jo;
 	ctx.gate_tag = jo.gate_tag;
 	flow.set_context(ctx);
 	CHECK(flow.login("user", "pass").kind == LoginResult::Kind::NeedRequest);
@@ -391,19 +391,19 @@ void consumers_refuse_without_identity() {
 	const Protocol &dfx2 = *title_protocol("dfx2");
 	CHECK(!flow.gsb_request().valid && flow.join(7).kind == JoinResult::Kind::Failed);
 	LobbyHttpFlow dfx2_flow;
-	ctx.title = &dfx2;
+	ctx.protocol = &dfx2;
 	ctx.gate_tag = dfx2.gate_tag;
 	dfx2_flow.set_context(ctx);
 	CHECK(!dfx2_flow.gsb_request().valid && dfx2_flow.join(7).kind == JoinResult::Kind::Failed);
 	// The demo has no web flow to speak.
 	LobbyHttpFlow demo_flow;
-	ctx.title = title_protocol("jodemo");
-	ctx.gate_tag = ctx.title->gate_tag;
+	ctx.protocol = title_protocol("jodemo");
+	ctx.gate_tag = ctx.protocol->gate_tag;
 	demo_flow.set_context(ctx);
 	CHECK(demo_flow.login("user", "pass").reason ==
 			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 	CHECK(!demo_flow.gsb_request().valid && demo_flow.join(7).kind == JoinResult::Kind::Failed);
-	ctx.title = &dfx2;
+	ctx.protocol = &dfx2;
 	ctx.gate_tag = dfx2.gate_tag;
 	// Its start page's tokens are its own (the live gate's template, dfx2-vs-jo-re §6.5).
 	ctx.startup_url = "http://[domainname]/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38"
