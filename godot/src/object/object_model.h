@@ -511,6 +511,8 @@ private:
 	uint32_t shadow_caster_layers_ = 0;
 	bool slot_shadow_person_ = false;
 	bool slot_captured_ = false;
+	// The process frame whose runtime frame last ran the render-derived work.
+	uint64_t drawn_frame_ = UINT64_MAX;
 	// Effective entity/model scale in signed Q16.16. Zero is retail's sentinel
 	// for an ordinary 1.0 matrix; kept on the model so every present writer
 	// composes the same scale instead of overwriting it with a pose transform.
@@ -975,6 +977,13 @@ public:
 	// carries the witness).
 	void set_slot_captured(bool p_captured);
 	bool is_slot_captured() const { return slot_captured_; }
+	// A render slot captured this model after this frame's runtime frame ran
+	// without its render-derived work (no pass drew it then): the slot's own
+	// pass poses it now, ahead of its capture, as retail's shadow pass draws
+	// its caster through the caster's render callback (engine
+	// renderer/render_slot_shadow.h carries the witness). No-op for a model
+	// this frame already drew, or one not captured.
+	void pose_for_slot_capture();
 	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
 	int64_t get_entity_uniform_scale_q16() const;
 	// Compose a renderer-owned entity pose with the effective authored scale.

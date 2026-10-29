@@ -1475,6 +1475,9 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 		sleep_runtime_frame_if_idle();
 		return;
 	}
+	if (renderable) {
+		drawn_frame_ = Engine::get_singleton()->get_process_frames();
+	}
 	apply_runtime_state(p_delta, renderable, p_profile);
 	sleep_runtime_frame_if_idle();
 }
@@ -1815,6 +1818,18 @@ void ObjectModel::set_slot_captured(bool p_captured) {
 	if (p_captured) {
 		wake_runtime_frame();
 	}
+}
+
+// The render-derived work at the clocks this frame's runtime frame already
+// advanced (no time passes), for a caster the slot captured after it ran.
+void ObjectModel::pose_for_slot_capture() {
+	const uint64_t frame = Engine::get_singleton()->get_process_frames();
+	if (!slot_captured_ || world_skipped_ || drawn_frame_ == frame ||
+			!needs_runtime_frame_work()) {
+		return;
+	}
+	drawn_frame_ = frame;
+	apply_runtime_state(0.0, true, nullptr);
 }
 
 // The two visibility owners: the entity presenter's placed walk writes the

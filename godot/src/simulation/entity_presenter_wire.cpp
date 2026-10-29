@@ -910,11 +910,15 @@ void EntityPresenter::reset_wire_plan_state() {
 }
 
 void EntityPresenter::present_wire_rows(PresentRowsView snap,
-		int stride, int tick_delta) {
+		int stride, int tick_delta, const HashSet<uint64_t> *p_captured) {
 	const int64_t size = snap.size();
 	const int64_t walk_start = wire_profile_ != nullptr ? wire_profile_now_ns() : 0;
 	for (WireRow &row : wire_rows_) {
 		if (row.base < 0 || row.base + stride > size) {
+			continue;
+		}
+		if (p_captured != nullptr &&
+				(!row.culled || !p_captured->has(uint64_t(row.node_id)))) {
 			continue;
 		}
 		ObjectModel *model =
@@ -981,7 +985,8 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	// captured runs every leg below with its node hidden by the views'
 	// verdicts, and the cull itself is the occlusion claim, so the slot
 	// planner still reads the row's own hide and its current pose.
-	if (main_culled && inset_culled && mirrors_culled && !model->is_slot_captured()) {
+	row.culled = main_culled && inset_culled && mirrors_culled && !model->is_slot_captured();
+	if (row.culled) {
 		// The held weapon is a sibling node under the pass container, so it
 		// hides through its own leg (retail draws the third-person gun inside
 		// the body's submit; a culled body never draws its gun

@@ -474,7 +474,12 @@ struct SlotCandidateState {
 	// callback, whose bone callbacks pose it [orig: RenderSlot_RenderEntityAndChildren
 	// @ 0x5d7690 - Entity_RenderWithLODCallback @ 0x5d78e5]: a caster no view
 	// collected keeps its live position for this sort, and one a slot captures
-	// is posed as if drawn.
+	// is posed as if drawn. The pass sorts and assigns, then draws each slot's
+	// caster, all ahead of the scene it shadows, so a caster entering a slot is
+	// posed the frame it enters, by the slot's own draw [orig: Render_TerrainScene
+	// @ 0x610c80 - Render_ShadowPass @ 0x610cb5 ahead of the scene setup @ 0x610ccd;
+	// Render_ShadowPass @ 0x5d7b70 - RenderSlot_SortAndAssign @ 0x5d7c36, then the
+	// slot walk's RenderSlot_RenderEntityAndChildren @ 0x5d7c95].
 	bool hidden = false;
 	// Seat-parented (parentSlot 1/2/5, or 3 with a live parent)
 	// [orig: @ 0x5d65a0..0x5d65eb].

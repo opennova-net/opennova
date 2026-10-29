@@ -596,6 +596,42 @@ func test_render_culled_row_hides_and_skips_legs_until_released() -> void:
 	assert_true(avatar.visible, "clearing the verdicts releases the row")
 
 
+func test_a_caster_entering_a_slot_is_posed_the_frame_it_enters() -> void:
+	# Retail's shadow pass sorts and assigns its slots and then draws each slot's
+	# caster through the caster's own render callback, ahead of the scene (engine
+	# renderer/render_slot_shadow.h carries the witness): a caster the slot plan
+	# captures after the frame's walk skipped its culled row is presented again
+	# over the frame's own rows, ahead of its capture, not a frame later.
+	var container := PresentPassFixture.container(self)
+	var p := _wire_pass(_sim(), _placer(), container)
+	var snap := Snapshot.new()
+	snap.entities = [{ "type_id": TYPE_RIFLEMAN, "handle": 2, "x": 7.0,
+			"emplaced_controls_valid": 1, "emplaced_gun_yaw": 100 }]
+	_present(p, snap)
+	var avatar: ObjectModel = p.resolve_wire_handle(2)
+	assert_not_null(avatar)
+	p.set_render_culled(2, true)
+	snap.entities[0]["emplaced_gun_yaw"] = 200
+	_present(p, snap)
+	assert_eq(_ctrl(avatar, "EWEAP_GUNYAW"), 100, "the walk skips the culled row's legs")
+	# The slot plan, later in the same frame, captures it.
+	avatar.set_slot_captured(true)
+	p.present_slot_captures_snapshot(snap.build(), Simulation.PF_STRIDE, 1,
+			PackedInt64Array([avatar.get_instance_id()]))
+	assert_eq(_ctrl(avatar, "EWEAP_GUNYAW"), 200, "the entering caster is posed that frame")
+	assert_false(avatar.visible, "the views still hide it")
+	# A row the walk presented is not presented twice.
+	snap.entities[0]["emplaced_gun_yaw"] = 300
+	_present(p, snap)
+	assert_eq(_ctrl(avatar, "EWEAP_GUNYAW"), 300, "a captured caster runs the walk's legs")
+	snap.entities[0]["emplaced_gun_yaw"] = 400
+	p.present_slot_captures_snapshot(snap.build(), Simulation.PF_STRIDE, 1,
+			PackedInt64Array([avatar.get_instance_id()]))
+	assert_eq(_ctrl(avatar, "EWEAP_GUNYAW"), 300,
+			"a row this frame's walk already posed is left as the walk posed it")
+	avatar.set_slot_captured(false)
+
+
 func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:
 	var container := PresentPassFixture.container(self)
 	var p := _wire_pass(_sim(), _placer(), container)

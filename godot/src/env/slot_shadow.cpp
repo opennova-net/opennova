@@ -707,6 +707,7 @@ Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
 }
 
 void SlotShadow::_mark_captured_casters() {
+	newly_captured_.clear();
 	for (const uint64_t id : captured_ids_) {
 		if (capture_orders_.has(id)) {
 			continue;
@@ -720,6 +721,9 @@ void SlotShadow::_mark_captured_casters() {
 	for (const KeyValue<uint64_t, int> &entry : capture_orders_) {
 		if (ObjectModel *model = Object::cast_to<ObjectModel>(
 						ObjectDB::get_instance(ObjectID(entry.key)))) {
+			if (!model->is_slot_captured()) {
+				newly_captured_.push_back(entry.key);
+			}
 			model->set_slot_captured(true);
 		}
 		captured_ids_.push_back(entry.key);
@@ -768,8 +772,14 @@ Ref<Image> SlotShadow::get_capture_image(int p_order) const {
 }
 
 void SlotShadow::advance_frame() {
+	if (plan_frame()) {
+		capture_frame();
+	}
+}
+
+bool SlotShadow::plan_frame() {
 	if (!is_inside_tree() || shutdown_) {
-		return;
+		return false;
 	}
 	_ensure_captures();
 	++frame_;
@@ -859,7 +869,7 @@ void SlotShadow::advance_frame() {
 		}
 		report_bound_ = report_captures_ = 0;
 		_mark_captured_casters();
-		return;
+		return false;
 	}
 
 	_part("plan");
@@ -1124,6 +1134,19 @@ void SlotShadow::advance_frame() {
 	}
 	_hide_patches_from(drawn_patch_mask);
 	_part_end();
+	return true;
+}
+
+void SlotShadow::capture_frame() {
+	// The slot's pass draws its caster through the caster's own render
+	// callback, which poses it: a caster no pass drew before this capture is
+	// posed here, ahead of the compile that reads its bones.
+	for (const uint64_t id : newly_captured_) {
+		if (ObjectModel *model = Object::cast_to<ObjectModel>(
+						ObjectDB::get_instance(ObjectID(id)))) {
+			model->pose_for_slot_capture();
+		}
+	}
 	// The armed requests compile into this frame's device draw list; an
 	// unarmed order keeps its previous capture (retail's sticky RT).
 	if (effect_.is_valid()) {

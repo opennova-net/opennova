@@ -1595,7 +1595,15 @@ void GameWorld::render_slot_shadow_frame() {
 	if (slot_shadow_ != nullptr) {
 		// A post-load frame's parts nest under its slot_shadows span (an instrument).
 		slot_shadow_->set_part_timeline(post_load_leg_);
-		slot_shadow_->advance_frame();
+		// The slot pass poses the casters its assignment newly captured, ahead of
+		// their capture (SlotShadow::plan_frame carries the witness): the rows
+		// this frame's walks skipped (no view collected them) are presented now.
+		if (slot_shadow_->plan_frame()) {
+			if (MissionRoot *runtime = get_runtime()) {
+				runtime->present_slot_captures(slot_shadow_->newly_captured());
+			}
+			slot_shadow_->capture_frame();
+		}
 		slot_shadow_->set_part_timeline(nullptr);
 	}
 }

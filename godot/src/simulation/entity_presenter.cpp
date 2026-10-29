@@ -137,6 +137,10 @@ void EntityPresenter::_bind_methods() {
 			D_METHOD("present_wire_snapshot", "snap", "stride", "layout_revision"),
 			&EntityPresenter::present_wire_snapshot);
 	ClassDB::bind_method(
+			D_METHOD("present_slot_captures_snapshot", "snap", "stride", "layout_revision",
+					"captured"),
+			&EntityPresenter::present_slot_captures_snapshot);
+	ClassDB::bind_method(
 			D_METHOD("materialize_wire_snapshot", "snap", "stride", "layout_revision"),
 			&EntityPresenter::materialize_wire_snapshot);
 	ClassDB::bind_method(D_METHOD("set_render_culled", "wire_handle", "culled"),
@@ -1311,9 +1315,40 @@ std::vector<EntityPresenter::RagdollRow> EntityPresenter::take_ragdoll_rows() {
 	return out;
 }
 
+void EntityPresenter::present_slot_captures(PresentRowsView snap, int stride,
+		int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
+		const std::vector<uint64_t> &p_captured) {
+	if (p_captured.empty() || stride < Simulation::PF_STRIDE) {
+		return;
+	}
+	HashSet<uint64_t> captured;
+	for (const uint64_t id : p_captured) {
+		captured.insert(id);
+	}
+	// Only over the plans this frame's walks presented these rows from.
+	if (index_.is_valid() && row_plan_is_current(snap.size(), stride, layout_revision)) {
+		present_snapshot_impl(snap, stride, layout_revision, door_phases, door_phase_count,
+				nullptr, &captured);
+	}
+	if (wire_plan_revision_ == layout_revision && wire_plan_stride_ == stride &&
+			wire_plan_snapshot_size_ == snap.size()) {
+		present_wire_rows(snap, stride, 0, &captured);
+	}
+}
+
+void EntityPresenter::present_slot_captures_snapshot(const PackedFloat32Array &p_snap,
+		int p_stride, int64_t p_layout_revision, const PackedInt64Array &p_captured) {
+	std::vector<uint64_t> captured;
+	for (int64_t i = 0; i < p_captured.size(); ++i) {
+		captured.push_back(static_cast<uint64_t>(p_captured[i]));
+	}
+	present_slot_captures({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision, nullptr, 0,
+			captured);
+}
+
 void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		int stride, int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
-		MissionFrameProfile *p_profile) {
+		MissionFrameProfile *p_profile, const HashSet<uint64_t> *p_captured) {
 	if (stride < Simulation::PF_STRIDE || index_.is_null()) {
 		return;
 	}
@@ -1328,7 +1363,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 	if (!row_plan_is_current(size, stride, layout_revision)) {
 		rebuild_row_plan(p, size, stride, layout_revision);
 	}
-	++placed_walk_serial_;
+	if (p_captured == nullptr) {
+		++placed_walk_serial_;
+	}
 	for (Row &row : rows_) {
 		// Main-thread Node destruction advances this stamp in PREDELETE. Once
 		// a planned model was freed by a notification dispatched during this
@@ -1348,8 +1385,14 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 				continue;
 			}
 		}
+		if (p_captured != nullptr && (row.submitted_walk == placed_walk_serial_ ||
+					!p_captured->has(uint64_t(row.node_id)))) {
+			continue;
+		}
 		const int base = row.base;
-		note_ragdoll_row(model, row.handle, p, base);
+		if (p_captured == nullptr) {
+			note_ragdoll_row(model, row.handle, p, base);
+		}
 		uint64_t profile_phase_start = p_profile != nullptr
 				? opennova::io::perf_now_us()
 				: 0;
@@ -1380,6 +1423,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		// submission so its unsubmitted share stays measurable.
 		const bool submitted = present_visible &&
 				(model->is_view_collected() || model->is_slot_captured());
+		if (submitted) {
+			row.submitted_walk = placed_walk_serial_;
+		}
 		stamp_match_terrain(model, p, base);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
@@ -1881,7 +1927,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 					present_visible && !model->is_occlusion_hidden());
 		}
 	}
-	retire_unvisited_placed_held_weapons();
+	if (p_captured == nullptr) {
+		retire_unvisited_placed_held_weapons();
+	}
 }
 
 void EntityPresenter::update_placed_held_weapon(const Row &row, ObjectModel *body,
