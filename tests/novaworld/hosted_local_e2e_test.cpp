@@ -613,7 +613,7 @@ int main(int argc, char **argv) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(session, true),
 					"{\"product_id\":" + std::to_string(jo_set) +
 							",\"game_name\":\"Hosted E2E\",\"max_players\":8,"
-							"\"missions\":[\"servetst.bms\"]}");
+							"\"rotation\":[{\"file\":\"servetst.bms\",\"swap_sides\":false}]}");
 			const auto json = crow::json::load(body_text(reply));
 			if (reply.code != 202) std::fprintf(stderr, "  start: %d %s\n", reply.code, body_text(reply).c_str());
 			const auto started = reply.code == 202 ? integer_at(json, { "server", "id" }) : std::nullopt;
@@ -666,7 +666,7 @@ int main(int argc, char **argv) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(second, true),
 					"{\"product_id\":" + std::to_string(dfx2_set) +
 							",\"game_name\":\"Hosted E2E DFX2\",\"max_players\":8,"
-							"\"missions\":[\"dfxtest.bms\"]}");
+							"\"rotation\":[{\"file\":\"dfxtest.bms\",\"swap_sides\":false}]}");
 			if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %d %s\n", reply.code, body_text(reply).c_str());
 			dfx2_id = reply.code == 202 ? integer_at(crow::json::load(body_text(reply)), { "server", "id" }).value_or(0)
 										: 0;

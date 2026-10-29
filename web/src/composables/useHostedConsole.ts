@@ -376,11 +376,11 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
     );
   }
 
-  function addMission(mission: string, swapSides: boolean): Promise<boolean> {
+  function addMission(mission: string, swapSides: boolean, insertAt: number | null = null, oneShot = false): Promise<boolean> {
     return command(
       'rotation',
-      () => addRotationMission(target, mission, swapSides),
-      () => `Added ${mission} to the end of the rotation.`,
+      () => addRotationMission(target, mission, swapSides, insertAt, oneShot),
+      () => `Added ${mission}${oneShot ? " for one play" : ""} ${insertAt === null ? "to the end of the rotation" : `at position ${insertAt + 1}`}.`,
       [readRotation],
     );
   }

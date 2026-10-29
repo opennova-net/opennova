@@ -328,12 +328,10 @@ this directory's.
   Each slot's `game.cfg` pins `mpnovaworldportmin` = `max` to its game port, and the
   containers run on the machine's own network (`--network host`).
 - **The working directory** is rendered from scratch at every start (`model/hosted_settings.*`),
-  in retail's formats: the host file (`server.host`: the owner's settings, `Replay 1` so
-  the rotation never ends the session, the owner's first map last since the last line is
-  the starting map; cp1252, CR LF), `game.cfg` (through the format's own writer, the
+  in retail's formats: the host file (`server.host`: the owner's settings and replay preference, maps in play order with `--rotation-first` selecting entry zero; cp1252, CR LF), `game.cfg` (through the format's own writer, the
   NovaWorld network type and the slot's ports), `admin.cfg` (user `svc`, a 31-character
-  random password, rights `7F`, `ip_restrict` the fleet's network) and the
-  `--credentials` file. All but `game.cfg` are secret: sent to the agent only until it
+  random password, rights `8000007F`, `ip_restrict` the fleet's network) and the
+  `--credentials` file. All four files are secret: sent to the agent only until it
   has reported the container, written owner-only, never logged; the admin login lives in
   the row's own columns, read by `hosted::admin_login_of` alone. `opennova-serve` runs
   with `/HOST server.host --credentials credentials.txt --master-host <host>
@@ -498,7 +496,7 @@ minutes and hours in the shape every subject shares ([`../README.md`](../README.
   command's replies are read by the dispatcher's per-verb count (`admin_reply_plan`), with
   a 200 ms quiet gap only where the line cannot tell. The link polls `GET GAMESTATE` every
   15 s, reconnects with a backoff (1 s doubling to 4 s), runs the queued commands (16 at
-  most; `QUIT` is refused, the link's own) and ends with `QUIT`. The password is a log
+  most), supports `QUIT` by closing and reconnecting its admin session, and ends with `QUIT`. The password is a log
   secret for the link's lifetime and never reaches a log line, a console line or a reply.
 - **The console** is the table `hosted_server_console`, a capped ring of each server's
   newest 500 lines: the commands the routes ask a link to record (with their sender,
@@ -569,7 +567,7 @@ writes need the CSRF header.
 | --- | --- | --- |
 | `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `products` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, its `product` (`id`, `key`, `display_name` and `title`, the game's title code), pins, `update_available`, restarts, times, `listing` (its RID, name, mission, `game_type`, players and address; null while it holds none), its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) `novalogic` (for an owner who asked to be listed on NovaLogic's NovaWorld, while it is live: that listing's `state` as its agent last reported it, `off`, `trying`, `listed`, `retrying` or `not_listed`, with `try` and `tries` while trying or retrying, `next_try_at` while retrying, the server's `reason` while retrying or not listed, and the console `player_slots` of the players that service sent; an admin's view adds the NWEC `tag`; null otherwise, and while no report carries it) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
-| `POST /api/me/servers` | a website session | the settings (`game_name` required; `product_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
+| `POST /api/me/servers` | a website session | the settings (`game_name` required; `product_id`, `expansion_id` and `rotation` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason, why it lapsed and times) |
 | `POST /api/me/addresses` | a website session | `{"name"}`: the account's next bought address named, then allocated by a worker: 201 `{"address"}`; 400 `invalid_json`, `invalid_field`, `invalid_name`; 404; 409 `name_taken`, `no_address`; 503 `addresses_disabled` |
 | `POST /api/me/servers/<id>/stop` | a website session | 202 `stopping` (or `stopped`); 404; 409 `not_live`; 429 |
@@ -759,15 +757,13 @@ a package of its command file alone that the catalog writes into its cache. Logg
 
 ## The console routes
 
-**The console routes** (`console_routes.*`) run the curated commands on a hosted server's
+**The console routes** (`console_routes.*`, `configuration_routes.cpp`) run structured and raw commands on a hosted server's
 admin link, which the fleet program holds: a route writes its command to
 `hosted_console_commands` with the deadline its budget allows and reads its row until it
 is done; the fleet's console drain (`apps/novaworld_fleet/hosted/console_drain.*`) claims the queued commands
 (`FOR UPDATE SKIP LOCKED`), runs each on its link and writes the outcome and each reply
 packet (`hosted_console_replies`); the route reads them and deletes the row. A command
-still queued when the route's wait ends is withdrawn, never sent; only a done row says a
-command went out; one whose fleet leader went away is answered link down by the next
-leader's drain. The owner's routes act on the caller's own servers by id (another
+still queued when the route's wait ends is withdrawn, never sent. A claimed command keeps running after the HTTP deadline; an uncertain result is explicitly marked `delivery_unknown` and is never replayed. A new leader also marks unfinished work uncertain. The owner's routes act on the caller's own servers by id (another
 account's answers as no server's does); the admin's (`/api/admin/hosted/<id>/...`) on any.
 In order: the session or admin check (401; 403 without the CSRF header on a `POST`); the
 arguments (400, before anything is read or sent); the server (404 `not_found`, 409
@@ -797,22 +793,50 @@ ahead of the waiting polls, so a page never meets its own `console_busy`.
 | `POST /api/me/servers/<id>/players/<slot>/punt`, `/ban`, `/swap`, `/kill` | `PLAYER PUNT` / `BAN` / `SWAPTEAM` / `KILL <slot>` | the result; 400 `invalid_slot` (1..255); 404 `player_not_found`; 409 `no_pcid`, `not_connected` |
 | `GET /api/me/servers/<id>/missions` | `MISSION AVAILABLE` | the missions |
 | `GET /api/me/servers/<id>/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none) | the rotation with its current and next; 409 `not_in_game` |
-| `POST /api/me/servers/<id>/rotation` | `MISSION LIST`, then `MISSION ADD <file> <0\|1>` | `{"mission", "swap_sides"}` appended; 400; 404 `mission_not_found`; 409 `rotation_full` (128 maps, policy), `not_in_game` |
+| `POST /api/me/servers/<id>/rotation` | `MISSION LIST`, then `MISSION ADD <file> <0\|1>` | `{"mission", "swap_sides", "insert_at", "one_shot"}`; omitted position appends; 400; 404 `mission_not_found`; 409 `rotation_full` (128 maps, policy), `not_in_game` |
 | `POST /api/me/servers/<id>/rotation/<index>/remove`, `/next` | `MISSION LIST`, then `MISSION REMOVE` / `SETNEXT <index>` | 400 `invalid_index`; 404 `no_such_entry` (the server answers OK for any index, so the rotation is read first); 409 `last_mission` (an empty rotation ends the session), `not_in_game` |
 | `POST /api/me/servers/<id>/rotation/cycle` | `MISSION CYCLE` | the round ends now; 409 `not_in_game` |
 | `GET /api/me/servers/<id>/chat` | `CHAT GET` | the chat window, oldest first |
 | `POST /api/me/servers/<id>/chat` | `CHAT SEND <text>` | `{"text"}`: cp1252, no control character, not blank, at most 59 characters; 400 `invalid_text` |
 | `GET /api/me/servers/<id>/console` | none | the console ring in any state, with the link's state (`?limit=`, `?after=`); 404 |
-| `GET /api/admin/hosted/<id>/settings` (admin only) | `GET GAMESETTINGS` | the settings, in the server's order |
+| `GET .../settings` | `GET GAMESETTINGS` | live values, saved configuration, revision, title schema and pinned weapon catalog |
+| `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch |
+| `GET .../weapons` | `WEAPON LIST` | complete reply packets |
+| `POST .../command` | `{command}` | full ordered replies, delivery status, saved status and new revision |
 
-**The console's commands are a curated list** (policy, ADR 0053 d9;
-`console_commands.h`): owners get exactly the commands above but `GET GAMESETTINGS`;
-admins get that one wider read besides. There is no passthrough of an arbitrary admin
-line: every line is composed from checked arguments (a slot 1..255, since the server
-compares `(u8)atol` and 256 would be its own slot 0; an index 0..127; a `.bms` name of
-letters, digits, `_` and `-`; chat text as above), so nothing reaches the server's files or
-config (`SET`, `WEAPON SET`, `CMD`), its admin users or ban files (`ADMINUSER`, `BANLIST`)
-or its session's end (`GOTO`, `MISSION CLEAR`, `QUIT`) outside the supervisor's stop.
-`MISSION ADD` takes no insert position and no `ONESHOT`, and no `PLAYER ... ALL` form is on
-the list. The commands that change the server are recorded in the console with their
-sender; the reads are not.
+Owners and admins can use the full TCP command surface on hosted servers, including
+bulk player actions, weapon restrictions, inserted/one-shot missions, `CMD`, `GOTO`,
+and `QUIT`. `ADMINUSER`, `BANLIST`, and `SET LevelRestrict` remain retail stubs;
+the web shows the server's unsupported response. The console never connects to
+arbitrary external endpoints. Authentication, ownership, CSRF, admission and rate
+limits still apply. Password-bearing lines are redacted in persistent logs.
+
+## Saved server configuration
+
+`engine/formats/gamecfg/server_settings.*` describes the title-aware fields, defaults,
+types, validation and live setters shared by the website and in-game host editor.
+NovaWorld and LAN use the same authored host screen, with a supplemental options panel.
+
+`hosted_servers.configuration` is the canonical JSONB document. Existing core fields
+remain at the top level, advanced fields live under `options`, and `rotation` is an
+ordered array of `{file, swap_sides}` entries, including repeated maps. A map's side-switch
+flag applies to every occurrence, as in retail. Classes and
+weapons use stable names; weapon availability is `always`, `never` or `armory`.
+A product tree carries its weapon catalog, so published updates cannot reinterpret
+an already running server's restrictions by another tree's numeric indexes.
+
+The fleet serializes queued operations per server and fences them by process generation
+and configuration revision. It saves accepted live changes and command completion in
+one transaction, retries database persistence without resending TCP commands, and
+finishes independently of the browser. Structured edits require the current revision;
+stale edits return 409. File-only options are saved for the next launch without forcing
+a restart. One-shot missions are excluded from saved rotations. QUIT closes only the
+admin session; exhausted non-repeating rotations and explicit session ends release the
+allocation without consuming a crash restart.
+
+Deployment requires `0005_server_configuration.sql`. It migrates existing settings
+and rotations, removes their old columns, and queues catalog backfills for ready trees.
+Deploy the matching service binaries together with that schema (old binaries cannot
+use the removed columns); update the serve/hostd runtime and fleet before exposing the
+new web UI. Let `tree.server_catalog` jobs finish before configuring weapons on existing
+trees. The migration preserves existing servers' repeat-rotation behavior.

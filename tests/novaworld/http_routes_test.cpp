@@ -6024,7 +6024,7 @@ int test_hosted_server_routes(Harness &h) {
 	};
 	const std::string settings =
 			"{\"game_name\":\"Ana's Server\",\"expansion_id\":null,\"max_players\":16,"
-			"\"missions\":[\"first.bms\",\"second.bms\"]}";
+			"\"rotation\":[{\"file\":\"first.bms\",\"swap_sides\":false},{\"file\":\"second.bms\",\"swap_sides\":false}]}";
 
 	// Logged out: 401; no CSRF header on a state change: 403, before any bucket.
 	TEST_EXPECT(h.send("GET", "/api/me/servers").code == 401);
@@ -6060,13 +6060,13 @@ int test_hosted_server_routes(Harness &h) {
 				str(jo["expansions"][0]["display_name"]) == "Escalation" &&
 				str(jo["expansions"][0]["version"]) == "JOX V1.0" && jo["expansions"][0]["missions"].size() == 1 &&
 				str(jo["expansions"][0]["missions"][0]["file"]) == "escal.bms");
-		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 2 && jo["limits"]["max_players"]["max"].i() == 64);
-		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == 500 && jo["limits"]["start_delay"]["min"].i() == 0);
+		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 1 && jo["limits"]["max_players"]["max"].i() == 64);
+		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == INT32_MAX && jo["limits"]["start_delay"]["min"].i() == INT32_MIN);
 		TEST_EXPECT(dfx2["id"].i() == h.dfx2_id && str(dfx2["display_name"]) == "Delta Force Xtreme 2" &&
 				str(dfx2["title"]) == "dfx2");
 		TEST_EXPECT(dfx2["expansions"].size() == 0);
 		TEST_EXPECT(dfx2["missions"].size() == 2 && str(dfx2["missions"][1]["file"]) == "dfx2_b.bms");
-		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == 300);
+		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == INT32_MAX);
 		TEST_EXPECT(dfx2["limits"]["max_players"]["max"].i() == 100);
 	}
 	TEST_EXPECT(!json.has("default_missions"));
@@ -6082,11 +6082,11 @@ int test_hosted_server_routes(Harness &h) {
 		const char *field;
 	};
 	const Refused refused[] = {
-		{ "{\"game_name\":\"\",\"missions\":[\"a.bms\"]}", "invalid_settings", "game_name" },
-		{ "{\"game_name\":\"x\",\"max_players\":99,\"missions\":[\"a.bms\"]}", "invalid_settings",
+		{ "{\"game_name\":\"\",\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}]}", "invalid_settings", "game_name" },
+		{ "{\"game_name\":\"x\",\"max_players\":99,\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}]}", "invalid_settings",
 				"max_players" },
-		{ "{\"game_name\":\"x\",\"missions\":[\"../a.bms\"]}", "invalid_settings", "missions" },
-		{ "{\"game_name\":\"x\",\"max_players\":\"16\"}", "invalid_field", "" },
+		{ "{\"game_name\":\"x\",\"rotation\":[{\"file\":\"../a.bms\",\"swap_sides\":false}]}", "invalid_settings", "missions" },
+		{ "{\"game_name\":\"x\",\"max_players\":\"16\"}", "invalid_settings", "max_players" },
 		{ "not json", "invalid_json", "" },
 	};
 	for (const Refused &r : refused) {
@@ -6098,12 +6098,12 @@ int test_hosted_server_routes(Harness &h) {
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
 	// A NovaLogic listing this service does not offer, and a mistyped one (Hal's two draws).
-	reply = start(hal, "{\"game_name\":\"x\",\"missions\":[\"a.bms\"],\"list_on_novalogic\":true}");
+	reply = start(hal, "{\"game_name\":\"x\",\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}],\"list_on_novalogic\":true}");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_settings" && json &&
 			str(json["field"]) == "list_on_novalogic" && json.has("message"));
 	reply = start(hal, "{\"game_name\":\"x\",\"list_on_novalogic\":\"yes\"}");
-	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_settings");
 	// A valid start with no entitlement.
 	reply = start(dee, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
@@ -6118,13 +6118,13 @@ int test_hosted_server_routes(Harness &h) {
 		const char *field;
 	};
 	const RefusedBody product_refused[] = {
-		{ "{\"product_id\":999999,\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "product_id" },
-		{ "{\"product_id\":" + on + ",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "product_id" },
+		{ "{\"product_id\":999999,\"game_name\":\"x\",\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}]}", "invalid_settings", "product_id" },
+		{ "{\"product_id\":" + on + ",\"game_name\":\"x\",\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}]}", "invalid_settings", "product_id" },
 		{ "{\"product_id\":" + dfx2 + ",\"game_name\":\"x\",\"expansion_id\":" + jox + "}", "invalid_settings",
 				"expansion_id" },
-		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"escal.bms\"]}", "invalid_settings", "missions" },
-		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"dfx2_a.bms\"]}", "invalid_settings", "missions" },
-		{ "{\"product_id\":\"" + jo + "\",\"game_name\":\"x\"}", "invalid_field", "" },
+		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"rotation\":[{\"file\":\"escal.bms\",\"swap_sides\":false}]}", "invalid_settings", "missions" },
+		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"rotation\":[{\"file\":\"dfx2_a.bms\",\"swap_sides\":false}]}", "invalid_settings", "missions" },
+		{ "{\"product_id\":\"" + jo + "\",\"game_name\":\"x\"}", "invalid_settings", "product_id" },
 		{ "{\"game_name\":\"x\",\"own_machine\":1}", "invalid_field", "" },
 	};
 	size_t refusals = 0;
@@ -6140,7 +6140,7 @@ int test_hosted_server_routes(Harness &h) {
 	// Escalation's missions count with the expansion picked (the rotation then
 	// spans both), refused past the settings at the entitlement: gus has none yet.
 	reply = start(gus, "{\"product_id\":" + jo + ",\"expansion_id\":" + jox +
-							",\"game_name\":\"x\",\"missions\":[\"first.bms\",\"escal.bms\"]}");
+							",\"game_name\":\"x\",\"rotation\":[{\"file\":\"first.bms\",\"swap_sides\":false},{\"file\":\"escal.bms\",\"swap_sides\":false}]}");
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
 
 	// The comp grants: admin only (the token, or an admin session with the CSRF
@@ -6201,8 +6201,8 @@ int test_hosted_server_routes(Harness &h) {
 	// first start pins it; nothing asked.
 	TEST_EXPECT(json["server"]["update_available"].b() && !json["server"]["update_requested"].b());
 	TEST_EXPECT(json["server"]["settings"]["max_players"].i() == 16);
-	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2);
-	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "first.bms");
+	TEST_EXPECT(json["server"]["settings"]["rotation"].size() == 2);
+	TEST_EXPECT(str(json["server"]["settings"]["rotation"][0]["file"]) == "first.bms");
 	TEST_EXPECT(json["server"]["listing"].t() == crow::json::type::Null);
 	reply = one(ana, ana_first);
 	json = crow::json::load(body_text(reply));
@@ -6218,9 +6218,9 @@ int test_hosted_server_routes(Harness &h) {
 	// (with Escalation, the expansion's after the base's).
 	reply = start(ana, "{\"game_name\":\"Ana's Second\",\"expansion_id\":" + jox + "}");
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["missions"].size() == 5);
-	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "a.bms" &&
-			str(json["server"]["settings"]["missions"][4]) == "escal.bms");
+	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["rotation"].size() == 5);
+	TEST_EXPECT(str(json["server"]["settings"]["rotation"][0]["file"]) == "a.bms" &&
+			str(json["server"]["settings"]["rotation"][4]["file"]) == "escal.bms");
 	TEST_EXPECT(json["server"]["settings"]["expansion_id"].i() == h.jox_id &&
 			json["server"]["expansion"]["id"].i() == h.jox_id && str(json["server"]["expansion"]["code"]) == "jox01" &&
 			str(json["server"]["expansion_display_name"]) == "Escalation");
@@ -6247,8 +6247,8 @@ int test_hosted_server_routes(Harness &h) {
 	// Delta Force Xtreme 2's server takes its tree's missions.
 	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["product_id"].i() == h.dfx2_id);
 	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Delta Force Xtreme 2");
-	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2 &&
-			str(json["server"]["settings"]["missions"][0]) == "dfx2_a.bms");
+	TEST_EXPECT(json["server"]["settings"]["rotation"].size() == 2 &&
+			str(json["server"]["settings"]["rotation"][0]["file"]) == "dfx2_a.bms");
 	const int64_t cy_server = json["server"]["id"].i();
 	TEST_EXPECT(crow::json::load(body_text(list(ana)))["full"].b());
 	reply = start(fay, "{\"game_name\":\"Fay's\"}");
@@ -6403,14 +6403,10 @@ int test_hosted_server_routes(Harness &h) {
 	{
 		auto db = h.pool.acquire();
 		for (int i = 0; i < 12; ++i) {
-			db->exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, "
-					 "kill_limit, max_score, respawn, start_delay, missions, ended_at) "
-					 "VALUES ($1, 'stopped', $2, 8, 30, 50, 5, 5, 0, 'a.bms', now());",
+			db->exec("INSERT INTO hosted_servers (owner_user_id, state, ended_at, configuration) VALUES ($1, 'stopped', now(), jsonb_build_object('game_name', $2::text, 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false))));",
 					{ opennova::db::BindValue(gus.id), opennova::db::BindValue("Gus ended " + std::to_string(i)) });
 		}
-		db->exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, "
-				 "kill_limit, max_score, respawn, start_delay, missions) "
-				 "VALUES ($1, 'running', 'Gus live', 8, 30, 50, 5, 5, 0, 'a.bms');",
+		db->exec("INSERT INTO hosted_servers (owner_user_id, state, configuration) VALUES ($1, 'running', jsonb_build_object('game_name', 'Gus live', 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false))));",
 				{ opennova::db::BindValue(gus.id) });
 	}
 	json = crow::json::load(body_text(list(gus)));
@@ -6834,6 +6830,8 @@ public:
 		} else if (is(0, "GET") && is(1, "GAMESETTINGS")) {
 			replies.emplace_back("AutoBalanceOnRecycle = 1\nServerName           = Console Test\n"
 								 "ServerPassword       = s3cret\n");
+		} else if (is(0, "SET")) {
+			replies.emplace_back("OK - Setting Changed.");
 		} else if (is(0, "PLAYER") && is(1, "LIST")) {
 			if (!in_game) {
 				replies.emplace_back("ERROR - Not in Game State.");
@@ -8072,6 +8070,37 @@ int test_hosted_console_routes(Harness &h) {
 	}
 
 	// Stopping: refused before the link, the console still read.
+	// The expanded routes enforce ownership and CSRF, and persist accepted TCP
+	// edits in the fleet independently of the caller's HTTP lifetime.
+	TEST_EXPECT(get(me + "/settings", {with_session(other_s)}).code == 404);
+	TEST_EXPECT(post(me + "/command", {with_session(owner_s)}, R"({"command":"SET KillLimit 500"})").code == 403);
+	reply = post(base + "/command", {kBearer}, R"({"command":"SET KillLimit 500"})");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json["configuration_saved"].b());
+	const auto revision = json["settings_revision"].i();
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), id)->settings.kill_limit == 500);
+	const std::string edit_body = "{\"settings_revision\":" + std::to_string(revision) +
+			",\"patch\":{\"options\":{\"server_message\":\"Next launch\",\"replay\":false}}}";
+	reply = h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body);
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["configuration_saved"].b());
+	const auto persisted = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(persisted->settings.options.get_string("server_message", "") == "Next launch");
+	TEST_EXPECT(!persisted->settings.options.get_bool("replay", true));
+	TEST_EXPECT(h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body).code == 409);
+	// A short-lived caller stops waiting after send; the drain still saves the reply.
+	fake.delay("SET KillLimit", 950);
+	hosted::AdminCommandOptions durable_options;
+	durable_options.record = true;
+	const auto timed = hosted::run_console_command(h.pool, id, "SET KillLimit 42", durable_options, std::chrono::milliseconds(100));
+	TEST_EXPECT(timed.delivery_unknown);
+	TEST_EXPECT(wait_until([&] { return hosted::find_server(*h.pool.acquire(),id)->settings.kill_limit == 42; }, 3000));
+	fake.delay("", 0);
+	const auto sent_lines = fake.lines();
+	TEST_EXPECT(std::count(sent_lines.begin(),sent_lines.end(),"SET KillLimit 42") == 1);
+	reply = post(base + "/command", {kBearer}, R"({"command":"QUIT"})");
+	TEST_EXPECT(reply.code == 200);
+	TEST_EXPECT(wait_until([&] { return h.links->find(id)->status().state == hosted::AdminLinkState::Up; }, 5000));
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(),id)->state == hosted::State::Running);
 	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test",
 			hosted::StartCause::OwnerStop));
 	reply = get(me + "/players", as_owner);

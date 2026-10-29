@@ -48,6 +48,9 @@ std::optional<AdminCommandOutcome> parse_admin_command_outcome(std::string_view 
 struct AdminCommandResult {
 	AdminCommandOutcome outcome = AdminCommandOutcome::LinkDown;
 	bool sent = false;
+	bool delivery_unknown = false;
+	bool configuration_saved = false;
+	int64_t settings_revision = 0;
 	// Each reply packet's text, in the server's code page (cp1252), in order.
 	std::vector<std::string> replies;
 };
@@ -55,6 +58,11 @@ struct AdminCommandResult {
 struct AdminCommandOptions {
 	std::string actor = "service"; // the console's sender: "owner", "admin" or "service"
 	bool record = true;            // the command and its replies go to the console
+	// Fleet completion outlives an HTTP request. Once sent, wait for the bounded
+	// socket exchange to finish so the accepted configuration can be saved.
+	bool finish_sent = false;
+	std::optional<int64_t> expected_revision;
+	std::string settings_patch; // validated JSON for a structured configuration edit
 };
 
 // A row whose seen_at is older than this reads as no link: no fleet leader

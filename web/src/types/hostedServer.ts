@@ -3,6 +3,7 @@
 
 import type { ServerAddress } from './addresses';
 import type { TierNumber } from './billing';
+import type { ServerOptions, ServerSetting, ServerWeapon } from '../utils/serverConfiguration';
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
@@ -44,6 +45,8 @@ export interface HostedSettings {
   list_on_novalogic: boolean;
   // The rotation in play order: the first is the map the server starts on.
   missions: string[];
+  mission_options?: boolean[];
+  options?: ServerOptions;
 }
 
 // The settings in POST /api/me/servers's body: every field but game_name may
@@ -84,6 +87,7 @@ export interface HostedExpansionOption {
   display_name: string;
   version: string;
   missions: HostedMission[];
+  weapons?: ServerWeapon[];
 }
 
 // A base game the service offers hosted servers of (one with a ready
@@ -107,6 +111,8 @@ export interface HostedProduct {
   // Whether a server on it may also list on NovaLogic's NovaWorld (Joint
   // Operations alone). A reply that leaves it out reads as false.
   novalogic_listing?: boolean;
+  settings_schema?: ServerSetting[];
+  weapons?: ServerWeapon[];
 }
 
 // A game a server runs, as its row names it: its key (JO, ACIDGAMBIT) and

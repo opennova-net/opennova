@@ -19,6 +19,7 @@ DFX2 (`/game dfx2`, on LAN and through OpenNova's NovaWorld, 2026-10-14,
 ```text
 opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/exp <name>]
                [/d] [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] [--log-debug]
+               [--rotation-first]
                [--master-host <gate>] [--master-gate-port <n>]
                [--credentials <file>] [--allow-public]
                [--also-master-host <gate>] [--also-master-gate-port <n>]
@@ -33,6 +34,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 |---|---|
 | `--resource-dir <dir>` | The install to serve from (its `.pff` set), as `opennova.exe` takes it. Required. |
 | `/HOST <file>` | The host file (below). Required. |
+| `--rotation-first` | Start at the first `Mission` entry. Hosted servers use this to play their saved rotation in order; without it, retail's last-entry starting behavior applies. |
 | `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as retail's switch does (a host file with no `MaxPlayers` line leaves it unread). |
 | `/exp <name>`, `/mod <name>` | Mount that expansion (for example `revx02`); `/mod` is the same switch, as in the game (the last one given wins). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
@@ -50,7 +52,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 | `--also-credentials <file>` | The second listing's account, in the `--credentials` file's form. |
 | `--status-page on\|off` | `on` (the default) prints the status page on standard output and takes standard input as its chat input (below); `off` does neither. |
 | `--stats-file <file>` | Rewrite the file once a minute with the last minute's tick health ("Supervised runs" below). |
-| `--exit-file <file>` | At a non-zero exit, write the error that ended the server to the file, one line ("Supervised runs" below). |
+| `--exit-file <file>` | Write the error at a non-zero exit, or `completed:rotation` / `completed:admin-session` at an intentional session completion, one line ("Supervised runs" below). |
 | `--second-listing-file <file>` | Rewrite the file whenever the second listing's state changes ("Supervised runs" below). |
 | `/PROFILE <path>` | Record every mission to a `.sph` server log (below). |
 | `/PUNTLOG`, `/PUNT.TXT` | Log the players the server punts to `_PUNT.TXT` (below). |
@@ -367,8 +369,10 @@ line by line.
   instrumentation only: the loop runs as it does without it.
 - **`--exit-file <file>`**: at a non-zero exit (the table below), the error the server
   logged as it ended, one line (`the session ended: ...`, `the NovaWorld listing did not
-  host: ...`), so its supervisor can say why without reading its log. A clean exit (0)
-  writes nothing.
+  host: ...`), so its supervisor can say why without reading its log. A completed rotation
+  or explicit admin session end exits with 0 and writes `completed:rotation` or
+  `completed:admin-session`, so the supervisor can distinguish it from a crash.
+  Other clean exits write nothing.
 - **`--second-listing-file <file>`**: the second listing's state ("Two listings" above), so
   its supervisor can show whether and why the server is listed there without reading its
   log. The server rewrites the file (a new file renamed over the old) whenever the state

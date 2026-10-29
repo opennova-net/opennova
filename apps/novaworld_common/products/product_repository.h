@@ -13,6 +13,7 @@
 // db::Error on a database failure. Service policy, not a port.
 
 #include "program/catalog_repository.h"
+#include <formats/gamecfg/game_cfg.h>
 
 #include <net/novaworld/db/database.h>
 
@@ -97,6 +98,7 @@ struct ProductTree {
 	std::string version_text;
 	std::vector<TreeFile> files;
 	std::vector<TreeMission> missions;
+	gamecfg::WeaponRoster weapons;
 	int64_t bytes = 0;
 	std::string error;
 	std::string created_by;
@@ -271,6 +273,7 @@ struct OfferedExpansion {
 	int64_t tree_id = 0;
 	std::string version;
 	std::vector<TreeMission> missions;
+	gamecfg::WeaponRoster weapons;
 };
 struct OfferedProduct {
 	int64_t id = 0;
@@ -280,6 +283,7 @@ struct OfferedProduct {
 	int64_t tree_id = 0;
 	std::string version;
 	std::vector<TreeMission> missions;
+	gamecfg::WeaponRoster weapons;
 	std::vector<OfferedExpansion> expansions;
 };
 // What the account `caller` may start (none: what any account may): the service's own products,
@@ -317,6 +321,7 @@ bool set_tree_state(db::Database &db, int64_t id, TreeState from, TreeState to,
 struct TreeReady {
 	std::vector<TreeFile> files;
 	std::vector<TreeMission> missions;
+	gamecfg::WeaponRoster weapons;
 	std::string version_text;
 	int64_t bytes = 0;
 };
@@ -470,6 +475,8 @@ std::optional<CurrentTrees> current_trees_of(db::Database &db, int64_t product_i
 // "size"}]}`).
 std::string encode_tree_files(const std::vector<TreeFile> &files);
 bool decode_tree_files(std::string_view json, std::vector<TreeFile> &out);
+std::string encode_tree_weapons(const gamecfg::WeaponRoster &weapons);
+bool decode_tree_weapons(std::string_view json, gamecfg::WeaponRoster &out);
 std::string encode_tree_missions(const std::vector<TreeMission> &missions);
 bool decode_tree_missions(std::string_view json, std::vector<TreeMission> &out);
 

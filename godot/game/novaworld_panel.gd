@@ -35,6 +35,7 @@ signal join_in_match_requested(target: JoinTarget)
 # Host a NovaWorld game. The panel's session is already hosting (the service's ServerHostResult
 # landed), so MainGame loads the mission as a listen host and the session rides in with it.
 signal host_requested(config: HostSessionConfig)
+signal host_setup_requested
 # A mod's install or update started the updater: the game ends for it, as the
 # menu's UPDATE ends it (MenuShell's exit_to_desktop_requested).
 signal update_started(reason: String)
@@ -379,8 +380,7 @@ func _retry_server_list() -> void:
 func _on_host_screen_pressed() -> void:
 	if not _logged_in:
 		return
-	_populate_missions()
-	_set_screen(Screen.HOST)
+	_on_host_pressed()
 
 
 func _on_host_cancel_pressed() -> void:
@@ -1048,39 +1048,24 @@ func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedB
 # loads the mission as a listen host. We host on the OpenNova gate only — never advertise a host on
 # NovaLogic's live service.
 func _on_host_pressed() -> void:
+	if _pending_host_config != null:
+		return
 	if not _logged_in and start_client_on_ready:
 		return
 	if _target == NovaWorldSettings.Target.REAL:
 		_show_message(HOST_ON_OPENNOVA_ONLY, "Back to Games",
 				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
-	var mission := _selected_mission()
-	if mission.is_empty():
-		_set_status("No missions are available to host.")
-		_show_message("No missions are available to host. Check the game folder.",
-				"Back to Host Game", Callable(self, "_return_to_host"), Screen.HOST)
+	host_setup_requested.emit()
+
+
+# Called by the same authored host dialog as LAN, after its controls and
+# ordered mission selection have been read into the process configuration.
+func begin_configured_host(config: HostSessionConfig) -> void:
+	if config == null or config.mission.is_empty() or _pending_host_config != null:
 		return
-	_set_status("Starting host...")
-	# Retail's NovaWorld host is its host dialog, the LAN host's MULTI_PLAYER_HOST, whose START
-	# reads the controls back into the process's cfg block before its NovaWorld arm opens the
-	# hosting URL; this page's map picker stands in for that dialog, untouched. It opens on
-	# the block (the populate writes the cap clamped to the screen's into it) and reads back
-	# every control as the mounted menu's screen shows it, so the block keeps game.cfg's words
-	# the screen can show, the session's name among them (no name of the page's own), and
-	# takes the screen's for the rest: a spin's row 0 for a word no row holds, the location
-	# row's own name, with no pb\pbcl.dll PunkBuster's 0 (engine inmatch/host_settings.h
-	# read_untouched_host_dialog carries the witness). The request seeds from the block
-	# (HostSessionConfig), and every mission start applies the block again (engine
-	# inmatch::apply_block_session_settings).
-	GameCfgStore.block().read_untouched_host_dialog(_host_dialog_document())
-	var config := HostSessionConfig.new()
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
-	config.mission = mission
-	# The authority plays the starting map's mode: g_GameType comes from the
-	# mission, as the LAN host screen's request derives it.
-	config.game_type_auto = true
-	if resource_root != null:
-		config.expansion = String(resource_root.get_expansion())
+	_set_status("Starting host...")
 	_pending_host_config = config
 	if _host_start_button != null:
 		_host_start_button.disabled = true

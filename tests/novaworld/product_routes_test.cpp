@@ -185,9 +185,7 @@ int64_t seeded(Database &db, const char *display_name) {
 // A hosted server row as a start writes it, pinned to `base_tree`.
 int64_t insert_server(Database &db, int64_t product_id, int64_t base_tree) {
 	const auto rows = db.query(
-			"INSERT INTO hosted_servers (state, game_name, max_players, time_limit, kill_limit, "
-			"max_score, respawn, start_delay, missions, product_id, base_tree_id) "
-			"VALUES ('running', 'srv', 32, 30, 50, 5, 5, 0, 'a.bms', $1, $2) RETURNING id;",
+			"INSERT INTO hosted_servers (state, product_id, base_tree_id, configuration) VALUES ('running', $1, $2, jsonb_build_object('game_name', 'srv', 'max_players', 32, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false)))) RETURNING id;",
 			{ BindValue(product_id), BindValue(base_tree) });
 	return rows.front().as_int(0).value_or(0);
 }

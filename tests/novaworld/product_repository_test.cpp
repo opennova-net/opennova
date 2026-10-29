@@ -56,9 +56,7 @@ TreeReady ready_with(const std::string &version, std::vector<TreeMission> missio
 int64_t insert_server(Database &db, int64_t product_id, std::optional<int64_t> expansion_id,
 		const char *state = "running") {
 	const auto rows = db.query(
-			"INSERT INTO hosted_servers (state, game_name, max_players, time_limit, kill_limit, "
-			"max_score, respawn, start_delay, missions, product_id, expansion_id) "
-			"VALUES ($1, 'srv', 32, 30, 50, 5, 5, 0, 'a.bms', $2, $3) RETURNING id;",
+			"INSERT INTO hosted_servers (state, product_id, expansion_id, configuration) VALUES ($1, $2, $3, jsonb_build_object('game_name', 'srv', 'max_players', 32, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false)))) RETURNING id;",
 			{ BindValue(state), BindValue(product_id),
 					expansion_id ? BindValue(*expansion_id) : BindValue(std::monostate{}) });
 	return rows.front().as_int(0).value_or(0);

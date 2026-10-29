@@ -1,4 +1,5 @@
 #include "supervisor.h"
+#include "server_completion.h"
 
 #include "accounts/auth.h"
 #include "billing/billing_repository.h"
@@ -17,6 +18,7 @@
 #include <iterator>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -343,6 +345,7 @@ void Supervisor::sync_admin_links(db::Database &db) {
 		target.port = static_cast<uint16_t>(login->port);
 		target.user = login->user;
 		target.password = login->password;
+		target.generation = s.generation;
 		wanted.emplace(s.id, std::move(target));
 	}
 	admin_links_->sync(wanted);
@@ -808,6 +811,25 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 			return;
 		}
 	}
+	// The weapons its trees name, the expansion's when it has any. A saved option those
+	// trees no longer take (a weapon a newer tree renamed) fails this server alone,
+	// before its account and admin login turn over.
+	gamecfg::WeaponRoster weapons;
+	if (const auto base = find_tree(db, base_tree)) weapons = base->weapons;
+	if (expansion_tree) {
+		if (const auto expansion = find_tree(db, *expansion_tree); expansion && !expansion->weapons.empty())
+			weapons = expansion->weapons;
+	}
+	try {
+		(void)settings_block(s.settings, data->title, weapons);
+	} catch (const std::invalid_argument &e) {
+		end_start(db, s.id, s.generation, StartCause::NoData);
+		release_slot(db, s.id);
+		finish(db, s, State::Failed,
+				std::string("its settings do not fit its game's data (") + e.what() + ")",
+				StartCause::NoData);
+		return;
+	}
 	// The service account, with a new password at every start.
 	const std::string username = service_username(s.id);
 	const std::string nw_password = random_secret(kServicePasswordChars);
@@ -827,6 +849,7 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	set_admin_login(db, s.id, plan.admin_port, kAdminUser, admin_password);
 	RenderInputs inputs;
 	inputs.server_id = s.id;
+	inputs.weapons = std::move(weapons);
 	inputs.plan = plan;
 	inputs.service_username = username;
 	inputs.service_password = nw_password;
@@ -883,6 +906,11 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 
 void Supervisor::on_exit(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms,
 		const SlotReport &report) {
+	if (!report.oom && report.exit_code && server_completed(*report.exit_code, report.reason)) {
+		end_start(db, s.id, s.generation, StartCause::Stop, StartExit{ report.exit_code, report.oom, report.reason });
+		finish(db, s, State::Stopped, report.reason == kRotationCompleted ? "rotation completed" : "session ended by administrator", StartCause::Stop);
+		return;
+	}
 	// Whatever the code: a stop is the supervisor's own act (the row in
 	// stopping), never read from an exit. opennova-serve exits 0 for its
 	// rotation's end or the admin's GOTO MENUSTATE, 3 when the service ends its

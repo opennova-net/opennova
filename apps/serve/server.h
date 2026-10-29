@@ -127,6 +127,7 @@ struct ServeOptions {
 	// the error a non-zero exit ends on (--exit-file) and the second listing's state, rewritten
 	// whenever it changes (--second-listing-file; off for a run with none); "" writes no file.
 	bool status_page = true;
+	bool rotation_first = false; // --rotation-first: hosted rotations start at entry zero
 	std::string stats_file;
 	std::string exit_file;
 	std::string second_listing_file;

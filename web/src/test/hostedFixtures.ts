@@ -13,6 +13,8 @@ import type {
 import type { MyServer } from '../types/myServers';
 
 export const JO: HostedProduct = {
+  settings_schema: [],
+  weapons: [],
   id: 1,
   display_name: 'Joint Operations',
   title: 'jo',
@@ -33,6 +35,7 @@ export const JO: HostedProduct = {
     {
       id: 2,
       code: 'jox01',
+      weapons: [],
       display_name: 'Escalation',
       version: '1.7.5.5',
       missions: [{ file: 'jox_one.bms', title: 'Escalation Point' }],
@@ -43,6 +46,8 @@ export const JO: HostedProduct = {
 };
 
 export const DFX2: HostedProduct = {
+  settings_schema: [],
+  weapons: [],
   id: 3,
   display_name: 'Delta Force Xtreme 2',
   title: 'dfx2',
@@ -76,6 +81,8 @@ export function settings(overrides: Partial<HostedSettings> = {}): HostedSetting
     team_ff: false,
     list_on_novalogic: false,
     missions: ['jo_one.bms'],
+    mission_options: [false],
+    options: { replay: true },
     ...overrides,
   };
 }

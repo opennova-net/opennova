@@ -163,6 +163,9 @@ private:
 	crow::response chat_send(const Caller &c, const ConsoleCommand &command);
 	crow::response console(const Caller &c, const crow::request &req);
 	crow::response settings(const Caller &c);
+	crow::response configuration_command(const Caller &c, const crow::request &req, bool edit);
+	crow::response weapon_settings(const Caller &c);
+	void register_configuration(WebApp &app);
 
 	void register_owner(WebApp &app);
 	void register_admin(WebApp &app);

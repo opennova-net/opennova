@@ -69,6 +69,27 @@ func _record(name: String, value: Variant) -> void:
 	_signals.append([name, value])
 
 
+func test_advanced_host_options_validate_and_survive_save() -> void:
+	var block := GameCfgStore.block()
+	assert_eq(block.apply_server_configuration_json(JSON.stringify({"flag_return_time": 777,
+		"vote_percent": 0.625, "classes": {"sniper": false}})), "")
+	GameCfgStore.save()
+	GameCfgStore.reset()
+	var document: Dictionary = JSON.parse_string(GameCfgStore.block().server_configuration_json())
+	# Retail's writer emits `flagreturntime`, which its reader never reads back
+	# (game_cfg_write.cpp cites it): the save keeps retail's text, so the value
+	# holds for the session alone.
+	assert_ne(document["values"]["flag_return_time"], 777.0)
+	assert_eq(document["values"]["vote_percent"], 0.625)
+	assert_false(document["values"]["classes"]["sniper"])
+	var panel := HostSettingsPanel.new()
+	add_child_autofree(panel)
+	assert_gt(panel.field_count(), 40, "the supplemental editor renders the shared schema")
+	assert_true(panel.has_field("vote_percent"))
+	assert_false(panel.has_field("game_name"), "the authored host screen owns its controls")
+	assert_false(block.apply_server_configuration_json('{"remote_admin_port":9999}').is_empty())
+
+
 func test_the_lan_switch_forces_the_lan_only_word() -> void:
 	# `/LAN`, any case: every read of the block forces mpnovaworldhostlanonly
 	# to 1 (docs/gamecfg/game-cfg-re.md, D-GAMECFG-5).

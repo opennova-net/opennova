@@ -13,6 +13,7 @@ import {
 } from './hostedServer';
 import { hostedServer, serversResponse, settings } from '../test/hostedFixtures';
 import { FIELD_RULES } from '../utils/hostedSettings';
+import { configurationDocument } from '../utils/serverConfiguration';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn() },
@@ -24,7 +25,10 @@ const post = vi.mocked(apiClient.post);
 const adminGet = vi.mocked(adminClient.get);
 
 function reply(data: unknown, status = 200) {
-  return { status, data } as AxiosResponse;
+  // Fixtures are the UI model; HTTP carries the canonical ordered rotation.
+  const wire = JSON.parse(JSON.stringify(data, (_key, value) => value && !Array.isArray(value) &&
+    Array.isArray(value.missions) && typeof value.game_name === 'string' ? configurationDocument(value) : value)) as unknown;
+  return { status, data: wire } as AxiosResponse;
 }
 
 // A refusal as axios throws it.

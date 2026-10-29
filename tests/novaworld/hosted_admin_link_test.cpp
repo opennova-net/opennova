@@ -193,10 +193,7 @@ int main(int argc, char **argv) {
 		int64_t server_id = 0;
 		{
 			auto db = pool.acquire();
-			server_id = db->query("INSERT INTO hosted_servers (state, game_name, max_players, time_limit, "
-								  "kill_limit, max_score, respawn, start_delay, missions) "
-								  "VALUES ('running', 'Admin Link Test', 8, 30, 50, 5, 5, 0, 'servetst.bms') "
-								  "RETURNING id;")
+			server_id = db->query("INSERT INTO hosted_servers (state, configuration) VALUES ('running', jsonb_build_object('game_name', 'Admin Link Test', 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'servetst.bms', 'swap_sides', false)))) RETURNING id;")
 								.front()
 								.as_int(0)
 								.value();

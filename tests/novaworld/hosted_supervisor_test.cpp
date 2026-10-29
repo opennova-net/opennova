@@ -32,6 +32,7 @@
 // hosted sources directly, so it runs on every build.
 
 #include "hosted_fleet_rig.h"
+#include "server_completion.h"
 
 #include "accounts/web_session.h"
 #include "core/random_secret.h"
@@ -170,13 +171,13 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.game_password = "has space"; }), "game_password"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_password = "q\"uote"; }), "game_password"));
 	TEST_EXPECT(!check(with([](auto &c) { c.game_password = "Secret!16-chars."; })));
-	TEST_EXPECT(refused(with([](auto &c) { c.max_players = 1; }), "max_players"));
+	TEST_EXPECT(!check(with([](auto &c) { c.max_players = 1; })));
 	TEST_EXPECT(refused(with([](auto &c) { c.max_players = 65; }), "max_players"));
-	TEST_EXPECT(refused(with([](auto &c) { c.time_limit = 0; }), "time_limit"));
-	TEST_EXPECT(refused(with([](auto &c) { c.kill_limit = 501; }), "kill_limit"));
-	TEST_EXPECT(refused(with([](auto &c) { c.max_score = 0; }), "max_score"));
+	TEST_EXPECT(!check(with([](auto &c) { c.time_limit = 0; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.kill_limit = 501; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.max_score = 0; })));
 	TEST_EXPECT(refused(with([](auto &c) { c.respawn = -1; }), "respawn"));
-	TEST_EXPECT(refused(with([](auto &c) { c.start_delay = 301; }), "start_delay"));
+	TEST_EXPECT(!check(with([](auto &c) { c.start_delay = 301; })));
 	// The expansion: one of the product's with data.
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion_id = 99; }), "expansion_id"));
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion_id = 1; }), "expansion_id")); // the base itself
@@ -220,7 +221,7 @@ int test_settings_rules() {
 		hosted::HostedSettings big = s;
 		big.max_players = jo.max_players.max + 1;
 		const auto too_many = hosted::check_settings(big, offered);
-		TEST_EXPECT(too_many && too_many->field == "max_players" && too_many->reason == "must be 2 to 64");
+		TEST_EXPECT(too_many && too_many->field == "max_players" && too_many->reason == "must be 1 to 64");
 		hosted::HostedSettings escalation = s;
 		escalation.product_id = 3;
 		escalation.expansion_id = 2;
@@ -238,6 +239,14 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.missions = { "two words.bms" }; }), "missions"));
 	TEST_EXPECT(!check(with([](auto &c) { c.missions = { "ASH_G11A.BMS", "x-y_1.bms" }; })));
 	TEST_EXPECT(!check(with([](auto &c) { c.missions = { "servetst.BMS", "Second.BMS" }; })));
+	TEST_EXPECT(!check(with([](auto &c) {
+		c.missions = { "map.bms", "MAP.BMS" };
+		c.mission_options = { 1, 1 };
+	})));
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.missions = { "map.bms", "MAP.BMS" };
+		c.mission_options = { 0, 1 };
+	}), "rotation"));
 	{
 		const auto unknown = check(with([](auto &c) { c.missions = { "second.bms", "unknown.bms" }; }));
 		TEST_EXPECT(unknown && unknown->field == "missions" &&
@@ -272,8 +281,8 @@ int test_renders() {
 		"GameName \"Caf\xE9 Night\"\r\n", "MaxPlayers 24\r\n", "MPHostGamePassword \"letmein\"\r\n",
 		"Time_Limit 45\r\n", "KillLimit 100\r\n", "MaxScore 7\r\n", "Respawn 10\r\n", "Delay 15\r\n",
 		"TeamFF 1\r\n", "Replay 1\r\n",
-		// The first map's line last: the last Mission line is the starting map.
-		"Mission second.bms 0\r\nMission third.bms 0\r\nMission first.bms 0\r\n",
+		// The service starts the first entry with --rotation-first.
+		"Mission first.bms 0\r\nMission second.bms 0\r\nMission third.bms 0\r\n",
 	};
 	for (const char *line : want) {
 		if (!contains(host, line)) std::fprintf(stderr, "  the host file lacks %s", line);
@@ -300,7 +309,7 @@ int test_renders() {
 	const auto admin = opennova::admincfg::parse(admin_text.data(), admin_text.size());
 	TEST_EXPECT(admin.users.size() == 1);
 	TEST_EXPECT(admin.users[0].name == "svc" && admin.users[0].password == admin_password);
-	TEST_EXPECT(admin.users[0].rights == 0x7Fu);
+	TEST_EXPECT(admin.users[0].rights == 0x8000007Fu);
 	TEST_EXPECT(admin.ip_restrictions == std::vector<std::string>{ "10.1.2.3" });
 
 	const std::string creds = hosted::render_credentials("srv-12", "pw");
@@ -326,13 +335,12 @@ int test_renders() {
 	const hosted::LaunchSpec spec = hosted::render_launch(s, "jo", "jox01", in);
 	TEST_EXPECT(spec.server_id == 12 && spec.files.size() == 4);
 	for (const auto &f : spec.files) {
-		const bool secret = f.name != "game.cfg"; // the host file carries the game password
-		TEST_EXPECT(f.secret == secret);
+		TEST_EXPECT(f.secret); // game.cfg also contains gameplay passwords
 	}
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"/game", "jo", "/exp", "jox01" };
+		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
 	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597, in.novalogic) == args);
 
@@ -404,11 +412,11 @@ int test_renders() {
 	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"/game", "dfx2" };
+		"--rotation-first", "/game", "dfx2" };
 	TEST_EXPECT(dfx2.serve_args == dfx2_args);
 	const hosted::LaunchSpec on = hosted::render_launch(s, "jo", "", in);
-	TEST_EXPECT(on.serve_args.size() == 16 && on.serve_args[14] == "/game" &&
-			on.serve_args[15] == "jo");
+	TEST_EXPECT(on.serve_args.size() == 17 && on.serve_args[14] == "--rotation-first" &&
+			on.serve_args[15] == "/game" && on.serve_args[16] == "jo");
 	return 0;
 }
 
@@ -469,9 +477,9 @@ int test_no_data() {
 int test_products() {
 	const hosted::HostLimits &jo = hosted::host_limits_for_title("jo");
 	const hosted::HostLimits &dfx2 = hosted::host_limits_for_title("dfx2");
-	TEST_EXPECT(jo.max_players.min == 2 && jo.max_players.max == 64 && jo.time_limit.max == 300 &&
-			jo.kill_limit.max == 500 && jo.max_score.max == 500 && jo.respawn.min == 0 && jo.start_delay.max == 300);
-	TEST_EXPECT(dfx2.max_players.max == 100 && dfx2.time_limit.max == 300 && dfx2.kill_limit.max == 500);
+	TEST_EXPECT(jo.max_players.min == 1 && jo.max_players.max == 64 && jo.time_limit.max == INT32_MAX &&
+			jo.kill_limit.max == INT32_MAX && jo.max_score.max == INT32_MAX && jo.respawn.min == 0 && jo.start_delay.max == INT32_MAX);
+	TEST_EXPECT(dfx2.max_players.max == 100 && dfx2.time_limit.max == INT32_MAX && dfx2.kill_limit.max == INT32_MAX);
 	// Every title this service hosts runs Joint Operations' rules but DFX2's cap.
 	TEST_EXPECT(&hosted::host_limits_for_title("opennova") == &jo && &hosted::host_limits_for_title("") == &jo);
 
@@ -1007,7 +1015,7 @@ int test_lifecycle_and_stop() {
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"/game", "jo", "/exp", "jox01" };
+		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(c->desired.args == args);
 	{
 		Database *db = &rig.db;
@@ -1503,9 +1511,19 @@ int test_stop_paths() {
 
 int test_exits_and_crash_restarts() {
 	Rig rig("hosted_restarts");
-	// opennova-serve exiting 0 while it should run (its rotation's end, the
-	// admin's GOTO MENUSTATE) is no stop: only the supervisor stops a server, so
-	// it is a crash, restarted and counted.
+	// Intentional completion ends the allocation without consuming a restart.
+	for (const auto reason : {opennova::kRotationCompleted, opennova::kAdminSessionEnded}) {
+		const int64_t completed = rig.request(reason == opennova::kRotationCompleted ? "rotation_done" : "admin_done");
+		const auto container = rig.to_running(completed, 7099);
+		TEST_EXPECT(!container.empty());
+		auto *agent = rig.agent_of(completed);
+		agent->exit_with(container, 0);
+		agent->containers.at(container).report.reason = reason;
+		rig.sync_all(); rig.tick();
+		TEST_EXPECT(rig.state(completed) == State::Stopped && rig.server(completed)->restarts == 0);
+		hostdb::remove_host_by_rid(rig.db,7099);
+	}
+	// An unexplained zero exit remains a failure.
 	const int64_t zero = rig.request("exit_zero");
 	const std::string c0 = rig.to_running(zero, 7001);
 	TEST_EXPECT(!c0.empty());

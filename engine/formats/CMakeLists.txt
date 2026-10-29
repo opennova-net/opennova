@@ -95,6 +95,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/runtime.cpp
     # gamecfg — game.cfg, the persisted settings (the key model, reader, writer)
     ${CMAKE_CURRENT_SOURCE_DIR}/gamecfg/game_cfg.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gamecfg/server_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gamecfg/game_cfg_write.cpp
     # grm — facial texture mesh and gesture offsets
     ${CMAKE_CURRENT_SOURCE_DIR}/grm/grm.cpp

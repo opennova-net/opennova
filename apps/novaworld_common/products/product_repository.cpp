@@ -2,6 +2,7 @@
 #include "program/catalog_repository.h"
 
 #include <base/io/json.h>
+#include <base/io/cp1252.h>
 
 #include <array>
 
@@ -24,7 +25,7 @@ constexpr const char *kProductColumns =
 		"lobby_locked";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
-		"error, created_by, created_at, ready_at, pruned_at";
+		"error, created_by, created_at, ready_at, pruned_at, weapons::text";
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
 		"published_at, retired_at, product_id, revision, base_revision, version, "
@@ -76,6 +77,7 @@ ProductTree row_to_tree(const db::Row &r) {
 	t.created_at = r.as_text(10).value_or("");
 	t.ready_at = r.as_text(11).value_or("");
 	t.pruned_at = r.as_text(12).value_or("");
+	decode_tree_weapons(r.as_text(13).value_or("[]"), t.weapons);
 	return t;
 }
 
@@ -410,7 +412,7 @@ std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int
 	std::vector<OfferedProduct> out;
 	const auto rows = db.query(
 			"SELECT d.id, d.display_name, d.kind, d.parent_id, d.expansion_code, d.title, d.lobby, "
-			"t.id, t.version_text, t.missions::text "
+			"t.id, t.version_text, t.missions::text, t.weapons::text "
 			"FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
 			"WHERE d.kind <> 'app' AND t.state = 'ready' "
 			"AND (d.owner_id IS NULL OR d.visibility = 'public' OR d.owner_id = $1) "
@@ -427,6 +429,7 @@ std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int
 			d.tree_id = r.as_int(7).value_or(0);
 			d.version = r.as_text(8).value_or("");
 			decode_tree_missions(r.as_text(9).value_or("[]"), d.missions);
+			decode_tree_weapons(r.as_text(10).value_or("[]"), d.weapons);
 			out.push_back(std::move(d));
 			continue;
 		}
@@ -441,6 +444,7 @@ std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int
 			e.tree_id = r.as_int(7).value_or(0);
 			e.version = r.as_text(8).value_or("");
 			decode_tree_missions(r.as_text(9).value_or("[]"), e.missions);
+			decode_tree_weapons(r.as_text(10).value_or("[]"), e.weapons);
 			d.expansions.push_back(std::move(e));
 		}
 	}
@@ -481,11 +485,11 @@ bool finish_tree(db::Database &db, int64_t id, const TreeReady &ready) {
 	db::Transaction tx(db);
 	const auto rows = db.query(
 			"UPDATE product_trees SET state = 'ready', ready_at = now(), error = '', "
-			"manifest = $2::jsonb, missions = $3::jsonb, version_text = $4, bytes = $5 "
+			"manifest = $2::jsonb, missions = $3::jsonb, version_text = $4, bytes = $5, weapons = $6::jsonb "
 			"WHERE id = $1 AND state = 'building' RETURNING product_id;",
 			{ BindValue(id), BindValue(encode_tree_files(ready.files)),
 					BindValue(encode_tree_missions(ready.missions)), BindValue(ready.version_text),
-					BindValue(ready.bytes) });
+					BindValue(ready.bytes), BindValue(encode_tree_weapons(ready.weapons)) });
 	if (rows.empty())
 		return false;
 	db.exec("UPDATE products SET current_tree_id = $2, updated_at = now() WHERE id = $1;",
@@ -876,6 +880,28 @@ bool decode_tree_files(std::string_view json, std::vector<TreeFile> &out) {
 		out.push_back(std::move(f));
 	}
 	return true;
+}
+
+std::string encode_tree_weapons(const gamecfg::WeaponRoster &weapons) {
+    auto out = io::JsonValue::make_array();
+    for (const auto &w : weapons) {
+        auto row = io::JsonValue::make_object();
+        row.set("name", io::json_string(cp1252_to_utf8(w.name)));
+        row.set("selectable", io::JsonValue::make_bool(w.loadout_selectable != 0));
+        out.push(std::move(row));
+    }
+    return io::json_write(out);
+}
+bool decode_tree_weapons(std::string_view text, gamecfg::WeaponRoster &out) {
+    io::JsonValue list; std::string error;
+    out.clear();
+    if (!io::json_parse(text, list, error) || !list.is_array()) return false;
+    for (const auto &row : list.array) {
+        std::string name;
+        if (!utf8_to_cp1252(row.get_string("name", ""), name)) return false;
+        out.push_back({name, row.get_bool("selectable", false) ? 1 : 0});
+    }
+    return true;
 }
 
 std::string encode_tree_missions(const std::vector<TreeMission> &missions) {
