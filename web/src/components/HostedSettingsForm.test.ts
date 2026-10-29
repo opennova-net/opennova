@@ -54,6 +54,48 @@ describe('HostedSettingsForm', () => {
     start.mockReset();
   });
 
+  it('submits custom network tuning and keeps it when starting a previous server again', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    const wrapper = mountForm([JO], settings());
+    expect(wrapper.get('#hosted-settings-send_holdoff_ticks-hint').text()).toContain('Nominal 192 ms (5.21 updates/s in each direction)');
+    await wrapper.get('#hosted-settings-send_holdoff_ticks').setValue(2);
+    await wrapper.get('#hosted-settings-entity_send_budget').setValue(1200);
+    await wrapper.get('#hosted-settings-max_packet_size').setValue(1100);
+    await wrapper.get('#hosted-settings-lock_framerate').setValue(false);
+    expect(wrapper.get('#hosted-settings-send_holdoff_ticks-hint').text()).toContain('Nominal 32 ms (31.25 updates/s in each direction)');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    const saved = start.mock.calls[0][0] as HostedSettings;
+    expect(saved).toMatchObject({ send_holdoff_ticks: 2, entity_send_budget: 1200, max_packet_size: 1100, lock_framerate: false });
+    const again = mountForm([JO], saved);
+    expect((again.get('#hosted-settings-send_holdoff_ticks').element as HTMLInputElement).value).toBe('2');
+    expect((again.get('#hosted-settings-lock_framerate').element as HTMLInputElement).checked).toBe(false);
+    await again.get('form').trigger('submit');
+    await flushPromises();
+    expect(start.mock.calls[1][0]).toEqual(saved);
+    wrapper.unmount();
+    again.unmount();
+  });
+
+  it('opens network tuning for invalid values and marks a field refused by the service', async () => {
+    const wrapper = mount(HostedSettingsForm, { props: { previous: settings(), products: [JO] }, attachTo: document.body });
+    await wrapper.get('#hosted-settings-max_packet_size').setValue(16385);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).not.toHaveBeenCalled();
+    expect((wrapper.get('[data-advanced-settings]').element as HTMLDetailsElement).open).toBe(true);
+    expect(document.activeElement?.id).toBe('hosted-settings-max_packet_size');
+    expect(wrapper.get('#hosted-settings-max_packet_size-error').text()).toBe('Enter a whole number from 100 to 16384.');
+    await wrapper.get('#hosted-settings-max_packet_size').setValue(1300);
+    start.mockResolvedValue({ ok: false, error: { code: 'invalid_settings', status: 400, message: 'The server refused the settings.', field: 'send_holdoff_ticks' } });
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(wrapper.get('#hosted-settings-send_holdoff_ticks-error').text()).toBe(FIELD_RULES.send_holdoff_ticks);
+    await wrapper.get('#hosted-settings-send_holdoff_ticks').setValue(3);
+    expect(wrapper.find('#hosted-settings-send_holdoff_ticks-error').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it('shows the rules openly and focuses an invalid one', async () => {
     const wrapper = mount(HostedSettingsForm, { props: { previous: settings(), products: [JO] }, attachTo: document.body });
     expect(wrapper.get('#hosted-settings-time_limit').element.closest('details')).toBeNull();

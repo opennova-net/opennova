@@ -34,6 +34,23 @@ export const INT_FIELDS: readonly IntField[] = [
   'start_delay',
 ];
 
+// Network tuning has the same ranges for every hosted game.
+export const NETWORK_LIMITS = {
+  send_holdoff_ticks: { min: 0, max: 255 },
+  entity_send_budget: { min: 100, max: 1600 },
+  max_packet_size: { min: 100, max: 16384 },
+} as const;
+export type NetworkIntField = keyof typeof NETWORK_LIMITS;
+export const NETWORK_INT_FIELDS = Object.keys(NETWORK_LIMITS) as NetworkIntField[];
+
+export function sendCadenceText(value: number | string): string {
+  const period = wholeNumber(value);
+  if (period === null || period < 0 || period > 255) return '';
+  const ticks = Math.max(1, period);
+  const rate = Number((62.5 / ticks).toFixed(2));
+  return `Nominal ${ticks * 16} ms (${rate} updates/s in each direction)`;
+}
+
 // The backend's defaults for a field a start leaves out (HostedSettings); the
 // game's is the first the service offers (0 stands for none here).
 export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
@@ -48,6 +65,10 @@ export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
   respawn: 5,
   start_delay: 0,
   team_ff: false,
+  send_holdoff_ticks: 12,
+  entity_send_budget: 600,
+  max_packet_size: 1300,
+  lock_framerate: true,
   list_on_novalogic: false,
   missions: [],
   mission_options: [],
@@ -67,6 +88,10 @@ export const FIELD_LABELS: Record<SettingsField, string> = {
   respawn: 'Respawn time',
   start_delay: 'Pre-round delay',
   team_ff: 'Friendly fire',
+  send_holdoff_ticks: 'Send interval (ticks)',
+  entity_send_budget: 'Entity update budget (bytes)',
+  max_packet_size: 'Packet size ceiling (bytes)',
+  lock_framerate: 'Pace server frames',
   list_on_novalogic: "Also list on NovaLogic's NovaWorld",
   missions: 'Mission rotation',
   mission_options: 'Map side switching',
@@ -89,6 +114,10 @@ export const FIELD_RULES: Record<SettingsField, string> = {
   respawn: 'The respawn time is a whole number of seconds in the range the game allows.',
   start_delay: 'The pre-round delay is a whole number of seconds in the range the game allows.',
   team_ff: 'Friendly fire is on or off.',
+  send_holdoff_ticks: 'The send interval is a whole number from 0 to 255 ticks; 0 and 1 send every tick.',
+  entity_send_budget: 'The entity update budget is a whole number from 100 to 1600 bytes.',
+  max_packet_size: 'The packet size ceiling is a whole number from 100 to 16384 bytes.',
+  lock_framerate: 'Server frame pacing is on or off.',
   list_on_novalogic: "Listing on NovaLogic's NovaWorld is not available right now. Untick the box to start your server.",
   missions: `A rotation is 1 to ${MISSIONS_MAX} missions of the game and its expansion. Pick them from the list.`,
   mission_options: 'Choose whether each map swaps sides at the half.',
@@ -218,6 +247,10 @@ export interface SettingsForm {
   respawn: number | string;
   start_delay: number | string;
   team_ff: boolean;
+  send_holdoff_ticks: number | string;
+  entity_send_budget: number | string;
+  max_packet_size: number | string;
+  lock_framerate: boolean;
   list_on_novalogic: boolean;
   missions: string[];
   mission_options: boolean[];
@@ -248,6 +281,10 @@ export function formFrom(settings: HostedSettings | null, product: HostedProduct
     respawn: base.respawn,
     start_delay: base.start_delay,
     team_ff: base.team_ff,
+    send_holdoff_ticks: base.send_holdoff_ticks,
+    entity_send_budget: base.entity_send_budget,
+    max_packet_size: base.max_packet_size,
+    lock_framerate: base.lock_framerate,
     list_on_novalogic: base.list_on_novalogic === true,
     missions: [...missions],
     mission_options: flags,
@@ -392,6 +429,13 @@ export function checkSettings(
       errors[field] = range ? `Enter a whole number from ${range.min} to ${range.max}.` : 'Enter a whole number.';
     }
   }
+  const network = {} as Record<NetworkIntField, number>;
+  for (const field of NETWORK_INT_FIELDS) {
+    const value = wholeNumber(form[field]);
+    const range = NETWORK_LIMITS[field];
+    if (value !== null && value >= range.min && value <= range.max) network[field] = value;
+    else errors[field] = `Enter a whole number from ${range.min} to ${range.max}.`;
+  }
   const expansionOk = product ? allowsExpansion(product, form.expansion_id) : true;
   if (!expansionOk && product) errors.expansion_id = fieldRule('expansion_id', product);
   const missions = missionsProblem(form.missions, product && expansionOk ? availableMissions(product, form.expansion_id) : null);
@@ -405,7 +449,9 @@ export function checkSettings(
       game_name: form.game_name.trim(),
       game_password: form.game_password,
       ...numbers,
+      ...network,
       team_ff: form.team_ff,
+      lock_framerate: form.lock_framerate,
       list_on_novalogic: offersNovaLogicListing(product, novalogicListing) && form.list_on_novalogic,
       missions: [...form.missions],
       mission_options: [...form.mission_options],

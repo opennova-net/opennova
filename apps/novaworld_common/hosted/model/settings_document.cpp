@@ -12,8 +12,22 @@ struct IntField {
 constexpr IntField integers[] = { { "max_players", &HostedSettings::max_players },
 	{ "time_limit", &HostedSettings::time_limit }, { "kill_limit", &HostedSettings::kill_limit },
 	{ "max_score", &HostedSettings::max_score }, { "respawn", &HostedSettings::respawn },
-	{ "start_delay", &HostedSettings::start_delay } };
+	{ "start_delay", &HostedSettings::start_delay },
+	{ "send_holdoff_ticks", &HostedSettings::send_holdoff_ticks },
+	{ "entity_send_budget", &HostedSettings::entity_send_budget },
+	{ "max_packet_size", &HostedSettings::max_packet_size } };
 } //namespace
+
+io::JsonValue hosted_settings_schema(gamecfg::ConfigTable table) {
+	Json schema = gamecfg::server_settings_schema(table, true);
+	for (auto &row : schema.array) {
+		if (row.get_string("key", "") != "max_packet_size") continue;
+		row.set("core", Json::make_bool(true));
+		row.set("min", io::json_number(kMaxPacketSizeRange.min));
+		row.set("max", io::json_number(kMaxPacketSizeRange.max));
+	}
+	return schema;
+}
 
 io::JsonValue settings_document(const HostedSettings &s) {
 	Json out = Json::make_object();
@@ -26,6 +40,7 @@ io::JsonValue settings_document(const HostedSettings &s) {
 		out.set(f.key, io::json_number(s.*f.member));
 	out.set("team_ff", Json::make_bool(s.team_ff));
 	out.set("list_on_novalogic", Json::make_bool(s.list_on_novalogic));
+	out.set("lock_framerate", Json::make_bool(s.lock_framerate));
 	Json rotation = Json::make_array();
 	for (size_t i = 0; i < s.missions.size(); ++i) {
 		Json entry = Json::make_object();
@@ -68,12 +83,13 @@ bool read_settings_document(
 				return false;
 			}
 			(m.key == "game_name" ? s.game_name : s.game_password) = m.value.string;
-		} else if (m.key == "team_ff" || m.key == "list_on_novalogic") {
+		} else if (m.key == "team_ff" || m.key == "list_on_novalogic" || m.key == "lock_framerate") {
 			if (!m.value.is_bool()) {
 				error = "Expected a boolean.";
 				return false;
 			}
-			(m.key == "team_ff" ? s.team_ff : s.list_on_novalogic) = m.value.boolean;
+			(m.key == "team_ff" ? s.team_ff : m.key == "list_on_novalogic"
+					? s.list_on_novalogic : s.lock_framerate) = m.value.boolean;
 		} else if (m.key == "product_id" || m.key == "expansion_id") {
 			if (m.key == "expansion_id" && m.value.is_null()) {
 				s.expansion_id.reset();
@@ -93,7 +109,8 @@ bool read_settings_document(
 				return false;
 			}
 			for (const auto &option : m.value.object) {
-				if (const auto *spec = gamecfg::server_setting(option.key); spec && spec->core) {
+				if (const auto *spec = gamecfg::server_setting(option.key);
+						option.key == "max_packet_size" || (spec && spec->core)) {
 					field = option.key;
 					error = "Core settings belong at the top level.";
 					return false;
@@ -153,6 +170,8 @@ gamecfg::GameCfg settings_block(
 	cfg.max_score = s.max_score;
 	cfg.timeout = s.respawn;
 	cfg.startdelay = s.start_delay;
+	cfg.mp_max_packet_size = s.max_packet_size;
+	cfg.lock_framerate = s.lock_framerate ? 1 : 0;
 	cfg.mpattrib = s.team_ff ? cfg.mpattrib & ~0x200 : cfg.mpattrib | 0x200;
 	cfg.dedicated = 1;
 	return cfg;

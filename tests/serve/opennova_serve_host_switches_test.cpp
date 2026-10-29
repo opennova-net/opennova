@@ -111,11 +111,54 @@ void run_the_random_start() {
 	       "the scan's attempt count, the draw's range");
 }
 
+void run_network_launch_options() {
+	const std::vector<std::string> base = {"--resource-dir", "x", "/HOST", "h.host"};
+	std::string error;
+	serve::ServeOptions defaults;
+	expect(serve::parse_serve_options(base, defaults, error) == 0 &&
+	               !defaults.send_holdoff_ticks && !defaults.entity_send_budget,
+	       "omitted tuning keeps the engine's session defaults");
+	for (const char *flag : {"--send-holdoff-ticks", "--entity-send-budget"}) {
+		const bool holdoff = std::string(flag) == "--send-holdoff-ticks";
+		for (const char *value : holdoff ? std::vector<const char *>{"0", "1", "3", "255"}
+		                                : std::vector<const char *>{"100", "600", "1000", "1600"}) {
+			auto args = base;
+			args.insert(args.end(), {flag, value});
+			serve::ServeOptions parsed;
+			expect(serve::parse_serve_options(args, parsed, error) == 0 &&
+			               (holdoff ? parsed.send_holdoff_ticks : parsed.entity_send_budget) ==
+			                       static_cast<uint32_t>(std::stoul(value)),
+			       "a valid launch value reaches its override");
+		}
+		for (const char *value : {"", "-1", "1.5", "3junk", " 3", "4294967296", "words"}) {
+			auto args = base;
+			args.insert(args.end(), {flag, value});
+			serve::ServeOptions parsed;
+			expect(serve::parse_serve_options(args, parsed, error) == 1,
+			       "malformed tuning is refused, never partially parsed");
+		}
+		for (const char *value : holdoff ? std::vector<const char *>{"256"}
+		                                : std::vector<const char *>{"99", "1601"}) {
+			auto args = base;
+			args.insert(args.end(), {flag, value});
+			serve::ServeOptions parsed;
+			expect(serve::parse_serve_options(args, parsed, error) == 1, "out-of-range tuning is refused");
+		}
+		auto args = base;
+		args.push_back(flag);
+		serve::ServeOptions parsed;
+		expect(serve::parse_serve_options(args, parsed, error) == 1 &&
+		               error == std::string(flag) + " needs a value",
+		       "a launch override needs its value");
+	}
+}
+
 } // namespace
 
 int main() {
 	run_the_maxplayers_switch();
 	run_the_random_start();
+	run_network_launch_options();
 	if (failures == 0) std::printf("opennova_serve_host_switches: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
