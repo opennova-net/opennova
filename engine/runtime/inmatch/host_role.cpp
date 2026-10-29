@@ -127,18 +127,18 @@ void HostRole::reset_session(bool serve_and_play) {
 //  @0x561C23 (SinglePlayer_StartMission), ahead of GameLoop_Init's Game_StartMission call
 //  @0x526377, which seeds nothing]
 void HostRole::bind_session_world(const inmatch::GameConfig &config, bool serve_and_play,
-		bool in_session, const Protocol *title) {
+		bool in_session, const Protocol *protocol) {
 	mission::MissionKernel &kernel = *kernel_;
 	local_round_reset_seen_ = kernel.local.round_reset_revision;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	ctx.world = &kernel.world;
 	ctx.mission = &kernel.mission;
 	kernel.world.crt_rand = client_process_->crt_rand;
-	apply_rule_words(config, serve_and_play, in_session, title);
+	apply_rule_words(config, serve_and_play, in_session, protocol);
 }
 
 void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play,
-		bool in_session, const Protocol *title) {
+		bool in_session, const Protocol *protocol) {
 	mission::MissionKernel &kernel = *kernel_;
 	// The process's loadout name list, whose first name every body the session spawns takes
 	// as its equipped weapon (world::player_spawn_equipped_default) [orig:
@@ -163,7 +163,7 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// authority then ORs the scope-zero bit 0x10000 into the word, in a session or out
 	// (DFX2-18) [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)].
 	const uint32_t rules_word = (in_session ? config.mp_attributes : GameConfig::kSpRulesWord) |
-			protocol_in_match(title).rules_word_bits;
+			protocol_in_match(protocol).rules_word_bits;
 	kernel.world.rules.mpattrib = rules_word;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
@@ -801,7 +801,7 @@ void HostRole::apply_own_world_state_load(mission::MissionKernel &kernel,
 //  NapiNPServerMsg_PlayerJoinRequest @0x51AB10]
 void HostRole::send_own_mission_status() {
 	if (state.host_owner.ctx.is_mp_session_peer == 0 || !state.client_runtime) return;
-	const Protocol *title = state.host_owner.ctx.np_protocol.identity;
+	const Protocol *protocol = state.host_owner.ctx.np_protocol.identity;
 	// In a session the own client's mission start submits its profile's kit twice
 	// ahead of the 0x0B, as a joiner's does: the side block the local team names, its
 	// class byte and the kit page it selects, first with the fixed slot 195, then
@@ -838,7 +838,7 @@ void HostRole::send_own_mission_status() {
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
 						weapons, &kernel.local.inventory, team,
 						kernel.local.inventory.current_slot));
-			if (protocol_in_match(title).loadout_class_fixed)
+			if (protocol_in_match(protocol).loadout_class_fixed)
 				submit.player_class =
 						kernel.mission.header.mission_type == bms::MissionType::CombatVehicleMission
 						? uint8_t{7}
@@ -852,7 +852,7 @@ void HostRole::send_own_mission_status() {
 	}
 	if (!state.client_runtime->queue_host_message(c2s::MISSION_FILE_STATUS,
 				build_mission_status(std::string_view{},
-						packed_game_version(title != nullptr ? title->version_text : nullptr))))
+						packed_game_version(protocol != nullptr ? protocol->version_text : nullptr))))
 		return;
 	state.client_runtime->flush_host_sends();
 }

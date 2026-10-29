@@ -53,9 +53,9 @@ void expect(bool cond, const char *what) {
 const Protocol *jo() { return title_protocol("jo"); }
 const Protocol *dfx2() { return title_protocol("dfx2"); }
 
-// One phase-3 frame of a co-op host (g_GameType 0x30020) speaking `title`, to a remote recipient,
+// One phase-3 frame of a co-op host (g_GameType 0x30020) speaking `protocol`, to a remote recipient,
 // its world's co-op checkpoint at `checkpoint`.
-std::vector<uint8_t> phase3_frame(const Protocol *title, uint16_t checkpoint = 0xFFFF) {
+std::vector<uint8_t> phase3_frame(const Protocol *protocol, uint16_t checkpoint = 0xFFFF) {
 	world::World w;
 	w.script.coop_checkpoint_slot = checkpoint;
 	w.registry.configure_pool(0, 1);
@@ -67,7 +67,7 @@ std::vector<uint8_t> phase3_frame(const Protocol *title, uint16_t checkpoint = 0
 	ns::LoopbackChannel channel;
 	ns::Connection conn{&channel, ns::TransportMode::Loopback, h, 0};
 	conn.s2c_phase = 2; // the next counter value is phase 3
-	(void)ns::emit_connection_s2c(w, conn, ns::snapshot_world(w), 0x30020u, 0, 0, 0, title);
+	(void)ns::emit_connection_s2c(w, conn, ns::snapshot_world(w), 0x30020u, 0, 0, 0, protocol);
 	ns::Datagram dg;
 	expect(channel.client_recv(dg) && dg.tag == s2c::PER_FRAME_UPDATE, "the phase-3 0x0A goes out");
 	return dg.body;

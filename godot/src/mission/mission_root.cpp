@@ -170,14 +170,14 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		bool join_identity = true;
 		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
 			std::string title_error;
-			const opennova::Protocol *title =
+			const opennova::Protocol *protocol =
 					p_options->get_resource_root()->protocol(title_error);
-			if (title == nullptr) {
+			if (protocol == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to join with: %s",
 						opennova::to_gd(title_error)));
 				join_identity = false;
 			}
-			r_sim->set_protocol(title);
+			r_sim->set_protocol(protocol);
 		}
 		if (needs_join_connection && p_options->get_join_character_profile().is_valid()) {
 			r_sim->set_join_character_profile(p_options->get_join_character_profile());
@@ -249,15 +249,15 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// witnessed one would answer no joiner, so it does not host.
 		if (p_options->get_resource_root().is_valid()) {
 			std::string title_error;
-			const opennova::Protocol *title =
+			const opennova::Protocol *protocol =
 					p_options->get_resource_root()->protocol(title_error);
-			if (title == nullptr) {
+			if (protocol == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to host with: %s",
 						opennova::to_gd(title_error)));
 				r_sim.unref();
 				return ERR_UNCONFIGURED;
 			}
-			r_sim->set_protocol(title);
+			r_sim->set_protocol(protocol);
 		}
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).

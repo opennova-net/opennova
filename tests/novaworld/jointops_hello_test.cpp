@@ -60,10 +60,10 @@ int main() {
 	    0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
 	    0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 
-	const Protocol &title = *title_protocol("jo");
+	const Protocol &protocol = *title_protocol("jo");
 
 	// Exact retail JointOperations game-session hello.
-	ClientSession jo{ClientSession::Config::game_protocol(title)};
+	ClientSession jo{ClientSession::Config::game_protocol(protocol)};
 	ClientHello jo_hello;
 	check(decode_hello(jo.start(), jo_hello), "JO hello decodes");
 	check(jo_hello.nvs ==
@@ -72,7 +72,7 @@ int main() {
 	check(jo_hello.co == "NovaLogic Inc, Calabasas CA U.S.A.",
 	      "JO hello CO == retail NovaLogic company");
 	// D-NET-975: AP is the running executable's file name (this test's own), cut to 63, as
-	// the network init reads it, not a title constant. [orig: CNapiNetwork_Init @0x4ca4a0 -
+	// the network init reads it, not a protocol constant. [orig: CNapiNetwork_Init @0x4ca4a0 -
 	//  Napi_GetExeBasename (the call @0x4ca747), Napi_CopyString(proto+0x58, .., 0x40) @0x4ca759]
 	check(jo_hello.ap == read_exe_basename().substr(0, kLobbyApChars),
 	      "JO hello AP == the running executable's file name");
@@ -83,8 +83,8 @@ int main() {
 	check(jo_hello.pg_present, "JO hello carries PG");
 	check(jo_hello.pg == kRetailJoPg, "JO hello PG == retail JO GUID");
 
-	// The title's lobby hello.
-	ClientSession nw{ClientSession::Config::lobby(title, title.gate_tag)};
+	// The protocol's lobby hello.
+	ClientSession nw{ClientSession::Config::lobby(protocol, protocol.gate_tag)};
 	ClientHello nw_hello;
 	check(decode_hello(nw.start(), nw_hello), "NOVAWORLDUDP hello decodes");
 	check(nw_hello.pn == "NOVAWORLDUDP", "default hello PN == NOVAWORLDUDP");

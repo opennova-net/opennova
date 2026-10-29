@@ -63,7 +63,7 @@ void expect(bool cond, const char *what) {
 const Protocol *jo() { return title_protocol("jo"); }
 const Protocol *dfx2() { return title_protocol("dfx2"); }
 
-// A listen host on a mission with one start marker and no spawn zone, speaking `title`: its own
+// A listen host on a mission with one start marker and no spawn zone, speaking `protocol`: its own
 // player joined through the round init and the pending spawns, the 0x0F of its burst decoded.
 struct JoinedHost {
 	w::World world;
@@ -73,7 +73,7 @@ struct JoinedHost {
 	bool decoded = false;
 };
 
-void join_own_player(JoinedHost &host, const Protocol *title) {
+void join_own_player(JoinedHost &host, const Protocol *protocol) {
 	host.world.registry.configure_pool(0, 16);
 	host.world.registry.configure_pool(3, 16);
 	w::Entity start;
@@ -86,7 +86,7 @@ void join_own_player(JoinedHost &host, const Protocol *title) {
 	host.world.rules.mp_session = true;
 	inmatch::test::bring_up_host(host.ctx, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, /*host_key=*/0, &host.loopback);
-	host.ctx.np_protocol.identity = title;
+	host.ctx.np_protocol.identity = protocol;
 	host.ctx.world = &host.world;
 	inmatch::Server_InitNewRoundState(host.ctx);
 	inmatch::Server_ProcessPendingPlayerSpawns(host.ctx, host.world);
@@ -103,10 +103,10 @@ void join_own_player(JoinedHost &host, const Protocol *title) {
 }
 
 void world_state_flags_and_join_state() {
-	for (const Protocol *title : {jo(), dfx2()}) {
-		const bool is_dfx2 = title == dfx2();
+	for (const Protocol *protocol : {jo(), dfx2()}) {
+		const bool is_dfx2 = protocol == dfx2();
 		JoinedHost host;
-		join_own_player(host, title);
+		join_own_player(host, protocol);
 		expect(host.decoded, "the burst carries a decodable 0x0F");
 		expect(!host.world.zones.has_spawn_zone(), "the mission has no spawn zone");
 		expect((host.state.game_flags & 0x01u) == (is_dfx2 ? 0x01u : 0x00u),
@@ -118,7 +118,7 @@ void world_state_flags_and_join_state() {
 		               : "a JO join with no spawn zone or pre-round is deployed, unlatched");
 		conn.link.preround_loadout_latch = false;
 		(void)inmatch::Server_ReleasePlayerDeployment(host.ctx.config, conn, host.world, {}, 0xFFFF,
-				nullptr, title);
+				nullptr, protocol);
 		expect(conn.link.preround_loadout_latch == is_dfx2,
 		       is_dfx2 ? "DFX2-11: a DFX2 deploy sets the loadout latch (3)"
 		               : "a JO deploy outside the pre-round leaves it clear");
@@ -128,20 +128,20 @@ void world_state_flags_and_join_state() {
 // The admin console's WEAPON SET: ARMORY stores the title's armory-only value, which the host's
 // restriction table keeps (the 0x66 entries).
 void admin_weapon_armory() {
-	for (const Protocol *title : {jo(), dfx2()}) {
+	for (const Protocol *protocol : {jo(), dfx2()}) {
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
-		ctx.np_protocol.identity = title;
+		ctx.np_protocol.identity = protocol;
 		inmatch::AdminConsole console(ctx, inmatch::AdminConsole::Seams{});
 		AdminSession session;
 		session.rights = 0xFFFFFFFFu;
 		std::vector<std::string> replies;
 		console.dispatch(session, "WEAPON SET 5 ARMORY", replies);
 		console.dispatch(session, "WEAPON SET 6 NEVER", replies);
-		const uint8_t armory = title == dfx2() ? 3 : 2;
+		const uint8_t armory = protocol == dfx2() ? 3 : 2;
 		expect(ctx.weapon_restrictions ==
 		               std::vector<std::pair<uint8_t, uint8_t>>{{5, armory}, {6, 0}},
-		       title == dfx2() ? "DFX2-10: a DFX2 host's ARMORY is 3" : "a JO host's ARMORY is 2");
+		       protocol == dfx2() ? "DFX2-10: a DFX2 host's ARMORY is 3" : "a JO host's ARMORY is 2");
 	}
 }
 
@@ -208,8 +208,8 @@ void lan_cd_key_check() {
 
 // The 0x42 build gates read the title's values: the same four for JO and DFX2.
 void join_build_values() {
-	for (const Protocol *title : {jo(), dfx2()}) {
-		const JoinBuild &b = protocol_join_build(title);
+	for (const Protocol *protocol : {jo(), dfx2()}) {
+		const JoinBuild &b = protocol_join_build(protocol);
 		expect(b.bn == 1 && b.vn == 2 && b.mbn == 20042002 && b.sopd == 180,
 		       "BN 1, VN 2, MBN 20042002, SOPD 180 in both titles");
 	}
@@ -227,9 +227,9 @@ void chat_squad_tag() {
 void rules_word() {
 	inmatch::GameConfig config;
 	config.mp_attributes = 0x3A06u;
-	const auto word = [&config](const Protocol *title) {
+	const auto word = [&config](const Protocol *protocol) {
 		const inmatch::MissionMetadataBlob blob =
-				inmatch::build_mission_metadata_blob(config, /*mp_session_peer=*/true, title,
+				inmatch::build_mission_metadata_blob(config, /*mp_session_peer=*/true, protocol,
 						config.mission_file);
 		return static_cast<uint32_t>(blob[44]) | (static_cast<uint32_t>(blob[45]) << 8) |
 				(static_cast<uint32_t>(blob[46]) << 16) | (static_cast<uint32_t>(blob[47]) << 24);

@@ -611,8 +611,8 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	opennova::inmatch::GameConfig config = p_options->config();
 	config.mission_header_blob = std::move(net_.host_session_config.mission_header_blob);
 	// The rules the session runs are the title's it hosts as (session_protocol); none, Jointops.exe's.
-	const opennova::Protocol *title = session_protocol(net_.protocol);
-	config.title = opennova::protocol_game_id(title);
+	const opennova::Protocol *protocol = session_protocol(net_.protocol);
+	config.title = opennova::protocol_game_id(protocol);
 	net_.host_bind_port = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
 	net_.host_network_type = p_options->network_type();
 	config.spectator_slots = std::max(config.spectator_slots, -1);
@@ -767,11 +767,11 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// session's role switch is the gate: re-dialing a live mission is rejected
 	// without partially replacing its transport. A session with no title identity
 	// (session_protocol) has nothing to join with.
-	const opennova::Protocol *title = session_protocol(net_.protocol);
-	if (title == nullptr) return false;
+	const opennova::Protocol *protocol = session_protocol(net_.protocol);
+	if (protocol == nullptr) return false;
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
-	joiner_role_->set_protocol(title);
+	joiner_role_->set_protocol(protocol);
 	// The process's 0x4C report count runs on across joins (ClientProcessState).
 	joiner_role_->use_process_state(net_.client_process);
 	// The process's log devices: a session destroy's stop of a held server writes its

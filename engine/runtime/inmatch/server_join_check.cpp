@@ -205,12 +205,12 @@ void read_join_cd_key_ids(NapiNPConnection &conn, const std::vector<uint8_t> &jo
 uint32_t Server_ValidatePlayerJoinRequest(const GameConfig &config, NapiNPServerCtx *ctx,
 		NapiNPConnection &conn, const std::vector<NapiNPConnection> &roster,
 		const std::vector<uint8_t> &join_payload) {
-	const Protocol *title = ctx != nullptr ? ctx->np_protocol.identity : nullptr;
-	uint32_t reject_dpc = validate_join_environment(conn.join_environment, protocol_join_build(title));
+	const Protocol *protocol = ctx != nullptr ? ctx->np_protocol.identity : nullptr;
+	uint32_t reject_dpc = validate_join_environment(conn.join_environment, protocol_join_build(protocol));
 	if (reject_dpc == 0 && ctx != nullptr)
 		reject_dpc = validate_novaworld_app_id(*ctx, conn);
 	if (reject_dpc == 0 && ctx != nullptr)
-		reject_dpc = validate_lan_cd_key(*ctx, protocol_in_match(title), conn, roster);
+		reject_dpc = validate_lan_cd_key(*ctx, protocol_in_match(protocol), conn, roster);
 	if (reject_dpc == 0)
 		reject_dpc = validate_join_request(config, join_payload);
 	if (reject_dpc == 0)

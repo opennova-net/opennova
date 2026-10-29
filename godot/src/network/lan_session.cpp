@@ -185,8 +185,8 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	emit_signal("servers_changed", get_servers());
 
 	std::string title_error;
-	const opennova::Protocol *title = ResourceRoot::session_protocol(resource_root_, title_error);
-	if (title == nullptr) {
+	const opennova::Protocol *protocol = ResourceRoot::session_protocol(resource_root_, title_error);
+	if (protocol == nullptr) {
 		emit_error(String("LAN browse has no identity: ") + opennova::to_gd(title_error));
 		return static_cast<int>(ERR_UNCONFIGURED);
 	}
@@ -194,7 +194,7 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	// The enumerator's connection: created twice, as every enumerate's is, so its
 	// CI is the counter's second step (next_browse_connection_index).
 	if (target.is_empty() ||
-			!browser_.begin(*title, opennova::next_browse_connection_index(),
+			!browser_.begin(*protocol, opennova::next_browse_connection_index(),
 					enumerate_address(target), port_min, port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);

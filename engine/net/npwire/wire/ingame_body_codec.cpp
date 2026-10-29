@@ -15,14 +15,14 @@
 namespace opennova {
 
 IngameBodyCodecContext IngameBodyCodecContext::for_session(uint32_t game_type,
-		const Protocol *title) {
+		const Protocol *protocol) {
 	IngameBodyCodecContext ctx;
 	// The off-wire gates the decoders take [orig: the 0x0A objective body
 	// gate g_GameType & 0x20000; the 0x0F waypoint gate
 	// (g_GameType & 0xFFFDFFFF) == 0x10020] (net-re §5.9, §5.29), and the
-	// title's co-op checkpoint after the objective values (DFX2-1).
+	// protocol's co-op checkpoint after the objective values (DFX2-1).
 	ctx.objective_body = frame_objective_body((game_type & 0x20000u) != 0,
-			protocol_in_match(title).objective_checkpoint);
+			protocol_in_match(protocol).objective_checkpoint);
 	ctx.waypoint_gametype = (game_type & ~0x20000u) == 0x10020u;
 	return ctx;
 }

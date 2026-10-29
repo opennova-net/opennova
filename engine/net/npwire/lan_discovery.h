@@ -39,7 +39,7 @@ struct LanDiscoveryServer {
 };
 
 // Build a complete, ready-to-send NWU datagram containing the same NP/NAPI
-// 0x41 title identity as the direct-peer join path (`title` complete:
+// 0x41 identity as the direct-peer join path (`protocol` complete:
 // make_title_client_hello). The caller owns broadcast/socket policy. `client_index` is the CI the replies
 // echo; it must be non-zero (the announce builder omits a zero CI entirely).
 // `target_ip` / `target_port` are the datagram's own destination, which the
@@ -50,7 +50,7 @@ struct LanDiscoveryServer {
 //  EPN @0x61fd23..0x61fd47, the SendTo to the same pair @0x61fdd3..0x61fdde;
 //  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - one announce per port
 //  @0x629241..0x629268]
-std::vector<uint8_t> build_lan_discovery_probe(const Protocol &title, uint32_t client_index,
+std::vector<uint8_t> build_lan_discovery_probe(const Protocol &protocol, uint32_t client_index,
                                                uint32_t target_ip, uint32_t target_port);
 
 // Decode a complete NWU datagram and project a 0x81 ServerHello into the LAN
@@ -58,9 +58,9 @@ std::vector<uint8_t> build_lan_discovery_probe(const Protocol &title, uint32_t c
 // reply's CI against its enumerator and drops a reply for a CI it did not
 // issue (an absent CI resolves as 0 and never matches a live enumerator).
 // Returns false for malformed packets, any opcode other than ServerHello, a
-// foreign CI, or a game identity other than `title`'s; `out` is changed only
+// foreign CI, or a game identity other than `protocol`'s; `out` is changed only
 // on success.
-bool parse_lan_discovery_reply(const Protocol &title, const uint8_t *data, size_t size,
+bool parse_lan_discovery_reply(const Protocol &protocol, const uint8_t *data, size_t size,
                                uint32_t client_index, LanDiscoveryServer &out);
 
 // The connection index a browse's announces carry (LanDiscoveryBrowser::begin's
@@ -225,7 +225,7 @@ public:
 	// P2 admits it lists (lan_session_admits_connect_type). `enumerate_ip` is the
 	// destination every announce goes to, in PeerAddr's packing (0xFFFFFFFF for the
 	// LAN broadcast, the resolved address on a direct browse; 0 writes no EIP).
-	// `title` is the identity the announces carry and the replies must match (complete,
+	// `protocol` is the identity the announces carry and the replies must match (complete,
 	// outliving the window). The search drains the enumerator's records first
 	// (drain_records) and starts its row table empty. False (nothing changes) on an
 	// invalid port range or a zero client index.
@@ -235,7 +235,7 @@ public:
 	//  CNapiGameSession_InitTransportConnection @0x4c9e10 - -1 on a LAN browse
 	//  @0x4c9eab, the resolved address on a direct one @0x4c9eb5..0x4c9ec3, stored
 	//  to enumerator+4 @0x4c9f0b]
-	bool begin(const Protocol &title, uint32_t client_index, uint32_t enumerate_ip,
+	bool begin(const Protocol &protocol, uint32_t client_index, uint32_t enumerate_ip,
 	           int port_min, int port_max, int connect_type);
 	// Stops the enumerator; its records and the rows stay (the window's end). A row's join
 	// press stops the browse's pump too: the press pushes the join machine's PreMenu mode,

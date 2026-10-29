@@ -40,7 +40,7 @@ struct IngameBodyCodecContext {
 
 	// The session a capture or a host runs: its game type and the title it speaks
 	// (null runs JO's, protocol_in_match).
-	static IngameBodyCodecContext for_session(uint32_t game_type, const Protocol *title);
+	static IngameBodyCodecContext for_session(uint32_t game_type, const Protocol *protocol);
 };
 
 enum class BodyDecode : uint8_t {

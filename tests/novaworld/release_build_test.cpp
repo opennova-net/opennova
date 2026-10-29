@@ -619,11 +619,11 @@ static int test_expansion_folders() {
 	const auto *gate = entry_named(package.sections[0], "gt.ssc");
 	std::vector<uint8_t> bytes;
 	std::string tag, why;
-	const auto *title = opennova::resolve_title_protocol("jo", why);
+	const auto *protocol = opennova::resolve_title_protocol("jo", why);
 	TEST_EXPECT(gate &&
 			update::nlz_decode(gate->data.data(), gate->data.size(), bytes) !=
 					update::NlzDecode::Corrupt &&
-			title && opennova::decode_gate_tag_file(bytes, title->gate_tag_keys, tag) &&
+			protocol && opennova::decode_gate_tag_file(bytes, protocol->gate_tag_keys, tag) &&
 			tag == "jop:cus2");
 
 	// An expansion project on the game install's base game: no base game's project to lay out.

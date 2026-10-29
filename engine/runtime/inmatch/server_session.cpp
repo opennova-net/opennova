@@ -100,10 +100,10 @@ void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 
 // The config the session serves from: the resolved send period, the session
 // title (the mount's override table `text_override` answering first), the
-// mission-data block (its rules word the title identity's, `title`; its +0x74
+// mission-data block (its rules word the protocol's, `protocol`; its +0x74
 // the session title), the advertised name and cap.
 void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
-		const Protocol *title, const rtxt::File *text_override) {
+		const Protocol *protocol, const rtxt::File *text_override) {
 	// Resolve the session-selected retail default once at session creation so
 	// every later connection, settings record, and countdown reads the same
 	// concrete period. A caller-supplied override wins verbatim.
@@ -120,7 +120,7 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
 	// CNapiGameSession_InitRandomSeedOrRequest @0x5248A7].
 	ctx.session_title = mission_session_title(text_override, config.mission_file);
 	ctx.mission_metadata_blob = build_mission_metadata_blob(
-			ctx.config, ctx.is_mp_session_peer != 0, title, ctx.session_title);
+			ctx.config, ctx.is_mp_session_peer != 0, protocol, ctx.session_title);
 	// The MP TLV (the 0x82 and the LAN discovery 0x81) carries the session's
 	// cap, never the slot limit's dedicated slot [orig: protocol +0x524 =
 	// ctx+0xF28, CNapiGameSession_CreateSession @0x4C9A80;

@@ -78,14 +78,14 @@ bool decode_c2s(const std::vector<uint8_t> &datagram, const std::string &client_
 			decode_protocol_packet_plaintext(body.data(), body.size(), client_scrk, header, messages);
 }
 
-// The class byte of the 0x2F an in-match joiner speaking `title`, whose kit is a medic's (5),
+// The class byte of the 0x2F an in-match joiner speaking `protocol`, whose kit is a medic's (5),
 // re-submits when an S2C 0x50 moves its own entity, after the host's BMS header named a mission
 // of `mission_type` (0: no header). The sender fixes the class for every 0x2F (the armory's
 // takes it in inmatch::armory_accept_in_session, pinned by damage_class_bytes).
 // [orig: NapiNPClientMsg_TeamAssign @0x431910 - the reselect's submit @0x431AAD]
-int resubmit_class(const Protocol *title, uint8_t mission_type) {
+int resubmit_class(const Protocol *protocol, uint8_t mission_type) {
 	inmatch::JoinerConnection joiner("Dfx2Loadout");
-	joiner.set_protocol(title);
+	joiner.set_protocol(protocol);
 	inmatch::JoinerConnection::LoadoutKit kit;
 	kit.player_class = 5;
 	joiner.set_loadout_kit(kit);
@@ -119,7 +119,7 @@ void loadout_class_byte() {
 	expect(resubmit_class(dfx2(), 2) == 7, "DFX2-12: 7 in a mission of type 2");
 }
 
-// Drive a joiner speaking `title` from its hello to its JOIN and return the JOIN's TLV names, its
+// Drive a joiner speaking `protocol` from its hello to its JOIN and return the JOIN's TLV names, its
 // CDKIID and GLSVSSREQUEST (each empty when it sent none), and the ClientAuth's CU (name, value)
 // pairs.
 struct JoinSent {
@@ -130,11 +130,11 @@ struct JoinSent {
 	bool ok = false;
 };
 
-JoinSent join_of(const Protocol *title, const cdkey::WireKeys &ids, const std::string &app_id,
+JoinSent join_of(const Protocol *protocol, const cdkey::WireKeys &ids, const std::string &app_id,
 		const std::string &glsvss_request = {}, const std::vector<uint8_t> &cd_cookie = {}) {
 	JoinSent out;
 	inmatch::JoinerConnection joiner("Dfx2Joiner");
-	joiner.set_protocol(title);
+	joiner.set_protocol(protocol);
 	joiner.set_cd_key_ids(ids);
 	if (!app_id.empty()) joiner.set_app_id(app_id);
 	joiner.set_glsvss_request(glsvss_request);

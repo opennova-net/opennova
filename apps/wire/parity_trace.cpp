@@ -214,7 +214,7 @@ void ParityTraceBuilder::emit_decoded(
 		emit_message(message, ts_of(message.frame_index));
 }
 
-const Protocol *handshake_title(const std::vector<uint8_t> &raw) {
+const Protocol *handshake_protocol(const std::vector<uint8_t> &raw) {
 	std::vector<uint8_t> stripped(raw.size());
 	size_t stripped_len = 0;
 	if (napi_envelope_decode(
@@ -241,7 +241,7 @@ const Protocol *handshake_title(const std::vector<uint8_t> &raw) {
 
 void ParityTraceBuilder::emit_handshake(
 		int frame, uint64_t ts_ns, int src_port, int dst_port, const std::vector<uint8_t> &raw) {
-	if (const Protocol *title = handshake_title(raw)) protocol_ = title;
+	if (const Protocol *protocol = handshake_protocol(raw)) protocol_ = protocol;
 	std::vector<uint8_t> stripped(raw.size());
 	size_t stripped_len = 0;
 	if (napi_envelope_decode(
