@@ -2499,6 +2499,52 @@ void test_ai_authored_entry_claim_and_stages() {
 	CHECK(r.player().mounted);
 }
 
+// A command-125 boarder tests its cached target first: a cached row still carrying the
+// target SSN is the target, with no pool scan and no E-point claim, even while a pool-0
+// row carrying the same SSN sits ahead of it in the scan; a miss clears the cache and
+// scans, the first match the target (claimed only from pools 1..3). 123/124 find the cache
+// cleared at the think head, so they scan every think.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the think head's clear @0x4BA9AD..0x4BA9C7,
+//  the cache test @0x4BAE9C..0x4BAEAF, the clear @0x4BAEB5, the scans @0x4BAEBB..0x4BAF8E,
+//  the pool-0 hit past the claim @0x4BAEF1, the claim @0x4BAF9B..0x4BB185]
+void test_board_target_cache_is_tested_before_the_scan() {
+	for (const int32_t command : {125, 123}) {
+		Rig r;
+		r.w.cached.local_player = {};
+		r.player().net_id = 88;
+		Entity decoy; // a pool-0 row carrying the carrier's SSN, first in the scan
+		decoy.kind = EntityKind::Organic;
+		decoy.item_type_index = 3;
+		decoy.net_id = r.veh().net_id;
+		decoy.position = {300.0f, 300.0f, 10.0f};
+		const EntityHandle decoy_h = r.w.registry.spawn(0, decoy);
+		auto &brain = *r.sys.at(r.sys.attach(r.player_h));
+		brain.slot.f[37] = command;
+		brain.slot.f[38] = r.veh().net_id;
+		brain.slot.f[36] = int32_t(r.veh_h.packed) + 1;
+		brain.inf.board_entry_slot = 5; // a claim writes it
+		r.sys.infantry_think(brain, r.w);
+		if (command == 125) {
+			CHECK(brain.slot.f[36] == int32_t(r.veh_h.packed) + 1); // the hit, no scan
+			CHECK(brain.inf.board_entry_slot == 5);                  // and no claim
+		} else {
+			CHECK(brain.slot.f[36] == int32_t(decoy_h.packed) + 1); // scanned: pool 0 first
+			CHECK(brain.inf.board_entry_slot == 5);                  // a pool-0 hit claims nothing
+		}
+		// A miss: the scan finds the carrier in pool 1 and claims an E point.
+		r.w.registry.despawn(decoy_h);
+		brain.slot.f[37] = 125;
+		brain.slot.f[36] = 0;
+		r.sys.infantry_think(brain, r.w);
+		CHECK(brain.slot.f[36] == int32_t(r.veh_h.packed) + 1);
+		CHECK(brain.inf.board_entry_slot == 1);
+		// The next think hits the cache: no claim.
+		brain.inf.board_entry_slot = 5;
+		r.sys.infantry_think(brain, r.w);
+		CHECK(brain.inf.board_entry_slot == 5);
+	}
+}
+
 void test_ai_boarding_moving_and_destroyed_carrier_admission() {
 	Rig r;
 	r.w.cached.local_player = {};
@@ -6061,6 +6107,7 @@ int main() {
     test_epilog_entity_update();
     test_same_team_hold_scan_follows_the_session();
     test_hold_scan_walks_the_refnum_list();
+    test_board_target_cache_is_tested_before_the_scan();
     test_remote_player_control_seat_preserves_wire_look();
     test_remote_passenger_keeps_its_wire_look();
     test_live_pose_provider_and_static_fallback();
