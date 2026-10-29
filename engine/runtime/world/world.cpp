@@ -480,9 +480,9 @@ void World::update_all_entities(const TickContext &ctx) {
         return p != nullptr && !p->pool1_visited ? p : nullptr;
     };
     // Decoded joiner rows can exist beyond the registry high-water mark; their
-    // slot adapter retains the full walk, bounded by the 12-bit slot field: a
-    // scaled pool (revx02's 9600) past 4096 would alias each handle onto a lower
-    // slot and visit its decoded row again. Authority snapshots used after respawns.
+    // slot adapter retains the full walk, bounded by the 12-bit slot field (a
+    // scaled pool is capped there, kWirePoolCapacity, so no handle aliases a lower
+    // slot's row). Authority snapshots used after respawns.
     // [orig: Entity_UpdateAllEntities @ 0x4C2100, used read @ 0x4C215E]
     const size_t pool1 = pool1_slot_leg
             ? std::min<size_t>(registry.pool_capacity(1), size_t{0xFFF} + 1)

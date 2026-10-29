@@ -243,7 +243,7 @@ public:
     // One pool's live rows in slot order below its used count — the retail
     // per-pool array walk (g_PoolList[pool].used entries) the per-tick systems
     // take instead of the whole registry. Retail reads `used` in every walk,
-    // never the capacity, so a scaled pool (revx02's 2048 / 9600 slots) walks
+    // never the capacity, so a scaled pool (revx02's, up to kWirePoolCapacity) walks
     // only the rows it allocated [orig: Entity_UpdateAllEntities @0x4c2100 -
     // @0x4C2134 / @0x4C215E (pool 1, its walk @0x4c2140..), @0x4C242C (pool 0,
     // its walk @0x4c244c..), @0x4C2248 (pool 2),

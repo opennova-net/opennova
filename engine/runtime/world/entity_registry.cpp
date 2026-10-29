@@ -26,7 +26,8 @@ constexpr ExpansionPoolScale kExpansionPoolScales[] = {
 
 PoolCapacities scaled_pool_capacities(std::size_t scale) {
     PoolCapacities out = kRetailPoolCapacity;
-    for (std::size_t &capacity : out) capacity *= scale;
+    for (std::size_t pool = 0; pool < out.size(); ++pool)
+        out[pool] = std::min(out[pool] * scale, kWirePoolCapacity[pool]);
     return out;
 }
 

@@ -998,12 +998,14 @@ static void test_pool_capacities_size_the_load() {
     CHECK(retail->registry.get(EntityHandle::make(1, 1199)) != nullptr);
     CHECK(retail->registry.by_net_id(1000 + 1213) == nullptr);
     set_pool_capacities(pool_capacities_for_expansion("revx02"));
-    CHECK(pool_capacity(0) == 2048 && pool_capacity(1) == 9600 && pool_capacity(2) == 9600 &&
-          pool_capacity(3) == 6144 && pool_capacity(4) == 1024 && pool_capacity(5) == 0);
+    // Scaled, each capped at what the wire can name: pool 0 at the person byte's 256,
+    // pools 1..3 at the handle's 4096 slots.
+    CHECK(pool_capacity(0) == 256 && pool_capacity(1) == 4096 && pool_capacity(2) == 4096 &&
+          pool_capacity(3) == 4096 && pool_capacity(4) == 1024 && pool_capacity(5) == 0);
     auto scaled = std::make_unique<World>();
     const mission::PromoteResult kept = mission::promote_mission(file, *scaled);
     set_pool_capacities(kRetailPoolCapacity);
-    CHECK(scaled->registry.pool_capacity(1) == 9600 && kept.dropped == 0);
+    CHECK(scaled->registry.pool_capacity(1) == 4096 && kept.dropped == 0);
     const Entity *last = scaled->registry.get(EntityHandle::make(1, 1213));
     CHECK(last != nullptr && last->net_id == 1000 + 1213);
     CHECK(pool_capacity(1) == 1200);

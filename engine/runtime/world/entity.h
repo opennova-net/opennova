@@ -62,8 +62,15 @@ constexpr std::size_t retail_pool_capacity(int pool) {
             ? kRetailPoolCapacity[pool]
             : 0;
 }
-// Retail's capacities, each times `scale` (1: retail's own). A slot past the 12-bit
-// handle field (4096) aliases another's handle, so a pool is useful up to 4096.
+// The widest each pool may be configured and still be named on the wire: a handle
+// carries a 12-bit slot (EntityHandle, 4096 slots), and the S2C records name a person
+// by its pool-0 slot's one byte, 0xFF for none (pool0_index_byte: the kill feed, the
+// radio call, the emote, the medic, the squad and capture records), so pool 0 stays at
+// retail's 256. The wire's widths are retail's and stay, so a scaled pool is capped
+// here rather than aliasing a row onto another's name.
+inline constexpr PoolCapacities kWirePoolCapacity = {256, 4096, 4096, 4096, 4096};
+// Retail's capacities, each times `scale` (1: retail's own), each capped at its
+// kWirePoolCapacity.
 PoolCapacities scaled_pool_capacities(std::size_t scale);
 // The capacities the game takes with `expansion` mounted (a name as /exp gives it,
 // ASCII case-blind; "" the base game): an expansion whose content outgrows retail's
