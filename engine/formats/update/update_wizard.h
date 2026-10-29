@@ -63,9 +63,6 @@ std::string substitute_territory(std::string_view value, const Territory &territ
 // [orig: Cupdate2Dlg_ReadWizard @ 0x404c90 (UPDATE.EXE)]
 UpdateWizard with_territory(UpdateWizard wizard, const Territory &territory);
 
-// OP: Acid Gambit's updater login, the one its own wizard names.
-inline constexpr std::string_view kAcidGambitLogin = "ACIDGAMBIT";
-
 // The runtime's product, the one an OpenNova folder's OPENNOVA.WIZ names when it holds the
 // runtime: the login and the command file. A wizard naming another login is an app's folder
 // (the editor's ONEDITOR), which updates that app alone.

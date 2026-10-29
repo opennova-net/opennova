@@ -36,6 +36,10 @@ struct Title {
 	// The command file a game folder's stock UPDATE.WIZ names for the title (its CMD), which
 	// the launch reads for the folder's product (ADR 0067 d2).
 	const char *command_file = nullptr;
+	// The updater login of a title whose content OpenNova's service serves with no wizard in the
+	// folder yet (its own wizard's PRODUCT_LOGIN, the product the updater installs: OP: Acid
+	// Gambit's). Null for a retail title, whose folder's own UPDATE.WIZ names its login.
+	const char *updater_login = nullptr;
 	// The game.cfg table the title's executable walks (gamecfg::config_var_rows).
 	gamecfg::ConfigTable config_table{};
 	// DFX2-8: the player caps the title's executable compiles in. `max_players` is the most a

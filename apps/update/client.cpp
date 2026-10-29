@@ -651,8 +651,11 @@ bool discover_products(const Options &o, std::vector<Product> &out, std::string 
 		}
 	}
 	if (native_content) {
-		out.push_back({o.resource_dir, std::string(update::kAcidGambitLogin),
-				std::string(default_title().command_file), {}, true});
+		// The launched title's own product: the default title, whose content the service serves
+		// under its updater login (Title::updater_login).
+		const Title &launched = default_title();
+		out.push_back({o.resource_dir, std::string(launched.updater_login),
+				std::string(launched.command_file), {}, true});
 	} else {
 		Product retail;
 		if (!wizard_product(o.resource_dir, named_file(o.resource_dir, "UPDATE.WIZ"), retail, error)) return false;

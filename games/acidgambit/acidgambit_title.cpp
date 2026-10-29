@@ -21,6 +21,8 @@ Title make() {
 	// The command file its own wizard names, the one the release build writes into its package
 	// (products/release_build.h).
 	t.command_file = "ACIDGAMBIT.CMD";
+	// The login its wizard names, the service's product for it (products.updater_login).
+	t.updater_login = "ACIDGAMBIT";
 	t.config_table = gamecfg::ConfigTable::Jo;
 	// Its player caps are Joint Operations', as its rules are (acidgambit_rules.cpp).
 	t.max_players = jo_title().max_players;

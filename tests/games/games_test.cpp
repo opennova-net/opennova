@@ -92,6 +92,12 @@ void acidgambit_speaks_jo() {
 	CHECK(std::string(ag.command_file) == "ACIDGAMBIT.CMD" && ag.executable == nullptr);
 	CHECK(ag.scr_policy == games::jo_title().scr_policy);
 	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == title_protocol("dfx2"));
+	// The updater login the service serves OpenNova's own content under is its title's; a retail
+	// title's folder names its own (Title::updater_login).
+	CHECK(title_by_code("acidgambit")->updater_login != nullptr &&
+			std::string(title_by_code("acidgambit")->updater_login) == "ACIDGAMBIT");
+	CHECK(title_by_code("jo")->updater_login == nullptr &&
+			title_by_code("dfx2")->updater_login == nullptr);
 }
 
 // The titles no binary has been read for: refused by name, as before the registry.
