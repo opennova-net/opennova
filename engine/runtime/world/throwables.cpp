@@ -1686,11 +1686,20 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
 }
 
 PlacedDevice *ThrowableSim::device_for(const Entity &entity) {
-    for (PlacedDevice &d : devices)
-        if (d.active && d.entity == entity.handle &&
-                d.entity_spawn_id == entity.registry_spawn_id)
-            return &d;
-    return nullptr;
+    if (device_index_stale_ || device_index_count_ != devices.size()) {
+        device_index_.clear();
+        for (size_t i = 0; i < devices.size(); ++i)
+            device_index_.emplace(devices[i].entity_spawn_id, i);
+        device_index_count_ = devices.size();
+        device_index_stale_ = false;
+    }
+    const auto it = device_index_.find(entity.registry_spawn_id);
+    if (it == device_index_.end()) return nullptr;
+    PlacedDevice &d = devices[it->second];
+    return d.active && d.entity == entity.handle &&
+                    d.entity_spawn_id == entity.registry_spawn_id
+            ? &d
+            : nullptr;
 }
 
 void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
@@ -1908,6 +1917,7 @@ void ThrowableSim::compact() {
     size_t w = 0;
     for (size_t i = 0; i < devices.size(); ++i)
         if (devices[i].active) devices[w++] = devices[i];
+    if (w != devices.size()) device_index_stale_ = true;
     devices.resize(w);
 }
 

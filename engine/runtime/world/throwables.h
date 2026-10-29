@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <runtime/world/entity.h>
@@ -241,7 +242,11 @@ public:
     uint16_t fan_prng();
 
     // The active device placed as `entity` (same registry lifetime), else null:
-    // the placed-device row's class on its pool-1 visit.
+    // the placed-device row's class on its pool-1 visit. Retail reads that class
+    // off the row itself, its +0x1C8 think [orig: Entity_UpdatePool1Slot @0x4B8E2A];
+    // every brainless pool-1 visit asks, so the answer comes from a lifetime ->
+    // record index, rebuilt after `devices` changes size or compacts (not a
+    // retail claim).
     PlacedDevice *device_for(const Entity &entity);
     // One placed device's pool-1 visit legs: the arm-delay/age gate, the think,
     // the stuck-to parent follow, the decrement [orig: Entity_UpdatePool1Slot
@@ -290,10 +295,19 @@ public:
 
     void reset() noexcept {
         devices.clear();
+        device_index_stale_ = true;
         fan_prng_state = 0x2B0749C1u;
     }
 
 private:
+    // device_for's index: each record's entity lifetime (its registry spawn id)
+    // to its first position in `devices`. Stale after compact() or reset(), and
+    // whenever `devices` no longer holds the count it was built over (a
+    // placement, or a caller's own push).
+    std::unordered_map<uint64_t, size_t> device_index_;
+    size_t device_index_count_ = 0;
+    bool device_index_stale_ = true;
+
     void enforce_device_cap(World &world, const PlacedDevice &placed,
                             int32_t max_devices);
     void detonate_device(World &world, PlacedDevice &device,
