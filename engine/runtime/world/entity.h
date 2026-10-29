@@ -140,8 +140,9 @@ struct TargetRef {
     bool operator!=(const TargetRef &o) const { return !(*this == o); }
 };
 
-// Pool_GetIndexFromPtr(0, entity) as the wire's byte: the pool-0 index (a
-// pool-0 slot is below the pool's 256 capacity), the -1 (0xFF) of an entity
+// Pool_GetIndexFromPtr(0, entity) as the wire's byte: the pool-0 index's low
+// byte (retail's pool 0 holds 256; a pool 0 configured past 256 aliases its
+// slots 256 on onto the byte, a wire width), the -1 (0xFF) of an entity
 // outside pool 0 or of none. [orig: Pool_GetIndexFromPtr @0x441f90 — the
 // base and capacity tests return -1; its callers store the low byte, e.g.
 // NapiNPServerMsg_HandleEmoteRequest @0x501e87, the radio call @0x5143c5, the
