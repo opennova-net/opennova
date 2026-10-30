@@ -30,6 +30,8 @@ public:
 	// Whether expansion/<code>/ is a folder the Mods page installed (its mark), and the codes of every
 	// such folder.
 	static bool folder_marked(const String &game_root, const String &code);
+	// A mod's folder under `game_root`: expansion/<code>/ (engine base/vfs/vfs.h vfs_expansion_dir).
+	static String folder(const String &game_root, const String &code);
 	static PackedStringArray marked_folders(const String &game_root);
 	// expansion/<code>/UPDATE.WIZ naming this mod's product and the runtime's update host, and the
 	// page's mark; "" when written.

@@ -84,6 +84,9 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method(
 			"LaunchFlags", D_METHOD("version_line"), &LaunchFlags::version_line);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("one_version"), &LaunchFlags::one_version);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("after_update_flag"), &LaunchFlags::after_update_flag);
+	ClassDB::bind_static_method(
+			"LaunchFlags", D_METHOD("novaworld_join_flag"), &LaunchFlags::novaworld_join_flag);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game_given"), &LaunchFlags::game_given);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_update"), &LaunchFlags::no_update);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("after_update"), &LaunchFlags::after_update);
@@ -196,6 +199,9 @@ String LaunchFlags::version_line() {
 String LaunchFlags::one_version() {
 	return to_gd(opennova::one_build().version.text());
 }
+
+String LaunchFlags::after_update_flag() { return String(opennova::kLaunchFlagAfterUpdate); }
+String LaunchFlags::novaworld_join_flag() { return String(opennova::kLaunchFlagNovaWorldJoin); }
 
 bool LaunchFlags::game_given() { return parse().game_given; }
 bool LaunchFlags::no_update() { return parse().no_update; }

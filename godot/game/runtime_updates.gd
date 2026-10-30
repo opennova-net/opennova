@@ -12,11 +12,11 @@ signal check_finished(exit_code: int)
 ## stops waiting a little after it.
 const CHECK_TIMEOUT_MS := 15000
 
-## The relaunch marker a first-run install passes to the game (boot_policy.h).
-const AFTER_UPDATE_FLAG := "--after-update"
-## The NovaWorld server a mod's install was for, which the relaunched game joins
-## once signed in (boot_policy.h, ADR 0074).
-const NOVAWORLD_JOIN_FLAG := "--novaworld-join"
+## The relaunch markers (engine boot_policy.h): a first-run install's, and the
+## NovaWorld server a mod's install was for, which the relaunched game joins once
+## signed in (ADR 0074).
+var _after_update_flag := LaunchFlags.after_update_flag()
+var _novaworld_join_flag := LaunchFlags.novaworld_join_flag()
 
 ## Whether the updater's check found an update waiting. Unknown (checking, a
 ## failed or timed-out check, updates off for the launch) reads false, so it
@@ -62,9 +62,9 @@ func check_arguments() -> PackedStringArray:
 	return arguments
 
 
-## `bootstrap`: a first-run install, whose relaunch carries AFTER_UPDATE_FLAG so a
+## `bootstrap`: a first-run install, whose relaunch carries the after-update mark so a
 ## game that still finds no content stops instead of starting the updater again.
-## `join_rid`: the NovaWorld server the relaunch joins (NOVAWORLD_JOIN_FLAG). An
+## `join_rid`: the NovaWorld server the relaunch joins (the NovaWorld join mark). An
 ## earlier launch's markers are never carried into a later relaunch.
 func install_arguments(parent_pid: int, bootstrap := false, join_rid := 0) -> PackedStringArray:
 	var arguments := PackedStringArray(["/RUN", "--parent-pid", str(parent_pid)])
@@ -74,15 +74,15 @@ func install_arguments(parent_pid: int, bootstrap := false, join_rid := 0) -> Pa
 	for argument in _run_args:
 		if skip_value:
 			skip_value = false
-		elif argument == NOVAWORLD_JOIN_FLAG:
+		elif argument == _novaworld_join_flag:
 			skip_value = true
-		elif argument != AFTER_UPDATE_FLAG:
+		elif argument != _after_update_flag:
 			relaunch.append(argument)
 	var marks := PackedStringArray()
 	if bootstrap:
-		marks.append(AFTER_UPDATE_FLAG)
+		marks.append(_after_update_flag)
 	if join_rid > 0:
-		marks.append_array([NOVAWORLD_JOIN_FLAG, str(join_rid)])
+		marks.append_array([_novaworld_join_flag, str(join_rid)])
 	if not marks.is_empty():
 		if not relaunch.has("--"):
 			relaunch.append("--")
@@ -184,7 +184,7 @@ func _exit_tree() -> void:
 ## A mod's folder in this game (ADR 0074): expansion/<code>/, which holds the
 ## mod once its update ran.
 func mod_dir(code: String) -> String:
-	return _resource_dir.path_join("expansion").path_join(code)
+	return ModListing.folder(_resource_dir, code)
 
 
 func has_mod(code: String) -> bool:

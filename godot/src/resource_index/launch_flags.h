@@ -52,6 +52,10 @@ public:
 	// ONE's version, the build this program is (base/version/one_build.h one_build()): "0.0.22",
 	// a staging run's "0.0.22.123". The game MCP endpoint's serverInfo names it.
 	static String one_version();
+	// The relaunch markers' spellings (boot_policy.h kLaunchFlagAfterUpdate,
+	// kLaunchFlagNovaWorldJoin), which the updater's install hands back to the game.
+	static String after_update_flag();
+	static String novaworld_join_flag();
 	// True when `/game` was passed, even without a value.
 	static bool game_given();
 	static bool no_update();

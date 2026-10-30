@@ -3,6 +3,8 @@
 #include "util/record_bind.h"
 #include "util/string_convert.h"
 
+#include <base/vfs/vfs.h> // vfs_expansion_dir
+
 #include <godot_cpp/classes/ref.hpp>
 
 #include <string>
@@ -21,6 +23,7 @@ void ModListing::_bind_methods() {
 			&ModListing::folder_marked);
 	ClassDB::bind_static_method("ModListing", D_METHOD("marked_folders", "game_root"),
 			&ModListing::marked_folders);
+	ClassDB::bind_static_method("ModListing", D_METHOD("folder", "game_root", "code"), &ModListing::folder);
 	ClassDB::bind_method(D_METHOD("write_wizard", "game_root", "runtime_dir"), &ModListing::write_wizard);
 	OPENNOVA_RECORD_READ_ONLY(ModListing, Variant::STRING, key)
 	OPENNOVA_RECORD_READ_ONLY(ModListing, Variant::STRING, code)
@@ -51,6 +54,10 @@ String ModListing::remove_folder(const String &game_root, const String &code) {
 
 bool ModListing::folder_marked(const String &game_root, const String &code) {
 	return opennova::mod_folder_marked(to_std(game_root), to_std(code));
+}
+
+String ModListing::folder(const String &game_root, const String &code) {
+	return to_gd(opennova::vfs_expansion_dir(to_std(game_root), to_std(code)));
 }
 
 PackedStringArray ModListing::marked_folders(const String &game_root) {
