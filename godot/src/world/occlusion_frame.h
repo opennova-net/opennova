@@ -30,6 +30,19 @@ class SlotShadow;
 class Terrain;
 class Water;
 
+// What a collect's view takes from the scene's devices, the game's main view and the editor's
+// mission view alike: the camera's horizontal field of view in degrees (its keep-aspect mode decides
+// which axis its own fov names; 90 with no camera or viewport), the environment's fog distance
+// (1000 with none) and the water plane's height while its render is active (-100000 without), as
+// engine world/occlusion_camera.h occlusion_camera_from_view takes them (D-OCC-12).
+struct OcclusionViewInputs {
+	double fov_h_deg = 90.0;
+	double fog_dist = 1000.0;
+	double water_z = -100000.0;
+};
+OcclusionViewInputs occlusion_view_inputs(const Camera3D *p_camera, const MissionEnvironment *p_env,
+		const Water *p_water);
+
 // The render-occlusion frame (the former occlusion_frame_pass.gd, ADR 0043
 // d9; docs/render/render-occlusion-re.md §3/§4/§5): the blink letter gates,
 // the per-render-frame section-mask/portal apply, the probe A/B seam edges,
