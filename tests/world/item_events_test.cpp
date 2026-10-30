@@ -1164,9 +1164,11 @@ int test_destroy_phases_and_ambient() {
     e.engine_flags = 0;
     update_item_destroy_fade(w,e);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
-    // A husked row holding no final husk: nothing spends its delay or restamps its death
-    // tick, and it carries zero phases, the per-model array holding only what was written for
-    // it (D-3DI-2) [orig: Render_SectorEntity @0x5C4190 - +0x38 @0x5C41F9].
+    // A husked row holding no final husk: the draw spends no delay, restamps no death tick
+    // and writes no phase, so the row keeps what was last written for it, the per-model
+    // array holding only what was written for that model (D-3DI-2)
+    // [orig: Render_SectorEntity @0x5C4190 - +0x38 @0x5C41F9].
+    // Nothing ever written: zeros.
     {
         auto &r = *w.registry.get(spawn(w, 2, 73, ItemDeathClass::kGnrl)); // default timing
         r.destroy_timer = 10;
@@ -1178,6 +1180,39 @@ int test_destroy_phases_and_ambient() {
             CHECK(r.death_tick == 100 && r.destroy_timer == 10);
             CHECK(r.destroy_phases_q16 == (std::array<int32_t,6>{}) && r.destroy_progress == 0);
         }
+    }
+    // An upfx row's own tick publication: its draw keeps it, and stamps nothing over it
+    // [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - Flags & 4 @0x4A92F5 alone,
+    //  Entity_PublishSwapFadePhases @0x4A9304].
+    {
+        auto &u = *w.registry.get(spawn(w, 2, 74, ItemDeathClass::kGnrl)); // 50 + 4 x 25
+        u.death_tick = 100;
+        u.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+        u.death_motion = DeathMotionMode::BuildingEffects;
+        w.logic_tick = 160;
+        CHECK(tick_item_class_motion(w, u, nullptr));
+        const std::array<int32_t,6> published{26214,65536,45875,13107,0,0};
+        CHECK(u.destroy_phases_q16 == published && u.destroy_progress == 0.4);
+        const size_t stamps = w.out.destruction.draw_fades.size();
+        CHECK(!update_item_destroy_fade(w,u));
+        run_draw_husk_leg(w,u);
+        CHECK(u.destroy_phases_q16 == published && u.destroy_progress == 0.4);
+        CHECK(w.out.destruction.draw_fades.size() == stamps && u.death_tick == 100);
+    }
+    // A promoted row keeps its last publication, the share at 1.0.
+    {
+        auto &f = *w.registry.get(spawn(w, 2, 75, ItemDeathClass::kGnrl)); // 50 + 4 x 25
+        f.death_tick = 100;
+        f.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+        f.final_husk_loaded = true;
+        w.logic_tick = 250;
+        CHECK(update_item_destroy_fade(w,f));
+        const std::array<int32_t,6> last{65536,65536,65536,65536,65536,65536};
+        CHECK(f.husk_promoted && !f.holds_final_husk());
+        CHECK(f.destroy_phases_q16 == last && f.destroy_progress == 1.0);
+        w.logic_tick = 300;
+        CHECK(!update_item_destroy_fade(w,f));
+        CHECK(f.destroy_phases_q16 == last && f.destroy_progress == 1.0 && f.death_tick == 100);
     }
     traits = w.tables.item_death_traits.get_mutable(70); // the set() above may move the rows
     e.death_motion = DeathMotionMode::BuildingEffects;

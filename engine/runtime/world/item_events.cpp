@@ -712,11 +712,11 @@ bool update_item_destroy_fade(World &world, Entity &entity) {
     const std::array<int32_t, 6> phases_before = entity.destroy_phases_q16;
     const double progress_before = entity.destroy_progress;
     const size_t swaps_before = world.out.destruction.husk_swaps.size();
-    entity.destroy_phases_q16.fill(0);
-    entity.destroy_progress = 0;
     if ((entity.engine_flags & kEntityFlagHusk) == 0) {
         // An entity back intact (an emplaced gun's revive; a vehicle respawn clears the
-        // word itself) draws no pending final husk.
+        // word itself) carries no fade and draws no pending final husk.
+        entity.destroy_phases_q16.fill(0);
+        entity.destroy_progress = 0;
         if (entity.final_husk_overlay) {
             entity.final_husk_overlay = false;
             HuskSwapEvent hide = husk_swap_event(entity);
@@ -728,9 +728,11 @@ bool update_item_destroy_fade(World &world, Entity &entity) {
         if (const auto *traits = world.tables.item_death_traits.get(entity.item_id))
             update_husk_swap_stage(world, entity, *traits);
     }
-    // A husked row holding no final husk (none loaded, or promoted) keeps the zeroes: retail
-    // publishes nothing for it, and its model reads the process-wide bus's last value, while a
-    // per-model array carries only what was written for that model (D-3DI-2).
+    // A husked row holding no final husk (none loaded, or promoted) keeps what was last
+    // written for it: retail's draw publishes nothing for it, and its model reads the
+    // process-wide bus's last value, while a per-model array carries only what was written for
+    // that model (D-3DI-2): the upfx row's own publication, the last one before a promotion,
+    // or zero when nothing was.
     return entity.destroy_phases_q16 != phases_before || entity.destroy_progress != progress_before ||
             world.out.destruction.husk_swaps.size() != swaps_before;
 }

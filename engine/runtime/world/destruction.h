@@ -836,10 +836,11 @@ inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
 // retail's publication (publish_swap_fade_phases: past the delay it spends it and restamps
 // the death tick) and the swap stage; retail publishes for no other row, so a husked row
 // holding none (none loaded, or promoted) spends nothing and restamps nothing (the death tick
-// the targeting window reads stands, Entity_ValidateWeaponTarget) and carries zero phases:
-// retail's model there reads the process-wide bus's last value, and a per-model array carries
-// only what was written for that model (D-3DI-2). Returns whether the row's phases, its husks
-// or its swap events changed.
+// the targeting window reads stands, Entity_ValidateWeaponTarget) and keeps the phases last
+// written for it (the upfx row's own tick publication, the last one before a promotion, or
+// zero when nothing was): retail's model there reads the process-wide bus's last value, and a
+// per-model array carries only what was written for that model (D-3DI-2). Returns whether the
+// row's phases, its husks or its swap events changed.
 // [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38 @0x5C41F9,
 //  Entity_PublishSwapFadePhases @0x5C4200, the sub-pixel reject @0x5C42DE; its live callers
 //  Terrain_RenderSectorEntities @0x5C7B60 (@0x5C7D13), Terrain_RenderSectorModels @0x5C5D30
