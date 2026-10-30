@@ -398,8 +398,10 @@ def extract_lines(path, lines):
             # image qualifier lands (`sub_401C23 @0x401C23` / `(Nile.exe)`); its own pairs
             # alone count
             text = line + " " + (lines[i + 1].lstrip() if i + 1 < len(lines) else "")
+        # outside a marker an address below the image is a field's offset (`randomized_timeout_ms
+        # @0x1194`), never a cite
         found = [m for m in PAIR.finditer(text)
-                 if marked or (m.start() < len(line) and m["name"]
+                 if marked or (m.start() < len(line) and m["name"] and int(m["addr"], 16) >= 0x401000
                                and (symbol_like(m["name"]) or SNAKE.match(m["name"])))]
         subjects = set()
         for opened in MARKER_LINE.finditer(text):

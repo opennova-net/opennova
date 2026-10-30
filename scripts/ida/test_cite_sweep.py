@@ -173,6 +173,8 @@ class MarkerSubjects(unittest.TestCase):
         line = "| D-SND-8 | `Sound_ApplyDopplerShift` @ 0x527f60 doppler, the call @ 0x52896a |"
         got = [(tok, addr) for _, _, tok, addr, _, _ in cite_sweep.extract_lines("docs/audio/x-re.md", [line])]
         self.assertEqual(got, [("Sound_ApplyDopplerShift", "0x527f60")])
+        # a field's offset in a record's prose is no cite
+        self.assertEqual(list(cite_sweep.extract_lines("docs/x-re.md", ["`randomized_timeout_ms`@0x1194 (int)"])), [])
         # code joins markers only
         self.assertEqual(list(cite_sweep.extract_lines("engine/x.cpp", ["// Foo_Bar @0x500000"])), [])
 
