@@ -184,6 +184,13 @@ const RemoteProject *listed_project(const NovaWorldView &view, const std::string
 	return nullptr;
 }
 
+// Whether a mod's base game, `listed` as the account's list has it, is got from NovaWorld (make_base):
+// any the account reads with a revision to get, and the service's other games, whose get says if they
+// hold none. One the account may not read, or NovaLogic's with nothing pushed, is the game install's.
+bool base_is_got(const RemoteProject *listed) {
+	return listed && (listed->head > 0 || !novalogic_project(*listed));
+}
+
 // Where the expansion's project at `dir` finds its base game's project: its project file's
 // expansion.base_project resolved against `dir`; false when it names none.
 bool base_project_folder(const std::string &dir, std::string &out) {
@@ -604,6 +611,22 @@ void NovaWorldController::get(const EditorRequest &request) {
 		return;
 	if (request.dir.empty() || request.project_key.empty()) {
 		refuse("A get names the project and the folder it goes into.");
+		return;
+	}
+	// A folder holding this project is its working copy, opened rather than got again.
+	const std::string project_file = ProjectPaths::for_root(request.dir).project_file;
+	std::error_code ec;
+	if (fs::is_regular_file(system_path(project_file), ec)) {
+		ProjectDocument held;
+		Diagnostic unread;
+		if (load_project_document(project_file, held, unread) &&
+				held.novaworld == request.project_key) {
+			view_last("The project is in " + request.dir + " already: opened, not got again.");
+			core_.open_project(request.dir);
+			return;
+		}
+		refuse("The folder " + request.dir +
+				" holds another project: a project is got into an empty folder.");
 		return;
 	}
 	if (!empty_folder(request.dir)) {
@@ -1426,6 +1449,7 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 			get_dir_.clear();
 			const std::string base_key = std::move(get_base_key_);
 			get_base_key_.clear();
+			name_project(dir, pull.remote().key);
 			// A mod's: its base game's project made where its project file names it, unless a project
 			// is there already (make_base: got from NovaWorld, or a retail game's imported from the
 			// game install), the mod opened then; one the editor cannot make said so, the mod opened.
@@ -1487,6 +1511,19 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 	add_changed_files(core_.paths(), changed, changes);
 	if (!changes.empty())
 		core_.start_changed_refresh(std::move(changes));
+}
+
+void NovaWorldController::name_project(const std::string &root, const std::string &key) {
+	const std::string project_file = ProjectPaths::for_root(root).project_file;
+	ProjectDocument doc;
+	Diagnostic error;
+	// A file that does not read is left for the Open to refuse.
+	if (!load_project_document(project_file, doc, error) || doc.novaworld == key)
+		return;
+	doc.novaworld = key;
+	if (!save_project_document(project_file, doc, error))
+		core_.note("NovaWorld: the project file in " + root + " was not written (" + error.message +
+				"): it does not name the project it was got as.");
 }
 
 void NovaWorldController::finish_push(NovaWorldPush &push) {
@@ -1697,12 +1734,12 @@ bool NovaWorldController::make_base(
 		BaseSetup setup, const std::string &game, const std::string &install, std::string &why) {
 	const RemoteProject *listed = listed_project(core_.view().novaworld, setup.key);
 	std::unique_ptr<BaseSetupOperation> operation;
-	if (listed && !novalogic_project(*listed)) {
+	if (base_is_got(listed)) {
 		auto pull = std::make_unique<NovaWorldPull>(*transport_, account_,
 				ProjectPaths::for_root(setup.dir), "", NovaWorldWorkingCopy{ setup.key, 0 });
 		operation = std::make_unique<BaseSetupOperation>(*this, std::move(setup), std::move(pull));
 	} else {
-		// NovaLogic's game's files are the install's (private on NovaWorld, which players cannot get).
+		// A game the account cannot get is the install's (NovaLogic's are private on NovaWorld).
 		if (install.empty() || install_game(install) != game) {
 			why = setup.title + "'s project is made from a " + game_words(game) + " install, and the editor's " +
 					(install.empty() ? std::string("game install is none.")
@@ -1783,8 +1820,7 @@ void NovaWorldController::show_new_base() {
 		if (!found.found)
 			found.dir = io::utf8_generic_path(
 					io::os_path(form.dir).lexically_normal().parent_path() / io::os_path(key));
-		const RemoteProject *listed = listed_project(view, key);
-		found.from_install = !found.found && (!listed || novalogic_project(*listed));
+		found.from_install = !found.found && !base_is_got(listed_project(view, key));
 	}
 	core_.view().novaworld.new_base = found;
 	core_.touch(ViewConcern::NovaWorld);
@@ -1824,8 +1860,10 @@ OperationOutcome NovaWorldController::finish_base(BaseSetupOperation &operation)
 			core_.open_project(setup.then.dir);
 		return outcome;
 	}
-	if (NovaWorldPull *pull = operation.pull(); pull && pull->remote_known())
+	if (NovaWorldPull *pull = operation.pull(); pull && pull->remote_known()) {
 		cache_lobby(ProjectPaths::for_root(setup.dir), pull->remote());
+		name_project(setup.dir, setup.key);
+	}
 	view_last(setup.title + "'s project is in " + setup.dir + ".");
 	// It is the editor's to find again, as a project of the author's: among the recent projects.
 	core_.preferences().remember_recent_project(setup.dir);

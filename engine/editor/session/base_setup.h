@@ -2,13 +2,14 @@
 
 // A mod's base game's project made on this computer (ADR 0074; session/novaworld_controller.h's
 // make_base, the one resolver of the New project form's A mod of and of a got mod's base): the
-// project of one of NovaWorld's games made in a folder of its own, as an operation. A retail game's
-// (its files the game install's, private on NovaWorld, which players cannot get) is imported from
+// project of one of NovaWorld's games made in a folder of its own, as an operation. One the account
+// cannot get (a retail game's, private on NovaWorld, which players cannot read) is imported from
 // the game install, as a game of its own with the whole install imported is: made and opened in a
 // session of its own (no process seam, the editor's preferences in memory, its workspace neither
 // read nor written), every file of its game imported, each step of that session one step of this
-// operation within the poll's budget, so the editor keeps drawing. Any other game's is got from
-// NovaWorld: a pull of its head into the empty folder, which is then its working copy. Its finish
+// operation within the poll's budget, so the editor keeps drawing. It names no NovaWorld project.
+// Any other is got from NovaWorld: a pull of its head into the empty folder, which is then its
+// working copy. Its finish
 // hands it to the controller, which goes on with what waited on it
 // (NovaWorldController::finish_base: the mod made on it, or the got mod opened). While it runs the
 // folder carries its mark (.opennova/base_setup), gone once the project is in: a folder still

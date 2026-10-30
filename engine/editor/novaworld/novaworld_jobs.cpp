@@ -326,7 +326,9 @@ NovaWorldJobState NovaWorldPull::step(uint64_t budget) {
 							scan_->incomplete());
 				std::vector<project::ProjectFile> base;
 				std::string error;
-				if (!read_novaworld_base(novaworld_paths_, base, error))
+				// No revision held is no base, whatever the folder's `.opennova` kept: a get into a
+				// folder whose files went would plan each as one the folder deleted.
+				if (copy_.revision != 0 && !read_novaworld_base(novaworld_paths_, base, error))
 					return fail(error);
 				plan_ = restore_ ? plan_restore(scan_->files(), scan_->unread(), theirs_,
 										   restore_->paths)
