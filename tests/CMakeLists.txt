@@ -2349,6 +2349,18 @@ add_executable(loadout_screen_test menu/loadout_screen_test.cpp)
 target_link_libraries(loadout_screen_test PRIVATE opennova_runtime)
 add_test(NAME loadout_screen COMMAND loadout_screen_test)
 
+# The in-game armory's WEAPON screen (menu/armory_screen.h) driven headless over the runtime's store
+# and a faked host: the INIT's class spin, the on-show's order (the class resolve, the rows the mask
+# enables, the class pair, the stage under the team gate, the populate, the readout and the icons),
+# the class flip's page memory, the picks, a banned grenade, ACCEPT and CANCEL past the press latch,
+# the empty and missing tables, the authored fixtures/game/weapon.mnu's first-open weight, and a
+# DFX2 title's DEATH screen picker (DFX2-41) over another screen's runtime.
+add_executable(armory_screen_test menu/armory_screen_test.cpp)
+target_link_libraries(armory_screen_test PRIVATE opennova_runtime)
+target_include_directories(armory_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(armory_screen_test PRIVATE cxx_std_17)
+add_test(NAME armory_screen COMMAND armory_screen_test)
+
 # The loadout dialogs' list and state model (menu/loadout_screen.h's list fill,
 # reselects, clip count and accept pick; menu/player_info_loadout.h): the rows
 # under NONE, the restore's catalog rows, the handlers' picks, the kit page's

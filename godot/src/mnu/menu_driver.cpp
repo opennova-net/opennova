@@ -882,9 +882,6 @@ bool MenuDriver::deploy_map_moved() {
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
 void MenuDriver::spin_cycle(int p_id, int p_delta) { runtime_.spin_cycle(p_id, p_delta); }
 
-void MenuDriver::enable_class_rows(int p_id, int p_class_allow_mask) {
-	opennova::menu::enable_class_rows(runtime_, p_id, static_cast<uint32_t>(p_class_allow_mask));
-}
 String MenuDriver::spin_value_attr(int p_id) const { return item_value(p_id, selected_row(p_id)); }
 
 bool MenuDriver::dispatch_action_row(const Ref<MnuActionRow> &p_action) {
@@ -1403,8 +1400,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("activate", "id"), &MenuDriver::activate);
 	ClassDB::bind_method(D_METHOD("spin_cycle", "id", "delta"), &MenuDriver::spin_cycle);
 	ClassDB::bind_method(D_METHOD("is_item_enabled", "id", "row"), &MenuDriver::is_item_enabled);
-	ClassDB::bind_method(D_METHOD("enable_class_rows", "id", "class_allow_mask"),
-			&MenuDriver::enable_class_rows);
 	ClassDB::bind_method(D_METHOD("spin_value_attr", "id"), &MenuDriver::spin_value_attr);
 	ClassDB::bind_method(D_METHOD("dispatch_action_row", "action"),
 			&MenuDriver::dispatch_action_row);

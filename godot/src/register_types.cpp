@@ -197,7 +197,7 @@
 #include "mnu/menu_audio.h"
 #include "mnu/menu_driver.h"
 #include "mnu/player_info_loadout.h"
-#include "mnu/armory_loadout.h"
+#include "mnu/armory_screen.h"
 #include "mnu/pre_game_controller.h"
 #include "mnu/vehicle_menu_controller.h"
 #include "mnu/menu_video_underlay.h"
@@ -288,7 +288,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponSightRow);
 	GDREGISTER_CLASS(WeaponActionRow);
 	GDREGISTER_CLASS(WeaponDef);
-	GDREGISTER_CLASS(ArmoryClassRow);
 	GDREGISTER_CLASS(WeaponDatabase);
 	GDREGISTER_CLASS(AmmoDatabase);
 	GDREGISTER_CLASS(AvatarPartRow);
@@ -475,7 +474,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuScrollRange);
 	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(PlayerInfoLoadout);
-	GDREGISTER_CLASS(ArmoryLoadout);
+	GDREGISTER_CLASS(ArmoryScreen);
 	GDREGISTER_CLASS(PreGameController);
 	GDREGISTER_CLASS(VehicleMenuController);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
