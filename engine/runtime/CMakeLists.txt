@@ -87,6 +87,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_screen.cpp
     # the WEAPON screen's class pages, counts and type bytes (D-MNU-9)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/armory_loadout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/armory_screen.cpp # the WEAPON screen's controller: its on-show, picks, ACCEPT and CANCEL
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_sound.cpp # the windows' SOUND rows and when the pump plays them
