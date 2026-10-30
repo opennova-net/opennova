@@ -1,4 +1,6 @@
 #include "terrain/foliage_dispatcher.h"
+
+#include <runtime/assets/foliage_assets.h>
 #include "util/data_format.h"
 
 #include "render/visual_layers.h"
@@ -295,6 +297,23 @@ void FoliageDispatcher::_notification(int p_what) {
 void FoliageDispatcher::configure_slots(const Array &p_defs,
                                             const Array &p_meshes,
                                             const Array &p_fd_textures) {
+  // The script seam: each supplied mesh's triangles stand for its model.
+  const int slot_count = opennova::FOLIAGE_MAX_DEFS;
+  std::vector<opennova::renderer::FoliageSlotGeometry> geometry(
+      static_cast<size_t>(slot_count));
+  std::vector<bool> supplied(static_cast<size_t>(slot_count), false);
+  for (int slot = 0; slot < slot_count && slot < p_meshes.size(); ++slot) {
+    const Ref<Mesh> mesh = p_meshes[slot];
+    supplied[static_cast<size_t>(slot)] = mesh.is_valid();
+    geometry[static_cast<size_t>(slot)] = _extract_source_geometry(mesh);
+  }
+  configure_slot_geometry(p_defs, std::move(geometry), supplied, p_fd_textures);
+}
+
+void FoliageDispatcher::configure_slot_geometry(
+    const Array &p_defs,
+    std::vector<opennova::renderer::FoliageSlotGeometry> p_geometry,
+    const std::vector<bool> &p_supplied, const Array &p_fd_textures) {
   palette_masks_.fill(0u);
   slot_diagnostics_.clear();
   authored_slot_count_ = 0;
@@ -315,11 +334,11 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
       def = p_defs[slot];
     }
 
-    Ref<Mesh> mesh;
-    if (slot < p_meshes.size()) {
-      mesh = p_meshes[slot];
+    const bool mesh_supplied =
+        static_cast<size_t>(slot) < p_supplied.size() && p_supplied[static_cast<size_t>(slot)];
+    if (static_cast<size_t>(slot) < p_geometry.size()) {
+      source_geometry_[slot] = std::move(p_geometry[static_cast<size_t>(slot)]);
     }
-    source_geometry_[slot] = _extract_source_geometry(mesh);
 
     if (slot < p_fd_textures.size()) {
       fd_textures_[slot] = p_fd_textures[slot];
@@ -327,7 +346,7 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
 
     Dictionary diagnostic;
     diagnostic["slot"] = slot;
-    diagnostic["mesh_supplied"] = mesh.is_valid();
+    diagnostic["mesh_supplied"] = mesh_supplied;
     diagnostic["fd_texture_loaded"] = fd_textures_[slot].is_valid();
     diagnostic["source_vertices"] =
         static_cast<int64_t>(source_geometry_[slot].vertices.size());
@@ -345,7 +364,7 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
     ++authored_slot_count_;
     diagnostic["graphic"] = def->get_graphic();
     diagnostic["match"] = def->get_match();
-    if (mesh.is_null()) {
+    if (!mesh_supplied) {
       ++disabled_slot_count_;
       diagnostic["status"] = "missing_mesh";
       slot_diagnostics_.append(diagnostic);
@@ -575,8 +594,11 @@ PackedVector3Array FoliageDispatcher::get_silhouette_anchors() const {
 void FoliageDispatcher::configure_slots_from_defs(
     const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
   asset_cache_.check_epoch();
-  configure_slots(p_defs, asset_cache_.resolve_slot_meshes(p_resource_root, p_defs),
-                  asset_cache_.resolve_slot_fd_textures(p_resource_root, p_defs));
+  std::vector<bool> supplied;
+  std::vector<opennova::renderer::FoliageSlotGeometry> geometry =
+      asset_cache_.resolve_slot_geometry(p_resource_root, p_defs, supplied);
+  configure_slot_geometry(p_defs, std::move(geometry), supplied,
+                          asset_cache_.resolve_slot_fd_textures(p_resource_root, p_defs));
 }
 
 void FoliageDispatcher::configure_for_terrain(
@@ -624,13 +646,6 @@ FoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
   if (p_mesh.is_null()) {
     return result;
   }
-
-  Vector3 minimum(std::numeric_limits<real_t>::max(),
-                  std::numeric_limits<real_t>::max(),
-                  std::numeric_limits<real_t>::max());
-  Vector3 maximum(std::numeric_limits<real_t>::lowest(),
-                  std::numeric_limits<real_t>::lowest(),
-                  std::numeric_limits<real_t>::lowest());
 
   for (int surface = 0; surface < p_mesh->get_surface_count(); ++surface) {
     // VegAssets supplies an ArrayMesh aggregate. Validate its public surface
@@ -681,12 +696,6 @@ FoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
         source_vertex.v = static_cast<float>(uvs[vertex].y);
       }
       result.vertices.push_back(source_vertex);
-      minimum.x = std::min(minimum.x, position.x);
-      minimum.y = std::min(minimum.y, position.y);
-      minimum.z = std::min(minimum.z, position.z);
-      maximum.x = std::max(maximum.x, position.x);
-      maximum.y = std::max(maximum.y, position.y);
-      maximum.z = std::max(maximum.z, position.z);
     }
 
     if (source_indices.is_empty()) {
@@ -715,12 +724,9 @@ FoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
   if (result.vertices.empty() || result.indices.empty()) {
     return opennova::renderer::FoliageSlotGeometry{};
   }
-
-  result.center_x = static_cast<float>((minimum.x + maximum.x) * 0.5);
-  result.center_z = static_cast<float>((minimum.z + maximum.z) * 0.5);
-  result.radius = std::max(static_cast<float>((maximum.x - minimum.x) * 0.5),
-                           static_cast<float>((maximum.z - minimum.z) * 0.5));
-  result.valid = std::isfinite(result.radius) && result.radius > 1.0e-6f;
+  // The slot's centre and bound radius are the engine's
+  // (assets::foliage_slot_bounds carries the witness).
+  opennova::assets::foliage_slot_bounds(result);
   return result;
 }
 

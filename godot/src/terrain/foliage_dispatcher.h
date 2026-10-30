@@ -80,6 +80,13 @@ public:
   // slot. No placeholder geometry is manufactured.
   void configure_slots(const Array &p_defs, const Array &p_meshes,
                        const Array &p_fd_textures);
+  // The same over each slot's engine geometry (the load's path:
+  // FoliageAssetCache::resolve_slot_geometry); `p_supplied` says which slots
+  // resolved a model.
+  void configure_slot_geometry(const Array &p_defs,
+                               std::vector<opennova::renderer::FoliageSlotGeometry> p_geometry,
+                               const std::vector<bool> &p_supplied,
+                               const Array &p_fd_textures);
 
   // --- The vegetation asset resolver (the former veg_assets.gd, ADR 0043
   //     slice G10): the dispatcher's FoliageAssetCache (foliage_asset_cache.h)

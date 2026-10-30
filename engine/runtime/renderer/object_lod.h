@@ -186,6 +186,73 @@ inline int attachment_lod_index(int parent_lod_index, int lod_count) {
   return std::clamp(parent_lod_index, 0, lod_count - 1);
 }
 
+// One view of the per-view RLOD walk. Retail runs the scene pass, collector to
+// RLOD walk, once per view it draws (the frame's image, the weapon Inset pass,
+// each water mirror's reflected subscene; world/occlusion.h OcclusionView
+// carries the witness), each on its own frame scale. A model a view projects
+// gets that view's verdict: under the sub-pixel floor it draws at no level,
+// above it the selector picks one [orig: Render_SectorEntity @ 0x5c42d8..0x5c42de,
+// the floor ahead of Model_SelectRlodLevel @ 0x5c3b20]. A model a view does not
+// project (outside its frustum, or a view its collect rejected) never reaches
+// the selector and keeps that view's verdict.
+struct ObjectLodViewVerdict {
+  bool subpixel = false;
+  int lod_index = -1;  // -1: no level selected (the floor culled it)
+};
+
+struct ObjectLodWalk {
+  // The view's frame scale (object_lod_frame_scale).
+  float projection_scale = 0.0f;
+
+  // A model this view projects to `projected_radius_q16`.
+  ObjectLodViewVerdict verdict(int32_t projected_radius_q16,
+                               const std::vector<int32_t> &thresholds_q16,
+                               const std::vector<bool> &available = {}) const {
+    ObjectLodViewVerdict out;
+    out.subpixel = object_subpixel_culled(projected_radius_q16);
+    if (!out.subpixel) {
+      out.lod_index = select_object_lod(thresholds_q16, projected_radius_q16,
+                                        projection_scale, available)
+                          .lod_index;
+    }
+    return out;
+  }
+
+  // A retained static instance's level in this view (the placer's rows): none
+  // for one the view's collect dropped or the floor culls, the view's current
+  // level for one the view did not project, else the selector's.
+  int static_level(bool collect_dropped, bool projected, int32_t projected_radius_q16,
+                   const std::vector<int32_t> &thresholds_q16,
+                   const std::vector<bool> &available, int current_level) const {
+    if (collect_dropped) {
+      return -1;
+    }
+    if (!projected) {
+      return current_level;
+    }
+    const ObjectLodViewVerdict out = verdict(projected_radius_q16, thresholds_q16, available);
+    return out.subpixel ? -1 : out.lod_index;
+  }
+};
+
+// The level a second view (the weapon Inset, a water mirror) draws a model at:
+// the level its own walk selected, else the one it kept from an earlier walk of
+// its own, else the frame's image's.
+inline int object_lod_view_level(int selected, bool view_owns_level, int view_level,
+                                 int main_level) {
+  return selected >= 0 ? selected : view_owns_level ? view_level : main_level;
+}
+
+// An attachment's level in a view: its owner's there, exactly for an
+// attachment that mirrors its owner's level table, else clamped to its own
+// count (attachment_lod_index); its sub-pixel verdict is its owner's, as the
+// owner's sub-pixel return drops everything its bone callback draws
+// [orig: Render_SectorEntity @ 0x5c42de, ahead of the BoneCallback_org0_World
+// draws @ 0x4e39c4..0x4e3e51].
+inline int attachment_view_level(int owner_level, bool exact_owner_lod, int lod_count) {
+  return exact_owner_lod ? owner_level : attachment_lod_index(owner_level, lod_count);
+}
+
 // The held weapon's own projected-size gate (draw 5 of the person callback):
 // outside the render-slot pass (render state bits 2/4 skip the test), the
 // weapon's model sphere (its model header radius, gpm[5]) is projected at the
