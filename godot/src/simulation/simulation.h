@@ -986,7 +986,7 @@ public:
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
 	// The S2C 0x60's session variables as the loading screen's session block, and each parse's
-	// edge, taken once (engine: inmatch/joiner_connection.h take_session_vars_parsed).
+	// edge, taken once, SessionDrive's alone (engine: joiner_connection.h take_session_vars_parsed).
 	Ref<LoadingScreenInfo> get_join_server_info() const;
 	bool take_join_server_info_parsed();
 	String get_join_mission_file() const;
