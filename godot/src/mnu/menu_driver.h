@@ -5,18 +5,14 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object_id.hpp>
-#include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
-#include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/callable.hpp>
-#include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/vector2.hpp>
-#include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/menu/menu_commands.h>
 #include <runtime/menu/mission_screen.h>
@@ -24,7 +20,6 @@
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
-#include <runtime/menu/player_info_avatars.h>
 #include <runtime/menu/menu_screen_controller.h>
 #include <runtime/menu/menu_shell.h>
 
@@ -46,8 +41,6 @@ class MnuDocument;
 class MusicDirector;
 class ResourceRoot;
 class RtxtStringFile;
-class AvatarDatabase;
-class AvatarComboRow;
 
 // The standalone CScrollWnd range of one widget, as the driver's store holds
 // it (a value snapshot; MenuDriver.set_widget_scroll_range is the one write
@@ -109,7 +102,6 @@ class MenuDriver : public RefCounted {
 	std::unique_ptr<ShellHost> host_;
 	String mods_root_; // the game folder the Mods list's records were scanned in
 	std::vector<opennova::ExpansionRecord> mods_records_;
-	opennova::menu::PlayerInfoAvatars avatars_;
 	// The commands a document the embedder opened itself binds (wire_commands); the shell's own opens
 	// carry the shell's.
 	opennova::menu::MenuCommands direct_commands_;
@@ -270,22 +262,6 @@ public:
 	// tools read the remap flow through it).
 	String options_control_text(int p_action, int p_device) const;
 
-	enum AvatarChange {
-		AVATAR_TEAM = int(opennova::menu::PlayerInfoAvatars::Change::Team),
-		AVATAR_NATIONALITY = int(opennova::menu::PlayerInfoAvatars::Change::Nationality),
-		AVATAR_DIVISION = int(opennova::menu::PlayerInfoAvatars::Change::Division),
-		AVATAR_COMBO = int(opennova::menu::PlayerInfoAvatars::Change::Combo),
-		AVATAR_VOICE = int(opennova::menu::PlayerInfoAvatars::Change::Voice),
-	};
-	int update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int p_change,
-			int p_value, int p_team, int p_voice, const Ref<RtxtStringFile> &p_gameui,
-			const Ref<RtxtStringFile> &p_menutxt);
-	PackedInt32Array player_info_nationality_rows() const;
-	int player_info_avatar_nationality() const { return avatars_.nationality; }
-	int player_info_avatar_division() const { return avatars_.division; }
-	bool player_info_avatar_preview_changed() const { return avatars_.preview_changed; }
-	Ref<AvatarComboRow> player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const;
-	void preview_player_info_voice(const Ref<AvatarDatabase> &p_db, int p_voice);
 
 	MenuDriver();
 	~MenuDriver() override;
@@ -430,6 +406,5 @@ public:
 
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsEffect);
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsWordIndex);
-VARIANT_ENUM_CAST(godot::MenuDriver::AvatarChange);
 VARIANT_ENUM_CAST(godot::MenuDriver::MissionScreen);
 VARIANT_ENUM_CAST(godot::MenuDriver::ShellExit);

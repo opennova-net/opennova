@@ -213,23 +213,6 @@ String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringF
 static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,
 		"DEFAULT_VOICE_VALUE mirrors the engine's PLAYERVOICE default");
 
-Array WeaponDatabase::kit_entry_rows(const opennova::menu::PlayerInfoKitSelection &sel) const {
-	const opennova::menu::WeaponNameLookup name = [this](int32_t p_row) -> std::string {
-		const opennova::def::DefWeaponDef *w = row(p_row);
-		return w != nullptr ? std::string(w->weapon_name) : std::string();
-	};
-	Array out;
-	for (const opennova::playersav::KitEntry &e : opennova::menu::player_info_kit_entries(sel, name)) {
-		Dictionary d;
-		d["name"] = opennova::to_gd(e.name);
-		d["ammo_primary"] = e.ammo_primary;
-		d["ammo_secondary"] = e.ammo_secondary;
-		d["flags"] = e.flags;
-		out.push_back(d);
-	}
-	return out;
-}
-
 int WeaponDatabase::encumbrance_class(double weight) const {
 	return static_cast<int>(def_encumbrance_class(weight));
 }

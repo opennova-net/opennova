@@ -1,8 +1,6 @@
 #include "player/player_profiles.h"
 
 #include "object/avatar_database.h"
-#include "object/weapon_database.h"
-#include "player/player_info_kit_restore.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/weapon_profile_summary.h"
 #include "util/data_format.h"
@@ -10,7 +8,6 @@
 
 #include <formats/playersav/player_sav.h>
 #include <runtime/inmatch/character_registry.h>
-#include <runtime/menu/player_info_kit.h>
 #include <runtime/profile/profile_controls.h>
 
 #include <cstdio>
@@ -277,21 +274,6 @@ Ref<WeaponProfileSummary> PlayerProfiles::character_summary() const {
 	return out;
 }
 
-Ref<PlayerInfoKitRestore> PlayerProfiles::restore_player_info_kit(int p_side,
-		const Ref<WeaponDatabase> &p_weapons) const {
-	Ref<PlayerInfoKitRestore> out;
-	out.instantiate();
-	if (p_side < 0 || p_side > 1) return out;
-	const playersav::Side &side =
-			store_.current_weapons().side(p_side == 0 ? playersav::SideId::Blue : playersav::SideId::Red);
-	const opennova::def::DefWeaponsFile empty{};
-	const playersav::KitPage *page = side.selected_page();
-	out->assign(opennova::menu::player_info_restore_kit(page != nullptr ? *page : playersav::KitPage{},
-						p_weapons.is_valid() ? p_weapons->native_file() : empty),
-			static_cast<int>(side.player_class));
-	return out;
-}
-
 Error PlayerProfiles::apply_character_selection(const Dictionary &p_profile) {
 	// The dialog's snapshot (PlayerCharacterSelectionState.snapshot) as the engine's
 	// CharacterSelection: the shared PLAYERCLASS value, the shown side (`team`), that
@@ -373,8 +355,6 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_auto_medic_checked", "checked"),
 			&PlayerProfiles::set_auto_medic_checked);
 	ClassDB::bind_method(D_METHOD("character_summary"), &PlayerProfiles::character_summary);
-	ClassDB::bind_method(D_METHOD("restore_player_info_kit", "side", "weapons"),
-			&PlayerProfiles::restore_player_info_kit);
 	ClassDB::bind_method(D_METHOD("apply_character_selection", "profile"),
 			&PlayerProfiles::apply_character_selection);
 	ClassDB::bind_method(D_METHOD("record_mission_start", "campaign"),

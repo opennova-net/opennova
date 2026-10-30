@@ -313,7 +313,7 @@ add_library(opennova_bindings OBJECT
     mnu/menu_driver.cpp
     mnu/death_screen.cpp
     mnu/end_round_screen.cpp
-    mnu/player_info_loadout.cpp
+    mnu/player_info_screen.cpp
     mnu/armory_screen.cpp
     mnu/lan_multiplayer_menu.cpp
     mnu/pre_game_controller.cpp
@@ -331,8 +331,6 @@ add_library(opennova_bindings OBJECT
     player/player_input_router.cpp
     player/special_key_outcome.cpp
     player/player_move_intent.cpp
-    player/player_info_kit_restore.cpp
-    player/player_info_character_state.cpp
     player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp

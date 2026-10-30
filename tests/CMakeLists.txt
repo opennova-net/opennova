@@ -2370,6 +2370,16 @@ add_executable(player_info_avatars_test menu/player_info_avatars_test.cpp)
 target_link_libraries(player_info_avatars_test PRIVATE opennova_runtime)
 add_test(NAME player_info_avatars COMMAND player_info_avatars_test)
 
+# The PLAYER_INFO screen's controller (inmatch/player_info_screen.h) driven headless over the menu
+# runtime as the shell hands it the document: the populate, the cascades, the side radios, the
+# name rule, the voice override, the loadout's saved page and the ACCEPT's save, over the minted
+# synth_avatars.def, a weapon.def written in the test and a fresh profile store.
+add_executable(player_info_screen_test menu/player_info_screen_test.cpp)
+target_link_libraries(player_info_screen_test PRIVATE opennova_runtime)
+target_include_directories(player_info_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_info_screen_test PRIVATE cxx_std_17)
+add_test(NAME player_info_screen COMMAND player_info_screen_test)
+
 # The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the

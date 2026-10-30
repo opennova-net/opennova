@@ -15,10 +15,6 @@
 
 #include <vector>
 
-namespace opennova::menu {
-struct PlayerInfoKitSelection;
-} // namespace opennova::menu
-
 namespace godot {
 
 class ResourceRoot;
@@ -131,11 +127,6 @@ public:
 	// The PLAYER_INFO team and class masks (native world/player_loadout.h).
 	static int player_info_team_mask(int p_team);
 	static int player_info_class_mask(int p_playerclass_value);
-	// The PLAYER_INFO kit page (one impl in engine/runtime/menu player_info_kit.h)
-	// in retail's order for a selection of this table's catalog rows, one
-	// Dictionary per KitEntry (name, ammo_primary, ammo_secondary, flags): the
-	// form the profile writer takes (PlayerInfoLoadout.kit_entries).
-	Array kit_entry_rows(const opennova::menu::PlayerInfoKitSelection &p_selection) const;
 	// The loadout screens' shared text compositions (one impl in
 	// engine/runtime/menu loadout_labels.h): the WepDes weapon label with its
 	// raw-id fallback, and the weight readout with its encumbrance band token
