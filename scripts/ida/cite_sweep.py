@@ -138,6 +138,16 @@ DOC_DEFAULT_IMAGE = {
     ),
     # misldr.dll (every 0x100xxxxx), dfx2med.exe and JOTACmed.exe, never mixed in one marker
     "docs/mission/mis-format-re.md": "misldr.dll",
+    # "Addresses are Jointops.exe retail ... except §8, which is dfx2med.exe"
+    "docs/mission/bms-event-runtime-re.md": (
+        ("## 8. ", "dfx2med.exe"),
+        ("## 8b. ", None),
+    ),
+    # the verdict table and §1 cite the game's launch of the updater (Jointops.exe); from
+    # §2 on the record is the updater pair's, its REVUPDAT.EXE cites qualified
+    "docs/update/updater-re.md": (
+        ("## 2. ", "UPDATE.EXE"),
+    ),
 }
 
 

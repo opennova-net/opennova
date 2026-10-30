@@ -176,6 +176,11 @@ class MarkerSubjects(unittest.TestCase):
         # code joins markers only
         self.assertEqual(list(cite_sweep.extract_lines("engine/x.cpp", ["// Foo_Bar @0x500000"])), [])
 
+    def test_a_record_section_names_its_default_image(self):
+        lines = ["## 1. Launch", "`UI_LaunchUpdateProcess @ 0x55b0b0`", "## 2. Inputs", "`Cupdate2Dlg_ReadWizard @ 0x405000`"]
+        got = [ctx for *_, ctx, _ in cite_sweep.extract_lines("docs/update/updater-re.md", lines)]
+        self.assertEqual(got, ["", "(other-image) UPDATE.EXE"])
+
     def test_a_bare_site_marker_is_its_own_subject(self):
         got = [subject for *_, subject in cite_sweep.extract_lines("engine/x.cpp", ["// [orig: @0x500010]"])]
         self.assertEqual(got, [True])
