@@ -198,6 +198,7 @@
 #include "mnu/menu_driver.h"
 #include "mnu/player_info_loadout.h"
 #include "mnu/armory_screen.h"
+#include "mnu/lan_multiplayer_menu.h"
 #include "mnu/pre_game_controller.h"
 #include "mnu/vehicle_menu_controller.h"
 #include "mnu/menu_video_underlay.h"
@@ -472,9 +473,11 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuFrame);
 	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(MenuScrollRange);
+	GDREGISTER_CLASS(MenuScreenBinding);
 	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(PlayerInfoLoadout);
 	GDREGISTER_CLASS(ArmoryScreen);
+	GDREGISTER_CLASS(LanMultiplayerMenu);
 	GDREGISTER_CLASS(PreGameController);
 	GDREGISTER_CLASS(VehicleMenuController);
 	GDREGISTER_CLASS(MenuVideoUnderlay);

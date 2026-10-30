@@ -316,6 +316,7 @@ add_library(opennova_bindings OBJECT
     mnu/menu_driver.cpp
     mnu/player_info_loadout.cpp
     mnu/armory_screen.cpp
+    mnu/lan_multiplayer_menu.cpp
     mnu/pre_game_controller.cpp
     mnu/vehicle_menu_controller.cpp
     mnu/menu_video_underlay.cpp

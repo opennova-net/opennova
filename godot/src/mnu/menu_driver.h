@@ -105,7 +105,6 @@ class MenuDriver : public RefCounted {
 	opennova::menu::MenuFlow flow_;
 	opennova::menu::ModList mods_;
 	String mods_root_; // the game folder the Mods list's records were scanned in
-	opennova::menu::HostDialog host_dialog_;
 	opennova::menu::OptionsScreen options_;
 	opennova::menu::PlayerInfoAvatars avatars_;
 	// The commands the game binds on the open document by control name (wire_commands).
@@ -216,16 +215,6 @@ public:
 	bool request_expansion(const String &p_name, const String &p_current, bool p_packed);
 	bool has_pending_expansion_reload() const { return flow_.has_pending_expansion(); }
 	String take_expansion_reload();
-	void seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows);
-	void filter_host_missions() { host_dialog_.filter(runtime_); }
-	void add_host_missions(const Ref<RtxtStringFile> &p_text);
-	void remove_host_missions() { host_dialog_.remove_selected(runtime_); }
-	bool can_start_host() const { return host_dialog_.can_start(); }
-	PackedStringArray selected_host_missions() const;
-	// The SELECTED_MISSIONS Switch cell's click and the rows' launch options
-	// (engine menu::HostDialog::toggle_switch / selected_launch_options).
-	void toggle_host_mission_switch(int p_row) { host_dialog_.toggle_switch(runtime_, p_row); }
-	PackedInt32Array selected_host_launch_options() const;
 	// The Options screens over the profile's current record (engine
 	// menu::OptionsScreen): the screen's binding records built from the
 	// record's table; null profiles = the catalog defaults, no words.
@@ -465,9 +454,6 @@ public:
 	void set_widget_clip_rect(int p_id, const Rect2i &p_rect);
 	// The engine runtime, for native screen companions (C++ only).
 	opennova::menu::MenuRuntime &runtime() { return runtime_; }
-	// The host screen's mission rotation and START gate (C++ only: the cfg block's restriction
-	// lists, GameConfigBlock).
-	opennova::menu::HostDialog &host_dialog() { return host_dialog_; }
 
 	// --- activation / actions ---
 	void activate(int p_id);
