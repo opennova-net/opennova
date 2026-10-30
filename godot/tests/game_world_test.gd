@@ -2236,7 +2236,7 @@ func test_join_wire_asset_failure_is_edge_gated_per_session() -> void:
 # parked in slot state 3 short of the C2S 0x0A's world stream and never releases the 0x1A.
 # Nothing is loaded and no admission watch is armed, so the admission leg declines the ESC and
 # the preload's takes it (the shell offers it the preload's first, main_game.gd
-# _on_camera_escape).
+# _on_escape, the frontend's ESCAPE_CANCEL_LOAD route).
 func test_escape_aborts_the_joiner_game_start_wait() -> void:
 	var world := WorldFixture.make_world(self)
 	await get_tree().process_frame
@@ -2577,8 +2577,8 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 # loads the next map's environment and terrain alone (D-NET-845; engine
 # inmatch/joiner_connection.h set_sync_tail_loading carries the witness). The host is a GameWorld
 # through its own map change (net/host_map_change_test.gd); its slot reset's S2C 0x25 ends the
-# joiner's round, exit 4, which the shell routes to the Game Loop (main_game.gd
-# _route_round_end).
+# joiner's round, exit 4, which the frontend routes to the Game Loop (frontend::Frontend::
+# route_exit's JoinerReload, main_game.gd _on_session_lost).
 func test_a_joiner_reload_loads_the_next_maps_terrain_at_its_sync_tail() -> void:
 	var host_world := WorldFixture.make_world(self)
 	var world := WorldFixture.make_world(self)

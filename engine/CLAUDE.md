@@ -16,7 +16,8 @@
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
     environment, hud, menu, assets, profile (the player profile: `player.sav` and
-    `weapon.sav` in memory), ragdoll (the opt-in ragdoll corpses, ADR 0060), and
+    `weapon.sav` in memory), frontend (the game's mode table above the session, retail's
+    `Game_MainLoop` modes, its save points and routing, ADR 0077 R3), ragdoll (the opt-in ragdoll corpses, ADR 0060), and
     devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
     allowlist; the frame-stats board builds in every flavour; Dear ImGui, the pass
@@ -119,7 +120,7 @@
   `opennova_net -> opennova_runtime` and keeps the libpq containment. ADR 0020's terrain
   seam is include-level (`include_graph_check.py`: for inmatch/replication/wac/mission/world
   the `runtime/terrain/` prefix is forbidden; the seam is `<runtime/terrain_query/...>`),
-  and every runtime lib but inmatch/replication is NET-AGNOSTIC (no `net/`,
+  and every runtime lib but inmatch/replication/frontend is NET-AGNOSTIC (no `net/`,
   `runtime/inmatch/` or `runtime/replication/` include, the same lint).
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/`BitWriter`,
