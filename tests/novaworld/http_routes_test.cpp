@@ -8172,8 +8172,9 @@ int test_hosted_console_routes(Harness &h) {
 			persisted->settings.max_packet_size == 1250 && persisted->settings.lock_framerate);
 	TEST_EXPECT(h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body).code == 409);
 	// A command the server refuses stops the edit there: the fields before it saved, the rest
-	// never sent, and the reply names it rather than reading as saved.
-	fake.refuse("SET MaxScore");
+	// never sent, and the reply names it rather than reading as saved. The commands go in the
+	// settings schema's order whatever the patch's (GameTime, KillLimit, MaxScore).
+	fake.refuse("SET KillLimit");
 	const auto before_refusal = hosted::find_server(*h.pool.acquire(), id);
 	const size_t refusal_lines = fake.lines().size();
 	reply = h.send("PATCH", base + "/settings", {kBearer,kJson},
@@ -8181,15 +8182,15 @@ int test_hosted_console_routes(Harness &h) {
 					",\"patch\":{\"kill_limit\":61,\"max_score\":12,\"time_limit\":25}}");
 	fake.refuse("");
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && str(json["refused_command"]) == "SET MaxScore 12" &&
+	TEST_EXPECT(reply.code == 200 && json && str(json["refused_command"]) == "SET KillLimit 61" &&
 			json["configuration_saved"].b());
 	const auto after_refusal = hosted::find_server(*h.pool.acquire(), id);
-	TEST_EXPECT(after_refusal->settings.kill_limit == 61 &&
-			after_refusal->settings.max_score == before_refusal->settings.max_score &&
-			after_refusal->settings.time_limit == before_refusal->settings.time_limit);
+	TEST_EXPECT(after_refusal->settings.time_limit == 25 &&
+			after_refusal->settings.kill_limit == before_refusal->settings.kill_limit &&
+			after_refusal->settings.max_score == before_refusal->settings.max_score);
 	const auto refusal_sent = fake.lines();
 	TEST_EXPECT(std::none_of(refusal_sent.begin() + static_cast<std::ptrdiff_t>(refusal_lines),
-			refusal_sent.end(), [](const std::string &l) { return l.rfind("SET GameTime", 0) == 0; }));
+			refusal_sent.end(), [](const std::string &l) { return l.rfind("SET MaxScore", 0) == 0; }));
 	// With no admin link (the fleet's row gone stale, as a restarting server's is), an edit no
 	// admin line applies still saves, for the next launch, and says so; one with a live command
 	// is refused until the link is back.

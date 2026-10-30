@@ -115,6 +115,12 @@ int main() {
 			decoded.size() == 1 && decoded[0].admin_loadout_selectable == -1);
 	edit = edit_of(R"({"kill_limit":5,"options":{"weapons":{"Rifle":"armory"}}})", saved, known);
 	TEST_EXPECT(edit.commands == (std::vector<std::string>{ "SET KillLimit 5", "WEAPON SET 1 ARMORY" }));
+	// The SETs go in the schema's order whatever order the patch names them in (the queue keeps
+	// the patch as jsonb, which reorders its keys), the weapons after them.
+	edit = edit_of(R"({"options":{"weapons":{"Rifle":"armory"}},"max_score":12,"kill_limit":61,"time_limit":25})",
+			saved, known);
+	TEST_EXPECT(edit.commands == (std::vector<std::string>{ "SET GameTime 25", "SET KillLimit 61",
+										 "SET MaxScore 12", "WEAPON SET 1 ARMORY" }));
 	TEST_EXPECT(io::json_parse(R"({"weapons":{"Rifle":"never"}})", saved.options, error));
 	edit = edit_of(R"({"options":{"weapons":{"Rifle":"mission","Grenade":"mission"}}})", saved, known);
 	TEST_EXPECT(edit.commands.empty() &&

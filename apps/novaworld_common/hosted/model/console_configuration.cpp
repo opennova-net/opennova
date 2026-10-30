@@ -8,6 +8,7 @@
 #include <runtime/inmatch/host_settings.h> // server_settings_title
 
 #include <algorithm>
+#include <utility>
 
 namespace opennova::novaworld_server::hosted {
 namespace {
@@ -146,11 +147,17 @@ ConfigurationEdit configuration_edit(const Json &patch, const HostedSettings &sa
 		std::string_view title, const gamecfg::WeaponRoster &weapons) {
 	ConfigurationEdit edit;
 	Json later = Json::make_object();
+	// The commands in one order whatever order the patch's keys come in (the queue stores the
+	// patch as jsonb, which reorders them): each SET in the settings schema's order
+	// (gamecfg::server_settings, the form's), then the weapons'. A refusal stops the edit at its
+	// command, so which fields an edit saves depends on this order alone.
+	std::vector<std::pair<size_t, std::string>> sets;
+	std::vector<std::string> weapon_commands;
 	const auto field = [&](const std::string &key, const Json &value, bool option) {
 		if (key == "weapons") {
 			Json later_weapons = Json::make_object();
 			weapon_edit(value, settings_block(saved, title, weapons),
-					inmatch::server_settings_title(title), weapons, edit.commands, later_weapons);
+					inmatch::server_settings_title(title), weapons, weapon_commands, later_weapons);
 			if (!later_weapons.object.empty())
 				later.set("weapons", std::move(later_weapons));
 			return;
@@ -169,7 +176,8 @@ ConfigurationEdit configuration_edit(const Json &patch, const HostedSettings &sa
 				while (!argument.empty() && (argument.back() == '\n' || argument.back() == '\r'))
 					argument.pop_back();
 			}
-			edit.commands.push_back("SET " + std::string(spec->command) + " " + argument);
+			sets.emplace_back(static_cast<size_t>(spec - gamecfg::server_settings().data()),
+					"SET " + std::string(spec->command) + " " + argument);
 		} else
 			(option ? later : edit.next_launch).set(key, value);
 	};
@@ -180,6 +188,12 @@ ConfigurationEdit configuration_edit(const Json &patch, const HostedSettings &sa
 		else
 			field(m.key, m.value, false);
 	}
+	std::stable_sort(sets.begin(), sets.end(),
+			[](const auto &a, const auto &b) { return a.first < b.first; });
+	for (auto &set : sets)
+		edit.commands.push_back(std::move(set.second));
+	for (auto &command : weapon_commands)
+		edit.commands.push_back(std::move(command));
 	if (!later.object.empty())
 		edit.next_launch.set("options", std::move(later));
 	return edit;
