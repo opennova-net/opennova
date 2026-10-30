@@ -18,8 +18,6 @@
 #include "util/string_convert.h"
 
 #include <runtime/inmatch/stat_screen_feed.h>
-#include <runtime/inmatch/vehicle_menu.h> // the ITEM_DISPLAY preview's view
-#include <runtime/world/occlusion.h>      // render_matrix_from_pose
 #include <runtime/menu/menu_commands.h>
 #include <runtime/menu/menu_credits.h>
 #include <runtime/world/deploy_screen_feed.h>
@@ -992,51 +990,6 @@ PackedInt32Array MenuDriver::player_info_nationality_rows() const {
 	return rows;
 }
 
-namespace {
-// A Godot length as 16.16, truncated (the engine's box words).
-int32_t preview_q16(real_t p_value) {
-	return static_cast<int32_t>(static_cast<double>(p_value) * 65536.0);
-}
-} // namespace
-
-Vector3 MenuDriver::vehicle_preview_eye(const AABB &p_bounds) {
-	const Vector3 lo = p_bounds.position;
-	const Vector3 hi = p_bounds.position + p_bounds.size;
-	const int32_t box_min[3] = {preview_q16(lo.x), preview_q16(lo.y), preview_q16(lo.z)};
-	const int32_t box_max[3] = {preview_q16(hi.x), preview_q16(hi.y), preview_q16(hi.z)};
-	const opennova::inmatch::VehiclePreviewView view =
-			opennova::inmatch::vehicle_preview_view(box_min, box_max, 0);
-	// Render float (x south, y up, z east) to Godot (x east, y up, z south).
-	return Vector3(view.eye[2], view.eye[1], view.eye[0]);
-}
-
-Basis MenuDriver::vehicle_preview_model_basis(int64_t p_tick_ms) {
-	const int32_t zero[3] = {0, 0, 0};
-	const opennova::inmatch::VehiclePreviewView view = opennova::inmatch::vehicle_preview_view(
-			zero, zero, static_cast<uint32_t>(p_tick_ms));
-	const opennova::world::RenderMatrix pose = opennova::world::render_matrix_from_pose(
-			zero, static_cast<int32_t>(view.yaw_bam), 0, 0);
-	// The pose is row-major for row vectors (v' = v M), so its column-vector basis is M's
-	// transpose; the render-to-Godot axis map swaps x and z on both sides.
-	const int swap[3] = {2, 1, 0};
-	Basis basis;
-	for (int i = 0; i < 3; ++i)
-		for (int j = 0; j < 3; ++j)
-			basis.rows[i][j] = pose.m[4 * swap[j] + swap[i]];
-	return basis;
-}
-
-float MenuDriver::vehicle_preview_fov() {
-	return opennova::inmatch::VehiclePreviewView().fov_deg;
-}
-
-Color MenuDriver::vehicle_preview_clear_color() {
-	const uint32_t argb = opennova::inmatch::kVehiclePreviewClear;
-	return Color(static_cast<float>((argb >> 16) & 0xFFu) / 255.0f,
-			static_cast<float>((argb >> 8) & 0xFFu) / 255.0f,
-			static_cast<float>(argb & 0xFFu) / 255.0f);
-}
-
 Ref<AvatarComboRow> MenuDriver::player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const {
 	if (p_db.is_null()) return {};
 	const auto *combo = avatars_.selected_combo(runtime_, p_db->native_file());
@@ -1066,14 +1019,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("player_info_avatar_division"), &MenuDriver::player_info_avatar_division);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_preview_changed"), &MenuDriver::player_info_avatar_preview_changed);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_combo", "db"), &MenuDriver::player_info_avatar_combo);
-	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_eye", "bounds"),
-			&MenuDriver::vehicle_preview_eye);
-	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_model_basis", "tick_ms"),
-			&MenuDriver::vehicle_preview_model_basis);
-	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_fov"),
-			&MenuDriver::vehicle_preview_fov);
-	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_clear_color"),
-			&MenuDriver::vehicle_preview_clear_color);
 	ClassDB::bind_method(D_METHOD("preview_player_info_voice", "db", "voice"), &MenuDriver::preview_player_info_voice);
 	ClassDB::bind_method(D_METHOD("clear_mission_rows"), &MenuDriver::clear_mission_rows);
 	ClassDB::bind_method(D_METHOD("seed_mission_list", "id", "rows"), &MenuDriver::seed_mission_list);
