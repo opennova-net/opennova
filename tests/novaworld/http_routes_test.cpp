@@ -8147,8 +8147,10 @@ int test_hosted_console_routes(Harness &h) {
 			std::to_string(hosted::find_server(*h.pool.acquire(), id)->settings_revision) +
 			",\"patch\":{\"kill_limit\":500}}";
 	TEST_EXPECT(h.send("PATCH", me + "/settings", {with_session(owner_s), kJson}, kill_limit_edit).code == 403);
-	TEST_EXPECT(post(me + "/command", as_owner_post, R"({"command":"SET KillLimit 500"})").code == 404);
-	TEST_EXPECT(post(base + "/command", {kBearer}, R"({"command":"QUIT"})").code == 404);
+	// No route serves them: the portal's GET catch-all (/<path>, http_listener.cpp) answers a
+	// POST to a path no route takes 405, and nothing reaches the server.
+	TEST_EXPECT(post(me + "/command", as_owner_post, R"({"command":"SET KillLimit 500"})").code == 405);
+	TEST_EXPECT(post(base + "/command", {kBearer}, R"({"command":"QUIT"})").code == 405);
 	reply = h.send("PATCH", base + "/settings", {kBearer, kJson}, kill_limit_edit);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json["configuration_saved"].b());

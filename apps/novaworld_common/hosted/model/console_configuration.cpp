@@ -156,10 +156,17 @@ ConfigurationEdit configuration_edit(const Json &patch, const HostedSettings &sa
 		const auto *spec = gamecfg::server_setting(key);
 		if (spec && *spec->command) {
 			std::string argument;
-			if (value.is_string())
+			if (value.is_string()) {
 				(void)utf8_to_cp1252(value.string, argument);
-			else
-				argument = value.is_bool() ? (value.boolean ? "1" : "0") : io::json_write(value);
+			} else if (value.is_bool()) {
+				argument = value.boolean ? "1" : "0";
+			} else {
+				// The number's JSON spelling, without the line end json_write closes a document
+				// with: a control byte has no place in an admin line (the link refuses it).
+				argument = io::json_write(value);
+				while (!argument.empty() && (argument.back() == '\n' || argument.back() == '\r'))
+					argument.pop_back();
+			}
 			edit.commands.push_back("SET " + std::string(spec->command) + " " + argument);
 		} else
 			(option ? later : edit.next_launch).set(key, value);
