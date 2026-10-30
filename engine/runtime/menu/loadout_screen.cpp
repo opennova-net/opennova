@@ -431,10 +431,17 @@ playersav::KitPage armory_serialize_page(const MenuRuntime &menu,
 		const int combo = menu.widget_id(kGrenades[i]);
 		if (!every_position && (combo < 0 || !menu.is_widget_shown(combo)))
 			continue;
-		const auto *w = i < grenades.size() ? weapon(weapons, grenades[i]) : nullptr;
-		if (w == nullptr) continue;
-		const int32_t count = pairs.clips_of(catalog_index_of_row(grenades[i]));
-		add(w->weapon_name, count, kKitFiller, kKitFiller);
+		const int row = i < grenades.size() ? grenades[i] : -1;
+		const auto *w = weapon(weapons, row);
+		// A zeroed position (the "None" catalog row) is AdmDef entry 0, the "null" entry the
+		// table's init names, which resolves: only dfx2.exe's serializer reaches it, Jointops.exe's
+		// fill showing only the positions it fills.
+		// [orig: AnimDef_InitAll @0x540830 - the first free entry named "null" @0x540885;
+		//  AdmDef_GetEntryByIndex @0x53cef0 - only 0xFF and an unnamed entry refused (dfx2.exe)]
+		if (w == nullptr && !(every_position && row < 0))
+			continue;
+		const int32_t count = pairs.clips_of(catalog_index_of_row(row));
+		add(w != nullptr ? w->weapon_name : kAdmDefNullName, count, kKitFiller, kKitFiller);
 	}
 	return out;
 }

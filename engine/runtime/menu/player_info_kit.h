@@ -68,6 +68,10 @@ inline constexpr int32_t kMedicPlayerClass = 5;
 // row i is catalog row i + 1 [orig: WeaponDef_LoadAll @0x54dd3b (count 1),
 // @0x54dd45 strcpy(g_WeaponDefTable, "None")].
 inline constexpr const char *kCatalogNoneName = "None";
+// The weapon table's entry 0, the name AnimDef_InitAll gives the first free entry before any
+// definition loads: the catalog's "None" row as the AdmDef lookups read it
+// [orig: AnimDef_InitAll @0x540830 - @0x540885 (dfx2.exe)].
+inline constexpr const char *kAdmDefNullName = "null";
 // The catalog row of a weapon.def row (0-based, the parse's order); a negative
 // row, NONE, is catalog row 0.
 inline constexpr int32_t catalog_index_of_row(int32_t row) { return row < 0 ? 0 : row + 1; }

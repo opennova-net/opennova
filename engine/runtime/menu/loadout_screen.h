@@ -199,8 +199,9 @@ std::vector<int> armory_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFi
 // or 4), the medic's medpack (class 5), each category's selected weapon with its two
 // counts and its ammo-type byte (-1 for ACCESSORY), then each shown grenade position's
 // weapon with its count, every other value -1. With `every_position` (Title::
-// death_screen_loadout, DFX2-38) a position writes whenever its weapon resolves, its control
-// shown, hidden or absent, as dfx2.exe's serializer reads no grenade control.
+// death_screen_loadout, DFX2-38) a position writes whenever its AdmDef entry resolves, its
+// control shown, hidden or absent, as dfx2.exe's serializer reads no grenade control: a zeroed
+// one is entry 0, "null" (kAdmDefNullName), with the None row's count.
 // [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 - the knife @0x5658ca..0x56595b
 //  ("WPN_KNIFE" @0x7C3584, "-1" @0x7C3328), the medpack @0x5659fc..0x565a8d, the categories
 //  @0x565a97..0x565bab (AdmDef_GetEntryByIndex @0x565acb, the counts @0x565b10 /

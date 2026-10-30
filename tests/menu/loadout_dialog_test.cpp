@@ -320,11 +320,13 @@ void test_grenade_positions_by_title() {
 	death.populate(menu, weapons.file, 1, 8, {}, "NONE", text);
 	CHECK(death.every_grenade_position());
 	CHECK(names_of(death.accept(menu, weapons.file, 1, 8)) ==
-			"WPN_KNIFE:-1,-1,-1 WPN_MIKE:2,-1,1 WPN_FRAG:-1,-1,-1 WPN_FLASH:2,-1,-1 ");
-	// A position the walk zeroed (the "None" catalog row) writes nothing under either.
+			"WPN_KNIFE:-1,-1,-1 WPN_MIKE:2,-1,1 WPN_FRAG:-1,-1,-1 WPN_FLASH:2,-1,-1 "
+			"null:-1,-1,-1 ");
+	// A position the walk zeroed (the "None" catalog row) is AdmDef entry 0, "null", which
+	// dfx2.exe's serializer writes with the None row's count.
 	CHECK(armory_serialize_page(
 				  menu, weapons.file, death.slot_rows, { -1, -1, -1 }, death.pairs, 1, 8, true)
-					.entries.size() == 2);
+					.entries.size() == 5);
 }
 
 void test_player_info_state() {
