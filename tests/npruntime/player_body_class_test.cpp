@@ -895,9 +895,11 @@ void test_the_plyr_class_init_warms_up_its_channels() {
 			CHECK(ae->inf.anim_pending == 0);
 			CHECK(ae->inf.clip_phase == steps[i]);
 			CHECK(ae->inf.wpn_clip_phase == steps[i]);
+			// The record's ratio byte over the warmed-up channel.
+			CHECK(w::wire_anim_ratio(ae->inf, r.world->ai.root_motion) ==
+			      std::min(steps[i], int32_t{255}));
 		}
 		CHECK(body->position.z.q16 == z);
-		CHECK(body->net_anim_phase == std::min(steps[i], int32_t{255}));
 		std::vector<int> targets;
 		for (const int state : clips.calls)
 			if (state != w::anim_state::kReset) targets.push_back(state);
@@ -1079,7 +1081,8 @@ void test_the_update_follows_the_rows_move_function() {
 		body->saved_live_roll = 0x05B05B00;
 		const int32_t entry[3] = {body->position.x.q16, body->position.y.q16,
 				body->position.z.q16};
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		const w::Entity *after = r.world->registry.get(ae->handle);
 		CHECK(after != nullptr && after->saved_live_valid == c.ran);
 		if (after != nullptr) {
@@ -1184,7 +1187,8 @@ void test_a_vehicle_row_body_runs_its_movers_person_path() {
 		body->saved_live_roll = 0x05B05B00;
 		const int32_t entry[3] = {body->position.x.q16, body->position.y.q16,
 				body->position.z.q16};
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		const w::Entity *after = r.world->registry.get(ae->handle);
 		CHECK(after != nullptr && after->saved_live_valid == c.ran);
 		if (after != nullptr) {
@@ -1249,7 +1253,8 @@ void test_a_genx_row_body_rides_its_ground_entity() {
 	body->saved_live_valid = false;
 	const int32_t entry[3] = {body->position.x.q16, body->position.y.q16,
 			body->position.z.q16};
-	r.world->ai.update_organic(*ae, *r.world, 1);
+	r.world->ai.update_organic(*ae, *r.world, 1,
+			w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 	const w::Entity *after = r.world->registry.get(ae->handle);
 	CHECK(after != nullptr && after->saved_live_valid);
 	if (after != nullptr) {
@@ -1317,7 +1322,8 @@ void test_an_item_row_body_runs_its_movers_head() {
 		const int32_t entry[3] = {body->position.x.q16, body->position.y.q16,
 				body->position.z.q16};
 		const uint32_t flags = body->flags | body->engine_flags;
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		const w::Entity *after = r.world->registry.get(ae->handle);
 		CHECK(after != nullptr);
 		if (after != nullptr) {
@@ -1385,7 +1391,8 @@ void test_an_envs_or_upfx_row_body_registers_its_loop() {
 		body->net_move_input = 0x08;
 		r.world->rules.last_tick_of_batch = c.last_tick;
 		r.world->out.sound_emitters.clear();
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		const auto &sent = r.world->out.sound_emitters.pending();
 		CHECK(sent.size() == (c.registered ? 1u : 0u));
 		if (c.registered && sent.size() == 1) {
@@ -1442,8 +1449,10 @@ void test_an_upfx_row_body_runs_the_husk_leg() {
 		r.world->rules.logic_authority = c.authority;
 		r.world->out.entity_events.clear();
 		r.world->out.sound_emitters.clear();
-		r.world->ai.update_organic(*ae, *r.world, 1);
-		r.world->ai.update_organic(*ae, *r.world, 2);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
+		r.world->ai.update_organic(*ae, *r.world, 2,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		CHECK(r.world->out.entity_events.size() == c.sends);
 		if (c.sends == 1 && r.world->out.entity_events.size() == 1) {
 			const auto *state = std::get_if<w::ItemStateEvent>(&r.world->out.entity_events[0]);
@@ -1497,14 +1506,16 @@ void test_an_ele0_row_body_runs_the_elevator_mover() {
 	r.world->out.slot_sounds.clear();
 	r.world->out.sound_emitters.clear();
 	// Lowering: 0x800 -> 0x400, still above 0, no change.
-	r.world->ai.update_organic(*ae, *r.world, 1);
+	r.world->ai.update_organic(*ae, *r.world, 1,
+			w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 	CHECK(body->saved_live_valid && body->saved_live_pos[2] == 20 << 16);
 	CHECK(ae->inf.target_heading == 0x400 && ae->inf.vel[2] == -0x400);
 	CHECK(body->position.z.q16 == (20 << 16) - 0x400);
 	CHECK(body->veh.speed == 0 && body->script_next_ssn == 0);
 	CHECK(r.world->out.slot_sounds.empty() && r.world->out.sound_emitters.empty());
 	// At 0 it stops: the cue and the loop.
-	r.world->ai.update_organic(*ae, *r.world, 2);
+	r.world->ai.update_organic(*ae, *r.world, 2,
+			w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 	CHECK(ae->inf.target_heading == 0 && body->position.z.q16 == (20 << 16) - 0x800);
 	CHECK(body->veh.speed == 1 && body->script_next_ssn == 1);
 	CHECK(r.world->out.slot_sounds.size() == 1 &&
@@ -1516,10 +1527,12 @@ void test_an_ele0_row_body_runs_the_elevator_mover() {
 	body->ground_target = rider;
 	r.world->out.slot_sounds.clear();
 	r.world->out.sound_emitters.clear();
-	r.world->ai.update_organic(*ae, *r.world, 3);
+	r.world->ai.update_organic(*ae, *r.world, 3,
+			w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 	CHECK(body->veh.speed == 2 && body->script_next_ssn == 2 && ae->inf.vel[2] == 0);
 	CHECK(r.world->out.slot_sounds.empty() && r.world->out.sound_emitters.size() == 1);
-	r.world->ai.update_organic(*ae, *r.world, 4);
+	r.world->ai.update_organic(*ae, *r.world, 4,
+			w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 	CHECK(ae->inf.vel[2] == 0x400 && body->position.z.q16 == (20 << 16) - 0x400);
 	CHECK(!ae->inf.player_moving);
 	r.world->ai.root_motion = nullptr;
@@ -1575,7 +1588,8 @@ void test_an_arty_row_body_zeroes_its_velocity_and_sends_group_6() {
 		r.world->rules.mp_session = c.session;
 		r.world->rules.logic_authority = c.authority;
 		r.world->out.entity_events.clear();
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		for (int axis = 0; axis < 3; ++axis) CHECK(ae->inf.vel[axis] == 0);
 		CHECK(r.world->out.entity_events.size() == (c.sent ? 1u : 0u));
 		if (c.sent && r.world->out.entity_events.size() == 1) {
@@ -1750,7 +1764,8 @@ void test_an_arty_row_body_runs_the_barrage() {
 		r.world->rules.mp_session = false;
 		r.world->tables.terrain = nullptr;
 		r.world->logic_tick = c.tick;
-		r.world->ai.update_organic(*ae, *r.world, c.tick);
+		r.world->ai.update_organic(*ae, *r.world, c.tick,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		if (!c.fires) {
 			CHECK(r.world->out.rounds.count == 0);
 			CHECK(ae->pitch == 0x12345678);
@@ -1815,14 +1830,16 @@ void test_an_ewep_row_body_runs_the_ewep_legs() {
 			for (const Step s : {Step{0x01123456, 0x3B120000, 0x00050750},
 						Step{0x00123456, 0x3B120000, 0x00050EB0},
 						Step{0x00123456, 0x3A120000, 0x000515F0}}) {
-				r.world->ai.update_organic(*ae, *r.world, 1);
+				r.world->ai.update_organic(*ae, *r.world, 1,
+						w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 				CHECK(ae->inf.aim_point[0] == s.anchor_x);
 				CHECK(body->spawn_position.x.q16 == s.backup_x);
 				CHECK(body->spawn_position.z.q16 == s.backup_z);
 				CHECK(body->spawn_position.y.q16 == 0x00340000);
 			}
 			ae->inf.leg_yaw[0] = 0;
-			r.world->ai.update_organic(*ae, *r.world, 1);
+			r.world->ai.update_organic(*ae, *r.world, 1,
+					w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 			CHECK(body->spawn_position.x.q16 == 0x3A120000);
 		}
 		r.world->ai.root_motion = nullptr;
@@ -1876,7 +1893,8 @@ void test_an_ewep_row_body_runs_the_ewep_legs() {
 				w::FixedVec3{c.anchored ? 0x00120200 : 0x00120000, 0x00340000, 0x00050000});
 		ae->inf.leg_yaw[0] = c.zero_word ? 0 : 0x40000000;
 		ae->inf.aim_point[0] = 0x00123456;
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		if (c.dead_hull) {
 			CHECK((body->flags & w::kEntityFlagCarried) != 0);
 			CHECK((body->flags & w::kEntityFlagDead) != 0);
@@ -1957,7 +1975,8 @@ void test_an_ewep_row_body_asks_for_a_destroyed_ground() {
 		r.world->logic_tick = c.tick;
 		ae->inf.leg_yaw[0] = 0x40000000;
 		ae->inf.aim_point[0] = 0x01123456;
-		r.world->ai.update_organic(*ae, *r.world, c.tick);
+		r.world->ai.update_organic(*ae, *r.world, c.tick,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		const std::vector<w::EntityHandle> &asks = r.world->out.entity_info_requests;
 		if (c.asks) {
 			CHECK(asks.size() == 2);
@@ -2020,7 +2039,8 @@ void test_an_ewep_row_local_body_is_destroyed_in_place() {
 		r.world->destroyed_mark = [](uint16_t handle) { return handle == kGround; };
 		r.world->logic_tick = 0x7F;
 		ae->inf.leg_yaw[0] = 0x40000000;
-		r.world->ai.update_organic(*ae, *r.world, 0x7F);
+		r.world->ai.update_organic(*ae, *r.world, 0x7F,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		body = r.world->registry.get(self);
 		CHECK(body != nullptr);
 		if (body == nullptr) {
@@ -2104,7 +2124,8 @@ void test_an_ewep_row_body_over_a_zeroed_ground() {
 		body->saved_live_yaw = 0x44440000;
 		ae->inf.leg_yaw[0] = c.zero_word ? 0 : 0x40000000;
 		ae->inf.aim_point[0] = 0x01123456;
-		r.world->ai.update_organic(*ae, *r.world, 0x100);
+		r.world->ai.update_organic(*ae, *r.world, 0x100,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		CHECK(r.world->out.entity_info_requests.empty());
 		if (c.zeroed) {
 			CHECK(body->position.x.q16 == 0 && body->position.y.q16 == 0 && body->position.z.q16 == 0);
@@ -2162,7 +2183,8 @@ void test_an_ewep_row_body_refills_its_anchor_byte() {
 		body->spawn_position.set_q16(w::FixedVec3{c.backup_x, 0x00340000, 0x00050000});
 		ae->inf.leg_yaw[0] = 0x40000000;
 		ae->inf.aim_point[0] = 0x00123456; // the spin tail stays idle: no anchor count, no coast
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		CHECK(body->spawn_position.x.q16 == c.backup_x_after);
 		CHECK(((body->flags & w::kEntityFlagCarried) != 0) == c.dead);
 		r.world->ai.root_motion = nullptr;
@@ -2214,7 +2236,8 @@ void test_an_ewep_row_body_lets_go_of_a_rider_off_it() {
 		body->primary_occupant = linked;
 		body->spawn_phase = 40;
 		ae->inf.leg_yaw[0] = c.zero_word ? 0 : 0x40000000;
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		CHECK(body->primary_occupant == (c.kept ? linked : w::EntityHandle{}));
 		CHECK(body->spawn_phase == (c.kept && !c.zero_word ? 1 : 40));
 		r.world->ai.root_motion = nullptr;
@@ -2279,7 +2302,8 @@ void test_an_ewep_row_body_runs_the_tank_command_call() {
 		body->spawn_position.y.q16 = kBackupY;
 		const uint32_t tick = static_cast<uint32_t>(kBackupY) + c.past_stamp;
 		r.world->logic_tick = tick;
-		r.world->ai.update_organic(*ae, *r.world, tick);
+		r.world->ai.update_organic(*ae, *r.world, tick,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		CHECK(body->primary_occupant == rider);
 		CHECK(r.world->out.hud_chat_lines.size() == (c.posts ? 1u : 0u));
 		bool composite = false;
@@ -2373,7 +2397,8 @@ void test_an_ewep_row_body_rides_its_anchor() {
 		ae->inf.leg_yaw[0] = 0x40000000;
 		ae->inf.aim_point[0] = 0x00123456;
 		ae->inf.detour_target[0] = 0x00005678;
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		const w::AiEntity *brain = r.world->ai.for_handle(ground);
 		CHECK(brain != nullptr);
 		const int32_t published = subobject == 0 ? 0x12340000 : 0;
@@ -2448,7 +2473,8 @@ void test_a_psec_row_body_runs_the_physics_step() {
 		body->roll_bam = -0x00780000;
 		body->saved_live_valid = false;
 		for (int i = 0; i < 3; ++i) ae->inf.vel[i] = c.vel[i];
-		r.world->ai.update_organic(*ae, *r.world, 1);
+		r.world->ai.update_organic(*ae, *r.world, 1,
+				w::body_move_row(*r.world, *ae, r.world->registry.get(ae->handle)));
 		const w::Entity *after = r.world->registry.get(ae->handle);
 		CHECK(after != nullptr);
 		if (after != nullptr) {

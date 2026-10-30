@@ -170,11 +170,17 @@ void powerup_sync_local_weapon_grant(World &world, LocalPlayer &lp, const Entity
 bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *row,
                                    bool local_dead);
 
-// The respawn countdown over every bound row, authority only: a positive
-// countdown steps down, zero fires the respawn action, arms -1 and spends one
-// remaining respawn. [orig: Powerup_TickRespawn @0x442850 -- the
-//  is_authority and +0x2C8 gates @0x442862, the decrement @0x442878, the fire
-//  @0x442883..0x442895]
-void powerup_tick(World &world, const TickContext &ctx);
+// One bound row's +0x1C4 update callback, the respawn countdown, authority only:
+// a row with no respawn left does nothing, a positive countdown steps down, zero
+// fires the respawn action, arms -1 and spends one remaining respawn. It is the
+// row's own update, so it runs where the row's update runs: a pool-1 row at its
+// pool-1 visit every tick, a pool-2 row on its slot cohort of the pool-2 walk,
+// one tick in 8 (its respawn takes 8x the ticks).
+// [orig: Powerup_TickRespawn @0x442850 -- the is_authority gate @0x442859, the
+//  +0x2C8 gate @0x442862, the decrement @0x442878, the fire @0x442883..0x442895;
+//  installed as +0x1C4 by PowerupEntity_InitFromDef @0x442D20; called by
+//  Entity_UpdatePool1Slot @0x4B8E53 and the pool-2 walk @0x4C22E7 (the cohort
+//  @0x4C225A)]
+void powerup_tick_respawn(World &world, Entity &row, bool is_authority);
 
 } // namespace opennova::world

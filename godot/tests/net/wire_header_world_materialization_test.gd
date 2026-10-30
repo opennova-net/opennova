@@ -417,10 +417,10 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# Model/seat resolution commonly completes after the stock 0x0D rows. First
 	# install a deliberately ambiguous same-type sibling (a second authored
 	# addeweap row of the same child type, stored slot 2, missing anchor). The
-	# joiner cannot know which authored slot produced its child, so its exact
-	# rigid 0x0D pose remains authoritative. The promoted host does know stored
-	# slot 1 and must retain that identity across the same duplicate-table
-	# refresh.
+	# joiner keys its child's slot by the 0x0D subType, so the sibling leaves it
+	# on stored slot 1, at its exact rigid 0x0D offset. The promoted host does
+	# know stored slot 1 and must retain that identity across the same
+	# duplicate-table refresh.
 	var ambiguous_db := _item_db("ambiguous")
 	assert_not_null(ambiguous_db)
 	if ambiguous_db == null:
@@ -430,6 +430,14 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	joiner.set_asset_root(root)
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			ambiguous_db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
+	# The rows' class init slot leg with the table, as the shell's late
+	# resolution runs it (local_player_visuals.cpp): the B50 child's slot Def
+	# binds from its def's weapon, and the ewep class update composes it only
+	# behind that Def.
+	# [orig: WeaponSlot_InitFromEntityDef @0x5466C0 - the def's name @0x5466E1;
+	#  Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def exit
+	#  @0x440E8E..0x440EA0 ahead of the matrix @0x440F04..0x4411BC]
+	joiner.run_join_streamed_weapon_slot_class_inits()
 	var joiner_parent_before := _present_position_for_type(
 			joiner, DESIGNATED_G_PARENT_TYPE)
 	var joiner_child_before := _present_position_for_type(

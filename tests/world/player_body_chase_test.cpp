@@ -71,7 +71,9 @@ struct Rig {
         return rep::apply_player_intent(*world, intent, slot_in_game);
     }
     void step(int ticks = 1) {
-        for (int i = 0; i < ticks; ++i) world->ai.update_organic(ai(), *world, tick++);
+        for (int i = 0; i < ticks; ++i)
+            world->ai.update_organic(ai(), *world, tick++,
+                    body_move_row(*world, ai(), world->registry.get(ai().handle)));
     }
 };
 

@@ -11,7 +11,7 @@
 //     @0x43615c..0x436183], so a seated rider never sees its own gun as free.
 //     Before the fix our scan skipped only the carrier itself, so USE cycled
 //     driver -> gun -> driver forever.
-//   * the gun child rides the driven buggy (pose_emplacement_attachments over
+//   * the gun child rides the driven buggy (the ewep update's compose over
 //     the authored userpoint), so it never falls behind a moving carrier.
 //
 // And a wall-contact fact: the motorcycle parked west of the start (SSN 311)

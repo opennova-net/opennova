@@ -147,7 +147,11 @@ world::EntityHandle MissionKernel::spawn_teammate(const world::TeammateSpawn &re
     //  @0x452390; Entity_SpawnAddEWeapChildren @0x40F300, called only from
     //  Mission_LoadBMSFile @0x40FD69 / @0x40FD8E and Entity_SpawnDeployable @0x51C49A]
     world.facials.initialize(world);
-    collision.refresh_after_registry_change(world);
+    // Neither factory builds a proximity table or a slice: the operation builds the slices
+    // once, after its last spawn (TeammateOperations::start, D-SIM-5).
+    // [orig: Entity_SpawnHelicopter @0x4521A0 and Entity_SpawnFromItemDef @0x452390 - no
+    //  proximity builder among their callees; HeliLift_SpawnPickup @0x4526EB,
+    //  HeliLift_SpawnFlyover @0x4529C0]
     return handle;
 }
 

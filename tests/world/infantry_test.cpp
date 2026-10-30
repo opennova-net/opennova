@@ -232,7 +232,8 @@ void step_organics(AiSystem &ai, World &w, const TickContext &ctx) {
     for (int i = 0; i < ai.count(); ++i) {
         AiEntity &e = *ai.at(i);
         if (e.brain.f[AiBrain::kOwner] != 0 && e.inf.active)
-            ai.update_organic(e, w, ctx.logic_tick);
+            ai.update_organic(e, w, ctx.logic_tick,
+                    body_move_row(w, e, w.registry.get(e.handle)));
     }
     ai.events.process_timed(ai, w);
 }
@@ -1049,7 +1050,8 @@ void test_player_body_health_adjust() {
 // probes the whole frame at entry, so one more inline block overflowed the stack.
 // The movement motor skips a wire-snapped peer, but the anim selection still runs from
 // the REPLICATED MoveOrder byte (bits 0-2 dir, bit 3 moving) + the C2S 0x1D stance bits,
-// and the selected state/phase mirror onto the world Entity the 0x0A record reads.
+// and the selected state mirrors onto the world Entity the 0x0A record reads (its ratio
+// byte is the live channel's at the record's write, wire_anim_ratio).
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0 — authority gate @0x4b70a3-0x4b70b2,
 //  4th-tick @0x4b70ce, bases @0x4b7183-0x4b7226, idles @0x4b7228-0x4b7293]
 void test_remote_player_body_anim() {
@@ -1088,7 +1090,7 @@ void test_remote_player_body_anim() {
     ent->net_move_input = 0x08;
     run_ticks(ai, w, 0, 8);
     CHECK(ent->net_anim_state == anim_state::kWalkForward);
-    CHECK(ent->net_anim_phase > 0);            // the channel ratio sweeps
+    CHECK(wire_anim_ratio(e->inf, &src) > 0);   // the channel ratio sweeps
     CHECK(ent->net_move_input == 0x08);        // the uplinked byte is NOT overwritten
     // Crouch (the 0x1D stance-change model) lifts the walk to base 11.
     ent->net_stance_bits = 2;
@@ -3607,6 +3609,31 @@ void test_npc_respawn_counts_and_spawn_reset() {
         CHECK(endless.entity().npc_respawns == count);
         CHECK(endless.entity().health == 125);
     }
+}
+
+// D-SIM-8: an org1 respawn on the authority counts the row into the census again, an enemy
+// growing the enemy-unit total and its class; the group live counts wait for the server
+// tick's periodic rescan.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - Entity_ResetToSpawnState called @0x4BA044,
+//  Score_ClassifyEntityForCounts @0x4FD070 called @0x4BA055; EntityPool_RecountLiveByGroup
+//  @0x40E8D0 - Server_TickUpdate's call @0x51DC02]
+void test_npc_respawn_counts_into_the_census() {
+    NpcRespawnRig r;
+    World &w = *r.storage;
+    r.entity().team = 2;
+    r.entity().item_unit_type = 1; // an infantry unit class
+    count_mission_units(w);
+    CHECK(w.kill_stats.enemy_unit_total == 1 && w.kill_stats.enemy_infantry_total == 1);
+    w.script.relations.group(7).live_count = 5; // the last rescan's
+    r.entity().npc_respawns = 1;
+    r.kill();
+    r.tick(1, 4);
+    CHECK(r.entity().health == 125 && r.entity().npc_respawns == 0);
+    CHECK(w.kill_stats.enemy_unit_total == 2 && w.kill_stats.enemy_infantry_total == 2);
+    CHECK(w.kill_stats.enemy_vehicle_total == 0 && w.kill_stats.enemy_aircraft_total == 0);
+    CHECK(w.script.relations.group(7).live_count == 5);
+    w.recount_group_live();
+    CHECK(w.script.relations.group(7).live_count == 1);
 }
 
 void test_npc_respawn_watch_and_control_point() {
@@ -6947,6 +6974,7 @@ int main() {
     test_death_presentation();
     test_new_remote_player_death_keeps_the_entity_until_deploy();
     test_npc_respawn_counts_and_spawn_reset();
+    test_npc_respawn_counts_into_the_census();
     test_npc_respawn_watch_and_control_point();
     test_npc_silent_cleanup_and_corpse_effect_lifetime();
     test_spawn_reset_clears_refs_and_restarts_nearest_route();

@@ -26,7 +26,8 @@ constexpr ExpansionPoolScale kExpansionPoolScales[] = {
 
 PoolCapacities scaled_pool_capacities(std::size_t scale) {
     PoolCapacities out = kRetailPoolCapacity;
-    for (std::size_t &capacity : out) capacity *= scale;
+    for (std::size_t pool = 0; pool < out.size(); ++pool)
+        out[pool] = std::min(out[pool] * scale, kWirePoolCapacity[pool]);
     return out;
 }
 
@@ -51,8 +52,80 @@ void EntityRegistry::configure_pool(int pool, size_t capacity) {
     p.used.assign(capacity, 0);
     p.destroyed.assign(capacity, 0);
     p.freed_by_destroy.assign(capacity, 0);
+    p.ref_joined.assign(capacity, 0);
+    p.fade_rows.clear();
+    p.fade_listed.assign(capacity, 0);
+    for (std::vector<EntityHandle> &list : ref_groups_)
+        list.erase(std::remove_if(list.begin(), list.end(),
+                           [pool](EntityHandle h) { return h.pool() == pool; }),
+                list.end());
     p.live = 0;
     p.used_count = 0; // [orig: Pool_Clear @0x442060 -- used = 0 @0x4420DE..0x4420F6]
+}
+
+void EntityRegistry::ref_group_join(Pool &p, size_t slot) {
+    const Entity &row = p.slots[slot];
+    // [orig: Entity_SpawnFromBMSRecord - the refNum test @0x40EC29..0x40EC2B]
+    if (!row.ref_group_member || row.ref_num == 0 || p.ref_joined[slot] == row.ref_num) return;
+    ref_group_leave(p, slot);
+    ref_groups_[row.ref_num].push_back(row.handle); // [orig: @0x40EC45]
+    p.ref_joined[slot] = row.ref_num;
+}
+
+void EntityRegistry::ref_group_leave(Pool &p, size_t slot) {
+    const uint8_t ref = p.ref_joined[slot];
+    if (ref == 0) return;
+    // The first entry naming the row comes off, the rest shift down.
+    // [orig: Entity_Destroy - DynArray_RemoveById @0x43E858]
+    std::vector<EntityHandle> &list = ref_groups_[ref];
+    const auto it = std::find(list.begin(), list.end(), p.slots[slot].handle);
+    if (it != list.end()) list.erase(it);
+    p.ref_joined[slot] = 0;
+}
+
+void EntityRegistry::set_ref_group_member(EntityHandle h, bool member) {
+    Entity *row = get(h);
+    if (row == nullptr) return;
+    Pool &p = pools_[h.pool()];
+    const size_t slot = static_cast<size_t>(h.slot());
+    row->ref_group_member = member;
+    if (member)
+        ref_group_join(p, slot);
+    else
+        ref_group_leave(p, slot);
+}
+
+void EntityRegistry::list_fade_row(EntityHandle h) {
+    if (!h.valid() || (h.pool() != 2 && h.pool() != 3)) return;
+    Pool &p = pools_[h.pool()];
+    const uint32_t slot = static_cast<uint32_t>(h.slot());
+    if (slot >= p.fade_listed.size() || p.fade_listed[slot]) return;
+    p.fade_listed[slot] = 1;
+    p.fade_rows.insert(std::lower_bound(p.fade_rows.begin(), p.fade_rows.end(), slot), slot);
+}
+
+void EntityRegistry::unlist_fade_row(EntityHandle h) {
+    if (!h.valid() || (h.pool() != 2 && h.pool() != 3)) return;
+    Pool &p = pools_[h.pool()];
+    const uint32_t slot = static_cast<uint32_t>(h.slot());
+    if (slot >= p.fade_listed.size() || !p.fade_listed[slot]) return;
+    p.fade_listed[slot] = 0;
+    p.fade_rows.erase(std::lower_bound(p.fade_rows.begin(), p.fade_rows.end(), slot));
+}
+
+bool EntityRegistry::fade_row_listed(EntityHandle h) const {
+    if (!h.valid() || h.pool() >= kPoolCount) return false;
+    const Pool &p = pools_[h.pool()];
+    const size_t slot = static_cast<size_t>(h.slot());
+    return slot < p.fade_listed.size() && p.fade_listed[slot] != 0;
+}
+
+size_t EntityRegistry::next_fade_row(int pool, size_t from) const {
+    if (pool < 0 || pool >= kPoolCount) return SIZE_MAX;
+    const std::vector<uint32_t> &rows = pools_[pool].fade_rows;
+    const auto it = std::lower_bound(rows.begin(), rows.end(), from,
+            [](uint32_t slot, size_t at) { return slot < at; });
+    return it != rows.end() ? *it : SIZE_MAX;
 }
 
 void EntityRegistry::set_pool_used(int pool, size_t count) {
@@ -86,6 +159,8 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
             p.used[s] = 1;
             p.destroyed[s] = 0;
             p.freed_by_destroy[s] = 0;
+            ref_group_join(p, s);
+            if (seed.needs_destroy_fade()) list_fade_row(h);
             ++p.live;
             // An includeInUse-1 allocation takes the first free row below the
             // used count when there is one, so the count moves only when the
@@ -117,6 +192,8 @@ EntityHandle EntityRegistry::spawn_at(EntityHandle h, const Entity &seed) {
     p.used[slot] = 1;
     p.destroyed[slot] = 0;
     p.freed_by_destroy[slot] = 0;
+    ref_group_join(p, static_cast<size_t>(slot));
+    if (seed.needs_destroy_fade()) list_fade_row(h);
     ++p.live;
     // A slotted load raises the count to the slot + 1, never lowers it.
     // [orig: Pool_UpdateMaxUsedFromSlotId @0x442100 -- @0x442115..0x442123;
@@ -134,6 +211,9 @@ void EntityRegistry::despawn(EntityHandle h) {
     Pool &p = pools_[pool];
     if (slot < 0 || static_cast<size_t>(slot) >= p.slots.size()) return;
     if (p.used[slot]) {
+        // [orig: Entity_Destroy - the refNum list removal @0x43E840..0x43E858]
+        ref_group_leave(p, static_cast<size_t>(slot));
+        unlist_fade_row(h);
         p.used[slot] = 0;
         p.destroyed[slot] = 1; // [orig: Entity_Destroy @0x43EA7F]
         p.freed_by_destroy[slot] = 1; // [orig: Entity_Destroy @0x43EA70..0x43EA92]
@@ -235,10 +315,12 @@ Entity *EntityRegistry::by_bms_id(int32_t bms_id) {
 
 EntityHandle EntityRegistry::find_by_net_id(uint16_t net_id) const {
     // [orig: EntityPool_FindByNetId @0x4f0a20] pool 0 first, then pools where
-    // (1<<i)&0xF (i.e. 1..3); pool 4 is skipped. First match wins.
+    // (1<<i)&0xF (i.e. 1..3); pool 4 is skipped. First match wins. Each pool's
+    // scan stops at its used count [orig: @0x4F0A2D (pool 0), @0x4F0A68].
     auto scan = [&](int pool) -> EntityHandle {
         const Pool &p = pools_[pool];
-        for (size_t s = 0; s < p.slots.size(); ++s) {
+        const size_t bound = walk_bound(p);
+        for (size_t s = 0; s < bound; ++s) {
             if (p.used[s] && p.slots[s].net_id == net_id) {
                 return EntityHandle::make(pool, static_cast<int>(s));
             }
@@ -259,7 +341,8 @@ void EntityRegistry::by_group(uint8_t group, std::vector<EntityHandle> &out) con
     out.clear();
     for (int pool = 0; pool < kPoolCount; ++pool) {
         const Pool &p = pools_[pool];
-        for (size_t s = 0; s < p.slots.size(); ++s) {
+        const size_t bound = walk_bound(p);
+        for (size_t s = 0; s < bound; ++s) {
             if (p.used[s] && p.slots[s].group_id == group) {
                 out.push_back(EntityHandle::make(pool, static_cast<int>(s)));
             }

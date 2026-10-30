@@ -1607,13 +1607,14 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
     CollisionWorld *queries = collision != nullptr ? collision : world.collision;
     if (queries != nullptr) queries->terrain = terrain;
     const int pool = vehicles ? 1 : 0;
-    const size_t cap = world.registry.pool_capacity(pool);
+    // The pool to its used count [orig: @0x43CA19 / @0x43CBC9].
+    const size_t used = world.registry.pool_used(pool);
     // Both variants trace from 0.3 u above the device [orig: +0x4CCC @0x43CA29
     // / @0x43CBD9].
     const int32_t dev[3] = {device.pos.x.q16, device.pos.y.q16, device.pos.z.q16};
     const int32_t eye[3] = {dev[0], dev[1], dev[2] + 0x4CCC};
     const int32_t max_range = to_fixed(max_range_units);
-    for (size_t s = 0; s < cap; ++s) {
+    for (size_t s = 0; s < used; ++s) {
         const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
         const Entity *e = world.registry.get(h);
         if (e == nullptr) continue;
@@ -1686,11 +1687,20 @@ bool ThrowableSim::enemy_in_cone(World &world, CollisionWorld *collision,
 }
 
 PlacedDevice *ThrowableSim::device_for(const Entity &entity) {
-    for (PlacedDevice &d : devices)
-        if (d.active && d.entity == entity.handle &&
-                d.entity_spawn_id == entity.registry_spawn_id)
-            return &d;
-    return nullptr;
+    if (device_index_stale_ || device_index_count_ != devices.size()) {
+        device_index_.clear();
+        for (size_t i = 0; i < devices.size(); ++i)
+            device_index_.emplace(devices[i].entity_spawn_id, i);
+        device_index_count_ = devices.size();
+        device_index_stale_ = false;
+    }
+    const auto it = device_index_.find(entity.registry_spawn_id);
+    if (it == device_index_.end()) return nullptr;
+    PlacedDevice &d = devices[it->second];
+    return d.active && d.entity == entity.handle &&
+                    d.entity_spawn_id == entity.registry_spawn_id
+            ? &d
+            : nullptr;
 }
 
 void ThrowableSim::think_device(World &world, PlacedDevice &d, Entity *e,
@@ -1908,6 +1918,7 @@ void ThrowableSim::compact() {
     size_t w = 0;
     for (size_t i = 0; i < devices.size(); ++i)
         if (devices[i].active) devices[w++] = devices[i];
+    if (w != devices.size()) device_index_stale_ = true;
     devices.resize(w);
 }
 

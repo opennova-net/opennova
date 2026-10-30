@@ -39,9 +39,11 @@ uint8_t wire_anim_ratio(const InfantryState &inf, const IRootMotionSource *sourc
     return static_cast<uint8_t>(value);
 }
 
-// Mirror the motor-selected body-anim state + channel ratio onto the world Entity — the store
-// snapshot_of reads for the 0x0A player record bytes 14/15 (emit reads pending ?: current
-// [orig: @0x4c0cc7]; the ratio wire_anim_ratio's). The LOCAL player additionally exports
+// Mirror the motor-selected body-anim state onto the world Entity — the store snapshot_of reads
+// for the 0x0A player record byte 14 (emit reads pending ?: current [orig: @0x4c0cc7]). Byte 15,
+// the channel ratio, is no mirror: retail's writer divides the live channel's words only while
+// it writes a record, so replication::snapshot_world reads wire_anim_ratio there
+// [orig: NetPacket_SerializePlayerState @0x4C0CF2..0x4C0D35]. The LOCAL player additionally exports
 // its packed MoveOrder low byte (bits 0-2 dir, bit 3 moving) so its own record echoes real
 // input to the peers that motor-drive its avatar [orig: Player_PackInputStateToEntity
 // @0x4df68f-0x4df6a1 packs it; the record write reads entity+0x12C low @0x4c0c9c].
@@ -60,7 +62,6 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     ent->eye_offset_x = inf.eye_offset_x;
     ent->eye_offset_y = inf.eye_offset_y;
     ent->eye_offset_z = inf.eye_offset_z;
-    ent->net_anim_phase = wire_anim_ratio(inf, root_motion);
     if (inf.is_local_player) {
         // Bits 0-2 dir, 3 moving, 5 the packed jump bit, 6/7 the lean keys — the
         // MoveOrder LOW byte layout the uplink's byte 19 carries [orig: the

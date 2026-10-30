@@ -1324,9 +1324,11 @@ void JoinerRole::pump() {
 	// walk, interleaved with the World's movers in slot order (visit_replica_pool1_slot,
 	// D-NET-196).
 	// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9]
-	devtools::ProfileNsSum slot_visits(world.profile, devtools::Slot::SIM_WALK_REPLICA_ROWS);
-	world.pool1_slot_leg = [this, &slot_visits](world::EntityHandle handle) {
-		slot_visits.lap([&] { visit_replica_pool1_slot(handle); });
+	// (Each visit lands on SIM_WALK_REPLICA_ROWS on the profile's microsecond clock, the one the
+	// walk's laps read, so the walk's remainder never reads below zero.)
+	world.pool1_slot_leg = [this, &world](world::EntityHandle handle) {
+		const devtools::ProfileScope visit(world.profile, devtools::Slot::SIM_WALK_REPLICA_ROWS);
+		visit_replica_pool1_slot(handle);
 	};
 	// The tick's own phases land on the SIM_WORLD_* / SIM_UPDATE_* rows inside run_logic_tick.
 	world.run_logic_tick(

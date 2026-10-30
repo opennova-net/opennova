@@ -3,11 +3,13 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <editor/preview/definition_effects.h>
 #include <editor/preview/effect_catalog.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_collect.h>
 #include <editor/preview/mission_effects.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_ground_overlay.h>
@@ -175,6 +177,13 @@ public:
 	// Its people playing their clips on the preview clock from their spawn (S23 C, preview/mission_people): the device
 	// poses each person's model by its body as it plays now.
 	const MissionPeople &people() const { return people_; }
+	// The game's main-view collect over the device's camera (preview/mission_collect, over the mission as it stands,
+	// followed with the scene): the records it drops and the buildings' verdicts, which its device's picture draws and
+	// animates by as the game's main view does. Run per drawn frame (it ticks the records' latches); none before the
+	// mission's world loads.
+	void collect(const world::OcclusionViewSpec &view, MissionCollectVerdicts &out) const {
+		collect_.collect(view, out);
+	}
 	// Its items' effects as the mission's start attaches them (DI-31, preview/mission_effects), followed and
 	// played to the preview clock while its options show them (closed otherwise): the device draws its scene.
 	const MissionEffects &effects() const { return effects_; }
@@ -321,6 +330,13 @@ private:
 	void follow_effects_(const SessionView &view, const PreviewClock &clock);
 	// The mission's start followed over the document (start()); the seats it took.
 	const std::vector<MissionStartSeat> &follow_start_(const SessionView &view, const Document *document);
+	// The collect's world followed over the scene, the ground and the files (collect()): loaded again where a record,
+	// the ground or a file it read moved, a record's move under a gesture written in place.
+	void follow_collect_(const SessionView &view, const Document &document);
+	// The posed people's entities stood where the view draws their bodies (their spawn's lift, or the seat the start
+	// took), where a pose, a person's record or its carrier moved since, or `again` (the world loaded or its records
+	// moved).
+	void stand_collect_people_(bool again);
 	// The Listen followed over the scene and the document and played to the clock at the camera's eye while the
 	// options listen (DI-36), closed while they do not.
 	void follow_listen_(const SessionView &view, const Document *document, const PreviewClock &clock);
@@ -390,6 +406,11 @@ private:
 	MissionEffects effects_;
 	MissionScriptRun start_;
 	MissionListen listen_{ start_ };
+	// Mutable: each collect ticks its records' latches, as the game's does per drawn frame.
+	mutable MissionCollect collect_;
+	uint64_t collect_key_ = 0; // the records, the ground and the files it was loaded over
+	std::unordered_map<NodeId, uint32_t> collect_stamps_; // each record's stamp its entity stands at
+	uint64_t collect_people_key_ = 0; // the posed people's places its entities stand at
 	io::JsonValue drawn_;
 	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
 	uint64_t stood_ground_ = UINT64_MAX; // the ground's revision then

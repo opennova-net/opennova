@@ -107,7 +107,8 @@ func test_selected_character_builds_composed_head_body_and_per_part_camo() -> vo
 	rows[Simulation.PF_BMS_ID] = 1
 	rows[Simulation.PF_BODY_ANIM_SLOT] = -1
 	rows[Simulation.PF_ANIM_STATE] = -1
-	rows[Simulation.PF_HIDDEN] = 1
+	rows[Simulation.PF_ANIM_SOURCE_STATE] = -1
+	rows[Simulation.PF_HUSK] = 1
 	rows[Simulation.PF_OBJECT_DESTROY] = 65536
 	presenter.present_snapshot(rows, Simulation.PF_STRIDE, 1)
 	assert_eq(int(head.get_ctrl_values().get("OBJECT_DESTROY", -1)), 65536,

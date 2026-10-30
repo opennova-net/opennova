@@ -65,8 +65,9 @@ void collect_debug_hitboxes(MissionKernel &kernel, DebugHitboxReport &out, const
 		posed_handles.insert(person.handle.packed);
 	}
 
-	// The bounded stand-in for every remaining live pool-0 entity.
-	const size_t pool0 = w.registry.pool_capacity(0);
+	// The bounded stand-in for every remaining live pool-0 entity, to the pool's used
+	// count as every walk (tooling, not a retail claim).
+	const size_t pool0 = w.registry.pool_used(0);
 	int fallback_entity_count = static_cast<int>(posed_handles.size());
 	for (size_t s = 0; s < pool0; ++s) {
 		if (fallback_entity_count >= entity_cap) break;

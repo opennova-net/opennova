@@ -87,10 +87,11 @@ public:
 	ObjectModel *build_local_player_held_weapon(const String &p_graphic);
 	// The local avatar's item overlays (canopy, goggles, binoculars, carried
 	// object) build and parent exactly like its held weapon: world siblings of
-	// the avatar through the mission placer.
+	// the avatar through the mission placer, and show while the avatar is drawn
+	// (`p_body_drawn`: a view collected it, or a render slot captured it).
 	void present_local_player_person_overlays(PersonOverlayModels &p_overlays,
 			const opennova::world::PersonOverlays &p_state, ObjectModel *p_avatar,
-			PersonOverlayModels::Presentation p_presentation);
+			bool p_body_drawn, PersonOverlayModels::Presentation p_presentation);
 	// Build a GameWorld-managed avatar model for the local player (which has
 	// no BMS placement of its own). The caller (LocalPlayerPresenter)
 	// positions it and swaps its visual/shadow policy per first/third person.

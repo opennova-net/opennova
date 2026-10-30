@@ -33,6 +33,16 @@ uint64_t stable_los_cell_key(int32_t x, int32_t y) {
            static_cast<uint32_t>(y);
 }
 
+// A pool's live rows below its used count, in slot order: the builders walk each pool's array
+// to its used high-water mark, not its capacity (D-SIM-1's bound).
+template <class F>
+void for_each_used_row(const EntityRegistry &registry, int pool, F &&fn) {
+    const size_t used = registry.pool_used(pool);
+    for (size_t slot = 0; slot < used; ++slot)
+        if (const Entity *row = registry.get(EntityHandle::make(pool, static_cast<int>(slot))))
+            fn(*row);
+}
+
 } // namespace
 
 // ----------------------------------------------------------------------------
@@ -66,6 +76,7 @@ void CollisionWorld::assign_entity(EntityHandle h, int32_t model_id,
         final_husk = existing->second.final_husk_model_id;
     }
     instances_[h.packed] = Instance{model_id, husk, final_husk, registry_spawn_id};
+    bindings_dirty_ = true; // the next build's prune tests it (prune_stale_bindings)
     invalidate_trace_view(h);
 }
 
@@ -102,11 +113,12 @@ void CollisionWorld::set_pose_provider(IPoseProvider *provider) {
 }
 
 const CollisionWorld::Instance *CollisionWorld::live_instance(
-        const World &world, EntityHandle h) const {
+        const World &world, EntityHandle h, const Entity **entity_out) const {
     const auto it = instances_.find(h.packed);
     if (it == instances_.end()) return nullptr;
     const Entity *entity = world.registry.get(h);
     if (entity == nullptr) return nullptr;
+    if (entity_out != nullptr) *entity_out = entity;
     if (it->second.registry_spawn_id != 0 &&
         it->second.registry_spawn_id != entity->registry_spawn_id)
         return nullptr;
@@ -159,6 +171,9 @@ int32_t CollisionWorld::entity_husk_model_id(const Entity &e) const {
 // [orig: Entity_SpawnFromBMSRecord - the 0x2B4-byte memset @0x40EA27; NapiNPClientMsg_0x00D
 //  @0x432D23; Entity_Destroy @0x43E810 - @0x43EA70]
 const CollisionWorld::CandidateSlice *CollisionWorld::find_slice(EntityHandle h) const {
+    // The replica resolve's staged slice under the never-allocated invalid key.
+    if (h.packed == EntityHandle::kInvalid)
+        return replica_slice_staged_ ? &replica_slice_ : nullptr;
     const auto it = candidates_.find(h.packed);
     if (it == candidates_.end()) return nullptr;
     if (it->second.lifetime != 0) {
@@ -340,6 +355,7 @@ void CollisionWorld::replace_wire_collision_proxies(
     wire_person_proxies_ = std::move(persons);
     wire_dynamic_proxies_ = std::move(dynamics);
     wire_local_player_handle_ = local_player_wire_handle;
+    person_proxy_order_valid_ = false;
     skipped.erase(std::remove_if(skipped.begin(), skipped.end(),
                                  [](const WireSliceRow &row) {
                                      return row.wire_handle == EntityHandle::kInvalid;
@@ -872,6 +888,20 @@ void CollisionWorld::prune_stale_bindings(World &world) {
     // Packed pool/slot handles are reused. Remove every binding whose recorded
     // lifetime no longer names the registry occupant before any proximity,
     // contact, or occlusion consumer can observe its old model or husk.
+    // A binding or a slice goes stale only when a slot's occupant changes (a spawn steps the
+    // registry's serial, a despawn its live count; a restore rebuilds through
+    // build_all_tables) or a binding is assigned, so the walk runs at the first build after
+    // one and a build over an unchanged registry skips it (D-SIM-7; host bookkeeping, not a
+    // retail claim: retail's tables hold no binding to prune).
+    const uint64_t serial = world.registry.spawn_serial();
+    const size_t live = world.registry.live_count();
+    if (!bindings_dirty_ && pruned_registry_ == &world.registry &&
+            pruned_spawn_serial_ == serial && pruned_live_count_ == live)
+        return;
+    bindings_dirty_ = false;
+    pruned_registry_ = &world.registry;
+    pruned_spawn_serial_ = serial;
+    pruned_live_count_ = live;
     for (auto it = instances_.begin(); it != instances_.end();) {
         const EntityHandle h{it->first};
         const Entity *entity = world.registry.get(h);
@@ -898,10 +928,12 @@ void CollisionWorld::build_statics(World &world) {
     statics_.clear();
     static_building_count_ = 0;
     auto push_static = [&](const Entity &e) {
-        // The original's count saturates at 1199 — the 1200th slot is written
-        // but never counted, so 1199 is the effective cap. [orig: the
+        // The original's count saturates one short of the table's size (pool 2's
+        // capacity) — the last slot is written but never counted. [orig: the
         // `count < 1199` post-increment gate @ 0x4b94cb / 0x4b955f]
-        if (statics_.size() >= static_cast<size_t>(kStaticProxCountBound)) return;
+        if (statics_.size() >=
+                static_cast<size_t>(static_prox_count_bound(world.registry.pool_capacity(2))))
+            return;
         auto it = instances_.find(e.handle.packed);
         const CollisionModel *attached =
             it != instances_.end() ? model(it->second.model_id) : nullptr;
@@ -937,7 +969,8 @@ void CollisionWorld::build_statics(World &world) {
     // pool-2 row is a BMS "building" record, but only the Building-type
     // defs form the prefix; the decorations and foliage follow it.
     // [orig: `def->type == ItemType_Building` @ 0x4b946e, `!=` @ 0x4b9502
-    //  — building_def_row, world/collision.h]
+    //  — building_def_row, world/collision.h] Both passes stop at pool 2's used
+    // count, as for_each_in_pool does [orig: @0x4B9432].
     world.registry.for_each_in_pool(2, [&](const Entity &e) {
         if (building_def_row(e)) push_static(e);
     });
@@ -960,6 +993,7 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     // --- pool-0 persons + pool-1 dynamics. [orig: 0x4b9340] ---
     persons_.clear();
     dynamics_.clear();
+    person_proxy_order_valid_ = false;
     // A def'd row lists by retail's gate alone, a type index (+0x1C), a def (+0x20)
     // and Flags bit 0 clear, whatever its kind, model or seats, at its own bound word
     // (entity+0) as its radius, zero included. A row with no def is ours alone (a
@@ -978,22 +1012,21 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         int32_t pf[3];
         entity_pos_fixed(e, pf);
         p.x = pf[0]; p.y = pf[1]; p.z = pf[2];
-        auto inst = instances_.find(e.handle.packed);
-        const CollisionModel *attached =
-            inst != instances_.end() ? model(inst->second.model_id) : nullptr;
-        p.radius = e.has_item_def ? e.bound_radius.q16
-                                  : entity_proximity_radius(*this, e, attached);
+        p.radius = e.bound_radius.q16;
         p.bound = e.bound_radius > 0.0f ? e.bound_radius.q16 : 0;
-        // A def-less row's published live pose can place bones far from the feet;
-        // its slot widens to the pose's own bone-sphere reach.
-        if (!e.has_item_def && inst != instances_.end() &&
-                !inst->second.section_matrices.empty()) {
-            const CollisionModel *m = model(inst->second.model_id);
-            if (m != nullptr &&
-                inst->second.section_matrices.size() == m->sections.size()) {
+        // A def'd row's slot is its words alone; only a def-less row looks its binding up.
+        if (!e.has_item_def) {
+            const auto inst = instances_.find(e.handle.packed);
+            const CollisionModel *attached =
+                inst != instances_.end() ? model(inst->second.model_id) : nullptr;
+            p.radius = entity_proximity_radius(*this, e, attached);
+            // A def-less row's published live pose can place bones far from the feet;
+            // its slot widens to the pose's own bone-sphere reach.
+            if (attached != nullptr && !inst->second.section_matrices.empty() &&
+                inst->second.section_matrices.size() == attached->sections.size()) {
                 int32_t max_reach = 0;
-                for (size_t si = 0; si < m->sections.size(); ++si) {
-                    const CollisionSection &sec = m->sections[si];
+                for (size_t si = 0; si < attached->sections.size(); ++si) {
+                    const CollisionSection &sec = attached->sections[si];
                     if (sec.radius < 0) continue;
                     int32_t c[3];
                     inst->second.section_matrices[si].transform_point(sec.center, c);
@@ -1019,12 +1052,14 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
     auto push_dynamic = [&](const Entity &e) {
         if (e.has_item_def && !listed_by_def(e)) return;
         if (!e.has_item_def && (e.kind != EntityKind::Item || (e.flags & 1u) != 0)) return;
-        auto it = instances_.find(e.handle.packed);
-        const CollisionModel *attached =
-            it != instances_.end() ? model(it->second.model_id) : nullptr;
-        const bool attachable = !e.seats.empty() || !e.armory_points.empty();
-        if (!e.has_item_def && attached == nullptr && e.bound_radius <= 0.0f && !attachable)
-            return;
+        // A def'd row's slot is its words alone; only a def-less row looks its binding up.
+        const CollisionModel *attached = nullptr;
+        if (!e.has_item_def) {
+            const auto it = instances_.find(e.handle.packed);
+            attached = it != instances_.end() ? model(it->second.model_id) : nullptr;
+            const bool attachable = !e.seats.empty() || !e.armory_points.empty();
+            if (attached == nullptr && e.bound_radius <= 0.0f && !attachable) return;
+        }
         DynSlot d;
         int32_t pf[3];
         entity_pos_fixed(e, pf);
@@ -1051,12 +1086,12 @@ void CollisionWorld::build_tables(World &world, bool advance_candidate_slices) {
         dynamics_.push_back(d);
     };
 
-    // Retail walks each pool's own array: pool 1 then pool 0 every tick
-    // [orig: 0x4b9340 @0x4b9389 / @0x4b93eb], and pool 2 twice at the start
-    // of a mission so the complete Building prefix precedes every other
-    // pool-2 entry [orig: 0x4b9430].
-    world.registry.for_each_in_pool(0, push_person);
-    world.registry.for_each_in_pool(1, push_dynamic);
+    // Retail walks each pool's own array to its used count: pool 1 then pool 0
+    // every tick [orig: 0x4b9340 @0x4b9389 / @0x4b93eb; the used reads @0x4B9354 /
+    // @0x4B93C4], and pool 2 twice at the start of a mission so the complete
+    // Building prefix precedes every other pool-2 entry [orig: 0x4b9430].
+    for_each_used_row(world.registry, 0, push_person);
+    for_each_used_row(world.registry, 1, push_dynamic);
     if (statics_dirty_) build_statics(world);
 
     if (!advance_candidate_slices) return;
@@ -1153,9 +1188,10 @@ void CollisionWorld::build_candidate_slices(World &world) {
     // Sources use their current live positions, including a direct teleport
     // between pool-table publications; candidate target positions remain the
     // published dynamics/statics. A pool-0 source needs its +0x1C word alone,
-    // whatever its kind or Flags. [orig: the pool-0 loop @0x4B8EE2, the +0x1C
-    //  test @0x4B8EF9..0x4B8F00]
-    world.registry.for_each_in_pool(0, [&](const Entity &e) {
+    // whatever its kind or Flags. Each loop runs to its pool's used count. [orig: the
+    //  pool-0 used read @0x4B8EB8, the loop @0x4B8EE2, the +0x1C test
+    //  @0x4B8EF9..0x4B8F00; the pool-1 used read @0x4B90F5]
+    for_each_used_row(world.registry, 0, [&](const Entity &e) {
         if (e.item_type_index != 0) build_for(e, 0x40000);
     });
     // Pool-1 SOURCE slices for every retail-eligible active item, not merely
@@ -1168,7 +1204,7 @@ void CollisionWorld::build_candidate_slices(World &world) {
     // bit 0 skip @0x4B9137..0x4B913B, def attrib 0x20 (+0x54) excluded unless
     // def type (+0x5C) == 1 @0x4B913D..0x4B9147; radius +6.0u (0x60000)
     // @0x4b9152]
-    world.registry.for_each_in_pool(1, [&](const Entity &e) {
+    for_each_used_row(world.registry, 1, [&](const Entity &e) {
         if (e.item_type_index == 0 || !e.has_item_def || (e.flags & 1u) != 0) return;
         if ((e.item_attrib & kItemAttribEweap) != 0 && e.item_type != 1) return;
         build_for(e, 0x60000);
@@ -1201,9 +1237,6 @@ void CollisionWorld::build_candidate_slices(World &world) {
         slice.start = wire_arena_used_;
         slice.count = 0;
         slice.lifetime = lifetime;
-        slice.built_pos[0] = position_q16.x;
-        slice.built_pos[1] = position_q16.y;
-        slice.built_pos[2] = position_q16.z;
         for (const DynSlot &d : dynamics_) {
             if (registry_twin.valid() && d.h == registry_twin) continue;
             const int32_t total = range + d.radius;
@@ -1330,10 +1363,27 @@ void CollisionWorld::refresh_after_registry_change(World &world) {
     build_tick_tables(world);
 }
 
+void CollisionWorld::rebuild_slices_after_spawn(World &world) {
+    invalidate_trace_views();
+    // The pre-slice states as refresh_after_registry_change keeps them: a never-built world
+    // keeps its fallbacks, a tables-only one takes the pre-logic snapshot.
+    if (!candidate_slices_built_) {
+        if (tick_tables_built_) build_initial_tables(world);
+        return;
+    }
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0 - the counter @0x4B8ECA, the fill
+    //  @0x4B8ED0; the spawns' calls @0x43C4EB / @0x4526EB / @0x4529C0, the vehicle
+    //  respawn's @0x460133]
+    build_candidate_slices(world);
+}
+
 void CollisionWorld::build_all_tables(World &world) {
     // [orig: Entity_BuildAllProximityLists @0x4C20F0 - Entity_BuildProximityLists_Pool2,
     //  then Entity_BuildProximityLists_Pool01, then Entity_BuildProximityListsFromPools]
     statics_dirty_ = true;
+    // A restore's rebuild: the registry it restored can match the last prune's serial and
+    // live count with other occupants (EntityRegistry::restore_from keeps the serial).
+    bindings_dirty_ = true;
     refresh_after_registry_change(world);
 }
 

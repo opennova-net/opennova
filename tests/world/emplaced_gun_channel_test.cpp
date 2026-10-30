@@ -116,6 +116,21 @@ void author_arc(Entity &gun) {
     gun.emplacement_up_limit_bam = -10 * kBamPerDegree;
 }
 
+// Only the ewep class update composes an attached gun, behind its slot Def: an
+// ewep row whose slot is bound to a Def with a window that spans every angle.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def exit
+//  @0x440E8E..0x440EA0 ahead of the matrix @0x440F04..0x4411BC]
+void make_composed_ewep(World &w, Entity &gun) {
+    gun.emplaced_update = true;
+    w.tables.weapons.entries.resize(1);
+    WeaponTableEntry &weapon = w.tables.weapons.entries[0];
+    weapon.valid = true;
+    weapon.turret_yaw_range_deg = 180;
+    weapon.turret_pitch_max_deg = 90;
+    weapon.turret_pitch_min_deg = 90;
+    gun.primary_weapon_slot_adm = 0;
+}
+
 // The immediate path (attrib2 IsTurret clear): word322 = (gun.Yaw - occ.Yaw)
 // >> 16, word324 = (gun.Pitch - occ.recoilPitch - occ.Pitch) >> 16, and the
 // publication is those words verbatim. [orig: @0x440b39..0x440b58]
@@ -511,6 +526,7 @@ void test_attached_turret_slews_once_per_world_tick() {
             r.gun().emplacement_parent = parent;
             r.gun().emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
             r.gun().emplacement_pose_metadata_resolved = true;
+            make_composed_ewep(r.w, r.gun());
         }
         const int32_t look = bam_sub(kGunHeading, 30 * kBamPerDegree);
         r.look(look, 0);
@@ -587,6 +603,47 @@ void test_barrel_spin_once_before_weapon_pump() {
     r.w.pump_weapon_actions();
     CHECK(r.gun().emplaced_spin_ticks == 58);
     CHECK(r.gun().emplaced_spin_phase == 3744);
+}
+
+// The spin tail follows the class update's matrix leg: the kick's last tick
+// plays the trail-off at the child's composed Position, its carrier's of this
+// tick. The carrier stands 1000 units from where the child stood: a play from
+// that old frame would queue a distance-delayed slot instead of playing at
+// the listener.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the root copy
+//  @0x4410EA..0x4411BC and the OR @0x4411C2 ahead of the spin tail
+//  @0x44139D..0x441447, Sound_PlayWithDistanceAttenuation at [child+4]
+//  @0x44141E..0x441423]
+void test_trail_off_plays_at_the_composed_position() {
+    Rig r(/*local=*/true, /*player_bit=*/true);
+    CHECK(r.w.vehicles.detach(r.gunner_h));
+    r.w.tables.weapons.entries.resize(1);
+    WeaponTableEntry &weapon = r.w.tables.weapons.entries[0];
+    weapon.valid = true;
+    std::strcpy(weapon.action_fsm.soundtrailoff, "GUN_TAIL");
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.health = 100;
+    carrier.position = {1000.0f, 0.0f, 0.0f};
+    const EntityHandle parent = r.w.registry.spawn(1, carrier);
+    Entity &gun = r.gun();
+    gun.emplaced_update = true;
+    gun.primary_weapon_slot_adm = 0;
+    gun.emplacement_parent = parent;
+    gun.emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
+    gun.emplacement_pose_metadata_resolved = true;
+    gun.ground_target = parent;
+    gun.primary_weapon_slot.kick = 1;
+    r.w.out.fire_sounds.set_listener({1000.0f, 0.0f, 0.0f});
+    r.w.run_logic_tick(true);
+    CHECK(r.gun().position.x == 1000.0f); // the root copy of the carrier
+    CHECK(r.gun().primary_weapon_slot.kick == 0);
+    bool played = false;
+    for (const ReadyFireSound &sound : r.w.out.fire_sounds.drain())
+        if (sound.set_name == "GUN_TAIL")
+            played = sound.pos.x == 1000.0f && sound.pos.y == 0.0f && sound.pos.z == 0.0f;
+    CHECK(played);
+    CHECK(r.w.out.fire_sounds.pending_count() == 0);
 }
 
 // The ewep class's CTRL writer has no occupant test: once the gunner leaves,
@@ -1330,6 +1387,7 @@ void test_slew_reads_the_frame_before_the_compose() {
     r.gun().emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
     r.gun().emplacement_pose_metadata_resolved = true;
     r.gun().emplacement_bone = 1;
+    make_composed_ewep(r.w, r.gun());
     r.look(kGunHeading, 0);
     r.w.run_logic_tick(true);
     CHECK(r.gun().emplaced_gun_yaw_word == 0);
@@ -1353,6 +1411,7 @@ void test_slew_reads_the_frame_before_the_compose() {
     gun.emplacement_parent = hull_h;
     gun.emplacement_bone = 1;
     gun.emplacement_pose_metadata_resolved = true;
+    make_composed_ewep(i.w, gun);
     gun.saved_live_yaw = kGunHeading;
     gun.saved_live_pitch = 0x00400000;
     gun.saved_live_valid = true;
@@ -1367,6 +1426,72 @@ void test_slew_reads_the_frame_before_the_compose() {
     i.tick_channel();
     CHECK(i.gun().emplaced_gun_yaw_word == 0x0200);
     CHECK(i.gun().emplaced_gun_pitch_word == 0);
+    // So does a child whose class update stops ahead of the compose (no slot Def).
+    i.gun().emplacement_pose_metadata_resolved = true;
+    i.gun().emplaced_gun_yaw_word = 0x0100;
+    i.gun().emplaced_gun_pitch_word = 0x0040;
+    i.gun().primary_weapon_slot_adm = kAdmSlotNone;
+    i.tick_channel();
+    CHECK(i.gun().emplaced_gun_yaw_word == 0x0200);
+    CHECK(i.gun().emplaced_gun_pitch_word == 0);
+}
+
+// Only the ewep class update composes an attached child, past its gates: a
+// child whose move function is not ewep, one with no slot Def and one whose
+// carrier is a dead PlayerControl hull all hold their frames on a moved
+// carrier (the hull's child hidden); the ewep child with its slot Def rides.
+// [orig: Entity_UpdatePool1Slot @0x4B8E53 (the row's own +0x1C4);
+//  Entity_UpdateTransformAndTurret @0x440CA0 - the hide and return
+//  @0x440CD7..0x440CE1, the slot Def exit @0x440E8E..0x440EA0, the root copy
+//  @0x4410EA..0x4411BC]
+void test_only_the_ewep_update_composes_a_child() {
+    auto wp = std::make_unique<World>();
+    World &w = *wp;
+    w.registry.configure_pool(1, 8);
+    Entity carrier_seed;
+    carrier_seed.kind = EntityKind::Item;
+    carrier_seed.health = 100;
+    carrier_seed.alive = true;
+    carrier_seed.position = {8.0f, 12.0f, 4.0f};
+    const EntityHandle carrier = w.registry.spawn(1, carrier_seed);
+    Entity hull_seed = carrier_seed;
+    hull_seed.has_item_def = true;
+    hull_seed.item_attrib = kItemAttribPlayerControl;
+    hull_seed.flags = kEntityFlagDead;
+    hull_seed.alive = false;
+    const EntityHandle hull = w.registry.spawn(1, hull_seed);
+    const auto child_on = [&](EntityHandle parent, bool ewep, bool slot_def) {
+        Entity seed;
+        seed.kind = EntityKind::Item;
+        seed.item_type_index = 2; // a resolved def row: the walk visits it
+        seed.health = 100;
+        seed.alive = true;
+        seed.emplacement_parent = parent;
+        seed.emplacement_parent_spawn_id = w.registry.get(parent)->registry_spawn_id;
+        seed.ground_target = parent;
+        seed.emplacement_pose_metadata_resolved = true;
+        const EntityHandle h = w.registry.spawn(1, seed);
+        Entity &child = *w.registry.get(h);
+        make_composed_ewep(w, child);
+        child.emplaced_update = ewep;
+        if (!slot_def) child.primary_weapon_slot_adm = kAdmSlotNone;
+        return h;
+    };
+    const EntityHandle ridden = child_on(carrier, true, true);
+    const EntityHandle other_class = child_on(carrier, false, true);
+    const EntityHandle no_def = child_on(carrier, true, false);
+    const EntityHandle on_wreck = child_on(hull, true, true);
+    w.run_logic_tick();
+    const auto at = [&](EntityHandle h, float x, float y, float z) {
+        const Entity *e = w.registry.get(h);
+        return e != nullptr && e->position.x == x && e->position.y == y && e->position.z == z;
+    };
+    CHECK(at(ridden, 8.0f, 12.0f, 4.0f));
+    CHECK(at(other_class, 0.0f, 0.0f, 0.0f));
+    CHECK(at(no_def, 0.0f, 0.0f, 0.0f));
+    CHECK(at(on_wreck, 0.0f, 0.0f, 0.0f));
+    CHECK((w.registry.get(on_wreck)->flags & kEntityFlagCarried) != 0);
+    CHECK((w.registry.get(on_wreck)->engine_flags & kEntityFlagMatrixBuilt) == 0);
 }
 
 // The joiner's remote-gunner leg over a gun its world composes: the slew reads the row's frame
@@ -1386,6 +1511,10 @@ void test_replica_gun_window_reads_the_composed_frame() {
         Entity twin_seed;
         twin_seed.kind = EntityKind::Item;
         twin_seed.item_id = 123;
+        // The twin's slot Def, its class init's bind: the fallback window reads it.
+        w.tables.weapons.entries.resize(1);
+        w.tables.weapons.entries[0].valid = true;
+        twin_seed.primary_weapon_slot_adm = 0;
         const EntityHandle twin_h = w.registry.spawn(1, twin_seed);
         const int32_t row_frame = kGunHeading;
         const int32_t composed_frame = bam_add(kGunHeading, 0x08000000);
@@ -1429,6 +1558,54 @@ void test_replica_gun_window_reads_the_composed_frame() {
     }
 }
 
+// The joiner's fallback window reads the gun's slot Def, as the World's window does: a twin no
+// class init bound (a gun neither ewep nor an EWeap aircraft) takes no window from the weapon its
+// def names, whose limits its spec carries, so a gunner past the +-45 degree yaw range keeps its
+// look, as on the host; with the Def bound the same look pins at the window.
+// [orig: Entity_GetWeaponTurretLimits @0x540D70 - the fallback off the slot's def
+//  @0x540E35..0x540E58; WeaponSlot_InitFromEntityDef @0x5466C0, called only by
+//  Entity_InitBoneReferences @0x441482 and Entity_InitAircraftWeaponBones @0x49017B]
+void test_replica_fallback_window_reads_the_twins_slot_def() {
+    using opennova::replication::ClientEntityState;
+    for (const bool bound : {false, true}) {
+        auto wp = std::make_unique<World>();
+        World &w = *wp;
+        w.registry.configure_pool(1, 4);
+        w.tables.weapons.entries.resize(1);
+        w.tables.weapons.entries[0].valid = true;
+        Entity twin_seed;
+        twin_seed.kind = EntityKind::Item;
+        twin_seed.item_id = 123;
+        if (bound) twin_seed.primary_weapon_slot_adm = 0;
+        const EntityHandle twin_h = w.registry.spawn(1, twin_seed);
+        std::vector<opennova::mission::ItemSeatSpec> specs(1);
+        specs[0].type_id = 123;
+        Seat seat;
+        seat.type = SeatType::Gunner;
+        seat.bone_index = 1;
+        specs[0].seats.push_back(seat);
+        specs[0].turret_limits_valid = true;
+        specs[0].turret_yaw_range_bam = 0x20000000;
+        specs[0].turret_pitch_max_bam = 0x40000000;
+        specs[0].turret_pitch_min_bam = 0x40000000;
+        opennova::replication::ClientState state;
+        ClientEntityState &mount = state.upsert(twin_h.packed);
+        mount.type_id = 123;
+        mount.cls = opennova::EntityClass::NoNetworkCallback;
+        mount.heading_bam = kGunHeading;
+        ClientEntityState &gunner = state.upsert(2);
+        gunner.cls = opennova::EntityClass::Player;
+        gunner.carrier_handle = twin_h.packed;
+        gunner.mount_bone = 1;
+        gunner.heading_bam = bam_sub(kGunHeading, 0x30000000);
+        opennova::inmatch::tick_replica_emplaced_channels(state, specs, w, 0xFFFF, nullptr,
+                opennova::inmatch::ReplicaGunLeg::Pool1Walk);
+        CHECK(state.find(twin_h.packed)->emplaced_gun_yaw_word == (bound ? 0x2000 : 0x3000));
+        CHECK(state.find(2)->heading_bam ==
+                bam_sub(kGunHeading, bound ? 0x20000000 : 0x30000000));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1439,6 +1616,7 @@ int main() {
     test_dfx2_channel_publishes_then_counter_rotates();
     test_slew_reads_the_frame_before_the_compose();
     test_replica_gun_window_reads_the_composed_frame();
+    test_replica_fallback_window_reads_the_twins_slot_def();
     test_weapon_window_zero_yawrange_locks_traverse();
     test_unoccupied_gun_publishes_held_words_spin_and_heat();
     test_parent_publication_runs_unoccupied_every_tick();
@@ -1448,6 +1626,8 @@ int main() {
     test_carrier_destruction_resets_child_words();
     test_vehicle_death_releases_or_destroys_the_eweap_group();
     test_barrel_spin_once_before_weapon_pump();
+    test_trail_off_plays_at_the_composed_position();
+    test_only_the_ewep_update_composes_a_child();
     test_barrel_spin_tail_and_class_gate();
     test_attached_turret_slews_once_per_world_tick();
     test_immediate_path_words_and_recoil_term();

@@ -533,7 +533,9 @@ static int test_people_play() {
 			world::AiEntity &entity = *people.world.ai.for_handle(bodies[i]);
 			const int32_t before = entity.inf.clip_phase;
 			// The game's tick: the clock's first past the people's start is its first frame, tick 1.
-			people.world.ai.update_organic(entity, people.world, uint32_t(tick));
+			people.world.ai.update_organic(entity, people.world, uint32_t(tick),
+					world::body_move_row(people.world, entity,
+							people.world.registry.get(entity.handle)));
 			if (entity.inf.last_events != 0) ++world_events;
 			wraps += entity.inf.clip_phase < before ? 1 : 0;
 		}

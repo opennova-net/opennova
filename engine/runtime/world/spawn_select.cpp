@@ -524,11 +524,13 @@ void SpawnWaveList::build_from_mission(const World &world,
     entries_.clear();
     // Retail scans pool 2, then pool 1, and registers every SpawnPoint ItemDef
     // regardless of alive state. A numbered zone uses its dedicated interval
-    // when nonzero, otherwise it falls back to the base interval.
-    // [orig: SpawnWaveList_BuildFromMission @0x52A920]
+    // when nonzero, otherwise it falls back to the base interval. Each pool runs
+    // to its used count.
+    // [orig: SpawnWaveList_BuildFromMission @0x52A920 - the used loads @0x52A931
+    //  (pool 2), @0x52A9EF (pool 1)]
     for (const int pool : {2, 1}) {
-        const size_t capacity = world.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        const size_t used = world.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const Entity *zone = world.registry.get(
                     EntityHandle::make(pool, static_cast<int>(slot)));
             if (zone == nullptr || !zone->is_spawn_point) continue;
