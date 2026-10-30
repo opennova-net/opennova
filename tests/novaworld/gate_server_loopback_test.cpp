@@ -1,4 +1,4 @@
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 #include <net/protocol/protocol.h>
 
 #include <net/napi/envelope.h>

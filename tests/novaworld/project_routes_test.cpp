@@ -32,8 +32,8 @@
 #include "accounts/web_session.h"
 #include "core/local_object_store.h"
 #include "http_listener.h"
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 #include "products/product_jobs.h"
 #include "products/project_repository.h"
 #include "products/project_routes.h"

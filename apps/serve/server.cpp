@@ -1304,11 +1304,6 @@ SecondListingReport Server::second_listing_report() const {
 
 void Server::tick_second_listing() {
 	if (!second_listing_wanted() || listing_ == nullptr) return;
-	// The torn-down tries' web exchanges that landed go.
-	second_http_left_.erase(std::remove_if(second_http_left_.begin(), second_http_left_.end(),
-			[](const std::future<net::HttpReply> &left) {
-				return left.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-			}), second_http_left_.end());
 	if (second_stopped_) return;
 	const uint32_t now = wall_ms();
 	if (second_lister_ == nullptr) {
@@ -1441,9 +1436,8 @@ void Server::end_second_listing(bool stop_hosting) {
 	else
 		second_lister_->disconnect();
 	if (demux_ != nullptr) demux_->set_session_claim(nullptr, kSecondListingLane);
-	// A web exchange still out lands on its own: the lister goes without waiting on it.
-	std::future<net::HttpReply> left = second_lister_->release_http();
-	if (left.valid()) second_http_left_.push_back(std::move(left));
+	// A web exchange still out lands on its own: the lister goes without waiting on it
+	// (BrowserChannel drops it).
 	second_lister_.reset();
 	second_published_ = false;
 }
@@ -1602,7 +1596,6 @@ void Server::stop() {
 		lister_.reset();
 	}
 	second_resolve_ = {};
-	second_http_left_.clear();
 	listing_.reset();
 	demux_.reset();
 	datagrams_.reset();

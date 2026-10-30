@@ -1,4 +1,5 @@
-#include "net_sockets.h"
+#include "socket.h"
+#include "stream_socket.h"
 
 #include <cstdio>
 #include <cstring>
@@ -468,6 +469,45 @@ void close_socket_reset(Socket &s) {
 	::setsockopt(native_socket(s.fd), SOL_SOCKET, SO_LINGER, reinterpret_cast<const char *>(&reset),
 			sizeof(reset));
 	close_socket(s);
+}
+
+namespace {
+
+// tcp_connect's stream as the seam's: each receive waits for bytes first, so the stream's owner
+// bounds its own waits (the HTTP exchange's cancel and its reply bounds).
+class TcpStream final : public IStreamSocket {
+public:
+	explicit TcpStream(Socket s) : socket_(s) {}
+
+	bool send_all(const uint8_t *data, std::size_t len) override {
+		return tcp_send_all(socket_.get(), data, len);
+	}
+
+	int recv(uint8_t *buf, std::size_t cap, int wait_ms) override {
+		const int ready = wait_ready(socket_.get().fd, /*write=*/false, wait_ms < 0 ? 0 : wait_ms);
+		if (ready == 0) return kStreamRecvTimedOut;
+		if (ready < 0) return -1;
+		return tcp_recv(socket_.get(), buf, cap);
+	}
+
+private:
+	ScopedSocket socket_;
+};
+
+class TcpStreamConnector final : public IStreamConnector {
+public:
+	std::unique_ptr<IStreamSocket> connect(const Endpoint &to, int timeout_ms) override {
+		const Socket s = tcp_connect(to, timeout_ms);
+		if (!s.is_valid()) return nullptr;
+		return std::make_unique<TcpStream>(s);
+	}
+};
+
+} // namespace
+
+IStreamConnector &tcp_stream_connector() {
+	static TcpStreamConnector connector;
+	return connector;
 }
 
 } // namespace opennova::net

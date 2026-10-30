@@ -8,7 +8,7 @@
 
 #include "lister.h"
 #include "listing_source.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <formats/gamecfg/game_cfg.h>
 #include <net/protocol/protocol.h>

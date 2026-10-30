@@ -106,8 +106,10 @@ Gotchas:
 - Bind native C++ engine APIs directly. Do not introduce a parallel flat FFI surface.
 - Net bindings (`network/novaworld_client`, `network/lan_session`) are thin pumps
   over the wire-compatible codecs — `engine/net/npwire` for the in-game codec + capture decode
-  (ADR 0019), `engine/net/novaworld` for matchmaking — sockets and signals here, protocol and
-  crypto in `engine/` (ADR 0010). Keep wire behavior in the portable libs so it stays
+  (ADR 0019), `engine/net/novaworld` for matchmaking — signals here, protocol and crypto in
+  `engine/` (ADR 0010). The NovaWorld web flow's HTTP is the engine's menu-browser transport
+  (`engine/net/novaworld/browser_transport.h`: its own worker, the binding only takes the replies
+  on the main thread, ADR 0077 R4); the UDP pumps are still Godot's until they move. Keep wire behavior in the portable libs so it stays
   unit-testable and interoperable; see `docs/net/novaworld-net-re.md`.
 - Decoded in-match entities have one runtime fold and one presenter (ADR 0026,
   ADR 0043 d9): `ClientReplicaPipeline` owns `ClientState`, and the one native

@@ -6,7 +6,7 @@
 // HTTP (an ECS task's metadata endpoint, the service a machine agent posts to).
 // Infrastructure only.
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <atomic>
 #include <cstdint>

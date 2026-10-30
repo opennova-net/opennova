@@ -1683,21 +1683,6 @@ std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
 }
 
 // See http_flow.h.
-std::string browser_resolved_get_url(const std::string &url, uint32_t tick_ms,
-		const std::array<uint8_t, 4> &server_ip) {
-	const std::size_t scheme = url.find("://");
-	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
-	const std::size_t host_end = url.find_first_of(":/", host_at);
-	char dotted[16];
-	std::snprintf(dotted, sizeof dotted, "%u.%u.%u.%u", static_cast<unsigned>(server_ip[0]),
-			static_cast<unsigned>(server_ip[1]), static_cast<unsigned>(server_ip[2]),
-			static_cast<unsigned>(server_ip[3]));
-	const std::string at_address = url.substr(0, host_at) + dotted +
-			(host_end == std::string::npos ? std::string() : url.substr(host_end));
-	return browser_cache_bust_url(at_address, tick_ms, server_ip);
-}
-
-// See http_flow.h.
 std::string browser_request_host(const std::string &url) {
 	const std::string whole = url.substr(0, url.find('#'));
 	const std::size_t scheme = whole.find("://");

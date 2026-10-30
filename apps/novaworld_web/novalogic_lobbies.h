@@ -24,7 +24,7 @@
 // page's ACTIVATE of SERVER_LIST_REFRESH, whose action is GLB_LOADANDPING over
 // @GSB_SERVER@, templates/jop_2_main.mnx).
 
-#include "net_http.h"
+#include <net/http/http_exchange.h>
 
 #include <net/novaworld/gsb.h>
 

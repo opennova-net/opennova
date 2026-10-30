@@ -43,7 +43,7 @@
 #include "tree_store.h"
 
 #include "core/proc_stats.h"
-#include "net_http.h"
+#include <net/http/http_exchange.h>
 
 #include <cstdint>
 #include <functional>
