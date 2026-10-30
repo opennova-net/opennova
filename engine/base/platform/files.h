@@ -50,19 +50,19 @@ public:
 	virtual std::string user_data_dir() const = 0;
 
 	// The file at `path` opened as `mode` asks; null with `error` when it cannot be.
-	virtual std::unique_ptr<FileStream> open(const std::string &path, FileMode mode,
-			std::string &error) = 0;
+	virtual std::unique_ptr<FileStream> open(
+			const std::string &path, FileMode mode, std::string &error) = 0;
 
 	// The whole file at `path` into `out`; false with `error` when it cannot be read (`out` then
 	// empty).
-	virtual bool read_file(const std::string &path, std::vector<uint8_t> &out,
-			std::string &error) = 0;
+	virtual bool read_file(
+			const std::string &path, std::vector<uint8_t> &out, std::string &error) = 0;
 
 	// `size` bytes from `data` as the whole file at `path`, atomically: a reader (a crash
 	// included) sees the file as it was or as it is now, never a part. False with `error` when it
 	// cannot be written; the file is then as it was.
-	virtual bool write_file(const std::string &path, const void *data, size_t size,
-			std::string &error) = 0;
+	virtual bool write_file(
+			const std::string &path, const void *data, size_t size, std::string &error) = 0;
 };
 
 } // namespace opennova::platform
