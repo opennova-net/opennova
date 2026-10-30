@@ -79,6 +79,8 @@ void test_columns_follow_the_session() {
 	ctx.config.max_players = 10;
 	ctx.config.dedicated_server = false;
 	ctx.join_locked = true;
+	// The install's CC.BIN as the session create's tick init read it (byte_C87044).
+	ctx.cc_bin = "us";
 
 	// The host request's registration: the first map's columns.
 	HostRegistration r;
@@ -102,6 +104,8 @@ void test_columns_follow_the_session() {
 	CHECK(r.password);
 	CHECK(r.country == "DE");
 	CHECK(r.round_time_remaining_ticks == 3720 * 7 + 5);
+	// GCC: the session create's CC.BIN. [orig: byte_C87044 pushed @0x4FF29C]
+	CHECK(r.gcc == "us");
 	// D-NET-709: no timeofday line: the zeroed class, Unknown.
 	CHECK(r.time_of_day == 0);
 	// The registration's own keys stay.
