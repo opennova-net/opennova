@@ -159,6 +159,88 @@ class GodotLegs(unittest.TestCase):
         self.assertFalse(cite_sweep.godot_leg_named(line, "godot/src/world/world_scene.cpp", self.read))
 
 
+class MarkerSubjects(unittest.TestCase):
+    """A marker's first address is the function it is about; the rest are the sites and callees
+    its prose names."""
+
+    def test_the_first_address_of_each_marker(self):
+        lines = ["// [orig: Foo_Bar @0x500000 - the call Baz_Qux @0x500010]; [orig: Qux_Quux @0x600000]"]
+        got = [(tok, subject) for _, _, tok, _, _, subject in cite_sweep.extract_lines("engine/x.cpp", lines)]
+        self.assertEqual(got, [("Foo_Bar", True), ("Baz_Qux", False), ("Qux_Quux", True)])
+
+    def test_a_bare_site_marker_is_its_own_subject(self):
+        got = [subject for *_, subject in cite_sweep.extract_lines("engine/x.cpp", ["// [orig: @0x500010]"])]
+        self.assertEqual(got, [True])
+
+
+class ReverseLinks(unittest.TestCase):
+    """classify_reimpl: an IDB `reimpl:` link joined against the tree, with the planned rewrite."""
+
+    START, END = "0x7671b0", "0x767200"   # AudioChannel_InitAll's range in these rows
+
+    def classify(self, link, pairs, tracked, held=()):
+        rows = [[self.START, self.START, self.END, "AudioChannel_InitAll", 0, "reimpl: " + link]]
+        n, out, edits = cite_sweep.classify_reimpl(rows, pairs, tracked,
+                                                   history=lambda paths: set(paths) & set(held))
+        return [(r[0], r[4]) for r in out], edits
+
+    @staticmethod
+    def cite(path, addr, subject):
+        return (path, 1, "AudioChannel_InitAll", addr, "", subject)
+
+    def test_a_path_no_landed_commit_held_is_unlanded(self):
+        rows, _ = self.classify("Mixer::init_all @ engine/runtime/audio/mixer.cpp", [], [])
+        self.assertEqual(rows, [("reimpl-unlanded", "")])
+
+    def test_a_path_the_history_held_is_stale(self):
+        held = ["engine/runtime/audio/mixer.cpp"]
+        rows, _ = self.classify("Mixer::init_all @ engine/runtime/audio/mixer.cpp", [], [], held)
+        self.assertEqual(rows, [("reimpl-stale", "")])
+
+    def test_an_include_root_path_is_its_engine_path(self):
+        tracked = ["engine/base/platform/input_sample.h"]
+        pairs = [self.cite("engine/base/platform/input_sample.h", "0x7671c0", True)]
+        rows, _ = self.classify("InputState @ base/platform/input_sample.h", pairs, tracked)
+        self.assertEqual(rows, [])
+        # gone under both spellings, and held under its engine path: stale, not unlanded
+        rows, _ = self.classify("InputState @ base/platform/input_sample.h", [], [],
+                                ["engine/base/platform/input_sample.h"])
+        self.assertEqual(rows, [("reimpl-stale", "")])
+
+    def test_a_mention_in_another_functions_marker_is_no_home(self):
+        # world.h names AudioChannel_InitAll @0x7671B0 inside Input_HandleActionBinding's marker
+        tracked = ["engine/runtime/world/world.h"]
+        pairs = [("engine/runtime/world/world.h", 1, "Input_HandleActionBinding", "0x49ad40", "", True),
+                 self.cite("engine/runtime/world/world.h", "0x7671b0", False)]
+        rows, edits = self.classify("Mixer::init_all @ engine/runtime/audio/mixer.cpp", pairs, tracked)
+        self.assertEqual(rows, [("reimpl-unlanded", "")])
+        self.assertEqual(edits, [])
+
+    def test_the_file_whose_marker_is_about_the_function_is_the_home(self):
+        tracked = ["engine/runtime/world/world.h", "engine/runtime/audio/channels.cpp"]
+        pairs = [self.cite("engine/runtime/world/world.h", "0x7671b0", False),
+                 self.cite("engine/runtime/audio/channels.cpp", "0x7671b0", True)]
+        rows, edits = self.classify("Mixer::init_all @ engine/runtime/audio/mixer.cpp", pairs, tracked)
+        self.assertEqual(rows, [("reimpl-unlanded", "engine/runtime/audio/channels.cpp")])
+        self.assertEqual(edits, [(self.START, 0, "reimpl: Mixer::init_all @ engine/runtime/audio/channels.cpp")])
+
+    def test_the_editor_is_no_home_for_a_port(self):
+        # the blank menu factory's marker says why its screens keep a close command: no port
+        tracked = ["engine/editor/blank/blank_mission_menus.cpp"]
+        pairs = [self.cite("engine/editor/blank/blank_mission_menus.cpp", "0x7671b0", True)]
+        rows, edits = self.classify("x @ engine/runtime/menu/death_screen.cpp", pairs, tracked)
+        self.assertEqual((rows, edits), ([("reimpl-unlanded", "")], []))
+
+    def test_a_moved_link_follows_only_a_lone_engine_home(self):
+        tracked = ["godot/src/audio/old_home.cpp", "engine/runtime/audio/channels.cpp"]
+        pairs = [self.cite("engine/runtime/audio/channels.cpp", "0x7671d0", True)]
+        rows, _ = self.classify("x @ godot/src/audio/old_home.cpp", pairs, tracked)
+        self.assertEqual(rows, [("reimpl-moved", "engine/runtime/audio/channels.cpp")])
+        pairs = [self.cite("engine/runtime/audio/channels.cpp", "0x7671d0", False)]
+        rows, _ = self.classify("x @ godot/src/audio/old_home.cpp", pairs, tracked)
+        self.assertEqual(rows, [("reimpl-moved", "")])
+
+
 class Unchanged(unittest.TestCase):
     def test_the_accepted_forms(self):
         self.assertEqual(classify("Foo_Bar", "0x500000", cite_sweep.entry_info("Foo_Bar", "0x500000")), "ok")
