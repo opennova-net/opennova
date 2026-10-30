@@ -1,24 +1,16 @@
 class_name MenuCompanion
 extends RefCounted
 
-# Base for the game-specific menu drivers ("companions") MenuShell delegates
-# whole menus to (add_companion): the JO multiplayer menu (MpMenuCompanion) and the
-# PLAYER_INFO character screen (PlayerInfoMenuCompanion). When the engine names a
-# freshly opened document's owner (menu::MenuCommands::owner, MenuDriver.command_owner)
-# as a companion's owner_name(), the shell hands it the whole named-control wiring
-# through on_menu_built() instead of running its generic launch/mission wiring.
-# Subclasses override owner_name + _wire and share the
-# by-NAME helpers below, all riding the shell's MenuDriver (widgets are
-# addressed by document id via widget_id — the find_child successor).
+# Base for the device half of an engine screen controller (the JO multiplayer
+# menu MpMenuCompanion, the PLAYER_INFO screen PlayerInfoMenuCompanion, the
+# armory's icons ArmoryMenuCompanion): the controller itself, its populate, its
+# cascades and its commands, is the engine's (menu::MenuScreenController behind a
+# MenuScreenBinding, which MenuShell.add_companion hands MenuDriver.add_screen);
+# this keeps only the mounts it asks for over the compiled frame and the
+# weapon.def table it reads, riding the shell's MenuDriver.
 
 var _driver: MenuDriver
 var _root: ResourceRoot
-# NAME (upper) -> Callable, rebuilt per _wire; dispatched off the driver's
-# widget_activated. Only fires while the wired document is still loaded.
-var _activation_handlers: Dictionary = {}
-var _wired_file := ""
-# Guards a companion's value-changed cascade against programmatic-fill re-entry.
-var _populating := false
 # The loadout screens' weapon icons: PRIMARY/SECONDARY/ACCESSORY -> TextureRect
 # mounted as a frame child over the blank authored *_ICON window (the compiled
 # frame owns no per-widget Control nodes); freed and rebuilt per menu build.
@@ -39,37 +31,15 @@ func screen() -> MenuScreenBinding:
 	return null
 
 
-## The engine's name for the delegate this companion is (MenuDriver.command_owner:
-## "lan", "player_info"), whose documents it drives; "" for none. Which document a
-## delegate owns is the engine's (menu::MenuCommands::wire, by the controls it holds).
-func owner_name() -> String:
-	return ""
-
-
-## Called by MenuShell after each open_menu of a document this companion owns.
-func on_menu_built(driver: MenuDriver, file: String, screen: String, root: ResourceRoot) -> void:
+## The driver its screen opens on and the root its tables come from: the menu
+## shell hands them over after its assembly and again when its root changes.
+func attach(driver: MenuDriver, root: ResourceRoot) -> void:
 	_driver = driver
 	_root = root
-	_activation_handlers.clear()
-	_wired_file = driver.get_menu_file() if driver != null else ""
-	if driver == null:
-		return
-	if not driver.widget_activated.is_connected(_on_widget_activated):
-		driver.widget_activated.connect(_on_widget_activated)
-	_wire(file, screen)
 
 
-## Called by MenuShell when a freshly opened document is NOT this companion's
-## while it was the wired one: the companion must drop anything it parked on
-## the shared frame (mounts, previews), because no later on_menu_built is
-## coming. Subclasses override and call super.
+## The screen let go of its document: the mounts parked on the shared frame go.
 func on_menu_released() -> void:
-	_activation_handlers.clear()
-	_wired_file = ""
-
-
-## Subclass hook: wire the owned screens' controls (by name) off _driver/_root.
-func _wire(_file: String, _screen: String) -> void:
 	pass
 
 
@@ -100,28 +70,6 @@ func _ensure_weapons(owner_name: String, consequence: String) -> bool:
 
 func _id(name: String) -> int:
 	return _driver.widget_id(name) if _driver != null else -1
-
-
-func _connect_pressed(name: String, handler: Callable) -> void:
-	if _driver != null and _driver.has_widget(name):
-		_activation_handlers[name.to_upper()] = handler
-
-
-func _on_widget_activated(_id_activated: int, widget_name: String) -> void:
-	# The shell swaps documents under the shared driver; a stale companion's
-	# name matches must not double-dispatch against the new document.
-	if _driver == null or _driver.get_menu_file() != _wired_file:
-		return
-	var handler: Callable = _activation_handlers.get(widget_name.to_upper(), Callable())
-	if handler.is_valid():
-		handler.call()
-
-
-func _edit_text(name: String, default_value := "") -> String:
-	var id := _id(name)
-	if id < 0:
-		return default_value
-	return _driver.get_widget_text(id)
 
 
 # --- Weapon-slot icon mounts (the two loadout companions) -----------------------

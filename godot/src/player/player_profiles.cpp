@@ -275,7 +275,7 @@ Ref<WeaponProfileSummary> PlayerProfiles::character_summary() const {
 }
 
 Error PlayerProfiles::apply_character_selection(const Dictionary &p_profile) {
-	// The dialog's snapshot (PlayerCharacterSelectionState.snapshot) as the engine's
+	// The dialog's snapshot (engine inmatch::PlayerInfoScreen::snapshot) as the engine's
 	// CharacterSelection: the shared PLAYERCLASS value, the shown side (`team`), that
 	// side's side_profiles[team] {avatar_a, avatar_b, avatar_packed} when non-empty, and a
 	// `kit` array of {name, ammo_primary, ammo_secondary, flags} into the page of

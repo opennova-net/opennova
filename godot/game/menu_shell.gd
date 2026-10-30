@@ -182,6 +182,7 @@ func add_companion(companion: MenuCompanion) -> void:
 		return
 	_companions.append(companion)
 	if _driver != null:
+		companion.attach(_driver, _root)
 		_driver.add_screen(companion.screen())
 
 
@@ -299,6 +300,9 @@ func _load_root_assets() -> void:
 	_style = MnsStyleSheet.load_shell(_root) if _root != null else null
 	_audio.set_resource_root(_root)
 	_driver.set_shell_sources(_root, _style)
+	# The screen controllers' device halves read their tables from the live root.
+	for companion in _companions:
+		companion.attach(_driver, _root)
 
 
 # --- Input routing (the frame is a passive surface; the shell samples) --------

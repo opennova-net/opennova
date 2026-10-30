@@ -40,10 +40,10 @@ func test_selected_primary_mounts_and_clears_its_weapon_icon() -> void:
 	assert_eq(root.set_root_dir(temp_dir), OK)
 
 	var companion := ArmoryMenuCompanion.new()
-	companion.screen.set_weapon_database(_load_weapons())
+	companion.armory_screen.set_weapon_database(_load_weapons())
 	var driver := _framed_driver()
 	companion.mount(driver, root)
-	assert_true(driver.claim_screen(companion.screen), "the screen claims the open document")
+	assert_true(driver.claim_screen(companion.armory_screen), "the screen claims the open document")
 	var primary := driver.widget_id("PRIMARY")
 	var m4_row := Array(driver.get_widget_items(primary)).find("Authored rifle label")
 	if m4_row < 0:

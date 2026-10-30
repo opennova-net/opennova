@@ -7,11 +7,11 @@ extends MenuCompanion
 # (ArmoryScreen over engine menu::ArmoryScreen, runtime/menu/armory_screen.h), which says
 # when the icons change (icons_changed) and which weapon each slot shows.
 
-var screen := ArmoryScreen.new()
+var armory_screen := ArmoryScreen.new()
 
 
 func _init() -> void:
-	screen.icons_changed.connect(_show_icons)
+	armory_screen.icons_changed.connect(_show_icons)
 
 
 ## The screen's frame and root, before the claim's on-show refreshes the icons.
@@ -33,7 +33,7 @@ func on_menu_released() -> void:
 
 
 func _show_icons() -> void:
-	_update_weapon_icons("ArmoryIcon", screen.selected_weapon)
+	_update_weapon_icons("ArmoryIcon", armory_screen.selected_weapon)
 
 
 func _on_screen_changed(_screen_name: String) -> void:

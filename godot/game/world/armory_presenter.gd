@@ -47,8 +47,8 @@ var _armory := ArmoryMenuCompanion.new()
 
 
 func _init() -> void:
-	_armory.screen.close_requested.connect(close)
-	_armory.screen.viewmodel_changed.connect(_on_viewmodel_changed)
+	_armory.armory_screen.close_requested.connect(close)
+	_armory.armory_screen.viewmodel_changed.connect(_on_viewmodel_changed)
 
 
 ## Wire the presenter to its world view + player presenter and the node the menu
@@ -59,18 +59,18 @@ func setup(view: ArmoryWorldView, player_presenter_in: LocalPlayerPresenter,
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
-	_armory.screen.setup(view)
+	_armory.armory_screen.setup(view)
 	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func set_player_profiles(profiles: PlayerProfiles) -> void:
-	_armory.screen.set_player_profiles(profiles)
+	_armory.armory_screen.set_player_profiles(profiles)
 
 
 ## The mission start's stage of the screen's class pages (engine
 ## ArmoryScreen::stage_mission_start).
 func on_mission_started() -> void:
-	_armory.screen.stage_mission_start()
+	_armory.armory_screen.stage_mission_start()
 
 
 func is_open() -> bool:
@@ -133,7 +133,7 @@ func menu_key(keycode: int, unicode: int = 0) -> bool:
 	ev.pressed = true
 	if not is_accept_hotkey(bound_key_of(ev)) or not can_dismiss():
 		return false
-	_armory.screen.trigger_accept()
+	_armory.armory_screen.trigger_accept()
 	return true
 
 
@@ -154,9 +154,9 @@ func open() -> bool:
 	if not _ensure_menu():
 		return false
 	_armory.mount(_driver, _menu_root)
-	_armory.screen.set_text_tables(Strings.get_table(Strings.TABLE_GAMETEXT),
+	_armory.armory_screen.set_text_tables(Strings.get_table(Strings.TABLE_GAMETEXT),
 			Strings.get_table(Strings.TABLE_MENUTXT), Strings.get_table(Strings.TABLE_GAMEUI))
-	if not _driver.claim_screen(_armory.screen):
+	if not _driver.claim_screen(_armory.armory_screen):
 		return false
 	# The menu draws over every HUD element (the lazily built GameHud may have been
 	# added after us).
@@ -202,7 +202,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null or key.echo or not key.pressed or not is_accept_hotkey(bound_key_of(key)):
 		return
 	if can_dismiss():
-		_armory.screen.trigger_accept()
+		_armory.armory_screen.trigger_accept()
 		get_viewport().set_input_as_handled()
 
 
