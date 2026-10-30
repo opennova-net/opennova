@@ -11,8 +11,16 @@ const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
 static var BOOT_FIXTURE_DIR := RuntimeFixture.directory()
 const TMAP_TRN := "Tmap.trn"
 ## The synthetic models staged under the Tmap's two foliage graphics.
-const FOLIAGE_MODEL_BUSH1 := "res://../fixtures/threedi/synth/bird.3di"
-const FOLIAGE_MODEL_BUSH2 := "res://../fixtures/threedi/synth/house.3di"
+# The Tmap's two foliage definitions' models: the synth crate under both names
+# (36 LOD0 vertices), as the editor fixture stages them. A foliage model sizes
+# its slot's detail pool from its vertex count (foliage::Runtime::
+# detail_cache_capacity, TerrainTile_InitBuffers @0x5ff920: 0xFFFF over 36
+# vertices a source vertex), so a fixture model must be as light as the game's
+# foliage for the pool to hold the cells around the eye: the crate's slot holds
+# 50, where the bird's 324 vertices held 5 and the house's 108 held 16, and a
+# steady frame then regenerated cells every frame.
+const FOLIAGE_MODEL_BUSH1 := "res://../fixtures/threedi/synth/crate.3di"
+const FOLIAGE_MODEL_BUSH2 := "res://../fixtures/threedi/synth/crate.3di"
 
 
 ## Stage a runtime root under the cache dir: every tmap fixture file, then
@@ -58,8 +66,7 @@ static func staged_foliage_tmap(label: String) -> String:
 
 
 ## The synthetic models the Tmap's two foliage definitions name and their
-## diffuses (bush1.3di the bird, bush2.3di the house, as
-## foliage_dispatcher_assets_test stages them), written into the staged terrain
+## diffuses (bush1.3di and bush2.3di, the synth crate both), written into the staged terrain
 ## root `root`; with `code` >= 0 the foliage map (Tmap_f.pcx) is painted `code`
 ## on every texel, so every candidate the frame weighs matches the definition
 ## naming it (254: bush1) wherever the terrain collects a cell. A
@@ -70,7 +77,7 @@ static func stage_tmap_foliage(root: String, code := 254) -> void:
 			root.path_join("bush1.3di"))
 	DirAccess.copy_absolute(ProjectSettings.globalize_path(FOLIAGE_MODEL_BUSH2),
 			root.path_join("bush2.3di"))
-	for texture in ["bird.tga", "wall.tga", "roof.tga", "wood.tga"]:
+	for texture in ["crate.tga"]:
 		_store(root.path_join(texture), tga_bytes(Vector2i(64, 64), Color(0.25, 0.5, 0.25, 1.0)))
 	if code >= 0:
 		_store(root.path_join("Tmap_f.pcx"), TestPcx.solid_indexed(256, 256, code))
