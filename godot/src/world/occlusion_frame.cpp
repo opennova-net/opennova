@@ -619,6 +619,18 @@ void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_wate
 	}
 }
 
+void OcclusionFrame::apply_draw_husk_leg() {
+	Simulation *s = sim();
+	EntityPresenter *presenter = entities();
+	if (s == nullptr || presenter == nullptr) {
+		return;
+	}
+	std::vector<opennova::world::HuskSwapEvent> swaps;
+	std::vector<opennova::world::DrawFadeStamp> fades;
+	s->take_draw_husk_output(swaps, fades);
+	presenter->present_draw_husk_leg(swaps, fades);
+}
+
 void OcclusionFrame::apply_mirror_admissions(int p_view) {
 	Simulation *s = sim();
 	EntityIndex *registry = entity_index();

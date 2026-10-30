@@ -530,6 +530,37 @@ void EntityPresenter::present_death_piece_draws_native(
 	destruction_->apply_piece_draws(p_draws);
 }
 
+void EntityPresenter::present_draw_husk_leg(
+		const std::vector<opennova::world::HuskSwapEvent> &p_swaps,
+		const std::vector<opennova::world::DrawFadeStamp> &p_fades) {
+	for (const opennova::world::HuskSwapEvent &husk : p_swaps) {
+		destruction_->apply_husk_swap(husk);
+	}
+	if (p_fades.empty()) {
+		return;
+	}
+	// The changed rows by handle, both walks' (a placed row's PF_WIRE_HANDLE, a wire row's).
+	std::unordered_map<int32_t, const opennova::world::DrawFadeStamp *> by_handle;
+	by_handle.reserve(p_fades.size());
+	for (const opennova::world::DrawFadeStamp &stamp : p_fades) {
+		by_handle[static_cast<int32_t>(stamp.handle)] = &stamp;
+	}
+	for (Row &row : rows_) {
+		const auto found = by_handle.find(row.handle);
+		if (found == by_handle.end() || row.model == nullptr) continue;
+		stamp_destroy_values(row.model, found->second->husked, found->second->phases_q16.data(),
+				row.destroy_published);
+	}
+	for (WireRow &row : wire_rows_) {
+		const auto found = by_handle.find(row.handle);
+		if (found == by_handle.end()) continue;
+		ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
+		if (model == nullptr) continue;
+		stamp_destroy_values(model, found->second->husked, found->second->phases_q16.data(),
+				row.destroy_published);
+	}
+}
+
 void EntityPresenter::present_death_piece_draws_inset(
 		const std::vector<opennova::world::DeathPieceDraw> &p_draws) {
 	destruction_->apply_piece_draws_inset(p_draws);
@@ -1024,10 +1055,18 @@ int EntityPresenter::emplaced_apply(Object *node,
 
 void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base,
 		int32_t &published) {
+	int32_t phases[6];
+	for (int i = 0; i < 6; ++i) {
+		phases[i] = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
+	}
+	stamp_destroy_values(model, field_i(p, base, Simulation::PF_HUSK) != 0, phases, published);
+}
+
+void EntityPresenter::stamp_destroy_values(ObjectModel *model, bool husked,
+		const int32_t *phases, int32_t &published) {
 	// The draw publishes the swap fade only for a model it submits, under the
 	// husk bit (engine: world::update_item_destroy_fade carries the witness);
 	// an intact row that holds nothing has no work.
-	const bool husked = field_i(p, base, Simulation::PF_HUSK) != 0;
 	if (!husked && published == 0) {
 		return;
 	}
@@ -1044,9 +1083,7 @@ void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, i
 		if (target == nullptr) continue;
 		target->begin_ctrl_update();
 		for (int i = 0; i < 6; ++i) {
-			const int32_t phase = husked
-					? field_i(p, base, Simulation::PF_OBJECT_DESTROY + i)
-					: 0;
+			const int32_t phase = husked ? phases[i] : 0;
 			if (phase != 0) target->set_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i, phase);
 			else target->clear_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i);
 		}

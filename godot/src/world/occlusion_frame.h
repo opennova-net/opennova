@@ -180,6 +180,10 @@ public:
 	void apply_mirror_view(int p_view, bool p_ran, bool p_below_water);
 	// The main view's drops mirror `p_view` admitted, as its explicit admits.
 	void apply_mirror_admissions(int p_view);
+	// The draw leg the frame's collect ran (engine world::run_draw_husk_leg): its husk swaps
+	// and fade stamps onto the models now, so they draw with it this frame
+	// (EntityPresenter::present_draw_husk_leg).
+	void apply_draw_husk_leg();
 	void release_mirror(int p_view);
 	// The last Inset collect's MODEL foliage anchors (Godot space; the main
 	// collect's are Simulation::get_foliage_mask_anchor_positions), empty

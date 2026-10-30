@@ -409,6 +409,18 @@ void Simulation::drain_destruction_events(opennova::world::DestructionEvents &r_
 	ev.clear();
 }
 
+// The collects' husk swaps and fade stamps, the only events the frame's occlusion leg adds
+// past the present's drain (engine world::run_draw_husk_leg).
+void Simulation::take_draw_husk_output(std::vector<opennova::world::HuskSwapEvent> &r_swaps,
+		std::vector<opennova::world::DrawFadeStamp> &r_fades) {
+	r_swaps.clear();
+	r_fades.clear();
+	if (!world_installed_) return;
+	opennova::world::DestructionEvents &ev = kernel_->world.out.destruction;
+	r_swaps.swap(ev.husk_swaps);
+	r_fades.swap(ev.draw_fades);
+}
+
 // The live death-piece pool snapshot (world/present_drains.h fill_death_pieces).
 void Simulation::fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const {
 	r_pieces.clear();

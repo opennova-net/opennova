@@ -1834,6 +1834,10 @@ public:
 	// events; the tests author a DestructionDrain through its data leg.
 	void drain_vehicle_effects(std::vector<opennova::world::VehicleEffectEvent> &r_events);
 	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
+	// The view collects' draw-leg output (engine world::run_draw_husk_leg), taken at the frame's
+	// occlusion end so the models it changed draw with it this frame. NOT ClassDB-bound.
+	void take_draw_husk_output(std::vector<opennova::world::HuskSwapEvent> &r_swaps,
+			std::vector<opennova::world::DrawFadeStamp> &r_fades);
 	// Every queue the entity presenter's passes drain, dropped undrawn: a session that
 	// presents no entity (a dedicated host) empties them each ticked frame (engine
 	// world::discard_entity_presentation). NOT ClassDB-bound: MissionRoot's session step.
