@@ -83,6 +83,7 @@ void test_title_rule() {
 
 void test_coop_advertises_the_session_title() {
 	inmatch::NapiNPServerCtx ctx;
+	ctx.np_protocol.identity = title_protocol("jo");
 	// The hosting gate every ServerCommand verb but SetMPReset tests (D-NET-383).
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;

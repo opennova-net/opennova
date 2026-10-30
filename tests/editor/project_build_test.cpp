@@ -1062,7 +1062,6 @@ static int test_plan_blockers_are_the_plans() {
 		if (expansion) {
 			p.doc.expansion.name = minted_install::kExpansion;
 			target.expansion = minted_install::kExpansion;
-			target.game = p.doc.target_game;
 		}
 		const AssetScan scan = scan_project_assets(p.paths, p.doc);
 		const RequirementReport requirements = evaluate_requirements(p.doc, scan);
