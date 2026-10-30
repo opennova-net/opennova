@@ -442,6 +442,13 @@ int dfx2_player_cap_defaults() {
 	TEST_EXPECT(jo.mp_max_players == 64 && dfx2.mp_max_players == 16);
 	TEST_EXPECT(jo.mp_novaworld_port_max == 65535 && dfx2.mp_novaworld_port_max == 32787);
 	TEST_EXPECT(dfx2.mp_lan_enum_port_max == 32787);
+	// Every weapon defaults to its table's mission word (DFX2-10): JO's 3, DFX2's 2, which a
+	// dfx2.exe session takes as the mission's own and 3 as armory-only
+	// [orig: @0x54D410] [orig: Config_SetDefaults @0x54a2c0 (dfx2.exe)].
+	TEST_EXPECT(dfx2.weapon_availability[0] == 2 &&
+			dfx2.weapon_availability[kWeaponAvailabilityCount - 1] == 2);
+	TEST_EXPECT(std::string(weapon_availability_name(dfx2.weapon_availability[1], ConfigTable::Dfx2)) ==
+			"mission");
 
 	LoadOptions dfx2_options;
 	dfx2_options.table = ConfigTable::Dfx2;
