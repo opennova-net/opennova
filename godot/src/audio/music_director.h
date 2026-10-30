@@ -1,11 +1,12 @@
 #pragma once
 
-// MusicDirector embeds a engine/formats/mus VM and routes its hooks to Godot
-// signals. Owns a small AudioStreamPlayer pool for marker playback driven
-// by the play / playw opcodes.
+// MusicDirector embeds a engine/formats/mus VM and the engine's music stream pump
+// (runtime/audio/music_stream_pump.h), which paces the VM, and is the pump's device: a
+// small AudioStreamPlayer pool streaming the one music track each play / playw selects,
+// the section and echo notices as Godot signals.
 //
 // The engine port (engine/formats/mus mus_vm.cpp, which carries the witnesses) loads the
-// script, fires the play / playw opcodes' sound triggers and the GSV / GSDV intrinsics' volume.
+// script and fires the play / playw opcodes' sound triggers; the pump steps it.
 
 #include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/node.hpp>
@@ -17,6 +18,7 @@
 #include <godot_cpp/variant/string_name.hpp>
 
 #include <runtime/audio/music_policy.h>
+#include <runtime/audio/music_stream_pump.h>
 
 #include <formats/mus/mus.h>
 
@@ -95,8 +97,9 @@ public:
 	// the step MusicCtx_SelectEndTrack runs at once): the SP round-end tail
 	// hands the end track here (1 win / 2 lose; retail gamemus.bin dispatches
 	// them to Missionwin / Missionlose). Runs on any loaded script regardless
-	// of the streaming state; the handler's setstate lands at once and the
-	// sting's first entry plays on the next paced advance. Returns 0 when the
+	// of the streaming state; the handler's setstate lands at once, its GFB
+	// empties the stream, and the next frame steps to the sting's first entry,
+	// which cuts the sounding track. Returns 0 when the
 	// frame ran, -1 with no script, -2 when the script carries no handler (the
 	// signal dropped, the plain step run).
 	int signal_end_track(int p_value);
@@ -110,14 +113,22 @@ protected:
 	static void _bind_methods();
 
 private:
-	// Hook trampolines (per Phase A spec): translate raw VM args into
-	// signal emissions. Always called with `user` == MusicDirector*.
-	static void _on_play_sound(void *user, uint32_t sbf_entry_index, int wait);
-	static void _on_section_entered(void *user, const char *name);
-	static void _on_echo(void *user, int32_t arg);
+	// The pump's device: the player pool streaming the track a play selects, and
+	// the section and echo notices as signals.
+	class StreamDevice final : public opennova::audio::MusicStreamDevice {
+	public:
+		explicit StreamDevice(MusicDirector &p_owner) : _owner(p_owner) {}
+		void start_track(uint32_t p_entry) override;
+		bool track_sounding() const override;
+		void section_entered(const char *p_name) override;
+		void echo(int32_t p_value) override;
+
+	private:
+		MusicDirector &_owner;
+	};
+
 	// The script start() and open_context() bind: the named one, else the file's default.
 	const opennova::mus::MusScript *_raw_script(const Ref<MusicScript> &p_script) const;
-	void _install_hooks();
 
 	Ref<MusicScript> _script;
 	Ref<SbfBank> _bank;
@@ -127,16 +138,14 @@ private:
 	StringName _audio_bus = StringName("Music");
 
 	opennova::mus::MusVM *_vm = nullptr;
+	StreamDevice _device{ *this };
+	opennova::audio::MusicStreamPump _pump;
 	Vector<AudioStreamPlayer *> _players;
 	// IDs observe AudioServer ownership without keeping a stopped stream alive.
 	Vector<ObjectID> _playbacks;
 	int _next_player = 0;
-	bool _vm_running = false;
-	// The player streaming the track the VM's last `play` started. The VM is only
-	// advanced once this track finishes (matching the original's pacing in
-	// AudioStream_Update @0x671c60, which steps the script only when the stream's
-	// remaining bytes reach 0). Without this the VM re-fires `play` every frame and
-	// restarts the SBF stream ~60x/sec -> a low buzz.
+	// The player streaming the track the VM's last `play` started: the one music
+	// stream, whose sounding the pump reads (track_sounding).
 	AudioStreamPlayer *_active_play = nullptr;
 };
 

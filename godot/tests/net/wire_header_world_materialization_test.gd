@@ -592,9 +592,8 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 			"the decoded child remains inside retail's seat-scan radius")
 	var attach_hud := HudOverlay.new()
 	autofree(attach_hud)
-	attach_hud.set_attach_labels(
-			Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-2.0, 0.0, 0.0)),
-			Projection.create_perspective(70.0, 1.0, 0.05, 4000.0), null, joiner)
+	attach_hud.set_view_block(Vector3(-2.0, 0.0, 0.0), 0, 0, 0, 90.0)
+	attach_hud.set_attach_labels(null, joiner)
 	assert_eq(attach_hud.get_attach_label_count(), 1,
 			"the decoded child contributes one in-range UseGun label")
 	assert_eq(attach_hud.get_attach_label_selected(), 0,

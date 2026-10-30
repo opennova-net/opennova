@@ -31,10 +31,6 @@ void Simulation::advance_audio_out_meter(double p_seconds, float p_peak) {
     if (kernel_) kernel_->world.audio_out_meter.advance(p_seconds, p_peak);
 }
 
-int32_t Simulation::audio_out_stage1() const {
-    return kernel_ ? kernel_->world.audio_out_meter.stage1() : 0;
-}
-
 bool Simulation::play_script_wave(const String &p_filename) {
     return kernel_->world.script.voice.wave(kernel_->world, p_filename.utf8().get_data()) == 0;
 }

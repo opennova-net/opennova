@@ -1103,7 +1103,7 @@ void test_the_weapon_rows_take_the_whole_head() {
 }
 
 // D-NET-710 (the HUD toggle rows' leg, LI-s20): the rows the HUD poll's head mask reads
-// (PlayerInputRouter::poll_hud_toggles fills HudKeyPoll::head_drops from the role's head at each
+// (inmatch::PlayerInputFrame::dispatch_hud_rows fills HudKeyPoll::head_drops from the role's head at each
 // record's dispatch) take the whole head by their catalog flags, not only its pause and dead
 // legs: dotsize, ShowFriendly, AudioEmote and RadioMacro (codes 216 / 30 / 33 / 54, flags
 // 0x0C000C01) drop in the pre-round timer (0x400), at round over and under the pause word (bit 0);

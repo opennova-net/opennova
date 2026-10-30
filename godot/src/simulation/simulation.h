@@ -49,6 +49,7 @@
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <runtime/inmatch/admin_console.h> // AdminConsole::Seams (remote_admin_seams)
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminBinding (remote_admin_binding)
+#include <runtime/inmatch/hud_frame_feeds.h> // HudFeedSource: what the HUD feeds read
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/inmatch/special_key_chain.h> // SpecialKeyInput / SpecialKeyOutcome
 #include <runtime/terrain_query/terrain_field_store.h>
@@ -1460,11 +1461,6 @@ public:
 
 	// The type-2043 grid-origin marker: present + Godot-space position.
 	Ref<HudMapGridOrigin> get_hud_map_grid_origin() const;
-	// The objectives-panel rows for header slots 1..8, terminated at the first 0/255 win-condition
-	// id — the panel's row walk (engine: runtime/mission/promote.cpp) — filled natively for
-	// HudOverlay::set_objectives: the SHOWN rows, lines resolved through the table. NOT bound.
-	void fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
-			std::vector<opennova::hud::HudObjectiveRow> &r_rows) const;
 	// The briefing panel's text: info/briefing2, else info/briefing (HudBriefingState). NOT bound.
 	std::string mission_briefing_text() const { return net_.mission_text.briefing2(); }
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
@@ -1525,12 +1521,11 @@ public:
 	// false (rows cleared) when the local player rides nothing.
 	bool fill_vehicle_panel(const opennova::def::DefVehicleHudBlock &p_block,
 			opennova::hud::HudVehiclePanelState &r_state) const;
-	// NOT ClassDB-bound: the AAS zone panel feed (world/lfp_feed.h), one HudLfpZone per
-	// spawn-zone entry joined with its zone-timer entry and its regular map slot's capture bits.
-	bool fill_lfp_zones(int p_local_team, std::vector<opennova::hud::HudLfpZone> &r_zones);
-	// NOT ClassDB-bound: the takeover dialog's nearest zone-timer entry
-	// (inmatch/takeover_status_feed.h); false when none qualifies.
-	bool fill_takeover_facts(opennova::hud::HudTakeoverFacts &r_facts);
+	// NOT ClassDB-bound: what HudOverlay's engine feeds read of this session
+	// (inmatch/hud_frame_feeds.h: the role view, the spawn-zone registry, a joiner's
+	// seat occupancy) -- the AAS zone panel, the takeover dialog, the objectives, the
+	// attach labels, the friendly tags and the role facts.
+	opennova::inmatch::HudFeedSource hud_feed_source();
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
 	String get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const; // RULELIST (inmatch::command_map_rules_text); "" = keep
@@ -1797,9 +1792,8 @@ public:
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
 	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
 	bool play_script_wave(const String &p_filename);
-	// The mixer meter's device feed (engine audio::AudioOutMeter): seconds mixed, the script-voice bus's peak; its first stage.
+	// The mixer meter's device feed (engine audio::AudioOutMeter): seconds mixed, the script-voice bus's peak.
 	void advance_audio_out_meter(double p_seconds, float p_peak);
-	int32_t audio_out_stage1() const;
 	// The world's one dialog table, which mission audio plays (runtime/audio/dialog_queue.h).
 	opennova::audio::DialogQueue *dialog_queue();
 	// One dialog tick over the world's table: the device loads and plays each line, then the
@@ -2438,22 +2432,6 @@ public:
 	bool local_player_toggle_mount();
 	bool local_player_select_seat(int p_index);
 
-	// The floating attach labels around the local player (world::AttachLabel:
-	// the mission-space position with the +0.1875 u lift applied, the seat
-	// type (world::SeatType, 4 = armory point), the armory-zone flag, the
-	// nearest full-bright highlight and the USEGUN weapon's attachtextid
-	// Overlays key, "" = absent -> the STROVER_USEGUN default). Armory mode
-	// rides the zone flag; the nearest-only gate consumes the same complete
-	// live fire verdict as body/HUD selection. NOT ClassDB-bound:
-	// HudOverlay::set_attach_labels projects and resolves the rows natively.
-	// False without a kernel. (engine: runtime/hud/hud_frame.cpp)
-	bool fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const;
-	// The friendly-tags gather (D-HUD-20; world::FriendlyTagSource): the raw
-	// positions + per-entity facts; HudOverlay::set_friendly_tags lifts,
-	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
-	// False without a kernel or a local player.
-	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
-	opennova::inmatch::HudRoleFacts hud_role_facts(uint32_t p_voice_menus = 0) const; // NOT bound
 	// The radio-request icon's viewer gate over the local player (world::
 	// friendly_tag_radio_request_viewer): a driver/controller seat or an own latch.
 	bool local_player_radio_request_icon_viewer() const;

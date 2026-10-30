@@ -235,12 +235,6 @@ PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 	return out;
 }
 
-void Simulation::fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
-		std::vector<opennova::hud::HudObjectiveRow> &r_rows) const {
-	r_rows.clear();
-	if (!kernel_) return;
-	opennova::world::fill_objective_rows(kernel_->world, game_text_lookup(p_mission_text), r_rows);
-}
 // The round-impact drain (world/present_drains.h drain_round_impact_rows).
 void Simulation::drain_round_impact_rows(
 		std::vector<opennova::world::RoundImpactPresentation> &r_rows) {

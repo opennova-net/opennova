@@ -182,8 +182,8 @@ end
 	return true
 
 
-# The overlay's read of the sim's attach labels through the play camera
-# (at the probe player, looking down +X so every candidate projects).
+# The overlay's read of the sim's attach labels through a view block at
+# mission (-2, 0, 0) looking down +X, so every candidate projects.
 class AttachLabels:
 	var count := 0
 	var selected := -1
@@ -191,9 +191,8 @@ class AttachLabels:
 
 func _attach_labels(sim: Simulation) -> AttachLabels:
 	var hud := HudOverlay.new()
-	hud.set_attach_labels(
-			Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-2.0, 0.0, 0.0)),
-			Projection.create_perspective(70.0, 1.0, 0.05, 4000.0), null, sim)
+	hud.set_view_block(Vector3(-2.0, 0.0, 0.0), 0, 0, 0, 90.0)
+	hud.set_attach_labels(null, sim)
 	var read := AttachLabels.new()
 	read.count = hud.get_attach_label_count()
 	read.selected = hud.get_attach_label_selected()

@@ -17,7 +17,6 @@
 #include <runtime/inmatch/client_runtime.h> // queue_chat_message (the talk keys' send)
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType (the NovaWorld talk gate)
 #include <runtime/inmatch/server_status_feed.h> // the status page's roster and host facts
-#include <runtime/inmatch/takeover_status_feed.h> // the takeover dialog's nearest entry
 #include <runtime/world/player_present.h> // kWeaponSwitchDenySoundset (the crew key's tone)
 #include <runtime/world/script_sounds.h>
 #include <runtime/replication/client_state.h>
@@ -65,18 +64,14 @@ bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
 			is_joiner() ? joiner_role_ : nullptr);
 }
 
-bool Simulation::fill_lfp_zones(int p_local_team,
-		std::vector<opennova::hud::HudLfpZone> &r_zones) {
-	// The zone walk with the role's zone-timer image and minimap slot flags
-	// (inmatch/role_feeds.h collect_lfp_zones carries the witnesses).
-	return opennova::inmatch::collect_lfp_zones(role_view(), deploy_zone_registry(), p_local_team,
-			r_zones);
-}
-
-bool Simulation::fill_takeover_facts(opennova::hud::HudTakeoverFacts &r_facts) {
-	// The nearest running zone-timer entry over the role's image and map slots
-	// (inmatch/takeover_status_feed.h carries the witness).
-	return opennova::inmatch::collect_takeover_status(role_view(), deploy_zone_registry(), r_facts);
+opennova::inmatch::HudFeedSource Simulation::hud_feed_source() {
+	// The role view, the spawn-zone registry the zone panel and the takeover dialog key
+	// on, and a joiner's seat occupancy (its decoded rows) for the attach-label scan.
+	opennova::inmatch::HudFeedSource source;
+	source.view = role_view();
+	source.zones = &deploy_zone_registry();
+	source.occupancy = is_joiner() ? joiner_role_ : nullptr;
+	return source;
 }
 
 int64_t Simulation::get_session_game_type() const {

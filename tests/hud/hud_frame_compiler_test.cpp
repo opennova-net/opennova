@@ -3657,11 +3657,10 @@ void test_attach_label_text_anchor_and_round_divisor() {
 	CHECK(opennova::hud::attach_label_text(table, SeatType::Gunner, "STROVER_MG") == "Use MG", "the def key");
 	CHECK(opennova::hud::attach_label_text(table, SeatType::Passenger, "") == "Sit", "the table's sit");
 
-	const float position[3] = {1.0f, 2.0f, 3.0f};
-	float anchor[3];
-	opennova::hud::friendly_tag_anchor(position, 0x18000, anchor);
-	CHECK(anchor[0] == 1.0f && anchor[1] == 2.0f && anchor[2] == 3.0f + (1.5f + 0.25f),
-			"anchor z = position + eye + 0.25");
+	const std::array<int32_t, 3> anchor =
+			opennova::hud::friendly_tag_anchor({0x10000, 0x20000, 0x30000}, 0x18000);
+	CHECK(anchor[0] == 0x10000 && anchor[1] == 0x20000 && anchor[2] == 0x30000 + 0x18000 + 0x4000,
+			"anchor z = position + eye + 0x4000");
 
 	CHECK(opennova::hud::rounds_per_icon_from_layout(1) == 1, "divisor 1");
 	CHECK(opennova::hud::rounds_per_icon_from_layout(257) == 1, "the low byte only");
