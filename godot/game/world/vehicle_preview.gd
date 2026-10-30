@@ -51,14 +51,14 @@ func _ready() -> void:
 	_environment = WorldEnvironment.new()
 	_environment.environment = Environment.new()
 	_environment.environment.background_mode = Environment.BG_COLOR
-	_environment.environment.background_color = MenuDriver.vehicle_preview_clear_color()
+	_environment.environment.background_color = VehicleMenuController.preview_clear_color()
 	root.add_child(_environment)
 	_spin = Node3D.new()
 	_spin.name = "VehiclePreviewSpin"
 	root.add_child(_spin)
 	_camera = Camera3D.new()
 	_camera.keep_aspect = Camera3D.KEEP_WIDTH
-	_camera.fov = MenuDriver.vehicle_preview_fov()
+	_camera.fov = VehicleMenuController.preview_fov()
 	_camera.near = NEAR
 	_camera.far = FAR
 	_camera.current = true
@@ -75,7 +75,7 @@ func show_graphic(graphic: String, tick_ms: int) -> void:
 		_graphic = graphic
 		_load(graphic)
 	if _spin != null:
-		_spin.basis = MenuDriver.vehicle_preview_model_basis(tick_ms)
+		_spin.basis = VehicleMenuController.preview_model_basis(tick_ms)
 
 
 ## The graphic the pane was last asked for, and whether its model loaded.
@@ -112,6 +112,6 @@ func _load(graphic: String) -> void:
 	# The box centre at the origin, the turn about it; the eye from the box.
 	var bounds := _model.get_model_bounds()
 	_model.position = -bounds.get_center()
-	var eye := MenuDriver.vehicle_preview_eye(bounds)
+	var eye := VehicleMenuController.preview_eye(bounds)
 	if eye.length() > 0.0:
 		_camera.look_at_from_position(eye, Vector3.ZERO, Vector3.UP)

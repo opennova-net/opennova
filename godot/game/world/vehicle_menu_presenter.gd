@@ -1,24 +1,21 @@
 class_name VehicleMenuPresenter
 extends Node
 
-## The in-world vehicle screen: vehicle.mnu's VEHICLE screen, opened over live
-## play as the game opens it (UI_OpenMenuScreen("vehicle.mnu", "VEHICLE") on the
-## USE-ITEM vehicle-loadout arm), on the compiled-menu surface the armory's
-## weapon.mnu rides (MenuFrameSurface). The engine's inmatch::VehicleMenu carries
-## every rule (the first open's C2S 0x42, the poll that asks again and refills
-## the list, the rows over the bay mask and the S2C 0x70 counts, ACCEPT's C2S
-## 0x40), reached through Simulation; this node shows the ITEM_LIST rows the
-## engine holds, routes a row pick and the ACCEPT / CANCEL clicks, and closes.
-## The shell opens it (LocalPlayerPresenter.take_use_item_vehicle_menu_request);
-## the world keeps ticking underneath. The witnesses are the engine's
-## (runtime/inmatch/vehicle_menu.h).
+## The in-world vehicle screen's device half: vehicle.mnu's VEHICLE screen over
+## live play on the compiled-menu surface the armory's weapon.mnu rides
+## (MenuFrameSurface). The screen is the engine's VehicleMenuController
+## (runtime/inmatch/vehicle_menu_controller.h, over inmatch::VehicleMenu): its
+## open, the ITEM_LIST rows and pick, the ACCEPT / CANCEL click. This node mounts
+## the frame and the ITEM_DISPLAY preview, pumps them, and closes the frame when
+## the controller asks. The shell opens it
+## (LocalPlayerPresenter.take_use_item_vehicle_menu_request); the world keeps
+## ticking underneath.
 
 signal opened
 signal closed
 
 const MENU_FILE := "vehicle.mnu"
 const MENU_SCREEN := "VEHICLE"
-const LIST_CONTROL := "ITEM_LIST"
 const DISPLAY_CONTROL := "ITEM_DISPLAY"
 
 var _view: WorldView = null
@@ -32,8 +29,8 @@ var _audio: MenuAudio = null
 var _driver: MenuDriver = null
 # The ITEM_DISPLAY pane over the screen's widget (null when the screen authors none).
 var _preview: VehiclePreview = null
-var _shown_rows := PackedStringArray()
-var _shown_selection := -2
+# The screen's controller (claimed on the driver at each open).
+var _controller: VehicleMenuController = null
 
 
 ## The world view (its Simulation and resource root) and the node the screen
@@ -63,20 +60,17 @@ func get_preview() -> VehiclePreview:
 	return _preview
 
 
-## Open the screen over live play: the screen shows, and the engine runs its open
-## events (Simulation.open_vehicle_menu: the first parse's init, every open's
-## activate) and this node shows what they listed.
+## Open the screen over live play: the controller runs the menu's open events
+## (the first parse's init, every open's activate) and lists what they hold.
 func open() -> bool:
 	if is_open() or _view == null or _ui_parent == null:
 		return false
 	var sim: Simulation = _view.sim()
 	if sim == null or not _ensure_menu():
 		return false
-	sim.open_vehicle_menu()
-	_shown_rows = PackedStringArray()
-	_shown_selection = -2
-	_refresh(sim)
-	_refresh_preview(sim)
+	_controller.setup(_driver, sim)
+	_driver.claim_screen(_controller)
+	_refresh_preview()
 	# The menu draws over every HUD element, as the armory's does.
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
@@ -87,7 +81,13 @@ func open() -> bool:
 
 ## The Escape close: CANCEL's click (the engine sends nothing for it).
 func close() -> void:
-	_click(true)
+	if is_open():
+		_controller.click(true)
+
+
+## The screen's controller (ADR 0018 read seam; null until the first open builds the menu).
+func get_controller() -> VehicleMenuController:
+	return _controller
 
 
 func teardown() -> void:
@@ -100,6 +100,7 @@ func teardown() -> void:
 	_audio = null
 	_driver = null
 	_preview = null
+	_controller = null
 
 
 func _process(_delta: float) -> void:
@@ -110,10 +111,8 @@ func _process(_delta: float) -> void:
 	_driver.pump_mouse()
 	_driver.tick(_view.frame_clock_ms)
 	# The engine's poll refills the list every 64 frames while a reply stands.
-	var sim: Simulation = _view.sim()
-	if sim != null:
-		_refresh(sim)
-		_refresh_preview(sim)
+	_controller.refresh()
+	_refresh_preview()
 
 
 # Build the compiled surface over the gameplay view from the world's root, the
@@ -124,16 +123,15 @@ func _ensure_menu() -> bool:
 	var root: ResourceRoot = _view.resource_root()
 	var surface := MenuFrameSurface.open_surface(root, _ui_parent, _layout_control,
 			MENU_FILE, MENU_SCREEN, "VehicleMenu", "VehicleMenuPresenter", _on_frame_gui_input,
-			func(built: MenuDriver) -> void:
-				_register_text_tables(root)
-				built.widget_value_changed.connect(_on_widget_value_changed)
-				built.widget_activated.connect(_on_widget_activated))
+			func(_built: MenuDriver) -> void: _register_text_tables(root))
 	if surface == null:
 		return false
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
 	_frame.visible = false
+	_controller = VehicleMenuController.new()
+	_controller.close_requested.connect(_on_close_requested)
 	_mount_preview(root)
 	return true
 
@@ -161,53 +159,16 @@ func _place_preview() -> void:
 
 
 # The selected group's model and its turn on the process clock (GetTickCount).
-func _refresh_preview(sim: Simulation) -> void:
+func _refresh_preview() -> void:
 	if _preview != null and is_instance_valid(_preview):
-		_preview.show_graphic(sim.get_vehicle_menu_preview_graphic(), GameWorld.tick_count_ms())
+		_preview.show_graphic(_controller.preview_graphic(), GameWorld.tick_count_ms())
 
 
-# The engine's rows and selection into the ITEM_LIST when they changed.
-func _refresh(sim: Simulation) -> void:
-	var list := _driver.widget_id(LIST_CONTROL)
-	if list < 0:
-		return
-	var rows: PackedStringArray = sim.get_vehicle_menu_rows()
-	var selected: int = sim.get_vehicle_menu_selected_row()
-	if rows == _shown_rows and selected == _shown_selection:
-		return
-	_shown_rows = rows
-	_shown_selection = selected
-	_driver.set_widget_items(list, rows)
-	# A selection outside the rows (none, or past a refill's end) shows no row.
-	_driver.select_row(list, selected if selected >= 0 and selected < rows.size() else -1, false)
-
-
-# An ITEM_LIST pick: the engine's row select.
-func _on_widget_value_changed(widget_name: String, _kind: String, index: int,
-		_value: String) -> void:
-	if not is_open() or widget_name.to_upper() != LIST_CONTROL or index < 0:
-		return
-	var sim: Simulation = _view.sim()
-	if sim != null:
-		sim.select_vehicle_menu_row(index)
-
-
-# ACCEPT and CANCEL, the screen's two buttons.
-func _on_widget_activated(_id: int, widget_name: String) -> void:
-	match widget_name.to_upper():
-		"ACCEPT":
-			_click(false)
-		"CANCEL":
-			_click(true)
-
-
-# ACCEPT (cancel false) or CANCEL: the engine's click, then the screen closes.
-func _click(cancel: bool) -> void:
+# The controller's click (ACCEPT, CANCEL or the Escape close): the frame closes.
+func _on_close_requested() -> void:
 	if not is_open():
 		return
-	var sim: Simulation = _view.sim()
-	if sim != null:
-		sim.click_vehicle_menu(cancel)
+	_driver.release_screen()
 	MenuFrameSurface.hide_frame(_frame)
 	set_process(false)
 	closed.emit()

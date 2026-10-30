@@ -2382,6 +2382,13 @@ add_executable(command_map_screen_test menu/command_map_screen_test.cpp)
 target_link_libraries(command_map_screen_test PRIVATE opennova_runtime)
 target_compile_features(command_map_screen_test PRIVATE cxx_std_17)
 add_test(NAME command_map_screen COMMAND command_map_screen_test)
+# The CMAP screen's controller (menu/command_map_controller.h, D-HUD-19) over an authored cmap.mnu and a
+# fake host: the show's order, every registered control's callback, the tab radios' rebinding and gates,
+# the waypoint name dialog and the delete button.
+add_executable(command_map_controller_test menu/command_map_controller_test.cpp)
+target_link_libraries(command_map_controller_test PRIVATE opennova_runtime)
+target_compile_features(command_map_controller_test PRIVATE cxx_std_17)
+add_test(NAME command_map_controller COMMAND command_map_controller_test)
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -5622,7 +5629,8 @@ add_executable(netsim_client_replica_census_test netsim/client_replica_census_te
 target_link_libraries(netsim_client_replica_census_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_replica_census COMMAND netsim_client_replica_census_test)
 # The vehicle screen (D-NET-907): the first open's C2S 0x42, the poll's per-frame retry
-# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick.
+# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick,
+# and the screen's controller over the menu runtime (inmatch/vehicle_menu_controller.h).
 add_executable(npruntime_vehicle_menu_test npruntime/vehicle_menu_test.cpp)
 target_link_libraries(npruntime_vehicle_menu_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_vehicle_menu COMMAND npruntime_vehicle_menu_test)
