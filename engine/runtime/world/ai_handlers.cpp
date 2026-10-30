@@ -1175,7 +1175,6 @@ void h_enter_aircraft_dead(AiThinkCtx &ctx) {
 			}
 			entity->flags |= 6;
 			entity->engine_flags |= 6;
-			world.registry.list_fade_row(entity->handle);
 			entity->alive = false;
 			if (!entity->death_tick)
 				entity->death_tick = world.logic_tick;

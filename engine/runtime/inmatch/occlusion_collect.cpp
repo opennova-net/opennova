@@ -6,6 +6,7 @@
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/world/collision.h> // ResolvedCollisionShape, BlinkAccum, collision_matrix_from_euler
+#include <runtime/world/destruction.h> // update_item_destroy_fade (the draw's husk leg)
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_feed.h> // pack_building_visibility
 #include <base/io/fixed.h> // kFp16OneD
@@ -59,14 +60,19 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	// statics' box reads its words), null for a pool 0 / 1 row.
 	// A spawned player carries its net id as its placed identity (world/player_spawn.cpp), so
 	// the local player's body is walked here and its verdict is this leg's.
+	// An admitted row is drawn, and the draw runs its husk leg (the swap fade and the swap
+	// stage) for it there, every view's pass alike (world::update_item_destroy_fade carries
+	// the witness).
 	const auto gate_placed = [&](world::Entity &e,
 			const world::CollisionWorld::StaticSlotView *static_row) {
 		const bool admitted = kernel.occlusion.entity_render_visible(kernel.world, kernel.collision,
 				e, cam, static_row);
-		if (!admitted)
+		if (!admitted) {
 			r_culled_bms.push_back(e.bms_id);
-		else
+		} else {
 			anchor_entity(e);
+			world::update_item_destroy_fade(kernel.world, e);
+		}
 		if (r_local_collected != nullptr && e.handle == kernel.world.cached.local_player)
 			*r_local_collected = admitted;
 	};
@@ -115,10 +121,12 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			// es.x/y/z never follow a moving carrier, and a sphere pinned
 			// there culled the gun the moment the driven buggy left it.
 			if (!kernel.occlusion.entity_render_visible(
-						kernel.world, kernel.collision, *twin, cam))
+						kernel.world, kernel.collision, *twin, cam)) {
 				r_culled_wire.push_back(static_cast<int32_t>(handle));
-			else
+			} else {
 				anchor_entity(*twin);
+				world::update_item_destroy_fade(kernel.world, *twin);
+			}
 			return;
 		}
 		// A bare row is the client-built pool entity retail's collector
@@ -368,10 +376,10 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	}
 }
 
-void collect_building_verdicts(const world::World &world, const world::CollisionWorld &collision,
+void collect_building_verdicts(world::World &world, const world::CollisionWorld &collision,
 		const world::OcclusionWorld &occlusion, std::vector<BuildingVerdict> &r_out) {
 	r_out.clear();
-	const auto verdict = [&](const world::Entity &e) {
+	const auto verdict = [&](world::Entity &e) {
 		if (e.kind != world::EntityKind::Building || e.bms_id == 0) return;
 		if (!world::building_def_row(e)) return;
 		if (!occlusion.has_instance(e.handle) && collision.model_for(world, e.handle) == nullptr)
@@ -383,6 +391,10 @@ void collect_building_verdicts(const world::World &world, const world::Collision
 				occlusion.building_visible(e.handle));
 		v.forced = static_cast<int64_t>(occlusion.forced_section_mask(e.handle));
 		r_out.push_back(v);
+		// A visible building is drawn, and its draw runs the husk leg
+		// (world::update_item_destroy_fade) [orig: Terrain_RenderSectorModels @0x5C5D30 ->
+		//  Render_SectorEntity @0x5C5F23].
+		if (occlusion.building_visible(e.handle)) world::update_item_destroy_fade(world, e);
 	};
 	// The batch's walk is the static prox table's prefix, rows [0, static_building_count)
 	// as its last Pool2 build listed them (the Building-type defs, pool-2 slot order, at
@@ -399,7 +411,7 @@ void collect_building_verdicts(const world::World &world, const world::Collision
 	const int32_t buildings = collision.static_building_count();
 	for (int32_t i = 0; i < buildings; ++i) {
 		const world::CollisionWorld::StaticSlotView row = collision.static_slot(i);
-		const world::Entity *e = world.registry.get(row.h);
+		world::Entity *e = world.registry.get(row.h);
 		if (e == nullptr) continue;
 		if (static_cast<size_t>(row.h.slot()) < walked.size())
 			walked[static_cast<size_t>(row.h.slot())] = 1;
@@ -409,9 +421,10 @@ void collect_building_verdicts(const world::World &world, const world::Collision
 	// bound, or with no item type) is in no batch, so no view draws it: its verdict
 	// (never batched, not visible) still goes out, so an embedder hides it, as the
 	// statics' walk drops its own unlisted rows (collect_view_verdicts).
-	world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
-		const size_t slot = static_cast<size_t>(e.handle.slot());
-		if (slot >= walked.size() || walked[slot] == 0) verdict(e);
+	world.registry.for_each_in_pool(2, [&](const world::Entity &row) {
+		const size_t slot = static_cast<size_t>(row.handle.slot());
+		if (slot >= walked.size() || walked[slot] == 0)
+			if (world::Entity *e = world.registry.get(row.handle)) verdict(*e);
 	});
 }
 
