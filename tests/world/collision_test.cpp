@@ -1413,7 +1413,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     }
 }
 
-// D-SIM-T1: a corpse's expiry builds no table. Its destroy runs inside the pool-0 walk, after
+// D-SIM-3: a corpse's expiry builds no table. Its destroy runs inside the pool-0 walk, after
 // earlier bodies' resolves recorded the tick's contacts, which the walk's tail drains: they
 // stand, and so does the 17-tick slice phase, every slice keeping what the last build gave it.
 // [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810 (no proximity builder
@@ -4723,7 +4723,7 @@ void test_reused_registry_slot_rejects_old_collision_identity() {
     CHECK(provider.ensure_calls == 1);
 }
 
-// D-SIM-T5: a table build skips the binding prune over an unchanged registry, and still prunes
+// D-SIM-7: a table build skips the binding prune over an unchanged registry, and still prunes
 // after every occupancy change: a despawn alone (the live count), a binding assigned to no live
 // row, and a restore whose registry matches the last prune's serial and live count.
 void test_binding_prune_follows_every_occupancy_change() {

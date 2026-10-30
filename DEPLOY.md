@@ -976,8 +976,10 @@ task has no execution role at all).
    which failed (a refused call by name, the admin API's status). Either way the deploy
    goes on;
 5. once every program runs it, registers the backup task's revision (the nightly run
-   takes the newest) and records the release: its manifest (the images by digest, each
-   revision, the previous release, the release it was promoted from) goes to
+   takes the newest) and records the release: its manifest (the images by digest, the
+   commit each was built from as its own `org.opencontainers.image.revision` label names
+   it, which the admin's infrastructure page shows, each revision, the previous release,
+   the release it was promoted from) goes to
    `s3://<ops bucket>/releases/<id>.json` and to `/opennova/<deployment>/release`. A
    deploy that stops records nothing: the release it was on stays the deployment's, and
    `app rollback --to <that id>` puts the programs it already moved back on it.

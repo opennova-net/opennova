@@ -3611,7 +3611,7 @@ void test_npc_respawn_counts_and_spawn_reset() {
     }
 }
 
-// D-SIM-T6: an org1 respawn on the authority counts the row into the census again, an enemy
+// D-SIM-8: an org1 respawn on the authority counts the row into the census again, an enemy
 // growing the enemy-unit total and its class; the group live counts wait for the server
 // tick's periodic rescan.
 // [orig: Entity_UpdateInfantryAI @0x4B9910 - Entity_ResetToSpawnState called @0x4BA044,

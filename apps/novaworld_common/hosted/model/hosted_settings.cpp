@@ -215,8 +215,15 @@ std::string render_credentials(const std::string &username, const std::string &p
 	return "NOVAWORLD_USER=" + username + "\nNOVAWORLD_PASS=" + password + "\n";
 }
 
-LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
+HostedSettings launched_settings(const HostedSettings &settings, MachineKind kind) {
+	HostedSettings launched = settings;
+	if (kind != MachineKind::Own) launched.lock_framerate = true;
+	return launched;
+}
+
+LaunchSpec render_launch(const HostedSettings &owner_settings, std::string_view title,
 		std::string_view expansion_code, const RenderInputs &in) {
+	const HostedSettings settings = launched_settings(owner_settings, in.machine_kind);
 	LaunchSpec spec;
 	spec.server_id = in.server_id;
 	spec.files.push_back({ kHostFileName, render_host_file(settings, in.server_id), true });

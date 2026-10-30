@@ -811,7 +811,7 @@ static void spawn_corpse_decay(World &world, Entity &entity, const std::string &
 // The destroy builds no proximity table and no slice: the row stays in the tables this tick's
 // build published until the next one, where every reader skips it (a person row resolves to
 // no registry entity, its slice to none, D-COL-19), and the tick's contact streams and the
-// 17-tick slice phase run on (D-SIM-T1).
+// 17-tick slice phase run on (D-SIM-3).
 // [orig: Entity_Destroy @0x43E810 - no Entity_BuildProximityListsFromPools @0x4B8EB0 or
 //  Entity_BuildProximityLists_Pool01 @0x4B9340 among its callees; its one pool walk is
 //  Entity_ClearAllReferences @0x465670 (EntityCommands::remove_ssn's clear_entity_references)]
@@ -851,7 +851,7 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         reset_to_spawn_state(world, ai, entity, spawn_health_ceiling(world, entity));
         // The authority counts the respawned row into the census again (an enemy grows the
         // enemy-unit total and its class). The group live counts wait for the server tick's
-        // periodic rescan (D-SIM-T6).
+        // periodic rescan (D-SIM-8).
         // [orig: Entity_UpdateInfantryAI @0x4B9910 - Entity_ResetToSpawnState called @0x4BA044,
         //  the is_authority test @0x4BA04C, Score_ClassifyEntityForCounts @0x4FD070 called
         //  @0x4BA055; EntityPool_RecountLiveByGroup @0x40E8D0, called from Server_TickUpdate

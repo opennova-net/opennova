@@ -308,6 +308,7 @@ constexpr const char *kRelease =
 		R"("Value":"{\"id\":\"20261017T120000Z-abc1234\",\"deployment\":\"prod\",\"created\":\"2026-10-17T12:00:00Z\",)"
 		R"(\"revision\":\"abc1234def56\",\"dirty\":false,\"previous\":\"20261016T090000Z-0f0f0f0\",\"programs\":[\"gate\",\"lobby\",\"web\",\"fleet\",\"worker\",\"data\"],)"
 		R"(\"images\":{\"gate\":\"ghcr.io/opennova-net/opennova-novaworld-gate@sha256:0123\"},)"
+		R"(\"image_commits\":{\"gate\":\"f42f7fe\"},)"
 		R"(\"task_definitions\":{\"gate\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:7\",)"
 		R"(\"lobby\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:7\",)"
 		R"(\"web\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:42\",)"

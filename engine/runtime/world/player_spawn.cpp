@@ -283,7 +283,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
         world.local_player_state->radar.lock_tone = 0;
     // No table or slice build here: the add's one slice build follows its model init, which
     // stamps the bound radius the body's slice reads, and that is the embedder's
-    // (MissionKernel::bind_spawned_body, MissionKernel::spawn_local_player) (D-SIM-T2).
+    // (MissionKernel::bind_spawned_body, MissionKernel::spawn_local_player) (D-SIM-4).
     // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel called
     //  @0x43C492, Entity_BuildProximityListsFromPools called @0x43C4EB]
     return h;

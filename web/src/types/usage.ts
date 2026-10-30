@@ -91,6 +91,10 @@ export interface ProgramTask extends UsageNow {
   health: string | null;
   started_at: string | null;
   task_definition: string | null;
+  // The ONE build the task said it runs with its newest sample: its version
+  // ("0.0.22.123") and its commit's short sha; null where it named none.
+  one_version: string | null;
+  one_commit: string | null;
 }
 
 export interface ProgramUsage extends UsageNow {
@@ -98,8 +102,9 @@ export interface ProgramUsage extends UsageNow {
   // ECS's counts; with no cloud, the tasks reporting now and null.
   running: number;
   desired: number | null;
-  // The revision its service runs (family:revision), null without the cloud.
-  release: string | null;
+  // The ECS task definition revision its service runs (family:revision), null
+  // without the cloud.
+  task_definition: string | null;
   // Whether that is the release's; null when unknown.
   on_release: boolean | null;
   // Its tasks that reported in the last 24 hours and no longer do (a crash's,
