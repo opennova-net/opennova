@@ -250,12 +250,12 @@ bool Simulation::apply_local_player_loadout_impl(
 	// switch (the two-GUI regression).
 	if (!kernel_) return false;
 	return apply_local_player_loadout_rows(kit_rows_from(p_kit), p_player_class,
-			p_submit_joiner_request);
+			p_submit_joiner_request, opennova::world::LoadoutApplySelect::HeldWeapon);
 }
 
 bool Simulation::apply_local_player_loadout_rows(
 		std::vector<opennova::world::WeaponKitEntry> p_kit, int p_player_class,
-		bool p_submit_joiner_request) {
+		bool p_submit_joiner_request, opennova::world::LoadoutApplySelect p_select) {
 	if (!kernel_) return false;
 	// The armory ACCEPT in a session, a joiner's client and a listen host's own client
 	// alike: the selection becomes the process's loadout name list, off the authority the slot table
@@ -276,7 +276,7 @@ bool Simulation::apply_local_player_loadout_rows(
 	}
 	if (!opennova::world::local_loadout_apply_accept(kernel_->world, kernel_->local.loadout,
 				kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid, p_kit,
-				p_player_class, /*validate_banned=*/p_submit_joiner_request))
+				p_player_class, /*validate_banned=*/p_submit_joiner_request, p_select))
 		return false;
 	// Always re-arm the 0x2F seam after a rebuild settles the equipped combo —
 	// the S2C 0x5A grant apply (p_submit=false) refreshes only the live
@@ -515,8 +515,10 @@ void Simulation::apply_joiner_authoritative_loadout() {
 		// inside still re-arms the seam, but its ROWS come from the profile page, never
 		// from the grant — only the live equipped slot refreshes, which is exactly what
 		// retail's second submit carries [orig: Game_StartMission @0x525c2e].
-		if (apply_local_player_loadout_rows(
-					std::move(kit), grant.avatar_class, /*p_submit_joiner_request=*/false))
+		// The apply's select is the session protocol's (engine inmatch::grant_apply_select).
+		if (apply_local_player_loadout_rows(std::move(kit), grant.avatar_class,
+					/*p_submit_joiner_request=*/false,
+					opennova::inmatch::grant_apply_select(runtime_->view().protocol())))
 			net_.joiner_applied_loadout_revision = revision;
 	}
 	// The S2C 0x0F pool image lands AFTER the 0x5A slot rebuild, exactly as the

@@ -321,6 +321,12 @@ void kit_from_authoritative_grant(const world::WeaponTable &weapons,
 	}
 }
 
+world::LoadoutApplySelect grant_apply_select(const Protocol *protocol) {
+	return protocol_in_match(protocol).s2c_5a.select_last_primary_row
+			? world::LoadoutApplySelect::LastPrimaryRow
+			: world::LoadoutApplySelect::HeldWeapon;
+}
+
 void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &list) {
 	if (world.loadout_weapon_names == nullptr) return;
 	world::LoadoutWeaponNameList &names = *world.loadout_weapon_names;

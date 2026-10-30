@@ -87,6 +87,12 @@ struct ProtocolInMatch {
 		// up about 20 s more.
 		int32_t end_round_linger_ticks = 0;
 	} s2c_25;
+	// S2C 0x5A WEAPON_LOADOUT_SYNC, a joiner's apply (DFX2-35).
+	struct {
+		// The apply's closing select takes the grant's last primary row (weapon_class 1),
+		// where JO's takes the weapon the body holds.
+		bool select_last_primary_row = false;
+	} s2c_5a;
 	// S2C 0x64 MISSION_DATA_CHUNK, the mission-data block it carries (DFX2-18).
 	struct {
 		// The bits the block's rules word (+44) is ORed with; the authority's own rules word
@@ -150,6 +156,7 @@ inline constexpr ProtocolDialectRow kProtocolDialect[] = {
 	{ 'S', 0x2D, "person_index.pool0_wire_capacity", "D-SIM-52" },
 	{ 'S', 0x33, "person_index.pool0_wire_capacity", "D-SIM-52" },
 	{ 'S', 0x46, "person_index.pool0_wire_capacity", "D-SIM-52" },
+	{ 'S', 0x5A, "s2c_5a.select_last_primary_row", "DFX2-35" },
 	{ 'S', 0x64, "s2c_64.rules_word_bits", "DFX2-18" },
 	{ 'S', 0x66, "s2c_66.armory_only_availability", "DFX2-10" },
 	{ 'S', 0x6D, "person_index.pool0_wire_capacity", "D-SIM-52" },

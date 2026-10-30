@@ -77,6 +77,10 @@ Protocol make() {
 	// S2C 0x25 (DFX2-17): a joiner's reset arms the end-round linger at 1240 ticks.
 	// [orig: sub_422650 @0x42269d (dfx2.exe), the twin of NapiNPClientMsg_GameReset @0x422800]
 	m.s2c_25.end_round_linger_ticks = 1240;
+	// S2C 0x5A (DFX2-35): a joiner's apply selects the grant's last primary row.
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42b0ab..0x42b0bd, @0x42b4f3..0x42b50b
+	//  (dfx2.exe)]
+	m.s2c_5a.select_last_primary_row = true;
 	// S2C 0x64 (DFX2-18): the rules word ORed with 0x10000.
 	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)]
 	m.s2c_64.rules_word_bits = 0x10000u;

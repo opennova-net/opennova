@@ -212,7 +212,8 @@ void test_an_out_of_session_accept_writes_the_list() {
 	const std::vector<w::WeaponKitEntry> selection = {w::WeaponKitEntry{"WPN_AK47AUTO", 4, -1, -1},
 			w::WeaponKitEntry{"WPN_KNIFE", -1, -1, -1}};
 	CHECK(w::local_loadout_apply_accept(r.world, local->loadout, local->weapon, local->inventory,
-			local->inventory_valid, selection, 6, /*validate_banned=*/true));
+			local->inventory_valid, selection, 6, /*validate_banned=*/true,
+			w::LoadoutApplySelect::HeldWeapon));
 	const w::LoadoutWeaponNameList &names = r.process->loadout_weapon_names;
 	CHECK(names.set && names.entries.size() == 2);
 	if (!names.entries.empty()) CHECK(names.entries[0].name == "WPN_AK47AUTO");
@@ -222,7 +223,7 @@ void test_an_out_of_session_accept_writes_the_list() {
 	auto joiner_local = std::make_unique<w::LocalPlayer>(g.world);
 	CHECK(w::local_loadout_apply_accept(g.world, joiner_local->loadout, joiner_local->weapon,
 			joiner_local->inventory, joiner_local->inventory_valid, selection, 6,
-			/*validate_banned=*/false));
+			/*validate_banned=*/false, w::LoadoutApplySelect::HeldWeapon));
 	CHECK(!g.process->loadout_weapon_names.set);
 }
 
@@ -363,6 +364,17 @@ void test_a_fixed_class_protocol_writes_its_class_before_the_page() {
 
 } // namespace
 
+// A client's S2C 0x5A apply selects as its protocol has it (DFX2-35, ProtocolInMatch::s2c_5a):
+// JO's the weapon the body holds, DFX2's the grant's last primary row.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4;
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD]
+void test_the_grant_apply_select_is_the_protocols() {
+	CHECK(inmatch::grant_apply_select(opennova::title_protocol("jo")) ==
+			w::LoadoutApplySelect::HeldWeapon);
+	CHECK(inmatch::grant_apply_select(opennova::title_protocol("dfx2")) ==
+			w::LoadoutApplySelect::LastPrimaryRow);
+}
+
 int main() {
 	test_a_dedicated_host_keeps_the_initializers_first_weapon();
 	test_a_listen_hosts_own_list_names_every_body_after_its_fold();
@@ -371,6 +383,7 @@ int main() {
 	test_an_out_of_session_accept_writes_the_list();
 	test_the_session_weapon_profile_clamps_and_routes_its_seed();
 	test_a_fixed_class_protocol_writes_its_class_before_the_page();
+	test_the_grant_apply_select_is_the_protocols();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

@@ -2503,7 +2503,7 @@ void install_grant_apply(Harness &h, uint64_t &applied) {
 		w::LocalPlayer &lp = h.kernel->local;
 		if (w::local_loadout_apply_accept(h.kernel->world, lp.loadout, lp.weapon, lp.inventory,
 					lp.inventory_valid, kit, rt.authoritative_loadout().avatar_class,
-					/*validate_banned=*/false))
+					/*validate_banned=*/false, w::LoadoutApplySelect::HeldWeapon))
 			applied = revision;
 	};
 }

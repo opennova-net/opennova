@@ -50,6 +50,9 @@ Protocol make() {
 	// S2C 0x25 (DFX2-17): a joiner's reset zeroes the end-round linger, so its next frame leaves
 	// the board. [orig: NapiNPClientMsg_GameReset @0x42281f]
 	m.s2c_25.end_round_linger_ticks = 0;
+	// S2C 0x5A (DFX2-35): a joiner's apply selects the weapon the body holds.
+	// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4296bc..0x4296d4]
+	m.s2c_5a.select_last_primary_row = false;
 	// S2C 0x64 (DFX2-18): the rules word as built.
 	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51e94b..0x51e957]
 	m.s2c_64.rules_word_bits = 0;

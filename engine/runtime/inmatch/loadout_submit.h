@@ -150,6 +150,14 @@ void kit_from_authoritative_grant(const world::WeaponTable &weapons,
 		const WeaponLoadout &grant,
 		std::vector<world::WeaponKitEntry> &r_kit);
 
+// The weapon a client's S2C 0x5A apply selects (world::local_loadout_apply_accept's
+// `select`), as the session's protocol has it (ProtocolInMatch::s2c_5a): JO's the weapon the
+// body holds, DFX2's the grant's last primary row.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4;
+//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD,
+//  @0x42B4F3..0x42B50B]
+world::LoadoutApplySelect grant_apply_select(const Protocol *protocol);
+
 // A client's S2C 0x5A apply rebuilds the process's loadout name list (World::
 // loadout_weapon_names) from the list's rows: emptied, then each row whose weapon the table
 // has, its name and its three values, with no authority test ahead of it, so a listen host's

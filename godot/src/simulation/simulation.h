@@ -452,9 +452,12 @@ private:
 			bool p_submit_joiner_request);
 	// The typed-rows core of the apply (the record overload converts, the 0x5A
 	// grant path feeds inmatch::kit_from_authoritative_grant's rows directly).
+	// p_select names the weapon the closing select's slot word comes from: the
+	// armory ACCEPT's held weapon, the 0x5A's protocol's (inmatch::grant_apply_select).
 	bool apply_local_player_loadout_rows(
 			std::vector<opennova::world::WeaponKitEntry> p_kit,
-			int p_player_class, bool p_submit_joiner_request);
+			int p_player_class, bool p_submit_joiner_request,
+			opennova::world::LoadoutApplySelect p_select);
 	// Fold the latest authoritative S2C 0x5A grant into the local slot pool at
 	// the same recv-before-actions boundary as the retail handler.
 	void apply_joiner_authoritative_loadout();

@@ -70,7 +70,8 @@ struct Rig {
 	bool accept(int32_t fourth) {
 		return w::local_loadout_apply_accept(world, local->loadout, local->weapon,
 				local->inventory, local->inventory_valid,
-				{w::WeaponKitEntry{"WPN_M4AUTO", 2, -1, fourth}}, 8, false);
+				{w::WeaponKitEntry{"WPN_M4AUTO", 2, -1, fourth}}, 8, false,
+				w::LoadoutApplySelect::HeldWeapon);
 	}
 };
 
