@@ -123,7 +123,7 @@ bool os_registry_write_string(const std::string &key, const std::string &value,
 #else
 	(void)path;
 	std::string error;
-	return !stand_in.empty() && io::write_whole(stand_in, stored.data(), stored.size(), error);
+	return !stand_in.empty() && io::write_file_atomic(stand_in, stored.data(), stored.size(), error);
 #endif
 }
 
