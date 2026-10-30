@@ -1227,9 +1227,10 @@ static func mod_title(mod: ModListing) -> String:
 	return title if not title.is_empty() else mod.code
 
 
-# The page's rows: the listed mods, then each mod installed here the list does
-# not hold (a private one, a retired one, another service's), by its folder's
-# name, marked as not listed once a list has loaded, which only Remove takes.
+# The page's rows: the listed mods, then each mod the page installed here (its
+# folder's mark) that the list does not hold (a private one, a retired one, another
+# service's), by its folder's name, marked as not listed once a list has loaded,
+# which only Remove takes.
 func _show_mods() -> void:
 	if _mods_tree == null:
 		return
@@ -1295,7 +1296,7 @@ func _update_mod_buttons() -> void:
 	var installed := not code.is_empty() and RuntimeUpdates.has_mod(code)
 	_mod_install_button.disabled = mod == null or installed
 	_mod_update_button.disabled = mod == null or not installed
-	_mod_remove_button.disabled = not installed
+	_mod_remove_button.disabled = not RuntimeUpdates.can_remove_mod(code)
 
 
 func _on_mod_install_pressed() -> void:
@@ -1326,18 +1327,26 @@ func _on_mod_update_pressed() -> void:
 
 func _on_mod_remove_pressed() -> void:
 	var code := _selected_code()
-	if code.is_empty():
+	if code.is_empty() or not RuntimeUpdates.can_remove_mod(code):
 		return
 	var title := mod_title(_selected_mod()) if _selected_mod() != null else code
 	if resource_root != null and String(resource_root.get_expansion()).to_lower() == code.to_lower():
 		_show_message(("%s is the mod the game is playing now. Choose the base game under "
 				+ "Options, Mods, then remove it.") % title, "Back", Callable(), Screen.MODS)
 		return
+	_show_message(("Remove %s? Its folder is deleted with everything in it, and a server "
+			+ "playing it can be joined again only once it is installed again.") % title,
+			"Remove", _remove_mod.bind(code, title), Screen.MODS, "Back")
+
+
+# The confirmed removal: the folder the Mods page installed deleted, the page shown again.
+func _remove_mod(code: String, title: String) -> void:
 	if not RuntimeUpdates.remove_mod(code):
 		_show_message("%s could not be removed.\n\n%s" % [title, RuntimeUpdates.last_error],
 				"Back", Callable(), Screen.MODS)
 		return
 	_installed_listed = false
+	_show_screen(Screen.MODS)
 	_show_mods()
 	_rebuild_view()
 

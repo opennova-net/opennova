@@ -191,12 +191,18 @@ func has_mod(code: String) -> bool:
 	return not code.is_empty() and DirAccess.dir_exists_absolute(mod_dir(code))
 
 
-## The mods installed here: every expansion/<code>/ folder, by its name.
+## The mods installed here: the expansion/<code>/ folders the Mods page installed, by
+## name (engine base/resource_index/mod_listing.h, its mark); the game's own expansions
+## are none.
 func installed_mods() -> PackedStringArray:
-	var expansions := _resource_dir.path_join("expansion")
-	if _resource_dir.is_empty() or not DirAccess.dir_exists_absolute(expansions):
+	if _resource_dir.is_empty():
 		return PackedStringArray()
-	return DirAccess.get_directories_at(expansions)
+	return ModListing.marked_folders(_resource_dir)
+
+
+## Whether the Mods page may remove the mod's folder: one it installed.
+func can_remove_mod(code: String) -> bool:
+	return not _resource_dir.is_empty() and ModListing.folder_marked(_resource_dir, code)
 
 
 ## A mod's install, as the NovaWorld screen runs it (ADR 0074): its folder's
@@ -214,7 +220,8 @@ func install_mod(mod: ModListing, join_rid := 0) -> bool:
 	return launch_update(false, join_rid)
 
 
-## A mod's removal: its folder deleted with everything in it.
+## A mod's removal: its folder deleted with everything in it, when the Mods page
+## installed it.
 func remove_mod(code: String) -> bool:
 	last_error = ModListing.remove_folder(_resource_dir, code)
 	return last_error.is_empty()

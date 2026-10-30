@@ -69,9 +69,17 @@ func _row(fields: Dictionary) -> NovaWorldServerRow:
 	return row
 
 
-func _install_folder(code: String) -> void:
+# A folder the Mods page installed: it holds the page's mark (engine mod_listing.h
+# kModMarkFileName); `marked` false makes one of the game's own expansions instead.
+func _install_folder(code: String, marked := true) -> void:
 	var dir := _game_dir.path_join("expansion").path_join(code)
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	if marked:
+		var mark := FileAccess.open(dir.path_join("OPENNOVA.MOD"), FileAccess.WRITE)
+		assert_not_null(mark)
+		if mark != null:
+			mark.store_string(code)
+			mark.close()
 
 
 # The site whose /api/mods belongs to the OpenNova target's gate: a deployment's
@@ -127,7 +135,13 @@ func test_remove_deletes_the_mods_folder() -> void:
 	panel.apply_mods_reply(200, MODS_REPLY)
 	panel.select_mod_for_test(1)
 	panel.press_mod_remove()
+	assert_true(DirAccess.dir_exists_absolute(_game_dir.path_join("expansion/other")),
+			"Remove asks first")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_true(panel.message_back_visible(), "with a Back that keeps the folder")
+	panel.press_message_action()
 	assert_false(DirAccess.dir_exists_absolute(_game_dir.path_join("expansion/other")))
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MODS)
 	assert_eq(panel.mod_cells(1)[3], "", "it reads as not installed")
 	assert_true(DirAccess.dir_exists_absolute(_game_dir.path_join("expansion")),
 			"the other mods' folder stays")
@@ -146,6 +160,7 @@ func test_an_installed_mod_the_list_does_not_hold_shows_with_remove_alone() -> v
 	panel.select_mod_for_test(2)
 	assert_eq(panel.mod_buttons_enabled(), [false, false, true] as Array[bool], "Remove alone")
 	panel.press_mod_remove()
+	panel.press_message_action()
 	assert_false(DirAccess.dir_exists_absolute(_game_dir.path_join("expansion/secret")))
 	assert_eq(panel.mod_row_count(), 2, "gone from the page")
 	var unlisted := _make_panel()
@@ -155,6 +170,22 @@ func test_an_installed_mod_the_list_does_not_hold_shows_with_remove_alone() -> v
 	unlisted.select_mod_for_test(0)
 	assert_eq(unlisted.mod_buttons_enabled(), [false, false, true] as Array[bool])
 
+
+
+# A folder the Mods page did not install (one of the game's own expansions, a retail
+# install's jox01) is no mod of the page's: not listed, and a listed mod of its code
+# shows installed with Update but no Remove.
+func test_a_games_own_expansion_folder_is_never_removed() -> void:
+	_install_folder("jox01", false)
+	_install_folder("other", false)
+	var panel := _make_panel()
+	panel.apply_mods_reply(200, MODS_REPLY)
+	assert_eq(panel.mod_row_count(), 2, "an unmarked folder the list lacks is not shown")
+	panel.select_mod_for_test(1)
+	assert_eq(panel.mod_buttons_enabled(), [false, true, false] as Array[bool], "Update alone")
+	panel.press_mod_remove()
+	panel.press_message_action()
+	assert_true(DirAccess.dir_exists_absolute(_game_dir.path_join("expansion/other")))
 
 # The Mods page opens before the sign-in too, and stays up while the session
 # connects behind it; its Back returns to where the session got to.

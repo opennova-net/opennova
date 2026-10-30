@@ -34,16 +34,28 @@ bool read_mod_listings(std::string_view json, std::vector<ModListing> &out, std:
 // game can mount, at most kExpansionNameMax characters (boot_policy.h).
 bool expansion_code_valid(const std::string &code);
 
+// The mark the Mods page leaves in a folder it installs a mod into: expansion/<code>/OPENNOVA.MOD,
+// holding the mod's key. Only a folder holding it is the page's to remove; the game's own expansions
+// (a retail install's jox01, the base game's own) never hold one. No game file has the name.
+inline constexpr const char *kModMarkFileName = "OPENNOVA.MOD";
+
 // Writes <game_root>/expansion/<code>/UPDATE.WIZ naming the mod's updater product, and the update
 // host the runtime's OPENNOVA.WIZ in `runtime_dir` names (its URL; none without one, which the
-// updater never dials anyway). The folder is made when absent. False with `error` for a code
-// expansion_code_valid refuses, a value a wizard cannot carry, or a failed write.
+// updater never dials anyway), then the folder's kModMarkFileName. The folder is made when absent.
+// False with `error` for a code expansion_code_valid refuses, a value a wizard cannot carry, or a
+// failed write.
 bool write_mod_wizard(const std::string &game_root, const std::string &runtime_dir, const ModListing &mod,
 		std::string &error);
 
-// Deletes <game_root>/expansion/<code>/ with everything in it. True when it is gone (or was never
-// there); false with `error` for a code expansion_code_valid refuses or a file that would not go
-// (one the game holds open).
+// Whether <game_root>/expansion/<code>/ is a folder the Mods page installed (it holds the mark).
+bool mod_folder_marked(const std::string &game_root, const std::string &code);
+// The codes of the folders under <game_root>/expansion/ the Mods page installed, by name.
+std::vector<std::string> marked_mod_folders(const std::string &game_root);
+
+// Deletes <game_root>/expansion/<code>/ with everything in it, when the Mods page installed it. True
+// when it is gone (or was never there); false with `error` for a code expansion_code_valid refuses, a
+// folder without the mark (no mod of the page's: the game's own expansion), or a file that would not
+// go (one the game holds open).
 bool remove_mod_folder(const std::string &game_root, const std::string &code, std::string &error);
 
 } // namespace opennova

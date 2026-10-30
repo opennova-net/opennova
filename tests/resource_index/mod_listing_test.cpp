@@ -100,6 +100,19 @@ void test_a_mods_folder_is_written_and_removed() {
     unwritable.updater_login.clear();
     CHECK(!write_mod_wizard(game.string(), runtime.string(), unwritable, error));
     CHECK(!fs::exists(game / "expansion" / "other"));
+    // The page's mark: its key, in the folder it installed; only such a folder is the page's to remove.
+    mod.key = "mymod-key";
+    CHECK(write_mod_wizard(game.string(), runtime.string(), mod, error));
+    CHECK(read(game / "expansion" / "mymod" / "OPENNOVA.MOD") == "mymod-key\n");
+    CHECK(mod_folder_marked(game.string(), "mymod"));
+    // A folder of the game's own (a retail install's expansion) holds no mark: listed as no mod, kept.
+    fs::create_directories(game / "expansion" / "jox01", ec);
+    std::ofstream((game / "expansion" / "jox01" / "jox01.pff").string(), std::ios::binary) << "retail";
+    std::ofstream((game / "expansion" / "jox01" / "UPDATE.WIZ").string(), std::ios::binary) << "[HEADER]\r\n";
+    CHECK(!mod_folder_marked(game.string(), "jox01"));
+    CHECK(marked_mod_folders(game.string()) == std::vector<std::string>{"mymod"});
+    CHECK(!remove_mod_folder(game.string(), "jox01", error) && !error.empty());
+    CHECK(fs::exists(game / "expansion" / "jox01" / "jox01.pff"));
     std::ofstream((game / "expansion" / "mymod" / "mymod.pff").string(), std::ios::binary) << "archive";
     CHECK(remove_mod_folder(game.string(), "mymod", error));
     CHECK(!fs::exists(game / "expansion" / "mymod") && fs::exists(game / "expansion"));
