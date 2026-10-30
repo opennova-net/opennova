@@ -305,7 +305,7 @@ std::string class_word_token(const hud::GameTextLookup& menu_ui, int32_t word) {
 }
 
 constexpr int kRestrictionCell = 1; // the token's column [orig: CTableWnd_SetCellText(.., 1) @0x5566BF]
-constexpr size_t kClassWordCount = std::size(gamecfg::GameCfg{}.class_availability);
+constexpr size_t kClassWordCount = gamecfg::kClassAvailabilityCount;
 
 int host_screen_list(const menu::MenuRuntime& screen, std::string_view list) {
     return screen.find_screen_control(std::string(kHostDialogScreen), std::string(list));

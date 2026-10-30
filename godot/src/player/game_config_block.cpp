@@ -1,6 +1,7 @@
 #include "player/game_config_block.h"
 
 #include "mnu/menu_driver.h"
+#include "mnu/mnu_document.h" // the driver's Ref<MnuDocument> members
 #include "network/join_target.h"
 #include "network/novaworld_identity.h" // sample_device_identity, primary_desktop_size
 #include "resource_index/launch_flags.h"
