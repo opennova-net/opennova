@@ -394,6 +394,49 @@ void test_a_joiner_walks_the_wire_persons() {
 	CHECK(!collision.sun_ray_clear_of_entities(w, from, to));
 }
 
+// The frozen frame's settle stops once the brightness holds eight frames past
+// the window fill, and never before the fourth frame.
+void test_the_settle_stops_on_an_eight_frame_hold_past_the_window_fill() {
+	env::GlareSettle rising(0);
+	int stopped_at = -1;
+	const int brightness[] = {16, 32, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48};
+	for (int frame = 0; frame < 13; ++frame) {
+		if (rising.step(brightness[frame])) {
+			stopped_at = frame;
+			break;
+		}
+	}
+	// Frames 3..10 hold at 48: the eighth unchanged step lands on frame 10.
+	CHECK(stopped_at == 10);
+	CHECK(rising.brightness() == 48);
+
+	// A settled start still runs the window fill: the hold reaches eight at
+	// frame 7, past frame 3.
+	env::GlareSettle settled(64);
+	int frames = 0;
+	while (!settled.step(64)) {
+		++frames;
+	}
+	CHECK(frames == 7);
+}
+
+// The view-aligned body turns by the camera's orthonormalized rotation with
+// its right and back negated; the reference camera (level, looking east)
+// gives the build's quarter turn.
+void test_the_view_aligned_body_takes_the_camera_turn() {
+	const env::CelestialBasis reference = env::celestial_view_aligned_basis(
+			env::Vec3{0.0f, 0.0f, 1.0f}, env::Vec3{0.0f, 1.0f, 0.0f}, env::Vec3{-1.0f, 0.0f, 0.0f});
+	CHECK(close_to(reference.x, env::Vec3{0.0f, 0.0f, -1.0f}));
+	CHECK(close_to(reference.y, env::Vec3{0.0f, 1.0f, 0.0f}));
+	CHECK(close_to(reference.z, env::Vec3{1.0f, 0.0f, 0.0f}));
+	// A scaled, slightly skewed camera is orthonormalized first.
+	const env::CelestialBasis scaled = env::celestial_view_aligned_basis(
+			env::Vec3{2.0f, 0.0f, 0.0f}, env::Vec3{0.1f, 3.0f, 0.0f}, env::Vec3{0.0f, 0.0f, 4.0f});
+	CHECK(close_to(scaled.x, env::Vec3{-1.0f, 0.0f, 0.0f}));
+	CHECK(close_to(scaled.y, env::Vec3{0.0f, 1.0f, 0.0f}));
+	CHECK(close_to(scaled.z, env::Vec3{0.0f, 0.0f, -1.0f}));
+}
+
 } // namespace
 
 int main() {
@@ -408,6 +451,8 @@ int main() {
 	test_the_sun_veil_composes_the_sky_and_the_water_terms();
 	test_the_entity_walk_skips_the_local_player_and_its_near_teammates();
 	test_a_joiner_walks_the_wire_persons();
+	test_the_settle_stops_on_an_eight_frame_hold_past_the_window_fill();
+	test_the_view_aligned_body_takes_the_camera_turn();
 	std::printf(failures ? "GLARE OCCLUSION TEST FAILED (%d)\n" : "glare occlusion test passed\n",
 	            failures);
 	return failures ? 1 : 0;

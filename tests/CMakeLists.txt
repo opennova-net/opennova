@@ -604,6 +604,13 @@ add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
 target_link_libraries(mission_load_plan_test PRIVATE opennova_runtime)
 add_test(NAME mission_load_plan COMMAND mission_load_plan_test)
 
+# The load plan's executor (mission/mission_load.h): each arm's order over recording legs (a
+# fresh session's, a headless dedicated host's as opennova-serve fills them, a wire joiner's S2C
+# 0x11 head and 0x1A load), the stage checkpoints, and the failures' stops.
+add_executable(mission_load_test mission/mission_load_test.cpp)
+target_link_libraries(mission_load_test PRIVATE opennova_runtime)
+add_test(NAME mission_load COMMAND mission_load_test)
+
 # fixtures/bms/synth_dense.bms: the synthetic dense mission (four populated
 # pools, zero-valued optional fields) authored through bms_edit and
 # written by bms::write; mission_bms and mission_mis_idempotency read it.
@@ -1465,18 +1472,22 @@ target_include_directories(mission_def_table_read_test PRIVATE ${CMAKE_CURRENT_S
 add_test(NAME mission_def_table_read COMMAND mission_def_table_read_test)
 
 # Object renderer/shader tests
-foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
-        particle_atlas_contract particle_frame_compiler_contract particle_quad_inputs render_order
-        frame_fx_effects nvg_scope_lens q3_frame render_slot_frame render_slot_shadow
+foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_draw_frame light_spawn light_terrain_pass material_classify material_eval material_texture
+        particle_atlas_contract particle_frame_compiler_contract particle_frame_plan particle_quad_inputs render_order
+        frame_fx_effects nvg_scope_lens pipeline_state q3_frame render_slot_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
         texture_registry texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info
-        texture_roles fixed_texture_names)
+        texture_roles fixed_texture_names view_frustum triangle_strip)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
+
+# The device fog law's GLSL text checked against the .gdshader passes' copy of it.
+target_compile_definitions(renderer_device_fog_test PRIVATE
+    DEVICE_FOG_GDSHADERINC="${CMAKE_SOURCE_DIR}/godot/shaders/device_fog.gdshaderinc")
 
 # The NORMAL-pass coverage table checked against the object pipeline manifest's coverage_source.
 target_compile_definitions(renderer_material_classify_test PRIVATE
@@ -1738,6 +1749,14 @@ add_executable(environment_state_test environment/environment_state_test.cpp)
 target_link_libraries(environment_state_test PRIVATE opennova_runtime)
 target_include_directories(environment_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME environment_state COMMAND environment_state_test)
+
+# The water pass orchestration (runtime/environment/water_frame): which of a
+# scene's water passes run, the Inset's own, the per-side pass fog end and the
+# noise pair's frame counter.
+add_executable(water_frame_test environment/water_frame_test.cpp)
+target_link_libraries(water_frame_test PRIVATE opennova_runtime)
+target_include_directories(water_frame_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME water_frame COMMAND water_frame_test)
 
 # The mission-start weather seed (runtime/environment/weather_seed): the
 # mission-selected ENV/BMS derivation and retail's 255-tick weather settle must
@@ -4383,6 +4402,13 @@ add_test(NAME npruntime_player_list_vars COMMAND npruntime_player_list_vars_test
 add_executable(inmatch_joiner_role_test npruntime/joiner_role_test.cpp)
 target_link_libraries(inmatch_joiner_role_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME inmatch_joiner_role COMMAND inmatch_joiner_role_test)
+# The one joiner bring-up (inmatch/joiner_boot.h), headless: a JoinerRole booted over an in-memory
+# socket dials with every setting (its ClientAuth's APPID against a scripted ServerHello), a load's
+# rebuilt runtime takes the same, and a header-only join's streamed types settle in order.
+add_executable(inmatch_joiner_boot_test npruntime/joiner_boot_test.cpp)
+target_link_libraries(inmatch_joiner_boot_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(inmatch_joiner_boot_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME inmatch_joiner_boot COMMAND inmatch_joiner_boot_test)
 
 # The joiner session-drive policy (S10b): the preload's failure edge (no join wait has a deadline,
 # D-NET-1070), the S2C 0x7B promote validation, the admission/deploy/loss edge machine (frame
@@ -5008,6 +5034,13 @@ add_executable(asset_store_test assets/asset_store_test.cpp)
 target_link_libraries(asset_store_test PRIVATE opennova_runtime)
 target_include_directories(asset_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME asset_store COMMAND asset_store_test)
+
+# A foliage definition's model asset (runtime/assets/foliage_assets.h): the slot bounds as the
+# terrain load takes them, the LOD0 geometry, the :fd material and the model key.
+add_executable(foliage_assets_test assets/foliage_assets_test.cpp)
+target_link_libraries(foliage_assets_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(foliage_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME foliage_assets COMMAND foliage_assets_test)
 
 # The files a running mission opens by a fixed name (runtime/assets/mission_fixed_files.h): each
 # set by the runtime's own constants, every name once.

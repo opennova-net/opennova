@@ -805,11 +805,11 @@ bool SlotShadow::plan_frame() {
 	// The caster registry replaces the per-frame get_nodes_in_group walk:
 	// records rebuild only when the group revision moved (every membership or
 	// cached-fact mutation site bumps it), and a freed node self-heals here
-	// through its null ObjectDB resolve.
-	std::vector<CasterInfo> &casters = casters_scratch_;
-	HashMap<uint64_t, size_t> &caster_index = caster_index_scratch_;
-	casters.clear();
-	caster_index.clear();
+	// through its null ObjectDB resolve. Each live caster hands the engine
+	// the facts its presenters stamped (runtime/renderer/render_slot_frame.h
+	// SlotCasterFacts); the engine decides every caster's slot state.
+	std::vector<opennova::renderer::SlotCasterFacts> &facts = caster_facts_scratch_;
+	facts.clear();
 	if (live) {
 		if (!caster_records_valid_ ||
 				caster_records_revision_ != caster_group_revision()) {
@@ -817,7 +817,7 @@ bool SlotShadow::plan_frame() {
 			_rebuild_caster_records();
 			_part_end();
 		}
-		casters.reserve(caster_records_.size());
+		facts.reserve(caster_records_.size());
 		bool pruned = false;
 		for (const CasterRecord &record : caster_records_) {
 			ObjectModel *model = Object::cast_to<ObjectModel>(
@@ -829,22 +829,7 @@ bool SlotShadow::plan_frame() {
 			if (!model->is_inside_tree()) {
 				continue;
 			}
-			CasterInfo info;
-			info.model = model;
-			info.caster.capture_radius = record.capture_radius;
-			info.caster.state.bound_radius = record.slot_radius;
-			if (record.radius_fallback) {
-				// Unstamped models (previews/tests) keep the live-bounds
-				// derivation the per-frame walk used.
-				const AABB bounds = model->get_world_bounds();
-				info.caster.capture_radius =
-						MAX(0.5f, float(bounds.size.length()) * 0.5f);
-				info.caster.state.bound_radius = info.caster.capture_radius;
-			}
-			info.caster.state.is_person = record.is_person;
-			info.caster.state.seat_parented = record.seat_parented_ancestor;
-			casters.push_back(info);
-			caster_index[uint64_t(record.id)] = casters.size() - 1;
+			facts.push_back(_caster_facts(*model, record));
 		}
 		if (pruned) {
 			caster_records_valid_ = false;
@@ -852,9 +837,13 @@ bool SlotShadow::plan_frame() {
 	}
 
 	// Registration diff against the plan.
+	HashSet<uint64_t> live_ids;
+	for (const opennova::renderer::SlotCasterFacts &fact : facts) {
+		live_ids.insert(fact.id);
+	}
 	std::vector<uint64_t> stale;
 	for (const uint64_t id : registered_ids_) {
-		if (!caster_index.has(id)) {
+		if (!live_ids.has(id)) {
 			stale.push_back(id);
 		}
 	}
@@ -874,11 +863,6 @@ bool SlotShadow::plan_frame() {
 
 	_part("plan");
 	const uint64_t local_id = uint64_t(local_player_id_);
-	// The vehicle the local player rides (entity+0x16C) shares the local
-	// player's halved priority and every-frame refresh (retail:
-	// RenderSlot_SortAndAssign @0x5d669c..0x5d66a6; RenderSlot_RenderEntity-
-	// AndChildren @0x5d7707..0x5d7734).
-	const uint64_t local_parent_id = uint64_t(local_player_parent_id_);
 	// The frame-open slot projection direction: get_light_direction now
 	// serves the Godot-axes vector (the util/axes.h x/z swap IS the witnessed
 	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
@@ -898,54 +882,14 @@ bool SlotShadow::plan_frame() {
 	// terrain's fog law and uniforms.
 	env->apply_terrain_uniforms(drape);
 
-	// Build per-caster planner state. capture_links collects (child, parent)
-	// for models linked capture-with another caster. The stamped radii, the
-	// person flag, and the ancestor half of seat_parented
-	// come off the registry record (their mutation sites bump the group
-	// revision); only the live per-frame facts — position, visibility, the
-	// capture-with link — read the node here.
-	std::vector<std::pair<uint64_t, uint64_t>> capture_links;
-	for (CasterInfo &info : casters) {
-		ObjectModel *model = info.model;
-		const uint64_t id = uint64_t(model->get_instance_id());
-		plan_.register_entity(id);
-		registered_ids_.insert(id);
-		const Vector3 pos = model->get_global_position();
-		info.caster.position = {float(pos.x), float(pos.y), float(pos.z)};
-		const Vector3 march_offset = model->get_slot_march_offset();
-		info.caster.march_offset = {float(march_offset.x), float(march_offset.y),
-				float(march_offset.z)};
-		opennova::renderer::SlotCandidateState &state = info.caster.state;
-		state.pos2d = {float(pos.x), float(pos.z)};
-		// Hidden = the sim's present intent (retail Flags & 1), never the
-		// render-occlusion claim: retail's slot pass reads no render gate, so
-		// a caster hidden by the blink or outdoors latch keeps its shadow
-		// (retail: RenderSlot_SortAndAssign @0x5d657d, RenderSlot_DrawAllDrapes
-		// @0x5d6e6a).
-		const bool shown = model->is_occlusion_hidden() ? model->is_present_visible()
-													 : model->is_visible();
-		const Node3D *parent = Object::cast_to<Node3D>(model->get_parent());
-		state.hidden = !shown || (parent != nullptr && !parent->is_visible_in_tree());
-		// A caster parented under another caster renders with its parent in
-		// retail (the seat/standing child walk of the parent's slot RT);
-		// its own slot is excluded.
-		ObjectModel *capture_with = model->get_slot_shadow_capture_with();
-		if (capture_with != nullptr) {
-			state.seat_parented = true;
-			capture_links.push_back(
-					{ id, uint64_t(capture_with->get_instance_id()) });
-		}
-		state.on_vehicle = false;
-		state.is_local_player_or_parent =
-				id == local_id || (local_parent_id != 0 && id == local_parent_id);
-		// entity+0x1D0: a contained entity zeroes the pick threshold
-		// (retail RenderSlot_UpdateEntityLight @0x5d6adc..0x5d6aed); the
-		// entity lighting feed stamps the same first-blink-hit fact as the
-		// model's interior lerp.
-		ObjectModel *entity_model = model->get_entity_light_owner();
-		state.interior = (entity_model != nullptr ? entity_model : model)->is_interior_lerp();
-		state.dynamic = true;
+	// The frame's casters: the engine's state for each from its facts (the
+	// local player and the vehicle it rides take the local priority).
+	for (const opennova::renderer::SlotCasterFacts &fact : facts) {
+		plan_.register_entity(fact.id);
+		registered_ids_.insert(fact.id);
 	}
+	opennova::renderer::slot_frame_casters(facts, local_id, uint64_t(local_player_parent_id_),
+			frame_casters_);
 
 	const Vector3 cam_pos = camera->get_global_position();
 	const Vector3 cam_forward =
@@ -953,17 +897,8 @@ bool SlotShadow::plan_frame() {
 	const std::array<float, 2> cam2d{float(cam_pos.x), float(cam_pos.z)};
 	const std::array<float, 2> view2d{float(cam_forward.x),
 			float(cam_forward.z)};
-	const auto state_for = [&](uint64_t id) -> opennova::renderer::SlotCandidateState {
-		const size_t *index = caster_index.getptr(id);
-		if (index == nullptr) {
-			opennova::renderer::SlotCandidateState gone;
-			gone.hidden = true;
-			return gone;
-		}
-		return casters[*index].caster.state;
-	};
-	const std::vector<opennova::renderer::SlotAssignment> assignments =
-			plan_.assign(cam2d, view2d, state_for);
+	const std::vector<opennova::renderer::SlotAssignment> assignments = plan_.assign(cam2d,
+			view2d, [this](uint64_t p_id) { return frame_casters_.state_for(p_id); });
 
 	PackedVector4Array silhouette_terms;
 	silhouette_terms.resize(opennova::renderer::kSlotCaptureCount);
@@ -998,26 +933,27 @@ bool SlotShadow::plan_frame() {
 	// A closed terrain sector pass skips its drapes; the captures and the
 	// terms keep running (set_terrain_pass_drawn).
 	frame_input.terrain_pass_drawn = terrain_pass_drawn_;
-	const auto caster_for = [&](uint64_t p_id) -> const opennova::renderer::SlotFrameCaster * {
-		const size_t *index = caster_index.getptr(p_id);
-		return index != nullptr ? &casters[*index].caster : nullptr;
+	const auto caster_for = [this](uint64_t p_id) {
+		return frame_casters_.find(p_id);
 	};
 	opennova::renderer::SlotFrameLightQuery lights_for;
 	if (light_director_.is_valid()) {
 		Weather *weather = Object::cast_to<Weather>(ObjectDB::get_instance(weather_id_));
-		lights_for = [&, weather](uint64_t p_id)
+		lights_for = [this, weather](uint64_t p_id)
 				-> const std::vector<opennova::renderer::SlotPointLight> & {
-			const CasterInfo &info = casters[*caster_index.getptr(p_id)];
-			// The entity's interior light group from its first blink hit
-			// (retail @0x5d6b40..0x5d6b77 -> Lighting_SetInteriorLightGroup).
-			ObjectModel *entity_model = info.model->get_entity_light_owner();
-			if (entity_model == nullptr) entity_model = info.model;
-			const int interior_bms = entity_model->get_interior_light_group_bms();
-			const int64_t interior_owner = interior_bms != 0
-					? light_director_->interior_owner_for_bms(interior_bms) : 0;
-			light_director_->scene()->slot_shadow_lights(info.model->get_global_position(),
-					info.caster.state.bound_radius, interior_owner,
-					entity_model->get_interior_light_group_section(), light_gain_,
+			// The engine's query around the caster (its entity origin, bound
+			// and interior group); the light scene answers it.
+			const opennova::renderer::SlotCasterLightQuery *query =
+					frame_casters_.light_query(p_id);
+			slot_lights_.clear();
+			if (query == nullptr) {
+				return slot_lights_;
+			}
+			const int64_t interior_owner = query->interior_bms != 0
+					? light_director_->interior_owner_for_bms(query->interior_bms) : 0;
+			light_director_->scene()->slot_shadow_lights(
+					Vector3(query->position[0], query->position[1], query->position[2]),
+					query->bound_radius, interior_owner, query->interior_section, light_gain_,
 					light_time_ms_, weather, slot_lights_);
 			return slot_lights_;
 		};
@@ -1031,8 +967,8 @@ bool SlotShadow::plan_frame() {
 			return terrain->get_height_world(Vector3(p_x, 0.0f, p_z));
 		};
 	}
-	opennova::renderer::slot_frame(frame_input, assignments, caster_for, capture_links,
-			lights_for, terrain_height, slot_frame_);
+	opennova::renderer::slot_frame(frame_input, assignments, caster_for,
+			frame_casters_.capture_links, lights_for, terrain_height, slot_frame_);
 	report_bound_ = slot_frame_.bound;
 	report_captures_ = slot_frame_.captures;
 
@@ -1053,7 +989,7 @@ bool SlotShadow::plan_frame() {
 		// -forward by one sphere diameter (2 * radius) plus 2 u and the band
 		// spans the sphere. An orthographic silhouette is invariant under
 		// that translation, so the capture is the same image.
-		const float radius = casters[*caster_index.getptr(slot.id)].caster.capture_radius;
+		const float radius = frame_casters_.find(slot.id)->capture_radius;
 		const float half_extent = capture.half_extent;
 		const Vector3 center(capture.center[0], capture.center[1], capture.center[2]);
 		const Vector3 forward(-capture.axes.z[0], -capture.axes.z[1], -capture.axes.z[2]);
@@ -1184,6 +1120,45 @@ uint64_t SlotShadow::caster_group_revision() {
 
 void SlotShadow::bump_caster_group_revision() {
 	++g_caster_group_revision;
+}
+
+// One caster's engine facts as its presenters stamped them on the model:
+// gathered, never decided (runtime/renderer/render_slot_frame.h
+// slot_frame_casters owns every rule over them).
+opennova::renderer::SlotCasterFacts SlotShadow::_caster_facts(const ObjectModel &p_model,
+		const CasterRecord &p_record) const {
+	opennova::renderer::SlotCasterFacts fact;
+	fact.id = uint64_t(p_model.get_instance_id());
+	fact.visibility = slot_draw_visibility(p_model);
+	const Node3D *parent = Object::cast_to<Node3D>(p_model.get_parent());
+	fact.visibility.scene_hidden = parent != nullptr && !parent->is_visible_in_tree();
+	if (const ObjectModel *capture_with = p_model.get_slot_shadow_capture_with()) {
+		fact.capture_with = uint64_t(capture_with->get_instance_id());
+	}
+	fact.parented_under_caster = p_record.seat_parented_ancestor;
+	fact.is_person = p_record.is_person;
+	fact.model_sphere_radius = p_record.radius_fallback ? 0.0f : p_record.capture_radius;
+	fact.entity_bound_radius = p_record.slot_radius;
+	if (p_record.radius_fallback) {
+		fact.fallback_radius = float(p_model.get_world_bounds().size.length()) * 0.5f;
+	}
+	const Vector3 position = p_model.get_global_position();
+	fact.position = {float(position.x), float(position.y), float(position.z)};
+	const Vector3 march_offset = p_model.get_slot_march_offset();
+	fact.march_offset = {float(march_offset.x), float(march_offset.y), float(march_offset.z)};
+	const auto lighting_of = [](const ObjectModel &p_owner) {
+		opennova::renderer::SlotCasterLighting lighting;
+		lighting.interior = p_owner.is_interior_lerp();
+		lighting.interior_bms = p_owner.get_interior_light_group_bms();
+		lighting.interior_section = p_owner.get_interior_light_group_section();
+		return lighting;
+	};
+	fact.lighting = lighting_of(p_model);
+	if (const ObjectModel *owner = p_model.get_entity_light_owner()) {
+		fact.has_light_owner = true;
+		fact.owner_lighting = lighting_of(*owner);
+	}
+	return fact;
 }
 
 void SlotShadow::_rebuild_caster_records() {

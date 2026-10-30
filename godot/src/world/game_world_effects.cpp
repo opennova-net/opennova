@@ -230,3 +230,11 @@ void GameWorld::on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item
 		light_director_->on_wire_node_spawned(p_node, p_kind, p_item_id);
 	}
 }
+
+// The entity presenter's live-row retirement: the light pool's entity
+// lifecycle (renderer::LightSpawner::destroy_entity).
+void GameWorld::on_wire_node_retired(int p_handle) {
+	if (light_director_.is_valid()) {
+		light_director_->on_wire_entity_destroyed(p_handle);
+	}
+}

@@ -24,12 +24,13 @@ uint32_t vertex_index(const SceneOverlayFrame &frame) {
 // texture set by the caller): its triangle list depth-tested without writes,
 // the diffuse unfogged and the fog term per vertex under `fog`, toward black
 // for a style whose +0 word fogs to black, else toward the pass colour. The
-// primary fog state's two arms (CD3DDevice_SetFogParameters): table EXP fog by
-// the eye depth, else vertex LINEAR fog by the range.
+// primary fog state's arms (CD3DDevice_SetFogParameters, renderer/device_fog.h):
+// table EXP fog by the eye depth, else vertex LINEAR fog by the range, or by the
+// eye depth over the parked range.
 void append_fogged_tracer_draw(const TracerRibbonFrame &ribbons, const TracerDraw &draw,
 		SceneOverlayBatch batch, const SceneOverlayFog &fog, SceneOverlayFrame &out) {
-	const bool exponent = fog.enabled && fog.type == 0;
-	const float density = kDeviceFogLn64 / std::max(fog.end, 1.0f);
+	const bool exponent = fog.enabled && device_fog_exponential(fog.start, fog.end, fog.type);
+	const float density = exponent ? kDeviceFogLn64 / fog.end : 0.0f;
 	batch.depth = SceneOverlayDepth::TestNoWrite;
 	batch.geometry = SceneOverlayGeometry::World;
 	batch.fog_term = exponent ? SceneOverlayFogTerm::Exponent : SceneOverlayFogTerm::Factor;
@@ -55,13 +56,14 @@ void append_fogged_tracer_draw(const TracerRibbonFrame &ribbons, const TracerDra
 		const float dx = src.x - fog.eye[0];
 		const float dy = src.y - fog.eye[1];
 		const float dz = src.z - fog.eye[2];
+		const float view_depth = dx * fog.forward[0] + dy * fog.forward[1] + dz * fog.forward[2];
 		if (exponent) {
 			// The signed eye depth: the pixel clamps it, so a strip that
 			// passes beside the eye interpolates its true depth.
-			v.fog = (dx * fog.forward[0] + dy * fog.forward[1] + dz * fog.forward[2]) * density;
+			v.fog = view_depth * density;
 		} else {
-			v.fog = device_fog_visibility(std::sqrt(dx * dx + dy * dy + dz * dz), fog.start,
-					fog.end, fog.type, fog.enabled);
+			v.fog = device_fog_visibility(view_depth, std::sqrt(dx * dx + dy * dy + dz * dz),
+					fog.start, fog.end, fog.type, fog.enabled);
 		}
 		out.vertices.push_back(v);
 	}
@@ -83,21 +85,36 @@ void compile_scene_overlay(const SceneOverlayFrame &frame, const SceneOverlaySlo
 	}
 }
 
-SceneOverlayBlend scene_overlay_blend(SceneOverlayShading shading) {
-	using F = SceneOverlayBlendFactor;
+BlendState scene_overlay_blend(SceneOverlayShading shading) {
+	using F = BlendFactor;
+	// The colour pair; the alpha keeps the target's (ZERO / ONE) but under
+	// SRCALPHA / INVSRCALPHA, where it blends the same way.
+	const auto keep_alpha = [](F source, F dest) {
+		return BlendState{true, source, dest, F::Zero, F::One};
+	};
 	switch (shading) {
 		case SceneOverlayShading::AdditiveModulate:
 		case SceneOverlayShading::SelfLumAdditive:
 		case SceneOverlayShading::RibbonStock:
-			return {F::One, F::One};
+			return keep_alpha(F::One, F::One);
 		case SceneOverlayShading::DimMultiply:
-			return {F::DestColor, F::Zero};
+			return keep_alpha(F::DestColor, F::Zero);
 		case SceneOverlayShading::NvgLaser:
-			return {F::SrcAlpha, F::One};
+			return keep_alpha(F::SrcAlpha, F::One);
 		default:
 			// Modulate2xBlend, FlatBlend, RibbonSmoke.
-			return {F::SrcAlpha, F::InvSrcAlpha};
+			return {true, F::SrcAlpha, F::InvSrcAlpha, F::SrcAlpha, F::InvSrcAlpha};
 	}
+}
+
+FixedFunctionState scene_overlay_pipeline_state(const SceneOverlayPipelineState &state) {
+	FixedFunctionState out;
+	out.blend = scene_overlay_blend(state.shading);
+	out.cull = CullMode::None;
+	out.depth_test = state.depth_test;
+	out.depth_write = false;
+	out.depth_compare = DepthCompare::LessEqual;
+	return out;
 }
 
 bool scene_overlay_view_draws(const SceneOverlayBatch &batch, float eye_height) {

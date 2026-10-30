@@ -108,11 +108,6 @@ float foliage_detail_wind_sector_origin_z(uint32_t cell_key);
 // @ 0x60108e..0x6010cf]
 float foliage_model_wind_offset(double angle);
 
-// The camera's side of the water: retail compares the camera z against
-// g_EnvWaterHeightFixed with setnl (camera >= water is above).
-// [orig: Terrain_RenderWorldScene @ 0x5c93a1..0x5c93b0]
-bool foliage_camera_above_water(float camera_y, float water_height);
-
 // The BySide wave a person entity rides: entity z - 1.0 below the water is
 // the below-water wave, drawn first (the far wave) while the camera is at or
 // above the water; the other wave is the camera side. The MODEL masks drawn

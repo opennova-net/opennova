@@ -146,6 +146,16 @@ struct TerrainTileSectorPatchPoint {
 	int32_t sector_origin_z = 0;
 };
 
+// The weather clock's two marks a page sweep reads: the TOD epoch the
+// sweep's claims stamp (g_EnvTodEpoch, one step per 311 logic ticks), and the
+// count of time sets run so far, each of which empties every record
+// (world::WeatherState::time_set_resets; reset_time_caches carries the
+// witness).
+struct TerrainTileTimeMarks {
+	uint32_t tod_epoch = 0;
+	uint32_t time_set_resets = 0;
+};
+
 class TerrainTileCompositionCache {
 public:
 	// The retail cache layout: 128 records over pages of the tier's side.
@@ -203,6 +213,18 @@ public:
 	// [orig: dword_319FC04 += 1 @ 0x60EAE8]
 	void begin_frame(uint32_t tod_epoch) noexcept;
 	uint32_t frame() const noexcept { return frame_; }
+	// The time sets a sweep's marks name since the sweep before: true once per
+	// change of the count, and the embedder then empties every record
+	// (invalidate_all, with its own state for them), as each set's reset does
+	// [orig: Terrain_ResetTileCache @0x605FB0, the keys -1 and flags 0
+	// @0x605FC0..0x605FC5].
+	bool take_time_set_reset(const TerrainTileTimeMarks &marks) noexcept {
+		if (marks.time_set_resets == seen_time_set_resets_) {
+			return false;
+		}
+		seen_time_set_resets_ = marks.time_set_resets;
+		return true;
+	}
 
 	// PolyTrn_RenderTile's cache half. A resident record with the same
 	// identity is a hit: its last use refreshes and no job returns. A miss
@@ -302,6 +324,7 @@ private:
 	std::array<Slot, kCapacity> slots_{};
 	uint32_t frame_ = 0;
 	uint32_t tod_epoch_ = 0;
+	uint32_t seen_time_set_resets_ = 0;
 	int dimension_ = kDimensionHigh;
 };
 

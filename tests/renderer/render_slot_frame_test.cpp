@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <vector>
 
 static int failures = 0;
 
@@ -66,7 +67,100 @@ const SlotFrameSlot *find_slot(const SlotFrame &frame, uint64_t id) {
 
 }  // namespace
 
+// The frame's casters from their facts (slot_frame_casters): the hidden rule
+// with the render claims lifted, the exclusions, the local priority, the
+// owner's lighting and the radii.
+void test_frame_casters_from_facts() {
+	std::vector<SlotCasterFacts> facts;
+	facts.reserve(32);
+	const auto fact = [&](uint64_t id) -> SlotCasterFacts & {
+		facts.emplace_back();
+		SlotCasterFacts &f = facts.back();
+		f.id = id;
+		f.position = {float(id), 2.0f, -float(id)};
+		f.model_sphere_radius = 1.5f;
+		f.entity_bound_radius = 2.0f;
+		return f;
+	};
+	fact(1);                                       // plain, shown
+	fact(2).visibility.present_visible = false;    // unclaimed sim hide: the draw hidden too
+	facts.back().visibility.draw_visible = false;
+	fact(3).visibility.render_claimed = true;      // occluded / sub-pixel, sim shown
+	facts.back().visibility.draw_visible = false;
+	fact(4).visibility.render_claimed = true;      // claimed and sim hidden
+	facts.back().visibility.present_visible = false;
+	facts.back().visibility.draw_visible = false;
+	fact(5).visibility.draw_visible = false;       // a direct hide of an attached draw
+	fact(6).visibility.scene_hidden = true;        // the editor hid its layer
+	fact(7).capture_with = 1;                      // a held weapon in 1's slot
+	fact(8).parented_under_caster = true;          // a seated rider
+	fact(9);                                       // no vehicle-ride fact yet
+	fact(10);                                      // the local player
+	fact(11);                                      // the vehicle it rides
+	SlotCasterFacts &weapon = fact(12);            // an attached draw
+	weapon.lighting = {false, 0, 0};
+	weapon.has_light_owner = true;
+	weapon.owner_lighting = {true, 77, 3};
+	SlotCasterFacts &unstamped = fact(13);
+	unstamped.model_sphere_radius = 0.0f;
+	unstamped.fallback_radius = 0.2f;
+	SlotCasterFacts &preview = fact(14);
+	preview.model_sphere_radius = 0.0f;
+	preview.fallback_radius = 3.0f;
+	SlotCasterFacts &groupless = fact(15);
+	groupless.lighting = {true, 0, 9};
+
+	SlotFrameCasters casters;
+	slot_frame_casters(facts, 10, 11, casters);
+	CHECK(casters.casters.size() == facts.size());
+	CHECK(!casters.state_for(1).hidden);
+	CHECK(casters.state_for(2).hidden);
+	CHECK(!casters.state_for(3).hidden);  // the slot reads no render gate
+	CHECK(casters.state_for(4).hidden);
+	CHECK(casters.state_for(5).hidden);
+	CHECK(casters.state_for(6).hidden);
+	CHECK(casters.state_for(7).seat_parented && casters.state_for(8).seat_parented);
+	CHECK(!casters.state_for(1).seat_parented);
+	CHECK(casters.capture_links.size() == 1 && casters.capture_links[0].first == 7 &&
+			casters.capture_links[0].second == 1);
+	CHECK(!casters.state_for(9).on_vehicle);
+	CHECK(casters.state_for(10).is_local_player_or_parent);
+	CHECK(casters.state_for(11).is_local_player_or_parent);
+	CHECK(!casters.state_for(1).is_local_player_or_parent);
+	CHECK(casters.state_for(99).hidden && casters.find(99) == nullptr);
+
+	// The attached draw reads its owner's lighting, and its query the owner's group.
+	CHECK(casters.state_for(12).interior);
+	const SlotCasterLightQuery *query = casters.light_query(12);
+	CHECK(query != nullptr && query->interior_bms == 77 && query->interior_section == 3);
+	CHECK(query != nullptr && near_f(query->bound_radius, 2.0f) && near_f(query->position[0], 12.0f));
+	// No group, no section.
+	const SlotCasterLightQuery *groupless_query = casters.light_query(15);
+	CHECK(groupless_query != nullptr && groupless_query->interior_section == 0);
+	CHECK(casters.state_for(15).interior);
+
+	// The radii: stamped, the 0.5 u floor of the fallback, the fallback itself.
+	const SlotFrameCaster *plain = casters.find(1);
+	CHECK(plain != nullptr && near_f(plain->capture_radius, 1.5f) &&
+			near_f(plain->state.bound_radius, 2.0f));
+	CHECK(plain != nullptr && near_f(plain->state.pos2d[0], 1.0f) &&
+			near_f(plain->state.pos2d[1], -1.0f));
+	const SlotFrameCaster *floor = casters.find(13);
+	CHECK(floor != nullptr && near_f(floor->capture_radius, 0.5f) &&
+			near_f(floor->state.bound_radius, 0.5f));
+	const SlotFrameCaster *bounds = casters.find(14);
+	CHECK(bounds != nullptr && near_f(bounds->capture_radius, 3.0f) &&
+			near_f(bounds->state.bound_radius, 3.0f));
+
+	// A frame with no local parent never matches id 0.
+	SlotFrameCasters none;
+	std::vector<SlotCasterFacts> zero(1);
+	slot_frame_casters(zero, 10, 0, none);
+	CHECK(!none.state_for(0).is_local_player_or_parent);
+}
+
 int main() {
+	test_frame_casters_from_facts();
 	SlotFrameInput input;
 	input.sun_direction = slot_projection_direction({0.6f, 0.8f, 0.0f});
 	input.sun_rgb = {0.9f, 0.8f, 0.7f};

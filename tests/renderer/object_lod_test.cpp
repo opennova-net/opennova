@@ -22,6 +22,10 @@ int failures = 0;
 
 int main() {
   using opennova::renderer::attachment_lod_index;
+  using opennova::renderer::attachment_view_level;
+  using opennova::renderer::object_lod_view_level;
+  using opennova::renderer::ObjectLodViewVerdict;
+  using opennova::renderer::ObjectLodWalk;
   using opennova::renderer::kObjectLodBehindEyeRadiusQ16;
   using opennova::renderer::kObjectLodDetailLevelMax;
   using opennova::renderer::kObjectLodSubPixelCullQ16;
@@ -337,6 +341,40 @@ int main() {
       for (size_t level = 0; level < table.size(); ++level)
         CHECK(selected[level] == object_lod_reachable(table, level));
     }
+  }
+
+  // The per-view walk (ObjectLodWalk): the sub-pixel floor ahead of the
+  // selector, on the view's own frame scale.
+  {
+    const std::vector<int32_t> table{200 << 16, 60 << 16, 20 << 16, 0};
+    const ObjectLodWalk frame_view{1.0f};
+    const ObjectLodViewVerdict floor = frame_view.verdict(kObjectLodSubPixelCullQ16, table);
+    CHECK(floor.subpixel && floor.lod_index == -1);
+    const ObjectLodViewVerdict selected = frame_view.verdict(300 << 16, table);
+    CHECK(!selected.subpixel && selected.lod_index == 0);
+    CHECK(selected.lod_index == select_object_lod(table, 300 << 16, 1.0f).lod_index);
+    // A view on a smaller frame scale selects a coarser level for one radius.
+    const ObjectLodWalk inset{0.25f};
+    CHECK(inset.verdict(300 << 16, table).lod_index ==
+          select_object_lod(table, 300 << 16, 0.25f).lod_index);
+    CHECK(inset.verdict(300 << 16, table).lod_index > selected.lod_index);
+
+    // A static instance: dropped by its collect, not projected, floored, selected.
+    const std::vector<bool> none;
+    CHECK(frame_view.static_level(true, true, 300 << 16, table, none, 2) == -1);
+    CHECK(frame_view.static_level(false, false, 300 << 16, table, none, 2) == 2);
+    CHECK(frame_view.static_level(false, true, kObjectLodSubPixelCullQ16, table, none, 2) == -1);
+    CHECK(frame_view.static_level(false, true, 300 << 16, table, none, 2) == 0);
+
+    // A second view's level: its own selection, else what it kept, else the main.
+    CHECK(object_lod_view_level(1, true, 3, 0) == 1);
+    CHECK(object_lod_view_level(-1, true, 3, 0) == 3);
+    CHECK(object_lod_view_level(-1, false, 3, 0) == 0);
+
+    // An attachment's level: the owner's exactly, or clamped to its own count.
+    CHECK(attachment_view_level(3, true, 2) == 3);
+    CHECK(attachment_view_level(3, false, 2) == 1);
+    CHECK(attachment_view_level(-1, false, 2) == 0);
   }
 
   return failures == 0 ? 0 : 1;

@@ -4,7 +4,8 @@ The headless game server (ADR 0051): the game's Serve Only host with no window a
 Godot, configured by a host file, retail's own dedicated-server format, over the
 `game.cfg` in the directory it runs from. It mounts a game install (Joint Operations unless
 `/game` names another title) the way `opennova.exe` mounts it, boots the starting mission through the engine's one host boot
-(`engine/runtime/inmatch/host_boot.h`, the same two phases the game's hosts run), binds
+(`engine/runtime/inmatch/host_boot.h`, the same two phases the game's hosts run) in the game's
+load order (`engine/runtime/mission/mission_load.h`, the load plan's executor), binds
 `game.cfg`'s LAN port range (or, given a NovaWorld gate, its NovaWorld one, listing itself there),
 answers LAN browsers and admits joiners, and takes retail's remote admin when `game.cfg`
 names its port. Stock retail clients have joined it: a stock JO:CA 1.7.5.7 `Jointops.exe`

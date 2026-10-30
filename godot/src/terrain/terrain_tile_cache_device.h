@@ -76,9 +76,11 @@ public:
 			const Ref<TerrainSurfaceInputs> &p_surface_inputs,
 			const Ref<TerrainTileInfo> &p_tile_info_override, bool p_page_targets = true);
 	void clear();
-	// One PolyTrn_RenderFrame: the cache frame advances and this frame's
-	// claims stamp the given TOD epoch (g_EnvTodEpoch).
-	void begin_frame(uint64_t p_frame_id, uint32_t p_tod_epoch);
+	// One PolyTrn_RenderFrame over the weather clock's marks: a time set since
+	// the sweep before makes every page cold (the engine cache's
+	// take_time_set_reset decides it), then the cache frame advances and this
+	// frame's claims stamp the TOD epoch (g_EnvTodEpoch).
+	void begin_frame(uint64_t p_frame_id, const opennova::TerrainTileTimeMarks &p_marks);
 	// Byte-level capture diagnostics (full-page FNV output hash, pre/post
 	// shadow byte diffs) copy and re-walk every composed 256 KB page — that
 	// is capture/test instrumentation, not steady-state work. Default OFF;
@@ -98,9 +100,6 @@ public:
 	void set_device_shadow_enabled(bool p_enabled);
 	PackedByteArray read_device_layer(int p_layer) const;
 	void invalidate_static_shadow_pages();
-	// Every page cold, the time sets' tile-cache reset (engine world::WeatherState::
-	// reset_time_caches carries the witness).
-	void invalidate_all_pages() { _invalidate_all(); }
 	// Appends one already-resolved permanent record and retires exactly the
 	// occupied cache pages its inclusive Q16 bounds touch.
 	bool append_terrain_scorch(

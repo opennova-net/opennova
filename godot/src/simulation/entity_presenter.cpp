@@ -252,6 +252,10 @@ void EntityPresenter::_bind_methods() {
 					"ObjectModel"),
 			PropertyInfo(Variant::INT, "kind"),
 			PropertyInfo(Variant::INT, "item_id")));
+	// Emitted once per wire body whose entity left the live present rows (its
+	// destruction, retail's Entity_Destroy), before its node is freed; a husk
+	// swap keeps the row live and emits nothing.
+	ADD_SIGNAL(MethodInfo("wire_node_retired", PropertyInfo(Variant::INT, "handle")));
 	// --- the statics ---
 	ClassDB::bind_static_method("EntityPresenter",
 			D_METHOD("held_weapon_attach_transform", "body", "attach_angles_bms",

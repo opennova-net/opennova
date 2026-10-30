@@ -184,7 +184,70 @@ void reject(Q3DrawList &draw_list, std::size_t input_index,
 		++draw_list.debug.unsupported_light_coronas;
 }
 
+// A blended Q3 state: `source` / `dest` on the colour, ONE / ONE on the alpha.
+BlendState q3_blend(BlendFactor source, BlendFactor dest) {
+	BlendState blend;
+	blend.enabled = true;
+	blend.src_color = source;
+	blend.dst_color = dest;
+	blend.src_alpha = BlendFactor::One;
+	blend.dst_alpha = BlendFactor::One;
+	return blend;
+}
+
+// A material's blend: _OP replaces (blending off), _AB SRCALPHA / INVSRCALPHA,
+// _AD ONE / ONE.
+BlendState q3_material_blend(ObjectBlendMode mode) {
+	switch (mode) {
+		case ObjectBlendMode::AlphaBlend:
+			return q3_blend(BlendFactor::SrcAlpha, BlendFactor::InvSrcAlpha);
+		case ObjectBlendMode::Additive:
+			return q3_blend(BlendFactor::One, BlendFactor::One);
+		case ObjectBlendMode::Opaque:
+		case ObjectBlendMode::Multiplicative: // Q3FrameCompiler rejects it, unwitnessed.
+			break;
+	}
+	return BlendState{};
+}
+
 } // namespace
+
+FixedFunctionState q3_pipeline_state(const Q3DrawCommand &command) {
+	FixedFunctionState state;
+	switch (command.technique) {
+		case Q3Technique::NormalCopy:
+			state.blend = q3_material_blend(command.object.classification.blend);
+			break;
+		case Q3Technique::RotatedSpecularGlass:
+			state.blend = q3_blend(BlendFactor::One, BlendFactor::One);
+			break;
+		case Q3Technique::WaterNightVision:
+			// The bloom pass's redraw is the above-water call only
+			// (g_WaterShaderBlendNV, ONE + dst*SRCALPHA); the Water producer
+			// never publishes it underwater.
+			state.blend = q3_blend(BlendFactor::One, BlendFactor::SrcAlpha);
+			break;
+		case Q3Technique::CelestialBody:
+		case Q3Technique::SunGlow:
+			// The body's own material blend, mapped like NormalCopy's: the
+			// glow's submit flags never override it.
+			state.blend = q3_material_blend(command.celestial.blend);
+			break;
+		case Q3Technique::Count:
+			break;
+	}
+	const bool object_technique = command.technique == Q3Technique::NormalCopy ||
+			command.technique == Q3Technique::RotatedSpecularGlass;
+	const bool two_sided = !object_technique || command.object.classification.is_two_sided;
+	state.cull = two_sided ? CullMode::None : CullMode::CCW;
+	// Every Q3 draw ends in the ordinary z-tested flush; the discs and the
+	// sun glow only reach it through the far-band viewport remap in the
+	// vertex shader.
+	state.depth_test = true;
+	state.depth_write = false;
+	state.depth_compare = DepthCompare::LessEqual;
+	return state;
+}
 
 const Q3DrawList &Q3FrameCompiler::compile(const Q3FrameSnapshot &snapshot) {
 	draw_list_.frame_id = snapshot.frame_id;

@@ -22,12 +22,12 @@
 #include <runtime/environment/water_mirror.h>
 
 #include "env/water_core.h"
+#include "render/q3_source_registry.h"
 #include "terrain/terrain_data.h"
 
 namespace godot {
 
 class Compositor;
-class EnvFile;
 class Environment;
 class FrameFxCompositorEffect;
 class MissionEnvironment;
@@ -196,7 +196,7 @@ public:
 	// whose world held its entity update regenerates the same pair. A Water
 	// nobody feeds counts its own render frames.
 	void set_noise_frame_counter(uint32_t p_counter);
-	int get_noise_frame_counter() const { return frame_counter_; }
+	int get_noise_frame_counter() const { return static_cast<int>(noise_clock_.counter()); }
 	// The mirror's outdoors flag (renderer::ScenePassGates::mirror_sky, off
 	// under the indoors blink letter), fed from the scene-pass gates; it
 	// selects the mirror target's own clear (EnvironmentState::
@@ -305,11 +305,12 @@ private:
 	// The march inputs a frame's water passes share, with the lit colours
 	// pushed to every water material.
 	struct MarchInputs {
+		// The engine's frame block (the per-side pass fog ends among it).
+		opennova::env::WaterFrameInputs frame;
 		float murk = 0.0f;
 		float fog_end = 0.0f;
 		opennova::env::WaterDepthCurve depth_curve;
 		Color lit;
-		Ref<EnvFile> env_data;
 	};
 	MarchInputs _march_inputs(MissionEnvironment *p_env);
 	// The animated noise pair at this frame's counter, once per counter value.
@@ -324,6 +325,7 @@ private:
 	// The bloom strip's mirror image (environment/water_mirror.h
 	// bloom_water_mirror_image).
 	void _apply_night_vision_reflection();
+	void _publish_night_vision_q3();
 	void _retire_inset();
 	// The last march as ArrayMesh surface arrays.
 	Array _strip_arrays() const;
@@ -360,6 +362,10 @@ private:
 	MeshInstance3D *inset_mesh_instance_ = nullptr;
 	Ref<ShaderMaterial> water_material_;
 	Ref<ShaderMaterial> night_vision_material_;
+	// The night-vision strip's Q3 block, kept beside each write of its
+	// material and published to the focused Q3 compile
+	// (_publish_night_vision_q3): the compile never reads the material back.
+	Q3WaterMaterialValues night_vision_q3_;
 	Ref<ShaderMaterial> inset_material_;
 	// The main frame's mirror and the weapon Inset pass's own.
 	MirrorRig mirror_;
@@ -378,9 +384,9 @@ private:
 	float inset_max_height_ = 0.0f;
 	// The latch as the main collect left it, the Inset's g_WaterActive input.
 	bool inset_blink_latch_ = false;
-	// The counter the noise pair was last generated at.
-	int noise_counter_ = 0;
-	bool noise_counter_valid_ = false;
+	// The noise pair's frame counter and its last regeneration (engine
+	// environment/water_frame.h).
+	opennova::env::WaterNoiseClock noise_clock_;
 	bool mirror_scene_outdoors_ = true;
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
@@ -397,8 +403,6 @@ private:
 	Ref<Image> noise_normal_img_;
 	Ref<ImageTexture> noise_color_tex_;
 	Ref<ImageTexture> noise_normal_tex_;
-	int frame_counter_ = 0;
-	bool frame_counter_fed_ = false;
 };
 
 } // namespace godot

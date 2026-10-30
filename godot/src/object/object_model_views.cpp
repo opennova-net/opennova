@@ -123,11 +123,10 @@ int ObjectModel::update_authored_lods_for_mirror_view(Camera3D *p_main, float p_
 	return applied;
 }
 
-// [engine: renderer::select_object_lod, object_subpixel_culled and
-//  project_bound_sphere_radius_q16 own the witnessed rules — the sector-entity
-//  draw returns before the RLOD walk below 0.75 px (retail Render_SectorEntity
-//  @ 0x5c42d8..0x5c42de); this walk feeds them each registered model per
-//  view, on that view's own frame scale]
+// [engine: renderer::ObjectLodWalk (object_lod.h) owns every view's verdict,
+//  the second views' level retention and the attachments' inheritance; this
+//  walk projects each registered model per view and applies the verdicts to
+//  the nodes]
 int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 		int p_frame_count, const ObjectLodFrame *p_mirror_gate_frames) {
 	const int view_count =
@@ -279,15 +278,12 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 					(!mirror_view_open_[v - kMirrorView] || !model->mirror_collected_)) {
 				continue;
 			}
-			const int32_t projected_q16 = source->lod_projected_radius_q16_[v];
-			const bool above_floor = !opennova::renderer::object_subpixel_culled(projected_q16);
-			int lod_index = -1;
-			if (above_floor) {
-				lod_index = opennova::renderer::select_object_lod(
-						model->authored_lod_thresholds_q16_, projected_q16,
-						p_frames[v].projection_scale, model->authored_lod_available_)
-									.lod_index;
-			}
+			const opennova::renderer::ObjectLodViewVerdict verdict =
+					opennova::renderer::ObjectLodWalk{ p_frames[v].projection_scale }.verdict(
+							source->lod_projected_radius_q16_[v],
+							model->authored_lod_thresholds_q16_, model->authored_lod_available_);
+			const bool above_floor = !verdict.subpixel;
+			const int lod_index = verdict.lod_index;
 			if (v == kMainView) {
 				if (above_floor == model->subpixel_hidden_) {
 					subpixel_changes.push_back(SubpixelChange{ model, !above_floor });
@@ -300,17 +296,14 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 			if (v >= kMirrorView) {
 				// A water mirror's own walk: its level and sub-pixel verdict.
 				const int m = v - kMirrorView;
-				const int mirror_level = lod_index >= 0 ? lod_index
-						: (model->mirror_[m].own & kInsetOwnLod) != 0 ? model->mirror_[m].lod
-																		: model->active_lod_;
+				const int mirror_level = opennova::renderer::object_lod_view_level(lod_index,
+						(model->mirror_[m].own & kInsetOwnLod) != 0, model->mirror_[m].lod,
+						model->active_lod_);
 				model->set_mirror_view_subpixel(m, mirror_level, !above_floor);
 				continue;
 			}
-			if (lod_index >= 0) {
-				model->inset_lod_ = lod_index;
-			} else if ((model->inset_own_ & kInsetOwnLod) == 0) {
-				model->inset_lod_ = model->active_lod_;
-			}
+			model->inset_lod_ = opennova::renderer::object_lod_view_level(lod_index,
+					(model->inset_own_ & kInsetOwnLod) != 0, model->inset_lod_, model->active_lod_);
 			model->inset_subpixel_hidden_ = !above_floor;
 			model->inset_own_ |= kInsetOwnLod;
 			model->mark_inset_view();
@@ -345,10 +338,9 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 		// Retail draws an attachment inside its owner's bone callback, so the
 		// owner's sub-pixel return drops it too.
 		attachment->set_subpixel_hidden(owner != nullptr && owner->subpixel_hidden_);
-		const int level = attachment->exact_owner_lod_ && owner != nullptr
-				? owner->active_lod_
-				: opennova::renderer::attachment_lod_index(
-						  owner != nullptr ? owner->active_lod_ : 0, threshold_count);
+		const int level = opennova::renderer::attachment_view_level(
+				owner != nullptr ? owner->active_lod_ : 0,
+				attachment->exact_owner_lod_ && owner != nullptr, threshold_count);
 		if (level >= 0 && level != attachment->active_lod_) {
 			attachment->set_active_lod(level);
 			++applied;
@@ -359,10 +351,8 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 					!mirror_view_open_[m]) {
 				continue;
 			}
-			const int mirror_level = attachment->exact_owner_lod_
-					? owner->mirror_[m].lod
-					: opennova::renderer::attachment_lod_index(owner->mirror_[m].lod,
-							  threshold_count);
+			const int mirror_level = opennova::renderer::attachment_view_level(
+					owner->mirror_[m].lod, attachment->exact_owner_lod_, threshold_count);
 			attachment->set_mirror_view_subpixel(m,
 					mirror_level >= 0 ? mirror_level : attachment->active_lod_,
 					owner->mirror_[m].subpixel_hidden);
@@ -375,9 +365,8 @@ int ObjectModel::update_authored_lod_views(const ObjectLodFrame *p_frames,
 		const int owner_level = owner == nullptr ? 0
 				: owner_own ? owner->inset_lod_
 							: owner->active_lod_;
-		const int inset_level = attachment->exact_owner_lod_ && owner != nullptr
-				? owner_level
-				: opennova::renderer::attachment_lod_index(owner_level, threshold_count);
+		const int inset_level = opennova::renderer::attachment_view_level(owner_level,
+				attachment->exact_owner_lod_ && owner != nullptr, threshold_count);
 		attachment->inset_lod_ = inset_level >= 0 ? inset_level : attachment->active_lod_;
 		attachment->inset_subpixel_hidden_ = owner != nullptr &&
 				(owner_own ? owner->inset_subpixel_hidden_ : owner->subpixel_hidden_);

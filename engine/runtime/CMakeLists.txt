@@ -109,6 +109,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_load.cpp # the load plan's executor over the embedder's legs (ADR 0077 R2)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_sidecars.cpp # the files the game finds by a mission's name, as one table
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_text.cpp # the <mission>.bin RTXT harvest (briefings, locations, people names)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/debug_oracles.cpp # the F3 hitbox view and entity pick over the kernel
@@ -187,6 +188,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/authored_occluder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_draw_frame.cpp # the per-draw light pass over a view
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_spawn.cpp # the pool spawners and their entity lifecycle
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp # the D3DX DXT texture codec
@@ -211,6 +214,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame_plan.cpp # which views compile which particle passes
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_quad_inputs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/frame_fx_effects.cpp
@@ -224,6 +228,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/foliage_assets.cpp # a foliage definition's slot geometry and bounds
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/mission_fixed_files.cpp # the files a running mission opens by a fixed name
     # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
@@ -498,6 +503,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_boot.cpp             # the one joiner bring-up (the host boot's joiner half)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role_replica_world.cpp  # the replica-world mirror and the authoritative appliers of JoinerRole
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp

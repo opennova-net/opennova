@@ -513,13 +513,15 @@ private:
 	// on the host role and runtime_'s view: their record classes and the def
 	// facts the view's destroy reads (no-op until resolve_item_traits built
 	// it). A host role is constructed with the same catalog. Called from
-	// resolve_item_traits, the boot's role hook, and enable_join.
+	// resolve_item_traits and the boot's role hook (a join's runtimes take it from
+	// joiner_tables, engine inmatch::install_joiner_runtime).
 	void install_item_catalog();
 	// Install the retained Avatars.def registry (assets_.character_registry) on
 	// runtime_'s view: a player row's NetId the table lacks takes its side's first
 	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-853);
 	// a mounted empty table installs too (it packs 0), none with no table mounted.
-	// Called from set_character_avatar_database, the boot's role hook, and enable_join.
+	// Called from set_character_avatar_database and the boot's role hook (a join's runtimes take
+	// it from joiner_tables).
 	void install_character_registry();
 	// Install the retained boot charattr table on the current Joiner runtime.
 	void install_charattr_table();
@@ -529,22 +531,14 @@ private:
 	// creation, at every table install, and after each net pump (engine:
 	// runtime/inmatch/charattr_table.h).
 	void sync_class_attribute_flags();
-	// Install the retained retail player-profile join block on the current runtime.
-	void install_character_join_vars();
-	// The current record's auto-medic word onto the joiner runtime (C2S 0x03).
+	// The current record's auto-medic word onto the runtime (C2S 0x03).
 	void install_auto_medic_preference();
 	// The session copy of the record's input words (profile::session_input).
 	void apply_session_input();
-	// Install the retained JOIN-checksum install root (D-NET-166).
-	void install_expansion_version_root();
-	// Install the retained APPID join token (decoded .joi CK) on the current runtime.
-	void install_app_id();
-	// Install the retained CD identity cookie (packed PUB* blob) on the runtime.
-	void install_join_cd_cookie();
-	// Install the retained gate GLSVSSREQUEST (the NovaWorld JOIN's last TLV) on the runtime.
-	void install_join_glsvss_request();
-	// Install the retained mission-start seam (the load flag, the side password).
-	void install_join_mission_start();
+	// The process tables the join's runtimes read (engine inmatch/joiner_boot.h JoinerTables):
+	// the retained charattr.def table, the items.def catalog, the Avatars.def registry, the
+	// record's auto-medic word and the connect log.
+	opennova::inmatch::JoinerTables joiner_tables() const;
 	// The host's session record for a mission of `p_game_type` (the UI host config or the SP
 	// listen server's, whose mission file is `p_sp_mission_file`: ShellHostSource::
 	// sp_mission_file); host_bringup() adds the retained .til, text and Server strings for the
@@ -960,6 +954,11 @@ public:
 	// The header-only load's slot leg, past its seat table and traits (engine:
 	// inmatch::JoinerRole::run_streamed_weapon_slot_class_inits, D-NET-1363).
 	void run_join_streamed_weapon_slot_class_inits();
+	// A header-only join's stream types' model-derived legs over `p_root` and `p_item_db` (engine
+	// inmatch::settle_streamed_types: the seat table, the traits, the slot legs, the collision,
+	// the portal init), ahead of the C2S 0x3D page's freeze.
+	void settle_join_streamed_types(const Ref<class ResourceRoot> &p_root,
+			const Ref<class ItemDatabase> &p_item_db);
 	// The mission start's model reload's pool-0 animation maps, at the reload's place in the
 	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-1252).
 	void reload_join_pool0_row_channels();
