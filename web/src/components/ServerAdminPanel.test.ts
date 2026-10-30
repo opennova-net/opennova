@@ -60,6 +60,22 @@ it('sends only edited settings with the revision and masks live passwords', asyn
   expect(wrapper.text()).toContain('Accepted changes saved');
   wrapper.unmount();
 });
+it('shows a weapon at its mission word and sends only the weapons the user changed', async () => {
+  vi.mocked(readConfiguration).mockResolvedValue({ ...state,
+    weapons: [{ name: 'M16', selectable: true }, { name: 'Knife', selectable: true }],
+    saved: { ...state.saved, options: { ...state.saved.options, weapons: { M16: 'mission', Knife: 'never' } } } });
+  const wrapper = page();
+  const details = wrapper.get('details');
+  details.element.open = true; await details.trigger('toggle'); await flushPromises();
+  const m16 = wrapper.findAll('label').find((l) => l.text().startsWith('M16'))!.get('select');
+  expect((m16.element as HTMLSelectElement).value).toBe('mission');
+  expect(m16.findAll('option').map((o) => o.text())).toEqual(['Mission default', 'Always available', 'Armory only', 'Unavailable']);
+  await m16.setValue('armory');
+  await wrapper.findAll('button').find((b) => b.text() === 'Apply and save changes')!.trigger('click');
+  await flushPromises();
+  expect(editConfiguration).toHaveBeenCalledWith({ kind: 'owner', id: 1 }, 7, { options: { weapons: { M16: 'armory' } } });
+  wrapper.unmount();
+});
 it('offers the settings editor alone, with no raw command console', async () => {
   const wrapper = page();
   expect(wrapper.findAll('details')).toHaveLength(1);

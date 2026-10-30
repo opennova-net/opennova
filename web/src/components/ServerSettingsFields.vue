@@ -84,7 +84,7 @@
           <div class="grid gap-x-6 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-3">
             <label v-for="weapon in shownWeapons" :key="weapon.name" class="flex min-w-0 items-center justify-between gap-2 text-sm text-ink">
               <span class="min-w-0 truncate" :title="weapon.name">{{ weapon.name }}</span>
-              <select class="field w-36 shrink-0 py-1 text-xs" :disabled="disabled" :value="nested('weapons')[weapon.name] ?? 'always'"
+              <select class="field w-36 shrink-0 py-1 text-xs" :disabled="disabled" :value="nested('weapons')[weapon.name] ?? 'mission'"
                 @change="setNested('weapons', weapon.name, ($event.target as HTMLSelectElement).value)">
                 <option v-for="option in AVAILABILITY" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
@@ -114,7 +114,11 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: ServerOptions): void 
 
 const WEAPONS_GROUP = 'Classes and weapons';
 const GROUP_ORDER = ['Server', 'Players and access', 'Teams', 'Rules', 'Rotation', WEAPONS_GROUP, 'Network'];
+// A weapon's availability as the host screen's WEAPON_LIST cycles it: the title's MISSION
+// word (the mission's own item availability decides; every weapon's default), always (1),
+// the armory-only word, never (0) (engine/formats/gamecfg/server_settings.cpp).
 const AVAILABILITY = [
+  { value: 'mission', label: 'Mission default' },
   { value: 'always', label: 'Always available' },
   { value: 'armory', label: 'Armory only' },
   { value: 'never', label: 'Unavailable' },
