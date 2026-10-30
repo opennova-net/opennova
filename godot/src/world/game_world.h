@@ -24,6 +24,7 @@
 #include <runtime/inmatch/main_loop_clock.h> // MainLoopClock (the frame's timing)
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminConsoles (the remote admin)
 #include <runtime/inmatch/server_log_devices.h> // ServerLogDevices (the server log switches)
+#include <runtime/mission/mission_load.h> // MissionLoadLegs (the load plan's legs)
 
 #include <memory>
 #include <runtime/renderer/object_lod.h> // the object detail rungs
@@ -887,11 +888,14 @@ private:
 	// texcompression and particle-density words, the ragdoll bit), ahead of its effect system
 	// and its head.
 	void copy_mission_start_options();
-	// The mission start's head through its terrain past the copies (the tile info, the
-	// environment, the terrain); `r_timeline` takes the load's timeline, begun here when the
-	// caller began none.
-	int load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
-			const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline);
+	// The load plan's legs over this world and the load's simulation (engine
+	// mission/mission_load.h): the legs hold `r_timeline` (the load's, which they begin when it is
+	// null), `r_host_sim` (the host session its head resolves) and `r_runtime_options` (the
+	// runtime's start's) by reference, so the caller keeps them for the load's call.
+	opennova::mission::MissionLoadLegs mission_load_legs(const Ref<MissionData> &p_mission,
+			const String &p_bms_name, const Ref<ResourceRoot> &p_resource_root,
+			Ref<LoadTimeline> &r_timeline, Ref<Simulation> &r_host_sim,
+			Ref<MissionSetupOptions> &r_runtime_options);
 	void start_mission_root();
 	void place_mission_objects(const Ref<MissionData> &p_mission);
 	// One load-progress present at `p_percent` (the loading screen's due rule gates it): the
@@ -945,19 +949,18 @@ private:
 	// builds_tile_cache_targets and loads_foliage_definitions, D-NET-1158, D-NET-1161,
 	// D-NET-1133). `p_timeline` takes it as one span. Nothing when no connect leg is pending.
 	void load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
-	// The same stage's sky maps past the terrain's: the full arm loads the environment's cloud
-	// layers (WorldScene::load_sky_maps), a dedicated host's reduced arm none (D-NET-1170).
-	// `p_timeline` takes it as the span sky_maps on either arm.
-	void load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	// The same stage's view effects, tracer pool and FrameFX past the HUD's textures: the full
 	// arm creates the NVG view's device objects (FrameFx::init_view_effects), the tracer pool's
 	// (EffectWorld::create_tracer_pool_devices) and FrameFX's pixel shaders with its "ffscan"
 	// scanlines (WorldScene::init_frame_fx_mission_textures), a dedicated host's reduced arm
-	// none (D-NET-1172, D-NET-1231). `p_timeline` takes it as the span
-	// frame_fx_textures on either arm.
-	void load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
+	// none (D-NET-1172, D-NET-1231).
+	void load_frame_fx_textures(bool p_dedicated_host);
 	void configure_foliage();
-	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
+	// The runtime's start (the host boot's phase A inside MissionRoot::setup), its options into
+	// `r_options`; its device tail past the mission start's place (finish_runtime_start).
+	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			Ref<MissionSetupOptions> &r_options);
+	void finish_runtime_start(const Ref<MissionSetupOptions> &p_options, const String &p_bms_name);
 	// The runtime's options the load knows at its start: the mission's names, the process's words
 	// and profiles, the playable gate and the session request the drive stages (start_runtime adds
 	// the terrain, the item table, the .til and the placer once the load built them).
@@ -974,7 +977,6 @@ private:
 	// (null: the empty table's projection) over the spawn loadout, in session or out. The fresh
 	// session's create reads it at the load's start, the placement again over the placer's table.
 	void project_local_character_profile(const Ref<AvatarDatabase> &p_avatar_db);
-	void run_mission_start();
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	// `p_spawn_effects` false: the catalog was warmed already (a join's effect system load), so

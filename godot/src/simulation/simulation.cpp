@@ -497,13 +497,10 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 	return [this](bool fresh_joiner_runtime) {
 		runtime_ = active_role().client_runtime();
 		install_console_seams();
-		if (fresh_joiner_runtime) {
-			install_charattr_table();
-			install_character_join_vars();
-			install_auto_medic_preference();
-			install_expansion_version_root();
-			install_join_mission_start();
-		}
+		// A fresh joiner runtime (the load rebuilt one no hello went out from) takes what the
+		// dial's took (engine inmatch::install_joiner_runtime).
+		if (fresh_joiner_runtime && joiner_role_ != nullptr)
+			opennova::inmatch::install_joiner_runtime(*joiner_role_, net_.joiner, joiner_tables());
 		if (is_joiner()) {
 			net_.joiner_applied_loadout_revision = 0;
 			net_.deploy_zone_registry.invalidate(); // fresh world -> fresh zone registry
