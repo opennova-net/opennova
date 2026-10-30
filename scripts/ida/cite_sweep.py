@@ -148,6 +148,13 @@ DOC_DEFAULT_IMAGE = {
     "docs/update/updater-re.md": (
         ("## 2. ", "UPDATE.EXE"),
     ),
+    # §12's IDB-change logs are each one IDB's, its heading says which
+    "docs/titles/dfx2-vs-jo-re.md": (
+        ("### 12.1 ", "dfx2.exe"),
+        ("### 12.7 ", None),
+        ("### 12.8 ", None),
+        ("### 12.9 ", "dfx2.exe"),
+    ),
     # "addresses are `MDEdit.exe`'s" in its writers' subsection
     "docs/audio/mus-sbf-re.md": (
         ("### MDEdit's own writers", "MDEdit.exe"),
