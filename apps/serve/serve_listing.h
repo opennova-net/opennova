@@ -1,37 +1,38 @@
 #pragma once
 
 // opennova-serve's NovaWorld listing source (ADR 0051 d6): the live in-process
-// match behind the lister's NovaWorld session. It does what the game's
-// SessionDrive does for its hosted match (godot/src/world/session_drive.cpp,
-// godot/src/simulation/simulation_net.cpp): the columns from the live session
-// (inmatch::read_session_listing_columns, the round clock's TimeLeft among
-// them), the PlayerList from the host's connections (a Serve Only host has no
-// slot 0), the GSID / AppId / cookie keys and the join-ticket arm on the
-// server context, the NWU session's facts the authority's NovaWorld exit
-// reads, and the service's ServerCommands and ServerPlayerEnterResults run on
-// the match; a changed name, message or mpreset reaches the cfg block and
-// game.cfg. A ServerCommand that arrives before the match binds (the hosting
-// wait) runs on a session-less context, where only SetMPReset passes its gate
-// (on_command).
+// match behind the lister's NovaWorld session. The match side of the listing
+// is the engine's, which the game's listen host binds too
+// (inmatch::HostListingBinding: the context's hooks into the hosting session,
+// the columns from the live session, the round clock's TimeLeft among them, the
+// GSID / AppId / ticket arms on the server context, the NWU session's facts the
+// authority's NovaWorld exit reads, the PlayerList rows; a Serve Only host has
+// no slot 0). What stays here is the lister's source: the columns and roster
+// the lister pulls, and the service's ServerCommands and
+// ServerPlayerEnterResults run on the match; a changed name, message or mpreset
+// reaches the cfg block and game.cfg. A ServerCommand that arrives before the
+// match binds (the hosting wait) runs on a session-less context, where only
+// SetMPReset passes its gate (on_command).
 //
 // A server listed on a second service as well (ServeOptions::also_master_host,
 // none of retail's: a stock host lists on one; D-NET-1385, ADR 0068) lists the same match there through
 // SecondListing: the second lister's host role reads the same columns and runs
 // the same server-info refresh (set_second), and its ServerCommands run on the
 // match. It registers under an AppId of its own, which the server context
-// carries beside the first's with the second's ticket arm (sync_second): a
-// joiner the second service sent carries that AppId, so the match tags it as the
-// second listing's, holds it to that listing's ticket rule, and its
-// ClientPlayerEnterRequest goes to that listing's session. The rest of the
-// match's NovaWorld facts stay the first listing's: its GSID is the 0x81's SUS1,
-// and its session word the one the match's NovaWorld exit reads, so the second
-// service stopping its listing never ends the match.
+// carries beside the first's with the second's ticket arm: a joiner the second
+// service sent carries that AppId, so the match tags it as the second listing's,
+// holds it to that listing's ticket rule, and its ClientPlayerEnterRequest goes
+// to that listing's session. The rest of the match's NovaWorld facts stay the
+// first listing's: its GSID is the 0x81's SUS1, and its session word the one
+// the match's NovaWorld exit reads, so the second service stopping its listing
+// never ends the match.
 
 #include "listing_source.h"
 
 #include <formats/gamecfg/game_cfg.h>
 #include <net/novaworld/lobby_vars.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/inmatch/host_listing_binding.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/mission/mission_kernel.h>
 
@@ -68,8 +69,9 @@ public:
 	void bind(inmatch::HostRole &role, mission::MissionKernel &kernel, Lister &lister);
 	void unbind();
 	// The second listing's lister (null: none), bound or not: its host role reads the match's
-	// columns and runs the match's server-info refresh beside the first's. It outlives the
-	// setting: the embedder clears it before the lister goes.
+	// columns and runs the match's server-info refresh beside the first's, and its AppId and
+	// ticket arm reach the server context at once. It outlives the setting: the embedder clears it
+	// before the lister goes.
 	void set_second(Lister *second);
 	// Feed the NWU session's facts to the authority (its 62-frame NovaWorld
 	// exit reads them) and the session's keys to the server context. The
@@ -90,18 +92,12 @@ public:
 	bool run_command(const ServerCommand &command, Lister *issuer);
 
 private:
-	// `lister`'s host role reads the match's columns at each server-info update.
-	void install_column_source(Lister &lister);
-	// The second listing's AppId and ticket arm onto the server context (none while it does
-	// not host).
-	void sync_second();
-
 	HostRegistration base_;
 	Seams seams_;
 	inmatch::HostRole *role_ = nullptr;
 	mission::MissionKernel *kernel_ = nullptr;
 	Lister *lister_ = nullptr;
-	Lister *second_ = nullptr;
+	inmatch::HostListingBinding binding_;
 };
 
 // The second listing's source (ServeOptions::also_master_host): the first's live match, read the
