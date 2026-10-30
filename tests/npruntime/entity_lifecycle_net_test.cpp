@@ -584,6 +584,8 @@ bool run_empty_slot_sweep_retires_the_row() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kGhost = 0x0003;
 	inmatch::ClientRuntime client("SweepJoiner", [] { return uint64_t(0); });
+	// The 0x0F fold reads its protocol (ProtocolInMatch::s2c_0f).
+	client.set_protocol(title_protocol("jo"));
 	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, kSelf, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();

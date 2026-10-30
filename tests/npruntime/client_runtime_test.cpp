@@ -7221,14 +7221,16 @@ bool run_dfx2_game_reset_keeps_the_board() {
 	const std::vector<uint8_t> reset = frame_server_session(server_tx, server_scrk, 1u,
 			{make_protocol_message(s2c::GAME_RESET, {})});
 	client.receive(reset.data(), reset.size());
-	if (!expect(client.state().end_round_linger_ticks == 1240,
-			"dfx2 linger: the 0x25 arms the linger at 1240 ticks"))
+	// The frame folds the 0x25 at its receive (1240), then its countdown takes the first tick.
+	client.Client_ProcessNetworkFrame(11);
+	if (!expect(client.state().end_round_linger_ticks == 1239,
+			"dfx2 linger: the 0x25 arms the linger at 1240 ticks, its frame counting one"))
 		return false;
-	for (uint32_t tick = 11; tick < 11 + 1239; ++tick) client.Client_ProcessNetworkFrame(tick);
+	for (uint32_t tick = 12; tick < 12 + 1238; ++tick) client.Client_ProcessNetworkFrame(tick);
 	if (!expect(client.mission_exit_reason() == inmatch::kMissionExitNone,
 			"dfx2 linger: the board stands through 1239 frames"))
 		return false;
-	client.Client_ProcessNetworkFrame(11 + 1239);
+	client.Client_ProcessNetworkFrame(12 + 1238);
 	return expect(client.mission_exit_reason() == inmatch::kMissionExitRoundOver,
 			"dfx2 linger: the 1240th frame stores mission exit 4");
 }
