@@ -1,7 +1,8 @@
 extends GutTest
 
 # The native bank supplies already posed points; the real particle device owns
-# their persistent groups and retires them on point/registry lifetime changes.
+# their persistent groups, moves each to its point's pose every sync
+# (EffectWorld.move_group) and retires them on point/registry lifetime changes.
 const W3_EFFECT := "fx_sml_wk"
 const W4_EFFECT := "fx_sml_wk_f"
 const HANDLE := 0x0123
@@ -13,11 +14,18 @@ func _catalog_file() -> ParticleFile:
 			"emit_dur = 0.1;\nemit_rate = 30;\nemit_rate_adj = 30;\nemit_burst = 1;\ny_offset = 2;\nz_offset = 4;\nage = 1;\nflags = FOREVEREMIT;\n", [W3_EFFECT, W4_EFFECT])
 
 
-func _make_presenter(fx: EffectWorld, anchors: ItemEffectDirector) -> EntityPresenter:
+func _make_fx() -> EffectWorld:
+	var fx := EffectWorld.new()
+	add_child_autofree(fx)
+	fx.load_particle_file(_catalog_file())
+	return fx
+
+
+func _make_presenter(fx: EffectWorld) -> EntityPresenter:
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(null, null, null)
-	presenter.setup_passes(null, null, null, null, fx, null, null, anchors)
+	presenter.setup_passes(null, null, null, null, fx, null, null)
 	return presenter
 
 
@@ -27,14 +35,14 @@ func _row(generation: int, point: int, position: Vector3, magnitude: float,
 			position, Vector3(0, 0, 1), magnitude, 42)
 
 
-func _owner_key(generation: int, point: int) -> String:
+func _slot_key(generation: int, point: int) -> String:
 	return "vehicle-trail:%d:%d:p%d" % [generation, HANDLE, point]
 
 
-func _live_owned_row(fx: EffectWorld, owner_key: String) -> EffectGroupReport:
+func _live_slot_row(fx: EffectWorld, slot_key: String) -> EffectGroupReport:
 	for value in fx.get_debug_group_report():
 		var row := value as EffectGroupReport
-		if row.owner_key == owner_key and not row.detached:
+		if row.slot_key == slot_key and not row.detached:
 			return row
 	return null
 
@@ -54,11 +62,10 @@ func _emitter(row: EffectGroupReport) -> EffectEmitterReport:
 
 
 func test_points_follow_sampled_pose_and_tune_without_respawn() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file())
-	var presenter := _make_presenter(fx, anchors)
-	var a_key := _owner_key(41, 0)
-	var b_key := _owner_key(41, 1)
+	var fx := _make_fx()
+	var presenter := _make_presenter(fx)
+	var a_key := _slot_key(41, 0)
+	var b_key := _slot_key(41, 1)
 	var position := Vector3(12.5, 3.0, -7.25)
 	var sample := _row(41, 0, position, 0.75)
 	assert_eq(sample.pos, position, "typed seam preserves the sampled position")
@@ -66,8 +73,8 @@ func test_points_follow_sampled_pose_and_tune_without_respawn() -> void:
 	assert_eq(sample.source_tick, 42)
 	presenter.present_vehicle_trail_visuals([
 		sample, _row(41, 1, position + Vector3.RIGHT, 0.25, W4_EFFECT)])
-	var a := _live_owned_row(fx, a_key)
-	var b := _live_owned_row(fx, b_key)
+	var a := _live_slot_row(fx, a_key)
+	var b := _live_slot_row(fx, b_key)
 	assert_not_null(a)
 	assert_not_null(b)
 	if a == null or b == null:
@@ -89,50 +96,47 @@ func test_points_follow_sampled_pose_and_tune_without_respawn() -> void:
 	presenter.present_vehicle_trail_visuals([
 		_row(41, 0, position, 1.25),
 		_row(41, 1, position + Vector3.RIGHT, 0.5, W4_EFFECT)])
-	a = _live_owned_row(fx, a_key)
+	a = _live_slot_row(fx, a_key)
 	assert_eq(int(a.id), a_id, "fixed samples update the same group")
-	assert_eq(int(_live_owned_row(fx, b_key).id), b_id)
-	var moved: Variant = anchors.resolve_owner_transform(a_key)
-	assert_true(moved is Transform3D)
-	if moved is Transform3D:
-		assert_almost_eq((moved as Transform3D).origin, position, POSITION_EPS)
+	assert_eq(int(_live_slot_row(fx, b_key).id), b_id)
+	assert_almost_eq(a.transform.origin, position, POSITION_EPS,
+			"the held group moved to the new sample")
 	fx.advance_fixed_tick(0.0)
-	a = _live_owned_row(fx, a_key)
+	a = _live_slot_row(fx, a_key)
 	assert_almost_eq(_emitter(a).position, position, POSITION_EPS)
 	assert_almost_eq(_emitter(a).emit_rate, 75.0, 0.0001,
 			"magnitudes above one remain unclamped")
 	assert_almost_eq(_emitter(a).spawn_y_offset, 8.0, 0.0001,
 			"1.25 extrapolates the spawn height past the authored z_offset")
 	presenter.present_vehicle_trail_visuals([_row(41, 1, position, 0.0, W4_EFFECT)])
-	assert_null(_live_owned_row(fx, a_key))
+	assert_null(_live_slot_row(fx, a_key))
 	assert_true(_row_by_id(fx, a_id).detached)
-	assert_false(anchors.has_effect_anchor(a_key))
-	assert_eq(int(_live_owned_row(fx, b_key).id), b_id,
+	assert_false(fx.has_slot_key(a_key))
+	assert_eq(int(_live_slot_row(fx, b_key).id), b_id,
 			"an active zero parameter is distinct from an absent point")
 	presenter.present_vehicle_trail_visuals([])
-	assert_null(_live_owned_row(fx, b_key))
+	assert_null(_live_slot_row(fx, b_key))
 	assert_true(_row_by_id(fx, b_id).detached)
-	assert_false(anchors.has_effect_anchor(b_key))
+	assert_false(fx.has_slot_key(b_key))
 
 
 func test_registry_generation_replaces_same_handle_ownership() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file())
-	var presenter := _make_presenter(fx, anchors)
-	var old_key := _owner_key(61, 0)
-	var next_key := _owner_key(62, 0)
+	var fx := _make_fx()
+	var presenter := _make_presenter(fx)
+	var old_key := _slot_key(61, 0)
+	var next_key := _slot_key(62, 0)
 	presenter.present_vehicle_trail_visuals([_row(61, 0, Vector3.ZERO, 0.5)])
-	var old := _live_owned_row(fx, old_key)
+	var old := _live_slot_row(fx, old_key)
 	assert_not_null(old)
 	if old == null:
 		return
 	var old_id := int(old.id)
 	presenter.present_vehicle_trail_visuals([_row(62, 0, Vector3.ZERO, 0.5)])
-	assert_null(_live_owned_row(fx, old_key))
+	assert_null(_live_slot_row(fx, old_key))
 	assert_true(_row_by_id(fx, old_id).detached)
-	assert_false(anchors.has_effect_anchor(old_key))
-	assert_not_null(_live_owned_row(fx, next_key))
-	assert_true(anchors.has_effect_anchor(next_key))
+	assert_false(fx.has_slot_key(old_key))
+	assert_not_null(_live_slot_row(fx, next_key))
+	assert_true(fx.has_slot_key(next_key))
 
 
 func test_focal_wind_moves_the_authored_second_part_and_clears() -> void:

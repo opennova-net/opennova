@@ -1472,10 +1472,11 @@ public:
 	void drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events);
 	void bind_item_effect_scene(std::shared_ptr<opennova::particle::EffectScene> scene);
 	void open_effect_producers(); // the world's producers onto it (ItemEmitterSystem::open_producers)
-	// The +0x1CC slot token (engine world/item_effects.h entity_effect_slot) of the entity a
-	// presented node stands for: its wire handle when it has one, else the placed row with that
-	// BMS id; 0 for none.
-	int64_t entity_effect_slot_for(int p_bms_id, int p_wire_handle) const;
+	// Slot A for the row a wire node the presenter built draws, by its wire handle (the engine
+	// keeps the walk's gates and attaches a lifetime once: ItemEmitterSystem::attach_entity_effects).
+	void attach_item_effects(int p_wire_handle);
+	// The particle switch lifted: the slot-A attaches it refused (ItemEmitterSystem::retry_hidden).
+	void retry_hidden_item_effects();
 	TypedArray<RoundImpactRow> drain_round_impacts();
 	// Destructively drain permanent terrain-cache scorch insertions and the
 	// destroyed-entity page invalidations (mission 16.16 bounds; the consumer

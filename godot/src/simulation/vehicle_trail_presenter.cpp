@@ -3,7 +3,6 @@
 #include "particle/effect_spawn_records.h"
 #include "particle/effect_world.h"
 #include "simulation/simulation.h"
-#include "world/item_effect_director.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/core/object.hpp>
@@ -32,12 +31,10 @@ String heat_glow_key(const opennova::world::WeaponHeatGlowRow &row) {
 
 void VehicleTrailPresenter::_bind_methods() {}
 
-void VehicleTrailPresenter::setup(
-		Simulation *p_sim, EffectWorld *p_fx, const Ref<ItemEffectDirector> &p_anchors) {
+void VehicleTrailPresenter::setup(Simulation *p_sim, EffectWorld *p_fx) {
 	reset_runtime_state();
 	sim_id_ = p_sim != nullptr ? p_sim->get_instance_id() : ObjectID();
 	fx_id_ = p_fx != nullptr ? p_fx->get_instance_id() : ObjectID();
-	anchors_ = p_anchors;
 }
 
 Simulation *VehicleTrailPresenter::sim() const {
@@ -191,34 +188,33 @@ void VehicleTrailPresenter::present_group(const String &p_key, const String &p_e
 		retire_group(p_key);
 		has_group = false;
 	}
-	transforms_.insert(p_key, p_transform);
 	EffectWorld *effect_world = fx();
 	if (has_group) {
-		if (effect_world == nullptr ||
-				!effect_world->set_group_parameters(
-						groups_[p_key].group_id, p_magnitude, p_magnitude)) {
+		// The held group re-poses and re-intensifies on every later row.
+		const int64_t group_id = groups_[p_key].group_id;
+		if (effect_world == nullptr || !effect_world->move_group(group_id, p_transform) ||
+				!effect_world->set_group_parameters(group_id, p_magnitude, p_magnitude)) {
 			retire_group(p_key);
 		}
 		return;
 	}
-	if (effect_world == nullptr || anchors_.is_null()) {
-		transforms_.erase(p_key);
+	if (effect_world == nullptr) {
 		return;
 	}
-	anchors_->register_effect_anchor(
-			p_key, callable_mp(this, &VehicleTrailPresenter::resolve_trail_anchor).bind(p_key));
-	const Ref<EffectSpawnReceipt> receipt = effect_world->spawn_effect_owned_request(
-			p_key, p_effect, p_transform.origin, p_transform.basis.get_column(2),
-			p_section_tagged);
+	Ref<EffectSpawnOptions> options;
+	options.instantiate();
+	options->set_admission(EffectWorld::ADMISSION_REPLACE_OWNED);
+	options->set_slot_key(p_key);
+	options->set_section_tagged(p_section_tagged);
+	const Ref<EffectSpawnReceipt> receipt = effect_world->spawn_effect_request(p_effect,
+			EffectWorld::descriptor_pose(p_transform.origin, p_transform.basis.get_column(2)),
+			options);
 	if (receipt.is_null() || !receipt->get_spawned()) {
-		anchors_->unregister_effect_anchor(p_key);
-		transforms_.erase(p_key);
-		effect_world->release_effect_binding(p_key);
+		effect_world->release_slot_key(p_key);
 		return;
 	}
 	TrailGroup group;
 	group.effect = p_effect;
-	group.owner_key = p_key;
 	group.group_id = receipt->get_group_id();
 	group.weapon_heat = p_weapon_heat;
 	groups_.insert(p_key, group);
@@ -227,31 +223,19 @@ void VehicleTrailPresenter::present_group(const String &p_key, const String &p_e
 	}
 }
 
-Variant VehicleTrailPresenter::resolve_trail_anchor(String p_key) {
-	if (!groups_.has(p_key)) {
-		return Variant();
-	}
-	const Transform3D *transform = transforms_.getptr(p_key);
-	return transform != nullptr ? Variant(*transform) : Variant();
-}
-
 void VehicleTrailPresenter::retire_group(const String &p_key) {
 	const TrailGroup *found = groups_.getptr(p_key);
 	const bool had_group = found != nullptr;
 	const TrailGroup group = had_group ? *found : TrailGroup();
 	groups_.erase(p_key);
-	transforms_.erase(p_key);
 	if (!had_group) {
 		return;
-	}
-	if (anchors_.is_valid()) {
-		anchors_->unregister_effect_anchor(group.owner_key);
 	}
 	if (EffectWorld *effect_world = fx()) {
 		if (group.group_id != 0) {
 			effect_world->stop_group(group.group_id);
 		}
-		effect_world->release_effect_binding(group.owner_key);
+		effect_world->release_slot_key(p_key);
 	}
 }
 
@@ -268,7 +252,6 @@ void VehicleTrailPresenter::reset_runtime_state() {
 	for (const String &key : keys) {
 		retire_group(key);
 	}
-	transforms_.clear();
 	if (EffectWorld *effect_world = fx()) {
 		for (const KeyValue<int, ZoneGroup> &kv : zone_groups_) {
 			if (kv.value.group_id != 0) {

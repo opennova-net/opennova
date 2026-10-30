@@ -412,6 +412,7 @@ public:
 
 	EffectSpawnReceipt spawn(const EffectSpawnRequest &request);
     void set_spawn_enabled(bool enabled) { spawn_enabled_ = enabled; }
+    bool spawn_enabled() const { return spawn_enabled_; }
 	void apply_owner_poses(const std::vector<EffectOwnerPoseUpdate> &updates);
 	// Unique live FollowOwner tokens in deterministic group order. This narrow
 	// query avoids constructing the particle-bounds debug snapshot on hot paths.
@@ -435,6 +436,22 @@ public:
 	//  @0x5E59A0 reports its last child dead]
 	bool trigger_group_children(EffectGroupId group, const Vec3 &position,
 			const Vec3 &forward, std::uint16_t force_zone);
+	// A producer's per-tick re-pose of the group it holds: every emitter moved to `position`
+	// and, given a `forward`, the group re-aimed along it (an EMITVECTOR member's emission
+	// axis); with none the group keeps its aim. Nothing in the scene follows an owner of its
+	// own: each producer moves its handle from its entity's state, as retail's do. False for a
+	// missing or detached group, and while spawning is off (retail's particle switch gates the
+	// move too).
+	// [orig: CEffectEmitter_UpdatePositionAndParams @ 0x5F6810 and CEffect_UpdateEmitterTransform
+	//  @ 0x5F7410 - the g_ParticlesDisabled tests @ 0x5F681A / @ 0x5F741A, then
+	//  CEffectWorld_UpdateChildPositions @ 0x5E5AC0 (the calls @ 0x5F6861 / @ 0x5F75A0) and,
+	//  for a direction, CEffectEmitter_SetOrientationFromDirection @ 0x5E5B00 (@ 0x5F6883 /
+	//  @ 0x5F75C2)]
+	bool move_group(EffectGroupId group, const Vec3 &position, const Vec3 *forward = nullptr);
+	// The same for the live group a slot holds (false for an empty slot).
+	bool move_slot(EffectSlotToken slot, const Vec3 &position, const Vec3 *forward = nullptr);
+	// The pose a live group stands at (false for a missing group).
+	bool group_pose(EffectGroupId group, EffectPose &out) const;
 	// True until the last child is reaped, including detached groups draining particles.
 	bool contains_group(EffectGroupId group) const;
 	// The live group a slot holds: the last one stored there, until a detach or its death clears it

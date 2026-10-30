@@ -25,24 +25,6 @@ class EffectLoadReport;
 class EffectSpawnReceipt;
 class EffectSpawnRequest;
 
-// A reusable batch of owner pose updates for EffectScene::apply_owner_poses:
-// EffectWorld clears and refills one per frame, so the per-frame path
-// allocates nothing once warm. add_absent retires the owner (every group
-// following it detaches). A plain C++ scratch, not a ClassDB class.
-class EffectOwnerPoseBatch {
-public:
-	void clear() { updates_.clear(); }
-	void add(int64_t p_owner_token, const Transform3D &p_transform);
-	void add_absent(int64_t p_owner_token);
-	int get_count() const { return static_cast<int>(updates_.size()); }
-	const std::vector<opennova::particle::EffectOwnerPoseUpdate> &updates() const {
-		return updates_;
-	}
-
-private:
-	std::vector<opennova::particle::EffectOwnerPoseUpdate> updates_;
-};
-
 // Godot adapter for the portable EffectScene module. This class owns no
 // Nodes and performs no simulation or rendering of its own: it only converts
 // Godot values to the portable interface; the value-only debug read model
@@ -117,10 +99,6 @@ public:
 	// answers an invalid-request receipt naming the failing field.
 	Ref<EffectSpawnReceipt> spawn(const Ref<EffectSpawnRequest> &p_request);
 
-	// Applies every update in the batch; an absent owner detaches all of its
-	// following groups. The non-in-place form also refreshes the snapshot.
-	void apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch);
-	void apply_owner_poses(const EffectOwnerPoseBatch &p_batch);
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);
 	// The hard destroy (engine particle::EffectScene::destroy_slot): the group goes now.

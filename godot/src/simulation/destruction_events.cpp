@@ -6,60 +6,6 @@
 
 using namespace godot;
 
-// --- DestructionEffectEvent -------------------------------------------------
-
-Ref<DestructionEffectEvent> DestructionEffectEvent::make(const String &p_effect,
-		const Vector3 &p_pos, int p_family, const Vector3 &p_dir, int p_attach_net_id,
-		int p_attach_bms_id, int p_attach_wire_handle, int64_t p_attach_spawn_origin,
-		bool p_release, int p_bank_slot, const Vector3 &p_local_pos, bool p_section_tagged,
-		bool p_positioned) {
-	opennova::world::DestructionEffectEvent v;
-	v.effect = opennova::to_std(p_effect);
-	v.release = p_release;
-	v.section_tagged = p_section_tagged;
-	v.positioned = p_positioned;
-	v.bank_slot = static_cast<uint8_t>(p_bank_slot);
-	v.attach_local_pos = { p_local_pos.z, -p_local_pos.x, p_local_pos.y };
-	v.pos = godot_to_mission<opennova::world::Vec3>(p_pos);
-	v.dir = godot_to_mission<opennova::world::Vec3>(p_dir);
-	v.family = static_cast<uint8_t>(p_family);
-	v.attach_net_id = static_cast<uint16_t>(p_attach_net_id);
-	v.attach_bms_id = p_attach_bms_id;
-	v.attach_wire_handle = static_cast<uint16_t>(p_attach_wire_handle);
-	v.attach_spawn_origin = static_cast<uint32_t>(p_attach_spawn_origin);
-	Ref<DestructionEffectEvent> out;
-	out.instantiate();
-	out->assign(v);
-	return out;
-}
-
-String DestructionEffectEvent::get_effect() const { return opennova::to_gd(value_.effect); }
-Vector3 DestructionEffectEvent::get_pos() const { return mission_to_godot(value_.pos); }
-Vector3 DestructionEffectEvent::get_dir() const { return mission_to_godot(value_.dir); }
-
-void DestructionEffectEvent::_bind_methods() {
-	ClassDB::bind_static_method("DestructionEffectEvent",
-			D_METHOD("make", "effect", "pos", "family", "dir", "attach_net_id", "attach_bms_id",
-					"attach_wire_handle", "attach_spawn_origin", "release", "bank_slot",
-					"local_pos", "section_tagged", "positioned"),
-			&DestructionEffectEvent::make, DEFVAL(0), DEFVAL(Vector3()), DEFVAL(0), DEFVAL(0),
-			DEFVAL(static_cast<int>(opennova::world::EntityHandle::kInvalid)),
-			DEFVAL(static_cast<int64_t>(opennova::world::kSpawnOriginNone)), DEFVAL(false),
-			DEFVAL(0), DEFVAL(Vector3()), DEFVAL(false), DEFVAL(false));
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::STRING, effect)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::VECTOR3, pos)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::VECTOR3, dir)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, family)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, bank_slot)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::BOOL, release)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::BOOL, section_tagged)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::BOOL, positioned)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_net_id)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_bms_id)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_wire_handle)
-	OPENNOVA_RECORD_READ_ONLY(DestructionEffectEvent, Variant::INT, attach_spawn_origin)
-}
-
 // --- HuskSwapEvent ----------------------------------------------------------
 
 Ref<HuskSwapEvent> HuskSwapEvent::make(int p_bms_id, int p_item_id, int64_t p_spawn_origin,
@@ -103,7 +49,6 @@ void HuskSwapEvent::_bind_methods() {
 // --- DestructionDrain -------------------------------------------------------
 
 void DestructionDrain::assign(const opennova::world::DestructionEvents &p_value) {
-	value_.effects = p_value.effects;
 	value_.sounds = p_value.sounds;
 	value_.husk_swaps = p_value.husk_swaps;
 	value_.death_lights = p_value.death_lights;
@@ -114,18 +59,13 @@ void DestructionDrain::assign(const opennova::world::DestructionEvents &p_value)
 }
 
 Ref<DestructionDrain> DestructionDrain::make(const TypedArray<HuskSwapEvent> &p_husk_swaps,
-		const TypedArray<DestructionEffectEvent> &p_effects, int p_debris_triangles,
-		int p_crackles, const PackedVector3Array &p_death_light_positions,
+		int p_debris_triangles, int p_crackles, const PackedVector3Array &p_death_light_positions,
 		const PackedFloat32Array &p_death_light_radii) {
 	Ref<DestructionDrain> out;
 	out.instantiate();
 	for (int i = 0; i < p_husk_swaps.size(); ++i) {
 		const Ref<HuskSwapEvent> row = p_husk_swaps[i];
 		if (row.is_valid()) out->value_.husk_swaps.push_back(row->value());
-	}
-	for (int i = 0; i < p_effects.size(); ++i) {
-		const Ref<DestructionEffectEvent> row = p_effects[i];
-		if (row.is_valid()) out->value_.effects.push_back(row->value());
 	}
 	const int64_t lights = MIN(p_death_light_positions.size(), p_death_light_radii.size());
 	for (int64_t i = 0; i < lights; ++i) {
@@ -166,17 +106,6 @@ PackedFloat32Array DestructionDrain::get_death_light_radii() const {
 	return out;
 }
 
-TypedArray<DestructionEffectEvent> DestructionDrain::get_effects() const {
-	TypedArray<DestructionEffectEvent> out;
-	for (const opennova::world::DestructionEffectEvent &e : value_.effects) {
-		Ref<DestructionEffectEvent> row;
-		row.instantiate();
-		row->assign(e);
-		out.push_back(row);
-	}
-	return out;
-}
-
 TypedArray<HuskSwapEvent> DestructionDrain::get_husk_swaps() const {
 	TypedArray<HuskSwapEvent> out;
 	for (const opennova::world::HuskSwapEvent &h : value_.husk_swaps) {
@@ -190,10 +119,10 @@ TypedArray<HuskSwapEvent> DestructionDrain::get_husk_swaps() const {
 
 void DestructionDrain::_bind_methods() {
 	ClassDB::bind_static_method("DestructionDrain",
-			D_METHOD("make", "husk_swaps", "effects", "debris_triangles", "crackles",
+			D_METHOD("make", "husk_swaps", "debris_triangles", "crackles",
 					"death_light_positions", "death_light_radii"),
-			&DestructionDrain::make, DEFVAL(TypedArray<DestructionEffectEvent>()), DEFVAL(0),
-			DEFVAL(0), DEFVAL(PackedVector3Array()), DEFVAL(PackedFloat32Array()));
+			&DestructionDrain::make, DEFVAL(0), DEFVAL(0), DEFVAL(PackedVector3Array()),
+			DEFVAL(PackedFloat32Array()));
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::INT, explosions_processed)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::INT, items_destroyed)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::INT, crackles)
@@ -202,6 +131,5 @@ void DestructionDrain::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::PACKED_VECTOR3_ARRAY, sound_positions)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::PACKED_VECTOR3_ARRAY, death_light_positions)
 	OPENNOVA_RECORD_READ_ONLY(DestructionDrain, Variant::PACKED_FLOAT32_ARRAY, death_light_radii)
-	OPENNOVA_RECORD_READ_ONLY_ROWS(DestructionDrain, effects, DestructionEffectEvent)
 	OPENNOVA_RECORD_READ_ONLY_ROWS(DestructionDrain, husk_swaps, HuskSwapEvent)
 }

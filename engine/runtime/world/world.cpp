@@ -299,6 +299,10 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
                     tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
                 }
             }
+            // The device row's update callback is followed by the same +0x1CC re-pose
+            // [orig: Entity_UpdatePool1Slot @0x4B8E6C..0x4B8E76].
+            if (Entity *e = live(); e != nullptr && emitter_update_runs(*this, *e))
+                item_emitters.update_emitter_transform(*this, *e);
             lap.mark(devtools::Slot::SIM_WALK_DEVICES);
             return;
         }
@@ -373,6 +377,9 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
     Entity *e = live();
     if (e == nullptr) return;
+    // A vehicle mover re-poses its critical fire (+0x400) at its head, before it moves the hull
+    // (DestructionEmitters::move_vehicle_fire carries the witness).
+    if (vehicles.traits.get(e->item_id) != nullptr) destruction_emitters.move_vehicle_fire(*this, *e);
     vehicles.update_motor(*e, ctx.is_authority);
     lap.mark(devtools::Slot::SIM_WALK_MOTOR);
     if ((e = live()) == nullptr) return;
@@ -417,6 +424,9 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         pool1_slot_leg(handle);
         if ((e = live()) == nullptr) return;
     }
+    // The +0x1CC emitter's re-pose follows the update callback, past the same null-row test.
+    // [orig: Entity_UpdatePool1Slot @0x4B8E6C..0x4B8E76, behind @0x4B8E41..0x4B8E50]
+    if (emitter_update_runs(*this, *e)) item_emitters.update_emitter_transform(*this, *e);
     // A mounted non-organic brain re-poses on its seat after the mover ran.
     if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0) {
         ai.refresh_mounted_pose(*brain, *this);
@@ -701,7 +711,11 @@ void World::run_entity_pass(const TickContext &ctx) {
     const bool update_phase = ctx.is_authority ? !pre_mission : gameplay;
     if (update_phase && entity_update_admitted(ctx.is_authority)) update_all_entities(ctx);
     lap.restart();
-    item_emitters.sync_owners(*this);
+    // The tick's effect rows spawn, the rounds' move emitters follow their rounds, then the held
+    // slots of a destroyed row release (and an owned scene's clock steps).
+    destruction_emitters.sync(*this);
+    round_emitters.sync(*this);
+    item_emitters.sync_slots(*this);
     // The waypoint current-selection pass, from the local player's position (the
     // original runs it in the client frame beside the player update; our SP host
     // is that client — the pure-client view is D-HUD-16). Position converts to
@@ -1122,6 +1136,8 @@ void World::restore(const Snapshot &s) {
     death_pieces.reset();
     destruction_rng.reset();
     item_emitters.reset();
+    destruction_emitters.reset();
+    round_emitters.reset();
     out.scars.reset();
     out.terrain_scorches.reset();
     out.destruction = DestructionEvents{};

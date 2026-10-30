@@ -258,7 +258,6 @@ add_library(opennova_bindings OBJECT
     simulation/simulation_script_voice.cpp
     simulation/simulation_scars.cpp
     simulation/simulation_hud_feeds.cpp
-    world/item_effect_director.cpp
     world/occlusion_frame.cpp
     world/game_world.cpp
     world/game_world_frame.cpp

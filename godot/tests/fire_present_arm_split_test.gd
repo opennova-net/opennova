@@ -86,7 +86,7 @@ func _userpoint_world(weapon: ObjectModel, userpoint: String) -> Vector3:
 func _presenter_over(container: Node3D) -> EntityPresenter:
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup_passes(container, null, null, _audio, _fx, null, null, null)
+	presenter.setup_passes(container, null, null, _audio, _fx, null, null)
 	return presenter
 
 

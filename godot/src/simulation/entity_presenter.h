@@ -47,7 +47,6 @@ namespace godot {
 
 class EffectLightDirector;
 class EffectWorld;
-class ItemEffectDirector;
 class MissionAudio;
 class MissionEnvironment;
 class ScarDrawList;
@@ -345,13 +344,12 @@ public:
 	// legs still run (a dedicated host binds no pass at all, MissionRoot's
 	// session step presents nothing there); `fx` (nullable) the effect
 	// legs; `lights` (nullable) the MF_Light muzzle glow and the death flash;
-	// `environment` (nullable) the scar fog cull + terrain light; `anchors`
-	// (nullable) the owner-anchor registry the wreck/piece/move effect groups
-	// anchor through.
+	// `environment` (nullable) the scar fog cull + terrain light. The wreck, piece and round
+	// effect groups are the engine's (world::DestructionEmitters, world::RoundEmitters).
 	void setup_passes(Node3D *p_container, const Ref<ItemDatabase> &p_item_db,
 			const Ref<ResourceRoot> &p_resource_root, MissionAudio *p_audio,
 			EffectWorld *p_fx, EffectLightDirector *p_lights,
-			MissionEnvironment *p_environment, ItemEffectDirector *p_anchors);
+			MissionEnvironment *p_environment);
 	// The presenting shell's listener: the camera position the driver pushes
 	// once per present frame (MissionFrameInput.set_camera_sample carries the
 	// same sample to the sim's fire-sound distance gate, world/fire_sound.h);

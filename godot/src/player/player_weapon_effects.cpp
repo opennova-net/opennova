@@ -12,11 +12,10 @@
 #include "simulation/entity_presenter.h"
 #include "world/game_world.h"
 #include "world/game_world_access.h"
-#include "world/item_effect_director.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/callable.hpp>
-#include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
@@ -33,13 +32,9 @@ void PlayerWeaponEffects::setup(Node *p_world, LocalPlayerPresenter *p_presenter
 }
 
 void PlayerWeaponEffects::teardown() {
-	// Drop our anchors from the world-side ItemEffectDirector BEFORE losing
-	// the world reference: the director's registry is world-lifetime and its
-	// reset() deliberately leaves owner keys to their owners -- a discarded
-	// effects object would otherwise leave its bound-resolver entries pinned
-	// there forever (the Callable keeps this object alive, so the
-	// invalid-callable reap never fires).
-	unregister_effect_anchors();
+	// Release the live action handles BEFORE losing the world reference (their
+	// groups would otherwise keep emitting where they stand).
+	release_action_effects();
 	world_id_ = ObjectID();
 	presenter_id_ = ObjectID();
 }
@@ -71,10 +66,6 @@ MissionAudio *PlayerWeaponEffects::mission_audio() const {
 	return world_access::mission_audio(world());
 }
 
-Ref<ItemEffectDirector> PlayerWeaponEffects::effect_anchors() const {
-	return world_access::item_effect_director(world());
-}
-
 void PlayerWeaponEffects::reset() {
 	weapon_play_serial_ = -1;
 	weapon_view_.unref();
@@ -82,7 +73,7 @@ void PlayerWeaponEffects::reset() {
 
 void PlayerWeaponEffects::on_viewmodel_refresh() {
 	++viewmodel_generation_;
-	unregister_effect_anchors();
+	release_action_effects();
 }
 
 // A committed weapon switch from the sim: reinstall the FP viewmodel/FSM for
@@ -123,14 +114,38 @@ void PlayerWeaponEffects::apply_weapon_clear() {
 	owner->refresh_viewmodel();
 }
 
-void PlayerWeaponEffects::unregister_effect_anchors() {
-	const Ref<ItemEffectDirector> anchors = effect_anchors();
-	if (anchors.is_valid()) {
-		for (const String &key : registered_effect_anchor_keys_) {
-			anchors->unregister_effect_anchor(key);
+void PlayerWeaponEffects::release_action_effects() {
+	if (EffectWorld *fx = effect_world()) {
+		for (const KeyValue<String, ActionEffect> &kv : action_effects_) {
+			fx->stop_group(kv.value.group_id);
+			fx->release_slot_key(kv.key);
 		}
 	}
-	registered_effect_anchor_keys_.clear();
+	action_effects_.clear();
+}
+
+// The per-tick re-anchor of the live handles (engine world/player_present.h
+// kActionEffectSpawnPolicy carries the witness).
+void PlayerWeaponEffects::follow_action_effects() {
+	EffectWorld *fx = effect_world();
+	if (fx == nullptr) {
+		action_effects_.clear();
+		return;
+	}
+	Vector<String> gone;
+	for (const KeyValue<String, ActionEffect> &kv : action_effects_) {
+		const Variant pose = resolve_anchor(kv.value.userpoint);
+		if (pose.get_type() != Variant::TRANSFORM3D) {
+			fx->stop_group(kv.value.group_id);
+			gone.push_back(kv.key);
+		} else if (!fx->move_group(kv.value.group_id, pose)) {
+			gone.push_back(kv.key);
+		}
+	}
+	for (const String &key : gone) {
+		action_effects_.erase(key);
+		fx->release_slot_key(key);
+	}
 }
 
 void PlayerWeaponEffects::consume_pending(const Ref<PlayerWeaponView> &p_view) {
@@ -144,6 +159,8 @@ void PlayerWeaponEffects::consume_pending(const Ref<PlayerWeaponView> &p_view) {
 void PlayerWeaponEffects::consume(const Ref<PlayerWeaponView> &p_view,
 		const TypedArray<PlayerWeaponEvent> &p_events) {
 	weapon_view_ = p_view;
+	// The live action handles re-pose to this tick's userpoints first.
+	follow_action_effects();
 	// The batch facts the engine ordering reads, one per event.
 	std::vector<Ref<PlayerWeaponEvent>> events;
 	std::vector<opennova::world::WeaponBatchEvent> facts;
@@ -246,32 +263,30 @@ void PlayerWeaponEffects::fire_action_effects(const Ref<PlayerWeaponEvent> &p_ev
 	// the one forward pose every effect spawn shares (ptl-format-re.md,
 	// ActionSlot_SpawnEffect).
 	const Transform3D anchor_transform = EffectWorld::forward_pose(pos, forward);
-	// The owner-bound group re-reads the live userpoint pose through its
-	// anchor resolver for its whole life (the engine's
-	// kActionEffectSpawnPolicy: one live handle per action slot, follow the
-	// owner, the world render domain).
-	if (const Ref<ItemEffectDirector> anchors = effect_anchors(); anchors.is_valid()) {
-		anchors->register_effect_anchor(slot_key,
-				callable_mp(this, &PlayerWeaponEffects::resolve_anchor).bind(userpoint));
-		registered_effect_anchor_keys_.insert(slot_key);
-	}
+	// The engine's kActionEffectSpawnPolicy: one live handle per action slot, re-posed to the
+	// live userpoint each fixed tick for its whole life (follow_action_effects), the world render
+	// domain.
 	const opennova::world::ActionEffectSpawnPolicy &policy = opennova::world::kActionEffectSpawnPolicy;
 	Ref<EffectSpawnOptions> options;
 	options.instantiate();
 	options->set_admission(policy.suppress_while_owned ? EffectScene::ADMISSION_SUPPRESS_WHILE_OWNED
 														: EffectScene::ADMISSION_ALWAYS);
-	options->set_binding(policy.follow_owner ? EffectScene::BINDING_FOLLOW_OWNER : EffectScene::BINDING_WORLD);
 	options->set_render_domain(policy.world_render_domain ? EffectScene::RENDER_DOMAIN_WORLD
 														   : EffectScene::RENDER_DOMAIN_FIRST_PERSON);
 	options->set_slot_key(slot_key);
-	options->set_owner_key(slot_key);
-	options->set_owner_transform(anchor_transform);
-	options->set_has_owner_transform(true);
 	options->set_initial_age_ticks(std::max(p_event->get_age_ticks(), 0));
 	// The action slot's descriptor carries its entity as the tag (retail
 	// ActionSlot_SpawnEffect @ 0x401F20): the group takes the section gate.
 	options->set_section_tagged(true);
-	fx->spawn_effect_request(particle, anchor_transform, options);
+	const Ref<EffectSpawnReceipt> receipt =
+			fx->spawn_effect_request(particle, anchor_transform, options);
+	// A spawned group's handle is held; a suppressed one leaves the live handle as it was.
+	if (policy.follow_owner && receipt.is_valid() && receipt->get_spawned()) {
+		ActionEffect held;
+		held.group_id = receipt->get_group_id();
+		held.userpoint = userpoint;
+		action_effects_.insert(slot_key, held);
+	}
 }
 
 // The recoil-row DIRECT effect leg is entirely data-defined. Retail submits
@@ -567,5 +582,5 @@ void PlayerWeaponEffects::pose_viewmodel_channel(const Ref<PlayerWeaponView> &p_
 }
 
 void PlayerWeaponEffects::_bind_methods() {
-	// The anchor resolvers bind through callable_mp; nothing is script-visible.
+	// Nothing is script-visible.
 }

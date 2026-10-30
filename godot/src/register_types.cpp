@@ -55,7 +55,6 @@
 #include "render/retained_array_mesh.h"
 #include "render/scene_overlay_compositor.h"
 #include "render/target_projection_xr_interface.h"
-#include "world/item_effect_director.h"
 #include "world/occlusion_frame.h"
 #include "world/game_world.h"
 #include "world/load_timeline.h"
@@ -316,7 +315,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(DeployStatus);
 	GDREGISTER_CLASS(DeployZoneRow);
 	GDREGISTER_CLASS(DeployListRow);
-	GDREGISTER_CLASS(DestructionEffectEvent);
 	GDREGISTER_CLASS(HuskSwapEvent);
 	GDREGISTER_CLASS(DestructionDrain);
 	GDREGISTER_CLASS(HitboxDebugEntity);
@@ -428,8 +426,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TargetProjectionXrInterface);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(EffectWorld);
-	GDREGISTER_CLASS(ItemEffectDirectorStats);
-	GDREGISTER_CLASS(ItemEffectDirector);
 	GDREGISTER_CLASS(OcclusionFrame);
 	// The world (ADR 0043 slice G10): the world node, its two view interfaces
 	// (the live implementations are internal), the resource-root resolver

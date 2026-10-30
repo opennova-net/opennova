@@ -1,6 +1,5 @@
 // The per-item ITEMS.DEF particlefx law (runtime/world/item_effects): the
-// pool-walk attrib gates, the occupied-controller bypass, the identity
-// aliases a vehicle_control_* event names an entity by, and the
+// pool-walk attrib gates, the occupied-controller bypass, and the
 // matched-userpoint / origin-fallback attach plan
 // [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0 ->
 //  ItemDef_GetBoneMaskByName @ 0x49ea40 -> Entity_SpawnBoneTrailEffect
@@ -76,49 +75,6 @@ void test_controller_gate_bypasses_only_player_control() {
 	}
 }
 
-std::vector<std::string> aliases(int32_t net_id, int32_t bms_id, int64_t spawn_origin,
-		int32_t wire_handle) {
-	std::vector<std::string> out;
-	out.emplace_back("stale");
-	w::item_effect_identity_aliases(net_id, bms_id, spawn_origin, wire_handle, out);
-	return out;
-}
-
-bool same(const std::vector<std::string> &got, std::initializer_list<const char *> want) {
-	if (got.size() != want.size()) return false;
-	size_t i = 0;
-	for (const char *expected : want) {
-		if (got[i++] != expected) return false;
-	}
-	return true;
-}
-
-void test_identity_aliases() {
-	// A placed record: net id, BMS id and spawn origin, no wire identity.
-	const int64_t origin = w::spawn_origin_pack(static_cast<uint32_t>(kItem), 3);
-	CHECK(same(aliases(71, 9001, origin, -1),
-			{"net:71", "bms:9001", ("origin:" + std::to_string(origin)).c_str()}));
-	// A wire-only synthetic attachment (bms 0, sentinel origin): the wire
-	// alias alone, for both sentinel spellings.
-	CHECK(same(aliases(0, 0, -1, 0x1004), {"wire:4100"}));
-	CHECK(same(aliases(5, 0, static_cast<int64_t>(w::kSpawnOriginNone), 0x1004),
-			{"wire:4100"}));
-	// A wire node WITH an authored BMS id keeps its record aliases beside the
-	// wire alias; the -1 origin contributes none.
-	CHECK(same(aliases(0, 9001, -1, 0x1004), {"wire:4100", "bms:9001"}));
-	// A simulation net id is not a wire handle: the event's a-word names
-	// only the net alias.
-	CHECK(same(aliases(77, 0, 0, -1), {"net:77"}));
-	// 0xffff is the wire-handle none sentinel; zero is a valid handle.
-	CHECK(same(aliases(5, 0, 0, 0xffff), {"net:5"}));
-	CHECK(same(aliases(0, 0, -1, 0), {"wire:0"}));
-	// Nothing to name.
-	CHECK(aliases(0, 0, 0, -1).empty());
-	CHECK(w::item_effect_aliases_intersect({"wire:4100", "bms:9001"}, {"bms:9001"}));
-	CHECK(!w::item_effect_aliases_intersect({"wire:4100"}, {"wire:4101", "net:1"}));
-	CHECK(!w::item_effect_aliases_intersect({}, {"net:1"}));
-}
-
 // A model whose first 16 userpoints carry the authored name at indices 0, 2
 // and 9 (mixed case), plus a 17th and 18th copy past the scan limit.
 struct SynthModel {
@@ -186,7 +142,6 @@ void test_attach_plan_matches_the_first_sixteen_or_falls_back_to_the_origin() {
 int main() {
 	test_pool_gates_are_kind_sensitive();
 	test_controller_gate_bypasses_only_player_control();
-	test_identity_aliases();
 	test_attach_plan_matches_the_first_sixteen_or_falls_back_to_the_origin();
 	if (failures != 0) {
 		std::printf("item_effects_test: %d failure(s)\n", failures);

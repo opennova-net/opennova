@@ -278,16 +278,19 @@ void Simulation::open_effect_producers() {
     kernel_->world.item_emitters.open_producers(kernel_->world, kernel_->script_effect_catalog.interned_names());
 }
 
-int64_t Simulation::entity_effect_slot_for(int p_bms_id, int p_wire_handle) const {
-    if (!world_installed_) return 0;
-    uint16_t packed = opennova::world::EntityHandle::kInvalid;
-    if (p_wire_handle >= 0 && p_wire_handle < opennova::world::EntityHandle::kInvalid) {
-        packed = static_cast<uint16_t>(p_wire_handle);
-    } else if (p_bms_id != 0) {
-        if (const opennova::world::Entity *entity = kernel_->world.registry.by_bms_id(p_bms_id))
-            packed = entity->handle.packed;
-    }
-    return static_cast<int64_t>(opennova::world::entity_effect_slot(packed).value);
+void Simulation::attach_item_effects(int p_wire_handle) {
+    if (!world_installed_ || p_wire_handle < 0 ||
+            p_wire_handle >= opennova::world::EntityHandle::kInvalid)
+        return;
+    opennova::world::World &world = kernel_->world;
+    if (const opennova::world::Entity *entity =
+                world.registry.get(opennova::world::EntityHandle{static_cast<uint16_t>(p_wire_handle)}))
+        world.item_emitters.attach_entity_effects(world, *entity);
+}
+
+void Simulation::retry_hidden_item_effects() {
+    if (!world_installed_) return;
+    kernel_->world.item_emitters.retry_hidden(kernel_->world);
 }
 
 void Simulation::drain_script_effects(std::vector<opennova::world::ScriptEffectEvent> &events) {
@@ -391,8 +394,10 @@ void Simulation::drain_vehicle_effects(std::vector<opennova::world::VehicleEffec
 void Simulation::drain_destruction_events(opennova::world::DestructionEvents &r_events) {
 	r_events.clear();
 	if (!world_installed_) return;
+	// The effect rows are the engine's: the rows a joiner's post-tick folds queued since the
+	// tick's end spawn now (world::DestructionEmitters::consume), and a closed scene's drop.
+	kernel_->world.destruction_emitters.consume(kernel_->world);
 	opennova::world::DestructionEvents &ev = kernel_->world.out.destruction;
-	r_events.effects.swap(ev.effects);
 	r_events.sounds.swap(ev.sounds);
 	r_events.husk_swaps.swap(ev.husk_swaps);
 	r_events.death_lights.swap(ev.death_lights);

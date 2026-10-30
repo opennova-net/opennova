@@ -2,7 +2,6 @@
 
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/templates/vector.hpp>
-#include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
@@ -15,9 +14,7 @@
 #include "audio/mission_audio.h"
 #include "lights/effect_light_director.h"
 #include "mission/mission_data.h"
-#include "particle/effect_world.h"
 #include "render/object_lod_frame.h"
-#include "simulation/effect_owner_keys.h"
 #include "simulation/entity_presenter.h"
 #include "simulation/simulation.h"
 #include "util/axes.h"
@@ -64,12 +61,6 @@ MissionAudio *DestructionPresenter::audio() const {
 			: nullptr;
 }
 
-EffectWorld *DestructionPresenter::fx() const {
-	return fx_id_.is_valid()
-			? Object::cast_to<EffectWorld>(ObjectDB::get_instance(fx_id_))
-			: nullptr;
-}
-
 EffectLightDirector *DestructionPresenter::lights() const {
 	return lights_id_.is_valid()
 			? Object::cast_to<EffectLightDirector>(ObjectDB::get_instance(lights_id_))
@@ -78,17 +69,15 @@ EffectLightDirector *DestructionPresenter::lights() const {
 
 void DestructionPresenter::setup(EntityPresenter *p_owner, Simulation *p_sim, Node3D *p_container,
 		const Ref<EntityIndex> &p_index, const Ref<MissionObjectPlacer> &p_placer,
-		const Ref<ItemDatabase> &p_item_db, const Ref<ItemEffectDirector> &p_anchors,
-		MissionAudio *p_audio, EffectWorld *p_fx, EffectLightDirector *p_lights) {
+		const Ref<ItemDatabase> &p_item_db, MissionAudio *p_audio,
+		EffectLightDirector *p_lights) {
 	owner_ = p_owner;
 	sim_id_ = p_sim != nullptr ? p_sim->get_instance_id() : ObjectID();
 	container_id_ = p_container != nullptr ? p_container->get_instance_id() : ObjectID();
 	index_ = p_index;
 	placer_ = p_placer;
 	item_db_ = p_item_db;
-	anchors_ = p_anchors;
 	audio_id_ = p_audio != nullptr ? p_audio->get_instance_id() : ObjectID();
-	fx_id_ = p_fx != nullptr ? p_fx->get_instance_id() : ObjectID();
 	lights_id_ = p_lights != nullptr ? p_lights->get_instance_id() : ObjectID();
 }
 
@@ -102,25 +91,10 @@ void DestructionPresenter::reset_runtime_state() {
 		piece_slots.push_back(kv.key);
 	}
 	for (int slot : piece_slots) {
-		unregister_piece_anchor(slot);
 		free_piece_model(slot);
 	}
 	piece_generation_.clear();
 	piece_models_.clear();
-	piece_pos_.clear();
-
-	if (EffectWorld *effects = fx()) {
-		for (const KeyValue<String, int64_t> &group : attached_groups_) {
-			effects->stop_group(group.value);
-			effects->release_effect_binding(group.key);
-		}
-	}
-	attached_groups_.clear();
-	for (const String &key : wreck_anchor_keys_) {
-		unregister_effect_anchor(key);
-	}
-	wreck_anchor_keys_.clear();
-	burning_.clear();
 
 	for (const KeyValue<String, FinalOverlay> &kv : final_overlays_) {
 		if (ObjectModel *entity = live_model(kv.value.entity)) {
@@ -171,9 +145,6 @@ void DestructionPresenter::present_drained(const opennova::world::DestructionEve
 	for (const opennova::world::HuskSwapEvent &husk : p_events.husk_swaps) {
 		apply_husk_swap(husk);
 	}
-	for (const opennova::world::DestructionEffectEvent &eff : p_events.effects) {
-		apply_effect(eff);
-	}
 	for (const opennova::world::DestructionSoundEvent &sound : p_events.sounds) {
 		apply_sound(opennova::to_gd(sound.sound), mission_to_godot(sound.pos));
 	}
@@ -183,12 +154,11 @@ void DestructionPresenter::present_drained(const opennova::world::DestructionEve
 		}
 	}
 	stat_debris_triangles_ += p_events.debris_triangles;
-	// Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
-	// drain above; its sound rides the fire pass's drain_fire_sounds.
+	// Sim-side rolls (S12b): the crackle EFFECT is the engine's (world::DestructionEmitters);
+	// its sound rides the fire pass's drain_fire_sounds.
 	stat_crackles_ += p_events.crackles;
 	sync_static_husks();
 	present_pieces(p_pieces);
-	tick_wreck_fires();
 }
 
 Node3D *DestructionPresenter::resolve_entity_node(int p_bms_id, int64_t p_spawn_origin,
@@ -515,135 +485,6 @@ void DestructionPresenter::sync_static_husks() {
 	}
 }
 
-void DestructionPresenter::apply_effect(const opennova::world::DestructionEffectEvent &p_effect) {
-	EffectWorld *fx_world = fx();
-	if (fx_world == nullptr) {
-		return;
-	}
-	const String effect = opennova::to_gd(p_effect.effect);
-	if (effect.is_empty() && !p_effect.release) {
-		return;
-	}
-	const Vector3 pos = mission_to_godot(p_effect.pos);
-	const int family = static_cast<int>(p_effect.family);
-	const int net_id = static_cast<int>(p_effect.attach_net_id);
-	const int bms_id = p_effect.attach_bms_id;
-	const int64_t spawn_origin = static_cast<int64_t>(p_effect.attach_spawn_origin);
-	const int wire_handle = static_cast<int>(p_effect.attach_wire_handle);
-	const bool dynamic_identity = uses_dynamic_husk_identity(
-			bms_id, spawn_origin, wire_handle);
-	// The row's descriptor tag (the engine producer sets it) decides whether
-	// the group takes the building-section gate.
-	if (family == 0 || (net_id == 0 && !dynamic_identity)) {
-		fx_world->spawn_effect(effect, pos, mission_to_godot(p_effect.dir),
-				p_effect.section_tagged);
-		++stat_effects_;
-		return;
-	}
-	// Each retained emitter follows its own model point under the live owner.
-	String key = dynamic_identity ? wreck_wire_owner_key(wire_handle, family)
-								  : wreck_owner_key(net_id, family);
-	if (p_effect.bank_slot != 0)
-		key += ":" + String::num_int64(p_effect.bank_slot);
-	const auto &local = p_effect.attach_local_pos;
-	const Vector3 local_point(-local.y, local.z, local.x);
-	if (p_effect.release) {
-		if (const int64_t *group = attached_groups_.getptr(key))
-			fx_world->stop_group(*group);
-		attached_groups_.erase(key);
-		fx_world->release_effect_binding(key);
-		unregister_effect_anchor(key);
-		wreck_anchor_keys_.erase(key);
-		burning_.erase(key);
-		return;
-	}
-	if (p_effect.positioned) {
-		// The slot holds the group for its next release only: a world-bound
-		// spawn under the slot key, with no owner pose to follow.
-		unregister_effect_anchor(key);
-		wreck_anchor_keys_.erase(key);
-		// A wire-built body's hit emitter (engine world/wire_person_hit.h); a world entity's
-		// spawns in the engine, into its +0x1CC slot (ItemEmitterSystem::store_positioned_emitter).
-		Ref<EffectSpawnOptions> options;
-		options.instantiate();
-		options->set_admission(EffectWorld::ADMISSION_REPLACE_OWNED);
-		options->set_slot_key(key);
-		options->set_section_tagged(p_effect.section_tagged);
-		const Ref<EffectSpawnReceipt> receipt = fx_world->spawn_effect_request(effect,
-				EffectWorld::descriptor_pose(pos, mission_to_godot(p_effect.dir)), options);
-		attached_groups_[key] = receipt.is_valid() ? receipt->get_group_id() : 0;
-		++stat_effects_;
-		return;
-	}
-	attached_groups_[key] = fx_world->spawn_effect_owned(key, effect, pos,
-			mission_to_godot(p_effect.dir), p_effect.section_tagged);
-	++stat_effects_;
-	if (anchors_.is_valid()) {
-		Node3D *node = nullptr;
-		if (dynamic_identity) {
-			node = resolve_entity_node(bms_id, spawn_origin, wire_handle);
-		} else if (index_.is_valid() && bms_id != 0) {
-			node = index_->resolve_single(bms_id);
-		}
-		if (node != nullptr) {
-			anchors_->register_effect_anchor(key,
-					callable_mp(this, &DestructionPresenter::resolve_wreck_node_anchor)
-							.bind(static_cast<int64_t>(node->get_instance_id()), local_point));
-			if (family == 2) {
-				WreckFire fire;
-				fire.node = node->get_instance_id();
-				fire.pinned = false;
-				burning_[key] = fire;
-			}
-		} else {
-			// Batched-static wreck: no node. Resolve the authoritative present
-			// pose while it settles, with the event pose as an identity fallback.
-			const Transform3D fixed(Basis(), pos);
-			anchors_->register_effect_anchor(key,
-					callable_mp(this, &DestructionPresenter::resolve_wreck_pinned_anchor)
-							.bind(dynamic_identity, bms_id, spawn_origin, fixed, local_point));
-			if (family == 2) {
-				// A dynamic identity with no runtime node has no sibling-safe
-				// positional lookup; either way the wreck stays pinned at its
-				// event pose instead of querying the shared sentinel.
-				WreckFire fire;
-				fire.pinned = true;
-				burning_[key] = fire;
-			}
-		}
-		wreck_anchor_keys_.insert(key);
-	}
-}
-
-Variant DestructionPresenter::resolve_wreck_node_anchor(int64_t p_node_id, const Vector3 &p_local) {
-	Node3D *node = live_node3d(ObjectID(static_cast<uint64_t>(p_node_id)));
-	if (node == nullptr)
-		return Variant();
-	Transform3D pose = node->get_global_transform();
-	pose.origin = pose.xform(p_local);
-	return pose;
-}
-
-Variant DestructionPresenter::resolve_wreck_pinned_anchor(bool p_dynamic_identity, int p_bms_id,
-		int64_t p_spawn_origin, const Transform3D &p_fixed, const Vector3 &p_local) {
-	const Variant live_v = p_dynamic_identity
-			? Variant()
-			: present_transform_for_identity(p_bms_id, p_spawn_origin);
-	if (live_v.get_type() != Variant::TRANSFORM3D)
-		return p_fixed;
-	Transform3D pose = live_v;
-	pose.origin = pose.xform(p_local);
-	return pose;
-}
-
-Variant DestructionPresenter::resolve_piece_anchor(int p_slot) {
-	if (!piece_generation_.has(p_slot)) {
-		return Variant();
-	}
-	const Vector3 *pos = piece_pos_.getptr(p_slot);
-	return pos != nullptr ? Variant(*pos) : Variant();
-}
-
 void DestructionPresenter::apply_sound(const String &p_name, const Vector3 &p_pos) {
 	MissionAudio *audio_node = audio();
 	if (audio_node == nullptr) {
@@ -656,11 +497,10 @@ void DestructionPresenter::apply_sound(const String &p_name, const Vector3 &p_po
 	++stat_sounds_;
 }
 
-// Death pieces: the sim owns positions/physics; each live piece carries its
-// type's trail effect as an owned follow group and its own piece model, which
-// the frame's piece draws place and show (apply_piece_draws).
+// Death pieces: the sim owns positions/physics and each piece's trail (the engine's
+// world::DestructionEmitters); each live piece carries its own piece model, which the frame's
+// piece draws place and show (apply_piece_draws).
 void DestructionPresenter::present_pieces(const std::vector<opennova::world::DeathPieceRow> &p_pieces) {
-	EffectWorld *fx_world = fx();
 	stat_pieces_peak_ = MAX(stat_pieces_peak_, static_cast<int64_t>(p_pieces.size()));
 	HashSet<int> seen;
 	for (const opennova::world::DeathPieceRow &piece : p_pieces) {
@@ -669,43 +509,16 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 			continue;
 		}
 		seen.insert(slot);
-		const Vector3 pos = mission_to_godot(piece.pos);
-		piece_pos_[slot] = pos;
 		const int64_t generation = static_cast<int64_t>(piece.generation);
 		const int64_t *presented = piece_generation_.getptr(slot);
 		const bool is_new_generation = (presented != nullptr ? *presented : -1) != generation;
 		if (is_new_generation) {
 			if (presented != nullptr) {
-				// The reused slot's trail goes outright, its particles with it (engine
-				// DeathPieceSim::alloc carries the witness).
-				if (fx_world != nullptr) fx_world->destroy_owned_group(piece_owner_key(slot));
-				unregister_piece_anchor(slot);
 				free_piece_model(slot);
 			}
 			piece_generation_[slot] = generation;
 			ObjectModel *model = build_piece_model(slot, piece.item_id);
 			piece_models_[slot] = model != nullptr ? model->get_instance_id() : ObjectID();
-		}
-		if (piece.settled) {
-			continue;
-		}
-		if (is_new_generation) {
-			// The type's trail effect from the ONE native table
-			// (world/destruction death_piece_trail_effect, S12b)
-			// (engine: runtime/world/destruction.h).
-			const String trail(opennova::world::death_piece_trail_effect(piece.type_index));
-			// A silent death's piece never submits its trail [orig: @0x493811].
-			if (fx_world != nullptr && !trail.is_empty() && piece.trail) {
-				const String key = piece_owner_key(slot);
-				// Untagged: every death-piece submit carries tag 0 (the engine
-				// table death_piece_trail_effect carries the witness).
-				fx_world->spawn_effect_owned(key, trail, pos, Vector3(0, 1, 0));
-				if (anchors_.is_valid()) {
-					anchors_->register_effect_anchor(key,
-							callable_mp(this, &DestructionPresenter::resolve_piece_anchor)
-									.bind(slot));
-				}
-			}
 		}
 	}
 	Vector<int> retired;
@@ -715,10 +528,8 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 		}
 	}
 	for (int slot : retired) {
-		unregister_piece_anchor(slot);
 		free_piece_model(slot);
 		piece_generation_.erase(slot);
-		piece_pos_.erase(slot);
 	}
 }
 
@@ -894,47 +705,6 @@ void DestructionPresenter::apply_piece_draws_mirror(int p_view,
 	}
 }
 
-void DestructionPresenter::unregister_piece_anchor(int p_slot) {
-	unregister_effect_anchor(piece_owner_key(p_slot));
-}
-
-void DestructionPresenter::unregister_effect_anchor(const Variant &p_key) {
-	if (anchors_.is_valid()) {
-		anchors_->unregister_effect_anchor(p_key);
-	}
-}
-
-// The wreck-fire registry prune: drop entries whose node died. The random
-// crackle itself rolls in the SIM on the engine PRNG stream, per logic tick,
-// and arrives as an ordinary transient effect + distance-delay-gated sound
-// (S12b; world/destruction tick_item_death_motion
-// (engine: runtime/world/death_effects.cpp)).
-void DestructionPresenter::tick_wreck_fires() {
-	if (burning_.is_empty()) {
-		return;
-	}
-	Vector<String> dead;
-	for (const KeyValue<String, WreckFire> &kv : burning_) {
-		const WreckFire &entry = kv.value;
-		if (entry.node.is_valid()) {
-			if (live_node3d(entry.node) == nullptr) {
-				dead.push_back(kv.key);
-			}
-			continue;
-		}
-		if (!entry.pinned) {
-			dead.push_back(kv.key);
-		}
-	}
-	for (const String &key : dead) {
-		burning_.erase(key);
-	}
-}
-
-bool DestructionPresenter::has_active_wreck_fire(const String &p_owner_key) const {
-	return burning_.has(p_owner_key);
-}
-
 Ref<DestructionPresentStats> DestructionPresenter::get_stats() const {
 	Ref<DestructionPresentStats> stats;
 	stats.instantiate();
@@ -942,7 +712,6 @@ Ref<DestructionPresentStats> DestructionPresenter::get_stats() const {
 	stats->no_husk = stat_no_husk_;
 	stats->pieces_peak = stat_pieces_peak_;
 	stats->debris_triangles = stat_debris_triangles_;
-	stats->effects = stat_effects_;
 	stats->sounds = stat_sounds_;
 	stats->crackles = stat_crackles_;
 	return stats;

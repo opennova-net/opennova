@@ -136,10 +136,6 @@ Callable EffectWorld::get_image_provider() const {
 	return image_provider_;
 }
 
-void EffectWorld::set_owner_position_provider(const Callable &p_provider) {
-	owner_position_provider_ = p_provider;
-}
-
 void EffectWorld::set_water_plane(float p_value, Camera3D *p_reflection_camera) {
 	water_height_ = p_value;
 	reflection_camera_id_ = p_reflection_camera != nullptr
@@ -269,14 +265,11 @@ void EffectWorld::_open_files() {
 void EffectWorld::clear_world() {
 	files_.clear();
 	slot_tokens_.clear();
-	owner_tokens_.clear();
-	owner_keys_by_token_.clear();
-	owner_pose_cache_.clear();
+	slot_keys_by_token_.clear();
 	next_token_ = 1;
 	root_.unref();
 	image_provider_ = Callable();
 	texture_dir_ = String();
-	owner_position_provider_ = Callable();
 	water_height_ = 0.0f;
 	reflection_camera_id_ = ObjectID();
 	second_scene_camera_id_ = ObjectID();
@@ -297,9 +290,7 @@ void EffectWorld::clear_world() {
 
 void EffectWorld::reset_runtime_state() {
 	slot_tokens_.clear();
-	owner_tokens_.clear();
-	owner_keys_by_token_.clear();
-	owner_pose_cache_.clear();
+	slot_keys_by_token_.clear();
 	next_token_ = 1;
 	if (ParticleRenderer *renderer = _renderer()) {
 		renderer->clear_warm_pipelines();
@@ -320,36 +311,20 @@ String EffectWorld::effect_name_for_handle(int64_t p_handle) const {
 	return scene_->effect_name(p_handle);
 }
 
-int64_t EffectWorld::_allocate_token() {
-	const int64_t token = next_token_;
-	++next_token_;
-	return token;
-}
-
 int64_t EffectWorld::_slot_token_for(const Variant &p_key) {
 	if (const int64_t *existing = slot_tokens_.getptr(p_key)) {
 		return *existing;
 	}
-	const int64_t token = _allocate_token();
+	const int64_t token = next_token_++;
 	slot_tokens_.insert(p_key, token);
-	return token;
-}
-
-int64_t EffectWorld::_owner_token_for(const Variant &p_key) {
-	if (const int64_t *existing = owner_tokens_.getptr(p_key)) {
-		return *existing;
-	}
-	const int64_t token = _allocate_token();
-	owner_tokens_.insert(p_key, token);
-	owner_keys_by_token_.insert(token, p_key);
+	slot_keys_by_token_.insert(token, p_key);
 	return token;
 }
 
 // The engine's spawn poses (runtime/particle/effect_scene.h): a descriptor
-// spawn (transient or owned) with a zero orientation is retail's "no
-// orientation" case and aims at +Y (particle::descriptor_pose); an attached
-// spawn keeps its identity local frame on a zero forward, its orientation
-// coming from the owner transform it composes with (particle::forward_pose).
+// spawn with a zero orientation is retail's "no orientation" case and aims at
+// +Y (particle::descriptor_pose); a forward pose keeps the identity frame on a
+// zero forward (particle::forward_pose).
 Transform3D EffectWorld::descriptor_pose(const Vector3 &p_position, const Vector3 &p_orientation) {
 	return godot_pose(opennova::particle::descriptor_pose(
 			{ p_position.x, p_position.y, p_position.z },
@@ -360,13 +335,6 @@ Transform3D EffectWorld::forward_pose(const Vector3 &p_position, const Vector3 &
 	return godot_pose(opennova::particle::forward_pose(
 			{ p_position.x, p_position.y, p_position.z },
 			{ p_forward.x, p_forward.y, p_forward.z }));
-}
-
-void EffectWorld::_seed_owner_pose(int64_t p_owner_token, const Transform3D &p_transform) {
-	owner_pose_cache_.insert(p_owner_token, p_transform);
-	owner_pose_batch_.clear();
-	owner_pose_batch_.add(p_owner_token, p_transform);
-	scene_->apply_owner_poses(owner_pose_batch_);
 }
 
 Ref<EffectSpawnReceipt> EffectWorld::_disabled_receipt() const {
@@ -386,36 +354,15 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_request(const String &p_name,
 		options.instantiate();
 	}
 	const int64_t handle = intern_effect(p_name);
-	const int admission = options->get_admission();
 	int64_t slot_token = 0;
-	int64_t owner_token = 0;
-	if (options->get_entity_slot() != 0) {
-		slot_token = options->get_entity_slot();
-	} else if (options->get_slot_key().get_type() != Variant::NIL) {
+	if (options->get_slot_key().get_type() != Variant::NIL) {
 		slot_token = _slot_token_for(options->get_slot_key());
 	}
-	if (options->get_owner_key().get_type() != Variant::NIL) {
-		owner_token = _owner_token_for(options->get_owner_key());
-	}
-	Transform3D owner_transform;
-	bool seed_owner_after_spawn = false;
-	if (owner_token > 0 && options->get_has_owner_transform()) {
-		owner_transform = options->get_owner_transform();
-		// ReplaceOwned must detach its predecessor at that predecessor's
-		// last pose. Seeding the new pose first would move both groups
-		// before the portable scene gets a chance to detach the old one.
-		seed_owner_after_spawn = admission == ADMISSION_REPLACE_OWNED;
-		if (!seed_owner_after_spawn) {
-			_seed_owner_pose(owner_token, owner_transform);
-		}
-	}
 	Ref<EffectSpawnRequest> request = EffectSpawnRequest::make(handle, p_transform);
-	request->set_admission(admission);
-	request->set_binding(options->get_binding());
+	request->set_admission(options->get_admission());
+	request->set_binding(EffectScene::BINDING_WORLD);
 	request->set_render_domain(options->get_render_domain());
 	request->set_slot_token(slot_token);
-	request->set_owner_token(owner_token);
-	request->set_owner_relative_transform(options->get_owner_relative_transform());
 	request->set_initial_age_ticks(options->get_initial_age_ticks());
 	request->set_force_zone(options->get_force_zone());
 	request->set_source_tick(options->get_source_tick());
@@ -425,11 +372,7 @@ Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_request(const String &p_name,
 	if (options->get_section_tagged()) {
 		_stamp_section_gate(request, p_transform.origin);
 	}
-	Ref<EffectSpawnReceipt> receipt = scene_->spawn(request);
-	if (seed_owner_after_spawn && receipt.is_valid() && receipt->get_spawned()) {
-		_seed_owner_pose(owner_token, owner_transform);
-	}
-	return receipt;
+	return scene_->spawn(request);
 }
 
 void EffectWorld::invalidate_scene_snapshot() {
@@ -540,67 +483,7 @@ int64_t EffectWorld::spawn_effect(const String &p_name, const Vector3 &p_positio
 			0, p_section_tagged);
 }
 
-Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_owned_request(const Variant &p_owner_key,
-		const String &p_name, const Vector3 &p_position, const Vector3 &p_orientation,
-		bool p_section_tagged) {
-	if (particles_disabled_) {
-		return _disabled_receipt();
-	}
-	const Transform3D initial_transform = descriptor_pose(p_position, p_orientation);
-	Ref<EffectSpawnOptions> options;
-	options.instantiate();
-	options->set_admission(ADMISSION_REPLACE_OWNED);
-	options->set_binding(BINDING_FOLLOW_OWNER);
-	options->set_slot_key(p_owner_key);
-	options->set_owner_key(p_owner_key);
-	options->set_owner_transform(initial_transform);
-	options->set_has_owner_transform(true);
-	options->set_section_tagged(p_section_tagged);
-	return spawn_effect_request(p_name, initial_transform, options);
-}
-
-int64_t EffectWorld::spawn_effect_owned(const Variant &p_owner_key, const String &p_name,
-		const Vector3 &p_position, const Vector3 &p_orientation, bool p_section_tagged) {
-	const Ref<EffectSpawnReceipt> receipt = spawn_effect_owned_request(
-			p_owner_key, p_name, p_position, p_orientation, p_section_tagged);
-	return receipt->get_effect_handle();
-}
-
-Ref<EffectSpawnReceipt> EffectWorld::spawn_effect_attached_request(const Variant &p_owner_key,
-		const String &p_name, const Transform3D &p_initial_transform,
-		const Vector3 &p_local_pos, const Vector3 &p_local_dir, bool p_section_tagged,
-		int64_t p_entity_slot) {
-	if (particles_disabled_) {
-		return _disabled_receipt();
-	}
-	const Transform3D local_transform = forward_pose(p_local_pos, p_local_dir);
-	Ref<EffectSpawnOptions> options;
-	options.instantiate();
-	if (p_entity_slot != 0) {
-		options->set_admission(ADMISSION_STORE_OWNED);
-		options->set_entity_slot(p_entity_slot);
-	}
-	options->set_binding(BINDING_FOLLOW_OWNER);
-	options->set_owner_key(p_owner_key);
-	options->set_owner_transform(p_initial_transform);
-	options->set_has_owner_transform(true);
-	options->set_owner_relative_transform(local_transform);
-	options->set_section_tagged(p_section_tagged);
-	return spawn_effect_request(p_name, p_initial_transform * local_transform, options);
-}
-
-int64_t EffectWorld::spawn_effect_attached(const Variant &p_owner_key, const String &p_name,
-		const Transform3D &p_initial_transform, const Vector3 &p_local_pos,
-		const Vector3 &p_local_dir, bool p_section_tagged) {
-	const Ref<EffectSpawnReceipt> receipt = spawn_effect_attached_request(p_owner_key, p_name,
-			p_initial_transform, p_local_pos, p_local_dir, p_section_tagged);
-	if (!receipt->get_spawned()) {
-		return 0;
-	}
-	return receipt->get_effect_handle();
-}
-
-int64_t EffectWorld::spawn_effect_unless_alive(const Variant &p_owner_key, const String &p_name,
+int64_t EffectWorld::spawn_effect_unless_alive(const Variant &p_slot_key, const String &p_name,
 		const Vector3 &p_position, const Vector3 &p_orientation) {
 	if (particles_disabled_) {
 		return 0;
@@ -608,7 +491,7 @@ int64_t EffectWorld::spawn_effect_unless_alive(const Variant &p_owner_key, const
 	Ref<EffectSpawnOptions> options;
 	options.instantiate();
 	options->set_admission(ADMISSION_SUPPRESS_WHILE_OWNED);
-	options->set_slot_key(p_owner_key);
+	options->set_slot_key(p_slot_key);
 	const Ref<EffectSpawnReceipt> receipt =
 			spawn_effect_request(p_name, descriptor_pose(p_position, p_orientation), options);
 	return receipt->get_effect_handle();
@@ -633,10 +516,19 @@ void EffectWorld::stop_group(int64_t p_group_id) {
 	scene_->detach(p_group_id);
 }
 
-void EffectWorld::detach_entity_slot(int64_t p_entity_slot) {
-	if (p_entity_slot != 0) {
-		scene_->detach_slot(p_entity_slot);
+bool EffectWorld::move_group(int64_t p_group_id, const Transform3D &p_pose) {
+	if (p_group_id == 0) {
+		return false;
 	}
+	const Vector3 forward = p_pose.basis.get_column(2);
+	const opennova::particle::Vec3 at{ p_pose.origin.x, p_pose.origin.y, p_pose.origin.z };
+	const opennova::particle::Vec3 aim{ forward.x, forward.y, forward.z };
+	const bool moved = scene_->shared_native_scene()->move_group(
+			opennova::particle::EffectGroupId{ static_cast<uint64_t>(p_group_id) }, at, &aim);
+	if (moved) {
+		scene_->invalidate_snapshot();
+	}
+	return moved;
 }
 
 bool EffectWorld::set_group_parameters(int64_t p_group_id, float p_rate_control,
@@ -645,98 +537,16 @@ bool EffectWorld::set_group_parameters(int64_t p_group_id, float p_rate_control,
 			scene_->set_group_parameters(p_group_id, p_rate_control, p_offset_control);
 }
 
-void EffectWorld::destroy_owned_group(const Variant &p_owner_key) {
-	if (const int64_t *slot_token = slot_tokens_.getptr(p_owner_key)) {
-		scene_->destroy_slot(*slot_token);
-	}
-}
-
-void EffectWorld::release_effect_binding(const Variant &p_owner_key) {
-	if (const int64_t *slot_token = slot_tokens_.getptr(p_owner_key)) {
+void EffectWorld::release_slot_key(const Variant &p_slot_key) {
+	if (const int64_t *slot_token = slot_tokens_.getptr(p_slot_key)) {
 		scene_->detach_slot(*slot_token);
-		slot_tokens_.erase(p_owner_key);
+		slot_keys_by_token_.erase(*slot_token);
+		slot_tokens_.erase(p_slot_key);
 	}
-	const int64_t *owner_token_ptr = owner_tokens_.getptr(p_owner_key);
-	if (owner_token_ptr == nullptr) {
-		return;
-	}
-	const int64_t owner_token = *owner_token_ptr;
-	// A group may already be detached by stop_group(), but explicitly
-	// retiring the native pose keeps this safe for rejected spawns and
-	// callers that only know the owner identity.
-	owner_pose_batch_.clear();
-	owner_pose_batch_.add_absent(owner_token);
-	scene_->apply_owner_poses(owner_pose_batch_);
-	owner_pose_cache_.erase(owner_token);
-	owner_keys_by_token_.erase(owner_token);
-	owner_tokens_.erase(p_owner_key);
 }
 
-bool EffectWorld::has_owner_binding(const Variant &p_owner_key) const {
-	const int64_t *owner_token = owner_tokens_.getptr(p_owner_key);
-	return slot_tokens_.has(p_owner_key) && owner_token != nullptr &&
-			owner_keys_by_token_.has(*owner_token);
-}
-
-bool EffectWorld::has_cached_owner_pose(const Variant &p_owner_key) const {
-	const int64_t *owner_token = owner_tokens_.getptr(p_owner_key);
-	if (owner_token == nullptr) {
-		return false;
-	}
-	return owner_pose_cache_.has(*owner_token);
-}
-
-bool EffectWorld::has_no_owner_bindings() const {
-	return slot_tokens_.is_empty() && owner_tokens_.is_empty() &&
-			owner_keys_by_token_.is_empty() && owner_pose_cache_.is_empty();
-}
-
-void EffectWorld::_sync_owner_poses(bool p_refresh_frame) {
-	if (!owner_position_provider_.is_valid()) {
-		return;
-	}
-	EffectOwnerPoseBatch &batch = owner_pose_batch_;
-	batch.clear();
-	const std::vector<opennova::particle::EffectOwnerToken> tokens =
-			scene_->native_scene().active_owner_tokens();
-	for (const opennova::particle::EffectOwnerToken &token : tokens) {
-		const int64_t owner_token = token_to_godot(token.value);
-		const Variant *owner_key = owner_keys_by_token_.getptr(owner_token);
-		if (owner_key == nullptr) {
-			continue;
-		}
-		const Variant state = owner_position_provider_.call(*owner_key);
-		if (state.get_type() == Variant::TRANSFORM3D) {
-			const Transform3D owner_transform = state;
-			if (const Transform3D *cached = owner_pose_cache_.getptr(owner_token)) {
-				if (cached->is_equal_approx(owner_transform)) {
-					continue;
-				}
-			}
-			owner_pose_cache_.insert(owner_token, owner_transform);
-			batch.add(owner_token, owner_transform);
-		} else if (state.get_type() == Variant::VECTOR3) {
-			const Transform3D *cached_ptr = owner_pose_cache_.getptr(owner_token);
-			const bool had_cached = cached_ptr != nullptr;
-			const Transform3D cached = had_cached ? *cached_ptr : Transform3D();
-			const Transform3D translated(cached.basis, Vector3(state));
-			if (had_cached && cached.is_equal_approx(translated)) {
-				continue;
-			}
-			owner_pose_cache_.insert(owner_token, translated);
-			batch.add(owner_token, translated);
-		} else {
-			owner_pose_cache_.erase(owner_token);
-			batch.add_absent(owner_token);
-		}
-	}
-	if (batch.get_count() > 0) {
-		if (p_refresh_frame) {
-			scene_->apply_owner_poses(batch);
-		} else {
-			scene_->apply_owner_poses_in_place(batch);
-		}
-	}
+bool EffectWorld::has_slot_key(const Variant &p_slot_key) const {
+	return slot_tokens_.has(p_slot_key);
 }
 
 void EffectWorld::set_mission_wind(int p_wind_speed, int p_wind_direction_degrees) {
@@ -751,7 +561,6 @@ void EffectWorld::advance_fixed_tick(double p_delta) {
 
 void EffectWorld::advance_simulation_tick(double p_delta,
 		const opennova::particle::ParticleForceField *p_forces) {
-	_sync_owner_poses(false);
 	// The NOVISNOUPDATE gate reads the camera that rendered the previous
 	// frame, like retail's manager clip state set at BeginFrame; without a
 	// current camera every emitter advances.
@@ -787,7 +596,6 @@ void EffectWorld::attach_distortion_row(Node *p_frame_fx) {
 }
 
 void EffectWorld::render_frame(int64_t p_time_ms) {
-	_sync_owner_poses(true);
 	_ensure_renderer()->render_now(p_time_ms);
 }
 
@@ -846,8 +654,8 @@ TypedArray<EffectGroupReport> EffectWorld::get_debug_group_report(bool p_include
 		}
 		row->set_id(token_to_godot(group.id.value));
 		row->set_name(to_gd(group.effect_name));
-		const Variant *owner_key = owner_keys_by_token_.getptr(token_to_godot(group.owner.value));
-		row->set_owner_key(owner_key != nullptr ? *owner_key : Variant());
+		const Variant *slot_key = slot_keys_by_token_.getptr(token_to_godot(group.slot.value));
+		row->set_slot_key(slot_key != nullptr ? *slot_key : Variant());
 		row->set_source(to_gd(group.source).get_file());
 		row->set_forever(forever && !group.detached);
 		row->set_admission(static_cast<int>(group.admission));
@@ -882,8 +690,6 @@ void EffectWorld::_bind_methods() {
 			&EffectWorld::set_particles_hidden);
 	ClassDB::bind_method(D_METHOD("are_particles_hidden"), &EffectWorld::are_particles_hidden);
 	ClassDB::bind_method(D_METHOD("get_image_provider"), &EffectWorld::get_image_provider);
-	ClassDB::bind_method(D_METHOD("set_owner_position_provider", "provider"),
-			&EffectWorld::set_owner_position_provider);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "value", "reflection_camera"),
 			&EffectWorld::set_water_plane);
 	ClassDB::bind_method(D_METHOD("set_inset_mirror_camera", "camera"),
@@ -927,17 +733,8 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_effect", "name", "position", "orientation",
 								 "section_tagged"),
 			&EffectWorld::spawn_effect, DEFVAL(Vector3()), DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("spawn_effect_owned_request", "owner_key", "name", "position",
-								 "orientation", "section_tagged"),
-			&EffectWorld::spawn_effect_owned_request, DEFVAL(Vector3()), DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("spawn_effect_owned", "owner_key", "name", "position",
-								 "orientation", "section_tagged"),
-			&EffectWorld::spawn_effect_owned, DEFVAL(Vector3()), DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("spawn_effect_attached", "owner_key", "name", "initial_transform",
-								 "local_pos", "local_dir", "section_tagged"),
-			&EffectWorld::spawn_effect_attached, DEFVAL(false));
 	ClassDB::bind_method(
-			D_METHOD("spawn_effect_unless_alive", "owner_key", "name", "position", "orientation"),
+			D_METHOD("spawn_effect_unless_alive", "slot_key", "name", "position", "orientation"),
 			&EffectWorld::spawn_effect_unless_alive, DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("spawn_effect_by_handle", "handle", "position", "orientation"),
 			&EffectWorld::spawn_effect_by_handle, DEFVAL(Vector3()));
@@ -945,12 +742,9 @@ void EffectWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_group_parameters", "group_id", "rate_control",
 					"offset_control"),
 			&EffectWorld::set_group_parameters);
-	ClassDB::bind_method(D_METHOD("release_effect_binding", "owner_key"),
-			&EffectWorld::release_effect_binding);
-	ClassDB::bind_method(D_METHOD("has_owner_binding", "owner_key"), &EffectWorld::has_owner_binding);
-	ClassDB::bind_method(D_METHOD("has_cached_owner_pose", "owner_key"),
-			&EffectWorld::has_cached_owner_pose);
-	ClassDB::bind_method(D_METHOD("has_no_owner_bindings"), &EffectWorld::has_no_owner_bindings);
+	ClassDB::bind_method(D_METHOD("move_group", "group_id", "pose"), &EffectWorld::move_group);
+	ClassDB::bind_method(D_METHOD("release_slot_key", "slot_key"), &EffectWorld::release_slot_key);
+	ClassDB::bind_method(D_METHOD("has_slot_key", "slot_key"), &EffectWorld::has_slot_key);
 	ClassDB::bind_method(D_METHOD("advance_fixed_tick", "delta"), &EffectWorld::advance_fixed_tick);
 	ClassDB::bind_method(D_METHOD("set_mission_wind", "wind_speed", "wind_direction_degrees"),
 			&EffectWorld::set_mission_wind);
@@ -965,8 +759,6 @@ void EffectWorld::_bind_methods() {
 	BIND_CONSTANT(ADMISSION_REPLACE_OWNED);
 	BIND_CONSTANT(ADMISSION_SUPPRESS_WHILE_OWNED);
     BIND_CONSTANT(ADMISSION_STORE_OWNED);
-	BIND_CONSTANT(BINDING_WORLD);
-	BIND_CONSTANT(BINDING_FOLLOW_OWNER);
 	BIND_CONSTANT(RENDER_DOMAIN_WORLD);
 	BIND_CONSTANT(RENDER_DOMAIN_FIRST_PERSON);
 	BIND_CONSTANT(KILL_PLANE_DISABLED);

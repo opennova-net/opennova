@@ -74,10 +74,4 @@ inline MissionAudio *mission_audio(Object *p_world) {
 			: nullptr;
 }
 
-inline Ref<ItemEffectDirector> item_effect_director(Object *p_world) {
-	if (GameWorld *world = game_world(p_world)) return world->get_item_effect_director();
-	return p_world != nullptr ? Ref<ItemEffectDirector>(p_world->call("get_item_effect_director"))
-							  : Ref<ItemEffectDirector>();
-}
-
 } // namespace godot::world_access
