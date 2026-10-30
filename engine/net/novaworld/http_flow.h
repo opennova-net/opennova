@@ -24,11 +24,10 @@
 // Godot-free: no HTTPRequest, no Variant. The owner ships each HttpRequestSpec over its transport and
 // feeds the (code, headers, body) back in.
 //
-// Faithful port of novaworld_client.cpp's login()/send_login_post()/on_login_request_completed(),
-// gsb_url()/request_server_list()/on_gsb_request_completed(), join()/on_join_request_completed(),
-// and http_base()/request_headers()/merge_response_cookies(). The URL/.dll shapes are
-// byte-preserved, the startup URL's version pair and product code the title's (Protocol::ver1
-// / ver2 / product_code); every page name and pfid is the service's: NWStart's is the start page's
+// The login, the list and the join moved here from godot/src/network/novaworld_client.cpp, which
+// now ships each request and feeds its reply back. The URL/.dll shapes are byte-preserved, the
+// startup URL's version pair and product code the protocol's (Protocol::ver1 / ver2 /
+// product_code); every page name and pfid is the service's: NWStart's is the start page's
 // refresh, followed as it stands, the NWLogin form the sign-in page's own, posted as it stands
 // (ib3_form_inputs), and the list and the NWJoin URL the lobby page's template's actions
 // (gsb_request, join).

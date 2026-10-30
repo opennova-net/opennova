@@ -1514,7 +1514,7 @@ it ([`CMakeLists.txt`](CMakeLists.txt) says what each holds):
 | `opennova_novaworld_jobs` | `jobs/` | core | web, the fleet, the worker, data |
 | `opennova_novaworld_accounts` | `accounts/` | core, program, jobs | web, the fleet, the worker |
 | `opennova_novaworld_billing` | `billing/` | core, jobs | web, the fleet, the worker |
-| `opennova_novaworld_products` | `products/` | core, jobs | web, the fleet, the worker, data |
+| `opennova_novaworld_products` | `products/` | core, program, jobs | web, the fleet, the worker, data |
 | `opennova_novaworld_hosting_model` | `hosted/model/` | core, program, jobs, billing, products, hosting_protocol | web, the fleet, the worker |
 | `opennova_novaworld_hosting_cloud` | `hosted/cloud/` | core, jobs, billing, hosting_protocol, hosting_model | the worker alone |
 
