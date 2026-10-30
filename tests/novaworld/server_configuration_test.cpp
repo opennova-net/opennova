@@ -128,7 +128,8 @@ int main() {
 	TEST_EXPECT(edit.commands == std::vector<std::string>{ "SET ServerName A new name" } &&
 			!edit.next_launch.get("game_name"));
 	for (const char *uncarried : { R"({"game_name":"OpenNova Dedicated Server East1"})",
-				 R"({"game_name":"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"})", R"({"game_name":"Two  blanks"})" }) {
+				 R"({"game_name":"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"})",
+				 R"({"game_name":"Two  blanks"})" }) {
 		io::JsonValue named;
 		TEST_EXPECT(io::json_parse(uncarried, named, error));
 		edit = edit_of(uncarried, saved, known);
