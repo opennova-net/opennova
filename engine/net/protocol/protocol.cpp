@@ -39,13 +39,17 @@ const char *part_name(ProtocolPart part) {
 // (resolve_title_protocol), set before its first in-match read. No session runs another title's.
 [[noreturn]] void session_protocol_missing(const char *reader, const Protocol *protocol,
 		const char *part) {
-	if (protocol == nullptr)
-		std::fprintf(stderr, "%s: the session runs no protocol: the host or joiner sets its "
-				"title's (title_protocol) before an in-match read\n", reader);
-	else
-		std::fprintf(stderr, "%s: the %s protocol leaves its %s unwitnessed: no session runs it "
-				"(resolve_title_protocol)\n", reader,
-				protocol->code != nullptr ? protocol->code : "?", part);
+	std::fputs(reader, stderr);
+	if (protocol == nullptr) {
+		std::fputs(": the session runs no protocol: the host or joiner sets its title's "
+				"(title_protocol) before an in-match read\n", stderr);
+	} else {
+		std::fputs(": the ", stderr);
+		std::fputs(protocol->code != nullptr ? protocol->code : "?", stderr);
+		std::fputs(" protocol leaves its ", stderr);
+		std::fputs(part, stderr);
+		std::fputs(" unwitnessed: no session runs it (resolve_title_protocol)\n", stderr);
+	}
 	std::abort();
 }
 
