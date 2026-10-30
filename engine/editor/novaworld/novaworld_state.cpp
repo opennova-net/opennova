@@ -1,5 +1,6 @@
 #include <editor/novaworld/novaworld_state.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <system_error>
 
@@ -96,6 +97,26 @@ bool read_novaworld_state(
 	}
 	out.revision = static_cast<int64_t>(number);
 	return true;
+}
+
+std::vector<NovaWorldServiceCopy> read_novaworld_copies(const ProjectPaths &paths) {
+	std::vector<NovaWorldServiceCopy> out;
+	NovaWorldPaths service = NovaWorldPaths::for_project(paths, "");
+	std::error_code ec;
+	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(service.dir), ec)) {
+		if (!entry.is_directory(ec))
+			continue;
+		NovaWorldServiceCopy found;
+		found.host = io::utf8_path(entry.path().filename());
+		service.state_file = join_path(join_path(service.dir, found.host), "state.json");
+		std::string error;
+		if (read_novaworld_state(service, found.copy, error))
+			out.push_back(std::move(found));
+	}
+	std::sort(out.begin(), out.end(), [](const NovaWorldServiceCopy &a, const NovaWorldServiceCopy &b) {
+		return a.host < b.host;
+	});
+	return out;
 }
 
 bool write_novaworld_state(

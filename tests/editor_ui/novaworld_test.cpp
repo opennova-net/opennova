@@ -9,7 +9,7 @@
 // is (none of another kind chosen), and no Bind anywhere; a
 // project whose working copy is being set up, or that the service does not show; the sign-in's form raising
 // novaworld_sign_in with what was typed; the store's projects listed with no project open in two groups, Yours
-// and Everyone's, Get... asking for a folder and the pick getting the project into a folder of its key's name,
+// and Everyone's, Sync... asking for a folder and the pick getting the project into a folder of its key's name,
 // Set up... filling the New project form for an empty one, which then says so with its clear; the welcome page's
 // section; Project settings' NovaWorld section; nothing past its room.
 #include <cstdio>
@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <editor/project/project_document.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_windows.h>
@@ -77,6 +78,235 @@ SessionView tracked_view() {
 
 ImGuiID novaworld_item(std::initializer_list<const char *> steps) { return item_id(Ui::window_id("NovaWorld"), steps); }
 ImGuiID put_item(std::initializer_list<const char *> steps) { return item_id(ImHashStr("Put on NovaWorld"), steps); }
+ImGuiID own_item(std::initializer_list<const char *> steps) { return item_id(ImHashStr("Make it your own"), steps); }
+ImGuiID replace_item(std::initializer_list<const char *> steps) {
+	return item_id(ImHashStr("Replace with this folder"), steps);
+}
+
+// Every standing, with what the window and the status bar say of it.
+void test_standing() {
+	using Kind = NovaWorldStandingKind;
+	SessionView v = tracked_view();
+	NovaWorldView &c = v.novaworld;
+	const auto is = [&c](Kind kind, const char *line, const char *status, const char *what) {
+		const NovaWorldStanding standing = novaworld_standing(c);
+		CHECK(standing.kind == kind && standing.line == line && standing.status == status, what);
+	};
+	is(Kind::Behind, "r3, r5 on NovaWorld, 2 changed", "novaworld.test: r3, 2 changed, 2 incoming", "behind and changed");
+	CHECK(novaworld_standing(c).tip.find("novaworld.test") != std::string::npos, "the service named");
+	c.changes.clear();
+	is(Kind::Behind, "r3, r5 on NovaWorld", "novaworld.test: r3, 2 incoming", "behind");
+	c.revision = 5;
+	is(Kind::UpToDate, "r5, up to date", "novaworld.test: r5", "up to date");
+	c.changes = {{"defs/a.def", NovaWorldChange::Modified}};
+	is(Kind::Changed, "r5, 1 changed", "novaworld.test: r5, 1 changed", "changed, never up to date");
+	c.checked = false;
+	is(Kind::Changed, "r5, 1 changed", "novaworld.test: r5, 1 changed", "counted before the last save: still said");
+	c.changes.clear();
+	is(Kind::Unchecked, "r5, not checked yet", "novaworld.test: r5", "not counted, never up to date");
+	c.conflicts = {NovaWorldConflictView{"defs/a.def", {}, {}}};
+	is(Kind::Conflicts, "r5, 1 conflict", "novaworld.test: r5, 1 conflict", "conflicts first");
+	c.conflicts.clear();
+	c.head_known = false;
+	c.head_error = "NovaWorld did not answer.";
+	is(Kind::Unreachable, "r5, NovaWorld not reached", "novaworld.test: r5, not reached", "the service not answering");
+	c.head_missing = true;
+	is(Kind::NotFound, "Not on novaworld.test, or private.", "novaworld.test: not found", "a 404 is no silence");
+	c.head_missing = false;
+	c.head_error.clear();
+	c.head_known = true;
+	c.revision = 0;
+	is(Kind::NoRevision, "No revision here yet: Pull r5 first.", "novaworld.test: no revision yet", "no revision held");
+	c.tracked = false;
+	is(Kind::NotSetUp, "Not set up here yet.", "novaworld.test: not set up", "no working copy, nothing making one");
+	c.setting_up = true;
+	is(Kind::SettingUp, "Setting up...", "novaworld.test: setting up", "the setup running");
+	c.setting_up = false;
+	c.head_error = "The setup failed.";
+	is(Kind::Unreachable, "NovaWorld not reached", "novaworld.test: not reached", "the setup not answered");
+	c.key.clear();
+	is(Kind::None, "", "", "on no project: nothing to say");
+	std::printf("content: every standing, what the window and the status bar say of it\n");
+}
+
+// A read-only project's Make it your own...: asked first, what goes and stays said, nothing raised until it is
+// confirmed; a mod warned its short name stays NovaWorld's. Signed out, an owner reads as anyone, so it is not offered.
+// Not on NovaWorld with the folder's state naming a project: Rejoin. The service showing the project none: Rejoin
+// where the state names one, and leaving it, signed in.
+void test_make_own() {
+	Ui ui;
+	SessionView v = tracked_view();
+	NovaWorldView &c = v.novaworld;
+	c.role = "player";
+	c.remote.can_push = false;
+	c.remote.can_release = false;
+	ui.windows.set_view(&v);
+	ui.focus("NovaWorld");
+	ui.frames(2);
+	ui.activate(novaworld_item({"Make it your own..."}));
+	CHECK(ui.drain().empty(), "Make it your own...: nothing raised yet");
+	ui.frames(2);
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("on every service") != std::string::npos && text.find("Rejoin brings") != std::string::npos,
+	      "what goes, what stays and the way back said");
+	ui.activate(own_item({"Cancel"}));
+	CHECK(ui.drain().empty(), "Cancel raises nothing");
+	ui.frames(2);
+
+	ProjectDocument mod = *v.project.document;
+	mod.expansion.name = "night";
+	mod.expansion.builds_on = "JO";
+	v.project.document = std::make_shared<const ProjectDocument>(mod);
+	ui.activate(novaworld_item({"Make it your own..."}));
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("NovaWorld keeps this mod's short name.") != std::string::npos, "a mod: warned");
+	ui.activate(own_item({"Make it your own"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldMakeOwn), "confirmed: one novaworld_make_own");
+	ui.frames(2);
+
+	c.signed_in = false;
+	c.role.clear();
+	ui.frames(2);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Sign in to push.") != std::string::npos && text.find("Read-only") == std::string::npos &&
+	              text.find("Make it your own...") == std::string::npos,
+	      "signed out: an owner is not told the project is another's");
+	c.signed_in = true;
+	c.role = "player";
+
+	c.key.clear();
+	c.tracked = false;
+	c.former_key = "MOD";
+	c.former_revision = 3;
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Was on NovaWorld at r3.") != std::string::npos, "the folder's state: said");
+	ui.activate(novaworld_item({"Rejoin"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldRejoin), "Rejoin: one novaworld_rejoin");
+
+	c.key = "OLD";
+	c.head_missing = true;
+	c.head_error = "OLD is not on novaworld.test, or is private.";
+	ui.frames(2);
+	ui.activate(novaworld_item({"Rejoin"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldRejoin), "not found: Rejoin");
+	c.former_key.clear();
+	ui.frames(2);
+	ui.activate(novaworld_item({"Make it your own..."}));
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("on every service") != std::string::npos, "not found: leaving it asks first too");
+	std::printf("content: Make it your own asks first, Rejoin the way back\n");
+}
+
+// Which service an editor is on, said where two editors side by side are told apart; a folder holding no revision
+// with Replace with this folder..., asked first; a project this service shows none of with Put on its host....
+void test_two_services() {
+	Ui ui;
+	SessionView v = tracked_view();
+	NovaWorldView &c = v.novaworld;
+	CHECK(editor_window_title(v) == "My Mod - OpenNova Editor (novaworld.test)", "the window's title names the service");
+	// The project open now, in the list under it: nothing to open.
+	ProjectView::RecentProject here;
+	here.root = v.project.root;
+	here.found = true;
+	here.novaworld = "MOD";
+	v.project.working_copies = {here};
+	ui.windows.set_view(&v);
+	ui.focus("NovaWorld");
+	ui.frames(2);
+	ui.activate(novaworld_item({"Other projects on NovaWorld"}));
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Open now") != std::string::npos, "the open project's row says so");
+	ui.activate(novaworld_item({"Other projects on NovaWorld"}));
+	ui.drain();
+	v.project.working_copies.clear();
+
+	c.revision = 0;
+	c.other_copies = {{"staging.test", 12}};
+	ui.frames(2);
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("At r12 on staging.test") != std::string::npos, "where it stands on the other service");
+	ui.activate(novaworld_item({"Replace with this folder..."}));
+	CHECK(ui.drain().empty(), "Replace with this folder...: nothing raised yet");
+	ui.frames(2);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("anything newer") != std::string::npos && text.find("Nothing is sent until you push") != std::string::npos,
+	      "what it undoes, and that nothing is sent yet");
+	ui.activate(replace_item({"Replace with this folder"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldKeepFolder), "confirmed: one novaworld_keep_folder");
+	ui.frames(2);
+
+	c.revision = 3;
+	c.head_known = false;
+	c.remote_known = false;
+	c.head_missing = true;
+	c.head_error = "MOD is not on novaworld.test, or is private.";
+	ui.frames(2);
+	ui.activate(novaworld_item({"Put on novaworld.test..."}));
+	ui.frames(3);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Put on its host...: the lists asked again");
+	CHECK(text.find("Who gets it") != std::string::npos, "Put on its host...: the dialog, asking no key");
+	std::printf("content: the service named, Replace with this folder asked first, Put on its host\n");
+}
+
+// The controls that rewrite a folder's place on NovaWorld follow the gate: while a build holds the project, each stays
+// held back, and takes its request once it ends. (gate_test.cpp's walk stands on a view with no NovaWorld project.)
+void test_controls_wait_for_the_gate() {
+	Ui ui;
+	SessionView v = tracked_view();
+	NovaWorldView &c = v.novaworld;
+	c.key.clear();
+	c.tracked = false;
+	c.former_key = "MOD";
+	ui.windows.set_view(&v);
+	ui.focus("NovaWorld");
+	ui.frames(2);
+
+	OperationStatus building;
+	building.id = 1;
+	building.kind = OperationKind::Build;
+	building.reads = operation_kind_row(OperationKind::Build).reads;
+	building.writes = operation_kind_row(OperationKind::Build).writes;
+	const auto with_build = [&](bool running) {
+		v.activity.operation = running ? building : OperationStatus();
+		v.revisions.touch(ViewConcern::Operation);
+		ui.frames(2);
+		ui.drain();
+	};
+	with_build(true);
+	CHECK(!v.allows(EditorRequestKind::NovaWorldRejoin) && !v.allows(EditorRequestKind::NovaWorldMakeOwn) &&
+	              !v.allows(EditorRequestKind::NovaWorldKeepFolder),
+	      "a build holds the folder's place on NovaWorld");
+	ui.activate(novaworld_item({"Rejoin"}));
+	CHECK(ui.drain().empty(), "Rejoin waits for the build");
+	with_build(false);
+	ui.activate(novaworld_item({"Rejoin"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldRejoin), "Rejoin after it");
+
+	c.key = "MOD";
+	c.tracked = true;
+	c.revision = 0;
+	c.former_key.clear();
+	with_build(true);
+	ui.activate(novaworld_item({"Replace with this folder..."}));
+	ui.frames(2);
+	CHECK(ui.drain().empty(), "Replace with this folder... waits for the build");
+	with_build(false);
+	ui.activate(novaworld_item({"Replace with this folder..."}));
+	ui.frames(2);
+	ui.activate(replace_item({"Replace with this folder"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldKeepFolder), "Replace with this folder after it");
+	std::printf("content: what rewrites a folder's place on NovaWorld waits for the gate\n");
+}
 
 void test_working_copy() {
 	Ui ui;
@@ -86,12 +316,13 @@ void test_working_copy() {
 	ui.away();
 	const std::string text = logged_frame(ui);
 	CHECK(text.find("taylor (admin) on novaworld.test") != std::string::npos, "who is signed in, and where");
-	CHECK(text.find("MOD r3, r5 on NovaWorld") != std::string::npos, "the revision and NovaWorld's newest");
+	CHECK(text.find("r3, r5 on NovaWorld, 2 changed") != std::string::npos, "the revision and NovaWorld's newest");
 	CHECK(text.find("Changes (2)") != std::string::npos && text.find("modified  defs/a.def") != std::string::npos &&
 	              text.find("added  models/b.3di") != std::string::npos,
 	      "the changes, each with what it did");
-	CHECK(text.find("MOD r3, 2 changed, 2 incoming") != std::string::npos, "the status bar's standing");
+	CHECK(text.find("novaworld.test: r3, 2 changed, 2 incoming") != std::string::npos, "the status bar's standing");
 	CHECK(text.find("Bind") == std::string::npos, "no Bind");
+	CHECK(text.find("MOD") == std::string::npos, "the key is no word of the window's");
 	for (const std::string &offender : overflowing()) CHECK(false, ("tracked: " + offender).c_str());
 
 	// Push waits for a message; typed, it raises novaworld_push with it.
@@ -101,9 +332,15 @@ void test_working_copy() {
 	ImGui::GetIO().AddInputCharactersUTF8("Fix the armory");
 	ui.frames(2);
 	ui.activate(novaworld_item({"Push"}));
+	CHECK(ui.drain().empty(), "behind: Push waits for a pull");
+	v.novaworld.head = 3;
+	ui.frames(2);
+	ui.activate(novaworld_item({"Push"}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *push = one(raised, EditorRequestKind::NovaWorldPush);
 	CHECK(push && push->message == "Fix the armory", "Push: one novaworld_push with the message");
+	v.novaworld.head = 5;
+	ui.frames(2);
 
 	// Release r3 waits for a game version; typed, it raises novaworld_release with it. Above it, the release players
 	// get and the protocol the project's title speaks.
@@ -225,8 +462,12 @@ void test_working_copy() {
 	              read_only.find("Players update to 0.1.0, built by ONE 0.0.22.") != std::string::npos,
 	      "a player's own project: no read-only line, its Release and the release players get, with the ONE that "
 	      "built it");
+	v.novaworld.head = 3; // caught up: Push waits for nothing
+	ui.frames(2);
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldPush), "a player's own project: Push");
+	v.novaworld.head = 5;
+	ui.frames(2);
 	const uint64_t before_menu = v.events.next_seq();
 	CHECK(choose(ui, "Build", {"###release"}).empty() && v.events.next_seq() > before_menu,
 	      "a player's own project: Build > Release... brings the NovaWorld window forward");
@@ -268,7 +509,7 @@ void test_working_copy() {
 	v.novaworld.revision = 0;
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("No revision of MOD here yet: Pull r5 first.") != std::string::npos, "no revision: said");
+	CHECK(logged_frame(ui).find("No revision here yet: Pull r5 first.") != std::string::npos, "no revision: said");
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(ui.drain().empty(), "no revision: Push waits for a pull");
 	v.novaworld.revision = 3;
@@ -322,6 +563,8 @@ void test_put_and_sign_in() {
 	CHECK(text.find("Runs as Joint Operations (JO protocol 16)") != std::string::npos &&
 	              text.find("Who gets it") != std::string::npos,
 	      "what it makes, and who gets it, shown");
+	CHECK(text.find("Details") != std::string::npos && text.find("MYMOD") == std::string::npos,
+	      "its key made from its name, kept under Details");
 	ui.activate(put_item({"Put"}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NovaWorldPut);
@@ -377,7 +620,7 @@ void test_put_and_sign_in() {
 	ui.frames(2);
 	ui.drain();
 	ui.away();
-	CHECK(logged_frame(ui).find("A mod of Joint Operations (JO), as mymod") != std::string::npos,
+	CHECK(logged_frame(ui).find("A mod of Joint Operations, as mymod") != std::string::npos,
 	      "a mod's base game, by its name");
 	ui.activate(put_item({"Cancel"}));
 	ui.drain();
@@ -405,16 +648,25 @@ void test_put_and_sign_in() {
 	// Set up for a key the service does not show: said so, and Check.
 	c.key = "NOPE";
 	c.head_error = "NOPE is not on novaworld.test, or is private: sign in with an account that may read it.";
+	c.head_missing = true;
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("NOPE is not on novaworld.test, or is private") != std::string::npos,
+	CHECK(logged_frame(ui).find("Not on novaworld.test, or private.") != std::string::npos,
 	      "a key the service does not show: said");
 	ui.activate(novaworld_item({"Check"}));
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Check: one novaworld_check");
 	c.head_error.clear();
+	c.head_missing = false;
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("Setting up NOPE's working copy...") != std::string::npos, "being set up: said");
+	const std::string idle = logged_frame(ui);
+	CHECK(idle.find("Not set up here yet.") != std::string::npos && idle.find("Setting up") == std::string::npos,
+	      "nothing setting it up: never said to be");
+	c.setting_up = true;
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Setting up...") != std::string::npos, "being set up: said");
+	c.setting_up = false;
 	c.key.clear();
 
 	// Signed out: the form, its server the view's, and what was typed.
@@ -466,45 +718,67 @@ void test_get_a_project() {
 	ui.frames(3);
 	ui.away();
 	const std::string home = logged_frame(ui);
-	CHECK(home.find("Get a project from NovaWorld") != std::string::npos && home.find("A mod  MOD r5") != std::string::npos,
+	CHECK(home.find("Sync a project from NovaWorld") != std::string::npos && home.find("A mod  r5") != std::string::npos,
 	      "the welcome page lists the store's projects");
 	CHECK(home.find("OpenNova's") != std::string::npos && home.find("Players'") != std::string::npos &&
-	              home.find("Theirs  THEIRS r5") != std::string::npos && home.find("Mine  EMPTY, empty") != std::string::npos,
+	              home.find("Theirs  r5") != std::string::npos && home.find("Mine, empty") != std::string::npos,
 	      "in groups by whose they are: OpenNova's, other players'");
-	// The NovaWorld window shown over the welcome page lists them too; Get... asks for a folder.
+	// The NovaWorld window shown over the welcome page lists them too; Sync... asks for a folder.
 	auto *content = const_cast<devtools::Window *>(find_window(ui.windows.pass(), "NovaWorld"));
 	CHECK(content != nullptr, "the NovaWorld window");
 	if (!content) return;
 	content->show_anyway();
 	ui.focus("NovaWorld");
-	ui.activate(novaworld_item({"novaworld_opennova", "MOD", "Get..."}));
+	ui.activate(novaworld_item({"novaworld_opennova", "MOD", "Sync..."}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *pick = one(raised, EditorRequestKind::PickDirectory);
 	CHECK(pick && pick->purpose == PickPurpose::NovaWorldFolder && pick->project_key.empty(),
-	      "Get...: one pick of a folder, the key kept by the windows");
+	      "Sync...: one pick of a folder, the key kept by the windows");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	raised = ui.drain();
-	const EditorRequest *get = one(raised, EditorRequestKind::NovaWorldGet);
+	const EditorRequest *get = one(raised, EditorRequestKind::NovaWorldSync);
 	CHECK(get && get->project_key == "MOD" && get->dir == "C:/mods/MOD", "the pick: the project got into C:/mods/MOD");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/other");
-	CHECK(ui.drain().empty(), "a second pick with no Get... before it gets nothing");
-	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Get..."}));
-	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "another's project: Get...");
+	CHECK(ui.drain().empty(), "a second pick with no Sync... before it gets nothing");
+	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Sync..."}));
+	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "another's project: Sync...");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	ui.drain();
-	// A copy of it on this computer (a recent project naming its key): Open, no second get.
+	// A copy of it on this computer, on the recent list or not: Open, no second get, the latest of several.
 	ProjectView::RecentProject copy;
 	copy.root = "C:/mods/THEIRS";
 	copy.found = true;
 	copy.title = "Theirs";
 	copy.novaworld = "THEIRS";
-	v.project.recent_details = {copy};
+	ProjectView::RecentProject older = copy;
+	older.root = "D:/old/THEIRS";
+	ProjectView::RecentProject unplugged = copy;
+	unplugged.root = "E:/gone/THEIRS";
+	unplugged.found = false;
+	v.project.working_copies = {unplugged, copy, older};
 	ui.frames(2);
 	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Open"}));
 	raised = ui.drain();
 	const EditorRequest *opened = one(raised, EditorRequestKind::OpenProject);
-	CHECK(opened && opened->dir == "C:/mods/THEIRS", "a copy on this computer: Open opens it");
-	v.project.recent_details.clear();
+	CHECK(opened && opened->dir == "C:/mods/THEIRS", "a copy on this computer: Open opens the latest one found");
+	// Its folder not found: nothing to open, so it can be got again.
+	v.project.working_copies = {unplugged};
+	ui.frames(2);
+	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Sync..."}));
+	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "no copy found: Sync...");
+	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
+	ui.drain();
+	// An empty project this computer has a copy of (put, nothing pushed): Open, never a second folder.
+	ProjectView::RecentProject empty_copy = copy;
+	empty_copy.root = "C:/mods/Mine";
+	empty_copy.novaworld = "EMPTY";
+	v.project.working_copies = {empty_copy};
+	ui.frames(2);
+	ui.activate(novaworld_item({"novaworld_opennova", "EMPTY", "Open"}));
+	raised = ui.drain();
+	opened = one(raised, EditorRequestKind::OpenProject);
+	CHECK(opened && opened->dir == "C:/mods/Mine", "an empty project's copy: Open before Set up...");
+	v.project.working_copies.clear();
 	ui.frames(2);
 	// Set up...: the New project form filled for the empty project, a mod of its code (the workspace's, as the
 	// session takes the set_workspace).
@@ -521,7 +795,7 @@ void test_get_a_project() {
 	ui.focus("Document");
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("For NovaWorld project EMPTY") != std::string::npos, "the form says what it is for");
+	CHECK(logged_frame(ui).find("For NovaWorld project Mine") != std::string::npos, "the form says what it is for");
 	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
 	ui.activate(item_id(welcome, {"Make the project"}));
 	raised = ui.drain();
@@ -530,7 +804,7 @@ void test_get_a_project() {
 	ui.activate(item_id(welcome, {"x##novaworld"}));
 	ui.drain();
 	CHECK(form.novaworld.empty(), "its clear: the form for no NovaWorld project");
-	std::printf("content: the store's projects on the welcome page, yours and everyone's, Get... and its folder, "
+	std::printf("content: the store's projects on the welcome page, yours and everyone's, Sync... and its folder, "
 	            "Set up... and the form it fills\n");
 }
 
@@ -545,7 +819,7 @@ void test_settings_section() {
 	ui.windows.set_view(&v);
 	ui.frames(3);
 	ui.away();
-	CHECK(logged_frame(ui).find("MOD on novaworld.test, revision 3, Public") != std::string::npos,
+	CHECK(logged_frame(ui).find("novaworld.test: r3, r5 on NovaWorld, 2 changed, Public") != std::string::npos,
 	      "settings: its NovaWorld project, revision and who gets it");
 	ui.activate(item_id(ImHashStr("Project settings"), {"Open on the site"}));
 	{
@@ -797,6 +1071,10 @@ void test_activity() {
 } // namespace
 
 void run_novaworld_tests() {
+	test_standing();
+	test_make_own();
+	test_two_services();
+	test_controls_wait_for_the_gate();
 	test_working_copy();
 	test_put_and_sign_in();
 	test_get_a_project();

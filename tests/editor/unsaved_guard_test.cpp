@@ -295,7 +295,7 @@ static int test_prompt_words_from_the_table() {
 		{EditorRequestKind::UndoFile, "Undo file", "Save all and undo"},
 		{EditorRequestKind::RedoFile, "Redo file", "Save all and redo"},
 		// ADR 0069: a get opens another project; a pull writes the files and a push reads them, as saved.
-		{EditorRequestKind::NovaWorldGet, "Get a project", "Save all"},
+		{EditorRequestKind::NovaWorldSync, "Sync a project", "Save all"},
 		{EditorRequestKind::NovaWorldPull, "Pull", "Save all and pull"},
 		{EditorRequestKind::NovaWorldPush, "Push", "Save all and push"},
 		{EditorRequestKind::NovaWorldRestore, "Discard the changes to main.mnu", "Save"},

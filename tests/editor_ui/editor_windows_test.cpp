@@ -166,7 +166,7 @@ void test_frame_bracket_follows_the_table() {
 	                              K::DeleteAsset, K::DuplicateAsset, K::RenameFolder, K::DeleteFolder, K::UndoFile,
 	                              K::RedoFile,
 	                              // ADR 0069: a NovaWorld get, a pull, a push and a restore act on the files as saved.
-	                              K::NovaWorldGet, K::NovaWorldPull, K::NovaWorldPush, K::NovaWorldRestore};
+	                              K::NovaWorldSync, K::NovaWorldPull, K::NovaWorldPush, K::NovaWorldRestore};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.

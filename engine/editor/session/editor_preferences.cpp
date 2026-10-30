@@ -22,16 +22,50 @@ bool EditorPreferences::load(Diagnostic &finding) {
 	return true;
 }
 
+// `preferences` with any working copy the store keeps that they lack: a debug and a release editor share the file.
+static void take_stored_copies(PreferencesStore &store, Preferences &preferences) {
+	Preferences kept;
+	Diagnostic finding;
+	if (!store.load(kept, finding)) return;
+	std::vector<std::string> &copies = preferences.working_copies;
+	for (const std::string &root : kept.working_copies)
+		if (copies.size() < kWorkingCopiesMax && std::find(copies.begin(), copies.end(), root) == copies.end())
+			copies.push_back(root);
+}
+
 bool EditorPreferences::write(const Preferences &next, Diagnostic &error) {
-	if (!store_.save(next, error)) return false;
-	values_ = next;
+	Preferences merged = next;
+	take_stored_copies(store_, merged);
+	if (!store_.save(merged, error)) return false;
+	values_ = std::move(merged);
 	return true;
+}
+
+bool EditorPreferences::save(Diagnostic &error) {
+	take_stored_copies(store_, values_);
+	return store_.save(values_, error);
 }
 
 void EditorPreferences::remember_recent_project(const std::string &root) {
 	forget_recent_project(root);
 	values_.recent_projects.insert(values_.recent_projects.begin(), root);
 	if (values_.recent_projects.size() > kRecentProjectsMax) values_.recent_projects.resize(kRecentProjectsMax);
+}
+
+bool EditorPreferences::remember_working_copy(const std::string &root) {
+	std::vector<std::string> &copies = values_.working_copies;
+	if (!copies.empty() && copies.front() == root) return false;
+	copies.erase(std::remove(copies.begin(), copies.end(), root), copies.end());
+	copies.insert(copies.begin(), root);
+	if (copies.size() > kWorkingCopiesMax) copies.resize(kWorkingCopiesMax);
+	return true;
+}
+
+bool EditorPreferences::know_working_copy(const std::string &root) {
+	std::vector<std::string> &copies = values_.working_copies;
+	if (copies.size() >= kWorkingCopiesMax || std::find(copies.begin(), copies.end(), root) != copies.end()) return false;
+	copies.push_back(root);
+	return true;
 }
 
 bool EditorPreferences::remember_recent_item(const std::string &game, int64_t item) {

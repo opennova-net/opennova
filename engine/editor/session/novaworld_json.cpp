@@ -1,5 +1,6 @@
 #include <editor/session/novaworld_json.h>
 
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
@@ -99,6 +100,17 @@ JsonValue novaworld_section(const SessionView &view) {
 	copy.set("key", json_string(novaworld.key));
 	copy.set("tracked", JsonValue::make_bool(novaworld.tracked));
 	copy.set("revision", json_number(double(novaworld.revision)));
+	copy.set("former_key", json_string(novaworld.former_key));
+	copy.set("former_revision", json_number(double(novaworld.former_revision)));
+	copy.set("former_host", json_string(novaworld.former_host));
+	JsonValue others = JsonValue::make_array();
+	for (const NovaWorldView::OtherCopy &other : novaworld.other_copies) {
+		JsonValue row = JsonValue::make_object();
+		row.set("host", json_string(other.host));
+		row.set("revision", json_number(double(other.revision)));
+		others.push(std::move(row));
+	}
+	copy.set("other_copies", others);
 	out.set("working_copy", copy);
 	out.set("project",
 			novaworld.remote_known ? project_json(novaworld.remote) : JsonValue::make_null());
@@ -119,6 +131,7 @@ JsonValue novaworld_section(const SessionView &view) {
 	out.set("new_base", base);
 	out.set("missing_base", json_string(novaworld.missing_base));
 	JsonValue standing = JsonValue::make_object();
+	standing.set("state", json_string(novaworld_standing_name(novaworld_standing(novaworld).kind)));
 	standing.set("checked", JsonValue::make_bool(novaworld.checked));
 	standing.set("head_known", JsonValue::make_bool(novaworld.head_known));
 	standing.set("head", json_number(double(novaworld.head)));

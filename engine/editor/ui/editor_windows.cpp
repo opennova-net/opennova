@@ -17,6 +17,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
 #include <editor/session/navigation_controller.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/rename_controller.h>
 #include <editor/project_build/export_build.h>
 #include <editor/session/play_controller.h>
@@ -263,9 +264,9 @@ void EditorWindows::request(EditorRequest request) {
 		request.path.clear();
 		request.values.clear();
 	}
-	// A NovaWorld project's Get... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
+	// A NovaWorld project's Sync... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
 	if (request.kind == EditorRequestKind::PickDirectory && request.purpose == PickPurpose::NovaWorldFolder) {
-		novaworld_get_key_ = request.project_key;
+		novaworld_sync_key_ = request.project_key;
 		request.project_key.clear();
 	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
@@ -555,11 +556,11 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 		break;
 	case PickPurpose::NovaWorldFolder:
 		// Into a folder of its key's name inside the one picked, as a clone makes one.
-		if (!novaworld_get_key_.empty()) {
+		if (!novaworld_sync_key_.empty()) {
 			const bool slash = path.back() == '/' || path.back() == '\\';
-			request(request::novaworld_get(novaworld_get_key_, path + (slash ? "" : "/") + novaworld_get_key_));
+			request(request::novaworld_sync(novaworld_sync_key_, path + (slash ? "" : "/") + novaworld_sync_key_));
 		}
-		novaworld_get_key_.clear();
+		novaworld_sync_key_.clear();
 		break;
 	case PickPurpose::None: break;
 	}
@@ -1170,8 +1171,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		                           : "See Problems.";
 	}
 
-	// The project's standing in NovaWorld (ADR 0069): "ACIDGAMBIT r41, 3 changed, 2 incoming".
-	const std::string novaworld_text = novaworld_status_text(v.novaworld);
+	// The project's standing in NovaWorld (ADR 0069): "opennova.net: r41, 3 changed, 2 incoming".
+	const std::string novaworld_text = novaworld_standing(v.novaworld).status;
 
 	// Each part's width, left to right: NovaWorld's standing, the unsaved files, the problem
 	// counts, the state and the buttons (the bar's layout puts an item spacing between items), from the

@@ -465,10 +465,21 @@ JsonValue preferences_section(const SessionView &view) {
 			entry.set("game", json_string(details.game));
 			entry.set("expansion", json_string(details.expansion));
 			entry.set("builds_on", json_string(details.builds_on));
+			entry.set("novaworld", json_string(details.novaworld));
 		}
 		recent.push(std::move(entry));
 	}
 	out.set("recent_projects", std::move(recent));
+	// The folders this computer knows as NovaWorld working copies, whatever the recent list holds.
+	JsonValue copies = JsonValue::make_array();
+	for (const ProjectView::RecentProject &copy : view.project.working_copies) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("root", json_string(copy.root));
+		entry.set("found", boolean(copy.found));
+		entry.set("novaworld", json_string(copy.novaworld));
+		copies.push(std::move(entry));
+	}
+	out.set("working_copies", std::move(copies));
 	out.set("game_install", json_string(view.project.retail_directory));
 	// The open project's Play settings (its local.json's; the defaults with none open).
 	out.set("play_mode", json_string(play_mode_token(view.project.play_mode)));

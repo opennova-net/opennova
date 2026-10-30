@@ -858,8 +858,8 @@ inline EditorRequest novaworld_sign_out() {
 inline EditorRequest novaworld_check() {
 	return of(EditorRequestKind::NovaWorldCheck);
 }
-inline EditorRequest novaworld_get(std::string project_key, std::string dir) {
-	EditorRequest request = of(EditorRequestKind::NovaWorldGet);
+inline EditorRequest novaworld_sync(std::string project_key, std::string dir) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldSync);
 	request.project_key = std::move(project_key);
 	request.dir = std::move(dir);
 	return request;
@@ -921,6 +921,12 @@ inline EditorRequest novaworld_submit(std::string version) {
 	EditorRequest request = of(EditorRequestKind::NovaWorldSubmit);
 	request.version = std::move(version);
 	return request;
+}
+inline EditorRequest novaworld_rejoin() {
+	return of(EditorRequestKind::NovaWorldRejoin);
+}
+inline EditorRequest novaworld_keep_folder() {
+	return of(EditorRequestKind::NovaWorldKeepFolder);
 }
 inline EditorRequest novaworld_make_own() {
 	return of(EditorRequestKind::NovaWorldMakeOwn);

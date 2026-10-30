@@ -344,6 +344,7 @@ add_library(opennova_editor STATIC
     # NovaWorld (ADR 0069): the session's part, its jobs as operations, its view's JSON
     ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_standing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/disk_watch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp

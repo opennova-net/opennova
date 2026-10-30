@@ -54,6 +54,19 @@ struct NovaWorldView {
 	std::string key;
 	bool tracked = false;
 	int64_t revision = 0;
+	// What the folder's own state names that its project file does not (a key taken out, or changed), the
+	// way back Rejoin takes: the key, the revision the folder held of it, and the service it held it on, ""
+	// this one. Read only for a folder that is no working copy here.
+	std::string former_key;
+	int64_t former_revision = 0;
+	std::string former_host;
+	// The folder's working copies of this project on other services, as its own state has them: one folder,
+	// a debug build's staging and a release build's live service each keeping a base of their own.
+	struct OtherCopy {
+		std::string host;
+		int64_t revision = 0;
+	};
+	std::vector<OtherCopy> other_copies;
 	// The project as the service last answered (the open project's ask, its setup, a check, a pull
 	// or a push): whether the account may push it is its can_push.
 	bool remote_known = false;
@@ -101,11 +114,16 @@ struct NovaWorldView {
 	// Its standing as the last check, pull or push left it: the project's head (when the service
 	// answered; the project's ask and its setup set it too), the folder's changes since its base,
 	// and what kept a file out of them. `head_error` says why the head is unknown: for a project
-	// the service does not show the account, "<KEY> is not on <host>, or is private: ...".
+	// the service does not show the account, "<KEY> is not on <host>, or is private: ...", with
+	// `head_missing` set (a 404, where anything else is the service not answering). `setting_up`: the
+	// folder's setup is due or running. `checked` goes as the files move, and the changes stay as they
+	// were counted until they are counted again. novaworld_standing.h reads all of this one way.
 	bool checked = false;
 	bool head_known = false;
 	int64_t head = 0;
 	std::string head_error;
+	bool head_missing = false;
+	bool setting_up = false;
 	std::vector<LocalChange> changes;
 	std::vector<std::string> problems;
 	// A pull stopped on conflicts: the revision it pulls, and each conflict still to settle.

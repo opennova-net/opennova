@@ -342,7 +342,7 @@ constexpr RequestField kFields[] = {
 			"novaworld_sign_in's password: a person's alone, typed into the NovaWorld window; novaworld_sign_in is never "
 			"served over the wire." },
 	{ F::ProjectKey, "project_key", J::String,
-			"A NovaWorld project by its key (\"JO\", \"JOX01\"; 1 to 16 of A-Z, 0-9 and _): the one novaworld_get "
+			"A NovaWorld project by its key (\"JO\", \"JOX01\"; 1 to 16 of A-Z, 0-9 and _): the one novaworld_sync "
 			"gets, the one novaworld_put puts the open project on (a new one's key, or an empty one's), and the one "
 			"new_project makes its project for (its project file's novaworld key, the welcome page's Set up...)." },
 	{ F::Message, "message", J::String,
