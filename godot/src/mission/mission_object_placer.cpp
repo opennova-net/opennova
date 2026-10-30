@@ -1122,22 +1122,15 @@ int MissionObjectPlacer::update_static_lod_views(const ObjectLodFrame *p_frames,
 		// that projects below the sub-pixel floor, and the view's current one
 		// for an instance outside its frustum (retail never reaches the
 		// selector for an entity its collector rejected).
+		// (engine renderer::ObjectLodWalk::static_level decides it.)
 		const auto view_level = [&](const ObjectLodFrame &p_frame, bool p_hidden,
 										int p_current) {
-			if (p_hidden) {
-				return -1;
-			}
 			int32_t radius_q16 = 0;
-			if (!p_frame.valid ||
-					!p_frame.project_q16(instance.origin, instance.radius_q16, radius_q16)) {
-				return p_current;
-			}
-			if (opennova::renderer::object_subpixel_culled(radius_q16)) {
-				return -1;
-			}
-			return opennova::renderer::select_object_lod(profile.thresholds_q16,
-					radius_q16, p_frame.projection_scale, profile.available)
-					.lod_index;
+			const bool projected = !p_hidden && p_frame.valid &&
+					p_frame.project_q16(instance.origin, instance.radius_q16, radius_q16);
+			return opennova::renderer::ObjectLodWalk{ p_frame.projection_scale }.static_level(
+					p_hidden, projected, radius_q16, profile.thresholds_q16, profile.available,
+					p_current);
 		};
 		const int main_lod = view_level(p_frames[0], instance.occlusion_hidden,
 				instance.active_lod);
