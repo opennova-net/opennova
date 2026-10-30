@@ -39,10 +39,19 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(
 // make_retail_machine_tokens carries the witness).
 opennova::LobbyMachineTokens machine_tokens(const opennova::FingerprintSerialMix &mix);
 
-// The CD-key ids this machine's activation gives a session of `protocol` (engine
-// activation_cd_keys over the process's menu-browser jar and machine_tokens().nwpssk): the CDKIID
-// a LAN join sends and the one a LAN host refuses as its own. None for a protocol with no CD key,
-// or with no activation in the jar (engine activation_cd_keys carries the witness).
+// The CD-key record's read from the registry value it is kept in (engine cdkey::read_registry
+// into cdkey::process_key_info(), under this machine's NWPSSK; the value is the registry's, or
+// the stand-in beside the executable where the platform has no registry): the boot's, and each
+// startup menu's, read. Nothing for a protocol with no CD key.
+void read_cd_key_registry(const opennova::Protocol *protocol);
+
+// The NovaWorld screen's update over the menu browser's jar: an NWACT there is written as this
+// machine's activation and cleared from the jar (engine consume_activation). True when one was.
+// Nothing for a protocol with no CD key.
+bool consume_cd_key_activation(const opennova::Protocol *protocol);
+
+// The CD-key ids the process's record holds for a session of `protocol`: the CDKIID a LAN join
+// sends and the one a LAN host refuses as its own. None for a protocol with no CD key.
 opennova::cdkey::WireKeys machine_activation_cd_keys(const opennova::Protocol *protocol);
 
 } // namespace godot

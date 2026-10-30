@@ -2,7 +2,7 @@
 
 #include <formats/gamecfg/game_cfg.h> // gamecfg::display_size
 #include <net/novaworld/cookie_jar_file.h> // process_menu_browser (the jar the activation rides)
-#include <net/novaworld/http_login.h> // activation_cd_keys
+#include <net/novaworld/http_login.h> // consume_activation
 #include <net/novaworld/lobby_identity.h>
 #include <net/protocol/protocol.h> // Protocol::cd_key
 
@@ -131,11 +131,46 @@ opennova::LobbyMachineTokens machine_tokens(const opennova::FingerprintSerialMix
 	return opennova::fallback_machine_tokens(stable_identity, mix);
 }
 
+namespace {
+
+// A protocol whose executable keeps a CD key, and so an activation (DFX2's).
+bool keeps_cd_key(const opennova::Protocol *protocol) {
+	return protocol != nullptr && protocol->cd_key != nullptr && protocol->nwpssk_mix.has_value();
+}
+
+// The registry value the activation lives in: the registry's, or, where the platform has none,
+// the stand-in file beside the executable.
+opennova::cdkey::KeyStore machine_store(const opennova::Protocol &protocol) {
+	OS *os = OS::get_singleton();
+	const std::string exe_dir =
+			os ? to_std(os->get_executable_path().get_base_dir()) : std::string();
+	return opennova::cdkey::machine_key_store(*protocol.cd_key, exe_dir);
+}
+
+} // namespace
+
+void read_cd_key_registry(const opennova::Protocol *protocol) {
+	if (!keeps_cd_key(protocol))
+		return;
+	(void)opennova::cdkey::read_registry(opennova::cdkey::process_key_info(), *protocol->cd_key,
+			machine_tokens(*protocol->nwpssk_mix).nwpssk, machine_store(*protocol));
+}
+
+bool consume_cd_key_activation(const opennova::Protocol *protocol) {
+	if (!keeps_cd_key(protocol))
+		return false;
+	opennova::CookieJar &jar = opennova::process_menu_browser().jar;
+	const std::string *nwact = jar.find("NWACT");
+	if (nwact == nullptr || nwact->empty())
+		return false;
+	return opennova::consume_activation(jar, opennova::cdkey::process_key_info(), protocol->cd_key,
+			machine_tokens(*protocol->nwpssk_mix).nwpssk, machine_store(*protocol));
+}
+
 opennova::cdkey::WireKeys machine_activation_cd_keys(const opennova::Protocol *protocol) {
-	if (protocol == nullptr || protocol->cd_key == nullptr || !protocol->nwpssk_mix)
+	if (!keeps_cd_key(protocol))
 		return {};
-	return opennova::activation_cd_keys(protocol->cd_key, opennova::process_menu_browser().jar,
-			machine_tokens(*protocol->nwpssk_mix).nwpssk);
+	return opennova::cdkey::process_key_info().keys;
 }
 
 opennova::LobbyIdentityParams collect_lobby_identity_params(

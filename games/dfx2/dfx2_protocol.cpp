@@ -20,6 +20,15 @@ const cdkey::KeyChains kCdKey = {
 	"928975689:234957945234:24598293879654:2349857982794876",
 	// [orig: off_812F00 +16 -> @0x7bf886 (dfx2.exe)]
 	"",
+	// The activation's home, the title's registry value CDKIID, which the boot read reads and an
+	// NWACT is written to. [orig: the path @0x7c2658 and the value's name @0x7c26a0, pushed by
+	// CDKey_ReadRegistry @0x411be8 / @0x411be3 and CDKey_WriteActivationFromNWACT @0x411e83 /
+	// @0x411e7e (dfx2.exe)]
+	"HKEY_LOCAL_MACHINE\\Software\\NovaLogic\\Delta Force Xtreme 2\\1.00.0000",
+	"CDKIID",
+	// Where the platform has no registry, the value's stand-in beside the executable (OpenNova's
+	// file, a player file: gameprofile/player_files.h).
+	"cdkiid.dat",
 };
 
 // dfx2.exe's protocol: Jointops.exe's row (jo_protocol.cpp), the same code over different data

@@ -359,17 +359,15 @@ std::vector<uint8_t> join_cd_cookie(const CookieJar &jar) {
 	return cd;
 }
 
-cdkey::WireKeys activation_cd_keys(
-		const cdkey::KeyChains *chains, const CookieJar &jar, std::string_view fingerprint) {
+bool consume_activation(CookieJar &jar, cdkey::KeyInfo &info, const cdkey::KeyChains *chains,
+		std::string_view fingerprint, const cdkey::KeyStore &store) {
 	constexpr std::size_t kNwactRead = 0x7FF; // the screen's read size [orig: @0x55752c (dfx2.exe)]
-	cdkey::WireKeys keys;
-	const std::string *nwact = jar.find("NWACT");
-	if (chains == nullptr || nwact == nullptr || nwact->empty())
-		return keys;
-	// A value that does not decode on this machine leaves the CDKIID empty (the activation's -3).
-	(void)cdkey::activation_wire_key(
-			*chains, nwact->substr(0, kNwactRead), fingerprint, keys.cdkiid);
-	return keys;
+	const std::string *nwact = chains != nullptr ? jar.find("NWACT") : nullptr;
+	if (nwact == nullptr || nwact->empty())
+		return false;
+	(void)cdkey::write_activation(info, *chains, nwact->substr(0, kNwactRead), fingerprint, store);
+	jar.set("NWACT", "");
+	return true;
 }
 
 std::vector<std::string> CookieJar::cookie_header_lines() const {

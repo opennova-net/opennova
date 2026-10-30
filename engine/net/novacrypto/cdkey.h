@@ -32,6 +32,8 @@
 // @ 0x512100]. Nothing here is JO's.
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,6 +50,12 @@ struct KeyChains {
 	const char *registry = nullptr;
 	// The chain a CDKIIDEXP1 decodes under.
 	const char *exp1 = nullptr;
+	// Where the client keeps its activation: the registry key and value its boot read reads and
+	// its NWACT is written to (os_registry), and the file that stands in for the value where the
+	// platform has no registry (OpenNova's, beside the executable).
+	const char *registry_key = nullptr;
+	const char *registry_value = nullptr;
+	const char *stand_in_file = nullptr;
 };
 
 // The NWPSSK fingerprint the hardware mix is keyed by: 23 characters, each 'A',
@@ -106,6 +114,58 @@ struct WireKeys {
 	std::string cdkiid;
 	std::string exp1;
 };
+
+// The client's CD-key record (g_CDKeyInfo): the status its last read or activation stored (1, or
+// -1 for a refused write, -3 for a value that does not decode), the multiplayer flag (a decoded
+// value ending "/MP"), and the two ids its LAN join sends (+16 the CDKIID, +0x810 the
+// CDKIIDEXP1, which no code of dfx2.exe writes).
+// [orig: g_CDKeyInfo @0xa71c38 (dfx2.exe) - +0 the status, +8 g_CDKeyInfoIsMultiplayer @0xa71c40,
+//  +16 g_CDKeyInfoWireCdkiid, +0x810 g_CDKeyInfoWireExp1 @0xa72448]
+struct KeyInfo {
+	int32_t status = 0;
+	bool multiplayer = false;
+	WireKeys keys;
+};
+// The process's record, which the boot read fills and an activation updates, and which the LAN
+// join, the LAN host's check and the NovaWorld verify Cookie read.
+KeyInfo &process_key_info();
+
+// The registry value the record is kept in, as the two operations reach it: `read` gives the
+// stored text (false: none could be read), `write` stores one (false: refused, as an unprivileged
+// process's write to HKEY_LOCAL_MACHINE is).
+struct KeyStore {
+	std::function<bool(std::string &)> read;
+	std::function<bool(const std::string &)> write;
+};
+// The platform's store for `chains`: os_registry over its registry key and value, the stand-in
+// file `stand_in_dir`/stand_in_file where the platform has no registry.
+KeyStore machine_key_store(const KeyChains &chains, const std::string &stand_in_dir);
+
+// The boot read, as the shipped dfx2.exe runs it: the stored value read (once more when the first
+// read fails, the second's result ignored), mixed down under this machine's `fingerprint`, decoded
+// under chains.registry; the multiplayer flag from a decoded value ending "/MP"; the decoded value
+// kept as the CDKIID (activation_wire_key's C string, empty where nothing decodes) and the status
+// set to 1, whatever was read. That build carries a patch over the read's three refusals (no
+// value, an empty one, one that does not decode), so it returns 1 and its menus' key gate and its
+// round end's re-read never refuse; the unpatched branches would store -2 or -3.
+// [orig: CDKey_ReadRegistry @0x411b90 (dfx2.exe) - the two reads @0x411bfe / @0x411c21, the
+//  patched `jmp` @0x411c2b and NOPs @0x411c3f / @0x411cb9, the fingerprint @0x411c46, the mix
+//  @0x411c58, CDKey_Decode @0x411c79 (its -3 @0x411c82), the "/MP" test @0x411c9b..0x411cb2, the
+//  status 1 @0x411cbb, the stores @0x411cce / @0x411cd0, the copy to +16 @0x411cd3]
+int32_t read_registry(KeyInfo &info, const KeyChains &chains, std::string_view fingerprint,
+		const KeyStore &store);
+
+// The activation from an NWACT: the value written to the store (once more when the first write
+// is refused); a refused second write stores status -1 and changes nothing else. Then the value is
+// mixed down under `fingerprint` and decoded under chains.registry: one that does not decode
+// stores -3, one that does stores 1 and its decoded value as the CDKIID. The multiplayer flag is
+// left as the boot read set it.
+// [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe) - NapiRegistry_WriteStringAtPath
+//  @0x411e88 / @0x411e9f, the -1 @0x411eab, the fingerprint @0x411ebb, the copy @0x411eca, the mix
+//  @0x411ee9, CDKey_Decode @0x411f0a (the -3 @0x411f13), the 1 @0x411f31 and the copy to +16
+//  @0x411f37]
+int32_t write_activation(KeyInfo &info, const KeyChains &chains, std::string_view nwact,
+		std::string_view fingerprint, const KeyStore &store);
 
 // The DFX2 LAN host's CD-key leg of its join check: Accepted, or the reject
 // code the host sends the joiner.

@@ -169,9 +169,9 @@ struct SimulationNetState {
 	// The gate's GLSVSSREQUEST for a NovaWorld 0x00 JOIN (D-NET-723). Empty for LAN. Retained
 	// across direct-load runtime rebuilds.
 	std::string join_glsvss_request;
-	// The CD-key ids a LAN 0x00 JOIN leads with: this machine's activation, read at the join
-	// (machine_activation_cd_keys, network/novaworld_identity.h). Retained across direct-load
-	// runtime rebuilds.
+	// The CD-key ids a LAN 0x00 JOIN leads with: this machine's activation as the process's
+	// record holds it at the join (machine_activation_cd_keys, network/novaworld_identity.h).
+	// Retained across direct-load runtime rebuilds.
 	opennova::cdkey::WireKeys join_cd_key_ids;
 	// The browse row's 0x81 record a join from it connects with (no 0x41).
 	// Retained across direct-load runtime rebuilds.

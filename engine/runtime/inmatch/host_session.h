@@ -229,7 +229,7 @@ struct HostConfig {
 	// The session start installs it ahead of the round init that loads both files.
 	std::optional<std::string> ban_directory;
 	// The host's own CD-key ids (NapiNPServerCtx::host_cd_keys), which the session start installs:
-	// what this machine's activation gives (activation_cd_keys, net/novaworld/http_login.h; a DFX2
+	// what this machine's activation gives (cdkey::process_key_info, net/novacrypto/cdkey.h; a DFX2
 	// LAN host refuses a joiner sending them, code 12); empty for a host that holds none.
 	// [orig: g_CDKeyInfo +16 / +0x810, read by Server_ValidatePlayerJoinRequest @0x50f458 /
 	//  @0x50f510 (dfx2.exe)]

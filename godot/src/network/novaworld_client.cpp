@@ -586,6 +586,9 @@ void NovaWorldClient::_process(double) {
 	// one clock (engine world/tick_count_clock.h), never a sum of the engine's capped process
 	// steps, which lost the time of every hitch past the cap.
 	clock_ms_ = opennova::world::frame_tick_count_ms() - clock_origin_ms_;
+	// The screen's update writes an NWACT a page handed it as this machine's activation and
+	// clears it from the jar (engine consume_activation carries the witness).
+	(void)consume_cd_key_activation(lobby_.protocol());
 	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) {
 		// A leg whose session a punt, the reap or an error ended still ends its wait on the
 		// session's state (engine: NwuHostRole::poll_request, connect_or_host.h's

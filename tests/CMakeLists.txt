@@ -88,6 +88,15 @@ target_compile_features(os_random_test PRIVATE cxx_std_17)
 target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME os_random COMMAND os_random_test)
 
+# The registry seam (base/os_registry): retail's refused key paths, and the stand-in file's round
+# trip where the platform has no registry (on Windows a read of an absent key only: the test never
+# writes the machine's registry).
+add_executable(os_registry_test os_registry/os_registry_test.cpp)
+target_link_libraries(os_registry_test PRIVATE opennova_base)
+target_compile_features(os_registry_test PRIVATE cxx_std_17)
+target_include_directories(os_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME os_registry COMMAND os_registry_test)
+
 # A project revision's manifest (base/project, ADR 0069): the paths a project's file may have
 # (each Windows rule, the machine's own folder, UTF-8), two paths one file once folded, the
 # canonical text read back and every other text of the same files refused.

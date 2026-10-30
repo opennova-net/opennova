@@ -800,8 +800,8 @@ public:
 	// a stock DFX2 has no writer of the +0x810 CDKIIDEXP1, so it sends that one
 	// empty). A DFX2 LAN host refuses a join without a CDKIID it can decode (codes
 	// 10..13, DFX2-13). Unset (empty) sends neither, a JO install with no key. The
-	// game's embedder sets what its activation gives (activation_cd_keys,
-	// net/novaworld/http_login.h): none without one, which a DFX2 LAN host refuses (10).
+	// game's embedder sets what its activation gives (cdkey::process_key_info,
+	// net/novacrypto/cdkey.h): none without one, which a DFX2 LAN host refuses (10).
 	// [orig: NapiNP_WriteClientAuthPayload @0x42a180 - @0x42a1d4 / @0x42a20d]
 	void set_cd_key_ids(cdkey::WireKeys ids) { cd_key_ids_ = std::move(ids); }
 	// The gate's GLSVSSREQUEST (GateResponse::glsvss_request, the embedder's lobby hands it

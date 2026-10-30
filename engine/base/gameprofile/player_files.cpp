@@ -32,15 +32,22 @@ struct Written {
 	const char *orig;
 };
 constexpr Written kWritten[] = {
-	{"_errlog.txt", "the game's error log", "[orig: ErrorLog_WriteTimestamped @ 0x53c6d0]"},
-	{"_netlog.txt", "the game's network log", "[orig: NapiNPManager_Init @ 0x62c480]"},
-	{"SYSDUMP.TXT", "the game's crash report", "[orig: Game_SaveSysdumpAndShowError @ 0x4a55b0]"},
-	{"admin_log.txt", "the admin server's log", "[orig: CAdminServer_Construct @ 0x402c10]"},
-	{"mru.txt", "the menu cache's recent list", "[orig: CUICache_ScanCacheDirectory @ 0x64d6b0, \"cache\\mru.txt\"]"},
-	{"hello.bin", "the chunk file test's output", "[orig: ChunkFile_TestWriteAndReload @ 0x56f810]"},
-	{"hello2.bin", "the chunk file test's output", "[orig: ChunkFile_TestWriteAndReload @ 0x56f810]"},
-	{"activesrvr.txt", "a hosted session's marker",
-	 "[orig: Game_HostMultiplayerSession @ 0x4a65a0; deleted by Game_Run @ 0x4a7fb0]"},
+	{ "_errlog.txt", "the game's error log", "[orig: ErrorLog_WriteTimestamped @ 0x53c6d0]" },
+	{ "_netlog.txt", "the game's network log", "[orig: NapiNPManager_Init @ 0x62c480]" },
+	{ "SYSDUMP.TXT", "the game's crash report", "[orig: Game_SaveSysdumpAndShowError @ 0x4a55b0]" },
+	{ "admin_log.txt", "the admin server's log", "[orig: CAdminServer_Construct @ 0x402c10]" },
+	{ "mru.txt", "the menu cache's recent list",
+			"[orig: CUICache_ScanCacheDirectory @ 0x64d6b0, \"cache\\mru.txt\"]" },
+	{ "hello.bin", "the chunk file test's output",
+			"[orig: ChunkFile_TestWriteAndReload @ 0x56f810]" },
+	{ "hello2.bin", "the chunk file test's output",
+			"[orig: ChunkFile_TestWriteAndReload @ 0x56f810]" },
+	{ "activesrvr.txt", "a hosted session's marker",
+			"[orig: Game_HostMultiplayerSession @ 0x4a65a0; deleted by Game_Run @ 0x4a7fb0]" },
+	// OpenNova's stand-in for DFX2's registry value CDKIID where the platform has none
+	// (Protocol::cd_key's stand_in_file, net/novacrypto/cdkey.h machine_key_store).
+	{ "cdkiid.dat", "this machine's CD-key activation",
+			"[orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe)]" },
 };
 
 // "SS" and five digits, then a dot: a screenshot [orig: Screenshot_CaptureToFile @ 0x5221a0, "SS%0.5d.%s"].
