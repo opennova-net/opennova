@@ -20,6 +20,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <runtime/renderer/frame_fx_effects.h>
+#include <runtime/renderer/material_eval.h>
 #include <runtime/renderer/nvg_scope_lens.h>
 #include <runtime/renderer/q3_frame.h>
 
@@ -36,6 +37,8 @@ class GeometryInstance3D;
 class ImageTexture;
 class Material;
 class Skeleton3D;
+struct Q3ObjectMaterialValues;
+struct Q3WaterMaterialValues;
 class Texture;
 class Texture2D;
 class Viewport;
@@ -105,16 +108,33 @@ public:
 	// authoritative creation seam; visible geometry then publishes only a
 	// material identity. Explicit water/celestial sources never infer a Q3
 	// technique from shader names or device state.
+	// Each material registers with its draw values (Q3ObjectMaterialValues:
+	// the engine's evaluated effect parameters and its stage textures), and
+	// its producer publishes every later write of them; the Q3 compile reads
+	// those values, never the ShaderMaterial's parameters.
 	static void register_q3_object_material(const Ref<Material> &p_material,
-			const opennova::renderer::ObjectMaterialClassification &p_classification);
+			const opennova::renderer::ObjectMaterialClassification &p_classification,
+			const Q3ObjectMaterialValues &p_values);
 	static void clone_q3_object_material(const Ref<Material> &p_source,
 			const Ref<Material> &p_clone);
-	// A producer rewrote one of an object material's Q3 parameters
-	// (u_diffuse, u_detail, u_rgb_mod, u_alpha_mod, u_reflect_color, the UV
-	// rows): the surfaces on it re-read their cached block at their next
-	// sight. ObjectModel's runtime writes call this; a stable material is
-	// never re-read per frame.
-	static void invalidate_q3_object_material(const Ref<Material> &p_material);
+	// A producer wrote an object material's evaluated effect parameters (the
+	// UV rows, SelfLumColor, AlphaGenValue, ReflectColor), or its Diffuse1
+	// stage (an animated frame): the surfaces on it re-read their cached
+	// block at their next sight. ObjectModel's runtime writes call these; a
+	// stable material is never re-read per frame.
+	static void update_q3_object_runtime(const Ref<Material> &p_material,
+			const opennova::renderer::MaterialRuntime &p_runtime);
+	static void update_q3_object_diffuse(const Ref<Material> &p_material,
+			const Ref<Texture2D> &p_diffuse, float p_max_lod);
+	// The two update legs for a script driving a material directly (the
+	// windowed device tests): the SelfLumColor alone, and the Diffuse1 stage.
+	static void set_q3_object_self_lum(const Ref<Material> &p_material,
+			const Vector3 &p_self_lum);
+	static void set_q3_object_diffuse(const Ref<Material> &p_material,
+			const Ref<Texture2D> &p_diffuse, float p_max_lod);
+	// A water source's published block (the night-vision strip's).
+	static void publish_q3_water(GeometryInstance3D *p_source,
+			const Q3WaterMaterialValues &p_water);
 	// An object surface instance with the material it currently draws: a
 	// glow-capable material registers it (a node registered before keeps its
 	// record, its swapped mesh is re-read once); any other material, or
