@@ -280,7 +280,6 @@ add_library(opennova_bindings OBJECT
     lwf/lwf_data.cpp
     lwf/wav_loader.cpp
     lwf/wave_stream.cpp
-    audio/ambient_mixer.cpp
     audio/sound_selector.cpp
     audio/ambient_layer.cpp
     audio/sound_bank.cpp

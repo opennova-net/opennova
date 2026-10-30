@@ -158,7 +158,6 @@
 #include "lwf/lwf_data.h"
 #include "lwf/wav_loader.h"
 #include "lwf/wave_stream.h"
-#include "audio/ambient_mixer.h"
 #include "audio/sound_selector.h"
 #include "audio/ambient_layer.h"
 #include "audio/sound_bank.h"
@@ -400,15 +399,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LwfData);
 	GDREGISTER_CLASS(WavLoader);
 	GDREGISTER_CLASS(WaveStream);
-	GDREGISTER_CLASS(AmbientMixer);
 	GDREGISTER_CLASS(SoundSelector);
 	GDREGISTER_CLASS(DbfData);
 	GDREGISTER_CLASS(AmbientLayer);
 	GDREGISTER_CLASS(SoundBank);
-	GDREGISTER_CLASS(MissionAudioMarker);
-	GDREGISTER_CLASS(MissionAudioChannel);
-	GDREGISTER_CLASS(MissionAudioCandidateBinding);
-	GDREGISTER_CLASS(MissionAudioDynamicEmitter);
 	GDREGISTER_CLASS(MissionAudioStats);
 	GDREGISTER_CLASS(MissionAudioPerf);
 	GDREGISTER_CLASS(FiredSoundset);
