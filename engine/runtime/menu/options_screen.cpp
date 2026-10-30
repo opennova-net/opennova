@@ -257,7 +257,7 @@ void OptionsScreen::fill(MenuRuntime &menu, int table, int blank) {
 // shown again, and the press arms the row only when it leaves no row selected
 // (the selected row compared with the capture's row, which the end reset)
 // (D-CTRL-3). [orig: UI_ControlsRemapArmHandler @0x55d560 - the end
-// @0x55d583..0x55d585, the first selected row (sub_63F550 @0x63f550) and its
+// @0x55d583..0x55d585, the first selected row (CTableWnd_GetFirstSelectedRow @0x63f550) and its
 // compare @0x55d58c..0x55d591; UI_UpdateControlMappingDisplay @0x55b700 (the
 // reset @0x55b9ad..0x55b9b3); CTableWnd_HandleNamedEvent @0x642400 - the
 // selection write @0x64259d, the row event @0x64261a]

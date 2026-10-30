@@ -58,8 +58,8 @@ public:
 		// material 0xA51 (twice the vertex colour, the texture's alpha) until
 		// the next mission's HUD init
 		// [orig: UI_IngameOptionsDialogEventHandler @0x554e40 - the find
-		//  @0x5551c3, the gate @0x5551ca, the old art released (sub_59EF10)
-		//  @0x5551d8, "cross%02d.tga" @0x5551f4, sub_59EEF0 @0x555201 ->
+		//  @0x5551c3, the gate @0x5551ca, the old art released (HUD_ReleaseCrosshairTexture)
+		//  @0x5551d8, "cross%02d.tga" @0x5551f4, HUD_LoadCrosshairTextureAlpha @0x555201 ->
 		//  HUD_LoadTextureWithInfo(name, 1, ...) @0x59eefc] (D-HUD-48).
 		ReloadCrosshairAlpha = 64,
 	};

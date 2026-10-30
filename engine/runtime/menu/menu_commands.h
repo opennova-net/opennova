@@ -89,7 +89,7 @@ bool is_mission_menu_file(const std::string &file);
 // What the game does with an APPMSG row's message, on any screen: the row raises scene event 10
 // with its text, and the game's handler starts the updater on "UPDATE" (without case, untrimmed)
 // and does nothing with another [orig: CUIWidget_HandleScriptedAction @ 0x6497f0 case 13
-// @ 0x649b88..0x649b99 (the row's text +0x1C) -> sub_63B5C0 @ 0x63b5c0 (CUIScene_RaiseEvent(10));
+// @ 0x649b88..0x649b99 (the row's text +0x1C) -> CUIScene_RaiseAppMessage @ 0x63b5c0 (CUIScene_RaiseEvent(10));
 // UI_DispatchScreenEvent @ 0x54e6a0 case 10 - the _stricmp with "UPDATE" @ 0x54f3a4..0x54f3b4,
 // UI_LaunchUpdateProcess @ 0x54f3c1]. No availability gates it: the launch runs update.exe and
 // the game quits once the process started (UI_LaunchUpdateProcess @ 0x55b0b0, the CreateProcessA

@@ -117,7 +117,7 @@ struct AmbientCandidate {
 // and the AudioChannel_SetAndPlay call @ 0x528a5c; the layer member's authored
 // pitch is never a play factor (member 0 is read for its wave, volume and clamp
 // alone, @ 0x528649; D-SND-56). Read unsigned and exact; its doppler is
-// unported (Sound_Calculate3DAttenuation, called @ 0x52896a; D-SND-8). A slot
+// unported (Sound_ApplyDopplerShift, called @ 0x52896a; D-SND-8). A slot
 // whose word is 0 never reaches a channel: the mix skips it before candidacy
 // (@ 0x528582) and a lane registered with 0 is cleared
 // (AmbientMixer::register_emitter, SoundEmitter_RegisterSetLayers @ 0x528340),

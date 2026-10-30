@@ -190,7 +190,7 @@ class BindingSet {
   // [orig: KeyBinding_CheckWeaponSlotConflict @0x55ae60 - the gate @0x55ae79,
   //  the pair test @0x55aebc..0x55af13, the key slots @0x55af1b..0x55af77,
   //  the mouse @0x55af79..0x55af96, the joystick @0x55afae..0x55afc6;
-  //  sub_55AE10 @0x55ae10 (the modes overlap)]
+  //  KeyBinding_ModesOverlap @0x55ae10 (the modes overlap)]
   bool shares_binding(int index) const;
 
   // Every VK bound to a catalog action token (primary then secondary; empty
