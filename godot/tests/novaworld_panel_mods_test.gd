@@ -97,6 +97,8 @@ func test_the_mod_list_asks_the_gates_own_site_by_the_games_command_file() -> vo
 	assert_eq(NovaWorldSettings.web_base_for("gs.novaworld.net"), "",
 			"NovaLogic's gate serves no mods: nothing is asked of it")
 	assert_eq(NovaWorldSettings.web_base_for("GS.NovaWorld.net"), "")
+	assert_eq(NovaWorldSettings.web_base_for("gs.novaworld.net."), "",
+			"a root label's dot names NovaLogic's gate too (the engine's one rule)")
 	assert_eq(NovaWorldPanel.mods_url("https://opennova.net", "JOPTR.CMD"),
 			"https://opennova.net/api/mods?game=JOPTR.CMD")
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _game_dir]))
