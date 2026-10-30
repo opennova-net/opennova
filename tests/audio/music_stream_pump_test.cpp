@@ -1,8 +1,10 @@
 // The music stream pump (runtime/audio/music_stream_pump.h) over scripts compiled from MUS text:
 // the script steps only once the track its last `play` selected has stopped sounding, a service
-// frame steps through section changes to the next `play` (at most seven updates), GFB empties
-// the stream so the next frame steps over a track still sounding, a fresh context selects no
-// track, and a context ends with its VM or with end().
+// frame steps through section changes to the next `play` (at most seven updates), a signal's
+// handler whose run reaches a `play` starts it at once, the shipped handler's GFB empties the
+// stream so the next update steps over a track still sounding when its run ends short of the
+// sting's `play`, a fresh context selects no track, and a context ends with its VM or with
+// end().
 #include <formats/mus/mus.h>
 #include <runtime/audio/music_stream_pump.h>
 
@@ -120,28 +122,62 @@ const char *kStingNoFlushSrc =
 		"handler MessageHandler(msgtype, source)\n{\n  on (msgtype) enter Begin Sting\n}\n"
 		"section Sting\n{\n  play sound_5\n  enter Begin\n}\n";
 
-// GFB empties the stream: the frame after the handler steps to the sting's `play` while the
-// track it cuts still sounds. Without it the sting waits for that track.
+// The shipped gamemus handler's shape: its `on` table's entry enters a section (Missionwin) whose
+// first op is a `setstate` to the section that plays the sting, with the handler's GFB or without.
+std::string shipped_sting_src(bool flush) {
+	std::string src = "script t\n";
+	src += "section Begin\n{\n  play sound_1\n  enter Begin\n}\n";
+	src += "handler MessageHandler(msgtype, source)\n{\n";
+	if (flush) src += "  FB()\n";
+	src += "  on (msgtype) enter Begin Win\n}\n";
+	src += "section Win\n{\n  enter WinPlay\n}\n";
+	src += "section WinPlay\n{\n  play sound_5\n  enter Begin\n}\n";
+	return src;
+}
+
+// The signal runs the step at once (MusicCtx_SelectEndTrack @0x672FD0 sets the restart byte and
+// runs AudioVM_RunContext @0x672E50): a handler whose run reaches a `play` starts it in the
+// signal's own run (the play's STC ends the run, AudioVM_Op_Play @0x672CBF), its
+// AudioVM_SelectStream seeding the bytes left again (@0x671BF0), so a GFB ahead of it changes
+// nothing. The shipped handler's run ends at Missionwin's `setstate` (its STC) short of the sting's
+// `play`: its GFB has zeroed the bytes left (AudioVM_Intrinsic_GFB @0x672150), so the next update
+// steps at once over the track still sounding (AudioStream_Update @0x671C76) and plays the sting;
+// without the GFB the sting waits for that track to stream out.
 void test_flush_steps_over_the_sounding_track() {
-	{
-		Context c(kStingSrc);
+	for (const char *src : {kStingSrc, kStingNoFlushSrc}) {
+		Context c(src);
 		CHECK(c.ok);
 		if (!c.ok) return;
 		c.pump.service_frame(16);
 		c.pump.service_frame(16);
 		CHECK(c.device.tracks == std::vector<uint32_t>({1}));
 		CHECK(mus::mus_vm_signal(c.vm, 1) == 0);
+		CHECK(c.device.tracks == std::vector<uint32_t>({1, 5}));
+		CHECK(c.pump.streaming());
+		c.pump.service_frame(16);
+		CHECK(c.device.tracks == std::vector<uint32_t>({1, 5}));
+	}
+	{
+		const std::string src = shipped_sting_src(true);
+		Context c(src.c_str());
+		CHECK(c.ok);
+		if (!c.ok) return;
+		c.pump.service_frame(16);
+		CHECK(mus::mus_vm_signal(c.vm, 1) == 0);
+		CHECK(c.device.tracks == std::vector<uint32_t>({1}));
 		CHECK(!c.pump.streaming());
 		CHECK(c.device.sounding);
 		c.pump.service_frame(16);
 		CHECK(c.device.tracks == std::vector<uint32_t>({1, 5}));
 	}
 	{
-		Context c(kStingNoFlushSrc);
+		const std::string src = shipped_sting_src(false);
+		Context c(src.c_str());
 		CHECK(c.ok);
 		if (!c.ok) return;
 		c.pump.service_frame(16);
 		CHECK(mus::mus_vm_signal(c.vm, 1) == 0);
+		CHECK(c.device.tracks == std::vector<uint32_t>({1}));
 		CHECK(c.pump.streaming());
 		c.pump.service_frame(16);
 		CHECK(c.device.tracks == std::vector<uint32_t>({1}));
