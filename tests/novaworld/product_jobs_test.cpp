@@ -327,11 +327,14 @@ struct Rig {
 		return create_product(db, e, expansion) == ProductOutcome::Ok;
 	}
 	// The package opennova-update-tool builds from `root`'s from and to trees (`full`: every file
-	// of `to` a row, as every release now is): false when it builds none.
+	// of `to` a row, as every release now is; `previous` the release before it, whose rows the
+	// tree lacks it carries as removals): false when it builds none.
 	bool build_package(const std::string &root, std::vector<update_tool::ProductSpec> products,
-			bool full, update::SfsPackage &package) {
+			bool full, update::SfsPackage &package, const update::SfsPackage *previous = nullptr) {
 		update_tool::BuildSpec spec;
 		spec.full = full;
+		if (previous != nullptr)
+			spec.previous = *previous;
 		spec.from = io::os_path(root + "/from");
 		spec.to = io::os_path(root + "/to");
 		spec.package_product = "Synthetic Product";
@@ -369,8 +372,9 @@ struct Rig {
 	// game `product_id` built from its project's revision 1, the package where an upload lands,
 	// validated by the job: its id.
 	int64_t built_release(const std::string &root, const char *name, int64_t product_id,
-			std::vector<update_tool::ProductSpec> products, update::SfsPackage &package) {
-		if (!build_package(root, std::move(products), true, package))
+			std::vector<update_tool::ProductSpec> products, update::SfsPackage &package,
+			const update::SfsPackage *previous = nullptr) {
+		if (!build_package(root, std::move(products), true, package, previous))
 			return 0;
 		NewBuiltRelease made;
 		made.name = name;
@@ -561,6 +565,45 @@ int test_native_first_release() {
 	TEST_EXPECT(expansion_tree && file_named(expansion_tree->files, "gt.ssc") != nullptr &&
 			rig.get(tree_prefix(expansion_tree->id) + "gt.ssc") ==
 					read_bytes(rig.temp.file("to/expansion/nifty") + "/gt.ssc"));
+	return 0;
+}
+
+// A release built over the one before it, as release.build builds every later release: the
+// earlier release's rows the tree no longer has come after the archives' rows as removals, a
+// root file's under `TARGET .`, and the package validates to a draft.
+int test_built_over_previous() {
+	Rig rig("product_jobs_built_over_previous");
+	TEST_EXPECT(make_base_tree(rig.temp.file("to"), true));
+	const int64_t native = rig.seeded("OP: Acid Gambit");
+	const std::vector<update_tool::ProductSpec> products = {
+		{ "", "", "ACIDGAMBIT.CMD", "OpenNova", "1.0", "opennova.exe" }
+	};
+	update::SfsPackage first;
+	TEST_EXPECT(rig.built_release(rig.temp.root(), "first", native, products, first) != 0);
+	std::error_code ec;
+	TEST_EXPECT(std::filesystem::remove(io::os_path(rig.temp.file("to") + "/readme.txt"), ec));
+	update::SfsPackage second;
+	const int64_t id = rig.built_release(rig.temp.root(), "second", native, products, second, &first);
+	TEST_EXPECT(id != 0);
+	if (id == 0)
+		return 1;
+	// The second package's command file ends `TARGET .` then `REMOVE readme.txt`.
+	std::optional<update::CommandFile> cmd;
+	for (const update::SfsSection &section : second.sections)
+		for (const update::SfsEntry &entry : section.entries)
+			if (entry.name == "ACIDGAMBIT.CMD")
+				cmd = update::read_command_file(std::string(entry.data.begin(), entry.data.end()));
+	TEST_EXPECT(cmd && cmd->rows.size() >= 2);
+	if (!cmd || cmd->rows.size() < 2)
+		return 1;
+	const update::CommandRow &target = cmd->rows[cmd->rows.size() - 2];
+	const update::CommandRow &remove = cmd->rows.back();
+	TEST_EXPECT(target.type == update::CommandType::Target && target.name == ".");
+	TEST_EXPECT(remove.type == update::CommandType::Remove && remove.name == "readme.txt");
+	const auto release = find_release(rig.db, id);
+	TEST_EXPECT(release && release->status == ReleaseStatus::Draft);
+	if (release && release->status != ReleaseStatus::Draft)
+		std::fprintf(stderr, "  release: %s\n", release->error.c_str());
 	return 0;
 }
 
@@ -841,6 +884,7 @@ int main(int argc, char **argv) {
 		{ "validate", test_validate },
 		{ "runtime_release", test_runtime_release },
 		{ "native_first_release", test_native_first_release },
+		{ "built_over_previous", test_built_over_previous },
 		{ "apply", test_apply },
 		{ "apply_incomplete", test_apply_incomplete },
 		{ "prune", test_prune },

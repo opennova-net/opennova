@@ -302,14 +302,14 @@ bool check_section(PackageFile &package, const update::SfsSectionSpans &section,
 		why = "the command file " + command.name + " does not read";
 		return false;
 	}
+	// The rows' names and order as the apply library takes them: a TARGET of `.` (back at the
+	// install's root, as a REMOVE carried from an earlier release follows) names no file.
+	if (!update::validate_commands(*cmd, why))
+		return false;
 	const update::SectionBlobs blobs = package.blobs(section);
 	out.version = cmd->version;
 	out.row_count = 0;
 	for (const update::CommandRow &row : cmd->rows) {
-		if (!update::is_safe_row_name(row.name)) {
-			why = "the row \"" + row.name + "\" does not name a file";
-			return false;
-		}
 		switch (row.type) {
 			case update::CommandType::Target:
 				if (row.name != "." && !strutil::ends_with_icase(row.name, ".pff")) {
