@@ -14,16 +14,12 @@
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
-#include "simulation/deploy_rows.h"
-#include "simulation/hud_view_records.h"
 #include "util/string_convert.h"
 
-#include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/inmatch/vehicle_menu.h> // the ITEM_DISPLAY preview's view
 #include <runtime/world/occlusion.h>      // render_matrix_from_pose
 #include <runtime/menu/menu_commands.h>
 #include <runtime/menu/menu_credits.h>
-#include <runtime/world/deploy_screen_feed.h>
 
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_joypad_button.hpp>
@@ -842,43 +838,6 @@ int MenuDriver::table_sort_column(int p_id) const {
 	return runtime_.table_sort_column(p_id);
 }
 
-// The stat RESULTLIST filled the way StatScreen_PopulateStatResultsList fills it: the
-// engine's fill (inmatch stat_screen_feed.h, where the witness lives) over the
-// records' own values, so the NAME and Squad cells take the roster's bytes.
-void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
-		const TypedArray<EndRoundRow> &p_rows, int p_local_slot) {
-	std::vector<opennova::inmatch::StatScreenColumn> columns;
-	columns.reserve(static_cast<size_t>(p_columns.size()));
-	for (int i = 0; i < p_columns.size(); ++i) {
-		const Ref<EndRoundColumn> column = p_columns[i];
-		if (column.is_valid()) columns.push_back(column->value());
-	}
-	std::vector<opennova::inmatch::StatScreenRow> rows;
-	rows.reserve(static_cast<size_t>(p_rows.size()));
-	for (int i = 0; i < p_rows.size(); ++i) {
-		const Ref<EndRoundRow> row = p_rows[i];
-		if (row.is_valid()) rows.push_back(row->value());
-	}
-	opennova::inmatch::fill_stat_results(runtime_, p_id, columns, rows, p_local_slot);
-}
-
-void MenuDriver::filter_stat_results(int p_id, int p_tab) {
-	opennova::inmatch::stat_screen_filter_rows(runtime_, p_id, p_tab);
-}
-
-// The death screen's SPAWNPOINTS_LIST from the compiled rows: the engine's items
-// (world deploy_screen_feed.h deploy_list_items: the tags stripped, each row in
-// the code page's bytes, an occupant's roster name as the roster holds it).
-void MenuDriver::set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows) {
-	std::vector<opennova::world::DeployListRow> rows;
-	rows.reserve(static_cast<size_t>(p_rows.size()));
-	for (int i = 0; i < p_rows.size(); ++i) {
-		const Ref<DeployListRow> row = p_rows[i];
-		if (row.is_valid()) rows.push_back(row->value());
-	}
-	runtime_.set_widget_items(p_id, opennova::world::deploy_list_items(rows));
-}
-
 // ---- activation / actions --------------------------------------------------------
 
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
@@ -1263,12 +1222,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("table_select_row", "id", "row", "additive"),
 			&MenuDriver::table_select_row, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("table_sort_column", "id"), &MenuDriver::table_sort_column);
-	ClassDB::bind_method(D_METHOD("fill_stat_results", "id", "columns", "rows", "local_slot"),
-			&MenuDriver::fill_stat_results);
-	ClassDB::bind_method(D_METHOD("filter_stat_results", "id", "tab"),
-			&MenuDriver::filter_stat_results);
-	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
-			&MenuDriver::set_deploy_list_items);
 	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),
 			&MenuDriver::table_cell_value);
 	ClassDB::bind_method(D_METHOD("table_selected_rows", "id"), &MenuDriver::table_selected_rows);

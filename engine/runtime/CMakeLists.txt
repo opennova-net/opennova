@@ -100,6 +100,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/mod_list.cpp # the Mods list's rows, its pick's description and ACCEPT's pick (D-MNU-31)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/death_screen.cpp # the DEATH screen's controller (the reveal, the refresh, the picks)
     # profile — the player profile's in-memory image (player.sav + weapon.sav),
     # its load and save (witness: docs/playerinfo/player-sav-re.md)
     ${CMAKE_CURRENT_SOURCE_DIR}/profile/player_profiles.cpp
@@ -556,6 +557,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/replica_track.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_screen.cpp # the STAT screen's controller (the show, the tabs, the exit)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_info.cpp       # the NovaWorld listing's live-session columns
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_listing_binding.cpp # the NovaWorld host listing's match side (game and serve)
