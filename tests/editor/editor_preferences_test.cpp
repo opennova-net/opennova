@@ -159,6 +159,14 @@ static int test_saves_keep_the_other_editors_copies() {
 	TEST_EXPECT(first.remember_working_copy("D:/Mine") && !first.remember_working_copy("D:/Mine"));
 	TEST_EXPECT(first.save(error));
 	TEST_EXPECT((store.preferences().working_copies == std::vector<std::string>{"D:/Mine", "D:/Theirs"}));
+	// A preference changed goes the same way.
+	theirs = store.preferences();
+	theirs.working_copies.push_back("D:/Later");
+	TEST_EXPECT(store.save(theirs, error));
+	Preferences changed = first.values();
+	changed.game_install = "D:/Joint Operations";
+	TEST_EXPECT(first.write(changed, error));
+	TEST_EXPECT(store.preferences().working_copies.size() == 3 && first.values().working_copies.size() == 3);
 	return 0;
 }
 

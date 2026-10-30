@@ -22,17 +22,27 @@ bool EditorPreferences::load(Diagnostic &finding) {
 	return true;
 }
 
+// `preferences` with any working copy the store keeps that they lack: a debug and a release editor share the file.
+static void take_stored_copies(PreferencesStore &store, Preferences &preferences) {
+	Preferences kept;
+	Diagnostic finding;
+	if (!store.load(kept, finding)) return;
+	std::vector<std::string> &copies = preferences.working_copies;
+	for (const std::string &root : kept.working_copies)
+		if (copies.size() < kWorkingCopiesMax && std::find(copies.begin(), copies.end(), root) == copies.end())
+			copies.push_back(root);
+}
+
 bool EditorPreferences::write(const Preferences &next, Diagnostic &error) {
-	if (!store_.save(next, error)) return false;
-	values_ = next;
+	Preferences merged = next;
+	take_stored_copies(store_, merged);
+	if (!store_.save(merged, error)) return false;
+	values_ = std::move(merged);
 	return true;
 }
 
 bool EditorPreferences::save(Diagnostic &error) {
-	Preferences kept;
-	Diagnostic finding;
-	if (store_.load(kept, finding))
-		for (const std::string &root : kept.working_copies) know_working_copy(root);
+	take_stored_copies(store_, values_);
 	return store_.save(values_, error);
 }
 
