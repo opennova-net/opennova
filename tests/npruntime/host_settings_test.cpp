@@ -45,9 +45,12 @@ int title_caps() {
     TEST_EXPECT(dfx2.mp_max_players == 100);
     TEST_EXPECT(session_player_cap(0, kDfx2) == 1 && session_player_cap(100, kDfx2) == 100);
     TEST_EXPECT(session_player_cap(251, kDfx2) == 251 && session_player_cap(300, kDfx2) == 251);
-    TEST_EXPECT(host_player_slot_limit(100, false, kDfx2) == 101);
-    TEST_EXPECT(host_player_slot_limit(251, false, kDfx2) == 252);
-    TEST_EXPECT(host_player_slot_limit(252, false, kDfx2) == 251);
+    TEST_EXPECT(host_player_slot_limit(100, false, 1, kDfx2) == 101);
+    TEST_EXPECT(host_player_slot_limit(251, false, 1, kDfx2) == 252);
+    TEST_EXPECT(host_player_slot_limit(252, false, 1, kDfx2) == 251);
+    // dfx2.exe's ceiling reads the same word. [orig: Game_ApplySessionSettingsToGlobals - `cmp
+    //  channelType, esi; jnz` @0x54ED8B..0x54ED91 (dfx2.exe)]
+    TEST_EXPECT(host_player_slot_limit(252, false, 2, kDfx2) == 253);
     GameConfig config;
     config.set_title(kDfx2);
     config.max_players = 251;
@@ -440,23 +443,29 @@ int main() {
     TEST_EXPECT(read("MAX_PLAYERS", "99"));
     TEST_EXPECT(cfg.mp_max_players == 64);
     TEST_EXPECT(read("SERVERTYPE", "1"));
-    TEST_EXPECT(cfg.dedicated == 1 && host_player_slot_limit(cfg.mp_max_players, false, kJo) == 65);
+    TEST_EXPECT(cfg.dedicated == 1 && host_player_slot_limit(cfg.mp_max_players, false, 1, kJo) == 65);
     TEST_EXPECT(read("MAX_PLAYERS", ""));
     // No lower clamp: a blank cap publishes 0, or 1 as the dedicated slot alone;
     // the 65 ceiling tests the pre-increment cap, so a dedicated 65 publishes 66.
-    TEST_EXPECT(cfg.mp_max_players == 0 && host_player_slot_limit(cfg.mp_max_players, false, kJo) == 1);
-    TEST_EXPECT(host_player_slot_limit(0, true, kJo) == 0 && host_player_slot_limit(-3, true, kJo) == 0);
-    TEST_EXPECT(host_player_slot_limit(65, false, kJo) == 66 && host_player_slot_limit(65, true, kJo) == 65);
-    TEST_EXPECT(host_player_slot_limit(66, false, kJo) == 65 && host_player_slot_limit(99, true, kJo) == 65);
+    TEST_EXPECT(cfg.mp_max_players == 0 && host_player_slot_limit(cfg.mp_max_players, false, 1, kJo) == 1);
+    TEST_EXPECT(host_player_slot_limit(0, true, 1, kJo) == 0 && host_player_slot_limit(-3, true, 1, kJo) == 0);
+    TEST_EXPECT(host_player_slot_limit(65, false, 1, kJo) == 66 && host_player_slot_limit(65, true, 1, kJo) == 65);
+    TEST_EXPECT(host_player_slot_limit(66, false, 1, kJo) == 65 && host_player_slot_limit(99, true, 1, kJo) == 65);
+    // The ceiling is network connect type 1's alone: under the LAN screen's 2 a cap past it
+    // stands, the dedicated slot on top. [orig: Game_ApplySessionSettingsToGlobals - `cmp
+    //  networkConnectType_480, esi; jnz` @0x551B3B..0x551B41]
+    TEST_EXPECT(host_player_slot_limit(99, true, 2, kJo) == 99 &&
+                host_player_slot_limit(99, false, 2, kJo) == 100);
+    TEST_EXPECT(host_player_slot_limit(65, false, 2, kJo) == 66);
     // In session the create clamps the cap into 1..65 first, so a blank cap
     // publishes 1 (2 dedicated) and a dedicated 65+ the ceiling's 66.
     // [orig: CNapiGameSession_BuildAndCreateSession @0x56955D..0x56956C]
     TEST_EXPECT(session_player_cap(0, kJo) == 1 && session_player_cap(-3, kJo) == 1);
     TEST_EXPECT(session_player_cap(1, kJo) == 1 && session_player_cap(65, kJo) == 65);
     TEST_EXPECT(session_player_cap(66, kJo) == 65 && session_player_cap(99, kJo) == 65);
-    TEST_EXPECT(host_player_slot_limit(session_player_cap(0, kJo), true, kJo) == 1 &&
-                host_player_slot_limit(session_player_cap(0, kJo), false, kJo) == 2);
-    TEST_EXPECT(host_player_slot_limit(session_player_cap(99, kJo), false, kJo) == 66);
+    TEST_EXPECT(host_player_slot_limit(session_player_cap(0, kJo), true, 1, kJo) == 1 &&
+                host_player_slot_limit(session_player_cap(0, kJo), false, 1, kJo) == 2);
+    TEST_EXPECT(host_player_slot_limit(session_player_cap(99, kJo), false, 1, kJo) == 66);
     TEST_EXPECT(read("TAKEOVER_TIME", "20"));
     TEST_EXPECT(read("LFP_TAKEOVER", "3"));
     TEST_EXPECT(cfg.teamchange_time == 20 && cfg.mp_lfp_takeoverspeed == 3);

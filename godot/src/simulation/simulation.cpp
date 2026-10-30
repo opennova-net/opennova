@@ -57,7 +57,7 @@ void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 	options.player_limit = host_listening
 			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
 					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play,
-					host_title))
+					net.host_session_config.network_connect_type, host_title))
 			: static_cast<int32_t>(net.host_session_config.player_slot_limit());
 	options.team_count = net.host_session_config.num_teams;
 	if (!options.joiner || joined == nullptr) return;

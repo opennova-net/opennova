@@ -175,7 +175,8 @@ GameConfig stage_next_mission(const GameConfig &session, const gamecfg::GameCfg 
 	GameConfig out = session;
 	apply_mission_start_session_config(out, block, rotation, mission_name);
 	out.mission_slot_limit = block != nullptr
-			? host_player_slot_limit(block->mp_max_players, block->dedicated == 0, *session.title)
+			? host_player_slot_limit(block->mp_max_players, block->dedicated == 0,
+					block->networkconnecttype, *session.title)
 			: session.live_slot_limit();
 	return out;
 }
@@ -227,6 +228,9 @@ void apply_block_session_settings(GameConfig &config, const gamecfg::GameCfg &cf
 	config.no_scope_drift = cfg.mp_no_scope_drift;
 
 	config.num_teams = static_cast<uint8_t>(cfg.mp_numteams); // g_NumTeamsConfig @0x551BAC
+	// The network connect type the apply's player ceiling reads (host_player_slot_limit)
+	// [orig: networkConnectType_480 @0x551B3B].
+	config.network_connect_type = cfg.networkconnecttype;
 	// The block's own game type, which the remote add's TDM preference test reads
 	// (GameConfig::cfg_game_type) [orig: Server_PlayerAdd @0x51CC6C].
 	config.cfg_game_type = cfg.mp_gametype;

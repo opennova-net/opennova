@@ -576,8 +576,17 @@ struct GameConfig {
 	uint32_t lan_mode = 1;
 	std::optional<uint32_t> send_holdoff_ticks;
 
+	// The cfg block's network connect type (game.cfg `networkconnecttype`: 1 as the
+	// NovaWorld screen writes it and by default, 2 as the LAN screen writes it), which
+	// the session apply's player ceiling reads (host_player_slot_limit).
+	// [orig: networkConnectType_480 - Config_SetDefaults @0x54D1D4,
+	//  UI_InitLANMultiplayerScreen @0x5569E1 (2), sub_556A90 @0x556AA0 (1);
+	//  Game_ApplySessionSettingsToGlobals @0x551B3B]
+	int32_t network_connect_type = 1;
+
 	// The session create's player-slot limit: max_players plus the dedicated
-	// host's own slot (host_player_slot_limit), the create's cap and server type.
+	// host's own slot (host_player_slot_limit), the create's cap, server type
+	// and network connect type.
 	// The slot table is allocated with it (total_player_slot_capacity); the live
 	// limit starts as it (live_slot_limit).
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState
