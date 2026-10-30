@@ -142,11 +142,11 @@ public:
 	// the chain and its witness) over the session (the shell's world view's, which the deploy
 	// pick's send serves too; null = this router's world's), the HUD's words as the key meets
 	// them (none open without the HUD's toggles) and this router's action latches: its VK
-	// (the layout's) and the KeyPress gametext keys' VKs. A digit arm's
+	// (the layout's), and the quit dialog's keys the gametext the HUD handed over reads
+	// (engine hud::hud_key_press_keys). A digit arm's
 	// pick runs at once, past no head (the seat pick, or the menu's send: the chain closed
 	// the menu); the outcome carries the rest of the device half, which the shell runs.
-	Ref<SpecialKeyOutcome> special_key(const Ref<Simulation> &p_session, int p_vk, int p_yes_vk,
-			int p_no_vk, int p_restart_vk);
+	Ref<SpecialKeyOutcome> special_key(const Ref<Simulation> &p_session, int p_vk);
 	// The held USE row's armory arm took its open on the last frame's poll
 	// (controls::PlayerAction::OpenArmory); reading clears it. The shell
 	// opens weapon.mnu's WEAPON screen.
@@ -197,10 +197,10 @@ public:
 	// since the last read, in their order; reading clears them. The HUD
 	// presenter applies them at its frame.
 	PackedInt64Array take_hud_toggle_events();
-	// The HUD's chat line and the gametext its prompts read: the talk rows
-	// (the command prompt among them) are polled here in every input frame.
-	// The HUD presenter hands its process-lifetime instance over. Null = no
-	// talk rows polled.
+	// The HUD's chat line and the gametext its prompts and the special-key chain's
+	// KeyPress keys read: the talk rows (the command prompt among them) are polled
+	// here in every input frame. The HUD presenter hands its process-lifetime
+	// instance over. Null = no talk rows polled.
 	void set_hud_chat(const Ref<HudChatEntry> &p_chat, const Ref<RtxtStringFile> &p_gametext);
 
 private:
@@ -248,7 +248,7 @@ private:
 	Ref<HudToggles> hud_toggles_;
 	std::vector<int64_t> hud_toggle_events_;
 	Ref<HudChatEntry> hud_chat_;
-	Ref<RtxtStringFile> chat_gametext_;
+	Ref<RtxtStringFile> gametext_;
 	Ref<KeyEventQueue> key_events_;
 	opennova::controls::PlayerActions actions_;
 	bool armory_requested_ = false;

@@ -56,14 +56,6 @@ signal loadout_accepted(kit: Array[WeaponKitEntry], player_class: int)
 signal armory_closed
 
 
-# weapon.mnu's WEAPON screen: PLAYER_CLASS (spinlist) + PRIMARY_AMMO1 are unique to it
-# (player.mnu uses PLAYERCLASS, no ammo combos).
-func owns_menu(driver: MenuDriver) -> bool:
-	if driver == null:
-		return false
-	return driver.has_widget("PLAYER_CLASS") and driver.has_widget("PRIMARY_AMMO1")
-
-
 func set_entity_team(entity_team: int) -> void:
 	_entity_team = entity_team
 
@@ -144,8 +136,9 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	# menu_commands.h: WEAPON ACCEPT -> apply_loadout, CANCEL -> cancel_loadout)
 	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 -- ACCEPT's arg 0 @0x5671f6,
 	# CANCEL's arg 1 @0x567214 skips the apply].
+	driver.wire_commands(true)
 	for control in ["ACCEPT", "CANCEL"]:
-		match driver.screen_command(screen, control, true):
+		match driver.screen_command(screen, control):
 			"apply_loadout":
 				_activation_handlers[control] = _on_accept
 			"cancel_loadout":

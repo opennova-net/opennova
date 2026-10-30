@@ -284,8 +284,9 @@ public:
 
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
-	// The model files and animation maps this placer read from the mount since the last take:
-	// their counts and wall time (an instrument: the wire walk's cold spawns print it beside
+	// The model files this placer read from the mount and the rigs it resolved (the engine's
+	// AssetStore caches each rig, so a repeat resolve is a lookup) since the last take: their
+	// counts and wall time (an instrument: the wire walk's cold spawns print it beside
 	// ObjectModel's build profile). C++ siblings only.
 	struct LoadProfile {
 		int data_loads = 0;
@@ -642,7 +643,6 @@ private:
 	HashMap<uint64_t, Ref<ObjectData>> static_source_assets_;
 
 	HashMap<String, Ref<ObjectData>> object_data_cache_;
-	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
 	LoadProfile load_profile_; // take_load_profile
 	HashMap<String, Vector<StaticBatch>> static_batch_cache_;
 	HashMap<String, PackedVector3Array> static_face_cache_; // get_static_graphic_faces

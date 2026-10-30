@@ -266,7 +266,6 @@ void MissionObjectPlacer::_check_epoch() {
 	}
 	built_epoch_ = epoch;
 	object_data_cache_.clear();
-	skeletal_cache_.clear();
 	static_batch_cache_.clear();
 	static_face_cache_.clear();
 	static_lod_profile_cache_.clear();
@@ -893,15 +892,15 @@ void MissionObjectPlacer::_configure_item_lighting(ObjectModel *p_model,
 			item_db_->get_light_transfer(p_item_id));
 }
 
-// Cached per (.adm, model bone table): two models can share one .adm (the FP
-// arms + gun both use ak47_1st.adm) yet carry different .3di pivots, so they
-// must not alias (witness: placement_traits.h ledger — the model is the rig
-// source, never the lossy .bad records).
+// The rig is the engine store's (AssetStore::skeletal_rig), cached there per (.adm, model bone
+// table, viewmodel or body): two models can share one .adm (the FP arms + gun both use
+// ak47_1st.adm) yet carry different .3di pivots, so they must not alias (witness:
+// placement_traits.h ledger — the model is the rig source, never the lossy .bad records).
 Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 		const String &p_adm_name, const PackedVector3Array &p_bone_origins,
 		const PackedInt32Array &p_bone_parents, bool p_first_person) {
 	// The def's name as authored opens <stem>.adm, or default.adm where the
-	// mounted roots do not carry that file, and the cache keys the RESOLVED name
+	// mounted roots do not carry that file, and the store keys the RESOLVED name
 	// (AnimMap_LoadAdmFile's extension swap and FileSystem_FileExists miss ahead
 	// of AnimMap_FindByName; engine anim/adm_fallback.h). An empty name loads
 	// no map. A present-but-broken file still fails below, as retail's parse
@@ -913,13 +912,6 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	if (adm_name.is_empty()) {
 		return Ref<SkeletalAnim>();
 	}
-	const String cache_key = adm_name + String(p_first_person ? "#fp#" : "#") +
-			String::num_int64(Variant(p_bone_origins).hash()) + String("#") +
-			String::num_int64(Variant(p_bone_parents).hash());
-	const Ref<SkeletalAnim> *cached = skeletal_cache_.getptr(cache_key);
-	if (cached != nullptr) {
-		return *cached;
-	}
 	const uint64_t load_start = Time::get_singleton()->get_ticks_usec();
 	Ref<SkeletalAnim> skeletal;
 	skeletal.instantiate();
@@ -929,7 +921,6 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	}
 	++load_profile_.rig_loads;
 	load_profile_.rig_us += Time::get_singleton()->get_ticks_usec() - load_start;
-	skeletal_cache_[cache_key] = skeletal;
 	return skeletal;
 }
 

@@ -35,8 +35,8 @@ COPY . .
 
 # ONE's stamp (engine/base/version/one_build.h; serve-image.yml passes
 # scripts/ci/one_stamp.sh's, since the context holds no .git to take it from):
-# the release, the commit, which opennova-hostd also reports to the service as
-# its build ("dev" with none), the commit's time and the staging flag.
+# the release, the commit, the commit's time and the staging flag, which
+# opennova-hostd reports to the service as its build (one_build().label()).
 ARG OPENNOVA_VERSION=
 ARG OPENNOVA_COMMIT=
 ARG OPENNOVA_BUILD_TIME=0
@@ -51,7 +51,6 @@ ARG OPENNOVA_STAGING=OFF
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
         "-DOPENNOVA_VERSION=${OPENNOVA_VERSION}" "-DOPENNOVA_COMMIT=${OPENNOVA_COMMIT}" \
         "-DOPENNOVA_BUILD_TIME=${OPENNOVA_BUILD_TIME}" "-DOPENNOVA_STAGING=${OPENNOVA_STAGING}" \
-        "-DOPENNOVA_HOSTD_VERSION=${OPENNOVA_COMMIT:-dev}" \
     && cmake --build build --target opennova_serve opennova_hostd
 
 # ---- the docker CLI stage ---------------------------------------------------

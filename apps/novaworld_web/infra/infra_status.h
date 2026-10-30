@@ -13,7 +13,10 @@
 //              status, deployments (each one's rollout state) and task
 //              definition, and their newest events; and SSM GetParameter of
 //              the release (the manifest `app deploy` records, DEPLOY.md),
-//              whose revisions say whether each service runs the release's
+//              whose revisions say whether each service runs the release's,
+//              and whose images (each pinned by digest) and their commits (each
+//              image's own org.opencontainers.image.revision label, read as the
+//              deploy recorded it) name the build each image holds
 //   tasks      ECS ListTasks (the running ones, and the stopped ones ECS
 //              still lists, about an hour) and DescribeTasks: each one's
 //              status, health, start, zone, private address and size, and its
@@ -193,6 +196,14 @@ struct Release {
 	std::string created;
 	std::string revision;
 	std::map<std::string, std::string> task_definitions; // program (and backup) -> revision ARN
+	// Image key (the programs, portal, backup, serve, hostd) -> the image it pins
+	// (<registry>/<repository>@sha256:<digest>).
+	std::map<std::string, std::string> images;
+	// Image key -> the commit that image was built from, its short sha: the image's
+	// org.opencontainers.image.revision label as the deploy read it. None for an
+	// image whose label did not read, and in a release recorded before the deploy
+	// read them.
+	std::map<std::string, std::string> image_commits;
 };
 
 struct MachineInstance {

@@ -176,7 +176,7 @@ func _doc(xml: String) -> MnuDocument:
 
 func _frameless_driver(xml: String, menu_file := "menu.mnu") -> MenuDriver:
 	var driver := MenuDriver.new()
-	assert_true(driver.open_document(_doc(xml), null, null, null, menu_file),
+	assert_true(driver.open_document(_doc(xml), null, null, menu_file),
 			"document opens frameless")
 	return driver
 
@@ -187,7 +187,7 @@ func _framed_driver(xml: String, menu_file := "menu.mnu") -> MenuDriver:
 	frame.size = Vector2(800, 600)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(_doc(xml), null, null, null, menu_file),
+	assert_true(driver.open_document(_doc(xml), null, null, menu_file),
 			"document opens on the frame")
 	return driver
 
@@ -219,7 +219,7 @@ func test_attached_driver_releases_itself_and_its_document() -> void:
 	var driver := _framed_driver(ACTIONS_XML)
 	var driver_ref: WeakRef = weakref(driver)
 	var document_ref: WeakRef = weakref(driver.document())
-	driver.get_frame().configure(null, "", null, null, null)
+	driver.get_frame().configure(null, "", null, null)
 	driver = null
 	assert_null(driver_ref.get_ref(), "the frame's signal connections do not retain the driver")
 	assert_null(document_ref.get_ref(), "closing the driver releases its document")
@@ -346,7 +346,7 @@ func test_document_swap_during_activation_blocks_stale_dispatch() -> void:
 	driver.widget_activated.connect(
 			func(_id: int, _name: String) -> void:
 				assert_true(driver.open_document(
-						_doc(ACTION_BUTTON_XML), null, null, null, "other.mnu"),
+						_doc(ACTION_BUTTON_XML), null, null, "other.mnu"),
 						"observer swaps the document mid-activation"))
 	watch_signals(driver)
 	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "GO consumed")
@@ -377,7 +377,7 @@ func test_screen_changed_and_music_var_push_on_every_show() -> void:
 	driver.set_music_director(director)
 	driver.set_music_var_index(MUSIC_VAR_INDEX)
 	watch_signals(driver)
-	assert_true(driver.open_document(_doc(ACTIONS_XML), null, null, null, "menu.mnu"))
+	assert_true(driver.open_document(_doc(ACTIONS_XML), null, null, "menu.mnu"))
 	assert_signal_emitted_with_parameters(driver, "screen_changed", ["MAIN"])
 	assert_eq(director.get_var(MUSIC_VAR_INDEX), 3, "the authored MUSICVAR is pushed on show")
 
@@ -562,7 +562,7 @@ func test_code_page_item_reads_back_as_text() -> void:
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(bytes), OK, "the code-page fixture parses")
 	var driver := MenuDriver.new()
-	assert_true(driver.open_document(doc, null, null, null, "menu.mnu"), "document opens frameless")
+	assert_true(driver.open_document(doc, null, null, "menu.mnu"), "document opens frameless")
 	var list := driver.widget_id("PICKLIST")
 	assert_eq(driver.item_text(list, 1), "Café", "the item's byte reads as its character")
 	assert_eq(driver.get_widget_items(list), PackedStringArray(["AAA", "Café"]),
@@ -637,8 +637,8 @@ func test_scroll_slider_arrows_track_and_thumb_drag() -> void:
 	frame.size = Vector2(800, 600)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(_doc(SLIDER_XML), null, null, null,
-			"options.mnu"), "document opens on the frame")
+	assert_true(driver.open_document(_doc(SLIDER_XML), null, null, "options.mnu"),
+			"document opens on the frame")
 	var gamma := driver.widget_id("GAMMA")
 	driver.set_widget_scroll_range(gamma, 0, 100, 10, 50)
 	watch_signals(driver)
@@ -699,7 +699,7 @@ func test_scrollbar_arrow_steps_on_its_click_and_the_track_holds_nothing() -> vo
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
 	assert_true(driver.open_document(_doc(SLIDER_AND_BUTTON_XML), null, null,
-			null, "options.mnu"), "document opens on the frame")
+			"options.mnu"), "document opens on the frame")
 	var gamma := driver.widget_id("GAMMA")
 	driver.set_widget_scroll_range(gamma, 0, 100, 10, 50)
 	watch_signals(driver)
@@ -739,8 +739,8 @@ func test_combo_popup_row_hover_tracks_mouse() -> void:
 	frame.size = Vector2(800, 600)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(_doc(BOARD_XML), null, null, null,
-			"menu.mnu"), "document opens on the frame")
+	assert_true(driver.open_document(_doc(BOARD_XML), null, null, "menu.mnu"),
+			"document opens on the frame")
 	var combo := driver.widget_id("MODE")
 	_click_widget(driver, "MODE")
 	assert_true(driver.is_combo_popup_open(combo), "the popup is open")
@@ -798,8 +798,8 @@ func test_combo_popup_scrollbar_scrolls_rows() -> void:
 	frame.size = Vector2(800, 600)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(_doc(COMBO_SCROLL_XML), null, null, null,
-			"weapon.mnu"), "document opens on the frame")
+	assert_true(driver.open_document(_doc(COMBO_SCROLL_XML), null, null, "weapon.mnu"),
+			"document opens on the frame")
 	var combo := driver.widget_id("SCROLLY")
 	var index := frame.widget_index("SCROLLY")
 	_click(driver, Vector2(250, 10))
@@ -834,8 +834,8 @@ func test_wheel_ticks_scroll_open_popup_rows() -> void:
 	frame.size = Vector2(800, 600)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(_doc(COMBO_SCROLL_XML), null, null, null,
-			"weapon.mnu"), "document opens on the frame")
+	assert_true(driver.open_document(_doc(COMBO_SCROLL_XML), null, null, "weapon.mnu"),
+			"document opens on the frame")
 	var combo := driver.widget_id("SCROLLY")
 	_click(driver, Vector2(250, 10))
 	assert_true(driver.is_combo_popup_open(combo), "the popup is open")
