@@ -127,7 +127,8 @@ struct ProtocolDialectRow {
 };
 
 // Every knob by every message it shapes, S2C then C2S, each by id: where a reader of one message
-// finds the protocols' differences in it, the rows games_test pins each protocol's sheet by.
+// finds the protocols' differences in it (opennova-wire --dialect lists them), the rows games_test
+// pins each protocol's sheet by.
 inline constexpr ProtocolDialectRow kProtocolDialect[] = {
 	{ 'S', 0x0A, "s2c_0a.objective_checkpoint", "DFX2-1" },
 	{ 'S', 0x0A, "slot_state.join_state_fixed", "DFX2-11" },

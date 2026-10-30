@@ -1608,6 +1608,19 @@ void coverage_emit() {
 	            covered, partial, backlog.size());
 }
 
+// --dialect: the in-match dialect by message (net/protocol/protocol.h kProtocolDialect): each
+// message a protocol's sheet shapes, its catalog label, the knob and the catalog row
+// (docs/titles/dfx2-vs-jo-re.md §8) it answers to, one 'DIALECT' line per pair. A protocol's
+// values are its games/<code>/<code>_protocol.cpp's.
+int dialect_emit() {
+	for (const ProtocolDialectRow &row : kProtocolDialect) {
+		const char *label = tag_label(row.dir, row.tag);
+		std::printf("DIALECT %c 0x%02x %-24s %s (%s)\n", row.dir, unsigned(row.tag),
+				label ? label : "?", row.knob, row.row);
+	}
+	return 0;
+}
+
 bool g_hexdump_mode = false; // --hexdump: raw payload hex for EVERY message (byte-diff two captures)
 
 void print_payload(char dir, int frame, int tag,
@@ -1832,6 +1845,7 @@ int main(int argc, char *argv[]) {
 	bool handshake_mode = false;
 	bool histogram_mode = false;
 	bool coverage_mode = false;
+	bool dialect_mode = false;
 	bool sequencing_mode = false;
 	bool parity_events_mode = false;
 	bool scenario_events_mode = false;
@@ -1857,6 +1871,8 @@ int main(int argc, char *argv[]) {
 		} else if (std::strcmp(a, "--coverage") == 0) {
 			coverage_mode = true;
 			histogram_mode = true; // coverage joins the histogram tally with the catalog
+		} else if (std::strcmp(a, "--dialect") == 0) {
+			dialect_mode = true;
 		} else if (std::strcmp(a, "--sequencing") == 0) {
 			sequencing_mode = true;
 			stream_mode = true;
@@ -1884,10 +1900,11 @@ int main(int argc, char *argv[]) {
 			path = a;
 		}
 	}
+	if (dialect_mode) return dialect_emit();
 	if (!path || !*path) {
 		std::fprintf(stderr,
 		             "usage: opennova-wire <capture-path> [--items <items.def>] [--stream] "
-		             "[--histogram] [--coverage] [--sequencing] [--parity-events] "
+		             "[--histogram] [--coverage] [--dialect] [--sequencing] [--parity-events] "
 		             "[--scenario-events] "
 		             "[--max-frames N] [--skip N] [--game <code>] "
 		             "[0xNN ...]\n"
@@ -1897,6 +1914,9 @@ int main(int argc, char *argv[]) {
 		             "TOTAL line\n"
 		             "       --coverage ranks the DECODE BACKLOG: tags present in "
 		             "the capture with no structured decoder yet, by volume\n"
+		             "       --dialect (no capture) lists the in-match dialect: one "
+		             "'DIALECT <dir> 0x<tag> <name> <knob> (<row>)' line per message a "
+		             "protocol's sheet shapes\n"
 		             "       --sequencing emits one machine-readable 'PACKET "
 		             "frame=.. dir=.. session=.. sid=.. seq=.. ack=.. flags=.. "
 		             "records=.. tags=..' line per decrypted 0x43/0x83 datagram\n"
