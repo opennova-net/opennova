@@ -169,11 +169,8 @@ public:
 		std::vector<uint16_t> raw16(kTexels);
 		input.copy_rect(0, 0, kHeightsSide, kHeightsSide, reinterpret_cast<uint8_t *>(raw16.data()));
 		if (raw_) {
-			out.text.resize(kTexels * 2);
-			for (size_t i = 0; i < kTexels; ++i) {
-				out.text[i * 2] = char(raw16[i] & 0xFF);
-				out.text[i * 2 + 1] = char(raw16[i] >> 8);
-			}
+			const std::vector<uint8_t> bytes = trngen::encode_heightmap_raw16(raw16);
+			out.text.assign(bytes.begin(), bytes.end());
 			return out;
 		}
 		std::vector<uint16_t> samples;
