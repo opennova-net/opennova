@@ -1240,6 +1240,12 @@ typedef struct DefHudPosDef {
        g_HUDZoneInfoX @0x2723DA4 / dword_2723DA8 (atof) / dword_2723DAC
        (HUD_ParseTextAlignment on the third token)] */
     int zone_info[3];
+    /* EXPPOINTS is four numbers: x, y, the hidden dword and the pulse percent the EXP
+       fade scales its number by (100 = none), no alignment word. Jointops.exe parses it and
+       reads none; dfx2.exe's EXPPOINTS element reads all four (runtime/hud/hud_exp_points.h).
+       [orig: HUD_ParseHudposToken @0x59F370 (@0x5A0463..0x5A04AF -> dword_27236B4..C0, no
+       reader); the twin @0x59DDA0 (@0x59EE93..0x59EEDF -> dword_2724A2C..dword_2724A38)
+       (dfx2.exe)] */
     int exp_points[4];
     /* CONNECTSTATUS is the three-field form too: x, y, then the alignment
        word as the third token, no hidden dword (the shipped line is

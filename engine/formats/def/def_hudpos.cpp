@@ -251,7 +251,12 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             /* x, y, alignment word [orig: @0x5A0642..0x5A0676] */
             parse_pos_align3(vals, nvals, hud->zone_info);
         } else if (key_is(key, "exppoints")) {
-            parse_pos_aligned(vals, nvals, hud->exp_points);
+            /* x, y, hidden and the pulse percent, four numbers: no alignment word
+               [orig: HUD_ParseHudposToken @0x59F370 - the EXPPOINTS arm's four atof / ftol
+               pairs @0x5A0463..0x5A04AF -> dword_27236B4..dword_27236C0; the twin's
+               @0x59EE93..0x59EEDF -> dword_2724A2C..dword_2724A38 (dfx2.exe)] */
+            for (int i = 0; i < 4 && i < nvals; ++i)
+                hud->exp_points[i] = hud_number(vals[i].s, vals[i].len);
         } else if (key_is(key, "connectstatus")) {
             /* x, y, alignment word [orig: @0x59FAE9..0x59FB32] */
             parse_pos_align3(vals, nvals, hud->connect_status);
