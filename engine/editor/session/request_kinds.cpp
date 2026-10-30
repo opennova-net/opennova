@@ -281,8 +281,8 @@ void serve_novaworld_sign_out(SessionCore &core, const EditorRequest &) {
 void serve_novaworld_check(SessionCore &core, const EditorRequest &) {
 	core.novaworld().check();
 }
-void serve_novaworld_get(SessionCore &core, const EditorRequest &request) {
-	core.novaworld().get(request);
+void serve_novaworld_sync(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().sync(request);
 }
 void serve_novaworld_put(SessionCore &core, const EditorRequest &request) {
 	core.novaworld().put(request);
@@ -1533,19 +1533,19 @@ constexpr RequestKindRow kRows[] = {
 			"lists are in. Refused where the editor reaches no NovaWorld service.")
 			.holds(kFiles, kSlot)
 			.row,
-	Request(K::NovaWorldGet, "novaworld_get", serve_novaworld_get,
-			"The project project_key got into dir (missing, or empty) as a working copy at its head, an "
+	Request(K::NovaWorldSync, "novaworld_sync", serve_novaworld_sync,
+			"The project project_key synced into dir (missing, or empty) as a working copy at its head, an "
 			"operation (the files downloaded and checked by their SHA-256), its project file naming project_key "
 			"whatever the revision's named, then opened as open_project opens it; a dir holding the project "
 			"already is opened, nothing got. "
 			"A mod's project builds on its base game's in the folder its project file names: made there first where "
-			"none is (the base_setup operation: got from NovaWorld where the account reads it and it has a "
+			"none is (the base_setup operation: synced from NovaWorld where the account reads it and it has a "
 			"revision, else imported from the editor's game install; with no install of that game the mod opens "
 			"alone, Output saying where to make it).")
 			.takes(request_params({ F::Dir, F::ProjectKey }, {}))
 			.holds(kNone, kHoldsAll | kSlot)
 			.ends_edit_groups()
-			.guarded(GuardScope::AllDirty, "Get a project", "Save all")
+			.guarded(GuardScope::AllDirty, "Sync a project", "Save all")
 			.can_discard()
 			.acts_on_saved()
 			.row,
@@ -1651,7 +1651,7 @@ constexpr RequestKindRow kRows[] = {
 			.holds(kNone, kHoldsAll)
 			.row,
 	Request(K::NovaWorldKeepFolder, "novaworld_keep_folder", serve_novaworld_keep_folder,
-			"A working copy holding no revision of its project (a folder got from another service, or one that lost "
+			"A working copy holding no revision of its project (a folder synced from another service, or one that lost "
 			"its base): the project's head taken as its base with no file changed, an operation, then checked, so "
 			"every difference from the head, deletions too, is a change for the next push. A stopped pull is given "
 			"up. Refused for a folder that holds a revision.")
@@ -1668,8 +1668,8 @@ constexpr RequestKindRow kRows[] = {
 	// An operation (base_setup) that opens the project again once it is in: its unsaved edits saved first.
 	Request(K::NovaWorldMakeBase, "novaworld_make_base", serve_novaworld_make_base,
 			"The open mod's base game's project made where its project file names it, which holds no project "
-			"(the novaworld section's missing_base), as a got mod's is: its NovaWorld game (the mod's project's "
-			"base) got from NovaWorld, or a retail game's imported from game_install (left out, the project's; "
+			"(the novaworld section's missing_base), as a synced mod's is: its NovaWorld game (the mod's project's "
+			"base) synced from NovaWorld, or a retail game's imported from game_install (left out, the project's; "
 			"refused where it holds none of that game); an operation (base_setup), the mod opened again once it is "
 			"in.")
 			.takes(request_params({}, { F::GameInstall }))

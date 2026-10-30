@@ -84,7 +84,7 @@ void draw_from_store(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	if (!v.novaworld.available) return;
 	ImGui::Spacing();
-	ImGui::SeparatorText("Get a project from NovaWorld");
+	ImGui::SeparatorText("Sync a project from NovaWorld");
 	draw_novaworld_activity(workspace); // a get, a base game's project made, what NovaWorld is asked
 	draw_novaworld_projects(workspace);
 	if (v.novaworld.signed_in) return;
@@ -439,7 +439,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			}
 			ui_kit::tooltip("The NovaWorld game the mod changes. Make the project makes the mod on its project: the one on this "
 			                "computer, or one made beside the mod first (a retail game's imported from your game install, "
-			                "any other got from NovaWorld).");
+			                "any other synced from NovaWorld).");
 			// Its short name offered from its name, as the website offers it, until one is typed.
 			if (name_field() && !short_typed_)
 				set("expansion", io::JsonValue::make_string(short_name_for(title_.sent())));

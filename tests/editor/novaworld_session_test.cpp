@@ -159,7 +159,7 @@ static int test_offline() {
 	editor::ProjectSession session(platform, preferences);
 	TEST_EXPECT(!session.view().novaworld.available);
 	for (const editor::EditorRequest &r : { request::novaworld_check(), request::novaworld_pull(),
-				 request::novaworld_push("x"), request::novaworld_get("MOD", "somewhere"),
+				 request::novaworld_push("x"), request::novaworld_sync("MOD", "somewhere"),
 				 request::novaworld_put_empty("MOD") }) {
 		session.handle(r);
 		bool refused = false;
@@ -254,9 +254,9 @@ static int test_share_through_sessions() {
 	// Got into an empty folder, opened there, its project file naming MOD: a working copy at
 	// revision 1; a folder that holds files refused.
 	TEST_EXPECT(put(dir.file("Full") + "/x.txt", "x"));
-	second.send(request::novaworld_get("MOD", dir.file("Full")));
+	second.send(request::novaworld_sync("MOD", dir.file("Full")));
 	TEST_EXPECT(second.refused("novaworld.refused"));
-	second.send(request::novaworld_get("MOD", dir.file("Second")));
+	second.send(request::novaworld_sync("MOD", dir.file("Second")));
 	TEST_EXPECT(second.session.view().project.open);
 	TEST_EXPECT(second.novaworld().key == "MOD" && second.novaworld().tracked &&
 			second.novaworld().revision == 1 && second.read("defs/a.def") == "a1");
@@ -312,7 +312,7 @@ static int test_share_through_sessions() {
 	TEST_EXPECT(second.refused("novaworld.refused") && second.novaworld().conflicts.size() == 1);
 	// A get given up on (a project the store lacks) took the waiting pull's place: its conflicts go
 	// with it, and a pull plans again.
-	second.send(request::novaworld_get("NOPE", dir.file("Third")));
+	second.send(request::novaworld_sync("NOPE", dir.file("Third")));
 	TEST_EXPECT(second.novaworld().conflicts.empty());
 	second.send(request::novaworld_pull());
 	TEST_EXPECT(second.novaworld().conflicts.size() == 1);
@@ -660,7 +660,7 @@ static int test_get_expansion() {
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
 	TEST_EXPECT(s.novaworld().projects.size() == 2 && s.novaworld().projects[1].base == "MOD");
-	s.send(request::novaworld_get("EXP", dir.file("work/EXP")));
+	s.send(request::novaworld_sync("EXP", dir.file("work/EXP")));
 	std::string text, error;
 	TEST_EXPECT(opennova::io::read_file_text(dir.file("work/EXP/defs/e.def"), text, error) &&
 			text == "expansion");
@@ -692,7 +692,7 @@ static int test_get_then_open_again() {
 		{
 			Session got(&service);
 			got.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
-			got.send(request::novaworld_get("MOD", folder));
+			got.send(request::novaworld_sync("MOD", folder));
 			TEST_EXPECT(got.session.view().project.open && got.novaworld().key == "MOD" &&
 					got.novaworld().tracked && got.novaworld().revision == 1);
 		}
@@ -726,24 +726,24 @@ static int test_get_again() {
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
 	const std::string copy = dir.file("Copy");
-	s.send(request::novaworld_get("MOD", copy));
+	s.send(request::novaworld_sync("MOD", copy));
 	const size_t downloads = service.downloads;
 	TEST_EXPECT(s.novaworld().tracked && downloads == 2);
 	s.send(request::close_project());
-	s.send(request::novaworld_get("MOD", copy));
+	s.send(request::novaworld_sync("MOD", copy));
 	TEST_EXPECT(s.session.view().project.open && s.novaworld().tracked &&
-			service.downloads == downloads && s.said("not got again"));
+			service.downloads == downloads && s.said("not synced again"));
 	s.send(request::close_project());
 
 	TEST_EXPECT(put(dir.file("Other/project.opennova"), project_file_naming("OTHER")));
-	s.send(request::novaworld_get("MOD", dir.file("Other")));
+	s.send(request::novaworld_sync("MOD", dir.file("Other")));
 	TEST_EXPECT(s.refused("novaworld.refused") && !s.session.view().project.open &&
 			s.session.view().activity.status.find("holds another project") != std::string::npos);
 
 	std::error_code removed;
 	std::filesystem::remove(opennova::io::os_path(copy + "/project.opennova"), removed);
 	std::filesystem::remove_all(opennova::io::os_path(copy + "/defs"), removed);
-	s.send(request::novaworld_get("MOD", copy));
+	s.send(request::novaworld_sync("MOD", copy));
 	TEST_EXPECT(s.session.view().project.open && s.novaworld().key == "MOD" &&
 			s.novaworld().tracked && s.novaworld().revision == 1 && s.read("defs/a.def") == "a");
 	std::printf("get again: a copy opened, another project refused, a folder left with only its "
@@ -761,7 +761,7 @@ static int test_copies_outlive_recents() {
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
 	const std::string copy = dir.file("Copy");
-	s.send(request::novaworld_get("MOD", copy));
+	s.send(request::novaworld_sync("MOD", copy));
 	s.send(request::close_project());
 	s.send(request::forget_recent(s.session.view().project.recent_projects.front()));
 	const auto known = [](const Session &session) {
@@ -820,7 +820,7 @@ static int test_make_own_and_rejoin() {
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
 	const std::string copy = dir.file("Copy");
-	s.send(request::novaworld_get("MOD", copy));
+	s.send(request::novaworld_sync("MOD", copy));
 	s.send(request::novaworld_sign_out());
 	s.send(request::novaworld_make_own());
 	TEST_EXPECT(s.refused("novaworld.refused") && s.novaworld().key == "MOD");
@@ -894,7 +894,7 @@ static int test_two_services() {
 
 	// A base for each: the live editor adopts the same files at its head, and staging's work is a plain push.
 	const std::string folder = dir.file("Mod");
-	s.send(request::novaworld_get("MOD", folder));
+	s.send(request::novaworld_sync("MOD", folder));
 	s.send(request::close_project());
 	l.send(request::open_project(folder));
 	TEST_EXPECT(l.novaworld().tracked && l.novaworld().revision == 1);
@@ -922,7 +922,7 @@ static int test_two_services() {
 
 	// The old way, a pull keeping this folder's files, goes on working, and keeps what only live has.
 	const std::string pulled = dir.file("Pulled");
-	s.send(request::novaworld_get("MOD", pulled));
+	s.send(request::novaworld_sync("MOD", pulled));
 	s.send(request::close_project());
 	TEST_EXPECT(put(pulled + "/defs/a.def", "a3"));
 	l.send(request::open_project(pulled));
@@ -938,7 +938,7 @@ static int test_two_services() {
 
 	// Replace with this folder: every difference a change, deletions too; nothing sent until the push.
 	const std::string fresh = dir.file("Fresh");
-	s.send(request::novaworld_get("MOD", fresh));
+	s.send(request::novaworld_sync("MOD", fresh));
 	s.send(request::close_project());
 	l.send(request::open_project(fresh));
 	TEST_EXPECT(standing(l).kind == editor::NovaWorldStandingKind::NoRevision);
@@ -1011,7 +1011,7 @@ static int test_get_mod_base_not_got() {
 	{
 		Session s(&service);
 		s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
-		s.send(request::novaworld_get("EXP", dir.file("read/EXP")));
+		s.send(request::novaworld_sync("EXP", dir.file("read/EXP")));
 		editor::NovaWorldWorkingCopy base_copy;
 		editor::ProjectDocument base_named;
 		editor::Diagnostic unread;
@@ -1025,9 +1025,9 @@ static int test_get_mod_base_not_got() {
 	{
 		Session s(&service);
 		s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
-		s.send(request::novaworld_get("EXP", dir.file("retail/EXP")));
+		s.send(request::novaworld_sync("EXP", dir.file("retail/EXP")));
 		TEST_EXPECT(got(dir.file("retail/EXP")) && !got(dir.file("retail/MOD")) &&
-				s.said("Its base game's project, MOD, is not got: MOD's project is made from a Joint "
+				s.said("Its base game's project, MOD, is not synced: MOD's project is made from a Joint "
 					   "Operations install, and the editor's game install is none.") &&
 				s.said("retail/MOD"));
 		// The window says it is missing; made from here once an install of its game is named (imported from it),
@@ -1211,7 +1211,7 @@ static int test_progress() {
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
 	s.session.set_poll_budget(editor::PollBudget{ 0, 1 });
-	TEST_EXPECT(s.session.handle(request::novaworld_get("MOD", dir.file("Got"))));
+	TEST_EXPECT(s.session.handle(request::novaworld_sync("MOD", dir.file("Got"))));
 	std::vector<std::string> labels;
 	bool counted = false;
 	for (int i = 0; i < 200 && s.session.view().activity.operation.running(); ++i) {
@@ -1294,7 +1294,7 @@ static int test_account_changes_and_jobs() {
 	push_to_mod(service, { { "project.opennova", project_file_naming("MOD") }, { "defs/a.def", "a" } });
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
-	s.send(request::novaworld_get("MOD", dir.file("Copy")));
+	s.send(request::novaworld_sync("MOD", dir.file("Copy")));
 	push_to_mod(service, { { "project.opennova", project_file_naming("MOD") }, { "defs/a.def", "theirs" } });
 	TEST_EXPECT(put(dir.file("Copy/defs/a.def"), "mine"));
 	s.send(request::novaworld_pull());
@@ -1327,7 +1327,7 @@ static int test_pull_keeps_the_key() {
 	push_to_mod(service, { { "project.opennova", project_file_naming("MOD") }, { "defs/a.def", "a" } });
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
-	s.send(request::novaworld_get("MOD", dir.file("Copy")));
+	s.send(request::novaworld_sync("MOD", dir.file("Copy")));
 	push_to_mod(service, { { "project.opennova", project_file_naming("OLD") }, { "defs/a.def", "a2" } });
 	s.send(request::novaworld_pull());
 	TEST_EXPECT(s.session.view().project.open && s.novaworld().key == "MOD" && s.novaworld().tracked &&
@@ -1354,7 +1354,7 @@ static int test_get_without_revision() {
 		Session s(&service);
 		s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
 		TEST_EXPECT(s.novaworld().projects.size() == 1 && s.novaworld().projects[0].head == 0);
-		s.send(request::novaworld_get("MOD", dir.file("Listed")));
+		s.send(request::novaworld_sync("MOD", dir.file("Listed")));
 		TEST_EXPECT(!s.session.view().project.open && !tracked(dir.file("Listed")) &&
 				s.novaworld().last.find("A mod has no revision yet") != std::string::npos);
 	}
@@ -1363,7 +1363,7 @@ static int test_get_without_revision() {
 		Session s(&service);
 		s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
 		service.expansion = true; // EXP at no revision, not in the session's list
-		s.send(request::novaworld_get("EXP", dir.file("Unlisted")));
+		s.send(request::novaworld_sync("EXP", dir.file("Unlisted")));
 		TEST_EXPECT(!s.session.view().project.open && !tracked(dir.file("Unlisted")) &&
 				s.novaworld().last.find("no revision yet") != std::string::npos);
 	}
@@ -1378,7 +1378,7 @@ static int test_get_without_revision() {
 		service.expansion_head = 1;
 		Session s(&service);
 		s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
-		s.send(request::novaworld_get("EXP", dir.file("work/EXP")));
+		s.send(request::novaworld_sync("EXP", dir.file("work/EXP")));
 		TEST_EXPECT(tracked(dir.file("work/EXP")) && !tracked(dir.file("work/MOD")) &&
 				s.novaworld().last.find("A mod has no revision yet") != std::string::npos);
 	}

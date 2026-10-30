@@ -75,7 +75,7 @@ bool BaseSetupOperation::step(const StepBudget &budget) {
 		if (pull_->step(std::max<uint64_t>(budget.bytes, 1)) == NovaWorldJobState::Running)
 			return false;
 		if (pull_->state() != NovaWorldJobState::Done)
-			return fail(pull_->error().empty() ? "the get was cancelled" : pull_->error());
+			return fail(pull_->error().empty() ? "the sync was cancelled" : pull_->error());
 		if (pull_->up_to_date())
 			return fail(setup_.title + " has no revision yet");
 		return finished();
@@ -120,7 +120,7 @@ OperationProgress BaseSetupOperation::progress() const {
 			p.total == 0 ? OperationUnit::Steps
 			: p.bytes	 ? OperationUnit::Bytes
 						 : OperationUnit::Files,
-			"Getting " + setup_.title + ": " + p.label };
+			"Syncing " + setup_.title + ": " + p.label };
 	}
 	if (!session_)
 		return { 0, 0, OperationUnit::Steps, "Making " + setup_.title + "'s project" };

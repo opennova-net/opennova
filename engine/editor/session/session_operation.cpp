@@ -52,7 +52,7 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	// starting once the base is in (session/base_export.h).
 	{OperationKind::BaseExport, "base_export", HoldsProject, HoldsSlot, {K::Build, K::Play, K::Export}, {},
 	 "Exporting the base game", "the base game's export"},
-	// A mod's base game's project made in a folder of its own, as new_project and novaworld_get go on to open a
+	// A mod's base game's project made in a folder of its own, as new_project and novaworld_sync go on to open a
 	// project once it is in (the mod made on it, a got mod): what reads or writes the open one waits, as for them;
 	// it gives way to novaworld_cancel.
 	{OperationKind::BaseSetup, "base_setup", HoldsNothing, kHoldsAll | HoldsSlot, {}, {K::NovaWorldCancel},

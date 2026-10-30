@@ -32,7 +32,7 @@ private:
 
 // The projects NovaWorld lists (the public ones, the account's own, every one for an admin; a private one says so)
 // in two groups, Yours (those the account may push) and Everyone's, each by its title with its key and its newest
-// revision. One with a revision has Get..., which asks the Shell for a folder (PickPurpose::NovaWorldFolder; the
+// revision. One with a revision has Sync..., which asks the Shell for a folder (PickPurpose::NovaWorldFolder; the
 // windows keep the key until the pick comes back): the project is got into a folder of its key's name inside the
 // one chosen, and opens. An empty one of yours has Set up..., which fills the New project form for it (what it
 // makes, its name, the key its project file takes). Listed none yet, List asks the store (novaworld_check). The

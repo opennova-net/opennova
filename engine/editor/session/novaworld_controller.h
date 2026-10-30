@@ -70,7 +70,7 @@ public:
 	void sign_in(const EditorRequest &request);
 	void sign_out();
 	void check();
-	void get(const EditorRequest &request);
+	void sync(const EditorRequest &request);
 	void put(const EditorRequest &request);
 	void pull();
 	void resolve(const EditorRequest &request);
@@ -278,10 +278,10 @@ private:
 	// it lands
 	// ("" a pull of the open project).
 	std::unique_ptr<NovaWorldPull> paused_;
-	std::string get_dir_;
+	std::string sync_dir_;
 	// A get of a mod's project: its base game's project's key, made next where the mod's project file
 	// names it (make_base), the mod opened once it is in.
-	std::string get_base_key_;
+	std::string sync_base_key_;
 };
 
 } // namespace opennova::editor

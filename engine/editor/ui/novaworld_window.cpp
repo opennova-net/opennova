@@ -82,10 +82,10 @@ std::vector<const ProjectView::RecentProject *> local_copies(const SessionView &
 }
 
 // One group of the projects list (Yours, Everyone's): each by its title, its key and its newest revision, with
-// Get... or, for an empty one the account may push, Set up....
+// Sync... or, for an empty one the account may push, Set up....
 void project_rows(Workspace &workspace, const char *table, const std::vector<const RemoteProject *> &projects) {
 	const SessionView &v = workspace.view();
-	const bool gets = v.allows(EditorRequestKind::NovaWorldGet);
+	const bool gets = v.allows(EditorRequestKind::NovaWorldSync);
 	if (!ImGui::BeginTable(table, 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) return;
 	ImGui::TableSetupColumn("Project", ImGuiTableColumnFlags_WidthStretch);
 	ImGui::TableSetupColumn("##get", ImGuiTableColumnFlags_WidthFixed);
@@ -128,7 +128,7 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 		} else {
 			const bool can = gets && project.head > 0;
 			ImGui::BeginDisabled(!can);
-			if (ImGui::SmallButton("Get...") && can) {
+			if (ImGui::SmallButton("Sync...") && can) {
 				EditorRequest pick = request::pick_directory(PickPurpose::NovaWorldFolder);
 				pick.project_key = project.key;
 				workspace.request(std::move(pick));
@@ -183,7 +183,7 @@ void draw_novaworld_projects(Workspace &workspace) {
 		ImGui::BeginDisabled(!lists);
 		if (ImGui::Button("List projects") && lists) workspace.request(request::novaworld_check());
 		ImGui::EndDisabled();
-		ui_kit::tooltip("Asks " + novaworld_host(c.server) + " for the projects you may get.");
+		ui_kit::tooltip("Asks " + novaworld_host(c.server) + " for the projects you may sync.");
 		return;
 	}
 	ui_kit::WrapRow row;
@@ -226,7 +226,7 @@ std::string novaworld_cancel_words(OperationKind kind) {
 	switch (kind) {
 	case OperationKind::NovaWorldPull:
 		return "Stops between files: nothing in the folder changes, and the files downloaded so far are kept, so the "
-		       "next pull or get downloads none of them again.";
+		       "next pull or sync downloads none of them again.";
 	case OperationKind::NovaWorldPush:
 		return "Stops between files: no revision is made, and the files uploaded so far stay on NovaWorld, so the next "
 		       "push sends none of them again.";
@@ -364,7 +364,7 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 		ImGui::BeginDisabled(!makes);
 		if (ImGui::SmallButton("Make the base game's project") && makes) workspace_.request(request::novaworld_make_base());
 		ImGui::EndDisabled();
-		ui_kit::tooltip(c.remote_known ? "Makes it there: got from NovaWorld, or a retail game's imported from the game "
+		ui_kit::tooltip(c.remote_known ? "Makes it there: synced from NovaWorld, or a retail game's imported from the game "
 		                                 "install (Project settings names it); then opens the mod again."
 		                               : "Check first: NovaWorld says which game the mod is of.");
 	}
@@ -715,7 +715,7 @@ void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		draw_conflicts(c);
 		draw_history(c);
 	}
-	// NovaWorld's other projects, to get while this one is open (Get... opens the one got in its place).
+	// NovaWorld's other projects, to get while this one is open (Sync... opens the one got in its place).
 	if (v.project.open && ImGui::CollapsingHeader("Other projects on NovaWorld")) draw_novaworld_projects(workspace_);
 	if (!c.last.empty()) {
 		ImGui::Spacing();

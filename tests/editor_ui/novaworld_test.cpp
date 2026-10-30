@@ -9,7 +9,7 @@
 // is (none of another kind chosen), and no Bind anywhere; a
 // project whose working copy is being set up, or that the service does not show; the sign-in's form raising
 // novaworld_sign_in with what was typed; the store's projects listed with no project open in two groups, Yours
-// and Everyone's, Get... asking for a folder and the pick getting the project into a folder of its key's name,
+// and Everyone's, Sync... asking for a folder and the pick getting the project into a folder of its key's name,
 // Set up... filling the New project form for an empty one, which then says so with its clear; the welcome page's
 // section; Project settings' NovaWorld section; nothing past its room.
 #include <cstdio>
@@ -668,30 +668,30 @@ void test_get_a_project() {
 	ui.frames(3);
 	ui.away();
 	const std::string home = logged_frame(ui);
-	CHECK(home.find("Get a project from NovaWorld") != std::string::npos && home.find("A mod  r5") != std::string::npos,
+	CHECK(home.find("Sync a project from NovaWorld") != std::string::npos && home.find("A mod  r5") != std::string::npos,
 	      "the welcome page lists the store's projects");
 	CHECK(home.find("OpenNova's") != std::string::npos && home.find("Players'") != std::string::npos &&
 	              home.find("Theirs  r5") != std::string::npos && home.find("Mine, empty") != std::string::npos,
 	      "in groups by whose they are: OpenNova's, other players'");
-	// The NovaWorld window shown over the welcome page lists them too; Get... asks for a folder.
+	// The NovaWorld window shown over the welcome page lists them too; Sync... asks for a folder.
 	auto *content = const_cast<devtools::Window *>(find_window(ui.windows.pass(), "NovaWorld"));
 	CHECK(content != nullptr, "the NovaWorld window");
 	if (!content) return;
 	content->show_anyway();
 	ui.focus("NovaWorld");
-	ui.activate(novaworld_item({"novaworld_opennova", "MOD", "Get..."}));
+	ui.activate(novaworld_item({"novaworld_opennova", "MOD", "Sync..."}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *pick = one(raised, EditorRequestKind::PickDirectory);
 	CHECK(pick && pick->purpose == PickPurpose::NovaWorldFolder && pick->project_key.empty(),
-	      "Get...: one pick of a folder, the key kept by the windows");
+	      "Sync...: one pick of a folder, the key kept by the windows");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	raised = ui.drain();
-	const EditorRequest *get = one(raised, EditorRequestKind::NovaWorldGet);
+	const EditorRequest *get = one(raised, EditorRequestKind::NovaWorldSync);
 	CHECK(get && get->project_key == "MOD" && get->dir == "C:/mods/MOD", "the pick: the project got into C:/mods/MOD");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/other");
-	CHECK(ui.drain().empty(), "a second pick with no Get... before it gets nothing");
-	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Get..."}));
-	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "another's project: Get...");
+	CHECK(ui.drain().empty(), "a second pick with no Sync... before it gets nothing");
+	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Sync..."}));
+	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "another's project: Sync...");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	ui.drain();
 	// A copy of it on this computer, on the recent list or not: Open, no second get, the latest of several.
@@ -714,8 +714,8 @@ void test_get_a_project() {
 	// Its folder not found: nothing to open, so it can be got again.
 	v.project.working_copies = {unplugged};
 	ui.frames(2);
-	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Get..."}));
-	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "no copy found: Get...");
+	ui.activate(novaworld_item({"novaworld_players", "THEIRS", "Sync..."}));
+	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "no copy found: Sync...");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	ui.drain();
 	// An empty project this computer has a copy of (put, nothing pushed): Open, never a second folder.
@@ -754,7 +754,7 @@ void test_get_a_project() {
 	ui.activate(item_id(welcome, {"x##novaworld"}));
 	ui.drain();
 	CHECK(form.novaworld.empty(), "its clear: the form for no NovaWorld project");
-	std::printf("content: the store's projects on the welcome page, yours and everyone's, Get... and its folder, "
+	std::printf("content: the store's projects on the welcome page, yours and everyone's, Sync... and its folder, "
 	            "Set up... and the form it fills\n");
 }
 

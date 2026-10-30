@@ -258,9 +258,9 @@ void EditorWindows::request(EditorRequest request) {
 		request.path.clear();
 		request.values.clear();
 	}
-	// A NovaWorld project's Get... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
+	// A NovaWorld project's Sync... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
 	if (request.kind == EditorRequestKind::PickDirectory && request.purpose == PickPurpose::NovaWorldFolder) {
-		novaworld_get_key_ = request.project_key;
+		novaworld_sync_key_ = request.project_key;
 		request.project_key.clear();
 	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
@@ -544,11 +544,11 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 		break;
 	case PickPurpose::NovaWorldFolder:
 		// Into a folder of its key's name inside the one picked, as a clone makes one.
-		if (!novaworld_get_key_.empty()) {
+		if (!novaworld_sync_key_.empty()) {
 			const bool slash = path.back() == '/' || path.back() == '\\';
-			request(request::novaworld_get(novaworld_get_key_, path + (slash ? "" : "/") + novaworld_get_key_));
+			request(request::novaworld_sync(novaworld_sync_key_, path + (slash ? "" : "/") + novaworld_sync_key_));
 		}
-		novaworld_get_key_.clear();
+		novaworld_sync_key_.clear();
 		break;
 	case PickPurpose::None: break;
 	}

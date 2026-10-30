@@ -851,8 +851,8 @@ inline EditorRequest novaworld_sign_out() {
 inline EditorRequest novaworld_check() {
 	return of(EditorRequestKind::NovaWorldCheck);
 }
-inline EditorRequest novaworld_get(std::string project_key, std::string dir) {
-	EditorRequest request = of(EditorRequestKind::NovaWorldGet);
+inline EditorRequest novaworld_sync(std::string project_key, std::string dir) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldSync);
 	request.project_key = std::move(project_key);
 	request.dir = std::move(dir);
 	return request;
