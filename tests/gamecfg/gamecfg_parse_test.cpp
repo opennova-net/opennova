@@ -511,6 +511,28 @@ int server_settings_availability() {
 	return 0;
 }
 
+// The schema offers what the session reads: the team lives and the difficulty word ride to every
+// joiner (runtime/inmatch/host_config.cpp), so both are offered, with their defaults; a patch sets
+// them, the difficulty within its one byte.
+int server_settings_session_rows() {
+	const opennova::io::JsonValue schema = server_settings_schema(ConfigTable::Jo, true);
+	bool lives = false, difficulty = false;
+	for (const auto &row : schema.array) {
+		lives = lives || (row.get_string("key", "") == "max_team_lives" && row.get_int("default", 0) == 100);
+		difficulty = difficulty || (row.get_string("key", "") == "difficulty" && row.get_int("max", 0) == 255);
+	}
+	TEST_EXPECT(lives && difficulty);
+	GameCfg cfg = defaults();
+	opennova::io::JsonValue patch;
+	std::string field, error;
+	TEST_EXPECT(opennova::io::json_parse(R"({"max_team_lives":5,"difficulty":2})", patch, error));
+	TEST_EXPECT(apply_server_settings(cfg, patch, true, {}, field, error));
+	TEST_EXPECT(cfg.max_team_lives == 5 && cfg.mp_difficulty == 2);
+	TEST_EXPECT(opennova::io::json_parse(R"({"difficulty":256})", patch, error));
+	TEST_EXPECT(!apply_server_settings(cfg, patch, true, {}, field, error) && cfg.mp_difficulty == 2);
+	return 0;
+}
+
 int main() {
 	if (defaults_match_config_set_defaults() != 0) return 1;
 	if (dfx2_table_row() != 0) return 1;
@@ -525,6 +547,7 @@ int main() {
 	if (string_bounds() != 0) return 1;
 	if (weapon_availability() != 0) return 1;
 	if (server_settings_availability() != 0) return 1;
+	if (server_settings_session_rows() != 0) return 1;
 	if (long_line_splits() != 0) return 1;
 	if (duplicates_and_floats() != 0) return 1;
 	if (crt_fixed_print() != 0) return 1;

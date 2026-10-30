@@ -159,6 +159,13 @@ const std::vector<ServerSetting> &server_settings() {
 					"KOTHLimit"),
 			integer("koth_delta", "King of the Hill scoring interval", "Rules",
 					&GameCfg::koth_delta),
+			// The session takes both, and both ride to every joiner: the team lives in the initial
+			// state block (g_MaxTeamLives), the difficulty word as the S2C 0x08 block's and the
+			// S2C 0x04's byte (g_SessionDifficulty) [orig: Game_ApplySessionSettingsToGlobals
+			// @0x551500 - g_MaxTeamLives @0x551B67, g_SessionDifficulty @0x551E80]
+			// (runtime/inmatch/host_config.cpp, server_initial_state.cpp, server_dispatch_join.cpp).
+			integer("max_team_lives", "Team lives", "Rules", &GameCfg::max_team_lives),
+			integer("difficulty", "Difficulty", "Rules", &GameCfg::mp_difficulty, "", 0, 255),
 			integer("max_friendly_kills", "Allowed friendly kills", "Rules",
 					&GameCfg::numallowablefriendlykills, "MaxFriendlyKills"),
 			integer("capture_duration", "Capture duration (seconds)", "Teams",

@@ -825,18 +825,19 @@ server from the site. Password-bearing lines are redacted in persistent logs.
 ## Saved server configuration
 
 `engine/formats/gamecfg/server_settings.*` describes the title-aware fields, defaults,
-types, validation and live setters shared by the website and in-game host editor. It
-offers only the settings something in the runtime acts on (a game.cfg key nothing reads
-stays in the format, not the schema), and a row's `depends_on` names the toggle or count
-it does nothing without, which the editors show it beneath.
-NovaWorld and LAN use the same authored host screen, with a supplemental options panel.
+types, validation and live setters the website's server forms read. It offers only the
+settings something in the runtime acts on (a game.cfg key nothing reads stays in the format,
+not the schema), and a row's `depends_on` names the toggle or count it does nothing without,
+which the form shows it beneath. The game's own host is the authored MULTI_PLAYER_HOST
+screen alone, NovaWorld's and LAN's alike; a game.cfg-only setting is edited in game.cfg.
 
 `hosted_servers.configuration` is the canonical JSONB document. Existing core fields
 remain at the top level, advanced fields live under `options`, and `rotation` is an
 ordered array of `{file, swap_sides}` entries, including repeated maps. A map's side-switch
 flag applies to every occurrence, as in retail. Classes and
 weapons use stable names; weapon availability is `always`, `never`, `armory` or `mission`
-(server_settings.h weapon_availability_name). A settings edit sends only the weapons whose
+(the title's own words, the host screen's WEAPON_LIST names; server_settings.h
+weapon_availability_name), and a class is on or off. A settings edit sends only the weapons whose
 availability it changes from the saved configuration, with retail's `ALWAYS`, `NEVER` and
 `ARMORY` keywords (one `WEAPON SET ALL` when every selectable weapon ends at one of them); a
 weapon set to `mission`, which no `WEAPON SET` keyword reaches, waits for the next launch. A
