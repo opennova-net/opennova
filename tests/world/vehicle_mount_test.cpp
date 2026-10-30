@@ -1689,7 +1689,7 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
 // source slice immediately. Waiting for the normal 17-tick cadence would make
 // USE and attach labels disappear just after spawning. The add's slice build
 // follows its model init, the embedder's (MissionKernel::bind_spawned_body), which
-// this headless world stands in for (D-SIM-T2).
+// this headless world stands in for (D-SIM-4).
 // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel @0x43C492,
 //  Entity_BuildProximityListsFromPools @0x43C4EB]
 void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
