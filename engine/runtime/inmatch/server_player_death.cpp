@@ -534,18 +534,26 @@ void player_death_transaction(NapiNPServerCtx &ctx, world::World &world,
 		// server frames after the slot's last seed arm (its join, deploy or
 		// revive) forces exactly three: the frame clock less the arm's stamp,
 		// a signed compare, with no validity flag (a fresh row's stamp is 0).
-		// +364 retains the greater value only when a spawn-target registry exists.
+		// +364 retains the greater value only when a spawn-target registry exists. Both
+		// compares are signed: a negative timeout (game.cfg takes the word whole) waits 3, and
+		// a negative +364 (a 0x41's raw store of that timeout) takes the hold.
 		// [orig: GameEvent_PlayerDeath @0x516E9F..0x516EB4 (`mov eax,
 		//  g_ServerFrameClock` @0x516E9F, `sub eax, [edi+178C8h]` @0x516EA4, `cmp eax,
-		//  26Ch; jl` @0x516EAF..0x516EB4), the stores @0x516EBE..0x516EEB]
+		//  26Ch; jl` @0x516EAF..0x516EB4), the stores @0x516EBE..0x516EEB (`cmp ecx, ebp`
+		//  @0x516EBC / `jge` @0x516EC4 against 3; `cmp [edi+16Ch], eax` @0x516EE3 / `jge`
+		//  @0x516EE9)] [orig: GameEvent_PlayerDeath @0x514020 - @0x51410B / @0x514113, @0x514132 /
+		//  @0x514138 (dfx2.exe)]
 		replication::Connection &link = victim_connection->link;
-		uint32_t hold = std::max(ctx.config.respawn_timeout, 3u);
+		const int32_t timeout = static_cast<int32_t>(ctx.config.respawn_timeout);
+		uint32_t hold = static_cast<uint32_t>(timeout < 3 ? 3 : timeout);
 		if (static_cast<int32_t>(world.out.rounds.frame_clock -
 				victim_connection->seed_armed_clock) < 620)
 			hold = 3;
 		link.respawn_delay_seconds = hold;
+		const bool keeps_target_hold =
+				static_cast<int32_t>(link.spawn_target_hold_seconds) >= static_cast<int32_t>(hold);
 		link.spawn_target_hold_seconds = world.zones.has_spawn_zone()
-				? std::max(link.spawn_target_hold_seconds, hold)
+				? (keeps_target_hold ? link.spawn_target_hold_seconds : hold)
 				: 0u;
 	}
 }
