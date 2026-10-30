@@ -6,9 +6,7 @@ extends GutTest
 ## points. The record's clamps, defaults and words are the engine's (ctest
 ## npruntime_player_options); these cases drive the binding and the device.
 
-const BUS_NAMES := [&"SFX", &"Ambient", &"Voice", &"Music"]
-
-var _saved_bus_volumes: Dictionary = {}
+var _saved_option_volumes := PackedInt32Array()
 var _run_dir := ""
 
 
@@ -18,21 +16,14 @@ func before_each() -> void:
 	DirAccess.make_dir_recursive_absolute(_run_dir)
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
 	GameCfgStore.reset()
-	_saved_bus_volumes.clear()
-	for bus_name: StringName in BUS_NAMES:
-		var bus := AudioServer.get_bus_index(bus_name)
-		if bus >= 0:
-			_saved_bus_volumes[bus_name] = AudioServer.get_bus_volume_db(bus)
+	_saved_option_volumes = AudioOut.option_volumes()
 
 
 func after_each() -> void:
 	GameCfgStore.reset()
 	LaunchFlags.clear_args_override()
 	TestFs.remove_dir_recursive(_run_dir)
-	for bus_name: StringName in _saved_bus_volumes:
-		var bus := AudioServer.get_bus_index(bus_name)
-		if bus >= 0:
-			AudioServer.set_bus_volume_db(bus, float(_saved_bus_volumes[bus_name]))
+	AudioOut.set_option_volumes(_saved_option_volumes[0], _saved_option_volumes[1], _saved_option_volumes[2])
 
 
 # A game.cfg in the run directory (version 29 and `lines`), read by the next
@@ -186,27 +177,15 @@ func test_the_video_tests_desktop_is_the_dpi_unaware_sample() -> void:
 		)
 
 
-func test_update_maps_each_audio_option_to_its_runtime_buses() -> void:
+# The three volume options are the engine's sound option words (runtime/audio/sound_options.h), which the
+# sounds scale their volume bytes by as the mixer opens them [orig: Game_ApplySessionSettingsToGlobals
+# @ 0x551581..0x5515A2].
+func test_update_hands_each_audio_option_to_the_engine() -> void:
 	var options := PlayerOptions.new()
 	var state := options.current()
 	state.sound_fx_volume = 32
 	state.dialog_volume = 96
 	state.music_volume = 160
 	options.update(state)
-
-	_assert_bus_volume(&"SFX", 32)
-	_assert_bus_volume(&"Ambient", 32)
-	_assert_bus_volume(&"Voice", 96)
-	_assert_bus_volume(&"Music", 160)
-
-
-func _assert_bus_volume(bus_name: StringName, volume: int) -> void:
-	var bus := AudioServer.get_bus_index(bus_name)
-	assert_gte(bus, 0, "%s bus exists" % bus_name)
-	if bus >= 0:
-		assert_almost_eq(
-			AudioServer.get_bus_volume_db(bus),
-			float(SoundSelector.volume_db_from_255(volume)),
-			0.001,
-			"%s receives the 0..255 option through the shared conversion" % bus_name
-		)
+	assert_eq(AudioOut.option_volumes(), PackedInt32Array([32, 96, 160]),
+			"the sound-effects, dialogue and music words")

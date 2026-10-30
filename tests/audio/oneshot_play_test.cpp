@@ -298,32 +298,54 @@ int test_pitch_draws_and_channel_pool() {
 	SoundSelector zero_ranges;
 	TEST_EXPECT(zero_ranges.compose_pitch(65536, 0, 65536, 0) == 65536u);
 	TEST_EXPECT(zero_ranges.select(99, 256, kRandom) == 249);
-	OneshotChannelPool pool;
-	for (int slot = 12; slot < 26; ++slot)
-		TEST_EXPECT(pool.acquire(100 + slot, 200) == slot);
-	TEST_EXPECT(pool.acquire(999, 100) == -1); // exactly half cannot steal
-	TEST_EXPECT(pool.acquire(999, 101) == 12); // strictly louder than half can
-	TEST_EXPECT(pool.acquire(999, 0) == -1);
-	pool.release(20);
-	TEST_EXPECT(pool.acquire(1000, 1) == 20); // idle outranks a quieter live slot
-	OneshotChannelPool keyed;
-	TEST_EXPECT(keyed.acquire(1234, 250, 9) == 12);
-	TEST_EXPECT(keyed.acquire(1234, 1, 9) == 12); // same wave + nonzero id forces score zero
-	TEST_EXPECT(keyed.acquire(1234, 1, 10) == 13);
-	// An entity re-firing its wave while a quieter voice is live retakes its
-	// OWN channel; an id-less refire of the same wave opens a new one instead
-	// [orig: Audio_FindAndOpenChannel @0x766F46 / @0x766F8E].
-	OneshotChannelPool own;
-	TEST_EXPECT(own.acquire(500, 10) == 12);
-	TEST_EXPECT(own.acquire(777, 100, 5) == 13);
-	TEST_EXPECT(own.acquire(777, 100, 5) == 13);
-	TEST_EXPECT(own.acquire(777, 100, 0) == 14);
+	// The allocator over the channels' own volume bytes is the mixer's (ctest audio_mixer,
+	// Mixer::find_and_open).
 	return 0;
 }
 
 // The per-entity key is nonzero for EVERY entity (pool 0 slot 0 packs to 0),
 // the handle wins over the BMS id, the handle-less fallback never aliases a
 // handle, and "no source" is 0 (the retail NULL entity).
+// The plan's voices on the mixer: the allocator's channels, the fire's pan for a heading layer
+// alone, a voice without a wave skipped, nothing for a culled plan [orig:
+// SoundBank_PlayTriggerEntries @0x75CE52..0x75CE5F, @0x75CFA8..0x75CFE3].
+int test_a_plan_opens_on_the_oneshot_channels() {
+	Mixer mixer;
+	// Two waves: the allocator restarts a channel playing the same wave for the same id.
+	const MixWaveRef waves[2] = { make_mix_wave(64, 0x10000, 2, 0, std::vector<int16_t>(68, 0)),
+		make_mix_wave(64, 0x10000, 2, 0, std::vector<int16_t>(68, 0)) };
+	OneshotPlan plan;
+	plan.in_range = true;
+	plan.sound_id = 7;
+	OneshotVoice heading;
+	heading.vol255 = 200;
+	heading.pitch_q16 = 0x8000;
+	heading.positional = true;
+	OneshotVoice flat = heading;
+	flat.positional = false;
+	flat.sndparm = 1;
+	OneshotVoice missing = heading;
+	missing.sndparm = 2;
+	plan.voices = { heading, flat, missing };
+	const auto wave_of = [&waves](const OneshotVoice &voice) {
+		return voice.sndparm == 2 ? nullptr : waves[voice.sndparm];
+	};
+	TEST_EXPECT(open_oneshot_plan(mixer, plan, 128, wave_of));
+	int sounding = 0;
+	int panned = 0;
+	for (size_t ch = kFirstOneshotChannel; ch < kAudioChannelCount; ++ch) {
+		const ChannelParams &params = mixer.channel(ch);
+		if (params.wave != waves[0] && params.wave != waves[1]) continue;
+		++sounding;
+		panned += params.pan == 128 && params.wave == waves[0] ? 1 : 0;
+		TEST_EXPECT(params.volume == 200 && params.play_q16 == 0x8000 && params.id == 7);
+	}
+	TEST_EXPECT(sounding == 2 && panned == 1);
+	plan.in_range = false;
+	TEST_EXPECT(!open_oneshot_plan(mixer, plan, 128, wave_of));
+	return 0;
+}
+
 int test_sound_id_is_nonzero_per_entity() {
 	TEST_EXPECT(oneshot_sound_id(0, 0) != 0);
 	TEST_EXPECT(oneshot_sound_id(0, 0) != oneshot_sound_id(1, 0));
@@ -582,6 +604,7 @@ int main() {
     failed |= test_set_view_bit_gate_and_rejected_pitch_rng();
     failed |= test_tank_sets_select_view_layers();
 	failed |= test_sound_id_is_nonzero_per_entity();
+	failed |= test_a_plan_opens_on_the_oneshot_channels();
 	failed |= test_index_is_case_insensitive_and_first_bank_wins();
 	failed |= test_pitch_draws_and_channel_pool();
 	failed |= test_distance_and_cull_range();

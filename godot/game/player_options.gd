@@ -6,18 +6,14 @@ extends RefCounted
 ## engine/runtime/inmatch/player_options.h: the words' keys, the clamps, the defaults and the
 ## mission start's apply rule), read and written through the block (GameCfgStore), which
 ## reaches game.cfg at its save points. This object keeps the current record, publishes each
-## change and drives the device's mixer buses with the volumes.
+## change and hands the volumes to the engine mixer's option words (AudioOut over engine
+## audio::sound_options).
 
 # One home for the crosshair colour default / mask and spread default: the native HudOverlay
 # binding over the engine's HudLayout.
 const CROSSHAIR_COLOR_MASK := HudOverlay.CROSSHAIR_COLOR_MASK
 const DEFAULT_CROSSHAIR_COLOR := HudOverlay.DEFAULT_CROSSHAIR_COLOR
 const DEFAULT_CROSSHAIR_SPREAD := HudOverlay.DEFAULT_CROSSHAIR_SPREAD != 0
-
-# The device's mixer buses each volume drives.
-const SOUND_FX_BUSES := [&"SFX", &"Ambient"]
-const DIALOG_BUS := &"Voice"
-const MUSIC_BUS := &"Music"
 
 signal changed(state: PlayerOptionsState)
 
@@ -54,13 +50,10 @@ func reload() -> void:
 	changed.emit(current())
 
 
-## The volumes to the mixer buses and, at a mission start (the world loaded), the aspect mode as
-## the session's copy (the engine's apply rule, inmatch/player_options.h).
+## The volumes to the engine mixer's option words and, at a mission start (the world loaded),
+## the aspect mode as the session's copy (the engine's apply rule, inmatch/player_options.h).
 func apply(simulation: Simulation = null) -> void:
-	for bus_name: StringName in SOUND_FX_BUSES:
-		_set_bus_volume(bus_name, _state.sound_fx_volume)
-	_set_bus_volume(DIALOG_BUS, _state.dialog_volume)
-	_set_bus_volume(MUSIC_BUS, _state.music_volume)
+	AudioOut.set_option_volumes(_state.sound_fx_volume, _state.dialog_volume, _state.music_volume)
 	if simulation != null:
 		simulation.set_local_player_aspect_mode(_state.aspect_mode)
 
@@ -74,9 +67,3 @@ static func fresh_profile_aspect_mode(desktop: Vector2i) -> int:
 ## The primary desktop's size, as retail's video test samples it.
 static func desktop_size() -> Vector2i:
 	return GameConfigBlock.primary_desktop_size()
-
-
-static func _set_bus_volume(bus_name: StringName, volume: int) -> void:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus >= 0:
-		AudioServer.set_bus_volume_db(bus, SoundSelector.volume_db_from_255(volume))

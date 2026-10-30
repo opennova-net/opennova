@@ -155,12 +155,12 @@ std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
    always four. The +0 channel fills the buffer mixer channel 2 plays at pan 0xC0, the +4
    channel channel 1's at pan 0x40, the buffer the byte-paired split fills with its first
    (left) byte, so both forms play on mixer channels 1 and 2 alike (D-SND-8)
-   [orig: Audio_PlayStereoSample @ 0x7BCF95 - off_79CDB0 @ 0x7BCFA4 and off_79CDD0
+   [orig: Audio_PlayStereoSample @ 0x7BCF95 - g_MusicStreamLeftBuffers @ 0x7BCFA4 and g_MusicStreamRightBuffers
    @ 0x7BCFAB, the count's bounds @ 0x7BCFB2..0x7BCFC1, the +0 channel's blocks
-   @ 0x7BCFEA..0x7BCFF3 into off_79CDD0, the +4 channel's four @ 0x7BD095 into off_79CDB0
+   @ 0x7BCFEA..0x7BCFF3 into g_MusicStreamRightBuffers, the +4 channel's four @ 0x7BD095 into g_MusicStreamLeftBuffers
    (the pushes @ 0x7BCFE0..0x7BCFE9, the pops @ 0x7BD090..0x7BD091), the blocks
    @ 0x7BD001..0x7BD07F and @ 0x7BD0A5..0x7BD123, each nibble Audio_AdpcmDecodeNibbleStep
-   @ 0x7BF250; Audio_SubmitStereoSampleSplit @ 0x7BD205 - the first byte into off_79CDB0
+   @ 0x7BF250; Audio_SubmitStereoSampleSplit @ 0x7BD205 - the first byte into g_MusicStreamLeftBuffers
    @ 0x7BD214..0x7BD25D]. `count` frames, left then right, appended to `out`; none for a
    count outside 1..4068. */
 inline constexpr uint32_t SBF_ADPCM_FRAMES = 4068;

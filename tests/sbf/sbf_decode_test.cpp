@@ -245,8 +245,8 @@ static int test_play_stream_takes_the_split_rule(void) {
 /* A bank of flags 0 or 2 streams stereo IMA ADPCM: 1024-byte blocks, the right header at +0 and the
    left at +4 (a predictor, then a signed index byte), then 127 pairs of 4-byte words, right then left,
    eight nibbles a word low first, through the wave loader's step; the +4 channel fills the buffer the
-   byte-paired split's left byte does [orig: Audio_PlayStereoSample @ 0x7BCF95 - off_79CDB0
-   @ 0x7BCFA4, off_79CDD0 @ 0x7BCFAB; Audio_AdpcmDecodeNibbleStep @ 0x7BF250]. */
+   byte-paired split's left byte does [orig: Audio_PlayStereoSample @ 0x7BCF95 - g_MusicStreamLeftBuffers
+   @ 0x7BCFA4, g_MusicStreamRightBuffers @ 0x7BCFAB; Audio_AdpcmDecodeNibbleStep @ 0x7BF250]. */
 static int test_adpcm_chunk_decodes_both_channels(void) {
     std::vector<uint8_t> block(4096, 0);
     const int16_t right = 1000, left = -1000;

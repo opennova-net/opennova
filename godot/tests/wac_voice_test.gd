@@ -1,9 +1,24 @@
 extends GutTest
 
+# The scripted voice rides the engine mixer's channel zero.
+const VOICE_CHANNEL := 0
+# A second of the mixer's 44100 Hz device frames: the fixture's clip plays out well inside it.
+const PLAY_OUT_FRAMES := 44100
+
+
 var staged_dirs: Array[String] = []
+var _options := PackedInt32Array()
+
+
+# The dialogue option at full: a WAC start's gain is (210 * 255 + 128) >> 8, 209, through the
+# distance curve clamped at 255 (engine world::ScriptVoiceChannel).
+func before_each() -> void:
+	_options = AudioOut.option_volumes()
+	AudioOut.set_option_volumes(_options[0], 255, _options[2])
 
 
 func after_each() -> void:
+	AudioOut.set_option_volumes(_options[0], _options[1], _options[2])
 	for path in staged_dirs:
 		TestFs.remove_dir_recursive(path)
 	staged_dirs.clear()
@@ -41,14 +56,6 @@ func _boot_voice_world(aud: bool = false) -> GameWorld:
 	return world
 
 
-func _playing_voice(audio: MissionAudio) -> AudioStreamPlayer:
-	for child in audio.find_children("*", "AudioStreamPlayer", true, false):
-		var player := child as AudioStreamPlayer
-		if player.playing:
-			return player
-	return null
-
-
 func _script_pass(sim: Simulation) -> void:
 	for _tick in range(62):
 		sim.step()
@@ -58,70 +65,57 @@ func test_wac_voice_completion_and_interrupt_use_the_real_channel() -> void:
 	var world := _boot_voice_world()
 	var sim := world.get_sim()
 	var audio := world.get_mission_audio()
-	var first := _playing_voice(audio)
-	assert_not_null(first, "initial WAC wave reaches a physical audio player")
+	var first := audio.script_voice_handle()
+	assert_ne(first, 0, "initial WAC wave opens the voice channel")
+	assert_true(audio.channel_sounding(VOICE_CHANNEL))
 	assert_eq(sim.get_mission_variable(3), 0, "waveready is false during playback")
-	if first == null:
+	if first == 0:
 		world.unload()
 		return
-	assert_almost_eq(first.volume_db, linear_to_db(207.0 / 255.0), 0.001)
+	assert_eq(audio.channel_volume(VOICE_CHANNEL), 207)
 
 	# The actual VM replaces the line on its next scheduled pass.
 	sim.set_mission_variable(1, 1)
 	_script_pass(sim)
 	audio.update_script_voice()
-	var second := _playing_voice(audio)
-	assert_not_null(second)
-	assert_ne(second, first)
-	assert_false(first.playing)
-	first.finished.emit() # delayed callback from the interrupted physical channel
+	var second := audio.script_voice_handle()
+	assert_ne(second, 0)
+	assert_ne(second, first, "the new line opens the channel anew")
 	audio.update_script_voice()
 	_script_pass(sim)
-	assert_eq(sim.get_mission_variable(3), 0, "old completion cannot release the new line")
+	assert_eq(sim.get_mission_variable(3), 0, "the old line's handle cannot release the new line")
 
-	# The live line's own completion releases waveready. Its `finished` is
-	# emitted here as the interrupted channel's is above: the player emits it
-	# on its next process frame after the mixer drops `playing`, so a
-	# real-time poll of `playing` could run the pass first and read v3 as 0.
-	if second != null:
-		# The clip plays once, so the driver's `finished` does come (WavLoader).
-		assert_eq((second.stream as AudioStreamWAV).loop_mode, AudioStreamWAV.LOOP_DISABLED)
-		second.finished.emit()
-	# The device's release holds the busy word until the scene frame's validation reads it
+	# The live line's own completion releases waveready: the mixer renders the clip out (it
+	# plays once), and the scene frame's validation reads the channel no longer holding it
 	# (retail's Audio_UpdateAmbientStream runs from the scene frame alone): a frame the status
 	# page stands in for leaves waveready false.
+	AudioOut.mix_frames(PLAY_OUT_FRAMES)
+	assert_false(audio.channel_sounding(VOICE_CHANNEL), "the clip played out")
 	_script_pass(sim)
 	assert_eq(sim.get_mission_variable(3), 0, "the release waits for the scene frame")
 	audio.update_script_voice()
 	_script_pass(sim)
 	assert_eq(sim.get_mission_variable(3), 1, "the scene frame's validation releases waveready")
-	assert_null(_playing_voice(audio))
+	assert_eq(audio.script_voice_handle(), 0)
 	world.unload()
 
 
-func test_aud1_script_voice_reaches_the_audio_player() -> void:
+# The game's AUD1 buffer reaches the channel at its header's play word: 32768, half the 44100 Hz
+# device rate.
+func test_aud1_script_voice_reaches_the_channel() -> void:
 	var world := _boot_voice_world(true)
-	var voice := _playing_voice(world.get_mission_audio())
-	assert_not_null(voice)
-	if voice != null:
-		var clip := voice.stream as AudioStreamWAV
-		assert_not_null(clip)
-		assert_eq(clip.mix_rate, 22050)
-		assert_eq(clip.format, AudioStreamWAV.FORMAT_16_BITS)
-		assert_eq(clip.data.size(), 44100)
-		assert_false(clip.stereo)
+	var audio := world.get_mission_audio()
+	assert_true(audio.channel_sounding(VOICE_CHANNEL))
+	assert_eq(audio.channel_play(VOICE_CHANNEL), 32768)
 	world.unload()
 
 
-func test_missing_replacement_stops_the_previous_physical_voice() -> void:
+func test_missing_replacement_stops_the_previous_voice() -> void:
 	var world := _boot_voice_world()
 	var audio := world.get_mission_audio()
-	var first := _playing_voice(audio)
-	assert_not_null(first)
+	assert_ne(audio.script_voice_handle(), 0)
 	assert_false(audio.play_wac_wave("missing.wav"))
-	if first != null:
-		assert_false(first.playing, "reset occurs before the failed file lookup")
-	assert_null(_playing_voice(audio))
+	assert_false(audio.channel_sounding(VOICE_CHANNEL), "reset occurs before the failed file lookup")
 	# The reset handle keeps the busy word until the scene frame's validation.
 	_script_pass(world.get_sim())
 	assert_eq(world.get_sim().get_mission_variable(3), 0)
@@ -131,7 +125,10 @@ func test_missing_replacement_stops_the_previous_physical_voice() -> void:
 	world.unload()
 
 
-func test_ssnwave_uses_a_following_spatial_player_and_engine_distance_gain() -> void:
+# SSNwave's voice follows its speaker: the channel's volume byte is the engine's distance gain,
+# zero at the authored range while the clip plays on to its natural end [orig:
+# Audio_UpdateAmbientStream @ 0x4edb3e -> AudioChannel_SetAndPlay].
+func test_ssnwave_follows_its_speaker_at_the_engine_distance_gain() -> void:
 	var root_dir := WorldFixture.stage_minimal_root("wac_spatial_voice", false,
 		{"mnml.wac": ""})
 	staged_dirs.append(root_dir)
@@ -152,26 +149,19 @@ func test_ssnwave_uses_a_following_spatial_player_and_engine_distance_gain() -> 
 	sim.debug_set_world_entity_position(speaker_id[0], Vector3(5, 0, 0))
 	audio.tick(Vector3.ZERO, 0.0)
 	audio.update_script_voice()
-	var voice: AudioStreamPlayer3D = null
-	for child in audio.find_children("*", "AudioStreamPlayer3D", true, false):
-		if child.playing:
-			voice = child
-			break
-	assert_not_null(voice, "SSNwave creates the dedicated spatial channel")
-	if voice == null:
+	assert_ne(audio.script_voice_handle(), 0, "SSNwave opens the voice channel")
+	if audio.script_voice_handle() == 0:
 		world.unload()
 		return
-	assert_eq(voice.attenuation_model, AudioStreamPlayer3D.ATTENUATION_DISABLED)
-	assert_almost_eq(voice.global_position.x, 5.0, 0.001)
-	var near_volume := voice.volume_db
+	var near_volume := audio.channel_volume(VOICE_CHANNEL)
+	assert_gt(near_volume, 0)
 	sim.debug_set_world_entity_position(speaker_id[0], Vector3(10, 0, 0))
 	audio.tick(Vector3.ZERO, 0.0)
 	audio.update_script_voice()
-	assert_almost_eq(voice.global_position.x, 10.0, 0.001)
-	assert_lt(voice.volume_db, near_volume)
+	assert_lt(audio.channel_volume(VOICE_CHANNEL), near_volume)
 	sim.debug_set_world_entity_position(speaker_id[0], Vector3(20, 0, 0))
 	audio.tick(Vector3.ZERO, 0.0)
 	audio.update_script_voice()
-	assert_eq(voice.volume_db, -80.0, "the authored range is a hard silence boundary")
-	assert_true(voice.playing, "out-of-range playback continues through its natural duration")
+	assert_eq(audio.channel_volume(VOICE_CHANNEL), 0, "the authored range is a hard silence boundary")
+	assert_true(audio.channel_sounding(VOICE_CHANNEL), "out-of-range playback continues through its natural duration")
 	world.unload()

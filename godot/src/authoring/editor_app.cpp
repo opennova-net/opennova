@@ -1,7 +1,5 @@
 #include "authoring/editor_app.h"
 
-#include <godot_cpp/classes/audio_stream_player.hpp>
-#include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -49,7 +47,6 @@
 #include "authoring/mission_viewport_applier.h"
 #include "authoring/viewport_device.h"
 #include "authoring/viewport_devices.h"
-#include "lwf/wav_loader.h"
 #include "object/object_model.h"
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
@@ -119,6 +116,7 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
 	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
+	ClassDB::bind_method(D_METHOD("get_sound_voices_started"), &EditorApp::get_sound_voices_started);
 	ClassDB::bind_method(D_METHOD("wait_for_bakes"), &EditorApp::wait_for_bakes);
 	ClassDB::bind_method(D_METHOD("wait_for_sound"), &EditorApp::wait_for_sound);
 	ClassDB::bind_method(D_METHOD("get_clip_voices_started"), &EditorApp::get_clip_voices_started);
@@ -847,6 +845,13 @@ String EditorApp::get_sound_state() const {
 
 String EditorApp::get_sound_path() const {
 	return get_sound_state() == "idle" ? String() : opennova::to_gd(sound_->path());
+}
+
+PackedInt32Array EditorApp::get_sound_voices_started() const {
+	PackedInt32Array out;
+	if (sound_)
+		for (const bool started : sound_->voices_started()) out.push_back(started ? 1 : 0);
+	return out;
 }
 
 void EditorApp::wait_for_bakes() {

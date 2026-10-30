@@ -17,7 +17,10 @@ bool ScriptVoiceChannel::start(World &world, const std::string &filename,
     state_.portrait = portrait;
     state_.max_distance = max_distance;
     state_.pitch_q16 = 0x10000u;
-    state_.volume = kScriptVoiceVolume;
+    // The WAC starts' gain through the dialogue option; a set's start replaces it with its
+    // member's volume [orig: Wac_PlayScriptedVoiceWave @0x4ED65F..0x4ED688; WacCmd_SsnWave
+    // @0x4F7956..0x4F7989; WacCmd_SsnRadio @0x4F7A3A..0x4F7A63].
+    state_.volume = (kScriptVoiceVolume * dialogue_volume() + 128) >> 8;
     world.out.effects.push({"dialog_wav", 0, 0, 0, 0, filename});
     std::vector<uint8_t> bytes;
     auto decoded = std::make_shared<lwf::WavPcm>();
@@ -157,11 +160,10 @@ ScriptVoiceChannel::Frame ScriptVoiceChannel::sample(const World &world, Vec3 li
         // common spatial-audio path.
         distance = length > 2147418112.0 ? 2147418112 : static_cast<int32_t>(length);
     }
-    // User voice volume remains on the host's Voice bus. The channel's selected
-    // gain and the existing retail distance curve are applied exactly once.
-    // [orig: @0x4ED688; Audio_UpdateAmbientStream @0x4EDB22]
-    out.volume = audio::calc_distance_volume(distance, state_.max_distance,
-            (state_.volume * 255 + 128) >> 8, 255);
+    // The channel's gain (g_SoundTriggerVolume) through the distance curve, clamped at the
+    // dialogue option [orig: Audio_UpdateAmbientStream @0x4EDB0D..0x4EDB22; Audio_Play3DPositionalSound
+    // @0x4ECD46..0x4ECD5B].
+    out.volume = audio::calc_distance_volume(distance, state_.max_distance, state_.volume, dialogue_volume());
     return out;
 }
 

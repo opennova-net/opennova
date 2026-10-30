@@ -15,6 +15,11 @@
 // [orig: PRNG_ScaledRandom @ 0x75be50] one global ROL-LCG stream drives every pick:
 //   state = ROL32(state + ROL32(state, 11), 3); index = (count * (state & 0xFF)) >> 8;
 // seeded statically with 0x2B0749C1 [orig: .data @ 0x85A3DC] and never reseeded.
+// The per-layer selection state (the playlist record's cursor +2, anchor +12, cycle bit 0x100)
+// survives a round restart: Game_RestartRoundSP @0x5263A0 re-enters Game_StartMission, whose bank
+// loop (Game_StartMission @0x52544A -> SoundBank_LoadIfExists @0x527530) returns early on an
+// already loaded slot [orig: SoundBank_OpenFile @0x75CAA5]; only Game_TeardownMission @0x522600
+// frees the banks. The embedder's selector therefore lives as long as its banks.
 #pragma once
 
 #include <cstdint>

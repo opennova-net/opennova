@@ -28,6 +28,13 @@ struct SoundEmitterEvent {
     int32_t lifetime_ticks = 0; // the weapon kick byte is sign-extended
     int32_t pitch_q16 = 0;
     uint16_t volume_q8_8 = 0;     // high byte is the emitter volume consumed by the mixer
+    // The registration's velocity, 16.16 in the mission frame, which the slot keeps for the
+    // emitter channel's doppler (audio::doppler_play_word): the step back to the vehicle's
+    // previous tick's place for the ground fold's lanes, the +0x98 words for the lift's; zeros
+    // for a registration passing none [orig: SoundEmitter_RegisterSetLayers @0x528417..0x528451;
+    // Entity_ProcessMovementSoundEffects @0x529538..0x52955F; Entity_UpdateFallAndLandState
+    // @0x4A21B6].
+    int32_t velocity[3] = {0, 0, 0};
     bool source_only = false;
     std::string set_name;         // name-keyed LWF lookup; empty on clear/source-only rows
 };

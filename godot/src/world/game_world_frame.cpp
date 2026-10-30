@@ -582,7 +582,7 @@ Error GameWorld::debug_refresh_render_pose(Camera3D *p_camera) {
 
 GameWorld::LegResult GameWorld::leg_begin(FrameContext &r_ctx) {
     if (MissionAudio *audio = get_mission_audio()) {
-        audio->set_listener_position(frame_camera_pos_);
+        audio->set_listener_view(frame_camera_xform_);
     }
 	begin_device_frame();
 	return kLegRan;
@@ -697,8 +697,8 @@ GameWorld::LegResult GameWorld::leg_script_voice(FrameContext &r_ctx) {
 	MissionAudio *audio = get_mission_audio();
 	if (!world_ready_ || audio == nullptr) return kLegSkipped;
 	audio->update_script_voice();
-	// The mixer meter's feed for the frame (MissionAudio::meter_script_voice).
-	audio->meter_script_voice(frame_delta_);
+	// The mixer meter's words into the world for the frame (MissionAudio::meter_out).
+	audio->meter_out();
 	return kLegRan;
 }
 
@@ -1682,7 +1682,7 @@ void GameWorld::mix_audio_frame(int p_ticks_run, bool p_rendered) {
 		// update's, and a sound a wait pass raised plays at once, as retail's handler plays it
 		// inside the wait's receive (engine inmatch::Session::renders carries the witness).
 		post_load_part("audio_mix");
-		if (p_rendered) audio->tick(frame_camera_pos_, frame_delta_);
+		if (p_rendered) audio->tick_view(frame_camera_xform_, frame_delta_);
 		post_load_part_end();
 		post_load_part("music");
 		music_var_pump();

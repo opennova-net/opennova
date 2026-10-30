@@ -191,6 +191,17 @@ int test_a_wave_found_as_the_bank_finds_it() {
 // The hold: 2 * ((62 * samples + rate) / rate), the rate rounded back from the
 // pitch ratio; 12 for no wave or a rate of 0 [orig: Dialog_LoadAudioClip
 // @0x44dd7c, @0x44dd87..0x44ddbf].
+// The play hook's record: pan 0, the play factor 0x10000, the line's volume through the dialogue
+// option, 255's for a line of 0 [orig: Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527560].
+int test_a_line_s_record_takes_the_dialogue_option() {
+	const MixWaveRef wave = make_mix_wave(4, 0x10000, 2, 0, std::vector<int16_t>(8, 0));
+	const ChannelParams line = dialog_line_params(wave, 200, 128);
+	TEST_EXPECT(line.wave == wave && line.pan == 0 && line.play_q16 == 0x10000 && line.volume == 100);
+	TEST_EXPECT(dialog_line_params(wave, 0, 128).volume == (255 * 128) >> 8);
+	TEST_EXPECT(dialog_line_params(wave, 255, 255).volume == 254);
+	return 0;
+}
+
 int test_a_line_holds_about_twice_its_wave() {
 	DialogClip clip;
 	TEST_EXPECT(dialog_clip_hold(clip) == 12);
@@ -594,6 +605,7 @@ int main() {
 	int failed = 0;
 	failed |= test_a_number_plays_its_dialog_s_waves();
 	failed |= test_a_wave_found_as_the_bank_finds_it();
+	failed |= test_a_line_s_record_takes_the_dialogue_option();
 	failed |= test_a_line_holds_about_twice_its_wave();
 	failed |= test_the_next_line_waits_hold_channel_delay();
 	failed |= test_the_hold_starts_after_a_rendered_frame();

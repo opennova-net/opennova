@@ -253,8 +253,6 @@ func _start_embedded_game() -> void:
 	_game_viewport.name = "GameViewport"
 	_game_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_game_viewport.handle_input_locally = true
-	_game_viewport.audio_listener_enable_2d = true
-	_game_viewport.audio_listener_enable_3d = true
 	_game_viewport.gui_disable_input = false
 	_resize_game_viewport(get_window().size)
 	_game_container.add_child(_game_viewport)

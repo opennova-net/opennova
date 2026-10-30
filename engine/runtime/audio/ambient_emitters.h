@@ -22,8 +22,10 @@
 
 #include <runtime/audio/ambient_channel_pool.h>
 #include <runtime/audio/ambient_mixer.h>
+#include <runtime/audio/mixer.h>
 #include <runtime/audio/envs_markers.h>
 #include <runtime/audio/oneshot_play.h>
+#include <runtime/audio/sound_listener.h>
 #include <runtime/world/sound_emitter_mailbox.h>
 
 #include <array>
@@ -120,9 +122,31 @@ public:
 	const AmbientChannelPlan &frame(const float listener[3], float delta_seconds, bool can_grow,
 			const Resolve &resolve, OcclusionFn occl = nullptr, void *occl_ctx = nullptr);
 
-	// The audio channel shutdown: every channel free (the candidates stay; the
-	// next frame binds anew).
-	void release_channels() { pool_.release_all(); }
+	// The frame's plan played on the mixer's eight emitter channels, 4..11 [orig:
+	// SoundEmitter_UpdateAndMixTop8 @0x528905..0x528AEF]: a released channel reset, an
+	// incumbent re-panned, re-levelled and re-pitched (AudioChannel_SetAndPlay; one its
+	// channel no longer plays is reset), an entrant opened looping on its channel
+	// (AudioChannel_OpenSlotChecked). A row's volume is the sound-effects option's scale of
+	// its curve volume [orig: @0x52891A..0x528939], its pan the bearing byte from the
+	// listener, centred where the listener rides the source (`centered`) [orig:
+	// @0x528971..0x5289ED], its play word its registration's through the doppler [orig:
+	// @0x528943..0x528995]. `wave` hands the entrant's buffer (null: it opens nothing).
+	using WaveOf = std::function<MixWaveRef(int32_t candidate_id, const AmbientCandidateRef &candidate)>;
+	using Centered = std::function<bool(uint64_t source_spawn_id)>;
+	void play(Mixer &mixer, const SoundListener &listener, int32_t sound_fx_option,
+			const WaveOf &wave, const Centered &centered);
+
+	// The audio channel shutdown: every channel free and its handle dropped (the candidates
+	// stay; the next frame binds anew), the mixer's channels reset by the device [orig:
+	// Audio_ResetChannelsForRestart @0x527910 -> AudioChannel_InitAll, __ioterm @0x5277CD].
+	void release_channels() {
+		pool_.release_all();
+		handles_.fill(0);
+	}
+	// The mixer handle of a plan channel (0..7), 0 for none.
+	uint32_t channel_handle(int channel) const {
+		return channel >= 0 && channel < kAmbientMixChannels ? handles_[size_t(channel)] : 0u;
+	}
 
 	// A live candidate's wave and table; null for an id nothing holds.
 	const AmbientCandidateRef *candidate(int32_t candidate_id) const;
@@ -187,6 +211,8 @@ private:
 	AmbientEmitterStats stats_;
 	std::vector<AmbientCandidate> describable_; // frame()'s rows, their storage kept
 	AmbientChannelPlan plan_;
+	// The mixer handles of the eight channels [orig: g_AmbientChannelHandles @0x24D6688].
+	std::array<uint32_t, kAmbientMixChannels> handles_{};
 };
 
 } // namespace opennova::audio

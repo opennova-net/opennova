@@ -1,6 +1,6 @@
 #include "player_options.h"
 
-#include <runtime/audio/volume_law.h>
+#include <runtime/audio/sound_options.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_texture_names.h>
 #include <runtime/renderer/device_texture.h>

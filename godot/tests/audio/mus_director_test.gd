@@ -52,7 +52,7 @@ func test_exit_tree_stops_the_music_vm() -> void:
 	dir.start()
 	assert_eq(dir.vm_state(), 1)
 	remove_child(dir)
-	assert_eq(dir.vm_state(), 0, "tree exit stops the VM before its players leave")
+	assert_eq(dir.vm_state(), 0, "tree exit stops the VM")
 
 
 func test_service_playback_drain_is_bounded_and_reports_the_timeout() -> void:
@@ -73,10 +73,10 @@ func test_service_playback_drain_is_bounded_and_reports_the_timeout() -> void:
 	assert_true(dir.has_pending_playback(), "the fixture reached real streaming playback")
 	var drained: bool = await MusicService.await_playback_stopped(0)
 	assert_false(drained, "an exhausted bound reports the timeout while playback is pending")
-	assert_true(dir.has_pending_playback(), "the timeout leaves the playback to the mixer")
+	assert_true(dir.has_pending_playback(), "the timeout leaves the track streaming")
 	MusicService.stop_context()
 	drained = await MusicService.await_playback_stopped()
-	assert_true(drained, "a live mixer releases the stopped playback inside the bound")
+	assert_true(drained, "the stop ends the stream inside the bound")
 	assert_false(dir.has_pending_playback(), "the shutdown barrier clears after the drain")
 
 
@@ -98,13 +98,12 @@ func test_stopped_playback_releases_its_bank_after_the_mixer_drains() -> void:
 	dir.bank = null
 	dir.load_mus_script(null)
 	bank = null
-	# The player drops its stream (and the bank with it) as it stops; the stopped
-	# built-in playback, which holds only the entry's decoded PCM, goes on the
-	# mixer's cleanup pass after its fade, which is the shutdown barrier's clear.
+	# The stop closes the music stream over the engine mixer: the channels flushed and the bank
+	# unbound, its queued buffers holding only their decoded samples.
 	await wait_until(func(): return bank_ref.get_ref() == null, 2.0)
 	assert_null(bank_ref.get_ref(), "a stopped stream releases the bank")
 	await wait_until(func(): return not dir.has_pending_playback(), 2.0)
-	assert_false(dir.has_pending_playback(), "the shutdown barrier clears after playback destruction")
+	assert_false(dir.has_pending_playback(), "the stopped stream streams nothing")
 
 
 # The SP round-end tail's end track reaches the loaded script through the
