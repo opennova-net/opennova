@@ -324,6 +324,48 @@ void PlayerProfiles::commit_name(const std::string &text) {
 	current().name = std::move(name);
 }
 
+bool PlayerProfiles::apply_character_selection(const CharacterSelection &selection) {
+	if (selection.player_class < playersav::kMinPlayerClass ||
+			selection.player_class > playersav::kMaxPlayerClass)
+		return false;
+	if (selection.team != 0 && selection.team != 1) return false;
+	if (selection.character) {
+		const CharacterSelection::Character &c = *selection.character;
+		if (c.avatar_a < 0 || c.avatar_a > 0xff || c.avatar_b < 0 || c.avatar_b > 0xff ||
+				c.avatar_packed < 0 || c.avatar_packed > 0xffff ||
+				((c.avatar_packed >> 15) & 1) != selection.team)
+			return false;
+	}
+	if (selection.kit) {
+		for (const playersav::KitEntry &entry : selection.kit->entries)
+			if (entry.name.empty()) return false;
+	}
+	const size_t slot = static_cast<size_t>(slot_);
+	const playersav::SideId shown = selection.team == 0 ? playersav::SideId::Blue
+														: playersav::SideId::Red;
+	const uint8_t player_class = static_cast<uint8_t>(selection.player_class);
+	// The class loop [orig: @0x55EE3F..0x55EE6D], then the shown side's bytes
+	// [orig: @0x55EE93..0x55EF38].
+	playersav::update_player_class(weapons_, slot, player_class);
+	if (selection.character) {
+		const CharacterSelection::Character &c = *selection.character;
+		playersav::update_avatar_selection(weapons_, slot, shown, player_class,
+				static_cast<uint8_t>(c.avatar_a), static_cast<uint8_t>(c.avatar_b),
+				static_cast<uint16_t>(c.avatar_packed));
+	}
+	if (selection.kit) {
+		// The page the populate restored, or with none the written class's (D-PLAYERINFO-26)
+		// [orig: PlayerInfo_SerializeWeaponLoadout @0x55E4B0 into g_PlayerInfoLoadoutPtr].
+		int page_class = selection.kit->page_class;
+		if (page_class < playersav::kMinPlayerClass || page_class > playersav::kMaxPlayerClass)
+			page_class = selection.player_class;
+		playersav::KitPage &page = weapons_.slots[slot].side(shown).pages[static_cast<size_t>(
+				page_class - playersav::kMinPlayerClass)];
+		page.entries = selection.kit->entries;
+	}
+	return true;
+}
+
 void PlayerProfiles::reset_current(const ProfileDefaults &defaults) {
 	// [orig: PlayerInfo_OnDeleteQueryYes — g_curProfileSlot < 5 @0x561412, InitDefaults
 	//  @0x561435, +52 |= 1 @0x561442]

@@ -95,23 +95,6 @@ Error write_save_file(const String &p_path, const std::vector<uint8_t> &p_bytes)
 	return rename_error;
 }
 
-bool avatar_selection_from_dictionary(const Dictionary &profile, int side,
-		uint8_t &avatar_a, uint8_t &avatar_b, uint16_t &avatar_packed) {
-	if (profile.is_empty() || !profile.has("avatar_a") || !profile.has("avatar_b") ||
-			!profile.has("avatar_packed"))
-		return false;
-	const int a = profile.get("avatar_a", -1);
-	const int b = profile.get("avatar_b", -1);
-	const int packed = profile.get("avatar_packed", -1);
-	if (a < 0 || a > 0xff || b < 0 || b > 0xff || packed < 0 || packed > 0xffff ||
-			((packed >> 15) & 1) != side)
-		return false;
-	avatar_a = static_cast<uint8_t>(a);
-	avatar_b = static_cast<uint8_t>(b);
-	avatar_packed = static_cast<uint16_t>(packed);
-	return true;
-}
-
 // A name crosses into the profile as the game's code-page bytes, the bytes the
 // PLAYERNAME edit and GetUserNameA hand the game and player.sav keeps: cp1252,
 // '?' for a character the page has no byte for (utf8_to_retail_text); it reads
@@ -311,69 +294,44 @@ Ref<PlayerInfoKitRestore> PlayerProfiles::restore_player_info_kit(int p_side,
 }
 
 Error PlayerProfiles::apply_character_selection(const Dictionary &p_profile) {
-	if (p_profile.is_empty()) return ERR_INVALID_PARAMETER;
-	// The dialog's snapshot (PlayerCharacterSelectionState.snapshot): the shared
-	// PLAYERCLASS value, the shown side (`team`) and side_profiles[blue, red],
-	// each carrying the side's authored nationality/division ids and packed
-	// character id. The engine's update_player_class and update_avatar_selection
-	// are the dialog's write: the class to both sides, the character of the shown
-	// side alone; the side not shown keeps its bytes, as does a shown side with no
-	// selection (no character table), the class and the kit written all the same.
-	const int player_class = p_profile.get("player_class", -1);
-	if (player_class < playersav::kMinPlayerClass || player_class > playersav::kMaxPlayerClass)
-		return ERR_INVALID_PARAMETER;
-	const int team = p_profile.get("team", -1);
-	if (team < 0 || team > 1) return ERR_INVALID_PARAMETER;
-	const playersav::SideId shown = team == 0 ? playersav::SideId::Blue : playersav::SideId::Red;
+	// The dialog's snapshot (PlayerCharacterSelectionState.snapshot) as the engine's
+	// CharacterSelection: the shared PLAYERCLASS value, the shown side (`team`), that
+	// side's side_profiles[team] {avatar_a, avatar_b, avatar_packed} when non-empty, and a
+	// `kit` array of {name, ammo_primary, ammo_secondary, flags} into the page of
+	// `kit_class`. A missing value reads as one the engine refuses; the rules are the
+	// engine's (profile::PlayerProfiles::apply_character_selection).
+	opennova::profile::CharacterSelection selection;
+	selection.player_class = int(p_profile.get("player_class", -1));
+	selection.team = int(p_profile.get("team", -1));
 	const Array side_profiles = p_profile.get("side_profiles", Array());
-	playersav::File &file = store_.weapon_sav();
-	const size_t slot = static_cast<size_t>(store_.current_slot());
-	// Every input is checked before the record changes.
-	uint8_t avatar_a = 0;
-	uint8_t avatar_b = 0;
-	uint16_t avatar_packed = 0;
-	Dictionary selected;
-	if (team < side_profiles.size() && side_profiles[team].get_type() == Variant::DICTIONARY)
-		selected = side_profiles[team];
-	const bool has_character = !selected.is_empty();
-	if (has_character &&
-			!avatar_selection_from_dictionary(selected, team, avatar_a, avatar_b, avatar_packed))
-		return ERR_INVALID_PARAMETER;
-	// The shown side's kit page as the PLAYER screen serializes it, into the page
-	// of the class the screen restored; an absent "kit" key (no weapon.def
-	// loaded) leaves the pages untouched. A side whose class byte picks no page
-	// (outside 5..9) had nothing restored, and its kit goes into the page of the
-	// class the dialog writes (D-PLAYERINFO-26).
-	bool has_kit = false;
-	int kit_class = player_class;
-	playersav::KitPage page;
+	if (selection.team >= 0 && selection.team < side_profiles.size() &&
+			side_profiles[selection.team].get_type() == Variant::DICTIONARY) {
+		const Dictionary selected = side_profiles[selection.team];
+		if (!selected.is_empty()) {
+			opennova::profile::CharacterSelection::Character character;
+			character.avatar_a = int(selected.get("avatar_a", -1));
+			character.avatar_b = int(selected.get("avatar_b", -1));
+			character.avatar_packed = int(selected.get("avatar_packed", -1));
+			selection.character = character;
+		}
+	}
 	if (p_profile.has("kit")) {
-		kit_class = p_profile.get("kit_class", player_class);
-		const Array kit = p_profile.get("kit", Array());
-		if (kit_class < playersav::kMinPlayerClass || kit_class > playersav::kMaxPlayerClass)
-			kit_class = player_class;
-		for (int i = 0; i < kit.size(); ++i) {
-			if (kit[i].get_type() != Variant::DICTIONARY) return ERR_INVALID_PARAMETER;
-			const Dictionary entry = kit[i];
-			const String name = entry.get("name", String());
-			if (name.is_empty()) return ERR_INVALID_PARAMETER;
+		opennova::profile::CharacterSelection::Kit kit;
+		kit.page_class = int(p_profile.get("kit_class", -1));
+		const Array entries = p_profile.get("kit", Array());
+		for (int i = 0; i < entries.size(); ++i) {
+			if (entries[i].get_type() != Variant::DICTIONARY) return ERR_INVALID_PARAMETER;
+			const Dictionary entry = entries[i];
 			playersav::KitEntry out;
-			out.name = opennova::to_std(name);
+			out.name = opennova::to_std(String(entry.get("name", String())));
 			out.ammo_primary = int32_t(int(entry.get("ammo_primary", -1)));
 			out.ammo_secondary = int32_t(int(entry.get("ammo_secondary", -1)));
 			out.flags = int32_t(int(entry.get("flags", -1)));
-			page.entries.push_back(std::move(out));
+			kit.entries.push_back(std::move(out));
 		}
-		has_kit = true;
+		selection.kit = std::move(kit);
 	}
-	playersav::update_player_class(file, slot, static_cast<uint8_t>(player_class));
-	if (has_character)
-		playersav::update_avatar_selection(file, slot, shown, static_cast<uint8_t>(player_class),
-				avatar_a, avatar_b, avatar_packed);
-	if (has_kit)
-		file.slots[slot].side(shown).pages[static_cast<size_t>(kit_class) - playersav::kMinPlayerClass] =
-				std::move(page);
-	return OK;
+	return store_.apply_character_selection(selection) ? OK : ERR_INVALID_PARAMETER;
 }
 
 void PlayerProfiles::_bind_methods() {
