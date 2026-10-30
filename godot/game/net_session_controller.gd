@@ -1,23 +1,16 @@
 class_name NetSessionController
-extends Node
+extends JoinFlow
 
-# The game shell's NET SESSION entries: every way a networked session starts —
-# the mp.mnu LAN browser/host screens, the NovaWorld panel, and the --lan-host /
-# --lan-join launch flags — plus the callsign, panel lifecycle, and spectator
-# kill feed that ride them. The shell (MainGame) keeps the state machine and the
-# load pipeline; this component builds the typed requests (HostSessionConfig /
-# JoinTarget, ADR 0017) and hands each load to the shell's start_world_load
-# seam. Game-layer only: the engine world below knows nothing of menus or
-# launch flags.
+# The game shell's NET SESSION device: every way a networked session starts (the mp.mnu LAN
+# browser/host screens, the NovaWorld panel, the --lan-host / --lan-join launch flags) runs the
+# engine's join flow (inmatch::JoinFlow: the enumerate, the choice, the dial, state 9,
+# g_ReturnToNovaWorldMenu), and this node is its device: the browse's LanSession, the shell's join
+# screen and loads, the mount, the held NovaWorld session and its panel.
 
 var _shell: MainGame  # start_world_load / current_resource_root
-# The NovaWorld servers that refused this install this process, with each
-# refusal's text: the one record (engine BrowserRefusals), handed to every panel
-# this controller opens; and the rid the current NovaWorld join went to
-# (note_join_failure).
+# The NovaWorld servers that refused this install this process, with each refusal's text: the
+# one record (engine BrowserRefusals), handed to every panel this controller opens.
 var _refusals := NovaWorldServerBrowser.new()
-var _joining_rid := 0
-var _joining_novaworld_server := false
 var _world: GameWorld
 var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
@@ -30,24 +23,14 @@ var _host_return_screen := ""
 var _menu_visible_before_novaworld := false
 var _menu_key_input_before_novaworld := false
 var _novaworld_menu_state_captured := false
-# The NovaWorld session a resolved join or a granted host hands over, held from
-# the panel's dismissal until the load takes it (or an abandoned join hands it back to the
-# NovaWorld menu).
+# The NovaWorld session a resolved join or a granted host hands over, held from the panel's
+# dismissal until the load takes it (or an abandoned join hands it back to the NovaWorld menu).
 var _novaworld_client: NovaWorldClient
-# The match was entered from the NovaWorld menu: a normal exit returns there
-# (retail's g_ReturnToNovaWorldMenu, docs/net/novaworld-net-re.md).
-var _return_to_novaworld := false
-# The target the join screen's choice panels are up for (_begin_join_choice).
-var _join_choice_target: JoinTarget
 ## The join screen the choice shows on when the controller runs without its shell
 ## (the GUT harness opens one over an authored pre.mnu); the shell's own otherwise.
 var standalone_join_screen: PreGameMenuPresenter = null
-var _spectator_probe: LanSession
-var _spectator_probe_target: JoinTarget
-var _spectator_probe_serial := 0
-# The `--lan-join browse[:<port>]` search and the port its row must carry (0 = any).
-var _launch_browse: LanSession
-var _launch_browse_port := 0
+# The flow's browse (the enumerate-and-join's, or the launch search's).
+var _browse: LanSession
 
 const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
@@ -57,9 +40,7 @@ func _exit_tree() -> void:
 		_advanced_host_dialog.queue_free()
 	if is_instance_valid(_advanced_host_button):
 		_advanced_host_button.queue_free()
-	_cancel_launch_browse()
-	_cancel_spectator_probe()
-	_join_choice_target = null
+	_end_browse()
 	_release_novaworld_client()
 
 
@@ -84,11 +65,11 @@ func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
 	mp_companion.novaworld_host_start_requested.connect(_start_configured_novaworld_host)
 	mp_companion.novaworld_host_cancelled.connect(_cancel_novaworld_host_setup)
 	mp_companion.lan_host_start_requested.connect(_on_lan_host_start_requested)
-	mp_companion.lan_join_requested.connect(join_lan_server)
-	mp_companion.lan_join_refused.connect(refuse_lan_join)
+	mp_companion.lan_join_requested.connect(join)
+	mp_companion.lan_join_refused.connect(refuse)
 
 
-# --- Launch-flag entries (dev/probe/automation launches) -----------------------
+# --- The host screens (mp.mnu MULTI_PLAYER_HOST) -----------------------------------
 
 func _process(_delta: float) -> void:
 	if _advanced_host_button == null or _menu_shell == null:
@@ -146,132 +127,154 @@ func _start_configured_novaworld_host(config: HostSessionConfig) -> void:
 	_novaworld_panel.begin_configured_host(config)
 	_restore_host_return_menu.call_deferred()
 
-# Co-op LAN launches (LaunchFlags, ADR 0041). These remain useful for
-# deterministic smoke runs even though mp.mnu's LAN_SEARCH now browses live
-# hosts through LanSession. `--lan-host <mission.bms>` boots straight in as a
-# co-op host; `--lan-join <ip[:port]>` boots as a joiner dialing that host, and
-# `--lan-join browse[:<port>]` as one joining from a LAN search's row. The
-# joiner learns the mission from S2C 0x7B after authentication; there is no
-# local mission override (D-NET-194). Two instances on localhost = the
-# bidirectional co-op demo. The 1..4 rate mode (the witnessed holdoffs
-# 12/6/4/3) and the 1..64 listen-host capacity are validated by the engine
-# parser; an absent or malformed value keeps the typed request's default.
-func maybe_launch_lan_from_flags() -> bool:
-	var lan_mission := LaunchFlags.lan_host()
-	if not lan_mission.is_empty():
-		# game_type = the numeric session g_GameType the host config chooses at host start
-		# [orig: g_GameType = session gametype setting @0x4a6657]. An absent override
-		# means `auto`: derive it from the loaded mission. That distinction
-		# matters for 00TRg, whose zero mode resolves to retail's 0x10020 training Co-op.
-		var lan_gametype := LaunchFlags.lan_gametype()
-		# The session name, like every word no flag sets, is the cfg block's
-		# (HostSessionConfig seeds from it: D-NET-335). `--callsign` is the host
-		# player's callsign, matching LanHostCallsign in onhook.cfg.
-		var demo_config := HostSessionConfig.new()
-		demo_config.mission = lan_mission
-		# `--lan-rotation`: the missions after it, appended in order as the host
-		# screen's START appends its selected rows, each at launch option 0.
-		var rotation := LaunchFlags.lan_rotation()
-		if not rotation.is_empty():
-			demo_config.missions.assign([lan_mission] + Array(rotation))
-		demo_config.max_players = LaunchFlags.lan_max_players(4)
-		demo_config.bind_port = LaunchFlags.lan_port(demo_config.bind_port)
-		demo_config.game_type_auto = lan_gametype < 0
-		if not demo_config.game_type_auto:
-			demo_config.game_type = lan_gametype
-		demo_config.lan_mode = LaunchFlags.lan_mode(demo_config.lan_mode)
-		_on_lan_host_start_requested(demo_config)
-		return true
-	if LaunchFlags.lan_join_browse():
-		_begin_launch_browse(LaunchFlags.lan_join_port(0))
-		return true
-	var lan_join_ip := LaunchFlags.lan_join_ip()
-	if not lan_join_ip.is_empty():
-		var demo_target := JoinTarget.new()
-		demo_target.host_ip = lan_join_ip
-		demo_target.port = LaunchFlags.lan_join_port(demo_target.port)
-		_apply_launch_join_role(demo_target)
-		join_lan_server(demo_target)
-		return true
-	return false
+
+# --- The join flow's device (engine inmatch::JoinFlow decides; JoinFlow binding) ----
+
+# The browse: the enumerate of a target's endpoint (unwindowed, under its network type, a
+# NovaWorld join's on the held session's socket with its proxy rendezvous), or with no target the
+# `--lan-join browse` search on the LAN screen's defaults. Its socket binds on the block's client
+# quad (engine inmatch::transport_bind_ports, D-NET-958).
+func _begin_browse(target: JoinTarget, serial: int) -> bool:
+	_end_browse()
+	_browse = LanSession.new()
+	_browse.resource_root = _resource_root()
+	_browse.game_config = GameCfgStore.block()
+	if target == null:
+		_browse.name = "LaunchBrowse"
+		add_child(_browse)
+		_browse.servers_changed.connect(browse_rows.bind(serial))
+		_browse.browse_finished.connect(browse_finished.bind(serial))
+		return int(_browse.start_browsing()) == OK
+	_browse.name = "SpectatorPreflight"
+	_browse.set_windowed(false)
+	if _novaworld_client != null:
+		_browse.set_transport(_novaworld_client.get_game_pump())
+	add_child(_browse)
+	_browse.servers_changed.connect(browse_rows.bind(serial))
+	_browse.set_proxy_from_target(target)
+	return int(_browse.start_browsing(target.host_ip, target.port, target.port,
+			target.network_type)) == OK
 
 
-# `--spectator` / `--spectator-password` answer the join's role question.
-func _apply_launch_join_role(target: JoinTarget) -> void:
-	if LaunchFlags.spectator():
-		target.join_role = JoinTarget.ROLE_SPECTATOR
-		target.spectator_password = LaunchFlags.spectator_password()
-		target.role_explicit = true
+func _adopt_browse(target: JoinTarget) -> void:
+	target.transport = _browse.take_transport()
+	if _shell != null:
+		_shell.adopt_lan_records(_browse)
 
 
-# `--lan-join browse[:<port>]` joins as a player does from the LAN screen
-# (mp_menu_companion: LAN_SEARCH, then LAN_JOINGAME on a row): the search runs
-# on LanSession's defaults, the broadcast over the retail port range, and the
-# join takes the row's discovered session (JoinTarget.from_lan_row). The row is
-# the first on <port> (any port without one), the endpoint rule a scripted
-# retail joiner picks its row by. The search closes before the join opens its
-# own socket, as the spectator preflight's does.
-func _begin_launch_browse(port: int) -> void:
-	_cancel_launch_browse()
-	_launch_browse_port = port
-	_launch_browse = LanSession.new()
-	_launch_browse.name = "LaunchBrowse"
-	_launch_browse.resource_root = _resource_root()
-	# The browse's socket binds on the block's client quad (engine
-	# inmatch::transport_bind_ports, D-NET-958).
-	_launch_browse.game_config = GameCfgStore.block()
-	add_child(_launch_browse)
-	_launch_browse.servers_changed.connect(_on_launch_browse_rows.bind(_launch_browse))
-	_launch_browse.browse_finished.connect(_on_launch_browse_finished.bind(_launch_browse))
-	if int(_launch_browse.start_browsing()) != OK:
-		push_warning("NetSessionController: --lan-join browse could not start the LAN search")
-		_cancel_launch_browse()
+func _end_browse() -> void:
+	if _browse != null:
+		_browse.stop()
+		_browse.queue_free()
+	_browse = null
 
 
-func _on_launch_browse_rows(rows: Array, browse: LanSession) -> void:
-	if browse != _launch_browse:
+func _drain_browse() -> void:
+	if _browse != null:
+		_browse.drain_records()
+
+
+func _drain_enumerator() -> void:
+	if _shell != null:
+		_shell.drain_lan_records()
+
+
+func _show_enumerating() -> bool:
+	if _shell != null:
+		_shell.begin_join_enumerate(cancel)
+	return true
+
+
+func _show_choice(server_flags: int) -> bool:
+	if _shell != null:
+		return _shell.begin_join_choice(server_flags, commit_choice, cancel)
+	if standalone_join_screen == null or not standalone_join_screen.show_choice(server_flags):
+		return false
+	if not standalone_join_screen.choice_committed.is_connected(commit_choice):
+		standalone_join_screen.choice_committed.connect(commit_choice)
+		standalone_join_screen.cancelled.connect(cancel)
+	return true
+
+
+func _show_refusal(text: String) -> bool:
+	return _shell != null and _shell.show_join_refusal(text, cancel)
+
+
+func _close_join_screen() -> void:
+	if _shell != null:
+		_shell.end_join_enumerate()
+
+
+func _callsign() -> String:
+	return PlayerProfile.load_callsign()
+
+
+func _switch_expansion(expansion: String) -> String:
+	return _world.mount_join_expansion(expansion) if _world != null else "no world to mount"
+
+
+func _save_profile() -> void:
+	PlayerProfile.save()
+
+
+func _reload_profile() -> void:
+	if _shell != null:
+		_shell.refresh_local_profile_for_mount()
+
+
+func _save_config() -> void:
+	GameCfgStore.save()
+
+
+func _start_join(target: JoinTarget) -> void:
+	if _shell == null:
 		return
-	for candidate in rows:
-		var row := candidate as LanServerRow
-		if row == null or (_launch_browse_port != 0 and row.port != _launch_browse_port):
-			continue
-		var target := JoinTarget.from_lan_row(row)
-		# The join goes on with the search's socket (D-NET-1019) and its records, the
-		# process enumerator's from here on (MainGame.adopt_lan_records).
-		target.transport = _launch_browse.take_transport()
-		if _shell != null:
-			_shell.adopt_lan_records(_launch_browse)
-		_cancel_launch_browse()
-		_apply_launch_join_role(target)
-		join_lan_server(target)
-		return
+	var load_info := LoadingScreenInfo.make(target.mission, true, target.server_name, "",
+			target.game_type, "")
+	_adopt_held_novaworld_client()
+	_shell.start_join_load(load_info, _world.load_mission_as_joiner.bind(target))
 
 
-func _on_launch_browse_finished(browse: LanSession) -> void:
-	if browse != _launch_browse:
-		return
-	push_warning("NetSessionController: --lan-join browse found no host on port %d" % _launch_browse_port)
-	_cancel_launch_browse()
+func _start_launch_host(mission: String, rotation: PackedStringArray, max_players: int,
+		port: int, game_type: int, lan_mode: int) -> void:
+	var config := HostSessionConfig.new()
+	config.mission = mission
+	if not rotation.is_empty():
+		config.missions.assign(Array(rotation))
+	config.max_players = max_players
+	if port > 0:
+		config.bind_port = port
+	config.game_type_auto = game_type < 0
+	if not config.game_type_auto:
+		config.game_type = game_type
+	if lan_mode > 0:
+		config.lan_mode = lan_mode
+	_on_lan_host_start_requested(config)
 
 
-func _cancel_launch_browse() -> void:
-	if _launch_browse != null:
-		_launch_browse.stop()
-		_launch_browse.queue_free()
-	_launch_browse = null
+func _cancel_pre_game() -> void:
+	if _world != null:
+		_world.pre_game_cancelled()
+
+
+func _show_main_menu() -> void:
+	if _menu_shell != null:
+		_menu_shell.show_menu()
+
+
+func _route_novaworld_session(reenter: bool) -> void:
+	var held := _novaworld_client
+	_novaworld_client = null
+	_enter_menu_with(held, reenter)
 
 
 # --- LAN co-op (mp.mnu) --------------------------------------------------------
 
-# Host a LAN co-op game: the same menu->world handoff as a single-player start, but the
-# world loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen.
+# Host a LAN co-op game: the same menu->world handoff as a single-player start, but the world
+# loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen. LAN reads no
+# NovaWorld service configuration; g_ExpansionName is the expansion the process mounted.
 func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
-	# The callsign is part of the local game session. LAN does not inspect or inherit
-	# any NovaWorld service configuration; online registration is owned exclusively
-	# by _on_novaworld_host_requested and the config that panel supplies.
-	config.player_name = resolve_player_callsign()
-	# g_ExpansionName is the expansion the process actually mounted (empty for base
-	# JO), not a session template or a value copied from one capture.
+	config.player_name = PlayerProfile.load_callsign()
 	var root := _resource_root()
 	config.expansion = root.get_expansion() if root != null else ""
 	var load_info := LoadingScreenInfo.for_host(root, config.mission, config.server_name,
@@ -279,289 +282,6 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 	_shell.start_world_load(
 		load_info,
 		_world.load_mission_as_host.bind(config.to_session_options()))
-
-
-## Public entry for "join this server" — the seam behind the LAN browser's
-## `lan_join_requested` signal, the NovaWorld panel row, the `--lan-join` launch flag
-## hook, and the shell's ADR-0018 delegate. Dial it as a co-op JOINER: the world
-## loads as a non-authority client that runs the witnessed in-match JOIN and
-## renders the host + NPCs wire-direct (net-re §5.38b). The LAN row carries only
-## the observed host_ip/port and browse-time server fields; the mission arrives
-## after authentication in the normal S2C 0x7B session record.
-func join_lan_server(target: JoinTarget) -> void:
-	if target == null:
-		return
-	_cancel_spectator_probe()
-	_join_choice_target = null
-	# The entry's step is the engine's (inmatch/server_flags.h join_entry_step):
-	# enumerate the endpoint for its flag word first (every target without one),
-	# dial, or ask the retail player/spectator question.
-	match target.entry_step():
-		JoinTarget.ENTRY_PREFLIGHT:
-			_begin_spectator_preflight(target)
-		JoinTarget.ENTRY_PROMPT:
-			_begin_join_choice(target)
-		_:
-			_start_lan_join(target)
-
-
-## A LAN row's join the join machine refuses before it dials (the row's index names
-## no listed session, engine: net/npwire/lan_discovery.h join_session): the join
-## screen shows `text` (CVUNABLETOCREATE) with Cancel only, which leaves to the menu as
-## the choice's Cancel does (retail's error arm, then its state 9).
-func refuse_lan_join(text: String) -> void:
-	_cancel_spectator_probe()
-	_join_choice_target = null
-	if _shell == null or not _shell.show_join_refusal(text, _cancel_join_role_choice):
-		_cancel_join_role_choice()
-
-
-# Complete the join only after the retail Player/Spectator decision has been
-# made. Keeping the load below this seam prevents a speculative player ClientAuth
-# from racing the prompt.
-func _start_lan_join(target: JoinTarget) -> void:
-	# Joiner: the retail client obtains the full session-variable set from the
-	# connect stream before wire-header world load [orig: Client_ParseServerSessionVariables
-	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
-	# them with the authoritative post-auth record before starting MissionRoot.
-	# Retail also holds the screen through the post-world-load connection/game-start
-	# waits [orig: NapiClient_SendPlayerSyncAndWaitForSyncTail @ 0x42cb20 then
-	# NapiClient_WaitForGameStart @ 0x42cc10]. GameWorld pumps the loaded runtime
-	# while hidden and reports the authoritative admission/deploy edge separately
-	# (docs/interface/loading-screen-re.md, the load-flow case matrix).
-	if target.player_name.is_empty():
-		target.player_name = resolve_player_callsign()
-	# The join switches to the host's expansion (the discovered row's) before it
-	# dials and re-reads the local profile from that expansion, so the character
-	# vars the join uploads and the spawn kit come from the host's data set. The
-	# post-auth reconcile on the session record stays the authoritative check; a
-	# failed switch here leaves it to fail the join there. The switch hands the
-	# process's cfg block the new mount's weapon table and reads no game.cfg
-	# (GameConfigBlock.switch_expansion).
-	if target.expansion_known and _world != null:
-		var switch_error := _world.mount_join_expansion(target.expansion)
-		if switch_error.is_empty():
-			# The switch saves the player profile under the expansion it leaves
-			# before the profile loads again under the one it takes (engine:
-			# runtime/profile/player_profiles.h; PlayerProfile keeps the loaded
-			# expansion until the reload).
-			PlayerProfile.save()
-			if _shell != null:
-				_shell.refresh_local_profile_for_mount()
-		else:
-			push_warning("NetSessionController: pre-dial expansion switch: %s" % switch_error)
-	var load_info := LoadingScreenInfo.make(target.mission, true, target.server_name, "",
-			target.game_type, "")
-	_adopt_held_novaworld_client()
-	_shell.start_join_load(
-		load_info,
-		_world.load_mission_as_joiner.bind(target))
-
-
-# NovaWorld rows and direct --lan-join targets do not carry ServerHello.P2:
-# retail's enumerate-and-join browses the endpoint and joins only a session it
-# discovered. The browse runs with no time limit, its first announce at once and
-# then every 3 s, until the session answers or the player aborts on the join
-# screen (PRE_ENUMSESSION, ABORT_CANCEL); there is no row-less fallback dial
-# (D-NET-703). The row it finds is the join's discovered session, and the join
-# goes on with the browse's socket and the row's address (D-NET-521,
-# D-NET-1019). A NovaWorld join's browse rides the NovaWorld session's
-# socket, and its proxy rendezvous rides the browse (D-NET-712). The witness
-# rides the engine (inmatch/server_flags.h join_entry_step, inmatch/pre_game_menu.h
-# PRE_ENUMSESSION, net/npwire/lan_discovery.h set_windowed).
-func _begin_spectator_preflight(target: JoinTarget) -> void:
-	_spectator_probe_serial += 1
-	var serial := _spectator_probe_serial
-	_spectator_probe_target = target
-	# The enumerate drains the process's enumerator first: the LAN screen's records
-	# go, each with its removed line (engine: LanDiscoveryBrowser::drain_records).
-	if _shell != null:
-		_shell.drain_lan_records()
-	_spectator_probe = LanSession.new()
-	_spectator_probe.name = "SpectatorPreflight"
-	_spectator_probe.resource_root = _resource_root()
-	_spectator_probe.game_config = GameCfgStore.block()
-	_spectator_probe.set_windowed(false)
-	if _novaworld_client != null:
-		_spectator_probe.set_transport(_novaworld_client.get_game_pump())
-	add_child(_spectator_probe)
-	_spectator_probe.servers_changed.connect(
-			_on_spectator_preflight_rows.bind(_spectator_probe, target, serial))
-	# A proxy-assisted NovaWorld join's rendezvous rides this enumeration, ahead of
-	# each announce burst; the join from its row sends none (D-NET-712).
-	_spectator_probe.set_proxy_from_target(target)
-	# The enumeration runs under the target's network connect type: a NovaWorld
-	# host's P2 admits only a NovaWorld browse, a LAN host's only a LAN one
-	# (the engine's lan_session_admits_connect_type).
-	var err := int(_spectator_probe.start_browsing(
-			target.host_ip, target.port, target.port, target.network_type))
-	if err != OK:
-		push_warning("NetSessionController: the join could not enumerate %s:%d (error %d)"
-				% [target.host_ip, target.port, err])
-		_abort_spectator_preflight()
-		return
-	if _shell != null:
-		_shell.begin_join_enumerate(_abort_spectator_preflight)
-
-
-func _on_spectator_preflight_rows(rows: Array, probe: LanSession,
-		target: JoinTarget, serial: int) -> void:
-	if (
-			probe != _spectator_probe
-			or target != _spectator_probe_target
-			or serial != _spectator_probe_serial
-			or rows.is_empty()
-	):
-		return
-	var row: LanServerRow = rows[0]
-	for candidate in rows:
-		var typed := candidate as LanServerRow
-		if typed.port == target.port:
-			row = typed
-			break
-	_finish_spectator_preflight(probe, target, row)
-
-
-func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
-		row: LanServerRow) -> void:
-	target.server_flags = row.server_flags
-	# The enumerated 0x81's SUS2 names the host's expansion.
-	target.expansion = row.expansion
-	target.expansion_known = true
-	if target.server_name.is_empty():
-		target.server_name = row.server_name
-	if target.game_type < 0:
-		target.game_type = row.gametype
-	# The row is the join's discovered session: the join goes on with the
-	# browse's connection, straight to the 0x42 with the row's HK and SF and
-	# the browse's CI, so the only 0x41s are the browse's (D-NET-521; the
-	# engine's JoinerConnection::DiscoveredSession carries the witness). It
-	# connects to the address the session answered from, on the browse's socket
-	# (engine: inmatch/joiner_connection.h set_host_address carries the witness).
-	target.discovered_session = true
-	target.session_host_key = row.host_key
-	target.session_password_required = row.password_required
-	target.session_client_index = row.client_index
-	target.host_ip = row.host_ip
-	target.port = row.port
-	target.transport = probe.take_transport()
-	# The enumerate's records stay the process enumerator's until the join's session reset
-	# drains them (MainGame.adopt_lan_records; engine: ClientRuntime::drain_enumerator).
-	if _shell != null:
-		_shell.adopt_lan_records(probe)
-	_cancel_spectator_probe()
-	if target.entry_step() == JoinTarget.ENTRY_PROMPT:
-		_begin_join_choice(target)
-	else:
-		_start_lan_join(target)
-
-
-# Stop the enumerate-and-join's browse (its join screen with it).
-func _cancel_spectator_probe() -> void:
-	_spectator_probe_serial += 1
-	if _spectator_probe != null:
-		_spectator_probe.stop()
-		_spectator_probe.queue_free()
-	_spectator_probe = null
-	_spectator_probe_target = null
-	if _shell != null:
-		_shell.end_join_enumerate()
-
-
-# ABORT_CANCEL while the join enumerates: retail's state 9 destroys the session
-# and returns to the main menu (engine: inmatch/server_flags.h join_entry_step);
-# the destroy zeroes the process game type the remote admin reads
-# (GameWorld.pre_game_cancelled).
-func _abort_spectator_preflight() -> void:
-	# State 9's FullDestroy drains the enumerate's records, each writing its removed line
-	# (engine: ClientRuntime::drain_enumerator carries the witness), then stops a held server
-	# and, off NovaWorld, tears the transport down with its line (LanSession.destroy_pre_dial_session).
-	if _spectator_probe != null:
-		_spectator_probe.drain_records()
-	LanSession.destroy_pre_dial_session(_spectator_probe_target != null
-			and _spectator_probe_target.network_type == JoinTarget.NETWORK_NOVAWORLD)
-	_cancel_spectator_probe()
-	_leave_abandoned_join()
-
-
-# The join machine's choice (its state 8, which a discovered word carrying any of
-# 0x6038 reaches): pre.mnu's choice panels on the join screen, GAME_PASSWORD for a
-# server password, SPECTATE when the host takes spectators, then the spectator
-# password or the side password in the one shared TEAM_PASSWORD control; ACCEPT
-# walks them and its commit routes the three controls onto the target
-# (JoinTarget.apply_pre_game_choice: the shared text to the spectator password
-# when spectating, else to the side password), after which the join goes on; BACK
-# or Cancel leaves to the menu. The screen has no team control: every join sends
-# the automatic TR=-1 (D-NET-590). The walk and the routing are the engine's
-# (inmatch/pre_game_menu.h carries the witness; ctest npruntime_pre_game_menu).
-func _begin_join_choice(target: JoinTarget) -> void:
-	_join_choice_target = target
-	var shown := false
-	if _shell != null:
-		shown = _shell.begin_join_choice(target.server_flags, _commit_join_choice,
-				_cancel_join_role_choice)
-	elif standalone_join_screen != null:
-		shown = standalone_join_screen.show_choice(target.server_flags)
-		if shown and not standalone_join_screen.choice_committed.is_connected(_commit_join_choice):
-			standalone_join_screen.choice_committed.connect(_commit_join_choice)
-			standalone_join_screen.cancelled.connect(_cancel_join_role_choice)
-	if not shown:
-		push_warning("NetSessionController: the join screen could not show the join choice")
-		_cancel_join_role_choice()
-
-
-## The join choice's panels are up for a target (the test and probe read).
-func is_join_choice_pending() -> bool:
-	return _join_choice_target != null
-
-
-func _commit_join_choice(game_password: String, spectate: bool, team_password: String) -> void:
-	var target := _join_choice_target
-	_join_choice_target = null
-	if target == null:
-		return
-	target.apply_pre_game_choice(game_password, spectate, team_password)
-	_start_lan_join(target)
-
-
-# The choice's BACK or Cancel: retail's state 9 as above.
-func _cancel_join_role_choice() -> void:
-	# A refused LAN row has no target: the LAN screen's join.
-	var target := _join_choice_target
-	_join_choice_target = null
-	# State 9's FullDestroy drains the process enumerator's records (the browse the join came
-	# from), each writing its removed line (engine: ClientRuntime::drain_enumerator), then
-	# stops a held server and, off NovaWorld, tears the transport down with its line: the
-	# socket the join would have gone on with (LanSession.destroy_pre_dial_session).
-	if _shell != null:
-		_shell.drain_lan_records()
-	LanSession.destroy_pre_dial_session(target != null
-			and target.network_type == JoinTarget.NETWORK_NOVAWORLD)
-	_leave_abandoned_join()
-
-
-# State 9's tail after its FullDestroy (the game type zeroed: GameWorld.pre_game_cancelled): the
-# main menu. A join entered from the NovaWorld menu (its page's connect URL) leaves it again for
-# the NovaWorld menu with the session the destroy kept, as a normal exit from its match does: the
-# held session goes back to the panel, never stopped, so its socket stays open and writes no NET
-# TEARING DOWN SOCKET line (engine: inmatch/host_config.h write_transport_socket_teardown_line
-# carries the witness).
-func _leave_abandoned_join() -> void:
-	if _world != null:
-		_world.pre_game_cancelled()
-	if _menu_shell != null:
-		_menu_shell.show_menu()
-	var held := _novaworld_client
-	_novaworld_client = null
-	_enter_menu_with_novaworld_session(held)
-
-
-## The local player's display callsign, carried by game ClientAuth.NA.
-## Connection IDs independently identify the local player.
-## PlayerProfile is the single source: the persisted per-machine default, or the
-## `--callsign` launch flag for the two-instance demo.
-func resolve_player_callsign() -> String:
-	return PlayerProfile.load_callsign()
 
 
 # --- NovaWorld (online multiplayer) ---------------------------------------------
@@ -619,16 +339,13 @@ func _on_novaworld_closed() -> void:
 	_dismiss_novaworld_panel()
 
 
-## A join that failed on the join screen: a NovaWorld server that refused this
-## install outright (ConnectionError.refuses_this_install) reads as unjoinable
-## in the browser for the rest of the session, with the refusal's own text.
+## A join that failed on the join screen: a NovaWorld server that refused this install outright
+## (engine inmatch::refuses_this_install) reads as unjoinable in the browser for the rest of the
+## process, with the refusal's own text.
 func note_join_failure(error: ConnectionError) -> void:
-	if not _joining_novaworld_server:
-		return
-	_joining_novaworld_server = false
-	if error == null or not error.refuses_this_install():
-		return
-	_refusals.note_refusal(_joining_rid, error.reason_text(Strings.get_table(Strings.TABLE_GAMEERR)))
+	var rid := join_failed(error)
+	if rid > 0:
+		_refusals.note_refusal(rid, error.reason_text(Strings.get_table(Strings.TABLE_GAMEERR)))
 
 
 func _dismiss_novaworld_panel() -> void:
@@ -662,48 +379,34 @@ func _restore_menu_after_novaworld() -> void:
 
 
 # The NovaWorld panel's session is hosting (the service's ServerHostResult landed). The host is
-# retail's host dialog left untouched: its mission and its session name are what the dialog's
-# readback gave (an empty name stays empty, as HostDialog_ReadSettings copies GAME_NAME as it
-# stands; engine inmatch/host_settings.cpp carries the witness). Fill the callsign and load it
+# retail's host dialog left untouched (engine inmatch/host_settings.cpp carries the witness), loaded
 # as a listen host through the SAME bring-up the mp.mnu host screen uses; the hosting session
 # rides in with the load and keeps the match registered.
 func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
-	var mission := config.mission
-	if mission.is_empty():
-		# No mission to host: report back so the panel leaves "Starting..." instead of hanging
-		# silently, and leave the hosting the service just granted.
+	if config.mission.is_empty():
 		push_warning("NetSessionController: NovaWorld host requested with no mission")
 		if _novaworld_panel != null:
 			_novaworld_panel.host_failed("No mission selected to host.")
 		return
 	_hold_novaworld_client(_novaworld_panel.release_client())
-	_return_to_novaworld = true
+	host_from_novaworld()
 	_dismiss_novaworld_panel()
 	config.player_name = _novaworld_player_name()
 	_adopt_held_novaworld_client()
 	_shell.start_world_load(
-			LoadingScreenInfo.for_host(_resource_root(), mission, config.server_name,
+			LoadingScreenInfo.for_host(_resource_root(), config.mission, config.server_name,
 					config.game_type, config.game_type_auto, config.custom_text),
 			_world.load_mission_as_host.bind(config.to_session_options()))
 
 
-# The NovaWorld panel resolved a join target. Tear down the panel overlay, then enter the match
-# through the SAME joiner entry the LAN browser + --lan-join launch use (the target already
-# carries host_ip/port/mission/player_name).
+# The NovaWorld panel resolved a join target: the panel goes and the flow joins it
+# (JoinFlow.join_from_novaworld: the profile and game.cfg saves, the return to the NovaWorld menu).
 func _on_novaworld_join_requested(target: JoinTarget) -> void:
-	# The NovaWorld page's launch saves the player profile, then game.cfg,
-	# before it dials, as its host leg does (the panel's Host); a join that
-	# switches expansions saves the profile again at the switch
-	# (docs/playerinfo/player-sav-re.md, docs/gamecfg/game-cfg-re.md).
-	PlayerProfile.save()
-	GameCfgStore.save()
-	_joining_rid = _novaworld_panel.joining_rid()
-	_joining_novaworld_server = true
+	var rid := _novaworld_panel.joining_rid()
 	_hold_novaworld_client(_novaworld_panel.release_client())
 	target.player_name = _novaworld_player_name()
-	_return_to_novaworld = true
 	_dismiss_novaworld_panel()
-	join_lan_server(target)
+	join_from_novaworld(target, rid)
 
 
 # The local player's name in the held NovaWorld session, what a join sends as its ClientAuth NA
@@ -711,7 +414,7 @@ func _on_novaworld_join_requested(target: JoinTarget) -> void:
 # else the profile's callsign (D-NET-1299; the retail session apply's rule, witnessed at
 # engine/net/novaworld/http_login.h novaworld_character_name, which a join and a host both run).
 func _novaworld_player_name() -> String:
-	var callsign := resolve_player_callsign()
+	var callsign := PlayerProfile.load_callsign()
 	if _novaworld_client == null:
 		return callsign
 	return _novaworld_client.get_session_player_name(callsign)
@@ -719,41 +422,33 @@ func _novaworld_player_name() -> String:
 
 ## The post-mission route's NovaWorld half, once the shell is back in the menu. A normal exit
 ## keeps the NovaWorld session: a player who left from the NovaWorld menu re-enters it with the
-## session (still verified, its hosting and play left on re-entry). An exit with an error text
-## shows the NovaWorld error dialog first, the session already reset with the world
-## (the router's verdict, engine: inmatch/mission_exit.h).
+## session. An exit with an error text shows the NovaWorld error dialog first, the session already
+## reset with the world (the router's verdict, engine: inmatch/mission_exit.h).
 func return_from_mission(client: NovaWorldClient, error_exit: bool, error_text: String) -> void:
-	if error_exit:
-		var reenter := _return_to_novaworld
-		_return_to_novaworld = false
-		if client != null:
-			client.stop()
-			client.queue_free()
-		open_novaworld_panel(false)
-		if _novaworld_panel != null:
-			_novaworld_panel.show_post_mission_error(error_text, reenter)
+	var reenter := take_return_to_novaworld()
+	if not error_exit:
+		_enter_menu_with(client, reenter)
 		return
-	_enter_menu_with_novaworld_session(client)
-
-
-# The main menu's entry with the NovaWorld session a match's normal exit or an abandoned join
-# kept: a player who left from the NovaWorld menu re-enters it with the session; a stray session
-# is stopped.
-func _enter_menu_with_novaworld_session(client: NovaWorldClient) -> void:
-	var reenter := _return_to_novaworld
-	_return_to_novaworld = false
-	if client == null:
-		return
-	if not reenter:
+	if client != null:
 		client.stop()
 		client.queue_free()
-		return
 	open_novaworld_panel(false)
 	if _novaworld_panel != null:
-		_novaworld_panel.adopt_client(client)
-	else:
-		client.stop()
-		client.queue_free()
+		_novaworld_panel.show_post_mission_error(error_text, reenter)
+
+
+# The main menu's entry with a kept NovaWorld session: back to the NovaWorld menu when the flow's
+# return says so, else stopped.
+func _enter_menu_with(client: NovaWorldClient, reenter: bool) -> void:
+	if client == null:
+		return
+	if reenter:
+		open_novaworld_panel(false)
+		if _novaworld_panel != null:
+			_novaworld_panel.adopt_client(client)
+			return
+	client.stop()
+	client.queue_free()
 
 
 # The play the service admitted stays up through the match: the client waits
@@ -793,7 +488,7 @@ func _release_novaworld_client() -> void:
 		_novaworld_client.stop()
 		_novaworld_client.queue_free()
 	_novaworld_client = null
-	_return_to_novaworld = false
+	release_novaworld()
 
 
 # --- Shared lookups --------------------------------------------------------------

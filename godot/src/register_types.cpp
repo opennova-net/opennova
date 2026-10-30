@@ -145,6 +145,8 @@
 #include "mission/mission_perf_counters.h"
 #include "mission/mission_root.h"
 #include "mission/mission_setup_options.h"
+#include "network/join_flow.h"
+#include "network/novaworld_service_target.h"
 #include "network/join_target.h"
 #include "simulation/entity_card.h"
 #include "simulation/end_round_state.h"
@@ -503,6 +505,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NetProtocol);
 	GDREGISTER_CLASS(NetSessionPolicy);
 	GDREGISTER_CLASS(ConnectionError);
+	GDREGISTER_CLASS(JoinFlow);
+	GDREGISTER_CLASS(NovaWorldServiceTarget);
 	GDREGISTER_CLASS(JoinScreenStatus);
 	// The ImGui pass seams (ADR 0039): registered in every flavour so scripts
 	// parse; the release DLL's DevTools is inert.

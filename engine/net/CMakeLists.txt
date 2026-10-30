@@ -83,6 +83,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/registration_url.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/http_login.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/server_browser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service_target.cpp # the service the menu dials (OpenNova's or the original)
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/http_flow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/browser_cache.cpp # the menu browser's content cache
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/cookie_jar_file.cpp # nw_cdata.coo, the jar across processes

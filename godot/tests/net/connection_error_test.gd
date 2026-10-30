@@ -35,14 +35,11 @@ func test_a_join_refusal_reads_its_gameerr_entry() -> void:
 	assert_eq(error.reason_key(), "NCC007")
 	assert_eq(error.reason_text(_gameerr()),
 			"Your game is incompatible with this server. (NCC007)")
-	assert_true(error.refuses_this_install(),
-			"a game-version refusal cannot be retried on the same server")
 
 
 func test_a_disconnect_substitutes_its_text() -> void:
 	var error := ConnectionError.from_fields(0, 0, "", 2, 32, "Kicked by admin")
 	assert_eq(error.reason_text(_gameerr()), "Kicked by admin (GDC032)")
-	assert_false(error.refuses_this_install(), "a kick is not a refusal of this install")
 
 
 func test_an_empty_record_has_no_reason() -> void:

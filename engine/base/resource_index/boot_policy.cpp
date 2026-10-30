@@ -414,4 +414,55 @@ bool mount_install(Vfs &vfs, const std::string &root, const LaunchFlags &flags) 
            vfs.has_mounted_archive();
 }
 
+namespace {
+
+std::vector<std::string> updater_product_arguments(const UpdaterProduct &product) {
+    return {kLaunchFlagGame, product.product, "--runtime-dir", product.runtime_dir,
+            kLaunchFlagResourceDir, product.resource_dir};
+}
+
+} // namespace
+
+std::vector<std::string> updater_check_arguments(const UpdaterProduct &product) {
+    std::vector<std::string> arguments{"--check"};
+    const std::vector<std::string> rest = updater_product_arguments(product);
+    arguments.insert(arguments.end(), rest.begin(), rest.end());
+    return arguments;
+}
+
+std::vector<std::string> updater_install_arguments(const UpdaterProduct &product,
+        long long parent_pid, const std::vector<std::string> &run_args, bool bootstrap,
+        long long join_rid) {
+    std::vector<std::string> arguments{"/RUN", "--parent-pid", std::to_string(parent_pid)};
+    const std::vector<std::string> rest = updater_product_arguments(product);
+    arguments.insert(arguments.end(), rest.begin(), rest.end());
+    // The launch's own arguments, an earlier launch's markers never carried into this relaunch.
+    std::vector<std::string> relaunch;
+    bool skip_value = false;
+    for (const std::string &argument : run_args) {
+        if (skip_value)
+            skip_value = false;
+        else if (argument == kLaunchFlagNovaWorldJoin)
+            skip_value = true;
+        else if (argument != kLaunchFlagAfterUpdate)
+            relaunch.push_back(argument);
+    }
+    std::vector<std::string> marks;
+    if (bootstrap) marks.push_back(kLaunchFlagAfterUpdate);
+    if (join_rid > 0) {
+        marks.push_back(kLaunchFlagNovaWorldJoin);
+        marks.push_back(std::to_string(join_rid));
+    }
+    if (!marks.empty()) {
+        if (std::find(relaunch.begin(), relaunch.end(), "--") == relaunch.end())
+            relaunch.push_back("--");
+        relaunch.insert(relaunch.end(), marks.begin(), marks.end());
+    }
+    for (const std::string &argument : relaunch) {
+        arguments.push_back("--run-arg");
+        arguments.push_back(argument);
+    }
+    return arguments;
+}
+
 } // namespace opennova
