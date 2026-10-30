@@ -1,5 +1,6 @@
 #include <runtime/inmatch/main_loop_clock.h>
 
+#include <base/platform/clock.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/session.h> // FrameInput
 #include <runtime/world/tick_count_clock.h>
@@ -24,6 +25,14 @@ public:
 world::FrameLockClock &main_loop_tick_count_clock() {
 	static TickCountFrameLockClock clock;
 	return clock;
+}
+
+// [orig: Game_MainLoop @0x52B630 - Sleep(1) @0x52B8B2, GetTickCount @0x52B8B8]
+void PlatformFrameLockClock::sleep_one_ms() {
+	clock_.sleep_ms(1);
+}
+uint32_t PlatformFrameLockClock::now_ms() {
+	return world::frame_tick_count_ms(clock_);
 }
 
 // [orig: Game_MainLoop @0x52B86C (the lock word's read), g_FrameLockActive @0x52B876]
