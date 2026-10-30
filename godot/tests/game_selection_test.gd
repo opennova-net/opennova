@@ -46,6 +46,6 @@ func test_saved_game_is_ignored_by_the_next_launch() -> void:
 
 
 func test_format_callers_can_request_an_explicit_profile_fallback() -> void:
-	assert_eq(LaunchFlags.game("jodemo"), "jodemo")
+	assert_eq(LaunchFlags.game("dfx2"), "dfx2")
 	assert_eq(LaunchFlags.game(""), "acidgambit")
-	assert_eq(LaunchFlags.game("JODEMO"), "jodemo")
+	assert_eq(LaunchFlags.game("DFX2"), "dfx2")

@@ -4552,6 +4552,7 @@ bool run_host_as_client() {
 	// persistent pool-2 markers to the fresh epoch (without the re-arm the
 	// building/zone markers would be missing for the rest of the session).
 	inmatch::ClientRuntime restart_view(host_loop);
+	restart_view.set_protocol(&kJo);
 	inmatch::Server_RearmMinimapInitialScan(ctx);
 	bool restart_map_overlay = false;
 	for (int tick = 0; tick < 16 && !restart_map_overlay; ++tick) {
@@ -4644,6 +4645,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	            "the own client's 0x0B reaches its receiver")) return false;
 	inmatch::Server_TickUpdate(owner.ctx);
 	inmatch::ClientRuntime host_view(host_loop);
+	host_view.set_protocol(&kJo);
 	host_view.view().set_item_class_resolver([](uint16_t type_id) {
 		if (type_id == 0x14B9u) return EntityClass::Player;
 		if (type_id == 5311u) return EntityClass::Infantry;

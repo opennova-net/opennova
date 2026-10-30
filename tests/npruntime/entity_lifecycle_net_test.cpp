@@ -42,6 +42,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
+#include <net/protocol/protocol.h>
 
 #include <runtime/world/ai.h>
 #include <runtime/world/player_spawn.h>
@@ -142,6 +143,7 @@ const ns::ClientEntityState *row_for(const ns::ClientState &state, uint16_t hand
 bool run_team_assign_relatches_self_and_resubmits() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("TeamJoiner", [] { return uint64_t(0); });
+	joiner.set_protocol(title_protocol("jo"));
 	inmatch::JoinerConnection::LoadoutKit kit;
 	kit.player_class = 6;
 	kit.equipped_combo = 212; // deliberately NOT 195: the re-submit must ignore it
@@ -255,6 +257,7 @@ bool same_rows(const std::vector<LoadoutSubmitEntry> &got,
 bool run_team_assign_reselects_the_new_sides_profile() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("SideJoiner", [] { return uint64_t(0); });
+	joiner.set_protocol(title_protocol("jo"));
 	inmatch::JoinerConnection::LoadoutKit kit;
 	// The single applied kit is deliberately DIFFERENT from BOTH side blocks, so an
 	// implementation that keeps submitting "the one applied kit" cannot pass.
@@ -358,6 +361,7 @@ bool run_team_assign_reselects_the_new_sides_profile() {
 bool run_team_assign_default_kit_stays_byte_identical() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("DefaultKitJoiner", [] { return uint64_t(0); });
+	joiner.set_protocol(title_protocol("jo"));
 	// deliberately NO set_loadout_kit; a synthetic weapon table holding the fresh red
 	// page's names behind an unrelated entry
 	const opennova::playersav::KitPage red =

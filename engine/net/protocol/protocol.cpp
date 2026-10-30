@@ -34,9 +34,23 @@ const char *part_name(ProtocolPart part) {
 	return part == ProtocolPart::WebFlow ? "web flow" : "session";
 }
 
-// The protocol the default title speaks: what a session brought up with none runs.
-const Protocol *default_protocol() {
-	return title_protocol(default_title().code);
+// An in-match read with no protocol, or with one that leaves `part` unwitnessed, aborts naming
+// the invariant: every host and joiner runs its title's protocol, complete
+// (resolve_title_protocol), set before its first in-match read. No session runs another title's.
+[[noreturn]] void session_protocol_missing(const char *reader, const Protocol *protocol,
+		const char *part) {
+	std::fputs(reader, stderr);
+	if (protocol == nullptr) {
+		std::fputs(": the session runs no protocol: the host or joiner sets its title's "
+				"(title_protocol) before an in-match read\n", stderr);
+	} else {
+		std::fputs(": the ", stderr);
+		std::fputs(protocol->code != nullptr ? protocol->code : "?", stderr);
+		std::fputs(" protocol leaves its ", stderr);
+		std::fputs(part, stderr);
+		std::fputs(" unwitnessed: no session runs it (resolve_title_protocol)\n", stderr);
+	}
+	std::abort();
 }
 
 } // namespace
@@ -129,21 +143,16 @@ std::string protocol_refusal(const Protocol &protocol, ProtocolPart part) {
 }
 
 const ProtocolInMatch &protocol_in_match(const Protocol *protocol) {
-	if (protocol != nullptr && protocol->in_match.has_value())
-		return *protocol->in_match;
-	const Protocol *fallback = default_protocol();
-	if (fallback != nullptr && fallback->in_match.has_value())
-		return *fallback->in_match;
-	static const ProtocolInMatch none{};
-	return none;
+	if (protocol == nullptr || !protocol->in_match.has_value())
+		session_protocol_missing("protocol_in_match", protocol, "in-match branches");
+	return *protocol->in_match;
 }
 
 const JoinBuild &protocol_join_build(const Protocol *protocol) {
-	for (const Protocol *p : { protocol, default_protocol() })
-		if (p != nullptr && p->generation != nullptr && p->generation->join_build.has_value())
-			return *p->generation->join_build;
-	static const JoinBuild none{};
-	return none;
+	if (protocol == nullptr || protocol->generation == nullptr ||
+			!protocol->generation->join_build.has_value())
+		session_protocol_missing("protocol_join_build", protocol, "join build values");
+	return *protocol->generation->join_build;
 }
 
 const Protocol *resolve_title_protocol(std::string_view title_code, std::string &error) {

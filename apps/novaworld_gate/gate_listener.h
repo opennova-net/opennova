@@ -23,13 +23,7 @@ namespace opennova::novaworld_server {
 struct ServerConfig;
 
 // Port-7597 UDP listener implementing the simple GATEPROTOCOL bootstrap
-// (NWU-encrypted text-tag request -> VAR-encoded plain-text response) and,
-// on the same socket, the POSTIPADDRESS:POSTIPPORT sink for the plaintext
-// host-status heartbeat a hosting retail client posts every ~30 s
-// [orig: Lobby_UpdateServerInfo @0x4ff448..0x4ff62c]. policy: the gate
-// advertises its own port as POSTIPPORT so no second port needs opening;
-// the blob is told apart from a probe by its "HostKey =" preamble before
-// the NWU tag decrypt runs.
+// (NWU-encrypted text-tag request -> VAR-encoded plain-text response).
 //
 // The lobby it hands each client (udpnovaworld): the address every lobby
 // instance announces, the deployment's one lobby address (on ECS the load
@@ -42,13 +36,13 @@ struct ServerConfig;
 // (ONNET_LOBBY_ENDPOINT, optional), and with no fallback the probe goes
 // unanswered (logged every kNoLobbyLogMs at most, and counted in the
 // heartbeat's probes_unanswered), which the client meets as a lost reply.
-// The reply is the same for every client but its reflected pair:
-// POSTIPADDRESS is this gate, and the web fields name the one web endpoint.
+// The reply is the same for every client but its reflected pair (and its
+// TimeOnGateServer clock).
 //
 // One lobby per gate tag: the probe's tag selects its `games` row
 // (catalog::GameCatalog::by_gate_tag), which supplies the reply's LobbyName,
 // its startupurl's query and its GLSVSS leg (the configured one standing in
-// for a row with none); a tag no row (nor alias) answers to gets no reply. The
+// for a row with none); a tag no row answers to gets no reply. The
 // receive thread loads the catalog once from its leased connection before it
 // serves, so it answers a probe without touching the database.
 //
@@ -87,10 +81,9 @@ public:
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
 	// Optional DB pool. When set, the receive thread leases one connection for
-	// its lifetime and reads the games catalogue on it (start() waits for
-	// both), and a received host-status blob refreshes the active_hosts row
-	// that owns its HostKey on it (hostdb::apply_status_blob). Without a pool
-	// the catalogue is empty and every probe goes unanswered.
+	// its lifetime and reads the games catalogue and the lobby instances on it
+	// (start() waits for the first). Without a pool the catalogue is empty and
+	// every probe goes unanswered.
 	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
 	// Bind the UDP socket and spawn the receive loop, which leases its DB
@@ -104,8 +97,7 @@ public:
 	void stop();
 
 	// The port start() bound and the receive loop serves (the OS's pick when
-	// the configured port is 0); the gate response advertises it as POSTIPPORT
-	// (but to a protocol whose live reply is witnessed without the pair: DFX2's).
+	// the configured port is 0).
 	uint16_t bound_port() const { return bound_port_; }
 
 	// The games catalogue as the receive thread holds it now (the lobbies the gate answers for).
@@ -139,14 +131,10 @@ private:
 	// took them (the receive thread adds, the main loop's heartbeat takes).
 	std::atomic<uint64_t> probes_unanswered_{ 0 };
 	uint16_t bound_port_ = 0;
-	std::string public_host_;
-	// What UDPNOVAWORLD and STARTUPURL advertise, as the config start() took
-	// names them (ONNET_LOBBY_ENDPOINT; ONNET_WEB_HOST and ONNET_HTTP_PORT):
-	// the lobbies and web are other processes, whose bound ports this one
-	// never learns.
+	// What UDPNOVAWORLD advertises with no instance active, as the config
+	// start() took names it (ONNET_LOBBY_ENDPOINT): the lobbies are other
+	// processes, whose bound ports this one never learns.
 	std::string lobby_endpoint_; // the fallback with no instance active ("": none)
-	std::string web_host_;
-	uint16_t http_port_ = 0;
 	// The receive thread's own: the live instances' address and count (none
 	// after a read that failed) and when it read them (the steady clock in ms;
 	// 0: never), and whether its last read failed (logged once until one

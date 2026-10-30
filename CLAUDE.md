@@ -12,7 +12,7 @@ easier to relay than to rediscover.
   `editor/`) and the one public include root (`#include <runtime/world/x.h>`). See
   `engine/CLAUDE.md`.
 - `games/` — every game's own code, one directory per title (`jo/`, `dfx2/`, `acidgambit/`, the
-  unwitnessed `jodemo/`, `dfx/`, `bhd/`) and the shared `novalogic_2009/` generation: each
+  unwitnessed `dfx/` and `bhd/`) and the shared `novalogic_2009/` generation: each
   title's Title and the Protocol it speaks, which `games::install()` registers from an explicit
   call at each program's start. STATIC `opennova_games` above `opennova_runtime`; engine/ never
   includes or links it. See `games/CLAUDE.md`.

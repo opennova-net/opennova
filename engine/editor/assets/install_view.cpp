@@ -44,7 +44,7 @@ std::map<std::string, std::string> renames_for(const std::string &installed, con
 } // namespace
 
 InstallSpec install_spec(const std::string &root, const ProjectDocument &document) {
-	InstallSpec spec = base_install_spec(root, document);
+	InstallSpec spec = base_install_spec(root);
 	spec.expansion = document.expansion.builds_on;
 	spec.project_expansion = document.expansion.name;
 	return spec;
@@ -52,16 +52,15 @@ InstallSpec install_spec(const std::string &root, const ProjectDocument &documen
 
 InstallSpec installed_expansion_spec(const std::string &root, const ProjectDocument &document,
                                      const std::string &expansion) {
-	InstallSpec spec = base_install_spec(root, document);
+	InstallSpec spec = base_install_spec(root);
 	spec.expansion = expansion;
 	spec.project_expansion = document.expansion.name;
 	return spec;
 }
 
-InstallSpec base_install_spec(const std::string &root, const ProjectDocument &document) {
+InstallSpec base_install_spec(const std::string &root) {
 	InstallSpec spec;
 	spec.root = root;
-	spec.game = document.target_game;
 	return spec;
 }
 
@@ -72,7 +71,6 @@ bool InstallView::open(const InstallSpec &spec, std::string &error) {
 	by_name_.clear();
 	vfs_.clear();
 	LaunchFlags stock; // no /d: a stock launch of the project's game, with /exp when it names one
-	stock.game = spec.game;
 	stock.expansion = spec.expansion;
 	if (spec.root.empty() || !mount_install(vfs_, spec.root, stock)) {
 		error = "No game archives found under " + spec.root + ".";
@@ -201,7 +199,7 @@ std::shared_ptr<const InstallFileSource> base_game_files(const std::string &base
 	if (document.expansion.standalone() || base.empty()) return nullptr;
 	auto view = std::make_unique<InstallView>();
 	std::string error;
-	if (!view->open(base_install_spec(base, document), error)) return nullptr;
+	if (!view->open(base_install_spec(base), error)) return nullptr;
 	return std::make_shared<const InstallFileSource>(std::move(view));
 }
 

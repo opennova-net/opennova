@@ -371,7 +371,7 @@ private:
 	void bind_session_world(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
 			const Protocol *protocol);
 	// The rule words the world reads at tick time, from the session config and the protocol the
-	// session speaks (null: JO's).
+	// session speaks.
 	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
 			const Protocol *protocol);
 	// The context's spawn-time body bind over this role's kernel

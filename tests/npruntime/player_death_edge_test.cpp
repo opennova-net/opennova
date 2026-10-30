@@ -33,6 +33,7 @@
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdio>
 #include <memory>
@@ -64,6 +65,7 @@ struct Fixture {
 	explicit Fixture(std::vector<uint16_t> slots = {1, 2, 3}) {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config.game_type = 0x10000u; // TDM
 		ctx.config.respawn_timeout = 1;
 		ctx.config.max_players = 16; // the admin commands' slot index range

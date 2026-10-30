@@ -647,7 +647,6 @@ static int test_expansion_layout() {
 	BuildTarget target;
 	target.expansion = "jxm";
 	target.install = install.root;
-	target.game = "jo";
 	target.gate_tag_file = p.dir.file("generated/gt.ssc");
 	const std::string version = "Synthetic, V1.0; English\r\n";
 	target.version_file = p.dir.file("generated/version.txt");
@@ -803,7 +802,6 @@ static int test_lean_packing() {
 	BuildTarget target;
 	target.expansion = "jxm";
 	target.install = install.root;
-	target.game = "jo";
 	const auto plan_of = [&] {
 		const AssetScan scan = scan_project_assets(p.paths, p.doc);
 		return plan_build(p.paths, scan, evaluate_requirements(p.doc, scan), {}, target, &base);
@@ -1064,7 +1062,6 @@ static int test_plan_blockers_are_the_plans() {
 		if (expansion) {
 			p.doc.expansion.name = minted_install::kExpansion;
 			target.expansion = minted_install::kExpansion;
-			target.game = p.doc.target_game;
 		}
 		const AssetScan scan = scan_project_assets(p.paths, p.doc);
 		const RequirementReport requirements = evaluate_requirements(p.doc, scan);

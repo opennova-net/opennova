@@ -182,7 +182,7 @@ public:
 	// (e.g. "jox01") layers the expansion's archives over the base game. `/d` makes loose-first
 	// the session default; without it, retained loose roots are visible only to explicit retail
 	// force-loose-first calls. `game_code` (the `/game <code>` launch flag; empty, the default
-	// title's, base/title/title.h) selects the SCR decode key so demo data decodes correctly.
+	// title's, base/title/title.h) names the title a session over the root runs as (session_title).
 	// Safe to call on an already-mounted root: the mount is replaced, not layered (the index
 	// rebuilds, the resolver caches drop, and the epoch bump self-clears every epoch-keyed
 	// holder), so holders of this object move with it — the in-place expansion switch the

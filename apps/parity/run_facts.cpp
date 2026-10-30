@@ -513,8 +513,9 @@ void attach_external(RunFacts &facts, const wire::ParityTrace &external) {
 bool load_run_facts(const RunInfo &info, const wire::ItemClassMap *item_classes, RunFacts &out,
 		std::string &error) {
 	wire::ParityTrace trace;
-	if (!wire::read_parity_trace(info.capture, item_classes, trace)) {
-		error = info.label + ": cannot read the capture " + info.capture;
+	std::string read_error;
+	if (!wire::read_parity_trace(info.capture, item_classes, trace, read_error)) {
+		error = info.label + ": " + read_error;
 		return false;
 	}
 	const bool evidence_is_external = !info.external_capture.empty() &&
@@ -524,7 +525,8 @@ bool load_run_facts(const RunInfo &info, const wire::ItemClassMap *item_classes,
 		external = trace;
 	const bool external_read = evidence_is_external ||
 			(!info.external_capture.empty() &&
-					wire::read_parity_trace(info.external_capture, item_classes, external));
+					wire::read_parity_trace(
+							info.external_capture, item_classes, external, read_error));
 	out = make_run_facts(info, std::move(trace));
 	if (external_read)
 		attach_external(out, external);

@@ -11,7 +11,6 @@
 
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
-#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
@@ -189,7 +188,7 @@ std::vector<std::string> list_retail_file_names(const std::string &retail_root, 
 
 std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document) {
 	if (document.expansion.standalone()) return std::vector<std::string>();
-	return list_install_file_names(base_install_spec(retail_root, document));
+	return list_install_file_names(base_install_spec(retail_root));
 }
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
@@ -329,9 +328,7 @@ class AssetImport::Run {
 public:
 	Run(std::vector<ImportChoice> sources, const ProjectPaths &paths, const ProjectDocument &document, bool replace_existing)
 	    : sources_(std::move(sources)), paths_(paths), document_(document), replace_existing_(replace_existing),
-	      walk_(paths_, document_) {
-		archive_.set_scr_policy(title_scr_policy_for_code(document_.target_game.c_str()));
-	}
+	      walk_(paths_, document_) {}
 
 	bool step(uint64_t bytes) {
 		cost_ = 0;

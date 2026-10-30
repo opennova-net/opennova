@@ -220,13 +220,21 @@ public:
 // records): push_decoded() one whole decode_capture result.
 class ParityTraceBuilder {
 public:
-	// `item_classes` (optional) sizes the S2C 0x0A trailing records; without it
-	// only the universal player template decodes.
-	explicit ParityTraceBuilder(ParityTraceSink &sink, const ItemClassMap *item_classes = nullptr);
+	// `item_classes` (null for none) sizes the S2C 0x0A trailing records; without it
+	// only the universal player template decodes. `protocol` is the session's when the
+	// caller names it (opennova-wire's --game); null learns it from the capture's
+	// session handshake (handshake_protocol).
+	ParityTraceBuilder(ParityTraceSink &sink, const ItemClassMap *item_classes,
+			const Protocol *protocol);
 
 	void push(const net::PcapDatagram &datagram);
 	void push_decoded(
 			const CaptureDecodeResult &decoded, const std::map<int, uint64_t> &frame_timestamps);
+	// Why the trace stopped, empty while it runs: an S2C 0x0A whose objective body the
+	// session's protocol lays out (an objective game type's, DFX2-1) met while no protocol
+	// is known, which the trace refuses rather than read under another title's. Once set,
+	// nothing more is emitted.
+	const std::string &error() const { return error_; }
 
 private:
 	void emit_handshake(
@@ -242,9 +250,11 @@ private:
 	// g_GameType, learned from the S2C 0x7B `extra` field: the 0x0A sub-block 3
 	// objective body is gated on it, off the wire.
 	uint32_t game_type_ = 0;
-	// The protocol the handshake names (handshake_protocol): a DFX2 host's objective
-	// body carries the co-op checkpoint. Null decodes JO's.
+	// The session's protocol: the caller's, else the one the first handshake names
+	// (handshake_protocol). A DFX2 host's objective body carries the co-op checkpoint;
+	// null (none known yet) refuses an objective body (error()).
 	const Protocol *protocol_ = nullptr;
+	std::string error_;
 };
 
 // The `opennova-wire --parity-events` line printer.
@@ -292,8 +302,11 @@ private:
 	ParityTrace &trace_;
 };
 
-// Stream a pcap/pcapng into `out`. False when the file cannot be read as one.
-bool read_parity_trace(const std::string &path, const ItemClassMap *item_classes, ParityTrace &out);
+// Stream a pcap/pcapng into `out`, the session's protocol learned from its handshake. False, with
+// `error` saying why, when the file cannot be read as one or the trace refuses it
+// (ParityTraceBuilder::error).
+bool read_parity_trace(const std::string &path, const ItemClassMap *item_classes, ParityTrace &out,
+		std::string &error);
 
 // The PARITY_DATAGRAM class names.
 const char *parity_datagram_class_name(CaptureDatagramClass datagram_class);

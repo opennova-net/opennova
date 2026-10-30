@@ -25,6 +25,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <cmath>
 #include <cstdint>
@@ -90,6 +91,7 @@ double offset_err_m(const ns::ClientEntityState &gun,
 
 int main() {
 	ns::ClientReplicaPipeline view;
+	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	view.set_item_class_resolver([](uint16_t type)
 			-> ns::ClientReplicaPipeline::ItemClassResolution {

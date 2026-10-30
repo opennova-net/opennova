@@ -25,7 +25,7 @@ output "task_definitions" {
 
 output "public_ip" {
   value       = local.service_public_ip
-  description = "The gate's public address, the load balancer's in zone a (its Elastic IP): retail clients' gs.novaworld.net, where host status blobs land, and the retail HTTP routes (ONNET_PUBLIC_HOST, ONNET_WEB_HOST)"
+  description = "The gate's public address, the load balancer's in zone a (its Elastic IP): retail clients' gs.novaworld.net and the retail HTTP routes (ONNET_PUBLIC_HOST, ONNET_WEB_HOST)"
 }
 
 output "service_eip_allocation_id" {

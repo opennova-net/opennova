@@ -28,8 +28,6 @@ struct Title {
 	// The title text the executable copies into g_TitleText: the _connectlog.txt header's TITLE
 	// line and the VERSION command's title word.
 	const char *title_text = nullptr;
-	// VfsScrPolicy (base/vfs/vfs_decode.h): how the title's SCR payloads key.
-	int scr_policy = 0;
 	// The program the title's install ships beside its archives, which a player starts (and the
 	// editor's Play in the game install).
 	const char *executable = nullptr;
@@ -56,6 +54,14 @@ struct Title {
 	// title's stock data never ships and its program still reads unchecked: each is optional for
 	// the title. Null-terminated; null for none.
 	const char *const *absent_resource_roles = nullptr;
+	// Whether the title's executable mounts an expansion (`/exp` / `/mod`: an expansion folder's
+	// archives over the base game's), which a project may build as (the editor's
+	// check_project_expansion). False where no binary of the title was read for it.
+	bool expansions = false;
+	// Every .def name the title's executable opens, each at its open site: a definitions text under
+	// any other name the game never reads (the editor's game_never_reads). Null-terminated, as
+	// absent_resource_roles is; null: no claim, the title's binary unread for them.
+	const char *const *read_defs = nullptr;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title
@@ -75,9 +81,5 @@ const Title *title_at(size_t index);
 // The title whose command_file is `command_file` (compared case-insensitively, as the updater
 // opens the file); null for none.
 const Title *title_by_command_file(std::string_view command_file);
-
-// The SCR policy (VfsScrPolicy) for a title `code`: VFS_SCR_VERSION_DETECT for a null or unknown
-// code, so a missing or bad `/game` value keys as JO's does. The engine's one game-to-policy seam.
-int title_scr_policy_for_code(const char *code);
 
 } // namespace opennova

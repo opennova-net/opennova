@@ -24,16 +24,23 @@ constexpr ExpansionPoolScale kExpansionPoolScales[] = {
 
 } // namespace
 
-PoolCapacities scaled_pool_capacities(std::size_t scale) {
-    PoolCapacities out = kRetailPoolCapacity;
-    for (std::size_t pool = 0; pool < out.size(); ++pool)
-        out[pool] = std::min(out[pool] * scale, kWirePoolCapacity[pool]);
+PoolCapacities wire_pool_capacities(std::size_t pool0) {
+    PoolCapacities out = kWirePoolCapacity;
+    out[0] = std::min(pool0, std::size_t{0xFFF} + 1); // the handle's 12-bit slot (EntityHandle)
     return out;
 }
 
-PoolCapacities pool_capacities_for_expansion(const std::string &expansion) {
+PoolCapacities scaled_pool_capacities(std::size_t scale, const PoolCapacities &wire) {
+    PoolCapacities out = kRetailPoolCapacity;
+    for (std::size_t pool = 0; pool < out.size(); ++pool)
+        out[pool] = std::min(out[pool] * scale, wire[pool]);
+    return out;
+}
+
+PoolCapacities pool_capacities_for_expansion(const std::string &expansion,
+                                             const PoolCapacities &wire) {
     for (const ExpansionPoolScale &row : kExpansionPoolScales)
-        if (iequals(expansion, row.expansion)) return scaled_pool_capacities(row.scale);
+        if (iequals(expansion, row.expansion)) return scaled_pool_capacities(row.scale, wire);
     return kRetailPoolCapacity;
 }
 

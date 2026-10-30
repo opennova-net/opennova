@@ -470,7 +470,7 @@ class Vfs;
 // The game install at `root` mounted into `vfs` as a launch with `flags` mounts it:
 // the witnessed boot archive table with the /exp expansion layered over it
 // [orig: PFF_OpenAllArchives @ 0x4a4310; Expansion_LoadAssets @ 0x4a4730], its
-// payloads decoded with the /game code's key (launch_game), and its lookup the
+// payloads decoded by their SCR version byte, and its lookup the
 // archives alone while one is mounted unless /d puts the loose files first
 // [orig: FileSystem_OpenFile @ 0x75b1c0, the gate @ 0x75b1e5; /D
 // Game_ParseCommandLineAndInit @ 0x4a7667 -> Game_InitSubsystems @ 0x4a6fa3 ->

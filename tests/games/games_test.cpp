@@ -35,7 +35,7 @@ int g_failures = 0;
 
 // Every installed title resolves by its code and speaks an installed protocol.
 void every_title_resolves() {
-	CHECK(title_count() == 6);
+	CHECK(title_count() == 5);
 	for (size_t i = 0; i < title_count(); ++i) {
 		const Title *title = title_at(i);
 		CHECK(title != nullptr && title_by_code(title->code) == title);
@@ -90,7 +90,6 @@ void acidgambit_speaks_jo() {
 	CHECK(std::string(ag.display_name) == "OP: Acid Gambit" &&
 			std::string(ag.title_text) == "OP: Acid Gambit");
 	CHECK(std::string(ag.command_file) == "ACIDGAMBIT.CMD" && ag.executable == nullptr);
-	CHECK(ag.scr_policy == games::jo_title().scr_policy);
 	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == title_protocol("dfx2"));
 	// The updater login the service serves OpenNova's own content under is its title's; a retail
 	// title's folder names its own (Title::updater_login).
@@ -107,12 +106,6 @@ void unwitnessed_titles_refused() {
 	CHECK(error.find("the bhd title's session identity is not witnessed yet: NVS") == 0);
 	CHECK(resolve_title_protocol("dfx", error) == nullptr);
 	CHECK(error.find("the dfx title's session identity is not witnessed yet: NVS") == 0);
-	CHECK(resolve_title_protocol("jodemo", error) == nullptr);
-	CHECK(error.find("PG") != std::string::npos && error.find("gate tag") == std::string::npos);
-	const Protocol *demo = title_protocol("jodemo");
-	CHECK(demo != nullptr && std::string(demo->gate_tag) == "jopd:cus4");
-	CHECK(protocol_refusal(*demo, ProtocolPart::WebFlow) ==
-			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 	CHECK(resolve_title_protocol("nosuchgame", error) == nullptr);
 	CHECK(error == "unknown game 'nosuchgame'");
 }
@@ -124,7 +117,7 @@ void every_title_runs_rules() {
 	CHECK(&jo == &games::jo_rules());
 	CHECK(&world::title_rules("JO") == &jo);
 	CHECK(&world::title_rules("dfx2") == &games::dfx2_rules() && &games::dfx2_rules() != &jo);
-	for (const char *code : { "acidgambit", "jodemo", "dfx", "bhd" })
+	for (const char *code : { "acidgambit", "dfx", "bhd" })
 		CHECK(&world::title_rules(code) == &jo);
 	CHECK(&games::acidgambit_rules() == &jo);
 	CHECK(&world::title_rules("") == &jo && &world::title_rules("nosuchgame") == &jo);
@@ -194,6 +187,7 @@ std::string bump_rule_row(const char *title_code) {
 			" cd_key=" + std::to_string(protocol->cd_key != nullptr) +
 			" chat_squad_tag_wrapped=" + std::to_string(m.chat_squad_tag_wrapped) +
 			" rules_word_bits=" + rules_word +
+			" pool0_wire_capacity=" + std::to_string(m.pool0_wire_capacity) +
 			" | waypoint_goals_met_advance=" + std::to_string(r.waypoint_goals_met_advance) +
 			" waypoint_advance_needs_done=" + std::to_string(r.waypoint_advance_needs_done) +
 			" route_done_records=" + std::to_string(r.route_done_records) +
@@ -207,16 +201,18 @@ void bump_rule_row_per_game() {
 	const std::string jo =
 			"objective_checkpoint=0 spawn_zone_flag_always=0 armory_only_availability=2 "
 			"join_state_fixed=0 loadout_class_fixed=0 cd_key=0 chat_squad_tag_wrapped=0 "
-			"rules_word_bits=0x0 | waypoint_goals_met_advance=1 waypoint_advance_needs_done=0 "
-			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
-			"narrow_still_player_radius=0 spawn_kit=jo_single_player_page";
+			"rules_word_bits=0x0 pool0_wire_capacity=256 | waypoint_goals_met_advance=1 "
+			"waypoint_advance_needs_done=0 route_done_records=0 emplaced_turret_update=0 "
+			"emplaced_solo_planar_slew=0 narrow_still_player_radius=0 "
+			"spawn_kit=jo_single_player_page";
 	const std::string dfx2 =
 			"objective_checkpoint=1 spawn_zone_flag_always=1 armory_only_availability=3 "
 			"join_state_fixed=1 loadout_class_fixed=1 cd_key=1 chat_squad_tag_wrapped=1 "
-			"rules_word_bits=0x10000 | waypoint_goals_met_advance=0 waypoint_advance_needs_done=1 "
-			"route_done_records=1 emplaced_turret_update=1 emplaced_solo_planar_slew=3848520 "
-			"narrow_still_player_radius=1 spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
-			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE";
+			"rules_word_bits=0x10000 pool0_wire_capacity=256 | waypoint_goals_met_advance=0 "
+			"waypoint_advance_needs_done=1 route_done_records=1 emplaced_turret_update=1 "
+			"emplaced_solo_planar_slew=3848520 narrow_still_player_radius=1 "
+			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,WPN_GRENADEFB,WPN_GRENADEHE,"
+			"WPN_GRENADESM,WPN_KNIFE";
 	CHECK(bump_rule_row("jo") == jo);
 	CHECK(bump_rule_row("dfx2") == dfx2);
 	// OP: Acid Gambit's row is JO's, as it speaks JO's protocol at JO's protocol version.
@@ -224,7 +220,7 @@ void bump_rule_row_per_game() {
 	CHECK(std::string(protocol_version(*title_protocol("acidgambit"))) ==
 			protocol_version(*title_protocol("jo")));
 	// The unwitnessed titles have no in-match protocol: their session part is refused by name.
-	for (const char *code : { "jodemo", "dfx", "bhd" })
+	for (const char *code : { "dfx", "bhd" })
 		CHECK(bump_rule_row(code) == "no in-match protocol");
 }
 
@@ -243,10 +239,10 @@ void title_parts_of_the_version_line() {
 	named.game = "My Game";
 	title_versions("acidgambit", named);
 	CHECK(named.game == "My Game" && named.protocol == "JO" && named.protocol_version == "16");
-	Versions demo;
-	title_versions("jodemo", demo);
-	CHECK(demo.game == "Joint Operations (Demo)" && demo.protocol.empty() &&
-			demo.protocol_version.empty());
+	Versions dfx;
+	title_versions("dfx", dfx);
+	CHECK(dfx.game == "Delta Force: Xtreme" && dfx.protocol.empty() &&
+			dfx.protocol_version.empty());
 	Versions unknown;
 	title_versions("nosuchgame", unknown);
 	title_versions("", unknown);

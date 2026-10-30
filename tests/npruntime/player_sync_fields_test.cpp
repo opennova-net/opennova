@@ -15,6 +15,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/protocol/protocol.h>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -203,6 +204,7 @@ AdmittedJoin admit_and_sync(inmatch::NetworkType transport) {
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.transport_mode = transport;
 	ctx.config.expansion.clear(); // the JOIN below carries no EXP
 	ctx.config.max_players = 4;
@@ -268,6 +270,7 @@ void test_join_ticket_rides_the_admission_join() {
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = heap.get();
 	ctx.is_authority = ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.transport_mode = inmatch::NetworkType::NovaWorld;
 	ctx.config.expansion.clear();
 	auto &roster = ctx.np_protocol.connection_list;
@@ -297,6 +300,7 @@ void test_join_keeps_the_last_cd() {
 		inmatch::NapiNPServerCtx ctx;
 		ctx.world = heap.get();
 		ctx.is_authority = ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.transport_mode = inmatch::NetworkType::Lan;
 		ctx.config.expansion.clear();
 		auto &roster = ctx.np_protocol.connection_list;

@@ -22,6 +22,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -52,7 +53,7 @@ w::PlayerSpawn at(float x, uint16_t min_slot) {
 // The recipient's 0x0A run: every datagram its emit queued, in order.
 std::vector<ns::Datagram> emit(const w::World &world, ns::Connection &conn,
 		const std::vector<GameEntitySnapshot> &ents) {
-	(void)ns::emit_connection_s2c(world, conn, ents, 0);
+	(void)ns::emit_connection_s2c(world, conn, ents, 0, 0, 0, 0, title_protocol("jo"));
 	std::vector<ns::Datagram> out;
 	ns::Datagram d;
 	auto &ch = *static_cast<ns::LoopbackChannel *>(conn.transport);

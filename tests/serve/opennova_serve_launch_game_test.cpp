@@ -88,8 +88,8 @@ void the_launch_picks_the_game() {
 			<< "[HEADER]\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n";
 	CHECK(serve::Server(options_for(own, "")).version_line() ==
 			"OP: Acid Gambit 0.1.4" + dot + one + dot + "JO protocol 16");
-	CHECK(serve::Server(options_for(own, "jodemo")).version_line() ==
-			"Joint Operations (Demo)" + dot + one);
+	CHECK(serve::Server(options_for(own, "dfx")).version_line() ==
+			"Delta Force: Xtreme" + dot + one);
 	std::error_code ec;
 	fs::remove_all(root, ec);
 	std::printf("  /game, else the folder's UPDATE.WIZ, else OpenNova's own; a foreign folder needs /game\n");

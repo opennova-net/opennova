@@ -21,6 +21,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <base/io/rotating_prng.h>
 
@@ -384,6 +385,7 @@ nw::FrameUpdate player_frame(uint16_t handle, int32_t x, uint8_t state_flags) {
 // Position and +0x2D4 the Yaw; a live record before it leaves both at the spawn's clear.
 void test_the_respawn_edge_runs_the_reset() {
 	ns::ClientReplicaPipeline view([](uint16_t) { return EntityClass::Player; });
+	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x0033;
 	view.state().upsert(handle).type_id = kEwepType;

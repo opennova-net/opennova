@@ -152,14 +152,6 @@ const GameRow *GameCatalog::by_gate_tag(std::string_view tag) const {
 		if (g.gate_tag == tag)
 			return &g;
 	}
-	for (const GateTagAlias &alias : kGateTagAliases) {
-		if (alias.tag != tag)
-			continue;
-		for (const GameRow &g : rows_) {
-			if (g.gate_tag == alias.answers_as)
-				return &g;
-		}
-	}
 	return nullptr;
 }
 

@@ -28,6 +28,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 
@@ -124,6 +125,7 @@ struct Rig {
 	bool indoors = false;
 
 	explicit Rig(nw::EntityClass rider_class, bool split = false, bool seated = true) {
+		view->set_protocol(nw::title_protocol("jo"));
 		view->set_remote_motion_mode(true);
 		view->set_root_motion_source(&src);
 		view->set_item_class_resolver(

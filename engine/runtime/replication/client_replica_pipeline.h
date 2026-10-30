@@ -834,15 +834,15 @@ public:
 	// True once a folded 0x08 / 0x7B (or set_game_type) wrote the word.
 	bool game_type_known() const { return game_type_known_; }
 
-	// The title the session speaks (net/protocol/protocol.h; null: JO's), whose
-	// edits to the in-match bodies the folds follow: the 0x0A objective body's
-	// co-op checkpoint (DFX2-1) and the 0x66 armory-only value (DFX2-10).
+	// The protocol the session speaks (net/protocol/protocol.h), whose edits to
+	// the in-match bodies the folds follow: the 0x0A objective body's co-op
+	// checkpoint (DFX2-1) and the 0x66 armory-only value (DFX2-10). Set before
+	// the first fold; a fold with none aborts (protocol_in_match).
 	void set_protocol(const Protocol *protocol) { protocol_ = protocol; }
 	const Protocol *protocol() const { return protocol_; }
 	// The rules the session's title runs (world::title_rules; null: the default
-	// title's, as protocol_in_match reads the default title's for no protocol),
-	// whose joiner-side knobs the folds follow: the 0x0F route's done records
-	// (DFX2-9).
+	// title's), whose joiner-side knobs the folds follow: the 0x0F route's done
+	// records (DFX2-9).
 	void set_rules(const world::TitleRules *rules) { rules_ = rules; }
 
 	// The 0x1D header-form discriminator's session half: retail reads

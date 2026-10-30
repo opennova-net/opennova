@@ -16,8 +16,7 @@ namespace opennova::editor {
 std::set<std::string> OriginalBytes::identical(const InstallSpec &install, const std::string &root,
                                                const std::vector<std::string> &files) {
 	std::set<std::string> out;
-	const std::string key = root + '\x1f' + install.root + '\x1f' + install.game + '\x1f' + install.expansion + '\x1f' +
-	                        install.project_expansion;
+	const std::string key = root + '\x1f' + install.root + '\x1f' + install.expansion + '\x1f' + install.project_expansion;
 	if (key != key_) {
 		known_.clear();
 		key_ = key;

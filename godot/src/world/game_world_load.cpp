@@ -100,9 +100,8 @@ Ref<ResourceRoot> GameWorld::resolve_root(const String &p_dir) {
 // Mount `dir` as the runtime resource root: PFF archives are the packed game
 // data, the `/exp <name>` flag (or persisted setting) layers an expansion over
 // the base, loose files override the archives only under the `/d` dev flag,
-// and the `/game <code>` flag (or persisted setting, default the default title's) selects the
-// SCR decode key so demo data decodes correctly. Emits load_failed and
-// returns null on a bad root.
+// and the `/game <code>` flag (or persisted setting, default the default title's) names the
+// title the root's session runs as. Emits load_failed and returns null on a bad root.
 // The expansion here is the LOCAL choice, which is only authoritative for
 // single-player and for hosting. A joiner's is the HOST's, learned after this
 // mount and reconciled by SessionDrive::reconcile_join_expansion before any

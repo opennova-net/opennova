@@ -19,7 +19,7 @@ bool BaseLayerBuild::step(uint64_t bytes) {
 		if (document_.expansion.standalone() || base_.empty()) return done_ = true;
 		view_ = std::make_unique<InstallView>();
 		std::string error;
-		if (!view_->open(base_install_spec(base_, document_), error)) {
+		if (!view_->open(base_install_spec(base_), error)) {
 			view_.reset();
 			return done_ = true;
 		}

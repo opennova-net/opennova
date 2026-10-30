@@ -9,15 +9,12 @@
 //   * two retail hosts whose per-session AppIds collide in their low bits
 //     (1000 and 5096) must yield two rows;
 //   * the VarFNum-indexed PlayerList lands in host_roster and reaches the GSB
-//     row tail together with every host-reported column;
-//   * the POST status blob (Lobby_UpdateServerInfo heartbeat) refreshes the
-//     row that owns its HostKey.
+//     row tail together with every host-reported column.
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_session.h>
-#include <net/novaworld/lobby_update.h>
 
 #include "common/test_database.h"
 
@@ -199,60 +196,6 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(a.last_host_update["PlayerList"].size() == 5); // bob's five vars only
 	}
 
-	// The POST status blob refreshes the row owning its HostKey.
-	{
-		opennova::LobbyStatusBlob blob;
-		blob.lobby_name = "jop_2_consumer";
-		blob.host_key = "HK-A";
-		blob.host_vars = {{"ServerName", "Posted Name"}, {"Players", "4"}, {"TimeLeft", "7"},
-		                  {"TimeOfDay", "Night"}, {"PCIDKey", "16777218"}};
-		blob.player_names = {"alice", "bob", "carol", "dave"};
-		const std::string text = opennova::lobby_update_build(blob);
-		opennova::LobbyStatusBlob parsed;
-		TEST_EXPECT(opennova::lobby_update_parse(text, parsed));
-		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, parsed));
-		auto row = opennova::hostdb::find_host_by_rid(db, a.rid);
-		TEST_EXPECT(row.has_value());
-		TEST_EXPECT(row->server_name == "Posted+Name");   // sanitized on the wire, stored as received
-		TEST_EXPECT(row->player_count == 4);
-		TEST_EXPECT(row->time_left == "7");
-		TEST_EXPECT(row->time_of_day == "Night");
-		TEST_EXPECT(row->pcid_key == "16777218");
-		TEST_EXPECT(opennova::hostdb::list_roster(db, a.rid).size() == 4);
-		// An unknown HostKey is ignored.
-		parsed.host_key = "HK-NOBODY";
-		TEST_EXPECT(!opennova::hostdb::apply_status_blob(db, parsed));
-
-		// A count that is no number, or out of int's range, keeps the stored one
-		// (a result, not a caught throw: strutil::parse_int).
-		const int max_before = row->max_players;
-		opennova::LobbyStatusBlob bad;
-		bad.host_key = "HK-A";
-		bad.send_player_names = false;
-		bad.host_vars = {{"Players", "lots"}, {"MaxPlayers", "99999999999"}};
-		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, bad));
-		auto kept = opennova::hostdb::find_host_by_rid(db, a.rid);
-		TEST_EXPECT(kept.has_value());
-		TEST_EXPECT(kept->player_count == 4);
-		TEST_EXPECT(kept->max_players == max_before);
-		// A numeric prefix reads as std::stoi read it.
-		bad.host_vars = {{"Players", "6 players"}, {"MaxPlayers", " 24"}};
-		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, bad));
-		kept = opennova::hostdb::find_host_by_rid(db, a.rid);
-		TEST_EXPECT(kept.has_value() && kept->player_count == 6 && kept->max_players == 24);
-		TEST_EXPECT(opennova::hostdb::list_roster(db, a.rid).size() == 4);
-
-		// The blob's names stay inside the roster's bounds (lobby_session.h): with
-		// MaxPlayers 24 a 40-name list keeps its first 25.
-		opennova::LobbyStatusBlob crowd;
-		crowd.host_key = "HK-A";
-		for (int i = 0; i < 40; ++i) crowd.player_names.push_back("p" + std::to_string(i));
-		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, crowd));
-		const auto capped = opennova::hostdb::list_roster(db, a.rid);
-		TEST_EXPECT(capped.size() == 25 && capped.back().slot == 24);
-		TEST_EXPECT(capped.back().player_name == "p24");
-	}
-
 	// A re-sent ClientHostRequest updates the row in place: the player /NWJoin.dll
 	// recorded stays in host_players (a delete-and-reinsert cascaded it away),
 	// and the columns and the roster are the new ones.
@@ -293,8 +236,7 @@ int main(int argc, char **argv) {
 	// A DFX2 host's lists: DFXCATEGORY1 after LAN on both, and PBServer always
 	// "0" (dfx2-vs-jo-re.md DFX2-7) [orig: @0x4d0e8a..0x4d0eb1, @0x4d0faf..0x4d0fd5,
 	// @0x4fc4db (dfx2.exe)]. The var no browser column names is ignored, as
-	// any unknown var is; the listing lands under its LobbyName, dfx2_0_consumer,
-	// and the status blob carrying the same var still refreshes it.
+	// any unknown var is; the listing lands under its LobbyName, dfx2_0_consumer.
 	{
 		NapiMessage in;
 		in.name = "ClientHostRequest";
@@ -334,19 +276,6 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(opennova::hostdb::list_hosts_by_game(db, "jop_2_consumer").size() == 1);
 		const auto entry = opennova::hostdb::gsb_entry_from_host(*row, {}, { "1", "1" });
 		TEST_EXPECT(entry.pb_server == "0" && entry.ver1 == "1" && entry.exp_bits == "1");
-
-		opennova::LobbyStatusBlob blob;
-		blob.lobby_name = "dfx2_0_consumer";
-		blob.host_key = "HK-DFX2";
-		blob.host_vars = { { "LobbyName", "dfx2_0_consumer" }, { "ServerName", "DFX2 Posted" },
-			{ "LAN", "0" }, { "DFXCATEGORY1", "0" }, { "Players", "3" }, { "PBServer", "0" } };
-		blob.send_player_names = false;
-		opennova::LobbyStatusBlob parsed;
-		TEST_EXPECT(opennova::lobby_update_parse(opennova::lobby_update_build(blob), parsed));
-		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, parsed));
-		const auto posted = opennova::hostdb::find_host_by_rid(db, d.rid);
-		TEST_EXPECT(posted.has_value() && posted->server_name == "DFX2+Posted");
-		TEST_EXPECT(posted->player_count == 3 && posted->pb_server == "0");
 		opennova::hostdb::remove_host_by_rid(db, d.rid);
 	}
 
@@ -466,6 +395,6 @@ int main(int argc, char **argv) {
 		opennova::hostdb::remove_host_by_rid(db, west.rid);
 	}
 
-	std::printf("OK: host register -> list round-trip (rid minting, roster, GSB projection, status blob, re-send, DFX2 lists, a joiner's account and play)\n");
+	std::printf("OK: host register -> list round-trip (rid minting, roster, GSB projection, re-send, DFX2 lists, a joiner's account and play)\n");
 	return 0;
 }

@@ -73,6 +73,11 @@ struct ProtocolInMatch {
 	bool chat_squad_tag_wrapped = false;
 	// DFX2-18: the bits the mission-data block's rules word (+44) is ORed with.
 	uint32_t rules_word_bits = 0;
+	// D-SIM-52: the people the S2C person records can name, pool 0's cap however a mount scales
+	// it (world::wire_pool_capacities). Each names a person by the one-byte pool-0 index
+	// (pool0_index_byte, runtime/world/entity.h): the 0x1E, 0x2D, 0x6D and 0x33 records, and
+	// 0x46's entity byte. 256 in JO's and DFX2's.
+	uint32_t pool0_wire_capacity = 256;
 };
 
 struct Protocol {
@@ -117,13 +122,6 @@ struct Protocol {
 	// witnessed difference rather than an unwitnessed value: absent from JO's lists, present in
 	// DFX2's (docs/titles/dfx2-vs-jo-re.md DFX2-7).
 	bool host_category_var = false;
-	// Whether NovaLogic's own gate's reply to the protocol's tag is witnessed, which the service's
-	// gate then answers in that shape: no POSTIPADDRESS / POSTIPPORT (the udpnovaworld line skips
-	// the client's POST tests), a startupurl on http://[domainname]/ (the client fills it from the
-	// lobby's 0x82), and a TimeOnGateServer line after the reflected pair: DFX2's (2026-10-14:
-	// docs/titles/dfx2-vs-jo-re.md §6.5, D-NET-721) and JO's (the LN S1 retail host record,
-	// 2026-10-23). The JO demo's is unrecorded, so its tag keeps the reply the service always sent.
-	bool gate_reply_witnessed = false;
 	// The sign-in page's submit control (its template's form-post button): the one the
 	// executable's LOGIN callbacks and its login validation name when it is "LOGIN"
 	// (LobbyHttpFlow::sign_in_submit_enabled, D-NET-1335).
@@ -163,7 +161,7 @@ const char *protocol_version(const Protocol &protocol);
 // title `title_code`: the title's display name where `versions` names no game yet, and the
 // protocol the title speaks with its protocol version (PV2), "JO" and "16", where that protocol's
 // session part is witnessed in full. An unknown title adds nothing; one whose protocol is
-// unwitnessed (the JO demo's, DFX's, BHD's) leaves the protocol part out.
+// unwitnessed (DFX's, BHD's) leaves the protocol part out.
 void title_versions(std::string_view title_code, Versions &versions);
 
 // The parts of a protocol, each complete or not on its own: what the in-match protocol and the
@@ -185,9 +183,10 @@ std::string protocol_refusal(const Protocol &protocol, ProtocolPart part);
 // (protocol_missing(.., WebFlow)).
 const Protocol *resolve_title_protocol(std::string_view title_code, std::string &error);
 
-// The in-match branches a session's protocol takes, and its 0x42 build values. A host or joiner
-// brought up with no protocol (an in-process test that skips the hello, which a host with no
-// protocol never answers) runs the default title's (base/title/title.h default_title).
+// The in-match branches a session's protocol takes, and its 0x42 build values. Every host and
+// joiner runs its title's protocol, set before its first in-match read: a read with none, or with
+// a protocol that leaves the part unwitnessed, aborts naming the invariant. No session runs a
+// default title's.
 const ProtocolInMatch &protocol_in_match(const Protocol *protocol);
 const JoinBuild &protocol_join_build(const Protocol *protocol);
 

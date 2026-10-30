@@ -14,6 +14,7 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <runtime/terrain_query/height_field.h>
 
@@ -161,6 +162,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	auto &connections = ctx.np_protocol.connection_list;
 	connections.push_back(make_conn(
 			1, 2, &loopback, ns::TransportMode::Loopback, host, true));
@@ -369,6 +371,7 @@ bool run_owner_devices_live_until_the_deploy() {
 	inmatch::NapiNPConnection conn =
 			make_conn(3, 1, nullptr, ns::TransportMode::Client, owner, true);
 	inmatch::GameConfig config;
+	const Protocol *const jo = title_protocol("jo");
 
 	w::Entity *body = world.registry.get(owner);
 	body->health = 0;
@@ -383,20 +386,20 @@ bool run_owner_devices_live_until_the_deploy() {
 		return false;
 
 	conn.reply.revive_pose_valid = true;
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF, nullptr, jo);
 	if (!expect(world.registry.get(satchel) != nullptr && world.registry.get(claymore) != nullptr &&
 			queued_removals(world).empty(),
 			"a medic revive deploy keeps the devices"))
 		return false;
 
 	conn.link.spectator = true;
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF, nullptr, jo);
 	if (!expect(world.registry.get(satchel) != nullptr && queued_removals(world).empty(),
 			"a spectator slot's deploy keeps the devices"))
 		return false;
 	conn.link.spectator = false;
 
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF, nullptr, jo);
 	if (!expect(world.registry.get(satchel) == nullptr && world.registry.get(claymore) == nullptr,
 			"the next deploy removes the devices") ||
 		!expect(queued_removals(world) == (std::vector<uint16_t>{satchel.packed, claymore.packed}),

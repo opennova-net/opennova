@@ -1121,7 +1121,7 @@ static int test_install_open() {
 		cache.end();
 		const double files_ms = ms_since(part);
 		ProjectAssetSource assets;
-		assets.set_scan(paths.root, *v.project.scan, v.project.document->target_game);
+		assets.set_scan(paths.root, *v.project.scan);
 		MenuRenderCheck check;
 		check.begin();
 		double slowest_render = 0;

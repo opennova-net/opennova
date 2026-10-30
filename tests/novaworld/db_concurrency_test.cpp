@@ -1,12 +1,10 @@
 // Several threads on one database and one db::ConnectionPool, the way the
 // NovaWorld service's programs run them (issue #981). Registrations (the
 // /api/register write, create_user, each on a connection leased for the call
-// as a Crow handler leases one) race two writers per host: the NW UDP lobby
+// as a Crow handler leases one) race each host's writer: the NW UDP lobby
 // dispatch (LobbySession re-sending ClientHostRequest: the host row and its
-// roster in one transaction) and the gate's status-blob fold
-// (apply_status_blob, a read-modify-write of the same row). Readers meanwhile
-// take each host's row and roster in one db::ReadSnapshot, as /api/hosts and
-// the GSB feed do.
+// roster in one transaction). Readers meanwhile take each host's row and
+// roster in one db::ReadSnapshot, as /api/hosts and the GSB feed do.
 //
 // Guards:
 //   * every registration's id is the row it inserted and no two share one,
@@ -23,12 +21,10 @@
 //     write: every write replaces the whole roster and those columns with one
 //     tagged generation's;
 //   * a row never goes back in time: the UDP writer stamps MissionName with a
-//     rising counter the status blob does not carry, so a blob fold that wrote
-//     back a row it had read before a newer UDP write landed shows to a
-//     reader as the counter falling;
+//     rising counter, which a reader never sees fall;
 //   * no write fails (a writer waits only on the locks its invariant takes:
 //     the host's row, the registration's names; within the lock timeout), and
-//     each host ends on one of its writers' last generations.
+//     each host ends on its writer's last generation.
 
 #include "accounts/auth.h"
 
@@ -36,7 +32,6 @@
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_session.h>
-#include <net/novaworld/lobby_update.h>
 
 #include "client_var_fixture.h"
 #include "common/test_database.h"
@@ -72,7 +67,7 @@ constexpr int kGenerationsPerWriter = 50;
 constexpr int kReaders = 3;
 // The connections' lock timeout, raised from the server's 5 s to 60 s as a
 // deliberate stress margin: this test runs every writer flat out at once, each
-// host's two writers queued on its row and the registrars on the contested
+// host's writer on its row and the registrars on the contested
 // name, on what may be a loaded host (a CI runner under a parallel build).
 // What it asks is that no write is lost or mixed, not how long one waits; the
 // route harness keeps the server's 5 s. The statement timeout rises above it:
@@ -101,7 +96,7 @@ void record_warnings(opennova::io::LogLevel level, const char *message) {
 	if (level >= opennova::io::LogLevel::kWarn) g_failures.add(message);
 }
 
-// A write's tag: its writer ('u' the UDP lobby, 'g' the gate) and generation.
+// A write's tag: its writer ('u', the UDP lobby) and generation.
 std::string tag_of(char writer, int generation) {
 	return std::string(1, writer) + std::to_string(generation);
 }
@@ -189,31 +184,6 @@ void write_host_udp(ConnectionPool &pool, uint32_t rid, const std::atomic<bool> 
 		}
 	} catch (const std::exception &e) {
 		g_failures.add("udp " + std::to_string(rid) + ": " + e.what());
-	}
-}
-
-// The gate side of the same host: folds status blobs (read the row, take the
-// blob's columns, write it and the roster back), never carrying MissionName.
-void write_host_gate(ConnectionPool &pool, uint32_t rid, const std::atomic<bool> &go) {
-	try {
-		auto conn = pool.acquire();
-		wait_for(go);
-		for (int generation = 1; generation <= kGenerationsPerWriter; ++generation) {
-			const std::string tag = tag_of('g', generation);
-			opennova::LobbyStatusBlob blob;
-			blob.lobby_name = "jop_2_consumer";
-			blob.host_key = host_key(rid);
-			blob.host_vars = {{"ServerName", server_name(tag)},
-			                  {"Players", std::to_string(roster_size(generation))}};
-			for (int slot = 0; slot < roster_size(generation); ++slot) {
-				blob.player_names.push_back(slot_name(rid, tag, slot));
-			}
-			if (!hostdb::apply_status_blob(*conn, blob)) {
-				g_failures.add("gate " + std::to_string(rid) + ": status blob unmatched");
-			}
-		}
-	} catch (const std::exception &e) {
-		g_failures.add("gate " + std::to_string(rid) + ": " + e.what());
 	}
 }
 
@@ -371,7 +341,6 @@ int run(const opennova::db::ConnectOptions &options) {
 	std::vector<std::thread> writers;
 	for (const uint32_t rid : rids) {
 		writers.emplace_back(write_host_udp, std::ref(pool), rid, std::cref(go));
-		writers.emplace_back(write_host_gate, std::ref(pool), rid, std::cref(go));
 	}
 	for (int r = 0; r < kRegistrars; ++r) {
 		writers.emplace_back(register_users, std::ref(pool), r, std::cref(go),
@@ -421,15 +390,14 @@ int run(const opennova::db::ConnectOptions &options) {
 		TEST_EXPECT(salts.insert(salt).second);
 	}
 
-	// Each host ends on one writer's last generation, complete, and on the UDP
-	// writer's last MissionName (no blob fold after it wrote back an older one).
+	// Each host ends on its writer's last generation, complete, and on its last
+	// MissionName.
 	for (const uint32_t rid : rids) {
 		const auto roster = hostdb::list_roster(*check, rid);
 		const auto host = hostdb::find_host_by_rid(*check, rid);
 		TEST_EXPECT(host.has_value() && !roster.empty());
 		const std::string tag = tag_in(rid, roster.front().player_name);
-		TEST_EXPECT(tag == tag_of('u', kGenerationsPerWriter) ||
-		            tag == tag_of('g', kGenerationsPerWriter));
+		TEST_EXPECT(tag == tag_of('u', kGenerationsPerWriter));
 		const int size = roster_size(kGenerationsPerWriter);
 		TEST_EXPECT(static_cast<int>(roster.size()) == size);
 		for (int slot = 0; slot < size; ++slot) {
@@ -455,7 +423,7 @@ int main(int argc, char **argv) {
 	const int rc = run(options);
 	if (rc != 0) return rc;
 	std::printf("OK: pooled connections keep ids, rosters and rows consistent "
-	            "(%d registrars, %d hosts x 2 writers x %d generations, %d readers)\n",
+	            "(%d registrars, %d hosts x %d generations, %d readers)\n",
 	            kRegistrars, kHosts, kGenerationsPerWriter, kReaders);
 	return 0;
 }

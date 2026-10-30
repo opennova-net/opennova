@@ -14,7 +14,7 @@ The hosted servers (the fleet, its supervisor, the products, the console) are
 
 | Listener | Port | Protocol |
 | --- | --- | --- |
-| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: each game selects one" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
+| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: each game selects one" below) |
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> NOVAWORLDUDP containers; the opt-in JO game host (`ONNET_EMBEDDED_JO_HOST`) on a UDP port of its own |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 | `UpdateListener` (`apps/novaworld_web/updater/`) | TCP 20044, 20556, 21068, 21580 (`ONNET_UPDATE_PORTS`) | UPDATE.EXE's gateway and update server over the published releases, with `ONNET_UPDATE_HOST` set and an object store ([`hosted/README.md`](hosted/README.md) "The update listener") |
@@ -42,7 +42,7 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 
 | Program | Its parts | Scales by |
 | --- | --- | --- |
-| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: each game selects one" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
+| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients ("Lobbies: each game selects one" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
 | lobby (`apps/novaworld_lobby`) | one lobby instance: the NW UDP listener, its `ConnectionManager` tick, its lobby command drain, its session rows; its instance's registration, a row of its own, at the one lobby address ("Lobby instances" below) | more lobbies behind the one lobby address, each its own instance |
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the update listener (with `ONNET_UPDATE_HOST` and an object store), the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
@@ -68,11 +68,10 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
   (`billing/billing_stack.*`, `accounts/mail_stack.*`), the periodic jobs each schedules
   (the worker's `apps/novaworld_worker/worker_schedule.*`).
 - **Every address a program announces comes from the config**, never from a port another
-  bound: the gate's `POSTIPADDRESS` is `ONNET_PUBLIC_HOST` (where status blobs land), its
-  `udpnovaworld` the one lobby address every lobby instance announces (its row), and its
-  `startupurl`,
-  the lobby's SessionInit web domain and the menus' `HOST_URL` and `GSB_SERVER` all name
-  the one web endpoint, `ONNET_WEB_HOST` with `ONNET_HTTP_PORT`, so all three agree. The
+  bound: the gate's `udpnovaworld` is the one lobby address every lobby instance announces
+  (its row), and the lobby's SessionInit web domain (which the gate's `startupurl` takes as
+  its `[domainname]`) and the menus' `HOST_URL` and `GSB_SERVER` all name the one web
+  endpoint, `ONNET_WEB_HOST` with `ONNET_HTTP_PORT`, so they agree. The
   hosted servers' master address and gate port are `ONNET_PUBLIC_HOST` and
   `ONNET_GATE_UDP_PORT` (every machine, a local stack's container included, lists through
   the gate's public address); the machines reach the fleet program at `ONNET_INTERNAL_URL`, a
@@ -129,8 +128,8 @@ runs only its own job kinds and schedules only those: no kind has handlers in tw
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `ONNET_WEB_HOST` | none | The one load-balanced web endpoint (a name or an address) the gate's `startupurl`, the lobby's SessionInit web domain and the menus' `HOST_URL` / `GSB_SERVER` name, with `ONNET_HTTP_PORT`. Required by the gate, the lobby and web. |
-| `ONNET_PUBLIC_HOST` | `127.0.0.1` | The gate's public address: its `POSTIPADDRESS` (where the hosts' status blobs land) and the hosted servers' master address. The gate requires it set in its environment (an explicit `127.0.0.1` too): a gate left on the default would announce loopback to every client. |
+| `ONNET_WEB_HOST` | none | The one load-balanced web endpoint (a name or an address) the lobby's SessionInit web domain (the gate's `startupurl` `[domainname]`) and the menus' `HOST_URL` / `GSB_SERVER` name, with `ONNET_HTTP_PORT`. Required by the lobby and web. |
+| `ONNET_PUBLIC_HOST` | `127.0.0.1` | The gate's public address: the hosted servers' master address. |
 | `ONNET_LOBBY_ENDPOINT` | none | The lobby: the one lobby address every lobby announces, `<host>:<port>` (its instance row, the gates' `udpnovaworld`; on ECS the load balancer's, the gate's address and 64206); required. The gate: optional, the lobby it hands out while no instance takes clients; with none either, a probe goes unanswered (the client asks again) and the gate logs it, once every 10 s at most. |
 | `ONNET_INTERNAL_URL` | none | The fleet's internal listener as the machines' agents reach it, `http://<host>:<port>` (`fleet.<deployment>.opennova.internal:8070`, the deployment's Cloud Map name, in a deployment; the fleet's compose name in the local stack): the worker's alone, whose machine driver hands it to each machine it launches. Required by the driver with hosting on. |
 | `ONNET_HEALTH_PORT` | 8081 | The TCP port `GET /livez` answers on in the gate, the lobby, the fleet program, the worker and the data program (web's is its HTTP port); 0 lets the OS pick (the tests). |
@@ -427,7 +426,7 @@ only into build output. A linked project without that cache must refresh its con
 
 | Gate tag | Slug | LobbyName | Protocol | Start page | Browser list | pfid | Expansion bits |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
+| `jop:cus2` | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
 | `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2_0_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
 | `acidgambit:0` | `acidgambit_0_consumer` | `acidgambit_0_consumer` | `jo` | `acidgambit_0_start.htm` | `/acidgambit_0.gsb` | 100 | 1 |
 
@@ -442,16 +441,15 @@ bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, 
 - **The gate** answers a probe from the row its tag selects: `LobbyName`, the
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
   takes the configured `ONNET_GLSVSS_*`, none by default). DFX2's row carries the values
-  NovaLogic's live gate answered for its tag, in that reply's shape too (the witness:
-  `docs/titles/dfx2-vs-jo-re.md` §6.5; `Protocol::gate_reply_witnessed`, D-NET-721):
-  no `POSTIPADDRESS` / `POSTIPPORT` (its `udpnovaworld` line leaves the pair unread), a
-  `startupurl` on `http://[domainname]/` (the client fills it from the lobby's SessionInit
-  web domain) and a `TimeOnGateServer` line, the gate's UTC clock in asctime's shape, after
-  the reflected pair. JO's and ON's rows keep the POST pair, the web endpoint in the
-  `startupurl` and no `TimeOnGateServer`. A tag no row (nor the alias) answers to gets no reply,
-  and the unknown tracker records it, but first the gate reads the table again, 30 s after
-  its last read at the soonest, in case a row added since names the tag (an account's own
-  game's lobby): a probe of a known tag never touches the database.
+  NovaLogic's live gate answered for its tag. Every reply takes the shape NovaLogic's live
+  gate answered JO's tag and DFX2's in (the witnesses: the LN S1 retail host record and
+  `docs/titles/dfx2-vs-jo-re.md` §6.5, D-NET-721): no `POSTIPADDRESS` / `POSTIPPORT` (its
+  `udpnovaworld` line leaves the pair unread), a `startupurl` on `http://[domainname]/` (the
+  client fills it from the lobby's SessionInit web domain) and a `TimeOnGateServer` line, the
+  gate's UTC clock in asctime's shape, after the reflected pair. A tag no row answers to gets
+  no reply, and the unknown tracker records it, but first the gate reads the table again, 30 s
+  after its last read at the soonest, in case a row added since names the tag (an account's
+  own game's lobby): a probe of a known tag never touches the database.
 - **Listings** carry the LobbyName the gate gave their host (`active_hosts.game`), so a
   host lands in its own game: `/api/lobbies` groups the hosts by it (one group per row),
   and each row's `.gsb` route lists its own alone, showing its protocol's VER1 and the
@@ -568,8 +566,7 @@ port) and keeps each flow on one task.
   connection); after a failed read, its fallback for six refreshes; with none live, its
   fallback `ONNET_LOBBY_ENDPOINT`; with no fallback, no reply (logged every 10 s at most).
   The reply is the gate's one send, to the probe's source, so behind a UDP load balancer it
-  rides the probe's flow back. `POSTIPADDRESS` stays this gate's (`apply_status_blob` finds
-  the listing by its key whichever lobby holds it).
+  rides the probe's flow back.
 - **The lobby behind the balancer**: its target group (UDP 64206, client addresses and
   ports preserved, so a lobby lists a host at its own address) checks each task's `/livez`.
   A deployment starts the new task first, then the balancer drains the old one (10 s)
@@ -621,7 +618,7 @@ into clients and servers, with the server each lists or plays on and an end queu
 instance. A session's account is its listing's owner while it hosts, else the account it
 signed in as (the row's `user_id`). A **server** is a session that hosts (a listen host
 plays on its own server too); any other is a **client**. A session's game is its games row:
-a server's by its listing's `LobbyName`, else by its game tag (aliases included). A
+a server's by its listing's `LobbyName`, else by its game tag. A
 server's listing says what it is: `hosted` (a live hosted server of the fleet's, its page
 `/admin/servers/<id>`), `owned` (its HostKey names an account) or `anonymous`, and retail's
 Serve Only flag (`Dedicated`). Each session's **Client** is its `ap`. A client's server is the listing its `PlaySetup` named, by
@@ -1273,8 +1270,6 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
     generation: the account's row (`FOR NO KEY UPDATE`), so a password reset or a ban
     runs wholly before the mint (which then mints nothing) or wholly after (and
     deletes what it minted);
-  - the status blob's read-modify-write: the host's row (`FOR NO KEY UPDATE`), which
-    the lobby's own write of the row and its roster locks first too;
   - a username or handle a registration, an admin's edit or a service account
     writes: an advisory lock per name (`hashtext(lower(name))`), taken for each name
     it checks or writes, since a username may equal no account's username or handle

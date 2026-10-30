@@ -1,10 +1,10 @@
 #include <editor/project/expansion_name.h>
-#include <net/protocol/protocol.h>
 
 #include <base/gameprofile/required_resources.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/model/core_finding.h>
 #include <editor/project/expansion_files.h>
@@ -110,12 +110,12 @@ bool check_expansion_name(const std::string &name, ExpansionNameUse use, Diagnos
 bool check_project_expansion(const std::string &target_game, const ProjectExpansion &expansion,
                              Diagnostic &error) {
 	if (expansion.name.empty() && expansion.builds_on.empty() && !expansion.on_base_project()) return true;
-	// Joint Operations' expansions: a title that speaks its protocol runs its code.
-	const Protocol *protocol = title_protocol(target_game);
-	if (protocol == nullptr || protocol != title_protocol("jo")) {
+	// The title's own row says whether its executable mounts an expansion (Title::expansions).
+	const Title *title = title_by_code(target_game);
+	if (title == nullptr || !title->expansions) {
+		const std::string game = title != nullptr ? std::string(title->display_name) : "\"" + target_game + "\"";
 		error = make_finding(CoreFinding::ProjectExpansionUnsupported, DiagnosticSeverity::Error,
-		                     "Expansions are witnessed for Joint Operations only: a project for \"" + target_game +
-		                             "\" builds as the game itself.");
+		                     "No expansion is witnessed for " + game + ", so a project for it builds as the game itself.");
 		return false;
 	}
 	if (expansion.name.empty() && expansion.on_base_project()) {
