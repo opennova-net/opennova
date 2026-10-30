@@ -1384,6 +1384,10 @@ bool Simulation::take_death_menu_open(bool p_menu_open) {
 			opennova::inmatch::death_menu_triggered(role_view()), p_menu_open);
 }
 
+bool Simulation::take_death_menu_close() {
+	return runtime_ && runtime_->state().take_death_menu_close();
+}
+
 bool Simulation::is_death_menu_held() const {
 	return opennova::inmatch::death_menu_triggered(role_view()) || is_join_deploy_pick_pending();
 }

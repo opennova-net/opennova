@@ -127,6 +127,20 @@ func populate_death_screen(driver: MenuDriver) -> void:
 	_armory.populate_screen(driver)
 
 
+## The DEATH screen's close on its triggers' clear (DFX2-41): its picks serialized into the
+## class's page and applied as this screen's ACCEPT applies a kit, one C2S 0x2F in a session,
+## gated as the ACCEPT is on the press latch, the input reset first (engine
+## ClientState::take_death_menu_close carries the witness).
+func submit_death_screen(driver: MenuDriver) -> void:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim == null or driver == null or not can_dismiss():
+		return
+	_reset_all_input_state()
+	var kit := _armory.accept_screen(driver)
+	_player_class = _armory.get_selected_class()
+	sim.apply_local_player_loadout(kit, _player_class)
+
+
 ## The live menu driver over the armory frame (ADR 0018 read seam for tests and
 ## diagnostics; null until the first open builds the menu).
 func get_menu_driver() -> MenuDriver:

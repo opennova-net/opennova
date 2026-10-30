@@ -149,6 +149,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::is_deploy_overlay_active);
 	ClassDB::bind_method(D_METHOD("take_death_menu_open", "menu_open"),
 	                     &Simulation::take_death_menu_open);
+	ClassDB::bind_method(D_METHOD("take_death_menu_close"), &Simulation::take_death_menu_close);
 	ClassDB::bind_method(D_METHOD("is_death_menu_held"),
 	                     &Simulation::is_death_menu_held);
 	ClassDB::bind_method(D_METHOD("get_deploy_spawn_zones"),

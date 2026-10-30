@@ -140,6 +140,15 @@ func _activate_loadout(status: DeployStatus) -> void:
 		_armory.populate_death_screen(_driver)
 
 
+## The frame's close leg, run when its triggers' clear finds the open latch up (the shell's
+## Simulation.take_death_menu_close): a title whose DEATH screen picks the loadout applies
+## the screen's picks there, the screen open or not; any other title's runs nothing (engine
+## ClientState::take_death_menu_close carries the witness).
+func on_death_menu_close() -> void:
+	if _picks_loadout() and _driver != null:
+		_armory.submit_death_screen(_driver)
+
+
 func is_open() -> bool:
 	return _frame != null and is_instance_valid(_frame) and _frame.visible
 

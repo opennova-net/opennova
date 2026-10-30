@@ -206,10 +206,19 @@ void test_death_menu_open_latch() {
 	CHECK(!take());
 	CHECK(!view.state().death_menu_open_latch);
 	// A trigger other than the overlay (the local death) latches the same way.
+	(void)view.state().take_death_menu_close();
 	CHECK(view.state().take_death_menu_open(true, false));
 	CHECK(!view.state().take_death_menu_open(true, false));
+	CHECK(!view.state().take_death_menu_close());
 	CHECK(!view.state().take_death_menu_open(false, false));
 	CHECK(!view.state().death_menu_open_latch);
+	// That clear found the latch up: the close leg ran, once [orig: @0x5cac8e..0x5cac9c]
+	// [orig: sub_5C9000 @0x5c9c00..0x5c9c0e (dfx2.exe)].
+	CHECK(view.state().take_death_menu_close());
+	CHECK(!view.state().take_death_menu_close());
+	// A clear with no latch up runs none.
+	CHECK(!view.state().take_death_menu_open(false, false));
+	CHECK(!view.state().take_death_menu_close());
 }
 
 // The count of spectator-tip commands the pass queued (replication::

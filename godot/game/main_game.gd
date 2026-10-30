@@ -1490,7 +1490,11 @@ func _maybe_open_death_menu() -> void:
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
 		return
-	if not bool(sim.take_death_menu_open(_state != State.WORLD or _world_load_pending)):
+	var opening := bool(sim.take_death_menu_open(_state != State.WORLD or _world_load_pending))
+	# The clear's close leg, a title's own call ahead of the screens' close.
+	if bool(sim.take_death_menu_close()):
+		_deploy_presenter.on_death_menu_close()
+	if not opening:
 		return
 	_deploy_presenter.open()
 

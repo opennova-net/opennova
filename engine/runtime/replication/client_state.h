@@ -1606,12 +1606,26 @@ struct ClientState {
 	//  peer, `xor g_ServerStatusViewActive, 1`); the close's branch @0x5CAC81..0x5CAC9C].
 	bool take_death_menu_open(bool triggered, bool menu_open) {
 		if (!triggered) {
+			death_menu_closed_on_clear = death_menu_closed_on_clear || death_menu_open_latch;
 			death_menu_open_latch = false;
 			return false;
 		}
 		if (menu_open || death_menu_open_latch) return false;
 		death_menu_open_latch = true;
 		return true;
+	}
+	// The close leg's run: a clear that found the latch up, whose branch runs ahead of the
+	// screens' close the title's own call there (dfx2.exe's loadout apply, Jointops.exe's empty
+	// stub), until the embedder takes it. A clear with no latch up runs no close leg.
+	// [orig: Render_ProcessMainSceneFrame @0x5cac8e (the latch test), nullsub_137 @0x5cac97,
+	//  Game_CloseInGameScreens @0x5cac9c]
+	// [orig: sub_5C9000 @0x5c9000 - the latch test @0x5c9c00, sub_550BA0 @0x5c9c09,
+	//  Game_CloseInGameScreens @0x5c9c0e (dfx2.exe)]
+	bool death_menu_closed_on_clear = false;
+	bool take_death_menu_close() {
+		const bool ran = death_menu_closed_on_clear;
+		death_menu_closed_on_clear = false;
+		return ran;
 	}
 	std::uint8_t respawn_penalty_seconds = 0;
 	std::uint8_t local_revive_seconds = 0;

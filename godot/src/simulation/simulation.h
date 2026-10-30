@@ -1107,6 +1107,9 @@ public:
 	// triggers (inmatch::death_menu_triggered) unless another screen is up;
 	// the engine latch clears when they fall. The shell opens on true.
 	bool take_death_menu_open(bool p_menu_open);
+	// Whether a take since the last call cleared a raised latch: the close leg ran, whose
+	// title's call the shell then makes (engine ClientState::take_death_menu_close).
+	bool take_death_menu_close();
 	// The DEATH screen stays up while a trigger holds or a join pick is owed.
 	bool is_death_menu_held() const;
 	// The DEATH screen's spawn-zone rows (simulation/deploy_rows.h): one
