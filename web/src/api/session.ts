@@ -10,6 +10,7 @@
 import { isAxiosError } from 'axios';
 import { apiClient } from './client';
 import type { Role } from '../types/users';
+import { countLabel } from '../utils/format';
 
 // The account a session acts as: what /api/login and /api/me answer.
 export interface SessionUser {
@@ -60,10 +61,9 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<SessionErrorCode>([
 
 // "30 seconds", "2 minutes", "1 hour": a Retry-After for a sentence.
 export function formatRetryAfter(seconds: number): string {
-  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
-  if (seconds < 60) return plural(Math.max(1, Math.ceil(seconds)), 'second');
-  if (seconds < 3600) return plural(Math.ceil(seconds / 60), 'minute');
-  return plural(Math.ceil(seconds / 3600), 'hour');
+  if (seconds < 60) return countLabel(Math.max(1, Math.ceil(seconds)), 'second');
+  if (seconds < 3600) return countLabel(Math.ceil(seconds / 60), 'minute');
+  return countLabel(Math.ceil(seconds / 3600), 'hour');
 }
 
 // Retry-After as seconds: the server sends delta-seconds; an HTTP-date is

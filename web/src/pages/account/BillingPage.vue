@@ -29,7 +29,7 @@
         <dl id="billing-tier" class="card grid gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Tier</dt>
           <dd class="text-ink">
-            <template v-if="liveTier && billing.subscription">Tier {{ billing.subscription.tier }}, up to {{ plural(tierServers, 'server') }}</template>
+            <template v-if="liveTier && billing.subscription">Tier {{ billing.subscription.tier }}, up to {{ countLabel(tierServers, 'server') }}</template>
             <template v-else>None</template>
           </dd>
           <template v-if="liveTier && billing.subscription">
@@ -207,7 +207,7 @@ import {
   subscriptionStatusLabel,
   subscriptionStatusTone,
 } from '../../utils/billingView';
-import { formatDate, formatMoney, formatUtc, isoTime } from '../../utils/format';
+import { countLabel, formatDate, formatMoney, formatUtc, isoTime } from '../../utils/format';
 import { navigateToStripe } from '../../utils/navigate';
 
 // The wait for Stripe's confirmation after a checkout: from 2 s backing off
@@ -239,8 +239,6 @@ const selectedTier = ref<TierNumber | null>(
 const selectedOffer = computed(() => tiers.value?.tiers.find((offer) => offer.tier === selectedTier.value) ?? null);
 const reviewHeading = ref<HTMLElement | null>(null);
 
-const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
-
 const liveTier = computed(() => hasLiveTier(billing.value));
 // A payment past due: the tier's, a dedicated machine's or a static
 // address's (any keeps new servers from starting, and no dedicated machine
@@ -258,7 +256,7 @@ const pastDue = computed(() => {
 // running on shared machines, else its servers there stop.
 const afterTier = computed(() => {
   const n = billing.value?.comp_servers ?? 0;
-  return n > 0 ? `your grant keeps up to ${plural(n, 'server')} running` : 'your servers on shared machines stop';
+  return n > 0 ? `your grant keeps up to ${countLabel(n, 'server')} running` : 'your servers on shared machines stop';
 });
 // A checkout came back and its confirmation is awaited: no second one starts.
 const waiting = computed(() => confirm.value === 'confirming' || confirm.value === 'pending');
@@ -281,8 +279,8 @@ const grantText = computed(() => {
   const b = billing.value;
   if (!b) return '';
   const parts: string[] = [];
-  if (b.comp_servers > 0) parts.push(plural(b.comp_servers, 'shared server'));
-  if (b.comp_own_machines > 0) parts.push(plural(b.comp_own_machines, 'dedicated machine'));
+  if (b.comp_servers > 0) parts.push(countLabel(b.comp_servers, 'shared server'));
+  if (b.comp_own_machines > 0) parts.push(countLabel(b.comp_own_machines, 'dedicated machine'));
   if (b.comp_addresses > 0) parts.push(`${b.comp_addresses} static address${b.comp_addresses === 1 ? '' : 'es'}`);
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] ?? '');
 });

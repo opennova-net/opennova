@@ -67,7 +67,7 @@ import { confirmAction } from '../composables/useConfirm';
 import { usePolling } from '../composables/usePolling';
 import type { AdminLobby, LobbiesResponse } from '../types/admin';
 import { lobbyStateLabel, lobbyUsageLink, sessionTime, shortTaskId } from '../utils/adminView';
-import { countLabel } from '../utils/infraView';
+import { countLabel } from '../utils/format';
 
 withDefaults(defineProps<{ idBase?: string }>(), { idBase: 'lobbies' });
 
