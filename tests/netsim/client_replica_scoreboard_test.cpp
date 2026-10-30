@@ -641,6 +641,16 @@ void test_score_tracker_fold() {
 	view.apply(s2c::SCORE_TRACKER_RESET, {0x07, 0x00, 0x00, 0x00});
 	view.apply(s2c::SCORE_TRACKER_TIME, {0xC8, 0x00, 0x00, 0x00}); // 200
 	CHECK(t.valid && t.start == 100 && t.time == 200 && t.elapsed == 100 && t.entries.size() == 2);
+	// A zero or short game start leaves it; a nonzero one clears the node, valid, start and
+	// elapsed, keeping the time and the entries [orig: NapiNPClientMsg_HandleGameStart @0x42E180].
+	view.apply(s2c::GAME_START_SIGNAL, {0x00});
+	view.apply(s2c::GAME_START_SIGNAL, {});
+	CHECK(t.valid && t.node == 7);
+	view.apply(s2c::GAME_START_SIGNAL, {0x01});
+	CHECK(!t.valid && t.node == 0 && t.start == 0 && t.elapsed == 0 && t.time == 200 &&
+			t.entries.size() == 2);
+	view.apply(s2c::SCORE_TRACKER_TIME, {0x2C, 0x01, 0x00, 0x00});
+	CHECK(!t.valid); // no node: nothing records
 }
 
 void test_spawn_wave_status_fold() {

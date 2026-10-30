@@ -216,6 +216,21 @@ void ClientReplicaPipeline::apply_score_tracker_reset(const std::vector<uint8_t>
 	state_.mark_changed();
 }
 
+void ClientReplicaPipeline::apply_game_start_signal(const std::vector<uint8_t> &body) {
+	// A nonzero game-start flag clears the tracker's node, its valid word, its start and its
+	// elapsed (not its time, nor the entries), as the 0x80 does; a short body reads 0. The
+	// handler's other legs (the clan roster's walk kick, C2S 0x4E) are the joiner connection's.
+	// [orig: NapiNPClientMsg_HandleGameStart @0x42E180 - the flag @0x42E18E..0x42E198, its test
+	//  @0x42E1A4, the clears @0x42E1DE..0x42E1F0; the twin's @0x42FCCE..0x42FCE0 (dfx2.exe)]
+	if (body.empty() || body[0] == 0) return;
+	ClientScoreTracker &tracker = state_.score_tracker;
+	tracker.node = 0;
+	tracker.valid = false;
+	tracker.start = 0;
+	tracker.elapsed = 0;
+	state_.mark_changed();
+}
+
 void ClientReplicaPipeline::apply_score_tracker_time(const std::vector<uint8_t> &body) {
 	// [orig: NapiNPClientMsg_0x082 @0x42A0E0 -> CineTracker_RecordTimeEntry @0x422410;
 	//  ClientScoreTracker carries the witness]

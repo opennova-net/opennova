@@ -1203,7 +1203,8 @@ struct ClientScoreFeedback {
 // entry's time and the gain since its start as its elapsed, then copies the entry's start, time and
 // elapsed out and marks the record valid. dfx2.exe's EXPPOINTS element draws `elapsed` and `time`
 // as its session and total lines while it is valid (DFX2-36). No stock host sends either message
-// (ingame_message_catalog.h).
+// (ingame_message_catalog.h). A nonzero S2C 0x05 game start clears the node, valid, start and
+// elapsed too (ClientReplicaPipeline::apply_game_start_signal).
 // [orig: NapiNPClientMsg_0x080 @0x42A070 - the node @0x42A08B, the clears @0x42A090..0x42A09C;
 //  NapiNPClientMsg_0x082 @0x42A0E0 -> CineTracker_RecordTimeEntry @0x422410 - the node test
 //  @0x422413..0x422418, the walk @0x422420..0x422443, a found entry's elapsed @0x4224E3..0x4224F4,

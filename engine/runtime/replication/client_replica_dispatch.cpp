@@ -442,6 +442,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::SCORE_TRACKER_TIME:
 		apply_score_tracker_time(body);
 		break;
+	case s2c::GAME_START_SIGNAL: // the score tracker's leg; the join leg is the connection's
+		apply_game_start_signal(body);
+		break;
 	case s2c::SCRIPT_REMOTE_COMMAND: // the host VM's replicated WAC command
 		apply_script_remote_command(body);
 		break;
