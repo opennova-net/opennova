@@ -83,6 +83,7 @@ void LaunchFlags::_bind_methods() {
 			"LaunchFlags", D_METHOD("product_version"), &LaunchFlags::product_version);
 	ClassDB::bind_static_method(
 			"LaunchFlags", D_METHOD("version_line"), &LaunchFlags::version_line);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("one_version"), &LaunchFlags::one_version);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game_given"), &LaunchFlags::game_given);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_update"), &LaunchFlags::no_update);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("after_update"), &LaunchFlags::after_update);
@@ -190,6 +191,10 @@ String LaunchFlags::version_line() {
 	// The title the launch runs as: its name where the product has none, the protocol it speaks.
 	opennova::title_versions(product.game, versions);
 	return to_gd(opennova::version_line(versions));
+}
+
+String LaunchFlags::one_version() {
+	return to_gd(opennova::one_build().version.text());
 }
 
 bool LaunchFlags::game_given() { return parse().game_given; }

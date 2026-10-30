@@ -13,8 +13,8 @@
 param(
     # ONE's version, the one the builds carry (engine/base/version/one_build.h): the
     # GDExtensions' and the updater tools' stamp, the zips' names, the exes'
-    # VERSIONINFO, the project's config/version in the exports (the MCP endpoint's
-    # serverInfo reads it) and the smoke packages' VERSION. The service stamps each
+    # VERSIONINFO, the project's config/version in the exports (project.godot holds a
+    # 0.0.0 placeholder; the MCP endpoint names one_build() itself) and the smoke packages' VERSION. The service stamps each
     # release's own (ADR 0067 d8: the one a player is told). release.yml passes the
     # release tag without its "v", ci.yml its run's stamp (scripts/ci/one_stamp.sh);
     # empty (a local run) takes the latest v* tag reachable from HEAD, as CMake does.
@@ -589,9 +589,9 @@ function Assert-StageHoldsOnly {
 }
 
 # ONE's version stamped for the three exports: the export presets' file and product versions
-# (Godot embeds them in each exe's VERSIONINFO) and the project's config/version (the MCP
-# endpoint's serverInfo). The STARTUP screen's VERSION label reads none of them: it names the
-# GDExtension's own stamp (base/version/one_build.h, D-MNU-76). Both tracked files are put back as
+# (Godot embeds them in each exe's VERSIONINFO) and the project's config/version (its 0.0.0
+# placeholder otherwise). The MCP endpoint and the STARTUP screen's VERSION label read none of
+# them: each names the GDExtension's own stamp (base/version/one_build.h, D-MNU-76). Both tracked files are put back as
 # they were once the exports end, so a run leaves the tree as it found it.
 $presetsPath = "$ROOT\godot\export_presets.cfg"
 $projectPath = "$ROOT\godot\project.godot"

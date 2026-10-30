@@ -49,6 +49,9 @@ public:
 	// (net/protocol/protocol.h title_versions), "OP: Acid
 	// Gambit 0.1.4 · ONE 0.0.22 (a1b2c3d) · JO protocol 16"; a part unknown left out.
 	static String version_line();
+	// ONE's version, the build this program is (base/version/one_build.h one_build()): "0.0.22",
+	// a staging run's "0.0.22.123". The game MCP endpoint's serverInfo names it.
+	static String one_version();
 	// True when `/game` was passed, even without a value.
 	static bool game_given();
 	static bool no_update();
