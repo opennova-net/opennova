@@ -36,6 +36,9 @@ namespace opennova::editor {
 
 namespace {
 
+// What a poll spends counting the changes again: a little, the editor keeps drawing.
+constexpr uint64_t kRecountBudget = 1024 * 1024;
+
 // Whether the folder at `dir` may take a get: missing, empty, or holding the machine's own folder
 // alone (a get cut short before its first file).
 bool empty_folder(const std::string &dir) {
@@ -279,6 +282,8 @@ void NovaWorldController::keep_job_account(const NovaWorldAccountUpdate &update)
 
 void NovaWorldController::account_changed() {
 	NovaWorldView &view = core_.view().novaworld;
+	recount_.reset();
+	recount_due_ = false;
 	view.lobbies.clear();
 	project_ = NovaWorldCall(); // the last account's ask
 	// A put asked as the last account, or answered and waiting to write its key, is that account's:
@@ -567,6 +572,8 @@ bool NovaWorldController::start_check() {
 	if (!transport_ || !working_copy(copy))
 		return false;
 	files_seen_ = core_.view().revisions.of(ViewConcern::Files);
+	recount_.reset(); // the check counts them
+	recount_due_ = false;
 	start(OperationKind::NovaWorldCheck,
 			std::make_unique<NovaWorldCheck>(
 					*transport_, account_, core_.paths(), export_dir(), copy));
@@ -1196,18 +1203,21 @@ void NovaWorldController::poll() {
 		history_ = NovaWorldCall();
 		core_.touch(ViewConcern::NovaWorld);
 	}
-	// A change to the project's files since the last check (a save, an import, a refresh): its changes
-	// are counted again by the next check (a push finds them itself meanwhile).
+	// A change to the project's files since the last count (a save, an import, a refresh): what was
+	// counted stands until they are counted again (a push finds them itself meanwhile).
 	if (core_.view().project.open && view.tracked) {
 		const uint64_t files = core_.view().revisions.of(ViewConcern::Files);
 		if (files != files_seen_) {
 			files_seen_ = files;
+			recount_.reset();
+			recount_due_ = true;
 			if (view.checked) {
 				view.checked = false;
 				core_.touch(ViewConcern::NovaWorld);
 			}
 		}
 	}
+	recount();
 	show_new_base();
 	// The setup, then a check, once the slot is free.
 	if (!core_.operations().running()) {
@@ -1240,6 +1250,37 @@ bool NovaWorldController::session_ended(const NovaWorldResponse &reply) {
 	core_.note("NovaWorld: " + core_.view().novaworld.last);
 	core_.touch(ViewConcern::NovaWorld);
 	return true;
+}
+
+void NovaWorldController::recount() {
+	if (core_.operations().running()) {
+		if (recount_) {
+			recount_.reset();
+			recount_due_ = true;
+		}
+		return;
+	}
+	if (check_due_ || track_due_)
+		return; // what is due counts them
+	NovaWorldView &view = core_.view().novaworld;
+	if (!recount_ && recount_due_) {
+		recount_due_ = false;
+		NovaWorldWorkingCopy copy;
+		if (working_copy(copy))
+			recount_ = std::make_unique<NovaWorldScan>(core_.paths(), export_dir());
+	}
+	if (!recount_ || !recount_->step(kRecountBudget))
+		return;
+	std::vector<project::ProjectFile> base;
+	std::string error;
+	if (read_novaworld_base(NovaWorldPaths::for_project(core_.paths(), account_.server), base, error)) {
+		view.changes = local_changes(
+				base, recount_->files(), recount_->unread(), recount_->incomplete().empty());
+		view.problems = recount_->problems();
+		view.checked = true;
+		core_.touch(ViewConcern::NovaWorld);
+	}
+	recount_.reset();
 }
 
 void NovaWorldController::make_own() {
@@ -1425,7 +1466,7 @@ bool NovaWorldController::busy() const {
 	return login_.started() || projects_.started() || games_.started() || project_.started() ||
 			put_.started() || put_waiting_ || release_.started() || history_.started() ||
 			releases_.started() || submit_.started() ||
-			track_due_ || check_due_ || put_after_open_;
+			track_due_ || check_due_ || put_after_open_ || recount_ || recount_due_;
 }
 
 void NovaWorldController::show_conflicts() {
@@ -1447,6 +1488,8 @@ void NovaWorldController::project_opened() {
 	view.checked = false;
 	view.changes.clear();
 	view.problems.clear();
+	recount_.reset();
+	recount_due_ = false;
 	view.remote_known = false;
 	view.remote = RemoteProject();
 	view.head_known = false;
@@ -1481,6 +1524,8 @@ void NovaWorldController::project_opened() {
 void NovaWorldController::forget_project() {
 	if (get_dir_.empty())
 		paused_.reset();
+	recount_.reset();
+	recount_due_ = false;
 	NovaWorldView &view = core_.view().novaworld;
 	view.key.clear();
 	view.tracked = false;

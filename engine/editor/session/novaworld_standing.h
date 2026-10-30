@@ -32,7 +32,7 @@ enum class NovaWorldStandingKind : uint8_t {
 
 struct NovaWorldStanding {
 	NovaWorldStandingKind kind = NovaWorldStandingKind::None;
-	size_t changed = 0;	  // the changes counted (none before a check has)
+	size_t changed = 0;	  // the changes counted, as they last were
 	int64_t incoming = 0; // the revisions on NovaWorld past the folder's
 	std::string line;	  // the window's words ("r5, r7 on NovaWorld, 2 changed")
 	std::string tip;	  // the rest of it, the service named

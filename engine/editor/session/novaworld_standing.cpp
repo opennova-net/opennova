@@ -26,9 +26,9 @@ NovaWorldStandingKind kind_of(const NovaWorldView &c) {
 		return Kind::NoRevision;
 	if (c.head > c.revision)
 		return Kind::Behind;
-	if (!c.checked)
-		return Kind::Unchecked;
-	return c.changes.empty() ? Kind::UpToDate : Kind::Changed;
+	if (!c.changes.empty())
+		return Kind::Changed;
+	return c.checked ? Kind::UpToDate : Kind::Unchecked;
 }
 
 } // namespace
@@ -49,7 +49,7 @@ NovaWorldStanding novaworld_standing(const NovaWorldView &c) {
 		out.tip = "Rejoin takes this folder back to its project, with nothing downloaded.";
 		return out;
 	}
-	out.changed = c.checked ? c.changes.size() : 0;
+	out.changed = c.changes.size();
 	out.incoming = c.tracked && c.head_known && c.head > c.revision ? c.head - c.revision : 0;
 
 	const std::string host = novaworld_host(c.server);

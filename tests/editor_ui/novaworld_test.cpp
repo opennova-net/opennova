@@ -101,6 +101,8 @@ void test_standing() {
 	c.changes = {{"defs/a.def", NovaWorldChange::Modified}};
 	is(Kind::Changed, "r5, 1 changed", "novaworld.test: r5, 1 changed", "changed, never up to date");
 	c.checked = false;
+	is(Kind::Changed, "r5, 1 changed", "novaworld.test: r5, 1 changed", "counted before the last save: still said");
+	c.changes.clear();
 	is(Kind::Unchecked, "r5, not checked yet", "novaworld.test: r5", "not counted, never up to date");
 	c.conflicts = {NovaWorldConflictView{"defs/a.def", {}, {}}};
 	is(Kind::Conflicts, "r5, 1 conflict", "novaworld.test: r5, 1 conflict", "conflicts first");

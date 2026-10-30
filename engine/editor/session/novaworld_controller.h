@@ -32,6 +32,7 @@
 
 #include <editor/novaworld/novaworld_account.h>
 #include <editor/novaworld/novaworld_jobs.h>
+#include <editor/novaworld/novaworld_scan.h>
 #include <editor/novaworld/novaworld_transport.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/session_operation.h>
@@ -169,6 +170,10 @@ private:
 	void track(bool then_check);
 	// The open project's working copy checked (the slot free); false, nothing started, with none.
 	bool start_check();
+	// The changes counted again after the project's files moved (a save, an import, a pull's files read
+	// in): a scan stepped a little at each poll, holding nothing, since a check holds the files and asks
+	// the service. Dropped as an operation starts, and started again once none runs.
+	void recount();
 	// A put's answer: the key written and the folder a working copy at revision 0, once nothing
 	// holds the project (put_waiting_), and a check due.
 	void finish_put();
@@ -262,6 +267,8 @@ private:
 	bool check_after_track_ = false;
 	bool put_due_ = false;
 	uint64_t files_seen_ = 0; // the project's files' view revision as the last check started
+	std::unique_ptr<NovaWorldScan> recount_; // the changes being counted again (recount)
+	bool recount_due_ = false;
 	std::string new_base_asked_; // what the view's new_base was found for (show_new_base)
 	// A pull stopped on conflicts, for the author to settle; and the folder a get's pull opens once
 	// it lands

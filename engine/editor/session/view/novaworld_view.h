@@ -116,7 +116,8 @@ struct NovaWorldView {
 	// and what kept a file out of them. `head_error` says why the head is unknown: for a project
 	// the service does not show the account, "<KEY> is not on <host>, or is private: ...", with
 	// `head_missing` set (a 404, where anything else is the service not answering). `setting_up`: the
-	// folder's setup is due or running. novaworld_standing.h reads all of this one way.
+	// folder's setup is due or running. `checked` goes as the files move, and the changes stay as they
+	// were counted until they are counted again. novaworld_standing.h reads all of this one way.
 	bool checked = false;
 	bool head_known = false;
 	int64_t head = 0;

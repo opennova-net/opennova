@@ -289,10 +289,21 @@ static int test_share_through_sessions() {
 	TEST_EXPECT(put(dir.file("Second") + "/defs/a.def", "a-second"));
 	second.send(request::novaworld_check());
 	TEST_EXPECT(second.novaworld().checked && second.novaworld().changes.size() == 1);
-	// The files read again (a save, an import, a refresh): the changes counted again by the next check.
+	// The files read again (a save, an import, a refresh): the changes stand, and are counted again.
+	const auto next_frames = [&second] {
+		second.session.poll();
+		second.session.run_operations();
+	};
+	TEST_EXPECT(put(dir.file("Second") + "/defs/d.def", "d"));
 	second.send(request::rescan());
-	second.session.poll(); // the editor's next frame
-	TEST_EXPECT(!second.novaworld().checked);
+	second.session.poll(); // the editor's next frame: still at it, what was counted stands
+	TEST_EXPECT(second.novaworld().changes.size() >= 1);
+	second.session.run_operations();
+	TEST_EXPECT(second.novaworld().checked && second.novaworld().changes.size() == 2);
+	TEST_EXPECT(std::filesystem::remove(opennova::io::os_path(dir.file("Second") + "/defs/d.def")));
+	second.send(request::rescan());
+	next_frames();
+	TEST_EXPECT(second.novaworld().checked && second.novaworld().changes.size() == 1);
 	second.send(request::novaworld_pull());
 	TEST_EXPECT(second.novaworld().conflicts.size() == 1 &&
 			second.novaworld().conflicts[0].path == "defs/a.def" &&
@@ -311,8 +322,8 @@ static int test_share_through_sessions() {
 	second.send(request::novaworld_pull());
 	TEST_EXPECT(second.novaworld().revision == 5 && second.read("defs/a.def") == "a-first" &&
 			second.read("defs/c.def") == "c");
-	// The check's changes went with the pull that took theirs: counted again by the next check.
-	TEST_EXPECT(!second.novaworld().checked && second.novaworld().changes.empty());
+	// The check's changes went with the pull that took theirs, and the files it wrote are counted again by themselves.
+	TEST_EXPECT(second.novaworld().checked && second.novaworld().changes.empty());
 	// The JSON's working copy, project and pull.
 	const opennova::io::JsonValue section = editor::novaworld_section(second.session.view());
 	TEST_EXPECT(section.get("working_copy")->get_string("key", "") == "MOD" &&

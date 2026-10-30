@@ -385,10 +385,11 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	                 "Makes this folder the next revision on " + novaworld_host(c.server) + ". Asks first."))
 		keep_folder_asked_ = true;
 
-	ImGui::SeparatorText(c.checked ? ("Changes (" + std::to_string(c.changes.size()) + ")").c_str() : "Changes");
-	if (!c.checked) {
-		ui_kit::empty_state("Not counted since the last change.", "Check lists what changed here since the revision; "
-		                                                          "Push finds the changes itself.");
+	const bool uncounted = !c.checked && c.changes.empty();
+	ImGui::SeparatorText(uncounted ? "Changes" : ("Changes (" + std::to_string(c.changes.size()) + ")").c_str());
+	if (uncounted) {
+		ui_kit::empty_state("Not counted yet.", "Check lists what changed here since the revision; Push finds the "
+		                                        "changes itself.");
 	} else if (c.changes.empty()) {
 		ui_kit::empty_state("No changes.", "What you change in the project's files lists here.");
 		message_[0] = '\0'; // nothing left to push: the message went with the last push
