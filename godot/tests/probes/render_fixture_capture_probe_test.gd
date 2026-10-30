@@ -1152,7 +1152,6 @@ func test_fixture_lookup_and_capture_variants_are_bounded() -> void:
 	assert_true(RenderFixtureContract.fixture_by_id(catalog, "missing").is_empty())
 	assert_eq(RenderFixtureContract.capture_variants().map(func(row): return row.id), [
 		"beauty", "shadows_off", "lighting_only", "unshaded",
-		"directional_shadow_atlas",
 	])
 
 
@@ -1465,7 +1464,6 @@ func test_shadow_attribution_profile_is_opt_in_and_scratch_only() -> void:
 	assert_false(bool(canonical.scratch_only))
 	assert_eq((canonical.variants as Array).map(func(row): return row.id), [
 		"beauty", "shadows_off", "lighting_only", "unshaded",
-		"directional_shadow_atlas",
 	])
 
 	var attribution: Dictionary = RenderFixtureContract.select_capture_profile(
@@ -1558,7 +1556,6 @@ func test_minute_filter_only_selects_a_declared_integer_witness() -> void:
 func test_catalog_variants_must_exactly_match_the_capture_driver() -> void:
 	var declared := [
 		"beauty", "shadows_off", "lighting_only", "unshaded",
-		"directional_shadow_atlas",
 	]
 	assert_true(RenderFixtureContract.diagnostic_variant_contract_matches(declared))
 

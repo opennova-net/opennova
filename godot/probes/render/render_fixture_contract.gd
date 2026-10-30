@@ -72,7 +72,6 @@ static func capture_variants() -> Array:
 		CaptureVariant.new("shadows_off", 0, false),
 		CaptureVariant.new("lighting_only", 2, true),
 		CaptureVariant.new("unshaded", 1, true),
-		CaptureVariant.new("directional_shadow_atlas", 10, true),
 	]
 
 
