@@ -34,7 +34,7 @@
 
 #include "gate_listener.h"
 #include <net/protocol/protocol.h>
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 #include "program/server_config.h"
 
 #include <net/napi/envelope.h>

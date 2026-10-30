@@ -8,7 +8,7 @@
 //  CAdminServer_AcceptConnection @0x405580; CAdminServer_HandleLogin @0x405870]
 
 #include "admin_tcp_server.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <base/io/crt_rand.h>
 #include <formats/admincfg/admin_cfg.h>

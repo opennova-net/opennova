@@ -3,8 +3,8 @@
 #include "loggable.h"
 
 #include <base/io/json.h>
-#include <net_http.h>
-#include <net_sockets.h>
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 
 #include <cstdio>
 #include <cstdlib>

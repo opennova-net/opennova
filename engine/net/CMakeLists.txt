@@ -3,7 +3,8 @@
 #
 #   opennova_net — the WIRE: novacrypto, napi, the npwire game wire codec
 #     (+ the LAN discovery codec and the datagram-socket seam), the admin
-#     remote-admin protocol, and the novaworld SESSION and GATE legs
+#     remote-admin protocol, the platform sockets and the HTTP exchange over
+#     them (ADR 0077 d2), and the novaworld SESSION and GATE legs
 #     (client-side matchmaking). The in-match
 #     session and replication moved to engine/runtime (ADR 0043 d4); this
 #     target links nothing above base. The godot/src links opennova_runtime,
@@ -64,6 +65,14 @@ add_library(opennova_net STATIC
     # their replies (docs/update/updater-re.md §4, ADR 0061)
     ${CMAKE_CURRENT_SOURCE_DIR}/update/update_wire.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/update/update_server.cpp # the server side: one connection's requests answered
+    # socket — the platform sockets every wire rides (ADR 0077 d2): Winsock2 or BSD UDP and TCP,
+    # the name lookup, and the stream seam's TCP side (IStreamSocket, the TCP twin of npwire's
+    # IDatagramSocket)
+    ${CMAKE_CURRENT_SOURCE_DIR}/socket/socket.cpp
+    # http — one HTTP/1.0 exchange over the stream seam: the request as the caller lays it out,
+    # the reply read to its length or the server's close (the menu browser's framing or the
+    # plain one)
+    ${CMAKE_CURRENT_SOURCE_DIR}/http/http_exchange.cpp
     # novaworld session leg — NWU session establishment above the npwire
     # framing: the client session state machine, the session-protocol
     # classifier, join identity, the lobby CU var-list codec
@@ -88,6 +97,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/browser_cache.cpp # the menu browser's content cache
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/cookie_jar_file.cpp # nw_cdata.coo, the jar across processes
     ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/gsb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/gate/browser_transport.cpp # the menu browser's HTTP transport
 )
 
 # engine/ is the one public include root (ADR 0040): <net/<lib>/file.h>.
@@ -104,6 +114,8 @@ if(WIN32)
     # lobby_identity.cpp: GetAdaptersInfo (the retail machine tokens' adapter input); the NWHWI
     # reads' COM (DxDiag: ole32, oleaut32) and GetSystemMetrics (user32). d3d9.dll loads by name.
     target_link_libraries(opennova_net PUBLIC iphlpapi ole32 oleaut32 user32)
+    # socket/socket.cpp: Winsock2.
+    target_link_libraries(opennova_net PUBLIC ws2_32)
 endif()
 
 target_compile_features(opennova_net PUBLIC cxx_std_17)

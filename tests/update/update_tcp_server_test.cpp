@@ -9,7 +9,7 @@
 #include <net/update/update_server.h>
 #include <net/update/update_wire.h>
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 #include "update_tcp_server.h"
 
 #include <algorithm>

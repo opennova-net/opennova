@@ -57,8 +57,7 @@
 #include "credentials.h"
 #include "run_reports.h" // SecondListingReport
 #include "net_datagram_socket.h"
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <atomic>
 #include <cstdint>
@@ -455,9 +454,6 @@ private:
 	// A try's gate lookup (the gate's dotted address, or none when it did not resolve), which
 	// runs off the frame thread: the name's DNS lookup could hold the match up for seconds.
 	std::future<std::optional<std::string>> second_resolve_;
-	// The web exchanges of torn-down tries still out, kept until each lands so no teardown on the
-	// frame thread waited on one (Lister::release_http).
-	std::vector<std::future<net::HttpReply>> second_http_left_;
 	uint16_t bound_port_ = 0;
 	// The socket's bind address (the block's mpipaddressstring, 0 for every interface), which
 	// the /INOUT HOST STARTED and STOPPED lines print beside the port, as the game's host prints

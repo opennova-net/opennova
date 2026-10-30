@@ -46,7 +46,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 #include <base/pcapio/pcap_reader.h>
 
 #include <cstddef>

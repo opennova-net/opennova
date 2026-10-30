@@ -266,7 +266,6 @@ Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *se
 
 Lister::~Lister() {
 	source_.stop();
-	if (http_.valid()) http_.wait();
 }
 
 bool Lister::start() {
@@ -337,8 +336,8 @@ bool Lister::tick(uint32_t now_ms) {
 	}
 	role_.tick(now_ms);
 	if (!ending_ && phase_ == Phase::Connecting && lobby_.session_verified()) on_verified();
-	if (!ending_ && http_.valid() && http_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-		on_http_reply(http_.get());
+	if (!ending_) {
+		if (std::optional<net::HttpReply> reply = http_.take()) on_http_reply(*reply);
 	}
 	if (!ending_)
 		refresh_listing(false);
@@ -375,7 +374,7 @@ void Lister::on_listed() {
 	// The host request's wait ended: the menu's next frame opens the HOSTKEY page's refresh
 	// (engine: LobbyHttpFlow::on_host_response's Resolved request carries the witness). A failed
 	// request ends the lister, so only the listed one fetches it.
-	if (host_page_.valid && !http_.valid()) {
+	if (host_page_.valid && !http_.busy()) {
 		ship(host_page_);
 		host_page_in_flight_ = true;
 	}
@@ -469,51 +468,33 @@ void Lister::on_http_reply(const net::HttpReply &reply) {
 	}
 }
 
-// One HTTP exchange on a worker thread, so the session keeps pumping while it runs (the game's
-// HTTPRequest nodes run beside its frame the same way).
+// The web legs' transport: the menu browser's (one resolve per request through its name list,
+// the nocachefix pair over that address, the port-less Host line, HTTP/1.0, its reply framing),
+// its lookup under the destination rule (a refused name is never looked up) and every wait 15 s.
+BrowserTransportOptions Lister::web_options(bool allow_public) {
+	BrowserTransportOptions options;
+	options.lookup = [allow_public](const std::string &host, std::array<uint8_t, 4> &ip) {
+		net::Endpoint server{};
+		if (!resolve_destination(host, server, allow_public, "web host")) return false;
+		ip = server.ip;
+		return true;
+	};
+	options.tick_ms = world::frame_tick_count_ms;
+	options.connect_ms = kHttpTimeoutMs;
+	options.io_ms = kHttpTimeoutMs;
+	return options;
+}
+
+// One HTTP exchange on the transport's worker, so the session keeps pumping while it runs (the
+// game's NovaWorld client ships its legs the same way).
 void Lister::ship(const HttpRequestSpec &spec) {
 	// The session tags the last reply set ride the next URL: mask them before it is logged.
 	for (const char *tag : {"LOGINSESSIONTAG", "NWJOINSESSIONTAG", "NWHANDLE"}) {
 		if (const std::string *value = flow_.cookies().find(tag)) add_log_secret(*value);
 	}
-	const bool allow_public = options_.allow_public;
-	const char *method = spec.method == HttpMethod::Post ? "POST" : "GET";
-	io::logf(LogLevel::kDebug, "%s[http] %s %s", who(), method, spec.url.c_str());
-	http_ = std::async(std::launch::async, [spec, method, allow_public]() {
-		// One resolve per request: the connect uses the address the nocachefix pair reads.
-		// [orig: CNapiWinsock_InitFromUrl @0x658DA0 - CNapiWinsock_ResolveHostAsync called
-		//  @0x658E4B into the request's +0x30 word, which CUIBrowser_SendHTTPRequest @0x658840
-		//  reads for the pair @0x6588A3 and the connect reads @0x6597F3]
-		std::optional<net::Endpoint> resolved;
-		const auto resolve = [allow_public, &resolved](const std::string &host, net::Endpoint &out) {
-			if (!resolved) {
-				net::Endpoint server{};
-				if (!resolve_destination(host, server, allow_public, "web host")) return false;
-				resolved = server;
-			}
-			out.ip = resolved->ip;
-			return true;
-		};
-		// A menu-browser GET takes its nocachefix pair once its server resolved: the tick at the
-		// send and that server's address (browser_cache_bust_url, D-NET-1251).
-		std::string url = spec.url;
-		if (spec.cache_bust) {
-			// The name the browser's request resolves: its Host line's (browser_request_host).
-			const std::string host = browser_request_host(url);
-			net::Endpoint server{};
-			if (!resolve(host, server)) {
-				net::HttpReply refused;
-				refused.error = "cannot reach " + host;
-				return refused;
-			}
-			url = browser_cache_bust_url(url, world::frame_tick_count_ms(), server.ip);
-		}
-		// The menu browser's Host line leads the flow's lines: the URL's host with no port
-		// (browser_request_host, D-NET-1329), where the transport would write the authority.
-		std::vector<std::string> headers{"Host: " + browser_request_host(spec.url)};
-		headers.insert(headers.end(), spec.headers.begin(), spec.headers.end());
-		return net::http_exchange(method, url, headers, spec.body, kHttpTimeoutMs, resolve);
-	});
+	io::logf(LogLevel::kDebug, "%s[http] %s %s", who(),
+			spec.method == HttpMethod::Post ? "POST" : "GET", spec.url.c_str());
+	http_.ship(spec);
 }
 
 // The hosting leg of ConnectOrHost: its session and gate checks, then the request; the roster

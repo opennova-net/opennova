@@ -29,9 +29,10 @@ easier to relay than to rediscover.
 - `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
   `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"), except `update/` and
   `revupdat/`, which build retail's names, `update.exe` and `revupdat.exe`. `common/` is
-  the shared socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap
-  I/O lives in `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working
-  directory.
+  the remote-admin TCP pump, the update listener and the command runner, deliberately
+  app-layer over the engine's sockets (`engine/net/socket`; the HTTP exchange is
+  `engine/net/http`, ADR 0077 d2; pcap I/O lives in `engine/base/pcapio`); `serve/`
+  (ADR 0051) keeps its files in its working directory.
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service

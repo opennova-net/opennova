@@ -33,7 +33,12 @@
     game server's remote-admin TCP protocol), protocol (the Protocol type a
     title speaks, its wire and NovaWorld identity, and its registry keyed by
     title code; the gate tag and gt.ssc; the NAPI transport's and the lobby
-    protocol's constants) and update (the updater's wire, ADR 0061). Nothing under
+    protocol's constants), update (the updater's wire, ADR 0061), socket (the platform
+    sockets every wire rides, Winsock2 or BSD, and the stream seam `IStreamSocket`, the TCP
+    twin of npwire's datagram seam; ADR 0077 d2) and http (one HTTP/1.0 exchange over that
+    seam, its reply read plainly or in the NovaWorld menu browser's framing; the menu
+    browser's transport over it, the game's and serve's, is
+    `novaworld/browser_transport.h`). Nothing under
     `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
   - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/inmatch`
     (`session.*` owns lifecycle, role policy, fixed-tick banking and input consumption
@@ -102,7 +107,8 @@
   shared by the service and the editor, ADR 0069; `title` the Title type and its registry; `version` is
   `Version`'s one parse rule and ONE's build, `one_build()`, whose `one_build.cpp` is the one TU
   the CMake stamp compiles into: nothing else carries a version literal of ONE's), `opennova_net`
-  (novacrypto, napi, npwire, admin, protocol, update and the novaworld session/gate: the wire),
+  (novacrypto, napi, npwire, admin, protocol, update, socket, http and the novaworld
+  session/gate: the wire),
   `opennova_runtime` (the rest of runtime/, `inmatch` and
   `replication` included),
   `opennova_novaworld_service` (the service alone, only with the root option
@@ -185,7 +191,7 @@
   form the shipped corpus takes (minted, FNV-pinned) + a ledgered D-entry when output
   legitimately differs.
 - The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`,
-  `engine/net/admin`, `engine/net/update`) and the
+  `engine/net/admin`, `engine/net/update`, `engine/net/http`) and the
   replication seam (`engine/runtime/replication`) are
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires

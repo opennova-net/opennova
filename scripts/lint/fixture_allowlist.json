@@ -37,6 +37,8 @@
     "fixtures/mnu/hotkeys.mnu",
     "fixtures/mns/test_style.mns",
     "fixtures/mns/shipped_form.mns",
+    "fixtures/novaworld/browser_get.http",
+    "fixtures/novaworld/browser_post.http",
     "fixtures/particle/gorehit.ptu",
     "fixtures/particle/lexical_forms.ptl",
     "fixtures/score/score_sample.ini",

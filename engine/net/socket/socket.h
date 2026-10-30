@@ -9,9 +9,11 @@
 
 namespace opennova::net {
 
-// Thin cross-platform socket layer for the apps/ binaries (the NovaWorld programs,
-// lan_probe, serve); engine/ carries no socket code of its own.
-// Winsock2 on Windows, POSIX BSD sockets elsewhere.
+// The platform sockets every wire rides (ADR 0077 d2: networking is engine code over platform
+// sockets): the programs' (the NovaWorld programs, lan_probe, serve, the updater) and the game's
+// HTTP (net/http over the stream seam, stream_socket.h). Winsock2 on Windows, POSIX BSD sockets
+// elsewhere. Platform plumbing, no port: the listeners and the pumps over these stay their
+// programs' (apps/common's remote-admin and update listeners).
 
 // Initialize the underlying networking subsystem. On Windows this is
 // WSAStartup(1,1) — matching jodemo's CNapiWinsock_Init@0x5f8960 which

@@ -33,7 +33,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include "common/test_database.h"
 
