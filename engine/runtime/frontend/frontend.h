@@ -240,9 +240,10 @@ public:
 	//  @0x561BB2, the attribute store @0x561BB7, Profile_ApplySessionControls @0x561BC1,
 	//  PlayerProfile_SaveToFiles @0x561BF5, UI_NavHistoryPush(&g_GameModeGameLoop) @0x561E85]
 	bool start_single_player();
-	// The common mission start. A session's (`in_session`) passes through the PreMenu, whose init
-	// saves game.cfg at every multiplayer start, and its session apply clamps the record's class
-	// bytes; a single player's is remembered as the restart's entry. Then the load: the session's
+	// The common mission start. A session's (`in_session`) runs the PreMenu's init, whose game.cfg
+	// save comes at every multiplayer start (a host's PreMenu pushes the Game Loop at once, so the
+	// mode goes straight there), and its session apply clamps the record's class bytes; a single
+	// player's is remembered as the restart's entry. Then the load: the session's
 	// +1460 copy, the record's controls, the presentation, the Game Loop. False when the load
 	// coordinator refused the start (nothing changed) or its handoff failed (the failure leg ran).
 	// [orig: PreMenu_Init @0x5693E0 - Profile_ApplySessionControls @0x5693EF, Game_SaveConfig
