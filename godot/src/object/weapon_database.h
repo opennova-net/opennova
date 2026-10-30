@@ -92,12 +92,9 @@ public:
 		DEFAULT_VOICE_VALUE = 0,
 	};
 
-	// The armory class-allow / class-filter mask domains — mirrors
-	// engine/runtime/world player_loadout.h (static_asserts in the .cpp pin
-	// them): the no-restriction S2C 0x76 allow mask (wire class bits 0..9)
-	// and the five-class charfilter union ("show every class's weapons").
+	// The five-class charfilter union ("show every class's weapons") — mirrors
+	// engine/runtime/world player_loadout.h (a static_assert in the .cpp pins it).
 	enum {
-		CLASS_ALLOW_ALL = 0x3FF,
 		CLASS_MASK_ALL = 0x1F,
 	};
 
@@ -147,16 +144,6 @@ public:
 	String weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const;
 	static String loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 			const Ref<RtxtStringFile> &p_gameui);
-	// The armory screen's open-time class policy (one impl in
-	// engine/runtime/world player_loadout.h (engine: runtime/world/player_loadout.cpp)): the current class when the S2C 0x76 allow mask permits it,
-	// else scan up through 9, else gunner (7) (the class filter bit is the screen's
-	// populate's, engine menu::ArmoryLoadout).
-	static int armory_resolve_selected_class(int p_player_class, int p_class_allow_mask);
-	// The armory PLAYER_CLASS spin catalog, authored order — ArmoryClassRow
-	// records (one table in engine/runtime/world player_loadout.h
-	// kArmoryClassCatalog, which carries the UI_InitWeaponClassSelection
-	// witness — CHARCLASS_MEDIC..ENGINEER, 5..9).
-	static TypedArray<ArmoryClassRow> armory_class_catalog();
 };
 
 } // namespace godot
