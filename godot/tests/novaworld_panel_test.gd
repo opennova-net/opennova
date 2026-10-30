@@ -199,16 +199,6 @@ func test_the_original_novaworld_hosts_nothing_and_says_so() -> void:
 	assert_eq(ours_host.tooltip_text, "", "OpenNova's hosts")
 
 
-func test_map_picker_populates_from_root() -> void:
-	# The loose index is flat (memory: ResourceRoot indexes flat filenames);
-	# list_files still returns path-bearing entries, so MissionCatalog's
-	# basename reduction is what the picker text asserts below.
-	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
-	assert_eq(panel.mission_count(), 2, "Map picker lists the root's .bms missions")
-	assert_eq(panel.mission_name_at(0), "alpha.bms", "items are basenames")
-	assert_eq(panel.selected_mission(), "alpha.bms", "first mission selected by default")
-
-
 func test_server_browser_is_gated_until_login_succeeds() -> void:
 	var panel := _make_panel(PackedStringArray())
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.CONNECTING)
@@ -361,13 +351,8 @@ func _panel_with_requests_in_flight() -> NovaWorldPanel:
 	assert_eq(panel.visible_rows().size(), 3, "the browser is populated")
 	assert_eq(panel.joining_rid(), 2, "a join to the selected row is in flight")
 	assert_true(panel.host_enabled(), "Host is live on the signed-in session")
-	assert_true(_host_start_button(panel).disabled, "the host Start waits on its request")
+	assert_true(panel.host_pending(), "the host request waits on the service")
 	return panel
-
-
-func _host_start_button(panel: NovaWorldPanel) -> Button:
-	return panel.get_node("Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/"
-			+ "HostForm/HostActions/StartButton") as Button
 
 
 func _assert_connection_state_reset(panel: NovaWorldPanel, cause: String) -> void:
@@ -379,8 +364,7 @@ func _assert_connection_state_reset(panel: NovaWorldPanel, cause: String) -> voi
 	assert_false(panel.host_enabled(), "%s disables Host" % cause)
 	assert_false(panel.join_enabled(), "%s disables Join" % cause)
 	assert_false(panel.login_enabled(), "%s disables Login" % cause)
-	assert_false(_host_start_button(panel).disabled,
-			"%s drops the host request the Start button waited on" % cause)
+	assert_false(panel.host_pending(), "%s drops the host request in flight" % cause)
 	assert_eq(_population_label(panel).text, "", "%s clears the population line" % cause)
 	var message := panel.message_text()
 	watch_signals(panel)
@@ -569,7 +553,6 @@ func test_empty_and_filtered_states_are_not_fake_server_rows() -> void:
 # mission only starts once the service granted the hosting.
 func test_host_request_waits_for_the_service() -> void:
 	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
-	panel.select_mission(1)
 	watch_signals(panel)
 	_begin_configured_host(panel)
 	assert_signal_not_emitted(panel, "host_requested",
@@ -588,7 +571,6 @@ func test_host_press_saves_the_profile_first() -> void:
 	_root_dirs.append(run_dir)
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
 	var panel := _make_panel(PackedStringArray(["alpha.bms"]))
-	panel.select_mission(0)
 	_begin_configured_host(panel)
 	assert_true(FileAccess.file_exists(run_dir.path_join("player.sav")),
 		"the launch saved player.sav in the working directory")
@@ -599,7 +581,6 @@ func test_host_press_saves_the_profile_first() -> void:
 
 func test_hosting_started_hands_the_request_up() -> void:
 	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
-	panel.select_mission(1)
 	var client := panel.client_for_test()
 	# The unstarted session fails the leg at once; detach that answer so the
 	# service's grant can be played in its place.
@@ -646,9 +627,7 @@ func test_host_request_uses_the_rendered_host_dialog() -> void:
 		file.close()
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
 	GameCfgStore.reset()
-	var panel := _make_panel(PackedStringArray(["alpha.bms"]),
-			{NovaWorldPanel.HOST_DIALOG_MENU: _host_dialog_menu()})
-	panel.select_mission(0)
+	var panel := _make_panel(PackedStringArray(["alpha.bms"]))
 	var driver := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, _host_dialog_menu()), "mp.mnu", "MULTI_PLAYER_HOST")
 	GameCfgStore.block().populate_host_screen(driver)
 	GameCfgStore.block().read_host_screen(driver)

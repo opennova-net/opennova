@@ -19,7 +19,6 @@ namespace godot {
 
 class JoinTarget;
 class MenuDriver;
-class MnuDocument;
 class ResourceRoot;
 class RtxtStringFile;
 
@@ -83,12 +82,9 @@ public:
 	bool apply_host_dialog_control(const String &p_control, const String &p_value);
 	// The whole screen over the block (the engine's populate_host_screen /
 	// read_host_screen): the menu's MULTI_PLAYER_HOST controls shown from the
-	// block, and START's read of them into it; and the dialog left untouched
-	// over the mounted menu document (read_untouched_host_dialog; null: no
-	// screen).
+	// block, and START's read of them into it.
 	void populate_host_screen(const Ref<MenuDriver> &p_driver);
 	void read_host_screen(const Ref<MenuDriver> &p_driver);
-	void read_untouched_host_dialog(const Ref<MnuDocument> &p_doc);
 	// The screen's restriction lists over the block (the engine's populate_host_weapon_list /
 	// populate_host_class_list): the dialog's init fills both and gives its START gate the class
 	// words; the LAN screen's activation fills WEAPON_LIST again. `gametext` names the weapons

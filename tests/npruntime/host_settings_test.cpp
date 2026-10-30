@@ -107,6 +107,15 @@ mnu::Document host_dialog_document() {
 //  0 on a miss @0x64BA82); CButtonWnd_SetLabel @0x6572F0 (the {hot} cut @0x657451..0x657480);
 //  UI_HandleHostSessionStart - HostDialog_ReadSettings @0x556E36; HostDialog_ReadSettings -
 //  CSpinListWnd_GetSelectedValue @0x5559DE, the location's strncpy @0x555A72]
+// The screen opened over `doc` (null: no screen, every control lacking) and START pressed with
+// nothing changed: the populate, then the read.
+void open_and_start(gamecfg::GameCfg& cfg, const mnu::Document* doc) {
+    auto screen = std::make_unique<opennova::menu::MenuRuntime>();
+    if (doc != nullptr) screen->open_document(doc, std::string(), std::string(kHostDialogScreen));
+    populate_host_screen(*screen, cfg, kJo);
+    read_host_screen(*screen, cfg, kJo);
+}
+
 int untouched_dialog() {
     const mnu::Document doc = host_dialog_document();
     gamecfg::GameCfg cfg;
@@ -119,7 +128,7 @@ int untouched_dialog() {
     cfg.enable_ai = 2;
     cfg.dedicated = 1;
     cfg.mp_novaworld_host_lan_only = 5;
-    read_untouched_host_dialog(cfg, kJo, &doc);
+    open_and_start(cfg, &doc);
     TEST_EXPECT(cfg.game_name == "NightOps");
     TEST_EXPECT(cfg.country == "US");
     TEST_EXPECT(cfg.sv_punkbuster == 0 && cfg.replay == 0 && cfg.enable_ai == 0);
@@ -129,16 +138,16 @@ int untouched_dialog() {
     // copies its NUL alone.
     cfg.country = "USA";
     cfg.replay = 1;
-    read_untouched_host_dialog(cfg, kJo, &doc);
+    open_and_start(cfg, &doc);
     TEST_EXPECT(cfg.country.empty() && cfg.replay == 1);
     cfg.country = "de";
-    read_untouched_host_dialog(cfg, kJo, &doc);
+    open_and_start(cfg, &doc);
     TEST_EXPECT(cfg.country == "DE");
     // No screen: the clamp alone.
     cfg.sv_punkbuster = 1;
     cfg.replay = 2;
     cfg.mp_max_players = 80;
-    read_untouched_host_dialog(cfg, kJo, nullptr);
+    open_and_start(cfg, nullptr);
     TEST_EXPECT(cfg.sv_punkbuster == 1 && cfg.replay == 2 && cfg.mp_max_players == 64);
     // The LAN screen: the open, the player's edit, START's read; PunkBuster's spin is disabled.
     auto screen = std::make_unique<opennova::menu::MenuRuntime>();

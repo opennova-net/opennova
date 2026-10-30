@@ -1,7 +1,6 @@
 #include "player/game_config_block.h"
 
 #include "mnu/menu_driver.h"
-#include "mnu/mnu_document.h"
 #include "network/join_target.h"
 #include "network/novaworld_identity.h" // sample_device_identity, primary_desktop_size
 #include "resource_index/launch_flags.h"
@@ -82,8 +81,6 @@ void GameConfigBlock::_bind_methods() {
 			&GameConfigBlock::apply_host_dialog_control);
 	ClassDB::bind_method(D_METHOD("populate_host_screen", "driver"), &GameConfigBlock::populate_host_screen);
 	ClassDB::bind_method(D_METHOD("read_host_screen", "driver"), &GameConfigBlock::read_host_screen);
-	ClassDB::bind_method(D_METHOD("read_untouched_host_dialog", "doc"),
-			&GameConfigBlock::read_untouched_host_dialog);
 	ClassDB::bind_method(D_METHOD("populate_host_restrictions", "driver", "gametext", "menu_ui"),
 			&GameConfigBlock::populate_host_restrictions);
 	ClassDB::bind_method(D_METHOD("populate_host_weapon_list", "driver", "gametext", "menu_ui"),
@@ -186,11 +183,6 @@ void GameConfigBlock::populate_host_screen(const Ref<MenuDriver> &p_driver) {
 
 void GameConfigBlock::read_host_screen(const Ref<MenuDriver> &p_driver) {
 	if (p_driver.is_valid()) inmatch::read_host_screen(p_driver->runtime(), block_.cfg(), *block_.title());
-}
-
-void GameConfigBlock::read_untouched_host_dialog(const Ref<MnuDocument> &p_doc) {
-	inmatch::read_untouched_host_dialog(block_.cfg(), *block_.title(),
-			p_doc.is_valid() ? &p_doc->get_native() : nullptr);
 }
 
 void GameConfigBlock::populate_host_restrictions(const Ref<MenuDriver> &p_driver,

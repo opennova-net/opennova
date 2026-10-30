@@ -11,9 +11,6 @@ namespace opennova::menu {
 class HostDialog;
 class MenuRuntime;
 }
-namespace opennova::mnu {
-struct Document;
-}
 
 namespace opennova::inmatch {
 
@@ -26,11 +23,7 @@ namespace opennova::inmatch {
 // Game_SaveConfig @0x556E72; CNapiGameSession_BuildAndCreateSession @0x5694D0]
 // The NovaWorld host runs the same dialog: its open populates the controls,
 // its START reads them back into the block, then its NovaWorld arm opens the
-// hosting URL. So a dialog left untouched (the game shell's NovaWorld page,
-// whose map picker stands in for it) gives the block back as the screen
-// shows it: the populate's cap clamp, with no pb\pbcl.dll the PunkBuster
-// spin's 0, and every other control's read of what its populate showed
-// (read_untouched_host_dialog; D-NET-1108).
+// hosting URL; the game shell's NovaWorld page opens this screen for it.
 // [orig: UI_InitHostSettingsDialog @0x558960 - the populate @0x5589C7;
 //  UI_PopulateHostSettingsFromConfig - GAME_NAME @0x556010, the pb\pbcl.dll
 //  test @0x55613A; UI_HandleHostSessionStart - the NovaWorld arm
@@ -122,14 +115,6 @@ bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& 
 bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
                                     gamecfg::GameCfg& cfg, const gamecfg::WeaponRoster& weapons,
                                     std::string_view control, const hud::GameTextLookup& menu_ui);
-// The dialog left untouched: the mounted menu's MULTI_PLAYER_HOST opened
-// fresh (null `doc`, or a menu without the screen: no control), populated and
-// read back, so the block takes each word as the screen gives it back.
-// [orig: UI_InitHostSettingsDialog @0x558960 - UI_PopulateHostSettingsFromConfig
-//  @0x5589C7; UI_HandleHostSessionStart @0x556D00 - HostDialog_ReadSettings
-//  @0x556E36, the NovaWorld arm @0x556E47]
-void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const Title& title,
-                                const mnu::Document* doc);
 // The live player-slot limit the session apply makes of a cap: the cap, plus
 // the host's own slot when dedicated (GameConfig::player_slot_limit), under the
 // title's ceiling (TitlePlayerCaps::session).

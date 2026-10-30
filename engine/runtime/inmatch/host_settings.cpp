@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
-#include <memory>
 
 namespace opennova::inmatch {
 namespace {
@@ -433,15 +432,6 @@ bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog&
     }
     dialog.set_class_words(screen, cfg.class_availability, kClassWordCount);
     return true;
-}
-
-void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const Title& title,
-                                const mnu::Document* doc) {
-    // A fresh runtime (frameless): every control starts as the document authors it.
-    auto screen = std::make_unique<menu::MenuRuntime>();
-    if (doc != nullptr) screen->open_document(doc, std::string(), std::string(kHostDialogScreen));
-    populate_host_screen(*screen, cfg, title);
-    read_host_screen(*screen, cfg, title);
 }
 
 uint32_t session_point_limit(int32_t cfg_limit) {
