@@ -873,24 +873,6 @@ bool MenuDriver::request_expansion(const String &p_name, const String &p_current
 
 String MenuDriver::take_expansion_reload() { return to_gd(flow_.take_expansion_reload()); }
 
-void MenuDriver::seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows) {
-	host_dialog_.seed(runtime_, mission_choices(p_rows));
-}
-
-void MenuDriver::add_host_missions(const Ref<RtxtStringFile> &p_text) {
-	host_dialog_.add_selected(runtime_, game_text_lookup(p_text));
-}
-
-PackedStringArray MenuDriver::selected_host_missions() const {
-	return to_gd_strings(host_dialog_.selected_missions());
-}
-
-PackedInt32Array MenuDriver::selected_host_launch_options() const {
-	PackedInt32Array out;
-	for (const int32_t option : host_dialog_.selected_launch_options()) out.push_back(option);
-	return out;
-}
-
 bool MenuDriver::is_front_options_screen(const String &p_screen) {
 	return opennova::menu::OptionsScreen::is_front_screen(to_std(p_screen));
 }
@@ -1087,16 +1069,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request_expansion", "name", "current", "packed"), &MenuDriver::request_expansion);
 	ClassDB::bind_method(D_METHOD("has_pending_expansion_reload"), &MenuDriver::has_pending_expansion_reload);
 	ClassDB::bind_method(D_METHOD("take_expansion_reload"), &MenuDriver::take_expansion_reload);
-	ClassDB::bind_method(D_METHOD("seed_host_pool", "rows"), &MenuDriver::seed_host_pool);
-	ClassDB::bind_method(D_METHOD("filter_host_missions"), &MenuDriver::filter_host_missions);
-	ClassDB::bind_method(D_METHOD("add_host_missions", "text"), &MenuDriver::add_host_missions);
-	ClassDB::bind_method(D_METHOD("remove_host_missions"), &MenuDriver::remove_host_missions);
-	ClassDB::bind_method(D_METHOD("can_start_host"), &MenuDriver::can_start_host);
-	ClassDB::bind_method(D_METHOD("selected_host_missions"), &MenuDriver::selected_host_missions);
-	ClassDB::bind_method(D_METHOD("toggle_host_mission_switch", "row"),
-			&MenuDriver::toggle_host_mission_switch);
-	ClassDB::bind_method(D_METHOD("selected_host_launch_options"),
-			&MenuDriver::selected_host_launch_options);
 	ClassDB::bind_method(D_METHOD("prepare_options", "profiles"), &MenuDriver::prepare_options);
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
 	ClassDB::bind_method(D_METHOD("apply_options_policy", "profiles"), &MenuDriver::apply_options_policy);

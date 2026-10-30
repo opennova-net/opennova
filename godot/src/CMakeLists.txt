@@ -312,6 +312,7 @@ add_library(opennova_bindings OBJECT
     mnu/menu_driver.cpp
     mnu/player_info_loadout.cpp
     mnu/armory_loadout.cpp
+    mnu/lan_multiplayer_menu.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp

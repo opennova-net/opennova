@@ -4358,6 +4358,13 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# The LAN multiplayer screens' controller (inmatch/lan_multiplayer_menu.h, mp.mnu, the shell's "lan"
+# delegate) headless over the menu runtime and a fake host: the LAN screen's activation, the search
+# state, the list's keep-selection rule and the join, the host screen's pool, rotation, gate and START.
+add_executable(lan_multiplayer_menu_test npruntime/lan_multiplayer_menu_test.cpp)
+target_link_libraries(lan_multiplayer_menu_test PRIVATE opennova_runtime)
+target_include_directories(lan_multiplayer_menu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lan_multiplayer_menu COMMAND lan_multiplayer_menu_test)
 # The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7): the cfg table's
 # title, dfx2.exe's caps, score table seeds, linger, deploy protection and its want of a revive.
 add_executable(npruntime_title_host_rules_test npruntime/title_host_rules_test.cpp)
