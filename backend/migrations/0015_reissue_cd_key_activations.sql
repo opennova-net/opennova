@@ -1,0 +1,11 @@
+-- The machines' activations are issued again. Every NWACT stored before this file left out the
+-- wire key's NUL: a stock dfx2.exe decodes its registry CDKIID in place and writes no terminator,
+-- so it kept the wire key followed by the chain's CRC bytes and whatever its stack buffer held.
+-- Its LAN join sent that and a LAN host refused it, and its NovaWorld login, posting an NWCDKIID
+-- that was no wire key, was handed the same stored value again. The NWACT now encodes the wire
+-- key and its NUL (net/novacrypto/cdkey.h make_activation). With the rows gone, a machine whose
+-- NWCDKIID is no wire key is handed a new NWACT at its next login, recorded as its key's
+-- activation as before (apps/novaworld_web/cd_keys.cpp record_activation); one whose NWCDKIID
+-- decodes (OpenNova's client reads either form) is handed none and keeps what it holds. The keys
+-- stay: every serial, wire key and account assignment is unchanged.
+DELETE FROM cd_key_activations;

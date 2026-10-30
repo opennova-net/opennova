@@ -192,6 +192,18 @@ int activations(Database &db) {
 			history[1].title == "dfx2");
 	TEST_EXPECT(cdkeys::activations_of_key(db, key_id).size() == 2);
 	TEST_EXPECT(cdkeys::keys_of_account(db, first).size() == 1);
+	// The issued NWACT holds the wire key and its NUL under the registry chain's four keys.
+	TEST_EXPECT(nwact_a.size() == 2 * (result.key->wire_key.size() + 1 + 4 * 4));
+	// A machine whose row is gone (0015_reissue_cd_key_activations.sql dropped the NUL-less ones)
+	// is activated anew under the same key: the NWACT the codec makes, one row again.
+	db.exec("DELETE FROM cd_key_activations WHERE key_id = $1 AND nwpssk = $2;",
+			{ BindValue(key_id), BindValue(std::string(kMachineA)) });
+	TEST_EXPECT(cdkeys::activations_of_key(db, key_id).size() == 1);
+	result = cdkeys::activate_account(db, first, "dfx2", kMachineA, true);
+	TEST_EXPECT(result.outcome == O::Activated && !result.minted && result.key->id == key_id &&
+			result.nwact == nwact_a);
+	TEST_EXPECT(cdkeys::activations_of_key(db, key_id).size() == 2);
+	TEST_EXPECT(cdkeys::keys_of_account(db, first).size() == 1);
 
 	// A manual activation under the key: the machine's NWACT, recorded once.
 	const std::string third = "QQQQQQQQQQQQQQQQQQQQQQQ";
