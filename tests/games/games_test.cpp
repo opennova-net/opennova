@@ -146,6 +146,8 @@ void retail_rules_values() {
 			!jo.emplaced_solo_holds_fire);
 	CHECK(jo.ai_vehicle_near_reach == 0xC0000 && jo.ai_vehicle_write_off_count == 3410 &&
 			jo.spawn_kit == nullptr);
+	CHECK(jo.part_spin.full == 186413 && jo.part_spin.mid == 163110 && jo.part_spin.low == 139809 &&
+			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
 
 	const world::TitleRules &dfx2 = world::title_rules("dfx2");
 	CHECK(dfx2.waypoint_completion == world::WaypointCompletion::CoopCheckpoint); // DFX2-9
@@ -163,6 +165,9 @@ void retail_rules_values() {
 			dfx2.emplaced_solo_planar_slew == 0x3AB948 && dfx2.narrow_still_player_radius); // 26, 31
 	CHECK(dfx2.emplaced_solo_holds_fire); // DFX2-37
 	CHECK(dfx2.ai_vehicle_near_reach == 0x40000 && dfx2.ai_vehicle_write_off_count == 1860); // 32
+	CHECK(dfx2.part_spin.full == 372827 && dfx2.part_spin.mid == 326222 && // DFX2-23
+			dfx2.part_spin.low == 279619 && dfx2.part_spin.ground_decay == 372827 &&
+			dfx2.part_spin.helo_decay == 93206);
 	size_t kit = 0;
 	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
 	CHECK(kit == 8 && std::string(dfx2.spawn_kit[2]) == "WPN_MK23");
@@ -247,6 +252,10 @@ std::string joiner_rules_row(const world::TitleRules &r) {
 			" emplaced_solo_planar_slew=" + std::to_string(r.emplaced_solo_planar_slew) +
 			" narrow_still_player_radius=" + std::to_string(r.narrow_still_player_radius) +
 			" emplaced_solo_holds_fire=" + std::to_string(r.emplaced_solo_holds_fire) +
+			" part_spin=" + std::to_string(r.part_spin.full) + "/" +
+			std::to_string(r.part_spin.mid) + "/" + std::to_string(r.part_spin.low) + "/" +
+			std::to_string(r.part_spin.ground_decay) + "/" +
+			std::to_string(r.part_spin.helo_decay) +
 			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit);
 }
 
@@ -306,7 +315,7 @@ void bump_rule_sheet_per_protocol() {
 			"joiner: waypoint_goals_met_advance=1 waypoint_advance_needs_done=0 "
 			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
 			"narrow_still_player_radius=0 emplaced_solo_holds_fire=0 "
-			"spawn_kit=jo_single_player_page";
+			"part_spin=186413/163110/139809/186413/46603 spawn_kit=jo_single_player_page";
 	const std::string dfx2 =
 			"S 0x0A: s2c_0a.objective_checkpoint=1 slot_state.join_state_fixed=1\n"
 			"S 0x0F: s2c_0f.spawn_zone_flag_always=1 s2c_0f.deploy_screen_always=1\n"
@@ -326,6 +335,7 @@ void bump_rule_sheet_per_protocol() {
 			"joiner: waypoint_goals_met_advance=0 waypoint_advance_needs_done=1 "
 			"route_done_records=1 emplaced_turret_update=1 emplaced_solo_planar_slew=3848520 "
 			"narrow_still_player_radius=1 emplaced_solo_holds_fire=1 "
+			"part_spin=372827/326222/279619/372827/93206 "
 			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
 			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE";
 	CHECK(sheet("jo") == jo);

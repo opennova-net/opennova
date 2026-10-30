@@ -483,8 +483,9 @@ void init_infantry(AiEntity &ae) {
 // bit lives in the runtime view the motors toggle.
 // [orig: Entity_SpawnFromBMSRecord @0x40ED9F..0x40EDA5 (2 -> 0x40),
 //  @0x40EE2A..0x40EE33 (0x4000 -> 0x80), @0x40EE70..0x40EE94 (0x20000 ->
-//  Flags |= 0x80, +0x468 = 0x2D82D, +0x460 = 0x0CCCCCC0, +0x29C = 0x10000)]
-void fold_ai_entity_flags(Entity &entity, const bms::Entity &e) {
+//  Flags |= 0x80, +0x468 = 0x2D82D, +0x460 = 0x0CCCCCC0, +0x29C = 0x10000)]; the rate is the
+// title's full one (DFX2-23) [orig: Entity_SpawnFromBMSRecord - 0x5B05B @0x40ECD0 (dfx2.exe)].
+void fold_ai_entity_flags(Entity &entity, const bms::Entity &e, const PartSpinRates &rates) {
     const uint32_t attrib = e.bmsi_attributes;
     if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding)) {
         entity.engine_flags |= kEntityFlagMounted;
@@ -496,7 +497,7 @@ void fold_ai_entity_flags(Entity &entity, const bms::Entity &e) {
     }
     if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::EngineRunning)) {
         entity.flags |= 0x80u;
-        rotor_spawn_full(entity.veh.part_spin);
+        rotor_spawn_full(entity.veh.part_spin, rates);
         entity.veh.speed = 0x10000;
     }
 }
@@ -1203,7 +1204,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                      (opts.item_attributes(e.type_id) & kItemAttribAIData) != 0);
             if (ai_class) {
                 if (Entity *spawned = world.registry.get(h)) {
-                    fold_ai_entity_flags(*spawned, e);
+                    fold_ai_entity_flags(*spawned, e, world.rules.title().part_spin);
                     // The AI slot's +156 takes the record's raw 8-byte ai_textfile
                     // (two dwords over the zeroed 16-byte name, so at most 8
                     // characters before a NUL), case and padding kept.

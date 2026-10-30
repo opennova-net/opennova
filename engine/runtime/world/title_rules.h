@@ -79,6 +79,22 @@ using ScoreValuesTable = ScoreValues (*)(uint32_t game_type);
 // A title's person hit-zone -> bullet damage scale (hit_zone_damage_multiplier).
 using HitZoneScaleTable = double (*)(int32_t hit_zone);
 
+// DFX2-23: the rotor machines' rates (world/vehicle_part_anim.h): the three spin-up rates a part
+// seeds (the full one a player-control item's, an EngineRunning spawn's and a flying aircraft's
+// bone init's too; the other two a non-player-control item's 34..66 and 67..99 rolls) and the two
+// machines' spin-down per tick. Jointops.exe's below; dfx2.exe's are each about twice as large.
+// [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 - 186413 @0x4928F3 / @0x492915, 163110 and
+//  139809 @0x49290E..0x492935, the decay 186413 @0x492954; Entity_UpdateHeloRotorSpin @0x48FA70 -
+//  186413 @0x48FB0C / @0x48FB2E, the decay 46603 @0x48FB67; Entity_SpawnFromBMSRecord @0x40EE80;
+//  Entity_InitAircraftWeaponBones @0x4902ED]
+struct PartSpinRates {
+	int32_t full = 186413; // 0x2D82D
+	int32_t mid = 163110; // 0x27D26
+	int32_t low = 139809; // 0x22221
+	int32_t ground_decay = 186413;
+	int32_t helo_decay = 46603; // 0xB60B
+};
+
 struct TitleRules {
 	// --- DFX2-9: the co-op checkpoint (§7.1). --------------------------------------------------
 	// The authority's waypoint hook at an event's dispatch (event_runtime.cpp).
@@ -183,6 +199,12 @@ struct TitleRules {
 	// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368 (@0x516f4f)] [orig:
 	//  GameEvent_PlayerDeath `mov [edi+170h], ebx` @0x51419b, the 0x54 gate @0x5145cb (dfx2.exe)]
 	bool revive_window = true;
+
+	// --- DFX2-23: the vehicle part spin. ---------------------------------------------------------
+	// joiner-side: every peer spins the rotors and the spinning parts of the vehicles it does not
+	// drive (world/vehicle_part_anim.h). The defaults are Jointops.exe's; dfx2.exe doubles them
+	// (§5.4).
+	PartSpinRates part_spin;
 
 	// --- DFX2-25: the emplaced gun's counter-rotation. -------------------------------------------
 	// joiner-side: the World's gun channel and the joiner's replica gun channel
