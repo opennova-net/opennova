@@ -495,7 +495,7 @@ struct GameConfig {
 	// @0x530A60 copies row+300..+452]
 	// Absent selects GameType_CreateDefaultSettings for game_type. A parsed or
 	// explicitly supplied row is present even when every value is zero.
-	std::optional<std::array<int32_t, 39>> session_status_stat_values;
+	std::optional<world::ScoreValues> session_status_stat_values;
 	// score.ini FIELD rows for the selected game type, in file order. Empty
 	// means the match should use GameType_CreateDefaultSettings' retail schema.
 	// The second byte is preserved rather than normalized because it is emitted

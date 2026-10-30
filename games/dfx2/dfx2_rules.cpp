@@ -16,8 +16,8 @@ namespace gt = opennova::game_type;
 // ALIVEQUANTUM (36) 60 -- and its own Advance and Secure / Conquer and Control split, each row as
 // the function stores it.
 // [orig: GameType_CreateDefaultSettings @0x52ae80 (dfx2.exe)]
-std::array<int32_t, 39> dfx2_score_values(uint32_t game_type) {
-	std::array<int32_t, 39> values{};
+world::ScoreValues dfx2_score_values(uint32_t game_type) {
+	world::ScoreValues values{};
 	// What the capture and objective rows hold beside their own words.
 	auto objective_combat = [&] {
 		values[3] = 4;

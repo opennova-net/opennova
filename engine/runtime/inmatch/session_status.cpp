@@ -60,7 +60,7 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 	if (row < 0) return false;
 	const score::Row loaded = score::row_of(file, row);
 	if (!loaded.found) return false;
-	std::array<int32_t, 39> values =
+	world::ScoreValues values =
 			world::default_match_score_values(config.game_type, config.title_rules());
 	for (const score::Entry &var : loaded.vars)
 		if (var.id >= 0 && static_cast<size_t>(var.id) < values.size())
@@ -87,9 +87,9 @@ std::vector<uint8_t> serialize_session_status(
 	// @0x530A60, maxPlayers_3F4 @0x530B75..0x530B81].
 	out.push_back(static_cast<uint8_t>(config.max_players));
 	append_u32(out, uptime_ms);
-	const std::array<int32_t, 39> default_values =
+	const world::ScoreValues default_values =
 			world::default_match_score_values(config.game_type, config.title_rules());
-	const std::array<int32_t, 39> &score_values =
+	const world::ScoreValues &score_values =
 			config.session_status_stat_values.has_value()
 			? *config.session_status_stat_values
 			: default_values;

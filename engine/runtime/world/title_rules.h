@@ -36,11 +36,17 @@
 
 namespace opennova::world {
 
-// Jointops.exe's built-in score table: the 39 VAR values of a game type's row, as
+// A game type's score row: its 39 VAR values, the 0x9C bytes GameType_CreateDefaultSettings
+// zeroes per row before it stores them (S2C 0x58 carries the same 39).
+// [orig: GameType_CreateDefaultSettings @0x52DD00] [orig: GameType_CreateDefaultSettings
+//  @0x52ae80 - the row's memset(.., 0x9C) @0x52afd0 (dfx2.exe)]
+using ScoreValues = std::array<int32_t, 39>;
+
+// Jointops.exe's built-in score table: the VAR values of a game type's row, as
 // GameType_CreateDefaultSettings stores them (match_score_table.cpp, which carries the rows'
 // witness; MatchRules::score_values). TitleRules::score_values' default.
 // [orig: GameType_CreateDefaultSettings @0x52DD00]
-std::array<int32_t, 39> builtin_score_values(uint32_t game_type);
+ScoreValues builtin_score_values(uint32_t game_type);
 
 // DFX2-9: what a fired event's waypoint hook marks done, on the authority (the hook returns at
 // once off it [orig: the is_authority test @0x452ce0]).
@@ -67,8 +73,8 @@ enum class EmplacedTurretUpdate : uint8_t {
 	CounterRotate,
 };
 
-// A title's built-in score table: game type -> the row's 39 VAR values (builtin_score_values).
-using ScoreValuesTable = std::array<int32_t, 39> (*)(uint32_t game_type);
+// A title's built-in score table: game type -> the row's VAR values (builtin_score_values).
+using ScoreValuesTable = ScoreValues (*)(uint32_t game_type);
 // A title's person hit-zone -> bullet damage scale (hit_zone_damage_multiplier).
 using HitZoneScaleTable = double (*)(int32_t hit_zone);
 

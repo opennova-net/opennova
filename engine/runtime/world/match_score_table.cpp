@@ -77,8 +77,8 @@ std::vector<MatchScoreField> make_default_score_fields(uint32_t game_type) {
 
 // Jointops.exe's rows (title_rules.h).
 // [orig: GameType_CreateDefaultSettings @0x52DD00]
-std::array<int32_t, 39> builtin_score_values(uint32_t game_type) {
-    std::array<int32_t, 39> values{};
+ScoreValues builtin_score_values(uint32_t game_type) {
+    ScoreValues values{};
     auto common_combat = [&] {
         values[3] = 5;
         values[6] = 1;
@@ -152,7 +152,7 @@ std::array<int32_t, 39> builtin_score_values(uint32_t game_type) {
     return values;
 }
 
-std::array<int32_t, 39> default_match_score_values(uint32_t game_type, const TitleRules &rules) {
+ScoreValues default_match_score_values(uint32_t game_type, const TitleRules &rules) {
     return rules.score_values(game_type);
 }
 
