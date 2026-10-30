@@ -113,7 +113,11 @@ void WeatherState::seed(const WeatherSeed &seed) {
     night_phase = 0;
     compute_night_phase();
     tod_advance_per_tick = seed.tod_advance_per_tick;
-    tod_epoch_tickdown = kTodEpochTicks;
+    // The mission start sets its clock through Environment_SetCurrentTime, which leaves the
+    // minute counter at 10 (Environment_SnapStateToTargets touches neither).
+    // [orig: Game_StartMission @0x524360 - Environment_SetCurrentTime @0x5253D5 (the header's),
+    //  @0x5253B7 (a kept clock's); Environment_SetCurrentTime @0x57C4B9]
+    tod_epoch_tickdown = kClockSetTickdown;
     tod_epoch = 0;
     quake_ticks = 0;
     precipitation_kind = static_cast<uint32_t>(PrecipitationKind::Rain);
@@ -282,7 +286,7 @@ void WeatherState::command_time_of_day_minutes(int32_t minute_of_day) {
 
 void WeatherState::set_current_time(uint32_t fixed24) {
     tod_fixed24 = fixed24;
-    tod_epoch_tickdown = 10;
+    tod_epoch_tickdown = kClockSetTickdown;
     bump_command();
 }
 

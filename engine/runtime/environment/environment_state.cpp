@@ -169,7 +169,8 @@ void EnvironmentState::configure_mission_clock(int start_time_q8_8,
 			world::WeatherState::kTodDayFixed24;
 	standalone_weather_.tod_advance_per_tick =
 			static_cast<uint32_t>(tod_advance_per_tick(minutes_per_day));
-	standalone_weather_.tod_epoch_tickdown = world::WeatherState::kTodEpochTicks;
+	// A clock set: the minute counter at the set's 10 [orig: Environment_SetCurrentTime @0x57C4B9].
+	standalone_weather_.tod_epoch_tickdown = world::WeatherState::kClockSetTickdown;
 	if (weather_is_standalone()) {
 		sync_clock_from_weather();
 	}

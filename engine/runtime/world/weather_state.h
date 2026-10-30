@@ -171,7 +171,12 @@ struct WeatherState {
     // g_EnvTodAdvancePerTick @ 0x26c644c, g_EnvTodEpochTickdown @ 0x26c6064,
     // g_EnvTodEpoch @ 0x26c6450].
     static constexpr uint32_t kTodDayFixed24 = 24u << 24;
+    // The minute counter's reload when the tick runs it out
+    // [orig: Environment_UpdateWeatherTick @0x57E9D4..0x57E9E3]; a clock set leaves it at
+    // kClockSetTickdown instead, the mission start's among them
+    // [orig: Environment_SetCurrentTime @0x57C4B0 - @0x57C4B9].
     static constexpr int32_t kTodEpochTicks = 310;
+    static constexpr int32_t kClockSetTickdown = 10;
     // The 62 ticks-per-second scale every WAC seconds argument multiplies by
     // [orig: WacCmd_Rain @ 0x4edf60 `imul 62`; WacCmd_ColorFade @ 0x4edcb0].
     static constexpr int32_t kWacTicksPerSecond = 62;

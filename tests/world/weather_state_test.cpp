@@ -194,11 +194,15 @@ void test_tick_advances_the_clock_and_fires_thunder() {
 	const uint32_t tod = ws.tod_fixed24;
 	ws.tick_sim(nullptr, events);
 	CHECK(ws.tod_fixed24 == tod + 0x1234u);
-	CHECK(ws.tod_epoch_tickdown == w::WeatherState::kTodEpochTicks - 1);
+	// The seed's clock set leaves the minute counter at 10, so it runs out on the eleventh tick,
+	// counts one elapsed minute and reloads 310 [orig: Environment_SetCurrentTime @0x57C4B9;
+	// Environment_UpdateWeatherTick @0x57E9D4..0x57E9EF].
+	CHECK(ws.tod_epoch_tickdown == w::WeatherState::kClockSetTickdown - 1);
 	CHECK(!events.thunder_a && !events.thunder_b && !events.quake_shake_local);
-	// 310 ticks later the minute counter wraps and counts one elapsed minute.
-	for (int i = 0; i < 310; ++i) ws.tick_sim(nullptr, events);
-	CHECK(ws.tod_epoch == 1);
+	for (int i = 0; i < 9; ++i) ws.tick_sim(nullptr, events);
+	CHECK(ws.tod_epoch == 0 && ws.tod_epoch_tickdown == 0);
+	ws.tick_sim(nullptr, events);
+	CHECK(ws.tod_epoch == 1 && ws.tod_epoch_tickdown == w::WeatherState::kTodEpochTicks);
 	// flash: timer A 16 -> thunder on the 16th tick; farflash: B 32.
 	ws.command_flash();
 	int thunder_tick = -1;
