@@ -140,6 +140,9 @@ void test_the_mission_block_carries_the_session_title() {
 	startup.protocol = title_protocol("jo");
 	startup.text_override = &override_table;
 	inmatch::NapiNPServerCtx ctx;
+	// Not the authority, so the create's start_server installs no identity: the map change's
+	// block reads the context's, which names JO's.
+	ctx.np_protocol.identity = startup.protocol;
 	CHECK(inmatch::create_session(ctx, config, startup) == inmatch::CreateSessionResult::Created);
 	CHECK(ctx.session_title == "Desert Storm");
 	CHECK(block_string(ctx.mission_metadata_blob, 84) == "CO01.BMS");
