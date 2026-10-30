@@ -519,13 +519,14 @@ int server_settings_availability() {
 
 // The schema offers what the session reads: the team lives and the difficulty word ride to every
 // joiner (runtime/inmatch/host_config.cpp), so both are offered, with their defaults; a patch sets
-// them, the difficulty within its one byte.
+// them, the difficulty as the reader takes it, whole (-1 among the words the game tests:
+// [orig: Entity_GetMaxHealthWithDifficulty @0x43B8D1]).
 int server_settings_session_rows() {
 	const opennova::io::JsonValue schema = server_settings_schema(kJoSettings, true);
 	bool lives = false, difficulty = false;
 	for (const auto &row : schema.array) {
 		lives = lives || (row.get_string("key", "") == "max_team_lives" && row.get_int("default", 0) == 100);
-		difficulty = difficulty || (row.get_string("key", "") == "difficulty" && row.get_int("max", 0) == 255);
+		difficulty = difficulty || (row.get_string("key", "") == "difficulty" && row.get_int("max", 0) == INT32_MAX);
 	}
 	TEST_EXPECT(lives && difficulty);
 	GameCfg cfg = defaults();
@@ -534,14 +535,14 @@ int server_settings_session_rows() {
 	TEST_EXPECT(opennova::io::json_parse(R"({"max_team_lives":5,"difficulty":2})", patch, error));
 	TEST_EXPECT(apply_server_settings(cfg, patch, true, {}, kJoSettings, field, error));
 	TEST_EXPECT(cfg.max_team_lives == 5 && cfg.mp_difficulty == 2);
-	TEST_EXPECT(opennova::io::json_parse(R"({"difficulty":256})", patch, error));
-	TEST_EXPECT(!apply_server_settings(cfg, patch, true, {}, kJoSettings, field, error) && cfg.mp_difficulty == 2);
+	TEST_EXPECT(opennova::io::json_parse(R"({"difficulty":-1})", patch, error));
+	TEST_EXPECT(apply_server_settings(cfg, patch, true, {}, kJoSettings, field, error) && cfg.mp_difficulty == -1);
 	return 0;
 }
 
 // The schema's limits are the reader's: a text row keeps the bytes a game.cfg line of it keeps
 // (text_limit: the cfg table's size less its NUL, else the switch key's limit), the packet size the
-// defaults' fold, the LAN mode the reader's; the core rows are named, not counted.
+// network init's fold, the LAN mode the reader's; the core rows are named, not counted.
 int server_settings_limits() {
 	TEST_EXPECT(text_limit(&GameCfg::game_name) == 31 && text_limit(&GameCfg::servermsg) == 127);
 	TEST_EXPECT(text_limit(&GameCfg::mp_host_game_password) == 16 &&
@@ -557,6 +558,10 @@ int server_settings_limits() {
 	TEST_EXPECT(row("country").get_int("max", 0) == 7);
 	TEST_EXPECT(row("max_packet_size").get_int("min", 0) == 100 && row("max_packet_size").get_int("max", 0) == 0x4000);
 	TEST_EXPECT(row("lan_mode").get_int("min", 0) == 1 && row("lan_mode").get_int("max", 0) == 4);
+	// The rows whose word the reader and the session take whole name no range of their own.
+	for (const char *whole : { "spectator_slots", "lineup_queue_size", "farp_timer" })
+		TEST_EXPECT(row(whole).get_int("min", 0) == INT32_MIN && row(whole).get_int("max", 0) == INT32_MAX);
+	TEST_EXPECT(row("respawn").get_int("min", -1) == 0);
 	TEST_EXPECT(row("max_players").get_int("max", 0) == 64 &&
 			server_settings_schema(kDfx2Settings, false).array.size() > 0);
 	int core = 0;

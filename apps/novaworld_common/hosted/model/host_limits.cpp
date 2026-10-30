@@ -10,7 +10,8 @@ namespace {
 
 // The host screen's ranges, the same code in Joint Operations and Delta Force Xtreme 2
 // (docs/titles/dfx2-vs-jo-re.md DFX2-8): the live settings accept retail SET's signed words
-// (including the kill/score "no limit" sentinel 500); Respawn clamps negative values to zero.
+// (including the kill/score "no limit" sentinel 500); Respawn takes 0 up, since a death waits 3
+// seconds for any word below 3 [orig: GameEvent_PlayerDeath @0x516EB6..0x516EC6].
 // The MAX_PLAYERS cap is the title's (host_limits_for_title).
 constexpr HostLimits kHostScreenLimits = {
 	{ 1, 0 }, // max_players (the title's cap)
