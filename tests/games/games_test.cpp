@@ -173,10 +173,12 @@ void retail_rules_values() {
 // it names that the sheet does not, fails.
 std::string in_match_sheet(const Protocol &protocol) {
 	const ProtocolInMatch &m = *protocol.in_match;
-	const auto &[s2c_0a, s2c_0f, s2c_14, s2c_64, s2c_66, c2s_2f, slot_state, person_index] = m;
+	const auto &[s2c_0a, s2c_0f, s2c_14, s2c_25, s2c_64, s2c_66, c2s_2f, slot_state, person_index] =
+			m;
 	const auto &[objective_checkpoint] = s2c_0a;
 	const auto &[spawn_zone_flag_always] = s2c_0f;
 	const auto &[chat_squad_tag_wrapped] = s2c_14;
+	const auto &[end_round_linger_ticks] = s2c_25;
 	const auto &[rules_word_bits] = s2c_64;
 	const auto &[armory_only_availability] = s2c_66;
 	const auto &[loadout_class_fixed] = c2s_2f;
@@ -188,6 +190,7 @@ std::string in_match_sheet(const Protocol &protocol) {
 		{ "s2c_0a.objective_checkpoint", std::to_string(objective_checkpoint) },
 		{ "s2c_0f.spawn_zone_flag_always", std::to_string(spawn_zone_flag_always) },
 		{ "s2c_14.chat_squad_tag_wrapped", std::to_string(chat_squad_tag_wrapped) },
+		{ "s2c_25.end_round_linger_ticks", std::to_string(end_round_linger_ticks) },
 		{ "s2c_64.rules_word_bits", rules_word },
 		{ "s2c_66.armory_only_availability", std::to_string(armory_only_availability) },
 		{ "c2s_2f.loadout_class_fixed", std::to_string(loadout_class_fixed) },
@@ -283,6 +286,7 @@ void bump_rule_sheet_per_protocol() {
 			"S 0x0F: s2c_0f.spawn_zone_flag_always=0\n"
 			"S 0x14: s2c_14.chat_squad_tag_wrapped=0\n"
 			"S 0x1E: person_index.pool0_wire_capacity=256\n"
+			"S 0x25: s2c_25.end_round_linger_ticks=0\n"
 			"S 0x2D: person_index.pool0_wire_capacity=256\n"
 			"S 0x33: person_index.pool0_wire_capacity=256\n"
 			"S 0x46: person_index.pool0_wire_capacity=256\n"
@@ -300,6 +304,7 @@ void bump_rule_sheet_per_protocol() {
 			"S 0x0F: s2c_0f.spawn_zone_flag_always=1\n"
 			"S 0x14: s2c_14.chat_squad_tag_wrapped=1\n"
 			"S 0x1E: person_index.pool0_wire_capacity=256\n"
+			"S 0x25: s2c_25.end_round_linger_ticks=1240\n"
 			"S 0x2D: person_index.pool0_wire_capacity=256\n"
 			"S 0x33: person_index.pool0_wire_capacity=256\n"
 			"S 0x46: person_index.pool0_wire_capacity=256\n"

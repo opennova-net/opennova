@@ -356,10 +356,14 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (!authority_recipient_) {
 			state_.round_reset_hold = true;
 			state_.spawn_success_gate = true;
-			// The reset ends the end-round linger: the next client frame's
-			// countdown stores mission exit 4 [orig: `mov g_EndRoundLingerTimer,
-			//  ebx` (0) @0x42281f -> Client_ProcessNetworkFrame @0x42c3d3].
-			state_.end_round_linger_ticks = 0;
+			// The reset sets the end-round linger the protocol's joiner keeps (JO's 0, so
+			// the next client frame's countdown stores mission exit 4; DFX2's 1240 ticks
+			// first) [orig: `mov g_EndRoundLingerTimer, ebx` (0) @0x42281f ->
+			//  Client_ProcessNetworkFrame @0x42c3d3] [orig: `mov g_EndRoundLingerTimer, 4D8h`
+			//  @0x42269d in sub_422650; the countdown @0x42e21e..0x42e22e in sub_42DFF0
+			//  (dfx2.exe)].
+			state_.end_round_linger_ticks =
+					protocol_in_match(protocol_).s2c_25.end_round_linger_ticks;
 		}
 		break;
 	case s2c::DIALOG_LINE: { // the co-op dialog line (0x28)

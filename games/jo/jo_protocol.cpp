@@ -44,6 +44,9 @@ Protocol make() {
 	m.s2c_0f.spawn_zone_flag_always = false;
 	// S2C 0x14 (DFX2-14): the squad tag bare. [orig: NapiNPServer_HandleChatMessage @0x513930]
 	m.s2c_14.chat_squad_tag_wrapped = false;
+	// S2C 0x25 (DFX2-17): a joiner's reset zeroes the end-round linger, so its next frame leaves
+	// the board. [orig: NapiNPClientMsg_GameReset @0x42281f]
+	m.s2c_25.end_round_linger_ticks = 0;
 	// S2C 0x64 (DFX2-18): the rules word as built.
 	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51e94b..0x51e957]
 	m.s2c_64.rules_word_bits = 0;

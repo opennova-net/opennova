@@ -93,6 +93,7 @@
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
+static const opennova::Protocol &kDfx2 = *opennova::title_protocol("dfx2");
 
 namespace {
 
@@ -7193,6 +7194,45 @@ bool run_game_reset_ends_the_round_linger() {
 			"linger: the client frame after a 0x25 stores mission exit 4");
 }
 
+// A DFX2 joiner's end-round linger: its 0x25 arms the linger at 1240 ticks where JO's zeroes it,
+// so the board stands that long before the countdown stores mission exit 4 (DFX2-17's joiner leg,
+// ProtocolInMatch::s2c_25). [orig: `mov g_EndRoundLingerTimer, 4D8h` @0x42269d in sub_422650, the
+//  twin of NapiNPClientMsg_GameReset @0x422800; the countdown @0x42e21e..0x42e22e in sub_42DFF0
+//  (dfx2.exe)]
+bool run_dfx2_game_reset_keeps_the_board() {
+	constexpr uint32_t kServerKey = 0x4C494E48u;
+	const std::string client_scrk = "CLIENT-LINGER2-SCRK";
+	const std::string server_scrk = "SERVER-LINGER2-SCRK";
+	inmatch::ClientRuntime client("Linger2", [] { return uint64_t{0x31323334u}; });
+	client.set_protocol(&kDfx2);
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
+			w::kPlayerInfantryTypeId, 0x10000u, 0, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.team_score_0 = 3;
+	header.team_score_1 = 8;
+	header.player_index = 0;
+	const std::vector<uint8_t> round_over = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	client.receive(round_over.data(), round_over.size());
+	for (uint32_t tick = 1; tick <= 10; ++tick) client.Client_ProcessNetworkFrame(tick);
+	const std::vector<uint8_t> reset = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::GAME_RESET, {})});
+	client.receive(reset.data(), reset.size());
+	if (!expect(client.state().end_round_linger_ticks == 1240,
+			"dfx2 linger: the 0x25 arms the linger at 1240 ticks"))
+		return false;
+	for (uint32_t tick = 11; tick < 11 + 1239; ++tick) client.Client_ProcessNetworkFrame(tick);
+	if (!expect(client.mission_exit_reason() == inmatch::kMissionExitNone,
+			"dfx2 linger: the board stands through 1239 frames"))
+		return false;
+	client.Client_ProcessNetworkFrame(11 + 1239);
+	return expect(client.mission_exit_reason() == inmatch::kMissionExitRoundOver,
+			"dfx2 linger: the 1240th frame stores mission exit 4");
+}
+
 // A stance change pressed between boundaries is QUEUED like every other
 // reliable C2S: it mints no sequence and ages nothing until the next open
 // boundary, which carries it in queue order ahead of what was queued after it
@@ -9296,6 +9336,7 @@ int main() {
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&
 	                run_resend_answer_and_pong_leave_from_the_receive_pump() &&
 	                run_game_reset_ends_the_round_linger() &&
+	                run_dfx2_game_reset_keeps_the_board() &&
 	                run_queued_stance_waits_for_the_send_boundary() &&
 	                run_c2s_producers_share_one_chronological_queue() &&
 	                run_carrier_repair_queues_at_its_record() &&

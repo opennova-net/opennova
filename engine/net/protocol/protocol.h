@@ -77,6 +77,13 @@ struct ProtocolInMatch {
 		// The relayed chat wraps the sender's squad tag in <ch> and <co>.
 		bool chat_squad_tag_wrapped = false;
 	} s2c_14;
+	// S2C 0x25 GAME_RESET, a joiner's reaction (DFX2-17).
+	struct {
+		// The end-round linger the reset leaves a joiner, in ticks, which its client frame counts
+		// down to mission exit 4: JO's 0 ends the board at the next frame, DFX2's 1240 keeps it
+		// up about 20 s more.
+		int32_t end_round_linger_ticks = 0;
+	} s2c_25;
 	// S2C 0x64 MISSION_DATA_CHUNK, the mission-data block it carries (DFX2-18).
 	struct {
 		// The bits the block's rules word (+44) is ORed with; the authority's own rules word
@@ -135,6 +142,7 @@ inline constexpr ProtocolDialectRow kProtocolDialect[] = {
 	{ 'S', 0x0F, "s2c_0f.spawn_zone_flag_always", "DFX2-2" },
 	{ 'S', 0x14, "s2c_14.chat_squad_tag_wrapped", "DFX2-14" },
 	{ 'S', 0x1E, "person_index.pool0_wire_capacity", "D-SIM-52" },
+	{ 'S', 0x25, "s2c_25.end_round_linger_ticks", "DFX2-17" },
 	{ 'S', 0x2D, "person_index.pool0_wire_capacity", "D-SIM-52" },
 	{ 'S', 0x33, "person_index.pool0_wire_capacity", "D-SIM-52" },
 	{ 'S', 0x46, "person_index.pool0_wire_capacity", "D-SIM-52" },
