@@ -1512,10 +1512,12 @@ func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> 
 # request, and the next menu tick switches the live root, boots the menu anew
 # over it and persists nothing [orig: Options_PopulateModList @ 0x559fb0;
 # Options_OnModListSelect @ 0x55a530; Options_HandleAcceptOrBack @ 0x55ad05].
+# The switch keeps the game running (Joint Operations here), the remount
+# naming it, never the default title's.
 # Uses a runtime (packed PFF) mount so mount_runtime has real archives.
 func test_mods_tab_lists_the_base_game_and_switches_for_the_run() -> void:
 	var dir := _make_runtime_dir()
-	var shell = _make_runtime_shell(dir)
+	var shell = _make_runtime_shell(dir, null, "jo")
 	if shell == null:
 		pending("runtime resource root unavailable in this environment")
 		TestFs.remove_dir_recursive(dir)
@@ -1553,6 +1555,7 @@ func test_mods_tab_lists_the_base_game_and_switches_for_the_run() -> void:
 	shell.update_menu_frame()
 	assert_false(shell.has_pending_expansion_reload(), "the update tick lowers the request flag")
 	assert_eq(String(shell.get_resource_root().get_expansion()), "jox01", "the live root switched")
+	assert_eq(String(shell.get_resource_root().get_game_code()), "jo", "the switch keeps the game running")
 	assert_signal_emitted(shell, "game_reloaded", "the shell says the game reloaded")
 	assert_false(_persisted_expansion_key(), "the pick is not persisted: it lasts the run")
 	assert_not_null(MusicService.current_script(), "expansion menu context reopens")
@@ -1573,6 +1576,7 @@ func test_mods_tab_lists_the_base_game_and_switches_for_the_run() -> void:
 	shell.update_menu_frame()
 	assert_eq(String(shell.get_resource_root().get_expansion()), "",
 		"the base row switches to the base game")
+	assert_eq(String(shell.get_resource_root().get_game_code()), "jo", "still the game running")
 	assert_eq(driver.selected_row(driver.widget_id("AVAIL_LIST")), 0)
 	shell.get_resource_root().clear()  # release PFF handles before deleting the temp archives
 	TestFs.remove_dir_recursive(dir)
@@ -2055,9 +2059,9 @@ func _make_runtime_dir() -> String:
 	return dir
 
 
-func _make_runtime_shell(dir: String, options: PlayerOptions = null):
+func _make_runtime_shell(dir: String, options: PlayerOptions = null, game := ""):
 	var root := ResourceRoot.new()
-	if root.mount_runtime(dir) != OK:
+	if root.mount_runtime(dir, "", false, game) != OK:
 		return null
 	var shell = MenuShellScript.new()
 	if options != null:

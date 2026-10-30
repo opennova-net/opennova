@@ -778,11 +778,15 @@ func _mount_expansion(name: String) -> void:
 	# The reload closes every archive before it mounts the pick, so the pick's
 	# text-override table loads as at boot (docs/vfs/vfs-pff-mount-re.md,
 	# "Expansions" item 1): the root mounts from cleared, not as the join's
-	# switch does over its open archives.
+	# switch does over its open archives. The reload keeps the game running: it
+	# reopens the same game's archives and writes no title or protocol (the
+	# Game_ReloadExpansionAndMods witness above), so both mounts name the game the
+	# root ran, never the default title's.
+	var game := _root.get_game_code()
 	_root.clear()
-	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled()) != OK:
+	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled(), game) != OK:
 		push_warning("MenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
-		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled())  # rollback
+		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled(), game)  # rollback
 		return
 	_load_root_assets()
 	_enter_menu_music()
