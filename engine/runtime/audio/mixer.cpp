@@ -14,7 +14,7 @@ namespace {
 // The MMX word arithmetic the mixer is written in: paddsw / psubsw saturate, pmulhw keeps the high
 // word of the signed product, psraw shifts arithmetically and fills a word with its sign past 15.
 int16_t sat16(int32_t v) {
-	return static_cast<int16_t>(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+	return static_cast<int16_t>(v > INT16_MAX ? INT16_MAX : v < INT16_MIN ? INT16_MIN : v);
 }
 int16_t adds(int16_t a, int16_t b) { return sat16(int32_t(a) + int32_t(b)); }
 int16_t subs(int16_t a, int16_t b) { return sat16(int32_t(a) - int32_t(b)); }
@@ -498,6 +498,20 @@ void Mixer::render(int16_t *interleaved, uint32_t frames) {
 		}
 		++frame_;
 	}
+}
+
+platform::AudioSpec mix_audio_spec() {
+	return { kMixDeviceRate, static_cast<uint8_t>(kMixOutputChannels), platform::SampleFormat::S16 };
+}
+
+uint32_t feed_audio_device(Mixer &mixer, platform::AudioDevice &device) {
+	if (!device.is_open()) return 0;
+	const uint32_t queued = device.queued_frames();
+	if (queued >= kMixFillFrames) return 0;
+	const uint32_t frames = kMixFillFrames - queued;
+	std::vector<int16_t> pcm(size_t(frames) * kMixOutputChannels);
+	mixer.render(pcm.data(), frames);
+	return device.push(pcm.data(), frames) ? frames : 0;
 }
 
 } // namespace opennova::audio

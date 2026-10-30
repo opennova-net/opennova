@@ -14,7 +14,9 @@ extends GameProbe
 ## the player start the listener parks at. Runs on a menu launch: a loaded
 ## world's own bed would share the mixer.
 
-const LINE_TIMEOUT_SLACK_S := 3.0
+# The longest a line may play before the probe calls the queue jammed, and the clock's scale.
+const LINE_TIMEOUT_MS := 63000
+const MS_PER_S := 1000.0
 const AMBIENT_SPIN_MS := 1200
 const DIALOG_TICK_LOG_CAP := 12
 const UNMEASURED_DB := -200.0
@@ -168,7 +170,7 @@ func _play_line(audio: MissionAudio, id: int, ambient: bool, bed_volume: int,
 	# The dialog channel (3): its volume byte, the line's through the dialogue option.
 	var dialog_volume := audio.channel_volume(3)
 	var started := Time.get_ticks_msec()
-	var deadline := started + int(LINE_TIMEOUT_SLACK_S * 1000.0) + 60000
+	var deadline := started + LINE_TIMEOUT_MS
 	var peak_master := UNMEASURED_DB
 	while audio.is_dialog_voice_playing() and not _ctx.cancelled:
 		if Time.get_ticks_msec() > deadline:
@@ -178,7 +180,7 @@ func _play_line(audio: MissionAudio, id: int, ambient: bool, bed_volume: int,
 		audio.tick(listen_pos, 0.0)
 	var advanced: bool = not audio.is_dialog_voice_playing()
 	var audible := dialog_volume > 0
-	var length := float(Time.get_ticks_msec() - started) / 1000.0
+	var length := float(Time.get_ticks_msec() - started) / MS_PER_S
 	_ctx.log("dlg%03d set=%s played %.2fs volume %d -> spawn=OK audible=%s advance=%s | bed volume %d master peak %.1f dB" % [
 			id, set_name, length, dialog_volume, str(audible), str(advanced), bed_volume, peak_master])
 	line["length_s"] = length

@@ -19,6 +19,7 @@
 // each halved: the rear cue the pan table puts on bus 1 out of phase) and bus 0's word-3 low band
 // on both sides (the bass every channel sends).
 
+#include <base/platform/audio_device.h>
 #include <runtime/audio/audio_out_meter.h>
 
 #include <array>
@@ -214,5 +215,13 @@ private:
 	int32_t follower_ = 0;
 	AudioOutMeter meter_;
 };
+
+// The spec a platform audio device opens at to play the mixer's stream (platform::AudioDevice):
+// kMixDeviceRate, kMixOutputChannels, signed 16-bit.
+platform::AudioSpec mix_audio_spec();
+// The device's queue kept kMixFillFrames ahead of its play, as retail's fill keeps its stream
+// buffer: the frames it lacks mixed and pushed. The frames pushed (0 for a closed device or a full
+// queue).
+uint32_t feed_audio_device(Mixer &mixer, platform::AudioDevice &device);
 
 } // namespace opennova::audio
