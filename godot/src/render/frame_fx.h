@@ -38,7 +38,6 @@ class ImageTexture;
 class Material;
 class Skeleton3D;
 struct Q3ObjectMaterialValues;
-struct Q3WaterMaterialValues;
 class Texture;
 class Texture2D;
 class Viewport;
@@ -136,7 +135,7 @@ public:
 			const Ref<Texture2D> &p_diffuse, float p_max_lod);
 	// A water source's published block (the night-vision strip's).
 	static void publish_q3_water(GeometryInstance3D *p_source,
-			const Q3WaterMaterialValues &p_water);
+			const opennova::renderer::Q3WaterMaterialParameters &p_water);
 	// An object surface instance with the material it currently draws: a
 	// glow-capable material registers it (a node registered before keeps its
 	// record, its swapped mesh is re-read once); any other material, or

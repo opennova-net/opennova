@@ -15,6 +15,8 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/variant.hpp>
+#include <godot_cpp/variant/string_name.hpp>
 
 #include <runtime/renderer/material_eval.h>
 #include <runtime/renderer/q3_frame.h>
@@ -42,15 +44,19 @@ struct Q3ObjectMaterialValues {
 	float detail_max_lod = opennova::renderer::kQ3NoMipCeiling;
 };
 
-// A water source's block as its producer last published it: the engine
-// record's values (renderer::Q3WaterMaterialParameters, its leases filled by
-// the registry) and the three textures behind those leases.
-struct Q3WaterMaterialValues {
-	opennova::renderer::Q3WaterMaterialParameters values{};
-	Ref<Texture2D> reflection;
-	Ref<Texture2D> noise_color;
-	Ref<Texture2D> noise_normal;
-};
+// A water source's stage textures, the device resources its producer bound
+// on the material (the noise pair, the reflection): read at the compile
+// beside the published values (Q3SourceRecord::water). A null material or a
+// parameter of another type reads as none.
+inline Ref<Texture2D> water_stage_texture(const Ref<ShaderMaterial> &p_material,
+		const StringName &p_name) {
+	if (p_material.is_null())
+		return Ref<Texture2D>();
+	const Variant value = p_material->get_shader_parameter(p_name);
+	if (value.get_type() != Variant::OBJECT)
+		return Ref<Texture2D>();
+	return value;
+}
 
 // One surface of a registered Q3 source with the material block the focused
 // compile hands the compiler. An object surface caches the block and re-reads
@@ -106,8 +112,10 @@ struct Q3SourceRecord {
 	GeometryInstance3D *node = nullptr;
 	opennova::renderer::Q3Source source = opennova::renderer::Q3Source::Object;
 	std::uint64_t material_id = 0;
-	// Water sources: the producer's published block.
-	Q3WaterMaterialValues water;
+	// Water sources: the producer's published values, the engine record
+	// (renderer::Q3WaterMaterialParameters; its texture leases are filled
+	// from the material's bindings at the compile).
+	opennova::renderer::Q3WaterMaterialParameters water{};
 	// Celestial sources: the producer's bloom-pass SelfLumColor (the
 	// material's RgbGen at the bloom pass's UPL_INTENSITY value).
 	opennova::renderer::Q3Vec3 celestial_self_lum{1.0f, 1.0f, 1.0f};
@@ -206,8 +214,9 @@ public:
 			const opennova::renderer::MaterialRuntime &p_runtime);
 	static void update_object_diffuse(const Ref<Material> &p_material,
 			const Ref<Texture2D> &p_diffuse, float p_max_lod);
-	// A water source's block, published by its producer whenever it moves.
-	static void publish_water(GeometryInstance3D *p_source, const Q3WaterMaterialValues &p_water);
+	// A water source's values, published by its producer whenever they move.
+	static void publish_water(GeometryInstance3D *p_source,
+			const opennova::renderer::Q3WaterMaterialParameters &p_water);
 	// Register (or re-register) an object surface instance with the material
 	// it currently draws: a glow-capable material makes it a compiled source
 	// (a node already registered keeps its record and bumps its geometry

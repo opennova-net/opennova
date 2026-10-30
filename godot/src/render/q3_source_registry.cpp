@@ -261,7 +261,7 @@ void Q3SourceRegistry::update_object_diffuse(const Ref<Material> &p_material,
 }
 
 void Q3SourceRegistry::publish_water(GeometryInstance3D *p_source,
-		const Q3WaterMaterialValues &p_water) {
+		const Q3WaterMaterialParameters &p_water) {
 	std::lock_guard<std::recursive_mutex> lock(g_mutex);
 	if (Q3SourceRecord *record = find_record(p_source))
 		record->water = p_water;
@@ -584,18 +584,21 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 		return;
 	}
 	if (p_record.source == Q3Source::Water) {
-		const Q3WaterMaterialValues &published = p_record.water;
 		Q3WaterMaterialParameters &water = r_surface.water;
-		water = published.values;
-		water.reflection_texture = lease_for(published.reflection);
-		water.noise_color_texture = lease_for(published.noise_color);
-		water.noise_normal_texture = lease_for(published.noise_normal);
-		r_surface.primary_texture_resource = published.noise_color;
-		r_surface.secondary_texture_resource = published.noise_normal;
-		r_surface.tertiary_texture_resource = published.reflection;
-		r_surface.primary_texture = server_rid(published.noise_color);
-		r_surface.secondary_texture = server_rid(published.noise_normal);
-		r_surface.tertiary_texture = server_rid(published.reflection);
+		water = p_record.water;
+		const Ref<ShaderMaterial> &material = r_surface.material;
+		const Ref<Texture2D> reflection = water_stage_texture(material, "u_reflection");
+		const Ref<Texture2D> noise_color = water_stage_texture(material, "u_noise_color");
+		const Ref<Texture2D> noise_normal = water_stage_texture(material, "u_noise_normal");
+		water.reflection_texture = lease_for(reflection);
+		water.noise_color_texture = lease_for(noise_color);
+		water.noise_normal_texture = lease_for(noise_normal);
+		r_surface.primary_texture_resource = noise_color;
+		r_surface.secondary_texture_resource = noise_normal;
+		r_surface.tertiary_texture_resource = reflection;
+		r_surface.primary_texture = server_rid(noise_color);
+		r_surface.secondary_texture = server_rid(noise_normal);
+		r_surface.tertiary_texture = server_rid(reflection);
 		return;
 	}
 	Q3CelestialMaterialParameters &celestial = r_surface.celestial;

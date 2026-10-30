@@ -172,7 +172,7 @@ void FrameFx::set_q3_object_diffuse(const Ref<Material> &p_material,
 }
 
 void FrameFx::publish_q3_water(GeometryInstance3D *p_source,
-		const Q3WaterMaterialValues &p_water) {
+		const opennova::renderer::Q3WaterMaterialParameters &p_water) {
 	Q3SourceRegistry::publish_water(p_source, p_water);
 }
 

@@ -83,6 +83,7 @@ void Water::_bind_methods() {
 			&Water::warm_reflection_target);
 	ClassDB::bind_method(D_METHOD("get_night_vision_material"),
 			&Water::get_night_vision_material);
+	ClassDB::bind_method(D_METHOD("set_lit_water_color", "lit"), &Water::set_lit_water_color);
 	ClassDB::bind_method(D_METHOD("get_inset_reflection_viewport"),
 			&Water::get_inset_reflection_viewport);
 	ClassDB::bind_method(D_METHOD("get_inset_reflection_camera"),
@@ -269,11 +270,9 @@ void Water::release_runtime_renderer_resources() {
 			material->set_shader_parameter("u_noise_normal", Variant());
 		}
 	}
-	// The Q3 registry's copy of the block holds the noise and reflection
-	// textures too: publish the empty block while the strip's record is still
-	// found, so the registry lets go of them with the materials (the shell's
-	// exit frees every texture before the RenderingServer goes).
-	night_vision_q3_ = Q3WaterMaterialValues();
+	// The night-vision strip's published values go back to the engine
+	// record's defaults with it.
+	night_vision_q3_ = opennova::renderer::Q3WaterMaterialParameters();
 	_publish_night_vision_q3();
 	for (MeshInstance3D **strip :
 			{&mesh_instance_, &night_vision_mesh_instance_, &inset_mesh_instance_}) {
@@ -531,8 +530,7 @@ void Water::_exit_tree() {
 			material->set_shader_parameter("u_reflection", Variant());
 		}
 	}
-	night_vision_q3_.values.has_reflection = false;
-	night_vision_q3_.reflection.unref();
+	night_vision_q3_.has_reflection = false;
 	_publish_night_vision_q3();
 	// The mirror decode chains never outlive the node's time in the tree;
 	// ENTER_TREE re-installs them on the retained cameras.
@@ -680,9 +678,6 @@ void Water::build() {
 		material->set_shader_parameter("u_noise_color", noise_color_tex_);
 		material->set_shader_parameter("u_noise_normal", noise_normal_tex_);
 	}
-	night_vision_q3_.noise_color = noise_color_tex_;
-	night_vision_q3_.noise_normal = noise_normal_tex_;
-	_publish_night_vision_q3();
 
 	// The reflection RTT (env #30): the mirrored scene renders offscreen and
 	// the strip shader samples it as t2. The reimpl form is a SubViewport on
@@ -922,18 +917,27 @@ Water::MarchInputs Water::_march_inputs(MissionEnvironment *p_env) {
 	out.depth_curve = opennova::env::water_depth_curve(out.fog_end);
 	out.lit = Color(inputs.lit.r, inputs.lit.g, inputs.lit.b);
 	if (inputs.env_loaded && p_env != nullptr) {
+		set_lit_water_color(Vector3(inputs.lit.r, inputs.lit.g, inputs.lit.b));
 		for (const Ref<ShaderMaterial> &material :
 				{water_material_, night_vision_material_, inset_material_}) {
-			if (material.is_null()) {
-				continue;
+			if (material.is_valid()) {
+				material->set_shader_parameter("u_fog_color", p_env->get_scene_fog_color());
 			}
-			material->set_shader_parameter("u_water_color",
-					Vector3(inputs.lit.r, inputs.lit.g, inputs.lit.b));
-			material->set_shader_parameter("u_fog_color", p_env->get_scene_fog_color());
 		}
-		night_vision_q3_.values.water_color = {inputs.lit.r, inputs.lit.g, inputs.lit.b};
 	}
 	return out;
+}
+
+void Water::set_lit_water_color(const Vector3 &p_lit) {
+	for (const Ref<ShaderMaterial> &material :
+			{water_material_, night_vision_material_, inset_material_}) {
+		if (material.is_valid()) {
+			material->set_shader_parameter("u_water_color", p_lit);
+		}
+	}
+	night_vision_q3_.water_color = {static_cast<float>(p_lit.x), static_cast<float>(p_lit.y),
+		static_cast<float>(p_lit.z)};
+	_publish_night_vision_q3();
 }
 
 void Water::_regenerate_noise() {
@@ -1065,8 +1069,7 @@ void Water::_apply_night_vision_reflection() {
 	const bool has_reflection = inset || main_reflection_active_;
 	night_vision_material_->set_shader_parameter("u_reflection", rtt);
 	night_vision_material_->set_shader_parameter("u_has_reflection", has_reflection);
-	night_vision_q3_.reflection = rtt;
-	night_vision_q3_.values.has_reflection = has_reflection;
+	night_vision_q3_.has_reflection = has_reflection;
 	_publish_night_vision_q3();
 }
 
@@ -1376,7 +1379,7 @@ int Water::_march_strip(const DrawingView &p_view, bool p_underwater, bool p_nig
 			opennova::renderer::scene_far_plane(p_inputs.fog_end));
 	p_material->set_shader_parameter("u_scene_depth_range", scene_depth_range);
 	if (p_material == night_vision_material_) {
-		night_vision_q3_.values.scene_depth_range = {scene_depth_range.x, scene_depth_range.y};
+		night_vision_q3_.scene_depth_range = {scene_depth_range.x, scene_depth_range.y};
 	}
 	return water_core_->strip_build(water_height_, p_inputs.murk, p_inputs.lit,
 			p_inputs.depth_curve.scale, p_inputs.depth_curve.bias, p_underwater, p_nightvision);
