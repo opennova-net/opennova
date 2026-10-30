@@ -863,24 +863,15 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 					reach.max_x, -reach.min_y);
 		}
 	}
-	// The page claims stamp the weather clock's TOD epoch (g_EnvTodEpoch,
-	// one step per 311 logic ticks); a page whose stamp falls behind is
-	// refreshed on an all-hit frame.
-	const uint32_t tod_epoch = cached_env_node != nullptr &&
-					cached_env_node->state().weather() != nullptr
-			? cached_env_node->state().weather()->tod_epoch
-			: 0u;
-	// A time set's tile-cache reset empties every page (engine world::WeatherState::
-	// reset_time_caches carries the witness).
-	const uint32_t time_set_resets = cached_env_node != nullptr &&
-					cached_env_node->state().weather() != nullptr
-			? cached_env_node->state().weather()->time_set_resets
-			: 0u;
-	if (time_set_resets != seen_time_set_resets) {
-		seen_time_set_resets = time_set_resets;
-		tile_cache_device.invalidate_all_pages();
+	// The weather clock's marks (the TOD epoch the claims stamp, the time sets'
+	// reset count); the engine cache decides the refresh and the reset
+	// (TerrainTileCompositionCache::take_time_set_reset, begin_frame).
+	opennova::TerrainTileTimeMarks marks;
+	if (cached_env_node != nullptr && cached_env_node->state().weather() != nullptr) {
+		marks.tod_epoch = cached_env_node->state().weather()->tod_epoch;
+		marks.time_set_resets = cached_env_node->state().weather()->time_set_resets;
 	}
-	tile_cache_device.begin_frame(++page_sweep_id, tod_epoch);
+	tile_cache_device.begin_frame(++page_sweep_id, marks);
 	// Every missing visible page composes before the patches draw.
 	return tile_cache_device.compose_frame(draw_list, page_tile_tint, page_light_direction);
 }
