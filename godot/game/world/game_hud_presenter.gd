@@ -836,7 +836,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 				_game_hud.set_minimap_footprints(footprints)
 	# The talk rows are the player input router's: it polls them in every
 	# input frame, the frame's own sample and each later tick's, with the
-	# current gametext for the prompts (PlayerInputRouter::poll_talk_rows
+	# current gametext for the prompts (engine inmatch::PlayerInputFrame::dispatch_record
 	# carries the witness); the dispatch gates, the capture and the line
 	# editor are the engine's chat entry. This frame draws the line.
 	if _player_presenter != null:

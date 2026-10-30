@@ -41,6 +41,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/key_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/player_actions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/help_screen.cpp       # the F1 key-binding help pages
+    ${CMAKE_CURRENT_SOURCE_DIR}/controls/device_messages.cpp   # the window messages onto retail's input events
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
     # target-feed/writeback order) + the mission-start weather seed
@@ -541,6 +542,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_info.cpp       # the NovaWorld listing's live-session columns
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/special_key_chain.cpp # the special-key chain over a role
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_input_frame.cpp # the local player's input frame (TickInputSource)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
     # --- parity lane L1 sources ---

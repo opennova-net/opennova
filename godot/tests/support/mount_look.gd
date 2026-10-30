@@ -45,7 +45,7 @@ static func face(test: GutTest, sim: Simulation, target: Vector3, from = null) -
 
 # Action 6, the configurable scope row (RMB by default), switches the mounted
 # alternate gun. Headless Godot cannot capture the mouse, and
-# PlayerInputRouter::sample_weapon_input samples the weapon actions only while
+# engine inmatch::PlayerInputFrame samples the weapon actions only while
 # it is captured, so a headless run calls
 # Simulation.request_local_player_scope_toggle() itself: the router's one-line
 # forward, everything after it (the loopback request, the host handler, the

@@ -116,8 +116,8 @@ public:
 	void set_scripted_input(const Ref<ScriptedInput> &p_input) { scripted_input_ = p_input; }
 	Ref<ScriptedInput> get_scripted_input() const { return scripted_input_; }
 	// The input frame's step of the attached script at the logic tick it runs
-	// as (the frame's head and each later update's; PlayerInputRouter's
-	// before_world_tick and run_update_rows). Each code the step starts or stops holding also arrives as
+	// as (the frame's head and each later update's; engine inmatch::PlayerInputFrame's
+	// begin_frame and run_update_rows). Each code the step starts or stops holding also arrives as
 	// its bound key's own press or release event (slot 1, else slot 2), as a
 	// keyboard's would: the readers of raw key events (the deploy keys, the
 	// held-USE digits) see the script the way the binding scan does. A

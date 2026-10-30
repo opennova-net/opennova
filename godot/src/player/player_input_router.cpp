@@ -1,5 +1,6 @@
 #include "player/player_input_router.h"
 
+#include "player/input_device.h"
 #include "player/key_lock_device.h"
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
@@ -9,183 +10,23 @@
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
-#include <godot_cpp/classes/input_event_mouse_motion.hpp>
-#include <godot_cpp/classes/input_event_mouse_button.hpp>
-#include <godot_cpp/classes/global_constants.hpp>
 
-#include <base/gameprofile/game_type.h>
-#include <runtime/controls/controls.h> // action_code (the HUD rows' dispatch codes)
-#include <runtime/world/player_look.h> // pass_through_close_axis, kCursorCentreX / Y
-
-#include <cmath>
-#include <string_view>
+#include <runtime/world/player_look.h> // kCursorCentreX / Y
 
 using namespace godot;
 
 namespace {
-
-// Retail's auto-run word and its turn-off over the keyboard-lock device (D-NET-563; engine
-// controls::PlayerActionPoll::scroll_lock_on and PlayerActionFrame::scroll_lock_off carry
-// the witness).
-bool scroll_lock_device_on() {
-	return key_lock_device::on(opennova::controls::kVkScroll);
-}
-
-bool scroll_lock_device_turn_off() {
-	return key_lock_device::set(opennova::controls::kVkScroll, false);
-}
-
-// The held USE row's catalog row (useitem; its dispatch code is the action head's key).
-constexpr int kUseItemRow = 44;
-
-// The records whose arms are the shell's (set_record_leg): the special-key chain's deploy
-// pick, input event 12, and the escape row's, catalog row 67 (code 18) (engine
-// controls::KeyRowEvent and PlayerAction::EmbedderRow carry the witness).
-constexpr int kDeployPickCode = 12;
-constexpr int kEscapeRow = 67;
-// The Screen Shot row (code 2): its case writes the frame to a file, the shell's device leg
-// (engine gameprofile/player_files.h screenshot_file_name carries the witness).
-constexpr int kScreenShotRow = 69;
-// The cheat row 117's code 40, past the role's gates (out of a session, a local player): the
-// shell's weapon-screen toggle (engine inmatch::Role::dispatch_record carries the witness).
-constexpr int kWeaponScreenRow = 117;
-bool shell_record(int p_code) {
-	return p_code == kDeployPickCode || p_code == opennova::controls::action_code(kEscapeRow) ||
-			p_code == opennova::controls::action_code(kScreenShotRow) ||
-			p_code == opennova::controls::action_code(kWeaponScreenRow);
-}
-
-// The held USE row's arm through the sim's press latch (engine
-// LocalPlayer::take_use_item_press), its record having passed the dispatcher's head.
-opennova::controls::UseItemPressArm use_item_arm(Simulation &p_sim) {
-	using Arm = opennova::controls::UseItemPressArm;
-	switch (p_sim.take_use_item_press()) {
-		case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
-		case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;
-		// The vehicle-loadout arm's request: the shell closes a menu screen up, else opens
-		// vehicle.mnu past the team test (engine world::local_player_use_item_arm and
-		// local_player_vehicle_zone_team_matches carry the witness).
-		case Simulation::USE_ITEM_ARM_VEHICLE_LOADOUT: return Arm::kOpenVehicleMenu;
-		default: return Arm::kTaken;
-	}
-}
 
 // The Num Lock state the process start found, which its exit puts back; the exit runs only
 // once the start leg ran.
 bool s_key_locks_started = false;
 bool s_saved_num_lock = false;
 
-class GodotActionSource final : public opennova::controls::PlayerActionSource {
-public:
-	explicit GodotActionSource(const Ref<ControlsModel> &p_controls) : controls_(p_controls) {}
-	bool pressed(const char *p_token) const override {
-		return controls_.is_valid() && controls_->is_token_pressed(p_token);
-	}
-	int pressed_key(const char *p_token) const override {
-		return controls_.is_valid() ? controls_->pressed_key_for_token(p_token) : 0;
-	}
-	bool keys_down(const char *p_token) const override {
-		return pressed(p_token) || (controls_.is_valid() && controls_->is_token_key_down(p_token));
-	}
-	bool key_slots_down(const char *p_token) const override {
-		return controls_.is_valid() && controls_->is_token_key_down(p_token);
-	}
-	bool binding_active(const char *p_token) const override {
-		return controls_.is_valid() && controls_->is_token_binding_active(p_token);
-	}
-	// A keyboard key fires its row through the key queue's events (the shell's
-	// KeyboardPass); the mouse, joystick and scripted arms here.
-	bool held_off_keyboard(const char *p_token) const override {
-		return controls_.is_valid() && controls_->is_token_held_off_keyboard(p_token);
-	}
-	bool scripted_left_button(const char *p_token) const override {
-		return controls_.is_valid() && controls_->is_token_scripted_left_button(p_token);
-	}
-	// Shift's sign bit reads the key-state array, which a menu close's reset
-	// clears (engine controls::KeyStateReset carries the witness).
-	bool fire_signed(const char *p_token) const override {
-		return controls_.is_valid() && controls_->is_token_fire_signed(String(p_token));
-	}
-
-private:
-	const Ref<ControlsModel> &controls_;
-};
-
-void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActionRequest &p_request) {
-	using Action = opennova::controls::PlayerAction;
-	// A binding row's event passes the dispatcher's head by its row's flags
-	// (engine inmatch::Role::action_head_admits carries the witness).
-	if (p_request.code >= 0 && !p_sim.action_head_admits(p_request.code)) return;
-	switch (p_request.action) {
-		case Action::ToggleMount: p_sim.local_player_toggle_mount(); break;
-		case Action::SelectSeat: p_sim.local_player_select_seat(p_request.value); break;
-		case Action::ToggleScope: p_sim.request_local_player_scope_toggle(); break;
-		case Action::WeaponCategory:
-			p_sim.request_local_player_weapon_category(
-					static_cast<Simulation::WeaponCategory>(p_request.value));
-			break;
-		case Action::WeaponCycle: p_sim.request_local_player_weapon_cycle(p_request.value); break;
-		case Action::Stance:
-			p_sim.request_local_player_stance(static_cast<Simulation::Stance>(p_request.value));
-			break;
-		case Action::ScopeZero: p_sim.request_local_player_scope_zero(p_request.value); break;
-		case Action::RadarZoom: p_sim.request_hud_radar_zoom(p_request.value); break;
-		case Action::MapCycle: p_sim.request_hud_map_cycle(); break;
-		case Action::Binoculars: p_sim.request_local_player_binoculars_toggle(); break;
-		case Action::NightVision: p_sim.request_local_player_nvg_toggle(); break;
-		case Action::NvgGain: p_sim.request_local_player_nvg_gain(p_request.value); break;
-		case Action::WaypointCycle: p_sim.request_waypoint_cycle(p_request.value); break;
-		case Action::Spectate: p_sim.request_spectate_action(p_request.value); break;
-		// Sent over the session; the special-key chain closed the menu (special_key).
-		case Action::EmotePick: p_sim.send_voice_menu_pick(false, p_request.value); break;
-		case Action::RadioPick: p_sim.send_voice_menu_pick(true, p_request.value); break;
-		// The shell opens the screen (PlayerInputRouter::take_armory_request /
-		// take_vehicle_menu_request).
-		case Action::OpenArmory: break;
-		case Action::OpenVehicleMenu: break;
-		// The role's arms (engine inmatch::Role::dispatch_record): never handed here.
-		case Action::Respawn: break;
-		case Action::MedicRequest: break;
-		case Action::Reload: break;
-		case Action::ToSpecial: break;
-		case Action::Fire: break;
-		case Action::UseItem: break;
-		// The router's own records (PlayerInputRouter::dispatch_record): never handed here.
-		case Action::EmbedderRow: break;
-	}
-}
-
-// The talk row and the HUD toggle row a dispatch code names (-1 for none): the rows whose
-// records the router's dispatch takes through the chat line and the HUD's toggles.
-int talk_row_of(int p_code) {
-	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
-	if (def == nullptr) return -1;
-	const std::string_view token(def->token);
-	for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
-		if (token == opennova::hud::chat_talk_row_token(row)) return row;
-	return -1;
-}
-
-int hud_row_of(int p_code) {
-	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
-	if (def == nullptr) return -1;
-	const std::string_view token(def->token);
-	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
-		if (token == opennova::hud::hud_toggle_row_token(row)) return row;
-	return -1;
-}
-
-// A talk or HUD row's dispatch code by its token, as the key scan queues it (the catalog
-// row's code).
-int32_t row_token_code(std::string_view p_token) {
-	std::size_t count = 0;
-	const opennova::controls::ActionDef *rows = opennova::controls::catalog(&count);
-	for (std::size_t i = 0; i < count; ++i)
-		if (p_token == rows[i].token) return opennova::controls::action_code(rows[i].id);
-	return -1;
-}
-
 } // namespace
+
+PlayerInputRouter::PlayerInputRouter() : device_(*this), session_(*this) {
+	frame_.bind(&device_, &session_, &shell_);
+}
 
 void PlayerInputRouter::setup(Node *p_world, LocalPlayerPresenter *p_presenter,
 		const Ref<ControlsModel> &p_controls) {
@@ -217,37 +58,22 @@ void PlayerInputRouter::exit_process_key_locks() {
 	key_lock_device::set(opennova::controls::kVkCapital, false);
 }
 
-void PlayerInputRouter::owe_scroll_lock_turn_off() {
-	scroll_lock_turn_off_owed_ = true;
-}
-
 void PlayerInputRouter::teardown() {
+	frame_.teardown();
 	world_id_ = ObjectID();
 	presenter_id_ = ObjectID();
-	if (controls_.is_valid()) controls_->set_scan_gates(false, false);
 	controls_.unref();
 	input_override_.unref();
-	row_samples_.clear();
-	row_records_.clear();
-	action_events_.clear();
-	sample_records_.clear();
-	pump_records_.clear();
 }
 
-// The sim, re-resolved per use: mission reloads free the runtime and its sim,
-// so a cached reference would go stale (the presenter follows the same rule).
-// The game's world answers through its own accessor (no script call, no name
-// built per use); only another world node (a test's) goes through the call.
+// The sim, re-resolved per use: mission reloads free the runtime and its sim, so a cached
+// reference would go stale (the presenter follows the same rule).
 Ref<Simulation> PlayerInputRouter::sim() const {
 	return world_access::sim(ObjectDB::get_instance(world_id_));
 }
 
 LocalPlayerPresenter *PlayerInputRouter::presenter() const {
 	return Object::cast_to<LocalPlayerPresenter>(ObjectDB::get_instance(presenter_id_));
-}
-
-bool PlayerInputRouter::pressed(const char *p_token) const {
-	return controls_.is_valid() && controls_->is_token_pressed(p_token);
 }
 
 void PlayerInputRouter::set_input_override(const Ref<PlayerMoveIntent> &p_intent) {
@@ -260,46 +86,18 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	frame_input.instantiate();
 	frame_input->set_delta_seconds(p_delta);
 	frame_input->set_hud_toggles(hud_toggles_);
-	// The window's messages were read since the last frame: the keyboard state holds any
-	// turn-off sent then (retail pumps them at once after its send). A turn-off the Escape
-	// key's reset owes goes out here, ahead of the frame's sample, which then reads the word
-	// off (owe_scroll_lock_turn_off).
-	scroll_lock_turned_off_ = false;
-	if (scroll_lock_turn_off_owed_) {
-		scroll_lock_turn_off_owed_ = false;
-		scroll_lock_turned_off_ = scroll_lock_device_turn_off();
-	}
-	++frame_sequence_;
-	frame_input->set_sequence(frame_sequence_);
-	frame_player_ = false;
-	frame_gameplay_input_active_ = p_gameplay_input_active;
-	frame_menu_open_ = p_menu_open;
 	LocalPlayerPresenter *owner = presenter();
-	if (owner == nullptr) {
-		return frame_input;
-	}
-	// The frame's head steps the devices to the logic tick its first update runs as;
-	// the session runs every update's input frame through this router: its keyboard
-	// pass and its talk and HUD rows (run_update_rows), then its movement and action
-	// rows (sample_tick).
-	frame_input->set_tick_source(this, ObjectID(owner->get_instance_id()));
-	const Ref<Simulation> tick_sim = sim();
-	Vector2 scripted_look;
-	tick_spectating_ = begin_input_frame(
-			tick_sim, tick_sim.is_valid() ? tick_sim->get_logic_tick() : -1, scripted_look);
-	// The look waits for the next update's sample, a frame that drains none
-	// included, as the session kept it for the next tick.
-	tick_scripted_look_ += scripted_look;
-	// The rows' state this frame sees waits for the next update's poll: a frame
-	// whose bank drains no update runs no input frame, and its key events stay
-	// queued, a release and a new press included (engine inmatch::TickInputSource
-	// carries the witness).
-	queue_row_sample();
-	if (!owner->has_player()) {
+	const opennova::inmatch::PlayerInputFrame::FrameHead head = frame_.begin_frame(
+			owner != nullptr, owner != nullptr && owner->has_player(), p_gameplay_input_active,
+			p_menu_open);
+	frame_input->set_sequence(static_cast<int64_t>(head.sequence));
+	if (!head.sourced) return frame_input;
+	// The engine's input frame is the session's source for every update of this frame.
+	frame_input->set_tick_source(&frame_, ObjectID(owner->get_instance_id()));
+	if (!head.player) {
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
 		owner->clear_models();
-		look_delta_ = Vector2();
 		return frame_input;
 	}
 	owner->set_fly_camera_locked(true);
@@ -307,527 +105,34 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	if (p_capture_mouse && input->get_mouse_mode() != Input::MOUSE_MODE_CAPTURED) {
 		input->set_mouse_mode(Input::MOUSE_MODE_CAPTURED);
 	}
-	if (!tick_spectating_) owner->ensure_models();
-	frame_player_ = true;
-	// The frame's head reads: the mouse motion as the cursor offset in whole pixels,
-	// its sub-pixel rest carried to the next frame, which the session's mouse pump
-	// reads in the frame's first update and spreads over the frame's updates
-	// (engine world::MouseAxisPump), and the menu-screen bit the paused updates
-	// read.
-	if (p_gameplay_input_active) {
-		const Vector2i whole(
-				static_cast<int32_t>(look_delta_.x), static_cast<int32_t>(look_delta_.y));
-		look_delta_ -= Vector2(whole);
-		frame_input->set_cursor_delta(whole);
-	} else {
-		look_delta_ = Vector2();
-	}
-	frame_input->set_menu_open(frame_menu_open_);
+	if (!head.spectating) owner->ensure_models();
+	frame_input->set_cursor_delta(Vector2i(head.cursor_dx, head.cursor_dy));
+	frame_input->set_menu_open(head.menu_open);
 	return frame_input;
 }
 
-opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_tick) {
-	// The device already stands at p_logic_tick: the frame's head or this update's
-	// run_update_rows stepped it, and the update's keyboard pass and rows ran ahead of
-	// the action rows.
-	(void)p_logic_tick;
-	Ref<MissionFrameInput> tick_input;
-	tick_input.instantiate();
-	tick_input->set_sequence(frame_sequence_);
-	if (frame_player_) {
-		sample_input_frame(tick_input, tick_scripted_look_, tick_spectating_);
-	} else {
-		// No sample takes the action rows' events: they are dropped. Every other row's
-		// key-down is a record still (the talk and HUD rows' run with or without a local
-		// player, the command prompt a Serve Only host opens, as do the escape row's, the deploy
-		// picks with their parameter, and a keylist binding on a row no arm of the poll owns;
-		// engine controls::player_actions_own_code carries the witness).
-		for (const opennova::controls::KeyRowEvent &event : action_events_)
-			if (!event.release && !opennova::controls::player_actions_own_code(event.code))
-				sample_records_.push_back({event.code, event.param, 0, 0, event.sign});
-		action_events_.clear();
-	}
-	tick_scripted_look_ = Vector2();
-	return tick_input->native_value().player;
-}
-
-void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample) {
-	// An update's input frame, a paused update's too: its keyboard pass, whose talk, HUD
-	// and pause rows' events become records with the action rows' in the update's sample,
-	// and the drain dispatches them, the pause row's flip among them (engine
-	// inmatch::TickInputSource carries the witness). A later update of a running frame
-	// steps the device to the logic tick it runs as first.
-	const Ref<Simulation> rows_sim = sim();
-	if (p_new_sample) {
-		tick_spectating_ = begin_input_frame(rows_sim, p_logic_tick, tick_scripted_look_);
-		queue_row_sample();
-	}
-	// The menu-screen bit at this update's head: a screen an earlier update's keyboard
-	// pass opened (the escape row's INGAME) gates this one; every such screen holds a
-	// shell state whose gameplay word reads down (set_menu_screen_probe).
-	if (menu_screen_probe_.is_valid() && bool(menu_screen_probe_.call())) {
-		frame_menu_open_ = true;
-		frame_gameplay_input_active_ = false;
-	}
-	// Under a menu screen no input frame runs, so nothing drains the key events:
-	// they wait, in order, for the close's reset (reset_input_state) or, under
-	// DEATH's exit confirmation, for the first input frame after its NO raises
-	// the word (the shell's KeyboardPass carries the witness).
-	if (frame_menu_open_) return;
-	// The input frame's head: the shell's keyboard pass drains the key queue, its
-	// special-key legs land in this update, and the row events it queues become the
-	// update's records in its sample; a frame that runs no update keeps its keys
-	// (engine inmatch::TickInputSource carries the witness). Its legs may run the
-	// input reset, which drops the rows queued so far.
-	if (keyboard_pass_.is_valid()) keyboard_pass_.call();
-	// A later paused update of the same frame reads the state the frame left.
-	if (row_samples_.empty()) queue_row_sample();
-	// The talk and HUD rows' off-keyboard arms' states in their order, so a press, its
-	// release and a new press of a mouse or joystick arm seen by frames that ran no update
-	// each reach the rows: each press edge is its row's record, queued ahead of the
-	// sample's (a mouse button's click is a record of the update's message pump, ahead of
-	// its keyboard pass; engine inmatch::TickInputSource carries the witness). The
-	// mousescale fire's sign is its arm's (Shift held; engine BindingSet::fire_signed).
-	for (const RowSample &sample : row_samples_) {
-		const int talk_fired = sample.talk & ~talk_held_;
-		const int hud_fired = sample.hud & ~hud_held_;
-		talk_held_ = sample.talk;
-		hud_held_ = sample.hud;
-		for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
-			if ((talk_fired & (1 << row)) != 0)
-				row_records_.push_back({row_token_code(opennova::hud::chat_talk_row_token(row)), 0, 0,
-						0, false});
-		for (int row = 0; row < HudToggles::ROW_COUNT; ++row) {
-			if ((hud_fired & (1 << row)) == 0) continue;
-			const char *token = opennova::hud::hud_toggle_row_token(row);
-			row_records_.push_back({row_token_code(token), 0, 0, 0,
-					controls_.is_valid() && controls_->is_token_fire_signed(String(token))});
-		}
-	}
-	row_samples_.clear();
-}
-
-void PlayerInputRouter::queue_records(opennova::controls::InputEventQueue &r_records) {
-	// The update's message pump: a left button's down runs its PowerThrow windup test ahead
-	// of the input frame's records (engine world::local_weapon_left_button_down carries the
-	// witness).
-	if (left_down_owed_) {
-		left_down_owed_ = false;
-		const Ref<Simulation> pump_sim = sim();
-		if (pump_sim.is_valid()) pump_sim->local_player_left_button_down();
-	}
-	// Behind the records already waiting (the console's): the message pump's wheel records,
-	// the talk and HUD rows' off-keyboard edges, then the sample's rows (its key events in
-	// key order, then the action rows' off-keyboard edges); the queue's cap drops the rest.
-	for (const opennova::controls::InputEventRecord &record : pump_records_)
-		(void)r_records.push(record);
-	pump_records_.clear();
-	for (const opennova::controls::InputEventRecord &record : row_records_)
-		(void)r_records.push(record);
-	row_records_.clear();
-	for (const opennova::controls::InputEventRecord &record : sample_records_)
-		(void)r_records.push(record);
-	sample_records_.clear();
-}
-
-void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventRecord &p_record) {
-	const Ref<Simulation> record_sim = sim();
-	if (record_sim.is_null()) return;
-	// A talk row's record opens its line (one dispatch per record, an OS repeat's included);
-	// a HUD row's runs its toggle with the sign its fire carried, the pause row's behind the
-	// role's flip of the session's word (engine inmatch::Role::dispatch_record), whose case
-	// resets the key queue behind its flip (engine controls::KeyEventQueue::reset carries the
-	// witness; hud_toggles_dispatch and ChatEntry::dispatch_rows the rows').
-	const int talk_row = talk_row_of(p_record.code);
-	if (talk_row >= 0) {
-		poll_talk_rows(record_sim, 1 << talk_row);
-		return;
-	}
-	const int hud_row = hud_row_of(p_record.code);
-	if (hud_row >= 0) {
-		if (poll_hud_toggles(record_sim, 1 << hud_row, p_record.sign, p_record.p1))
-			key_events()->reset();
-		return;
-	}
-	// The escape row's record (case 18: the Escape action), the screen shot's (case 2), the
-	// weapon-screen toggle's (case 40) and a deploy pick's (case 12, its pick the record's
-	// first argument) run the shell's arms at their place in the drain; the escape's and the
-	// pick's input reset (the role's memset of the event queue) ends the drain there, and the
-	// shell's leg runs the devices' reset at once.
-	if (shell_record(p_record.code)) {
-		if (record_leg_.is_valid()) record_leg_.call(p_record.code, p_record.p1);
-		return;
-	}
-	// The held USE row's record (case 0xB1) past the dispatcher's head by its row's flags (the
-	// deploy overlay, the round-over gate and the pause word drop it as the dead bit does,
-	// under a pass-through screen's input frame too): its Scroll Lock turn-off and the arm the
-	// sim's press latch decides (engine controls::PlayerActions::use_item_record carries the
-	// witness). A dropped record arms nothing, so the hold ends at the frame's tail.
-	if (p_record.code == opennova::controls::action_code(kUseItemRow)) {
-		if (!record_sim->action_head_admits(p_record.code)) return;
-		apply_immediate(actions_.use_item_record(use_item_arm(*record_sim.ptr())), record_sim);
-		return;
-	}
-	// A movement or look row's record the role took past the head (a typed row's, a queued
-	// Last_move's): the back, forward (fourth argument 0) and strafe cases' Scroll Lock
-	// turn-off, once a frame (engine inmatch::Role::dispatch_record carries the witness).
-	switch (p_record.code) {
-		case 147: case 148: case 151: case 152: case 153: case 154: case 155: case 156:
-		case 157: case 158: case 159: case 176: {
-			const bool turns_off = p_record.code == 151 || p_record.code == 156 ||
-					p_record.code == 157 || (p_record.code == 152 && p_record.p3 == 0);
-			if (turns_off) {
-				opennova::controls::PlayerActionFrame frame;
-				frame.scroll_lock_off.push_back(p_record.code);
-				apply_immediate(frame, record_sim);
-			}
-			return;
-		}
-		default: break;
-	}
-	if (const auto request = opennova::controls::player_action_request(p_record)) {
-		apply_player_action(*record_sim.ptr(), *request);
-		return;
-	}
-	// The sim's own records: the exit (3) and the punt by slot (34), a console line's in play.
-	(void)record_sim->dispatch_action_record(p_record.code, p_record.p1);
-}
-
-void PlayerInputRouter::end_input_frame() {
-	// The input frame's tail: the USE hold's release edge (engine
-	// controls::PlayerActions::end_input_frame carries the witness).
-	const Ref<Simulation> tail_sim = sim();
-	apply_immediate(actions_.end_input_frame(tail_sim.is_valid()), tail_sim);
-}
-
-void PlayerInputRouter::apply_immediate(const opennova::controls::PlayerActionFrame &p_frame,
-		const Ref<Simulation> &p_sim) {
-	// Retail's auto-run turn-offs: a case that turns its toggle off passes the dispatcher's
-	// head by its code; one turn-off per frame, as the keyboard state reads it only once the
-	// window's messages are read (engine controls::PlayerActionFrame::scroll_lock_off).
-	for (const int code : p_frame.scroll_lock_off) {
-		if (scroll_lock_turned_off_) break;
-		if (code < 0 || (p_sim.is_valid() && p_sim->action_head_admits(code)))
-			scroll_lock_turned_off_ = scroll_lock_device_turn_off();
-	}
-	// The arms that run at once (no code): the USE row's opens, its release's mount toggle.
-	for (const auto &request : p_frame.requests) {
-		if (request.code >= 0) continue;
-		if (request.action == opennova::controls::PlayerAction::OpenArmory) {
-			armory_requested_ = true;
-		} else if (request.action == opennova::controls::PlayerAction::OpenVehicleMenu) {
-			vehicle_menu_requested_ = true;
-		} else if (p_sim.is_valid()) {
-			apply_player_action(*p_sim.ptr(), request);
-		}
-	}
-}
-
-void PlayerInputRouter::queue_row_event(int p_code, bool p_signed, int p_key) {
-	queue_key_row_event(opennova::controls::KeyRowEvent{p_code, p_signed, p_key, false});
-}
-
-void PlayerInputRouter::queue_pick_event(int p_param) {
-	// Input event 12 with the pick its first argument (engine controls::KeyRowEvent::param
-	// carries the witness).
-	queue_key_row_event(opennova::controls::KeyRowEvent{kDeployPickCode, false, 0, false, p_param});
-}
-
-void PlayerInputRouter::queue_key_row_event(const opennova::controls::KeyRowEvent &p_event) {
-	// Every row's event, in key order, for the next device sample: an action row's through
-	// its poll, a talk or HUD row's as its record (PlayerActionPoll::embedder_row).
-	action_events_.push_back(p_event);
-}
-
-void PlayerInputRouter::run_key_release_pass() {
-	if (controls_.is_null()) return;
-	const Ref<ControlsModel> &controls = controls_;
-	const auto key_state = [&controls](int p_vk) { return controls->is_key_state_down(p_vk); };
-	for (const opennova::controls::KeyRowEvent &event :
-			controls_->native_bindings().release_pass(key_events()->press_latch(), key_state))
-		queue_key_row_event(event);
-}
-
-void PlayerInputRouter::queue_row_sample() {
-	const RowSample sample{talk_rows_down(), hud_rows_down()};
-	if (row_samples_.empty() || row_samples_.back().talk != sample.talk ||
-			row_samples_.back().hud != sample.hud)
-		row_samples_.push_back(sample);
-}
-
-int PlayerInputRouter::talk_rows_down() const {
-	int rows_down = 0;
-	if (controls_.is_null()) return rows_down;
-	for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
-		if (controls_->is_token_held_off_keyboard(opennova::hud::chat_talk_row_token(row)))
-			rows_down |= 1 << row;
-	return rows_down;
-}
-
-int PlayerInputRouter::hud_rows_down() const {
-	int rows_down = 0;
-	if (controls_.is_null()) return rows_down;
-	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
-		if (controls_->is_token_held_off_keyboard(opennova::hud::hud_toggle_row_token(row)))
-			rows_down |= 1 << row;
-	return rows_down;
-}
-
-bool PlayerInputRouter::begin_input_frame(const Ref<Simulation> &p_sim, int64_t p_logic_tick,
-		Vector2 &r_scripted_look) {
-	// The scripted input device (devtools/scripted_input.h) steps on the logic
-	// tick this sample is keyed to, ahead of every device read below.
-	const Ref<ScriptedInput> scripted =
-			controls_.is_valid() ? controls_->get_scripted_input() : Ref<ScriptedInput>();
-	if (scripted.is_valid()) {
-		if (p_sim.is_valid()) controls_->advance_scripted_input(p_logic_tick);
-		r_scripted_look = scripted->take_look();
-	}
-	// The death screen samples the same device input: the engine's filter
-	// hands it to the free-fly motor or the chase orbit, and the binding scan
-	// admits only the death-screen rows (PlayerActionPoll::death_screen).
-	const bool spectating = p_sim.is_valid() && p_sim->local_death_screen_active();
-	// The key scan's gates for every poll of this input frame, the HUD's after
-	// the world tick too: the death screen, and the scan word, set on a
-	// dedicated host and otherwise while the local body is dead (engine
-	// BindingSet::set_scan_gates carries the witness).
-	if (controls_.is_valid())
-		controls_->set_scan_gates(spectating, p_sim.is_valid() &&
-				(p_sim->session_role() == Simulation::ROLE_DEDICATED_HOST ||
-						p_sim->local_player_dead()));
-	return spectating;
-}
-
-void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_fired) {
-	// The talk rows are action bindings the input frame's drain dispatches
-	// every tick, after any typed keys reached an open line, so a one-tick
-	// press inside a multi-tick frame opens its line on its tick; the command
-	// prompt opens with or without a local player, as a Serve Only host's does
-	// (engine hud/hud_chat_entry.h ChatEntry::poll_rows carries the witness and
-	// its open point). The key
-	// sampling is this router's; the dispatch gates, the capture, the talk
-	// debounce and the flood are the engine's chat entry (ChatEntryFacts::frame,
-	// inmatch/chat_flood.h); the HUD presenter draws the line at its frame.
-	if (hud_chat_.is_null() || p_sim.is_null()) return;
-	hud_chat_->dispatch_rows(p_rows_fired, frame_gameplay_input_active_, p_sim, chat_gametext_,
-			p_sim->get_main_frame_counter());
-}
-
-void PlayerInputRouter::set_hud_chat(const Ref<HudChatEntry> &p_chat,
-		const Ref<RtxtStringFile> &p_gametext) {
-	hud_chat_ = p_chat;
-	chat_gametext_ = p_gametext;
-}
-
-void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input,
-		const Vector2 &p_scripted_look, bool p_spectating) {
-	const bool active = frame_gameplay_input_active_;
-	Input *input = Input::get_singleton();
-	// A live UI overlay keeps the world ticking but must actively submit a
-	// neutral movement frame. Skipping this call leaves the sim holding its
-	// previous input, so a player who opened the armory while running would
-	// keep running under it. Scripted input (probes, automation) arrives
-	// through set_input_override: the same seven bits a device produces, so
-	// the sim sees one contract. u/d ride the LEAN keys there: retail packs
-	// lean_left/lean_right as MoveOrder bits 0x40/0x80, and the aircraft mover
-	// reads those same two bits as descend/ascend - the collective is the lean
-	// pair, overloaded.
-	bool forward = false, back = false, left = false, right = false;
-	bool lean_left = false, lean_right = false, jump = false;
-	if (active) {
-		read_input_state(forward, back, left, right, lean_left, lean_right, jump);
-	}
-    p_input->set_view_keys(active && pressed("FreeLook"),
-        active && pressed("look_up"), active && pressed("look_down"),
-        active && pressed("turn_left"), active && pressed("turn_right"));
-	// The mouse motion rides the frame's head (before_world_tick). The scripted
-	// device's look pixels are axis input at their own tick, as onHook's driver
-	// adds them to the axis word in that input frame, under the gate real motion
-	// meets on its way in (the shell hands handle_input only live gameplay with the
-	// mouse captured).
-	const bool captured = input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
-	// A pass-through screen's close owes this sample its cursor offset, axis
-	// input of this tick alone (close_pass_through_screen).
-	p_input->set_look_delta(active && captured ? p_scripted_look + close_axis_ : Vector2());
-	close_axis_ = Vector2();
-	const Ref<Simulation> action_sim = sim();
-	opennova::controls::PlayerActionPoll gate;
-	gate.active = active;
-	gate.captured = captured;
-	gate.simulation_available = action_sim.is_valid();
-	gate.keyboard_captured = controls_.is_valid() && controls_->is_keyboard_captured();
-	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
-	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
-	gate.death_screen = p_spectating;
-	gate.menu_open = frame_menu_open_;
-	// The keyboard pass's events since the last sample; the talk, HUD and pause rows', the
-	// escape row's and the deploy picks are this router's records in key order with the
-	// action rows' and the spectator rows' (dispatch_record).
-	gate.key_events.swap(action_events_);
-	action_events_.clear();
-	// The Scroll Lock word is a device the scripted input replaces like the keys.
-	const bool scroll_lock =
-			input_override_.is_null() && !scroll_lock_turned_off_ && scroll_lock_device_on();
-	// The joystick toggle pass's fires behind the keyboard and mouse passes' records (engine
-	// BindingSet::joystick_toggle_pass); no input frame runs under a menu screen.
-	if (controls_.is_valid() && !frame_menu_open_) {
-		const auto joystick = controls_->joystick_records(p_spectating, scroll_lock);
-		gate.key_events.insert(gate.key_events.end(), joystick.begin(), joystick.end());
-	}
-	gate.embedder_row = [](int p_code) {
-		return talk_row_of(p_code) >= 0 || hud_row_of(p_code) >= 0 || shell_record(p_code);
-	};
-	gate.scroll_lock_on = scroll_lock;
-	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
-	// Retail's auto-run rides the forward key (engine controls::PlayerActionFrame::
-	// auto_run_forward). A case that turns its toggle off passes the dispatcher's head by its
-	// code; one turn-off per frame, as the keyboard state reads it only once the window's
-	// messages are read.
-	p_input->set_movement(forward || actions.auto_run_forward, back, left, right, lean_left,
-			lean_right, jump);
-	apply_immediate(actions, action_sim);
-	// The fire binding's and the ToSpecial keys' state, which their records' arms test live;
-	// the fire, reload and ToSpecial rows are records (engine inmatch::Role::dispatch_record
-	// carries the witness).
-	p_input->set_weapon_input(actions.fire_held, false, false);
-	p_input->set_fire_keys_held(actions.fire_keys_held);
-	// The scripted fire hold standing for the left button: its press owes the left button's
-	// down, a joystick's none (engine controls::PlayerActionFrame::fire_scripted_left_down
-	// carries the witness).
-	if (actions.fire_scripted_left_down) left_down_owed_ = true;
-	p_input->set_to_special_held(actions.to_special_held);
-	p_input->set_menu_open(frame_menu_open_);
-	for (const auto &request : actions.requests) {
-		// An action row's request is a record the update's drain dispatches in queue order
-		// (queue_records, dispatch_record), a talk, HUD, pause or escape row's key event's and
-		// a deploy pick's among them (a pick's parameter its first argument), the held USE
-		// row's last.
-		if (request.code < 0) continue;
-		const int32_t first =
-				request.action == opennova::controls::PlayerAction::EmbedderRow ? request.value : 0;
-		sample_records_.push_back({request.code, first, 0, 0, request.sign});
-	}
-	// The death screen's own rows (the spectate sub-mode and target): their key events are
-	// the poll's records in key order; their off-keyboard arms' press edges are records of
-	// the update's drain behind the sample's other rows, each past the dispatcher's head at
-	// its dispatch (dispatch_record, engine controls::player_action_request).
-	if (p_spectating && action_sim.is_valid()) {
-		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_), active))
-			sample_records_.push_back({request.code, 0, 0, 0, request.sign});
-	}
-}
-
-bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_fired,
-		bool p_mouse_scale_negative, int32_t p_mouse_scale_param) {
-	// The HUD's key rows are action bindings like the rest: the input frame's
-	// key scan fires them and its drain dispatches them, every tick, so a row
-	// pressed for one tick of a multi-tick frame fires on that tick. hudcolor
-	// (row 76) defaults to Ctrl+F6 beside huddetail's bare F6 (row 50): the
-	// binding sampler's two passes keep them apart (Ctrl+F6 fires only
-	// hudcolor, F6 only huddetail), and its first match gives a key both rows
-	// carry to hudcolor alone (code 10 before 19; engine
-	// BindingSet::pressed_key). showhud (row 27) ships unbound. Ctrl is a
-	// binding modifier; Shift or Alt held gates nothing, as the key scan has no
-	// such gate (engine hud::HudKeyEdge carries the witness).
-	// [orig: Input_ProcessFrame @0x49D520 (the Input_ProcessPlayerFrame call
-	//  @0x49D58B, the drain's Input_HandleActionBinding call @0x49D5D8); the key
-	//  scan's fire @0x49d42f (the modifier pass) and @0x49d488 (the fallback);
-	//  huddetail dispatch @0x4E0601; showhud dispatch @0x4E0561]
-	// The row events are the keyboard pass's key-downs (an OS repeat fires its
-	// row again) and this router's press edges of the mouse, joystick and scripted
-	// arms (run_update_rows); the cycles and the window toggles are the engine's
-	// dispatch (engine hud/hud_toggles.h hud_toggles_dispatch); the HUD presenter
-	// applies the event words at its frame.
-	if (hud_toggles_.is_null() || p_sim.is_null()) return false;
-	// Each row's event passes the dispatcher's head by its catalog row's flags
-	// (the pre-round timer, the deploy overlay, the round-over gate, the dead
-	// operand): the rows the role's head drops this input frame (engine
-	// hud::HudKeyPoll::head_drops carries the witness).
-	int head_drops = 0;
-	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
-		if (!p_sim->action_head_admits(opennova::controls::action_code(
-					opennova::hud::hud_toggle_row_catalog_row(row))))
-			head_drops |= 1 << row;
-	// The connection mode's two bits: an authority is any role but a joiner, a
-	// session peer any role but a dedicated host. The mousescale row steps by
-	// its fire's sign bit (Shift on a modifier-less key).
-	const int role = p_sim->session_role();
-	int64_t events = hud_toggles_->dispatch(p_rows_fired, frame_gameplay_input_active_,
-			p_sim->is_mp_session(),
-			opennova::game_type::is_objective(static_cast<uint32_t>(p_sim->get_session_game_type())),
-			!p_sim->local_player_dead(), role != Simulation::ROLE_JOINER,
-			role != Simulation::ROLE_DEDICATED_HOST, p_mouse_scale_negative, head_drops);
-	// A typed mousescale's argument rides above the event bits (engine
-	// hud_toggle_event::kMouseScaleParamShift carries the witness).
-	if ((events & HudToggles::EVENT_MOUSE_SCALE_STEPPED) != 0)
-		events |= static_cast<int64_t>(static_cast<uint64_t>(static_cast<uint32_t>(p_mouse_scale_param))
-				<< HudToggles::MOUSE_SCALE_PARAM_SHIFT);
-	if (events != 0) hud_toggle_events_.push_back(events);
-	// The pause row's flip reaches the session at this update (engine
-	// inmatch::Session::run_updates); the HUD presenter's later apply of the event
-	// finds the session already there.
-	return (events & HudToggles::EVENT_PAUSE_TOGGLED) != 0;
-}
-
-PackedInt64Array PlayerInputRouter::take_hud_toggle_events() {
-	PackedInt64Array out;
-	for (const int64_t events : hud_toggle_events_) out.push_back(events);
-	hud_toggle_events_.clear();
-	return out;
-}
-
-void PlayerInputRouter::consume_use_hold() {
-	actions_.consume_use_hold();
+bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
+	LocalPlayerPresenter *owner = presenter();
+	if (!p_active || owner == nullptr || !owner->has_player()) return false;
+	opennova::platform::InputEvent event;
+	if (!input_device::to_platform(p_event, event)) return false;
+	// With no binding table the device's buttons and wheel reach no row.
+	if (controls_.is_null() && event.type != opennova::platform::InputEvent::Type::MouseMotion)
+		return false;
+	return frame_.device_event(event);
 }
 
 Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(const Ref<Simulation> &p_session, int p_vk,
 		int p_yes_vk, int p_no_vk, int p_restart_vk) {
 	const Ref<Simulation> chain_sim = p_session.is_valid() ? p_session : sim();
 	if (chain_sim.is_null()) return SpecialKeyOutcome::make({});
+	Session session(*this, &chain_sim);
 	opennova::inmatch::SpecialKeyInput input;
 	input.vk = p_vk;
 	input.yes_vk = p_yes_vk;
 	input.no_vk = p_no_vk;
 	input.restart_vk = p_restart_vk;
-	// The chain's arms read the HUD's words as the key meets them, so a pick that closed a
-	// menu hands the frame's next digit to the next arm.
-	opennova::hud::HudToggleState no_hud;
-	opennova::hud::HudToggleState &toggles =
-			hud_toggles_.is_valid() ? hud_toggles_->mutable_state() : no_hud;
-	const opennova::inmatch::SpecialKeyOutcome outcome =
-			chain_sim->special_key_chain(toggles, actions_, input);
-	if (outcome.digit_pick) apply_player_action(*chain_sim.ptr(), *outcome.digit_pick);
-	return SpecialKeyOutcome::make(outcome);
-}
-
-
-bool PlayerInputRouter::take_armory_request() {
-	const bool requested = armory_requested_;
-	armory_requested_ = false;
-	return requested;
-}
-
-bool PlayerInputRouter::take_vehicle_menu_request() {
-	const bool requested = vehicle_menu_requested_;
-	vehicle_menu_requested_ = false;
-	return requested;
-}
-
-void PlayerInputRouter::reset_input_state() {
-	// The reset's head: the key queue, then the key state (engine
-	// controls::KeyEventQueue::reset carries the witness).
-	key_events()->reset();
-	if (controls_.is_valid()) controls_->reset_key_state();
-	key_events()->clear_press_latch();
-	// The reset's event queue memset drops the rows a no-update frame left waiting.
-	row_samples_.clear();
-	row_records_.clear();
-	action_events_.clear();
-	sample_records_.clear();
-	pump_records_.clear();
-	left_down_owed_ = false;
-	const Ref<Simulation> reset_sim = sim();
-	if (reset_sim.is_valid()) reset_sim->clear_deferred_input();
+	return SpecialKeyOutcome::make(frame_.special_key(session, input));
 }
 
 Ref<KeyEventQueue> PlayerInputRouter::key_events() {
@@ -837,10 +142,9 @@ Ref<KeyEventQueue> PlayerInputRouter::key_events() {
 
 void PlayerInputRouter::push_key_event(const Ref<InputEventKey> &p_event) {
 	if (p_event.is_null()) return;
-	// The key-down handler sets the key's state (the shell's key_down_event), then
-	// queues the message, whose Ctrl and Shift bits read the key state (with no binding
-	// model, the event's own; engine controls::KeyEventQueue and key_event_flag carry
-	// the witness).
+	// The key-down handler sets the key's state (the shell's key_down_event), then queues the
+	// message, whose Ctrl and Shift bits read the key state (with no binding model, the
+	// event's own; engine controls::queued_key carries the witness).
 	const bool ctrl =
 			controls_.is_valid() ? controls_->is_vk_down(0x11) : p_event->is_ctrl_pressed();
 	const bool shift =
@@ -848,98 +152,30 @@ void PlayerInputRouter::push_key_event(const Ref<InputEventKey> &p_event) {
 	key_events()->push_key(p_event, ctrl, shift);
 }
 
-void PlayerInputRouter::close_pass_through_screen() {
-	// The device read: the cursor's position in the window's client pixels, the
-	// coordinates the original's mouse-move handler keeps.
-	DisplayServer *display = DisplayServer::get_singleton();
-	const Vector2i client = display->mouse_get_position() - display->window_get_position();
-	int32_t axis[2] = {};
-	opennova::world::pass_through_close_axis(client.x, client.y, axis);
-	close_axis_ = Vector2(static_cast<real_t>(axis[0]), static_cast<real_t>(axis[1]));
+void PlayerInputRouter::set_hud_toggles(const Ref<HudToggles> &p_toggles) {
+	hud_toggles_ = p_toggles;
+	frame_.set_hud_toggles(hud_toggles_.is_valid() ? &hud_toggles_->mutable_state() : nullptr);
 }
 
-// Mouse-look: the motion events add up the cursor offset the input frame
-// hands the session in whole pixels; the session's mouse pump spreads it into
-// the axis words the SIM's witnessed integer pipeline scales (the sim owns
-// sensitivity, the scoped zoom reduction, Y-invert, and the pitch clamps).
-// (engine: runtime/world/player_look.h MouseAxisPump, runtime/world/local_player.cpp)
-bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
-	LocalPlayerPresenter *owner = presenter();
-	if (!p_active || owner == nullptr || !owner->has_player()) {
-		return false;
-	}
-    InputEventMouseButton *button = Object::cast_to<InputEventMouseButton>(p_event.ptr());
-    if (button != nullptr && button->is_pressed() && controls_.is_valid() &&
-        (button->get_button_index() == MOUSE_BUTTON_WHEEL_UP ||
-         button->get_button_index() == MOUSE_BUTTON_WHEEL_DOWN)) {
-        const Ref<Simulation> event_sim = sim();
-        if (event_sim.is_null()) return false;
-        // The event's factor is |delta| / WHEEL_DELTA (0 where the platform
-        // reports none: one notch). The native accumulator turns the message
-        // stream into whole notches (controls/player_actions.h WheelRemainder).
-        const float factor = button->get_factor();
-        const int32_t units = factor > 0.0f
-                ? static_cast<int32_t>(std::lround(factor * opennova::controls::kWheelDelta))
-                : opennova::controls::kWheelDelta;
-        int notches = wheel_.feed(
-                button->get_button_index() == MOUSE_BUTTON_WHEEL_UP ? units : -units);
-        // Each notch is the wheel's event (256 up, 512 down), whose row the binding walk
-        // takes as a button's (a held row's included) and the next update's message pump
-        // queues as a record, ahead of that update's keyboard pass, for its drain
-        // (queue_records; engine controls::WheelRemainder, BindingSet::mouse_click_action
-        // and inmatch::TickInputSource carry the witness).
-        for (; notches > 0; --notches) queue_mouse_event_record(0x100);
-        for (; notches < 0; ++notches) queue_mouse_event_record(0x200);
-        return true;
-    }
-	// A mouse button's message is a click record its next update's pump queues, ahead of
-	// that update's keyboard pass: the row its event takes, with the Shift sign or the
-	// row's 0x200 bit; the click walk's head gate (the cine editor's open word) never closes
-	// in play (engine BindingSet::mouse_click_action carries the witness). The button's held
-	// state stays the sampler's (the fire, the held rows).
-	if (button != nullptr && controls_.is_valid()) {
-		int event = 0;
-		const bool down = button->is_pressed();
-		const bool twice = down && button->is_double_click();
-		switch (button->get_button_index()) {
-			case MOUSE_BUTTON_LEFT:
-				event = twice ? 1024 : down ? 2 : 4;
-				// The left button's down (event 2, not a double click's 1024) owes its
-				// PowerThrow windup test to the next update's message pump.
-				if (event == 2) left_down_owed_ = true;
-				break;
-			case MOUSE_BUTTON_RIGHT: event = twice ? 2048 : down ? 8 : 0x10; break;
-			case MOUSE_BUTTON_MIDDLE: event = twice ? 4096 : down ? 32 : 64; break;
-			default: break;
-		}
-		if (event != 0) queue_mouse_event_record(event);
-		return false;
-	}
-	InputEventMouseMotion *motion = Object::cast_to<InputEventMouseMotion>(p_event.ptr());
-	if (motion == nullptr) {
-		return false;
-	}
-	look_delta_ += motion->get_relative();
-	return true;
+PackedInt64Array PlayerInputRouter::take_hud_toggle_events() {
+	PackedInt64Array out;
+	for (const uint64_t events : frame_.take_hud_toggle_events())
+		out.push_back(static_cast<int64_t>(events));
+	return out;
 }
 
-void PlayerInputRouter::queue_mouse_event_record(int p_event) {
-	// The row the binding walk takes for the event and the record's sign (engine
-	// BindingSet::mouse_click_record carries the witness).
-	const ControlsModel::MouseClickRecord record = controls_->mouse_click_record(p_event);
-	if (record.code >= 0) pump_records_.push_back({record.code, 0, 0, 0, record.sign});
+bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_fired,
+		bool p_mouse_scale_negative, int32_t p_mouse_scale_param) {
+	if (p_sim.is_null()) return false;
+	Session session(*this, &p_sim);
+	return frame_.dispatch_hud_rows(session, static_cast<uint32_t>(p_rows_fired),
+			p_mouse_scale_negative, p_mouse_scale_param);
 }
 
-void PlayerInputRouter::reset() {
-	actions_.reset();
-	look_delta_ = Vector2();
-	close_axis_ = Vector2();
-	row_samples_.clear();
-	row_records_.clear();
-	action_events_.clear();
-	sample_records_.clear();
-	pump_records_.clear();
-	tick_scripted_look_ = Vector2();
+void PlayerInputRouter::set_hud_chat(const Ref<HudChatEntry> &p_chat,
+		const Ref<RtxtStringFile> &p_gametext) {
+	hud_chat_ = p_chat;
+	chat_gametext_ = p_gametext;
 }
 
 void PlayerInputRouter::release_mouse_capture() {
@@ -957,29 +193,262 @@ void PlayerInputRouter::release_capture_for_screen() {
 			Vector2i(opennova::world::kCursorCentreX, opennova::world::kCursorCentreY));
 }
 
-// The live binding table drives every key below (defaults: WASD move, Q/E
-// lean, Space jump -- see engine/runtime/controls k_catalog); jump is
-// momentary (the motor jumps once when grounded). There is no run key:
-// running is the automatic forward-walk promotion in the sim's body
-// selection, suppressed while scoped.
-// (engine: runtime/world/player_input.h)
-void PlayerInputRouter::read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
-		bool &r_lean_left, bool &r_lean_right, bool &r_jump) const {
-	if (input_override_.is_valid()) {
-		r_forward = input_override_->get_forward();
-		r_back = input_override_->get_back();
-		r_left = input_override_->get_left();
-		r_right = input_override_->get_right();
-		r_lean_left = input_override_->get_lean_left();
-		r_lean_right = input_override_->get_lean_right();
-		r_jump = input_override_->get_jump();
-		return;
+// --- the device ---------------------------------------------------------------------------
+
+bool PlayerInputRouter::Device::pressed(const char *p_token) const {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	return controls.is_valid() && controls->is_token_pressed(p_token);
+}
+
+int PlayerInputRouter::Device::pressed_key(const char *p_token) const {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	return controls.is_valid() ? controls->pressed_key_for_token(p_token) : 0;
+}
+
+bool PlayerInputRouter::Device::keys_down(const char *p_token) const {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	return pressed(p_token) || (controls.is_valid() && controls->is_token_key_down(p_token));
+}
+
+bool PlayerInputRouter::Device::key_slots_down(const char *p_token) const {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	return controls.is_valid() && controls->is_token_key_down(p_token);
+}
+
+bool PlayerInputRouter::Device::binding_active(const char *p_token) const {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	return controls.is_valid() && controls->is_token_binding_active(p_token);
+}
+
+// A keyboard key fires its row through the key queue's events (the shell's KeyboardPass); the
+// mouse, joystick and scripted arms here.
+bool PlayerInputRouter::Device::held_off_keyboard(const char *p_token) const {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	return controls.is_valid() && controls->is_token_held_off_keyboard(p_token);
+}
+
+bool PlayerInputRouter::Device::scripted_left_button(const char *p_token) const {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	return controls.is_valid() && controls->is_token_scripted_left_button(p_token);
+}
+
+// Shift's sign bit reads the key-state array, which a menu close's reset clears (engine
+// controls::KeyStateReset carries the witness).
+bool PlayerInputRouter::Device::fire_signed(const char *p_token) const {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	return controls.is_valid() && controls->is_token_fire_signed(String(p_token));
+}
+
+opennova::platform::InputState PlayerInputRouter::Device::state() const {
+	return input_device::state();
+}
+
+void PlayerInputRouter::Device::set_scan_gates(bool p_death_screen, bool p_scan_word) {
+	if (router_.controls_.is_valid()) router_.controls_->set_scan_gates(p_death_screen, p_scan_word);
+}
+
+bool PlayerInputRouter::Device::keyboard_captured() const {
+	return router_.controls_.is_valid() && router_.controls_->is_keyboard_captured();
+}
+
+opennova::inmatch::PlayerInputDevice::ClickRecord PlayerInputRouter::Device::mouse_click_record(
+		uint32_t p_event) const {
+	ClickRecord out;
+	if (router_.controls_.is_null()) return out;
+	const ControlsModel::MouseClickRecord record =
+			router_.controls_->mouse_click_record(static_cast<int>(p_event));
+	out.code = record.code;
+	out.sign = record.sign;
+	return out;
+}
+
+std::vector<opennova::controls::KeyRowEvent> PlayerInputRouter::Device::joystick_records(
+		bool p_death_screen, bool p_scroll_lock) {
+	if (router_.controls_.is_null()) return {};
+	return router_.controls_->joystick_records(p_death_screen, p_scroll_lock);
+}
+
+std::vector<opennova::controls::KeyRowEvent> PlayerInputRouter::Device::key_release_pass() {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	if (controls.is_null()) return {};
+	const auto key_state = [&controls](int p_vk) { return controls->is_key_state_down(p_vk); };
+	return controls->native_bindings().release_pass(router_.key_events()->press_latch(), key_state);
+}
+
+void PlayerInputRouter::Device::reset_key_queue() {
+	router_.key_events()->reset();
+}
+
+void PlayerInputRouter::Device::reset_key_state() {
+	if (router_.controls_.is_valid()) router_.controls_->reset_key_state();
+	router_.key_events()->clear_press_latch();
+}
+
+bool PlayerInputRouter::Device::step_scripted(bool p_advance, int64_t p_logic_tick,
+		float &r_look_x, float &r_look_y) {
+	const Ref<ControlsModel> &controls = router_.controls_;
+	const Ref<ScriptedInput> scripted =
+			controls.is_valid() ? controls->get_scripted_input() : Ref<ScriptedInput>();
+	if (scripted.is_null()) return false;
+	if (p_advance) controls->advance_scripted_input(p_logic_tick);
+	const Vector2 look = scripted->take_look();
+	r_look_x = static_cast<float>(look.x);
+	r_look_y = static_cast<float>(look.y);
+	return true;
+}
+
+bool PlayerInputRouter::Device::movement_override(opennova::world::PlayerInput &r_movement) const {
+	const Ref<PlayerMoveIntent> &intent = router_.input_override_;
+	if (intent.is_null()) return false;
+	r_movement.forward = intent->get_forward();
+	r_movement.back = intent->get_back();
+	r_movement.left = intent->get_left();
+	r_movement.right = intent->get_right();
+	r_movement.lean_left = intent->get_lean_left();
+	r_movement.lean_right = intent->get_lean_right();
+	r_movement.jump = intent->get_jump();
+	return true;
+}
+
+// Retail's auto-run word and its turn-off over the keyboard-lock device (D-NET-563; engine
+// controls::PlayerActionPoll::scroll_lock_on and PlayerActionFrame::scroll_lock_off carry the
+// witness).
+bool PlayerInputRouter::Device::scroll_lock_turn_off() {
+	return key_lock_device::set(opennova::controls::kVkScroll, false);
+}
+
+// --- the session --------------------------------------------------------------------------
+
+Ref<Simulation> PlayerInputRouter::Session::sim() const {
+	return fixed_ != nullptr ? *fixed_ : router_.sim();
+}
+
+bool PlayerInputRouter::Session::available() const {
+	return sim().is_valid();
+}
+
+opennova::inmatch::PlayerInputSession::Facts PlayerInputRouter::Session::facts() const {
+	Facts out;
+	const Ref<Simulation> s = sim();
+	if (s.is_null()) return out;
+	const int role = s->session_role();
+	out.death_screen = s->local_death_screen_active();
+	out.local_dead = s->local_player_dead();
+	out.dedicated_host = role == Simulation::ROLE_DEDICATED_HOST;
+	out.joiner = role == Simulation::ROLE_JOINER;
+	out.mp_session = s->is_mp_session();
+	out.game_type = static_cast<uint32_t>(s->get_session_game_type());
+	out.logic_tick = s->get_logic_tick();
+	return out;
+}
+
+bool PlayerInputRouter::Session::action_head_admits(int p_code) {
+	const Ref<Simulation> s = sim();
+	return s.is_valid() && s->action_head_admits(p_code);
+}
+
+opennova::controls::UseItemPressArm PlayerInputRouter::Session::take_use_item_press() {
+	using Arm = opennova::controls::UseItemPressArm;
+	const Ref<Simulation> s = sim();
+	if (s.is_null()) return Arm::kTaken;
+	switch (s->take_use_item_press()) {
+		case Simulation::USE_ITEM_ARM_MOUNT_CHAIN: return Arm::kMountChain;
+		case Simulation::USE_ITEM_ARM_ARMORY: return Arm::kOpenArmory;
+		// The vehicle-loadout arm's request: the shell closes a menu screen up, else opens
+		// vehicle.mnu past the team test (engine world::local_player_use_item_arm and
+		// local_player_vehicle_zone_team_matches carry the witness).
+		case Simulation::USE_ITEM_ARM_VEHICLE_LOADOUT: return Arm::kOpenVehicleMenu;
+		default: return Arm::kTaken;
 	}
-	r_forward = pressed("move_forward");
-	r_back = pressed("move_back");
-	r_left = pressed("strafe_left");
-	r_right = pressed("strafe_right");
-	r_lean_left = pressed("LeanRoll_left");
-	r_lean_right = pressed("LeanRoll_right");
-	r_jump = pressed("move_jump");
+}
+
+void PlayerInputRouter::Session::run_action(const opennova::controls::PlayerActionRequest &p_request) {
+	using Action = opennova::controls::PlayerAction;
+	const Ref<Simulation> s = sim();
+	if (s.is_null()) return;
+	Simulation &session = *s.ptr();
+	switch (p_request.action) {
+		case Action::ToggleMount: session.local_player_toggle_mount(); break;
+		case Action::SelectSeat: session.local_player_select_seat(p_request.value); break;
+		case Action::ToggleScope: session.request_local_player_scope_toggle(); break;
+		case Action::WeaponCategory:
+			session.request_local_player_weapon_category(
+					static_cast<Simulation::WeaponCategory>(p_request.value));
+			break;
+		case Action::WeaponCycle: session.request_local_player_weapon_cycle(p_request.value); break;
+		case Action::Stance:
+			session.request_local_player_stance(static_cast<Simulation::Stance>(p_request.value));
+			break;
+		case Action::ScopeZero: session.request_local_player_scope_zero(p_request.value); break;
+		case Action::RadarZoom: session.request_hud_radar_zoom(p_request.value); break;
+		case Action::MapCycle: session.request_hud_map_cycle(); break;
+		case Action::Binoculars: session.request_local_player_binoculars_toggle(); break;
+		case Action::NightVision: session.request_local_player_nvg_toggle(); break;
+		case Action::NvgGain: session.request_local_player_nvg_gain(p_request.value); break;
+		case Action::WaypointCycle: session.request_waypoint_cycle(p_request.value); break;
+		case Action::Spectate: session.request_spectate_action(p_request.value); break;
+		// Sent over the session; the special-key chain closed the menu.
+		case Action::EmotePick: session.send_voice_menu_pick(false, p_request.value); break;
+		case Action::RadioPick: session.send_voice_menu_pick(true, p_request.value); break;
+		// The shell opens the screen (the frame's take_armory_request /
+		// take_vehicle_menu_request).
+		case Action::OpenArmory: break;
+		case Action::OpenVehicleMenu: break;
+		// The role's arms (engine inmatch::Role::dispatch_record): never handed here.
+		case Action::Respawn: break;
+		case Action::MedicRequest: break;
+		case Action::Reload: break;
+		case Action::ToSpecial: break;
+		case Action::Fire: break;
+		case Action::UseItem: break;
+		// The frame's own records (engine inmatch::PlayerInputFrame::dispatch_record).
+		case Action::EmbedderRow: break;
+	}
+}
+
+bool PlayerInputRouter::Session::dispatch_action_record(int32_t p_code, int32_t p_param) {
+	const Ref<Simulation> s = sim();
+	return s.is_valid() && s->dispatch_action_record(p_code, p_param);
+}
+
+void PlayerInputRouter::Session::left_button_down() {
+	const Ref<Simulation> s = sim();
+	if (s.is_valid()) s->local_player_left_button_down();
+}
+
+void PlayerInputRouter::Session::clear_deferred_input() {
+	const Ref<Simulation> s = sim();
+	if (s.is_valid()) s->clear_deferred_input();
+}
+
+// The talk rows' dispatch gates, the capture, the talk debounce and the flood are the engine's
+// chat entry (ChatEntryFacts::frame, inmatch/chat_flood.h); the HUD presenter draws the line at
+// its frame.
+void PlayerInputRouter::Session::dispatch_talk_rows(uint32_t p_rows_fired, bool p_active) {
+	const Ref<Simulation> s = sim();
+	if (router_.hud_chat_.is_null() || s.is_null()) return;
+	router_.hud_chat_->dispatch_rows(static_cast<int>(p_rows_fired), p_active, s,
+			router_.chat_gametext_, s->get_main_frame_counter());
+}
+
+opennova::inmatch::SpecialKeyOutcome PlayerInputRouter::Session::special_key_chain(
+		opennova::hud::HudToggleState &p_toggles, opennova::controls::PlayerActions &p_actions,
+		const opennova::inmatch::SpecialKeyInput &p_input) {
+	const Ref<Simulation> s = sim();
+	if (s.is_null()) return {};
+	return s->special_key_chain(p_toggles, p_actions, p_input);
+}
+
+// --- the shell ----------------------------------------------------------------------------
+
+void PlayerInputRouter::Shell::keyboard_pass() {
+	if (keyboard_pass_.is_valid()) keyboard_pass_.call();
+}
+
+bool PlayerInputRouter::Shell::menu_screen_open() {
+	return menu_screen_probe_.is_valid() && bool(menu_screen_probe_.call());
+}
+
+void PlayerInputRouter::Shell::record_leg(int32_t p_code, int32_t p_param) {
+	if (record_leg_.is_valid()) record_leg_.call(p_code, p_param);
 }

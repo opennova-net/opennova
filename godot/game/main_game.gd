@@ -333,7 +333,7 @@ func _ready() -> void:
 	_player_presenter.setup(_world, _camera, _camera, ControlsBindings.model())
 	_keys = KeyboardPass.new(_player_presenter.get_key_events())
 	# The keyboard pass runs at each update's input-frame head, inside the session's
-	# update (PlayerInputRouter::run_update_rows), so a frame that runs no update keeps
+	# update (engine inmatch::PlayerInputFrame::run_update_rows), so a frame that runs no update keeps
 	# its keys (engine inmatch::TickInputSource carries the witness).
 	_player_presenter.set_keyboard_pass(_run_keyboard_pass)
 	# The menu-screen bit, read again at each update's input-frame head: a screen one
