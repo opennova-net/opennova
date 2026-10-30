@@ -64,20 +64,6 @@ bool NovaWorldCall::poll() {
 	return done_;
 }
 
-namespace {
-
-// Whether the service's head, at the folder's own revision number, holds other files than the folder's
-// base: the project made anew under its key, a reset that reached the same number again.
-bool head_replaced(const NovaWorldPaths &paths, const std::optional<RemoteRevision> &head, int64_t revision) {
-	if (!head || revision <= 0 || head->number != revision || head->manifest_sha256.empty())
-		return false;
-	std::string text, error;
-	return io::read_file_text(paths.base_file, text, error) &&
-			project::manifest_sha256(text) != head->manifest_sha256;
-}
-
-} // namespace
-
 // --- NovaWorldJob ---
 
 NovaWorldAccountUpdate NovaWorldJob::take_account() {
@@ -296,7 +282,7 @@ NovaWorldJobState NovaWorldPull::step(uint64_t budget) {
 				if (!read_remote(call_.reply(), head_, error))
 					return fail("cannot read the project: " + error.line());
 				call_ = NovaWorldCall();
-				if (remote_.head < copy_.revision || head_replaced(novaworld_paths_, head_, copy_.revision))
+				if (remote_.head < copy_.revision)
 					return end_reset();
 				if (remote_.head == 0 || remote_.head == copy_.revision) {
 					up_to_date_ = true;
@@ -469,17 +455,16 @@ NovaWorldJobState NovaWorldCheck::step(uint64_t budget) {
 				// The service's answer, or why there is none: the folder's own changes are read
 				// either way, unless the head is before the folder's base (the folder is its
 				// working copy again first).
-				std::optional<RemoteRevision> head;
 				if (!note_session(call_.reply())) {
 					remote_error_ = "the session ended: sign in again";
 				} else {
+					std::optional<RemoteRevision> head;
 					NovaWorldApiError error;
 					if (!read_remote(call_.reply(), head, error))
 						remote_error_ = error.line();
 				}
 				call_ = NovaWorldCall();
-				if (remote_known_ &&
-						(remote_.head < copy_.revision || head_replaced(novaworld_paths_, head, copy_.revision)))
+				if (remote_known_ && remote_.head < copy_.revision)
 					return end_reset();
 				scan_ = std::make_unique<NovaWorldScan>(paths_, export_dir_);
 				phase_ = Phase::Scan;
@@ -713,7 +698,7 @@ NovaWorldJobState NovaWorldPush::step(uint64_t budget) {
 				if (!remote_.can_push)
 					return fail(novaworld_push_refusal());
 				head_ = remote_.head;
-				if (head_ < copy_.revision || head_replaced(novaworld_paths_, head, copy_.revision))
+				if (head_ < copy_.revision)
 					return end_reset();
 				if (head_ != copy_.revision) {
 					outcome_ = PushOutcome::Stale;

@@ -1567,9 +1567,9 @@ void NovaWorldController::forget_project() {
 
 void NovaWorldController::reset_found(int64_t head) {
 	NovaWorldView &view = core_.view().novaworld;
-	view.last = "NovaWorld was reset: the project is at revision " + std::to_string(head) +
-			", with other files than the folder's revision " + std::to_string(view.revision) +
-			". The folder is set up as its working copy again.";
+	view.last = "NovaWorld was reset: the project's newest revision is " + std::to_string(head) +
+			", before the folder's " + std::to_string(view.revision) +
+			". The folder is set up as a working copy again.";
 	core_.note("NovaWorld: " + view.last);
 	view.checked = false;
 	view.changes.clear();

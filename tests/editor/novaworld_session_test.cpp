@@ -434,18 +434,6 @@ static int test_set_up_and_reset() {
 	TEST_EXPECT(copy_at(dir.file("Mod"), copy) && copy.revision == 0);
 	s.send(request::novaworld_push("First revision"));
 	TEST_EXPECT(service.head == 1 && s.novaworld().revision == 1);
-
-	// Made anew at the same number: nothing but its files tells it from the folder's own revision. Its digest
-	// matching the base's until then is what the pushes and pulls of this suite prove.
-	s.send(request::novaworld_check());
-	TEST_EXPECT(s.novaworld().revision == 1);
-	const std::string other = "another project's";
-	service.blobs[opennova::io::sha256_hex(other.data(), other.size())] = other;
-	service.manifests[1] = opennova::project::encode_manifest({ ProjectFile{ "defs/other.def",
-			opennova::io::sha256_hex(other.data(), other.size()), other.size() } });
-	s.send(request::novaworld_check());
-	TEST_EXPECT(s.novaworld().tracked && s.novaworld().revision == 0 && copy_at(dir.file("Mod"), copy) &&
-			copy.revision == 0);
 	std::printf("set up: a project made for MOD set up as it opens, at no revision (its files not the "
 				"head's), its push waiting for a pull; the store reset, set up again by the check that "
 				"found it\n");
@@ -756,6 +744,25 @@ static int test_get_again() {
 			s.novaworld().tracked && s.novaworld().revision == 1 && s.read("defs/a.def") == "a");
 	std::printf("get again: a copy opened, another project refused, a folder left with only its "
 				".opennova got whole\n");
+	return 0;
+}
+
+// A revision may list a file the service manages (an expansion's version.txt, a released game's gt.ssc), which a
+// folder never holds, so a base is not its manifest, nor the manifest's digest the base's: the folder is still
+// at that revision, and stays there. Taking the difference for a reset set the folder up, then checked it, forever.
+static int test_service_managed_files_are_no_reset() {
+	test_temp::TempDir dir("opennova_novaworld_session_managed");
+	FakeService service;
+	push_to_mod(service, { { "project.opennova", project_file_naming("MOD") }, { "defs/a.def", "a" },
+								 { "version.txt", "A mod, V0.1.0; English\r\n" } });
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	s.send(request::novaworld_sync("MOD", dir.file("Copy")));
+	s.send(request::novaworld_check());
+	s.send(request::novaworld_check());
+	TEST_EXPECT(s.novaworld().tracked && s.novaworld().revision == 1 && s.novaworld().changes.empty() &&
+			!s.said("NovaWorld was reset") && s.read("version.txt") == "<missing>");
+	std::printf("service-managed files: in the manifest, not the folder, and no reset for it\n");
 	return 0;
 }
 
@@ -1534,6 +1541,7 @@ int main() {
 	failures += test_get_expansion();
 	failures += test_get_then_open_again();
 	failures += test_get_again();
+	failures += test_service_managed_files_are_no_reset();
 	failures += test_copies_outlive_recents();
 	failures += test_make_own_and_rejoin();
 	failures += test_two_services();
