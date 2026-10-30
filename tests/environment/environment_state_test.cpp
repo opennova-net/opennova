@@ -719,12 +719,14 @@ int main() {
 					seen = mission.tod_fixed24 == kept.tod_fixed24 &&
 							mission.tod_advance_per_tick == kept.tod_advance_per_tick &&
 							mission.tod_epoch_tickdown == 10 &&
-							mission.fog_target_q16() == (640 << 16);
+							mission.fog_target_q16() == (640 << 16) &&
+							mission.night_phase == 1; // 03:07, kept; the header's 09:30 is day
 					weather.attach_state(&mission, &env);
 					weather.set_world_tick_driven(true);
 				},
 				[] {});
-		ok &= expect(seen, "a kept clock replaces the header's ahead of the hook, the rest seeded");
+		ok &= expect(seen,
+				"a kept clock replaces the header's ahead of the hook, its night phase with it");
 	}
 	{
 		EnvironmentState env;
