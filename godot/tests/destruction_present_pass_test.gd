@@ -270,8 +270,14 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 	presenter.teardown()
 	intact.queue_free()
 	await get_tree().process_frame
+	assert_eq(director.get_report().live, 1,
+			"a scene node leaving is no entity destruction: the lease is the entity's")
+	# The entity's destruction (the presenter's wire retirement, routed by the
+	# world) clears exactly the lease its cached word holds
+	# (renderer::LightSpawner::destroy_entity) [orig: Entity_Destroy @0x43e903..0x43e916].
+	director.on_wire_entity_destroyed(73)
 	assert_eq(director.get_report().live, 0,
-			"actual entity retirement clears its one cached EffectWorld handle")
+			"the entity's destruction clears its one cached light lease")
 	world.queue_free()
 	await get_tree().process_frame
 

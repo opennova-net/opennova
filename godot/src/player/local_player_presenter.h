@@ -252,6 +252,8 @@ public:
 	// local camera/avatar/viewmodel here gives action user points their
 	// production-tick pose; mission/vehicle Nodes retain the
 	// render-frame-batched present path that prevents 00TRa transform flicker.
+	// Bound: a test runs one fixed tick's weapon drain (the live action handles'
+	// re-pose, PlayerWeaponEffects::follow_action_effects) past a pose it set.
 	void present_fixed_weapon_tick(const TypedArray<PlayerWeaponEvent> &p_events);
 	// How many fixed-tick batches the router handed this presenter (a read
 	// seam: the world tests pin the fixed-tick order through it).
