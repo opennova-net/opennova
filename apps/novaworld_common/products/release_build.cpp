@@ -10,6 +10,7 @@
 #include "program/catalog_repository.h"
 #include "tree_files.h"
 
+#include <base/gameprofile/player_files.h>
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
@@ -456,7 +457,8 @@ Step Build::run_app(std::string &why) {
 // Every release is whole (ADR 0067 d6, amended 2026-10-25: the jointops and dfx2 zips install
 // their game into an empty folder from it), with the removals since `previous` ("" for none),
 // `from` being an empty folder. A game's export
-// record and the runtime's own files in a game's folder are left out (kRuntimeFiles); an app's
+// record, the runtime's own files in a game's folder (kRuntimeFiles) and the player's files
+// (gameprofile::player_files) are left out; an app's
 // package carries every file of its build, its update.exe and revupdat.exe among them.
 std::vector<std::string> Build::pack_command(
 		const std::string &from, const std::string &to, const std::string &previous) const {
@@ -468,9 +470,15 @@ std::vector<std::string> Build::pack_command(
 	if (game)
 		argv.insert(argv.end(), { "--exclude", "export.json" });
 	argv.push_back("--full");
-	if (game)
+	if (game) {
 		for (const char *name : kRuntimeFiles)
 			argv.insert(argv.end(), { "--exclude", name });
+		// The player's files (gameprofile::player_files: game.cfg, the saves, the NovaWorld cookie
+		// jar the game rewrites, the logs): no game release ships one, and none takes the REMOVE an
+		// earlier release's row of one would carry.
+		for (const gameprofile::PlayerFile &file : gameprofile::player_files())
+			argv.insert(argv.end(), { "--exclude", file.name });
+	}
 	if (!ds.expansion_code.empty()) {
 		argv.insert(argv.end(), { "--expansion", ds.expansion_code + "=" + ds.command_file });
 	} else {
