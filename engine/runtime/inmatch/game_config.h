@@ -601,7 +601,9 @@ struct GameConfig {
 	// [orig: the block's writers HostDialog_ReadSettings @0x555940 (from
 	//  UI_HandleHostSessionStart @0x556E36, HostDialog_StartSession @0x558764 and the host
 	//  screen's BACK callback sub_5571F0 @0x5571FA) and ServerConfig_ApplyHostSetting
-	//  @0x4A6000 (the host file); CAdminServer_HandleSetCommand @0x405A60 has no cap or
+	//  @0x4A6000 (the host file; its one caller, Game_HostMultiplayerSession @0x4A65A0, has
+	//  none: retail's dead /HOST path, ours opennova-serve's host file);
+	//  CAdminServer_HandleSetCommand @0x405A60 has no cap or
 	//  server-type key] [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals
 	//  @0x524662 under the first-load flag @0x52465E (the store @0x551B2B / @0x551B35, the
 	//  ceiling @0x551B3B..0x551B48); Server_InitNewRoundState has no map-change caller (its
