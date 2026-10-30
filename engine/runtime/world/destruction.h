@@ -263,6 +263,12 @@ struct ItemDeathTraits {
     float husk_swap_at = 0.0f;
     float husk_swap_at_sec = 0.0f;
     std::string particlefx;
+    // The particlefx userpoint name's mask over the graphic model's first 16 userpoints (the
+    // def's +0x276 word; graphic_userpoints holds the points), and its first point, the one the
+    // +0x1CC re-pose reads.
+    // [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @0x522EE0 -> ItemDef_GetBoneMaskByName
+    //  @0x49EA40; CEffect_UpdateEmitterTransform @0x5F7410 - the first set bit @0x5F7467..0x5F7497]
+    uint16_t particlefx_mask = 0;
     bool has_particlefx_point = false;
     int32_t particlefx_point_q16[3] = {};
     int32_t particlefx_direction_q16[3] = {};
