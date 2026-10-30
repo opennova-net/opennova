@@ -315,6 +315,7 @@ add_library(opennova_bindings OBJECT
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp
+    frontend/game_frontend.cpp
     player/game_config_block.cpp
     player/gameplay_camera.cpp
     player/local_player_presenter.cpp

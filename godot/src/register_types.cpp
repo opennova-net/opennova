@@ -202,6 +202,7 @@
 #include "player/gameplay_camera.h"
 #include "player/key_event_queue.h"
 #include "player/special_key_outcome.h"
+#include "frontend/game_frontend.h"
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
@@ -332,6 +333,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInfoCharacterState);
 	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(GameConfigBlock);
+	GDREGISTER_CLASS(GameFrontend);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);

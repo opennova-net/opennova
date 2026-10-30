@@ -18,10 +18,12 @@ in the path is what makes the layering visible, so this check reads it:
      (the editor is the OpenNova Editor's portable core, ADR 0046 d3; nothing
      below it may include it)
   1b. NET-AGNOSTIC (ADR 0043 d4) — every engine/runtime lib except
-     runtime/inmatch and runtime/replication stays free of net/,
-     runtime/inmatch/ and runtime/replication/ includes: the world, the
+     runtime/inmatch, runtime/replication and runtime/frontend stays free of
+     net/, runtime/inmatch/ and runtime/replication/ includes: the world, the
      scripts, the mission kernel and every presentation compiler are
-     headless facts the wire consumes, never the other way round.
+     headless facts the wire consumes, never the other way round. The
+     frontend (ADR 0077 R3) is the mode table above the session, so it
+     reaches the session's types.
   2. QUALIFIED — no include under engine/, apps/, tests/ or godot/src names an
      engine lib by its bare prefix (`<world/x.h>`); the group is mandatory. A
      quoted include that resolves locally (the includer's own directory, the
@@ -150,9 +152,9 @@ REGISTRATION_POINTS = {
     "apps/novaworld_fleet/main.cpp",
 }
 
-# Rule 1b: the runtime libs that carry the wire (ADR 0043 d4). Every other
-# runtime lib is net-agnostic.
-NET_AWARE_RUNTIME_LIBS = ("inmatch", "replication")
+# Rule 1b: the runtime libs that carry the wire (ADR 0043 d4), and the frontend
+# above them (ADR 0077 R3). Every other runtime lib is net-agnostic.
+NET_AWARE_RUNTIME_LIBS = ("inmatch", "replication", "frontend")
 NET_AGNOSTIC_FORBIDDEN_PREFIXES = ("net/", "runtime/inmatch/", "runtime/replication/")
 
 # Rule 3: the consumer trees on the far side of the seam. engine/runtime/world
