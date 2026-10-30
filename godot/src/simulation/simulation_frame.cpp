@@ -69,6 +69,7 @@ opennova::inmatch::RoleView Simulation::role_view() const {
 	view.materializer = joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr;
 	view.staged_mp_attributes = net_.host_session_config.mp_attributes;
 	view.frame_rate = session_.frame_rate_stats();
+	view.title = &session_title(net_, assets_.root);
 	return view;
 }
 

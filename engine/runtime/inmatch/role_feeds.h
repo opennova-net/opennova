@@ -32,6 +32,9 @@
 #include <unordered_set>
 #include <vector>
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
 namespace opennova::mission {
 class MissionKernel;
 }
@@ -75,6 +78,9 @@ struct RoleView {
 	// The session's frame-rate window (Session::frame_rate_stats), the frame-rate overlay's
 	// four words.
 	world::TickAccumulator::FrameRateStats frame_rate;
+	// The title the session runs as: its HUD's own elements (Title::hud_exp_points). Null draws
+	// none of them.
+	const Title *title = nullptr;
 };
 
 // The session rules word the role's HUD gates test (g_RulesFlags, the
@@ -265,6 +271,10 @@ struct HudRoleFacts {
 	// own client's; Role::action_head_admits reads the same) (D-NET-1322).
 	hud::HudConnectStatus connect_status;
 	int32_t start_timer_seconds = 0;
+	// DFX2-36's EXPPOINTS element (hud/hud_exp_points.h), its strings the embedder's
+	// (hud::hud_exp_points_text): the title's flag, the role's replica 0x81 score and fanfare arms
+	// and its 0x80 / 0x82 tracker (the listen host's own client's too); zero with no replica.
+	hud::HudExpPointsState exp_points;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;

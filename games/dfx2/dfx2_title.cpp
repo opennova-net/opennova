@@ -52,6 +52,10 @@ Title make() {
 	//  HostDialog_PopulateClassListCombo @0x5548b0 (@0x5548c2); @0x5562c0 (each restriction
 	//  control's registration, @0x556318..0x55640b) (dfx2.exe)]
 	t.host_screen = "NW_MULTI_PLAYER";
+	// DFX2-36: the EXPPOINTS element and its 0x81 fade.
+	// [orig: sub_5A6D20 @0x5A6D20 (@0x5A6EDE..0x5A6EE7); sub_59B7E0 @0x59B7E0; sub_59B730 called
+	//  @0x4223C5 (dfx2.exe)]
+	t.hud_exp_points = true;
 	return t;
 }
 

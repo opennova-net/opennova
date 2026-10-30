@@ -24,9 +24,11 @@ struct DefHudPosFile;  // formats/def/def.h
 namespace opennova::hud {
 
 // The 24 HUDDECLUT slots in retail's parse-arm order. Slots 0/1/5/9/10/11/12/
-// 14/15/16 are parsed but have NO retail draw-site reader — nothing may gate
-// on them. [orig: the HUD_ParseHudposToken arm table @ 0x59F370; the read
-// sites are the per-slot g_HUDDeclutterVisible cmps cited at each element]
+// 14/15/16 are parsed but have NO Jointops.exe draw-site reader — nothing may
+// gate on them, but slot 9, which dfx2.exe's EXPPOINTS element reads (DFX2-36,
+// HudFrameCompiler::element_exp_points). [orig: the HUD_ParseHudposToken arm
+// table @ 0x59F370; the read sites are the per-slot g_HUDDeclutterVisible cmps
+// cited at each element; sub_5A6D20 @0x5A6EDE (dfx2.exe)]
 enum HudDeclutterSlot : int {
 	kDeclutterMsnTitle = 0,
 	kDeclutterFarpInfo = 1,

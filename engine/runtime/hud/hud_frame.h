@@ -14,6 +14,7 @@
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_declutter.h>
 #include <runtime/hud/hud_elements.h> // which element of the walk drew each run
+#include <runtime/hud/hud_exp_points.h> // DFX2-36's EXPPOINTS element
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_scoreboard.h>
 #include <runtime/hud/hud_minimap.h>
@@ -366,6 +367,8 @@ struct HudLayout {
 	HudPosRecord player_count;
 	HudPosRecord team_xy;
 	HudPosRecord zone_info;
+	// EXPPOINTS: x, y, hidden and the pulse percent (hud_exp_points.h), unauthored the BSS zero.
+	HudExpPointsRecord exp_points;
 	HudSlotBarLayout hudls;
 	HudPosRecord chat_text;
 	// The chat box's x1/x2 columns — g_HUDChatBoxCoords rows 1 and 2, the
@@ -1068,6 +1071,7 @@ struct HudFrameState {
 	HudFrameRateOverlay frame_rate; // element_frame_rate_overlay
 	HudConnectStatus connect_status; // element_connect_status
 	HudStartTimer start_timer;       // element_start_timer
+	HudExpPointsState exp_points;    // element_exp_points (DFX2-36)
 	// An in-game .mnu screen is open (the in-game menu, the armory, the
 	// deploy screen, the end-round board, the command map): the preround
 	// armory line yields to it (element_service_prompt). [orig: dword_255110C,
@@ -1676,6 +1680,10 @@ private:
 	void element_frame_rate_overlay(const HudFrameState &state, float w, float h);
 	void element_connect_status(const HudFrameState &state, float w, float h);
 	void element_start_timer(const HudFrameState &state, float w, float h);
+	// DFX2-36: a new 0x81 fanfare arm starts the EXPPOINTS fade at the pass's head, as the
+	// receive starts it ahead of the frame's draw (hud_exp_points.h); the element draws it.
+	void start_exp_points_fade(const HudFrameState &state);
+	void element_exp_points(const HudFrameState &state, float w, float h);
 	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
@@ -1823,6 +1831,11 @@ private:
 	MapWindowDraw death_map_draw_;
 	MapWindowDraw command_map_draw_;
 	StanceFade stance_;
+	// The EXPPOINTS fade (DFX2-36) and the 0x81 fanfare arms it has seen: the HUD's first pass
+	// adopts the count, an arm folded before this HUD existed being an earlier mission's.
+	HudExpPointsFade exp_fade_;
+	uint32_t exp_fade_arms_seen_ = 0;
+	bool exp_fade_primed_ = false;
 	// The clip-indicator flash latch: the (bucket, reserve, class byte) key
 	// and the stamp, BSS-zero like retail's [orig: g_HUDAmmoKeyBucket / g_HUDAmmoKeyReserve
 	// / g_HUDAmmoKeyClass, stamp g_HUDAmmoFadeStamp; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].

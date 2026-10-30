@@ -5,6 +5,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/io/fixed.h>
+#include <base/title/title.h> // Title::hud_exp_points
 #include <runtime/replication/client_scoreboard_view.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/game_config.h>
@@ -341,6 +342,19 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	HudRoleFacts out;
 	out.breath = breath_bar_facts(view);
 	if (view.runtime != nullptr) out.squad_orders = view.runtime->state().squad_orders;
+	// The EXPPOINTS element's words (DFX2-36): the 0x81 score and its fanfare arms, the tracker's
+	// valid word and its two values [orig: dword_A7BA40 / dword_A7BA4C / dword_A7BA54 /
+	//  dword_A7BA58, read by sub_59B7E0 @0x59B998 / @0x59BA38..0x59BA48 (dfx2.exe)].
+	out.exp_points.element = view.title != nullptr && view.title->hud_exp_points;
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		out.exp_points.score = cs.score_feedback.score;
+		out.exp_points.fade_arms = cs.score_feedback.fanfare_arms;
+		out.exp_points.fade_tone = cs.score_feedback.fanfare_tone;
+		out.exp_points.tracker_valid = cs.score_tracker.valid;
+		out.exp_points.session_points = cs.score_tracker.elapsed;
+		out.exp_points.total_points = cs.score_tracker.time;
+	}
 	// The connection indicators: the role's replica runtime keeps g_NetQuality
 	// (the listen host's own client included); the N icon draws on a
 	// NovaWorld session whose NWU session is in use [orig:

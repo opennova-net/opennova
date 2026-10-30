@@ -183,6 +183,63 @@ void ClientReplicaPipeline::apply_score_delta_sound(
 			static_cast<uint32_t>(feedback.score));
 	feedback.score = sample.score;
 	++feedback.updates;
+	// The fanfare's arm (ClientScoreFeedback::fanfare_arms carries the witness).
+	const hud::ScoreTone tone = hud::score_delta_tone(feedback.delta, state_.exp_fanfare);
+	if (tone != hud::ScoreTone::None) {
+		feedback.fanfare_tone = tone;
+		++feedback.fanfare_arms;
+	}
+	state_.mark_changed();
+}
+
+namespace {
+
+// The one i32 the 0x80 and 0x82 handlers read: the body's first four bytes, 0 when the body is
+// shorter [orig: NapiNPClientMsg_0x080 @0x42A07D..0x42A089; NapiNPClientMsg_0x082
+// @0x42A0E4..0x42A0F9].
+int32_t score_tracker_value(const std::vector<uint8_t> &body) {
+	if (body.size() < 4) return 0;
+	return static_cast<int32_t>(static_cast<uint32_t>(body[0]) |
+			(static_cast<uint32_t>(body[1]) << 8) | (static_cast<uint32_t>(body[2]) << 16) |
+			(static_cast<uint32_t>(body[3]) << 24));
+}
+
+} // namespace
+
+void ClientReplicaPipeline::apply_score_tracker_reset(const std::vector<uint8_t> &body) {
+	// [orig: NapiNPClientMsg_0x080 @0x42A070; ClientScoreTracker carries the witness]
+	ClientScoreTracker &tracker = state_.score_tracker;
+	tracker.node = score_tracker_value(body);
+	tracker.valid = false;
+	tracker.start = 0;
+	tracker.elapsed = 0;
+	state_.mark_changed();
+}
+
+void ClientReplicaPipeline::apply_score_tracker_time(const std::vector<uint8_t> &body) {
+	// [orig: NapiNPClientMsg_0x082 @0x42A0E0 -> CineTracker_RecordTimeEntry @0x422410;
+	//  ClientScoreTracker carries the witness]
+	ClientScoreTracker &tracker = state_.score_tracker;
+	if (tracker.node == 0) return;
+	const int32_t time = score_tracker_value(body);
+	ClientScoreTracker::Entry *entry = nullptr;
+	for (ClientScoreTracker::Entry &each : tracker.entries)
+		if (each.node == tracker.node) {
+			entry = &each;
+			break;
+		}
+	if (entry != nullptr) {
+		entry->elapsed = static_cast<int32_t>(
+				static_cast<uint32_t>(time) - static_cast<uint32_t>(entry->start));
+	} else {
+		tracker.entries.push_back({tracker.node, time, 0, 0});
+		entry = &tracker.entries.back();
+	}
+	entry->time = time;
+	tracker.valid = true;
+	tracker.start = entry->start;
+	tracker.time = entry->time;
+	tracker.elapsed = entry->elapsed;
 	state_.mark_changed();
 }
 

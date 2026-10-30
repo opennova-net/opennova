@@ -436,6 +436,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::SCORE_DELTA_SOUND:
 		apply_score_delta_sound(body);
 		break;
+	case s2c::SCORE_TRACKER_RESET:
+		apply_score_tracker_reset(body);
+		break;
+	case s2c::SCORE_TRACKER_TIME:
+		apply_score_tracker_time(body);
+		break;
 	case s2c::SCRIPT_REMOTE_COMMAND: // the host VM's replicated WAC command
 		apply_script_remote_command(body);
 		break;

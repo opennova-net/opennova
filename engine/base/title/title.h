@@ -67,6 +67,14 @@ struct Title {
 	// any other name the game never reads (the editor's game_never_reads). Null-terminated, as
 	// absent_resource_roles is; null: no claim, the title's binary unread for them.
 	const char *const *read_defs = nullptr;
+	// DFX2-36: the executable's HUD draws the EXPPOINTS element (runtime/hud/hud_exp_points.h:
+	// the label, the S2C 0x81 score and the fade its fanfare starts, the S2C 0x80 / 0x82 tracker's
+	// lines). Jointops.exe parses the EXPPOINTS line and reads none of it, and its 0x81 starts no
+	// fade. On the Title, not the title's rules nor its Protocol: it is the executable's own HUD,
+	// single player's too, and changes no wire byte and no world.
+	// [orig: HUD_ParseHudposToken @0x59F370 (@0x5A0463..0x5A04AF, no reader)] [orig: sub_5A6D20
+	//  @0x5A6EDE, sub_59B7E0 @0x59B7E0, sub_59B730 called @0x4223C5 (dfx2.exe)]
+	bool hud_exp_points = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

@@ -69,6 +69,7 @@ enum class HudElement : uint8_t {
 	FrameRateOverlay,
 	ConnectStatus,
 	StartTimer,
+	ExpPoints,
 	kCount
 };
 inline constexpr size_t kHudElementCount = static_cast<size_t>(HudElement::kCount);

@@ -163,6 +163,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_end_round_statistics.cpp # the SP Show Score panel element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_lfp_panel.cpp     # the AAS zone status panel element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_session_lines.cpp # GAMEINFO/ZONEINFO, CLOCK, TEAMID
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_exp_points.cpp       # DFX2-36: the EXPPOINTS fade, strings
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_exp_points.cpp # its compile element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_slot_bar.cpp      # the HUDLS weapon slot bar element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_banks.cpp

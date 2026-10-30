@@ -180,6 +180,9 @@ void HudFrameCompiler::reset_runtime_state() {
 	hud_colors_active_ = 0;
 	hud_colors_active_index_ = -1;
 	silhouette_stamp_ = 0;
+	// The HUD init zeroes the EXPPOINTS fade (DFX2-36) [orig: HUD_InitOverlaySystem @0x5A3490
+	//  (dfx2.exe) - @0x5A372C..0x5A3764].
+	exp_fade_ = HudExpPointsFade{};
 	clear_message_rings();
 	draw_list_ = HudDrawList{};
 }
@@ -524,6 +527,8 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// The snapshot twin's two non-frame writers (sync_hud_colors_active); the
 	// per-frame restamp is the GAMEINFO drawer's (element_game_info).
 	sync_hud_colors_active(state);
+	// A 0x81 fanfare arm's EXPPOINTS fade (DFX2-36), ahead of every gate: the receive starts it.
+	start_exp_points_fade(state);
 
 	// hud_detail level 3 blanks the ENTIRE gameplay overlay pass — the walk
 	// below never runs [orig: the early-out @ 0x5A80C4..0x5A80DB; the
@@ -659,6 +664,9 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 		element_(HudElement::Stance, [&] { element_stance(state, surface_w, surface_h); });
 		element_weapon_cluster(state, surface_w, surface_h);
 		element_(HudElement::Heat, [&] { element_heat(state, surface_w, surface_h); });
+		// dfx2.exe's EXPPOINTS element follows the icons, ahead of the CLOCK pair (DFX2-36)
+		// [orig: sub_5A6D20 @0x5A6D20 (dfx2.exe) - @0x5A6ED9..0x5A6EEC].
+		element_(HudElement::ExpPoints, [&] { element_exp_points(state, surface_w, surface_h); });
 		// The CLOCK pair follows the heat bar and the icons in the dispatcher
 		// [orig: HUD_RenderOverlays @0x5A7D75..0x5A7D7C].
 		element_(HudElement::Clock, [&] { element_clock(state, surface_w, surface_h); });

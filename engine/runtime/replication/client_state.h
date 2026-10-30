@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <runtime/hud/feed_format.h>
+#include <runtime/hud/score_fanfare.h> // ScoreTone (the 0x81 fanfare arms)
 #include <net/npwire/entity_class.h> // EntityClass
 #include <net/npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
 #include <net/npwire/wire_handle.h>
@@ -1185,6 +1186,42 @@ struct ClientScoreFeedback {
 	int32_t score = 0;
 	int32_t delta = 0;
 	uint32_t updates = 0;
+	// The samples whose delta sounds the EXP_FANFARE ladder (hud::score_delta_tone over the
+	// state's exp_fanfare), and the last one's tone: dfx2.exe's 0x81 starts its EXPPOINTS fade
+	// there, by the tone's tier (hud/hud_exp_points.h, DFX2-36); the tone's sound is the
+	// embedder's (Simulation::take_score_feedback).
+	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42BEF0 -> @0x422350..0x4223C5 (dfx2.exe) - the
+	//  delta @0x422363..0x422367, the EXP_FANFARE gate @0x422369..0x42237B, the tiers
+	//  @0x422380..0x4223BE, sub_59B730 called @0x4223C5]
+	uint32_t fanfare_arms = 0;
+	hud::ScoreTone fanfare_tone = hud::ScoreTone::None;
+};
+
+// The S2C 0x80 / 0x82 score tracker, the words after the 0x81 score in the same block (a misnamed
+// CineTracker in both IDBs): an 0x80 names its node and clears the record; an 0x82 under a named
+// node finds the node's entry (or appends one, its start the value) and stores the value as the
+// entry's time and the gain since its start as its elapsed, then copies the entry's start, time and
+// elapsed out and marks the record valid. dfx2.exe's EXPPOINTS element draws `elapsed` and `time`
+// as its session and total lines while it is valid (DFX2-36). No stock host sends either message
+// (ingame_message_catalog.h).
+// [orig: NapiNPClientMsg_0x080 @0x42A070 - the node @0x42A08B, the clears @0x42A090..0x42A09C;
+//  NapiNPClientMsg_0x082 @0x42A0E0 -> CineTracker_RecordTimeEntry @0x422410 - the node test
+//  @0x422413..0x422418, the walk @0x422420..0x422443, a found entry's elapsed @0x4224E3..0x4224F4,
+//  the append @0x422445..0x4224BD, the time @0x4224C3, valid @0x4224C6, the copies
+//  @0x4224CF..0x4224DA; the twins @0x42BEC0, @0x42BF20, @0x422260 (dfx2.exe)]
+struct ClientScoreTracker {
+	struct Entry {
+		int32_t node = 0;
+		int32_t start = 0;
+		int32_t time = 0;
+		int32_t elapsed = 0;
+	};
+	int32_t node = 0;     // +0x08
+	bool valid = false;   // +0x0C
+	int32_t start = 0;    // +0x10
+	int32_t time = 0;     // +0x14: the total line's
+	int32_t elapsed = 0;  // +0x18: the session line's
+	std::vector<Entry> entries; // +0x1C count, +0x20 array
 };
 
 // Latest requester-specific deploy-wave panel plus a valid-packet edge. The
@@ -1624,6 +1661,7 @@ struct ClientState {
 	ClientEndRoundStats end_round;
 	ClientScoreboard scoreboard;
 	ClientScoreFeedback score_feedback;
+	ClientScoreTracker score_tracker;
 	// The host VarList's EXP_FANFARE u16 (lo/hi thresholds of the 0x81 tone
 	// ladder, hud/score_fanfare.h) [orig: g_SessionVarExpFanfare @0x24d5a10].
 	uint16_t exp_fanfare = 0;

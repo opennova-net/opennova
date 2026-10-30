@@ -942,6 +942,9 @@ private:
 	void apply_player_downed_state(const std::vector<uint8_t> &body);
 	void apply_spawn_wave_status(const std::vector<uint8_t> &body);
 	void apply_score_delta_sound(const std::vector<uint8_t> &body);
+	// S2C 0x80 / 0x82, the score tracker (ClientScoreTracker carries the witness).
+	void apply_score_tracker_reset(const std::vector<uint8_t> &body);
+	void apply_score_tracker_time(const std::vector<uint8_t> &body);
 	void apply_script_remote_command(const std::vector<uint8_t> &body); // 0x23
 	void apply_objective_notification(const std::vector<uint8_t> &body); // 0x3F
 	// S2C 0x56 -- one chunk of the end-of-round stat board. Reassembles into
