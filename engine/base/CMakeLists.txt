@@ -1,6 +1,7 @@
 # opennova_base — the engine base services (project, vfs, resource_index, gameprofile,
 # title, pcapio, os_random, proc, version), one STATIC group target (Shape A). The header-only
-# base/io leaf keeps its own INTERFACE target in its subdirectory.
+# base/io leaf keeps its own INTERFACE target in its subdirectory; the header-only base/platform
+# (the platform API a backend implements, ADR 0077 d2) needs no source here.
 #
 # base sits ABOVE formats in the Shape A chain (the deliberate inversion): vfs
 # consumes pff/scr/bfc1, so this group PUBLIC-links opennova_formats.

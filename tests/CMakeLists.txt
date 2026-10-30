@@ -3779,6 +3779,20 @@ target_include_directories(tick_digest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(tick_digest_test PRIVATE cxx_std_17)
 add_test(NAME tick_digest COMMAND tick_digest_test)
 
+# The headless test backend (ADR 0077 d8): every engine/base/platform interface with no OS
+# behind it (simulated time, scripted input, in-memory files), a STATIC library any ctest that
+# wants a platform links. null_backend_mission runs the synthetic mission through the platform
+# seams (its files, the R2 load executor, frames banked from the platform clock, scripted input)
+# and pins tick_digest's committed chain: the platform changes nothing.
+add_library(opennova_null_backend STATIC null_backend/null_platform.cpp)
+target_include_directories(opennova_null_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(opennova_null_backend PUBLIC opennova_base)
+target_compile_features(opennova_null_backend PUBLIC cxx_std_17)
+add_executable(null_backend_mission_test null_backend/null_backend_mission_test.cpp)
+target_link_libraries(null_backend_mission_test PRIVATE opennova_null_backend opennova_runtime)
+target_compile_features(null_backend_mission_test PRIVATE cxx_std_17)
+add_test(NAME null_backend_mission COMMAND null_backend_mission_test)
+
 # Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
 # snapshot/restore rewind of a mount.
