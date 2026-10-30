@@ -423,7 +423,6 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 struct RowConformIo {
 	const ClientReplicaPipeline::ReplicaGroundProbe *probe = nullptr;
 	const ClientReplicaPipeline::ReplicaDefAttribResolver *def_attrib = nullptr;
-	const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_radius = nullptr;
 	const terrain::TerrainHeightField *terrain = nullptr;
 	uint32_t tick = 0;
 };
@@ -446,8 +445,6 @@ int32_t row_ground_column(const ClientEntityState &es, const RowConformIo &io_in
 		q.dx = dx;
 		q.dy = dy;
 		q.entity_flags = es.rm_entity_flags;
-		q.source_bound_radius_q16 = io_in.bound_radius != nullptr && *io_in.bound_radius
-				? (*io_in.bound_radius)(es.type_id) : 0;
 		return (*io_in.probe)(q);
 	}
 	// The terrain column alone, clipped by the terrain (an indoors body skips it); with no
@@ -1660,7 +1657,6 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 	RowConformIo conform_io;
 	conform_io.probe = &replica_ground_probe_;
 	conform_io.def_attrib = &replica_def_attrib_resolver_;
-	conform_io.bound_radius = &replica_bound_radius_resolver_;
 	conform_io.terrain = remote_motion_terrain_;
 	conform_io.tick = rm_key;
 	auto organic_chase_tail = [&](ClientEntityState &row, bool is_self,

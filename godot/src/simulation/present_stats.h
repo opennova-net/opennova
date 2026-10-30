@@ -23,6 +23,9 @@ public:
 	STAT_FIELD(hidden)
 	STAT_FIELD(plan_rebuilds)
 	STAT_FIELD(transform_builds)
+	// The shares of moved / transform_builds on rows no view collected.
+	STAT_FIELD(moved_unsubmitted)
+	STAT_FIELD(transform_builds_unsubmitted)
 	STAT_FIELD(aim_dispatches)
 	STAT_FIELD(rhc_dispatches)
 	STAT_FIELD(part_dispatches)

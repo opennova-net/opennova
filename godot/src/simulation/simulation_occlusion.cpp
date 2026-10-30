@@ -100,12 +100,12 @@ PackedInt64Array building_visibility_changes_since(opennova::mission::MissionKer
 // MODEL-tier anchors mapped to Godot space for the foliage presenter.
 void collect_view(const opennova::inmatch::PresentRowsContext &p_context,
 		opennova::inmatch::WireOcclusionLatchMap &r_wire_latch,
-		std::vector<opennova::world::EntityHandle> &r_handles,
 		const opennova::world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
-		std::vector<int32_t> &r_culled_wire, PackedVector3Array &r_anchors) {
+		std::vector<int32_t> &r_culled_wire, PackedVector3Array &r_anchors,
+		bool &r_local_collected) {
 	std::vector<opennova::world::Vec3> anchors;
-	opennova::inmatch::collect_view_verdicts(p_context, r_wire_latch, r_handles, cam,
-			r_culled_bms, r_culled_wire, anchors);
+	opennova::inmatch::collect_view_verdicts(p_context, r_wire_latch, cam,
+			r_culled_bms, r_culled_wire, anchors, &r_local_collected);
 	r_anchors.clear();
 	for (const opennova::world::Vec3 &a : anchors) r_anchors.push_back(mission_to_godot(a));
 }
@@ -121,12 +121,12 @@ void Simulation::occlusion_init_mission() {
 	kernel_->occlusion_init_mission();
 }
 
-void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
+bool Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
                                          double p_viewport_width, double p_viewport_height,
                                          double p_fog_dist_units,
                                          double p_water_z_units, bool p_force_indoors,
                                          int p_object_detail) {
-	if (!kernel_) return;
+	if (!kernel_) return false;
 	const opennova::world::OcclusionFrameCamera cam = occlusion_frame_camera(p_camera,
 			p_fov_h_deg, p_viewport_width, p_viewport_height, p_fog_dist_units,
 			p_water_z_units, p_force_indoors, kernel_->collision.local_player_blink_flags,
@@ -145,16 +145,19 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_h
 	// host draws. (engine: runtime/world/occlusion.h)
 	// The death pieces ride the same collect, after the scar caches (retail
 	// DeathPiece_CollectVisible @ 0x57b560, called from
-	// Terrain_CollectVisibleEntities @ 0x5c91bc).
+	// Terrain_CollectVisibleEntities @ 0x5c91bc), and the flying rounds after
+	// them (the engine's collect_round_draws carries the witness).
 	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam,
-			present_.death_piece_draws);
+			present_.scene_draws.death_pieces);
+	kernel_->occlusion.collect_round_draws(kernel_->world, cam, present_.scene_draws.rounds);
+	bool local_collected = false;
 	collect_view(opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
-			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam,
-			present_.occlusion_culled_bms, present_.occlusion_culled_wire,
-			present_.foliage_mask_anchors);
+			present_.wire_occlusion_latch, cam, present_.occlusion_culled_bms,
+			present_.occlusion_culled_wire, present_.foliage_mask_anchors, local_collected);
 	if (runtime_profiling_enabled_)
 		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;
+	return local_collected;
 }
 
 // The weapon Inset pass's collect, after the main scene's: the same build and
@@ -173,16 +176,26 @@ const InsetOcclusionView &Simulation::run_inset_occlusion(const InsetOcclusionRe
 			kernel_->collision.local_player_blink_flags, p_request.object_detail);
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kInset);
 	kernel_->occlusion.build_frame(kernel_->world, kernel_->collision, cam);
-	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam, inset.death_piece_draws);
+	kernel_->occlusion.collect_death_piece_draws(kernel_->world, cam, inset.draws.death_pieces);
+	kernel_->occlusion.collect_round_draws(kernel_->world, cam, inset.draws.rounds);
 	collect_view(opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
-			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam,
-			inset.culled_bms, inset.culled_wire, inset.foliage_mask_anchors);
+			present_.wire_occlusion_latch, cam, inset.culled_bms, inset.culled_wire,
+			inset.foliage_mask_anchors, inset.local_collected);
 	inset.building_changes = building_visibility_changes_since(*kernel_, inset.building_last);
 	inset.water_visible = kernel_->occlusion.water_visible();
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
 	inset.culled_changes = culled_changes_since(inset.culled_bms, inset.culled_last);
 	inset.culled_wire_changes = culled_changes_since(inset.culled_wire, inset.culled_wire_last);
+	// The main view's drops it admitted; the Inset's water mirror collected ahead of
+	// it, after the main scene's, so its own are taken here too.
+	inset.admitted_changes = view_admissions_since(present_.occl_apply_culled_last,
+			inset.culled_last, inset.admitted_last);
+	MirrorOcclusionView &inset_mirror = present_.mirror_occlusion[MIRROR_INSET];
+	inset_mirror.admitted_changes = inset_mirror.active
+			? view_admissions_since(present_.occl_apply_culled_last, inset_mirror.culled_last,
+					  inset_mirror.admitted_last)
+			: PackedInt32Array();
 	return inset;
 }
 
@@ -195,6 +208,7 @@ bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_
 		double p_fog_dist_units, double p_water_z_units, bool p_force_indoors,
 		int p_object_detail) {
 	MirrorOcclusionView &view = present_.mirror_occlusion[p_mirror];
+	view.active = true;
 	view.building_changes = PackedInt64Array();
 	view.culled_changes = PackedInt32Array();
 	view.culled_wire_changes = PackedInt32Array();
@@ -211,9 +225,10 @@ bool Simulation::run_mirror_occlusion(MirrorView p_mirror, const Transform3D &p_
 	const bool water_visible = opennova::inmatch::collect_mirror_view(
 			opennova::inmatch::PresentRowsContext{*kernel_, runtime_, is_joiner(), nullptr,
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
-			present_.wire_occlusion_latch, present_.occlusion_probe_handles, cam, lists);
+			present_.wire_occlusion_latch, cam, lists);
 	view.culled_bms = std::move(lists.culled_bms);
 	view.culled_wire = std::move(lists.culled_wire);
+	view.local_collected = lists.local_collected;
 	view.foliage_mask_anchors.clear();
 	for (const opennova::world::Vec3 &a : lists.anchors)
 		view.foliage_mask_anchors.push_back(mission_to_godot(a));
@@ -281,7 +296,16 @@ PackedInt32Array Simulation::get_wire_render_culled_changes() {
 }
 
 PackedInt32Array Simulation::get_render_culled_changes() {
-	return culled_changes_since(present_.occlusion_culled_bms, present_.occl_apply_culled_last);
+	const PackedInt32Array changes =
+			culled_changes_since(present_.occlusion_culled_bms, present_.occl_apply_culled_last);
+	// The scene's water mirror collected ahead of this frame's main collect: its
+	// admissions over the main view's drops are taken against the drops just applied.
+	MirrorOcclusionView &mirror = present_.mirror_occlusion[MIRROR_MAIN];
+	mirror.admitted_changes = mirror.active
+			? view_admissions_since(present_.occl_apply_culled_last, mirror.culled_last,
+					  mirror.admitted_last)
+			: PackedInt32Array();
+	return changes;
 }
 
 float Simulation::sun_quality_factor(int p_quality) const {
@@ -348,10 +372,12 @@ void Simulation::reset_occlusion_apply_baseline() {
 	present_.inset_occlusion.building_last.clear();
 	present_.inset_occlusion.culled_last.clear();
 	present_.inset_occlusion.culled_wire_last.clear();
+	present_.inset_occlusion.admitted_last.clear();
 	for (MirrorOcclusionView &mirror : present_.mirror_occlusion) {
 		mirror.building_last.clear();
 		mirror.culled_last.clear();
 		mirror.culled_wire_last.clear();
+		mirror.admitted_last.clear();
 	}
 	present_.entity_lighting = opennova::inmatch::EntityLightingFeed();
 	present_.iris_interior_group_entity = opennova::world::EntityHandle{};

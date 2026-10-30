@@ -4,6 +4,8 @@
 #include "core/proc_stats.h"
 #include "core/text_util.h"
 
+#include <base/version/one_build.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -78,6 +80,8 @@ UsageSample UsageSampler::take(int64_t now_s, uint64_t steady_us) {
 	s.program = program_;
 	s.task_id = task_.id;
 	s.at = now_s - now_s % 60;
+	s.one_version = one_build().version.text();
+	s.one_commit = one_build().commit;
 	if (task_.cpu_limit > 0)
 		s.cpu_limit = task_.cpu_limit;
 
@@ -114,13 +118,16 @@ UsageSample UsageSampler::take(int64_t now_s, uint64_t steady_us) {
 
 void insert_usage_sample(db::Database &db, const UsageSample &s) {
 	db.exec("INSERT INTO program_samples (program, task_id, at, cpu_percent, cpu_limit, "
-			"memory_used_bytes, memory_limit_bytes, net_in_bytes, net_out_bytes) "
-			"VALUES ($1, $2, to_timestamp($3::double precision), $4, $5, $6, $7, $8, $9) "
+			"memory_used_bytes, memory_limit_bytes, net_in_bytes, net_out_bytes, one_version, "
+			"one_commit) "
+			"VALUES ($1, $2, to_timestamp($3::double precision), $4, $5, $6, $7, $8, $9, $10, "
+			"$11) "
 			"ON CONFLICT (program, task_id, at) DO NOTHING;",
 			{ BindValue(s.program), BindValue(s.task_id), BindValue(s.at),
 					db::double_or_null(s.cpu_percent), db::double_or_null(s.cpu_limit),
 					db::int_or_null(s.memory_used_bytes), db::int_or_null(s.memory_limit_bytes),
-					db::int_or_null(s.net_in_bytes), db::int_or_null(s.net_out_bytes) });
+					db::int_or_null(s.net_in_bytes), db::int_or_null(s.net_out_bytes),
+					BindValue(s.one_version), BindValue(s.one_commit) });
 }
 
 void rollup_usage_hours(db::Database &db, int64_t now) {

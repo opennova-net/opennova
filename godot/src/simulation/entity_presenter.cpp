@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <base/io/fixed.h>
+#include <base/io/perf_clock.h> // the Stats profile's clock (opennova::io::perf_now_us)
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
 #include <runtime/world/entity_pose.h>
@@ -135,6 +136,10 @@ void EntityPresenter::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("present_wire_snapshot", "snap", "stride", "layout_revision"),
 			&EntityPresenter::present_wire_snapshot);
+	ClassDB::bind_method(
+			D_METHOD("present_slot_captures_snapshot", "snap", "stride", "layout_revision",
+					"captured"),
+			&EntityPresenter::present_slot_captures_snapshot);
 	ClassDB::bind_method(
 			D_METHOD("materialize_wire_snapshot", "snap", "stride", "layout_revision"),
 			&EntityPresenter::materialize_wire_snapshot);
@@ -592,6 +597,14 @@ void EntityPresenter::present_throwable_visuals(const TypedArray<ThrowableVisual
 			unwrap_rows<opennova::world::ThrowableVisualRow, ThrowableVisualRow>(p_visuals));
 }
 
+void EntityPresenter::present_round_draws(const std::vector<int64_t> &p_keys) {
+	throwable_->apply_round_draws(p_keys, false);
+}
+
+void EntityPresenter::present_round_draws_inset(const std::vector<int64_t> &p_keys) {
+	throwable_->apply_round_draws(p_keys, true);
+}
+
 void EntityPresenter::present_vehicle_trail_visuals(
 		const TypedArray<VehicleTrailVisualRow> &p_visuals) {
 	vehicle_trail_->sync_visuals(
@@ -652,6 +665,8 @@ Ref<MissionPresentStats> EntityPresenter::get_stats_record() const {
 	stats->hidden = stat_hidden_;
 	stats->plan_rebuilds = stat_plan_rebuilds_;
 	stats->transform_builds = stat_transform_builds_;
+	stats->transform_builds_unsubmitted = stat_transform_builds_unsubmitted_;
+	stats->moved_unsubmitted = stat_moved_unsubmitted_;
 	stats->aim_dispatches = stat_aim_dispatches_;
 	stats->rhc_dispatches = stat_rhc_dispatches_;
 	stats->part_dispatches = stat_part_dispatches_;
@@ -966,6 +981,24 @@ void world_heat_clear_typed(ObjectModel *model) {
 	clear_owned_ctrl(model, n.owner_world_heat, n.heat_glow);
 }
 
+// Every retained CTRL writer a placed row's legs own on its model.
+void release_row_ctrl_writers(ObjectModel *model) {
+	model->begin_ctrl_update();
+	model->clear_part_phase(1);
+	model->clear_part_phase(2);
+	emplaced_clear_typed(model);
+	vehicle_motion_clear_typed(model);
+	zone_team_clear_typed(model);
+	world_heat_clear_typed(model);
+	// The ordinal DOOR_xx bus has no fixed register set: release whatever
+	// this writer owns instead of probing all 30 names.
+	model->clear_ctrl_overrides_owned_native(names().owner_doors);
+	model->clear_ctrl_overrides_owned_native("present:destruction");
+	model->clear_ctrl_overrides_owned_native(names().owner_death);
+	model->clear_ctrl_overrides_owned_native(names().owner_talk);
+	model->end_ctrl_update();
+}
+
 } // namespace
 
 int EntityPresenter::wire_controls_apply(ObjectModel *model,
@@ -989,26 +1022,37 @@ int EntityPresenter::emplaced_apply(Object *node,
 
 // --- The per-row legs both walks share ---------------------------------------
 
-void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base) {
+void EntityPresenter::stamp_destroy_phases(ObjectModel *model, const float *p, int base,
+		int32_t &published) {
+	// The draw publishes the swap fade only for a model it submits, under the
+	// husk bit (engine: world::update_item_destroy_fade carries the witness);
+	// an intact row that holds nothing has no work.
+	const bool husked = field_i(p, base, Simulation::PF_HUSK) != 0;
+	if (!husked && published == 0) {
+		return;
+	}
 	// The swap stage's pending final husk draws right after the same publication, so
 	// its controlled materials read the same six slots (engine:
-	// world::update_husk_swap_stage).
-	ObjectModel *overlay = destruction_->final_overlay_model(model);
-	model = destruction_->visual_model(model);
+	// world::update_husk_swap_stage). Both models ride the entity model itself.
+	ObjectModel *overlay = model->get_final_husk_overlay();
+	if (ObjectModel *husk = model->get_husk_visual()) model = husk;
 	static const std::string owner("present:destruction");
-	// Preserve publication before later culling and owner-scoped zero releases.
-	// Retail's direct six-slot writer and the retained-bus boundary are
-	// documented in docs/threedi/3di-gp-format-re.md (D-3DI-2).
+	// Owner-scoped zero releases: retail's direct six-slot writer and the
+	// retained-bus boundary are documented in docs/threedi/3di-gp-format-re.md
+	// (D-3DI-2).
 	for (ObjectModel *target : {model, overlay}) {
 		if (target == nullptr) continue;
 		target->begin_ctrl_update();
 		for (int i = 0; i < 6; ++i) {
-			const int32_t phase = field_i(p, base, Simulation::PF_OBJECT_DESTROY + i);
+			const int32_t phase = husked
+					? field_i(p, base, Simulation::PF_OBJECT_DESTROY + i)
+					: 0;
 			if (phase != 0) target->set_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i, phase);
 			else target->clear_ctrl_override_native(owner, opennova::threedi::THREEDI_CTRL_OBJECT_DESTROY + i);
 		}
 		target->end_ctrl_update();
 	}
+	published = husked ? 1 : 0;
 }
 
 void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
@@ -1065,29 +1109,31 @@ bool EntityPresenter::aim_payload_changed(const float *p, int base,
 
 void EntityPresenter::stamp_section_mask(ObjectModel *model, const float *p,
 		int base, int64_t &last_mask) {
-	// The pending final husk draws through the same world callback, so it takes the
-	// husk's mask (the overlay copies the husk's at its build; each change follows).
-	ObjectModel *overlay = destruction_->final_overlay_model(model);
-	model = destruction_->visual_model(model);
 	// The sim's destroyed sections (entity+0x138), the model's own hidden
 	// mask beside the occlusion frame's verdict (ObjectModel ORs the two).
+	// Only an edge writes: a changed published mask, or the one release when
+	// a row that owned the channel stops publishing.
+	int64_t next_mask = 0;
 	if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
-		const int64_t hidden_mask = static_cast<int64_t>(
+		next_mask = static_cast<int64_t>(
 				static_cast<uint32_t>(field_i(
 						p, base, Simulation::PF_SECTION_MASK_LO)) |
 				(static_cast<uint32_t>(field_i(
 						p, base, Simulation::PF_SECTION_MASK_HI))
 						<< 16));
-		if (hidden_mask != last_mask) {
-			model->set_destroyed_section_mask(hidden_mask);
-			if (overlay != nullptr) overlay->set_destroyed_section_mask(hidden_mask);
-			last_mask = hidden_mask;
-		}
-	} else if (last_mask != -2 && last_mask != 0) {
-		model->set_destroyed_section_mask(0);
-		if (overlay != nullptr) overlay->set_destroyed_section_mask(0);
-		last_mask = 0;
+	} else if (last_mask == -2) {
+		return;
 	}
+	if (next_mask == last_mask) {
+		return;
+	}
+	// The pending final husk draws through the same world callback, so it takes the
+	// husk's mask (the overlay copies the husk's at its build; each change follows).
+	ObjectModel *overlay = model->get_final_husk_overlay();
+	if (ObjectModel *husk = model->get_husk_visual()) model = husk;
+	model->set_destroyed_section_mask(next_mask);
+	if (overlay != nullptr) overlay->set_destroyed_section_mask(next_mask);
+	last_mask = next_mask;
 }
 
 // --- The placed walk ---------------------------------------------------------
@@ -1110,20 +1156,26 @@ bool EntityPresenter::row_plan_is_current(int64_t size, int stride,
 
 void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
 		int64_t layout_revision) {
-	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
+	++stat_plan_rebuilds_;
+	// A model the new plan keeps carries its row's applied stamps (the
+	// transform, the edges, the CTRL publish state, the body stamp) across the
+	// rebuild, matched by its ObjectID, so a spawn or despawn elsewhere
+	// re-applies nothing on it; only a new row starts cold. An index rebuild
+	// re-places the models, so nothing carries over one: every row starts cold
+	// and every retained writer is released, as a fresh plan. Not a retail
+	// claim (retail keeps no plan).
+	const bool carry = plan_index_generation_ == current_index_generation();
+	if (!carry && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
 		release_part_anim_outputs();
 	}
-	++stat_plan_rebuilds_;
-	// A placed model whose row left the snapshot belongs to a destroyed entity
-	// (a scripted VaporizeSingle / removeSSN, a teammate removal): the original
-	// frees the pool row, so the render walk never submits it again
-	// (docs/world/world-wac-ai-re.md §40.3). Dropping it from the plan alone would
-	// freeze its last pose on screen; hide it instead. A row that comes back
-	// re-plans and restamps its own visibility.
-	std::vector<ObjectID> dropped;
-	dropped.reserve(rows_.size());
-	for (const Row &row : rows_) dropped.push_back(row.node_id);
-	release_planned_rows();
+	std::vector<Row> previous;
+	previous.swap(rows_);
+	std::unordered_map<uint64_t, size_t> previous_by_node;
+	previous_by_node.reserve(previous.size());
+	for (size_t i = 0; i < previous.size(); ++i) {
+		previous_by_node.emplace(static_cast<uint64_t>(previous[i].node_id), i);
+	}
+	std::vector<bool> kept(previous.size(), false);
 	plan_revision_ = layout_revision;
 	plan_stride_ = stride;
 	plan_snapshot_size_ = size;
@@ -1132,34 +1184,63 @@ void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
 	plan_dirty_ = false;
 	if (index_.is_null()) {
 		plan_dirty_ = true;
-		return;
+	} else {
+		const int64_t count = size / stride;
+		rows_.reserve(static_cast<size_t>(count));
+		for (int64_t r = 0; r < count; ++r) {
+			const int base = static_cast<int>(r * stride);
+			const int32_t bms_id = field_i(p, base, Simulation::PF_BMS_ID);
+			const int32_t kind = field_i(p, base, Simulation::PF_KIND);
+			const int32_t idx = field_i(p, base, Simulation::PF_INDEX);
+			ObjectModel *model = index_->resolve(bms_id, kind, idx);
+			if (model == nullptr) {
+				continue;
+			}
+			Row row;
+			const auto found = previous_by_node.find(
+					static_cast<uint64_t>(model->get_instance_id()));
+			if (found != previous_by_node.end() && !kept[found->second]) {
+				// Still planned from the previous plan.
+				if (carry) {
+					row = previous[found->second];
+				}
+				kept[found->second] = true;
+			} else {
+				model->set_present_planned(true);
+			}
+			row.base = base;
+			row.node_id = model->get_instance_id();
+			row.model = model;
+			row.entity_kind = kind;
+			row.entity_index = idx;
+			row.bms_id = bms_id;
+			row.handle = field_i(p, base, Simulation::PF_WIRE_HANDLE);
+			rows_.push_back(row);
+		}
 	}
-	const int64_t count = size / stride;
-	rows_.reserve(static_cast<size_t>(count));
-	for (int64_t r = 0; r < count; ++r) {
-		const int base = static_cast<int>(r * stride);
-		const int32_t bms_id = field_i(p, base, Simulation::PF_BMS_ID);
-		const int32_t kind = field_i(p, base, Simulation::PF_KIND);
-		const int32_t idx = field_i(p, base, Simulation::PF_INDEX);
-		ObjectModel *model = index_->resolve(bms_id, kind, idx);
+	// A placed model whose row left the snapshot belongs to a destroyed entity
+	// (a scripted VaporizeSingle / removeSSN, a teammate removal): the original
+	// frees the pool row, so the render walk never submits it again
+	// (docs/world/world-wac-ai-re.md §40.3). Dropping it from the plan alone would
+	// freeze its last pose on screen; hide it instead (its retained writers
+	// released). A row that comes back re-plans cold and restamps its own
+	// visibility. A duplicate row of a kept model is no drop.
+	for (size_t i = 0; i < previous.size(); ++i) {
+		if (kept[i] || kept[previous_by_node[static_cast<uint64_t>(previous[i].node_id)]]) {
+			continue;
+		}
+		ObjectModel *model = Object::cast_to<ObjectModel>(
+				ObjectDB::get_instance(previous[i].node_id));
 		if (model == nullptr) {
 			continue;
 		}
-		Row row;
-		row.base = base;
-		row.node_id = model->get_instance_id();
-		row.model = model;
-		model->set_present_planned(true);
-		row.entity_kind = kind;
-		row.entity_index = idx;
-		row.bms_id = bms_id;
-		row.handle = field_i(p, base, Simulation::PF_WIRE_HANDLE);
-		rows_.push_back(row);
-	}
-	for (const ObjectID id : dropped) {
-		ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(id));
-		if (model != nullptr && !model->is_present_planned())
+		if (carry && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
+			release_row_ctrl_writers(model);
+		}
+		model->set_present_planned(false);
+		if (index_.is_valid()) {
 			model->set_present_visible(false);
+		}
 	}
 }
 
@@ -1168,20 +1249,7 @@ void EntityPresenter::release_part_anim_outputs() {
 		ObjectModel *model =
 				Object::cast_to<ObjectModel>(ObjectDB::get_instance(row.node_id));
 		if (model == nullptr) continue;
-		model->begin_ctrl_update();
-		model->clear_part_phase(1);
-		model->clear_part_phase(2);
-		emplaced_clear_typed(model);
-		vehicle_motion_clear_typed(model);
-		zone_team_clear_typed(model);
-		world_heat_clear_typed(model);
-		// The ordinal DOOR_xx bus has no fixed register set: release whatever
-		// this writer owns instead of probing all 30 names.
-		model->clear_ctrl_overrides_owned_native(names().owner_doors);
-		model->clear_ctrl_overrides_owned_native("present:destruction");
-		model->clear_ctrl_overrides_owned_native(names().owner_death);
-		model->clear_ctrl_overrides_owned_native(names().owner_talk);
-		model->end_ctrl_update();
+		release_row_ctrl_writers(model);
 	}
 }
 
@@ -1255,9 +1323,40 @@ std::vector<EntityPresenter::RagdollRow> EntityPresenter::take_ragdoll_rows() {
 	return out;
 }
 
+void EntityPresenter::present_slot_captures(PresentRowsView snap, int stride,
+		int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
+		const std::vector<uint64_t> &p_captured) {
+	if (p_captured.empty() || stride < Simulation::PF_STRIDE) {
+		return;
+	}
+	HashSet<uint64_t> captured;
+	for (const uint64_t id : p_captured) {
+		captured.insert(id);
+	}
+	// Only over the plans this frame's walks presented these rows from.
+	if (index_.is_valid() && row_plan_is_current(snap.size(), stride, layout_revision)) {
+		present_snapshot_impl(snap, stride, layout_revision, door_phases, door_phase_count,
+				nullptr, &captured);
+	}
+	if (wire_plan_revision_ == layout_revision && wire_plan_stride_ == stride &&
+			wire_plan_snapshot_size_ == snap.size()) {
+		present_wire_rows(snap, stride, 0, &captured);
+	}
+}
+
+void EntityPresenter::present_slot_captures_snapshot(const PackedFloat32Array &p_snap,
+		int p_stride, int64_t p_layout_revision, const PackedInt64Array &p_captured) {
+	std::vector<uint64_t> captured;
+	for (int64_t i = 0; i < p_captured.size(); ++i) {
+		captured.push_back(static_cast<uint64_t>(p_captured[i]));
+	}
+	present_slot_captures({p_snap.ptr(), p_snap.size()}, p_stride, p_layout_revision, nullptr, 0,
+			captured);
+}
+
 void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		int stride, int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
-		MissionFrameProfile *p_profile) {
+		MissionFrameProfile *p_profile, const HashSet<uint64_t> *p_captured) {
 	if (stride < Simulation::PF_STRIDE || index_.is_null()) {
 		return;
 	}
@@ -1272,7 +1371,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 	if (!row_plan_is_current(size, stride, layout_revision)) {
 		rebuild_row_plan(p, size, stride, layout_revision);
 	}
-	++placed_walk_serial_;
+	if (p_captured == nullptr) {
+		++placed_walk_serial_;
+	}
 	for (Row &row : rows_) {
 		// Main-thread Node destruction advances this stamp in PREDELETE. Once
 		// a planned model was freed by a notification dispatched during this
@@ -1292,16 +1393,48 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 				continue;
 			}
 		}
+		if (p_captured != nullptr && (row.submitted_walk == placed_walk_serial_ ||
+					!p_captured->has(uint64_t(row.node_id)))) {
+			continue;
+		}
 		const int base = row.base;
-		note_ragdoll_row(model, row.handle, p, base);
+		if (p_captured == nullptr) {
+			note_ragdoll_row(model, row.handle, p, base);
+		}
 		uint64_t profile_phase_start = p_profile != nullptr
-				? Time::get_singleton()->get_ticks_usec()
+				? opennova::io::perf_now_us()
 				: 0;
 		if (p_profile != nullptr) {
 			++p_profile->rows;
 		}
+		const bool present_visible =
+				field_i(p, base, Simulation::PF_HIDDEN) == 0 &&
+				field_i(p, base,
+						Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
+		// Camera submission: retail runs the presentation writers per
+		// SUBMITTED model [orig: Terrain_RenderSectorEntities @ 0x5c7b60
+		// draws each collected row through Render_SectorEntity @ 0x5c4190,
+		// whose sub-pixel reject @ 0x5c42de precedes the def's world callback
+		// @ 0x5c4335], in each pass that draws it. A row no view the frame
+		// draws collected (sim-hidden, or dropped by the main scene's, the
+		// weapon Inset's and every open water mirror's collect: engine
+		// inmatch/occlusion_collect.h carries the per-pass witness) skips the
+		// aim/part/CTRL dispatch legs below; the collects' own answer, with no
+		// second screen test. The applied stamps keep their last-dispatched
+		// values, so the next submitted frame re-applies exactly what changed
+		// while the row was out (set legs are per-submission re-asserts;
+		// falling edges latched in the publish state still clear). A render
+		// slot that captured the row's caster draws it too, through its own
+		// render callback (engine renderer/render_slot_shadow.h carries the
+		// witness), so that row is submitted whatever the views say. The
+		// transform leg still runs for every row; its counters split by the
+		// submission so its unsubmitted share stays measurable.
+		const bool submitted = present_visible &&
+				(model->is_view_collected() || model->is_slot_captured());
+		if (submitted) {
+			row.submitted_walk = placed_walk_serial_;
+		}
 		stamp_match_terrain(model, p, base);
-		stamp_destroy_phases(model, p, base);
 		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
 			// the placement Basis or Transform3D.
@@ -1337,10 +1470,16 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 										next_stamp[5])),
 						Vector3(next_stamp[0], next_stamp[1], next_stamp[2]));
 				++stat_transform_builds_;
+				if (!submitted) {
+					++stat_transform_builds_unsubmitted_;
+				}
 				if (row.transform_stamp_valid ||
 						model->get_transform() != next) {
 					model->set_transform(next);
 					++stat_moved_;
+					if (!submitted) {
+						++stat_moved_unsubmitted_;
+					}
 				}
 				if (placer_.is_valid()) {
 					// The render node and terrain projection registry consume the
@@ -1354,28 +1493,12 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 				row.transform_stamp_valid = true;
 			}
 		}
-		const bool present_visible =
-				field_i(p, base, Simulation::PF_HIDDEN) == 0 &&
-				field_i(p, base,
-						Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
-		// Camera submission: retail runs the presentation writers per
-		// SUBMITTED model [orig: Terrain_RenderSectorModels @ 0x5c5d30
-		// computes per drawn model; cull/submit @ Entity_RenderVehicleModel
-		// @ 0x4407d0]. A row the renderer would not submit — sim-hidden,
-		// occlusion-held, or bounds off-screen — skips the aim/part/CTRL
-		// dispatch legs below. The applied stamps keep their last-dispatched
-		// values, so the next submitted frame re-applies exactly what changed
-		// while the row was out (set legs are per-submission re-asserts;
-		// falling edges latched in the publish state still clear).
 		model->set_parachute_deployed(field_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
 		model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
 				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
 				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
-		const bool submitted = present_visible &&
-				!model->is_occlusion_hidden() &&
-				model->is_on_screen();
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->core_us += now - profile_phase_start;
 			profile_phase_start = now;
 			if (submitted) {
@@ -1417,9 +1540,13 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			}
 		}
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->aim_us += now - profile_phase_start;
 			profile_phase_start = now;
+		}
+		// The swap fade's slots, per submission like every writer below.
+		if (submitted) {
+			stamp_destroy_phases(model, p, base, row.destroy_published);
 		}
 		if (submitted && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
 			const int32_t active1_code =
@@ -1629,7 +1756,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			row.ctrl_publish_state_valid = true;
 		}
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->controls_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
@@ -1638,8 +1765,10 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed.
-			// [orig: Entity_RenderVehicleModel @ 0x4407d0 cull/submit;
-			// Render_SectorEntity @ 0x5C4190 (the Flags&4 husk pick @ 0x5C41A0)].
+			// [orig: Entity_RenderVehicleModel @ 0x4407d0 (the ewep world
+			// callback, g_BoneCallbackTable @ 0x82cfa4) - its UseGun predicate
+			// @ 0x4407f6..0x44084c; Render_SectorEntity @ 0x5C4190 (the Flags&4
+			// husk pick @ 0x5C41A0)].
 			// Two-bit visibility ownership: this walk owns the model's
 			// present bit (the sim's intent), the render-occlusion frame owns
 			// its occlusion-hidden bit, and the node's visible flag is their
@@ -1657,7 +1786,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			}
 		}
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->visibility_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
@@ -1793,7 +1922,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			row.body_stamp_valid = false;
 		}
 		if (p_profile != nullptr) {
-			const uint64_t now = Time::get_singleton()->get_ticks_usec();
+			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->body_us += now - profile_phase_start;
 			profile_phase_start = now;
 		}
@@ -1802,24 +1931,46 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		if (row.entity_kind == static_cast<int32_t>(opennova::world::EntityKind::Organic) &&
 				(field_i(p, base, Simulation::PF_HELD_WEAPON_ADM) != 0 ||
 						placed_held_weapons_.has(row.handle))) {
-			update_placed_held_weapon(row, model, snap,
-					present_visible && !model->is_occlusion_hidden());
+			update_placed_held_weapon(row, model, snap, present_visible);
 		}
 	}
-	retire_unvisited_placed_held_weapons();
+	if (p_captured == nullptr) {
+		retire_unvisited_placed_held_weapons();
+	}
 }
 
 void EntityPresenter::update_placed_held_weapon(const Row &row, ObjectModel *body,
-		PresentRowsView snap, bool body_visible) {
+		PresentRowsView snap, bool body_present) {
 	const ObjectModel *before = held_weapon_node(row.handle);
 	WireRow held;
 	held.handle = row.handle;
 	held.base = row.base;
-	update_wire_held_weapon(held, body, snap, body_visible);
+	// The gun draws inside its body's submit, in every pass that draws the body:
+	// a view whose collect admitted it and a render slot that captured it, which
+	// draws its caster with its children whatever the views say (engine
+	// renderer/render_slot_shadow.h carries the witness). So the leg places it
+	// for either, and the gun takes the body's two owner bits, as a wire gun
+	// does (apply_wire_row_views): the leg's draw intent, and the body's
+	// occlusion claim, which hides it from the main view while the slot's
+	// capture, which lifts the claim, still draws it.
+	const bool body_occluded = body->is_occlusion_hidden();
+	update_wire_held_weapon(held, body, snap,
+			body_present && (!body_occluded || body->is_slot_captured()));
 	ObjectModel *weapon = held_weapon_node(row.handle);
 	if (weapon == nullptr) {
 		placed_held_weapons_.erase(row.handle);
 		return;
+	}
+	const bool gun_drawn = weapon->is_visible();
+	if (weapon->is_present_visible() != gun_drawn) {
+		weapon->set_present_visible(gun_drawn);
+	}
+	if (weapon->is_occlusion_hidden() != body_occluded) {
+		weapon->set_occlusion_hidden(body_occluded);
+	}
+	const bool gun_node = gun_drawn && !body_occluded && !weapon->is_subpixel_hidden();
+	if (weapon->is_visible() != gun_node) {
+		weapon->set_visible(gun_node);
 	}
 	placed_held_weapons_[row.handle] = placed_walk_serial_;
 	if (weapon != before) {

@@ -256,7 +256,8 @@ static void test_script_los_splits_at_twenty_units() {
 }
 
 // R2-18: the LOS walks every pool-2 entry; only the proximity table stops
-// counting at 1199. With 1200 authored buildings the last one still blocks,
+// counting one short of pool 2's capacity (1199 of 1200 here). With 1200
+// authored buildings the last one still blocks,
 // through both the live walk and the replication fan's cached index.
 // [orig: Physics_RaycastTerrainAndSectors pool-2 walk @0x539A16..0x539A30;
 //  the proximity table's `count < 1199` gate @0x4B94CB]

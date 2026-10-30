@@ -57,7 +57,8 @@ bool rider_blocks_root(const World &world, const Entity &rider, EntityHandle roo
 bool vehicle_has_enemy_occupant(const World &world, const Entity &vehicle,
                                 const Entity &requester) {
 	const EntityHandle root = occupancy_root(world, vehicle);
-	for (std::size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
+	// Pool 0 to its used count [orig: Vehicle_HasEnemyOccupant - the load @0x435A36].
+	for (std::size_t slot = 0; slot < world.registry.pool_used(0); ++slot) {
 		const Entity *entity = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
 		if (entity != nullptr && is_blocking_enemy_rider(*entity, requester) &&
 				rider_blocks_root(world, *entity, root))
@@ -74,7 +75,9 @@ public:
 			const VehicleOccupancySource *source) :
 			world_(world) {
 		if (stats != nullptr) ++stats->enemy_occupancy_registry_passes;
-		for (std::size_t slot = 0; slot < world.registry.pool_capacity(0); ++slot) {
+		// The rows Vehicle_HasEnemyOccupant walks: pool 0 to its used count (the load
+		// @0x435A36).
+		for (std::size_t slot = 0; slot < world.registry.pool_used(0); ++slot) {
 			const Entity *entity =
 					world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
 			if (entity != nullptr && is_blocking_enemy_rider(*entity, requester))

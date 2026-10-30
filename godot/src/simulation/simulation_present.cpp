@@ -416,8 +416,8 @@ void Simulation::fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &
 	opennova::world::fill_death_pieces(kernel_->world, r_pieces);
 }
 
-const std::vector<opennova::world::DeathPieceDraw> &Simulation::death_piece_draws() const {
-	return present_.death_piece_draws;
+const SceneCollectDraws &Simulation::scene_draws() const {
+	return present_.scene_draws;
 }
 
 // The visible-person list retail walks holds every collected person; the rows

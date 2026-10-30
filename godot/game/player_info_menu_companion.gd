@@ -67,11 +67,10 @@ func set_persisted_profile(profile: Dictionary) -> void:
 	_character_state.set_persisted_profile(profile)
 
 
-# True for the JO PLAYER_INFO screen's unique avatar controls.
-func owns_menu(driver: MenuDriver) -> bool:
-	if driver == null:
-		return false
-	return driver.has_widget("NATIONALITY") and driver.has_widget("COMBO_LIST")
+# The PLAYER_INFO screen's delegate: the engine gives it a document holding
+# NATIONALITY and COMBO_LIST (menu::MenuCommands::wire).
+func owner_name() -> String:
+	return "player_info"
 
 
 # Losing the document to another (or no) companion is the only teardown edge

@@ -909,7 +909,8 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         // ammo flags NoOItems [orig: the & 0x80000 gate @ 0x4eaece]. Every
         // type runs it, the medic kit included. ---
         if ((ammo->flags & kAmmoFlagNoOItems) == 0) {
-            const size_t pool0 = world.registry.pool_capacity(0);
+            // To the pool's used count [orig: @0x4EAEE6].
+            const size_t pool0 = world.registry.pool_used(0);
             for (size_t s = 0; s < pool0; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(0, static_cast<int>(s)));
                 // A row with no ItemTypeIndex, or Flags & 1, leaves the walk
@@ -1074,7 +1075,8 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 kz_damage_if_authority(world, *ammo) == 0)
             continue;
         if ((ammo->flags & kAmmoFlagNoMItems) == 0) {
-            const size_t pool1 = world.registry.pool_capacity(1);
+            // To the pool's used count [orig: @0x4EB384].
+            const size_t pool1 = world.registry.pool_used(1);
             for (size_t s = 0; s < pool1; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(1, static_cast<int>(s)));
                 if (t == nullptr || t->item_type_index == 0) continue; // [orig: @0x4EB3B5]
@@ -1123,7 +1125,8 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
         // --- pool 2, static items/buildings [orig: @ 0x4eb5b8-0x4eb88c] —
         // NoDItems gate [orig: & 0x200000 @ 0x4eb5b8]. ---
         if ((ammo->flags & kAmmoFlagNoDItems) == 0) {
-            const size_t pool2 = world.registry.pool_capacity(2);
+            // To the pool's used count [orig: @0x4EB5C4].
+            const size_t pool2 = world.registry.pool_used(2);
             for (size_t s = 0; s < pool2; ++s) {
                 Entity *t = world.registry.get(EntityHandle::make(2, static_cast<int>(s)));
                 if (t == nullptr || t->item_type_index == 0 || (t->engine_flags & 0x1u) != 0)
@@ -1270,6 +1273,7 @@ void process_destructible_death(World &world, Entity &target) {
     //  from the death chain ahead of Flags |= 6 @ 0x43fbf6].
     world.out.scars.clear_entity(target.handle);
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk); // [orig: Flags |= 6 @ 0x43fbf6]
+    world.registry.list_fade_row(target.handle);
     target.alive = false;
     target.health = 0;
     if (target.death_tick == 0) target.death_tick = world.logic_tick; // [orig: @ 0x43fbfd]
@@ -1507,6 +1511,7 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 	}
 	target.flags |= kEntityFlagDead | kEntityFlagHusk;
 	target.engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+	world.registry.list_fade_row(target.handle);
 	target.alive = false;
 	// Roll rate (+172) from 0.45..0.65 deg/tick, pitch rate (+168) the negated
 	// 0.15..0.35 roll, in that PRNG order. [orig: Entity_InitDeathState
@@ -1636,6 +1641,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     //  no-row arm @0x493F48]
     target.flags |= kEntityFlagDead | kEntityFlagHusk;
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+    world.registry.list_fade_row(target.handle);
     target.alive = false;
     if (target.death_tick == 0) target.death_tick = world.logic_tick;
     if (!was_husked) {

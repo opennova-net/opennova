@@ -226,6 +226,12 @@ bool run_remote_usegun_rider_drives_the_child_compose() {
 	child_seed.spawn_origin = (1u << 24) | 4u;
 	child_seed.position = world.registry.get(carrier)->position;
 	child_seed.emplaced_update = true;
+	// The child's slot Def (its class init's bind): the ewep update composes only behind
+	// it. [orig: Entity_UpdateTransformAndTurret @0x440E8E..0x440EA0]
+	world.tables.weapons.entries.emplace_back();
+	world.tables.weapons.entries.back().valid = true;
+	child_seed.primary_weapon_slot_adm =
+			static_cast<uint8_t>(world.tables.weapons.entries.size() - 1);
 	child_seed.emplacement_parent = carrier;
 	child_seed.emplacement_parent_spawn_id = world.registry.get(carrier)->registry_spawn_id;
 	const w::EntityHandle child = test_common::materialize_twin(h.role.materializer(), state,

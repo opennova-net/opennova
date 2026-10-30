@@ -35,6 +35,7 @@
 #include <runtime/inmatch/server_console.h> // Server_HandleAdminNetlogCommand, entity_usage_text (SAVENFO)
 #include <runtime/controls/binding_set.h> // keylist_text (SAVEKEYS)
 #include <runtime/inmatch/server_info.h> // Server_ToggleJoinLock (the lockgame action)
+#include <runtime/inmatch/host_listing_binding.h> // set_nwu_match_facts (the NWU session's facts)
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
@@ -391,15 +392,6 @@ int Simulation::get_host_peer_count() const {
 	return n;
 }
 
-void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id,
-		const String &p_login_pcid) {
-	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx()) {
-		ctx->novaworld_gsid = opennova::to_std(p_gsid);
-		ctx->novaworld_app_id = static_cast<uint32_t>(p_app_id);
-		opennova::inmatch::set_novaworld_account_facts(*ctx, opennova::to_std(p_login_pcid));
-	}
-}
-
 // The NovaWorld link both roles read: the network type is the role's own (the
 // authority's transport_mode, the joiner's join record), the NWU session facts
 // the shell's NovaWorld session node's. The authority's 62-frame block reads
@@ -414,21 +406,17 @@ void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role
 	opennova::inmatch::NapiNPServerCtx *ctx = is_joiner() ? nullptr : host_ctx();
 	if (ctx != nullptr) {
 		facts.novaworld = ctx->transport_mode == opennova::inmatch::NetworkType::NovaWorld;
-		ctx->nwu_in_use = p_in_use;
-		ctx->nwu_session_role = p_role;
-		ctx->nwu_session_flags = facts.nwu_session_flags; // a Serve Only host's N icon (D-NET-971)
-		if (p_exit_reason != 0) ctx->mission_exit_reason = p_exit_reason;
+		opennova::NwuLobbySession::MatchFacts match;
+		match.in_use = p_in_use;
+		match.flags = p_flags;
+		match.role = p_role;
+		match.exit_reason = p_exit_reason;
+		opennova::inmatch::set_nwu_match_facts(*ctx, match);
 	} else {
 		facts.novaworld = net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld;
 		if (runtime_ != nullptr && p_exit_reason != 0) runtime_->set_mission_exit_reason(p_exit_reason);
 	}
 	if (runtime_ != nullptr) runtime_->set_novaworld_link(facts);
-}
-
-std::vector<opennova::inmatch::HostPlayerListRow> Simulation::host_player_list_rows() const {
-	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
-	if (ctx == nullptr) return {};
-	return opennova::inmatch::host_player_list_rows(*ctx);
 }
 
 Simulation::ServerCommandResult Simulation::execute_server_command(const String &p_verb,
@@ -577,22 +565,6 @@ opennova::inmatch::ClientRuntime *Simulation::host_client_runtime() {
 	return host_role_ != nullptr ? host_role_->state.client_runtime.get() : nullptr;
 }
 
-void Simulation::set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook) {
-	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
-	if (ctx == nullptr) return;
-	ctx->novaworld_join_tickets_armed = p_armed;
-	if (!p_hook) {
-		ctx->on_player_enter_request = nullptr;
-		return;
-	}
-	ctx->on_player_enter_request =
-			[hook = std::move(p_hook)](
-					const opennova::inmatch::NapiNPServerCtx::PlayerEnterRequest &p_request) {
-				hook(p_request.connection_id, p_request.peer.ip, p_request.peer.port,
-						opennova::to_gd(p_request.join_ticket));
-			};
-}
-
 bool Simulation::apply_player_enter_result(uint32_t p_connection_id, bool p_success,
 		int32_t p_msg_code) {
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
@@ -603,7 +575,7 @@ bool Simulation::apply_player_enter_result(uint32_t p_connection_id, bool p_succ
 
 // The lockgame action at the authority (HudToggles' EVENT_JOIN_LOCK_TOGGLED, in a session on the
 // authority): the join lock flips and a hosting NovaWorld session's server-info update runs at once
-// through the context's hook (SessionDrive::bind_nw_host).
+// through the context's hook (engine: inmatch::HostListingBinding).
 int Simulation::toggle_join_lock() {
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr)

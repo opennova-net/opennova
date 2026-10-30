@@ -7,7 +7,7 @@
 #include <runtime/inmatch/occlusion_collect.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_state.h>
-#include <runtime/world/collision.h> // kStaticProxCountBound, kItemDefTypeBuilding
+#include <runtime/world/collision.h> // static_prox_count_bound, kItemDefTypeBuilding
 #include <runtime/world/entity.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>
@@ -63,7 +63,8 @@ w::OcclusionFrameCamera camera_down_x(float water_z_units = -1000.0f) {
 }
 
 // One row at a fixed slot. A held latch makes the gate's verdict the view
-// test alone (no three-ray probe).
+// test alone (no three-ray probe). An organic's graphic loads: the model resolve
+// stamps its render model, the collectors' entity+0x30 gate.
 w::Entity &row(opennova::mission::MissionKernel &kernel, int pool, int slot, w::EntityKind kind,
 		int32_t bms_id, float x, float y) {
 	w::Entity seed;
@@ -74,6 +75,11 @@ w::Entity &row(opennova::mission::MissionKernel &kernel, int pool, int slot, w::
 	seed.bound_radius = 1.0f;
 	seed.occlusion_latch = 5;
 	const w::EntityHandle h = kernel.world.registry.spawn_at(w::EntityHandle::make(pool, slot), seed);
+	if (kind == w::EntityKind::Organic) {
+		opennova::renderer::ObjectProjectionSphere unstamped;
+		unstamped.valid = true;
+		kernel.occlusion.assign_render_model(h, unstamped);
+	}
 	return *kernel.world.registry.get(h);
 }
 
@@ -136,15 +142,16 @@ void test_the_walk() {
 
 	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
 	im::WireOcclusionLatchMap latches;
-	std::vector<w::EntityHandle> scratch;
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	std::vector<w::Vec3> anchors;
 
 	// No runtime: the placed rows and the local player alone.
 	latches[0x1FFF] = 9;
-	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, scratch, cam,
-			culled_bms, culled_wire, anchors);
+	bool local_collected = false;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors, &local_collected);
+	expect(local_collected, "the walk admits the local player's body ahead of the eye");
 	std::vector<int32_t> sorted = culled_bms;
 	std::sort(sorted.begin(), sorted.end());
 	expect(sorted == std::vector<int32_t>({102, 103, 105}),
@@ -176,7 +183,9 @@ void test_the_walk() {
 	// The twin's live pose, not the row's spawn image.
 	add(spawned.handle.packed, 0x0055, opennova::EntityClass::Infantry, -40);
 	add(gun.handle.packed, 0x0777, opennova::EntityClass::NoNetworkCallback, 15); // twin, no model: culled
-	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, scratch, cam,
+	// A live row's latch outlives the walk that drops it ahead of the latch.
+	latches[0x1003] = 9;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, cam,
 			culled_bms, culled_wire, anchors);
 	sorted = culled_wire;
 	std::sort(sorted.begin(), sorted.end());
@@ -184,9 +193,9 @@ void test_the_walk() {
 			"the wire walk drops the bare model-less row and the model-less twin only");
 	expect(has_anchor(anchors, 30.0f, 0.0f, 2.0f) && anchors.size() == 3,
 			"a visible twin anchors at its own live position");
-	expect(latches.count(0x1FFF) == 0 && latches.count(0x1003) == 1 &&
+	expect(latches.count(0x1FFF) == 0 && latches.count(0x1003) == 1 && latches[0x1003] == 9 &&
 					latches.count(0x1004) == 0,
-			"a gone row's latch is dropped; a hidden row's never starts");
+			"a gone row's latch is dropped, a live one's kept; a hidden row's never starts");
 
 	// A joiner walks the decoded row whose wire handle equals its native L's
 	// packed handle like any other (H and L are separate domains; the self row
@@ -194,10 +203,36 @@ void test_the_walk() {
 	// comparison skipped it (D-NET-698) [orig: Terrain_CollectVisibleEntities_0
 	// @0x5C6F20, every drawn entity built from the wire].
 	add(local.handle.packed, 0x1234, opennova::EntityClass::Player, 15);
-	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, true}, latches, scratch, cam,
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, true}, latches, cam,
 			culled_bms, culled_wire, anchors);
 	expect(contains(culled_wire, static_cast<int32_t>(local.handle.packed)),
 			"a joiner's wire walk takes the row at L's packed handle");
+
+	// The local player's body is gated like any person's, with no local-player
+	// exception, and its verdict is the one its presenter draws and poses by
+	// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 - the Flags & 1
+	// gate @ 0x5c8cf4]: a hidden body is dropped.
+	local.flags |= 1u;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors, &local_collected);
+	expect(!local_collected, "the walk drops a hidden local player's body");
+	local.flags &= ~1u;
+
+	// A spawned player carries its net id as its placed identity (world/player_spawn.cpp
+	// keys it so): its body takes the pool walk's placed leg, and that leg's verdict is
+	// the local player's.
+	local.bms_id = 0xFFF0;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors, &local_collected);
+	expect(local_collected && !contains(culled_bms, 0xFFF0),
+			"a local player keyed by its net id is admitted by the placed leg");
+	local.flags |= 1u;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors, &local_collected);
+	expect(!local_collected && contains(culled_bms, 0xFFF0),
+			"and dropped by it when hidden");
+	local.flags &= ~1u;
+	local.bms_id = 0;
 }
 
 // The water mirror's collect (collect_mirror_view) runs the scene collect's walk over
@@ -229,32 +264,31 @@ void test_the_mirror_walk() {
 	bare.z = 2 << 16;
 
 	im::WireOcclusionLatchMap latches;
-	std::vector<w::EntityHandle> scratch;
 	im::MirrorViewLists lists;
 	const im::PresentRowsContext context{kernel, &runtime, false};
 
 	// The eye above the water.
-	im::collect_mirror_view(context, latches, scratch, camera_down_x(), lists);
+	im::collect_mirror_view(context, latches, camera_down_x(), lists);
 	expect(contains(lists.culled_bms, 101) && person.occlusion_latch == 5,
 			"above the water the person drops ahead of its latch");
 	expect(!contains(lists.culled_bms, 102) && car.occlusion_latch == 4,
 			"the vehicle is collected and its latch ticks");
 	expect(contains(lists.culled_wire, 0x1003) && latches.count(0x1003) == 0,
-			"the bare row without the Reflective bit drops ahead of its latch");
+			"the model-less bare row drops ahead of its latch");
 	expect(lists.anchors.empty(), "above the water no person anchors the mirror's MODEL tier");
 	expect(kernel.occlusion.selected_view() == w::OcclusionView::kMain,
 			"the scene's view stays selected");
 
 	// The eye below the water: unfiltered.
-	im::collect_mirror_view(context, latches, scratch, camera_down_x(10.0f), lists);
+	im::collect_mirror_view(context, latches, camera_down_x(10.0f), lists);
 	expect(!contains(lists.culled_bms, 101) && person.occlusion_latch == 4,
 			"below the water the person is collected and its latch ticks");
 	expect(lists.anchors.size() == 1 && has_anchor(lists.anchors, 20.0f, 0.0f, 2.0f),
 			"below the water the crouched person anchors the mirror's MODEL tier");
 	expect(!contains(lists.culled_bms, 102) && car.occlusion_latch == 3,
 			"the vehicle again");
-	expect(latches.count(0x1003) == 1 && contains(lists.culled_wire, 0x1003),
-			"the bare row reaches its latch, then drops for its missing model");
+	expect(latches.count(0x1003) == 0 && contains(lists.culled_wire, 0x1003),
+			"the model-less bare row drops ahead of its latch whatever the match");
 }
 
 // The walk order: the statics (the pool-2 rows that are not Building-type defs, in
@@ -298,10 +332,12 @@ void test_the_walk_order() {
 	twin_row.type_id = 0x0055;
 	twin_row.cls = opennova::EntityClass::Infantry;
 
+	// The statics' walk reads the static prox table: the mission start's build lists
+	// the decoration.
+	kernel.collision.build_initial_tables(kernel.world);
 	const w::OcclusionFrameCamera cam = camera_down_x();
 	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
 	im::WireOcclusionLatchMap latches;
-	std::vector<w::EntityHandle> scratch;
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	std::vector<w::Vec3> anchors;
@@ -318,7 +354,7 @@ void test_the_walk_order() {
 	// The fixture first, apart from the order: with every latch held, each of the
 	// five rows passes the gates ahead of the latch (no draw).
 	for (w::Entity *e : order) e->occlusion_latch = 5;
-	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, scratch, cam,
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, cam,
 			culled_bms, culled_wire, anchors);
 	if (!expect(culled_bms.empty() && culled_wire.empty(), "every row passes the gates")) {
 		dump("(held latches)");
@@ -343,7 +379,7 @@ void test_the_walk_order() {
 		for (int j = i + 1; j < 5; ++j)
 			expect(expected[i] != expected[j], "the seed's five draws are distinct");
 
-	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, scratch, cam,
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, cam,
 			culled_bms, culled_wire, anchors);
 	bool ok = expect(culled_bms.empty() && culled_wire.empty(), "every row is collected");
 	ok = expect(stream == expected_stream, "five re-arms, one draw each") && ok;
@@ -363,31 +399,36 @@ void test_the_walk_order() {
 	}
 }
 
-// The statics' walk is the static prox list's tail, and the list counts at most
-// 1199 rows, Building-type defs first: with 1198 buildings listed, the first
-// decoration after them is collected and the next one is never walked (no verdict,
-// its latch untouched); a row with no def or no item type is never listed.
+// The statics' walk is the static prox table's tail, and the table counts at most pool
+// 2's capacity less one rows, Building-type defs first: in a full pool every row is
+// listed, the first decoration after the buildings is collected and the last one, the
+// row the table writes but never counts, is never walked (its latch untouched). The
+// bound follows the configured capacity, not retail's 1200. A row with no item type is
+// never listed. A row the walk never admits is in no list, so no pass draws it: it
+// drops with the culled rows.
 // [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 - pass 1's tests @ 0x4b945d /
 //  @ 0x4b9466 and bound @ 0x4b94b7 / @ 0x4b94cb, pass 2's @ 0x4b94f1 / @ 0x4b94fa
 //  and @ 0x4b954b / @ 0x4b955f; Terrain_CollectVisibleEntities_0 @ 0x5c6f20, the
 //  walk to g_StaticProxCount @ 0x5c6f48..0x5c721e]
 void test_the_statics_bound() {
-	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
-	opennova::mission::MissionKernel &kernel = *kernel_heap;
-	constexpr int kBuildings = w::kStaticProxCountBound - 1;
-	kernel.world.registry.configure_pool(2, kBuildings + 3);
+	constexpr int kCapacity = 6;
+	const auto collect = [](opennova::mission::MissionKernel &kernel) {
+		kernel.collision.build_initial_tables(kernel.world);
+		const w::OcclusionFrameCamera cam = camera_down_x();
+		kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+		im::WireOcclusionLatchMap latches;
+		std::vector<int32_t> culled_bms;
+		std::vector<int32_t> culled_wire;
+		std::vector<w::Vec3> anchors;
+		im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+				culled_bms, culled_wire, anchors);
+		std::sort(culled_bms.begin(), culled_bms.end());
+		return culled_bms;
+	};
 	opennova::renderer::ObjectProjectionSphere unstamped;
 	unstamped.valid = true;
-	// A def-less decoration ahead of every listed row: never listed.
-	w::Entity &unlisted = row(kernel, 2, 0, w::EntityKind::Item, 400, 20.0f, 0.0f);
-	kernel.occlusion.assign_render_model(unlisted.handle, unstamped);
-	for (int slot = 1; slot <= kBuildings; ++slot) {
-		w::Entity &b = row(kernel, 2, slot, w::EntityKind::Building, 0, -20.0f, 0.0f);
-		b.has_item_def = true;
-		b.item_type_index = 2;
-		b.item_type = w::kItemDefTypeBuilding;
-	}
-	const auto decoration = [&](int slot, int32_t bms_id) -> w::Entity & {
+	const auto decoration = [&](opennova::mission::MissionKernel &kernel, int slot,
+									int32_t bms_id) -> w::Entity & {
 		w::Entity &d = row(kernel, 2, slot, w::EntityKind::Building, bms_id, 20.0f, 1.0f);
 		d.has_item_def = true;
 		d.item_type_index = 1;
@@ -396,24 +437,48 @@ void test_the_statics_bound() {
 		kernel.occlusion.assign_render_model(d.handle, unstamped);
 		return d;
 	};
-	w::Entity &counted = decoration(kBuildings + 1, 401);
-	w::Entity &past = decoration(kBuildings + 2, 402);
-	unlisted.occlusion_latch = 0;
 
-	const w::OcclusionFrameCamera cam = camera_down_x();
-	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
-	im::WireOcclusionLatchMap latches;
-	std::vector<w::EntityHandle> scratch;
-	std::vector<int32_t> culled_bms;
-	std::vector<int32_t> culled_wire;
-	std::vector<w::Vec3> anchors;
-	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, scratch, cam,
-			culled_bms, culled_wire, anchors);
-	expect(culled_bms.empty(), "no static is culled");
-	expect(counted.occlusion_latch >= 16 && counted.occlusion_latch <= 23,
-			"the 1199th listed row is walked and its latch re-arms");
-	expect(past.occlusion_latch == 0, "the row past the bound is never walked");
-	expect(unlisted.occlusion_latch == 0, "a def-less row is never listed");
+	// A full pool: the buildings, then two decorations, the last the uncounted row.
+	{
+		auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+		opennova::mission::MissionKernel &kernel = *kernel_heap;
+		kernel.world.registry.configure_pool(2, kCapacity);
+		expect(w::static_prox_count_bound(kernel.world.registry.pool_capacity(2)) ==
+						kCapacity - 1,
+				"the bound is the configured pool-2 capacity less one");
+		for (int slot = 0; slot < kCapacity - 2; ++slot) {
+			w::Entity &b = row(kernel, 2, slot, w::EntityKind::Building, 0, -20.0f, 0.0f);
+			b.has_item_def = true;
+			b.item_type_index = 2;
+			b.item_type = w::kItemDefTypeBuilding;
+		}
+		w::Entity &counted = decoration(kernel, kCapacity - 2, 401);
+		w::Entity &past = decoration(kernel, kCapacity - 1, 402);
+		expect(collect(kernel) == std::vector<int32_t>({402}),
+				"the uncounted row drops, the counted decoration is admitted");
+		expect(counted.occlusion_latch >= 16 && counted.occlusion_latch <= 23,
+				"the last counted row is walked and its latch re-arms");
+		expect(past.occlusion_latch == 0, "the row past the bound is never walked");
+	}
+
+	// A row with no item type is never listed, whatever room the table has.
+	{
+		auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+		opennova::mission::MissionKernel &kernel = *kernel_heap;
+		kernel.world.registry.configure_pool(2, kCapacity);
+		w::Entity &unlisted = row(kernel, 2, 0, w::EntityKind::Item, 400, 20.0f, 0.0f);
+		unlisted.has_item_def = true;
+		unlisted.item_type_index = 0;
+		unlisted.item_type = 6;
+		unlisted.occlusion_latch = 0;
+		kernel.occlusion.assign_render_model(unlisted.handle, unstamped);
+		w::Entity &listed = decoration(kernel, 1, 401);
+		expect(collect(kernel) == std::vector<int32_t>({400}),
+				"the unlisted row drops, the listed decoration is admitted");
+		expect(unlisted.occlusion_latch == 0, "a row with no item type is never listed");
+		expect(listed.occlusion_latch >= 16 && listed.occlusion_latch <= 23,
+				"the listed decoration is walked");
+	}
 }
 
 // A listed decoration to the right of the camera's axis (a negative mission y,
@@ -432,18 +497,227 @@ void test_a_decoration_right_of_the_axis_is_collected() {
 	decoration.item_type_index = 1;
 	decoration.item_type = 6;
 	kernel.occlusion.assign_render_model(decoration.handle, unstamped);
+	kernel.collision.build_initial_tables(kernel.world);
 	const w::OcclusionFrameCamera cam = camera_down_x();
 	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
 	im::WireOcclusionLatchMap latches;
-	std::vector<w::EntityHandle> scratch;
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	std::vector<w::Vec3> anchors;
-	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, scratch, cam,
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
 			culled_bms, culled_wire, anchors);
 	if (!expect(culled_bms.empty() && decoration.occlusion_latch == 4,
 				"a decoration right of the axis is collected and its latch ticks"))
 		dump_gates("right of the axis", kernel, cam, decoration);
+}
+
+// The collectors' XY fog box. The eye at mission (0, 0, 2) looks along the mission
+// diagonal (x = y) with the fog at 1000 u, so a row at (1100, 300) lies 990 u deep and
+// 566 u to the side: inside the depth test and the frustum, but 1100 u out along X,
+// past its radius plus the fog. Retail skips such a row ahead of the view cull and the
+// latch, so it never ticks or re-arms; a row inside the box at (900, 400) is
+// collected and re-arms. Pools 0 / 1 box their entity+0 radius about their position,
+// the statics their static prox row's quantized words (the radius word: the entity+0
+// radius plus the table's 111876 pad, >> 16), so a static moved since the table's
+// build is boxed where the table holds it.
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8d12..0x5c8d3e;
+//  Terrain_CollectVisibleEntities_0 @ 0x5c6f82..0x5c6fcb; the table's words
+//  Entity_BuildProximityLists_Pool2 @ 0x4b9504..0x4b9537; the re-arm
+//  `(PRNG_Next16_C() & 7) + 16` @ 0x5c7162 / @ 0x5c8ea9 / @ 0x5c8fd6]
+void test_the_fog_box() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 16);
+	kernel.world.registry.configure_pool(1, 16);
+	kernel.world.registry.configure_pool(2, 16);
+	opennova::renderer::ObjectProjectionSphere unstamped;
+	unstamped.valid = true;
+	const auto decoration = [&](int slot, int32_t bms_id, float x, float y) -> w::Entity & {
+		w::Entity &d = row(kernel, 2, slot, w::EntityKind::Building, bms_id, x, y);
+		d.has_item_def = true;
+		d.item_type_index = 1;
+		d.item_type = 6;
+		kernel.occlusion.assign_render_model(d.handle, unstamped);
+		return d;
+	};
+	w::Entity &static_out = decoration(1, 501, 1100.0f, 300.0f);
+	w::Entity &static_in = decoration(2, 502, 900.0f, 400.0f);
+	w::Entity &static_moved = decoration(3, 503, 1100.0f, 306.0f);
+	// A person's radius projects past the sub-pixel floor at these depths.
+	w::Entity &person_out = row(kernel, 0, 1, w::EntityKind::Organic, 511, 1100.0f, 302.0f);
+	w::Entity &person_in = row(kernel, 0, 2, w::EntityKind::Organic, 512, 900.0f, 402.0f);
+	person_out.bound_radius = 2.0f;
+	person_in.bound_radius = 2.0f;
+	w::Entity &item_out = row(kernel, 1, 1, w::EntityKind::Item, 521, 1100.0f, 304.0f);
+	w::Entity &item_in = row(kernel, 1, 2, w::EntityKind::Item, 522, 900.0f, 404.0f);
+	kernel.occlusion.assign_render_model(item_out.handle, unstamped);
+	kernel.occlusion.assign_render_model(item_in.handle, unstamped);
+	kernel.collision.build_initial_tables(kernel.world);
+	// Moved inside the box after the table's build: its row still holds (1100, 306).
+	static_moved.position = {900.0f, 410.0f, 2.0f};
+	w::Entity *const rows[7] = {&static_out, &static_in, &static_moved, &person_out, &person_in,
+			&item_out, &item_in};
+	for (w::Entity *e : rows) e->occlusion_latch = 0;
+
+	w::OcclusionViewSpec view;
+	view.eye[1] = 2.0f;
+	const float c = 0.70710678f;
+	const float forward[3] = {c, 0.0f, -c}; // mission (c, c, 0)
+	const float right[3] = {c, 0.0f, c};    // mission (c, -c, 0)
+	const float up[3] = {0.0f, 1.0f, 0.0f};
+	for (int i = 0; i < 3; ++i) {
+		view.forward[i] = forward[i];
+		view.right[i] = right[i];
+		view.up[i] = up[i];
+	}
+	view.fov_h_deg = 91.4928f;
+	view.viewport_width = 1920.0f;
+	view.viewport_height = 1080.0f;
+	view.fog_dist_units = 1000.0f;
+	view.water_z_units = -1000.0f;
+	w::OcclusionFrameCamera cam;
+	w::occlusion_camera_from_view(view, cam);
+	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+
+	// Each row outside the box passes the stand-in's depth and frustum tests.
+	for (const w::Entity *e : {&static_out, &person_out, &item_out}) {
+		uint8_t held = 5;
+		const int32_t at[3] = {e->position.x.q16, e->position.y.q16, e->position.z.q16};
+		expect(kernel.occlusion.sphere_render_visible(kernel.collision, cam, at, 0, held, 0),
+				"an out-of-box row lies inside the depth test and the frustum");
+	}
+
+	uint32_t stream = 0x2468ACE1u;
+	kernel.occlusion.bind_focal_wind_random(&stream);
+	const auto next16 = [](uint32_t &s) {
+		const auto rol = [](uint32_t v, int k) { return (v << k) | (v >> (32 - k)); };
+		const uint32_t rotated = rol(s + rol(s, 11), 4);
+		s = rotated ^ 1u;
+		return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+	};
+	uint32_t expected_stream = stream;
+	uint8_t expected[3];
+	for (uint8_t &latch : expected) latch = static_cast<uint8_t>((next16(expected_stream) & 7) + 16);
+
+	im::WireOcclusionLatchMap latches;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors);
+	std::vector<int32_t> sorted = culled_bms;
+	std::sort(sorted.begin(), sorted.end());
+	expect(sorted == std::vector<int32_t>({501, 503, 511, 521}),
+			"the rows outside the box are dropped, the moved static where its row holds it");
+	expect(static_out.occlusion_latch == 0 && static_moved.occlusion_latch == 0 &&
+					person_out.occlusion_latch == 0 && item_out.occlusion_latch == 0,
+			"a row outside the box never reaches its latch");
+	expect(stream == expected_stream, "only the three rows inside the box draw the stream");
+	expect(static_in.occlusion_latch == expected[0] && person_in.occlusion_latch == expected[1] &&
+					item_in.occlusion_latch == expected[2],
+			"the rows inside the box re-arm in the walk's order");
+}
+
+// The render-model gate (entity+0x30) runs on every entity ahead of the type split,
+// a person's included: a placed person whose graphic did not load and a bare
+// Infantry wire row whose type has no render model are never collected, so neither
+// starts or re-arms a latch, while a stamped person beside them re-arms with the
+// stream's one draw. [orig: Terrain_CollectVisibleEntitiesForTerrain
+// `mov ecx,[edi+30h]; test ecx,ecx; jz` @ 0x5c8cf6..0x5c8cff, ahead of the type-3
+// branch @ 0x5c8de6..0x5c8de9; the re-arm `(PRNG_Next16_C() & 7) + 16` @ 0x5c8ea9]
+void test_the_person_model_gate() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 16);
+	kernel.world.registry.configure_pool(1, 16);
+	w::Entity &modelled = row(kernel, 0, 1, w::EntityKind::Organic, 601, 20.0f, 0.0f);
+	w::Entity &modelless = row(kernel, 0, 2, w::EntityKind::Organic, 602, 20.0f, 1.0f);
+	kernel.occlusion.remove_render_model(modelless.handle);
+	modelled.occlusion_latch = 0;
+	modelless.occlusion_latch = 0;
+	im::ClientRuntime runtime("OcclusionCollectModelGate");
+	opennova::replication::ClientEntityState &bare = runtime.state().upsert(0x0009);
+	bare.type_id = 0x1234;
+	bare.cls = opennova::EntityClass::Infantry;
+	bare.x = 15 << 16;
+	bare.z = 2 << 16;
+
+	const w::OcclusionFrameCamera cam = camera_down_x();
+	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+	uint32_t stream = 0x0BADF00Du;
+	kernel.occlusion.bind_focal_wind_random(&stream);
+	const auto next16 = [](uint32_t &s) {
+		const auto rol = [](uint32_t v, int k) { return (v << k) | (v >> (32 - k)); };
+		const uint32_t rotated = rol(s + rol(s, 11), 4);
+		s = rotated ^ 1u;
+		return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+	};
+	uint32_t expected_stream = stream;
+	const uint8_t expected = static_cast<uint8_t>((next16(expected_stream) & 7) + 16);
+
+	im::WireOcclusionLatchMap latches;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, &runtime, false}, latches, cam,
+			culled_bms, culled_wire, anchors);
+	expect(culled_bms == std::vector<int32_t>({602}) && modelless.occlusion_latch == 0,
+			"a placed person without a render model is dropped ahead of its latch");
+	expect(culled_wire == std::vector<int32_t>({0x0009}) && latches.count(0x0009) == 0,
+			"a bare person row without a render model is dropped ahead of its latch");
+	expect(modelled.occlusion_latch == expected && stream == expected_stream,
+			"the stamped person re-arms with the stream's one draw");
+}
+
+// The pool collector's type test: a pool 0 / 1 row whose def is Building-type
+// (5) is skipped after the blink gate, whatever its record family, so it is
+// dropped without ticking or re-arming its latch; a vehicle-type row beside it
+// is collected and re-arms with the stream's one draw.
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 - `cmp eax,5; jz`
+//  @ 0x5c8dd7..0x5c8de0, ahead of the type-3 branch @ 0x5c8de6; the re-arm
+//  `(PRNG_Next16_C() & 7) + 16` @ 0x5c8fd6]
+void test_the_building_type_skip() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 16);
+	kernel.world.registry.configure_pool(1, 16);
+	opennova::renderer::ObjectProjectionSphere unstamped;
+	unstamped.valid = true;
+	const auto item = [&](int slot, int32_t bms_id, uint8_t def_type, float y) -> w::Entity & {
+		w::Entity &e = row(kernel, 1, slot, w::EntityKind::Item, bms_id, 20.0f, y);
+		e.has_item_def = true;
+		e.item_type_index = 1;
+		e.item_type = def_type;
+		e.occlusion_latch = 0;
+		kernel.occlusion.assign_render_model(e.handle, unstamped);
+		return e;
+	};
+	w::Entity &building = item(1, 701, w::kItemDefTypeBuilding, 0.0f);
+	w::Entity &vehicle = item(2, 702, 1, 1.0f);
+
+	const w::OcclusionFrameCamera cam = camera_down_x();
+	kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+	uint32_t stream = 0x13579BDFu;
+	kernel.occlusion.bind_focal_wind_random(&stream);
+	const auto next16 = [](uint32_t &s) {
+		const auto rol = [](uint32_t v, int k) { return (v << k) | (v >> (32 - k)); };
+		const uint32_t rotated = rol(s + rol(s, 11), 4);
+		s = rotated ^ 1u;
+		return static_cast<uint16_t>((rotated & 0xFFFFu) ^ 1u);
+	};
+	uint32_t expected_stream = stream;
+	const uint8_t expected = static_cast<uint8_t>((next16(expected_stream) & 7) + 16);
+
+	im::WireOcclusionLatchMap latches;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+			culled_bms, culled_wire, anchors);
+	expect(culled_bms == std::vector<int32_t>({701}) && building.occlusion_latch == 0,
+			"a pool-1 row with a Building-type def is dropped ahead of its latch");
+	expect(vehicle.occlusion_latch == expected && stream == expected_stream,
+			"the vehicle-type row re-arms with the stream's one draw");
 }
 
 } // namespace
@@ -454,6 +728,9 @@ int main() {
 	test_the_walk_order();
 	test_the_statics_bound();
 	test_a_decoration_right_of_the_axis_is_collected();
+	test_the_fog_box();
+	test_the_person_model_gate();
+	test_the_building_type_skip();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

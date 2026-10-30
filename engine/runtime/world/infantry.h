@@ -1171,6 +1171,11 @@ inline bool infantry_has_anim_channel(const InfantryState &inf, const IRootMotio
     return source != nullptr && inf.adm_id >= 0 && source->has_clip(inf.adm_id, anim_state::kReset);
 }
 
+// The 0x0A player record's anim ratio byte over the body's primary channel as it stands, read
+// where the record is written (replication::snapshot_world), as retail's writer reads the live
+// AnimMap. Defined in infantry_wire.cpp. [orig: NetPacket_SerializePlayerState @0x4C0CF2..0x4C0D35]
+uint8_t wire_anim_ratio(const InfantryState &inf, const IRootMotionSource *source);
+
 // The org1 body's staggered key: the logic tick plus 36 times its net id (+0x7C, a placed record's
 // SSN). Its think runs where the key is a multiple of 16, its perception where it is one of 32 and
 // its attention scan where it is one of 256; a mission's first frame runs at tick 1

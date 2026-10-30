@@ -73,8 +73,9 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out, bool var
     // @0x467070..0x4673A3]. The remaining per-candidate gates (flags 2/0x8000000, the
     // +530 refcount saturation, FOV/range caps) live in the scoring core.
     const auto scan_pool = [&](int pool, bool target_vehicles, bool check_player_flag) {
-        const size_t cap = world.registry.pool_capacity(pool);
-        for (size_t s = 0; s < cap; ++s) {
+        // The pool to its used count [orig: `mov ecx, g_PoolList.used[eax]` @0x467081].
+        const size_t used = world.registry.pool_used(pool);
+        for (size_t s = 0; s < used; ++s) {
             const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
             const Entity *c = world.registry.get(h);
             if (c == nullptr) continue;                    // [orig: +28 in-use]
@@ -598,7 +599,9 @@ bool AiSystem::line_of_sight_clear_to_person(World &world, const int32_t a[3],
 // red even if that ally has no brain. [orig: Entity_AlertNearbyAllies @0x4654B0]
 void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t /*radius*/) {
     if (e.brain.f[AiBrain::kOwner] == 0) return;
-    for (size_t slot = 0; slot < world.registry.pool_capacity(1); ++slot) {
+    // Pool 1 to its used count [orig: @0x4654C2].
+    const size_t used = world.registry.pool_used(1);
+    for (size_t slot = 0; slot < used; ++slot) {
         const EntityHandle h = EntityHandle::make(1, static_cast<int>(slot));
         const Entity *ally = world.registry.get(h);
         if (ally == nullptr || ally->item_id == 0 || h == e.handle ||

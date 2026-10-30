@@ -6,14 +6,17 @@
 // CommandRunner answering as AWS would mid-deploy (infra_aws_stub.h). Rows are
 // planted as the programs would leave them: two lobby instances (one live with a
 // session, one gone quiet and draining), the fleet's election, a ready
-// fleet machine and an ended one. The cases: the route refused without an
-// admin (401, 403 for a player); the local stack's view (the cloud unavailable,
-// saying why, nothing called; the lobbies, the fleet leader and the machines from
-// the database); the deployment's (every program with its counts, rollout,
-// revision and whether it is the release's, its running and stopped tasks and
-// events; the one-off task; the target groups' targets; the database and the
-// cache; the machines' zones and EC2 states), read once for the polls within
-// the cache window; and no reply carrying any credential.
+// fleet machine whose hostd reported its build and image and an ended one, and
+// two running hosted servers and a stopped one with their serve images. The
+// cases: the route refused without an admin (401, 403 for a player); the local
+// stack's view (the cloud unavailable, saying why, nothing called; the lobbies,
+// the fleet leader, the serve images the live servers run and the machines with
+// their hostd's build from the database); the deployment's (the release with its
+// images and their commits; every program with its counts, rollout, revision and
+// whether it is the release's, its running and stopped tasks and events; the
+// one-off task; the target groups' targets; the database and the cache; the
+// machines' zones and EC2 states), read once for the polls within the cache
+// window; and no reply carrying any credential.
 
 #include "accounts/auth.h"
 #include "accounts/web_session.h"
@@ -127,7 +130,8 @@ std::string session_cookie(Database &db, int64_t id) {
 }
 
 // The rows the programs would have left: two lobby instances, the fleet's
-// election, a ready machine and an ended one. The live lobby's id.
+// election, a ready machine (its hostd's report) and an ended one, the hosted
+// servers. The live lobby's id.
 int64_t plant(Database &db) {
 	const int64_t live = lobbydb::register_instance(db, "54.162.79.147:64206");
 	const int64_t quiet = lobbydb::register_instance(db, "54.162.79.147:64206");
@@ -161,6 +165,24 @@ int64_t plant(Database &db) {
 	hosted::mark_launched(db, ready, launched);
 	hosted::transition_machine(
 			db, ready, hosted::FleetMachineState::Booting, hosted::FleetMachineState::Ready, "");
+	db.exec("UPDATE fleet_machines SET agent_version = 'ONE 0.0.22.123 (a1b2c3d, staging)', "
+			"agent_image = 'ghcr.io/opennova-net/opennova-hostd@sha256:4567' WHERE id = $1;",
+			{ BindValue(ready) });
+	// Two servers running one serve image, one stopped on an older one (not counted).
+	struct Server {
+		const char *state;
+		const char *digest;
+	};
+	for (const Server &server : { Server{ "running", "89ab" }, Server{ "running", "89ab" },
+				 Server{ "stopped", "0011" } })
+		db.exec("INSERT INTO hosted_servers (generation, state, serve_image, configuration) "
+				"VALUES (1, $1, $2, jsonb_build_object('game_name', 'Infra', 'max_players', 16, "
+				"'time_limit', 30, 'kill_limit', 0, 'max_score', 0, 'respawn', 0, 'start_delay', "
+				"0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'm.bms', "
+				"'swap_sides', false))));",
+				{ BindValue(std::string(server.state)),
+						BindValue(std::string("ghcr.io/opennova-net/opennova-serve@sha256:") +
+								server.digest) });
 	const int64_t ended = hosted::create_machine(db, shared).id;
 	launched.cloud_id = "i-0bbbbbbbbbbbbbbb2";
 	hosted::mark_launched(db, ended, launched);
@@ -227,6 +249,15 @@ int test_local(Harness &h, int64_t live_lobby) {
 	TEST_EXPECT(is_null(machines[0]["zone"]) && is_null(machines[0]["ec2_state"]));
 	TEST_EXPECT(str(machines[1]["state"]) == "ended" &&
 			str(machines[1]["end_reason"]) == "drained" && !is_null(machines[1]["ended_at"]));
+	// What each machine's hostd last said it runs; none from one that never reported.
+	TEST_EXPECT(str(machines[0]["agent_version"]) == "ONE 0.0.22.123 (a1b2c3d, staging)" &&
+			str(machines[0]["agent_image"]) == "ghcr.io/opennova-net/opennova-hostd@sha256:4567");
+	TEST_EXPECT(is_null(machines[1]["agent_version"]) && is_null(machines[1]["agent_image"]));
+	// The serve images the live servers run, the stopped one's left out.
+	const auto &serve = json["serve_images"];
+	TEST_EXPECT(serve.size() == 1 &&
+			str(serve[0]["image"]) == "ghcr.io/opennova-net/opennova-serve@sha256:89ab" &&
+			serve[0]["servers"].i() == 2);
 	TEST_EXPECT(h.stub->calls().empty());
 	return 0;
 }
@@ -247,6 +278,11 @@ int test_cloud(Harness &h) {
 	TEST_EXPECT(str(cloud["release"]["id"]) == "20261017T120000Z-abc1234" &&
 			str(cloud["release"]["revision"]) == "abc1234def56" && !cloud["release_none"].b() &&
 			is_null(cloud["release_error"]));
+	// Its images and the commits their labels name, as the manifest holds them.
+	TEST_EXPECT(str(cloud["release"]["images"]["gate"]) ==
+					"ghcr.io/opennova-net/opennova-novaworld-gate@sha256:0123" &&
+			str(cloud["release"]["image_commits"]["gate"]) == "f42f7fe" &&
+			cloud["release"]["image_commits"].size() == 1);
 
 	const auto &services = cloud["services"];
 	TEST_EXPECT(services.size() == 6 && is_null(cloud["services_error"]) &&

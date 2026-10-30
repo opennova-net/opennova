@@ -342,11 +342,11 @@ void arm_refused_capture_nags(NapiNPServerCtx &ctx, world::World &world) {
 // untouched. Both portable views of the Flags dword carry the bit because
 // both writers set it (ai_combat.cpp / infantry_combat.cpp).
 // [orig: EntityPool_ClearDirtyFlags @0x508E30 — pool 0 loop @0x508e59, pool 1
-//  loop @0x508e79, `&= ~0x4000`]
+//  loop @0x508e79, `&= ~0x4000`; each to its used count @0x508E36 / @0x508E64]
 void clear_priority_target_marks(world::World &world) {
 	for (const int pool : {0, 1}) {
-		const size_t capacity = world.registry.pool_capacity(pool);
-		for (size_t slot = 0; slot < capacity; ++slot) {
+		const size_t used = world.registry.pool_used(pool);
+		for (size_t slot = 0; slot < used; ++slot) {
 			world::Entity *e = world.registry.get(
 					world::EntityHandle::make(pool, static_cast<int>(slot)));
 			if (e == nullptr) continue;

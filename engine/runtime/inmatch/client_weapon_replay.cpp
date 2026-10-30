@@ -180,7 +180,10 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
                 seat_type(*row, *walk.carrier) == world::SeatType::Gunner;
         pump(*mount, row->z, walk);
     }
-    for (size_t i = 0; i < world.registry.pool_capacity(1); ++i) {
+    // The world's pool-1 rows to its used count, which every twin's slotted spawn raises
+    // [orig: WeaponAction_ProcessAllEntities @0x542690 - @0x5426D1].
+    const size_t pool1_used = world.registry.pool_used(1);
+    for (size_t i = 0; i < pool1_used; ++i) {
         auto *mount = world.registry.get(world::EntityHandle::make(1, static_cast<int>(i)));
         if (!mount || !mount->has_item_def || !(mount->item_attrib & world::kItemAttribEweap) ||
                 mount->primary_occupant.valid() || mount->primary_weapon_slot.heat_window_end_tick == 0 ||

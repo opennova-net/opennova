@@ -36,6 +36,8 @@
 #include <runtime/world/infantry.h>
 #include <runtime/world/present_rows.h>
 #include <runtime/environment/environment_state.h>
+#include <runtime/world/occlusion_camera.h> // mission_forces_indoors
+#include <runtime/world/occlusion_feed.h> // building_visibility_mask / _visible
 #include <runtime/environment/weather_runtime.h>
 #include <runtime/renderer/render_order.h>
 
@@ -462,6 +464,7 @@ void MissionViewportApplier::run_place_begin_(const MissionScene &scene, Build &
 	origins_.clear();
 	lifted_.clear();
 	shadow_pending_.clear();
+	claims_.clear();
 	drop_shapes_();
 	picture_moved_();
 	placed_ = false;
@@ -618,7 +621,8 @@ void MissionViewportApplier::run_lift_(const MissionScene &scene, Build &build, 
 
 void MissionViewportApplier::show_(Placed &placed, bool shown) {
 	if (ObjectModel *model = model_of_(placed)) {
-		model->set_visible(shown);
+		// The view's own hide is the model's present intent, the collect's verdict its claim (collect_frame_).
+		model->set_present_visible(shown);
 		// Its terrain shadow with it (an individual model's source answers to its key).
 		if (placer_.is_valid() && placed.key != 0) {
 			if (shown) placer_->clear_static_terrain_shadow_replacement(placed.key);
@@ -649,6 +653,7 @@ void MissionViewportApplier::drop_entities_() {
 	origins_.clear();
 	lifted_.clear();
 	shadow_pending_.clear();
+	claims_.clear();
 	drop_shapes_();
 	picture_moved_();
 	// The placed populations and models go with their container at the frame's end, renamed now: a
@@ -955,6 +960,7 @@ void MissionViewportApplier::place_camera_(const opennova::editor::ViewportModel
 }
 
 void MissionViewportApplier::clear() {
+	mission_ = nullptr;
 	build_.reset();
 	listen_->stop();
 	drop_entities_();
@@ -1055,6 +1061,7 @@ opennova::io::JsonValue MissionViewportApplier::drawn_json_() const {
 }
 
 void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
+	mission_ = &mission_of(viewport);
 	// The models' part animations on the preview clock.
 	clock_->sample(int64_t(clock.ms()), ++frame_);
 	// A paint's colour map, once its strokes pause, into the texture the foliage's tint reads (S25).
@@ -1222,6 +1229,9 @@ void MissionViewportApplier::present(double dt) {
 	const int64_t foliage_start = now_us();
 	layers_->present_ground(dt, clock_ms_);
 	leg_us_[0] = now_us() - foliage_start;
+	// The occlusion leg (GameWorld::apply_occlusion_frame), after the terrain and the water, ahead of the lights
+	// and the levels.
+	collect_frame_();
 	layers_->present_sun_veil();
 	// The light leg (GameWorld::render_light_frame): the pool spawned again where what stands moved, each
 	// model's and each static row's nearest lights selected (the atlas's lanes with them), the terrain's
@@ -1273,6 +1283,63 @@ void MissionViewportApplier::present(double dt) {
 	layers_->present_frame_effects();
 	layers_->present_clear_and_cube();
 	layers_->end_frame();
+}
+
+void MissionViewportApplier::collect_frame_() {
+	if (mission_ == nullptr || !placed_ || placer_.is_null() || camera_ == nullptr) return;
+	const Viewport *viewport = camera_->get_viewport();
+	if (viewport == nullptr) return;
+	// The camera handed over as the game's main view hands its own (Simulation::run_occlusion_frame): the
+	// presentation-frame triad, the horizontal field over the visible rect, the scene's fog distance, the water's
+	// plane while its render is active, the mission's force-indoors attribute, no local player's blink letters.
+	const Transform3D xform = camera_->get_global_transform();
+	const Vector3 axes[4] = { xform.origin, -xform.basis.get_column(2).normalized(),
+		xform.basis.get_column(0).normalized(), xform.basis.get_column(1).normalized() };
+	opennova::world::OcclusionViewSpec view;
+	float *const fields[4] = { view.eye, view.forward, view.right, view.up };
+	for (int i = 0; i < 4; ++i) {
+		fields[i][0] = float(axes[i].x);
+		fields[i][1] = float(axes[i].y);
+		fields[i][2] = float(axes[i].z);
+	}
+	float tan_h = 0.0f, tan_v = 0.0f;
+	view.fov_h_deg = ObjectLodFrame::camera_tangents(camera_, tan_h, tan_v)
+			? float(Math::rad_to_deg(2.0 * std::atan(double(tan_h))))
+			: 90.0f;
+	const Vector2 size = viewport->get_visible_rect().size;
+	view.viewport_width = float(size.x);
+	view.viewport_height = float(size.y);
+	view.fog_dist_units = environment_ != nullptr ? environment_->get_fog_distance() : 1000.0f;
+	view.water_z_units = water_->is_water_render_active() ? water_->get_water_height() : -100000.0f;
+	view.force_indoors = opennova::world::mission_forces_indoors(mission_->scene().header().attrib_flags);
+	view.object_detail = opennova::renderer::kObjectLodDetailFreshProfile;
+	mission_->collect(view, verdicts_);
+	verdict_of_.clear();
+	for (const opennova::editor::NodeId row : verdicts_.dropped) verdict_of_[row] = -1;
+	for (size_t i = 0; i < verdicts_.buildings.size(); ++i) verdict_of_[verdicts_.buildings[i].row] = int(i);
+	// Each entity's verdict landed where it changed (the game's applies the collect's changes alone): a row no
+	// verdict names is admitted.
+	for (auto &entry : entities_) {
+		const Placed &placed = entry.second;
+		const auto found = verdict_of_.find(entry.first);
+		const opennova::editor::MissionCollectVerdicts::Building *building =
+				found != verdict_of_.end() && found->second >= 0 ? &verdicts_.buildings[size_t(found->second)]
+																 : nullptr;
+		const int64_t verdict = building != nullptr ? building->packed : found != verdict_of_.end() ? -1 : -2;
+		const bool hidden = building != nullptr ? !opennova::world::building_visibility_visible(building->packed)
+												: verdict == -1;
+		Claim &claim = claims_[entry.first];
+		if (claim.model == placed.model && claim.key == placed.key && claim.verdict == verdict) continue;
+		if (ObjectModel *model = model_of_(placed)) {
+			if (building != nullptr)
+				model->set_occlusion_section_mask(
+						int64_t(opennova::world::building_visibility_mask(building->packed)), building->forced);
+			model->set_occlusion_hidden(hidden);
+		} else if (placed.key != 0) {
+			placer_->set_static_instance_occlusion_hidden(placed.key, hidden);
+		}
+		claim = Claim{ placed.model, placed.key, verdict };
+	}
 }
 
 // --- the ground ----------------------------------------------------------------------------------
@@ -1349,7 +1416,8 @@ const MissionViewportApplier::PickShape *MissionViewportApplier::pick_shape_(ope
 	if (placed.model != 0) {
 		// An individual model: its meshes through its nodes, in its own space; it where its node stands.
 		ObjectModel *model = model_of_(placed);
-		if (model == nullptr || model->is_queued_for_deletion() || !model->is_visible()) return nullptr;
+		// The view's own hide (show_), not the camera's collect: a pick asks every entity standing.
+		if (model == nullptr || model->is_queued_for_deletion() || !model->is_present_visible()) return nullptr;
 		xform = model->get_transform();
 		for (Node *up = model->get_parent(); up != nullptr && up != &layers_->root();
 				up = up->get_parent())

@@ -15,20 +15,18 @@ Ref<JoinScreenStatus> JoinScreenStatus::make(opennova::inmatch::JoinScreenStage 
 	return out;
 }
 
-String JoinScreenStatus::message_text(const Ref<RtxtStringFile> &p_override_table,
-		const Ref<RtxtStringFile> &p_gameerr) const {
+String JoinScreenStatus::message_text(const Ref<RtxtStringFile> &p_gameerr) const {
+	const std::shared_ptr<const opennova::rtxt::File> override_table = opennova::rtxt::text_override();
 	return opennova::cp1252_to_gd(opennova::inmatch::join_screen_text(stage_, queue_, now_ms_,
-			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr,
-			p_gameerr.is_valid() ? &p_gameerr->get_native() : nullptr));
+			override_table.get(), p_gameerr.is_valid() ? &p_gameerr->get_native() : nullptr));
 }
 
-String JoinScreenStatus::stage_text(int p_stage, const Ref<RtxtStringFile> &p_override_table,
-		const Ref<RtxtStringFile> &p_gameerr) {
+String JoinScreenStatus::stage_text(int p_stage, const Ref<RtxtStringFile> &p_gameerr) {
 	if (p_stage < STAGE_JOINING || p_stage > STAGE_ENUMERATING) return String();
+	const std::shared_ptr<const opennova::rtxt::File> override_table = opennova::rtxt::text_override();
 	return opennova::cp1252_to_gd(opennova::inmatch::join_screen_text(
 			static_cast<opennova::inmatch::JoinScreenStage>(p_stage),
-			opennova::inmatch::JoinQueueRecord{}, 0,
-			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr,
+			opennova::inmatch::JoinQueueRecord{}, 0, override_table.get(),
 			p_gameerr.is_valid() ? &p_gameerr->get_native() : nullptr));
 }
 
@@ -69,10 +67,10 @@ int JoinScreenStatus::accept_step(int p_panel, int p_server_flags, bool p_specta
 
 void JoinScreenStatus::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stage"), &JoinScreenStatus::get_stage);
-	ClassDB::bind_method(D_METHOD("message_text", "override_table", "gameerr"),
+	ClassDB::bind_method(D_METHOD("message_text", "gameerr"),
 			&JoinScreenStatus::message_text);
 	ClassDB::bind_static_method("JoinScreenStatus",
-			D_METHOD("stage_text", "stage", "override_table", "gameerr"),
+			D_METHOD("stage_text", "stage", "gameerr"),
 			&JoinScreenStatus::stage_text);
 	ClassDB::bind_static_method("JoinScreenStatus", D_METHOD("window_count"),
 			&JoinScreenStatus::window_count);

@@ -7,6 +7,7 @@
 #include <variant>
 
 #include <base/io/bam.h>
+#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <base/vfs/file_source.h>
 #include <editor/assets/asset_registry.h>
@@ -25,6 +26,7 @@
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_source.h>
+#include <editor/preview/mission_world.h>
 #include <editor/preview/model_placement.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/project/project_files.h>
@@ -391,6 +393,10 @@ ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	effects_.close();
 	listen_.close();
 	start_.close();
+	collect_.close();
+	collect_key_ = 0;
+	collect_stamps_.clear();
+	collect_people_key_ = 0;
 	drawn_ = JsonValue();
 	missing_.clear();
 	ground_ = false;
@@ -444,6 +450,92 @@ const std::vector<MissionStartSeat> &MissionViewport::follow_start_(const Sessio
 	}
 	start_.follow(view.findings.assets, *mission, scene_.header(), stem, mission_start_records(scene_));
 	return start_.start_seats();
+}
+
+void MissionViewport::follow_collect_(const SessionView &view, const Document &document) {
+	const auto *mission = dynamic_cast<const MissionDocument *>(&document);
+	const std::shared_ptr<const ProjectAssetSource> &source = view.findings.assets;
+	if (!mission || !source || scene_.entities().empty()) {
+		collect_.close();
+		collect_key_ = 0;
+		collect_stamps_.clear();
+		return;
+	}
+	follow_ground_(view);
+	// What its world holds: each record (its row, pool, place, item and stamp: the stamp moves with its transform,
+	// item, group and attributes) and the ground; and the files it read.
+	const auto mix = [](uint64_t hash, uint64_t value) { return io::fnv1a64_bytes(hash, &value, sizeof(value)); };
+	uint64_t key = mix(io::kFnv1a64Offset, terrain_ground_.revision());
+	key = mix(key, uint64_t(scene_.entities().size()));
+	for (const MissionEntityMark &mark : scene_.entities()) {
+		key = mix(key, mark.row);
+		key = mix(key, uint64_t(mark.pool));
+		key = mix(key, uint64_t(uint32_t(mark.index)));
+		key = mix(key, uint64_t(mark.item));
+		key = mix(key, mark.stamp);
+	}
+	const std::shared_ptr<MissionFiles> &read = collect_.files();
+	const bool files_moved = read && read->stamped->stamps().moved(*source);
+	if (collect_.loaded() && key == collect_key_ && !files_moved) {
+		stand_collect_people_(false);
+		return;
+	}
+	if (collect_.loaded() && gesture_open_ && !files_moved) {
+		// Under a gesture (a drag samples every frame) the moved records' entities take their places in the world that
+		// stands; the gesture's end loads it again over them.
+		bool moved = false;
+		for (const MissionEntityMark &mark : scene_.entities()) {
+			uint32_t &stamp = collect_stamps_[mark.row];
+			if (stamp != mark.stamp && collect_.move(mark)) {
+				stamp = mark.stamp;
+				moved = true;
+			}
+		}
+		stand_collect_people_(moved);
+		return;
+	}
+	bms::File composed;
+	if (!mission->compose(composed)) {
+		collect_.close();
+		collect_key_ = 0;
+		collect_stamps_.clear();
+		return;
+	}
+	// The files' reads kept while they stand (each model read once), for every world loaded over them.
+	const std::shared_ptr<MissionFiles> files = read && !files_moved ? read : std::make_shared<MissionFiles>(source);
+	collect_.load(files, composed, terrain_ground_, scene_.entities());
+	collect_key_ = key;
+	collect_stamps_.clear();
+	for (const MissionEntityMark &mark : scene_.entities()) collect_stamps_[mark.row] = mark.stamp;
+	stand_collect_people_(true);
+}
+
+void MissionViewport::stand_collect_people_(bool again) {
+	if (!collect_.loaded()) return;
+	const auto mix = [](uint64_t hash, uint64_t value) { return io::fnv1a64_bytes(hash, &value, sizeof(value)); };
+	uint64_t key = io::kFnv1a64Offset;
+	for (const MissionPose &pose : poses_.poses()) {
+		const MissionEntityMark *mark = pose.status == "posed" ? scene_.entity(pose.row) : nullptr;
+		if (mark == nullptr) continue;
+		key = mix(key, pose.row);
+		key = mix(key, pose.stamp);
+		key = mix(key, mark->stamp);
+		if (const MissionEntityMark *carrier = pose.seated && pose.carrier != 0 ? scene_.entity(pose.carrier) : nullptr)
+			key = mix(key, carrier->stamp);
+	}
+	if (!again && key == collect_people_key_) return;
+	collect_people_key_ = key;
+	// Where the device draws each body (MissionViewportApplier::person_place_): on the seat the start took, as it sits
+	// over its carrier now, else its record lifted where its spawn stands it.
+	for (const MissionPose &pose : poses_.poses()) {
+		const MissionEntityMark *mark = pose.status == "posed" ? scene_.entity(pose.row) : nullptr;
+		if (mark == nullptr) continue;
+		MissionStartSeat seat;
+		if (seat_now(pose, seat))
+			collect_.stand(pose.row, seat.x, seat.y, seat.z);
+		else
+			collect_.stand(pose.row, mark->x, mark->y, mark->z + pose.lift);
+	}
 }
 
 bool MissionViewport::seat_now(const MissionPose &pose, MissionStartSeat &out) const {
@@ -570,6 +662,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		bound_items_(view);
 		stand_people_(view, *document, poses_.refresh(view, scene_, follow_start_(view, document)));
 		people_.run_to(poses_, clock.ticks());
+		follow_collect_(view, *document);
 		follow_overlay_(view);
 		picture_.show(key, generation);
 		shown(*document);
@@ -632,6 +725,8 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// The people play their clips on to the clock (S23 C): the device poses them each frame as they stand, no Update
 	// asked.
 	people_.run_to(poses_, clock.ticks());
+	// The collect's world over the records as they stand (its device collects over it each drawn frame).
+	follow_collect_(view, *document);
 	// The overlay made again where the option or the ground moved (DI-29): an Update gives it the device.
 	const bool overlaid = follow_overlay_(view);
 	// The Shoot tool's shots run to the clock (DI-23): the device draws their scars each frame, their effects

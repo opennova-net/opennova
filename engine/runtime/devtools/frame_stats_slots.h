@@ -109,32 +109,60 @@
     X(SIM_WORLD_SCRIPTS, "registered authored systems (WAC + BMS)") \
     /* World::update_all_entities, lapped in retail order (Entity_UpdateAllEntities). */ \
     X(SIM_UPDATE_ENTITIES, "World::update_all_entities total, every lap below in retail order") \
-    X(SIM_UPDATE_WALKS, "the pool-1 slot walk (brains, vehicle motors, ewep, items) + the pool-0 organic walk")     /* The pool-1 slot visit's legs (World::update_pool1_slot), disjoint from SIM_AI_INFANTRY. */     X(SIM_WALK_THINK, "pool-1 think visits: the blink refresh, then a brain, a minefield or an item's damage callback")     X(SIM_WALK_MOTOR, "pool-1 vehicle motors")     X(SIM_WALK_EWEP, "pool-1 emplaced-weapon class updates")     X(SIM_WALK_ITEMS, "pool-1 item legs: destroy fade, squib, death motion, dropped objects, elevators")     X(SIM_WALK_DEVICES, "pool-1 placed devices (throwables): clock, think, parent-follow")     X(SIM_WALK_MOUNTED, "pool-1 mounted brains: the seat shortcut and the re-pose") \
+    X(SIM_UPDATE_WALKS, "the pool-1 slot walk (brains, vehicle motors, ewep, items) + the pool-0 organic walk") \
+    /* The pool-1 slot visit's legs (World::update_pool1_slot, one lap per visit), disjoint from SIM_AI_INFANTRY; */ \
+    /* the live re-get ahead of a leg rides that leg. */ \
+    X(SIM_WALK_VISIT, "pool-1 visit heads: the visited mark, the body / brain lookup, the placed-device test and the class pick (the item traits lookup)") \
+    X(SIM_WALK_THINK, "pool-1 think visits: the blink refresh, then a brain, a minefield or an item's damage callback") \
+    X(SIM_WALK_MOTOR, "pool-1 vehicle motors") \
+    X(SIM_WALK_EWEP, "pool-1 emplaced-weapon class updates") \
+    X(SIM_WALK_EWEP_COMPOSE, "inside the ewep class update: an attached child's pose rebuilt from its carrier (compose_emplaced_child)") \
+    X(SIM_WALK_POWERUPS, "a powerup row's respawn countdown at its own visit (powerup_tick_respawn)") \
+    X(SIM_WALK_ITEMS, "pool-1 item legs: destroy fade, squib, death motion, dropped objects, elevators") \
+    X(SIM_WALK_DEVICES, "pool-1 placed devices (throwables): clock, think, parent-follow") \
+    X(SIM_WALK_MOUNTED, "pool-1 mounted brains: the seat shortcut and the re-pose") \
+    X(SIM_WALK_CLAIMS, "the pool-0 walk's tail for a live body standing on a vehicle: the vehicle's gates, the hold scan, the team / berserk copy and the contact wake (the dead skip and the ground-chain find ahead of it stay walk glue)") \
     /* A joiner's replica legs inside the World's walks (JoinerRole's World hooks, D-NET-196). */ \
-    X(SIM_WALK_REPLICA_ROWS, "joiner: the decoded pool-1 rows' visits at their World slots (World::pool1_slot_leg)") \
+    X(SIM_WALK_REPLICA_ROWS, "joiner: the decoded pool-1 rows' visits at their World slots (World::pool1_slot_leg), each on the walk laps' microsecond clock") \
     X(SIM_WALK_REPLICA_POOL0, "joiner: the replica guns' channels, the remote rows' motion through the own body, the proxies' live words (World::before_pool0_walk)") \
     X(SIM_WALK_REPLICA_GUNS, "joiner: the replica guns' channels (tick_replica_emplaced_channels' pool-1 leg)") \
     X(SIM_WALK_REPLICA_MIDDLE, "joiner: the remote rows' motion through the own body's slot (tick_remote_motion_through_self)") \
     X(SIM_WALK_REPLICA_PROXIES, "joiner: every decoded row's proxy live words (sync_wire_collision_proxies_live)") \
     X(SIM_REPLICA_COLLISION, "joiner: the decoded persons' movement resolver and slope-conform ground probes, wherever their visits run") \
-    X(SIM_AI_INFANTRY, "infantry/player body rows") \
+    X(SIM_AI_INFANTRY, "the organic body updates (AiSystem::update_organic), pool-0 and pool-1 alike") \
+    /* Its children, in the body tick's order: one lap per body (tick_infantry), each mark closing the */ \
+    /* leg its slot names, the few stores and tests between two legs riding the leg after them. The */ \
+    /* update's head (the death screen's free-fly with it), org1's post-think tail (recoil, spread, */ \
+    /* torso roll, heading chase, eye) and its post-resolve tail (edges, ladder, water) stay the */ \
+    /* residual: glue. */ \
+    X(SIM_AI_INFANTRY_ITEM_MOVERS, "pool-0 bodies bound to an item row: the whole update of such a body, the row's mover over its words (person_item_mover)") \
+    X(SIM_AI_INFANTRY_ANIMATION, "weapon/body channels + root-motion sampling (the motor head)") \
+    X(SIM_AI_INFANTRY_PLAYER, "org2's own legs: the queued use, the network chase, the rain ambient, the view tick, the row event and radio latch; the kick; the seat site, lean, weapon channel, eye, stance sound, 4th-tick select and ladder override; gravity + parachute; the jump / landing edges and the water block") \
+    X(SIM_AI_INFANTRY_CORPSE, "the death edge, the dead tail and corpse legs, the corpse's respawn (both bodies)") \
+    X(SIM_AI_INFANTRY_MOTION, "the slope pass, the attachment sample, the carrier ride and the terrain gradient (org1 ahead of its think, org2 around its kick and mover), then the slide decay, the attachment move and the root integrate") \
+    X(SIM_AI_INFANTRY_THINK, "NPC think every 16th staggered tick: the 64-tick seat upgrade, then the route / command / board think") \
     X(SIM_AI_INFANTRY_COMBAT, "NPC perception, reactions, and aim") \
-    X(SIM_AI_INFANTRY_ANIMATION, "weapon/body channels + root-motion sampling")     X(SIM_AI_INFANTRY_MOTION, "NPC slope pass, attachment sample, carrier ride and terrain gradient ahead of the think") \
-    X(SIM_AI_INFANTRY_COLLISION, "mounted and ordinary movement resolver calls") \
+    X(SIM_AI_INFANTRY_SELECT, "NPC selection after combat: the burn / forced-animation arbiter, the detour and gait select, the attachment select") \
+    X(SIM_AI_INFANTRY_ATTENTION, "NPC attention think") \
+    X(SIM_AI_INFANTRY_SEAT, "a mounted-live NPC's seat pose (pose_if_mounted: the seat bone, the scrub, the ground link)") \
+    X(SIM_AI_INFANTRY_FIRE, "the anim-event consume: the foley / footstep sound pass (both bodies), then the NPC fire and mounted fire passes") \
+    X(SIM_AI_INFANTRY_COLLISION, "the movement resolver call (mounted and ordinary; its terrain settle without a collision world), org1's gravity step riding it") \
     X(SIM_AI_INFANTRY_COLLISION_CONTACTS, "candidate/model contact passes") \
     X(SIM_AI_INFANTRY_COLLISION_REPULSION, "person-sphere separation") \
     X(SIM_AI_INFANTRY_COLLISION_GROUND, "final terrain/model ground ray") \
-    X(SIM_UPDATE_ATTACHMENTS, "emplacement attachment posing") \
-    X(SIM_ATTACHMENT_ORPHANS, "dead-parent chain cleanup") \
-    X(SIM_ATTACHMENT_CHILDREN, "child userpoint/root posing") \
+    X(SIM_AI_INFANTRY_FINISH, "finish_infantry_tick past the motor head, whatever it runs: the motor-to-registry mirror") \
+    X(SIM_UPDATE_ATTACHMENTS, "after the pool-1 walk: the attached children's riders and the query-view epoch reset") \
     X(SIM_ATTACHMENT_RIDERS, "riders refreshed from attached children") \
     X(SIM_UPDATE_HELILIFT_FACES, "HeliLift update + facial interpolation") \
     X(SIM_UPDATE_PRECIPITATION, "precipitation fall tick") \
     X(SIM_UPDATE_PIECES_EVENTS, "death pieces + the timed AI event queue") \
+    X(SIM_UPDATE_EPILOG, "the epilog cine's dispatches (after the AI events, and at the update's tail while the SP end screen is up) and the update count") \
     X(SIM_UPDATE_PROJECTILES, "rotor wash + projectile rounds") \
     X(SIM_UPDATE_EXPLOSIONS, "explosion queue, round-hit reactions, pool-2/3 cohort walks, doors") \
     X(SIM_UPDATE_PROXIMITY, "pool-0/1 proximity table rebuild") \
     X(SIM_PROXIMITY_REPLICA, "joiner: the unvisited decoded rows' visits, the predicted vehicles' mirror, the wire proxies' rebuild (World::before_proximity_build)") \
+    X(SIM_UPDATE_CONTACTS, "after the pool-0 walk: the movement resolves' recorded flag / bay touches (authority) and powerup pickups") \
+    X(SIM_UPDATE_BODY_TRACE, "the body readout's per-tick record (body_trace.h, an instrument)") \
     X(SIM_WORLD_HOUSEKEEPING, "waypoint/recount/mailbox tail") \
     X(SIM_MATCH, "") \
     X(SIM_SERVER_RULES, "deaths, respawn, win/capture, maintenance events") \

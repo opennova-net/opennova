@@ -472,33 +472,29 @@ bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *
     return true;
 }
 
-void powerup_tick(World &world, const TickContext &ctx) {
-    if (!ctx.is_authority) return; // @0x442862
-    if (world.tables.powerups.rows.empty()) return;
-    std::vector<EntityHandle> rows;
-    for (int pool = 1; pool <= 2; ++pool) {
-        world.registry.for_each_in_pool(pool, [&](const Entity &e) {
-            if (e.powerup_def_index >= 0) rows.push_back(e.handle);
-        });
+void powerup_tick_respawn(World &world, Entity &row, bool is_authority) {
+    if (!is_authority) return;                    // @0x442859
+    if (row.powerup_respawns_left == 0) return;   // the +0x2C8 gate @0x442862
+    const int32_t timer = row.powerup_respawn_timer;
+    if (timer > 0) {
+        row.powerup_respawn_timer = timer - 1; // @0x442878
+        return;
     }
-    for (const EntityHandle h : rows) {
-        Entity *e = world.registry.get(h);
-        if (e == nullptr) continue;
-        if (e->powerup_respawns_left == 0) continue; // the +0x2C8 gate @0x442862
-        const int32_t timer = e->powerup_respawn_timer;
-        if (timer > 0) {
-            e->powerup_respawn_timer = timer - 1; // @0x442878
-            continue;
-        }
-        if (timer != 0) continue; // idle (-1)
-        e->powerup_respawn_timer = -1; // @0x442883
-        // [orig: Entity_InvokeFireCallback @0x442810 -- the +0x2BC respawn row
-        //  run with the row as both entity arguments @0x442828; the +0x2C6
-        //  emitter re-spawn @0x442838 has no bound emitter on a shipped row]
-        const PowerupDef *def = world.tables.powerups.by_index(e->powerup_def_index);
-        if (def != nullptr) run_action(world, *def, def->respawn, *e, *e, ctx);
-        if (Entity *again = world.registry.get(h)) --again->powerup_respawns_left; // @0x442895
+    if (timer != 0) return; // idle (-1)
+    row.powerup_respawn_timer = -1; // @0x442883
+    // [orig: Entity_InvokeFireCallback @0x442810 -- the +0x2BC respawn row
+    //  run with the row as both entity arguments @0x442828; the +0x2C6
+    //  emitter re-spawn @0x442838 has no bound emitter on a shipped row]
+    const EntityHandle h = row.handle;
+    const PowerupDef *def = world.tables.powerups.by_index(row.powerup_def_index);
+    if (def != nullptr) {
+        TickContext ctx;
+        ctx.world = &world;
+        ctx.logic_tick = world.logic_tick;
+        ctx.is_authority = true;
+        run_action(world, *def, def->respawn, row, row, ctx);
     }
+    if (Entity *again = world.registry.get(h)) --again->powerup_respawns_left; // @0x442895
 }
 
 } // namespace opennova::world

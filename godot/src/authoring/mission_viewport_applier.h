@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/preview/mission_collect.h>
 #include <editor/preview/mission_people.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/mission_poses.h>
@@ -57,7 +58,8 @@ namespace godot {
 // ResourceRoot mounted over the project's files, and the camera where the viewport's orbit camera
 // is. The frame's legs run in the game's order (godot/src/world/game_world_frame.cpp's frame-leg
 // table, no simulation): the scene environment and the environment nodes, the terrain, the water,
-// the foliage, the sun veil's feed, the lights, the static and the individual models' levels, the
+// the foliage, the collect (the game's main-view collect over the camera, which the entities draw and
+// animate by: collect_frame_), the sun veil's feed, the lights, the static and the individual models' levels, the
 // slot shadows, the particles, the drops, the overlay tail, the frame effects, the clear colour and
 // the cube. The mission's marks are the canvas's, drawn over the picture by the viewport's portable
 // half on the pixels this camera projects them to.
@@ -318,6 +320,27 @@ private:
 	// What a pick casts against for the placed entity of row `row`, and its transform in the picture's
 	// space now; null for none (hidden, a static not warm, a model with no meshes).
 	const PickShape *pick_shape_(opennova::editor::NodeId row, const Placed &placed, Transform3D &xform) const;
+
+	// The frame's collect (the game's occlusion leg, its main view's: game_world_frame.cpp's occlusion row): the
+	// viewport's collect over the camera as this frame draws it (MissionViewport::collect, the engine's own), its drops
+	// and the buildings' verdicts landing as the game's occlusion frame lands them (OcclusionFrame::apply_frame): a
+	// model's occlusion claim over its present intent (show_ writes the intent), a building model's section masks, a
+	// batched static's verdict on its placer instance. So a model no collect admitted is neither drawn nor posed, its
+	// clocks running on, as in the game.
+	void collect_frame_();
+	// The viewport the last tick handed the device (the collect's), null after a clear.
+	const opennova::editor::MissionViewport *mission_ = nullptr;
+	opennova::editor::MissionCollectVerdicts verdicts_;
+	// The frame's verdict by row: -1 dropped, else its building's place in verdicts_.buildings.
+	std::unordered_map<opennova::editor::NodeId, int> verdict_of_;
+	// What each row's claim stands at: the model or static it was landed on, and the verdict (-1 dropped, -2 admitted,
+	// else a building's packed word); forgotten with the placement.
+	struct Claim {
+		uint64_t model = 0;
+		int key = 0;
+		int64_t verdict = -2;
+	};
+	std::unordered_map<opennova::editor::NodeId, Claim> claims_;
 
 	// The Shoot tool's scars (DI-23), presented where the shots' run moved, cleared with no shot.
 	void apply_shots_(const opennova::editor::MissionViewport &mission);

@@ -15,11 +15,12 @@
 namespace opennova::inmatch {
 
 void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
-		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
-		std::vector<int32_t> &r_culled_bms, std::vector<int32_t> &r_culled_wire,
-		std::vector<world::Vec3> &r_anchors) {
+		const world::OcclusionFrameCamera &cam, std::vector<int32_t> &r_culled_bms,
+		std::vector<int32_t> &r_culled_wire, std::vector<world::Vec3> &r_anchors,
+		bool *r_local_collected) {
 	mission::MissionKernel &kernel = context.kernel;
 	ClientRuntime *const runtime = context.runtime;
+	if (r_local_collected != nullptr) *r_local_collected = false;
 	const bool joiner = context.joiner;
 	const replication::ClientWorldMaterializer *const materializer = context.materializer;
 	r_culled_bms.clear();
@@ -39,22 +40,35 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			return;
 		r_anchors.push_back(e.position);
 	};
-	// A placed row the walks gate: every row but the Building-type defs (they
-	// take the OcclusionWorld's batch verdicts) and the markers, the pool-2
-	// decorations and foliage included; a row with no placed identity is gated
-	// only as a wire row or as the local player (wire avatars ride their own
-	// present path).
+	// A placed row the walks gate: every row but the markers; a row with no
+	// placed identity is gated only as a wire row or as the local player (wire
+	// avatars ride their own present path).
 	const auto placed_row = [](const world::Entity &e) {
-		return !(e.kind == world::EntityKind::Building && world::building_def_row(e)) &&
-				e.kind != world::EntityKind::Marker && e.bms_id != 0;
+		return e.kind != world::EntityKind::Marker && e.bms_id != 0;
 	};
-	const auto gate_placed = [&](world::EntityHandle h) {
-		world::Entity *e = kernel.world.registry.get(h);
-		if (e == nullptr) return;
-		if (!kernel.occlusion.entity_render_visible(kernel.world, kernel.collision, *e, cam))
-			r_culled_bms.push_back(e->bms_id);
+	// A placed pool-2 row the statics' walk gates: every one but the Building-type
+	// defs (they take the OcclusionWorld's batch verdicts), the decorations and
+	// foliage included. Pools 0 and 1 hold no batch row: their collector skips a
+	// Building-type def at its own type test, so such a row drops in its gate
+	// (OcclusionWorld::entity_render_visible carries the witness).
+	const auto placed_static = [&](const world::Entity &e) {
+		return placed_row(e) &&
+				!(e.kind == world::EntityKind::Building && world::building_def_row(e));
+	};
+	// `static_row` is the static prox table row a static is walked from (the
+	// statics' box reads its words), null for a pool 0 / 1 row.
+	// A spawned player carries its net id as its placed identity (world/player_spawn.cpp), so
+	// the local player's body is walked here and its verdict is this leg's.
+	const auto gate_placed = [&](world::Entity &e,
+			const world::CollisionWorld::StaticSlotView *static_row) {
+		const bool admitted = kernel.occlusion.entity_render_visible(kernel.world, kernel.collision,
+				e, cam, static_row);
+		if (!admitted)
+			r_culled_bms.push_back(e.bms_id);
 		else
-			anchor_entity(*e);
+			anchor_entity(e);
+		if (r_local_collected != nullptr && e.handle == kernel.world.cached.local_player)
+			*r_local_collected = admitted;
 	};
 	// The decoded rows the wire pass draws — remote organics and runtime
 	// spawns with no placed identity — pass the SAME collector gate: retail's
@@ -115,6 +129,19 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 		// row's full Euler pose.
 		const world::ResolvedCollisionShape shape =
 				kernel.wire_collision_shape_for_type(es.type_id);
+		// The entity+0x30 model gate, every row ahead of the type split, a
+		// person row included: the collision model's bounds, else the render
+		// model's CMDL sphere; a row whose graphic did not load has no render
+		// model and is never collected, its latch never started
+		// (world/occlusion.h assign_render_model and
+		// OcclusionWorld::entity_render_visible carry the witness, the same rule
+		// the placed rows take).
+		const world::CollisionModel *model = kernel.collision.model(shape.model_id);
+		const bool collision_bounds = model != nullptr && model->valid();
+		if (!collision_bounds && !shape.has_render_model) {
+			r_culled_wire.push_back(static_cast<int32_t>(handle));
+			return;
+		}
 		// The walk's Flags match (the water mirror's collect alone sets one)
 		// over the client-built entity's Flags word, the vehicle init's
 		// Reflective bit included, ahead of the blink gate and the latch
@@ -126,6 +153,14 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			return;
 		}
 		const int32_t pos[3] = {es.x, es.y, es.z};
+		// The XY fog box over the client-built entity's entity+0 radius and
+		// position, ahead of the blink walk (world/occlusion.h collect_fog_box
+		// carries the witness).
+		if (!world::OcclusionWorld::collect_fog_box(cam, pos[0], pos[1],
+					shape.bound_radius_q16)) {
+			r_culled_wire.push_back(static_cast<int32_t>(handle));
+			return;
+		}
 		// The row's blink quad from the client's own blink walk (the one
 		// the lighting feed runs for a twin-less row): the collector's
 		// blink-hits gate reads it before the legs, and the render waves'
@@ -151,18 +186,13 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 					pos, radius, latch, kernel.world.logic_tick);
 		} else {
 			// The model leg: the collision model's bounds, else the render
-			// model's CMDL sphere (radius 0 without the block); a row whose
-			// graphic did not load has no render model and is never
-			// collected (world/occlusion.h assign_render_model carries the
-			// witness, the same rule the placed rows take).
+			// model's CMDL sphere (radius 0 without the block).
 			int32_t center_local[3] = {0, 0, 0};
 			int32_t radius = 0;
-			if (const world::CollisionModel *model =
-							kernel.collision.model(shape.model_id);
-					model != nullptr && model->valid()) {
+			if (collision_bounds) {
 				world::OcclusionWorld::bound_sphere_fixed(
 						*model, center_local, radius, shape.uniform_scale_q16);
-			} else if (shape.has_render_model) {
+			} else {
 				renderer::ObjectProjectionSphere sphere;
 				sphere.valid = true;
 				sphere.center_q16 = {shape.render_sphere_center_q16.x,
@@ -172,9 +202,6 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 						sphere, shape.uniform_scale_q16);
 				for (int axis = 0; axis < 3; ++axis) center_local[axis] = sphere.center_q16[axis];
 				radius = sphere.radius_q16;
-			} else {
-				r_culled_wire.push_back(static_cast<int32_t>(handle));
-				return;
 			}
 			int32_t center_world[3];
 			world::collision_matrix_from_euler(
@@ -192,7 +219,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			toc.pos_fixed[1] = es.y;
 			toc.pos_fixed[2] = es.z;
 			toc.radius_q16 = shape.bound_radius_q16;
-			toc.model = kernel.collision.model(shape.model_id);
+			toc.model = model;
 			toc.heading_bam = es.heading_bam;
 			toc.pitch_bam = es.pitch_bam;
 			toc.roll_bam = es.roll_bam;
@@ -226,37 +253,47 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	}
 
 	// The walk order is the collectors': the statics first (the static prox
-	// list's tail, the pool-2 rows that are not Building-type defs, in pool-2
+	// table's tail, the pool-2 rows that are not Building-type defs, in pool-2
 	// slot order), then pool 0, then pool 1, each pool in slot order. Every
 	// re-arm draws the one PRNG stream, so the order decides which entity takes
 	// which draw. [orig: Terrain_CollectVisibleEntities @ 0x5c9160 -
 	// Terrain_CollectVisibleEntities_0 @ 0x5c9199, Terrain_CollectVisibleEntitiesForTerrain
 	// pool 0 @ 0x5c91a1, pool 1 @ 0x5c91aa (the push 1 @ 0x5c91a8); the mirror's
 	// Terrain_CollectVisibleEntitiesForReflection @ 0x5c913d / @ 0x5c9145 / @ 0x5c914e;
-	// _0's walk g_StaticProxBuildingCount..g_StaticProxCount @ 0x5c6f48..0x5c721e over
-	// Entity_BuildProximityLists_Pool2 @ 0x4b9430's second pass, pool 2 in slot order
-	// @ 0x4b94e0..0x4b9568 (the type test @ 0x4b9502); ForTerrain's slot walk
-	// @ 0x5c8caa..0x5c8ced]
-	// The list holds the pool-2 rows with an item type and a def, the Building-type
-	// ones first, and counts at most kStaticProxCountBound of them: a static past the
-	// bound is never in the walked tail (world/collision.h static_prox_listed carries
-	// the witness).
-	int32_t listed = 0;
+	// ForTerrain's slot walk @ 0x5c8caa..0x5c8ced]
+	// The statics' walk is the table itself, rows [static_building_count, static_count)
+	// as its last Pool2 build listed them (at most static_prox_count_bound rows, the
+	// Building-type ones first; world/collision.h static_prox_listed carries the
+	// witness), each row's entity gated with the row, whose quantized words its box reads.
+	// [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 - the walk
+	//  g_StaticProxBuildingCount..g_StaticProxCount @ 0x5c6f48..0x5c721e, the row's box
+	//  @ 0x5c6f82..0x5c6fcb ahead of its entity g_StaticProxEntity[i] @ 0x5c6fd1; the
+	//  table's pass 2, Entity_BuildProximityLists_Pool2 @ 0x4b9430 @ 0x4b94e0..0x4b9568]
+	// The lists hold what the walks ADMIT and a pass draws only them, so a placed
+	// pool-2 row the table does not list (spawned since its last build, past its
+	// bound, or with no item type) is in no list and never drawn: it drops as a
+	// culled row does. Every pool-0 / pool-1 row is walked below.
+	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 - g_SectorEntityCount zeroed
+	//  @ 0x5c9177; Terrain_CollectVisibleEntities_0 @ 0x5c6f20 - its appends
+	//  @ 0x5c71bf / @ 0x5c7207; Terrain_RenderSectorEntities @ 0x5c7b60 - the draw's
+	//  walk to the count @ 0x5c7b65]
+	static thread_local std::vector<uint8_t> statics_walked;
+	statics_walked.assign(kernel.world.registry.pool_capacity(2), 0);
+	const int32_t statics = kernel.collision.static_count();
+	for (int32_t i = kernel.collision.static_building_count(); i < statics; ++i) {
+		const world::CollisionWorld::StaticSlotView row = kernel.collision.static_slot(i);
+		world::Entity *e = kernel.world.registry.get(row.h);
+		if (e != nullptr && placed_static(*e)) {
+			if (static_cast<size_t>(row.h.slot()) < statics_walked.size())
+				statics_walked[static_cast<size_t>(row.h.slot())] = 1;
+			gate_placed(*e, &row);
+		}
+	}
 	kernel.world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
-		if (world::static_prox_listed(e) && e.item_type == world::kItemDefTypeBuilding &&
-				listed < world::kStaticProxCountBound)
-			++listed;
+		const size_t slot = static_cast<size_t>(e.handle.slot());
+		if (placed_static(e) && (slot >= statics_walked.size() || statics_walked[slot] == 0))
+			r_culled_bms.push_back(e.bms_id);
 	});
-	std::vector<world::EntityHandle> &handles = r_handles;
-	handles.clear();
-	kernel.world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
-		if (!world::static_prox_listed(e) || e.item_type == world::kItemDefTypeBuilding ||
-				listed >= world::kStaticProxCountBound)
-			return;
-		++listed;
-		if (placed_row(e)) handles.push_back(e.handle);
-	});
-	for (const world::EntityHandle h : handles) gate_placed(h);
 
 	// Pools 0 and 1: the placed rows, the decoded wire rows and the local player
 	// each at its own pool slot. A wire row's slot is the one its handle names
@@ -311,7 +348,9 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 	for (const Visit &v : visits) {
 		switch (v.leg) {
 			case Leg::Placed:
-				gate_placed(world::EntityHandle{static_cast<uint16_t>(v.index)});
+				if (world::Entity *e = kernel.world.registry.get(
+							world::EntityHandle{static_cast<uint16_t>(v.index)}))
+					gate_placed(*e, nullptr);
 				break;
 			case Leg::Wire:
 				gate_wire(runtime->state().entities[v.index]);
@@ -320,8 +359,10 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 				if (world::Entity *local = kernel.world.registry.get(local_handle);
 						local != nullptr &&
 						kernel.occlusion.entity_render_visible(
-								kernel.world, kernel.collision, *local, cam))
+								kernel.world, kernel.collision, *local, cam)) {
 					anchor_entity(*local);
+					if (r_local_collected != nullptr) *r_local_collected = true;
+				}
 				break;
 		}
 	}
@@ -330,7 +371,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 void collect_building_verdicts(const world::World &world, const world::CollisionWorld &collision,
 		const world::OcclusionWorld &occlusion, std::vector<BuildingVerdict> &r_out) {
 	r_out.clear();
-	world.registry.for_each([&](const world::Entity &e) {
+	const auto verdict = [&](const world::Entity &e) {
 		if (e.kind != world::EntityKind::Building || e.bms_id == 0) return;
 		if (!world::building_def_row(e)) return;
 		if (!occlusion.has_instance(e.handle) && collision.model_for(world, e.handle) == nullptr)
@@ -342,17 +383,45 @@ void collect_building_verdicts(const world::World &world, const world::Collision
 				occlusion.building_visible(e.handle));
 		v.forced = static_cast<int64_t>(occlusion.forced_section_mask(e.handle));
 		r_out.push_back(v);
+	};
+	// The batch's walk is the static prox table's prefix, rows [0, static_building_count)
+	// as its last Pool2 build listed them (the Building-type defs, pool-2 slot order, at
+	// most static_prox_count_bound rows), each row's entity read through the row; the
+	// OcclusionWorld's batch (collect_buildings) walks the same rows.
+	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 - g_VisibleBuildingCount zeroed
+	//  @ 0x5c9171, Terrain_CollectVisibleSectorUserpoints called @ 0x5c9183;
+	//  Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60 - the walk to
+	//  g_StaticProxBuildingCount @ 0x5c6b97..0x5c6ba5, g_StaticProxEntity[i] @ 0x5c6c0e,
+	//  the append to g_VisibleBuildingCount @ 0x5c6d13..0x5c6d2f; the table's pass 1,
+	//  Entity_BuildProximityLists_Pool2 @ 0x4b9430 - the 1199 bound @ 0x4b94cb]
+	static thread_local std::vector<uint8_t> walked;
+	walked.assign(world.registry.pool_capacity(2), 0);
+	const int32_t buildings = collision.static_building_count();
+	for (int32_t i = 0; i < buildings; ++i) {
+		const world::CollisionWorld::StaticSlotView row = collision.static_slot(i);
+		const world::Entity *e = world.registry.get(row.h);
+		if (e == nullptr) continue;
+		if (static_cast<size_t>(row.h.slot()) < walked.size())
+			walked[static_cast<size_t>(row.h.slot())] = 1;
+		verdict(*e);
+	}
+	// A Building row the table does not list (spawned since its last build, past its
+	// bound, or with no item type) is in no batch, so no view draws it: its verdict
+	// (never batched, not visible) still goes out, so an embedder hides it, as the
+	// statics' walk drops its own unlisted rows (collect_view_verdicts).
+	world.registry.for_each_in_pool(2, [&](const world::Entity &e) {
+		const size_t slot = static_cast<size_t>(e.handle.slot());
+		if (slot >= walked.size() || walked[slot] == 0) verdict(e);
 	});
 }
 
 bool collect_mirror_view(const PresentRowsContext &context, WireOcclusionLatchMap &r_wire_latch,
-		std::vector<world::EntityHandle> &r_handles, const world::OcclusionFrameCamera &cam,
-		MirrorViewLists &r_lists) {
+		const world::OcclusionFrameCamera &cam, MirrorViewLists &r_lists) {
 	mission::MissionKernel &kernel = context.kernel;
 	r_lists.water_visible = kernel.occlusion.mirror_water_visible(kernel.world, kernel.collision,
 			cam, [&](const world::OcclusionFrameCamera &mirror) {
-				collect_view_verdicts(context, r_wire_latch, r_handles, mirror, r_lists.culled_bms,
-						r_lists.culled_wire, r_lists.anchors);
+				collect_view_verdicts(context, r_wire_latch, mirror, r_lists.culled_bms,
+						r_lists.culled_wire, r_lists.anchors, &r_lists.local_collected);
 				// The reflected subscene draws the collect's own batch at its own
 				// section masks [orig: Water_RenderReflectedWorldScene @ 0x5c8510 -
 				// Terrain_RenderSectorModels @ 0x5c8576].

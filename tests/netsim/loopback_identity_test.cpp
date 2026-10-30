@@ -978,6 +978,13 @@ bool run_parented_pool_spawn_follows_and_hides() {
 	child_seed.emplacement_pose_metadata_resolved = true;
 	child_seed.has_item_def = true; // the trait sweep's row (D-NET-487)
 	child_seed.item_type_index = 1;
+	// An ewep row with its slot Def: the one class update that composes a child.
+	// [orig: Entity_UpdateTransformAndTurret @0x440E8E..0x440EA0, the matrix
+	//  @0x440F04..0x4411BC]
+	child_seed.emplaced_update = true;
+	world.tables.weapons.entries.resize(1);
+	world.tables.weapons.entries[0].valid = true;
+	child_seed.primary_weapon_slot_adm = 0;
 	const w::EntityHandle child_h = world.registry.spawn(1, child_seed);
 	if (!expect(child_h.valid(), "attachment child spawned")) return false;
 

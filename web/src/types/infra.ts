@@ -135,6 +135,12 @@ export interface InfraRelease {
   created: string | null;
   // The commit it was cut from.
   revision: string | null;
+  // Each image it pins by key (gate, lobby, web, fleet, worker, data, portal,
+  // backup, serve, hostd): <registry>/<repository>@sha256:<digest>.
+  images: Record<string, string>;
+  // Each image's commit, its short sha, as its own org.opencontainers.image.revision
+  // label names it (the deploy reads them); empty for a release recorded before.
+  image_commits: Record<string, string>;
 }
 
 // A machine as the fleet cluster's container instance (ECS's view of it).
@@ -240,6 +246,16 @@ export interface InfraMachine {
   zone: string | null;
   ec2_state: string | null;
   image_id: string | null;
+  // What its hostd last reported it runs: its build (ONE's label, "ONE 0.0.22.123
+  // (a1b2c3d, staging)") and its image.
+  agent_version: string | null;
+  agent_image: string | null;
+}
+
+// A serve image the live hosted servers run, and how many run it.
+export interface InfraServeImage {
+  image: string;
+  servers: number;
 }
 
 export interface InfraOverview {
@@ -248,6 +264,8 @@ export interface InfraOverview {
   cloud: InfraCloud;
   lobbies: InfraLobby[];
   fleet: InfraFleet;
+  // The serve images the live hosted servers' containers run, most used first.
+  serve_images: InfraServeImage[];
   hosting: { enabled: boolean; provider: string };
   machines: InfraMachine[];
 }

@@ -1444,12 +1444,18 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 		}
 		return;
 	}
-	// A model the weapon Inset pass draws through its twins is submitted
-	// there even while the main view hides the node: its pose, PANM and
-	// materials advance for the twins (object_model_views.cpp).
-	// A frame that skips its world submits no model (set_world_skipped).
+	// The render-derived work (the pose write, PANM, the weather registers,
+	// the material generators) runs for a model a pass draws this frame, as
+	// retail poses and evaluates only in a drawn model's render callback
+	// (engine inmatch/occlusion_collect.h and renderer/render_slot_shadow.h
+	// carry the witnesses): the main view's draw is the node's own flag (the
+	// collect's claim and the sub-pixel floor fold into it), the weapon
+	// Inset's and the water mirrors' are the twins (object_model_views.cpp),
+	// and a render slot's is its capture. A model no collect governs draws by
+	// its own owner's flag. Clocks and anims advance either way. A frame that
+	// skips its world submits no model (set_world_skipped).
 	const bool renderable = !world_skipped_ &&
-			((is_visible_in_tree() && on_screen_) || has_view_twins());
+			(is_visible_in_tree() || has_view_twins() || slot_captured_);
 	if (p_profile != nullptr && renderable) {
 		++p_profile->renderable_models;
 	}
@@ -1468,6 +1474,9 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 		}
 		sleep_runtime_frame_if_idle();
 		return;
+	}
+	if (renderable) {
+		drawn_frame_ = Engine::get_singleton()->get_process_frames();
 	}
 	apply_runtime_state(p_delta, renderable, p_profile);
 	sleep_runtime_frame_if_idle();
@@ -1800,16 +1809,28 @@ bool ObjectModel::panm_view_for(const Node3D *p_model, const Camera3D *p_camera,
 	return true;
 }
 
-// The camera-submission input for the render-derived gate; public so the
-// bounds notifier's signals and deterministic owners/tests share one seam.
-void ObjectModel::set_on_screen(bool p_value) {
-	if (on_screen_ == p_value) {
+// A render slot's capture is one of the render-derived gate's draws: its
+// rising edge wakes the model for the pose the capture reads.
+void ObjectModel::set_slot_captured(bool p_captured) {
+	if (slot_captured_ == p_captured) {
 		return;
 	}
-	on_screen_ = p_value;
-	if (p_value) {
+	slot_captured_ = p_captured;
+	if (p_captured) {
 		wake_runtime_frame();
 	}
+}
+
+// The render-derived work at the clocks this frame's runtime frame already
+// advanced (no time passes), for a caster the slot captured after it ran.
+void ObjectModel::pose_for_slot_capture() {
+	const uint64_t frame = Engine::get_singleton()->get_process_frames();
+	if (!slot_captured_ || world_skipped_ || drawn_frame_ == frame ||
+			!needs_runtime_frame_work()) {
+		return;
+	}
+	drawn_frame_ = frame;
+	apply_runtime_state(0.0, true, nullptr);
 }
 
 // The two visibility owners: the entity presenter's placed walk writes the
@@ -1831,6 +1852,18 @@ void ObjectModel::set_present_visible(bool p_visible) {
 	apply_node_visibility();
 }
 
+ObjectModel *ObjectModel::get_husk_visual() const {
+	return husk_visual_.is_valid()
+			? Object::cast_to<ObjectModel>(ObjectDB::get_instance(husk_visual_))
+			: nullptr;
+}
+
+ObjectModel *ObjectModel::get_final_husk_overlay() const {
+	return final_husk_overlay_.is_valid()
+			? Object::cast_to<ObjectModel>(ObjectDB::get_instance(final_husk_overlay_))
+			: nullptr;
+}
+
 void ObjectModel::set_occlusion_hidden(bool p_hidden) {
 	occlusion_hidden_ = p_hidden;
 	apply_node_visibility();
@@ -1845,7 +1878,6 @@ void ObjectModel::set_subpixel_hidden(bool p_hidden) {
 }
 
 void ObjectModel::set_model_bounds(const AABB &p_bounds) {
-	sync_screen_notifier(p_bounds);
 	if (aabb_equal_approx(model_bounds_, p_bounds)) {
 		return;
 	}
@@ -2130,6 +2162,9 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::set_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_shadow_caster_enabled"),
 			&ObjectModel::is_shadow_caster_enabled);
+	ClassDB::bind_method(D_METHOD("set_slot_captured", "captured"),
+			&ObjectModel::set_slot_captured);
+	ClassDB::bind_method(D_METHOD("is_slot_captured"), &ObjectModel::is_slot_captured);
 	ClassDB::bind_method(D_METHOD("set_static_shadow_caster_enabled", "enabled"),
 			&ObjectModel::set_static_shadow_caster_enabled);
 	ClassDB::bind_method(D_METHOD("is_static_shadow_caster_enabled"),
@@ -2229,12 +2264,12 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rebuild"), &ObjectModel::rebuild);
 	ClassDB::bind_method(D_METHOD("advance_runtime_frame", "delta"),
 			&ObjectModel::advance_runtime_frame);
-	ClassDB::bind_method(D_METHOD("set_on_screen", "value"), &ObjectModel::set_on_screen);
-	ClassDB::bind_method(D_METHOD("is_on_screen"), &ObjectModel::is_on_screen);
 	ClassDB::bind_method(D_METHOD("is_present_visible"),
 			&ObjectModel::is_present_visible);
 	ClassDB::bind_method(D_METHOD("set_occlusion_hidden", "hidden"),
 			&ObjectModel::set_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("is_occlusion_hidden"), &ObjectModel::is_occlusion_hidden);
+	ClassDB::bind_method(D_METHOD("is_view_collected"), &ObjectModel::is_view_collected);
 	ClassDB::bind_method(D_METHOD("is_subpixel_hidden"),
 			&ObjectModel::is_subpixel_hidden);
 

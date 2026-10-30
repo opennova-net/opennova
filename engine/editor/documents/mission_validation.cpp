@@ -85,8 +85,8 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::RoutePastPool,
 	  game_fails_code("mission.route_past_pool",
 	                  "the player route's walk looks each word up in the marker pool unchecked, and a word past the "
-	                  "pool's 768 entries reads memory past the pool, the next pool's entities among it, as the stop's "
-	                  "entity [orig: "
+	                  "pool's capacity (768 entries at retail's size) reads memory past the pool, the next "
+	                  "pool's entities among it, as the stop's entity [orig: "
 	                  "NetPacket_WriteWorldStateLoad0x0F @ 0x502f2d; Pool_GetEntryUnchecked @ 0x441fc0; "
 	                  "EntityPool_Allocate, the capacity @ 0x442203]") },
 	// The .mis beside the mission (S24 Names, mission_names_file.h), which the game never reads: what the editor
@@ -114,14 +114,16 @@ DiagnosticSeverity source_severity(MissionFinding code) {
 	return code == MissionFinding::PathRebuilt ? DiagnosticSeverity::Warning : DiagnosticSeverity::Info;
 }
 
-// The pools' capacities (runtime/world/entity.h retail_pool_capacity: organics 0, items 1, buildings 2,
-// markers 3). The load's count checks warn of nothing: each compare is followed by an unconditional jump
+// The pools' capacities the game runs with (runtime/world/entity.h pool_capacity, the running process's,
+// which its mission load sizes the pools from: organics 0, items 1, buildings 2, markers 3; retail's
+// 256, 1200, 1200 and 768 [orig: EntityPool_Allocate @0x442168], an expansion's scaled ones). The load's
+// count checks warn of nothing: each compare is followed by an unconditional jump
 // over its warning dialog [orig: BMS_LoadAndValidateHeader, `jmp short` @0x40e31a (over the "Too many items"
 // sprintf @0x40e326), @0x40e34d, @0x40e380; Mission_LoadBMSFile @0x40f5ba]; past the capacity the pool's
 // allocator answers no slot [orig: Pool_AllocEntry @ 0x442230, @0x44227b] (what the spawn does then is not
 // witnessed).
-const size_t kMaxItems = world::retail_pool_capacity(1), kMaxBuildings = world::retail_pool_capacity(2),
-             kMaxMarkers = world::retail_pool_capacity(3), kMaxOrganics = world::retail_pool_capacity(0);
+// (mission::kOrganicPool..kMarkerPool are the pools' bits; these are their g_PoolList indices.)
+constexpr int kOrganicPoolIndex = 0, kItemPoolIndex = 1, kBuildingPoolIndex = 2, kMarkerPoolIndex = 3;
 // The group tables hold 64 (bms::kGroupRecordCount) [orig: docs/mission/bms-event-runtime-re.md 7.2].
 constexpr int64_t kLastGroup = bms::kGroupRecordCount - 1;
 // The zone ids the original editor offers [orig: dfx2med.exe Med_AreaTriggerDialogProc @0x40f400].
@@ -264,10 +266,10 @@ struct Checker {
 				                " the game's pool holds: the game's load warns of nothing (it jumps over the warning), and "
 				                "the pool's allocator gives the records past them no slot.");
 		};
-		limit(items, kMaxItems, "items");
-		limit(buildings, kMaxBuildings, "buildings");
-		limit(markers, kMaxMarkers, "markers");
-		limit(organics, kMaxOrganics, "organics");
+		limit(items, world::pool_capacity(kItemPoolIndex), "items");
+		limit(buildings, world::pool_capacity(kBuildingPoolIndex), "buildings");
+		limit(markers, world::pool_capacity(kMarkerPoolIndex), "markers");
+		limit(organics, world::pool_capacity(kOrganicPoolIndex), "organics");
 	}
 
 	void paths() {
@@ -277,8 +279,9 @@ struct Checker {
 		// lays out; MissionDocument::player_route_words).
 		{
 			const std::vector<uint32_t> &words = document.player_route_words();
+			const size_t marker_pool = world::pool_capacity(kMarkerPoolIndex);
 			for (size_t i = 0; i < words.size(); ++i) {
-				if (words[i] < kMaxMarkers) continue;
+				if (words[i] < marker_pool) continue;
 				const Node *route = document.row(document.player_route_path());
 				if (route)
 					on(NodeAddress{route->id, route->kind, 0}, MissionFinding::RoutePastPool, DiagnosticSeverity::Error,
@@ -287,7 +290,7 @@ struct Checker {
 					           (i < kMaxWaypointPathMarkers ? std::string("one of its slots")
 					                                       : std::string("a word past its 32 slots, the next record's or "
 					                                                     "the header's")) +
-					           "), past the marker pool's " + std::to_string(kMaxMarkers) +
+					           "), past the marker pool's " + std::to_string(marker_pool) +
 					           " entries: the game reads memory past the pool, the next pool's entities among it, as that "
 					           "stop.",
 					   "marker_count");
