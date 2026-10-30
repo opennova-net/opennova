@@ -1303,23 +1303,55 @@ std::vector<std::pair<std::string, int32_t>> mission_availability_pairs(const bm
 }
 
 void stash_mission_loadout_rules(
-        const bms::File &mission,
+        const bms::File &mission, const world::TitleRules &rules,
         std::vector<std::pair<std::string, int32_t>> &r_availability_rows,
         std::vector<world::WeaponKitEntry> &r_kit_rows) {
     r_availability_rows = mission_availability_pairs(mission);
     r_kit_rows.clear();
+    // The kit row's three numbers are the CRT atol (io::retail_atol: the locale's
+    // white space, 0xA0 included, saturating at 32 bits; D-NET-384)
+    // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 — j__atol @0x515647,
+    //  @0x51566f, @0x515697].
+    const auto kit_row = [](const std::string &name, const std::string &primary,
+                            const std::string &secondary, const std::string &flags) {
+        world::WeaponKitEntry entry;
+        entry.name = name;
+        entry.ammo_primary = io::retail_atol(primary.c_str());
+        entry.ammo_secondary = io::retail_atol(secondary.c_str());
+        entry.flags = io::retail_atol(flags.c_str());
+        return entry;
+    };
+    if (!rules.bms_loadout_sanitized) {
+        // dfx2.exe walks the chunk as the file holds it: a record that wrote three strings
+        // (has_flags false) gives three, so its stride takes the next record's name as the
+        // fourth, and the strides after it start on that record's numbers, names the walk's
+        // def lookup then drops (world::weapon_kit_filter_by_availability). An empty string
+        // where a name is due ends the walk. A stride past the chunk's last string reads empty
+        // strings, the parse's bound on a short chunk (D-EVT-7): the first is the chunk's
+        // closing NUL, where retail's walk then reads on into its stack buffer.
+        // [orig: Mission_LoadBMSFile @0x40F330 - strlen @0x40F599, the stride
+        //  @0x40F610..0x40F65D, the next stride and its NUL test @0x40F6B1..0x40F6B6 (dfx2.exe)]
+        std::vector<const std::string *> strings;
+        for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
+            strings.push_back(&row.name);
+            strings.push_back(&row.ammo_primary);
+            strings.push_back(&row.ammo_secondary);
+            if (row.has_flags) strings.push_back(&row.flags);
+        }
+        static const std::string kNone;
+        const auto at = [&](size_t i) -> const std::string & {
+            return i < strings.size() ? *strings[i] : kNone;
+        };
+        for (size_t i = 0; !at(i).empty(); i += 4)
+            r_kit_rows.push_back(kit_row(at(i), at(i + 1), at(i + 2), at(i + 3)));
+        return;
+    }
+    // Jointops.exe's chunk is repaired first, so each stride is one record (bms.h).
+    // [orig: Mission_LoadBMSFile @0x40F4E0 - AIProfile_SanitizeConfigData @0x40CFE0 from
+    //  @0x40F739, the stride @0x40F7B4..0x40F809]
     for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
         if (row.name.empty()) continue;
-        world::WeaponKitEntry entry;
-        entry.name = row.name;
-        // The kit row's three numbers are the CRT atol (io::retail_atol: the locale's
-        // white space, 0xA0 included, saturating at 32 bits; D-NET-384)
-        // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 — j__atol @0x515647,
-        //  @0x51566f, @0x515697].
-        entry.ammo_primary = io::retail_atol(row.ammo_primary.c_str());
-        entry.ammo_secondary = io::retail_atol(row.ammo_secondary.c_str());
-        entry.flags = io::retail_atol(row.flags.c_str());
-        r_kit_rows.push_back(std::move(entry));
+        r_kit_rows.push_back(kit_row(row.name, row.ammo_primary, row.ammo_secondary, row.flags));
     }
 }
 

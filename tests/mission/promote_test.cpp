@@ -1148,6 +1148,54 @@ static void test_dfx2_warns_of_a_table_past_its_pool() {
     io::set_log_sink(nullptr);
 }
 
+// The loadout chunk's kit rows: Jointops.exe repairs a record that wrote three strings, so
+// each stride of four is one record; dfx2.exe walks the file's strings as they stand, so the
+// three-string record takes the next record's name as its fourth, the strides after it start
+// on numbers, and the last runs past the chunk's last string onto its closing NUL (DFX2-27).
+// [orig: Mission_LoadBMSFile @0x40F4E0 - AIProfile_SanitizeConfigData @0x40CFE0 from @0x40F739]
+// [orig: Mission_LoadBMSFile @0x40F330 - strlen @0x40F599, the stride @0x40F610..0x40F65D
+//  (dfx2.exe)]
+static void test_dfx2_walks_the_loadout_chunk_unrepaired() {
+    const auto record = [](const char *name, const char *primary, const char *secondary,
+                           const char *flags) {
+        bms::WeaponLoadoutRecord row;
+        row.name = name;
+        row.ammo_primary = primary;
+        row.ammo_secondary = secondary;
+        if (flags != nullptr) row.flags = flags;
+        row.has_flags = flags != nullptr;
+        return row;
+    };
+    const auto same = [](const std::vector<WeaponKitEntry> &got,
+                         const std::vector<WeaponKitEntry> &want) {
+        if (got.size() != want.size()) return false;
+        for (size_t i = 0; i < got.size(); ++i) {
+            if (got[i].name != want[i].name || got[i].ammo_primary != want[i].ammo_primary ||
+                    got[i].ammo_secondary != want[i].ammo_secondary ||
+                    got[i].flags != want[i].flags)
+                return false;
+        }
+        return true;
+    };
+    bms::File file;
+    file.loadout.entries = { record("WPN_M4AUTO", "5", "2", nullptr),
+                             record("WPN_AK47AUTO", "3", "1", "2"),
+                             record("WPN_KNIFE", "-1", "-1", "-1") };
+    std::vector<std::pair<std::string, int32_t>> availability;
+    std::vector<WeaponKitEntry> kit;
+    mission::stash_mission_loadout_rules(file, title_rules("jo"), availability, kit);
+    CHECK(same(kit, { { "WPN_M4AUTO", 5, 2, -1 }, { "WPN_AK47AUTO", 3, 1, 2 },
+                      { "WPN_KNIFE", -1, -1, -1 } }));
+    mission::stash_mission_loadout_rules(file, title_rules("dfx2"), availability, kit);
+    CHECK(same(kit, { { "WPN_M4AUTO", 5, 2, 0 }, { "3", 1, 2, 0 }, { "-1", -1, -1, 0 } }));
+
+    // An empty string where a stride's name is due ends dfx2.exe's walk.
+    file.loadout.entries = { record("WPN_M4AUTO", "5", "2", nullptr),
+                             record("WPN_AK47AUTO", "", "1", "2") };
+    mission::stash_mission_loadout_rules(file, title_rules("dfx2"), availability, kit);
+    CHECK(same(kit, { { "WPN_M4AUTO", 5, 2, 0 } }));
+}
+
 // Each pool's used count after the load: pools 1..3 take their record count, a
 // rejected last record included, and pool 0 the accepted count (D-NET-417).
 // [orig: Mission_LoadBMSFile @0x40F4E0 -- Pool_SetUsed @0x40F9DB (1), @0x40FA4A
@@ -1391,6 +1439,7 @@ static void test_item_brain_follows_class_and_attrib() {
 
 int main() {
     test_dfx2_warns_of_a_table_past_its_pool();
+    test_dfx2_walks_the_loadout_chunk_unrepaired();
     test_item_brain_follows_class_and_attrib();
     test_bms_ai_attribute_fold();
     test_bms_range_slots_read_their_own_fields();

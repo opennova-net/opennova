@@ -34,6 +34,7 @@
 
 namespace opennova::world {
 class World;
+struct TitleRules;
 } // namespace opennova::world
 
 namespace opennova::mission {
@@ -259,11 +260,13 @@ std::vector<std::pair<std::string, int32_t>> mission_availability_pairs(const bm
 // The mission's loadout/availability chunks -> plain world rows, with retail's
 // own atol truncation semantics on the string tuples (a non-numeric prefix
 // parses as 0; trailing text is ignored) [orig: Mission_LoadBMSFile @ 0x40F4E0;
-// the tuple parse over restrictionData @ 0x42cf7c]. The embedder stashes these
-// at mission load and promotes at weapon-table time through
-// world::local_loadout_promote_mission_rules (the witnessed SP-vs-net gate).
+// the tuple parse over restrictionData @ 0x42cf7c]. The kit rows are the chunk's
+// strides of four strings: one per record where the title repairs the chunk, the
+// file's strings as they stand where it does not (TitleRules::bms_loadout_sanitized).
+// The embedder stashes these at mission load and promotes at weapon-table time
+// through world::local_loadout_promote_mission_rules (the witnessed SP-vs-net gate).
 void stash_mission_loadout_rules(
-        const bms::File &mission,
+        const bms::File &mission, const world::TitleRules &rules,
         std::vector<std::pair<std::string, int32_t>> &r_availability_rows,
         std::vector<world::WeaponKitEntry> &r_kit_rows);
 

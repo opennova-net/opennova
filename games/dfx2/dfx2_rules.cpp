@@ -179,6 +179,9 @@ world::TitleRules make() {
 	// DFX2-24: the load's table warnings [orig: Mission_LoadBMSFile @0x40F330 - `jle` @0x40F40A,
 	// @0x40F443, @0x40F47C, @0x40F4B5 (dfx2.exe)].
 	r.bms_table_warnings = true;
+	// DFX2-27: the loadout chunk walked as the file holds it [orig: Mission_LoadBMSFile @0x40F330 -
+	// strlen @0x40F599 where Jointops.exe calls AIProfile_SanitizeConfigData (dfx2.exe)].
+	r.bms_loadout_sanitized = false;
 	// DFX2-25: the counter-rotation [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) -
 	// IsTurret @0x440F87, Matrix_Multiply3x4_FixedPoint @0x440FC4, the words
 	// @0x440FDB..0x440FFE].

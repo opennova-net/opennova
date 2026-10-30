@@ -618,7 +618,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	// [orig: @ 0x4e15f0; the default kit literal @ 0x5246be].
 	std::vector<std::pair<std::string, int32_t>> availability_rows;
 	std::vector<w::WeaponKitEntry> kit_rows;
-	stash_mission_loadout_rules(mission, availability_rows, kit_rows);
+	stash_mission_loadout_rules(mission, world.rules.title(), availability_rows, kit_rows);
 	if (w::local_loadout_promote_mission_rules(world, local.loadout, availability_rows, std::move(kit_rows)))
 		w::local_player_view_reset(&world, local.weapon, local.view, local.view_tracker);
 	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory, local.inventory_valid,

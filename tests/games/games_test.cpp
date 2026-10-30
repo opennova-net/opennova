@@ -146,7 +146,7 @@ void retail_rules_values() {
 			!jo.emplaced_solo_holds_fire);
 	CHECK(jo.ai_vehicle_near_reach == 0xC0000 && jo.ai_vehicle_write_off_count == 3410 &&
 			jo.spawn_kit == nullptr);
-	CHECK(!jo.bms_table_warnings);
+	CHECK(!jo.bms_table_warnings && jo.bms_loadout_sanitized);
 	CHECK(jo.part_spin.full == 186413 && jo.part_spin.mid == 163110 && jo.part_spin.low == 139809 &&
 			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
 
@@ -167,6 +167,7 @@ void retail_rules_values() {
 	CHECK(dfx2.emplaced_solo_holds_fire); // DFX2-37
 	CHECK(dfx2.ai_vehicle_near_reach == 0x40000 && dfx2.ai_vehicle_write_off_count == 1860); // 32
 	CHECK(dfx2.bms_table_warnings); // DFX2-24
+	CHECK(!dfx2.bms_loadout_sanitized); // DFX2-27
 	CHECK(dfx2.part_spin.full == 372827 && dfx2.part_spin.mid == 326222 && // DFX2-23
 			dfx2.part_spin.low == 279619 && dfx2.part_spin.ground_decay == 372827 &&
 			dfx2.part_spin.helo_decay == 93206);

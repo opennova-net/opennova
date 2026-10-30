@@ -220,6 +220,18 @@ struct TitleRules {
 	//  @0x4A5D94, Game_ShutdownAndExit on Cancel @0x4A5D96 (dfx2.exe)]
 	bool bms_table_warnings = false;
 
+	// --- DFX2-27: the BMS loadout chunk's repair. ------------------------------------------------
+	// Out of a session the mission load walks its loadout chunk four strings at a time
+	// (mission::stash_mission_loadout_rules). Jointops.exe first repairs every record that wrote
+	// three strings (bms.h WeaponLoadoutRecord::has_flags), so each stride is one record; dfx2.exe
+	// measures the chunk with strlen and walks it as the file holds it, so a three-string record
+	// takes the next record's name as its fourth string and every later stride runs one string off.
+	// [orig: Mission_LoadBMSFile @0x40F4E0 - AIProfile_SanitizeConfigData @0x40CFE0 from @0x40F739,
+	//  the length @0x40F741, the stride @0x40F7B4..0x40F809]
+	// [orig: Mission_LoadBMSFile @0x40F330 - strlen @0x40F590..0x40F599, the length @0x40F59B, the
+	//  stride @0x40F610..0x40F65D (dfx2.exe)]
+	bool bms_loadout_sanitized = true;
+
 	// --- DFX2-25: the emplaced gun's counter-rotation. -------------------------------------------
 	// joiner-side: the World's gun channel and the joiner's replica gun channel
 	// (inmatch client_replica_emplaced.cpp) both run it.
