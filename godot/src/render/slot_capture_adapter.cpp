@@ -334,6 +334,8 @@ enum class SurfaceAdmission { Unclassified, NoPass, NoStream, Admitted };
 struct AdmittedSurface {
 	Ref<ShaderMaterial> material;
 	ObjectMaterialClassification classification;
+	// The material's published draw values (Q3SourceRegistry::object_material).
+	Q3ObjectMaterialValues values;
 	Ref<Texture2D> diffuse;
 	Ref<Texture2D> detail;
 	ObjectProjectedShadowPolicy policy = ObjectProjectedShadowPolicy::NoPass;
@@ -346,9 +348,9 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 		AdmittedSurface &r_surface) {
 	const Ref<Material> material = active_material(p_source, p_mesh, p_surface);
 	r_surface.material = material;
+	Q3ObjectMaterialValues &values = r_surface.values;
 	if (r_surface.material.is_null() ||
-			!Q3SourceRegistry::object_material_classification(material,
-					r_surface.classification)) {
+			!Q3SourceRegistry::object_material(material, r_surface.classification, values)) {
 		// An ArrayMesh surface whose material is not a registered
 		// object material (no ObjectMaterialClassification): retail
 		// submits no PROJSHAD pass for an effect without one, and no
@@ -357,8 +359,8 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 		// never reaches this test and is not counted.
 		return SurfaceAdmission::Unclassified;
 	}
-	r_surface.diffuse = texture_parameter(r_surface.material, "u_diffuse");
-	r_surface.detail = texture_parameter(r_surface.material, "u_detail");
+	r_surface.diffuse = values.diffuse;
+	r_surface.detail = values.detail;
 	ObjectShaderKey key = build_object_shader_key(r_surface.classification);
 	if (r_surface.detail.is_null()) {
 		// The runtime's missing-detail downgrade: an unresolved
@@ -389,10 +391,10 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 		static_cast<std::uint64_t>(p_array_mesh->get_rid().get_id())};
 	cache_request.geometry_generation = 1;
 	cache_request.pack.source = Q3Source::Object;
-	cache_request.pack.uv_u = vector3_parameter(r_surface.material,
-			"u_uv_transform_u", Vector3(1, 0, 0));
-	cache_request.pack.uv_v = vector3_parameter(r_surface.material,
-			"u_uv_transform_v", Vector3(0, 1, 0));
+	cache_request.pack.uv_u =
+			Vector3(values.runtime.uv.m00, values.runtime.uv.m10, values.runtime.uv.m20);
+	cache_request.pack.uv_v =
+			Vector3(values.runtime.uv.m01, values.runtime.uv.m11, values.runtime.uv.m21);
 	cache_request.pack.skin_channels = p_skinned;
 	r_surface.stream = r_cache.acquire(cache_request, [&](bool &r_read_back) {
 		return surface_arrays(p_array_mesh, p_surface, r_read_back);
@@ -1102,7 +1104,6 @@ void SlotCaptureAdapter::compile_frame(
 					case SurfaceAdmission::Admitted:
 						break;
 				}
-				const Ref<ShaderMaterial> &shader_material = admitted.material;
 				const ObjectMaterialClassification &classification = admitted.classification;
 				const Ref<Texture2D> &diffuse = admitted.diffuse;
 				const Ref<Texture2D> &detail = admitted.detail;
@@ -1132,11 +1133,9 @@ void SlotCaptureAdapter::compile_frame(
 				command.detail_resource = detail;
 				command.diffuse = server_rid(diffuse);
 				command.detail = server_rid(detail);
-				command.alpha_mod = float_parameter(shader_material, "u_alpha_mod", 1.0f);
-				command.diffuse_max_lod = float_parameter(shader_material,
-						"u_diffuse_max_lod", kQ3NoMipCeiling);
-				command.detail_max_lod = float_parameter(shader_material,
-						"u_detail_max_lod", kQ3NoMipCeiling);
+				command.alpha_mod = admitted.values.runtime.alpha;
+				command.diffuse_max_lod = admitted.values.diffuse_max_lod;
+				command.detail_max_lod = admitted.values.detail_max_lod;
 				command.alpha_test_value = classification.alpha_test_value;
 				if (classification.alpha_test)
 					command.flags |= kFlagAlphaTest;

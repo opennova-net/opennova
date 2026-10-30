@@ -426,15 +426,15 @@ int64_t EffectLightDirector::_owner_id_for_bms(int p_bms_id) {
 	return owner;
 }
 
+// The engine's light block gain (EnvironmentState::light_gain), the unlit 1
+// with no environment.
 Vector3 EffectLightDirector::light_gain() const {
-	Vector3 gain(1, 1, 1);
-	if (MissionEnvironment *env = _environment()) {
-		const Ref<EnvLightState> state = env->get_light_state();
-		if (state.is_valid() && state->get_values().is_valid()) {
-			gain = state->get_values()->get_gain();
-		}
+	MissionEnvironment *env = _environment();
+	if (env == nullptr) {
+		return Vector3(1, 1, 1);
 	}
-	return gain;
+	const opennova::env::Rgb gain = env->state().light_gain();
+	return Vector3(gain.r, gain.g, gain.b);
 }
 
 // Build the immutable-index static atlas rows. The placer owns row identity

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <runtime/renderer/object_lod.h>
+#include <runtime/renderer/view_frustum.h>
 
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -26,10 +27,9 @@ struct ObjectLodFrame {
 	Vector3 up;
 	float tan_half_vertical = 0.0f;
 	float tan_half_horizontal = 0.0f;
-	// The frustum side planes' 1/cos terms: a sphere is outside a side plane
-	// when its axis offset past the plane exceeds radius * this factor.
-	float vertical_plane_scale = 1.0f;
-	float horizontal_plane_scale = 1.0f;
+	// The view's frustum (renderer/view_frustum.h): the side planes and the
+	// forward plane through the eye, no far plane.
+	opennova::renderer::ViewFrustum frustum;
 	int32_t focal_pixels = 0;
 	float projection_scale = 0.0f;
 	bool valid = false;
@@ -67,6 +67,15 @@ struct ObjectLodFrame {
 	// null camera or an empty viewport.
 	static bool camera_tangents(const Camera3D *p_camera, float &r_tan_half_horizontal,
 			float &r_tan_half_vertical);
+
+	// The engine view frustum (renderer/view_frustum.h) of an eye transform
+	// (-z forward) over the given tangents and near and far distances, and the
+	// one a camera draws: its camera transform, camera_tangents, its near and
+	// far planes (no planes for a null camera, an empty viewport or a far plane
+	// not past the near one).
+	static opennova::renderer::ViewFrustum eye_frustum(const Transform3D &p_eye,
+			float p_tan_half_horizontal, float p_tan_half_vertical, float p_near, float p_far);
+	static opennova::renderer::ViewFrustum camera_frustum(const Camera3D *p_camera);
 
 	// The largest axis scale of a basis: the uniform entity scale a bound
 	// sphere radius is multiplied by.

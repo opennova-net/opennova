@@ -247,9 +247,10 @@ private:
 	// the redraw's own register value (celestial_frame.h GlareFrame), pushed
 	// to the Q3 registry per surface.
 	void _set_body_q3_pose(Body &p_body, const Ref<ObjectData> &p_data, int32_t p_q3_upl);
-	// Terrain line-of-sight between two points (the glare's gate ray and the
-	// water glint's two terrain rays): clear when the raycast misses.
-	bool _segment_clear(const Vector3 &p_from, const Vector3 &p_to);
+	// Terrain line-of-sight between two mission points (the glare's two rays
+	// and the water glint's two): the engine's game ray over the loaded
+	// terrain (terrain_query terrain_field_ray_hit), which no terrain blocks.
+	bool _segment_clear(const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) const;
 	// The entities' line of sight between two mission points (entities_clear_;
 	// clear when unset).
 	bool _entities_clear(const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) const {

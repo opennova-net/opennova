@@ -2,9 +2,13 @@
 #include "util/axes.h"
 #include "util/color_convert.h"
 
+#include <algorithm>
 #include <cstring>
 #include <cmath>
+#include <iterator>
+#include <vector>
 #include <base/io/fixed.h>
+#include <runtime/renderer/triangle_strip.h>
 
 using namespace godot;
 
@@ -223,33 +227,25 @@ PackedInt32Array WaterCore::strip_indices() const {
 	// The witnessed batch submits unrolled to PRIMITIVE_TRIANGLES: each
 	// <=5-row window locks 8n-10 vertices and draws a TRIANGLESTRIP through
 	// the first 8n-10 entries of the static index table; global vertex =
-	// 3*first_row + entry (engine: formats/env/env_water_render.h). The strip->list unroll alternates winding per triangle and
-	// SKIPS the {2,6}-style degenerate stitches (any two indices equal) —
-	// they only existed to join row pairs inside one strip call.
-	PackedInt32Array out;
+	// 3*first_row + entry (engine: formats/env/env_water_render.h). The
+	// strip->list unroll is the engine's renderer::triangle_strip_to_list: D3D
+	// strip parity per triangle, the {2,6}-style degenerate stitches (they
+	// only join row pairs inside one strip call) dropped. The water passes are
+	// two-sided anyway — cull NONE [orig: pass flags 0x400000 @ 0x5c340d, see
+	// docs/env/env-tod-re.md].
+	std::vector<uint32_t> list;
 	const std::vector<opennova::env::WaterStripBatch> batches =
 			opennova::env::water_strip_batches(strip_row_count);
 	for (const opennova::env::WaterStripBatch &batch : batches) {
-		const int32_t base = batch.first_row * 3;
-		for (int tri = 0; tri + 2 < batch.vertex_count; ++tri) {
-			const int32_t i0 = opennova::env::kWaterStripIndexTable[tri];
-			const int32_t i1 = opennova::env::kWaterStripIndexTable[tri + 1];
-			const int32_t i2 = opennova::env::kWaterStripIndexTable[tri + 2];
-			if (i0 == i1 || i1 == i2 || i0 == i2) {
-				continue;
-			}
-			// D3D strip parity: odd triangles swap the first two vertices to
-			// keep a consistent facing (the water passes are two-sided
-			// anyway — cull NONE [orig: pass flags 0x400000 @ 0x5c340d, see docs/env/env-tod-re.md]).
-			if ((tri & 1) != 0) {
-				out.push_back(base + i1);
-				out.push_back(base + i0);
-			} else {
-				out.push_back(base + i0);
-				out.push_back(base + i1);
-			}
-			out.push_back(base + i2);
-		}
+		opennova::renderer::triangle_strip_to_list(opennova::env::kWaterStripIndexTable,
+				std::min(static_cast<std::size_t>(std::max(batch.vertex_count, 0)),
+						std::size(opennova::env::kWaterStripIndexTable)),
+				static_cast<uint32_t>(batch.first_row * 3), list);
+	}
+	PackedInt32Array out;
+	out.resize(static_cast<int64_t>(list.size()));
+	for (size_t i = 0; i < list.size(); ++i) {
+		out.set(static_cast<int64_t>(i), static_cast<int32_t>(list[i]));
 	}
 	return out;
 }
