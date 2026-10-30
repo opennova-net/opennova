@@ -106,11 +106,11 @@ const _LAN_MULTI_PLAYER := "LAN_MULTI_PLAYER"
 ## The LAN multiplayer entry (an authored SCREEN action to mp.mnu), which the
 ## update gate disables beside the NovaWorld controls while an update waits.
 @export var lan_entry_control_names := PackedStringArray([_LAN_MULTI_PLAYER])
-## True while a screen over the menu holds the keyboard; main_game hands it its
-## join screen's is_open. Retail's join screen is its own mode, so the menu it
-## opens over (the LAN screen binds the same Return and Escape) takes no keys
-## while it is up.
-var keyboard_covered := Callable()  # () -> bool
+## True while a screen over the menu is its own mode; main_game hands it its join
+## screen's is_open. Retail's join screen is a mode of its own, so the menu it
+## opens over neither takes keys (the LAN screen binds the same Return and Escape)
+## nor runs its frame (the mouse pump, the widget clock) while it is up.
+var covered := Callable()  # () -> bool
 
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
@@ -201,21 +201,25 @@ func _process(delta: float) -> void:
 ## tick the way the mode loop does.
 ## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
 func update_menu_frame(delta: float = 0.0) -> void:
+	# Covered by a screen that is its own mode (the join screen), the menu's frame
+	# does not run: its pump, its clock and the deferred remount wait for it.
+	var menu_runs := not _is_covered()
 	# The pump, once a frame after the input events (each taken as its message
 	# in _gui_input): hover, the click and the window sounds of the mouse as the
 	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse). Over a
 	# running mission the game loop's frame runs it instead (pump_screen_pass).
-	if not _in_game:
+	if menu_runs and not _in_game:
 		pump_screen_pass()
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
-	if _driver != null:
+	if menu_runs and _driver != null:
 		_driver.tick(GameWorld.current_frame_clock_ms())
 	# The one model runtime-frame driver outside a live mission: menu portraits
 	# (avatar previews) are ObjectModels, which no longer self-clock. The static
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
 	ObjectModel.advance_awake_frame(delta)
-	_consume_expansion_reload_request()
+	if menu_runs:
+		_consume_expansion_reload_request()
 
 
 ## The screen pass's mouse pump: hover, the click and the window sounds of the
@@ -441,7 +445,7 @@ func _gui_input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	# A backgrounded menu must not steal Esc from the world, nor a covered one
 	# the keys of the screen over it.
-	if _driver == null or not is_visible_in_tree() or _is_keyboard_covered():
+	if _driver == null or not is_visible_in_tree() or _is_covered():
 		return
 	if _options_controller != null and _options_controller.consume_input(event):
 		get_viewport().set_input_as_handled()
@@ -450,8 +454,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-func _is_keyboard_covered() -> bool:
-	return keyboard_covered.is_valid() and bool(keyboard_covered.call())
+func _is_covered() -> bool:
+	return covered.is_valid() and bool(covered.call())
 
 
 # --- Menu loading + navigation ------------------------------------------------
@@ -1082,7 +1086,7 @@ func menu_click_at(design_pos: Vector2) -> bool:
 func menu_key(keycode: int, unicode: int = 0) -> bool:
 	# The same guard as the real input paths: a hidden menu (a world is up)
 	# or a covered one must not receive synthetic menu input either.
-	if _driver == null or not is_visible_in_tree() or _is_keyboard_covered():
+	if _driver == null or not is_visible_in_tree() or _is_covered():
 		return false
 	var ev := InputEventKey.new()
 	ev.keycode = keycode as Key
