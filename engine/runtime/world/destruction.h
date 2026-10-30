@@ -835,16 +835,19 @@ inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
 // phases (and ends a pending final husk). A husked row holding its final husk (+0x38) runs
 // retail's publication (publish_swap_fade_phases: past the delay it spends it and restamps
 // the death tick) and the swap stage; retail publishes for no other row, so a husked row
-// holding none spends nothing and restamps nothing (the death tick the targeting window reads
-// stands, Entity_ValidateWeaponTarget), and reads its own phases off its clock alone
-// (destroy_fade_resting_phases): retail's model there reads the process-wide bus's last
-// value, ours the slots written for it (D-3DI-2). Returns whether the row's phases, its
-// husks or its swap events changed.
+// holding none (none loaded, or promoted) spends nothing and restamps nothing (the death tick
+// the targeting window reads stands, Entity_ValidateWeaponTarget) and carries zero phases:
+// retail's model there reads the process-wide bus's last value, and a per-model array carries
+// only what was written for that model (D-3DI-2). Returns whether the row's phases, its husks
+// or its swap events changed.
 // [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38 @0x5C41F9,
 //  Entity_PublishSwapFadePhases @0x5C4200, the sub-pixel reject @0x5C42DE; its live callers
-//  Terrain_RenderSectorEntities @0x5C7B60 (@0x5C7D13) and Terrain_RenderSectorModels
-//  @0x5C5D30 (@0x5C603F), whose other calls sit behind RenderSlot_CollectReceiverSlots_Stub
-//  @0x5D7240, which returns 0]
+//  Terrain_RenderSectorEntities @0x5C7B60 (@0x5C7D13), Terrain_RenderSectorModels @0x5C5D30
+//  (@0x5C603F) and the person walk Terrain_RenderSectorEntitiesBySide @0x5C7D50 (the head
+//  part @0x5C7FFC, the body part @0x5C8039, which the jmp @0x5C8020 reaches; from
+//  Terrain_RenderWorldScene @0x5C93A0 and Water_RenderReflectedWorldScene @0x5C8510); the
+//  other calls (@0x5C7C99 / @0x5C7CEA, @0x5C5F23 / @0x5C5FD1) sit behind
+//  RenderSlot_CollectReceiverSlots_Stub @0x5D7240, which returns 0]
 bool update_item_destroy_fade(World &world, Entity &entity);
 // The collects' call: update_item_destroy_fade, and a changed row's DrawFadeStamp onto
 // world.out.destruction.draw_fades for the embedder's same-frame stamp.

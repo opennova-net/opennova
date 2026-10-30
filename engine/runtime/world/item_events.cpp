@@ -706,27 +706,6 @@ DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ti
     return fade;
 }
 
-namespace {
-
-// A husked row holding no final husk: retail's draw publishes nothing for it, so nothing
-// spends its delay or restamps its death tick; its own slots read the fade off its clock
-// alone, none while the delay runs and the fade from the delay's end past it (the D-3DI-2
-// per-model reading). [orig: Render_SectorEntity @0x5C4190 - the +0x38 test @0x5C41F9 ahead
-//  of the publication @0x5C4200]
-void destroy_fade_resting_phases(const World &world, Entity &entity) {
-    const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
-    if (traits == nullptr) return;
-    const int32_t since_death = int32_t(world.logic_tick - entity.death_tick);
-    const int32_t delay = entity.destroy_timer;
-    if (delay != 0 && since_death < delay) return;
-    const DestroyFade fade = destroy_fade_phases(
-            delay != 0 ? since_death - delay : since_death, traits->destroy_timing_ticks);
-    entity.destroy_progress = fade.progress;
-    entity.destroy_phases_q16 = fade.phases_q16;
-}
-
-} // namespace
-
 // See destruction.h. [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38
 //  @0x5C41F9, Entity_PublishSwapFadePhases @0x5C4200 and the swap @0x5C420A..0x5C42D3]
 bool update_item_destroy_fade(World &world, Entity &entity) {
@@ -748,9 +727,10 @@ bool update_item_destroy_fade(World &world, Entity &entity) {
         publish_swap_fade_phases(world, entity);
         if (const auto *traits = world.tables.item_death_traits.get(entity.item_id))
             update_husk_swap_stage(world, entity, *traits);
-    } else {
-        destroy_fade_resting_phases(world, entity);
     }
+    // A husked row holding no final husk (none loaded, or promoted) keeps the zeroes: retail
+    // publishes nothing for it, and its model reads the process-wide bus's last value, while a
+    // per-model array carries only what was written for that model (D-3DI-2).
     return entity.destroy_phases_q16 != phases_before || entity.destroy_progress != progress_before ||
             world.out.destruction.husk_swaps.size() != swaps_before;
 }
