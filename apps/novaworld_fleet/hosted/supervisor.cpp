@@ -291,9 +291,11 @@ void Supervisor::tick(uint64_t now_ms) {
 		seen.insert(s.id);
 		if (limited.count(s.id) != 0) continue;
 		if (!s.settings_error.empty()) {
-			// Its stored configuration does not read: it fails alone (its agent stops its
-			// container), and every other server's pass goes on.
+			// Its stored configuration does not read: it fails alone, its slot let go (so its
+			// agent stops its container), and every other server's pass goes on.
 			try {
+				if (s.machine_ref)
+					release_slot(db, s.id);
 				finish(db, s, State::Failed,
 						"its stored configuration does not read (" + s.settings_error + ")",
 						StartCause::NoData);
