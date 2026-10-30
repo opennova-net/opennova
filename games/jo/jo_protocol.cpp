@@ -58,8 +58,9 @@ Protocol make() {
 	// deploy's 1 or 3.
 	// [orig: Server_OnPlayerJoin @0x51a6d3..0x51a6f2; Server_DeployPlayer @0x517803..0x517812]
 	m.slot_state.join_state_fixed = false;
-	// The person index (D-SIM-52): pool 0's 256, one byte names each.
-	// [orig: EntityPool_Allocate @0x442168 - pool 0's 256 @0x4421cd]
+	// The person index (D-SIM-52): one byte names a person by its pool-0 index, so the wire names
+	// 256 at most. [orig: NetPacket_SerializePlayerSync0x46 @0x505E80 - Pool_GetIndexFromPtr
+	//  @0x505F40, the byte store @0x505F58]
 	m.person_index.pool0_wire_capacity = 256;
 	// C2S 0x00 (DFX2-13): no CD-key leg in the join check.
 	// [orig: Server_ValidatePlayerJoinRequest @0x5122a9..0x5122f0]
