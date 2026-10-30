@@ -3,6 +3,7 @@
 #include <base/io/json.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/host_settings.h>
 #include "common/test_expect.h"
 #include <set>
 #include <string>
@@ -20,22 +21,26 @@ int main() {
         "spectator_slots":-1,"vote_percent":0.625,"auto_balance":true,"flag_return_time":999,
         "flag_reset_time":777,"classes":{"sniper":false},"weapons":{"Rifle":"armory"}})",
 					patch, error));
+	const gamecfg::ServerSettingsTitle jo = opennova::inmatch::server_settings_title("jo");
+	const gamecfg::ServerSettingsTitle dfx2 = opennova::inmatch::server_settings_title("dfx2");
+	TEST_EXPECT(jo.max_players == 64 && jo.armory_word == 2 && jo.mission_word == 3);
+	TEST_EXPECT(dfx2.max_players == 100 && dfx2.armory_word == 3 && dfx2.mission_word == 2);
 	auto cfg = gamecfg::defaults();
-	TEST_EXPECT(gamecfg::apply_server_settings(cfg, patch, true, weapons, field, error));
+	TEST_EXPECT(gamecfg::apply_server_settings(cfg, patch, true, weapons, jo, field, error));
 	TEST_EXPECT(
 			cfg.replay == 0 && cfg.mp_num_spectators_max == -1 && cfg.mpvoting_percent == 0.625f);
 	TEST_EXPECT(cfg.class_availability[6] == 0 && cfg.weapon_availability[1] == 2);
 	auto dfx = gamecfg::defaults({}, 0, 0, gamecfg::ConfigTable::Dfx2);
-	TEST_EXPECT(gamecfg::apply_server_settings(dfx, patch, true, weapons, field, error));
+	TEST_EXPECT(gamecfg::apply_server_settings(dfx, patch, true, weapons, dfx2, field, error));
 	TEST_EXPECT(dfx.weapon_availability[1] == 3);
 	const auto previous = cfg.servermsg;
 	io::JsonValue bad;
 	TEST_EXPECT(io::json_parse(R"({"server_message":"bad","remote_admin_port":1234})", bad, error));
-	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, bad, true, weapons, field, error));
+	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, bad, true, weapons, jo, field, error));
 	TEST_EXPECT(cfg.servermsg == previous); // validation is atomic
 	TEST_EXPECT(io::json_parse(R"({"max_players":65})", bad, error));
-	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, bad, true, weapons, field, error));
-	TEST_EXPECT(gamecfg::apply_server_settings(dfx, bad, true, weapons, field, error));
+	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, bad, true, weapons, jo, field, error));
+	TEST_EXPECT(gamecfg::apply_server_settings(dfx, bad, true, weapons, dfx2, field, error));
 
 	hosted::HostedSettings settings;
 	settings.game_name = "Configuration test";
@@ -121,15 +126,15 @@ int main() {
 	TEST_EXPECT(hosted::console_changes_rotation("MISSION ADD a.bms 1 0 ONESHOT"));
 	TEST_EXPECT(!hosted::console_changes_rotation("MISSION CYCLE"));
 
-	for (auto table : { gamecfg::ConfigTable::Jo, gamecfg::ConfigTable::Dfx2 }) {
-		const auto schema = gamecfg::server_settings_schema(table, true);
-		auto defaults = gamecfg::defaults({}, 0, 0, table);
+	for (const gamecfg::ServerSettingsTitle &title : { jo, dfx2 }) {
+		const auto schema = gamecfg::server_settings_schema(title, true);
+		auto defaults = gamecfg::defaults({}, 0, 0, title.table);
 		std::set<std::string> keys;
 		for (const auto &row : schema.array) {
 			const auto key = row.get_string("key", "");
 			TEST_EXPECT(keys.insert(key).second);
 			TEST_EXPECT(gamecfg::set_server_setting(
-					defaults, *gamecfg::server_setting(key), *row.get("default"), error));
+					defaults, *gamecfg::server_setting(key), *row.get("default"), title, error));
 			// A dependency names a setting the same schema offers.
 			const auto parent = row.get_string("depends_on", "");
 			TEST_EXPECT(parent.empty() || gamecfg::server_setting(parent) != nullptr);
@@ -138,15 +143,15 @@ int main() {
 		TEST_EXPECT(
 				!keys.count("lan_mode") && !keys.count("wind") && keys.count("max_packet_size"));
 		TEST_EXPECT(
-				gamecfg::server_settings_schema(table, false).array.size() > schema.array.size());
+				gamecfg::server_settings_schema(title, false).array.size() > schema.array.size());
 	}
 	io::JsonValue unread;
 	TEST_EXPECT(io::json_parse(R"({"wind":3})", unread, error));
-	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, unread, false, weapons, field, error));
+	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, unread, false, weapons, jo, field, error));
 	TEST_EXPECT(io::json_parse(R"({"lan_mode":2})", unread, error));
-	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, unread, true, weapons, field, error));
-	TEST_EXPECT(gamecfg::apply_server_settings(cfg, unread, false, weapons, field, error));
-	for (const auto &row : gamecfg::server_settings_schema(gamecfg::ConfigTable::Jo, true).array)
+	TEST_EXPECT(!gamecfg::apply_server_settings(cfg, unread, true, weapons, jo, field, error));
+	TEST_EXPECT(gamecfg::apply_server_settings(cfg, unread, false, weapons, jo, field, error));
+	for (const auto &row : gamecfg::server_settings_schema(jo, true).array)
 		if (row.get_string("key", "") == "side_a_password")
 			TEST_EXPECT(row.get_string("depends_on", "") == "team_choose");
 	TEST_EXPECT(server_completed(0, kRotationCompleted) && server_completed(0, kAdminSessionEnded));

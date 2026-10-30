@@ -63,6 +63,9 @@ struct ProtocolInMatch {
 	// DFX2-10: the weapon availability value that means "armory only" (JO 2, DFX2 3); the other of
 	// 2 and 3 is the mission's default. S2C 0x66 carries the 0 entries and this value's.
 	int32_t armory_only_availability = 2;
+	// The mission's own word: the other of 2 and 3 (JO 3, DFX2 2), whose weapons take the mission's
+	// item availability.
+	int32_t mission_availability() const { return armory_only_availability == 2 ? 3 : 2; }
 	// DFX2-11: the join writes the slot state byte 0x13 (undeployed, with the pre-round loadout
 	// latch) whatever the mission and the pre-round timer, and every deploy writes 3 (the latch).
 	bool join_state_fixed = false;

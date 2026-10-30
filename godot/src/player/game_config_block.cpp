@@ -198,7 +198,7 @@ void GameConfigBlock::populate_host_restrictions(const Ref<MenuDriver> &p_driver
 void GameConfigBlock::populate_host_weapon_list(const Ref<MenuDriver> &p_driver,
 		const Ref<RtxtStringFile> &p_gametext, const Ref<RtxtStringFile> &p_menu_ui) {
 	if (p_driver.is_valid())
-		inmatch::populate_host_weapon_list(p_driver->runtime(), block_.cfg(), block_.weapon_roster(),
+		inmatch::populate_host_weapon_list(p_driver->runtime(), block_.cfg(), *block_.title(), block_.weapon_roster(),
 				game_text_lookup(p_gametext), game_text_lookup(p_menu_ui));
 }
 
@@ -206,14 +206,14 @@ bool GameConfigBlock::host_restriction_list_pressed(const Ref<MenuDriver> &p_dri
 		int p_row, int p_column, const Ref<RtxtStringFile> &p_menu_ui) {
 	return p_driver.is_valid() &&
 			inmatch::host_restriction_list_pressed(p_driver->runtime(), p_driver->host_dialog(), block_.cfg(),
-					opennova::to_std(p_widget), p_row, p_column, game_text_lookup(p_menu_ui));
+					*block_.title(), opennova::to_std(p_widget), p_row, p_column, game_text_lookup(p_menu_ui));
 }
 
 bool GameConfigBlock::host_restriction_radio_pressed(const Ref<MenuDriver> &p_driver, const String &p_control,
 		const Ref<RtxtStringFile> &p_menu_ui) {
 	return p_driver.is_valid() &&
 			inmatch::host_restriction_radio_pressed(p_driver->runtime(), p_driver->host_dialog(), block_.cfg(),
-					block_.weapon_roster(), opennova::to_std(p_control), game_text_lookup(p_menu_ui));
+					*block_.title(), block_.weapon_roster(), opennova::to_std(p_control), game_text_lookup(p_menu_ui));
 }
 
 void GameConfigBlock::join_choice(const Ref<GameConfigBlock> &p_block,

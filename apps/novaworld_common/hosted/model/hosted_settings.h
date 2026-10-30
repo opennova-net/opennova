@@ -75,7 +75,9 @@ struct HostedSettings {
 // One canonical persisted document, also used for API settings. Core settings
 // retain their public names; the additional server fields live in options.
 // Hosted packet tuning is a core setting with the runtime's packet-size limits.
-io::JsonValue hosted_settings_schema(gamecfg::ConfigTable table);
+// `title` the code of the title the server runs (inmatch::server_settings_title: its cfg table,
+// its host screen's cap and its availability words).
+io::JsonValue hosted_settings_schema(std::string_view title);
 io::JsonValue settings_document(const HostedSettings &settings);
 bool read_settings_document(const io::JsonValue &document, HostedSettings &settings,
 		std::string &field, std::string &error);
@@ -86,10 +88,6 @@ gamecfg::GameCfg settings_block(const HostedSettings &settings, std::string_view
 // tree's. `expansion` null for a server with no expansion.
 const gamecfg::WeaponRoster &server_weapon_roster(
 		const gamecfg::WeaponRoster &base, const gamecfg::WeaponRoster *expansion);
-// The game.cfg table a hosted server of title `title` runs (base/title/title.h
-// Title::config_table): Delta Force Xtreme 2's for dfx2, Joint Operations' for jo and
-// acidgambit; the default title's for a code no title has.
-gamecfg::ConfigTable title_config_table(std::string_view title);
 
 // Why check_settings refused: the field (its JSON name) and the reason.
 struct SettingsRefusal {

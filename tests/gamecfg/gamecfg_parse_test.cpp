@@ -28,6 +28,11 @@ LoadResult load_text(const std::string &text, const LoadOptions &options = {}) {
 	return load(text.data(), text.size(), options);
 }
 
+// The titles' words as inmatch::server_settings_title makes them from games/*: Joint Operations'
+// table, host screen cap 64, armory-only 2 and mission 3; dfx2.exe's 100, 3 and 2 (DFX2-8, DFX2-10).
+const ServerSettingsTitle kJoSettings{ ConfigTable::Jo, 64, 2, 3 };
+const ServerSettingsTitle kDfx2Settings{ ConfigTable::Dfx2, 100, 3, 2 };
+
 std::string with_version(const std::string &body) {
 	return "version = 29\r\n" + body;
 }
@@ -447,7 +452,7 @@ int dfx2_player_cap_defaults() {
 	// [orig: @0x54D410] [orig: Config_SetDefaults @0x54a2c0 (dfx2.exe)].
 	TEST_EXPECT(dfx2.weapon_availability[0] == 2 &&
 			dfx2.weapon_availability[kWeaponAvailabilityCount - 1] == 2);
-	TEST_EXPECT(std::string(weapon_availability_name(dfx2.weapon_availability[1], ConfigTable::Dfx2)) ==
+	TEST_EXPECT(std::string(weapon_availability_name(dfx2.weapon_availability[1], kDfx2Settings)) ==
 			"mission");
 
 	LoadOptions dfx2_options;
@@ -472,7 +477,7 @@ int dfx2_player_cap_defaults() {
 int server_settings_availability() {
 	const WeaponRoster weapons = { { "None", 0 }, { "Rifle", 1 }, { "Grenade", 1 } };
 	const auto name = [](int32_t word, ConfigTable table) {
-		return std::string(weapon_availability_name(word, table));
+		return std::string(weapon_availability_name(word, table == ConfigTable::Dfx2 ? kDfx2Settings : kJoSettings));
 	};
 	TEST_EXPECT(name(-1, ConfigTable::Jo) == "mission" && name(3, ConfigTable::Jo) == "mission");
 	TEST_EXPECT(name(0, ConfigTable::Jo) == "never" && name(2, ConfigTable::Jo) == "armory");
@@ -483,7 +488,8 @@ int server_settings_availability() {
 		opennova::io::JsonValue patch;
 		std::string field, error;
 		return opennova::io::json_parse(json, patch, error) &&
-				apply_server_settings(cfg, patch, false, weapons, field, error);
+				apply_server_settings(cfg, patch, false, weapons,
+						cfg.table == ConfigTable::Dfx2 ? kDfx2Settings : kJoSettings, field, error);
 	};
 	GameCfg cfg = defaults();
 	TEST_EXPECT(cfg.weapon_availability[1] == 3); // every weapon the mission's by default
@@ -515,7 +521,7 @@ int server_settings_availability() {
 // joiner (runtime/inmatch/host_config.cpp), so both are offered, with their defaults; a patch sets
 // them, the difficulty within its one byte.
 int server_settings_session_rows() {
-	const opennova::io::JsonValue schema = server_settings_schema(ConfigTable::Jo, true);
+	const opennova::io::JsonValue schema = server_settings_schema(kJoSettings, true);
 	bool lives = false, difficulty = false;
 	for (const auto &row : schema.array) {
 		lives = lives || (row.get_string("key", "") == "max_team_lives" && row.get_int("default", 0) == 100);
@@ -526,10 +532,10 @@ int server_settings_session_rows() {
 	opennova::io::JsonValue patch;
 	std::string field, error;
 	TEST_EXPECT(opennova::io::json_parse(R"({"max_team_lives":5,"difficulty":2})", patch, error));
-	TEST_EXPECT(apply_server_settings(cfg, patch, true, {}, field, error));
+	TEST_EXPECT(apply_server_settings(cfg, patch, true, {}, kJoSettings, field, error));
 	TEST_EXPECT(cfg.max_team_lives == 5 && cfg.mp_difficulty == 2);
 	TEST_EXPECT(opennova::io::json_parse(R"({"difficulty":256})", patch, error));
-	TEST_EXPECT(!apply_server_settings(cfg, patch, true, {}, field, error) && cfg.mp_difficulty == 2);
+	TEST_EXPECT(!apply_server_settings(cfg, patch, true, {}, kJoSettings, field, error) && cfg.mp_difficulty == 2);
 	return 0;
 }
 

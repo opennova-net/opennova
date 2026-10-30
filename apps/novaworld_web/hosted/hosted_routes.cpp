@@ -186,7 +186,7 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 	// alone; the list's novalogic_listing says whether the service offers it at all).
 	out["novalogic_listing"] = novalogic_lists(d);
 	out["missions"] = missions_json(d.missions);
-	out["settings_schema"] = to_crow(hosted_settings_schema(title_config_table(d.title)));
+	out["settings_schema"] = to_crow(hosted_settings_schema(d.title));
 	out["weapons"] = to_crow(encode_tree_weapons(d.weapons));
 	const HostLimits limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;

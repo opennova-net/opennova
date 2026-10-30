@@ -2,6 +2,7 @@
 
 #include "game_config.h"
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/gamecfg/server_settings.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <string>
@@ -81,6 +82,11 @@ int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_scree
 // 1 or 0.
 // [orig: HostDialog_ReadSettings @0x555940]
 void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title);
+// What the settings schema takes of `title` (gamecfg::ServerSettingsTitle): its cfg table, its
+// host screen's MAX_PLAYERS cap and the availability words of the protocol it speaks. A title code
+// the registry lacks reads as the default title's.
+gamecfg::ServerSettingsTitle server_settings_title(const Title& title);
+gamecfg::ServerSettingsTitle server_settings_title(std::string_view title_code);
 // The screen's restriction lists from the block, as the dialog's init fills them after its
 // populate, and the LAN screen's activation fills WEAPON_LIST again. WEAPON_LIST: cleared, then a
 // row per loadout_selectable weapon in the table's order, its text the weapon's WepDes name
@@ -92,7 +98,7 @@ void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, co
 // [orig: UI_InitHostSettingsDialog @0x558960 - @0x5589CC, @0x5589D1; UI_InitLANMultiplayerScreen
 //  @0x556930 - @0x5569CC; HostDialog_PopulateWeaponRestrictionList @0x556600;
 //  HostDialog_PopulateClassListCombo @0x556700; TextResource_GetStringWithFallback @0x562EE0]
-void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
+void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg, const Title& title,
                                const gamecfg::WeaponRoster& weapons, const hud::GameTextLookup& gametext,
                                const hud::GameTextLookup& menu_ui);
 void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
@@ -104,8 +110,8 @@ void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg&
 // [orig: HostDialog_WeaponRestrictionCycleHandler @0x5576c0; HostDialog_OnClassAvailabilityListClick
 //  @0x5577d0]
 bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
-                                   gamecfg::GameCfg& cfg, std::string_view widget, int row, int column,
-                                   const hud::GameTextLookup& menu_ui);
+                                   gamecfg::GameCfg& cfg, const Title& title, std::string_view widget, int row,
+                                   int column, const hud::GameTextLookup& menu_ui);
 // A press on a radio that sets every word: WPN_ALWAYS 1, WPN_NEVER 0, WPN_ARMORY 2 and WPN_MISSION 3
 // over each loadout_selectable weapon, every WEAPON_LIST row's cell relabelled; CLASS_ALWAYS 1,
 // CLASS_NEVER 0 and CLASS_MISSION 2 over the ten class words, every CLASS_LIST row's cell
@@ -113,8 +119,9 @@ bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& 
 // [orig: UI_RegisterHostSettingsCallbacks @0x5580f0 (the controls and their values);
 //  HostDialog_SetAllWeaponAvailability @0x557910; HostDialog_SetAllWeaponRestrictions @0x557a10]
 bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
-                                    gamecfg::GameCfg& cfg, const gamecfg::WeaponRoster& weapons,
-                                    std::string_view control, const hud::GameTextLookup& menu_ui);
+                                    gamecfg::GameCfg& cfg, const Title& title,
+                                    const gamecfg::WeaponRoster& weapons, std::string_view control,
+                                    const hud::GameTextLookup& menu_ui);
 // The live player-slot limit the session apply makes of a cap: the cap, plus
 // the host's own slot when dedicated (GameConfig::player_slot_limit), under the
 // title's ceiling (TitlePlayerCaps::session).

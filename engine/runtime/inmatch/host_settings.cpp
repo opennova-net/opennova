@@ -1,8 +1,8 @@
 #include "host_settings.h"
 
 #include <base/io/crt_ftol.h>
-#include <formats/gamecfg/server_settings.h>
 #include <formats/mnu/mnu.h>
+#include <net/protocol/protocol.h> // the availability words (DFX2-10)
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/hud/hud_game_text.h> // hud_sprintf (the CRT sprintf over a localized format)
@@ -292,8 +292,9 @@ std::string menu_token(const hud::GameTextLookup& menu_ui, const std::string& ke
 // A weapon word's cell: -1 and the mission word MISSION, 0 NEVER, the armory-only word ARMORY,
 // any other ALWAYS (gamecfg::weapon_availability_name's names, as the tokens spell them).
 // [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 - the switch @0x556655]
-std::string weapon_word_token(const hud::GameTextLookup& menu_ui, int32_t word, gamecfg::ConfigTable table) {
-    std::string key = gamecfg::weapon_availability_name(word, table);
+std::string weapon_word_token(const hud::GameTextLookup& menu_ui, int32_t word,
+                              const gamecfg::ServerSettingsTitle& words) {
+    std::string key = gamecfg::weapon_availability_name(word, words);
     for (char& c : key) c = static_cast<char>(c - 'a' + 'A');
     return menu_token(menu_ui, key);
 }
@@ -313,7 +314,23 @@ int host_screen_list(const menu::MenuRuntime& screen, std::string_view list) {
 
 } // namespace
 
-void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
+gamecfg::ServerSettingsTitle server_settings_title(const Title& title) {
+    // The host screen's cap (DFX2-8) and the words of the protocol the title speaks (DFX2-10).
+    const ProtocolInMatch& in_match = protocol_in_match(title_protocol(title.code));
+    gamecfg::ServerSettingsTitle out;
+    out.table = title.config_table;
+    out.max_players = title_player_caps(title).host_screen;
+    out.armory_word = in_match.armory_only_availability;
+    out.mission_word = in_match.mission_availability();
+    return out;
+}
+
+gamecfg::ServerSettingsTitle server_settings_title(std::string_view title_code) {
+    const Title* title = title_by_code(title_code);
+    return server_settings_title(title != nullptr ? *title : default_title());
+}
+
+void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg, const Title& title,
                                const gamecfg::WeaponRoster& weapons, const hud::GameTextLookup& gametext,
                                const hud::GameTextLookup& menu_ui) {
     // [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 - UI_FindScreenControl
@@ -324,6 +341,7 @@ void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg
     //  @0x5566BF]
     const int list = host_screen_list(screen, "WEAPON_LIST");
     if (list < 0) return;
+    const gamecfg::ServerSettingsTitle words = server_settings_title(title);
     screen.table_clear_rows(list);
     for (size_t i = 0; i < weapons.size() && i < gamecfg::kWeaponAvailabilityCount; ++i) {
         if (weapons[i].loadout_selectable == 0) continue;
@@ -333,7 +351,7 @@ void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg
                 : hud::game_text(gametext, hud::kGameTextWepDes, textid.c_str(), "");
         const int row = screen.table_insert_row(list, name, static_cast<int32_t>(i), 0, -1);
         screen.table_set_cell_text(list, row, kRestrictionCell,
-                weapon_word_token(menu_ui, cfg.weapon_availability[i], cfg.table));
+                weapon_word_token(menu_ui, cfg.weapon_availability[i], words));
     }
 }
 
@@ -357,8 +375,8 @@ void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg&
 }
 
 bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
-                                   gamecfg::GameCfg& cfg, std::string_view widget, int row, int column,
-                                   const hud::GameTextLookup& menu_ui) {
+                                   gamecfg::GameCfg& cfg, const Title& title, std::string_view widget, int row,
+                                   int column, const hud::GameTextLookup& menu_ui) {
     if (column != kRestrictionCell) return false;
     const bool weapons = widget == "WEAPON_LIST";
     if (!weapons && widget != "CLASS_LIST") return false;
@@ -372,7 +390,8 @@ bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& 
         if (index < 0 || index >= static_cast<int32_t>(gamecfg::kWeaponAvailabilityCount)) return false;
         int32_t& word = cfg.weapon_availability[index];
         if (++word > 3) word = 0;
-        screen.table_set_cell_text(list, row, kRestrictionCell, weapon_word_token(menu_ui, word, cfg.table));
+        screen.table_set_cell_text(list, row, kRestrictionCell,
+                weapon_word_token(menu_ui, word, server_settings_title(title)));
         return true;
     }
     // [orig: HostDialog_OnClassAvailabilityListClick @0x5577d0 - the press forms and column 1
@@ -388,8 +407,9 @@ bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& 
 }
 
 bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
-                                    gamecfg::GameCfg& cfg, const gamecfg::WeaponRoster& weapons,
-                                    std::string_view control, const hud::GameTextLookup& menu_ui) {
+                                    gamecfg::GameCfg& cfg, const Title& title,
+                                    const gamecfg::WeaponRoster& weapons, std::string_view control,
+                                    const hud::GameTextLookup& menu_ui) {
     // [orig: UI_RegisterHostSettingsCallbacks @0x5580f0 - CLASS_ALWAYS 1, CLASS_NEVER 0,
     //  CLASS_MISSION 2 to HostDialog_SetAllWeaponRestrictions; WPN_ALWAYS 1, WPN_NEVER 0,
     //  WPN_ARMORY 2, WPN_MISSION 3 to HostDialog_SetAllWeaponAvailability @0x557910]
@@ -414,7 +434,7 @@ bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog&
             if (weapons[i].loadout_selectable != 0) cfg.weapon_availability[i] = radio->word;
         const int list = host_screen_list(screen, "WEAPON_LIST");
         if (list >= 0) {
-            const std::string token = weapon_word_token(menu_ui, radio->word, cfg.table);
+            const std::string token = weapon_word_token(menu_ui, radio->word, server_settings_title(title));
             for (int row = 0; row < screen.table_row_count(list); ++row)
                 screen.table_set_cell_text(list, row, kRestrictionCell, token);
         }

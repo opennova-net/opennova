@@ -273,7 +273,7 @@ int restriction_lists() {
     cfg.weapon_availability[3] = 2;
     cfg.class_availability[gamecfg::kClassSniper] = 2;
     cfg.class_availability[gamecfg::kClassGunner] = 0;
-    populate_host_weapon_list(screen, cfg, weapons, gametext, menu_ui);
+    populate_host_weapon_list(screen, cfg, kJo, weapons, gametext, menu_ui);
     populate_host_class_list(screen, cfg, menu_ui);
     const int list = find("WEAPON_LIST");
     TEST_EXPECT(screen.table_row_count(list) == 2);
@@ -291,29 +291,29 @@ int restriction_lists() {
 
     opennova::menu::HostDialog dialog;
     // A press steps the word: column 1 only, past 3 to 0.
-    TEST_EXPECT(!host_restriction_list_pressed(screen, dialog, cfg, "WEAPON_LIST", 0, 0, menu_ui));
-    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, "WEAPON_LIST", 0, 1, menu_ui));
+    TEST_EXPECT(!host_restriction_list_pressed(screen, dialog, cfg, kJo, "WEAPON_LIST", 0, 0, menu_ui));
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, kJo, "WEAPON_LIST", 0, 1, menu_ui));
     TEST_EXPECT(cfg.weapon_availability[1] == 0 && screen.table_cell_text(list, 0, 1) == "Never");
-    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, "WEAPON_LIST", 0, 1, menu_ui));
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, kJo, "WEAPON_LIST", 0, 1, menu_ui));
     TEST_EXPECT(cfg.weapon_availability[1] == 1 && screen.table_cell_text(list, 0, 1) == "Always");
     // A class steps past 2 to 0.
-    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, "CLASS_LIST", 1, 1, menu_ui));
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, kJo, "CLASS_LIST", 1, 1, menu_ui));
     TEST_EXPECT(cfg.class_availability[gamecfg::kClassSniper] == 0);
-    TEST_EXPECT(!host_restriction_list_pressed(screen, dialog, cfg, "SELECTED_MISSIONS", 0, 1, menu_ui));
+    TEST_EXPECT(!host_restriction_list_pressed(screen, dialog, cfg, kJo, "SELECTED_MISSIONS", 0, 1, menu_ui));
     // The radios: every loadout_selectable weapon, every class word.
-    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, weapons, "WPN_MISSION", menu_ui));
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "WPN_MISSION", menu_ui));
     TEST_EXPECT(cfg.weapon_availability[1] == 3 && cfg.weapon_availability[3] == 3 &&
                 cfg.weapon_availability[2] == 3 && screen.table_cell_text(list, 1, 1) == "Mission");
-    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, weapons, "WPN_NEVER", menu_ui));
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "WPN_NEVER", menu_ui));
     TEST_EXPECT(cfg.weapon_availability[1] == 0 && cfg.weapon_availability[2] == 3);
     // Every class word 0: START off whatever the missions; one set: START follows them.
     const int start = find("START_GAME");
-    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, weapons, "CLASS_NEVER", menu_ui));
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "CLASS_NEVER", menu_ui));
     TEST_EXPECT(cfg.class_availability[0] == 0 && cfg.class_availability[9] == 0 && !dialog.can_start());
     TEST_EXPECT(screen.is_widget_disabled(start) && screen.table_cell_text(classes, 4, 1) == "Never");
-    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, weapons, "CLASS_ALWAYS", menu_ui));
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "CLASS_ALWAYS", menu_ui));
     TEST_EXPECT(cfg.class_availability[0] == 1 && screen.is_widget_disabled(start)); // no mission yet
-    TEST_EXPECT(!host_restriction_radio_pressed(screen, dialog, cfg, weapons, "START_GAME", menu_ui));
+    TEST_EXPECT(!host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "START_GAME", menu_ui));
     return 0;
 }
 } // namespace

@@ -6,6 +6,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <runtime/inmatch/host_settings.h> // server_settings_title
 
 #include <cstdio>
 #include <algorithm>
@@ -107,11 +108,14 @@ std::optional<SettingsRefusal> check_settings(
 		if (!expansion)
 			return SettingsRefusal{ "expansion_id", "is no expansion of this game with data" };
 	}
-	auto block = gamecfg::defaults({}, 0, 0, title_config_table(product->title));
+	const gamecfg::ServerSettingsTitle settings_title =
+			inmatch::server_settings_title(product->title);
+	auto block = gamecfg::defaults({}, 0, 0, settings_title.table);
 	std::string field, error;
 	const auto &weapons =
 			server_weapon_roster(product->weapons, expansion ? &expansion->weapons : nullptr);
-	if (!gamecfg::apply_server_settings(block, s.options, true, weapons, field, error))
+	if (!gamecfg::apply_server_settings(
+				block, s.options, true, weapons, settings_title, field, error))
 		return SettingsRefusal{ "options." + field, error };
 	if (s.mission_options.size() > s.missions.size() ||
 			std::any_of(s.mission_options.begin(), s.mission_options.end(),

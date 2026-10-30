@@ -90,7 +90,7 @@ crow::response ConsoleRoutes::settings(db::Database &db, const HostedServer &ser
 	out["server_id"] = server.id;
 	out["saved"] = to_crow(settings_document(server.settings));
 	out["settings_revision"] = server.settings_revision;
-	out["schema"] = to_crow(hosted_settings_schema(title_config_table(product.title)));
+	out["schema"] = to_crow(hosted_settings_schema(product.title));
 	const auto &weapons = server_weapon_roster(product.weapons,
 			product.expansions.empty() ? nullptr : &product.expansions.front().weapons);
 	out["weapons"] = to_crow(encode_tree_weapons(weapons));

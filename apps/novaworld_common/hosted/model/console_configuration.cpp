@@ -5,6 +5,7 @@
 #include <base/io/strutil.h>
 #include <formats/gamecfg/server_settings.h>
 #include <net/admin/admin_protocol.h>
+#include <runtime/inmatch/host_settings.h> // server_settings_title
 
 #include <algorithm>
 
@@ -47,15 +48,16 @@ bool all_sets_roster(const gamecfg::WeaponRoster &weapons, size_t rows) {
 // word, the mission word or any other. A changed weapon's WEAPON SET, or one WEAPON SET ALL when
 // the edit leaves every selectable weapon at one keyword's availability and ALL sets exactly
 // those rows (all_sets_roster); a weapon set to "mission" into `later`, the next launch's.
+// `title` names the launched block's words.
 void weapon_edit(const Json &patch_weapons, const gamecfg::GameCfg &launched,
-		const gamecfg::WeaponRoster &weapons, std::vector<std::string> &commands, Json &later) {
+		const gamecfg::ServerSettingsTitle &title, const gamecfg::WeaponRoster &weapons,
+		std::vector<std::string> &commands, Json &later) {
 	const size_t rows =
 			std::min(weapons.size(), static_cast<size_t>(gamecfg::kWeaponAvailabilityCount));
 	std::vector<std::string> target(rows);
 	for (size_t i = 1; i < rows; ++i)
 		if (weapons[i].loadout_selectable)
-			target[i] = gamecfg::weapon_availability_name(
-					launched.weapon_availability[i], launched.table);
+			target[i] = gamecfg::weapon_availability_name(launched.weapon_availability[i], title);
 	std::vector<size_t> live;
 	for (const auto &weapon : patch_weapons.object) {
 		if (!weapon.value.is_string())
@@ -147,8 +149,8 @@ ConfigurationEdit configuration_edit(const Json &patch, const HostedSettings &sa
 	const auto field = [&](const std::string &key, const Json &value, bool option) {
 		if (key == "weapons") {
 			Json later_weapons = Json::make_object();
-			weapon_edit(value, settings_block(saved, title, weapons), weapons, edit.commands,
-					later_weapons);
+			weapon_edit(value, settings_block(saved, title, weapons),
+					inmatch::server_settings_title(title), weapons, edit.commands, later_weapons);
 			if (!later_weapons.object.empty())
 				later.set("weapons", std::move(later_weapons));
 			return;

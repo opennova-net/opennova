@@ -386,8 +386,8 @@ int test_renders() {
 					copy.entity_send_budget == 1000 && copy.send_holdoff_ticks == 0 &&
 					copy.options.get_string("server_message", "") == "Keep this setting");
 		}
-		for (const auto table : { opennova::gamecfg::ConfigTable::Jo, opennova::gamecfg::ConfigTable::Dfx2 }) {
-			const auto schema = hosted::hosted_settings_schema(table);
+		for (const char *title : { "jo", "dfx2" }) {
+			const auto schema = hosted::hosted_settings_schema(title);
 			const auto packet = std::find_if(schema.array.begin(), schema.array.end(),
 					[](const auto &row) { return row.get_string("key", "") == "max_packet_size"; });
 			TEST_EXPECT(packet != schema.array.end());
