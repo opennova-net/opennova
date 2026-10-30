@@ -119,6 +119,10 @@ std::vector<std::string> filter_environment(const std::vector<std::string> &name
 // count UTF-8 bytes here, and a cut can split a character.
 std::string own_command_line();
 
+// This process's id (GetCurrentProcessId, getpid): what a child that waits on this process's end
+// is told (the updater's install).
+int64_t own_process_id();
+
 class ChildProcess {
 public:
 	ChildProcess();
