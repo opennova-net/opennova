@@ -109,6 +109,16 @@ struct AdminReplyPlan {
 //  @0x4067AD, isspace @0x4067B5 -> @0x76B964; CRT_init_ctype's mirror copy @0x784C59]
 std::vector<std::string_view> admin_split_command(std::string_view line);
 
+// SET ServerName's name: the value tokens, each followed by one space, a token skipped when it
+// would take the name past 30 characters (so a name ends in a blank).
+// [orig: CAdminServer_HandleSetCommand @0x405A60 - @0x4060BF..0x40615A]
+std::string admin_server_name(const std::vector<std::string_view> &values);
+// A SET password's field: strncpy(field, value, 0x11), its first 17 bytes, case kept (a
+// 17-character value keeps no terminator, D-NET-359).
+// [orig: CAdminServer_HandleSetCommand @0x405A60 - ServerPassword @0x4061D3..0x4061DB,
+//  SideAPassword @0x406228..0x406230, SideBPassword @0x406260]
+std::string admin_password_field(std::string_view value);
+
 // The plan for one command line, split as the dispatcher splits it (admin_split_command) with
 // its verbs and sub-verbs compared case aside. Every verb not named below, and every verb a
 // session's rights do not open, draws the one usage reply.

@@ -86,15 +86,12 @@ Json console_settings_patch(std::string_view line, const gamecfg::WeaponRoster &
 				continue;
 			const std::string value(args.size() > 2 ? args[2] : "");
 			Json v;
+			// The server's own rules for the two text kinds (net/admin/admin_protocol.h).
 			if (spec.kind == gamecfg::ServerSettingKind::Password) {
-				// CAdminServer copies at most 17 bytes, preserving case.
-				v = io::json_string(cp1252_to_utf8(value.substr(0, 17)));
+				v = io::json_string(cp1252_to_utf8(admin_password_field(value)));
 			} else if (spec.text) {
-				std::string name;
-				for (size_t i = 2; i < args.size(); ++i)
-					if (name.size() + args[i].size() + 2 < 32)
-						name += std::string(args[i]) + " ";
-				v = io::json_string(cp1252_to_utf8(name));
+				v = io::json_string(cp1252_to_utf8(admin_server_name(
+						std::vector<std::string_view>(args.begin() + 2, args.end()))));
 			} else if (spec.kind == gamecfg::ServerSettingKind::Boolean)
 				v = Json::make_bool(io::retail_atol(value.c_str()) != 0);
 			else if (spec.fraction)

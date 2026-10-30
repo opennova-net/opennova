@@ -214,6 +214,15 @@ int main() {
 		expect(chat == std::vector<std::string>({"Server: hello ", "  continued", "Ann: hi"}),
 		       "CHAT GET: the lines, a continuation's two spaces kept");
 		expect(admin_parse_chat_window("").empty(), "an empty window");
+
+		// SET's two text rules, the game's and the service's one home.
+		expect(admin_server_name({ "A", "new", "name" }) == "A new name ", "ServerName: each token and a blank");
+		expect(admin_server_name({ std::string_view("aaaaaaaaaaaaaaaaaaaaaaaaaaa"), "bbb", "c" }) ==
+		               "aaaaaaaaaaaaaaaaaaaaaaaaaaa c ",
+		       "ServerName: a token past 30 characters skipped, a later one kept");
+		expect(admin_password_field("abcdefghijklmnopqrs") == "abcdefghijklmnopq" &&
+		               admin_password_field("Short") == "Short",
+		       "a password field: its first 17 bytes, case kept");
 	}
 
 	// The reply plan: how many packets each command draws (§6.9's dispatcher), split as it

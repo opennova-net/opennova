@@ -382,6 +382,18 @@ std::vector<std::string> admin_parse_chat_window(std::string_view reply) {
 	return out;
 }
 
+std::string admin_server_name(const std::vector<std::string_view> &values) {
+	std::string name;
+	for (const std::string_view value : values)
+		if (value.size() + name.size() + 2 < 0x20)
+			name += std::string(value) + " ";
+	return name;
+}
+
+std::string admin_password_field(std::string_view value) {
+	return std::string(value.substr(0, 17));
+}
+
 std::string admin_log_redacted(std::string_view text) {
 	std::string out;
 	size_t pos = 0;
