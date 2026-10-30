@@ -700,6 +700,17 @@ const int32_t *int_word(const GameCfg &cfg, const char *key) {
 	return find_int_word(cfg, key);
 }
 
+size_t text_limit(std::string GameCfg::*field) {
+	for (const ConfigVarRow &row : config_var_rows(ConfigTable::Jo))
+		if (row.type == ConfigVarType::String && row.string_field == field && row.size >= 1)
+			return static_cast<size_t>(row.size - 1);
+	for (const SwitchKey &k : kSwitchKeys)
+		if (k.text_field == field && (k.store == Store::Text || k.store == Store::TextIfAny ||
+				k.store == Store::VideoRes))
+			return k.extra;
+	return 0;
+}
+
 void parse(const char *text, size_t size, GameCfg &cfg, const WeaponRoster &weapons) {
 	io::for_each_config_file_line(text, size, [&](io::ConfigTokens &line) { apply_line(cfg, line, weapons); });
 }

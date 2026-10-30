@@ -33,11 +33,12 @@ ServerSetting number(const char *key, const char *label, const char *group, floa
 	s.command = command;
 	return s;
 }
+// A text row: its byte cap the reader's (text_limit), the bytes a game.cfg line of it keeps.
 ServerSetting text(const char *key, const char *label, const char *group,
-		std::string GameCfg::*field, int cap, const char *command = "", bool secret = false) {
+		std::string GameCfg::*field, const char *command = "", bool secret = false) {
 	ServerSetting s{ key, label, group, secret ? Kind::Password : Kind::Text };
 	s.text = field;
-	s.maximum = cap;
+	s.maximum = static_cast<double>(text_limit(field));
 	s.command = command;
 	return s;
 }
@@ -112,9 +113,9 @@ const std::vector<ServerSetting> &server_settings() {
 	// names [orig: CAdminServer_HandleSetCommand @0x405A60] (admin_console.cpp).
 	static const std::vector<ServerSetting> settings = [] {
 		std::vector<ServerSetting> v = {
-			text("game_name", "Server name", "Server", &GameCfg::game_name, 31, "ServerName"),
+			text("game_name", "Server name", "Server", &GameCfg::game_name, "ServerName"),
 			text("game_password", "Game password", "Players and access",
-					&GameCfg::mp_host_game_password, 16, "ServerPassword", true),
+					&GameCfg::mp_host_game_password, "ServerPassword", true),
 			integer("max_players", "Maximum players", "Players and access",
 					&GameCfg::mp_max_players, "", 1),
 			// A setting with a SET verb takes its signed word whole (the range loop below), so
@@ -126,14 +127,14 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("start_delay", "Start delay (seconds)", "Rules", &GameCfg::startdelay,
 					"StartDelay"),
 			flag("team_ff", "Friendly fire", "Rules", 0x200, true, "FriendlyFire"),
-			text("server_message", "Server message", "Server", &GameCfg::servermsg, 127),
-			text("country", "Country code", "Server", &GameCfg::country, 3),
+			text("server_message", "Server message", "Server", &GameCfg::servermsg),
+			text("country", "Country code", "Server", &GameCfg::country),
 			text("side_a_password", "Blue team password", "Teams",
-					&GameCfg::mp_host_side_password_a, 16, "SideAPassword", true),
+					&GameCfg::mp_host_side_password_a, "SideAPassword", true),
 			text("side_b_password", "Red team password", "Teams", &GameCfg::mp_host_side_password_b,
-					16, "SideBPassword", true),
+					"SideBPassword", true),
 			text("spectator_password", "Spectator password", "Players and access",
-					&GameCfg::mp_host_spectator_password, 63, "", true),
+					&GameCfg::mp_host_spectator_password, "", true),
 			integer("spectator_slots", "Spectators (0 off, -1 unlimited)", "Players and access",
 					&GameCfg::mp_num_spectators_max, "", -1, 255),
 			toggle("use_lineup_queue", "Use lineup queue", "Players and access",
@@ -179,7 +180,7 @@ const std::vector<ServerSetting> &server_settings() {
 					&GameCfg::mpchangeteam_interval, "ChangeTeamInterval"),
 			integer("change_team_penalty", "Team change penalty (seconds)", "Teams",
 					&GameCfg::mpchangeteam_penalty, "ChangeTeamPenalty"),
-			integer("num_teams", "Number of teams", "Teams", &GameCfg::mp_numteams, "", 1, 4),
+			integer("num_teams", "Number of teams", "Teams", &GameCfg::mp_numteams),
 			toggle("punt_vote", "Allow kick votes", "Players and access", &GameCfg::mpvoting,
 					"PuntVote"),
 			number("vote_percent", "Vote threshold", "Players and access",
@@ -230,10 +231,13 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("dfx_category", "DFX category", "Server", &GameCfg::mp_dfx_category),
 			toggle("publish_players", "Publish player list", "Server", &GameCfg::sendplayerlist),
 			toggle("listing_ping", "Allow ping in listing", "Server", &GameCfg::ping),
+			// The fold the defaults apply [orig: Config_SetDefaults @0x54D030 - @0x54D060..0x54D090].
 			integer("max_packet_size", "Maximum packet size", "Network",
-					&GameCfg::mp_max_packet_size, "", 64, 65507),
+					&GameCfg::mp_max_packet_size, "", 100, 0x4000),
 			toggle("extended_metrics", "Extended network metrics", "Network",
 					&GameCfg::mp_extract_extended_metric_information),
+			// The reader's fold: a mode outside 1..4 is 2 [orig: Config_ParseSettingsLine @0x54F740 -
+			//  the lanmode fold @0x550425..0x55044C].
 			integer("lan_mode", "LAN network mode", "Network", &GameCfg::lanmode, "", 1, 4),
 			toggle("lan_only", "LAN-only admission", "Server",
 					&GameCfg::mp_novaworld_host_lan_only),
@@ -245,10 +249,12 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("lan_port_step", "LAN port step", "Network", &GameCfg::mp_lan_server_port_delta,
 					"", 1, 65535),
 		};
-		for (size_t i = 0; i < 9; ++i)
-			v[i].core = true;
+		// The hosted launch's established top-level fields.
+		constexpr std::string_view kCore[] = { "game_name", "game_password", "max_players",
+			"time_limit", "kill_limit", "max_score", "respawn", "start_delay", "team_ff" };
 		for (auto &s : v) {
 			const std::string_view key(s.key);
+			s.core = std::find(std::begin(kCore), std::end(kCore), key) != std::end(kCore);
 			// SET consumes signed 32-bit words, including retail sentinel values.
 			// Do not substitute the old website's guessed slider ranges.
 			if (*s.command && s.kind == Kind::Integer) {
@@ -386,7 +392,7 @@ io::JsonValue server_settings_values(const GameCfg &cfg, bool hosted) {
 			out.set(s.key, server_setting_value(cfg, s));
 	Json classes = Json::make_object();
 	for (int i = 0; i < 5; ++i)
-		classes.set(kClassNames[i], Json::make_bool(class_available(cfg.class_availability[i + 5])));
+		classes.set(kClassNames[i], Json::make_bool(class_available(cfg.class_availability[kClassMedic + i])));
 	out.set("classes", std::move(classes));
 	return out;
 }
@@ -413,7 +419,7 @@ bool apply_server_settings(GameCfg &cfg, const Json &patch, bool hosted,
 					for (int i = 0; i < 5; ++i)
 						if (entry.key == kClassNames[i] && entry.value.is_bool()) {
 							// A class left as it reads keeps its raw word (MISSION's 2 among them).
-							int32_t &word = next.class_availability[i + 5];
+							int32_t &word = next.class_availability[kClassMedic + i];
 							if (entry.value.boolean != class_available(word))
 								word = entry.value.boolean ? 1 : 0;
 							found = true;

@@ -401,6 +401,10 @@ void apply_line(GameCfg &cfg, const io::ConfigTokens &line, const WeaponRoster &
 // block's words by their keys.
 int32_t *int_word(GameCfg &cfg, const char *key);
 const int32_t *int_word(const GameCfg &cfg, const char *key);
+// The bytes the reader keeps of a string field's value: a cfg-table row's size less its NUL
+// (Napi_CopyString), else the switch key's limit (its strncpy count, Napi_CopyString's room, or the
+// field less one where the copy is unbounded, D-GAMECFG-1); 0 for a field no key stores.
+size_t text_limit(std::string GameCfg::*field);
 
 // The read of one file's text: every line the walk hands its callback,
 // through apply_line, onto `cfg` as it stands (no defaults, no version check).

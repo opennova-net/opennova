@@ -539,6 +539,33 @@ int server_settings_session_rows() {
 	return 0;
 }
 
+// The schema's limits are the reader's: a text row keeps the bytes a game.cfg line of it keeps
+// (text_limit: the cfg table's size less its NUL, else the switch key's limit), the packet size the
+// defaults' fold, the LAN mode the reader's; the core rows are named, not counted.
+int server_settings_limits() {
+	TEST_EXPECT(text_limit(&GameCfg::game_name) == 31 && text_limit(&GameCfg::servermsg) == 127);
+	TEST_EXPECT(text_limit(&GameCfg::mp_host_game_password) == 16 &&
+			text_limit(&GameCfg::mp_host_side_password_a) == 16 &&
+			text_limit(&GameCfg::mp_host_spectator_password) == 63);
+	TEST_EXPECT(text_limit(&GameCfg::country) == 7 && text_limit(&GameCfg::video_res) == 16);
+	const auto row = [](const char *key) {
+		for (const auto &r : server_settings_schema(kJoSettings, false).array)
+			if (r.get_string("key", "") == key) return r;
+		return opennova::io::JsonValue();
+	};
+	TEST_EXPECT(row("game_name").get_int("max", 0) == 31 && row("spectator_password").get_int("max", 0) == 63);
+	TEST_EXPECT(row("country").get_int("max", 0) == 7);
+	TEST_EXPECT(row("max_packet_size").get_int("min", 0) == 100 && row("max_packet_size").get_int("max", 0) == 0x4000);
+	TEST_EXPECT(row("lan_mode").get_int("min", 0) == 1 && row("lan_mode").get_int("max", 0) == 4);
+	TEST_EXPECT(row("max_players").get_int("max", 0) == 64 &&
+			server_settings_schema(kDfx2Settings, false).array.size() > 0);
+	int core = 0;
+	for (const auto &r : server_settings_schema(kJoSettings, true).array)
+		core += r.get_bool("core", false) ? 1 : 0;
+	TEST_EXPECT(core == 9 && row("team_ff").get_bool("core", false) && !row("server_message").get_bool("core", true));
+	return 0;
+}
+
 int main() {
 	if (defaults_match_config_set_defaults() != 0) return 1;
 	if (dfx2_table_row() != 0) return 1;
@@ -554,6 +581,7 @@ int main() {
 	if (weapon_availability() != 0) return 1;
 	if (server_settings_availability() != 0) return 1;
 	if (server_settings_session_rows() != 0) return 1;
+	if (server_settings_limits() != 0) return 1;
 	if (long_line_splits() != 0) return 1;
 	if (duplicates_and_floats() != 0) return 1;
 	if (crt_fixed_print() != 0) return 1;
