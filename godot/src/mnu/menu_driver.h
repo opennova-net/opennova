@@ -23,7 +23,6 @@
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
-#include <runtime/menu/player_info_avatars.h>
 #include <runtime/menu/menu_screen_controller.h>
 #include <runtime/menu/menu_shell.h>
 
@@ -44,8 +43,6 @@ class MnuDocument;
 class MusicDirector;
 class ResourceRoot;
 class RtxtStringFile;
-class AvatarDatabase;
-class AvatarComboRow;
 class DeployListRow;
 class EndRoundColumn;
 class EndRoundRow;
@@ -106,7 +103,6 @@ class MenuDriver : public RefCounted {
 	String mods_root_; // the game folder the Mods list's records were scanned in
 	opennova::menu::HostDialog host_dialog_;
 	opennova::menu::OptionsScreen options_;
-	opennova::menu::PlayerInfoAvatars avatars_;
 	// The commands the game binds on the open document by control name (wire_commands).
 	opennova::menu::MenuCommands commands_;
 	std::unique_ptr<FrameSeam> seam_;
@@ -275,21 +271,6 @@ public:
 	String options_control_text(int p_action, int p_device) const;
 	void show_ingame_main() { opennova::menu::OptionsScreen::show_ingame_main(runtime_); }
 
-	enum AvatarChange {
-		AVATAR_TEAM = int(opennova::menu::PlayerInfoAvatars::Change::Team),
-		AVATAR_NATIONALITY = int(opennova::menu::PlayerInfoAvatars::Change::Nationality),
-		AVATAR_DIVISION = int(opennova::menu::PlayerInfoAvatars::Change::Division),
-		AVATAR_COMBO = int(opennova::menu::PlayerInfoAvatars::Change::Combo),
-		AVATAR_VOICE = int(opennova::menu::PlayerInfoAvatars::Change::Voice),
-	};
-	int update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int p_change,
-			int p_value, int p_team, int p_voice, const Ref<RtxtStringFile> &p_gameui,
-			const Ref<RtxtStringFile> &p_menutxt);
-	PackedInt32Array player_info_nationality_rows() const;
-	int player_info_avatar_nationality() const { return avatars_.nationality; }
-	int player_info_avatar_division() const { return avatars_.division; }
-	bool player_info_avatar_preview_changed() const { return avatars_.preview_changed; }
-	Ref<AvatarComboRow> player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const;
 	// The VEHICLE screen's ITEM_DISPLAY preview (engine inmatch::vehicle_preview_view): the eye
 	// for a model of `p_bounds` (its centre at the origin), the model's turn at `p_tick_ms`
 	// (the engine's render-space pose matrix, its x / z swapped into Godot's), the field across
@@ -298,7 +279,6 @@ public:
 	static Basis vehicle_preview_model_basis(int64_t p_tick_ms);
 	static float vehicle_preview_fov();
 	static Color vehicle_preview_clear_color();
-	void preview_player_info_voice(const Ref<AvatarDatabase> &p_db, int p_voice);
 
 	MenuDriver();
 	~MenuDriver() override;
@@ -465,5 +445,4 @@ public:
 
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsEffect);
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsWordIndex);
-VARIANT_ENUM_CAST(godot::MenuDriver::AvatarChange);
 VARIANT_ENUM_CAST(godot::MenuDriver::MissionScreen);
