@@ -217,7 +217,6 @@ void join_build_values() {
 		expect(b.bn == 1 && b.vn == 2 && b.mbn == 20042002 && b.sopd == 180,
 		       "BN 1, VN 2, MBN 20042002, SOPD 180 in both titles");
 	}
-	expect(&protocol_join_build(nullptr) == &protocol_join_build(jo()), "no title reads JO's");
 }
 
 void chat_squad_tag() {
@@ -238,7 +237,7 @@ void rules_word() {
 		return static_cast<uint32_t>(blob[44]) | (static_cast<uint32_t>(blob[45]) << 8) |
 				(static_cast<uint32_t>(blob[46]) << 16) | (static_cast<uint32_t>(blob[47]) << 24);
 	};
-	expect(word(jo()) == 0x3A06u && word(nullptr) == 0x3A06u, "a JO block's +44 is mpattrib");
+	expect(word(jo()) == 0x3A06u, "a JO block's +44 is mpattrib");
 	expect(word(dfx2()) == 0x13A06u, "DFX2-18: a DFX2 block's +44 carries 0x10000 (the capture's 0x13A06)");
 }
 

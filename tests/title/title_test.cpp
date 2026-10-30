@@ -1,11 +1,9 @@
 /* The title registry (engine/base/title/title.h) over the installed games (games::install, linked
-   by every test's opennova_test_games): its lookups, the default title, the SCR policy seam and
-   each title's labels. */
+   by every test's opennova_test_games): its lookups, the default title and each title's labels. */
 #include <stdio.h>
 #include <string.h>
 
 #include <base/title/title.h>
-#include <base/vfs/vfs_decode.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <formats/pff/pff.h>
 
@@ -35,7 +33,7 @@ static int failed = 0;
 	} while (0)
 
 static int test_count(void) {
-	CHECK(title_count() == 6, "six titles: jo, jodemo, dfx, dfx2, bhd, acidgambit");
+	CHECK(title_count() == 5, "five titles: jo, dfx, dfx2, bhd, acidgambit");
 	CHECK(title_at(title_count()) == NULL, "past-end index -> NULL");
 	CHECK(title_at(0) != NULL && strcmp(title_at(0)->code, "jo") == 0, "index 0 is JO");
 	return 1;
@@ -68,36 +66,15 @@ static int test_labels(void) {
 	return 1;
 }
 
-/* title_by_code + the game-to-policy seam used by native runtime loaders. */
-static int test_by_code_and_policy(void) {
-	const Title *demo = title_by_code("jodemo");
-	CHECK(demo != NULL && strcmp(demo->code, "jodemo") == 0, "by_code jodemo -> demo");
-	CHECK(title_by_code("JODEMO") == demo, "by_code is case-insensitive");
+/* title_by_code and the default title. */
+static int test_by_code(void) {
+	const Title *jo = title_by_code("jo");
+	CHECK(jo != NULL && strcmp(jo->code, "jo") == 0, "by_code jo -> JO");
+	CHECK(title_by_code("JO") == jo, "by_code is case-insensitive");
 	CHECK(title_by_code("nope") == NULL, "unknown code -> NULL");
 	CHECK(title_by_code("") == NULL, "empty code -> NULL");
 	CHECK(strcmp(default_title().code, "acidgambit") == 0,
 			"the default title is OpenNova's own game's");
-
-	CHECK(title_scr_policy_for_code("jodemo") == VFS_SCR_FORCE_DEFAULT, "jodemo forces DEFAULT");
-	CHECK(title_scr_policy_for_code("jo") == VFS_SCR_VERSION_DETECT, "jo version-detect");
-	CHECK(title_scr_policy_for_code(NULL) == VFS_SCR_VERSION_DETECT,
-			"NULL -> version-detect (JO default)");
-	CHECK(title_scr_policy_for_code("nope") == VFS_SCR_VERSION_DETECT, "unknown -> version-detect");
-	return 1;
-}
-
-/* SCR keying is per-game. Retail titles key version-1 payloads with JO_DFX2 (which the version
-   byte selects), so they version-detect. The JO Demo keys the same version byte with the DEFAULT
-   key, so it must force that key. */
-static int test_scr_policy_per_game(void) {
-	CHECK(title_by_code("jodemo")->scr_policy == VFS_SCR_FORCE_DEFAULT,
-			"JO Demo forces the DEFAULT key");
-	CHECK(title_by_code("jo")->scr_policy == VFS_SCR_VERSION_DETECT, "retail JO version-detect");
-	CHECK(title_by_code("dfx")->scr_policy == VFS_SCR_VERSION_DETECT, "DFX version-detect");
-	CHECK(title_by_code("dfx2")->scr_policy == VFS_SCR_VERSION_DETECT, "DFX2 version-detect");
-	CHECK(title_by_code("bhd")->scr_policy == VFS_SCR_VERSION_DETECT, "BHD version-detect");
-	CHECK(title_by_code("acidgambit")->scr_policy == VFS_SCR_VERSION_DETECT,
-			"Acid Gambit version-detect");
 	return 1;
 }
 
@@ -133,8 +110,7 @@ static int test_command_files_tables_and_ids(void) {
 int main(void) {
 	RUN_TEST(test_count);
 	RUN_TEST(test_labels);
-	RUN_TEST(test_scr_policy_per_game);
-	RUN_TEST(test_by_code_and_policy);
+	RUN_TEST(test_by_code);
 	RUN_TEST(test_command_files_tables_and_ids);
 
 	printf("\n%d passed, %d failed\n", passed, failed);

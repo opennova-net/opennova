@@ -1,6 +1,5 @@
 #include "dfx.h"
 
-#include <base/vfs/vfs_decode.h>
 #include <formats/gamecfg/game_cfg.h>
 
 #include <games/jo/jo.h>
@@ -13,7 +12,6 @@ Title make() {
 	Title t;
 	t.code = "dfx";
 	t.display_name = "Delta Force: Xtreme";
-	t.scr_policy = VFS_SCR_VERSION_DETECT;
 	// The program the DFX install ships beside its archives.
 	t.executable = "DFX.EXE";
 	t.config_table = gamecfg::ConfigTable::Jo;

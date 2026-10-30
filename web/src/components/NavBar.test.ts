@@ -33,14 +33,18 @@ describe('NavBar', () => {
     session.signOut.mockReset().mockResolvedValue({ ok: true, value: null });
   });
 
-  it('shows the site links, Download, and Log in / Register to a visitor', async () => {
-    const found = links(await mountAt('/'));
-    expect(found['Play']).toBe('/play');
-    expect(found['Servers']).toBe('/lobby');
-    expect(found['Hosting']).toBe('/hosting');
+  it('shows the site links, Play, and Log in / Register to a visitor', async () => {
+    const wrapper = await mountAt('/');
+    const found = links(wrapper);
+    expect(found['Lobbies']).toBe('/lobby');
+    expect(found['Dedicated Hosting']).toBe('/hosting');
     // GitHub is the footer's (SiteFooter.vue), not the header's.
     expect(found['GitHub']).toBeUndefined();
-    expect(found['Download']).toBe('/downloads');
+    // Play is the button, not also a nav link; Downloads is the footer's.
+    expect(found['Play']).toBe('/play');
+    expect(wrapper.get('a[href="/play"]').classes()).toContain('btn-primary');
+    expect(wrapper.find('nav[aria-label="Primary"] a[href="/play"]').exists()).toBe(false);
+    expect(found['Download']).toBeUndefined();
     expect(found['Log in']).toBe('/login');
     expect(found['Register']).toBe('/register');
     expect(found['My account']).toBeUndefined();
@@ -67,7 +71,7 @@ describe('NavBar', () => {
     const wrapper = await mountAt('/admin');
     expect(wrapper.text()).toContain('Admin workspace');
     expect(wrapper.find('nav[aria-label="Primary"]').exists()).toBe(false);
-    expect(links(wrapper)['Download']).toBeUndefined();
+    expect(links(wrapper)['Play']).toBeUndefined();
     expect(wrapper.findAll('a').some(a => a.text().startsWith('View website') && a.attributes('href') === '/')).toBe(true);
   });
 

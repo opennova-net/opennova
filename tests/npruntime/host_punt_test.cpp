@@ -542,6 +542,7 @@ bool check_host_control_punt(uint32_t charattr_silence,
 	inmatch::HostOwner owner;
 	inmatch::set_connection_mode(owner.ctx, inmatch::ConnectionMode::HostOnly);
 	owner.ctx.is_in_session = 1;
+	owner.ctx.np_protocol.identity = &kJo;
 	owner.ctx.network_quality_broadcast_countdown = 100;
 
 	opennova::world::World world;
@@ -683,6 +684,7 @@ bool check_nopunt_keeps_the_control_quartet_from_punting() {
 	for (const uint32_t charattr : {8u, 7u}) {
 		inmatch::HostOwner owner;
 		inmatch::set_connection_mode(owner.ctx, inmatch::ConnectionMode::HostOnly);
+		owner.ctx.np_protocol.identity = &kJo;
 		owner.ctx.is_in_session = 1;
 		owner.ctx.nopunt = true;
 		owner.ctx.network_quality_broadcast_countdown = 100;
@@ -1298,6 +1300,7 @@ bool check_host_close_bursts_stop_to_every_connection() {
 bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	ctx.np_protocol.identity = &kJo;
 	ctx.is_in_session = 1;
 	ctx.config.max_players = 4;
 	ctx.network_quality_broadcast_countdown = 100;
@@ -1437,6 +1440,7 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	ctx.network_quality_broadcast_countdown = 100;
 
 	opennova::world::World world;
@@ -1586,6 +1590,7 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	ctx.nopunt = nopunt;
 	inmatch::set_connection_mode(ctx,
 			host_own ? inmatch::ConnectionMode::HostClient : inmatch::ConnectionMode::HostOnly);
+	ctx.np_protocol.identity = &kJo;
 	ctx.is_in_session = 1;
 	ctx.network_quality_broadcast_countdown = 100;
 	ctx.config.max_friendly_kills = max_friendly_kills;
@@ -1729,6 +1734,7 @@ bool check_round_ending_second_walks_nobody() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	ctx.network_quality_broadcast_countdown = 100;
 	ctx.config.max_friendly_kills = 3;
 	MemoryFiles files;

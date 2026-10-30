@@ -129,8 +129,8 @@ public:
 	void show_requirements();
 
 	// The project's files as the scan lists them, the open documents standing in (set_open).
-	void set_scan(const std::string &root, const AssetScan &scan, const std::string &game) {
-		assets_->set_scan(root, scan, game);
+	void set_scan(const std::string &root, const AssetScan &scan) {
+		assets_->set_scan(root, scan);
 	}
 	void set_open(const std::vector<std::shared_ptr<const DocumentBase>> &documents) {
 		assets_->set_open(documents);

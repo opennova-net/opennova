@@ -5,7 +5,6 @@
 #include <games/dfx/dfx.h>
 #include <games/dfx2/dfx2.h>
 #include <games/jo/jo.h>
-#include <games/jodemo/jodemo.h>
 
 #include <base/title/title.h>
 #include <runtime/world/title_rules.h>
@@ -21,7 +20,6 @@ void install_rules() {
 	installed = true;
 	const world::TitleRulesRow rules[] = {
 		{ jo_title().code, &jo_rules() },
-		{ jodemo_title().code, &jodemo_rules() },
 		{ dfx_title().code, &dfx_rules() },
 		{ dfx2_title().code, &dfx2_rules() },
 		{ bhd_title().code, &bhd_rules() },

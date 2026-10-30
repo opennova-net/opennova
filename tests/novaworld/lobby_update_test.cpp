@@ -1,5 +1,5 @@
 // The plaintext host-status heartbeat [orig: Lobby_UpdateServerInfo
-// @0x4ff473..0x4ff62c]: builder and parser round-trip, sanitization
+// @0x4ff473..0x4ff62c]: the builder, sanitization
 // [orig: String_SanitizeForLobby @0x4fe750], the doubled LobbyName/HostKey
 // entries, the player suffix and its absence.
 
@@ -158,42 +158,12 @@ bool check_post_datagram() {
 	              "CRC payload is the sanitized plaintext, without NWU or session framing");
 }
 
-bool check_parse_roundtrip() {
-	const auto blob = make_sample_blob();
-	const std::string text = opennova::lobby_update_build(blob);
-	opennova::LobbyStatusBlob parsed;
-	if (!expect(opennova::lobby_update_parse(text, parsed), "parse succeeds")) return false;
-	if (!expect(parsed.lobby_name == "jop_2_consumer", "lobby name")) return false;
-	if (!expect(parsed.host_key == "ABC+DEF+1234", "host key (sanitized)")) return false;
-	if (!expect(parsed.host_vars.size() == blob.host_vars.size(), "every var survives")) return false;
-	if (!expect(parsed.host_vars[0].first == "LobbyName", "order preserved")) return false;
-	if (!expect(opennova::lobby_status_value(parsed, "gametype") == "Team+Deathmatch",
-			"case-insensitive lookup")) return false;
-	if (!expect(opennova::lobby_status_value(parsed, "ServerName") == "---", "--- kept")) return false;
-	if (!expect(parsed.player_names.size() == 1 && parsed.player_names[0] == "Foo++Bar",
-			"player names")) return false;
-	if (!expect(parsed.send_player_names, "player suffix seen")) return false;
-
-	opennova::LobbyStatusBlob none;
-	if (!expect(opennova::lobby_update_parse("jop_2_consumer  HostKey = K p=", none), "lone p= parses")) return false;
-	if (!expect(none.host_vars.empty() && none.player_names.empty() && none.send_player_names,
-			"lone p= -> no names, suffix seen")) return false;
-	opennova::LobbyStatusBlob off;
-	if (!expect(opennova::lobby_update_parse("jop_2_consumer  HostKey = K A = 1", off), "no suffix parses")) return false;
-	if (!expect(!off.send_player_names && off.host_vars.size() == 1, "no suffix -> flag off")) return false;
-	opennova::LobbyStatusBlob bad;
-	if (!expect(!opennova::lobby_update_parse("jop:cus2", bad), "a gate tag is not a blob")) return false;
-	if (!expect(!opennova::lobby_update_parse("", bad), "empty is not a blob")) return false;
-	return true;
-}
-
 } // namespace
 
 int main() {
 	if (!check_sanitize()) return 1;
 	if (!check_update_blob()) return 1;
 	if (!check_player_suffix()) return 1;
-	if (!check_parse_roundtrip()) return 1;
 	if (!check_post_datagram()) return 1;
 	std::printf("OK: lobby_update text KV blob matches the retail host status heartbeat\n");
 	return 0;

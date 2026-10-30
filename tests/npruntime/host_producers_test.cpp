@@ -49,6 +49,7 @@
 #include <net/npwire/visible_players.h>
 #include <net/npwire/emote_wire.h>
 #include <net/novaworld/lobby_vars.h>
+#include <net/protocol/protocol.h>
 
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
@@ -105,6 +106,7 @@ struct HostFixture {
 
 	explicit HostFixture(size_t peers, uint8_t first_team = 1) {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.is_in_session = 1;
 		ctx.network_quality_broadcast_countdown = 1000;
 		ctx.config.max_players = 16;

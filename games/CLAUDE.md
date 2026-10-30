@@ -1,7 +1,7 @@
 # games/ — every game's own code
 
 - One directory per title, named by its code (`jo/`, `dfx2/`, `acidgambit/`, the unwitnessed
-  `jodemo/`, `dfx/`, `bhd/`), plus `novalogic_2009/`, the network-code generation Jointops.exe and
+  `dfx/` and `bhd/`), plus `novalogic_2009/`, the network-code generation Jointops.exe and
   dfx2.exe share (NVS, CO, PV2 "16", the 0x42's BN/VN/MBN/SOPD). Two STATIC targets: `opennova_games`,
   every title and protocol (the `_title.cpp` and `_protocol.cpp` files, `games.cpp`), linking
   `opennova_net` alone; and `opennova_games_rules`, the rules (the `_rules.cpp` files,

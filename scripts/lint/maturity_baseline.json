@@ -34,9 +34,7 @@
     "games/dfx/dfx_rules.cpp",
     "games/dfx/dfx_title.cpp",
     "games/games.cpp",
-    "games/games_rules.cpp",
-    "games/jodemo/jodemo_rules.cpp",
-    "games/jodemo/jodemo_title.cpp"
+    "games/games_rules.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,

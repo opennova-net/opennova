@@ -3116,8 +3116,8 @@ void test_version_line() {
 	CHECK(editor_version_line(v) ==
 					"Delta Force Xtreme 2 \xC2\xB7 " + one + " \xC2\xB7 DFX2 protocol 16",
 			"a DFX2 project");
-	editor_test::own(v.project.document).target_game = "jodemo";
-	CHECK(editor_version_line(v) == "Joint Operations (Demo) \xC2\xB7 " + one,
+	editor_test::own(v.project.document).target_game = "dfx";
+	CHECK(editor_version_line(v) == "Delta Force: Xtreme \xC2\xB7 " + one,
 			"an unwitnessed protocol: no protocol part");
 }
 

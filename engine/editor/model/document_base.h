@@ -303,8 +303,7 @@ protected:
 private:
 	// The first source finding that blocks (null for none): what a Save of a blocked document says.
 	const SourceIssue *first_blocking() const;
-	// Stored bytes decoded as the game's loader decodes them (the target game's SCR policy), then
-	// read_source.
+	// Stored bytes decoded as the game's loader decodes them, then read_source.
 	bool decode_and_read(std::vector<uint8_t> bytes, bool adopt, std::vector<SourceIssue> &issues,
 	                     Diagnostic &error);
 

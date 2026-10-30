@@ -571,10 +571,9 @@ bool Server::resolve_title(std::string &error) {
 // The mount opennova.exe makes (godot/game/boot_root_mount.gd over
 // ResourceRoot::mount_runtime / set_root_dir, the one install mount
 // ResourceIndex::scan_install): the witnessed fixed archive table (Packed,
-// PackedWithLooseOverride under /d) under the launch's game code's SCR keying,
-// set ahead of the scan, and, only when asked, a directory with no archives
-// mounted as a plain loose root with no expansion under the same keying
-// (ADR 0025). Then the gate tag: the title's, or the mount's gt.ssc's.
+// PackedWithLooseOverride under /d), and, only when asked, a directory with no
+// archives mounted as a plain loose root with no expansion (ADR 0025). Then the
+// gate tag: the title's, or the mount's gt.ssc's.
 bool Server::mount(std::string &error) {
 	const std::string &code = game_code_;
 	LaunchFlags flags;
@@ -586,7 +585,6 @@ bool Server::mount(std::string &error) {
 	bool mounted = index_.scan_install(options_.resource_dir, flags) ==
 			ResourceIndex::InstallScan::Mounted;
 	if (!mounted && options_.loose_root) {
-		index_.set_scr_policy(title_scr_policy_for_code(code.c_str()));
 		mounted = index_.scan(options_.resource_dir, std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll);
 	}
@@ -594,9 +592,11 @@ bool Server::mount(std::string &error) {
 		error = "could not mount '" + options_.resource_dir + "': " + index_.last_error();
 		return false;
 	}
-	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion)
-	// [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
-	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion()));
+	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion),
+	// each capped at what the title's protocol can name (resolve_title resolved it with its
+	// in-match branches) [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
+	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion(),
+			world::wire_pool_capacities(protocol_in_match(protocol_).pool0_wire_capacity)));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
 	gate_tag_ = protocol_gate_tag(*protocol_, &index_);

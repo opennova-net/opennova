@@ -26,6 +26,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 #include <base/io/bam.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>
@@ -307,6 +308,7 @@ nw::FrameUpdateRecord vehicle_record(uint16_t handle, uint16_t parent, int32_t l
 // vertical velocity lands under the wire-flag bit-0x02 gate.
 bool run_pipeline_parented_form() {
 	ns::ClientReplicaPipeline view;
+	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	view.set_item_class_resolver([](uint16_t type) -> ns::ClientReplicaPipeline::ItemClassResolution {
 		if (type == kVehType) return nw::EntityClass::Vehicle;

@@ -21,6 +21,7 @@
 #include <runtime/world/world.h>
 
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <base/gameprofile/game_type.h>
 
@@ -80,6 +81,7 @@ struct Session {
 		ctx.world = world.get();
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config.game_type = game_type::kCoop;
 		ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
 				3, 1, &wire, ns::TransportMode::Client, player, true));

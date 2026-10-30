@@ -21,6 +21,8 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
+#include <net/protocol/protocol.h>
+
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -57,6 +59,7 @@ struct Rig {
 		ctx->world = &world;
 		ctx->is_authority = 1;
 		ctx->is_in_session = 1;
+		ctx->np_protocol.identity = title_protocol("jo");
 	}
 	w::EntityHandle spawn(float x) {
 		w::PlayerSpawn s;

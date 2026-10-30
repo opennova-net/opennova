@@ -6,8 +6,9 @@
 // (the logic clock advances once per frame, the 0x0A fan folds into the local
 // ClientState, the viewport seam reaches the ctx), the local C2S gameplay
 // drain (reload, mounted-slot, medic and squad requests reach the server
-// dispatcher while movement stays queued for Server_TickUpdate), and the dedicated
-// bring-up (no loopback client, no local player, no local fold).
+// dispatcher while movement stays queued for Server_TickUpdate; the own deploy pick
+// reads the session's protocol), and the dedicated bring-up (no loopback client, no
+// local player, no local fold).
 #include <runtime/inmatch/host_role.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/local_role.h>
@@ -287,6 +288,65 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 		CHECK(host.host_loop.c2s_pending() == queued + (spectators != 0 ? 1u : 0u));
 		for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
 		CHECK(own->link.spectator == (spectators != 0));
+	}
+}
+
+// The listen host's own deploy pick (C2S 0x0E) reaches the server's handler with the host
+// context, as a joiner's does, so its deploy writes the state byte of the protocol the session
+// speaks: a DFX2 host's sets the pre-round loadout latch at every deploy (DFX2-11), a JO host's
+// only while the pre-round timer runs.
+// [orig: Input_HandleActionBinding case 12 -> CNapiNetwork_QueueReliableMessage(0x0E)
+//  @0x49b17b; Server_ProcessClientRequestRespawn @0x519AF0; Server_DeployPlayer
+//  @0x517803/@0x517812] [orig: Server_DeployPlayer @0x514a55 (dfx2.exe)]
+void check_listen_host_own_deploy_reads_its_protocol(std::map<std::string, std::string> &files) {
+	for (const char *code : {"jo", "dfx2"}) {
+		const Protocol *protocol = title_protocol(code);
+		const bool is_dfx2 = std::string(code) == "dfx2";
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		auto &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		auto &role = *role_storage;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "own_deploy", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.protocol = protocol;
+			cfg.config.server_name = "own_deploy";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(host.client_runtime != nullptr && kernel.local.has_local_player());
+		CHECK(host.host_owner.ctx.np_protocol.identity == protocol);
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		CHECK(own != nullptr && own->burst.spawned);
+		if (own == nullptr) continue;
+		// The slot waits on its pick with no pre-round timer running, so only the protocol's
+		// fixed state byte sets the latch.
+		kernel.world.preround_delay_seconds = 0;
+		own->link.respawn_pending = true;
+		own->link.respawn_delay_seconds = 0;
+		own->link.preround_loadout_latch = false;
+		CHECK(role.request_deployment_pick(0xFFFFu));
+		host.client_runtime->Client_ProcessNetworkFrame(); // the client frame sends the pick
+		role.drain_host_client_gameplay_requests();        // the server's handler, own slot
+		CHECK(!own->link.respawn_pending);
+		CHECK(own->link.preround_loadout_latch == is_dfx2);
 	}
 }
 
@@ -1384,7 +1444,8 @@ int main() {
         lp.player()->health = 0;
         lp.player()->flags |= w::kEntityFlagDead;
         const auto replies = inmatch::Server_ReleasePlayerDeployment(
-                owner.ctx.config, conn, kernel.world, {}, 0xFFFF);
+                owner.ctx.config, conn, kernel.world, {}, 0xFFFF, nullptr,
+                owner.ctx.np_protocol.identity);
         CHECK(!replies.empty());
         CHECK(lp.player()->alive && lp.player()->health > 0);
         CHECK(lp.round_reset_revision == revision + 1);
@@ -1417,7 +1478,8 @@ int main() {
         remote.link.owned_entity = w::EntityHandle::make(0, 0);
         CHECK(remote.link.owned_entity != kernel.world.cached.local_player);
         lp.hud_map_control.mode = 2;
-        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {}, 0xFFFF);
+        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {}, 0xFFFF,
+                nullptr, owner.ctx.np_protocol.identity);
         CHECK(lp.hud_map_control.mode == 2 && lp.round_reset_revision == revision + 1);
     }
 
@@ -1666,6 +1728,7 @@ int main() {
 	}
 
 	check_listen_host_deploy_convert(files);
+	check_listen_host_own_deploy_reads_its_protocol(files);
 	check_head_preround_reads_the_own_clients_copy(files);
 	check_listen_host_console_punts_only_through_server(files, "PUNT ALL", /*punts=*/false);
 	check_listen_host_console_punts_only_through_server(files, "SERVER PUNT ALL", /*punts=*/true);

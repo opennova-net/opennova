@@ -8,6 +8,7 @@
 #include <base/resource_index/resource_index.h>
 #include <runtime/assets/asset_store.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/protocol/protocol.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/world/infantry_internal.h>
@@ -385,6 +386,7 @@ int main() {
 	// capsule-bottom history holds it) and the promotion lands the tick after.
 	{
 		opennova::replication::ClientReplicaPipeline view;
+		view.set_protocol(opennova::title_protocol("jo"));
 		view.set_item_class_resolver(&classify);
 		view.set_remote_motion_mode(true);
 		view.set_root_motion_source(&source);

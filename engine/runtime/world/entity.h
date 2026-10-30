@@ -58,20 +58,28 @@ using PoolCapacities = std::array<std::size_t, kEntityPoolCount>;
 //  @0x44221e (pool 4, 128)]
 inline constexpr PoolCapacities kRetailPoolCapacity = {256, 1200, 1200, 768, 128};
 // The widest each pool may be configured and still be named on the wire: a handle
-// carries a 12-bit slot (EntityHandle, 4096 slots), and the S2C records name a person
-// by its pool-0 slot's one byte, 0xFF for none (pool0_index_byte: the kill feed, the
-// radio call, the emote, the medic, the squad and capture records), so pool 0 stays at
-// retail's 256. The wire's widths are retail's and stay, so a scaled pool is capped
-// here rather than aliasing a row onto another's name.
+// carries a 12-bit slot (EntityHandle, 4096 slots), and the S2C person records name a
+// person by its pool-0 slot's one byte, 0xFF for none (pool0_index_byte: the 0x1E
+// event's kill feed, medic and capture records, the 0x2D emote, the 0x6D radio call and
+// the 0x33 squad record; and 0x46 PLAYER_SYNC's entity byte, `entity_handle & 0xFF`),
+// so pool 0 holds retail's 256 here. A protocol whose records name more sets its own
+// (ProtocolInMatch::pool0_wire_capacity, D-SIM-52), which the embedder brings in
+// through wire_pool_capacities: world never reads the protocol. The wire's widths are
+// the protocol's, so a scaled pool is capped at them rather than aliasing a row onto
+// another's name.
 inline constexpr PoolCapacities kWirePoolCapacity = {256, 4096, 4096, 4096, 4096};
+// kWirePoolCapacity with pool 0's cap `pool0` (the protocol's pool0_wire_capacity),
+// itself capped at 4096, the 12-bit handle slot every pool's handle carries.
+PoolCapacities wire_pool_capacities(std::size_t pool0);
 // Retail's capacities, each times `scale` (1: retail's own), each capped at its
-// kWirePoolCapacity.
-PoolCapacities scaled_pool_capacities(std::size_t scale);
+// `wire` (wire_pool_capacities: what the running protocol can name).
+PoolCapacities scaled_pool_capacities(std::size_t scale, const PoolCapacities &wire);
 // The capacities the game takes with `expansion` mounted (a name as /exp gives it,
 // ASCII case-blind; "" the base game): an expansion whose content outgrows retail's
 // pools takes them scaled (revx02 eight times: two of its maps load 1214 items),
-// every other retail's.
-PoolCapacities pool_capacities_for_expansion(const std::string &expansion);
+// each capped at its `wire`, every other retail's.
+PoolCapacities pool_capacities_for_expansion(const std::string &expansion,
+                                             const PoolCapacities &wire);
 // The running process's capacities, g_PoolList's: retail's until the embedder sets
 // its mount's (pool_capacities_for_expansion), at every mount before a mission
 // loads, as retail sizes the pools at its start [orig: Game_Run @0x4a7fb0 ->

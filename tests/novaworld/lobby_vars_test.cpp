@@ -246,7 +246,7 @@ int main() {
 	}
 
 	// 4b. The POST status blob: the full Host list in order (LobbyName/HostKey repeat after the
-	//     preamble), every PlayerName, and the sendplayerlist gate; round-trips the codec.
+	//     preamble), every PlayerName, and the sendplayerlist gate; its text form.
 	{
 		std::vector<nw::HostPlayerSlot> players(2);
 		players[0].slot = 0; players[0].player_name = "Host";
@@ -261,12 +261,13 @@ int main() {
 		       "blob carries every PlayerName");
 		expect(blob.send_player_names, "sendplayerlist defaults on");
 		const std::string text_form = nw::lobby_update_build(blob);
-		nw::LobbyStatusBlob parsed;
-		expect(nw::lobby_update_parse(text_form, parsed), "the built blob parses");
-		expect(parsed.host_key == "HK-1" && nw::lobby_status_value(parsed, "MissionName") == "ASH_G11A",
-		       "the parsed blob keeps the Host columns");
-		expect(parsed.player_names.size() == 2 && parsed.player_names[1] == "Joiner+Two",
-		       "player names arrive lobby-sanitized");
+		expect(text_form.rfind("jop_2_consumer  HostKey = HK-1 ", 0) == 0 &&
+		               text_form.find(" MissionName = ASH_G11A") != std::string::npos,
+		       "the text form keeps the Host columns");
+		const std::string names = " p=Host p=Joiner+Two";
+		expect(text_form.size() > names.size() &&
+		               text_form.compare(text_form.size() - names.size(), names.size(), names) == 0,
+		       "player names go lobby-sanitized");
 		nw::HostRegistration quiet = cfg;
 		quiet.send_player_list = false;
 		expect(!nw::make_host_status_blob(quiet, text, players).send_player_names,

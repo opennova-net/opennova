@@ -1,29 +1,27 @@
 // The real GateListener (apps/novaworld_gate) over loopback UDP, on port 0.
 // start() binds the port the OS picks and hands that socket to the receive
-// thread, so bound_port() is the port a probe reaches and the port the reply
-// advertises as POSTIPPORT (the host-status sink). UDPNOVAWORLD and STARTUPURL
-// name what the config passed to start() carries (the gate's fallback lobby
-// endpoint, the web endpoint and its port), never a port another listener
-// bound: the lobbies and web are other processes. The probe goes out as soon
-// as start() returns, with no wait: the socket is bound by then. A second
-// listener asking for that same port fails start(), the boot-fatal path.
+// thread, so bound_port() is the port a probe reaches. UDPNOVAWORLD names what
+// the config passed to start() carries (the gate's fallback lobby endpoint),
+// never a port another listener bound: the lobbies are other processes; no
+// reply names the gate's own address or the web endpoint the config carries.
+// The probe goes out as soon as start() returns, with no wait: the socket is
+// bound by then. A second listener asking for that same port fails start(),
+// the boot-fatal path.
 //
 // One lobby per title: the listener reads the games table (the rows the repo's
 // migrations write, on a database of the test's own) at start(),
 // and each probe's tag selects the row whose LobbyName, startupurl query and
-// GLSVSS leg the reply carries. JO's tag and DFX2's get their rows' values in
-// the shape NovaLogic's live gate answered them (JO's: the LN S1 retail host
-// record, 2026-10-23; DFX2's: dfx2-vs-jo-re.md section 6.5, DFX2-6; D-NET-721:
-// no POST pair, the startupurl on http://[domainname]/, a TimeOnGateServer line
-// in asctime's shape after the reflected pair); the JO demo's alias of JO's tag,
-// whose live reply is unrecorded, gets JO's lobby in the reply this gate always
-// sent, byte for byte; OpenNova's tag (its row's own, a JO row) gets its row's
-// values in JO's live shape; a tag no row answers to gets nothing, until a row
-// added since names it (an account's own game's lobby, which its first publish
-// adds): the gate reads the table again for it and answers. Every
-// reply's text ends with one NUL, as the live gate's does. A
-// configured GLSVSS leg (ONNET_GLSVSS_*) stands in for a row with none, never
-// for DFX2's own.
+// GLSVSS leg the reply carries, in the shape NovaLogic's live gate answered
+// JO's tag and DFX2's in (JO's: the LN S1 retail host record, 2026-10-23;
+// DFX2's: dfx2-vs-jo-re.md section 6.5, DFX2-6; D-NET-721: no POST pair, the
+// startupurl on http://[domainname]/, a TimeOnGateServer line in asctime's
+// shape after the reflected pair). JO's tag and DFX2's get their rows' values;
+// OpenNova's tag (its row's own, a JO row) gets its row's values; a tag no row
+// answers to gets nothing, until a row added since names it (an account's own
+// game's lobby, which its first publish adds): the gate reads the table again
+// for it and answers. Every reply's text ends with one NUL, as the live gate's
+// does. A configured GLSVSS leg (ONNET_GLSVSS_*) stands in for a row with none,
+// never for DFX2's own.
 //
 // A gate with no lobby to hand out (no instance takes clients, no fallback)
 // answers no probe, and its heartbeat says so: probes_unanswered counts them
@@ -49,7 +47,6 @@
 #include "common/test_database.h"
 #include "common/test_expect.h"
 
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -65,10 +62,8 @@
 namespace net = opennova::net;
 namespace nws = opennova::novaworld_server;
 
-// The JO and JO demo titles' gate tags (net/protocol/protocol.h), the probes' payloads.
+// The JO title's gate tag (net/protocol/protocol.h), the probes' payload.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
-static const opennova::Protocol &kJoDemo =
-		*opennova::title_protocol("jodemo");
 
 namespace {
 
@@ -127,15 +122,13 @@ constexpr const char *kAcidGambitQuery =
 		"ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=acidgambit_0_start.htm";
 
 // One lobby's answer: its LobbyName, startupurl query and GLSVSS leg (an
-// empty request: none), and whether its title's live reply is witnessed
-// (Protocol::gate_reply_witnessed: JO's and DFX2's, not the JO demo's).
+// empty request: none).
 struct Lobby {
 	std::string name;
 	std::string query;
 	std::string glsvss_request;
 	std::string glsvss_rims;
 	std::string glsvss_agrms;
-	bool witnessed = false;
 };
 
 // asctime's shape with no newline: "Www Mmm dd hh:mm:ss yyyy", the day
@@ -156,20 +149,14 @@ bool asctime_shaped(const std::string &text) {
 			digit(23);
 }
 
-// The reply this gate sent every tag before the games table chose its lobby,
-// with the lobby's values in their places: for JO's lobby, "jop_2_consumer"
-// and kJoQuery with no GLSVSS, it is that reply byte for byte.
-std::string expected_reply(uint16_t gate_port, uint16_t client_port, const Lobby &lobby) {
+// The live shape's reply up to its TimeOnGateServer line, with the lobby's
+// values in their places.
+std::string expected_reply(uint16_t client_port, const Lobby &lobby) {
 	std::vector<std::pair<std::string, std::string>> vars = { { "LobbyName", lobby.name } };
-	if (!lobby.witnessed) {
-		vars.push_back({ "POSTIPADDRESS", "127.0.0.1" });
-		vars.push_back({ "POSTIPPORT", std::to_string(gate_port) });
-	}
-	const std::string web = lobby.witnessed ? "[domainname]" : "nw.example.test:40456";
 	vars.push_back({ "udpnovaworld", "198.51.100.7:40123" });
 	vars.push_back({ "udpcode1", "abc" });
 	vars.push_back({ "udpcode2", "xyz" });
-	vars.push_back({ "startupurl", "http://" + web + "/nwprepare.dll?" + lobby.query });
+	vars.push_back({ "startupurl", "http://[domainname]/nwprepare.dll?" + lobby.query });
 	vars.push_back({ "usejunction", "0" });
 	vars.push_back({ "clearjunction", "0" });
 	if (!lobby.glsvss_request.empty()) {
@@ -185,31 +172,29 @@ std::string expected_reply(uint16_t gate_port, uint16_t client_port, const Lobby
 	return text;
 }
 
-// `tag`'s reply is the expected one for `lobby`: byte for byte, but for a
-// witnessed shape's TimeOnGateServer value (the gate's clock), which is
-// asctime-shaped and ends the reply.
+// `tag`'s reply is the expected one for `lobby`: byte for byte, but for its
+// TimeOnGateServer value (the gate's clock), which is asctime-shaped and ends
+// the reply.
 int expect_lobby(uint16_t port, const std::string &tag, const Lobby &lobby) {
 	const auto got = probe_text(port, tag);
 	if (!got)
 		std::fprintf(stderr, "  no gate reply to %s from :%u\n", tag.c_str(), port);
 	TEST_EXPECT(got.has_value());
-	const std::string want = expected_reply(port, got->client_port, lobby);
+	const std::string want = expected_reply(got->client_port, lobby);
 	// The text ends with one NUL, its only one, as each of the live JO gate's replies does
 	// (LN S1b, 2026-10-23; D-NET-1262).
 	std::string text = got->text;
 	TEST_EXPECT(!text.empty() && text.back() == '\0' && text.find('\0') == text.size() - 1);
 	text.pop_back();
-	if (lobby.witnessed) {
-		const std::string head = "VAR " + std::string(1, '"') + "TimeOnGateServer" +
-				std::string(1, '"') + " " + std::string(1, '"');
-		const size_t at = text.rfind(head);
-		TEST_EXPECT(at != std::string::npos);
-		const std::string line = text.substr(at + head.size());
-		TEST_EXPECT(line.size() == 24 + 3 && line[24] == '"' && line[25] == '\r' &&
-				line[26] == '\n');
-		TEST_EXPECT(asctime_shaped(line.substr(0, 24)));
-		text.erase(at);
-	}
+	const std::string head = "VAR " + std::string(1, '"') + "TimeOnGateServer" +
+			std::string(1, '"') + " " + std::string(1, '"');
+	const size_t at = text.rfind(head);
+	TEST_EXPECT(at != std::string::npos);
+	const std::string line = text.substr(at + head.size());
+	TEST_EXPECT(line.size() == 24 + 3 && line[24] == '"' && line[25] == '\r' &&
+			line[26] == '\n');
+	TEST_EXPECT(asctime_shaped(line.substr(0, 24)));
+	text.erase(at);
 	if (text != want) {
 		std::fprintf(stderr, "  %s's reply:\n%s\n  expected:\n%s\n", tag.c_str(), got->text.c_str(),
 				want.c_str());
@@ -235,9 +220,10 @@ int main(int argc, char **argv) {
 	nws::ServerConfig config;
 	config.public_host = "127.0.0.1";
 	config.gate_udp_port = 0;
-	// What the gate's config names (ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST with
-	// ONNET_HTTP_PORT), never a port another listener bound: the lobbies and web
-	// are other processes, so the NW UDP port this process would bind is not it.
+	// What the gate's config names (ONNET_LOBBY_ENDPOINT), never a port another
+	// listener bound: the lobbies are other processes, so the NW UDP port this
+	// process would bind is not it. The web endpoint is the lobby's to name
+	// (its 0x82): no reply carries it.
 	config.lobby_endpoint = "198.51.100.7:40123";
 	config.web_host = "nw.example.test";
 	config.http_port = 40456;
@@ -250,30 +236,12 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(port != 0);
 	TEST_EXPECT(gate.games().games().size() == 3);
 
-	// The POST pair and the web endpoint, which the JO demo's unwitnessed reply names.
-	opennova::GateResponse reply;
-	{
-		const auto demo = probe_text(port, kJoDemo.gate_tag);
-		TEST_EXPECT(demo.has_value());
-		TEST_EXPECT(opennova::gate_response_parse(demo->text, reply));
-	}
-	TEST_EXPECT((reply.post_ip == std::array<uint8_t, 4>{127, 0, 0, 1}));
-	TEST_EXPECT(reply.post_port == port);
-	TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{ "198.51.100.7:40123" });
-	const std::string startup = "http://nw.example.test:40456/nwprepare.dll?";
-	TEST_EXPECT(reply.startup_url.compare(0, startup.size(), startup) == 0);
-
-	// Each tag's lobby: JO's and DFX2's as their live gates answer, the JO demo's
-	// alias in JO's lobby with the reply this gate always sent, and OpenNova's row,
-	// whose title is JO's, in JO's live shape with its own start page (its tag is
-	// the row's own, no alias).
-	const Lobby jo{ "jop_2_consumer", kJoQuery, "", "", "", true };
-	const Lobby jo_demo{ "jop_2_consumer", kJoQuery, "", "", "" };
-	const Lobby dfx2{ "dfx2_0_consumer", kDfx2Query, "[DFX2]KILLS", "3600000", "45000", true };
-	const Lobby on{ "acidgambit_0_consumer", kAcidGambitQuery, "", "", "", true };
+	// Each tag's lobby: JO's and DFX2's as their live gates answer, and OpenNova's
+	// row, whose title is JO's, with its own start page (its tag is the row's own).
+	const Lobby jo{ "jop_2_consumer", kJoQuery, "", "", "" };
+	const Lobby dfx2{ "dfx2_0_consumer", kDfx2Query, "[DFX2]KILLS", "3600000", "45000" };
+	const Lobby on{ "acidgambit_0_consumer", kAcidGambitQuery, "", "", "" };
 	if (expect_lobby(port, "jop:cus2", jo) != 0)
-		return 1;
-	if (expect_lobby(port, kJoDemo.gate_tag, jo_demo) != 0)
 		return 1;
 	if (expect_lobby(port, "dfx2:0:cus:buffy", dfx2) != 0)
 		return 1;
@@ -314,7 +282,7 @@ int main(int argc, char **argv) {
 		configured.set_db_pool(&pool);
 		TEST_EXPECT(configured.start(glsvss));
 		const uint16_t cport = configured.bound_port();
-		const Lobby jo_configured{ "jop_2_consumer", kJoQuery, "[JOP]CONFIGURED", "111", "222", true };
+		const Lobby jo_configured{ "jop_2_consumer", kJoQuery, "[JOP]CONFIGURED", "111", "222" };
 		if (expect_lobby(cport, "jop:cus2", jo_configured) != 0)
 			return 1;
 		if (expect_lobby(cport, "dfx2:0:cus:buffy", dfx2) != 0)
@@ -344,7 +312,7 @@ int main(int argc, char **argv) {
 				"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, exp_bits, pfid, "
 				"startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
 				"WHERE slug = 'acidgambit_0_consumer';");
-		const Lobby mine{ "mygame_0_consumer", kAcidGambitQuery, "", "", "", true };
+		const Lobby mine{ "mygame_0_consumer", kAcidGambitQuery, "", "", "" };
 		if (expect_lobby(lport, "mygame:0", mine) != 0)
 			return 1;
 		TEST_EXPECT(later.games().games().size() == 4);
@@ -409,7 +377,7 @@ int main(int argc, char **argv) {
 
 	gate.stop();
 	net::shutdown();
-	std::printf("OK: gate listener serves and advertises its bound port :%u, one lobby per tag\n",
+	std::printf("OK: gate listener serves on its bound port :%u, one lobby per tag\n",
 			static_cast<unsigned>(port));
 	return 0;
 }

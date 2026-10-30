@@ -8,7 +8,9 @@
 //   - the collected records and the printed lines agree in count;
 //   - the bytes: the LF-normalized output's SHA-256 for the pinned fixture;
 //   - the round events' lines (PARITY_ROUND), which the committed session never fires,
-//     over a synthetic S2C 0x0A through the same builder.
+//     over a synthetic S2C 0x0A through the same builder;
+//   - an objective game's S2C 0x0A, whose body the session's protocol lays out (DFX2-1),
+//     refused while no protocol is known and decoded under JO's.
 // A fixture regeneration (nw_self_capture_test --write-fixture) changes both hashes:
 // re-pin kFixtureSha256 and kOutputSha256 in the same commit, after checking that the
 // new output still matches the old line contract (the printed hashes are the new ones).
@@ -21,6 +23,8 @@
 #include <base/io/sha256.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include "common/run_command.h"
 #include "common/temp_dir.h"
@@ -184,13 +188,13 @@ void test_round_lines(const test_temp::TempDir &dir) {
 		return;
 	{
 		wire::ParityTracePrinter printer(out);
-		wire::ParityTraceBuilder builder(printer);
+		wire::ParityTraceBuilder builder(printer, nullptr, nullptr);
 		builder.push_decoded(decoded, stamps);
 	}
 	std::fclose(out);
 	wire::ParityTrace trace;
 	wire::ParityTraceCollector collector(trace);
-	wire::ParityTraceBuilder builder(collector);
+	wire::ParityTraceBuilder builder(collector, nullptr, nullptr);
 	builder.push_decoded(decoded, stamps);
 
 	std::string text, error;
@@ -214,6 +218,47 @@ void test_round_lines(const test_temp::TempDir &dir) {
 					"PARITY_ROUND frame=7 ts_ns=1785000000000000000 session=32776 index=1 "
 					"shooter=6 flags=0xb2 adm=38 sub=0 target=65535 seq=12 slot=2",
 			"the untargeted round prints 65535 and its slot byte");
+}
+
+// An objective game's S2C 0x0A (the game type a 0x7B's extra word named, its 0x20000 bit
+// set) lays its objective body out by the session's protocol (DFX2-1): with none named and
+// no session hello to learn it from, the builder refuses the frame and stops; under JO's it
+// decodes.
+void test_objective_frame_needs_protocol() {
+	InGameMessage summary;
+	summary.frame_index = 3;
+	summary.dir = 'S';
+	summary.tag = s2c::FULL_PLAYER_INFO;
+	summary.session = 32776;
+	summary.participant = 1;
+	// Five empty strings, the extra word 0x30020 (co-op), two empty strings.
+	summary.payload = { 0, 0, 0, 0, 0, 0x20, 0x00, 0x03, 0x00, 0, 0 };
+	FrameUpdate fu;
+	fu.health = 100;
+	InGameMessage frame;
+	frame.frame_index = 4;
+	frame.dir = 'S';
+	frame.tag = s2c::PER_FRAME_UPDATE;
+	frame.session = 32776;
+	frame.participant = 1;
+	frame.payload = encode_frame_update(fu);
+	CaptureDecodeResult decoded;
+	decoded.messages = { summary, frame };
+	const std::map<int, uint64_t> stamps;
+
+	wire::ParityTrace unnamed;
+	wire::ParityTraceCollector unnamed_collector(unnamed);
+	wire::ParityTraceBuilder refused(unnamed_collector, nullptr, nullptr);
+	refused.push_decoded(decoded, stamps);
+	expect(!refused.error().empty() && unnamed.frames.empty(),
+			"an objective frame with no protocol known stops the trace");
+
+	wire::ParityTrace named;
+	wire::ParityTraceCollector named_collector(named);
+	wire::ParityTraceBuilder decodes(named_collector, nullptr, title_protocol("jo"));
+	decodes.push_decoded(decoded, stamps);
+	expect(decodes.error().empty() && named.frames.size() == 1,
+			"an objective frame decodes under the named protocol");
 }
 
 } // namespace
@@ -245,7 +290,7 @@ int main(int argc, char **argv) {
 		return 1;
 	{
 		wire::ParityTracePrinter printer(lib_out);
-		wire::ParityTraceBuilder builder(printer);
+		wire::ParityTraceBuilder builder(printer, nullptr, nullptr); // the hello names the protocol
 		const bool read = net::stream_pcap_udp_file(fixture, [&](const net::PcapDatagram &d) {
 			builder.push(d);
 			return true;
@@ -254,7 +299,8 @@ int main(int argc, char **argv) {
 	}
 	std::fclose(lib_out);
 	wire::ParityTrace trace;
-	expect(wire::read_parity_trace(fixture, nullptr, trace), "read_parity_trace reads the fixture");
+	expect(wire::read_parity_trace(fixture, nullptr, trace, error),
+			"read_parity_trace reads the fixture");
 
 	std::string lib_text;
 	expect(io::read_file_text(lib_path, lib_text, error), "read back the library output");
@@ -313,6 +359,7 @@ int main(int argc, char **argv) {
 	}
 
 	test_round_lines(dir);
+	test_objective_frame_needs_protocol();
 
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

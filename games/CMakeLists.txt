@@ -22,8 +22,6 @@ add_library(opennova_games STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/acidgambit/acidgambit_title.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/acidgambit/acidgambit_protocol.cpp
     # the unwitnessed titles, refused by name
-    ${CMAKE_CURRENT_SOURCE_DIR}/jodemo/jodemo_title.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/jodemo/jodemo_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dfx/dfx_title.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dfx/dfx_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bhd/bhd_title.cpp
@@ -48,7 +46,6 @@ add_library(opennova_games_rules STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/jo/jo_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dfx2/dfx2_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/acidgambit/acidgambit_rules.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/jodemo/jodemo_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dfx/dfx_rules.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bhd/bhd_rules.cpp
 )

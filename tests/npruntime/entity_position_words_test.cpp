@@ -32,6 +32,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 #include <runtime/mission/promote.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/ai.h>
@@ -562,6 +563,7 @@ int flag_state_streams_the_words() {
 	ctx.world = world.get();
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = opennova::title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ctx.config.flag_reset_seconds = 1;
 	ctx.config.permanent_death = true;

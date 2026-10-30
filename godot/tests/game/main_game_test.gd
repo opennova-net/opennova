@@ -10,9 +10,6 @@ const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
 const STATE_CONFIG_PATH := "user://opennova.cfg"
 static var FIXTURE_DIR := RuntimeFixture.directory()
-const POLICY_FILE := "policy.bin"
-const POLICY_PLAIN := "explicit /game title reached the mounted root"
-const SCR_KEY_DEFAULT := 0xabee_face
 
 var _config: TestFs.Snapshot
 var _temp_dir := ""
@@ -349,7 +346,7 @@ func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 
 
 func test_root_render_measurement_releases_on_capture_close_and_tree_exit() -> void:
-	_shell = await _make_packed_shell("jodemo")
+	_shell = await _make_packed_shell("jo")
 	if _shell == null:
 		return
 	var board: FrameStats = _shell.get_frame_stats()
@@ -374,22 +371,6 @@ func test_root_render_measurement_releases_on_capture_close_and_tree_exit() -> v
 	# closed so the next process frame cannot re-arm measurement.
 	parent.add_child(_shell)
 	board.set_capture_active(false)
-
-
-func test_runtime_root_honors_the_explicit_game_profile() -> void:
-	_shell = await _make_packed_shell("jodemo")
-	if _shell == null:
-		return
-	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
-	assert_not_null(menu_shell.get_driver(),
-			"the packed fixture boots the public menu shell")
-	if menu_shell.get_driver() == null:
-		return
-	var root: ResourceRoot = menu_shell.get_resource_root()
-	assert_not_null(root, "the live menu exposes its mounted runtime root")
-	if root != null:
-		assert_eq(root.read_file(POLICY_FILE).get_string_from_utf8(), POLICY_PLAIN,
-				"the explicit /game title selects the root's SCR policy")
 
 
 func test_mission_text_effect_reaches_hud_objective() -> void:
@@ -620,10 +601,6 @@ func _make_packed_shell(game_code: String):
 		var bytes := FileAccess.get_file_as_bytes(fixture_path.path_join(filename))
 		assert_false(bytes.is_empty(), "%s is available in the committed fixture" % filename)
 		entries.append({"name": filename, "bytes": bytes})
-	entries.append({
-		"name": POLICY_FILE,
-		"bytes": _scr_wrap_default_key(POLICY_PLAIN.to_utf8_buffer(), 1),
-	})
 	WorldFixture.write_pff(self, _temp_dir.path_join("resource.pff"), entries)
 
 	LaunchFlags.set_args_override(PackedStringArray([
@@ -635,33 +612,3 @@ func _make_packed_shell(game_code: String):
 	add_child(shell)
 	await get_tree().process_frame
 	return shell
-
-
-func _u32(value: int) -> int:
-	return value & 0xffff_ffff
-
-
-func _rol32(value: int, shift: int) -> int:
-	value = _u32(value)
-	return _u32((value << shift) | (value >> (32 - shift)))
-
-
-func _xor_scr_keystream(bytes: PackedByteArray, key: int) -> PackedByteArray:
-	var out := bytes.duplicate()
-	for index in range(out.size()):
-		key = _u32(_rol32(_u32(key + _rol32(key, 11)), 4) ^ 1)
-		out[index] = int(out[index]) ^ (key & 0xff)
-	return out
-
-
-func _scr_wrap_default_key(plain: PackedByteArray, version: int) -> PackedByteArray:
-	var payload := _xor_scr_keystream(plain, SCR_KEY_DEFAULT)
-	var out := PackedByteArray()
-	out.resize(4 + payload.size())
-	out[0] = 83 # S
-	out[1] = 67 # C
-	out[2] = 82 # R
-	out[3] = version
-	for index in range(payload.size()):
-		out[4 + index] = payload[payload.size() - 1 - index]
-	return out

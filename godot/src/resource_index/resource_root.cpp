@@ -341,8 +341,8 @@ String mount_title_code(const String &game_code) {
 } // namespace
 
 Error ResourceRoot::set_root_dir(const String &path, const String &p_game_code) {
-	// Loose-source mount: never open PFF archives. The game it is mounted as names its title and
-	// its SCR policy, as a runtime mount's does.
+	// Loose-source mount: never open PFF archives. The game it is mounted as names its title, as a
+	// runtime mount's does.
 	const String game_code = mount_title_code(p_game_code);
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
@@ -359,7 +359,6 @@ Error ResourceRoot::set_root_dir(const String &path, const String &p_game_code) 
 			last_error_ = String(index_.last_error().c_str());
 			return ERR_CANT_OPEN;
 		}
-		index_.set_scr_policy(opennova::title_scr_policy_for_code(game_code.to_lower().utf8().get_data()));
 		game_code_ = game_code;
 		last_error_ = String();
 		mount_kind_ = MountKind::Loose;
@@ -378,11 +377,27 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 	const opennova::ExpansionLoadPoint load_point = mount_kind_ == MountKind::Runtime
 			? opennova::ExpansionLoadPoint::ArchivesOpen
 			: opennova::ExpansionLoadPoint::ArchivesClosed;
-	const Error err = mount_runtime_archives_(path, expansion, allow_loose_override, game_code);
-	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion).
-	if (err == OK)
-		opennova::world::set_pool_capacities(
-				opennova::world::pool_capacities_for_expansion(opennova::to_std(expansion_)));
+	Error err = mount_runtime_archives_(path, expansion, allow_loose_override, game_code);
+	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion),
+	// each capped at what the title's protocol can name (ProtocolInMatch::pool0_wire_capacity). A
+	// title whose protocol is unknown or unwitnessed (protocol(): resolve_title_protocol, its
+	// in-match branches among it) runs no game, so its mount fails, named: the runtime's launch
+	// refuses such a `/game` before it mounts (LaunchFlags::product_supported).
+	if (err == OK) {
+		std::string refusal;
+		const opennova::Protocol *spoken = protocol(refusal);
+		if (spoken == nullptr) {
+			const String code = game_code_;
+			clear();
+			last_error_ = "/game " + code + ": " + opennova::to_gd(refusal);
+			err = ERR_UNAVAILABLE;
+		} else {
+			opennova::world::set_pool_capacities(opennova::world::pool_capacities_for_expansion(
+					opennova::to_std(expansion_),
+					opennova::world::wire_pool_capacities(
+							opennova::protocol_in_match(spoken).pool0_wire_capacity)));
+		}
+	}
 	expansion_override_table_ = PackedByteArray();
 	std::vector<uint8_t> table;
 	if (err == OK &&

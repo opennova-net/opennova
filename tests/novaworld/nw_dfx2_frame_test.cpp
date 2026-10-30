@@ -59,7 +59,6 @@ void title_rows() {
 	const Protocol *dfx2 = title_protocol("dfx2");
 	expect(!protocol_in_match(jo).objective_checkpoint && protocol_in_match(dfx2).objective_checkpoint,
 	       "DFX2-1 is DFX2's branch alone");
-	expect(!protocol_in_match(nullptr).objective_checkpoint, "no title reads JO's");
 	expect(frame_objective_body(false, true) == FrameObjectiveBody::None &&
 	               frame_objective_body(true, false) == FrameObjectiveBody::Values &&
 	               frame_objective_body(true, true) == FrameObjectiveBody::ValuesAndCheckpoint,

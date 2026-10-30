@@ -82,7 +82,7 @@ struct ProblemsService::BlockerMemo {
 	          const ShippedFiles &shipped_now) const {
 		return made && serial_now != 0 && serial == serial_now && requirements == requirements_now &&
 		       target.expansion == target_now.expansion && target.install == target_now.install &&
-		       target.game == target_now.game && target.base_project == target_now.base_project &&
+		       target.base_project == target_now.base_project &&
 		       target.gate_tag_file == target_now.gate_tag_file && target.version_file == target_now.version_file &&
 		       base_files == base_now &&
 		       shipped.original == shipped_now.original && shipped.unsaved == shipped_now.unsaved;

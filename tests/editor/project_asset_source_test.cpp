@@ -214,7 +214,7 @@ static int test_load_in_place() {
 	TEST_EXPECT(entry != nullptr);
 	if (!entry) return 1;
 	ProjectAssetSource assets;
-	assets.set_scan(root, scan, project.target_game);
+	assets.set_scan(root, scan);
 	auto menu = std::make_shared<MnuDocument>();
 	TEST_EXPECT(menu->load(file, relative, entry->kind, project.target_game, error));
 	assets.set_open({menu});

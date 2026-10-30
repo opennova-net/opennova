@@ -85,13 +85,6 @@ Protocol make() {
 	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0ce0 (dfx2.exe) - the HostSetup list's
 	//  DFXCATEGORY1 @0x4d0e8a..0x4d0eb1, the Host list's @0x4d0faf..0x4d0fd5]
 	p.host_category_var = true;
-	// NovaLogic's live gate answered the DFX2 tag with no POST pair, an http://[domainname]
-	// startupurl and a TimeOnGateServer line (docs/titles/dfx2-vs-jo-re.md §6.5): the reply the
-	// service's gate gives this protocol. [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the
-	//  in-use word's skip of the POST tests @0x4CF541 / @0x4CF5A0, no key for TimeOnGateServer
-	//  (dfx2.exe's twin @0x4CEEB0 identical); Mission_DeobfuscateDescription @0x4CDAA0 -
-	//  [DOMAINNAME] @0x4CDB88, called from CNapiGameSession_OnNovaWorldConnected @0x4D1665]
-	p.gate_reply_witnessed = true;
 	// dfx2_0_login.mnx's submit is LOGIN (its FORM_POST to NWLogin.dll).
 	p.sign_in_submit = "LOGIN";
 	return p;

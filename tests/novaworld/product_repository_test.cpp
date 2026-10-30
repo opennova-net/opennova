@@ -777,14 +777,14 @@ int test_lobby_selection() {
 					resolve_title_protocol("jo", why)->gate_tag_keys, decoded) &&
 			decoded == "on:" + std::to_string(lobby->id));
 	// A lobby is made for the protocol a title speaks: OP: Acid Gambit's title JO's, from Acid
-	// Gambit's template; a title whose protocol is unwitnessed (the JO demo's) gets none.
+	// Gambit's template; a title whose protocol is unwitnessed (DFX's) gets none.
 	{
 		const std::string made = catalog::create_lobby(db, "Gambit lobby", "acidgambit");
 		const catalog::GameCatalog now = catalog::GameCatalog::load(db);
 		const catalog::GameRow *row = now.by_slug(made);
 		TEST_EXPECT(row && row->protocol == "jo" && row->pfid == "100" &&
 				row->start_page == "acidgambit_0_start.htm");
-		TEST_EXPECT(catalog::create_lobby(db, "Demo lobby", "jodemo").empty() &&
+		TEST_EXPECT(catalog::create_lobby(db, "DFX lobby", "dfx").empty() &&
 				catalog::create_lobby(db, "No lobby", "nogame").empty());
 		db.exec("DELETE FROM games WHERE slug = $1;", { BindValue(made) });
 	}
@@ -821,7 +821,7 @@ int test_lobby_selection() {
 			catalog::lobby_available(db, "extra_0_consumer", "jo", admin) &&
 			catalog::lobby_available(db, "extra_0_consumer", "acidgambit", admin) &&
 			!catalog::lobby_available(db, "extra_0_consumer", "dfx2", admin) &&
-			!catalog::lobby_available(db, "extra_0_consumer", "jodemo", admin) &&
+			!catalog::lobby_available(db, "extra_0_consumer", "dfx", admin) &&
 			!catalog::lobby_available(db, "extra_0_consumer", "nogame", admin));
 	patch.lobby = "extra_0_consumer";
 	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::InvalidLobby);

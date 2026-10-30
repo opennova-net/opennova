@@ -1,6 +1,6 @@
 # Base compose for the OpenNova NovaWorld service's six programs, each its own
 # image (one Dockerfile, a runtime target per program), plus the web portal:
-#   novaworld-gate        the gate (UDP 7597; the hosts' status blobs land there)
+#   novaworld-gate        the gate (UDP 7597)
 #   novaworld-lobby       a lobby instance (UDP 64206)
 #   novaworld-web         the HTTP routes (8080: the retail NW*.dll and .gsb
 #                         routes, the website's API behind the portal)
@@ -56,9 +56,9 @@ x-novaworld: &novaworld
 
 # Every program's settings. A program reads what it needs; the rest is unused.
 x-novaworld-env: &novaworld-env
-  # The gate's public address (POSTIPADDRESS: where clients and host status
-  # blobs land) and the ports the programs listen on (unset: 7597, 64206,
-  # 8080), and every program's health port (unset: 8081).
+  # The gate's public address (where clients land) and the ports the programs
+  # listen on (unset: 7597, 64206, 8080), and every program's health port
+  # (unset: 8081).
   ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-127.0.0.1}
   ONNET_GATE_UDP_PORT: ${ONNET_GATE_UDP_PORT:-}
   ONNET_NW_UDP_PORT: ${ONNET_NW_UDP_PORT:-}

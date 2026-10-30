@@ -7,6 +7,7 @@
 #include <vector>
 #include <formats/def/def.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/protocol/protocol.h>
 #include <runtime/hud/hud_bay_logos.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/inset_scope.h>
@@ -665,6 +666,7 @@ static void parser_and_received_feedback() {
 	}
 	def::def_free_weapons(&defs);
 	replication::ClientReplicaPipeline peer;
+	peer.set_protocol(title_protocol("jo"));
 	auto receive = [&](uint8_t flags) {
 		FrameUpdate frame;
 		frame.flags1 = flags;
@@ -706,8 +708,10 @@ static void sent_feedback() {
 	conn.transport = &transport;
 	conn.owned_entity = owner;
 	replication::ClientReplicaPipeline peer;
+	peer.set_protocol(title_protocol("jo"));
 	auto send = [&]() {
-		CHECK(replication::emit_connection_s2c(world, conn, {}));
+		CHECK(replication::emit_connection_s2c(world, conn, {}, 0, 0, 0, 0,
+				title_protocol("jo")));
 		replication::Datagram packet;
 		CHECK(transport.client_recv(packet));
 		peer.apply(packet.tag, packet.body);

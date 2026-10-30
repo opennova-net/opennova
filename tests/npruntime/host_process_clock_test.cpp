@@ -24,6 +24,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/session_ping.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -65,7 +66,9 @@ struct ClockHost {
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 		inmatch::GameConfig config;
 		config.max_players = 4;
-		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+		inmatch::SessionStartup startup;
+		startup.protocol = title_protocol("jo");
+		inmatch::create_session(ctx, config, startup, nullptr);
 		ctx.process_clock_ms = [this] { return clock; };
 		world.rules.mp_session = true;
 		world.registry.configure_pool(0, 8);
@@ -305,6 +308,7 @@ void test_deploy_idle_reads_the_process_clock() {
 	w::World &world = *world_owner;
 	uint32_t clock = 70000;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.is_in_session = 1;
 	ctx.config.max_players = 4;
 	ctx.network_quality_broadcast_countdown = 100;

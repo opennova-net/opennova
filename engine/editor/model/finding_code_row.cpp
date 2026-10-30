@@ -431,6 +431,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::NovaWorldRefused, code("novaworld.refused", G::NovaWorld) },
 	{ C::NovaWorldFailed, code("novaworld.failed", G::NovaWorld) },
 	{ C::NovaWorldConflicts, code("novaworld.conflicts", G::NovaWorld) },
+	// An export_heights that cannot land: a value of no key it takes, a file not a .raw or inside the project, a
+	// file no .cpt of the project, a .cpt that does not read, a write the disk refuses.
+	{ C::HeightsExport, code("terrain_heights.export", G::TerrainHeights) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

@@ -119,7 +119,8 @@ void test_windows_show_the_gate() {
 	v.project.root = "C:/mods/Gate";
 	v.documents.open = {a, b};
 	editor_test::own(v.project.scan).entries = {file_entry("a.mnu", a->path(), AssetKind::Menu), file_entry("b.mnu", b->path(), AssetKind::Menu),
-	                  file_entry("logo.png", "art/logo.png", AssetKind::ImportSource)};
+	                  file_entry("logo.png", "art/logo.png", AssetKind::ImportSource),
+	                  file_entry("Tmap.cpt", "terrain/Tmap.cpt", AssetKind::TerrainPolyData)};
 	editor_test::own(v.project.scan).index();
 	ImportedSource logo;
 	logo.source = "art/logo.png";
@@ -159,15 +160,16 @@ void test_windows_show_the_gate() {
 	const ImGuiID tab = document_tab_id(a->path());
 	const ImGuiID summary = item_id(Ui::window_id("Problems"), {v.project.root.c_str(), "required"});
 
-	// Where a right click opens a file's menu: a.mnu's row and logo.png's.
+	// Where a right click opens a file's menu: a.mnu's row, logo.png's and Tmap.cpt's.
 	const ImGuiWindow *files_window = ImGui::FindWindowByName("Files");
 	CHECK(files_window != nullptr, "the Files window");
 	if (!files_window) return;
 	const float x = files_window->Pos.x + files_window->Size.x * 0.3f;
 	const float top = files_window->Pos.y, bottom = files_window->Pos.y + files_window->Size.y;
-	ImVec2 a_row, logo_row;
+	ImVec2 a_row, logo_row, cpt_row;
 	CHECK(hover_find(ui, item_id(table, {"menus", "menus/a.mnu", "##row"}), x, top, bottom, a_row), "a.mnu's row");
 	CHECK(hover_find(ui, item_id(table, {"art", "art/logo.png", "##row"}), x, top, bottom, logo_row), "logo.png's row");
+	CHECK(hover_find(ui, item_id(table, {"terrain", "terrain/Tmap.cpt", "##row"}), x, top, bottom, cpt_row), "Tmap.cpt's row");
 	ui.away();
 
 	const auto menu = [&ui](const char *name, std::initializer_list<const char *> items, EditorRequestKind raised) {
@@ -316,6 +318,8 @@ void test_windows_show_the_gate() {
 	         nullptr},
 	        {"a file's Show in folder", K::RevealPath,
 	         file_menu(a_row, "menus", "menus/a.mnu", "Show in folder", K::RevealPath), nullptr},
+	        {"Tmap.cpt's Export heights...", K::ExportHeights,
+	         file_menu(cpt_row, "terrain", "terrain/Tmap.cpt", "Export heights...", K::PickFile), nullptr},
 	        {"logo.png's Import again", K::Reimport, file_menu(logo_row, "art", "art/logo.png", "Import again", K::Reimport),
 	         nullptr},
 	        {"Problems' Create", K::CreateMissing,

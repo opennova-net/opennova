@@ -1,6 +1,5 @@
 #include "bhd.h"
 
-#include <base/vfs/vfs_decode.h>
 #include <formats/gamecfg/game_cfg.h>
 
 #include <games/jo/jo.h>
@@ -13,7 +12,6 @@ Title make() {
 	Title t;
 	t.code = "bhd";
 	t.display_name = "Delta Force: Black Hawk Down";
-	t.scr_policy = VFS_SCR_VERSION_DETECT;
 	t.config_table = gamecfg::ConfigTable::Jo;
 	// Unwitnessed: no binary of the title was read for its player caps (DFX2-8's sites), so it
 	// keeps Joint Operations', as it runs Joint Operations' rules.

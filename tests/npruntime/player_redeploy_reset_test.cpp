@@ -475,7 +475,8 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 		return false;
 	motor->inf.stance = w::InfantryState::Stance::kCrouch;
 	world->entity_update_counter = 1;
-	inmatch::Server_ReleasePlayerDeployment(ctx.config, own, *world, w::EntityHandle{}, 0xFFFF);
+	inmatch::Server_ReleasePlayerDeployment(ctx.config, own, *world, w::EntityHandle{}, 0xFFFF,
+	                                        nullptr, ctx.np_protocol.identity);
 	body = world->registry.get(body_h);
 	if (!expect(body != nullptr && body->alive && (body->flags & w::kEntityFlagDead) == 0u,
 	            "deploy: the body is deployed")) return false;

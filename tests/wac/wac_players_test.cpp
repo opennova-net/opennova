@@ -11,6 +11,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/session_hello.h>
+#include <net/protocol/protocol.h>
 #include <formats/wac/command.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
@@ -181,7 +182,9 @@ struct HostFixture : Fixture {
         nm::set_connection_mode(ctx, nm::ConnectionMode::HostOnly);
         nm::GameConfig config;
         config.max_players = 4;
-        nm::create_session(ctx, config, {}, nullptr);
+        nm::SessionStartup startup;
+        startup.protocol = opennova::title_protocol("jo");
+        nm::create_session(ctx, config, startup, nullptr);
         ctx.world = &world;
         actor = spawn(10, 0);
         nm::NapiNPConnection conn;

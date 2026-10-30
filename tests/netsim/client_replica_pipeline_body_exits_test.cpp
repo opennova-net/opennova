@@ -26,6 +26,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 #include <runtime/terrain_query/height_field.h>
@@ -139,6 +140,7 @@ std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
 std::unique_ptr<ns::ClientReplicaPipeline> make_view(opennova::world::IRootMotionSource &src,
 		bool remote_motion = true) {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	view->set_protocol(nw::title_protocol("jo"));
 	view->set_remote_motion_mode(remote_motion);
 	view->set_root_motion_source(&src);
 	view->set_item_class_resolver([](uint16_t type) -> ns::ClientReplicaPipeline::ItemClassResolution {

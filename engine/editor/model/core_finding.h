@@ -250,6 +250,7 @@ enum class CoreFinding {
 	NovaWorldRefused,      // ADR 0069, appended: a NovaWorld request that cannot run now
 	NovaWorldFailed,       // a NovaWorld job that failed: the service's or the folder's reason
 	NovaWorldConflicts,    // a pull that stopped on conflicts for the author to settle
+	HeightsExport,         // appended
 	kCount
 };
 inline constexpr size_t kCoreFindingCount = static_cast<size_t>(CoreFinding::kCount);

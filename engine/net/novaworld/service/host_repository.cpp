@@ -4,7 +4,6 @@
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -300,68 +299,6 @@ std::map<uint32_t, std::vector<HostRosterSlot>> list_rosters(
 	for (const auto &r : rows)
 		out[static_cast<uint32_t>(r.as_int(0).value_or(0))].push_back(row_to_slot(r, 1));
 	return out;
-}
-
-bool apply_status_blob(opennova::db::Database &db, const LobbyStatusBlob &blob) {
-	if (blob.host_key.empty()) return false;
-	// One transaction for the read-modify-write: the row and its roster change
-	// together, and the read locks the row to the commit (FOR NO KEY UPDATE), so
-	// no ClientHostUpdate commits between this read and this write (and is
-	// overwritten with the columns the read saw): one in flight is waited for,
-	// and the read then returns the row it wrote. The lobby's own write of the
-	// row (lobby_session.cpp persist_host) takes the row's lock first too, so
-	// the two never hold the row and its roster crosswise.
-	opennova::db::Transaction tx(db);
-	const auto rows =
-			query_hosts(db, "WHERE host_key=$1 LIMIT 1 FOR NO KEY UPDATE;", { str(blob.host_key) });
-	if (rows.empty())
-		return false;
-	HostRow h = rows.front();
-	auto take = [&blob](std::string &dst, const char *key) {
-		if (auto v = lobby_status_value(blob, key); !v.empty()) dst = v;
-	};
-	take(h.server_name,  "ServerName");
-	take(h.game_type,    "GameType");
-	take(h.mission_name, "MissionName");
-	take(h.region,       "Region");
-	// A count that is no number (or out of int's range) keeps the stored one.
-	if (const auto n = strutil::parse_int(lobby_status_value(blob, "Players"))) h.player_count = *n;
-	if (const auto n = strutil::parse_int(lobby_status_value(blob, "MaxPlayers"))) h.max_players = *n;
-	take(h.dedicated,   "Dedicated");
-	take(h.locked,      "Locked");
-	take(h.skins,       "Skins");
-	take(h.time_left,   "TimeLeft");
-	take(h.password,    "Password");
-	take(h.tracers,     "Tracers");
-	take(h.mod,         "Mod");
-	take(h.country,     "Country");
-	take(h.msg,         "Msg");
-	take(h.age,         "Age");
-	take(h.time_of_day, "TimeOfDay");
-	take(h.pcid_key,    "PCIDKey");
-	take(h.stat,        "Stat");
-	take(h.level_range, "LevelRange");
-	take(h.bb_mode,     "BBMode");
-	take(h.pb_server,   "PBServer");
-	take(h.exp,         "Exp");
-	update_host(db, h);
-	if (blob.send_player_names) {
-		// Inside the roster's bounds (lobby_session.h), as the lobby's own lists.
-		const std::size_t cap = roster_row_cap(h.max_players);
-		std::vector<HostRosterSlot> roster;
-		roster.reserve(std::min(blob.player_names.size(), cap));
-		int slot = 0;
-		for (const auto &name : blob.player_names) {
-			if (roster.size() >= cap) break;
-			HostRosterSlot s;
-			s.slot = slot++;
-			s.player_name = name;
-			roster.push_back(std::move(s));
-		}
-		replace_roster(db, h.rid, roster);
-	}
-	tx.commit();
-	return true;
 }
 
 std::vector<HostRow> list_hosts(opennova::db::Database &db) {

@@ -1070,12 +1070,25 @@ static void test_bms_pool0_used_window_is_the_accepted_count() {
 
 // The running capacities size the load (world::set_pool_capacities): items past
 // retail's 1200 drop under retail's pools and all load under an expansion's scaled
-// ones; any other mount takes retail's. [orig: Game_Run @0x4a7fb0 ->
-// EntityPool_Allocate @0x4a7fc5; Mission_LoadBMSFile @0x40F4E0, pool 1 @0x40f9bb..0x40f9c6]
+// ones, each capped at what the protocol's wire can name (wire_pool_capacities over
+// its pool0_wire_capacity: JO's 256); any other mount takes retail's. [orig: Game_Run
+// @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5; Mission_LoadBMSFile @0x40F4E0, pool 1
+// @0x40f9bb..0x40f9c6]
 static void test_pool_capacities_size_the_load() {
-    CHECK(pool_capacities_for_expansion("RevX02") == scaled_pool_capacities(8));
-    CHECK(pool_capacities_for_expansion("jox01") == kRetailPoolCapacity &&
-          pool_capacities_for_expansion("") == kRetailPoolCapacity);
+    const PoolCapacities wire = wire_pool_capacities(256);
+    CHECK(wire == kWirePoolCapacity);
+    CHECK(pool_capacities_for_expansion("RevX02", wire) == scaled_pool_capacities(8, wire));
+    CHECK(pool_capacities_for_expansion("jox01", wire) == kRetailPoolCapacity &&
+          pool_capacities_for_expansion("", wire) == kRetailPoolCapacity);
+    // A protocol whose person records name 1024 people lets revx02's x8 reach 1024 in
+    // pool 0, the other pools as before; at 256 pool 0 holds 256; a cap past the
+    // handle's 12-bit slot holds 4096.
+    const PoolCapacities wide = pool_capacities_for_expansion("revx02", wire_pool_capacities(1024));
+    CHECK(wide[0] == 1024 && wide[1] == 4096 && wide[2] == 4096 && wide[3] == 4096 &&
+          wide[4] == 1024);
+    CHECK(pool_capacities_for_expansion("revx02", wire)[0] == 256);
+    CHECK(pool_capacities_for_expansion("", wire_pool_capacities(1024)) == kRetailPoolCapacity);
+    CHECK(wire_pool_capacities(std::size_t{1} << 20)[0] == 4096);
     bms::File file;
     for (int32_t i = 0; i < 1214; ++i) {
         file.items.push_back(item(/*type_id=*/164, (i * 4) << 16, 20 << 16, 3 << 16));
@@ -1086,7 +1099,7 @@ static void test_pool_capacities_size_the_load() {
     CHECK(retail->registry.pool_capacity(1) == 1200 && clipped.dropped == 14);
     CHECK(retail->registry.get(EntityHandle::make(1, 1199)) != nullptr);
     CHECK(retail->registry.by_net_id(1000 + 1213) == nullptr);
-    set_pool_capacities(pool_capacities_for_expansion("revx02"));
+    set_pool_capacities(pool_capacities_for_expansion("revx02", wire));
     // Scaled, each capped at what the wire can name: pool 0 at the person byte's 256,
     // pools 1..3 at the handle's 4096 slots.
     CHECK(pool_capacity(0) == 256 && pool_capacity(1) == 4096 && pool_capacity(2) == 4096 &&

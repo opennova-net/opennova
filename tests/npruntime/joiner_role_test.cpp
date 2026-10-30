@@ -999,7 +999,8 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		authority->run_logic_tick(true);
 		if ((tick + 1) % period == 0) {
 			if (!expect(replication::emit_connection_s2c(*authority, connection,
-					replication::snapshot_world(*authority)), "authority emits vehicle update"))
+					replication::snapshot_world(*authority), 0, 0, 0, 0, &kJo),
+					"authority emits vehicle update"))
 				return false;
 			replication::Datagram update;
 			while (channel.client_recv(update)) {

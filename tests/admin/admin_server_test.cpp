@@ -20,6 +20,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h> // hightag::DESCRIPTION_PACKET
 #include <net/npwire/session_hello.h>    // parse_disconnect_event
+#include <net/protocol/protocol.h>       // title_protocol (the host speaks JO's)
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/host_settings.h> // mission_session_title
 #include <runtime/inmatch/server_admin_command.h> // Server_ExecuteServerCommand (SetServerName)
@@ -149,6 +150,7 @@ struct Host {
 	Host() {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		w::MatchRules rules;
 		rules.game_type = 0x10000u;
 		world.match.configure(rules);

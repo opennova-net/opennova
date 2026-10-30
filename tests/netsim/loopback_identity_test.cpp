@@ -23,6 +23,7 @@
 #include <net/npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
+#include <net/protocol/protocol.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
 #include <runtime/world/collision.h>          // CollisionWorld / CollisionModel
@@ -267,6 +268,7 @@ bool run() {
 		return type_id == 0x2000 ? nw::EntityClass::Infantry
 		                         : nw::EntityClass::Unknown;
 	});
+	view.set_protocol(nw::title_protocol("jo"));
 	// The spawn stream's row: a compact 0x0A never creates one
 	// [orig: NapiNPClientMsg_0x00A @0x42FEC0 — the pre-apply check
 	//  @0x4307B1..0x4307FA queues C2S 0x0F and drops the record on a miss].
@@ -339,6 +341,7 @@ bool run_unresolved_carrier_record_drops_whole() {
 	ns::ClientReplicaPipeline view([](uint16_t) {
 		return nw::EntityClass::Player;
 	});
+	view.set_protocol(nw::title_protocol("jo"));
 	view.state().upsert(0x0003).type_id = 0x14B9; // the spawn stream's row
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
 	const ns::ClientEntityState *untouched = view.state().find(0x0003);
@@ -403,6 +406,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 		if (type_id == 0x1500) return nw::EntityClass::Vehicle;
 		return type_id == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Infantry;
 	});
+	view.set_protocol(nw::title_protocol("jo"));
 	// The spawn stream's rows: a compact never creates one.
 	view.state().upsert(0x0001).type_id = 0x14B9;
 	view.state().upsert(0x0002).type_id = 0x2000;
@@ -484,6 +488,7 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 	frame.records.push_back(right);
 
 	ns::ClientReplicaPipeline view([](uint16_t) { return nw::EntityClass::Player; });
+	view.set_protocol(nw::title_protocol("jo"));
 	view.state().upsert(0x0001).type_id = 0x14B9; // the spawn stream's rows
 	view.state().upsert(0x0002).type_id = 0x14B9;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
@@ -569,6 +574,7 @@ bool run_compact_lifecycle_survives_multi_frame_pump() {
 		return type_id == 0x14B9 ? nw::EntityClass::Player :
 				nw::EntityClass::Infantry;
 	});
+	view.set_protocol(nw::title_protocol("jo"));
 
 	// The spawn stream's rows: a compact 0x0A never creates one
 	// [orig: NapiNPClientMsg_0x00A @0x42FEC0, pre-apply check @0x4307B1..0x4307FA].
@@ -659,6 +665,7 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 		return type_id == 0x1004 ? nw::EntityClass::Vehicle : nw::EntityClass::Infantry;
 	};
 	ns::ClientReplicaPipeline view(classify);
+	view.set_protocol(nw::title_protocol("jo"));
 	view.state().upsert(0x0002).type_id = 0x2000; // the spawn stream's rows
 	view.state().upsert(0x1007).type_id = 0x1004;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(frame));
@@ -731,6 +738,7 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 		                         : nw::EntityClass::Infantry;
 	};
 	ns::ClientReplicaPipeline view(classify);
+	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	view.state().upsert(0x0002).type_id = 0x2000; // the spawn stream's rows
 	view.state().upsert(0x1007).type_id = 0x1004;
@@ -794,6 +802,7 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 // parent's full live BAM, not the stale coarse yaw_byte from the last record.
 bool run_no_callback_child_follows_live_parent_heading() {
 	ns::ClientReplicaPipeline view;
+	view.set_protocol(nw::title_protocol("jo"));
 	view.set_item_class_resolver([](uint16_t type_id) {
 		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
 		if (type_id == 0x0666) return nw::EntityClass::NoNetworkCallback;
@@ -892,6 +901,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 	spawn.records.push_back(vehicle);
 
 	ns::ClientReplicaPipeline view;
+	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(0x0D, nw::encode_pool_spawn_batch(spawn));
 	const ns::ClientEntityState *carrier = view.state().find(0x1007);
 	if (!expect(carrier != nullptr && carrier->pitch_bam == 0x23456789 &&
@@ -989,6 +999,7 @@ bool run_parented_pool_spawn_follows_and_hides() {
 	if (!expect(child_h.valid(), "attachment child spawned")) return false;
 
 	ns::ClientReplicaPipeline view;
+	view.set_protocol(nw::title_protocol("jo"));
 	view.set_item_class_resolver([](uint16_t type_id) {
 		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
 		if (type_id == 0x0666) return nw::EntityClass::NoNetworkCallback;
@@ -1149,6 +1160,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	// Seed the carrier through its existing pool-1 spawn before applying the local
 	// infantry sample, matching a real client that has completed load sync.
 	ns::ClientReplicaPipeline view(classify);
+	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
 	const ns::ClientEntityState *decoded_carrier = view.state().find(vh.packed);
 	// The unseeded carrier sends its placement pitch/roll: (15 << 16) / 360 << 16 and
@@ -1206,6 +1218,7 @@ bool run_header_only_records_are_ignored_by_replica_pipeline() {
 	ns::ClientReplicaPipeline view([](uint16_t t) {
 		return t == 0x0465 ? nw::class_from_tag("bldg") : nw::EntityClass::Unknown;
 	});
+	view.set_protocol(nw::title_protocol("jo"));
 	view.pump(channel);
 
 	if (!expect(view.frames_applied() == 1, "header-only frame applied")) return false;

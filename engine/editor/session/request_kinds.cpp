@@ -11,6 +11,7 @@
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/file_chores.h>
+#include <editor/session/heights_export.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/novaworld_controller.h>
@@ -267,6 +268,9 @@ void serve_wave_operation(SessionCore &core, const EditorRequest &request) {
 }
 void serve_music_stream_audio(SessionCore &core, const EditorRequest &request) {
 	core.documents().music_stream_audio(request);
+}
+void serve_export_heights(SessionCore &core, const EditorRequest &request) {
+	if (project_needed(core, "export heights")) export_heights(core, request);
 }
 void serve_correct_line(SessionCore &core, const EditorRequest &request) {
 	correct_source_line(core, request);
@@ -1653,6 +1657,19 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({}, { F::GameInstall }))
 			.holds(kNone, kHoldsAll | kSlot)
 			.guarded(GuardScope::AllDirty, "Make the base game's project", "Save all")
+			.row,
+	// Reads alone: it opens no document and writes no file of the project (session/heights_export.h).
+	Request(K::ExportHeights, "export_heights", serve_export_heights,
+			"The heights of the .cpt at path (left out, the active document) written to the file values.to names (a "
+			"relative one from the project's folder) as the game's 16-bit .raw: 1024 x 1024 little-endian words, the "
+			"top row first, 1/256 of a world unit a step, the atlas as the .cpt holds it, which a terrain import's "
+			"heightmap takes as it is. An open document's unsaved heights are in it, and it opens nothing, so it works "
+			"on an import's .cpt too. Refused, nothing written (terrain_heights.export): a value of no key it takes, a "
+			"values.to not a .raw or inside the project, a file no .cpt of the project or not the file its name reads, "
+			"a .cpt that does not read, a write the disk refuses.")
+			.takes(request_params({ F::Values }, { F::Path }))
+			.holds(kFilesAndDocuments, kNone)
+			.names_active()
 			.row,
 };
 

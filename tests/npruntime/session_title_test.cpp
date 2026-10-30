@@ -12,6 +12,7 @@
 #include <base/gameprofile/game_type.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/session_vars.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -82,6 +83,7 @@ void test_title_rule() {
 
 void test_coop_advertises_the_session_title() {
 	inmatch::NapiNPServerCtx ctx;
+	ctx.np_protocol.identity = title_protocol("jo");
 	// The hosting gate every ServerCommand verb but SetMPReset tests (D-NET-383).
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -135,8 +137,12 @@ void test_the_mission_block_carries_the_session_title() {
 	config.mission_file = "CO01.BMS";
 	config.server_name = "Cfg Host";
 	inmatch::SessionStartup startup;
+	startup.protocol = title_protocol("jo");
 	startup.text_override = &override_table;
 	inmatch::NapiNPServerCtx ctx;
+	// Not the authority, so the create's start_server installs no identity: the map change's
+	// block reads the context's, which names JO's.
+	ctx.np_protocol.identity = startup.protocol;
 	CHECK(inmatch::create_session(ctx, config, startup) == inmatch::CreateSessionResult::Created);
 	CHECK(ctx.session_title == "Desert Storm");
 	CHECK(block_string(ctx.mission_metadata_blob, 84) == "CO01.BMS");

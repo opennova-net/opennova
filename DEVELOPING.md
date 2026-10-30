@@ -252,7 +252,8 @@ scripts/dev_stack.sh down      # stop it; the database stays (reset wipes it and
 ```
 
 `up` finds this machine's LAN address and announces it everywhere (`ONNET_PUBLIC_HOST`: the
-gate's `POSTIPADDRESS`, the lobby's endpoint, web's host); `--address <ipv4>` names another.
+lobby's endpoint, web's host, the hosted servers' master address); `--address <ipv4>` names
+another.
 It is never loopback, since the stack's own containers (the smoke test, the hosted servers)
 reach the published ports there too. It prints what to point a client at when it is up.
 
@@ -371,9 +372,9 @@ ONNET_HEALTH_PORT=8085 ./build/apps/novaworld_data/opennova-novaworld-data
 
 There is no all-in-one binary: each program is its own process (`apps/novaworld_common/README.md`
 "Programs"). The lobby needs `ONNET_LOBBY_ENDPOINT` (the endpoint it announces, which the
-gate hands clients; in a deployment the load balancer's, shared by every lobby); the gate, the lobby and web need
-`ONNET_WEB_HOST` (the address the gate, the lobby and the pages announce for HTTP), and the
-gate `ONNET_PUBLIC_HOST`. On one machine each program but web answers `GET /livez` on its
+gate hands clients; in a deployment the load balancer's, shared by every lobby); the lobby and
+web need `ONNET_WEB_HOST` (the address the lobby and the pages announce for HTTP). On one
+machine each program but web answers `GET /livez` on its
 own `ONNET_HEALTH_PORT`. Hosted servers need machines of their own (containers, or
 cloud machines): run them in the Docker stack above (the in-process tests,
 `hosted_local_e2e`, drive the real agent on one machine).

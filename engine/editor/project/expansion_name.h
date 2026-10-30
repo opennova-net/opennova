@@ -54,8 +54,9 @@ bool check_expansion_name(const std::string &name, ExpansionNameUse use, Diagnos
 
 // A project's expansion as its file may hold it, before any install is asked: none at all (a
 // standalone project), or a name of the rule, and a `builds_on` only with a name and of the rule
-// too (project.field.invalid); and only for the game the expansions were witnessed for, Joint
-// Operations (project.expansion.unsupported: the other profiles' binaries are not researched).
+// too (project.field.invalid); and only for a title whose row says its executable mounts one
+// (Title::expansions; project.expansion.unsupported for any other, whose binary is not researched
+// for it).
 bool check_project_expansion(const std::string &target_game, const ProjectExpansion &expansion,
                              Diagnostic &error);
 

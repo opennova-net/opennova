@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/documents/terrain_heights_document.h>
 #include <editor/documents/til_document.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_camera.h>
@@ -806,9 +807,37 @@ void test_terrain_view_legend() {
 
 } // namespace
 
+// The heights' page: its Export heights... asks the Shell for a file under the .cpt's name as a .raw, and the file
+// picked gets those heights.
+void test_heights_export() {
+	MissionRun run("opennova_editor_ui_heights_export");
+	CHECK(run.open(), "the mission open");
+	const SessionView &v = run.session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(test_io::write_file(v.project.root + "/terrain/Tmap.cpt", test_io::read_file(repo + "/fixtures/terrain/tmap/Tmap.cpt")),
+	      "the heights' file written");
+	run.session.handle(request::rescan());
+	run.session.run_operations();
+	run.session.handle(request::open_document("terrain/Tmap.cpt"));
+	run.session.run_operations();
+	run.settle();
+	run.take();
+	CHECK(run.ui.click_item(item_id(document_tab_id("terrain/Tmap.cpt"), {"Export heights..."})), "the page's Export heights... clicked");
+	run.pump();
+	const std::vector<EditorRequest> raised = run.take();
+	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::PickFile && raised[0].purpose == PickPurpose::HeightsRaw &&
+	              raised[0].path == "Tmap.raw",
+	      "the button asks the Shell for a file, offering the .cpt's name as a .raw");
+	const std::string out = run.dir.file("Tmap.raw");
+	run.ui.windows.deliver_pick(PickPurpose::HeightsRaw, out);
+	run.settle();
+	CHECK(test_io::read_file(out).size() == size_t(kHeightsSide) * kHeightsSide * 2, "the file picked holds the heights");
+}
+
 void run_terrain_tests() {
 	test_terrain_pane();
 	test_sculpt_parts();
+	test_heights_export();
 	test_wire_brush_drag();
 	test_ledger();
 	test_lock_line();
