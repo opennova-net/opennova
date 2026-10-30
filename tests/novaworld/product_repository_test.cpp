@@ -916,6 +916,17 @@ int test_lobby_selection() {
 	}
 	TEST_EXPECT(waited && concurrent.get() == ProductOutcome::LobbyLocked &&
 			find_product(db, race_id)->lobby == race_lobby);
+	// A deleted game's own lobby: a released one's (its selection locked) stays for the installs
+	// that carry it; a never-built one's, which no install names, goes with the game.
+	TEST_EXPECT(delete_product(db, race_id) == ProductOutcome::Ok &&
+			catalog::GameCatalog::load(db).by_slug(race_lobby));
+	game.key = "GONEGAME";
+	int64_t gone_id = 0;
+	TEST_EXPECT(create_product(db, game, gone_id) == ProductOutcome::Ok);
+	const std::string gone_lobby = find_product(db, gone_id)->lobby;
+	TEST_EXPECT(gone_lobby.find("on_") == 0 && !find_product(db, gone_id)->lobby_locked);
+	TEST_EXPECT(delete_product(db, gone_id) == ProductOutcome::Ok &&
+			!catalog::GameCatalog::load(db).by_slug(gone_lobby));
 	return 0;
 }
 

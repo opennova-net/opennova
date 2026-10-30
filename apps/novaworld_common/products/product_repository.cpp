@@ -346,10 +346,13 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 
 ProductOutcome delete_product(db::Database &db, int64_t id) {
 	db::Transaction tx(db);
-	const auto row = db.query("SELECT owner_id, lobby, key FROM products WHERE id = $1 FOR UPDATE;",
+	const auto row = db.query(
+			"SELECT owner_id, lobby, key, lobby_locked FROM products WHERE id = $1 FOR UPDATE;",
 			{ BindValue(id) });
 	if (row.empty())
 		return ProductOutcome::NotFound;
+	const std::string lobby = row.front().as_text(1).value_or("");
+	const bool lobby_locked = row.front().as_int(3).value_or(0) != 0;
 	if (count_live_servers_of(db, id) > 0)
 		return ProductOutcome::InUse;
 	if (!db.query("SELECT 1 FROM products WHERE parent_id = $1;", { BindValue(id) }).empty())
@@ -358,7 +361,14 @@ ProductOutcome delete_product(db::Database &db, int64_t id) {
 			"WHERE id = $1;",
 			{ BindValue(id) });
 	db.exec("DELETE FROM products WHERE id = $1;", { BindValue(id) });
-	// Lobby identities outlive projects and may be shared by other games or local installs.
+	// A lobby a released game's installs carry, or one shared, outlives the game. A lobby this
+	// game created (an on_<id> row) whose selection never locked (no release build of it ever
+	// started, so no install names it) and no other product names goes with it, as a move off
+	// it does (update_product).
+	if (!lobby_locked && !lobby.empty())
+		db.exec("DELETE FROM games WHERE slug = $1 AND starts_with(slug, 'on_') "
+				"AND NOT EXISTS (SELECT 1 FROM products WHERE lobby = $1);",
+				{ BindValue(lobby) });
 	tx.commit();
 	return ProductOutcome::Ok;
 }
