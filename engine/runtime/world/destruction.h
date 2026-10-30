@@ -851,7 +851,12 @@ inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
 //  RenderSlot_CollectReceiverSlots_Stub @0x5D7240, which returns 0]
 bool update_item_destroy_fade(World &world, Entity &entity);
 // The collects' call: update_item_destroy_fade, and a changed row's DrawFadeStamp onto
-// world.out.destruction.draw_fades for the embedder's same-frame stamp.
+// world.out.destruction.draw_fades for the embedder's same-frame stamp. The embedder takes the
+// output after each pass's collects, the main view's and the weapon Inset's alike, so each
+// pass draws what its own collect changed in the frame it ran, as each of retail's passes
+// publishes and then draws in one call [orig: Render_SectorEntity @0x5C4190 -
+// Entity_PublishSwapFadePhases @0x5C4200 ahead of the draw @0x5C4335; Render_WeaponInsetScene
+// @0x5C9740 - its Terrain_RenderWorldScene call @0x5C9DE9].
 void run_draw_husk_leg(World &world, Entity &entity);
 // The husk -> final-husk swap stage of a husked entity holding a final husk, after the
 // fade's publication: in the fade window it draws the final husk beside the husk, at
