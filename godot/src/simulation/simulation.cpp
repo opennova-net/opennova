@@ -638,9 +638,10 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	stamp_admission_limits(options, net_, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	// A map change's next map gates its placements on the slot limit its staging took from the
-	// cfg block (engine inmatch::stage_next_mission), as opennova-serve's does.
-	if (next_mission && net_.staged_player_limit > 0) options.player_limit = net_.staged_player_limit;
-	net_.staged_player_limit = 0;
+	// cfg block (engine inmatch::stage_next_mission, GameConfig::mission_slot_limit), as
+	// opennova-serve's does.
+	if (next_mission && net_.host_session_config.mission_slot_limit.has_value())
+		options.player_limit = static_cast<int32_t>(*net_.host_session_config.mission_slot_limit);
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
 			: opennova::to_std(p_infantry_adm);

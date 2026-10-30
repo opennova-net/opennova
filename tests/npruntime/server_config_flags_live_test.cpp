@@ -255,16 +255,22 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	inmatch::MissionRotation rotation;
 	rotation.map_file = "next.bms";
 	rotation.map_game_type = game_type::kTeamDeathmatch;
-	const inmatch::NextMissionStage stage =
+	const inmatch::GameConfig next =
 			inmatch::stage_next_mission(session, &block, rotation, "Next Map");
-	const inmatch::GameConfig &next = stage.config;
 	inmatch::continue_session(*ctx, next, nullptr);
-	if (!expect(stage.player_limit == 9 && next.max_players == 4 &&
+	if (!expect(next.live_slot_limit() == 9 && next.max_players == 4 &&
 	                    inmatch::stage_next_mission(session, nullptr, rotation, "Next Map")
-	                                    .player_limit ==
-	                            static_cast<int32_t>(session.player_slot_limit()),
+	                                    .live_slot_limit() == session.player_slot_limit(),
 	            "the next map's slot limit is the block's cap and dedicated word, its cap the "
 	            "session's; with no block, the session's slot limit"))
+		return false;
+	// The live session takes it (Game_StartMission's apply stores dword_24D211C @0x551B2B /
+	// @0x551B35), which the lobby's published cap and the mission request block read, while
+	// the slot table keeps the create's capacity (no map-change caller of
+	// Server_InitNewRoundState).
+	if (!expect(ctx->config.live_slot_limit() == 9 &&
+	                    ctx->config.total_player_slot_capacity() == session.player_slot_limit(),
+	            "the map change moves the live slot limit and keeps the slot table's capacity"))
 		return false;
 	return expect((ctx->config.mp_attributes & kTeamChoose) != 0 &&
 	                      ctx->config.round_time_limit_minutes == 30 &&

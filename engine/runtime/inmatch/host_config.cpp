@@ -167,14 +167,13 @@ void apply_mission_start_session_config(GameConfig &config, const gamecfg::GameC
 	config.mission_name = mission_name;
 }
 
-NextMissionStage stage_next_mission(const GameConfig &session, const gamecfg::GameCfg *block,
+GameConfig stage_next_mission(const GameConfig &session, const gamecfg::GameCfg *block,
 		const MissionRotation &rotation, const std::string &mission_name) {
-	NextMissionStage out;
-	out.config = session;
-	apply_mission_start_session_config(out.config, block, rotation, mission_name);
-	out.player_limit = static_cast<int32_t>(block != nullptr
+	GameConfig out = session;
+	apply_mission_start_session_config(out, block, rotation, mission_name);
+	out.mission_slot_limit = block != nullptr
 			? host_player_slot_limit(block->mp_max_players, block->dedicated == 0, *session.title)
-			: session.player_slot_limit());
+			: session.live_slot_limit();
 	return out;
 }
 

@@ -92,14 +92,11 @@ void Simulation::stage_next_mission_session_config(const opennova::bms::File &p_
 	// inmatch::stage_next_mission carries the witness): the kept session config with the
 	// process's cfg block as it stands over it, so what a remote admin's SET wrote into it
 	// reaches the next mission, the rotation's map and mode, and the live slot limit the
-	// block's words give the next map's placements.
-	const opennova::inmatch::NextMissionStage stage = opennova::inmatch::stage_next_mission(
-			net_.host_session_config,
+	// block's words give the next map (GameConfig::mission_slot_limit).
+	net_.host_session_config = opennova::inmatch::stage_next_mission(net_.host_session_config,
 			net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr,
 			net_.rotation().list, p_document.get_mission_name());
-	net_.host_session_config = stage.config;
 	net_.host_session_config.spawn_names.clear();
-	net_.staged_player_limit = stage.player_limit;
 }
 
 // A map change's head runs on the session the map change latched, over the next map's document

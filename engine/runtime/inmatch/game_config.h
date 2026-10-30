@@ -566,14 +566,33 @@ struct GameConfig {
 	uint32_t lan_mode = 1;
 	std::optional<uint32_t> send_holdoff_ticks;
 
-	// The live player-slot limit: max_players plus the dedicated host's own
-	// slot (host_player_slot_limit). The slot table is allocated with it, the
-	// BMS placements are gated by it and the lobby publishes it, less that
-	// slot for a dedicated host; nothing advertises or admits against it.
-	// [orig: dword_24D211C, Game_ApplySessionSettingsToGlobals
-	//  @0x551B20..0x551B48; Server_InitNewRoundState @0x51C976;
-	//  Server_InitPlayerSlotSystem @0x4243B2; Entity_SpawnFromBMSRecord @0x40EA86]
+	// The session create's player-slot limit: max_players plus the dedicated
+	// host's own slot (host_player_slot_limit), the create's cap and server type.
+	// The slot table is allocated with it (total_player_slot_capacity); the live
+	// limit starts as it (live_slot_limit).
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState
+	//  @0x5695B3 (the store @0x51C976), then Game_ApplySessionSettingsToGlobals @0x5695B8
+	//  (@0x551B20..0x551B48)]
 	uint32_t player_slot_limit() const;
+
+	// The limit a map change's mission start recomputed from the cfg block as it then stood
+	// (stage_next_mission), unset until a map change: a remote admin's SET of the cap or the
+	// server type between maps moves it, while the session's cap and its slot table stay the
+	// create's. [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals
+	//  @0x524662 under the first-load flag @0x52465E (the store @0x551B2B / @0x551B35, the
+	//  ceiling @0x551B3B..0x551B48); Server_InitNewRoundState has no map-change caller (its
+	//  callers: Game_InitSubsystems @0x4A6D76, CNapiGameSession_FullDestroy @0x4C9780,
+	//  SinglePlayer_StartMission @0x561C23, CNapiGameSession_BuildAndCreateSession @0x5695B3)]
+	std::optional<uint32_t> mission_slot_limit;
+
+	// The live player-slot limit (dword_24D211C): the map change's when one ran, else the
+	// create's. The BMS placements are gated by it, the lobby publishes it and the mission
+	// request block names it, less that slot for a dedicated host, and the status page draws
+	// its rows to it; nothing advertises or admits against it.
+	// [orig: dword_24D211C - Entity_SpawnFromBMSRecord @0x40EA86, Lobby_UpdateServerInfo
+	//  @0x4FEB03, Client_BuildMissionDataRequestBlock @0x51E897, Server_DrawStatusScreen
+	//  @0x50A49A, Server_BuildStatusString @0x4FDF10, Server_InitPlayerSlotSystem @0x4243B2]
+	uint32_t live_slot_limit() const { return mission_slot_limit.value_or(player_slot_limit()); }
 
 	// The fixed player-slot table: the slot limit alone, a spectator taking an
 	// ordinary row (D-NET-401). A limit past 65, which retail's allocator refuses

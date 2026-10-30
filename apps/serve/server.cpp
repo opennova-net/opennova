@@ -748,17 +748,14 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// over it and the live slot limit from the block, as the game's map change stages it
 	// (inmatch/host_config.h stage_next_mission).
 	inmatch::GameConfig config;
-	int32_t player_limit = 0;
 	if (next_mission) {
-		const inmatch::NextMissionStage stage = inmatch::stage_next_mission(
+		config = inmatch::stage_next_mission(
 				session_config_, &config_.cfg(), list, doc.get_mission_name());
-		config = stage.config;
-		player_limit = stage.player_limit;
 	} else {
 		config = inmatch::host_screen_from_block(config_.cfg(), *config_.title()).config;
 		inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
-		player_limit = static_cast<int32_t>(config.player_slot_limit());
 	}
+	const int32_t player_limit = static_cast<int32_t>(config.live_slot_limit());
 	config.expansion = index_.mounted_expansion();
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
@@ -1011,7 +1008,7 @@ HostRegistration Server::listing_columns() const {
 	r.server_name = config.server_name;
 	r.server_message = config.custom_text;
 	r.max_players = host_.player_limit;
-	r.published_cap = static_cast<int>(config.player_slot_limit());
+	r.published_cap = static_cast<int>(config.live_slot_limit());
 	r.password = !config.server_password.empty();
 	r.listen_host = false;
 	r.lan_only = config_.cfg().mp_novaworld_host_lan_only != 0 ? 1 : 0;
