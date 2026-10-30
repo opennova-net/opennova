@@ -885,6 +885,15 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	const bool source = entry.kind == AssetKind::ImportSource;
 	if (source && ImGui::MenuItem("Import again", nullptr, false, reimports) && reimports)
 		workspace_.request(request::reimport(entry.relative_path, true));
+	if (entry.kind == AssetKind::TerrainPolyData) {
+		const bool exports = view.allows(EditorRequestKind::ExportHeights);
+		if (ImGui::MenuItem("Export heights...", nullptr, false, exports) && exports) {
+			EditorRequest pick = request::pick_file(PickPurpose::HeightsRaw);
+			pick.path = entry.relative_path;
+			workspace_.request(std::move(pick));
+		}
+		ui_kit::tooltip("Writes its 1024 x 1024 heights to a 16-bit .raw outside the project, which a terrain import reads.");
+	}
 	ImGui::EndPopup();
 }
 
