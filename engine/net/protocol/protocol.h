@@ -73,6 +73,11 @@ struct ProtocolInMatch {
 	bool chat_squad_tag_wrapped = false;
 	// DFX2-18: the bits the mission-data block's rules word (+44) is ORed with.
 	uint32_t rules_word_bits = 0;
+	// D-SIM-52: the people the S2C person records can name, pool 0's cap however a mount scales
+	// it (world::wire_pool_capacities). Each names a person by the one-byte pool-0 index
+	// (pool0_index_byte, runtime/world/entity.h): the 0x1E, 0x2D, 0x6D and 0x33 records, and
+	// 0x46's entity byte. 256 in JO's and DFX2's.
+	uint32_t pool0_wire_capacity = 256;
 };
 
 struct Protocol {

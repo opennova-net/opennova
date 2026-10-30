@@ -187,6 +187,7 @@ std::string bump_rule_row(const char *title_code) {
 			" cd_key=" + std::to_string(protocol->cd_key != nullptr) +
 			" chat_squad_tag_wrapped=" + std::to_string(m.chat_squad_tag_wrapped) +
 			" rules_word_bits=" + rules_word +
+			" pool0_wire_capacity=" + std::to_string(m.pool0_wire_capacity) +
 			" | waypoint_goals_met_advance=" + std::to_string(r.waypoint_goals_met_advance) +
 			" waypoint_advance_needs_done=" + std::to_string(r.waypoint_advance_needs_done) +
 			" route_done_records=" + std::to_string(r.route_done_records) +
@@ -200,16 +201,18 @@ void bump_rule_row_per_game() {
 	const std::string jo =
 			"objective_checkpoint=0 spawn_zone_flag_always=0 armory_only_availability=2 "
 			"join_state_fixed=0 loadout_class_fixed=0 cd_key=0 chat_squad_tag_wrapped=0 "
-			"rules_word_bits=0x0 | waypoint_goals_met_advance=1 waypoint_advance_needs_done=0 "
-			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
-			"narrow_still_player_radius=0 spawn_kit=jo_single_player_page";
+			"rules_word_bits=0x0 pool0_wire_capacity=256 | waypoint_goals_met_advance=1 "
+			"waypoint_advance_needs_done=0 route_done_records=0 emplaced_turret_update=0 "
+			"emplaced_solo_planar_slew=0 narrow_still_player_radius=0 "
+			"spawn_kit=jo_single_player_page";
 	const std::string dfx2 =
 			"objective_checkpoint=1 spawn_zone_flag_always=1 armory_only_availability=3 "
 			"join_state_fixed=1 loadout_class_fixed=1 cd_key=1 chat_squad_tag_wrapped=1 "
-			"rules_word_bits=0x10000 | waypoint_goals_met_advance=0 waypoint_advance_needs_done=1 "
-			"route_done_records=1 emplaced_turret_update=1 emplaced_solo_planar_slew=3848520 "
-			"narrow_still_player_radius=1 spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
-			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE";
+			"rules_word_bits=0x10000 pool0_wire_capacity=256 | waypoint_goals_met_advance=0 "
+			"waypoint_advance_needs_done=1 route_done_records=1 emplaced_turret_update=1 "
+			"emplaced_solo_planar_slew=3848520 narrow_still_player_radius=1 "
+			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,WPN_GRENADEFB,WPN_GRENADEHE,"
+			"WPN_GRENADESM,WPN_KNIFE";
 	CHECK(bump_rule_row("jo") == jo);
 	CHECK(bump_rule_row("dfx2") == dfx2);
 	// OP: Acid Gambit's row is JO's, as it speaks JO's protocol at JO's protocol version.
