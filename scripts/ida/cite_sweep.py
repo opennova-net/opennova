@@ -158,6 +158,10 @@ DOC_DEFAULT_IMAGE = {
         ("### 12.8 ", None),
         ("### 12.9 ", "dfx2.exe"),
     ),
+    # §16 logs the DFX IDB's names (Dfx_new_ver.exe.i64)
+    "docs/titles/dfx-vs-dfx2-re.md": (
+        ("## 16. ", "Dfx_new_ver.exe"),
+    ),
     # "addresses are `MDEdit.exe`'s" in its writers' subsection
     "docs/audio/mus-sbf-re.md": (
         ("### MDEdit's own writers", "MDEdit.exe"),
