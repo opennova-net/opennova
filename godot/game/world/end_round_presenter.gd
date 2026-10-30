@@ -1,37 +1,19 @@
 class_name EndRoundPresenter
 extends Node
 
-## The multiplayer end-of-round presentation (net-re §5.68): from the S2C 0x1D
-## announcement the HUD overlay shows the Impact38 text ladder over the whole
-## frame (headline, game-type line, score lines, game time) while the deploy /
-## armory screens are torn down; six seconds later, once the S2C 0x56 board
-## has reassembled, stat.mnu's STAT screen opens ONCE with its RESULTLIST
-## table filled, the RADIO_TAB_* trio hidden for non-team modes, and the tab
-## filter + the HIDDEN_BACK / CONFIRM_* exits wired.
-## The ladder's key selection, the empty-resolve folds, the printf forms, the
-## column headers, the tab filter, the 6 s delay and the transition latch
-## itself (the once-only bytes, the wall-clock gate) are the engine's
-## (hud/end_round_overlay.h EndRoundTransition, inmatch/stat_screen_feed.h
-## through the Simulation feeds); this node owns only the device work: the
-## HUD element, the compiled stat.mnu frame, its widgets and the cursor.
-## [orig: UI_ProcessEndRoundScreenTransition @0x5b8600 (every HUD frame while
-##  g_RoundOver && is_in_session from HUD_DrawOverlayPanels @0x5c0072): first pass
-##  Game_CloseInGameScreens (ex Server_ResetBalanceCounters) + Game_InitRespawnState +
-##  Overlay_ComputeStatFieldColumnLayout(40, 984); every pass
-##  UI_ProcessMenuScreenFrame (ex sub_54E650) (the menu-screen pass, which closes the screen) then HUD_DrawEndRoundStatsOverlay
-##  @0x5b7cd0; UI_OpenMenuScreen("stat.mnu", "STAT") once; the STAT show
-##  callback StatScreen_ShowCallback (ex sub_562840) (populate + tab visibility); StatScreen_StatFilterTabHandler
-##  @0x562140]
+## The multiplayer end-of-round presentation (net-re §5.68), the device half:
+## from the S2C 0x1D announcement the HUD overlay shows the text ladder while
+## the deploy / armory screens are torn down; six seconds later, once the S2C
+## 0x56 board has reassembled, stat.mnu's STAT screen opens ONCE. The ladder,
+## the 6 s delay and the transition latch are the engine's
+## (hud/end_round_overlay.h EndRoundTransition), and so is the STAT screen's
+## controller (inmatch/end_round_screen.h, the EndRoundScreen binding: the
+## table's fill, the tabs, the exit), claimed on this presenter's driver when
+## the screen opens; this node owns the HUD element, the compiled stat.mnu
+## frame and the cursor.
 
 const MENU_FILE := "stat.mnu"
 const MENU_SCREEN := "STAT"
-const RESULT_LIST := "RESULTLIST"
-# The RESULTLIST's authored width (jo_stat.mnu: the STATS window spans 20..770)
-# when the compiled frame has not laid the table out yet — a device fallback
-# for a frame that has not measured its widget.
-const RESULT_LIST_DEFAULT_WIDTH := 750
-# The stat.mnu tab radios, in the engine's tab order (0 all, 1 team 2, 2 team 1).
-const TAB_WIDGETS: Array[String] = ["RADIO_TAB_OVERALL", "RADIO_TAB_REDTEAM", "RADIO_TAB_BLUETEAM"]
 
 signal opened
 signal closed
@@ -50,10 +32,16 @@ var _armory_presenter: ArmoryPresenter = null
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
-# The engine's transition latch (the once-only bytes + the 6 s gate).
+# The engine's transition latch (the once-only bytes + the 6 s gate) and the
+# STAT screen's controller.
 var _transition := EndRoundTransition.new()
+var _screen := EndRoundScreen.new()
 var _overlay_shown := false
-var _team_mode := false
+
+
+func _init() -> void:
+	_screen.close_requested.connect(close)
+	_screen.exit_to_menu_requested.connect(exit_to_menu_requested.emit)
 
 
 func setup(view: WorldView, ui_parent: Node, hud_presenter: GameHudPresenter) -> void:
@@ -64,7 +52,7 @@ func setup(view: WorldView, ui_parent: Node, hud_presenter: GameHudPresenter) ->
 
 
 ## The shell seam: the announcement edge closes the deploy/armory screens (the
-## UI scene teardown every transition pass runs [orig: UI_ProcessMenuScreenFrame @0x5b8674]);
+## UI scene teardown every transition pass runs; inmatch/end_round_screen.h);
 ## `opened`/`closed` report the STAT screen's cursor ownership through the two
 ## callables (the overlay phase is not a UI state: the world keeps the cursor).
 func connect_shell(deploy_presenter: DeployScreenPresenter, armory_presenter,
@@ -87,7 +75,7 @@ static func install(parent: Node, view: WorldView, ui_parent: Node,
 	return presenter
 
 
-# The UI scene teardown at the announcement [orig: UI_ProcessMenuScreenFrame @0x5b8674].
+# The UI scene teardown at the announcement (inmatch/end_round_screen.h).
 func _tear_down_screens() -> void:
 	if _deploy_presenter != null and _deploy_presenter.is_open():
 		_deploy_presenter.close()
@@ -150,6 +138,7 @@ func reset() -> void:
 	_transition.reset()
 	_hide_overlay()
 	if is_open():
+		_driver.release_screen()
 		_frame.visible = false
 
 
@@ -170,8 +159,6 @@ func tick() -> void:
 	if step & EndRoundTransition.STEP_RESET:
 		reset()
 		return
-	if step & EndRoundTransition.STEP_ANNOUNCED:
-		_team_mode = state.is_team_mode()
 	if step & EndRoundTransition.STEP_PRE_STAT:
 		_tear_down_screens()
 		_apply_overlay(sim)
@@ -215,48 +202,21 @@ func _open_stat_screen(sim: Simulation) -> void:
 	_hide_overlay()
 	if not _ensure_menu():
 		return
-	_populate(sim)
+	# The STAT show (the engine controller's open): the RESULTLIST filled, the
+	# tabs by the game type.
+	_screen.set_simulation(sim)
+	_screen.set_gametext(_gametext())
+	_driver.claim_screen(_screen)
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
 	set_process(true)
 	opened.emit()
 
 
-# The STAT show callback [orig: StatScreen_ShowCallback @0x562840 (ex
-# sub_562840)]: fill the RESULTLIST, then hide the three tab radios for
-# non-team modes (team modes select OVERALL). The team-mode arm is the sim
-# state's `team_mode` (base/gameprofile/game_type.h).
-func _populate(sim: Simulation) -> void:
-	var list_id := _driver.widget_id(RESULT_LIST)
-	if list_id < 0:
-		return
-	for tab in TAB_WIDGETS:
-		var id := _driver.widget_id(tab)
-		if id >= 0:
-			_driver.set_widget_shown(id, _team_mode)
-	if _team_mode:
-		var overall := _driver.widget_id(TAB_WIDGETS[0])
-		if overall >= 0:
-			_driver.set_widget_checked(overall, true)
-	_fill_table(sim, list_id)
-
-
-# One table fill: the columns the populate defines (stat.mnu's RESULTLIST
-# authors none), then every row with its team colour, sorted as the fill sorts,
-# and the row of the local player entity's slot selected after the sort. The
-# header is the columns' labels, not a row (MenuDriver fill_stat_results; the
-# witness, the width split's design rect among it, lives at the engine home,
-# inmatch stat_screen_feed.h).
-func _fill_table(sim: Simulation, list_id: int) -> void:
-	# The design rect the width split reads (CWnd_GetRect's, not the scaled one).
-	var rect := _driver.widget_local_rect(list_id)
-	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
-	_driver.fill_stat_results(list_id, sim.get_end_round_columns(table_width, _gametext()),
-			sim.get_end_round_rows(), sim.get_end_round_state().get_local_slot())
-
-
 func close() -> void:
 	set_process(false)
+	if _driver != null:
+		_driver.release_screen()
 	if MenuFrameSurface.hide_frame(_frame):
 		closed.emit()
 
@@ -264,6 +224,8 @@ func close() -> void:
 func teardown() -> void:
 	set_process(false)
 	_hide_overlay()
+	if _driver != null:
+		_driver.release_screen()
 	if _frame != null and is_instance_valid(_frame):
 		_frame.queue_free()
 	if _audio != null and is_instance_valid(_audio):
@@ -274,41 +236,12 @@ func teardown() -> void:
 	_transition.reset()
 
 
-# Buttons and radios arrive on the driver's widget_activated (value_changed
-# never fires for them). The stat.mnu exit is confirmed, like the shipped
-# screen: HIDDEN_BACK's authored actions raise the CONFIRM_EXIT "Are you
-# sure?" panel (SHOW CONFIRM_EXIT + HIDE STATS), CONFIRM_NO's restore STATS,
-# and the CONFIRM_YES Command EXITS THE MISSION — the witnessed handler is the
-# same close-screens + action-3 pair as the pause menu's (docs/mnu/menu-re.md
-# "The in-game exit confirmation"), not a board hide. Closing on the other
-# names swallowed the confirmation.
-func _on_widget_activated(_id: int, widget_name: String) -> void:
-	if widget_name.nocasecmp_to("CONFIRM_YES") == 0:
-		close()
-		exit_to_menu_requested.emit()
-		return
-	# The tab radios map onto the engine's tab index [orig:
-	# StatScreen_StatFilterTabHandler @0x562140, registered with params 0/1/2 by
-	# HUD_CacheStatPanelValues @0x5627a8..0x5627f5]: the filled rows are shown or
-	# hidden by their team value, keeping their order and selection (D-MNU-53).
-	if widget_name.begins_with("RADIO_TAB_"):
-		var tab := -1
-		for i in TAB_WIDGETS.size():
-			if widget_name.nocasecmp_to(TAB_WIDGETS[i]) == 0:
-				tab = i
-		var list_id := _driver.widget_id(RESULT_LIST) if _driver != null else -1
-		if tab >= 0 and list_id >= 0:
-			_driver.filter_stat_results(list_id, tab)
-
-
 func _ensure_menu() -> bool:
 	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
 	var surface := MenuFrameSurface.open_surface(_view.resource_root(), _ui_parent,
 			_layout_control, MENU_FILE, MENU_SCREEN, "EndRoundMenu", "EndRoundPresenter",
-			_on_frame_gui_input,
-			func(driver: MenuDriver) -> void:
-				driver.widget_activated.connect(_on_widget_activated))
+			_on_frame_gui_input, Callable())
 	if surface == null:
 		return false
 	_frame = surface.frame

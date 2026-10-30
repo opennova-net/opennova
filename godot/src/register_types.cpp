@@ -121,6 +121,7 @@
 #include "hud/map_view_state.h"
 #include "hud/map_view_window.h"
 #include "hud/command_map_screen.h"
+#include "hud/command_map_controller.h"
 #include "hud/hud_toggles.h"
 #include "hud/hud_chat_entry.h"
 #include "hud/end_round_transition.h"
@@ -195,8 +196,13 @@
 #include "mnu/menu_frame.h"
 #include "mnu/menu_audio.h"
 #include "mnu/menu_driver.h"
-#include "mnu/player_info_loadout.h"
-#include "mnu/armory_loadout.h"
+#include "mnu/death_screen.h"
+#include "mnu/end_round_screen.h"
+#include "mnu/player_info_screen.h"
+#include "mnu/armory_screen.h"
+#include "mnu/lan_multiplayer_menu.h"
+#include "mnu/pre_game_controller.h"
+#include "mnu/vehicle_menu_controller.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
@@ -208,8 +214,6 @@
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
-#include "player/player_info_kit_restore.h"
-#include "player/player_info_character_state.h"
 #include "player/player_profiles.h"
 #include "player/player_spawn_loadout.h"
 #include "player/player_viewmodel_def.h"
@@ -240,6 +244,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	// forwarder above.
 	opennova::io::LogRing::install();
 
+	// The screen controllers' bindings derive from it (registered ahead of them).
+	GDREGISTER_CLASS(MenuScreenBinding);
 	GDREGISTER_CLASS(TerrainData);
 	GDREGISTER_CLASS(Terrain);
 	GDREGISTER_CLASS(TerrainSurfaceInputs);
@@ -284,7 +290,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponSightRow);
 	GDREGISTER_CLASS(WeaponActionRow);
 	GDREGISTER_CLASS(WeaponDef);
-	GDREGISTER_CLASS(ArmoryClassRow);
 	GDREGISTER_CLASS(WeaponDatabase);
 	GDREGISTER_CLASS(AmmoDatabase);
 	GDREGISTER_CLASS(AvatarPartRow);
@@ -330,9 +335,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInventory);
 	GDREGISTER_CLASS(WeaponProfileSide);
 	GDREGISTER_CLASS(WeaponProfileSummary);
-	GDREGISTER_CLASS(PlayerInfoKitRestore);
-	GDREGISTER_CLASS(PlayerInfoSideSelection);
-	GDREGISTER_CLASS(PlayerInfoCharacterState);
 	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(GameConfigBlock);
 	GDREGISTER_CLASS(GameFrontend);
@@ -357,6 +359,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MapViewState);
 	GDREGISTER_CLASS(MapViewWindow);
 	GDREGISTER_CLASS(CommandMapScreen);
+	GDREGISTER_CLASS(CommandMapController);
 	GDREGISTER_CLASS(HudToggles);
 	GDREGISTER_CLASS(HudChatEntry);
 	GDREGISTER_CLASS(EndRoundTransition);
@@ -470,8 +473,13 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(MenuScrollRange);
 	GDREGISTER_CLASS(MenuDriver);
-	GDREGISTER_CLASS(PlayerInfoLoadout);
-	GDREGISTER_CLASS(ArmoryLoadout);
+	GDREGISTER_CLASS(DeathScreen);
+	GDREGISTER_CLASS(EndRoundScreen);
+	GDREGISTER_CLASS(PlayerInfoScreen);
+	GDREGISTER_CLASS(ArmoryScreen);
+	GDREGISTER_CLASS(LanMultiplayerMenu);
+	GDREGISTER_CLASS(PreGameController);
+	GDREGISTER_CLASS(VehicleMenuController);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	// The scenario driver's scripted input device (inert until a probe arms
 	// it), ahead of the binding model it attaches to.

@@ -32,6 +32,9 @@
 
 namespace godot {
 
+class RtxtStringFile;
+
+
 // The current-waypoint slice of the HUD info rebuild plus the scripted show
 // gate (Simulation::get_waypoint_hud_view). `current` -1 = no selection yet;
 // `position` is Godot space; `number` the 1-based display index.
@@ -192,8 +195,11 @@ public:
 	void assign(const opennova::hud::EndRoundStatisticsPanel &p_value) { value_ = p_value; }
 
 	bool get_raised() const { return value_.raised; }
-	PackedStringArray get_label_keys() const;
 	PackedStringArray get_values() const;
+	// The panel's title and its rows' labels through the gametext table (engine
+	// hud::end_round_statistics_text carries the witness; a missing string is empty).
+	String title(const Ref<RtxtStringFile> &p_gametext) const;
+	PackedStringArray labels(const Ref<RtxtStringFile> &p_gametext) const;
 };
 
 // The sim-side end-of-round state plus the SP kill-stat buckets the epilog

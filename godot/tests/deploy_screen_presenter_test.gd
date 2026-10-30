@@ -271,7 +271,7 @@ func _await_refresh(pair: Dictionary) -> void:
 func _row_index_for_param(presenter: DeployPresenter, param: int) -> int:
 	var rows := presenter.get_spawn_rows()
 	for row in rows.size():
-		if rows[row].param == param:
+		if rows[row]["param"] == param:
 			return row
 	return -1
 
@@ -282,7 +282,7 @@ func _row_param(presenter: DeployPresenter, row: int) -> int:
 	var rows := presenter.get_spawn_rows()
 	if row < 0 or row >= rows.size():
 		return -1
-	return rows[row].param
+	return rows[row]["param"]
 
 
 # The shell leaves State.WORLD on `opened` and returns on `closed`; without those
@@ -868,11 +868,13 @@ func test_initial_overlay_row_selection_releases_authority_deployment() -> void:
 	var rows := presenter.get_spawn_rows()
 	var row := -1
 	for i in rows.size():
-		if rows[i].param != -1:
+		if rows[i]["param"] != -1:
 			row = i
 			break
 	assert_gte(row, 0, "the spawn list carries a selectable row")
-	presenter.select_spawn_row(row)
+	# The list's own select (the player's click): the engine controller sends the pick.
+	var list_driver := presenter.get_menu_driver()
+	list_driver.select_row(list_driver.widget_id("SPAWNPOINTS_LIST"), row)
 	assert_false(presenter.is_open(), "the overlay row click closes the screen locally")
 	assert_signal_emitted(presenter, "closed")
 	_assert_deployment_released(pair)
@@ -1006,16 +1008,14 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 	# Even an empty team zone contributes a non-selectable blank separator.
 	var separator_count := 0
 	for row in presenter.get_spawn_rows():
-		if row.param == -1:
+		if row["param"] == -1:
 			separator_count += 1
 		else:
-			assert_gte(row.param, 0, "spawn choices carry a nonnegative param")
+			assert_gte(row["param"], 0, "spawn choices carry a nonnegative param")
 	assert_eq(separator_count, 1, "the empty fixture zone retains its separator")
-	presenter.select_spawn_row(_row_index_for_param(presenter, -1))
-	# The engine builder's row model IS what a wave group would insert: a
-	# synthetic occupant row at the presenter seam proves the guard.
-	presenter.append_spawn_row("Ace", -1)
-	presenter.select_spawn_row(presenter.get_spawn_rows().size() - 1)
+	# The separator's select sends nothing (the occupant rows' guard is pinned
+	# in the menu_death_screen ctest).
+	driver.select_row(list_id, _row_index_for_param(presenter, -1))
 	for _i in range(40):
 		pair.host.step()
 		pair.joiner.step()
@@ -1041,7 +1041,7 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 	var title_id := driver.widget_id("STATIC_LIST_TITLE")
 	if title_id >= 0:
 		assert_true(driver.is_widget_shown(title_id), "the list title shows with the list")
-	assert_eq(driver.get_widget_items(list_id).size(), presenter.get_spawn_rows().size() - 1,
+	assert_eq(driver.get_widget_items(list_id).size(), presenter.get_spawn_rows().size(),
 			"the compiled list mirrors the real row model")
 
 

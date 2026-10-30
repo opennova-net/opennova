@@ -115,13 +115,15 @@ struct MenuBrowserState {
 	// nothing with no file. False, `error` set, when it cannot be written (retail's HRESULT, which
 	// every caller drops). Retail saves at five sites, ours at their equivalents:
 	//  - the menu's teardown that destroys it (the way out, and a mods reload ahead of the menu's
-	//    re-creation): MainGame.request_quit, MenuShell._mount_expansion;
+	//    re-creation): MainGame.request_quit, the menu shell's reload (menu::MenuShell, its host's
+	//    save_cookie_jar);
 	//  - the NovaWorld screen's deactivation: the NovaWorld panel's close
 	//    (NetSessionController._on_novaworld_closed);
 	//  - the home page's showing: LobbyHttpFlow::show_home_page;
 	//  - a page whose title is a connect string, ahead of its parse:
 	//    LobbyHttpFlow::save_at_connect_page;
-	//  - an external browser's open: MenuShell._on_url_requested.
+	//  - an external browser's open: the menu shell's URL row (menu::MenuShell, its host's
+	//    save_cookie_jar ahead of the browser).
 	// [orig: Menu_TeardownShellAndCloseBinkVideos @0x54E430 - under g_MenuDestroyOnTeardown (read
 	//  @0x54E491, its jz @0x54E4A3), CUIScene_SaveCookieJarFile called @0x54E4AA (the flag set by
 	//  Game_ReloadExpansionAndMods @0x552756 and by the quit confirmations @0x55578F / @0x5571DF);

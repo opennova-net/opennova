@@ -1,38 +1,28 @@
 class_name MenuShell
 extends Control
 
-# Runtime menu shell: drives the compiled menu surface — a MenuFrame (the
-# engine draw-list/pump Control) orchestrated by MenuDriver,
-# loading the game's .mnu menu set + audio from the user's resource directory.
-# Music streams through the shared MusicService autoload (one context at a
-# time, like the original AudioVM): the shell opens the MENU context; GameWorld
-# opens the GAME context at mission start. It is the runtime counterpart to
-# GameWorld: GameWorld turns a resource dir into a playable world, this turns it
-# into the playable menu front-end, and main_game.gd hands off between the two.
-#
-# The driver owns intra-.mnu navigation, widget interaction, sounds, and the
-# per-screen MUSICVAR push. The shell services the policy the driver leaves to
-# it: cross-.mnu file jumps (menu_requested) and their history (pop_requested),
-# the named back/quit Command, and the gameplay launch. Shipped JO menus carry no "launch" action verb; the engine
-# wires those by well-known control NAME (START_GAME, ACCEPT, EXIT, ...), so
-# the shell resolves those names against the loaded document and routes the
-# driver's activation signal; the names and the commands are the engine's
-# (menu::MenuCommands).
+# The menu front end's device half: the compiled menu surface (a MenuFrame, the
+# engine draw-list/pump Control), the backdrop movies under it, the widget
+# sounds, the menu music context and the input routing, over the engine's menu
+# shell (menu::MenuShell, engine/runtime/menu/menu_shell.h, which MenuDriver
+# runs and the editor's Try mode runs too). The engine owns the menu mode's
+# enter and leave, each open's wiring (the commands bound by control name, the
+# lists the game fills, the Options screens, the update gate, the screen
+# controller that owns a document), the cross-file jumps and their history, the
+# back and quit, the URL rows, the updater's launch and the Mods pick's reload;
+# this script answers its device requests and relays what leaves the menu to
+# main_game.gd. Music streams through the shared MusicService autoload (one
+# context at a time, like the original AudioVM): the shell opens the MENU
+# context; GameWorld opens the GAME context at mission start.
 
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
-# engine/runtime/audio audio/music_policy.h kMenuMusicVarSlot (the menumus MUS
-# script reads its section discriminator there; at index 0 it was inert and
-# the VM always ran the var2=0 path instead of the screen's section — golden
-# test tests/mus/mus_vm_test.cpp). setup() pushes it synchronously (open_menu
+# engine/runtime/audio audio/music_policy.h kMenuMusicVarSlot (golden test
+# tests/mus/mus_vm_test.cpp). setup() pushes it synchronously (the open
 # rebuilds in place) before the director's first _process tick, so the VM
 # starts in the right section.
 
-# The LAN multiplayer entry's control name (lan_entry_control_names).
-const _LAN_MULTI_PLAYER := "LAN_MULTI_PLAYER"
-
-# Asset names resolved from the resource dir. JO defaults; override per game. A
-# blank discovery name falls back to the first file of that kind in the dir.
+# Asset names resolved from the resource dir. JO defaults; override per game.
 @export var main_menu_file := "main.mnu"
 @export var ingame_menu_file := "game.mnu"
 @export var menu_text_file := "menutxt.BIN"
@@ -44,54 +34,37 @@ const _LAN_MULTI_PLAYER := "LAN_MULTI_PLAYER"
 # [orig: the menu boot loads "game.bin" @0x552510 -> the menu resource @0x25510F8 —
 # a SEPARATE table from g_TextGameText; the two were conflated pre-#226].
 @export var menu_ui_text_file := "Game.bin"
-# Interactive music: the engine hardcodes two bank+script pairs -- MENUMUS.SBF/.BIN
-# (menu) and GAMEMUS.SBF/.BIN (game), renamed to M<n>/G<n> forms when expansion <n>
-# is active [orig: Expansion_LoadAssets @ 0x4a4798]. Blank = that witnessed
-# resolution (see resolve_menu_music_pair / resolve_game_music_pair); an
-# explicit value wins (loose dev override).
-@export var menu_sound_bank_file := ""   # "" -> MENUMUS.SBF (M<n>.sbf under an expansion)
-@export var menu_music_file := ""        # "" -> MENUMUS.BIN (M<n>.bin under an expansion)
+# Interactive music: blank = the witnessed MENUMUS / M<n> resolution
+# (MusicService.resolve_menu_music_pair); an explicit value wins (loose dev override).
+@export var menu_sound_bank_file := ""
+@export var menu_music_file := ""
 
-# The commands the game binds by control NAME (ADR 0001: START_GAME, ACCEPT,
-# EXIT, CONFIRM_YES, HIDDEN_BACK, NW_MULTI_PLAYER, ...), the lists it fills and
-# the delegate that owns a document are the engine's (menu::MenuCommands::wire,
-# engine/runtime/menu/menu_commands.h, which the editor's Try mode runs too): the
-# driver wires them after each open and the shell runs what a control's command
-# asks (_on_widget_activated).
-
-## The LAN multiplayer entry (an authored SCREEN action to mp.mnu), which the
-## update gate disables beside the NovaWorld controls while an update waits.
-@export var lan_entry_control_names := PackedStringArray([_LAN_MULTI_PLAYER])
 ## True while a screen over the menu holds the keyboard; main_game hands it its
 ## join screen's is_open. Retail's join screen is its own mode, so the menu it
 ## opens over (the LAN screen binds the same Return and Escape) takes no keys
 ## while it is up.
 var keyboard_covered := Callable()  # () -> bool
 
-# Shell -> main_game intents. The shell never loads a world or quits the app
-# itself; it translates menu activity into these and lets main_game decide.
+# Shell -> main_game intents (the engine's menu::ShellExit). The shell never
+# loads a world or quits the app itself.
 signal start_requested(bms_name: String)
 # `reason` names what ends the process, for the exit's log line.
 signal exit_to_desktop_requested(reason: String)
 signal return_to_menu_requested()
 signal restart_requested()
 signal resume_requested()
-# The player chose NovaWorld (online multiplayer) from the menu. main_game
-# opens the NovaWorld panel; the shell stays out of the networking itself.
+# The player chose NovaWorld (online multiplayer) from the menu.
 signal novaworld_requested()
 # The Mods list's pick switched the game (the root remounted in place and the
-# menu opened anew): main_game reads the player's profile again, as the
-# original's menu boot does after the switch (docs/mnu/menu-re.md "The Mods
-# list").
+# menu opened anew): main_game reads the player's profile again.
 signal game_reloaded()
 # The in-game options dialog's Accept wrote the controls words and the key
 # bindings into the player profile's current record: main_game applies them
 # to the live bindings and the running session, then saves the profile
 # (docs/playerinfo/player-sav-re.md "The controls words").
 signal ingame_controls_accepted()
-# The in-game options dialog's Accept, on a dialog holding XHAIR_APPEARANCE,
-# reloads the crosshair art in the HUD loader's alpha mode (engine
-# menu::OptionsScreen::ReloadCrosshairAlpha carries the witness, D-HUD-48).
+# The in-game options dialog's Accept on a dialog holding XHAIR_APPEARANCE
+# (engine menu::OptionsScreen::ReloadCrosshairAlpha, D-HUD-48).
 signal ingame_crosshair_reload_requested()
 # A screen the driver shows (its activation): main_game runs the main menu's
 # (STARTUP's) transport reset off it.
@@ -107,33 +80,13 @@ var _text: RtxtStringFile
 var _style: MnsStyleSheet
 var _frame_stats: FrameStats = null
 var _player_options: PlayerOptions = null
-var _options_controller: OptionsMenuController = null
 # The window sounds the menu played, the last 16 oldest first, each numbered: what the game MCP's game_menu reads
 # of them (DI-34: the editor's menu preview plays the same pump).
 var _sounds_played: Array[Dictionary] = []
 var _sound_count := 0
-
-var _menu_cache: Dictionary = {}            # filename -> MnuDocument
-# The screen history across .mnu files and a mission is the driver's
-# (MenuDriver.push_screen_history / pop_screen_history, engine
-# menu/screen_history.h): one back stack for every file, kept while a mission runs.
-var _current_file := ""
-var _in_game := false
-# True from setup() until a mission's start leaves the menu (leave_menu_mode):
-# the next setup() on the same root is then the menu's re-entry.
-var _menu_mode := false
-# The multiplayer entries the update gate disabled in the open document.
-var _update_gated_ids: Array[int] = []
-# Optional delegates that own game-specific menus the generic shell does not handle
-# (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO character screen —
-# player_info_menu_companion.gd). Empty for a plain shell. The one whose owner_name()
-# is the engine's owner of a loaded document (MenuDriver.command_owner) drives it;
-# otherwise the shell's generic wiring runs.
+# The screen controllers' device halves (the multiplayer menu, PLAYER_INFO), each
+# registered with the driver by its binding (MenuCompanion.screen()).
 var _companions: Array = []
-# The companion wired to the current document (null when the shell's generic
-# wiring runs); the next document swap releases it if it loses ownership.
-var _wired_companion: MenuCompanion = null
-
 
 
 func _ready() -> void:
@@ -150,35 +103,26 @@ func _process(delta: float) -> void:
 				Time.get_ticks_usec() - started)
 
 
-## The menu mode's per-frame update: the widget clock, the menu-portrait model
-## advance, and -- at the tail, the way the original orders it -- the deferred
-## expansion remount. Public so a caller (and the GUT suite) can step the menu
-## tick the way the mode loop does.
+## The menu mode's per-frame update: the pump, the widget clock, the
+## menu-portrait model advance and, at the tail, the engine shell's deferred
+## Mods reload. Public so a caller (and the GUT suite) can step the menu tick.
 ## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
 func update_menu_frame(_delta: float = 0.0) -> void:
-	# The pump, once a frame after the input events (each taken as its message
-	# in _gui_input): hover, the click and the window sounds of the mouse as the
-	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse). Over a
-	# running mission the game loop's frame runs it instead (pump_screen_pass).
-	if not _in_game:
+	if not is_in_game():
 		pump_screen_pass()
-	# The blink/marquee clock rides the OS tick like the original's
-	# GetTickCount gate.
 	if _driver != null:
 		_driver.tick(GameWorld.current_frame_clock_ms())
 	# The one model runtime-frame driver outside a live mission: menu portraits
-	# (avatar previews) are ObjectModels, which no longer self-clock. The static
-	# advance is per-frame-guarded, so a mission's own driver takes precedence.
+	# (avatar previews) are ObjectModels, which no longer self-clock.
 	ObjectModel.advance_awake_frame(GameWorld.current_frame_clock_ms())
-	_consume_expansion_reload_request()
+	if _driver != null:
+		_driver.frame_tail()
 
 
 ## The screen pass's mouse pump: hover, the click and the window sounds of the
 ## mouse as the events left it. The menu mode's update runs it once a frame; over
 ## a running mission the game loop's frame runs it at its head, ahead of the
-## frame's net frame and tick, so an in-game screen's click (the INGAME
-## CONFIRM_YES's input action 3, a joiner's goodbye) runs before that frame's
-## session sends anything (MainGame._process).
+## frame's net frame and tick (MainGame._process).
 ## retail: Game_ProcessMainFrame @ 0x5263f0 - UI_ProcessMenuScreenFrame @ 0x54e650 (the call
 ## @ 0x52667b) -> CUIScene_EndFrame @ 0x63e600 (the call @ 0x54e668) ->
 ## CWnd_ProcessMouseEvent @ 0x647a00, ahead of
@@ -190,7 +134,7 @@ func pump_screen_pass() -> void:
 
 ## Whether the shell is the in-game overlay over a kept-loaded mission.
 func is_in_game() -> bool:
-	return _in_game
+	return _driver != null and _driver.is_in_game()
 
 
 ## MainGame installs its process-lifetime owner before setup; standalone shells
@@ -230,56 +174,45 @@ func consume_video_process_us() -> int:
 	return _underlay.consume_process_us() if _underlay != null else 0
 
 
-# Install a companion that owns game-specific menus the generic shell does not handle
-# (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO screen). The shell can
-# drive several: the first, in install order, whose owner_name() is the engine's owner
-# of the loaded document drives it (see _wire_named_controls).
+## Install a screen controller's device half (the JO multiplayer menu, the
+## PLAYER_INFO screen): its binding (companion.screen()) is a delegate the engine
+## shell hands every document whose owner names it.
 func add_companion(companion: MenuCompanion) -> void:
-	if companion != null and not _companions.has(companion):
-		_companions.append(companion)
+	if companion == null or _companions.has(companion):
+		return
+	_companions.append(companion)
+	if _driver != null:
+		companion.attach(_driver, _root)
+		_driver.add_screen(companion.screen())
 
 
-# Build the shell against a resource root and open the main menu. Idempotent on
-# the asset/driver wiring (only assembled once). The menu's re-entry after a
-# mission (leave_menu_mode at its start, the same root) shows again the screen
-# the mission was started from, the screen history under it kept (the driver's
-# return_to_menu_mode; D-MNU-28 in docs/mnu/menu-re.md); any other entry opens
-# the main menu's first screen with an empty history. A different root (the
-# bundled placeholder menu handing over to a picked retail install, ADR 0048)
-# reloads everything read from the root. Returns false when the main menu
-# cannot be resolved/loaded (an empty/incomplete resource dir).
+## Build the shell against a resource root and enter the menu mode. The asset and
+## driver wiring assemble once; a different root (the bundled placeholder menu
+## handing over to a picked retail install, ADR 0048) reloads everything read
+## from the root. The engine's enter shows the screen a mission was started from
+## on the return from it (D-MNU-28), else the main menu's first screen. Returns
+## false when the main menu cannot be resolved/loaded.
 func setup(root: ResourceRoot) -> bool:
 	var root_changed := root != _root
-	var reentry := _driver != null and not root_changed and not _menu_mode
 	_root = root
 	if _driver == null:
 		_assemble_assets()
 	elif root_changed:
 		_load_root_assets()
 	_enter_menu_music()
-	_in_game = false
-	_menu_mode = true
 	# Menu-mode enter (fresh boot AND return-from-game) recreates the
 	# backdrop slots [orig: Menu_InitShellResources @ 0x552500 calls
 	# UI_CreateMenuBinkVideos on both branches].
-	_refresh_underlay()
-	if not reentry:
-		_driver.clear_screen_history()
-		return open_menu(main_menu_file, "")
-	var row := _driver.return_to_menu_mode()
-	if row.size() == 2 and open_menu(row[0], row[1]):
-		return true
-	return open_menu(main_menu_file, "")
+	_refresh_underlay(false)
+	_driver.set_player_profiles(PlayerProfile.store())
+	return _driver.enter_menu_mode(root_changed)
 
 
 ## A mission's start leaves the menu: the screen it was started from is kept on
 ## the screen history, under a mark, for the re-entry's setup() to show again.
-## Once per stay in the menu (a restart or a map change starts no new mark).
 func leave_menu_mode() -> void:
-	if not _menu_mode or _driver == null:
-		return
-	_menu_mode = false
-	_driver.leave_menu_mode()
+	if _driver != null:
+		_driver.leave_menu_mode()
 
 
 # --- Asset assembly -----------------------------------------------------------
@@ -308,48 +241,45 @@ func _assemble_assets() -> void:
 	add_child(_frame)
 
 	# Menu hover/click SFX come from the .lwf profile (set-by-trigger -> .wav);
-	# playback is the MenuAudio device leg. The SBF stays on the music
-	# director only; it is not the menu's SFX source.
+	# playback is the MenuAudio device leg.
 	_audio = MenuAudio.new()
 	_audio.name = "MenuAudio"
 	add_child(_audio)
-	_load_root_assets()
 
 	_driver = MenuDriver.new()
 	_driver.attach(_frame, _audio)
-	# The one music context lives on the MusicService autoload (the original
-	# streams one AudioVM context at a time); the driver pushes each screen's
-	# MUSICVAR into its director at the menumus discriminator index.
+	_driver.set_menu_files(main_menu_file, ingame_menu_file)
+	_load_root_assets()
+	# The one music context lives on the MusicService autoload; the driver pushes
+	# each screen's MUSICVAR into its director at the menumus discriminator index.
 	_driver.set_music_director(MusicService.director())
 	_driver.set_music_var_index(MusicDirector.MENU_MUSIC_VAR_SLOT)
-
-	# Connect once on the persistent driver (screens reconfigure under it;
-	# these aggregate signals survive).
-	_driver.screen_changed.connect(_on_screen_changed)
-	_driver.menu_requested.connect(_on_menu_requested)
-	_driver.pop_requested.connect(_on_pop_requested)
-	_driver.widget_value_changed.connect(_on_widget_value_changed)
-	_driver.url_requested.connect(_on_url_requested)
-	_driver.widget_activated.connect(_on_widget_activated)
-	_driver.list_activated.connect(_on_list_activated)
-	_driver.sound_requested.connect(_on_sound_requested)
-	_driver.app_command_requested.connect(_on_app_command_requested)
-	if not RuntimeUpdates.availability_changed.is_connected(_on_update_availability_changed):
-		RuntimeUpdates.availability_changed.connect(_on_update_availability_changed)
 	if _player_options == null:
 		_player_options = PlayerOptions.new()
-	_options_controller = OptionsMenuController.new()
-	_options_controller.setup(_driver, _player_options)
-	_options_controller.controls_accepted.connect(ingame_controls_accepted.emit)
-	_options_controller.crosshair_reload_requested.connect(ingame_crosshair_reload_requested.emit)
+	_driver.set_player_words_source(
+			func() -> PackedInt32Array: return _player_options.current().to_words(),
+			_set_player_words)
+	_driver.set_update_launcher(_launch_update)
+	_driver.set_update_waiting(RuntimeUpdates.available)
+	_driver.screen_changed.connect(_on_screen_changed)
+	_driver.sound_requested.connect(_on_sound_requested)
+	_driver.shell_exit_requested.connect(_on_shell_exit_requested)
+	_driver.shell_resources_requested.connect(_on_shell_resources_requested)
+	_driver.game_reloaded.connect(game_reloaded.emit)
+	_driver.profile_save_requested.connect(func() -> void: PlayerProfile.save())
+	_driver.controls_accepted.connect(ingame_controls_accepted.emit)
+	_driver.crosshair_reload_requested.connect(ingame_crosshair_reload_requested.emit)
+	if not RuntimeUpdates.availability_changed.is_connected(_on_update_availability_changed):
+		RuntimeUpdates.availability_changed.connect(_on_update_availability_changed)
+	for companion in _companions:
+		_driver.add_screen(companion.screen())
 	set_process(true)
 
 
-# Everything the shell reads from its resource root: the cached documents, the
-# text tables and the stylesheet. A widget's <SOUND> plays from the bank it names
-# (MenuAudio), so the shell loads no sound bank of its own.
+# Everything the shell reads from its resource root: the text tables and the
+# stylesheet (the engine shell reads its menus again itself). A widget's <SOUND>
+# plays from the bank it names (MenuAudio), so the shell loads no sound bank.
 func _load_root_assets() -> void:
-	_menu_cache.clear()
 	_text = _load_text(menu_text_file)
 	# Register the engine text tables into the shared Strings registry, the way the
 	# original loads its TextResource globals: menutxt (UI/voice labels), gametext =
@@ -369,6 +299,10 @@ func _load_root_assets() -> void:
 	# there, so every %VAR% stays literal.
 	_style = MnsStyleSheet.load_shell(_root) if _root != null else null
 	_audio.set_resource_root(_root)
+	_driver.set_shell_sources(_root, _style)
+	# The screen controllers' device halves read their tables from the live root.
+	for companion in _companions:
+		companion.attach(_driver, _root)
 
 
 # --- Input routing (the frame is a passive surface; the shell samples) --------
@@ -376,7 +310,7 @@ func _load_root_assets() -> void:
 func _gui_input(event: InputEvent) -> void:
 	if _driver == null or not visible:
 		return
-	if _options_controller != null and _options_controller.consume_input(event):
+	if _driver.consume_options_input(event) & MenuDriver.OPTIONS_CONSUMED:
 		accept_event()
 		return
 	# Each mouse event as its message, as it arrives (the left button's press and
@@ -398,7 +332,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# the keys of the screen over it.
 	if _driver == null or not is_visible_in_tree() or _is_keyboard_covered():
 		return
-	if _options_controller != null and _options_controller.consume_input(event):
+	if _driver.consume_options_input(event) & MenuDriver.OPTIONS_CONSUMED:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and _driver.handle_key_input(event as InputEventKey):
@@ -409,36 +343,15 @@ func _is_keyboard_covered() -> bool:
 	return keyboard_covered.is_valid() and bool(keyboard_covered.call())
 
 
-# --- Menu loading + navigation ------------------------------------------------
+# --- Menu loading + navigation (the engine shell's) ---------------------------
 
-# Load a .mnu (cached) and show it, optionally jumping to target_screen. Fails
-# soft (logs, keeps the current screen) when the file can't be resolved, so a
-# partial resource dir does not crash the shell on a cross-.mnu jump.
+## Open `file` at `target_screen` (empty: its first) and wire it. Fails soft (a
+## warning, the current screen kept) when the file can't be resolved.
 func open_menu(file: String, target_screen: String) -> bool:
-	var doc := _load_doc(file)
-	if doc == null:
-		push_warning("MenuShell: could not load menu '%s'" % file)
+	if _driver == null:
 		return false
-	_current_file = file
-	_driver.clear_selected_mission()
-	# The new document's widget state starts fresh: nothing in it is the update
-	# gate's yet (its open's screen change gates it as it shows).
-	_update_gated_ids.clear()
-	# Shipped same-file screen jumps name their own file (mp.mnu does); the
-	# driver routes them as in-menu navigation by comparing against this
-	# basename.
-	if not _driver.open_document(doc, _root, _style, file.get_file(), target_screen):
-		push_warning("MenuShell: menu '%s' has no screens" % file)
-		# The driver may already have swapped its document: nothing parked on
-		# the shared frame by the previous companion can be rebuilt now.
-		if _wired_companion != null:
-			_wired_companion.on_menu_released()
-			_wired_companion = null
-		return false
-	if _options_controller != null:
-		_options_controller.prepare_document()
-	_wire_named_controls()
-	return true
+	_driver.set_player_profiles(PlayerProfile.store())
+	return _driver.open_menu(file, target_screen)
 
 
 func show_menu() -> void:
@@ -467,156 +380,77 @@ func release_runtime_renderer_resources() -> void:
 		_frame.configure(null, "", null, null)
 
 
-# Marks that the menu is now the in-game/pause overlay (a kept-loaded world sits
-# behind it), so the top-level back/quit resumes play instead of exiting.
+## The in-game/pause overlay over a kept-loaded world: the top-level back
+## resumes play instead of exiting.
 func open_ingame_menu() -> bool:
-	_in_game = true
-	# The in-game screens' rows from an earlier visit go, as the original's close
-	# of an in-game screen drops them (engine MenuRuntime::trim_screen_history);
-	# the screen the mission was started from stays under its mark, which a back
-	# here never pops past.
-	if _driver != null:
-		_driver.trim_screen_history()
 	# Menu movies never tick in-game [orig: BinkVideo_UpdateAllSlots
 	# @ 0x5676f0 has exactly one caller, Menu_RenderFrame].
 	if _underlay != null:
 		_underlay.stop()
-	return open_menu(ingame_menu_file, "")
+	if _driver == null:
+		return false
+	_driver.set_player_profiles(PlayerProfile.store())
+	return _driver.open_ingame_menu()
 
 
 # (Re)create the backdrop movie slots from the live root + expansion. The
 # in-game overlay never shows them.
-func _refresh_underlay() -> void:
+func _refresh_underlay(in_game: bool) -> void:
 	if _underlay == null:
 		return
-	if _in_game or _root == null:
+	if in_game or _root == null:
 		_underlay.stop()
 		return
-	_underlay.set_source(_root.get_root_dir(), _current_expansion())
+	_underlay.set_source(_root.get_root_dir(), String(_root.get_expansion()))
 
 
 func _on_screen_changed(screen_name: String) -> void:
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
-	_apply_update_gate()
 	screen_activated.emit(screen_name)
 
 
-func _on_update_availability_changed(_available: bool) -> void:
-	_apply_update_gate()
+func _on_update_availability_changed(available: bool) -> void:
+	if _driver != null:
+		_driver.set_update_waiting(available)
 
 
-# The update gate (ADR 0067 d3 as amended 2026-10-28, a divergence from retail,
-# whose UPDATE is always there and whose multiplayer is never held back): the
-# updater's controls show only while its check found an update waiting, and the
-# multiplayer entries are disabled while one waits. An unknown answer (checking,
-# offline, a failed check, updates off) gates nothing. Widget state is the open
-# document's, so each open applies it again (the open's screen change and
-# _wire_named_controls); a control the gate disabled is enabled back once the
-# answer changes, and no other.
-func _apply_update_gate() -> void:
-	if _driver == null:
-		return
-	var out_of_date: bool = RuntimeUpdates.available
-	var update_id := _driver.widget_id("UPDATE")
-	if update_id >= 0 and _driver.screen_command(_driver.widget_screen_of(update_id),
-			"UPDATE") == "update":
-		_driver.set_widget_shown(update_id, out_of_date)
-		_driver.set_widget_disabled(update_id, not out_of_date)
-	if not out_of_date:
-		for id in _update_gated_ids:
-			_driver.set_widget_disabled(id, false)
-		_update_gated_ids.clear()
-		return
-	for names in [MenuDriver.command_names("novaworld"), lan_entry_control_names]:
-		for n in names:
-			var id := _driver.widget_id(n)
-			if id >= 0 and not _update_gated_ids.has(id) and not _driver.is_widget_disabled(id):
-				_driver.set_widget_disabled(id, true)
-				_update_gated_ids.append(id)
-
-
-# After each open the engine wires the document's commands (menu::MenuCommands::wire:
-# the code's per-screen registrations, the delegate that owns the document, the
-# lists the game fills and the launch/quit controls: ACCEPT launches only on a
-# document holding a mission list, applies the Mods pick on one holding a mod
-# list, and is left to the menu's own rows on any other), and the shell seeds the
-# lists it names.
-func _wire_named_controls() -> void:
-	_driver.wire_commands(_in_game)
-	_apply_update_gate()
-	_driver.clear_mission_rows()
-
-	# A delegate (the multiplayer menu, the PLAYER_INFO character screen) owns a
-	# whole document by the controls it holds (the engine's command_owner): the
-	# companion of that name gets the named-control wiring, and the shell's
-	# generic launch/mission wiring stays out. The previously wired companion is
-	# RELEASED when it loses the document: mounts it parked on the persistent
-	# frame (the PLAYER_INFO avatar preview) would otherwise outlive their screen,
-	# since no later on_menu_built reaches it.
-	var owner := _driver.command_owner()
-	var claimant: MenuCompanion = null
-	if not owner.is_empty():
-		for companion in _companions:
-			if companion != null and companion.owner_name() == owner:
-				claimant = companion
-				break
-	if _wired_companion != null and _wired_companion != claimant:
-		_wired_companion.on_menu_released()
-	_wired_companion = claimant
-	if claimant != null:
-		claimant.on_menu_built(_driver, _current_file,
-				_driver.get_current_screen(), _root)
-		return
-	for id in _driver.command_mission_lists():
-		_seed_mission_list(id)
-	for id in _driver.command_mod_lists():
-		_seed_mod_list(id)
-
-
-func _on_widget_activated(id: int, widget_name: String) -> void:
-	# The command the game binds on the control, by the screen that holds it
-	# (engine menu_commands.h): the updater's buttons whatever file holds them
-	# and whoever owns the document's other controls, the shell's launch/quit
-	# controls on a document no delegate owns. A delegate's own commands are its
-	# companion's to run.
-	match _driver.screen_command(_driver.widget_screen_of(id), widget_name):
-		"update":
-			_launch_update()
-		"start_mission":
-			_on_start_control()
-		"apply_expansion":
-			_on_apply_selected_mod()
-		"exit":
-			_on_exit_control()
-		"return_to_menu":
+# What leaves the menu, as the engine shell asks it (menu::ShellExit).
+func _on_shell_exit_requested(exit: int, text: String) -> void:
+	match exit:
+		MenuDriver.SHELL_START_MISSION:
+			start_requested.emit(text)
+		MenuDriver.SHELL_EXIT:
+			exit_to_desktop_requested.emit(text)
+		MenuDriver.SHELL_RETURN_TO_MENU:
 			return_to_menu_requested.emit()
-		"restart":
+		MenuDriver.SHELL_RESTART:
 			restart_requested.emit()
-		"novaworld":
-			_on_novaworld_control()
-		"back":
-			_on_quit_requested()
+		MenuDriver.SHELL_RESUME:
+			resume_requested.emit()
+		MenuDriver.SHELL_NOVAWORLD:
+			novaworld_requested.emit()
 
 
-func _on_app_command_requested(command: String) -> void:
-	if command == "update":
-		_launch_update()
-
-
-# The updater runs whether or not an update is waiting (it finds that out
-# itself), and the game quits once it started; a launch that fails leaves the
-# menu as it was (engine menu_commands.h app_message_command).
-func _launch_update() -> void:
+# The updater's launch (the engine quits the game once it started).
+func _launch_update() -> bool:
 	if RuntimeUpdates.launch_update():
-		exit_to_desktop_requested.emit("the updater started")
-	else:
-		push_warning("MenuShell: the updater did not start: %s" % RuntimeUpdates.last_error)
+		return true
+	push_warning("MenuShell: the updater did not start: %s" % RuntimeUpdates.last_error)
+	return false
 
 
-# The catalog is the resource seam; filtering, selection and ACCEPT live in the engine.
-func _seed_mission_list(id: int) -> void:
-	_driver.seed_mission_list(id, MissionCatalog.rows(_root))
+func _set_player_words(words: PackedInt32Array) -> void:
+	var state := _player_options.current()
+	state.set_words(words)
+	_player_options.update(state)
+
+
+# The Mods pick's reload: the shell's resources read again from the new mount.
+func _on_shell_resources_requested() -> void:
+	_load_root_assets()
+	_enter_menu_music()
+	_refresh_underlay(false)
 
 
 func _on_sound_requested(file: String, trigger: String) -> void:
@@ -626,207 +460,8 @@ func _on_sound_requested(file: String, trigger: String) -> void:
 		_sounds_played.pop_front()
 
 
-func _on_list_activated(id: int, row: int) -> void:
-	# Double-click activation launches on the mission list. The Mods list's
-	# double click does nothing: the game takes its select alone (engine
-	# menu::ModList::select).
-	if _driver.command_mission_lists().has(id):
-		_driver.activate_mission(id, row)
-		_on_start_control()
-
-
-# --- Expansion / mod selection (Options -> Mods) ------------------------------
-
-# Fill a mod list: the base game's row, then a row per expansion folder under
-# the game folder's expansion/ by its own name, the game running highlighted and
-# described (engine menu::ModList over vfs_expansion_records).
-func _seed_mod_list(id: int) -> void:
-	_driver.seed_mod_list(id)
-
-
-# OK/ACCEPT on a Mods screen: switch the game to the highlighted row's game
-# rather than launching a mission (the engine binds it so on a document holding
-# a mod list but no mission list).
-func _on_apply_selected_mod() -> void:
-	var lists := _driver.command_mod_lists()
-	if not lists.is_empty():
-		_apply_expansion(_driver.mod_list_pick(lists[0]))
-
-
-# The engine queues the pick ("" the base game); the shell applies its resource
-# request at the frame tail. The pick of the game running takes nothing.
-func _apply_expansion(name: String) -> void:
-	if _root == null:
-		return
-	if not _driver.request_expansion(name, _current_expansion(), _root.is_runtime_mount()):
-		push_warning("MenuShell: expansions need a packed game install; the loose mount stands")
-		return
-	# A pick that switches the game saves the player profile first, under the
-	# expansion it leaves; the reload loads it again under the pick
-	# (engine: runtime/profile/player_profiles.h, the save points).
-	if _driver.has_pending_expansion_reload():
-		PlayerProfile.save()
-
-
 func has_pending_expansion_reload() -> bool:
 	return _driver != null and _driver.has_pending_expansion_reload()
-
-
-func _consume_expansion_reload_request() -> void:
-	if _driver == null or not _driver.has_pending_expansion_reload():
-		return
-	_mount_expansion(_driver.take_expansion_reload())
-
-
-# Switch the live root to the picked game ("" the base game) and boot the menu
-# anew over it: the menus and their text read again from the new mount, the
-# screen history dropped, the main menu's first screen shown, the music and the
-# backdrop movies the new game's. The pick lasts the run: nothing persists it,
-# the next launch boots `/exp` or the base game (D-MNU-31). A failed mount
-# clears the root, so the previous game is mounted again to recover.
-# [orig: Game_ReloadExpansionAndMods @ 0x552710 — the archives closed and
-#  reopened @ 0x552770..0x552798; Menu_TeardownShellAndCloseBinkVideos
-#  @ 0x54e430 destroys the menu scene (g_MenuDestroyOnTeardown @ 0x54e4a3) and
-#  Menu_InitShellResources @ 0x552500 makes it anew: main.mnu @ 0x552656, its
-#  start screen @ 0x552668]
-func _mount_expansion(name: String) -> void:
-	if _root == null:
-		return
-	var dir := _root.get_root_dir()
-	var prev := _current_expansion()
-	# The menu's teardown saves its cookie jar to nw_cdata.coo (MainGame makes
-	# the menu's jar anew from it after the reload; NovaWorldClient.save_cookie_jar)
-	# and forgets the kept NovaWorld gate response: the next NovaWorld entry
-	# probes the gate again (D-NET-706; the witness is the engine's
-	# NwuLobbySession::GateMemory::forget).
-	NovaWorldClient.save_cookie_jar()
-	NovaWorldClient.forget_gate_response()
-	# The reload closes every archive before it mounts the pick, so the pick's
-	# text-override table loads as at boot (docs/vfs/vfs-pff-mount-re.md,
-	# "Expansions" item 1): the root mounts from cleared, not as the join's
-	# switch does over its open archives.
-	_root.clear()
-	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled()) != OK:
-		push_warning("MenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
-		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled())  # rollback
-		return
-	_load_root_assets()
-	_enter_menu_music()
-	_refresh_underlay()
-	_driver.clear_screen_history()
-	open_menu(main_menu_file, "")
-	game_reloaded.emit()
-
-
-# The game running: the expansion the live root mounted, "" the base game.
-func _current_expansion() -> String:
-	return String(_root.get_expansion()) if _root != null else ""
-
-
-# --- Driver signal handlers ---------------------------------------------------
-
-func _on_menu_requested(file: String, target_screen: String) -> void:
-	# Cross-.mnu forward jump: remember where we are so the back stack can return.
-	# A file that does not load, or a target screen it does not hold, changes
-	# nothing: retail's select finds no such screen and keeps the current one,
-	# its history untouched (docs/mnu/menu-re.md, "Activation and the ACTION
-	# walk").
-	var doc := _load_doc(file)
-	if doc == null:
-		push_warning("MenuShell: could not load menu '%s'" % file)
-		return
-	if not target_screen.is_empty() and not _doc_has_screen(doc, target_screen):
-		push_warning("MenuShell: menu '%s' has no screen '%s'" % [file, target_screen])
-		return
-	var previous_file := _current_file
-	var previous_screen := _driver.get_current_screen()
-	if open_menu(file, target_screen):
-		_driver.push_screen_history(previous_file, previous_screen)
-
-
-func _doc_has_screen(doc: MnuDocument, screen_name: String) -> bool:
-	for screen_id in doc.get_screen_ids():
-		if doc.get_screen_name(screen_id).nocasecmp_to(screen_name) == 0:
-			return true
-	return false
-
-
-# POP_SCREEN with the document's own history empty: the previous file's screen,
-# the one history retail keeps across every loaded file; with none, nothing
-# happens (retail pops only a non-empty history; docs/mnu/menu-re.md).
-func _on_pop_requested() -> void:
-	# In a mission the history's top is the mark on the screen the mission was
-	# started from, which pops nothing (D-MNU-28).
-	var prev := _driver.pop_screen_history()
-	if prev.size() == 2:
-		open_menu(prev[0] if not prev[0].is_empty() else main_menu_file, prev[1])
-
-
-# The named back/quit Command (HIDDEN_BACK, the retail per-control callback):
-# cross-.mnu back first, then resume (in-game) or exit to the desktop.
-func _on_quit_requested() -> void:
-	# Top-level back/quit. Cross-.mnu back first; then it means resume (in-game)
-	# or exit-to-desktop (main menu). In a mission the history's top is the mark
-	# on the screen the mission was started from, which pops nothing.
-	var prev := _driver.pop_screen_history()
-	if prev.size() == 2:
-		open_menu(prev[0] if not prev[0].is_empty() else main_menu_file, prev[1])
-	elif _in_game:
-		resume_requested.emit()
-	else:
-		exit_to_desktop_requested.emit("the main menu's BACK with no screen behind it")
-
-
-func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
-	if kind != "list":
-		return
-	var id := _driver.widget_id(widget_name)
-	if _driver.command_mission_lists().has(id):
-		_driver.select_mission(id, index, value)
-	elif _driver.command_mod_lists().has(id):
-		_driver.select_mod(id, index)
-
-
-func _on_url_requested(url: String, external: bool) -> void:
-	# Shipped menus open website/marketing links (e.g. the splash PREORDER button)
-	# via <ACTION type="URL" EXTERNAL_BROWSER>. Hand them to the OS browser, adding
-	# a scheme if the authored link is bare (e.g. "www.novalogic.com/..."). A URL
-	# without the external browser is retail's in-game page fetch (docs/mnu/
-	# menu-re.md), which the shell does not host: it opens nothing.
-	if url.is_empty() or not external:
-		return
-	var target := url
-	if not (target.begins_with("http://") or target.begins_with("https://")):
-		target = "https://" + target
-	# The external browser's open saves the menu's cookie jar first
-	# (NovaWorldClient.save_cookie_jar; engine MenuBrowserState).
-	NovaWorldClient.save_cookie_jar()
-	OS.shell_open(target)
-
-
-# --- Named-control handlers (shell policy: launch / quit by control name) -------
-
-func _on_start_control() -> void:
-	# The retail ACCEPT handler launches only through a SHOWN mission list's
-	# current entry (or the IA_LIST's selected value); with nothing selected it
-	# does nothing (docs/mnu/menu-re.md, SINGLE_PLAYER). No catalog fallback.
-	var mission := get_selected_mission()
-	if mission.is_empty():
-		push_warning("MenuShell: start pressed with no mission selected")
-		return
-	start_requested.emit(mission)
-
-
-func _on_exit_control() -> void:
-	exit_to_desktop_requested.emit("the main menu's EXIT")
-
-
-func _on_novaworld_control() -> void:
-	# Out of date, NovaWorld waits for the update (the update gate); a press the
-	# disabled control could not take (a scripted activate) does nothing either.
-	if RuntimeUpdates.available:
-		return
-	novaworld_requested.emit()
 
 
 # --- Audio --------------------------------------------------------------------
@@ -839,35 +474,14 @@ func _enter_menu_music() -> void:
 	MusicService.open_menu_context(_root, menu_music_file, menu_sound_bank_file)
 
 
-# The witnessed music-pair resolution (engine-derived names via
-# MusicDirector.resolve_*_music_pair + the VFS/loose fallback orchestration)
-# lives on MusicService; these seams keep it queryable against the
-# shell's root (ADR 0018 — tests and diagnostics read it here, not the
-# privates).
+# The witnessed music-pair resolution lives on MusicService; these seams keep it
+# queryable against the shell's root (ADR 0018).
 func resolve_menu_music_pair() -> MusicPair:
 	return MusicService.resolve_menu_music_pair(_root)
 
 
 func resolve_game_music_pair() -> MusicPair:
 	return MusicService.resolve_game_music_pair(_root)
-
-
-# The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through
-# the VFS by name so they resolve from PFF archives at runtime; menu textures and
-# fonts resolve through the resource root the frame is given.
-func _load_doc(file: String) -> MnuDocument:
-	if _menu_cache.has(file):
-		return _menu_cache[file]
-	if _root == null or file.is_empty():
-		return null
-	var bytes := _root.read_file(file)
-	if bytes.is_empty():
-		return null
-	var doc := MnuDocument.new()
-	if doc.load_from_bytes(bytes) != OK:
-		return null
-	_menu_cache[file] = doc
-	return doc
 
 
 func _load_text(file: String) -> RtxtStringFile:
@@ -878,7 +492,6 @@ func _load_text(file: String) -> RtxtStringFile:
 
 # --- Misc helpers / accessors -------------------------------------------------
 
-# Accessors for owners / tests.
 func get_driver() -> MenuDriver:
 	return _driver
 
@@ -896,7 +509,7 @@ func get_resource_root() -> ResourceRoot:
 
 
 func get_current_menu_file() -> String:
-	return _current_file
+	return _driver.get_current_menu_file() if _driver != null else ""
 
 
 func get_selected_mission() -> String:
@@ -921,10 +534,10 @@ func menu_snapshot(include_widgets: bool = true) -> Dictionary:
 	var snapshot := {
 		"visible": is_visible_in_tree(),
 		"surface": "shell",
-		"file": _current_file,
+		"file": get_current_menu_file(),
 		"screen": _driver.get_current_screen(),
 		"screens": _driver.get_screen_names(),
-		"in_game": _in_game,
+		"in_game": is_in_game(),
 		"stack_depth": _driver.get_screen_history_depth(),
 		"sounds": _sounds_played.duplicate(true),
 		"underlay": {
@@ -982,7 +595,7 @@ func menu_key(keycode: int, unicode: int = 0) -> bool:
 	ev.unicode = unicode
 	ev.pressed = true
 	# Same order as the real path: an armed remap capture consumes keys first.
-	if _options_controller != null and _options_controller.consume_input(ev):
+	if _driver.consume_options_input(ev) & MenuDriver.OPTIONS_CONSUMED:
 		return true
 	return _driver.handle_key_input(ev)
 

@@ -53,6 +53,7 @@
 #include <runtime/inmatch/hud_frame_feeds.h> // HudFeedSource: what the HUD feeds read
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/inmatch/special_key_chain.h> // SpecialKeyInput / SpecialKeyOutcome
+#include <runtime/inmatch/vehicle_menu_controller.h> // VehicleMenuSession (vehicle_menu_session)
 #include <runtime/terrain_query/terrain_field_store.h>
 #include <runtime/wac/wac_system.h>
 
@@ -2410,16 +2411,10 @@ public:
 	// reads team 0 = open). False without a kernel.
 	bool local_player_in_vehicle_loadout_zone() const;
 	bool local_player_vehicle_zone_team_matches() const;
-	// THE VEHICLE SCREEN (engine: runtime/inmatch/vehicle_menu.h, D-NET-907): the open (its
-	// first asks the host, C2S 0x42), the ITEM_LIST rows and selected row as the engine's poll left
-	// them, a row pick, the ACCEPT / CANCEL click (true when ACCEPT queued its C2S 0x40), and the
-	// ITEM_DISPLAY preview's graphic. False / empty without a client runtime.
-	String get_vehicle_menu_preview_graphic() const;
-	bool open_vehicle_menu();
-	PackedStringArray get_vehicle_menu_rows() const;
-	int get_vehicle_menu_selected_row() const;
-	void select_vehicle_menu_row(int p_row);
-	bool click_vehicle_menu(bool p_cancel);
+	// THE VEHICLE SCREEN (engine: runtime/inmatch/vehicle_menu_controller.h, D-NET-907): the
+	// session its controller runs over (C++ only): the role's client runtime, the world and the
+	// mission's items.def rows; empty without a client runtime.
+	opennova::inmatch::VehicleMenuSession vehicle_menu_session();
 
 	// The USE-ITEM mount toggle: weapon-busy gate + the witnessed toggle
 	// (deck best-seat / nearest-seat scan / seat-swap-or-detach). Returns true when a

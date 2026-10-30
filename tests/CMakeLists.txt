@@ -2289,6 +2289,33 @@ target_link_libraries(menu_state_frame_test PRIVATE opennova_runtime)
 target_compile_features(menu_state_frame_test PRIVATE cxx_std_17)
 add_test(NAME menu_state_frame COMMAND menu_state_frame_test)
 
+# The menu shell (menu/menu_shell.h) over its runtime and a fake host: the menu mode's enter and
+# leave across a mission, the cross-file jumps and their history, the back, the quit and the resume,
+# the single-player launch, the Mods pick and its reload in the original's order, the URL rows, the
+# update gate and the updater, the Options dialog's preview baseline, and the screen controllers'
+# claim, events and release.
+add_executable(menu_shell_test menu/menu_shell_test.cpp)
+target_link_libraries(menu_shell_test PRIVATE opennova_runtime)
+target_compile_features(menu_shell_test PRIVATE cxx_std_17)
+add_test(NAME menu_shell COMMAND menu_shell_test)
+
+# The DEATH screen's controller (menu/death_screen.h) over the runtime and the state frame and a fake
+# session: the show, the reveal and the 16-tick refresh, the pick kept by its parameter, the pick
+# rule under the initial overlay, the occupant rows, the exit confirmation's word, SWAP_TEAMS, the
+# statics.
+add_executable(menu_death_screen_test menu/death_screen_test.cpp)
+target_link_libraries(menu_death_screen_test PRIVATE opennova_runtime)
+target_compile_features(menu_death_screen_test PRIVATE cxx_std_17)
+add_test(NAME menu_death_screen COMMAND menu_death_screen_test)
+
+# The end of round's STAT screen controller (inmatch/end_round_screen.h) over the runtime and the
+# state frame and a fake session: the table's fill at its design width, the tabs by the game type,
+# the tab filter, the exit.
+add_executable(menu_end_round_screen_test menu/end_round_screen_test.cpp)
+target_link_libraries(menu_end_round_screen_test PRIVATE opennova_runtime opennova_net)
+target_compile_features(menu_end_round_screen_test PRIVATE cxx_std_17)
+add_test(NAME menu_end_round_screen COMMAND menu_end_round_screen_test)
+
 # The Mods list (menu/mod_list.h, D-MNU-31): the base game's row and the expansion records, a pick's
 # description, ACCEPT's pick and its compare with the game running.
 add_executable(menu_mod_list_test menu/mod_list_test.cpp)
@@ -2331,6 +2358,16 @@ add_executable(loadout_screen_test menu/loadout_screen_test.cpp)
 target_link_libraries(loadout_screen_test PRIVATE opennova_runtime)
 add_test(NAME loadout_screen COMMAND loadout_screen_test)
 
+# The in-game armory's WEAPON screen (menu/armory_screen.h) driven headless over the runtime's store
+# and a faked host: the INIT's class spin, the on-show's order (the class resolve, the rows the mask
+# enables, the class pair, the stage under the team gate, the populate, the readout and the icons),
+# the class flip's page memory, the picks, a banned grenade, ACCEPT and CANCEL past the press latch,
+# the empty and missing tables, and the authored fixtures/game/weapon.mnu's first-open weight.
+add_executable(armory_screen_test menu/armory_screen_test.cpp)
+target_link_libraries(armory_screen_test PRIVATE opennova_runtime)
+target_compile_features(armory_screen_test PRIVATE cxx_std_17)
+add_test(NAME armory_screen COMMAND armory_screen_test)
+
 # The loadout dialogs' list and state model (menu/loadout_screen.h's list fill,
 # reselects, clip count and accept pick; menu/player_info_loadout.h): the rows
 # under NONE, the restore's catalog rows, the handlers' picks, the kit page's
@@ -2349,6 +2386,16 @@ add_executable(player_info_avatars_test menu/player_info_avatars_test.cpp)
 target_link_libraries(player_info_avatars_test PRIVATE opennova_runtime)
 add_test(NAME player_info_avatars COMMAND player_info_avatars_test)
 
+# The PLAYER_INFO screen's controller (inmatch/player_info_screen.h) driven headless over the menu
+# runtime as the shell hands it the document: the populate, the cascades, the side radios, the
+# name rule, the voice override, the loadout's saved page and the ACCEPT's save, over the minted
+# synth_avatars.def, a weapon.def written in the test and a fresh profile store.
+add_executable(player_info_screen_test menu/player_info_screen_test.cpp)
+target_link_libraries(player_info_screen_test PRIVATE opennova_runtime)
+target_include_directories(player_info_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_info_screen_test PRIVATE cxx_std_17)
+add_test(NAME player_info_screen COMMAND player_info_screen_test)
+
 # The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the
@@ -2361,6 +2408,13 @@ add_executable(command_map_screen_test menu/command_map_screen_test.cpp)
 target_link_libraries(command_map_screen_test PRIVATE opennova_runtime)
 target_compile_features(command_map_screen_test PRIVATE cxx_std_17)
 add_test(NAME command_map_screen COMMAND command_map_screen_test)
+# The CMAP screen's controller (menu/command_map_controller.h, D-HUD-19) over an authored cmap.mnu and a
+# fake host: the show's order, every registered control's callback, the tab radios' rebinding and gates,
+# the waypoint name dialog and the delete button.
+add_executable(command_map_controller_test menu/command_map_controller_test.cpp)
+target_link_libraries(command_map_controller_test PRIVATE opennova_runtime)
+target_compile_features(command_map_controller_test PRIVATE cxx_std_17)
+add_test(NAME command_map_controller COMMAND command_map_controller_test)
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4393,6 +4447,13 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# The LAN multiplayer screens' controller (inmatch/lan_multiplayer_menu.h, mp.mnu, the shell's "lan"
+# delegate) headless over the menu runtime and a fake host: the LAN screen's activation, the search
+# state, the list's keep-selection rule and the join, the host screen's pool, rotation, gate and START.
+add_executable(lan_multiplayer_menu_test npruntime/lan_multiplayer_menu_test.cpp)
+target_link_libraries(lan_multiplayer_menu_test PRIVATE opennova_runtime)
+target_include_directories(lan_multiplayer_menu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lan_multiplayer_menu COMMAND lan_multiplayer_menu_test)
 # The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7): the cfg table's
 # title, dfx2.exe's caps, score table seeds, linger, deploy protection and its want of a revive.
 add_executable(npruntime_title_host_rules_test npruntime/title_host_rules_test.cpp)
@@ -5619,7 +5680,8 @@ add_executable(netsim_client_replica_census_test netsim/client_replica_census_te
 target_link_libraries(netsim_client_replica_census_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_replica_census COMMAND netsim_client_replica_census_test)
 # The vehicle screen (D-NET-907): the first open's C2S 0x42, the poll's per-frame retry
-# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick.
+# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick,
+# and the screen's controller over the menu runtime (inmatch/vehicle_menu_controller.h).
 add_executable(npruntime_vehicle_menu_test npruntime/vehicle_menu_test.cpp)
 target_link_libraries(npruntime_vehicle_menu_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_vehicle_menu COMMAND npruntime_vehicle_menu_test)
