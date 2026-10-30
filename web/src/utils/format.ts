@@ -119,22 +119,6 @@ export function formatMemory(bytes: number): string {
   return `${shown} ${units[unit]}`;
 }
 
-// "0 b/s", "850 kb/s", "1.2 Mb/s": a rate in bytes a second as bits a second
-// in decimal units, as network links are rated; one decimal under ten.
-export function formatBitRate(bytesPerSecond: number): string {
-  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond < 0) return 'unknown';
-  const units = ['b/s', 'kb/s', 'Mb/s', 'Gb/s'];
-  let value = bytesPerSecond * 8;
-  let unit = 0;
-  while (value >= 1000 && unit < units.length - 1) {
-    value /= 1000;
-    unit++;
-  }
-  if (unit === 0) return `${Math.round(value)} b/s`;
-  const shown = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
-  return `${shown} ${units[unit]}`;
-}
-
 // "0 B/s", "850 kB/s", "1.2 MB/s": a rate in bytes a second, in decimal units
 // (the usage views' network in and out).
 export function formatByteRate(bytesPerSecond: number): string {

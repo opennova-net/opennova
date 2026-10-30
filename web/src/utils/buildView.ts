@@ -42,11 +42,6 @@ export function versionText(build: Build): string | null {
   return build.version ? `ONE ${build.version}` : null;
 }
 
-// "ONE 0.0.22.5922 b0c2b38", "b0c2b38" with no version; '' for neither.
-export function buildText(build: Build): string {
-  return [versionText(build), build.commit].filter((t): t is string => !!t).join(' ');
-}
-
 function short(commit: string | null): string | null {
   return commit && SHA.test(commit) ? commit.slice(0, 7) : null;
 }

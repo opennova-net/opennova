@@ -95,11 +95,6 @@ export function shortImage(image: string): string {
   return name;
 }
 
-// "sha256:0123456789ab".
-export function shortDigest(digest: string): string {
-  return digest.startsWith('sha256:') ? digest.slice(0, 7 + 12) : digest;
-}
-
 // "web: 1 of 2 running": counts in words.
 export function countLabel(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
