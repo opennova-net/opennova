@@ -244,6 +244,13 @@ struct LobbyIdentityParams {
 	std::string country = "United States";
 	std::string language = "English";
 	std::string my_installed_exp_bits = "0";
+	// The client's CD-key ids (g_CDKeyInfo +16 / +0x810): dfx2.exe sets them as NWCDKIID and
+	// NWCDKIIDEXP1 from its record; empty for a protocol with no CD key (Jointops.exe's comes from
+	// its own registry read, not ported: empty).
+	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4d1760 (dfx2.exe) - g_CDKeyInfo +16 pushed
+	//  @0x4d18d3 and set @0x4d18dd, +0x810 pushed @0x4d18e8 and set @0x4d18f2]
+	std::string nwcdkiid;
+	std::string nwcdkiidexp1;
 	std::string nwpssk;
 	std::string nwusid;
 	std::string nwhwi; // make_nwhwi over the embedder's HardwareIdentity

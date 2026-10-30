@@ -212,6 +212,12 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(
 	out.nwhwi = opennova::make_nwhwi(hw);
 
 	const opennova::LobbyMachineTokens tokens = machine_tokens(*protocol.nwpssk_mix);
+	// The client's CD-key ids from the process's record, for a protocol that keeps one (engine
+	// LobbyIdentityParams::nwcdkiid carries the witness).
+	if (keeps_cd_key(&protocol)) {
+		out.nwcdkiid = opennova::cdkey::process_key_info().keys.cdkiid;
+		out.nwcdkiidexp1 = opennova::cdkey::process_key_info().keys.exp1;
+	}
 	out.nwpssk = tokens.nwpssk;
 	out.nwusid = tokens.nwusid;
 

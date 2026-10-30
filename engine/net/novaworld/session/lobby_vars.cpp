@@ -303,8 +303,8 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 		{"TimeZoneBias", p.tz_bias},
 		{"MyInstalledExpBits", p.my_installed_exp_bits},
 		{"NWUID", ""},        // echoed from the ServerSessionInit at use
-		{"NWCDKIID", ""},     // empty in retail; verify is not CD-key-gated
-		{"NWCDKIIDEXP1", ""},
+		{"NWCDKIID", p.nwcdkiid}, // the client's CDKIID (dfx2.exe's record; JO's empty)
+		{"NWCDKIIDEXP1", p.nwcdkiidexp1},
 		{"NWPSSK", p.nwpssk},
 		{"NWUSID", p.nwusid},
 		{"NWHWI", p.nwhwi},

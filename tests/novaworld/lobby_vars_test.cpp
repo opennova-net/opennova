@@ -325,6 +325,14 @@ int main() {
 		expect(vars[3].second == p.my_installed_exp_bits, "MyInstalledExpBits passes through");
 		expect(vars[4].second.empty() && vars[5].second.empty() && vars[6].second.empty(),
 		       "NWUID / NWCDKIID / NWCDKIIDEXP1 are empty");
+		// dfx2.exe sets its record's two ids there. [orig: CNapiGameSession_OnNovaWorldConnected
+		//  @0x4d1760 - @0x4d18d3..0x4d18f2 (dfx2.exe)]
+		nw::LobbyIdentityParams keyed = p;
+		keyed.nwcdkiid = "BMCCDKDKDLFFNGFDJHMFMMALJCLEFPADLPHHDHEEDHOGCIDLKC";
+		const auto keyed_vars = nw::make_lobby_identity_vars(keyed);
+		expect(keyed_vars[5].first == "NWCDKIID" && keyed_vars[5].second == keyed.nwcdkiid &&
+						keyed_vars[6].first == "NWCDKIIDEXP1" && keyed_vars[6].second.empty(),
+				"NWCDKIID carries the client's CDKIID, NWCDKIIDEXP1 its (empty) CDKIIDEXP1");
 		expect(vars[7].second == p.nwpssk, "NWPSSK passes through from the client environment");
 		expect(vars[8].second == p.nwusid, "NWUSID passes through from the client environment");
 		expect(vars[9].second == p.nwhwi, "NWHWI passes through");
