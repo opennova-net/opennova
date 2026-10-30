@@ -218,6 +218,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/foliage_assets.cpp # a foliage definition's slot geometry and bounds
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/mission_fixed_files.cpp # the files a running mission opens by a fixed name
     # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
