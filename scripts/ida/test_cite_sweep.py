@@ -176,6 +176,12 @@ class MarkerSubjects(unittest.TestCase):
         # code joins markers only
         self.assertEqual(list(cite_sweep.extract_lines("engine/x.cpp", ["// Foo_Bar @0x500000"])), [])
 
+    def test_a_wrapped_qualifier_binds_its_cite(self):
+        lines = ["exchanged as 16.16 (`sub_401C23 @0x401C23", "(Nile.exe)`), each a 16.16 value.",
+                 "The loader `Foo_Bar @0x401000` reads them."]
+        got = [(tok, ctx) for _, n, tok, _, ctx, _ in cite_sweep.extract_lines("docs/world/x-re.md", lines)]
+        self.assertEqual(got, [("sub_401C23", "(other-image) Nile.exe"), ("Foo_Bar", "")])
+
     def test_a_record_section_names_its_default_image(self):
         lines = ["## 1. Launch", "`UI_LaunchUpdateProcess @ 0x55b0b0`", "## 2. Inputs", "`Cupdate2Dlg_ReadWizard @ 0x405000`"]
         got = [ctx for *_, ctx, _ in cite_sweep.extract_lines("docs/update/updater-re.md", lines)]

@@ -148,6 +148,11 @@ DOC_DEFAULT_IMAGE = {
     "docs/update/updater-re.md": (
         ("## 2. ", "UPDATE.EXE"),
     ),
+    # "addresses are `MDEdit.exe`'s" in its writers' subsection
+    "docs/audio/mus-sbf-re.md": (
+        ("### MDEdit's own writers", "MDEdit.exe"),
+        ("### The method table", None),
+    ),
 }
 
 
@@ -376,9 +381,12 @@ def extract_lines(path, lines):
         marked = bool(MARKER_LINE.search(line))
         if not marked and not (record and "@" in line):
             continue
-        text = marker_text(lines, i) if marked else line
+        # an unmarked record line reads on into the next line's start, where a wrapped image
+        # qualifier lands (`sub_401C23 @0x401C23` / `(Nile.exe)`); its own pairs alone count
+        text = marker_text(lines, i) if marked else line + " " + (lines[i + 1].lstrip() if i + 1 < len(lines) else "")
         found = [m for m in PAIR.finditer(text)
-                 if marked or (m["name"] and (symbol_like(m["name"]) or SNAKE.match(m["name"])))]
+                 if marked or (m.start() < len(line) and m["name"]
+                               and (symbol_like(m["name"]) or SNAKE.match(m["name"])))]
         subjects = set()
         for opened in MARKER_LINE.finditer(text):
             first = next((m.start() for m in found if m.start() >= opened.end()), None)
