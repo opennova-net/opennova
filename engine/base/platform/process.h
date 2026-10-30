@@ -39,7 +39,8 @@ public:
 	// A child started from `options`; null with `error` when it did not start.
 	static std::unique_ptr<Process> spawn(const proc::SpawnOptions &options, std::string &error) {
 		auto handle = std::make_unique<ChildProcessHandle>();
-		if (!handle->child_.spawn(options, error)) return nullptr;
+		if (!handle->child_.spawn(options, error))
+			return nullptr;
 		return handle;
 	}
 
