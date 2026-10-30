@@ -8,13 +8,16 @@
 //   2. the engine frame: the main loop's clock (inmatch::MainLoopClock over the platform's
 //      clock, retail's GetTickCount bank and frame lock) and the session's advance, its updates
 //      running the logic ticks with the input frame's rows applied;
-//   3. the GPU frame: R5's render frame encodes its passes here (runtime/gpu over SDL_GPU); until
+//   3. the audio: the engine's mixer (runtime/audio/mixer.h) tops the platform's audio sink up a
+//      fifth of a second ahead, and its output meter's words go into the world for the scene
+//      frame's readers (the speaking head's kick, TALK);
+//   4. the GPU frame: R5's render frame encodes its passes here (runtime/gpu over SDL_GPU); until
 //      then the swapchain is cleared;
-//   4. present: the frame's commands submitted, then the render callback's re-base stamp.
+//   5. present: the frame's commands submitted, then the render callback's re-base stamp.
 //
 // Until the engine frontend (R3's runtime/frontend) owns the game flow, the app boots the one
 // mission its command line names (local_mission.h), with no menus and no HUD, and plays the
-// engine's audio stream once the engine's mixer produces one (R4's mixer lane).
+// engine mixer's stream (silence until the sound calls open its channels on this path).
 
 #include "local_input.h"
 #include "local_mission.h"
@@ -26,6 +29,7 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <runtime/audio/mixer.h>
 #include <runtime/inmatch/main_loop_clock.h>
 
 #include <games/games.h>
@@ -135,10 +139,10 @@ int run(const AppOptions &options, const LaunchFlags &flags, std::vector<std::st
 		gpu = sdl3::Gpu::create(*backend, error);
 		if (gpu == nullptr) io::logf(io::LogLevel::kWarn, "opennova-game: no GPU: %s", error.c_str());
 	}
-	// The engine's PCM sink, at the mixer's rate and form (16-bit stereo, as retail's mixer
-	// writes): its stream is pushed at the engine frame's tail once the mixer produces one.
-	platform::AudioSpec audio;
-	if (!platform.audio->open(audio, error))
+	// The engine's PCM sink, at the mixer's rate and form (44100 Hz, 16-bit stereo, as retail's
+	// mixer writes), fed from the engine's mixer at each engine frame's tail.
+	audio::Mixer mixer;
+	if (!platform.audio->open(audio::mix_audio_spec(), error))
 		io::logf(io::LogLevel::kWarn, "opennova-game: no audio: %s", error.c_str());
 	io::logf(io::LogLevel::kInfo, "opennova-game: video %s, audio %s, gpu %s",
 			backend->video_driver().c_str(), backend->audio_driver().c_str(),
@@ -190,10 +194,15 @@ int run(const AppOptions &options, const LaunchFlags &flags, std::vector<std::st
 			break;
 		}
 
-		// 3. The GPU frame: R5's render frame records its passes in the clear's place.
+		// 3. The audio: the mixer's stream topped up on the sink (nothing while it is closed), its
+		// meter into the world for the scene frame.
+		audio::feed_audio_device(mixer, *platform.audio);
+		mission.kernel().world.audio_out_meter = mixer.meter();
+
+		// 4. The GPU frame: R5's render frame records its passes in the clear's place.
 		if (gpu != nullptr && gpu->begin_frame()) gpu->clear(0.0f, 0.0f, 0.0f, 1.0f);
 
-		// 4. Present, then the render callback's end: the stamp a mission-start frame re-bases to.
+		// 5. Present, then the render callback's end: the stamp a mission-start frame re-bases to.
 		if (gpu != nullptr) gpu->present();
 		clock.mark_rendered();
 		++frames;
