@@ -97,6 +97,9 @@ struct ProjectView {
 		std::string novaworld; // the NovaWorld project its file names ("" none)
 	};
 	std::vector<RecentProject> recent_details;
+	// The folders this computer knows as NovaWorld working copies, most recently opened first, read as the
+	// recent projects are: the NovaWorld list's Open of a project, whatever the recent list holds.
+	std::vector<RecentProject> working_copies;
 	// The last game install checked (the CheckInstall request, New project's check): what the New
 	// project form and the project settings show under an install's field, each keeping its own answer.
 	InstallCheck install_check;

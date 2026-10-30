@@ -41,6 +41,11 @@ public:
 	// dropped from it. In effect at once, kept by the next save.
 	void remember_recent_project(const std::string &root);
 	void forget_recent_project(const std::string &root);
+	// `root` moved (or added) to the front of the working copies, capped at kWorkingCopiesMax; or added
+	// behind them where it is not known and there is room. In effect at once, kept by the next save;
+	// false when nothing changed.
+	bool remember_working_copy(const std::string &root);
+	bool know_working_copy(const std::string &root);
 	// `item` moved (or added) to the front of the items recently placed for `game` (recent_items_game),
 	// capped at kRecentItemsMax. In effect at once, kept by the next save; false when it was first
 	// already (nothing changed).

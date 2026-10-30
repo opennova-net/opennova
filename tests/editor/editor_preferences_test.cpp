@@ -45,13 +45,15 @@ Preferences every_preference() {
 	preferences.import_dependencies = false;
 	preferences.preview_background = PreviewBackground::Checker;
 	preferences.recent_items = {{"jo", {106100, 2044}}, {"dfx", {7}}};
+	preferences.working_copies = {"D:/Copies/One", "E:/Unplugged/Two"};
 	return preferences;
 }
 
 bool same(const Preferences &a, const Preferences &b) {
 	return a.recent_projects == b.recent_projects && a.runtime_executable == b.runtime_executable &&
 	       a.game_install == b.game_install && a.import_dependencies == b.import_dependencies &&
-	       a.preview_background == b.preview_background && a.recent_items == b.recent_items;
+	       a.preview_background == b.preview_background && a.recent_items == b.recent_items &&
+	       a.working_copies == b.working_copies;
 }
 
 // The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
@@ -75,7 +77,11 @@ const char *const kSettingsFile = "{\n"
                                   "    \"D:/mods/Harbor\"\n"
                                   "  ],\n"
                                   "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
-                                  "  \"schema_version\": 2\n"
+                                  "  \"schema_version\": 2,\n"
+                                  "  \"working_copies\": [\n"
+                                  "    \"D:/Copies/One\",\n"
+                                  "    \"E:/Unplugged/Two\"\n"
+                                  "  ]\n"
                                   "}\n";
 
 // S15's file (schema 2 as well): every preference, the recently placed items one list whatever the
@@ -133,7 +139,11 @@ const char *const kRetiredPlayFile = "{\n"
                                      "  ],\n"
                                      "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
                                      "  \"save_before_play\": false,\n"
-                                     "  \"schema_version\": 2\n"
+                                     "  \"schema_version\": 2,\n"
+                                     "  \"working_copies\": [\n"
+                                     "    \"D:/Copies/One\",\n"
+                                     "    \"E:/Unplugged/Two\"\n"
+                                     "  ]\n"
                                      "}\n";
 
 // A store whose saves fail, as a settings file that cannot be written does.
@@ -233,11 +243,13 @@ static int test_file_store_writes_the_settings_file() {
 	Preferences kept = every_preference();
 	kept.recent_items.clear();
 	kept.preview_background = PreviewBackground::Grey; // S15's file has no background: the default
+	kept.working_copies.clear();                       // nor any working copy
 	loaded = Preferences();
 	Diagnostic two;
 	TEST_EXPECT(FilePreferencesStore(s15).load(loaded, two) && same(loaded, kept) && two.code().empty());
 	loaded.recent_items = every_preference().recent_items;
 	loaded.preview_background = every_preference().preview_background;
+	loaded.working_copies = every_preference().working_copies;
 	TEST_EXPECT(FilePreferencesStore(s15).save(loaded, error));
 	TEST_EXPECT(test_io::read_file_text(s15, written) && written == kSettingsFile);
 	// An item that is no whole number a double holds exactly is skipped, never cast: a fraction, one

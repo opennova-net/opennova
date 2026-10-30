@@ -1466,6 +1466,7 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 			const std::string base_key = std::move(get_base_key_);
 			get_base_key_.clear();
 			name_project(dir, pull.remote().key);
+			core_.remember_working_copy(dir); // known now, whether or not its Open ends well
 			// A mod's: its base game's project made where its project file names it, unless a project
 			// is there already (make_base: got from NovaWorld, or a retail game's imported from the
 			// game install), the mod opened then; one the editor cannot make said so, the mod opened.
@@ -1784,6 +1785,8 @@ void NovaWorldController::start_over_half_made(const std::string &dir) {
 
 std::string NovaWorldController::local_base(const std::string &dir, const RemoteGame &game) const {
 	std::vector<std::string> roots = core_.view().project.recent_projects;
+	for (const ProjectView::RecentProject &copy : core_.view().project.working_copies)
+		roots.push_back(copy.root);
 	const fs::path mod = io::os_path(dir).lexically_normal();
 	std::error_code ec;
 	for (const auto &entry : fs::directory_iterator(mod.parent_path(), ec))
@@ -1825,6 +1828,8 @@ void NovaWorldController::show_new_base() {
 				std::to_string(view.projects.size());
 		for (const std::string &recent : core_.view().project.recent_projects)
 			asked += "\n" + recent;
+		for (const ProjectView::RecentProject &copy : core_.view().project.working_copies)
+			asked += "\n" + copy.root;
 	}
 	if (asked == new_base_asked_)
 		return;
@@ -1881,6 +1886,7 @@ OperationOutcome NovaWorldController::finish_base(BaseSetupOperation &operation)
 	if (NovaWorldPull *pull = operation.pull(); pull && pull->remote_known()) {
 		cache_lobby(ProjectPaths::for_root(setup.dir), pull->remote());
 		name_project(setup.dir, setup.key);
+		core_.remember_working_copy(setup.dir);
 	}
 	view_last(setup.title + "'s project is in " + setup.dir + ".");
 	// It is the editor's to find again, as a project of the author's: among the recent projects.

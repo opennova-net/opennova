@@ -34,6 +34,22 @@ void EditorPreferences::remember_recent_project(const std::string &root) {
 	if (values_.recent_projects.size() > kRecentProjectsMax) values_.recent_projects.resize(kRecentProjectsMax);
 }
 
+bool EditorPreferences::remember_working_copy(const std::string &root) {
+	std::vector<std::string> &copies = values_.working_copies;
+	if (!copies.empty() && copies.front() == root) return false;
+	copies.erase(std::remove(copies.begin(), copies.end(), root), copies.end());
+	copies.insert(copies.begin(), root);
+	if (copies.size() > kWorkingCopiesMax) copies.resize(kWorkingCopiesMax);
+	return true;
+}
+
+bool EditorPreferences::know_working_copy(const std::string &root) {
+	std::vector<std::string> &copies = values_.working_copies;
+	if (copies.size() >= kWorkingCopiesMax || std::find(copies.begin(), copies.end(), root) != copies.end()) return false;
+	copies.push_back(root);
+	return true;
+}
+
 bool EditorPreferences::remember_recent_item(const std::string &game, int64_t item) {
 	std::vector<int64_t> &recent = values_.recent_items[game];
 	if (!recent.empty() && recent.front() == item) return false;

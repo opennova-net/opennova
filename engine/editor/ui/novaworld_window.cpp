@@ -71,11 +71,13 @@ void set_up(Workspace &workspace, const RemoteProject &project) {
 	window_requests::set_workspace(workspace, "new_project", std::move(members));
 }
 
-// A recent project of this computer's naming the NovaWorld project `key`, null for none.
-const ProjectView::RecentProject *local_copy(const SessionView &v, const std::string &key) {
-	for (const ProjectView::RecentProject &recent : v.project.recent_details)
-		if (recent.found && recent.novaworld == key) return &recent;
-	return nullptr;
+// This computer's copies of the NovaWorld project `key`, most recently opened first: each a folder its project file
+// names the project in, whatever the recent list holds.
+std::vector<const ProjectView::RecentProject *> local_copies(const SessionView &v, const std::string &key) {
+	std::vector<const ProjectView::RecentProject *> out;
+	for (const ProjectView::RecentProject &copy : v.project.working_copies)
+		if (copy.found && copy.novaworld == key) out.push_back(&copy);
+	return out;
 }
 
 // One group of the projects list (Yours, Everyone's): each by its title, its key and its newest revision, with
@@ -106,13 +108,14 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 			if (ImGui::SmallButton("Set up...") && sets_up) set_up(workspace, project);
 			ImGui::EndDisabled();
 			ui_kit::tooltip("Fills New project for " + project.key + ": create it, then push its files.");
-		} else if (const ProjectView::RecentProject *copy = local_copy(v, project.key)) {
-			// A copy of it on this computer already (a recent project naming its key): opened, not got again.
+		} else if (const auto copies = local_copies(v, project.key); !copies.empty()) {
+			// A copy of it on this computer already: opened, not got again.
 			const bool opens = v.allows(EditorRequestKind::OpenProject);
 			ImGui::BeginDisabled(!opens);
-			if (ImGui::SmallButton("Open") && opens) workspace.request(request::open_project(copy->root));
+			if (ImGui::SmallButton("Open") && opens) workspace.request(request::open_project(copies.front()->root));
 			ImGui::EndDisabled();
-			ui_kit::tooltip("Opens your copy of " + project.key + " in " + copy->root + ".");
+			ui_kit::tooltip("Opens your copy in " + copies.front()->root + "." +
+			                (copies.size() > 1 ? " You have " + counted(copies.size() - 1, "more") + " here." : ""));
 		} else {
 			const bool can = gets && project.head > 0;
 			ImGui::BeginDisabled(!can);

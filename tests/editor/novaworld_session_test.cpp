@@ -72,7 +72,8 @@ struct Session {
 	editor::MemoryNovaWorldAccountStore accounts;
 	editor::ProjectSession session{ platform, preferences };
 
-	explicit Session(FakeService *service) {
+	explicit Session(FakeService *service, editor::Preferences kept = editor::Preferences()) :
+			preferences(std::move(kept)) {
 		session.set_novaworld_transport(service);
 		session.set_novaworld_accounts(&accounts);
 	}
@@ -723,6 +724,59 @@ static int test_get_again() {
 	return 0;
 }
 
+// A copy stays known to this computer whatever the recent list does: Forget, a refused Open and a folder
+// not found take nothing from what the editor can offer, and the root of one not found is kept for a drive
+// that comes back.
+static int test_copies_outlive_recents() {
+	test_temp::TempDir dir("opennova_novaworld_session_copies");
+	FakeService service;
+	push_to_mod(service, { { "project.opennova", project_file_naming("MOD") }, { "defs/a.def", "a" } });
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	const std::string copy = dir.file("Copy");
+	s.send(request::novaworld_get("MOD", copy));
+	s.send(request::close_project());
+	s.send(request::forget_recent(s.session.view().project.recent_projects.front()));
+	const auto known = [](const Session &session) {
+		const std::vector<editor::ProjectView::RecentProject> &copies =
+				session.session.view().project.working_copies;
+		return copies.size() == 1 && copies[0].novaworld == "MOD" && copies[0].found;
+	};
+	TEST_EXPECT(s.session.view().project.recent_projects.empty() && known(s));
+	const editor::Preferences kept = s.preferences.preferences();
+	TEST_EXPECT(kept.working_copies.size() == 1);
+
+	// The editor started again: still known. A project on the recent list alone joins them as the editor starts.
+	editor::Preferences older;
+	older.recent_projects = kept.working_copies;
+	{
+		Session again(&service, kept);
+		TEST_EXPECT(known(again));
+		Session recent_only(&service, older);
+		TEST_EXPECT(known(recent_only) && recent_only.preferences.preferences().working_copies.size() == 1);
+	}
+
+	// Its folder gone: known no more as a copy to open, its root kept for a drive that comes back.
+	const std::string moved = dir.file("Moved");
+	std::error_code renamed;
+	std::filesystem::rename(opennova::io::os_path(copy), opennova::io::os_path(moved), renamed);
+	TEST_EXPECT(!renamed);
+	{
+		Session away(&service, kept);
+		const std::vector<editor::ProjectView::RecentProject> &copies =
+				away.session.view().project.working_copies;
+		TEST_EXPECT(copies.size() == 1 && !copies[0].found &&
+				away.preferences.preferences().working_copies == kept.working_copies);
+		// A moved folder joins them as it opens, and the one it left stays unfound.
+		away.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+		away.send(request::open_project(moved));
+		TEST_EXPECT(away.novaworld().tracked && copies.size() == 2 && copies[0].found && !copies[1].found);
+	}
+	std::printf("copies: known whatever the recent list does, a folder not found kept, a moved one found as it "
+				"opens\n");
+	return 0;
+}
+
 // A mod got whose base game's project the account may not read (a retail game's, its files the game
 // install's, private on NovaWorld): no get of the base is tried, its project is made from the game
 // install, and with no install of its game the mod's own working copy is got alone, Output saying
@@ -1210,6 +1264,7 @@ int main() {
 	failures += test_get_expansion();
 	failures += test_get_then_open_again();
 	failures += test_get_again();
+	failures += test_copies_outlive_recents();
 	failures += test_get_mod_base_not_got();
 	failures += test_new_mod();
 	failures += test_account_change_gives_up_put();

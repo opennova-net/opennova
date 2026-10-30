@@ -186,7 +186,7 @@ private:
 	// imported from `install`, false with `why` (nothing started) where that holds no install of `game`.
 	bool make_base(BaseSetup setup, const std::string &game, const std::string &install, std::string &why);
 	// A project of the NovaWorld game `game` on this computer already, for a mod made in `dir` to be
-	// made on (a recent project, or one in the folder `dir` is made in): one whose project file names
+	// made on (a recent project, a working copy, or one in the folder `dir` is made in): one whose project file names
 	// the game's key, else for a game of NovaLogic's or one the account may not read, one of its game's
 	// own files (a standalone project of its title code naming no key, its files imported from a game
 	// install: its archives recorded). "" none.

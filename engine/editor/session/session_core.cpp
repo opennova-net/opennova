@@ -475,10 +475,13 @@ bool SessionCore::open_project(const std::string &dir, bool import_pass, const s
 		// Taken off the recent projects, and said so where the welcome page shows why.
 		const bool listed = std::find(view_.project.recent_projects.begin(), view_.project.recent_projects.end(), dir) !=
 		                    view_.project.recent_projects.end();
-		if (listed) {
-			preferences_.forget_recent_project(dir);
-			save_preferences();
-		}
+		// What was read of it is old: a working copy that no longer opens is offered as one no longer.
+		std::vector<ProjectView::RecentProject> &copies = view_.project.working_copies;
+		copies.erase(std::remove_if(copies.begin(), copies.end(),
+		                            [&dir](const ProjectView::RecentProject &copy) { return copy.root == dir; }),
+		             copies.end());
+		if (listed) preferences_.forget_recent_project(dir);
+		save_preferences();
 		refuse_project(why, listed ? "The project could not be opened, and it is off the recent projects now"
 		                           : "The project could not be opened");
 		return false;
@@ -542,6 +545,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	view_.activity.has_export = false;
 	view_.activity.last_export = std::make_shared<const ExportReport>();
 	preferences_.remember_recent_project(paths_.root);
+	if (!view_.project.document->novaworld.empty()) preferences_.remember_working_copy(paths_.root);
 	save_preferences();
 	read_recent_details(view_.project.document.get(), paths_.root); // its entry as it is now, whatever was there
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
@@ -974,6 +978,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 bool SessionCore::write_project(const ProjectDocument &project, Diagnostic &error) {
 	if (!save_project_document(paths_.project_file, project, error)) return false;
 	view_.project.document = std::make_shared<const ProjectDocument>(project);
+	read_recent_details(view_.project.document.get(), paths_.root); // a key put or taken out shows at once
 	touch(ViewConcern::Project);
 	return true;
 }
@@ -1019,6 +1024,10 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 void SessionCore::forget_recent(const std::string &root) {
 	preferences_.forget_recent_project(root);
 	save_preferences();
+}
+
+void SessionCore::remember_working_copy(const std::string &root) {
+	if (preferences_.remember_working_copy(ProjectPaths::for_root(root).root)) save_preferences();
 }
 
 void SessionCore::check_install(const std::string &path) {
@@ -1085,29 +1094,32 @@ void SessionCore::read_recent_details(const ProjectDocument *open, const std::st
 		recent.novaworld = doc.novaworld;
 		return recent;
 	};
-	std::vector<ProjectView::RecentProject> details;
-	for (const std::string &root : view_.project.recent_projects) {
-		if (open && root == open_root) {
-			details.push_back(worded(root, *open));
-			continue;
-		}
-		const auto known = std::find_if(view_.project.recent_details.begin(), view_.project.recent_details.end(),
-		                                [&root](const ProjectView::RecentProject &each) { return each.root == root; });
-		if (known != view_.project.recent_details.end()) {
-			details.push_back(*known);
-			continue;
-		}
+	std::vector<ProjectView::RecentProject> known = view_.project.recent_details;
+	known.insert(known.end(), view_.project.working_copies.begin(), view_.project.working_copies.end());
+	const auto details_of = [&](const std::string &root) {
+		if (open && root == open_root) return worded(root, *open);
+		const auto held = std::find_if(known.begin(), known.end(),
+		                               [&root](const ProjectView::RecentProject &each) { return each.root == root; });
+		if (held != known.end()) return *held;
 		ProjectDocument doc;
 		Diagnostic error;
-		if (::opennova::editor::open_project(root, doc, error)) {
-			details.push_back(worded(root, doc));
-		} else {
-			ProjectView::RecentProject recent;
-			recent.root = root;
-			details.push_back(std::move(recent));
-		}
-	}
+		if (::opennova::editor::open_project(root, doc, error)) return worded(root, doc);
+		ProjectView::RecentProject recent;
+		recent.root = root;
+		return recent;
+	};
+	std::vector<ProjectView::RecentProject> details;
+	for (const std::string &root : view_.project.recent_projects) details.push_back(details_of(root));
+	// A recent project on NovaWorld is known from now on, whatever becomes of the recent list.
+	bool noted = false;
+	for (const ProjectView::RecentProject &recent : details)
+		if (recent.found && !recent.novaworld.empty()) noted = preferences_.know_working_copy(recent.root) || noted;
+	std::vector<ProjectView::RecentProject> copies;
+	for (const std::string &root : preferences_.values().working_copies) copies.push_back(details_of(root));
 	view_.project.recent_details = std::move(details);
+	view_.project.working_copies = std::move(copies);
+	Diagnostic unsaved;
+	if (noted && !preferences_.save(unsaved)) report(unsaved);
 }
 
 void SessionCore::refuse_project(const Diagnostic &why, const std::string &what) {

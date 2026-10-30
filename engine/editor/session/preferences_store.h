@@ -27,9 +27,15 @@ namespace opennova::editor {
 inline constexpr int kPreferencesSchemaVersion = 2;
 inline constexpr size_t kRecentProjectsMax = 10;
 inline constexpr size_t kRecentItemsMax = 12;
+inline constexpr size_t kWorkingCopiesMax = 64;
 
 struct Preferences {
 	std::vector<std::string> recent_projects; // project roots, most recent first
+	// The folders on this computer known as working copies of NovaWorld projects, most recently opened
+	// first, whatever the recent list has dropped since. Roots alone: what each is a copy of is its
+	// project file's to say (ADR 0073). One not found now stays, for a drive that comes back. A store
+	// that does not say reads as none.
+	std::vector<std::string> working_copies;
 	std::string runtime_executable;           // "" = the runtime packaged beside the editor
 	std::string game_install;                 // the game install (Joint Operations), on this machine
 	// The import dialog's "Include the files these need" (ADR 0046 S11g): what a preview the
