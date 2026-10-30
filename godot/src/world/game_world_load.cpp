@@ -864,9 +864,6 @@ void GameWorld::unload() {
 	if (container != nullptr) {
 		container->queue_free();
 	}
-	// Per-item attached-effect owner keys reference nodes in that container —
-	// never let a reload's provider resolve against freed instances.
-	item_fx_->reset();
 	MissionAudio *mission_audio = get_mission_audio();
 	if (mission_audio != nullptr) {
 		mission_audio->teardown();
@@ -1227,11 +1224,9 @@ void GameWorld::place_streamed_mission_objects(const Ref<Simulation> &p_sim,
 	leg("occlusion");
 	occlusion_->rebind_placed_nodes();
 	leg_end();
-	// The authored .def item effects and effect lights attached at load against
-	// an empty placer; re-attach against the placed sources (the same pair the
-	// effect-catalog warm-up re-runs).
+	// The effect lights attached at load against an empty placer; re-attach
+	// against the placed sources (the effect-catalog warm-up re-runs it).
 	leg("reattach");
-	item_fx_->reattach();
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
@@ -1822,7 +1817,6 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 			effect_world->set_particles_hidden(true);
 		}
 	}
-	item_fx_->reattach();
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
@@ -1931,7 +1925,7 @@ EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_
 	effect_world->set_name("EffectWorld");
 	add_child(effect_world);
 	effect_world->set_environment_source(env_);
-	if (item_fx_->particles_hidden()) {
+	if (particles_hidden_) {
 		effect_world->set_particles_hidden(true);
 	}
 	// The session's words, before the pages are built (CParticleTexture_InitTextureAndChannels
@@ -2043,9 +2037,8 @@ void GameWorld::start_effect_world() {
 			water_sim->set_water_z(water_->get_water_height());
 		}
 	}
-	// Item-effect wiring — the owner-pose provider, the persistent per-item
-	// attaches, and the wire-spawn callback — lives in the director.
-	item_fx_->on_effect_world_started();
+	// The persistent per-item effects are the engine's: its producers open onto this scene past
+	// the warm reset (open_script_effects, world::ItemEmitterSystem::open_producers).
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
@@ -2061,14 +2054,13 @@ void GameWorld::start_effect_world() {
 		presenter->connect("wire_node_spawned", callable_mp(this, &GameWorld::on_wire_node_spawned));
 	}
 	// The present passes' typed collaborators (ADR 0043 d9): the mission audio
-	// (the stage before this one), this effect world, the light director, the
-	// environment node and the owner-anchor registry (GameWorld's
-	// ItemEffectDirector). Bound
+	// (the stage before this one), this effect world, the light director and
+	// the environment node. Bound
 	// once here, inside the load and before the first session frame presents;
 	// the fire/destruction sound legs and the effect legs gate on the objects
 	// themselves (a dedicated serve binds no camera listener).
 	if (wire_runtime != nullptr) {
-		wire_runtime->setup_passes(get_mission_audio(), effect_world, light_director_.ptr(), env_, item_fx_.ptr());
+		wire_runtime->setup_passes(get_mission_audio(), effect_world, light_director_.ptr(), env_);
 	}
 	// The fire pass's tracer ribbons, built again per rendering water mirror
 	// against that mirror's camera (FirePresenter::set_mirror_cameras).

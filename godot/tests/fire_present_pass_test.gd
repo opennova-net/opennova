@@ -72,7 +72,7 @@ func _slot_sound(soundset: String, pos: Vector3, handle: int, slot: int) -> Slot
 func _make_presenter(audio: MissionAudio, container: Node3D = null) -> EntityPresenter:
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup_passes(container, null, null, audio, null, null, null, null)
+	presenter.setup_passes(container, null, null, audio, null, null, null)
 	return presenter
 
 
@@ -286,7 +286,7 @@ func test_tracer_rung_follows_the_eye_water_side() -> void:
 	environment.set_underwater_view(true)
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup_passes(container, null, null, audio, null, null, environment, null)
+	presenter.setup_passes(container, null, null, audio, null, null, environment)
 
 	presenter.draw_tracer_rows(PackedFloat32Array([
 		1.0, 0.0, 3.0,
@@ -513,7 +513,7 @@ func test_the_inset_scene_builds_its_ribbons_against_its_own_view() -> void:
 	add_child_autofree(effects)
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup_passes(container, null, null, audio, effects, null, null, null)
+	presenter.setup_passes(container, null, null, audio, effects, null, null)
 	# A far stdred trail along the views' x axis: the minimum width rules there.
 	var rows := PackedFloat32Array([
 		1.0, 1.0, 4.0,

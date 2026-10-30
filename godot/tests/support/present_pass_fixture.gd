@@ -1,23 +1,10 @@
 class_name PresentPassFixture
 extends RefCounted
 
-## What the present-pass tests share: a REAL EffectWorld wired the production
-## way, the read helpers over its public group report (rule 11: assert through
-## get_debug_group_report, never a private), the PF-layout phase packing the
-## flat snapshot builders use, and the per-entity lighting instance walk.
-
-
-## A REAL EffectWorld over `catalog`, its owner poses resolved by `anchors`
-## (the production wiring ItemEffectDirector.on_effect_world_started performs
-## for GameWorld's world): advance_fixed_tick(0.0) is the sync. Autofreed with
-## the test.
-static func make_fx(test: GutTest, anchors: ItemEffectDirector,
-		catalog: ParticleFile) -> EffectWorld:
-	var fx := EffectWorld.new()
-	test.add_child_autofree(fx)
-	fx.load_particle_file(catalog)
-	fx.set_owner_position_provider(anchors.resolve_owner_transform)
-	return fx
+## What the present-pass tests share: the read helpers over an EffectWorld's
+## public group report rows (rule 11: assert through get_debug_group_report,
+## never a private), the PF-layout phase packing the flat snapshot builders use,
+## and the per-entity lighting instance walk.
 
 
 ## A bare Node3D in the tree, autofreed with the test.
@@ -25,42 +12,6 @@ static func container(test: GutTest) -> Node3D:
 	var node := Node3D.new()
 	test.add_child_autofree(node)
 	return node
-
-
-## The live (still attached) group report row owned by `key`, or null when none.
-static func live_owned_row(fx: EffectWorld, key: String) -> EffectGroupReport:
-	for row_v in fx.get_debug_group_report():
-		var row := row_v as EffectGroupReport
-		if row.owner_key == key and not row.detached:
-			return row
-	return null
-
-
-## Every group report row owned by `key`, attached or detached.
-static func owned_rows(fx: EffectWorld, key: String) -> Array:
-	var out: Array = []
-	for row_v in fx.get_debug_group_report():
-		var row := row_v as EffectGroupReport
-		if row.owner_key == key:
-			out.append(row)
-	return out
-
-
-## The group report row with `group_id` (a released owner drops its key from
-## the row, so retired groups are found by id), or null once swept.
-static func row_by_id(fx: EffectWorld, group_id: int) -> EffectGroupReport:
-	for row_v in fx.get_debug_group_report():
-		var row := row_v as EffectGroupReport
-		if int(row.id) == group_id:
-			return row
-	return null
-
-
-## Whether the group with `group_id` is detached; `swept` once the report no
-## longer lists it.
-static func row_detached(fx: EffectWorld, group_id: int, swept: bool = false) -> bool:
-	var row := row_by_id(fx, group_id)
-	return swept if row == null else row.detached
 
 
 ## The first emitter's position of one group report row (the spawn point of a

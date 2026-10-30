@@ -67,13 +67,11 @@ GameWorld::GameWorld() :
 	panm_clock_.instantiate();
 	player_visuals_.instantiate();
 	player_visuals_->setup(this);
-	// The item-effect director and the light director, wired to this world:
-	// their two / three lent seams are typed reads off the placer's static
-	// item-effect sources, its static light draw sources (+ revision) and
-	// its item database, resolved lazily through the StaticSourceProvider
-	// this world implements (a placer exists only once a mission is placed).
-	item_fx_.instantiate();
-	item_fx_->setup_with_provider(this, this);
+	// The light director, wired to this world: its three lent seams are typed
+	// reads off the placer's static item-effect sources, its static light draw
+	// sources (+ revision) and its item database, resolved lazily through the
+	// StaticSourceProvider this world implements (a placer exists only once a
+	// mission is placed).
 	light_director_.instantiate();
 	light_director_->setup_with_provider(this, this);
 }
@@ -910,12 +908,24 @@ Ref<PlayerViewmodelDef> GameWorld::local_player_viewmodel_def() {
 
 // --- the dev tools' seams ---------------------------------------------------
 
+// The retail master particle switch (the dev tools' "Hide particles"): the effect world's spawn
+// facade off, and on its lift the engine's slot-A attaches it refused, once
+// (world::ItemEmitterSystem::retry_hidden). The preference survives mission reloads: each freshly
+// built EffectWorld takes it (create_effect_world).
 void GameWorld::set_particles_hidden(bool p_hidden) {
-	item_fx_->set_particles_hidden(p_hidden);
+	const bool was_hidden = particles_hidden_;
+	particles_hidden_ = p_hidden;
+	if (EffectWorld *effect_world = get_effect_world()) {
+		effect_world->set_particles_hidden(p_hidden);
+	}
+	const Ref<Simulation> sim = get_sim();
+	if (was_hidden && !p_hidden && sim.is_valid()) {
+		sim->retry_hidden_item_effects();
+	}
 }
 
 bool GameWorld::is_particles_hidden() const {
-	return item_fx_->particles_hidden();
+	return particles_hidden_;
 }
 
 void GameWorld::set_foliage_hidden(bool p_hidden) {
@@ -1310,7 +1320,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_foliage_hidden"), &GameWorld::is_foliage_hidden);
 	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"), &GameWorld::get_minimap_water_mask);
 	ClassDB::bind_method(D_METHOD("get_effect_world"), &GameWorld::get_effect_world);
-	ClassDB::bind_method(D_METHOD("get_item_effect_director"), &GameWorld::get_item_effect_director);
 	ClassDB::bind_method(D_METHOD("get_terrain_node"), &GameWorld::get_terrain_node);
 	ClassDB::bind_method(D_METHOD("get_foliage_dispatcher"), &GameWorld::get_foliage_dispatcher);
 	ClassDB::bind_method(D_METHOD("get_scene_overlay_cached_meshes"), &GameWorld::get_scene_overlay_cached_meshes);

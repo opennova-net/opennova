@@ -267,31 +267,6 @@ Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_requ
 	return spawn_receipt_record(receipt);
 }
 
-void EffectOwnerPoseBatch::add(int64_t p_owner_token, const Transform3D &p_transform) {
-	opennova::particle::EffectOwnerPoseUpdate update;
-	update.owner.value = token_from_godot(p_owner_token);
-	update.pose = native_pose(p_transform);
-	update.present = true;
-	updates_.push_back(update);
-}
-
-void EffectOwnerPoseBatch::add_absent(int64_t p_owner_token) {
-	opennova::particle::EffectOwnerPoseUpdate update;
-	update.owner.value = token_from_godot(p_owner_token);
-	update.present = false;
-	updates_.push_back(update);
-}
-
-void EffectScene::apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch) {
-	scene_->apply_owner_poses(p_batch.updates());
-	snapshot_dirty_ = true;
-}
-
-void EffectScene::apply_owner_poses(const EffectOwnerPoseBatch &p_batch) {
-	apply_owner_poses_in_place(p_batch);
-	advance_in_place(0.0);
-}
-
 void EffectScene::detach(int64_t p_group_id) {
 	scene_->detach(opennova::particle::EffectGroupId{
 		token_from_godot(p_group_id)

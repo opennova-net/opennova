@@ -256,7 +256,7 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 	# the director's on_muzzle_fire.
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup_passes(null, null, null, null, null, director, null, null)
+	presenter.setup_passes(null, null, null, null, null, director, null)
 	presenter.present_fires([_muzzle_fire(77, Vector3(1.0, 0.0, 0.0), 1)])
 	assert_eq(director.get_report().live, 1,
 			"the presented MF_Light event creates one muzzle glow")
@@ -296,8 +296,8 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 	# death-light column straight into the director's on_death_light.
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup_passes(null, null, null, null, null, director, null, null)
-	var drain := DestructionDrain.make([], [], 0, 0,
+	presenter.setup_passes(null, null, null, null, null, director, null)
+	var drain := DestructionDrain.make([], 0, 0,
 			PackedVector3Array([Vector3(2.0, 0.0, 0.0)]), PackedFloat32Array([6.0]))
 	presenter.present_destruction_drained(drain, [])
 	assert_eq(director.get_report().live, 1,

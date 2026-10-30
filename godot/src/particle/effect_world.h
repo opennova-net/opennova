@@ -41,10 +41,12 @@ class Simulation;
 // World-facing owner for the portable effect scene and draw-list renderer
 // (the former effect_world.gd, ADR 0043 d9). Effects, emitters, and
 // particles are values owned by EffectScene; this node owns one
-// ParticleRenderer for both render domains. Device only: the Variant
-// slot/owner keys the game hands it are interned to native tokens here, the
-// per-frame owner-pose sync polls the game's resolver, and the debug read
-// model joins the scene's snapshot to the renderer's bounds.
+// ParticleRenderer for both render domains. Device only: the Variant slot
+// keys the game hands it are interned to native tokens here, and the debug
+// read model joins the scene's snapshot to the renderer's bounds. No group
+// follows an owner: the engine's producers re-pose the groups they hold
+// (particle::EffectScene::move_group), and a binding that still holds one
+// moves it through move_group.
 class EffectWorld : public Node3D {
 	GDCLASS(EffectWorld, Node3D)
 
@@ -57,8 +59,6 @@ public:
 		ADMISSION_REPLACE_OWNED = EffectScene::ADMISSION_REPLACE_OWNED,
 		ADMISSION_SUPPRESS_WHILE_OWNED = EffectScene::ADMISSION_SUPPRESS_WHILE_OWNED,
         ADMISSION_STORE_OWNED = EffectScene::ADMISSION_STORE_OWNED,
-		BINDING_WORLD = EffectScene::BINDING_WORLD,
-		BINDING_FOLLOW_OWNER = EffectScene::BINDING_FOLLOW_OWNER,
 		RENDER_DOMAIN_WORLD = EffectScene::RENDER_DOMAIN_WORLD,
 		RENDER_DOMAIN_FIRST_PERSON = EffectScene::RENDER_DOMAIN_FIRST_PERSON,
 		KILL_PLANE_DISABLED = EffectScene::KILL_PLANE_DISABLED,
@@ -90,10 +90,6 @@ public:
 	// for an effect device whose texture loads through another retail loader
 	// than the particle graphics' TGA reader (the water wake).
 	const Ref<ResourceRoot> &resource_root() const { return root_; }
-	// The per-frame owner-pose resolver: called with the owner key, it
-	// answers a Transform3D (the full pose), a Vector3 (a translation over
-	// the cached basis) or null (the owner is gone: its groups detach).
-	void set_owner_position_provider(const Callable &p_provider);
 	void set_water_plane(float p_value, Camera3D *p_reflection_camera);
 	// The weapon Inset pass's own water mirror camera
 	// (ParticleRenderer::set_inset_mirror_camera); clear_world() drops it.
@@ -158,14 +154,13 @@ public:
 	String effect_name_for_handle(int64_t p_handle) const;
 
 	// The effect pose for an authored forward vector: Z along the forward,
-	// an up hint of UP (RIGHT when the forward is vertical). Shared with the
-	// static item-effect sources (ItemEffectDirector).
+	// an up hint of UP (RIGHT when the forward is vertical).
 	static Transform3D forward_pose(const Vector3 &p_position, const Vector3 &p_forward);
 	static Transform3D descriptor_pose(const Vector3 &p_position, const Vector3 &p_orientation);
 
-	// Deep spawn seam. Admission, binding, and render domain are explicit
-	// values; the options' slot_key/owner_key Variants are interned to
-	// stable native tokens.
+	// Deep spawn seam. Admission and render domain are explicit values; the
+	// options' slot_key Variant is interned to a stable native token. Every
+	// group is world-bound.
 	Ref<EffectSpawnReceipt> spawn_effect_request(const String &p_name,
 			const Transform3D &p_transform,
 			const Ref<EffectSpawnOptions> &p_options = Ref<EffectSpawnOptions>());
@@ -216,29 +211,16 @@ public:
 			int64_t p_source_order = 0, bool p_section_tagged = false);
 	int64_t spawn_effect(const String &p_name, const Vector3 &p_position,
 			const Vector3 &p_orientation = Vector3(), bool p_section_tagged = false);
-	Ref<EffectSpawnReceipt> spawn_effect_owned_request(const Variant &p_owner_key,
-			const String &p_name, const Vector3 &p_position,
-			const Vector3 &p_orientation = Vector3(), bool p_section_tagged = false);
-	int64_t spawn_effect_owned(const Variant &p_owner_key, const String &p_name,
-			const Vector3 &p_position, const Vector3 &p_orientation = Vector3(),
-			bool p_section_tagged = false);
-	// `p_entity_slot` nonzero: the group is stored in that entity's +0x1CC slot (StoreOwned;
-	// engine world/item_effects.h entity_effect_slot).
-	Ref<EffectSpawnReceipt> spawn_effect_attached_request(const Variant &p_owner_key,
-			const String &p_name, const Transform3D &p_initial_transform,
-			const Vector3 &p_local_pos, const Vector3 &p_local_dir,
-			bool p_section_tagged = false, int64_t p_entity_slot = 0);
-	int64_t spawn_effect_attached(const Variant &p_owner_key, const String &p_name,
-			const Transform3D &p_initial_transform, const Vector3 &p_local_pos,
-			const Vector3 &p_local_dir, bool p_section_tagged = false);
-	int64_t spawn_effect_unless_alive(const Variant &p_owner_key, const String &p_name,
+	int64_t spawn_effect_unless_alive(const Variant &p_slot_key, const String &p_name,
 			const Vector3 &p_position, const Vector3 &p_orientation = Vector3());
 	bool spawn_effect_by_handle(int64_t p_handle, const Vector3 &p_position,
 			const Vector3 &p_orientation = Vector3());
     std::shared_ptr<opennova::particle::EffectScene> shared_native_scene() const;
 	void stop_group(int64_t p_group_id);
-	// Detach what an entity's +0x1CC slot holds (engine world/item_effects.h entity_effect_slot).
-	void detach_entity_slot(int64_t p_entity_slot);
+	// The holder's per-tick re-pose of a live group: its emitters to the pose's origin, re-aimed
+	// along its forward (particle::EffectScene::move_group carries the witness). False for a
+	// dead or detached group.
+	bool move_group(int64_t p_group_id, const Transform3D &p_pose);
 	// The rotor-wash re-trigger: every child emitter of a live group spawns
 	// one particle at `p_position` along `p_forward`, bound to `p_force_zone`
 	// (the retail dword_29D6BB0 spawn window). False for a dead group, which
@@ -251,28 +233,13 @@ public:
 	// unclamped because the portable scene owns the retail formulas.
 	bool set_group_parameters(int64_t p_group_id, float p_rate_control,
 			float p_offset_control);
-	// Releases the script/native binding identity for an owner whose
-	// lifecycle is complete. Call after stopping its group: generation-scoped
-	// owners (flying rounds, debris pieces) otherwise accumulate one slot
-	// key, owner key, and cached pose for every lifetime until the whole
-	// mission is reset.
-	void release_effect_binding(const Variant &p_owner_key);
-	// Destroy outright the group this owner key's slot holds, its particles with it (engine
-	// particle::EffectScene::destroy_slot); the binding identity stays.
-	void destroy_owned_group(const Variant &p_owner_key);
-	// True while this owner key holds a live binding identity (slot token,
-	// owner token, and reverse lookup). Leak-check seam for generation-scoped
-	// owners (flying rounds, debris pieces) whose keys must not accumulate
-	// across lifetimes (ADR 0017: typed scalars, not a Dictionary report).
-	bool has_owner_binding(const Variant &p_owner_key) const;
-	// True while this owner key's binding also carries a cached native pose.
-	// A rejected ReplaceOwned spawn allocates its identities but never seeds
-	// one.
-	bool has_cached_owner_pose(const Variant &p_owner_key) const;
-	// True when every owner-binding table is empty, i.e. no retired owner
-	// key is still holding a slot token, owner token, reverse lookup, or
-	// cached pose.
-	bool has_no_owner_bindings() const;
+	// Releases a slot key whose holder is done with it: what the slot holds
+	// detaches and the key's native token is forgotten, so generation-scoped
+	// keys (a vehicle's trail lanes) never accumulate across lifetimes.
+	void release_slot_key(const Variant &p_slot_key);
+	// True while this slot key holds a native token (the leak-check seam,
+	// ADR 0017: a typed scalar, not a Dictionary report).
+	bool has_slot_key(const Variant &p_slot_key) const;
 	// The mission header's wind, the GLOBALWIND drift every tick
 	// (particle::mission_wind_vector). GameWorld feeds it at effect-world start.
 	void set_mission_wind(int p_wind_speed, int p_wind_direction_degrees);
@@ -286,9 +253,9 @@ public:
 	// spawn point and the live building section masks on every advance. Null
 	// (previews, tests) leaves every group ungated.
 	void set_section_source(Simulation *p_source);
-	// Explicit GameWorld device leg. Attachment poses and the
-	// immutable draw list are refreshed once at the pipeline's chosen point;
-	// particles never advance on render delta.
+	// Explicit GameWorld device leg. The immutable draw list is refreshed
+	// once at the pipeline's chosen point; particles never advance on render
+	// delta.
 	void render_frame(int64_t p_time_ms);
 	// The frame's post-particle overlay tail, handed to every view's overlay
 	// pass (ParticleRenderer::publish_scene_overlay). Not bound to Godot.
@@ -298,7 +265,8 @@ public:
 	// particle/render Nodes escape this facade. Hidden particles report
 	// nothing unless `include_hidden` (the GUT pins over the retail master
 	// switch read the suppressed groups through it); each row carries the
-	// spawn's `owner_key` (null for unowned groups).
+	// spawn's `slot_key` (null for a group spawned under none, the engine's
+	// producers' among them).
 	TypedArray<EffectGroupReport> get_debug_group_report(bool p_include_hidden = false);
 	// Unresolved names describe the loaded atlas catalog as a whole, not any
 	// one live group; keeping them here prevents one unrelated missing frame
@@ -315,12 +283,8 @@ private:
 	Node *_environment_source() const;
 	Camera3D *_reflection_camera() const;
 	void _open_files();
-	int64_t _allocate_token();
 	int64_t _slot_token_for(const Variant &p_key);
-	int64_t _owner_token_for(const Variant &p_key);
-	void _seed_owner_pose(int64_t p_owner_token, const Transform3D &p_transform);
 	Ref<EffectSpawnReceipt> _disabled_receipt() const;
-	void _sync_owner_poses(bool p_refresh_frame);
 
 	TypedArray<ParticleFile> files_;
 	Ref<EffectLoadReport> load_report_;
@@ -330,7 +294,6 @@ private:
 	Callable image_provider_;
 	String texture_dir_;
 	ObjectID environment_source_id_;
-	Callable owner_position_provider_;
 	float water_height_ = 0.0f;
 	ObjectID reflection_camera_id_;
 	ObjectID second_scene_camera_id_;
@@ -346,16 +309,10 @@ private:
 			const Vector3 &p_position) const;
 	bool particles_disabled_ = false;
 
-	// Keys never become native tokens by hashing. A shared monotonic
-	// allocator and separate maps give the same Variant distinct slot and
-	// owner identities.
+	// Keys never become native tokens by hashing: a monotonic allocator gives
+	// each Variant key its token (the engine's slot domains sit far above it).
 	HashMap<Variant, int64_t, VariantHasher, VariantComparator> slot_tokens_;
-	HashMap<Variant, int64_t, VariantHasher, VariantComparator> owner_tokens_;
-	HashMap<int64_t, Variant> owner_keys_by_token_;
-	HashMap<int64_t, Transform3D> owner_pose_cache_;
-	// The one pose-update batch, cleared and refilled per push so the
-	// per-frame owner sync allocates nothing once warm.
-	EffectOwnerPoseBatch owner_pose_batch_;
+	HashMap<int64_t, Variant> slot_keys_by_token_;
 	int64_t next_token_ = 1;
 };
 

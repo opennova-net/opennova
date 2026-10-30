@@ -63,15 +63,12 @@ void DestructionPresentStats::_bind_methods() {
 	STAT_BIND(DestructionPresentStats, no_husk)
 	STAT_BIND(DestructionPresentStats, pieces_peak)
 	STAT_BIND(DestructionPresentStats, debris_triangles)
-	STAT_BIND(DestructionPresentStats, effects)
 	STAT_BIND(DestructionPresentStats, sounds)
 	STAT_BIND(DestructionPresentStats, crackles)
 }
 
 void ThrowablePresentStats::_bind_methods() {
 	STAT_BIND(ThrowablePresentStats, live)
-	STAT_BIND(ThrowablePresentStats, move_effects)
-	STAT_BIND(ThrowablePresentStats, move_effect_transforms)
 }
 
 void ScarPresentStats::_bind_methods() {

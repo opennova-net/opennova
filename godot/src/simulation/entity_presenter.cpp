@@ -29,7 +29,6 @@
 #include "simulation/present_event_records.h"
 #include "simulation/simulation.h"
 #include <runtime/world/vehicle_motor.h>
-#include "world/item_effect_director.h"
 #include "world/scar_draw_list.h"
 #include "world/scar_presenter.h"
 
@@ -189,7 +188,7 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::virtual_display_node);
 	// --- the present passes ---
 	ClassDB::bind_method(D_METHOD("setup_passes", "container", "item_db",
-			"resource_root", "audio", "fx", "lights", "environment", "anchors"),
+			"resource_root", "audio", "fx", "lights", "environment"),
 			&EntityPresenter::setup_passes);
 	ClassDB::bind_method(D_METHOD("present_passes"), &EntityPresenter::present_passes);
 	ClassDB::bind_method(D_METHOD("get_fire_present_stats"),
@@ -352,15 +351,12 @@ MissionEnvironment *EntityPresenter::environment() const {
 
 void EntityPresenter::setup_passes(Node3D *p_container, const Ref<ItemDatabase> &p_item_db,
 		const Ref<ResourceRoot> &p_resource_root, MissionAudio *p_audio, EffectWorld *p_fx,
-		EffectLightDirector *p_lights, MissionEnvironment *p_environment,
-		ItemEffectDirector *p_anchors) {
+		EffectLightDirector *p_lights, MissionEnvironment *p_environment) {
 	Simulation *s = sim();
-	const Ref<ItemEffectDirector> anchors(p_anchors);
 	fire_->setup(s, p_container, p_audio, p_fx, p_lights, p_resource_root, p_environment);
-	destruction_->setup(this, s, p_container, index_, placer_, p_item_db, anchors, p_audio,
-			p_fx, p_lights);
-	throwable_->setup(s, p_container, placer_, p_item_db, p_fx, anchors);
-	vehicle_trail_->setup(s, p_fx, anchors);
+	destruction_->setup(this, s, p_container, index_, placer_, p_item_db, p_audio, p_lights);
+	throwable_->setup(s, p_container, placer_, p_item_db);
+	vehicle_trail_->setup(s, p_fx);
 	environment_id_ = p_environment != nullptr ? p_environment->get_instance_id() : ObjectID();
 	if (ScarPresenter *scars_node = scars()) {
 		scars_node->set_resource_root(p_resource_root);
@@ -413,7 +409,6 @@ PackedInt64Array EntityPresenter::profile_present_passes() {
 
 void EntityPresenter::sync_fixed_tick_effects() {
 	vehicle_trail_->sync_fixed_tick_effects();
-	throwable_->sync_fixed_tick_effects();
 }
 
 Ref<FirePresentStats> EntityPresenter::get_fire_present_stats() const {

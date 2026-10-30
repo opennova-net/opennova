@@ -90,19 +90,6 @@ particle::EffectPose emitter_owner_pose(const Entity &entity) {
     return pose;
 }
 
-// A mission-local point (16.16) through the entity's matrix, as a scene point, and a direction
-// through its rotation alone, as a scene vector.
-particle::Vec3 matrix_point(const CollisionMatrix &matrix, const int32_t local[3]) {
-    int32_t out[3];
-    matrix.transform_point(local, out);
-    return effect_axes(out);
-}
-particle::Vec3 matrix_direction(const CollisionMatrix &matrix, const int32_t local[3]) {
-    int32_t out[3];
-    matrix.rotate_point(local, out);
-    return effect_axes(out);
-}
-
 // The pool a row lives in, as the slot-A walk's gates read it (EntityKind's ordinal).
 int entity_pool_kind(const Entity &entity) {
     return static_cast<int>(entity.kind);
@@ -141,6 +128,45 @@ particle::EffectSectionGate effect_section_gate(World &world, const Vec3 &positi
 
 float effect_water_height(const World &world) {
     return float(world.env.water_z) / 65536.0f;
+}
+
+particle::Vec3 effect_matrix_point(const CollisionMatrix &matrix, const int32_t local[3]) {
+    int32_t out[3];
+    matrix.transform_point(local, out);
+    return effect_axes(out);
+}
+
+particle::Vec3 effect_matrix_direction(const CollisionMatrix &matrix, const int32_t local[3]) {
+    int32_t out[3];
+    matrix.rotate_point(local, out);
+    return effect_axes(out);
+}
+
+bool emitter_update_runs(const World &world, const Entity &entity) {
+    const std::vector<PlayerTemplate> &rows = world.tables.item_rows;
+    if (rows.empty()) return true;
+    const int32_t index = entity.item_type_index;
+    if (index <= 0 || static_cast<size_t>(index) >= rows.size()) return false;
+    return rows[static_cast<size_t>(index)].move_row != PhysicsClass::Null;
+}
+
+bool emitter_transform(const World &world, int32_t item_id, bool has_model,
+        const CollisionMatrix &matrix, const EntityPosition &position, particle::Vec3 &at,
+        particle::Vec3 &forward) {
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(item_id);
+    bool aimed = false;
+    if (has_model && traits != nullptr && traits->has_particlefx_point) {
+        at = effect_matrix_point(matrix, traits->particlefx_point_q16);
+        forward = effect_matrix_direction(matrix, traits->particlefx_direction_q16);
+        aimed = true;
+    } else {
+        at = effect_point(position);
+    }
+    if (traits != nullptr && traits->unit_type >= 5 && traits->unit_type <= 8) {
+        const float water = effect_water_height(world);
+        if (at.y < water) at.y = water;
+    }
+    return aimed;
 }
 
 ItemEmitterSystem &ItemEmitterSystem::operator=(ItemEmitterSystem &&other) noexcept {
@@ -300,7 +326,8 @@ int ItemEmitterSystem::spawn_bone_trail(World &world, const Entity &entity) {
             int32_t at[3];
             matrix.transform_point(point.pos_q16, at);
             const particle::EffectPose pose = particle::descriptor_pose(
-                    matrix_point(matrix, point.pos_q16), matrix_direction(matrix, point.dir_q16));
+                    effect_matrix_point(matrix, point.pos_q16),
+                    effect_matrix_direction(matrix, point.dir_q16));
             particle::EffectSpawnRequest request = slot_a_request(world, *scene_,
                     traits->particlefx, pose, at);
             request.admission = particle::EffectAdmission::StoreOwned;
@@ -386,26 +413,13 @@ int ItemEmitterSystem::retry_hidden(World &world) {
 }
 
 void ItemEmitterSystem::update_emitter_transform(World &world, const Entity &entity) {
-    if (!scene_ || !entity.has_item_def) return;
+    if (!scene_) return;
     const particle::EffectSlotToken slot = entity_effect_slot(entity.handle.packed);
     if (!scene_->slot_group(slot)) return;
-    const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
     particle::Vec3 at;
     particle::Vec3 forward;
-    bool aimed = false;
-    if (entity.has_graphic_model && traits != nullptr && traits->has_particlefx_point) {
-        const CollisionMatrix matrix = entity_placement_matrix(entity);
-        at = matrix_point(matrix, traits->particlefx_point_q16);
-        forward = matrix_direction(matrix, traits->particlefx_direction_q16);
-        aimed = true;
-    } else {
-        at = effect_point(entity.position);
-    }
-    // The watercraft classes' clamp to the water word [orig: @ 0x5F755F..0x5F757F].
-    if (traits != nullptr && traits->unit_type >= 5 && traits->unit_type <= 8) {
-        const float water = effect_water_height(world);
-        if (at.y < water) at.y = water;
-    }
+    const bool aimed = emitter_transform(world, entity.item_id, entity.has_graphic_model,
+            entity_placement_matrix(entity), entity.position, at, forward);
     scene_->move_slot(slot, at, aimed ? &forward : nullptr);
 }
 

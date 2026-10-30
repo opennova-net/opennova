@@ -661,7 +661,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	join_options.simulation = joiner
 	join_options.join_target = target
 	assert_gt(int(rt.setup(w.mission, w.container, join_options)), 0)
-	rt.setup_passes(audio, null, null, null, null)
+	rt.setup_passes(audio, null, null, null)
 
 	var fire_stats: FirePresentStats = rt.get_fire_present_stats()
 	assert_not_null(fire_stats,

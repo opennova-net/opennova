@@ -103,7 +103,6 @@ public:
 	STAT_FIELD(no_husk)
 	STAT_FIELD(pieces_peak)
 	STAT_FIELD(debris_triangles)
-	STAT_FIELD(effects)
 	STAT_FIELD(sounds)
 	STAT_FIELD(crackles)
 
@@ -112,15 +111,13 @@ protected:
 };
 
 // Typed diagnostic snapshot of the throwable present pass
-// (ThrowablePresenter): the live item models, the live round-bound move
-// groups, and the transforms their anchors resolve.
+// (ThrowablePresenter): the live item models. The rounds' move emitters are
+// the engine's (world::RoundEmitters).
 class ThrowablePresentStats : public RefCounted {
 	GDCLASS(ThrowablePresentStats, RefCounted)
 
 public:
 	STAT_FIELD(live)
-	STAT_FIELD(move_effects)
-	STAT_FIELD(move_effect_transforms)
 
 protected:
 	static void _bind_methods();

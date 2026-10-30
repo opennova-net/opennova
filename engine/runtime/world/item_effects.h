@@ -27,6 +27,8 @@ namespace opennova::world {
 
 class World;
 struct Entity;
+struct EntityPosition;
+struct CollisionMatrix;
 struct ItemDeathTraits;
 struct ScriptEffectEvent;
 
@@ -204,6 +206,27 @@ particle::EffectSectionGate effect_section_gate(World &world, const int32_t posi
 particle::EffectSectionGate effect_section_gate(World &world, const Vec3 &position);
 // The mission water plane as the scene's kill-plane height (env.water_z is 16.16, 0 = none).
 float effect_water_height(const World &world);
+// A model point and a direction (mission-local 16.16) through a row's matrix, as a scene point
+// and a scene vector.
+particle::Vec3 effect_matrix_point(const CollisionMatrix &matrix, const int32_t local[3]);
+particle::Vec3 effect_matrix_direction(const CollisionMatrix &matrix, const int32_t local[3]);
+// The +0x1CC re-pose's pose for a row of item `item_id` at `position` under `matrix`: the def's
+// first masked graphic userpoint and its direction when the row draws the def's model
+// (`has_model`, the row's +0x30), else the row's position alone (false: the aim is kept); a
+// watercraft class (def unit_type 5..8) clamps the point to the water plane.
+// [orig: CEffect_UpdateEmitterTransform @ 0x5F7410 - the first set bit @ 0x5F7467..0x5F7497, the
+//  point and direction @ 0x5F7518 / @ 0x5F7527, the position leg @ 0x5F7538..0x5F755B, the water
+//  clamp @ 0x5F755F..0x5F757F]
+// Whether a pool walk's visit runs a row's +0x1CC re-pose: its update callback is set and is not
+// the null row's (the row's def binds a move_function row other than `null`). A world with no
+// item rows (a native harness) runs it.
+// [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E50 and Entity_UpdateAllEntities
+//  @0x4C22D5..0x4C22E4 - `cmp eax, offset Entity_UpdateNullClass; jz` and `test eax, eax; jz`
+//  ahead of the call and the emitter update]
+bool emitter_update_runs(const World &world, const Entity &entity);
+bool emitter_transform(const World &world, int32_t item_id, bool has_model,
+        const CollisionMatrix &matrix, const EntityPosition &position, particle::Vec3 &at,
+        particle::Vec3 &forward);
 
 // The original walks entity pools 1-3 with distinct attrib masks; `kind` is
 // the imported mission kind (EntityKind: Marker=0, Item=1, Building=2,

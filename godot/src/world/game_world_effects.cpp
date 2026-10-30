@@ -146,14 +146,16 @@ void GameWorld::route_terrain_scorches() {
 	}
 }
 
-// Consume render-internal lifecycle effects first, route the dialog-line and
-// script-voice effects to mission audio, then expose only the remaining
-// downstream effects to HUD consumers.
+// Route the dialog-line and script-voice effects to mission audio, then expose the
+// downstream effects to HUD consumers. The vehicle_control_* lifecycle edges are the
+// engine's own (its item emitters run their slot-A leg where the claim edges run,
+// world::ItemEmitterSystem::control_started): no HUD consumer reads them.
 void GameWorld::on_runtime_effects(const Array &p_effects) {
 	Array routed;
 	for (int64_t i = 0; i < p_effects.size(); ++i) {
 		const Ref<MissionEffect> effect = p_effects[i];
-		if (effect.is_valid() && item_fx_->consume_control_effect(effect)) {
+		if (effect.is_valid() && (effect->get_kind() == "vehicle_control_started" ||
+										 effect->get_kind() == "vehicle_control_stopped")) {
 			continue;
 		}
 		routed.push_back(p_effects[i]);
@@ -222,10 +224,16 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	}
 }
 
-// One wire-spawn router for both directors, subscribed to the entity
-// presenter's spawn signal in start_effect_world.
+// One wire-spawn router, subscribed to the entity presenter's spawn signal in
+// start_effect_world: the engine's slot-A attach for the row the node draws (by its
+// wire handle; world::ItemEmitterSystem::attach_entity_effects keeps the walk's gates and
+// attaches a lifetime once), and the light director's.
 void GameWorld::on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id) {
-	item_fx_->on_wire_node_spawned(p_node, p_kind, p_item_id);
+	const Ref<EntityRef> ref = p_node != nullptr ? p_node->get_entity_ref() : Ref<EntityRef>();
+	const Ref<Simulation> sim = get_sim();
+	if (ref.is_valid() && sim.is_valid()) {
+		sim->attach_item_effects(ref->get_wire_handle());
+	}
 	if (light_director_.is_valid()) {
 		light_director_->on_wire_node_spawned(p_node, p_kind, p_item_id);
 	}

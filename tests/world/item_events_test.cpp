@@ -426,9 +426,14 @@ int test_emitter_lifetime() {
     CHECK(w.prng16_state == shared);
     const auto group = scene->inspect(false).groups.front();
     CHECK(group.pose.position.x == 14 && group.pose.position.y == 30 && group.pose.position.z == -20);
-    CHECK(group.binding == p::EffectBinding::FollowOwner);
+    // World-bound: the slot's re-pose at the pool walk's visit moves it to the def's first masked
+    // point through the entity's matrix [orig: CEffect_UpdateEmitterTransform @0x5F7410].
+    CHECK(group.binding == p::EffectBinding::World);
+    entity.has_graphic_model = true;
     entity.position.x = 15;
-    w.item_emitters.sync_owners(w);
+    w.item_emitters.sync_slots(w);
+    CHECK(scene->inspect(false).groups.front().pose.position.x == 14);
+    w.item_emitters.update_emitter_transform(w, entity);
     CHECK(scene->inspect(false).groups.front().pose.position.x == 19);
     // A still-live group is destroyed outright (no group drains on), gets the 15-tick gap, and
     // consumes no RNG [orig: Effect_DestroyEmitterIfLive called @0x43F935].
@@ -446,7 +451,7 @@ int test_emitter_lifetime() {
     CHECK(entity.class_think_ticks == 40 && scene->live_counts().group_count == 1);
     // Destroying/reusing the registry slot detaches the old lifetime's group.
     w.registry.despawn(h);
-    w.item_emitters.sync_owners(w);
+    w.item_emitters.sync_slots(w);
     CHECK(scene->inspect(false).groups.front().detached);
     return 0;
 }
@@ -507,7 +512,7 @@ int test_entity_slot_shared() {
     // A script's store is held by the world (EntityCommands' emit): the row's destroy releases it.
     w.item_emitters.hold_slot(entity);
     w.registry.despawn(h);
-    w.item_emitters.sync_owners(w);
+    w.item_emitters.sync_slots(w);
     CHECK(detached(replaced.group) && !scene->slot_group(slot));
     return 0;
 }
