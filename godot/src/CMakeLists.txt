@@ -314,6 +314,7 @@ add_library(opennova_bindings OBJECT
     mnu/end_round_screen.cpp
     mnu/player_info_loadout.cpp
     mnu/armory_screen.cpp
+    mnu/lan_multiplayer_menu.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp

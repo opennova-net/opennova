@@ -943,24 +943,6 @@ void MenuDriver::tick(int64_t p_time_ms) {
 
 String MenuDriver::get_selected_mission() const { return to_gd(shell_.selected_mission()); }
 
-void MenuDriver::seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows) {
-	host_dialog_.seed(runtime_, mission_choices(p_rows));
-}
-
-void MenuDriver::add_host_missions(const Ref<RtxtStringFile> &p_text) {
-	host_dialog_.add_selected(runtime_, game_text_lookup(p_text));
-}
-
-PackedStringArray MenuDriver::selected_host_missions() const {
-	return to_gd_strings(host_dialog_.selected_missions());
-}
-
-PackedInt32Array MenuDriver::selected_host_launch_options() const {
-	PackedInt32Array out;
-	for (const int32_t option : host_dialog_.selected_launch_options()) out.push_back(option);
-	return out;
-}
-
 String MenuDriver::screen_command(const String &p_screen, const String &p_name) const {
 	return String(opennova::menu::menu_command_token(
 			commands_().command_of(to_std(p_screen), to_std(p_name))));
@@ -1103,16 +1085,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("preview_player_info_voice", "db", "voice"), &MenuDriver::preview_player_info_voice);
 	ClassDB::bind_method(D_METHOD("get_selected_mission"), &MenuDriver::get_selected_mission);
 	ClassDB::bind_method(D_METHOD("has_pending_expansion_reload"), &MenuDriver::has_pending_expansion_reload);
-	ClassDB::bind_method(D_METHOD("seed_host_pool", "rows"), &MenuDriver::seed_host_pool);
-	ClassDB::bind_method(D_METHOD("filter_host_missions"), &MenuDriver::filter_host_missions);
-	ClassDB::bind_method(D_METHOD("add_host_missions", "text"), &MenuDriver::add_host_missions);
-	ClassDB::bind_method(D_METHOD("remove_host_missions"), &MenuDriver::remove_host_missions);
-	ClassDB::bind_method(D_METHOD("can_start_host"), &MenuDriver::can_start_host);
-	ClassDB::bind_method(D_METHOD("selected_host_missions"), &MenuDriver::selected_host_missions);
-	ClassDB::bind_method(D_METHOD("toggle_host_mission_switch", "row"),
-			&MenuDriver::toggle_host_mission_switch);
-	ClassDB::bind_method(D_METHOD("selected_host_launch_options"),
-			&MenuDriver::selected_host_launch_options);
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
 	ClassDB::bind_method(D_METHOD("wire_commands", "in_mission"), &MenuDriver::wire_commands);
 	ClassDB::bind_method(D_METHOD("screen_command", "screen", "name"), &MenuDriver::screen_command);

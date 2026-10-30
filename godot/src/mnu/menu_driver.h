@@ -109,7 +109,6 @@ class MenuDriver : public RefCounted {
 	std::unique_ptr<ShellHost> host_;
 	String mods_root_; // the game folder the Mods list's records were scanned in
 	std::vector<opennova::ExpansionRecord> mods_records_;
-	opennova::menu::HostDialog host_dialog_;
 	opennova::menu::PlayerInfoAvatars avatars_;
 	// The commands a document the embedder opened itself binds (wire_commands); the shell's own opens
 	// carry the shell's.
@@ -228,16 +227,6 @@ public:
 	void frame_tail() { shell_.frame_tail(); }
 	bool has_pending_expansion_reload() const { return shell_.has_pending_reload(); }
 	String get_selected_mission() const;
-	void seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows);
-	void filter_host_missions() { host_dialog_.filter(runtime_); }
-	void add_host_missions(const Ref<RtxtStringFile> &p_text);
-	void remove_host_missions() { host_dialog_.remove_selected(runtime_); }
-	bool can_start_host() const { return host_dialog_.can_start(); }
-	PackedStringArray selected_host_missions() const;
-	// The SELECTED_MISSIONS Switch cell's click and the rows' launch options
-	// (engine menu::HostDialog::toggle_switch / selected_launch_options).
-	void toggle_host_mission_switch(int p_row) { host_dialog_.toggle_switch(runtime_, p_row); }
-	PackedInt32Array selected_host_launch_options() const;
 	// Whether the open document is an Options surface (engine OptionsScreen::is_surface).
 	bool is_options_surface() const { return shell_.options().is_surface(); }
 	// The commands a document opened with open_document binds by control name, in a mission or
