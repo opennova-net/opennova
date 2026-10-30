@@ -36,6 +36,7 @@
 #include <runtime/renderer/foliage_frame.h>
 #include <runtime/renderer/model_panm_cache.h>
 #include <runtime/renderer/object_lod.h>
+#include <runtime/world/entity_pose.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/world/occlusion_feed.h>
 #include <runtime/world/tick_count_clock.h>
@@ -1946,8 +1947,12 @@ void ObjectModel::collect_point_light_draw_parts(
 
 Transform3D ObjectModel::subobject_model_to_world(int p_subobject) const {
 	if (skeleton_ != nullptr && p_subobject >= 0 && p_subobject < skeleton_->get_bone_count()) {
-		return skeleton_->get_global_transform() * skeleton_->get_bone_global_pose(p_subobject) *
-				skeleton_->get_bone_global_rest(p_subobject).affine_inverse();
+		opennova::world::PosedBoneFrames frames;
+		if (get_posed_bone_frames(p_subobject, get_global_transform(), frames)) {
+			return from_pose_transform(frames.model_to_world);
+		}
+		// A skeleton no rig poses stands at its rest: the model frame.
+		return get_global_transform();
 	}
 	Node3D *const *node = robj_nodes_.getptr(p_subobject);
 	if (node != nullptr && *node != nullptr) {

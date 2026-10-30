@@ -52,6 +52,10 @@
 #include "object/post_multiply_draw.h"
 #include "object/skeletal_anim.h"
 
+namespace opennova::world {
+struct PosedBoneFrames;
+}
+
 namespace godot {
 
 
@@ -1161,10 +1165,18 @@ public:
 	static int update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width,
 			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	Dictionary get_render_part_nodes() const;
-	// A model-space attachment through the rendered subobject's live pose.
-	// Skeletal bones need their inverse rest pose; rigid PANM parts already
-	// map model space directly. Missing parts use the model root.
+	// A model-space attachment through the rendered subobject's pose: a
+	// clip-posed bone's model->world frame from the engine's pose
+	// (world::posed_part_to_world over the body channel); rigid PANM parts
+	// already map model space directly. Missing parts use the model root.
 	Transform3D subobject_model_to_world(int p_subobject) const;
+	// The engine frames of one of this model's posed bones (world::posed_bone_frames over the
+	// channel's composed pose, the rig at its rest without one), placed by p_model_world: false
+	// without a rig or the bone. Nothing is read back from the device skeleton.
+	bool get_posed_bone_frames(int p_bone, const Transform3D &p_model_world,
+			opennova::world::PosedBoneFrames &r_frames) const;
+	static opennova::anim::SkeletalClips::RestTransform to_pose_transform(const Transform3D &p_transform);
+	static Transform3D from_pose_transform(const opennova::anim::SkeletalClips::RestTransform &p_transform);
 	void set_focal_sway(bool active, const Basis &basis, const Vector3 &world_offset);
 	// The occlusion frame's verdict: the RAW section mask (-1 = no verdict,
 	// every section) and the def's forced-visible sections the part draw ORs

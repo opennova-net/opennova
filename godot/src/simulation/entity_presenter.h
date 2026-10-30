@@ -473,16 +473,14 @@ public:
 	static void aim_apply_valid(Object *node, PresentRowsView snap,
 			int base, bool drive_root_basis);
 
-	// Third-person held-weapon placement — the ONE home (the witnessed
-	// calibration constants and the full derivation live at engine
-	// world/entity_pose.h). `body` may be the body root or the
-	// skeleton itself (resolved via find_skeleton); returns a Transform3D, or
-	// null when the skeleton cannot place one.
-	static Variant held_weapon_attach_transform(Object *body,
+	// Third-person held-weapon placement: the engine's (world::held_weapon_attach
+	// over the body's posed bone 16, world::posed_bone_frames), placed by the
+	// body's world transform as the presenter composed it; returns a
+	// Transform3D, or null when the body has no posed rig to place one.
+	static Variant held_weapon_attach_transform(ObjectModel *body, const Transform3D &body_world,
 			const Vector3 &attach_angles_bms, bool hand_frame);
+	// The hand frame's calibration over a bone basis (the engine's), for tests/tooling.
 	static Basis held_weapon_hand_frame_basis(const Basis &bone_model_to_world);
-	// The first Skeleton3D under `root` (or `root` itself), or null.
-	static Object *find_skeleton(Object *root);
 	// The engine calibration re-exported for tests/tooling (float/vector
 	// values cannot be class constants).
 	static Vector3 held_weapon_attach_nudge();

@@ -128,10 +128,11 @@ ObjectModel *LocalPlayerVisuals::build_local_player_held_weapon(const String &p_
 
 void LocalPlayerVisuals::present_local_player_person_overlays(PersonOverlayModels &p_overlays,
 		const opennova::world::PersonOverlays &p_state, ObjectModel *p_avatar,
-		bool p_body_drawn, PersonOverlayModels::Presentation p_presentation) {
+		const Transform3D &p_avatar_world, bool p_body_drawn,
+		PersonOverlayModels::Presentation p_presentation) {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
-	p_overlays.present(p_state, p_avatar, p_body_drawn, mission_placer.ptr(), world_node3d(),
-			p_presentation);
+	p_overlays.present(p_state, p_avatar, p_avatar_world, p_body_drawn, mission_placer.ptr(),
+			world_node3d(), p_presentation);
 }
 
 ObjectModel *LocalPlayerVisuals::build_local_player_avatar(int p_type_id) {

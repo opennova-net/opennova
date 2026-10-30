@@ -63,25 +63,30 @@ public:
 	};
 
 	// One frame: build what the state wants (rebuilding when a slot's item
-	// type changes), pose it from `p_body`'s skeleton, and show it iff the
-	// body is drawn. A body swap (a rebuilt node) rebuilds every overlay.
+	// type changes), place it on `p_body`'s posed bones (the engine's frames,
+	// placed by the body's world transform as its presenter composed it), and
+	// show it iff the body is drawn. A body swap (a rebuilt node) rebuilds
+	// every overlay.
 	void present(const opennova::world::PersonOverlays &p_overlays, ObjectModel *p_body,
-			bool p_body_drawn, MissionObjectPlacer *p_placer, Node3D *p_parent,
-			Presentation p_presentation);
+			const Transform3D &p_body_world, bool p_body_drawn, MissionObjectPlacer *p_placer,
+			Node3D *p_parent, Presentation p_presentation);
 	// Free every built model (the body left the walk).
 	void release();
 	bool is_empty() const;
 	ObjectModel *node(int p_kind, int p_pass) const;
 
-	// The rigid placement per overlay, from the body root or its skeleton;
-	// null when the skeleton lacks the bone. The ONE home each walk and the
-	// tests share.
-	static Variant canopy_transform(Object *p_body, float p_canopy_yaw_deg);
-	static Variant nvg_transform(Object *p_body);
-	static Variant binoculars_transform(Object *p_body);
-	static Variant carried_transform(Object *p_body, const Vector3 &p_carrier_euler_bms);
-	// The calibrated bases alone (the tests re-derive them from the original
-	// element placement).
+	// The rigid placement per overlay: the engine's (world::canopy_attach,
+	// night_vision_attach, binoculars_attach, carried_attach over the body's
+	// posed bones), placed by the body's world transform; null when the body
+	// has no posed rig with the bone.
+	static Variant canopy_transform(ObjectModel *p_body, const Transform3D &p_body_world,
+			float p_canopy_yaw_deg);
+	static Variant nvg_transform(ObjectModel *p_body, const Transform3D &p_body_world);
+	static Variant binoculars_transform(ObjectModel *p_body, const Transform3D &p_body_world);
+	static Variant carried_transform(ObjectModel *p_body, const Transform3D &p_body_world,
+			const Vector3 &p_carrier_euler_bms);
+	// The calibrated bases alone, the engine's (the tests re-derive them from
+	// the original element placement).
 	static Basis binoculars_frame_basis(const Basis &p_bone_model_to_world);
 	static Basis carried_frame_basis(const Vector3 &p_carrier_euler_bms);
 	// The engine calibration re-exported for the tests.

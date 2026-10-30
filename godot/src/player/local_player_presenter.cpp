@@ -21,7 +21,6 @@
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/os.hpp>
-#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -355,6 +354,7 @@ void LocalPlayerPresenter::refresh_camera_mode() {
 // the avatar's whole subtree (ROBJ nodes, mesh instances, the skeleton) into
 // the deferred flush's transform notifications. A still player writes nothing.
 void LocalPlayerPresenter::set_avatar_transform(ObjectModel *p_avatar, const Transform3D &p_next) {
+	avatar_world_ = p_next;
 	if (p_avatar->get_global_transform() != p_next) {
 		p_avatar->set_global_transform(p_next);
 	}
@@ -715,32 +715,24 @@ Vector3 LocalPlayerPresenter::eye_position(const Vector3 &p_pos) const {
 
 Vector3 LocalPlayerPresenter::avatar_root_world() const {
 	ObjectModel *body = avatar();
-	if (body == nullptr) {
+	if (body == nullptr || !body->has_skeleton()) {
 		return kNoSample;
 	}
-	Skeleton3D *skel = Object::cast_to<Skeleton3D>(EntityPresenter::find_skeleton(body));
-	if (skel == nullptr) {
-		return kNoSample;
-	}
-	// The SKELETON's own origin - the exact frame avatar_head_world() expresses
-	// the bone in, so head-minus-root is a pure body-relative delta. The avatar
-	// node's transform is not it: for the first-person local player that node
-	// sits at the world origin, which turned the delta into an absolute point
-	// again.
-	return skel->get_global_transform().origin;
+	// The avatar's own world frame, as update_avatar composed it: the frame
+	// avatar_head_world() expresses the bone in, so head-minus-root is a pure
+	// body-relative delta.
+	return avatar_world_.origin;
 }
 
 Vector3 LocalPlayerPresenter::avatar_head_world() const {
 	ObjectModel *body = avatar();
-	if (body == nullptr) {
+	opennova::world::PosedBoneFrames head;
+	if (body == nullptr ||
+			!body->get_posed_bone_frames(Simulation::player_head_bone_index(), avatar_world_, head)) {
 		return kNoSample;
 	}
-	Skeleton3D *skel = Object::cast_to<Skeleton3D>(EntityPresenter::find_skeleton(body));
-	const int head_bone = Simulation::player_head_bone_index();
-	if (skel == nullptr || skel->get_bone_count() <= head_bone) {
-		return kNoSample;
-	}
-	return skel->get_global_transform().xform(skel->get_bone_global_pose(head_bone).origin);
+	// The head bone's posed joint from the engine's own bone matrices.
+	return ObjectModel::from_pose_transform(head.joint_world).origin;
 }
 
 // The soldier's third-person gun: retail's draw 5. The model is the equipped
@@ -797,8 +789,8 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 		}
 	}
 	const Variant attach = body != nullptr
-			? EntityPresenter::held_weapon_attach_transform(body, p_overlay->get_weapon_attach_angles(),
-					  p_overlay->get_weapon_hand_frame())
+			? EntityPresenter::held_weapon_attach_transform(body, avatar_world_,
+					  p_overlay->get_weapon_attach_angles(), p_overlay->get_weapon_hand_frame())
 			: Variant();
 	if (attach.get_type() == Variant::NIL) {
 		weapon->set_visible(false);
@@ -1463,7 +1455,7 @@ void LocalPlayerPresenter::update_person_overlays() {
 	const bool draw_body = third_person_ || debug_body_in_first_person_;
 	ObjectModel *body = avatar();
 	visuals_->present_local_player_person_overlays(*person_overlays_.ptr(), state, body,
-			avatar_drawn(body),
+			avatar_world_, avatar_drawn(body),
 			draw_body ? PersonOverlayModels::PRESENT_LOCAL_THIRD_PERSON
 					  : PersonOverlayModels::PRESENT_LOCAL_FIRST_PERSON);
 }

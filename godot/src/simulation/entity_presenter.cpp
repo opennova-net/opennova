@@ -4,7 +4,6 @@
 #include "util/axes.h"
 
 #include <godot_cpp/classes/node3d.hpp>
-#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -258,7 +257,7 @@ void EntityPresenter::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("wire_node_retired", PropertyInfo(Variant::INT, "handle")));
 	// --- the statics ---
 	ClassDB::bind_static_method("EntityPresenter",
-			D_METHOD("held_weapon_attach_transform", "body", "attach_angles_bms",
+			D_METHOD("held_weapon_attach_transform", "body", "body_world", "attach_angles_bms",
 					"hand_frame"),
 			&EntityPresenter::held_weapon_attach_transform, DEFVAL(false));
 	ClassDB::bind_static_method("EntityPresenter",
@@ -689,38 +688,29 @@ constexpr int kHeldWeaponBoneIndex = opennova::world::kHeldWeaponBoneIndex;
 const Vector3 kHeldWeaponAttachNudge(opennova::world::kHeldWeaponAttachNudgeX,
 		opennova::world::kHeldWeaponAttachNudgeY,
 		opennova::world::kHeldWeaponAttachNudgeZ);
-// Hand-frame calibration (engine: runtime/world/entity_pose.h).
-constexpr double kHandFrameZRad = opennova::world::kHeldWeaponHandFrameZRad;
-constexpr double kHandFrameYRad = opennova::world::kHeldWeaponHandFrameYRad;
 
 } // namespace
 
 Basis EntityPresenter::held_weapon_hand_frame_basis(const Basis &bone_model_to_world) {
-	// Row-major `Ry_e · Rz_e · M16` = the calibrations on the RIGHT in column
-	// form; signs as authored (two inversions cancel — the entity_pose.h
-	// ledger documents why).
-	return bone_model_to_world * Basis(Vector3(0, 0, 1), kHandFrameZRad) *
-			Basis(Vector3(0, 1, 0), kHandFrameYRad);
+	opennova::world::PosedBoneFrames frames;
+	frames.model_to_world = ObjectModel::to_pose_transform(Transform3D(bone_model_to_world, Vector3()));
+	const float no_angles[3] = {0.0f, 0.0f, 0.0f};
+	return ObjectModel::from_pose_transform(
+			opennova::world::held_weapon_attach(frames, true, no_angles))
+			.basis;
 }
 
-Variant EntityPresenter::held_weapon_attach_transform(Object *body,
+Variant EntityPresenter::held_weapon_attach_transform(ObjectModel *body, const Transform3D &body_world,
 		const Vector3 &attach_angles_bms, bool hand_frame) {
-	Skeleton3D *skel = Object::cast_to<Skeleton3D>(find_skeleton(body));
-	if (skel == nullptr || skel->get_bone_count() <= kHeldWeaponBoneIndex) {
+	opennova::world::PosedBoneFrames hand;
+	if (body == nullptr ||
+			!body->get_posed_bone_frames(kHeldWeaponBoneIndex, body_world, hand)) {
 		return Variant();
 	}
-	// `M16 · pivot16` IS the joint world position; the nudge rides bone 16's
-	// MODEL->WORLD rotation (pose relative to REST — the rest basis is a large
-	// rotation) [orig: translation overwrite @ 0x4b22cf..0x4b22f8].
-	const Transform3D joint_world = skel->get_global_transform() *
-			skel->get_bone_global_pose(kHeldWeaponBoneIndex);
-	const Transform3D model_to_world = joint_world *
-			skel->get_bone_global_rest(kHeldWeaponBoneIndex).affine_inverse();
-	const Basis basis = hand_frame
-			? held_weapon_hand_frame_basis(model_to_world.basis)
-			: bms_to_godot_basis(attach_angles_bms);
-	return Transform3D(basis,
-			joint_world.origin + model_to_world.basis.xform(kHeldWeaponAttachNudge));
+	const float angles[3] = {static_cast<float>(attach_angles_bms.x),
+			static_cast<float>(attach_angles_bms.y), static_cast<float>(attach_angles_bms.z)};
+	return ObjectModel::from_pose_transform(
+			opennova::world::held_weapon_attach(hand, hand_frame, angles));
 }
 
 Vector3 EntityPresenter::held_weapon_attach_nudge() {
@@ -733,29 +723,6 @@ double EntityPresenter::held_weapon_hand_frame_z_rad() {
 
 double EntityPresenter::held_weapon_hand_frame_y_rad() {
 	return opennova::world::kHeldWeaponHandFrameYRad;
-}
-
-Object *EntityPresenter::find_skeleton(Object *root) {
-	// The recursive Skeleton3D walk the GDScript reference ran per call, native
-	// (ObjectModel.rebuild() frees children, so caching the result by
-	// ObjectID would go stale mid-play; the walk itself is now cheap).
-	if (root == nullptr) {
-		return nullptr;
-	}
-	if (Object::cast_to<Skeleton3D>(root) != nullptr) {
-		return root;
-	}
-	Node *node = Object::cast_to<Node>(root);
-	if (node == nullptr) {
-		return nullptr;
-	}
-	for (int i = 0; i < node->get_child_count(); ++i) {
-		Object *found = find_skeleton(node->get_child(i));
-		if (found != nullptr) {
-			return found;
-		}
-	}
-	return nullptr;
 }
 
 Basis EntityPresenter::aim_root_basis(const PackedFloat32Array &snap, int base,

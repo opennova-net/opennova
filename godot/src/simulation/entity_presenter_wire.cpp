@@ -1369,8 +1369,9 @@ void EntityPresenter::update_wire_held_weapon(WireRow &row, Node3D *node,
 		weapon->set_visible(false);
 		return;
 	}
-	const Variant attach = held_weapon_attach_transform(
-			find_skeleton(node),
+	ObjectModel *body = Object::cast_to<ObjectModel>(node);
+	const Variant attach = held_weapon_attach_transform(body,
+			body != nullptr ? wire_row_transform(body, snap, base) : Transform3D(),
 			Vector3(p[base + Simulation::PF_HELD_WEAPON_PITCH_DEG],
 					p[base + Simulation::PF_HELD_WEAPON_YAW_DEG],
 					p[base + Simulation::PF_HELD_WEAPON_ROLL_DEG]),
@@ -1404,8 +1405,9 @@ void EntityPresenter::update_wire_person_overlays(const WireRow &row, ObjectMode
 		person_overlays_.insert(row.handle, created);
 		existing = person_overlays_.getptr(row.handle);
 	}
-	(*existing)->present(overlays, body, body_visible, placer_.ptr(), container(),
-			PersonOverlayModels::PRESENT_WORLD);
+	(*existing)->present(overlays, body,
+			body != nullptr ? wire_row_transform(body, snap, row.base) : Transform3D(), body_visible,
+			placer_.ptr(), container(), PersonOverlayModels::PRESENT_WORLD);
 }
 
 // The rows the cold walk above builds a node for are the ones it does not skip or defer: a

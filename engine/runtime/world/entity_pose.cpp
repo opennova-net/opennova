@@ -21,6 +21,8 @@
 #include <runtime/world/infantry.h>
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/mounted_pose.h>
+#include <runtime/world/person_overlays.h>
+#include <runtime/mission/placement_traits.h>
 #include <runtime/world/world.h>
 
 #include <algorithm>
@@ -856,6 +858,147 @@ bool EntityPoseProvider::build_generic(world::World &world,
 		matched_section = true;
 	}
 	return matched_section;
+}
+
+// --- the attach frames ------------------------------------------------------------
+
+namespace {
+
+// The rotation part alone (the origin dropped).
+PoseTransform turn_of(const PoseTransform &t) {
+	PoseTransform out = t;
+	out.origin = anim::Vec3{};
+	return out;
+}
+
+// A turn about one unit axis (0 x, 1 y, 2 z), right-handed in the render frame, the angle taken
+// in float as the presenting frame builds it.
+PoseTransform axis_turn(int axis, float angle) {
+	const float c = std::cos(angle);
+	const float s = std::sin(angle);
+	PoseTransform out;
+	float *r = out.rows;
+	switch (axis) {
+		case 0:
+			r[0] = 1.0f; r[1] = 0.0f; r[2] = 0.0f;
+			r[3] = 0.0f; r[4] = c; r[5] = -s;
+			r[6] = 0.0f; r[7] = s; r[8] = c;
+			break;
+		case 1:
+			r[0] = c; r[1] = 0.0f; r[2] = s;
+			r[3] = 0.0f; r[4] = 1.0f; r[5] = 0.0f;
+			r[6] = -s; r[7] = 0.0f; r[8] = c;
+			break;
+		default:
+			r[0] = c; r[1] = -s; r[2] = 0.0f;
+			r[3] = s; r[4] = c; r[5] = 0.0f;
+			r[6] = 0.0f; r[7] = 0.0f; r[8] = 1.0f;
+			break;
+	}
+	return out;
+}
+
+// A mission euler triple (pitch, yaw, roll degrees) through the one placement builder
+// (mission::bms_to_presentation_basis, whose basis columns are the axes' images).
+PoseTransform placement_turn(const float deg[3]) {
+	const mission::PlacementBasis b = mission::bms_to_presentation_basis(deg[0], deg[1], deg[2]);
+	PoseTransform out;
+	float *r = out.rows;
+	r[0] = b.x.x; r[1] = b.y.x; r[2] = b.z.x;
+	r[3] = b.x.y; r[4] = b.y.y; r[5] = b.z.y;
+	r[6] = b.x.z; r[7] = b.y.z; r[8] = b.z.z;
+	return out;
+}
+
+// The joint plus a model-space nudge carried by the bone's model->world rotation: `M . (pivot +
+// nudge)` with `M . pivot` the joint.
+anim::Vec3 nudged_joint(const PosedBoneFrames &frames, const anim::Vec3 &nudge) {
+	const anim::Vec3 carried = anim::rest_transform_direction(frames.model_to_world, nudge);
+	const anim::Vec3 &joint = frames.joint_world.origin;
+	return anim::Vec3{joint.x + carried.x, joint.y + carried.y, joint.z + carried.z};
+}
+
+constexpr double kTau = 6.283185307179586476925286766559;
+
+} // namespace
+
+bool posed_bone_frames(const anim::SkeletalClips &rig, const std::vector<anim::PoseBone> &pose,
+		const PoseTransform &body_world, int bone, PosedBoneFrames &r_frames) {
+	if (bone < 0 || static_cast<size_t>(bone) >= rig.bone_count()) return false;
+	const size_t index = static_cast<size_t>(bone);
+	PoseTransform global = rig.rest_global()[index];
+	if (index < pose.size()) {
+		std::vector<PoseTransform> globals;
+		anim::pose_globals(pose, rig.parents(), index + 1, -1, globals);
+		if (index < globals.size()) global = globals[index];
+	}
+	r_frames.joint_world = anim::rest_mul(body_world, global);
+	r_frames.model_to_world = anim::rest_mul(r_frames.joint_world, rig.rest_global_inverse()[index]);
+	return true;
+}
+
+bool posed_part_to_world(const anim::SkeletalClips &rig, const std::vector<anim::PoseBone> &pose,
+		const PoseTransform &model_world, int part, PoseTransform &r_part) {
+	PosedBoneFrames frames;
+	if (!posed_bone_frames(rig, pose, model_world, part, frames)) return false;
+	r_part = frames.model_to_world;
+	return true;
+}
+
+// [orig: matrix build @0x4b2180..0x4b22f8 - the hand-frame gate @0x4b21b6, Rz dbl_7C9BA0
+//  @0x4b2215..0x4b2251, Ry dbl_7C9B98 @0x4b2256..0x4b22c2; the entity attach basis
+//  @0x4b1bdc..0x4b1bf8 through Math_BuildFixedPointToFloatMatrix4x4 @0x612200; the
+//  translation-only overwrite @0x4b22cf..0x4b22f8]
+PoseTransform held_weapon_attach(const PosedBoneFrames &hand, bool hand_frame,
+		const float attach_bms_deg[3]) {
+	PoseTransform out = hand_frame
+			? anim::rest_mul(anim::rest_mul(turn_of(hand.model_to_world),
+							  axis_turn(2, static_cast<float>(kHeldWeaponHandFrameZRad))),
+					  axis_turn(1, static_cast<float>(kHeldWeaponHandFrameYRad)))
+			: placement_turn(attach_bms_deg);
+	out.origin = nudged_joint(hand,
+			anim::Vec3{kHeldWeaponAttachNudgeX, kHeldWeaponAttachNudgeY, kHeldWeaponAttachNudgeZ});
+	return out;
+}
+
+// [orig: Entity_BuildBoneTransformMatrices @0x4b24e3..0x4b258e - bone slot +0x380, the pivot
+//  nudge flt_7C6FA4 / flt_7C69F4]
+PoseTransform night_vision_attach(const PosedBoneFrames &head) {
+	PoseTransform out = turn_of(head.model_to_world);
+	out.origin = nudged_joint(head, anim::Vec3{kNightVisionNudgeX, kNightVisionNudgeY, kNightVisionNudgeZ});
+	return out;
+}
+
+// [orig: Entity_BuildBoneTransformMatrices @0x4b2308..0x4b24d2 - Rz @0x4b2394..0x4b23d0, Rx
+//  @0x4b23d5..0x4b242b, Ry @0x4b2430..0x4b2486 via Math_BuildRotationMatrix4x4_ByAxis @0x611db0]
+PoseTransform binoculars_attach(const PosedBoneFrames &left_hand) {
+	PoseTransform out = anim::rest_mul(
+			anim::rest_mul(anim::rest_mul(turn_of(left_hand.model_to_world),
+								   axis_turn(2, static_cast<float>(kBinocularsFrameZRad))),
+					axis_turn(0, static_cast<float>(-kBinocularsFrameXRad))),
+			axis_turn(1, static_cast<float>(kBinocularsFrameYRad)));
+	out.origin = nudged_joint(left_hand, anim::Vec3{kBinocularsNudgeX, kBinocularsNudgeY, kBinocularsNudgeZ});
+	return out;
+}
+
+// [orig: BoneCallback_org0_World @0x4e39d6..0x4e3a48 - the axis-2 turn, bone 0's translation row]
+PoseTransform canopy_attach(const PosedBoneFrames &root, float canopy_yaw_deg) {
+	const float turn[3] = {0.0f, canopy_yaw_deg, 0.0f};
+	PoseTransform out = placement_turn(turn);
+	out.origin = root.model_to_world.origin;
+	return out;
+}
+
+// [orig: BoneCallback_org0_World @0x4e3dbd..0x4e3e26 - Math_BuildRotationMatrixZ_Float @0x613010
+//  after the entity matrix @0x4e3dcb..0x4e3df1, the binocular translation copied in]. The render-Z turn by +k is the
+// frame's X turn by -k; the angle is reduced in double first, as the x87 reduction keeps the
+// remainder a float call on 205887 radians would lose.
+PoseTransform carried_attach(const PosedBoneFrames &left_hand, const float carrier_bms_deg[3]) {
+	const double turn = std::remainder(static_cast<double>(kCarriedFrameZRad), kTau);
+	PoseTransform out = anim::rest_mul(axis_turn(0, static_cast<float>(-turn)),
+			placement_turn(carrier_bms_deg));
+	out.origin = binoculars_attach(left_hand).origin;
+	return out;
 }
 
 } // namespace opennova::world

@@ -12,6 +12,7 @@
 #include <godot_cpp/core/math.hpp>
 
 #include <runtime/anim/aim_overlay.h> // kOverlayClassCount (the nine overlay classes)
+#include <runtime/world/entity_pose.h> // posed_bone_frames (the attach frames)
 
 #include <algorithm>
 #include <limits>
@@ -96,6 +97,51 @@ void ObjectModel::resolve_muzzle_userpoint() {
 		return;
 	}
 	muzzle_bone_ = bone;
+}
+
+// --- the engine's bone frames --------------------------------------------------
+
+opennova::anim::SkeletalClips::RestTransform ObjectModel::to_pose_transform(
+		const Transform3D &p_transform) {
+	opennova::anim::SkeletalClips::RestTransform out;
+	for (int r = 0; r < 3; ++r) {
+		out.rows[r * 3 + 0] = static_cast<float>(p_transform.basis.rows[r].x);
+		out.rows[r * 3 + 1] = static_cast<float>(p_transform.basis.rows[r].y);
+		out.rows[r * 3 + 2] = static_cast<float>(p_transform.basis.rows[r].z);
+	}
+	out.origin = {static_cast<float>(p_transform.origin.x), static_cast<float>(p_transform.origin.y),
+			static_cast<float>(p_transform.origin.z)};
+	return out;
+}
+
+Transform3D ObjectModel::from_pose_transform(const opennova::anim::SkeletalClips::RestTransform &p_transform) {
+	const float *r = p_transform.rows;
+	Basis basis;
+	basis.rows[0] = Vector3(r[0], r[1], r[2]);
+	basis.rows[1] = Vector3(r[3], r[4], r[5]);
+	basis.rows[2] = Vector3(r[6], r[7], r[8]);
+	return Transform3D(basis, Vector3(p_transform.origin.x, p_transform.origin.y, p_transform.origin.z));
+}
+
+bool ObjectModel::get_posed_bone_frames(int p_bone, const Transform3D &p_model_world,
+		opennova::world::PosedBoneFrames &r_frames) const {
+	if (p_bone < 0) {
+		return false;
+	}
+	// The channel's rig and pose (the device skeleton is not needed: the frames are the
+	// engine's); a model nothing plays on stands at its rest rig.
+	static const std::vector<opennova::anim::PoseBone> kRest;
+	const opennova::anim::SkeletalClips *rig = body_.rig();
+	const std::vector<opennova::anim::PoseBone> *pose = &body_.pose();
+	if (rig == nullptr) {
+		if (rest_rig_.is_null() || !rest_rig_->is_loaded()) {
+			return false;
+		}
+		rig = &rest_rig_->native_rig();
+		pose = &kRest;
+	}
+	return opennova::world::posed_bone_frames(*rig, *pose, to_pose_transform(p_model_world), p_bone,
+			r_frames);
 }
 
 // --- the body channel's verbs -------------------------------------------------

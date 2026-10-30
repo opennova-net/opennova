@@ -3273,6 +3273,13 @@ target_link_libraries(world_body_present_test PRIVATE opennova_runtime)
 target_include_directories(world_body_present_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME world_body_present COMMAND world_body_present_test)
 
+# The attach frames from the engine's own bone matrices (runtime/world/entity_pose, ADR 0077 R2):
+# the posed bone frames, the held gun, the overlays and the part frame.
+add_executable(world_entity_pose_attach_test world/entity_pose_attach_test.cpp)
+target_link_libraries(world_entity_pose_attach_test PRIVATE opennova_runtime)
+target_include_directories(world_entity_pose_attach_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME world_entity_pose_attach COMMAND world_entity_pose_attach_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
