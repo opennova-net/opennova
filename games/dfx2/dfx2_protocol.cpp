@@ -68,6 +68,9 @@ Protocol make() {
 	// S2C 0x0F (DFX2-2): the flags byte starts at 1.
 	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x4ffeed (dfx2.exe)]
 	m.s2c_0f.spawn_zone_flag_always = true;
+	// S2C 0x0F (DFX2-34): the joiner's deploy screen raised on every 0x0F.
+	// [orig: NapiNPClientMsg_0x00F @0x42fdc8 (dfx2.exe)]
+	m.s2c_0f.deploy_screen_always = true;
 	// S2C 0x14 (DFX2-14): the squad tag between <ch> and <co>.
 	// [orig: NapiNPServer_HandleChatMessage @0x510b32..0x510b6a (dfx2.exe)]
 	m.s2c_14.chat_squad_tag_wrapped = true;

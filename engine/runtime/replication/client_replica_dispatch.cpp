@@ -117,8 +117,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			for (const std::string &name : wsl.team_names)
 				state_.location_names.push_back(name.substr(0, kLocationNameSlotBytes - 1));
 			state_.deploy_check_secured_spawn = (wsl.game_flags & 2u) != 0;
+			// A DFX2 joiner raises it on every 0x0F (ProtocolInMatch::s2c_0f)
+			// [orig: `mov g_DeployScreenActive, al` (1) @0x42fdc8 in NapiNPClientMsg_0x00F
+			//  @0x42fcf0 (dfx2.exe)].
 			state_.deploy_overlay_active =
-					(wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active;
+					protocol_in_match(protocol_).s2c_0f.deploy_screen_always ||
+					((wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active);
 			// The authoritative local-player pose and (waypoint gametype only)
 			// the route list, retained for the joiner frame's once-per-revision
 			// landing on L — retail writes them onto g_LocalPlayerEntity and

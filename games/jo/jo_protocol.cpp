@@ -42,6 +42,9 @@ Protocol make() {
 	// S2C 0x0F (DFX2-2): the flags byte's bit 0 only with spawn zones.
 	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502da7..0x502db0]
 	m.s2c_0f.spawn_zone_flag_always = false;
+	// S2C 0x0F (DFX2-34): the joiner's deploy screen cleared, then raised by bit 0 with no death
+	// screen. [orig: NapiNPClientMsg_0x00F @0x42e2d8, @0x42e2ed..0x42e2f8]
+	m.s2c_0f.deploy_screen_always = false;
 	// S2C 0x14 (DFX2-14): the squad tag bare. [orig: NapiNPServer_HandleChatMessage @0x513930]
 	m.s2c_14.chat_squad_tag_wrapped = false;
 	// S2C 0x25 (DFX2-17): a joiner's reset zeroes the end-round linger, so its next frame leaves

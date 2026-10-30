@@ -176,7 +176,7 @@ std::string in_match_sheet(const Protocol &protocol) {
 	const auto &[s2c_0a, s2c_0f, s2c_14, s2c_25, s2c_64, s2c_66, c2s_2f, slot_state, person_index] =
 			m;
 	const auto &[objective_checkpoint] = s2c_0a;
-	const auto &[spawn_zone_flag_always] = s2c_0f;
+	const auto &[spawn_zone_flag_always, deploy_screen_always] = s2c_0f;
 	const auto &[chat_squad_tag_wrapped] = s2c_14;
 	const auto &[end_round_linger_ticks] = s2c_25;
 	const auto &[rules_word_bits] = s2c_64;
@@ -189,6 +189,7 @@ std::string in_match_sheet(const Protocol &protocol) {
 	const std::vector<std::pair<std::string, std::string>> knobs = {
 		{ "s2c_0a.objective_checkpoint", std::to_string(objective_checkpoint) },
 		{ "s2c_0f.spawn_zone_flag_always", std::to_string(spawn_zone_flag_always) },
+		{ "s2c_0f.deploy_screen_always", std::to_string(deploy_screen_always) },
 		{ "s2c_14.chat_squad_tag_wrapped", std::to_string(chat_squad_tag_wrapped) },
 		{ "s2c_25.end_round_linger_ticks", std::to_string(end_round_linger_ticks) },
 		{ "s2c_64.rules_word_bits", rules_word },
@@ -283,7 +284,7 @@ void bump_rule_sheet_per_protocol() {
 	};
 	const std::string jo =
 			"S 0x0A: s2c_0a.objective_checkpoint=0 slot_state.join_state_fixed=0\n"
-			"S 0x0F: s2c_0f.spawn_zone_flag_always=0\n"
+			"S 0x0F: s2c_0f.spawn_zone_flag_always=0 s2c_0f.deploy_screen_always=0\n"
 			"S 0x14: s2c_14.chat_squad_tag_wrapped=0\n"
 			"S 0x1E: person_index.pool0_wire_capacity=256\n"
 			"S 0x25: s2c_25.end_round_linger_ticks=0\n"
@@ -301,7 +302,7 @@ void bump_rule_sheet_per_protocol() {
 			"narrow_still_player_radius=0 spawn_kit=jo_single_player_page";
 	const std::string dfx2 =
 			"S 0x0A: s2c_0a.objective_checkpoint=1 slot_state.join_state_fixed=1\n"
-			"S 0x0F: s2c_0f.spawn_zone_flag_always=1\n"
+			"S 0x0F: s2c_0f.spawn_zone_flag_always=1 s2c_0f.deploy_screen_always=1\n"
 			"S 0x14: s2c_14.chat_squad_tag_wrapped=1\n"
 			"S 0x1E: person_index.pool0_wire_capacity=256\n"
 			"S 0x25: s2c_25.end_round_linger_ticks=1240\n"

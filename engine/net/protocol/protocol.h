@@ -67,10 +67,13 @@ struct ProtocolInMatch {
 		// objective values, the co-op checkpoint, which the joiner reads.
 		bool objective_checkpoint = false;
 	} s2c_0a;
-	// S2C 0x0F WORLD_STATE_LOAD (DFX2-2).
+	// S2C 0x0F WORLD_STATE_LOAD (DFX2-2, DFX2-34).
 	struct {
 		// The flags byte's bit 0 is set whether or not the mission has spawn zones.
 		bool spawn_zone_flag_always = false;
+		// The joiner raises its deploy screen on every 0x0F, the death screen up or not and
+		// whatever the flags byte, where JO's raises it only for bit 0 with no death screen.
+		bool deploy_screen_always = false;
 	} s2c_0f;
 	// S2C 0x14 CHAT_BROADCAST (DFX2-14).
 	struct {
@@ -140,6 +143,7 @@ inline constexpr ProtocolDialectRow kProtocolDialect[] = {
 	{ 'S', 0x0A, "s2c_0a.objective_checkpoint", "DFX2-1" },
 	{ 'S', 0x0A, "slot_state.join_state_fixed", "DFX2-11" },
 	{ 'S', 0x0F, "s2c_0f.spawn_zone_flag_always", "DFX2-2" },
+	{ 'S', 0x0F, "s2c_0f.deploy_screen_always", "DFX2-34" },
 	{ 'S', 0x14, "s2c_14.chat_squad_tag_wrapped", "DFX2-14" },
 	{ 'S', 0x1E, "person_index.pool0_wire_capacity", "D-SIM-52" },
 	{ 'S', 0x25, "s2c_25.end_round_linger_ticks", "DFX2-17" },
