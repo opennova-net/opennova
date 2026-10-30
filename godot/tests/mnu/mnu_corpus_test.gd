@@ -54,7 +54,7 @@ func test_all_menu_screens_compile() -> void:
 		for screen_id in doc.get_screen_ids():
 			var screen_name := doc.get_screen_name(screen_id)
 			_collect_kinds(doc, doc.get_screen_root_id(screen_id), kinds)
-			assert_true(frame.configure(doc, screen_name, null, null, null),
+			assert_true(frame.configure(doc, screen_name, null, null),
 					"%s/%s configures" % [menu_name, screen_name])
 			var stats := frame.get_draw_list_stats()
 			assert_gt(stats.widgets_drawn, 0,

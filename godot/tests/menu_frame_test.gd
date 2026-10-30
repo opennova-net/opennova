@@ -27,7 +27,7 @@ func test_menu_frame_registers_and_compiles_a_layout_only_draw_list() -> void:
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(MNU_TEXT.to_utf8_buffer()), OK, "the smoke screen parses")
 	var frame := MenuFrame.new()
-	assert_true(frame.configure(doc, "", null, null, null), "MenuFrame.configure accepts the screen")
+	assert_true(frame.configure(doc, "", null, null), "MenuFrame.configure accepts the screen")
 	var stats := frame.get_draw_list_stats()
 	assert_eq(stats.widgets_drawn, 2, "the window and its button both draw: %s" % [stats.to_json_value()])
 	assert_true(stats.quads >= 1, "the color fill compiles a quad: %s" % [stats.to_json_value()])
@@ -47,7 +47,7 @@ func test_widget_text_reads_as_the_code_page() -> void:
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(bytes), OK)
 	var frame := MenuFrame.new()
-	assert_true(frame.configure(doc, "", null, null, null))
+	assert_true(frame.configure(doc, "", null, null))
 	var ok := -1
 	for i in frame.widget_count():
 		if frame.widget_name(i) == "OK":
@@ -95,7 +95,7 @@ func test_menu_text_draws_through_the_font_pages_modulate2x() -> void:
 	var frame := MenuFrame.new()
 	frame.size = Vector2(800, 600)
 	add_child_autofree(frame)
-	assert_true(frame.configure(doc, "", root, null, null))
+	assert_true(frame.configure(doc, "", root, null))
 	assert_gt(frame.get_draw_list_stats().glyphs, 0, "the label lays out through the real .fnt")
 	var rows := frame.get_glyph_submissions()
 	assert_gt(rows.size(), 0, "the label submits its glyph run")
@@ -125,7 +125,7 @@ func test_every_frame_draws_through_the_one_glyph_program() -> void:
 		var frame := MenuFrame.new()
 		frame.size = Vector2(800, 600)
 		add_child_autofree(frame)
-		assert_true(frame.configure(doc, "", null, null, null))
+		assert_true(frame.configure(doc, "", null, null))
 		assert_null(frame.get_glyph_shader(), "no program before the first draw")
 		frame.get_glyph_submissions()
 		assert_eq(frame.get_glyph_shader(), shared, "frame %d draws through the shared program" % i)
