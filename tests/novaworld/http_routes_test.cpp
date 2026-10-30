@@ -8188,6 +8188,31 @@ int test_hosted_console_routes(Harness &h) {
 	const auto refusal_sent = fake.lines();
 	TEST_EXPECT(std::none_of(refusal_sent.begin() + static_cast<std::ptrdiff_t>(refusal_lines),
 			refusal_sent.end(), [](const std::string &l) { return l.rfind("SET GameTime", 0) == 0; }));
+	// With no admin link (the fleet's row gone stale, as a restarting server's is), an edit no
+	// admin line applies still saves, for the next launch, and says so; one with a live command
+	// is refused until the link is back.
+	h.pool.acquire()->exec(
+			"UPDATE hosted_admin_links SET seen_at = now() - interval '1 hour' WHERE server_id = $1;",
+			{ opennova::db::BindValue(id) });
+	const auto unlinked = hosted::find_server(*h.pool.acquire(), id);
+	reply = h.send("PATCH", base + "/settings", { kBearer, kJson },
+			"{\"settings_revision\":" + std::to_string(unlinked->settings_revision) +
+					",\"patch\":{\"options\":{\"server_message\":\"Unlinked\"}}}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["next_launch_only"].b() &&
+			json["configuration_saved"].b());
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), id)->settings.options.get_string(
+						"server_message", "") == "Unlinked");
+	reply = h.send("PATCH", base + "/settings", { kBearer, kJson },
+			"{\"settings_revision\":" + std::to_string(unlinked->settings_revision + 1) +
+					",\"patch\":{\"kill_limit\":63}}");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "admin_unavailable");
+	const auto unlinked_sent = fake.lines();
+	TEST_EXPECT(std::none_of(unlinked_sent.begin(), unlinked_sent.end(), [](const std::string &l) {
+		return l == "SET KillLimit 63" || l.rfind("SET ServerMessage", 0) == 0;
+	}));
+	h.pool.acquire()->exec("UPDATE hosted_admin_links SET seen_at = now() WHERE server_id = $1;",
+			{ opennova::db::BindValue(id) });
 	// A short-lived caller stops waiting after send; the drain still saves the reply.
 	fake.delay("SET KillLimit", 950);
 	hosted::AdminCommandOptions durable_options;

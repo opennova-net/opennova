@@ -41,9 +41,12 @@ OfferedProduct pinned_product(db::Database &db, const HostedServer &server) {
 	return p;
 }
 
-crow::response command_reply(int64_t id, const AdminCommandResult &result) {
+// `next_launch_only`: a settings edit no admin line applies, saved for the next launch.
+crow::response command_reply(
+		int64_t id, const AdminCommandResult &result, bool next_launch_only = false) {
 	crow::json::wvalue out;
 	out["server_id"] = id;
+	out["next_launch_only"] = next_launch_only;
 	out["outcome"] = admin_command_outcome_name(result.outcome);
 	out["sent"] = result.sent;
 	out["delivery_unknown"] = result.delivery_unknown;
@@ -60,6 +63,8 @@ crow::response command_reply(int64_t id, const AdminCommandResult &result) {
 		replies.push_back(cp1252_to_utf8(reply));
 	out["replies"] = std::move(replies);
 	int status = 200;
+	if (next_launch_only && result.configuration_saved)
+		out["message"] = "Saved; the changes apply at the next launch.";
 	if (result.outcome != AdminCommandOutcome::Answered) {
 		status = result.outcome == AdminCommandOutcome::Refused	  ? 409
 				: result.outcome == AdminCommandOutcome::TimedOut ? 504
@@ -144,13 +149,39 @@ crow::response ConsoleRoutes::settings_edit(const Caller &c, const crow::request
 		// The drain's plan of the same edit (configuration_edit): the commands it will send.
 		const auto &weapons = server_weapon_roster(product.weapons,
 				product.expansions.empty() ? nullptr : &product.expansions.front().weapons);
+		std::optional<ConfigurationEdit> planned;
 		try {
-			wait = edit_budget(configuration_edit(*patch, server->settings, product.title, weapons)
-							.commands.size());
+			planned = configuration_edit(*patch, server->settings, product.title, weapons);
 		} catch (const std::invalid_argument &) {
 			// A saved configuration its game's data no longer takes: the drain's edit fails the
 			// same way, within the one command's budget.
 		}
+		if (planned && planned->commands.empty()) {
+			// No admin line applies it: every field waits for the next launch, so it is saved
+			// here, whatever the link (a server restarting or between starts), under the same
+			// revision and process fence the drain saves with.
+			HostedSettings saved = server->settings;
+			std::string next_field;
+			(void)read_settings_document(planned->next_launch, saved, next_field, error);
+			AdminCommandResult result;
+			result.outcome = AdminCommandOutcome::Answered;
+			result.configuration_saved = save_server_settings(*lease, server->id,
+					server->settings_revision, server->generation, saved);
+			if (result.configuration_saved) {
+				result.settings_revision = server->settings_revision + 1;
+			} else {
+				result.outcome = AdminCommandOutcome::Refused;
+				result.replies = { "ERROR - Configuration changed; reload before applying this edit." };
+			}
+			return command_reply(c.server_id, result, /*next_launch_only=*/true);
+		}
+		// Commands go out on the link: the server running, its link up.
+		if (auto refusal = check_server(*lease, *server)) {
+			refund(c);
+			return std::move(*refusal);
+		}
+		if (planned)
+			wait = edit_budget(planned->commands.size());
 	}
 	options.expected_revision = static_cast<int64_t>(revision->number);
 	options.settings_patch = io::json_write(*patch);
@@ -203,8 +234,10 @@ void ConsoleRoutes::register_configuration(WebApp &app) {
 		auto access = admin ? access_.require_admin(req) : access_.require_user(req);
 		if (access.refusal)
 			return std::move(*access.refusal);
-		auto c = admin ? admin_caller(access, id, !weapons)
-					   : owner_caller(*access.user, id, !weapons, !weapons);
+		// A settings edit may need no admin line (settings_edit checks the link when it has
+		// commands); the weapon list reads the server.
+		auto c = admin ? admin_caller(access, id, !weapons, /*needs_link=*/weapons)
+					   : owner_caller(*access.user, id, !weapons, !weapons, /*needs_link=*/weapons);
 		if (c.refusal)
 			return std::move(*c.refusal);
 		return weapons ? weapon_settings(c) : settings_edit(c, req);

@@ -813,7 +813,7 @@ ahead of the waiting polls, so a page never meets its own `console_busy`.
 | `POST /api/me/servers/<id>/chat` | `CHAT SEND <text>` | `{"text"}`: cp1252, no control character, not blank, at most 59 characters; 400 `invalid_text` |
 | `GET /api/me/servers/<id>/console` | none | the console ring in any state, with the link's state (`?limit=`, `?after=`); 404 |
 | `GET .../settings` | none (the database) | saved configuration, revision, title schema and pinned weapon catalog, in any state |
-| `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch |
+| `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch; an edit with no live command is saved with no admin line, its link up or not (`next_launch_only`), one with a live command needs the server running and its link up (409 `server_not_running`, 503 `admin_unavailable`) |
 | `GET .../weapons` | `WEAPON LIST` | complete reply packets |
 
 No admin line passes through (ADR 0053 decision 9): every command is one the routes
@@ -852,7 +852,7 @@ and configuration revision. It saves accepted live changes and command completio
 one transaction, retries database persistence without resending TCP commands, and
 finishes independently of the browser. Structured edits require the current revision;
 stale edits return 409. File-only options are saved for the next launch without forcing
-a restart. One-shot missions are excluded from saved rotations. QUIT closes only the
+a restart, also while the server restarts or its admin link is down. One-shot missions are excluded from saved rotations. QUIT closes only the
 admin session; exhausted non-repeating rotations and explicit session ends release the
 allocation without consuming a crash restart.
 

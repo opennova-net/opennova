@@ -20,7 +20,8 @@
 // header on a POST) or require_admin; the arguments (400, before anything is
 // read); the server: the id (404 not_found, also for another account's server
 // on an owner's route, 409 not_live), running (409 server_stopping while it stops, 409
-// server_not_running before it runs), its link up (503 admin_unavailable); the
+// server_not_running before it runs), its link up (503 admin_unavailable; a settings
+// edit with no live command needs neither, configuration_routes.cpp settings_edit); the
 // admission (below: 429 console_busy, 503 console_full, 409 rotation_busy);
 // for an owner, one token from the account's read or write bucket (429
 // rate_limited); then the link (503 admin_busy with its queue full, 504
@@ -137,13 +138,19 @@ private:
 	};
 	// The owner's server `id`, live and running, admitted, a token drawn from
 	// the account's write bucket (a command that changes the server) or its read
-	// bucket.
-	Caller owner_caller(const WebSessionUser &user, uint64_t id, bool write, bool rotation_edit);
-	// Server `id`, live and running, admitted.
-	Caller admin_caller(const RouteAccess &access, uint64_t id, bool rotation_edit);
+	// bucket. With `needs_link` false (a settings edit, which may need no admin line)
+	// a live server that is not stopping is enough: settings_edit checks the link
+	// when its edit has commands.
+	Caller owner_caller(const WebSessionUser &user, uint64_t id, bool write, bool rotation_edit,
+			bool needs_link = true);
+	// Server `id`, live and running, admitted (`needs_link` as owner_caller's).
+	Caller admin_caller(
+			const RouteAccess &access, uint64_t id, bool rotation_edit, bool needs_link = true);
 	// The server's state and link (its row, on `db`), for `c.server_id`; the
-	// refusal when it is not running or its link is not up.
-	std::optional<crow::response> check_server(db::Database &db, const HostedServer &server);
+	// refusal when it is stopping, or with `needs_link` when it is not running or its
+	// link is not up.
+	std::optional<crow::response> check_server(
+			db::Database &db, const HostedServer &server, bool needs_link = true);
 	// The admission of `account`'s request on `c`'s server (the class comment).
 	void admit(Caller &c, const std::string &account, bool rotation_edit);
 	// Takes server `id`'s one rotation edit under `token`; false while another
