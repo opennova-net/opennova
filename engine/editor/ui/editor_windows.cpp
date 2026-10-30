@@ -11,6 +11,7 @@
 
 #include <base/io/json.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <editor/graph/jump_queries.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
@@ -248,6 +249,11 @@ void EditorWindows::request(EditorRequest request) {
 	if (request.kind == EditorRequestKind::PickFile && request.purpose == PickPurpose::TextureImage) {
 		replace_target_ = request.path;
 		request.path.clear();
+	}
+	// A .cpt's Export heights...: the file kept likewise, the Shell's save dialog offering its name as a .raw.
+	if (request.kind == EditorRequestKind::PickFile && request.purpose == PickPurpose::HeightsRaw) {
+		heights_target_ = request.path;
+		request.path = utf8_of(path_of(basename_of(request.path)).replace_extension(".raw"));
 	}
 	// A music bank stream's audio from a wave...: the bank and the stream's place ("" a new stream) kept likewise.
 	if (request.kind == EditorRequestKind::PickFile && request.purpose == PickPurpose::MusicStreamWave) {
@@ -540,6 +546,12 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::MusicStreamWave:
 		if (!stream_pick_.bank.empty()) request(request::music_stream_audio(stream_pick_.bank, path, stream_pick_.place));
 		stream_pick_ = StreamPick();
+		break;
+	case PickPurpose::HeightsRaw:
+		// A name typed without its extension still lands as a .raw, the name a terrain import reads it by.
+		if (!heights_target_.empty())
+			request(request::export_heights(heights_target_, strutil::ends_with_icase(path, ".raw") ? path : path + ".raw"));
+		heights_target_.clear();
 		break;
 	case PickPurpose::NovaWorldFolder:
 		// Into a folder of its key's name inside the one picked, as a clone makes one.

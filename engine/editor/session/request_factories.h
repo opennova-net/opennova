@@ -221,6 +221,13 @@ inline EditorRequest music_stream_audio(std::string path, std::string wave, std:
 	request.open_first = open_first;
 	return request;
 }
+// The heights of the .cpt at `path` written to the .raw `to`, outside the project (session/heights_export.h).
+inline EditorRequest export_heights(std::string path, std::string to) {
+	EditorRequest request = of(EditorRequestKind::ExportHeights);
+	request.path = std::move(path);
+	request.values.emplace_back("to", std::move(to));
+	return request;
+}
 // Line `line` of the project file `path` written as `text` ("": taken out), refused where it no longer reads `was`
 // (none: unchecked; a blank line's "" is checked); `ask`: Problems' Correct the line... opened on it instead, nothing
 // written (session/source_line.h).

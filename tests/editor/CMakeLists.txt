@@ -938,6 +938,10 @@ opennova_add_editor_test(raster_document)
 # opened and saved byte for byte.
 opennova_add_editor_test(terrain_heights_document)
 
+# A .cpt's heights written out as the game's 16-bit .raw (the export_heights request); BAKES for the terrain a dumped
+# .raw makes.
+opennova_add_editor_test(heights_export BAKES TIMEOUT 600)
+
 # The heights brushes (S25).
 opennova_add_editor_test(heights_brushes BAKES TIMEOUT 600)
 
