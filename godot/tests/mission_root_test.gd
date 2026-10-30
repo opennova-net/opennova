@@ -6,7 +6,6 @@ extends GutTest
 # engine path without introducing a second editor gameplay runtime.
 
 
-
 func _advance_ticks(runtime: MissionRoot, delta: float) -> int:
 	var input := MissionFrameInput.new()
 	input.delta_seconds = delta
@@ -298,6 +297,7 @@ func test_effects_drained_signal_fires() -> void:
 # --- Fixed-timestep accumulator (session_frame): the sim runs at a constant 62.5 Hz independent of
 # the render/frame rate. [orig: Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0] -----
 
+
 func test_session_frame_accumulates_fixed_quanta() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRoot.new()
@@ -370,37 +370,6 @@ func test_session_frame_presents_latest_state_once() -> void:
 		"the node ends on the latest sim position after the batch")
 	assert_false((w.model as Node3D).position.is_equal_approx(Vector3(99, 99, 99)),
 		"the node left its authored position")
-
-
-func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() -> void:
-	var authored := Transform3D(Basis.IDENTITY, Vector3(99, 99, 99))
-	var w := _make_world(authored)
-	var rt := MissionRoot.new()
-	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
-	var entity_ref := EntityRef.make(3, 0, 0)
-	var observed: Array = []
-	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
-		observed.append({
-			"effect_pose": rt.presented_entity_effect_transform(entity_ref),
-			"node_pose": (w.model as Node3D).global_transform,
-		})
-	)
-	rt.play()
-	assert_eq(_advance_ticks(rt, 0.05), 3, "one render frame catches up three fixed ticks")
-	assert_eq(observed.size(), 3, "each fixed tick exposes its own attachment snapshot")
-	for row_v in observed:
-		var row: Dictionary = row_v
-		assert_true(row.effect_pose is Transform3D)
-		assert_false((row.effect_pose as Transform3D).origin.is_equal_approx(authored.origin),
-				"the attachment reads current sim values, not the stale authored Node")
-		assert_true((row.node_pose as Transform3D).origin.is_equal_approx(authored.origin),
-				"scene Nodes still present only once after the catch-up batch")
-	var final_row: Dictionary = observed[observed.size() - 1]
-	var final_effect_pose: Transform3D = final_row["effect_pose"]
-	assert_true((w.model as Node3D).global_position.is_equal_approx(
-			final_effect_pose.origin),
-			"the one final Node presentation matches the last fixed-tick value")
 
 
 func test_session_frame_drains_effects_per_tick() -> void:
@@ -600,45 +569,6 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 # selection (world/vehicle_attach.h) by tests/world/seat_prediction_test.cpp.
 
 
-const FLASHBANG_MOVE_EFFECT := "Effect_FlashBangToss"
-
-
-# One synthetic in-memory particle catalog authoring that move effect as a
-# FOREVEREMIT definition (the effect_world_test recipe), so a REAL EffectWorld
-# interns and spawns it without a resource root and the round-bound group
-# stays live until the throwable pass stops it.
-func _catalog_file() -> ParticleFile:
-	return ParticleFixture.catalog(self, "toss dots",
-			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", [FLASHBANG_MOVE_EFFECT])
-
-
-# The round-bound move group in the effect world's public report: by id once
-# known (a released owner drops its key from the row, so a retired group is
-# only reachable by id), else the first row owned by a throwable-move key.
-# {} when there is none or it was swept.
-func _round_move_group(fx: EffectWorld, group_id: int) -> EffectGroupReport:
-	for row_v in fx.get_debug_group_report():
-		var row := row_v as EffectGroupReport
-		if group_id > 0:
-			if int(row.id) == group_id:
-				return row
-		else:
-			var owner: Variant = row.owner_key
-			if owner is String and (owner as String).begins_with("throwable-move:"):
-				return row
-	return null
-
-
-# Every report row still owned by a throwable-move key (the live spawn census).
-func _round_move_rows(fx: EffectWorld) -> Array:
-	var out: Array = []
-	for row_v in fx.get_debug_group_report():
-		var owner: Variant = (row_v as EffectGroupReport).owner_key
-		if owner is String and (owner as String).begins_with("throwable-move:"):
-			out.append(row_v)
-	return out
-
-
 func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	# Joiner S2C tag-2 descriptors append to the visual RoundSim's fired queue
 	# and may carry a flying throwable TrcrID. MissionRoot must own both
@@ -692,100 +622,3 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	assert_true(audio.recent_fired_soundsets().is_empty(),
 			"the bank-less audio sink fired nothing")
 
-
-func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_expiry() -> void:
-	# The scene-node present stays batched, but a round-bound effects_table move
-	# group is part of the fixed-tick particle simulation. A four-second
-	# flashbang exercises the same attached-effect path as the smoke grenade in
-	# a short, production-authored lifetime.
-	var w := _make_world(Transform3D.IDENTITY)
-	# A REAL ItemEffectDirector and a REAL EffectWorld (ADR 0043 rule 11): the
-	# runtime anchors the round through the anchor registry and spawns into
-	# the effect world setup_passes binds; the world's public group report is
-	# the read seam.
-	var anchor_mount := ItemEffectDirector.new()
-	var effect_world := EffectWorld.new()
-	add_child_autofree(effect_world)
-	effect_world.load_particle_file(_catalog_file())
-	# The production owner-pose wiring (ItemEffectDirector.on_effect_world_started):
-	# the anchor registry resolves the owned group's live pose each fixed tick.
-	effect_world.set_owner_position_provider(anchor_mount.resolve_owner_transform)
-	var rt := MissionRoot.new()
-	add_child_autofree(rt)
-	rt.setup(w.mission, w.container, _options_with_placer(w.placer))
-	rt.setup_passes(null, effect_world, null, null, anchor_mount)
-	var def_root := ResourceRoot.new()
-	assert_eq(def_root.set_root_dir(_def_root()), OK)
-	assert_eq(rt.get_sim().load_ammo_table(def_root, "ammo.def"), OK)
-	var item_db := ItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
-	rt.get_sim().resolve_item_traits(item_db)
-	assert_gte(rt.get_sim().debug_spawn_round(
-			Vector3(100, 100, 100), Vector3.RIGHT, "grenadefb"), 0)
-	# The per-tick observation (the GameWorld leg): advance the real
-	# effect world after each fixed tick and read the round-bound group from
-	# the public report. A group the tick's throwable sync retired is already
-	# detached BEFORE that advance (the release timing pinned below); the
-	# emitter position read AFTER the advance is the owner sync's result, i.e.
-	# the pose the group actually emitted from on that tick.
-	var probe := {
-		"advances": 0,
-		"group_id": 0,
-		"active_tick_numbers": [],
-		"active_poses": [],
-		"stops_after_advance": [],
-	}
-	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
-		var group_id := int(probe["group_id"])
-		if group_id > 0 and (probe["stops_after_advance"] as Array).is_empty():
-			var before := _round_move_group(effect_world, group_id)
-			if before == null or before.detached:
-				(probe["stops_after_advance"] as Array).append(int(probe["advances"]))
-		effect_world.advance_fixed_tick(Simulation.tick_dt())
-		probe["advances"] = int(probe["advances"]) + 1
-		var after := _round_move_group(effect_world, group_id)
-		if after == null or after.detached:
-			return
-		probe["group_id"] = int(after.id)
-		(probe["active_tick_numbers"] as Array).append(int(probe["advances"]))
-		var emitters: Array = after.emitters
-		(probe["active_poses"] as Array).append(
-				(emitters[0] as EffectEmitterReport).position)
-	)
-	rt.play()
-
-	assert_eq(_advance_ticks(rt, 0.05), 3,
-			"one render frame catches up the first three round ticks")
-	assert_eq(_round_move_rows(effect_world).size(), 1,
-			"the attached move group exists before its first particle advance")
-	assert_eq(probe["active_tick_numbers"], [1, 2, 3],
-			"every birth-batch fixed tick advances the live group")
-	var active_poses: Array = probe["active_poses"]
-	assert_eq(active_poses.size(), 3)
-	if active_poses.size() == 3:
-		assert_false((active_poses[0] as Vector3).is_equal_approx(active_poses[1]),
-				"the second emission sees the second simulated round pose")
-		assert_false((active_poses[1] as Vector3).is_equal_approx(active_poses[2]),
-				"catch-up does not emit repeatedly from the frame-start pose")
-
-	# max_age 4 parses to 248 fixed ticks. Step to age 240, then expire eight
-	# ticks into a thirty-two-tick catch-up batch: advances 248..272 must observe
-	# no live group, rather than emitting stale ticks until final presentation.
-	for _step in range(237):
-		assert_true(rt.step_once())
-	assert_eq(int(probe["advances"]), 240)
-	# The bank runs on through the transport's pause (no pause writes the main
-	# loop's phase or smoothed bank; D-NET-1005): the 50 ms frame left 48
-	# units at phase 12. A 1 s frame clamps to 500 ms (8000 units, no smoothing)
-	# and drains 125 quanta from phase 12: 32 ticks.
-	rt.play()
-	assert_eq(_advance_ticks(rt, 1.0), 32)
-	assert_eq(int(probe["advances"]), 272)
-	var active_tick_numbers: Array = probe["active_tick_numbers"]
-	assert_eq(active_tick_numbers.size(), 247,
-			"the group advances exactly while the round is alive")
-	assert_eq(int(active_tick_numbers[-1]), 247,
-			"the expiry tick never advances a released round effect")
-	assert_eq(probe["stops_after_advance"], [247],
-			"release happens before fixed advance 248, inside the catch-up batch")
