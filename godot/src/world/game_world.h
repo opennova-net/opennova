@@ -82,7 +82,6 @@
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
-#include "world/item_effect_director.h"
 #include "world/load_timeline.h"
 #include "world/loading_screen_info.h"
 #include "world/occlusion_frame.h"
@@ -700,10 +699,6 @@ public:
 	void route_mission_effects(const Array &p_effects);
 	Ref<ImageTexture> get_minimap_water_mask() const { return minimap_water_mask_; }
 	EffectWorld *get_effect_world() const;
-	// The per-item effect director (built once with the world; its
-	// attach/anchor bookkeeping reads through ItemEffectDirector's public
-	// seams).
-	Ref<ItemEffectDirector> get_item_effect_director() const { return item_fx_; }
 	// The live terrain node, for the F3 Terrain & foliage page's
 	// counters/knobs.
 	Terrain *get_terrain_node() const { return terrain_; }
@@ -1132,11 +1127,10 @@ private:
 	// local-player view decodes; it OWNS the equipped-weapon state and the
 	// staged spawn loadout.
 	Ref<LocalPlayerVisuals> player_visuals_;
-	// The per-item ITEMS.DEF effect director (ItemEffectDirector): the
-	// attached/static/controller item emitters, the effect-anchor resolvers,
-	// and the retail master particle switch (plain RefCounted -- it owns no
-	// Nodes).
-	Ref<ItemEffectDirector> item_fx_;
+	// The retail master particle switch (set_particles_hidden): off by default, it survives
+	// mission reloads. The per-item ITEMS.DEF effects are the engine's
+	// (world::ItemEmitterSystem).
+	bool particles_hidden_ = false;
 	Ref<EffectLightDirector> light_director_;
 	// The loaded mission's force-indoors attribute, the kernel's mission's
 	// (Simulation::mission_forces_indoors); handed to the occlusion frame's

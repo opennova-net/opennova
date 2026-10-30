@@ -190,8 +190,8 @@ void MissionEffects::spawn_(Held &held, int32_t age) {
 	scene_->apply_owner_poses({ particle::EffectOwnerPoseUpdate{ owner, held.owner, true } });
 	const particle::EffectHandle effect = scene_->intern(held.slot.effect);
 	for (const particle::EffectPose &local : held.locals) {
-		// The attached spawn as the game's EffectWorld makes it: its local pose under the owner's
-		// (EffectWorld::spawn_effect_attached_request), following it.
+		// The slot-A spawn at its local pose under the owner's (the game's
+		// world::ItemEmitterSystem::spawn_bone_trail), following it as the preview moves the row.
 		particle::EffectSpawnRequest request;
 		request.effect = effect;
 		request.binding = particle::EffectBinding::FollowOwner;

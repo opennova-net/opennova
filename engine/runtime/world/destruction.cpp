@@ -1378,7 +1378,11 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
             if (static_cast<double>(tp.probability) * 65536.0 < static_cast<double>(draw))
                 continue;
         }
+        const int piece_slot = world.death_pieces.cursor;
         DeathPiece &p = world.death_pieces.alloc();
+        // The reused ring slot's trail goes outright, its particles with it (DeathPieceSim::alloc
+        // carries the witness).
+        world.destruction_emitters.destroy_piece_trail(world, piece_slot);
         p.active = true;
         p.item_id = target.item_id;
         p.section = static_cast<uint8_t>(s);
@@ -1452,10 +1456,13 @@ uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
         p.bounces_left = bounces;
         p.flags = tp.flags;
         p.settled = false;
-        // The per-piece trail effect/looped sound attach [orig: @ 0x493813] is
-        // presented by the host from the type row (trail_fx), unless the
-        // death was silent [orig: the (frameFlags & 1) test @ 0x493811].
+        // The per-piece trail effect, the type row's (trail_fx), held in the piece's handle,
+        // unless the death was silent [orig: the (frameFlags & 1) test @ 0x493811, the submit
+        // @ 0x493813..0x49382A].
         p.trail = !silent;
+        if (p.trail)
+            world.destruction_emitters.spawn_piece_trail(world, piece_slot, p,
+                    death_piece_trail_effect(p.type_index));
         mask |= (1u << (s & 31)); // x86 shl wraps the count mod 32 [orig: @ 0x493698]
     }
     target.spawned_piece_mask = mask; // [orig: entity+0x138 @ 0x493983]
@@ -2047,9 +2054,10 @@ DeathPiece &DeathPieceSim::alloc() {
     // [orig: DeathPiece_AllocSlot @ 0x57b4f0 — a plain ring; the next slot is
     // reused even if still live.] The reused slot's trail emitter is destroyed
     // outright, its particles with it, before the record is zeroed; the
-    // presenter destroys the slot's trail group when it meets the new
-    // generation [orig: the +0x8C test @0x57B51D..0x57B525,
-    // Effect_DestroyEmitterIfLive @0x57B528, the memset @0x57B53A..0x57B541].
+    // spawner destroys the slot's trail group as it takes the slot
+    // (DestructionEmitters::destroy_piece_trail) [orig: the +0x8C test
+    // @0x57B51D..0x57B525, Effect_DestroyEmitterIfLive @0x57B528, the memset
+    // @0x57B53A..0x57B541].
     DeathPiece &p = pieces[static_cast<size_t>(cursor)];
     cursor = (cursor + 1) % kCapacity;
     uint64_t generation = p.generation + 1;
@@ -2065,6 +2073,7 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
     // @ 0x492dd0] The piece is a row on words (D-NET-507).
     for (DeathPiece &p : pieces) {
         if (!p.active || p.settled) continue;
+        const int slot = static_cast<int>(&p - pieces.data());
         const DeathPieceType &tp = death_piece_type(p.type_index);
         // Gravity or the underwater sink, keyed on the PRE-move Z word: above
         // the water word vz += -334; below it the horizontal words halve
@@ -2100,6 +2109,8 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
             // ecx; jle` @0x492E1B..0x492E20, the point @0x492E45..0x492E58, the
             // free `cmp [esi+0Ch], edi; jg` @0x492E90..0x492E93].
             if (io::bam_sub(z, p.vel[2]) > water) {
+                // The crossing releases the trail [orig: @0x492E2D].
+                world.destruction_emitters.release_piece_trail(world, slot);
                 const EntityPosition at = EntityPosition::of_q16({p.pos.x.q16, p.pos.y.q16, water});
                 if (tp.splash_fx != nullptr)
                     events.effects.push_back(
@@ -2107,10 +2118,18 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
                 if (tp.splash_snd != nullptr)
                     events.sounds.push_back(DestructionSoundEvent{tp.splash_snd, at});
             }
-            if (z <= ground) p.active = false;
+            if (z <= ground) {
+                world.destruction_emitters.release_piece_trail(world, slot); // [orig: @0x492EA4]
+                p.active = false;
+            }
             continue;
         }
-        if (z >= ground) continue; // still airborne [orig: `cmp eax, edi; jge` @0x492ECE]
+        if (z >= ground) {
+            // Still airborne: the trail follows the piece [orig: `cmp eax, edi; jge` @0x492ECE,
+            //  CEffectEmitter_UpdatePositionAndParams @0x493068 at the Position, no direction].
+            world.destruction_emitters.move_piece_trail(world, slot, p);
+            continue;
+        }
         // Ground contact.
         if (p.bounces_left > 0) {
             // The spin words halve (`sar 1`), the horizontal words take 0.95
@@ -2144,6 +2163,7 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
             // this arm). Scorch texture selection advances the shared CRT before
             // the presentation events below. [orig: flag test @0x492FD7; scorch 7
             // call @0x492FE7; the persist stores @0x493039..0x493048]
+            world.destruction_emitters.release_piece_trail(world, slot); // [orig: @0x492FC9]
             if ((p.flags & 0x2u) == 0) {
                 world.out.terrain_scorches.emit_standard(
                         p.pos.x.q16, p.pos.y.q16, 7, world.logic_tick);

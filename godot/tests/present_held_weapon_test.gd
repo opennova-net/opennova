@@ -3,7 +3,8 @@ extends GutTest
 # The THIRD-PERSON held weapon's attach transform (D-WPN-32).
 #
 # Retail draws this model RIGID — one matrix stamped into every bone slot — so the whole
-# appearance is the transform EntityPresenter.held_weapon_attach_transform builds. Two independent things have to hold,
+# appearance is the transform the engine builds (world::held_weapon_attach; its frames and
+# placement are pinned by ctest world_entity_pose_attach). Two independent things have to hold,
 # and both were measured off the binary rather than tuned by eye:
 #
 #  * ORIENTATION is the entity attach basis and nothing else. The original writes the attach
@@ -16,100 +17,10 @@ extends GutTest
 #    MODEL-space pivot before carrying the sum through the bone matrix
 #    [orig: @0x4b2186..0x4b220b], so the nudge rides the bone's MODEL->WORLD rotation.
 #
-# A synthetic skeleton is used deliberately: the rig's real bone 16 rest basis is a large
-# rotation, and a test that only exercised an identity rest would pass either way.
+# What stays here pins the engine's bases against the original's own matrices.
 
 
 const BONE := EntityPresenter.HELD_WEAPON_BONE_INDEX
-
-var _root: Node3D = null
-
-
-func before_each() -> void:
-	_root = Node3D.new()
-	add_child_autofree(_root)
-
-
-# A skeleton whose bone `BONE` has a deliberately non-identity rest basis, so the
-# model->world term cannot be confused with the bone's own posed basis.
-func _make_skeleton(rest_basis: Basis, rest_origin: Vector3) -> Skeleton3D:
-	var skel := Skeleton3D.new()
-	for i in range(BONE + 1):
-		skel.add_bone("BN%d" % (i + 1))
-	skel.set_bone_rest(BONE, Transform3D(rest_basis, rest_origin))
-	_root.add_child(skel)
-	skel.reset_bone_poses()
-	return skel
-
-
-func test_orientation_sends_the_model_barrel_down_the_aim_direction() -> void:
-	var skel := _make_skeleton(Basis(Vector3.UP, deg_to_rad(37.0)), Vector3(0.2, 1.3, 0.0))
-	# Weapon models are authored with the barrel along model +Z (measured across all 33
-	# distinct firearm gfx3 models; only knives/grenades/satchels are +Y-long).
-	var barrel := Vector3(0.0, 0.0, 1.0)
-	for case in [Vector3.ZERO, Vector3(0.0, 90.0, 0.0), Vector3(17.95, 13.57, 0.0),
-			Vector3(30.0, 0.0, 0.0), Vector3(-20.0, -45.0, 0.0)]:
-		var angles: Vector3 = case
-		var attach: Variant = EntityPresenter.held_weapon_attach_transform(skel, angles)
-		assert_not_null(attach, "attach_transform must resolve for a rigged body")
-		var dir: Vector3 = ((attach as Transform3D).basis * barrel).normalized()
-		# Elevation is the attach pitch; bearing (from -Z toward +X) is the attach yaw.
-		assert_almost_eq(rad_to_deg(asin(clampf(dir.y, -1.0, 1.0))), angles.x, 0.01,
-				"barrel elevation must equal the attach pitch for %s" % angles)
-		assert_almost_eq(rad_to_deg(atan2(dir.x, -dir.z)), angles.y, 0.01,
-				"barrel bearing must equal the attach yaw for %s" % angles)
-
-
-func test_orientation_ignores_the_hand_bone_rotation() -> void:
-	# Retail takes the weapon's 3x3 from the attachment matrix, never from bone 16 — the
-	# bone-16 branch @0x4b21b0 is gated on g_AnimStateFlagsTable[weaponState] & 0x80, and
-	# bit 0x80 is set only for the death_bullet_* states. Two very different hand bases must
-	# therefore produce the same weapon orientation.
-	var a := _make_skeleton(Basis(Vector3.UP, deg_to_rad(37.0)), Vector3(0.2, 1.3, 0.0))
-	var b := _make_skeleton(Basis(Vector3.RIGHT, deg_to_rad(-88.0)), Vector3(0.2, 1.3, 0.0))
-	var angles := Vector3(12.0, 34.0, 0.0)
-	var xa: Transform3D = EntityPresenter.held_weapon_attach_transform(a, angles)
-	var xb: Transform3D = EntityPresenter.held_weapon_attach_transform(b, angles)
-	assert_true(xa.basis.is_equal_approx(xb.basis),
-			"the weapon basis must not depend on the hand bone's rotation")
-
-
-func test_position_is_the_joint_plus_the_nudge_in_the_model_frame() -> void:
-	# At REST the bone's model->world rotation is identity by definition, so the nudge must
-	# land unrotated on the joint. Using the bone's own posed basis instead would rotate it
-	# by the rest basis — the ~5 cm error this pins against.
-	var rest_basis := Basis(Vector3.UP, deg_to_rad(37.0))
-	var rest_origin := Vector3(0.2, 1.3, 0.0)
-	var skel := _make_skeleton(rest_basis, rest_origin)
-	var xf: Transform3D = EntityPresenter.held_weapon_attach_transform(skel, Vector3.ZERO)
-	assert_true(xf.origin.is_equal_approx(rest_origin + EntityPresenter.held_weapon_attach_nudge()),
-			"at rest the nudge is unrotated: expected %s, got %s" % [
-					rest_origin + EntityPresenter.held_weapon_attach_nudge(), xf.origin])
-
-
-func test_position_carries_the_nudge_through_the_posed_hand() -> void:
-	# Once the hand is posed away from rest, the nudge must follow it — that delta IS the
-	# original's `nudge · M16_rotation`.
-	var rest_basis := Basis(Vector3.UP, deg_to_rad(37.0))
-	var rest_origin := Vector3(0.2, 1.3, 0.0)
-	var skel := _make_skeleton(rest_basis, rest_origin)
-	var turn := Basis(Vector3.UP, deg_to_rad(90.0))
-	skel.set_bone_pose_rotation(BONE, (turn * rest_basis).get_rotation_quaternion())
-	var xf: Transform3D = EntityPresenter.held_weapon_attach_transform(skel, Vector3.ZERO)
-	assert_true(xf.origin.is_equal_approx(rest_origin + turn * EntityPresenter.held_weapon_attach_nudge()),
-			"posed: expected %s, got %s" % [
-					rest_origin + turn * EntityPresenter.held_weapon_attach_nudge(), xf.origin])
-
-
-func test_the_skeleton_world_transform_is_honoured() -> void:
-	# Both present paths assign the result to global_transform, so it must already be world.
-	var skel := _make_skeleton(Basis.IDENTITY, Vector3(0.2, 1.3, 0.0))
-	_root.transform = Transform3D(Basis(Vector3.UP, deg_to_rad(90.0)), Vector3(10.0, 0.0, -5.0))
-	var xf: Transform3D = EntityPresenter.held_weapon_attach_transform(skel, Vector3.ZERO)
-	var expected := _root.transform * (Vector3(0.2, 1.3, 0.0) + EntityPresenter.held_weapon_attach_nudge())
-	assert_true(xf.origin.is_equal_approx(expected),
-			"world: expected %s, got %s" % [expected, xf.origin])
-
 
 # --- The basis IS the original's placement matrix -----------------------------------------
 #
@@ -200,30 +111,6 @@ func test_bms_basis_matches_the_original_placement_matrix() -> void:
 
 # --- The HAND frame (the 0x80 branch) -------------------------------------------------------
 
-func test_hand_frame_ignores_the_attach_angles_entirely() -> void:
-	# In the hand branch the original never reads the entity triple -- var_13C0 is
-	# overwritten by Ry * Rz * boneMatrix[16] before the copy out.
-	var skel := _make_skeleton(Basis(Vector3.UP, deg_to_rad(37.0)), Vector3(0.2, 1.3, 0.0))
-	var a: Transform3D = EntityPresenter.held_weapon_attach_transform(skel, Vector3(11.0, 22.0, 33.0), true)
-	var b: Transform3D = EntityPresenter.held_weapon_attach_transform(skel, Vector3(-44.0, 5.0, 0.0), true)
-	assert_true(a.basis.is_equal_approx(b.basis),
-			"the hand frame must not depend on the attach triple")
-	# ...and it must differ from the entity frame, or the branch would be a no-op.
-	var entity: Transform3D = EntityPresenter.held_weapon_attach_transform(skel, Vector3(11.0, 22.0, 33.0))
-	assert_false(a.basis.is_equal_approx(entity.basis),
-			"the hand frame must actually differ from the entity frame")
-
-
-func test_hand_frame_tracks_the_hand_bone() -> void:
-	var rest := Basis(Vector3.UP, deg_to_rad(37.0))
-	var skel := _make_skeleton(rest, Vector3(0.2, 1.3, 0.0))
-	var before: Transform3D = EntityPresenter.held_weapon_attach_transform(skel, Vector3.ZERO, true)
-	var turn := Basis(Vector3.RIGHT, deg_to_rad(55.0))
-	skel.set_bone_pose_rotation(BONE, (turn * rest).get_rotation_quaternion())
-	var after: Transform3D = EntityPresenter.held_weapon_attach_transform(skel, Vector3.ZERO, true)
-	assert_true(after.basis.is_equal_approx(turn * before.basis),
-			"posing the hand must carry the weapon with it")
-
 
 func test_hand_frame_constants_match_the_original_composition() -> void:
 	# Independent re-derivation of the calibration, from the ELEMENT PLACEMENT of
@@ -256,13 +143,3 @@ func test_hand_frame_constants_match_the_original_composition() -> void:
 			"hand-frame calibration: derived %s, implementation %s" % [expected, got])
 
 
-func test_returns_null_when_the_body_has_no_usable_rig() -> void:
-	assert_null(EntityPresenter.held_weapon_attach_transform(null, Vector3.ZERO))
-	var bare := Node3D.new()
-	_root.add_child(bare)
-	assert_null(EntityPresenter.held_weapon_attach_transform(bare, Vector3.ZERO))
-	var short_skel := Skeleton3D.new()
-	short_skel.add_bone("BN1")
-	_root.add_child(short_skel)
-	assert_null(EntityPresenter.held_weapon_attach_transform(short_skel, Vector3.ZERO),
-			"a rig without bone %d cannot place a weapon" % BONE)

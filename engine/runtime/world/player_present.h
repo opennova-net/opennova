@@ -6,12 +6,14 @@
 // owner-bound action effect binds, the order one fixed tick's weapon batch
 // presents in, the per-submit CTRL register writers, the raw-key down latch,
 // the switch-deny click, the equipped weapon.def pick and its memo, and the
-// spawn-loadout projection. The device
+// spawn-loadout projection, and the avatar's present row (its MATCHTERRAIN
+// gate, its body clip request, its aim overlay's class deltas). The device
 // half -- camera stamps, fov/cull-mask, ObjectModel builds and parenting,
-// input sampling, the projection shader global, the userpoint bone remap --
-// stays in the binding (godot/src/player).
+// input sampling, the projection shader global -- stays in the binding
+// (godot/src/player).
 #pragma once
 
+#include <runtime/world/body_present.h> // BodyClipRequest (the body channel's request)
 #include <runtime/world/present_drains.h> // FirePresentationRow (the fire drain's row)
 
 #include <cstddef>
@@ -20,6 +22,35 @@
 #include <vector>
 
 namespace opennova::world {
+
+class LocalPlayer;
+class World;
+
+// --- the local avatar's present row ---------------------------------------------
+
+// One frame of the local player's third-person body, as the avatar presents it:
+//   * MATCHTERRAIN follows the simulation's exact MoveOrder stance latch: a
+//     crouched or prone body drapes on the terrain page, a standing one does
+//     not, whatever the camera shows (the body stays a shadow source in first
+//     person) [orig: NapiNPServerMsg_HandleStanceChange @0x501c60 - the
+//     latches @0x501d1b / @0x501d2d, the prone latch dword_B76484];
+//   * the body clip is the motor's primary channel at its tick, blended from
+//     the outgoing state while that blend runs, else the coarse body-anim
+//     slot (local_body_clip_request) [orig: Entity_BuildBoneTransformMatrices
+//     @0x4B1290 - the primary channel @0x4B1355];
+//   * the aim overlay rides the BODY frame (the lagged body heading), not the
+//     aim yaw: each class's delta is relative to the body class, so the hips
+//     stay glued to the node and the split renders as the torso twist
+//     [orig: Entity_BuildBoneTransformMatrices @0x4b1290 -- every overlay
+//     blends toward bodyHeading/bodyPitch; world-wac-ai-re.md §14 (D-INF-11)].
+// The deltas themselves are world::aim_overlay_deltas over the overlay's
+// mission euler degrees. `valid` false: no live local body (no clip request).
+struct LocalAvatarPresent {
+    bool valid = false;
+    bool match_terrain = false;
+    BodyClipRequest body;
+};
+LocalAvatarPresent local_avatar_present(const World &world, const LocalPlayer &local);
 
 // --- the camera mode's presentation split -------------------------------------
 
@@ -163,12 +194,13 @@ bool action_particle_uses_mounted_gun(bool borrowed_usegun_slot,
 // bone every tick, releasing it only on death [orig: ActionSlot_SpawnEffect
 // handle/action record @ 0x40208f/0x402092 -> the +0x18 tracker leg in
 // WeaponAction_ProcessFrame @ 0x540edf -> CEffectEmitter_UpdatePositionAndParams
-// @ 0x5f6810]. The presenter analog is an owner-bound group whose anchor
-// resolver re-reads the live userpoint pose; a re-fire while the group lives
-// is suppressed by the slot (one live handle per action slot).
+// @ 0x5f6810]. The holder keeps the handle and re-poses its group to the live
+// userpoint pose every fixed tick (particle::EffectScene::move_group); a
+// re-fire while the group lives is suppressed by the slot (one live handle per
+// action slot).
 struct ActionEffectSpawnPolicy {
     bool suppress_while_owned = true; // one live handle per action slot
-    bool follow_owner = true;         // the anchor re-read law above
+    bool follow_owner = true;         // the per-tick re-anchor law above
     bool world_render_domain = true;  // never the first-person domain
 };
 inline constexpr ActionEffectSpawnPolicy kActionEffectSpawnPolicy{};

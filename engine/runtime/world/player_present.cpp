@@ -2,6 +2,12 @@
 // map).
 #include <runtime/world/player_present.h>
 
+#include <runtime/world/ai.h>
+#include <runtime/world/entity.h>
+#include <runtime/world/infantry.h>
+#include <runtime/world/local_player.h>
+#include <runtime/world/world.h>
+
 namespace opennova::world {
 
 // [orig: the FP viewmodel gate g_CameraMode == 0 in
@@ -278,6 +284,20 @@ FireEffectPlan fire_effect_plan(const FirePresentationRow &row) {
     // @ 0x5F6DF0; every fire spawns one — no per-shooter guard on this leg].
     plan.spawn = !plan.effect.empty();
     return plan;
+}
+
+LocalAvatarPresent local_avatar_present(const World &world, const LocalPlayer &local) {
+    LocalAvatarPresent out;
+    out.match_terrain =
+            local.stance_latch() != static_cast<int>(InfantryState::Stance::kStand);
+    const EntityHandle handle = world.cached.local_player;
+    if (!handle.valid()) return out;
+    const AiEntity *body = world.ai.for_handle(handle);
+    const Entity *entity = world.registry.get(handle);
+    if (body == nullptr || entity == nullptr) return out;
+    out.valid = true;
+    out.body = local_body_clip_request(infantry_body_pose(body->inf), entity->body_anim_slot);
+    return out;
 }
 
 } // namespace opennova::world

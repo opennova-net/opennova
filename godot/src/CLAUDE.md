@@ -1,22 +1,16 @@
-# godot/src/ — the Godot backend (C++ GDExtension)
+# godot/src/ — the Godot GDExtension (retiring, ADR 0077)
 
-Godot is a backend (ADR 0077): it gives the engine the platform (window, raw
-input devices, audio output, files, processes, sockets) and the GPU, as SDL3 GPU
-would, and nothing else. A line here earns its place only as backend
-implementation of an engine interface (`engine/base/platform`,
-`engine/runtime/gpu`) or the boot. Every behavior, render and audio policy
-included (what to draw, order, state, culling, skinning, transforms, mixing,
-panning, text layout, the game flow), belongs in `engine/`, shaped like the
-retail runtime. "Godot can do this for us" is not a reason to put behavior here:
-a Godot class doing an engine's job (scene nodes, Camera3D, Skeleton3D,
-SubViewport, Godot meshes/materials/shaders, Control UI, audio players, Tween,
-HTTPRequest; the list is `GODOT_HIGH_LEVEL_CLASSES` in
-`scripts/lint/ratchet_counts.py`) is not used outside the backend's allowlist.
-The code still carries the pre-ADR 0077 shape (ADR 0043 d9's device legs,
-draw-list appliers, the `GameWorld` frame-leg table); the program's rounds move
-it out, and new code follows the backend rule, never the old shape. Register
-classes in `register_types.cpp`. The engine's formats never touch Godot's
-resource system (documents self-read/write via `load_from_path`/`save_to_path`).
+The engine owns everything above platform and GPU (ADR 0077), and SDL3 with SDL_GPU replaces
+Godot as the backend (`backend/sdl3`, `apps/game`); R8 deletes `godot/`. Until then this tree is
+the shipped game's binding and it only shrinks: no new behavior lands here, and nothing new is
+built here as a backend. Every behavior, render and audio policy included (what to draw, order,
+state, culling, skinning, transforms, mixing, panning, text layout, the game flow), belongs in
+`engine/`, shaped like the retail runtime. A Godot class doing an engine's job (scene nodes,
+Camera3D, Skeleton3D, SubViewport, Godot meshes/materials/shaders, Control UI, audio players,
+Tween, HTTPRequest; `GODOT_HIGH_LEVEL_CLASSES` in `scripts/lint/ratchet_counts.py`) is never
+added. A change here moves logic out to an engine home and leaves a thin call behind. Register
+classes in `register_types.cpp`. The engine's formats never touch Godot's resource system
+(documents self-read/write via `load_from_path`/`save_to_path`).
 Names and includes (ADR 0040): there is no "Nova layer" — a file is named after the
 type it declares, no `nova_`/`Nova` prefix anywhere (`NovaWorld*` is the service's
 proper noun and stays); a binding may share its class name and directory with the

@@ -37,10 +37,14 @@ static void emit_vehicle_control(World &world, const char *kind, uint16_t target
     world.out.effects.push(std::move(effect));
 }
 
+// The claim edges also run the item's slot-A leg: the occupancy spawner's start and the
+// claimant detach's +0x1CC release (ItemEmitterSystem::control_started / control_stopped carry
+// the witnesses).
 void VehicleSystem::emit_control_started(const Entity &vehicle) {
     World &world = world_;
     emit_vehicle_control(world, "vehicle_control_started", vehicle.net_id, vehicle.bms_id,
                          vehicle.spawn_origin, vehicle.handle.packed);
+    world.item_emitters.control_started(world, vehicle);
 }
 
 void VehicleSystem::emit_control_stopped(const Entity &vehicle) {
@@ -53,6 +57,8 @@ void VehicleSystem::emit_control_stopped(uint16_t target_net_id, int32_t target_
     World &world = world_;
     emit_vehicle_control(world, "vehicle_control_stopped", target_net_id, target_bms_id,
                          target_spawn_origin, target_wire_handle);
+    if (const Entity *vehicle = world.registry.get(EntityHandle{target_wire_handle}))
+        world.item_emitters.control_stopped(world, *vehicle);
 }
 
 bool VehicleSystem::claim_primary_occupant(Entity &vehicle, EntityHandle occupant, SeatType seat) {

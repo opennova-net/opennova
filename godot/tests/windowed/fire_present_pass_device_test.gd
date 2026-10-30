@@ -45,7 +45,7 @@ func test_distortion_style_tracers_draw_in_the_framefx_row() -> void:
 	# The ribbons face the camera of the presenter's own viewport.
 	var presenter := EntityPresenter.new()
 	viewport.add_child(presenter)
-	presenter.setup_passes(container, null, null, audio, effects, null, null, null)
+	presenter.setup_passes(container, null, null, audio, effects, null, null)
 
 	presenter.draw_tracer_rows(PackedFloat32Array([
 		1.0, 1.0, 3.0,  # stdred

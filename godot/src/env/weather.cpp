@@ -6,10 +6,10 @@
 #include "env/env_convert.h"
 #include "env/env_file.h"
 #include "env/mission_environment.h"
-#include "object/object_data.h"
 #include "simulation/simulation.h"
 
 #include <formats/mission/bms.h>
+#include <runtime/environment/weather_ctrl_registers.h>
 
 namespace godot {
 
@@ -203,16 +203,12 @@ void Weather::_write_global(
 
 void Weather::_write_ctrl_registers(int32_t p_flicker, int32_t p_swing) {
 	++global_writes_;
-	ObjectData::set_weather_ctrl_registers(p_flicker, p_swing);
+	opennova::env::weather_ctrl_registers().publish(p_flicker, p_swing);
 }
 
 void Weather::_write_rings(const opennova::env::WeatherOscillator *p_oscillator) {
 	++global_writes_;
-	if (p_oscillator != nullptr) {
-		ObjectData::set_weather_rings(*p_oscillator);
-	} else {
-		ObjectData::clear_weather_rings();
-	}
+	opennova::env::weather_ctrl_registers().publish_rings(p_oscillator);
 }
 
 void Weather::_write_globals(MissionEnvironment *p_env) {

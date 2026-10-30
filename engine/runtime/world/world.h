@@ -34,6 +34,8 @@
 #include <runtime/world/script_events.h>
 #include <runtime/world/script_effects.h>
 #include <runtime/world/item_effects.h>
+#include <runtime/world/destruction_emitters.h>
+#include <runtime/world/round_emitters.h>
 #include <runtime/world/script_remote_command.h>
 #include <runtime/world/script_sounds.h>
 #include <runtime/world/script_squad.h>
@@ -1402,7 +1404,12 @@ public:
     ITeammateSpawner *teammate_spawner = nullptr; // non-owning mission asset factory
     DeathPieceSim death_pieces;
     DestructionRng destruction_rng;
+    // The effect groups the world holds and re-poses from its rows' state, in the scene its
+    // embedder shares (ItemEmitterSystem::bind_scene): the +0x1CC slot's producers, the
+    // destruction rows' handles and the flying rounds' move emitters.
     ItemEmitterSystem item_emitters;
+    DestructionEmitters destruction_emitters;
+    RoundEmitters round_emitters;
 
     // The authoritative session rules/stats/outcome + the SP kill-stat buckets.
     // Multiplayer and WAC/BMS outcomes share Match's one double-run latch.

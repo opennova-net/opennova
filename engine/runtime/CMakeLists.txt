@@ -18,6 +18,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/clip_timeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/skeletal_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/remote_body_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/anim/body_channel.cpp # a clip-posed model's body channel: the clip, the blends, the remote arbitration, the composed pose
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_channel_pool.cpp # the eight physical voices the mix rows bind to
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_emitters.cpp # the mission's markers, lanes, clock and channel plan
@@ -53,6 +54,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/environment_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/sky_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/water_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/environment/weather_ctrl_registers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/weather_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/weather_seed.cpp
     # hud — pure witnessed HUD math (the shell owns every draw/Font blit)
@@ -273,6 +275,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/model_geometry.cpp
     world/entity_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/mounted_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/body_present.cpp # a person body's present inputs: the clip request, the wire body walk, the overlay deltas
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp
@@ -333,7 +336,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect_markers.cpp # the overlay entity markers (ADR 0042 d5)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_debug_rows.cpp # the ray/contact captures as drawable rows (dev tooling)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/inspect_local_player.cpp # the local player's live facts (ADR 0042 d5)
-    ${CMAKE_CURRENT_SOURCE_DIR}/world/item_effects.cpp   # the ITEMS.DEF particlefx attach law: pool gates, identity aliases, attach plan
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/item_effects.cpp   # the ITEMS.DEF particlefx law and the +0x1CC slot's producers (ItemEmitterSystem)
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction_emitters.cpp   # the destruction rows' effect handles
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/round_emitters.cpp   # the flying rounds' move emitters
     ${CMAKE_CURRENT_SOURCE_DIR}/world/present_passes.cpp # the present passes' shared law: husk render pick, husk identity, settle tilt retention
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_footprint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_overlay.cpp

@@ -3,7 +3,7 @@
 // evaluation on the retail clock.
 #include "object/object_data_internal.h"
 
-#include <formats/env/env_weather.h>
+#include <runtime/environment/weather_ctrl_registers.h>
 #include <runtime/renderer/material_eval.h>
 #include <runtime/renderer/model_controls.h>
 #include <formats/threedi/threedi_panm_pose.h> // liveness / noise / clock (one impl with the engine)
@@ -31,13 +31,6 @@ std::vector<std::string> control_register_names(const Threedi3di3 &model) {
 
 using GlobalCtrlValues = opennova::renderer::ControlRegisterValues;
 
-// The weather's FLICKER / SWING registers (ObjectData::set_weather_ctrl_registers)
-// and the ring copy models hash their own position into (set_weather_rings).
-int32_t g_weather_ctrl_flicker = 0;
-int32_t g_weather_ctrl_swing = 0;
-opennova::env::WeatherOscillator g_weather_rings;
-bool g_weather_rings_valid = false;
-
 GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
 	opennova::renderer::ModelControls controls;
 	const Array keys = dict.keys();
@@ -46,7 +39,11 @@ GlobalCtrlValues global_control_values_from_dict(const Dictionary &dict) {
 		controls.store(threedi_ctrl_register_ordinal(key.utf8().get_data()),
 				static_cast<int64_t>(dict[keys[i]]));
 	}
-	return controls.runtime_values(g_weather_ctrl_flicker, g_weather_ctrl_swing);
+	// The weather's FLICKER / SWING pair (engine environment/weather_ctrl_registers.h).
+	int32_t flicker = 0;
+	int32_t swing = 0;
+	opennova::env::weather_ctrl_registers().pair(flicker, swing);
+	return controls.runtime_values(flicker, swing);
 }
 
 } // namespace
@@ -77,11 +74,6 @@ ThreediMatrix4x4 ObjectData::panm_matrix(const Transform3D &p_transform) {
 	m.m[13] = static_cast<float>(p_transform.origin.y);
 	m.m[14] = static_cast<float>(p_transform.origin.z);
 	return m;
-}
-
-void ObjectData::weather_ctrl_registers(int32_t &r_flicker, int32_t &r_swing) {
-	r_flicker = g_weather_ctrl_flicker;
-	r_swing = g_weather_ctrl_swing;
 }
 
 bool ObjectData::has_live_panm_for_lod(int p_lod_index) const {
@@ -136,31 +128,6 @@ const std::vector<std::string> &ObjectData::_runtime_control_names() const {
 opennova::renderer::ControlRegisterValues ObjectData::runtime_control_values(
 		const Dictionary &p_ctrl_values) {
 	return global_control_values_from_dict(p_ctrl_values);
-}
-
-void ObjectData::set_weather_ctrl_registers(int32_t p_flicker, int32_t p_swing) {
-	g_weather_ctrl_flicker = p_flicker;
-	g_weather_ctrl_swing = p_swing;
-}
-
-void ObjectData::set_weather_rings(const opennova::env::WeatherOscillator &p_oscillator) {
-	g_weather_rings = p_oscillator;
-	g_weather_rings_valid = true;
-}
-
-void ObjectData::clear_weather_rings() {
-	g_weather_rings_valid = false;
-}
-
-bool ObjectData::weather_ctrl_registers_at(int32_t p_x_q16, int32_t p_y_q16, int32_t p_z_q16,
-		int32_t &r_flicker, int32_t &r_swing) {
-	if (!g_weather_rings_valid) {
-		return false;
-	}
-	const uint8_t slot = g_weather_rings.ring_slot(p_x_q16, p_y_q16, p_z_q16);
-	r_flicker = g_weather_rings.amp_ring[slot];
-	r_swing = g_weather_rings.osc_ring[slot];
-	return true;
 }
 
 bool ObjectData::uses_weather_ctrl_registers() const {
