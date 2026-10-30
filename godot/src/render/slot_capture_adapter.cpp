@@ -280,14 +280,16 @@ std::vector<Transform3D> skin_palette(MeshInstance3D *p_instance) {
 // strip and carry no classified material; retail's single PROJSHAD pass per
 // effect is the registered P0/P1 instance. An ObjectModel counts by the
 // engine's rule (renderer::slot_draw_shown: the render claims lifted, its
-// present intent kept). Every other node keeps its own visible flag (the
-// inactive RLOD levels, hidden parts).
+// present intent kept), except under a carrier's refNum walk (`p_ride_walk`),
+// which draws its riders with no visibility test (renderer::SlotFrameCapture).
+// Every other node keeps its own visible flag (the inactive RLOD levels,
+// hidden parts).
 void collect_visible_geometry(Node *p_node,
-		std::vector<GeometryInstance3D *> &r_instances) {
+		std::vector<GeometryInstance3D *> &r_instances, bool p_ride_walk = false) {
 	if (p_node == nullptr)
 		return;
 	if (const ObjectModel *model = Object::cast_to<ObjectModel>(p_node)) {
-		if (!slot_draw_shown(slot_draw_visibility(*model)))
+		if (!p_ride_walk && !slot_draw_shown(slot_draw_visibility(*model)))
 			return;
 	} else if (const Node3D *spatial = Object::cast_to<Node3D>(p_node)) {
 		if (!spatial->is_visible())
@@ -298,7 +300,7 @@ void collect_visible_geometry(Node *p_node,
 			r_instances.push_back(geometry);
 	}
 	for (int index = 0; index < p_node->get_child_count(); ++index)
-		collect_visible_geometry(p_node->get_child(index), r_instances);
+		collect_visible_geometry(p_node->get_child(index), r_instances, p_ride_walk);
 }
 
 void write_matrix(PackedByteArray &r_bytes, int64_t p_offset,
@@ -1004,9 +1006,10 @@ void SlotCaptureAdapter::compile_frame(
 		capture.view_projection = Projection::create_depth_correction(true) *
 				request.projection * Projection(request.view.affine_inverse());
 		instances.clear();
-		for (const std::uint64_t caster : request.casters) {
+		for (std::size_t index = 0; index < request.casters.size(); ++index) {
 			collect_visible_geometry(Object::cast_to<Node>(
-					ObjectDB::get_instance(caster)), instances);
+					ObjectDB::get_instance(request.casters[index])), instances,
+					index >= request.ride_walk_begin);
 		}
 		for (GeometryInstance3D *source : instances) {
 			Ref<Mesh> mesh;

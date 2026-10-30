@@ -55,7 +55,9 @@ class Weather;
 // capture-with linked children (held weapons, mounted riders) render into
 // their parent's slot through the per-frame claim pass — the
 // RenderSlot_RenderEntityAndChildren child walk — while tree-parented riders
-// fold into the ancestor exclusion and ride the parent's subtree walk; the
+// fold into the ancestor exclusion and ride the parent's subtree walk, and a
+// vehicle carrier's refNum-walk riders (ObjectModel::set_slot_ride, the ride
+// group) render into its slot whatever their visibility; the
 // attached-light drape darkening folds the light's attenuation at the entity
 // into the per-slot term; the capture eye backs off the caster along the
 // slot direction (the RenderingDevice depth band of advance_frame, D-RLIT-10)
@@ -71,6 +73,9 @@ public:
 	// Models flagged as dynamic shadow casters join this group
 	// (ObjectModel::set_shadow_caster_enabled).
 	static const StringName &caster_group();
+	// The refNum-walk riders (ObjectModel::set_slot_ride): drawn inside their
+	// carrier's capture whether or not they cast a slot of their own.
+	static const StringName &ride_group();
 	// The shared drape material every patch instance draws with, on
 	// renderer::kRungSlotDrape and reading the terrain/sky stencil mark.
 	static Ref<ShaderMaterial> get_drape_material();
@@ -200,6 +205,9 @@ private:
 		bool radius_fallback = false;
 		bool is_person = false;
 		bool seat_parented_ancestor = false;
+		// A caster-group member (a slot record of its own); false for a rider
+		// only its carrier's refNum walk draws.
+		bool slot_record = true;
 	};
 	void _rebuild_caster_records();
 	opennova::renderer::SlotCasterFacts _caster_facts(const ObjectModel &p_model,

@@ -57,8 +57,11 @@ struct SlotCaptureRequest {
 	RID target;
 	// ObjectModel instance ids: the admitted caster and the capture-with
 	// children claimed into its slot (the RenderSlot_RenderEntityAndChildren
-	// child walk). The adapter walks their visible geometry.
+	// child walk), then from `ride_walk_begin` the carrier's refNum-walk
+	// riders (renderer::SlotFrameCapture). The adapter walks their visible
+	// geometry; a rider's draws whatever its model's visibility.
 	std::vector<uint64_t> casters;
+	std::size_t ride_walk_begin = SIZE_MAX;
 };
 
 // Per-frame counters for the F3 board (VALUE slots) and the perf probe.

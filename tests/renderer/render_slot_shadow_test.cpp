@@ -489,6 +489,22 @@ int main() {
 		SlotCandidateState riding = near_front;
 		riding.on_vehicle = true;
 		CHECK(slot_priority_score(cam, view, riding) == kSlotScoreExcluded);
+		// The ride word and its two rules [orig: RenderSlot_UpdateEntityLight
+		// @ 0x5d6dfa (bit 0); RenderSlot_SortAndAssign @ 0x5d6604..0x5d661a;
+		// RenderSlot_RenderEntityAndChildren @ 0x5d796a..0x5d79a9].
+		CHECK(slot_ride_bits(1, 1, true) ==
+				(kSlotRideVehicle | kSlotRideGroundVehicle | kSlotRideGroundRefChild));
+		CHECK(slot_ride_bits(3, 1, false) == kSlotRideGroundVehicle);
+		CHECK(slot_ride_bits(1, -1, false) == kSlotRideVehicle);
+		CHECK(slot_ride_bits(-1, 5, true) == kSlotRideGroundRefChild);
+		CHECK(slot_rides_vehicle(slot_ride_bits(1, 1, false)));
+		CHECK(!slot_rides_vehicle(slot_ride_bits(1, 5, true)));   // a deck, not a vehicle
+		CHECK(!slot_rides_vehicle(slot_ride_bits(3, 1, true)));   // a person aboard
+		CHECK(!slot_rides_vehicle(slot_ride_bits(1, -1, false))); // on the terrain
+		CHECK(slot_ride_walk_child(slot_ride_bits(3, 1, true)));  // any member on a vehicle
+		CHECK(slot_ride_walk_child(slot_ride_bits(1, 1, true)));
+		CHECK(!slot_ride_walk_child(slot_ride_bits(1, 1, false))); // not in the group
+		CHECK(!slot_ride_walk_child(slot_ride_bits(1, 5, true)));  // the carrier no vehicle
 		// The 320 u bind horizon [orig: @ 0x5d66b2].
 		SlotCandidateState distant = near_front;
 		distant.pos2d = {0.0f, 321.0f};

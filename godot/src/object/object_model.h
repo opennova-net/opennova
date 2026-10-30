@@ -349,6 +349,8 @@ private:
 	int32_t entity_projection_scale_q16_ = 0;
 	bool parachute_deployed_ = false;
 	Vector3 slot_march_offset_;
+	uint32_t slot_ride_bits_ = 0;
+	ObjectID slot_ride_ground_;
 	int32_t parachute_projection_radius_q16_ = 0;
 	void refresh_entity_projection_sphere();
 	// The frame's views a projection is kept for: the frame's image (view 0)
@@ -1277,6 +1279,15 @@ public:
 	// present rows' PF_SLOT_MARCH_OFFSET_*; zero = start at the position).
 	void set_slot_march_offset(const Vector3 &p_offset) { slot_march_offset_ = p_offset; }
 	Vector3 get_slot_march_offset() const { return slot_march_offset_; }
+	// The render-slot ride facts (the present rows' PF_SLOT_RIDE_BITS, the
+	// renderer::SlotRideBit word) and the model of the entity this one stands
+	// on, set for a carrier's refNum-walk rider. Such a rider joins
+	// SlotShadow::ride_group() whether or not it casts a slot of its own: the
+	// carrier's capture draws it either way (engine:
+	// runtime/renderer/render_slot_shadow.h slot_ride_walk_child).
+	void set_slot_ride(uint32_t p_bits, ObjectModel *p_ground);
+	uint32_t get_slot_ride_bits() const { return slot_ride_bits_; }
+	ObjectModel *get_slot_ride_ground() const;
 	// A carved static becomes a live husk visual while retaining the primary
 	// entity's already-derived local sphere and the scale of its pose matrix.
 	void set_entity_projection_override(

@@ -527,9 +527,9 @@ SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
 
 static bool slot_excluded(const SlotCandidateState &state) {
 	// [orig: RenderSlot_SortAndAssign @ 0x5d6581..0x5d6627 —
-	// hidden (Flags & 1), seat-parented, or standing on a vehicle; the
-	// silhouette-render leg re-checks the same predicates
-	// @ 0x5d774e..0x5d77b3].
+	// hidden (Flags & 1), seat-parented, or a vehicle standing on a vehicle
+	// (slot_rides_vehicle); the silhouette-render leg re-checks the same
+	// predicates @ 0x5d774e..0x5d77b3].
 	return state.hidden || state.seat_parented || state.on_vehicle;
 }
 

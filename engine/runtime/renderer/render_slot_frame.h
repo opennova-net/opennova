@@ -95,7 +95,17 @@ struct SlotCasterLighting {
 // name other casters by theirs.
 struct SlotCasterFacts {
 	uint64_t id = 0;
+	// The draw holds a slot record of its own: an entity the init registered (a
+	// person, an ItemDef DynamicShadow item) or a draw linked into one. False
+	// for a draw only a carrier's refNum walk renders, which retail draws
+	// whatever slot it holds [orig: RenderSlot_RenderEntityAndChildren
+	// @ 0x5d79a0..0x5d79c8 reads no slot of the member].
+	bool slot_record = true;
 	SlotCasterVisibility visibility{};
+	// The ride facts (renderer::SlotRideBit) and the caster draw of the entity
+	// this one stands on (entity+0x28 groundEntity), 0 for none or one not drawn.
+	uint32_t ride_bits = 0;
+	uint64_t ground_id = 0;
 	// The caster whose slot renders this one (a held weapon, an overlay, a
 	// mounted child): 0 for none [orig: RenderSlot_RenderEntityAndChildren
 	// @ 0x5d78ef..0x5d79d6, the child walk].
@@ -136,7 +146,8 @@ struct SlotCasterLightQuery {
 class SlotFrameCasters;
 // Builds the frame's casters from their facts: the hidden rule (Flags & 1,
 // the render claims lifted, the scene parent's state), the capture-with and
-// scene-parent exclusions, the person class, the
+// scene-parent exclusions, the vehicle-ride exclusion and the refNum-walk
+// links (slot_rides_vehicle, slot_ride_walk_child), the person class, the
 // local player's and its ridden vehicle's priority [orig: RenderSlot_SortAndAssign
 // @ 0x5d669c..0x5d66a6 (cmp [ebp+16Ch]), the halving @ 0x5d6864;
 // RenderSlot_RenderEntityAndChildren @ 0x5d7707..0x5d7734, the every-frame
@@ -147,13 +158,18 @@ void slot_frame_casters(const std::vector<SlotCasterFacts> &facts, uint64_t loca
 		uint64_t local_parent_id, SlotFrameCasters &out);
 
 // The frame's casters: one SlotFrameCaster per fact in order, the capture-with
-// links (child, parent) and each caster's light query.
+// links (child, parent), the refNum-walk links (rider, carrier) and each
+// caster's light query.
 class SlotFrameCasters {
 public:
 	std::vector<uint64_t> ids;
+	// The ids that hold a slot record (SlotCasterFacts::slot_record): the ones
+	// the embedder registers with the plan.
+	std::vector<uint64_t> slot_ids;
 	std::vector<SlotFrameCaster> casters;
 	std::vector<SlotCasterLightQuery> light_queries;
 	std::vector<std::pair<uint64_t, uint64_t>> capture_links;
+	std::vector<std::pair<uint64_t, uint64_t>> ride_links;
 
 	const SlotFrameCaster *find(uint64_t id) const;
 	const SlotCasterLightQuery *light_query(uint64_t id) const;
@@ -198,8 +214,18 @@ struct SlotFrameCapture {
 	SlotCaptureViewAxes axes{};
 	std::array<float, 3> center{};
 	float half_extent = 0.0f;
-	// The caster first, then the models linked capture-with it.
+	// The caster first, then the models linked capture-with it, then from
+	// `ride_walk_begin` on its refNum walk's riders. The walk draws each rider
+	// through the rider's own render callback with no visibility test, under
+	// camera mode 1 [orig: RenderSlot_RenderEntityAndChildren — g_CameraMode = 1
+	// @ 0x5d7978, the draw @ 0x5d79c8, the mode restored @ 0x5d79dc;
+	// Entity_RenderWithLODCallback @ 0x5d6ef0 tests no Flags], so neither the
+	// rider's present intent (Flags & 1) nor the first-person culls that test
+	// camera mode 0 [orig: Entity_RenderVehicleModel @ 0x440808;
+	// Render_DestroyedSections @ 0x449f20] nor a render claim hides it: the
+	// device draws its geometry whatever its visibility.
 	std::vector<uint64_t> casters;
+	std::size_t ride_walk_begin = 0;
 };
 
 // A slot's terrain drape.
@@ -240,11 +266,13 @@ using SlotFrameLightQuery = std::function<const std::vector<SlotPointLight> &(ui
 
 // Fills `out` (its vectors keep their capacity) for this frame's assignments.
 // `capture_links` holds (child, parent) for every model linked capture-with
-// another caster. `terrain_height(x, z)` takes presentation planar
-// coordinates; null keeps the anchor under the march start.
+// another caster, `ride_links` (rider, carrier) for every refNum-walk rider.
+// `terrain_height(x, z)` takes presentation planar coordinates; null keeps
+// the anchor under the march start.
 void slot_frame(const SlotFrameInput &input, const std::vector<SlotAssignment> &assignments,
 		const SlotFrameCasterLookup &caster_for,
 		const std::vector<std::pair<uint64_t, uint64_t>> &capture_links,
+		const std::vector<std::pair<uint64_t, uint64_t>> &ride_links,
 		const SlotFrameLightQuery &lights_for,
 		const std::function<float(float, float)> &terrain_height, SlotFrame &out);
 

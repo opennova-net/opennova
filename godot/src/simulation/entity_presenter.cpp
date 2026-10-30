@@ -20,6 +20,7 @@
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/entity.h>       // EntityKind: the organic-row gate of the DEATH leg
 #include <runtime/world/present_rows.h> // PF_DEATH_CTRL: the org0 skin DEATH register word
+#include <runtime/renderer/render_slot_shadow.h> // slot_ride_walk_child: the slot ride facts
 
 #include "audio/mission_audio.h"
 #include "env/mission_environment.h"
@@ -1065,6 +1066,18 @@ void EntityPresenter::stamp_match_terrain(ObjectModel *model, const float *p,
 			(field_i(p, base, Simulation::PF_STANCE_BITS) & 0x03) != 0);
 }
 
+void EntityPresenter::stamp_slot_facts(ObjectModel *model, const float *p, int base) const {
+	model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
+			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
+			p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
+	const uint32_t ride_bits = static_cast<uint32_t>(field_i(p, base, Simulation::PF_SLOT_RIDE_BITS));
+	const int32_t ground_handle = field_i(p, base, Simulation::PF_SLOT_GROUND_HANDLE);
+	model->set_slot_ride(ride_bits,
+			opennova::renderer::slot_ride_walk_child(ride_bits) && ground_handle >= 0
+					? resolve_present_handle(ground_handle)
+					: nullptr);
+}
+
 bool EntityPresenter::stamp_right_hand_collapsed(ObjectModel *model,
 		const float *p, int base, int32_t &last_rhc) {
 	const int32_t rhc = field_i(p, base, Simulation::PF_RIGHT_HAND_COLLAPSED);
@@ -1498,9 +1511,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			}
 		}
 		model->set_parachute_deployed(field_i(p, base, Simulation::PF_PARACHUTE_DEPLOYED) != 0);
-		model->set_slot_march_offset(Vector3(p[base + Simulation::PF_SLOT_MARCH_OFFSET_X],
-				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Y],
-				p[base + Simulation::PF_SLOT_MARCH_OFFSET_Z]));
+		stamp_slot_facts(model, p, base);
 		if (p_profile != nullptr) {
 			const uint64_t now = opennova::io::perf_now_us();
 			p_profile->core_us += now - profile_phase_start;

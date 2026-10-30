@@ -67,9 +67,11 @@ SlotCandidateState SlotFrameCasters::state_for(uint64_t id) const {
 void slot_frame_casters(const std::vector<SlotCasterFacts> &facts, uint64_t local_id,
 		uint64_t local_parent_id, SlotFrameCasters &out) {
 	out.ids.clear();
+	out.slot_ids.clear();
 	out.casters.clear();
 	out.light_queries.clear();
 	out.capture_links.clear();
+	out.ride_links.clear();
 	out.index_.clear();
 	out.ids.reserve(facts.size());
 	out.casters.reserve(facts.size());
@@ -88,13 +90,10 @@ void slot_frame_casters(const std::vector<SlotCasterFacts> &facts, uint64_t loca
 		state.pos2d = {fact.position[0], fact.position[2]};
 		state.hidden = !slot_draw_shown(fact.visibility) || fact.visibility.scene_hidden;
 		state.seat_parented = fact.parented_under_caster || fact.capture_with != 0;
-		// The vehicle-ride exclusion (a vehicle whose ground entity is a
-		// vehicle, slot bit 0 [orig: RenderSlot_SortAndAssign @ 0x5d6604..0x5d6627])
-		// stays off: its other half, the carrier's capture drawing that rider
-		// through its refNum group [orig: RenderSlot_RenderEntityAndChildren
-		// @ 0x5d796d..0x5d79d6], has no fact here yet, and the exclusion alone
-		// would leave the rider with no shadow.
-		state.on_vehicle = false;
+		// A vehicle standing on a vehicle takes no slot of its own
+		// [orig: RenderSlot_SortAndAssign @ 0x5d6604..0x5d6627]; the carrier's
+		// refNum walk draws it into the carrier's (the ride links below).
+		state.on_vehicle = slot_rides_vehicle(fact.ride_bits);
 		state.is_local_player_or_parent =
 				fact.id == local_id || (local_parent_id != 0 && fact.id == local_parent_id);
 		const SlotCasterLighting &lighting =
@@ -107,6 +106,15 @@ void slot_frame_casters(const std::vector<SlotCasterFacts> &facts, uint64_t loca
 		if (fact.capture_with != 0) {
 			out.capture_links.push_back({fact.id, fact.capture_with});
 		}
+		// A member of its vehicle ground entity's refNum group rides that
+		// carrier's walk, whatever slot it holds and whatever its visibility
+		// (SlotFrameCapture::ride_walk_begin); only the embedder's own scene
+		// hiding drops it [orig: RenderSlot_RenderEntityAndChildren
+		// @ 0x5d796a..0x5d79d6].
+		if (fact.ground_id != 0 && slot_ride_walk_child(fact.ride_bits) &&
+				!fact.visibility.scene_hidden) {
+			out.ride_links.push_back({fact.id, fact.ground_id});
+		}
 		SlotCasterLightQuery query;
 		query.position = fact.position;
 		query.bound_radius = state.bound_radius;
@@ -114,6 +122,9 @@ void slot_frame_casters(const std::vector<SlotCasterFacts> &facts, uint64_t loca
 		query.interior_section = lighting.interior_bms != 0 ? lighting.interior_section : 0;
 		out.index_[fact.id] = out.casters.size();
 		out.ids.push_back(fact.id);
+		if (fact.slot_record) {
+			out.slot_ids.push_back(fact.id);
+		}
 		out.casters.push_back(caster);
 		out.light_queries.push_back(query);
 	}
@@ -122,6 +133,7 @@ void slot_frame_casters(const std::vector<SlotCasterFacts> &facts, uint64_t loca
 void slot_frame(const SlotFrameInput &input, const std::vector<SlotAssignment> &assignments,
 		const SlotFrameCasterLookup &caster_for,
 		const std::vector<std::pair<uint64_t, uint64_t>> &capture_links,
+		const std::vector<std::pair<uint64_t, uint64_t>> &ride_links,
 		const SlotFrameLightQuery &lights_for,
 		const std::function<float(float, float)> &terrain_height, SlotFrame &out) {
 	out.bound = 0;
@@ -193,6 +205,17 @@ void slot_frame(const SlotFrameInput &input, const std::vector<SlotAssignment> &
 		capture.casters.clear();
 		capture.casters.push_back(assignment.id);
 		for (const std::pair<uint64_t, uint64_t> &link : capture_links) {
+			if (link.second == assignment.id) {
+				capture.casters.push_back(link.first);
+			}
+		}
+		// Then, for a vehicle carrier, its refNum walk: every member of its
+		// group list standing on it, under camera mode 1 [orig:
+		// RenderSlot_RenderEntityAndChildren @ 0x5d796a..0x5d79dc]. A ride link
+		// exists only for a rider whose ground is ItemDef type 1, the carrier
+		// slot's own bit 0 the walk tests (slot_ride_walk_child).
+		capture.ride_walk_begin = capture.casters.size();
+		for (const std::pair<uint64_t, uint64_t> &link : ride_links) {
 			if (link.second == assignment.id) {
 				capture.casters.push_back(link.first);
 			}

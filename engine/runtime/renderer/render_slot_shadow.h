@@ -452,6 +452,53 @@ inline constexpr int kSlotCaptureCount = 12;   // silhouette RT budget
 // separate DRAPE gate — drape_culled above.)
 inline constexpr float kSlotBindMaxDistance = 320.0f;
 
+// An entity's ride facts as the slot pass reads them (world::PF_SLOT_RIDE_BITS
+// carries the word). kSlotRideVehicle is the slot record's flag bit 0, its
+// own ItemDef type 1, which the light update writes beside bit 1 (the Player
+// class bit 0x100, or a pool-0 entity) and bit 2 (the local player)
+// [orig: RenderSlot_UpdateEntityLight @ 0x5d6dbf..0x5d6e0e]. The ground bits
+// read the entity it stands on (entity+0x28 groundEntity): that entity's
+// ItemDef type 1 [orig: RenderSlot_SortAndAssign @ 0x5d6608..0x5d661a], and
+// whether this entity is in that ground entity's refNum group list
+// (g_EntityReferenceRegistry, the list the carrier's capture walks
+// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d797e..0x5d79a9]).
+enum SlotRideBit : uint32_t {
+	kSlotRideVehicle = 1u,
+	kSlotRideGroundVehicle = 2u,
+	kSlotRideGroundRefChild = 4u,
+};
+
+// The word from an entity's facts: its ItemDef type and its groundEntity's
+// (-1 for no def, or no ground entity), and whether it is in that ground
+// entity's refNum group list. The type 1 tests are `cmp [def+5Ch], 1`
+// [orig: RenderSlot_UpdateEntityLight @ 0x5d6dfa; RenderSlot_SortAndAssign
+// @ 0x5d6616].
+constexpr uint32_t slot_ride_bits(int item_type, int ground_item_type,
+		bool ground_ref_child) noexcept {
+	return (item_type == 1 ? kSlotRideVehicle : 0u) |
+			(ground_item_type == 1 ? kSlotRideGroundVehicle : 0u) |
+			(ground_ref_child ? kSlotRideGroundRefChild : 0u);
+}
+
+// The ride exclusion: a vehicle (flag bit 0) whose groundEntity is ItemDef
+// type 1 takes no slot of its own [orig: RenderSlot_SortAndAssign
+// @ 0x5d6604..0x5d6627, `cmp eax, ebp` on bit 0, the ground's def +0x5C;
+// re-checked by the capture @ 0x5d778c..0x5d77aa]. Its carrier's capture
+// draws it when it is in the carrier's refNum group (slot_ride_walk_child).
+constexpr bool slot_rides_vehicle(uint32_t ride_bits) noexcept {
+	return (ride_bits & kSlotRideVehicle) != 0 && (ride_bits & kSlotRideGroundVehicle) != 0;
+}
+
+// The carrier's refNum walk: a carrier whose slot holds flag bit 0 (its own
+// ItemDef type 1, which is this rider's ground bit) draws, after itself and
+// its pool-0 riders, every member of its refNum group list standing on it,
+// whatever slot that member holds [orig: RenderSlot_RenderEntityAndChildren
+// @ 0x5d796a..0x5d79dc: `test [esi+30h], dl`, the refNum @ 0x5d797e, the list
+// @ 0x5d798e, groundEntity == carrier @ 0x5d79a6, the draw @ 0x5d79c8].
+constexpr bool slot_ride_walk_child(uint32_t ride_bits) noexcept {
+	return (ride_bits & kSlotRideGroundVehicle) != 0 && (ride_bits & kSlotRideGroundRefChild) != 0;
+}
+
 // The is_person class (itemdef +0x5C == 3) does NOT stretch the drape. The
 // 4.0 (flt_7C44B8) multiplies the VERTICAL component of a COPY of the slot
 // direction, and that copy builds only the drape's SECOND texture matrix —
@@ -485,7 +532,8 @@ struct SlotCandidateState {
 	// Seat-parented (parentSlot 1/2/5, or 3 with a live parent)
 	// [orig: @ 0x5d65a0..0x5d65eb].
 	bool seat_parented = false;
-	// Standing on a vehicle-type ground entity [orig: @ 0x5d661a..0x5d6627].
+	// A vehicle standing on a vehicle (slot_rides_vehicle): the carrier's
+	// capture draws it [orig: @ 0x5d6604..0x5d6627].
 	bool on_vehicle = false;
 	bool is_local_player_or_parent = false;  // halves the score [orig: @ 0x5d6864]
 	bool interior = false;

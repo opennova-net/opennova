@@ -27,6 +27,7 @@
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
 #include <base/io/fixed.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -324,6 +325,35 @@ static void write_present_slot_march(float *r, uint32_t flags_dword, int item_ty
 	r[PF_SLOT_MARCH_OFFSET_Z] = offset[2];
 }
 
+// The render-slot ride facts one row publishes (world::PF_SLOT_RIDE_BITS,
+// PF_SLOT_GROUND_HANDLE): the row's own ItemDef type, its groundEntity's, and
+// whether `rider` is in that ground entity's refNum group list, the list the
+// carrier's capture walks [orig: RenderSlot_UpdateEntityLight @0x5d6dfa..0x5d6e0e;
+// RenderSlot_SortAndAssign @0x5d6604..0x5d661a; RenderSlot_RenderEntityAndChildren
+// @0x5d797e..0x5d79a9]. `ground_handle` is the ground entity's wire handle
+// (kInvalid for none); `ground` its row in `w`, when there is one.
+static void write_present_slot_ride(float *r, const World &w, int item_type,
+		uint16_t ground_handle, int ground_item_type, const Entity *ground,
+		const Entity *rider) {
+	bool ref_child = false;
+	if (ground != nullptr && rider != nullptr && ground->ref_num != 0) {
+		const std::vector<EntityHandle> &group = w.registry.ref_group(ground->ref_num);
+		ref_child = std::find(group.begin(), group.end(), rider->handle) != group.end();
+	}
+	r[PF_SLOT_RIDE_BITS] = static_cast<float>(
+			renderer::slot_ride_bits(item_type, ground_item_type, ref_child));
+	r[PF_SLOT_GROUND_HANDLE] =
+			ground_handle != EntityHandle::kInvalid ? static_cast<float>(ground_handle) : -1.0f;
+}
+
+// From the authoritative entity and the one it stands on (entity+0x28).
+static void write_present_slot_ride(float *r, const World &w, const Entity &e) {
+	const Entity *ground = w.registry.get(e.ground_target);
+	write_present_slot_ride(r, w, e.has_item_def ? e.item_type : -1,
+			ground != nullptr ? ground->handle.packed : EntityHandle::kInvalid,
+			ground != nullptr && ground->has_item_def ? ground->item_type : -1, ground, &e);
+}
+
 // From the authoritative entity: its split Flags words, live Euler triple and
 // stamped collision-bbox centre (entity+0x1FC).
 static void write_present_slot_march(float *r, const Entity &e) {
@@ -345,6 +375,30 @@ static void write_present_replica_slot_march(float *r, mission::MissionKernel &k
 	const int32_t euler[3] = {es.heading_bam, es.pitch_bam, es.roll_bam};
 	write_present_slot_march(r, replica_entity_flags_dword(es), shape.item_type, euler,
 			{shape.bbox_center_q16.x, shape.bbox_center_q16.y, shape.bbox_center_q16.z});
+}
+
+// The ride facts from a joiner's decoded row, as its own retail client entity
+// holds them: the type's ItemDef type, the ground-probe hit its compact apply
+// stores (resolved_ground, retail's groundEntity) and that row's type, and the
+// group lists the client's spawn handlers keep, which the materialized rows
+// carry (ClientWorldMaterializer::join_reference_group). `owned` is the row's
+// own materialized row (null for a header-only pool-0 row).
+static void write_present_replica_slot_ride(float *r, const PresentRowsContext &context,
+		const replication::ClientState &cs, const replication::ClientEntityState &es,
+		const Entity *owned) {
+	mission::MissionKernel &kernel = context.kernel;
+	const replication::ClientEntityState *ground_row =
+			es.resolved_ground != EntityHandle::kInvalid ? cs.find(es.resolved_ground) : nullptr;
+	const Entity *ground = ground_row != nullptr
+			? replication::replica_row_entity(context.materializer, kernel.world,
+					EntityHandle{ground_row->handle}, ground_row->type_id)
+			: nullptr;
+	write_present_slot_ride(r, kernel.world, kernel.wire_collision_shape_for_type(es.type_id).item_type,
+			ground_row != nullptr ? ground_row->handle : EntityHandle::kInvalid,
+			ground_row != nullptr
+					? kernel.wire_collision_shape_for_type(ground_row->type_id).item_type
+					: -1,
+			ground, owned);
 }
 
 // The frame's row buffer at `rows` rows. Each row's writer initializes it whole
@@ -463,6 +517,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 			r[PF_PARACHUTE_DEPLOYED] =
 					((ent->flags | ent->engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 			write_present_slot_march(r, *ent);
+			write_present_slot_ride(r, kernel.world, *ent);
 			write_present_section_mask(r, item_hidden_sections(*ent));
 			write_present_cut_sections(r, *ent);
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
@@ -641,6 +696,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// [orig: palm @ 0x53C4C0; cran @ 0x43FC70]
 		if (joiner) {
 			write_present_replica_slot_march(r, kernel, es);
+			write_present_replica_slot_ride(r, context, cs, es, owned);
 			// Every read below takes that row: the husk, the destroy phases, the
 			// doors, the motion controls, the gun words and the section draws.
 			if (owned) {
@@ -861,6 +917,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_PARACHUTE_DEPLOYED] =
 			((e.flags | e.engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 	write_present_slot_march(r, e);
+	write_present_slot_ride(r, w, e);
 	write_present_section_mask(r, item_hidden_sections(e));
 	write_present_cut_sections(r, e);
 	write_present_doors(r, row_index, w, e, door_phases);

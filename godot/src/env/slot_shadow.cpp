@@ -61,6 +61,11 @@ const StringName &SlotShadow::caster_group() {
 	return group;
 }
 
+const StringName &SlotShadow::ride_group() {
+	static const StringName group("slot_shadow_riders");
+	return group;
+}
+
 // The per-slot uniform names, built once: the device names up to two per
 // admitted slot every frame.
 struct SlotUniformNames {
@@ -839,7 +844,9 @@ bool SlotShadow::plan_frame() {
 	// Registration diff against the plan.
 	HashSet<uint64_t> live_ids;
 	for (const opennova::renderer::SlotCasterFacts &fact : facts) {
-		live_ids.insert(fact.id);
+		if (fact.slot_record) {
+			live_ids.insert(fact.id);
+		}
 	}
 	std::vector<uint64_t> stale;
 	for (const uint64_t id : registered_ids_) {
@@ -883,13 +890,15 @@ bool SlotShadow::plan_frame() {
 	env->apply_terrain_uniforms(drape);
 
 	// The frame's casters: the engine's state for each from its facts (the
-	// local player and the vehicle it rides take the local priority).
-	for (const opennova::renderer::SlotCasterFacts &fact : facts) {
-		plan_.register_entity(fact.id);
-		registered_ids_.insert(fact.id);
-	}
+	// local player and the vehicle it rides take the local priority); the
+	// draws holding a slot record register with the plan, a refNum-walk rider
+	// with none only rides its carrier's capture.
 	opennova::renderer::slot_frame_casters(facts, local_id, uint64_t(local_player_parent_id_),
 			frame_casters_);
+	for (const uint64_t id : frame_casters_.slot_ids) {
+		plan_.register_entity(id);
+		registered_ids_.insert(id);
+	}
 
 	const Vector3 cam_pos = camera->get_global_position();
 	const Vector3 cam_forward =
@@ -968,7 +977,8 @@ bool SlotShadow::plan_frame() {
 		};
 	}
 	opennova::renderer::slot_frame(frame_input, assignments, caster_for,
-			frame_casters_.capture_links, lights_for, terrain_height, slot_frame_);
+			frame_casters_.capture_links, frame_casters_.ride_links, lights_for, terrain_height,
+			slot_frame_);
 	report_bound_ = slot_frame_.bound;
 	report_captures_ = slot_frame_.captures;
 
@@ -1012,6 +1022,7 @@ bool SlotShadow::plan_frame() {
 				request.target = capture_targets_[order];
 			}
 			request.casters = capture.casters;
+			request.ride_walk_begin = capture.ride_walk_begin;
 			requests_.push_back(std::move(request));
 			armed_capture_mask_ |= 1u << order;
 		}
@@ -1129,6 +1140,7 @@ opennova::renderer::SlotCasterFacts SlotShadow::_caster_facts(const ObjectModel 
 		const CasterRecord &p_record) const {
 	opennova::renderer::SlotCasterFacts fact;
 	fact.id = uint64_t(p_model.get_instance_id());
+	fact.slot_record = p_record.slot_record;
 	fact.visibility = slot_draw_visibility(p_model);
 	const Node3D *parent = Object::cast_to<Node3D>(p_model.get_parent());
 	fact.visibility.scene_hidden = parent != nullptr && !parent->is_visible_in_tree();
@@ -1136,6 +1148,10 @@ opennova::renderer::SlotCasterFacts SlotShadow::_caster_facts(const ObjectModel 
 		fact.capture_with = uint64_t(capture_with->get_instance_id());
 	}
 	fact.parented_under_caster = p_record.seat_parented_ancestor;
+	fact.ride_bits = p_model.get_slot_ride_bits();
+	if (const ObjectModel *ground = p_model.get_slot_ride_ground()) {
+		fact.ground_id = uint64_t(ground->get_instance_id());
+	}
 	fact.is_person = p_record.is_person;
 	fact.model_sphere_radius = p_record.radius_fallback ? 0.0f : p_record.capture_radius;
 	fact.entity_bound_radius = p_record.slot_radius;
@@ -1167,7 +1183,11 @@ void SlotShadow::_rebuild_caster_records() {
 		caster_records_valid_ = false;
 		return;
 	}
+	// The casters, then the refNum-walk riders that cast no slot of their own
+	// (ObjectModel::set_slot_ride).
 	TypedArray<Node> nodes = get_tree()->get_nodes_in_group(caster_group());
+	const int64_t caster_count = nodes.size();
+	nodes.append_array(get_tree()->get_nodes_in_group(ride_group()));
 	caster_records_.reserve(static_cast<size_t>(nodes.size()));
 	// The casters of this node's own world: the group is the tree's, and a tree
 	// may hold several scenes, each a world of its own (the OpenNova Editor's
@@ -1177,11 +1197,13 @@ void SlotShadow::_rebuild_caster_records() {
 	for (int64_t i = 0; i < nodes.size(); ++i) {
 		ObjectModel *model = Object::cast_to<ObjectModel>(
 				static_cast<Object *>(nodes[i]));
-		if (model == nullptr || model->get_world_3d() != world) {
+		if (model == nullptr || model->get_world_3d() != world ||
+				(i >= caster_count && model->is_in_group(caster_group()))) {
 			continue;
 		}
 		CasterRecord record;
 		record.id = ObjectID(model->get_instance_id());
+		record.slot_record = i < caster_count;
 		// The two radii the slot reads: the model sphere (gpm[5]) sizes the
 		// capture extent and the depth clip; the entity bound (entity+0 —
 		// the sphere raised to the husk's, + 0x1000, and 0 without a
