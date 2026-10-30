@@ -102,8 +102,8 @@ import cite_images  # noqa: E402  the image table and rule, shared with cite_cen
 DEFAULT_URL = "http://127.0.0.1:13337/mcp"
 URL = DEFAULT_URL  # the IDA MCP endpoint; --url overrides
 
-CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/probes", "godot/shaders", "godot/tests",
-              "apps", "tests", "fixtures")
+CODE_ROOTS = ("engine", "games", "godot/src", "godot/game", "godot/editor", "godot/probes", "godot/shaders",
+              "godot/tests", "apps", "tests", "fixtures")
 DOC_ROOTS = ("docs",)
 # every tracked text form a marker has been written in: sources, shaders, the engine-side
 # .md records, CMake lists
