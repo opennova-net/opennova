@@ -24,6 +24,8 @@
 #include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
 #include <runtime/menu/player_info_avatars.h>
+#include <runtime/menu/menu_screen_controller.h>
+#include <runtime/menu/menu_shell.h>
 
 #include <memory>
 #include <vector>
@@ -65,6 +67,21 @@ public:
 	int get_maximum() const { return value_.maximum; }
 	int get_page() const { return value_.page; }
 	int get_value() const { return value_.value; }
+};
+
+// A screen controller's binding: the engine controller (menu::MenuScreenController) a script
+// hands a driver (MenuDriver.add_screen / claim_screen), with the host the controller reads its
+// models through. A subclass holds both and relays the device work its controller asks for (a
+// preview, an icon) as its own signals.
+class MenuScreenBinding : public RefCounted {
+	GDCLASS(MenuScreenBinding, RefCounted)
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	// The engine controller (C++ only); null for none.
+	virtual opennova::menu::MenuScreenController *screen_controller() { return nullptr; }
 };
 
 // The compiled-menu interaction driver: ONE MenuFrame (the engine draw-list /
@@ -429,6 +446,19 @@ public:
 
 	// Advance the blink/marquee clock; the shell's _process forwards its clock.
 	void tick(int64_t p_time_ms);
+
+	// --- screen controllers (engine menu_screen_controller.h, through menu::MenuShell) ---
+	// A delegate the shell hands every document it opens whose owner (menu::MenuCommands::owner)
+	// is the controller's owner(): its open() runs after the open's wiring, the runtime's events
+	// reach it while it holds the document, its close() runs when another document opens.
+	void add_screen(const Ref<MenuScreenBinding> &p_screen);
+	// The document open now (a screen a mission opens by name, opened with open_document) is
+	// `p_screen`'s: its open() runs now with the open file and screen, and it holds the document
+	// until release_screen() or the next open. False with no document open or no controller.
+	bool claim_screen(const Ref<MenuScreenBinding> &p_screen);
+	void release_screen();
+	// The engine shell (C++ only).
+	opennova::menu::MenuShell &shell() { return shell_; }
 };
 
 } // namespace godot
