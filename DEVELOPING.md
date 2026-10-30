@@ -460,7 +460,11 @@ PRs run the components selected by `scripts/ci/changes.py`: Godot, native tests,
 service/backend, web/stack, Blender, tools, or infrastructure. Shared engine/build inputs,
 unknown paths and an incomplete changed-file query select everything. Renames select
 both the old and new component. Repository gates always run, including docs-only PRs.
-Staging and master run every component. The existing required check names remain
+Staging and master run every component. A pull request whose head is this repository's
+staging branch selects none: every staging push already runs the whole graph on that same
+head commit, and that push run is its proof (strict branch protection makes the head and the
+merge one tree). Its own run keeps the repository gates and the two required checks, which
+verify the skips. The existing required check names remain
 `test (windows-latest)` and `godot-tests (windows-latest)`; they now verify all selected
 jobs, including Linux and the web/stack checks, and reject unexpected skips.
 
@@ -524,8 +528,7 @@ with its original source run, attempt, SHA and manifest artifact ID while artifa
 remain available and the commit is still staging's head. To rebuild, start a **new CI
 run on staging**. Do not mix successful artifacts from an earlier CI attempt with
 rerun components; admission rejects them, and overwriting admitted artifacts would
-break an active rollout. Before dispatcher registration, start a new CI run for a
-rollout retry as well. The separate Deploy and Publish manual workflows remain
+break an active rollout. The separate Deploy and Publish manual workflows remain
 production-only.
 
 ## Troubleshooting
