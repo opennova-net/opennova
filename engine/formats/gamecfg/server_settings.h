@@ -38,8 +38,22 @@ bool set_server_setting(
 // Metadata includes the title's defaults. hosted excludes local-only fields.
 io::JsonValue server_settings_schema(ConfigTable table, bool hosted);
 io::JsonValue server_settings_values(const GameCfg &cfg, bool hosted);
-// Validate the whole patch before changing the block. weapons is a name ->
-// availability map, classes a class name -> bool map, handled by the same seam.
+
+// A weapon's availability word by its name, as the host screen's WEAPON_LIST shows it: "never" 0,
+// "always" 1, "armory" the table's armory-only word and "mission" its mission word (the
+// mission's own item availability decides; Jointops.exe's 2 and 3, dfx2.exe's 3 and 2, DFX2-10).
+// -1 reads as "mission" too and any other word as "always", the list's default arm.
+const char *weapon_availability_name(int32_t word, ConfigTable table);
+// `name`'s word into `word`: untouched when `name` is the name `word` already reads as (the raw
+// word kept, -1 or any other), else the name's own word. False, `word` untouched, for no such name.
+bool set_weapon_availability(int32_t &word, std::string_view name, ConfigTable table);
+// A class word as the session's class mask takes it: on for ALWAYS (1) and MISSION (2), which
+// every mission entry's mask enables alike; off for NEVER (0) and any other word.
+bool class_available(int32_t word);
+
+// Validate the whole patch before changing the block. weapons is a weapon name ->
+// availability name map (weapon_availability_name's), classes a class name -> bool map
+// (class_available's; an unchanged one keeps its raw word), handled by the same seam.
 bool apply_server_settings(GameCfg &cfg, const io::JsonValue &patch, bool hosted,
 		const WeaponRoster &weapons, std::string &field, std::string &error);
 

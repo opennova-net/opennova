@@ -8,6 +8,7 @@
 #include "common/test_expect.h"
 
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/gamecfg/server_settings.h>
 
 #include <algorithm>
 #include <cmath>
@@ -456,6 +457,53 @@ int dfx2_player_cap_defaults() {
 
 } // namespace
 
+// The settings schema's availability names over the host screen's words: a weapon's MISSION word
+// (Jointops.exe's 3, dfx2.exe's 2, DFX2-10) and -1 read as "mission", the armory-only word as
+// "armory"; a patch naming the name a word already reads as keeps the raw word, another name
+// writes its own word. A class's MISSION 2 is on, kept by a true and cleared by a false.
+// [orig: HostDialog_WeaponRestrictionCycleHandler @0x5576c0] [orig: @0x5558a0 (dfx2.exe)]
+int server_settings_availability() {
+	const WeaponRoster weapons = { { "None", 0 }, { "Rifle", 1 }, { "Grenade", 1 } };
+	const auto name = [](int32_t word, ConfigTable table) {
+		return std::string(weapon_availability_name(word, table));
+	};
+	TEST_EXPECT(name(-1, ConfigTable::Jo) == "mission" && name(3, ConfigTable::Jo) == "mission");
+	TEST_EXPECT(name(0, ConfigTable::Jo) == "never" && name(2, ConfigTable::Jo) == "armory");
+	TEST_EXPECT(name(1, ConfigTable::Jo) == "always" && name(7, ConfigTable::Jo) == "always");
+	TEST_EXPECT(name(2, ConfigTable::Dfx2) == "mission" && name(3, ConfigTable::Dfx2) == "armory");
+
+	const auto patched = [&](GameCfg &cfg, const char *json) {
+		opennova::io::JsonValue patch;
+		std::string field, error;
+		return opennova::io::json_parse(json, patch, error) &&
+				apply_server_settings(cfg, patch, false, weapons, field, error);
+	};
+	GameCfg cfg = defaults();
+	TEST_EXPECT(cfg.weapon_availability[1] == 3); // every weapon the mission's by default
+	// A patch that names neither weapon leaves both words; one that names the mission keeps it.
+	TEST_EXPECT(patched(cfg, R"({"weapons":{"Grenade":"mission"}})"));
+	TEST_EXPECT(cfg.weapon_availability[1] == 3 && cfg.weapon_availability[2] == 3);
+	TEST_EXPECT(patched(cfg, R"({"weapons":{"Rifle":"always"}})") && cfg.weapon_availability[1] == 1);
+	TEST_EXPECT(patched(cfg, R"({"weapons":{"Rifle":"mission"}})") && cfg.weapon_availability[1] == 3);
+	cfg.weapon_availability[1] = -1;
+	TEST_EXPECT(patched(cfg, R"({"weapons":{"Rifle":"mission"}})") && cfg.weapon_availability[1] == -1);
+	cfg.weapon_availability[1] = 7;
+	TEST_EXPECT(patched(cfg, R"({"weapons":{"Rifle":"always"}})") && cfg.weapon_availability[1] == 7);
+	TEST_EXPECT(!patched(cfg, R"({"weapons":{"Rifle":"sometimes"}})") && cfg.weapon_availability[1] == 7);
+	GameCfg dfx = defaults({}, 0, 0, ConfigTable::Dfx2);
+	TEST_EXPECT(patched(dfx, R"({"weapons":{"Rifle":"mission","Grenade":"armory"}})"));
+	TEST_EXPECT(dfx.weapon_availability[1] == 2 && dfx.weapon_availability[2] == 3);
+
+	cfg.class_availability[kClassSniper] = 2;
+	TEST_EXPECT(server_settings_values(cfg, false).get("classes")->get_bool("sniper", false));
+	TEST_EXPECT(patched(cfg, R"({"classes":{"sniper":true}})") && cfg.class_availability[kClassSniper] == 2);
+	TEST_EXPECT(patched(cfg, R"({"classes":{"sniper":false}})") && cfg.class_availability[kClassSniper] == 0);
+	TEST_EXPECT(patched(cfg, R"({"classes":{"sniper":true}})") && cfg.class_availability[kClassSniper] == 1);
+	cfg.class_availability[kClassMedic] = 3; // a word the session's class mask takes as off
+	TEST_EXPECT(!server_settings_values(cfg, false).get("classes")->get_bool("medic", true));
+	return 0;
+}
+
 int main() {
 	if (defaults_match_config_set_defaults() != 0) return 1;
 	if (dfx2_table_row() != 0) return 1;
@@ -469,6 +517,7 @@ int main() {
 	if (reset_and_lan_switch() != 0) return 1;
 	if (string_bounds() != 0) return 1;
 	if (weapon_availability() != 0) return 1;
+	if (server_settings_availability() != 0) return 1;
 	if (long_line_splits() != 0) return 1;
 	if (duplicates_and_floats() != 0) return 1;
 	if (crt_fixed_print() != 0) return 1;

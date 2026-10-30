@@ -66,7 +66,56 @@ bool offered(const ServerSetting &s, ConfigTable table, bool hosted) {
 	return !(hosted && s.local_only) && !(s.dfx2_only && table != ConfigTable::Dfx2);
 }
 constexpr const char *kClassNames[] = { "medic", "sniper", "gunner", "rifleman", "engineer" };
+
+// The two availability words a table swaps (DFX2-10): Jointops.exe's armory-only 2 and mission
+// 3, dfx2.exe's 3 and 2.
+struct AvailabilityWords {
+	int32_t armory;
+	int32_t mission;
+};
+AvailabilityWords availability_words(ConfigTable table) {
+	return table == ConfigTable::Dfx2 ? AvailabilityWords{ 3, 2 } : AvailabilityWords{ 2, 3 };
+}
 } //namespace
+
+const char *weapon_availability_name(int32_t word, ConfigTable table) {
+	// The list's cell text: -1 and the mission word MISSION, 0 NEVER, the armory-only word
+	// ARMORY, any other word ALWAYS.
+	// [orig: HostDialog_WeaponRestrictionCycleHandler @0x5576c0 - the switch: -1 and 3 MISSION,
+	//  0 NEVER, 2 ARMORY, default ALWAYS]
+	// [orig: @0x5558a0 (dfx2.exe) - the switch: -1 and 2 MISSION, 0 NEVER, 3 ARMORY]
+	const AvailabilityWords words = availability_words(table);
+	if (word == -1 || word == words.mission)
+		return "mission";
+	if (word == 0)
+		return "never";
+	return word == words.armory ? "armory" : "always";
+}
+
+bool set_weapon_availability(int32_t &word, std::string_view name, ConfigTable table) {
+	const AvailabilityWords words = availability_words(table);
+	int32_t named = 0;
+	if (name == "never")
+		named = 0;
+	else if (name == "always")
+		named = 1;
+	else if (name == "armory")
+		named = words.armory;
+	else if (name == "mission")
+		named = words.mission;
+	else
+		return false;
+	if (name != weapon_availability_name(word, table))
+		word = named;
+	return true;
+}
+
+bool class_available(int32_t word) {
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - the class words @0x551882..0x551990:
+	//  1 enables its class, 2 while the mission entry's mask holds its bit (every entry's 0x3FF,
+	//  MissionList_ScanAndBuildFromFiles @0x56334A), any other word disables it]
+	return word == 1 || word == 2;
+}
 
 const std::vector<ServerSetting> &server_settings() {
 	// Field semantics and defaults: [orig: Config_SetDefaults @0x54D030] and
@@ -347,7 +396,7 @@ io::JsonValue server_settings_values(const GameCfg &cfg, bool hosted) {
 			out.set(s.key, server_setting_value(cfg, s));
 	Json classes = Json::make_object();
 	for (int i = 0; i < 5; ++i)
-		classes.set(kClassNames[i], Json::make_bool(cfg.class_availability[i + 5] != 0));
+		classes.set(kClassNames[i], Json::make_bool(class_available(cfg.class_availability[i + 5])));
 	out.set("classes", std::move(classes));
 	return out;
 }
@@ -372,21 +421,22 @@ bool apply_server_settings(GameCfg &cfg, const Json &patch, bool hosted,
 				if (m.key == "classes") {
 					for (int i = 0; i < 5; ++i)
 						if (entry.key == kClassNames[i] && entry.value.is_bool()) {
-							next.class_availability[i + 5] = entry.value.boolean ? 1 : 0;
+							// A class left as it reads keeps its raw word (MISSION's 2 among them).
+							int32_t &word = next.class_availability[i + 5];
+							if (entry.value.boolean != class_available(word))
+								word = entry.value.boolean ? 1 : 0;
 							found = true;
 						}
 				} else {
-					const int armory = cfg.table == ConfigTable::Dfx2 ? 3 : 2;
+					int32_t probe = 0;
 					if (entry.value.is_string() &&
-							(entry.value.string == "always" || entry.value.string == "never" ||
-									entry.value.string == "armory")) {
+							set_weapon_availability(probe, entry.value.string, cfg.table)) {
 						for (size_t i = 1; i < weapons.size() && i < kWeaponAvailabilityCount;
 								++i) {
 							if (weapons[i].loadout_selectable &&
 									strutil::iequals(entry.key, cp1252_to_utf8(weapons[i].name))) {
-								next.weapon_availability[i] = entry.value.string == "never" ? 0
-										: entry.value.string == "armory"					? armory
-																							: 1;
+								set_weapon_availability(
+										next.weapon_availability[i], entry.value.string, cfg.table);
 								found = true;
 							}
 						}

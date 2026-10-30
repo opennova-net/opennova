@@ -11,9 +11,14 @@ const AUTHORED_KEYS := ["game_name", "game_password", "max_players", "time_limit
 	"capture_speed", "friendly_tags", "ff_warning", "team_choose", "team_trigger_claymore",
 	"tracers", "lan_only", "dedicated"]
 
+# The weapon availability names the schema reads and takes (engine formats/gamecfg/server_settings.h
+# weapon_availability_name), in the choice's item order.
+const _AVAILABILITY := ["always", "never", "armory", "mission"]
+
 var _fields: Dictionary = {}
 var _classes: Dictionary = {}
 var _weapons: Dictionary = {}
+var _initial: Dictionary = {}  # each editor's value as it opened, so Apply sends only the changed rows
 var _row_search: Dictionary = {}  # row Control -> its lowercased label, for the find box
 var _error: Label
 
@@ -89,9 +94,13 @@ func _ready() -> void:
 		choice.add_item("Always available")
 		choice.add_item("Unavailable")
 		choice.add_item("Armory only")
-		choice.select(["always", "never", "armory"].find(values.weapons.get(name, "always")))
+		choice.add_item("Mission default")
+		choice.select(_AVAILABILITY.find(values.weapons.get(name, "always")))
 		row.add_child(choice)
 		_weapons[name] = choice
+	for editors: Dictionary in [_fields, _classes, _weapons]:
+		for widget: Control in editors.values():
+			_initial[widget] = _value(widget)
 	_error = Label.new()
 	_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	content.add_child(_error)
@@ -114,24 +123,34 @@ func _row(parent: Control, text: String) -> HBoxContainer:
 	return row
 
 
+func _value(widget: Control) -> Variant:
+	if widget is CheckBox:
+		return (widget as CheckBox).button_pressed
+	if widget is SpinBox:
+		return (widget as SpinBox).value
+	if widget is OptionButton:
+		return _AVAILABILITY[(widget as OptionButton).selected]
+	return (widget as LineEdit).text
+
+
+# Only what the player changed: a row left alone keeps the block's raw word.
 func _apply() -> void:
 	var patch: Dictionary = {}
 	for key: String in _fields:
-		var widget: Control = _fields[key]
-		if widget is CheckBox:
-			patch[key] = widget.button_pressed
-		elif widget is SpinBox:
-			patch[key] = widget.value
-		else:
-			patch[key] = (widget as LineEdit).text
+		if _value(_fields[key]) != _initial[_fields[key]]:
+			patch[key] = _value(_fields[key])
 	var classes: Dictionary = {}
 	for key: String in _classes:
-		classes[key] = (_classes[key] as CheckBox).button_pressed
-	patch.classes = classes
+		if _value(_classes[key]) != _initial[_classes[key]]:
+			classes[key] = _value(_classes[key])
+	if not classes.is_empty():
+		patch.classes = classes
 	var weapons: Dictionary = {}
 	for name: String in _weapons:
-		weapons[name] = ["always", "never", "armory"][(_weapons[name] as OptionButton).selected]
-	patch.weapons = weapons
+		if _value(_weapons[name]) != _initial[_weapons[name]]:
+			weapons[name] = _value(_weapons[name])
+	if not weapons.is_empty():
+		patch.weapons = weapons
 	var problem := GameCfgStore.block().apply_server_configuration_json(JSON.stringify(patch))
 	if not problem.is_empty():
 		_error.text = problem

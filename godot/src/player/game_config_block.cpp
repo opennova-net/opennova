@@ -13,7 +13,6 @@
 #include <runtime/inmatch/host_settings.h>
 #include <formats/gamecfg/server_settings.h>
 #include <base/io/cp1252.h>
-#include <net/protocol/protocol.h> // the armory-only value (DFX2-10)
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -107,10 +106,8 @@ String GameConfigBlock::server_configuration_json() const {
 		if (!roster[i].loadout_selectable) continue;
 		const auto name = cp1252_to_utf8(roster[i].name);
 		weapons.push(io::json_string(name));
-		const auto value = block_.cfg().weapon_availability[i];
-		// The armory-only value is the protocol's (DFX2-10: JO's 2, DFX2's 3).
-		const int armory = protocol_in_match(title_protocol(block_.title()->code)).armory_only_availability;
-		availability.set(name, io::json_string(value == 0 ? "never" : value == armory ? "armory" : "always"));
+		availability.set(name, io::json_string(gamecfg::weapon_availability_name(
+									   block_.cfg().weapon_availability[i], block_.config_table())));
 	}
 	values.set("weapons", std::move(availability));
 	out.set("values", std::move(values)); out.set("weapons", std::move(weapons));
