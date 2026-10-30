@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/platform/input_device.h>
 #include <base/platform/input_sample.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/key_event_queue.h>
@@ -19,16 +20,20 @@ namespace opennova::inmatch {
 // state snapshot (set_state); this device keeps what retail's window procedure keeps from them,
 // the key state the binding reads walk (a 512-entry array by VK, an extended key's also at
 // +0x100, so keypad Enter reads as 269) and the key queue the keyboard pass drains, and answers the
-// binding table's reads over them. The scripted device, the joystick and the keyboard locks' set
-// are not here: a platform that has them adds them (D-NET-563's Scroll Lock turn-off writes the
-// OS's lock state, which no platform interface carries yet).
+// binding table's reads over them. D-NET-563's Scroll Lock turn-off is the platform input device's
+// lock-key set (platform::InputDevice::set_lock_key), which writes the OS's lock state where the
+// platform keeps one. The scripted device and the joystick are not here: a platform that has them
+// adds them.
 //
 // Its holder is the SDL3 app shell (apps/game, ADR 0077 d9) until the engine frontend (R3's
 // runtime/frontend) takes the input frame over; the Godot build keeps its own device
 // (godot/src/player/player_input_router.h) until R8.
 class PlatformInputDevice final : public PlayerInputDevice {
 public:
-	explicit PlatformInputDevice(controls::BindingSet &bindings) : bindings_(bindings) {}
+	// `input`: the platform's input device the lock-key set goes to (null: none, the turn-off
+	// sends nothing).
+	PlatformInputDevice(controls::BindingSet &bindings, platform::InputDevice *input) :
+			bindings_(bindings), input_(input) {}
 
 	// One polled event, in the device's order: a key's state, and a key-down's (an OS repeat
 	// included) key queue entry with Ctrl and Shift as the key state then holds them; a focus
@@ -78,6 +83,7 @@ private:
 	bool token_pressed(const char *token, bool keyboard, bool mouse, bool active) const;
 
 	controls::BindingSet &bindings_;
+	platform::InputDevice *input_ = nullptr;
 	platform::InputState state_;
 	std::array<bool, controls::KeyStateReset::kKeyCount> keys_{};
 	mutable controls::KeyStateReset reset_;

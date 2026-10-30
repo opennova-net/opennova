@@ -195,8 +195,10 @@ bool PlatformInputDevice::movement_override(world::PlayerInput &movement) const 
 	return false;
 }
 
+// The turn-off is the lock's set to off: sent only where the keyboard state's word reads it on
+// (controls::PlayerActionFrame::scroll_lock_off carries the witness, D-NET-563).
 bool PlatformInputDevice::scroll_lock_turn_off() {
-	return false;
+	return input_ != nullptr && input_->set_lock_key(platform::LockKey::ScrollLock, false);
 }
 
 } // namespace opennova::inmatch

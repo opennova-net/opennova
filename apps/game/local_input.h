@@ -13,20 +13,23 @@
 // pointer's look reach the session's ticks; the action requests past the dispatch head (the
 // stance, the weapon rows, the seats), the chat line, the special keys and the shell's records
 // (the Escape row's INGAME, the screen shot) are the engine frontend's (R3), and do nothing here.
+// The binding cases' Scroll Lock turn-off (D-NET-563) reaches the platform's lock-key set.
 namespace opennova::game {
 
 class LocalMission;
 
 class LocalInput {
 public:
-	explicit LocalInput(LocalMission &mission);
+	// `input`: the platform's input device, whose events pump() takes and whose lock keys the
+	// frame's Scroll Lock turn-off sets.
+	LocalInput(LocalMission &mission, platform::InputDevice &input);
 	LocalInput(const LocalInput &) = delete;
 	LocalInput &operator=(const LocalInput &) = delete;
 
 	// The platform's events since the last pump, in order, onto the device (every key into its
 	// state and queue) and, under live gameplay with a player, the frame (the pointer's motion,
 	// its buttons and the wheel); then the device's state snapshot.
-	void pump(platform::InputDevice &input);
+	void pump();
 	// The frame's head (PlayerInputFrame::begin_frame) onto `frame`: the cursor offset its first
 	// update reads and the input frame as every update's source.
 	void begin_frame(inmatch::FrameInput &frame);
@@ -76,6 +79,7 @@ private:
 	};
 
 	LocalMission &mission_;
+	platform::InputDevice &input_;
 	controls::BindingSet bindings_; // the catalog's defaults
 	inmatch::PlatformInputDevice device_;
 	inmatch::PlayerInputFrame frame_;

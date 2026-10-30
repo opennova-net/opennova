@@ -3878,6 +3878,12 @@ add_executable(null_backend_mission_test null_backend/null_backend_mission_test.
 target_link_libraries(null_backend_mission_test PRIVATE opennova_null_backend opennova_runtime)
 target_compile_features(null_backend_mission_test PRIVATE cxx_std_17)
 add_test(NAME null_backend_mission COMMAND null_backend_mission_test)
+# The lock keys over the platform (D-NET-563): the null keyboard's lock-key set, the process's
+# forced locks through the frontend's boot leg, the input frame device's Scroll Lock turn-off.
+add_executable(null_backend_key_locks_test null_backend/null_backend_key_locks_test.cpp)
+target_link_libraries(null_backend_key_locks_test PRIVATE opennova_null_backend opennova_runtime)
+target_compile_features(null_backend_key_locks_test PRIVATE cxx_std_17)
+add_test(NAME null_backend_key_locks COMMAND null_backend_key_locks_test)
 
 # Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the

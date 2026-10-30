@@ -30,6 +30,8 @@
 #include <base/resource_index/boot_policy.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/audio/mixer.h>
+#include <runtime/controls/key_locks.h>
+#include <runtime/frontend/frontend.h>
 #include <runtime/inmatch/main_loop_clock.h>
 
 #include <games/games.h>
@@ -132,6 +134,20 @@ int run(const AppOptions &options, const LaunchFlags &flags, std::vector<std::st
 		io::logf(io::LogLevel::kError, "opennova-game: %s", error.c_str());
 		return 1;
 	}
+	// The process's start: the command line's init forces Num Lock on, saving its state (the
+	// frontend's boot leg; controls::ProcessKeyLocks carries the witness), then game.cfg's read,
+	// Config_SetDefaults' block until the frontend reads the file (R3), so no mpreset ends it;
+	// the subsystems' init turns Scroll Lock off, and their shutdown at the end puts the locks back.
+	controls::ProcessKeyLocks key_locks(platform.input);
+	frontend::BootLegs boot;
+	boot.force_num_lock = [&key_locks] { key_locks.command_line_init(); };
+	if (!frontend::boot(boot)) return 0;
+	key_locks.subsystems_init();
+	struct KeyLocksShutdown {
+		controls::ProcessKeyLocks &locks;
+		~KeyLocksShutdown() { locks.subsystems_shutdown(); }
+	} key_locks_shutdown{ key_locks };
+
 	// The GPU device claims the window; a headless run has none (the dummy driver has no surface),
 	// nor does a machine with no Vulkan, Direct3D 12 or Metal device, whose window stays blank.
 	std::unique_ptr<sdl3::Gpu> gpu;
@@ -158,7 +174,7 @@ int run(const AppOptions &options, const LaunchFlags &flags, std::vector<std::st
 		io::logf(io::LogLevel::kError, "opennova-game: %s", error.c_str());
 		return 1;
 	}
-	game::LocalInput input(mission);
+	game::LocalInput input(mission, *platform.input);
 	if (!backend->headless()) platform.input->set_cursor_mode(platform::CursorMode::Captured);
 
 	// The process's cfg block: Config_SetDefaults' until the frontend reads game.cfg (R3). Its
@@ -178,7 +194,7 @@ int run(const AppOptions &options, const LaunchFlags &flags, std::vector<std::st
 		// 1. The platform pump.
 		platform.clock->pump_events();
 		if (platform.window->take_close_request()) break;
-		input.pump(*platform.input);
+		input.pump();
 
 		// 2. The engine frame.
 		inmatch::FrameInput frame = clock.begin_frame(&cfg);

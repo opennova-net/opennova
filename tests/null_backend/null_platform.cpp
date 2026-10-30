@@ -65,6 +65,22 @@ void NullInputDevice::warp_cursor(int32_t x, int32_t y) {
 	state_.cursor_y = y;
 }
 
+bool NullInputDevice::set_lock_key(platform::LockKey key, bool on) {
+	bool &word = key == platform::LockKey::CapsLock ? state_.caps_lock
+			: key == platform::LockKey::NumLock     ? state_.num_lock
+													: state_.scroll_lock;
+	if (word == on) return false;
+	word = on;
+	lock_sets_.push_back({ key, on });
+	return true;
+}
+
+void NullInputDevice::set_lock_state(bool caps_lock, bool num_lock, bool scroll_lock) {
+	state_.caps_lock = caps_lock;
+	state_.num_lock = num_lock;
+	state_.scroll_lock = scroll_lock;
+}
+
 void NullInputDevice::deliver(const platform::InputEvent &event) {
 	queue_.push_back(event);
 	switch (event.type) {

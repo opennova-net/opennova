@@ -60,8 +60,19 @@ public:
 	platform::InputState state() const override { return state_; }
 	void set_cursor_mode(platform::CursorMode mode) override;
 	void warp_cursor(int32_t x, int32_t y) override;
+	// The null keyboard's toggle: the state's word against `on`, flipped where they differ (the
+	// key's press and release, as the OS's keyboard state takes them), each flip logged.
+	bool set_lock_key(platform::LockKey key, bool on) override;
 
 	platform::CursorMode cursor_mode() const { return mode_; }
+	// The lock keys the device toggled, oldest first, each with the state it set.
+	struct LockSet {
+		platform::LockKey key = platform::LockKey::ScrollLock;
+		bool on = false;
+	};
+	const std::vector<LockSet> &lock_sets() const { return lock_sets_; }
+	// The lock words as a keyboard that starts with them (a test's starting state).
+	void set_lock_state(bool caps_lock, bool num_lock, bool scroll_lock);
 
 private:
 	friend class NullPlatform;
@@ -73,6 +84,7 @@ private:
 	std::deque<platform::InputEvent> queue_;
 	platform::InputState state_;
 	platform::CursorMode mode_ = platform::CursorMode::Visible;
+	std::vector<LockSet> lock_sets_;
 };
 
 class NullClock final : public platform::Clock {

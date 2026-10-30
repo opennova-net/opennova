@@ -4,6 +4,16 @@
 
 #include <cstdint>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
 namespace opennova::sdl3 {
 
 namespace {
@@ -263,6 +273,45 @@ void InputDevice::warp_cursor(int32_t x, int32_t y) {
 	warp_y_ = static_cast<float>(y);
 	warp_pending_ = !SDL_GetWindowRelativeMouseMode(window);
 	SDL_WarpMouseInWindow(window, warp_x_, warp_y_);
+}
+
+bool InputDevice::set_lock_key(platform::LockKey key, bool on) {
+	struct Lock {
+		SDL_Keymod mod;
+		SDL_Scancode scancode;
+		uint8_t vk;
+	};
+	Lock lock{ SDL_KMOD_SCROLL, SDL_SCANCODE_SCROLLLOCK, 0x91 };
+	if (key == platform::LockKey::CapsLock) lock = { SDL_KMOD_CAPS, SDL_SCANCODE_CAPSLOCK, 0x14 };
+	if (key == platform::LockKey::NumLock) lock = { SDL_KMOD_NUM, SDL_SCANCODE_NUMLOCKCLEAR, 0x90 };
+#ifdef _WIN32
+	if (os_keyboard_) {
+		// The OS's toggle: the keyboard state's byte for the key (nonzero while its toggle is on
+		// or it is held) against the state wanted, and where they differ the key's press and its
+		// release put into the OS's input, the virtual key and the scan code both the key's code,
+		// the release stamped 10. Their key events come through the pump.
+		BYTE keyboard[256] = {};
+		if (::GetKeyboardState(keyboard) == 0 || (keyboard[lock.vk] != 0) == on) return false;
+		INPUT inputs[2] = {};
+		for (INPUT &input : inputs) {
+			input.type = INPUT_KEYBOARD;
+			input.ki.wVk = lock.vk;
+			input.ki.wScan = lock.vk;
+		}
+		inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+		inputs[1].ki.time = 10;
+		return ::SendInput(2, inputs, sizeof(INPUT)) != 0;
+	}
+#endif
+	// SDL's modifier state alone: its lock bit, the word state() reads (the bit, or the key held).
+	const SDL_Keymod mods = SDL_GetModState();
+	int count = 0;
+	const bool *held = SDL_GetKeyboardState(&count);
+	const bool down = held != nullptr && static_cast<int>(lock.scancode) < count && held[lock.scancode];
+	if (((mods & lock.mod) != 0 || down) == on) return false;
+	SDL_SetModState(on ? static_cast<SDL_Keymod>(mods | lock.mod)
+					   : static_cast<SDL_Keymod>(mods & ~lock.mod));
+	return true;
 }
 
 void InputDevice::on_event(const SDL_Event &event) {

@@ -71,7 +71,7 @@ constexpr uint16_t kUpScancode = platform::kScancodeExtended | 0x48;
 
 int main() {
 	controls::BindingSet bindings;
-	inmatch::PlatformInputDevice device(bindings);
+	inmatch::PlatformInputDevice device(bindings, nullptr);
 
 	// The held row reads the key state.
 	CHECK(!device.pressed("move_forward"), "nothing held");

@@ -6,19 +6,23 @@
 
 namespace opennova::game {
 
-LocalInput::LocalInput(LocalMission &mission) :
-		mission_(mission), device_(bindings_), session_(mission), shell_(device_, frame_) {
+LocalInput::LocalInput(LocalMission &mission, platform::InputDevice &input) :
+		mission_(mission),
+		input_(input),
+		device_(bindings_, &input),
+		session_(mission),
+		shell_(device_, frame_) {
 	frame_.bind(&device_, &session_, &shell_);
 }
 
-void LocalInput::pump(platform::InputDevice &input) {
+void LocalInput::pump() {
 	const bool live = mission_.session().state() == inmatch::State::Running && mission_.has_player();
 	platform::InputEvent event;
-	while (input.poll_event(event)) {
+	while (input_.poll_event(event)) {
 		device_.event(event);
 		if (live) (void)frame_.device_event(event);
 	}
-	device_.set_state(input.state());
+	device_.set_state(input_.state());
 }
 
 void LocalInput::begin_frame(inmatch::FrameInput &frame) {

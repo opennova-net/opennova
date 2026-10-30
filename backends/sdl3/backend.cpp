@@ -102,7 +102,7 @@ private:
 struct Backend::Impl {
 	Impl(const BackendOptions &options, std::string executable_dir, std::string user_data_dir) :
 			headless(options.headless),
-			input(window),
+			input(window, !options.headless),
 			clock(window, input),
 			files(std::move(executable_dir), std::move(user_data_dir)),
 			os(options.arguments) {
