@@ -814,12 +814,12 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	// The weapons its trees name, the expansion's when it has any. A saved option those
 	// trees no longer take (a weapon a newer tree renamed) fails this server alone,
 	// before its account and admin login turn over.
-	gamecfg::WeaponRoster weapons;
-	if (const auto base = find_tree(db, base_tree)) weapons = base->weapons;
-	if (expansion_tree) {
-		if (const auto expansion = find_tree(db, *expansion_tree); expansion && !expansion->weapons.empty())
-			weapons = expansion->weapons;
-	}
+	gamecfg::WeaponRoster base_weapons, expansion_weapons;
+	if (const auto base = find_tree(db, base_tree)) base_weapons = base->weapons;
+	if (expansion_tree)
+		if (const auto expansion = find_tree(db, *expansion_tree)) expansion_weapons = expansion->weapons;
+	const gamecfg::WeaponRoster &weapons =
+			server_weapon_roster(base_weapons, expansion_tree ? &expansion_weapons : nullptr);
 	try {
 		(void)settings_block(s.settings, data->title, weapons);
 	} catch (const std::invalid_argument &e) {

@@ -77,6 +77,11 @@ bool read_settings_document(const io::JsonValue &document, HostedSettings &setti
 		std::string &field, std::string &error);
 gamecfg::GameCfg settings_block(const HostedSettings &settings, std::string_view title,
 		const gamecfg::WeaponRoster &weapons = {});
+// The weapon roster a server's settings name weapons from: its expansion tree's when the server
+// runs one that lists any (an expansion's weapon.def replaces the base game's), else its base
+// tree's. `expansion` null for a server with no expansion.
+const gamecfg::WeaponRoster &server_weapon_roster(
+		const gamecfg::WeaponRoster &base, const gamecfg::WeaponRoster *expansion);
 // The game.cfg table a hosted server of title `title` runs (base/title/title.h
 // Title::config_table): Delta Force Xtreme 2's for dfx2, Joint Operations' for jo and
 // acidgambit; the default title's for a code no title has.

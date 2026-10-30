@@ -86,9 +86,8 @@ crow::response ConsoleRoutes::settings(db::Database &db, const HostedServer &ser
 	out["saved"] = json(settings_document(server.settings));
 	out["settings_revision"] = server.settings_revision;
 	out["schema"] = json(hosted_settings_schema(title_config_table(product.title)));
-	const auto &weapons = !product.expansions.empty() && !product.expansions.front().weapons.empty()
-			? product.expansions.front().weapons
-			: product.weapons;
+	const auto &weapons = server_weapon_roster(product.weapons,
+			product.expansions.empty() ? nullptr : &product.expansions.front().weapons);
 	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(weapons)));
 	return no_store(json_reply(200, out));
 }

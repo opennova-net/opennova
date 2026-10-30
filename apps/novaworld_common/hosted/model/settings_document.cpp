@@ -155,6 +155,11 @@ bool read_settings_document(
 	return true;
 }
 
+const gamecfg::WeaponRoster &server_weapon_roster(
+		const gamecfg::WeaponRoster &base, const gamecfg::WeaponRoster *expansion) {
+	return expansion != nullptr && !expansion->empty() ? *expansion : base;
+}
+
 gamecfg::ConfigTable title_config_table(std::string_view title) {
 	const Title *row = title_by_code(title);
 	return (row != nullptr ? *row : default_title()).config_table;

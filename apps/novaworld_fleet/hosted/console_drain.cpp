@@ -115,12 +115,14 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 			auto lease = pool_.acquire();
 			before = find_server(*lease, server_id);
 			if (before && before->base_tree_id) {
+				gamecfg::WeaponRoster base_weapons, expansion_weapons;
 				if (const auto tree = find_tree(*lease, *before->base_tree_id))
-					weapons = tree->weapons;
+					base_weapons = tree->weapons;
 				if (before->expansion_tree_id)
-					if (const auto tree = find_tree(*lease, *before->expansion_tree_id);
-							tree && !tree->weapons.empty())
-						weapons = tree->weapons;
+					if (const auto tree = find_tree(*lease, *before->expansion_tree_id))
+						expansion_weapons = tree->weapons;
+				weapons = server_weapon_roster(
+						base_weapons, before->expansion_tree_id ? &expansion_weapons : nullptr);
 			}
 		}
 		if (link && before && before->generation == server_generation &&

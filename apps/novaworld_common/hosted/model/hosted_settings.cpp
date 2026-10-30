@@ -107,14 +107,16 @@ std::optional<SettingsRefusal> check_settings(
 		if (!expansion)
 			return SettingsRefusal{ "expansion_id", "is no expansion of this game with data" };
 	}
-    auto block = gamecfg::defaults({}, 0, 0, title_config_table(product->title));
-    std::string field, error;
-    const auto &weapons = expansion && !expansion->weapons.empty() ? expansion->weapons : product->weapons;
-    if (!gamecfg::apply_server_settings(block, s.options, true, weapons, field, error))
-        return SettingsRefusal{ "options." + field, error };
-    if (s.mission_options.size() > s.missions.size() ||
-            std::any_of(s.mission_options.begin(), s.mission_options.end(), [](int v) { return v != 0 && v != 1; }))
-        return SettingsRefusal{"rotation", "invalid side-switch option"};
+	auto block = gamecfg::defaults({}, 0, 0, title_config_table(product->title));
+	std::string field, error;
+	const auto &weapons =
+			server_weapon_roster(product->weapons, expansion ? &expansion->weapons : nullptr);
+	if (!gamecfg::apply_server_settings(block, s.options, true, weapons, field, error))
+		return SettingsRefusal{ "options." + field, error };
+	if (s.mission_options.size() > s.missions.size() ||
+			std::any_of(s.mission_options.begin(), s.mission_options.end(),
+					[](int v) { return v != 0 && v != 1; }))
+		return SettingsRefusal{ "rotation", "invalid side-switch option" };
 	if (s.missions.empty()) return SettingsRefusal{ "missions", "names no mission" };
 	if (s.missions.size() > kMissionsMax)
 		return SettingsRefusal{ "missions",
