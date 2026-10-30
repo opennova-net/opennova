@@ -33,6 +33,7 @@ add_library(opennova_base STATIC
     # vfs — the engine-faithful PFF+loose+expansion mount stack
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_decode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/dir_case_index.cpp # a loose folder's files by name without case
 )
 
 # The ONE stamp (base/version/one_build.h): ONE's version, commit, staging flag and build time,

@@ -282,6 +282,9 @@ struct TaskNow {
 	std::optional<int64_t> memory_limit_bytes;
 	std::optional<double> in_bps;
 	std::optional<double> out_bps;
+	// The ONE build the task said it runs, with its newest minute ("" for none).
+	std::string one_version;
+	std::string one_commit;
 };
 
 // Every task's newest minute in the last 24 h (its two newest, for the rates),
@@ -294,7 +297,8 @@ std::vector<TaskNow> tasks_now(db::Database &db, const std::string &program, int
 	for (const db::Row &r :
 			db.query("SELECT program, task_id, CAST(extract(epoch FROM at) AS bigint), "
 					 "cpu_percent, cpu_limit, memory_used_bytes, memory_limit_bytes, "
-					 "net_in_bytes, net_out_bytes FROM (SELECT *, row_number() OVER (PARTITION BY "
+					 "net_in_bytes, net_out_bytes, one_version, one_commit FROM (SELECT *, "
+					 "row_number() OVER (PARTITION BY "
 					 "program, task_id ORDER BY at DESC) AS n FROM program_samples WHERE at >= "
 					 "to_timestamp($1::double precision) AND ($2 = '' OR program = $2)) s WHERE "
 					 "n <= 2 ORDER BY program, task_id, at;",
@@ -316,6 +320,8 @@ std::vector<TaskNow> tasks_now(db::Database &db, const std::string &program, int
 		t.memory_limit_bytes = r.as_int(6);
 		t.in_bps = in.next(t.at, r.as_int(7));
 		t.out_bps = sent.next(t.at, r.as_int(8));
+		t.one_version = r.as_text(9).value_or("");
+		t.one_commit = r.as_text(10).value_or("");
 	}
 	return out;
 }
@@ -609,16 +615,18 @@ crow::response UsageRoutes::usage(const crow::request &req) {
 // GET /api/admin/programs — {"at", "cloud" ({"configured", "unavailable",
 // "error"}: whether ECS was read), "programs": each program the service runs,
 // in its order, {"name", "running" and "desired" (ECS's counts; with no cloud,
-// the tasks reporting now and null), "release" (the revision its service runs,
-// family:revision; null without the cloud), "on_release" (whether it is the
-// release's; null when unknown), "cpu_percent" (of "cpu_limit", the reporting
-// tasks' CPUs together), "memory_bytes", "memory_limit_bytes", "net_in_bps",
-// "net_out_bps" (each null when no task reports), "restarts_24h" (its tasks
-// that reported in the last 24 h and no longer do: a crash's, a deploy's
-// replaced ones, a scale-in's), "tasks" (the reporting ones and the ones ECS
-// runs: {"id", "reporting", "sampled_at", the usage fields, and ECS's
-// "last_status", "health", "started_at", "task_definition", each null where
-// unknown})}. no-store.
+// the tasks reporting now and null), "task_definition" (the revision its
+// service runs, family:revision; null without the cloud), "on_release"
+// (whether it is the release's; null when unknown), "cpu_percent" (of
+// "cpu_limit", the reporting tasks' CPUs together), "memory_bytes",
+// "memory_limit_bytes", "net_in_bps", "net_out_bps" (each null when no task
+// reports), "restarts_24h" (its tasks that reported in the last 24 h and no
+// longer do: a crash's, a deploy's replaced ones, a scale-in's), "tasks" (the
+// reporting ones and the ones ECS
+// runs: {"id", "reporting", "sampled_at", the usage fields, "one_version" and
+// "one_commit" (the ONE build the task said it runs with its newest minute in
+// 24 h, program_samples'), and ECS's "last_status", "health", "started_at",
+// "task_definition", each null where unknown})}. no-store.
 crow::response UsageRoutes::programs(const crow::request &req) {
 	auto access = access_.require_admin(req);
 	if (access.refusal)
@@ -683,7 +691,7 @@ crow::response UsageRoutes::programs(const crow::request &req) {
 		if (service != nullptr) {
 			p["running"] = service->running;
 			p["desired"] = service->desired;
-			p["release"] = short_arn(service->task_definition_arn);
+			p["task_definition"] = short_arn(service->task_definition_arn);
 			p["on_release"] = nullptr;
 			if (snap->release) {
 				const auto &defs = snap->release->task_definitions;
@@ -693,7 +701,7 @@ crow::response UsageRoutes::programs(const crow::request &req) {
 		} else {
 			p["running"] = static_cast<int64_t>(live.size());
 			p["desired"] = nullptr;
-			p["release"] = nullptr;
+			p["task_definition"] = nullptr;
 			p["on_release"] = nullptr;
 		}
 		put_now(p, sum_now(live));
@@ -711,6 +719,15 @@ crow::response UsageRoutes::programs(const crow::request &req) {
 					return &t;
 			return nullptr;
 		};
+		// The build a task said it runs, with its newest minute in 24 h.
+		const auto put_build = [&](crow::json::wvalue &j, const std::string &id) {
+			const TaskNow *said = nullptr;
+			for (const TaskNow &t : tasks)
+				if (t.program == name && t.id == id)
+					said = &t;
+			text_or_null(j, "one_version", said ? said->one_version : std::string());
+			text_or_null(j, "one_commit", said ? said->one_commit : std::string());
+		};
 		const auto put_ecs = [](crow::json::wvalue &j, const EcsTask *t) {
 			text_or_null(j, "last_status", t ? t->last_status : std::string());
 			text_or_null(j, "health", t ? t->health : std::string());
@@ -724,6 +741,7 @@ crow::response UsageRoutes::programs(const crow::request &req) {
 			j["reporting"] = true;
 			j["sampled_at"] = iso_utc(t->at);
 			put_now(j, sum_now({ t }));
+			put_build(j, t->id);
 			put_ecs(j, ecs_task(t->id));
 			task_rows.push_back(std::move(j));
 			listed.push_back(t->id);
@@ -738,6 +756,7 @@ crow::response UsageRoutes::programs(const crow::request &req) {
 				j["reporting"] = false;
 				j["sampled_at"] = nullptr;
 				put_now(j, Now());
+				put_build(j, t.id);
 				put_ecs(j, &t);
 				task_rows.push_back(std::move(j));
 			}

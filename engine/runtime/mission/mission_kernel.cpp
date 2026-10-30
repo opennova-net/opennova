@@ -194,7 +194,7 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 	//  Entity_BuildProximityListsFromPools call @0x43C4EB]
 	// A joiner's own body builds none: retail's client creates it in NapiNPClientMsg_0x00C
 	// @0x42E730 and rebuilds it in NapiNPClientMsg_FullEntitySpawn @0x433780, neither of
-	// which calls the builder (D-SIM-T2).
+	// which calls the builder (D-SIM-4).
 	if (world.rules.logic_authority && world.collision != nullptr)
 		world.collision->rebuild_slices_after_spawn(world);
 	// The body's animation map registers at its spawn, so a player the server tick's spawn
@@ -495,7 +495,7 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 	if (!h.valid()) return false;
 	// Once the collision world is up (a spawn after the boot's), the model
 	// init stamps the bound radius ahead of the spawn's one slice build, which
-	// publishes no table (D-SIM-T2); the boot's own spawn precedes the wiring,
+	// publishes no table (D-SIM-4); the boot's own spawn precedes the wiring,
 	// and the mission start's build follows its collision step.
 	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel
 	//  called @0x43C492, the Entity_BuildProximityListsFromPools call @0x43C4EB]

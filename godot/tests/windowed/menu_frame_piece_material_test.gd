@@ -74,7 +74,7 @@ func test_the_pieces_share_one_material_made_once() -> void:
 	var frame := MenuFrame.new()
 	frame.size = Vector2(1600, 1200)
 	add_child_autofree(frame)
-	assert_true(frame.configure(doc, "", root, null, null))
+	assert_true(frame.configure(doc, "", root, null))
 	var pieces := frame.get_frame_piece_submissions()
 	assert_eq(pieces.size(), 8, "the box's eight border pieces reach the server")
 	var material := RID()

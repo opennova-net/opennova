@@ -91,9 +91,9 @@ public:
 	void consume_use_hold() { frame_.consume_use_hold(); }
 	bool is_use_held() const { return frame_.use_held(); }
 	// One key-down through the special-key chain over the session (the shell's world view's;
-	// null = this router's world's): its VK and the KeyPress gametext keys' VKs.
-	Ref<SpecialKeyOutcome> special_key(const Ref<Simulation> &p_session, int p_vk, int p_yes_vk,
-			int p_no_vk, int p_restart_vk);
+	// null = this router's world's): its VK, and the quit dialog's keys the gametext the HUD
+	// handed over reads (engine hud::hud_key_press_keys).
+	Ref<SpecialKeyOutcome> special_key(const Ref<Simulation> &p_session, int p_vk);
 	bool take_armory_request() { return frame_.take_armory_request(); }
 	bool take_vehicle_menu_request() { return frame_.take_vehicle_menu_request(); }
 	// A menu close's input reset (inmatch::PlayerInputFrame::reset_input_state).
@@ -121,7 +121,8 @@ public:
 	// flipped the HUD's pause word.
 	bool poll_hud_toggles(const Ref<Simulation> &p_sim, int p_rows_fired,
 			bool p_mouse_scale_negative, int32_t p_mouse_scale_param = 0);
-	// The HUD's chat line and the gametext its prompts read: the talk rows dispatch through it.
+	// The HUD's chat line and the gametext its prompts and the special-key chain's KeyPress keys
+	// read: the talk rows dispatch through it.
 	void set_hud_chat(const Ref<HudChatEntry> &p_chat, const Ref<RtxtStringFile> &p_gametext);
 
 private:
@@ -201,7 +202,7 @@ private:
 	Ref<PlayerMoveIntent> input_override_;
 	Ref<HudToggles> hud_toggles_;
 	Ref<HudChatEntry> hud_chat_;
-	Ref<RtxtStringFile> chat_gametext_;
+	Ref<RtxtStringFile> gametext_;
 	Ref<KeyEventQueue> key_events_;
 	Device device_;
 	Session session_;

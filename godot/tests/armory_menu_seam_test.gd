@@ -115,7 +115,7 @@ func _make_weapon_driver(with_frame := false) -> MenuDriver:
 	frame.size = Vector2(800, 600)
 	add_child_autofree(frame)
 	driver.attach(frame, null)
-	assert_true(driver.open_document(doc, null, null, null, "weapon.mnu", "WEAPON"),
+	assert_true(driver.open_document(doc, null, null, "weapon.mnu", "WEAPON"),
 			"the framed WEAPON document opens on the driver")
 	return driver
 
@@ -147,17 +147,6 @@ func test_weapon_labels_resolve_from_gametext_wepdes() -> void:
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
 	assert_has(_items(driver, "PRIMARY"), expected,
 			"PRIMARY rows show the resolved WepDes name, not the raw WPN_ id")
-
-
-func test_owns_menu_detects_weapon_screen() -> void:
-	var companion := ArmoryMenuCompanion.new()
-	assert_true(companion.owns_menu(_make_weapon_driver()),
-			"PLAYER_CLASS + PRIMARY_AMMO1 mark the WEAPON screen")
-	# player.mnu's screen (PLAYERCLASS combo, no ammo combos) is NOT claimed.
-	var player_info := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAYER_INFO",
-			MenuDriverFixture.wnd("combobox", "PLAYERCLASS", 10))), "player.mnu")
-	assert_false(companion.owns_menu(player_info),
-			"the PLAYER_INFO screen stays with its own companion")
 
 
 func test_unclassed_default_shows_all_weapons() -> void:
@@ -626,7 +615,6 @@ func test_real_weapon_mnu_populates() -> void:
 	var driver := _assets_weapon_driver()
 
 	var companion := ArmoryMenuCompanion.new()
-	assert_true(companion.owns_menu(driver), "the real weapon.mnu is claimed by the armory companion")
 	companion.set_weapon_database(_load_loadout_catalog())
 	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
 

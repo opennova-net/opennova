@@ -674,7 +674,7 @@ func _tick_dedicated_host(sim: Simulation) -> void:
 ## original rebuilding its HUD info struct each frame. Call once per frame while the
 ## player is in-world (the shells gate on their own state).
 ## [orig: HUD_BuildEntityInfo @0x4b8440]
-func tick(gameplay_input_active: bool = false) -> void:
+func tick() -> void:
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	if _world == null or not _world.is_loaded():
 		return
@@ -845,12 +845,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The HUD binding rows' events in input-frame order: the player input
 	# router polls the rows in every input frame, the frame's own sample and
 	# each later tick's (PlayerInputRouter::poll_hud_toggles carries the
-	# witness); with no router this presenter polls the frame's sample.
-	var toggle_frames: PackedInt64Array
+	# witness); with no router no rows are polled.
+	var toggle_frames := PackedInt64Array()
 	if _player_presenter != null:
 		toggle_frames = _player_presenter.take_hud_toggle_events()
-	else:
-		toggle_frames = PackedInt64Array([_poll_toggle_rows(sim, gameplay_input_active)])
 	for toggle_events in toggle_frames:
 		# The window actions' respawn init also closes the sim's map overlay (the
 		# witness rides hud_toggles.h kOverlayWindowsCleared).
@@ -1225,14 +1223,14 @@ func handle_chat_key(key: InputEventKey) -> bool:
 ## runs the rest (the restart's splash re-run, the event-12 pick). Null with no
 ## player presenter. The chain reads the key's one VK, the layout's (Godot's keycode,
 ## else the physical key), as the key queue and the binding scan do, over `session`
-## (the shell's world view's; null = the player presenter's world's).
+## (the shell's world view's; null = the player presenter's world's), and the quit
+## dialog's keys off the gametext this presenter hands the player presenter
+## (engine hud::hud_key_press_keys).
 func handle_special_key(key: InputEventKey, session: Simulation = null) -> SpecialKeyOutcome:
 	if _player_presenter == null:
 		return null
 	var vk := ControlsModel.vk_from_godot_key(ArmoryPresenter.bound_key_of(key))
-	var outcome: SpecialKeyOutcome = _player_presenter.special_key(session, vk,
-			_key_press_vk("STRKEYPRESS_YES", "Y"), _key_press_vk("STRKEYPRESS_NO", "N"),
-			_key_press_vk("STRKEYPRESS_RESTART", "R"))
+	var outcome: SpecialKeyOutcome = _player_presenter.special_key(session, vk)
 	if outcome.is_quit_confirmed():
 		quit_confirmed.emit()
 	var forward := outcome.is_page_forward()
@@ -1250,40 +1248,9 @@ func handle_special_key(key: InputEventKey, session: Simulation = null) -> Speci
 	return outcome
 
 
-## The KeyPress gametext key's code: its first character as written, the
-## default letter when the table lacks it or the string is empty (engine
-## hud_toggles.h HudQuitDialogKeyInput carries the witness).
-func _key_press_vk(key: String, fallback: String) -> int:
-	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	var text := fallback
-	if t != null and t.has_string_in_section("KeyPress", key):
-		var s := t.get_string_in_section("KeyPress", key)
-		if not s.is_empty():
-			text = s
-	return text.unicode_at(0)
-
-
 ## The connection mode's two bits by role (engine HudKeyPoll): single player
 ## and a listen host carry both, a joiner only the peer bit, a dedicated host
 ## only the authority bit.
-## One poll of the HUD binding rows over the frame's own sample, for a
-## presenter with no player input router (PlayerInputRouter::poll_hud_toggles
-## is the per-input-frame poll and carries the witness); the event bits.
-func _poll_toggle_rows(sim: Simulation, gameplay_input_active: bool) -> int:
-	var rows_down := 0
-	for row in HudToggles.ROW_COUNT:
-		if ControlsBindings.pressed(HudToggles.row_token(row)):
-			rows_down |= 1 << row
-	# The mousescale row's step direction is its fire's sign bit (Shift on a
-	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
-	return _toggles.poll(rows_down,
-			gameplay_input_active, sim.is_mp_session(),
-			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
-			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
-			ControlsBindings.model().is_token_fire_signed(
-					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
-
-
 static func _authority(sim: Simulation) -> bool:
 	return sim.session_role() != Simulation.ROLE_JOINER
 

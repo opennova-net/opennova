@@ -115,15 +115,6 @@ func _start_host_config(mission_file: String) -> HostSessionConfig:
 	return get_signal_parameters(mp, "lan_host_start_requested")[0] as HostSessionConfig
 
 
-func test_owns_menu_detects_mp_menu() -> void:
-	var mp := MpMenuCompanion.new()
-	assert_true(mp.owns_menu(_make_host_driver()),
-			"a menu carrying SELECTED_MISSIONS is the JO mp menu")
-	var plain := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAIN",
-			MenuDriverFixture.wnd("button", "OK", 10))), "plain.mnu")
-	assert_false(mp.owns_menu(plain), "a plain menu is left to the shell")
-
-
 func test_novaworld_uses_the_same_host_controls_and_rotation() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)

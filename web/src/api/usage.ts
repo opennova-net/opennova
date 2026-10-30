@@ -153,6 +153,8 @@ function pickTask(v: unknown): ProgramTask | null {
     health: textOrNull(v.health),
     started_at: textOrNull(v.started_at),
     task_definition: textOrNull(v.task_definition),
+    one_version: textOrNull(v.one_version),
+    one_commit: textOrNull(v.one_commit),
   };
 }
 
@@ -168,7 +170,7 @@ function pickProgram(v: unknown): ProgramUsage | null {
     name: v.name,
     running: v.running,
     desired: isCount(v.desired) ? v.desired : null,
-    release: textOrNull(v.release),
+    task_definition: textOrNull(v.task_definition),
     on_release: typeof v.on_release === 'boolean' ? v.on_release : null,
     ...pickNow(v),
     restarts_24h: isCount(v.restarts_24h) ? v.restarts_24h : 0,

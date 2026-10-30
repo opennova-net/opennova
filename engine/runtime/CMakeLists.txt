@@ -540,6 +540,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_info.cpp       # the NovaWorld listing's live-session columns
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_listing_binding.cpp # the NovaWorld host listing's match side (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/special_key_chain.cpp # the special-key chain over a role
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_input_frame.cpp # the local player's input frame (TickInputSource)

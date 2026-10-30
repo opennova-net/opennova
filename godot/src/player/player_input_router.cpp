@@ -11,6 +11,7 @@
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 
+#include <runtime/hud/hud_toggles.h> // hud_key_press_keys
 #include <runtime/world/player_look.h> // kCursorCentreX / Y
 
 using namespace godot;
@@ -122,16 +123,17 @@ bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_acti
 	return frame_.device_event(event);
 }
 
-Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(const Ref<Simulation> &p_session, int p_vk,
-		int p_yes_vk, int p_no_vk, int p_restart_vk) {
+Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(const Ref<Simulation> &p_session, int p_vk) {
 	const Ref<Simulation> chain_sim = p_session.is_valid() ? p_session : sim();
 	if (chain_sim.is_null()) return SpecialKeyOutcome::make({});
 	Session session(*this, &chain_sim);
 	opennova::inmatch::SpecialKeyInput input;
 	input.vk = p_vk;
-	input.yes_vk = p_yes_vk;
-	input.no_vk = p_no_vk;
-	input.restart_vk = p_restart_vk;
+	const opennova::hud::HudKeyPressKeys keys =
+			opennova::hud::hud_key_press_keys(game_text_lookup(gametext_));
+	input.yes_vk = keys.yes;
+	input.no_vk = keys.no;
+	input.restart_vk = keys.restart;
 	return SpecialKeyOutcome::make(frame_.special_key(session, input));
 }
 
@@ -175,7 +177,7 @@ bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_row
 void PlayerInputRouter::set_hud_chat(const Ref<HudChatEntry> &p_chat,
 		const Ref<RtxtStringFile> &p_gametext) {
 	hud_chat_ = p_chat;
-	chat_gametext_ = p_gametext;
+	gametext_ = p_gametext;
 }
 
 void PlayerInputRouter::release_mouse_capture() {
@@ -428,7 +430,7 @@ void PlayerInputRouter::Session::dispatch_talk_rows(uint32_t p_rows_fired, bool 
 	const Ref<Simulation> s = sim();
 	if (router_.hud_chat_.is_null() || s.is_null()) return;
 	router_.hud_chat_->dispatch_rows(static_cast<int>(p_rows_fired), p_active, s,
-			router_.chat_gametext_, s->get_main_frame_counter());
+			router_.gametext_, s->get_main_frame_counter());
 }
 
 opennova::inmatch::SpecialKeyOutcome PlayerInputRouter::Session::special_key_chain(

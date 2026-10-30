@@ -949,6 +949,27 @@ static void test_row_tokens_are_the_catalog_rows() {
 		CHECK(hud_toggle_row_token(row)[0] != '\0');
 }
 
+// The quit dialog's keys: the first byte of each gametext KeyPress string, signed as the init's
+// movsx reads it; an empty or absent string keeps 'Y' / 'N' / 'R'
+// [orig: Input_InitBindingSystem @0x499ab0, @0x49a5c0..0x49a615].
+void test_key_press_keys() {
+	const HudKeyPressKeys none = hud_key_press_keys(GameTextLookup());
+	CHECK(none.yes == 'Y' && none.no == 'N' && none.restart == 'R');
+	const GameTextLookup table = [](const char *section, const char *key, const char *fallback) {
+		if (std::strcmp(section, "KeyPress") != 0) return std::string(fallback);
+		if (std::strcmp(key, "STRKEYPRESS_YES") == 0) return std::string("Oui");
+		if (std::strcmp(key, "STRKEYPRESS_NO") == 0) return std::string(); // written empty
+		// A cp1252 E acute leads: a byte over 0x7F reads negative.
+		if (std::strcmp(key, "STRKEYPRESS_RESTART") == 0)
+			return std::string(1, static_cast<char>(0xC9)) + "tape";
+		return std::string(fallback);
+	};
+	const HudKeyPressKeys keys = hud_key_press_keys(table);
+	CHECK(keys.yes == 'O');
+	CHECK(keys.no == 'N');
+	CHECK(keys.restart == static_cast<int>(static_cast<signed char>(0xC9)) && keys.restart < 0);
+}
+
 int main() {
 	test_row_tokens_are_the_catalog_rows();
 	test_edge_latch();
@@ -974,6 +995,7 @@ int main() {
 	test_quit_dialog_escape_legs();
 	test_special_keys();
 	test_deploy_keys();
+	test_key_press_keys();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

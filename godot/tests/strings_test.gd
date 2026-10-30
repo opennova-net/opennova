@@ -50,11 +50,11 @@ func test_lookup_miss_returns_engine_marker() -> void:
 
 func test_override_table_wins_before_named_tables() -> void:
 	Strings.register_table("gametext", _make_table("menu", "TITLE", "Base game title"))
-	Strings.set_override_table(_make_table("menu", "TITLE", "Expansion title"))
+	_make_table("menu", "TITLE", "Expansion title").install_text_override()
 	assert_eq(Strings.lookup("gametext", "menu", "TITLE"), "Expansion title",
 		"the override table is consulted first, like the expansion text bin")
 
-	Strings.set_override_table(null)
+	RtxtStringFile.clear_text_override()
 	assert_eq(Strings.lookup("gametext", "menu", "TITLE"), "Base game title",
 		"clearing the override restores base lookups")
 
@@ -64,7 +64,7 @@ func test_override_table_wins_before_named_tables() -> void:
 ## the fallback before any search.
 func test_lookup_or_reads_the_installed_override_first() -> void:
 	Strings.register_table("gametext", _make_table("Overlays", "STROVER_A", "Base"))
-	Strings.set_override_table(_make_table("Overlays", "STROVER_A", "Expansion"))
+	_make_table("Overlays", "STROVER_A", "Expansion").install_text_override()
 	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_A", "fb"), "Expansion")
 	assert_true(Strings.has_text("gametext", "Overlays", "STROVER_A"))
 	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_B", "fb"), "fb")
@@ -72,13 +72,13 @@ func test_lookup_or_reads_the_installed_override_first() -> void:
 	assert_eq(Strings.lookup_or("absent", "Overlays", "STROVER_A", "fb"), "fb",
 			"no table answers the fallback, the override unsearched")
 	assert_false(Strings.has_text("absent", "Overlays", "STROVER_A"))
-	Strings.set_override_table(null)
+	RtxtStringFile.clear_text_override()
 	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_A", "fb"), "Base")
 
 
 func test_override_only_shadows_keys_it_has() -> void:
 	Strings.register_table("gametext", _make_table("menu", "TITLE", "Base"))
-	Strings.set_override_table(_make_table("menu", "OTHER", "Override"))
+	_make_table("menu", "OTHER", "Override").install_text_override()
 	assert_eq(Strings.lookup("gametext", "menu", "TITLE"), "Base",
 		"keys missing from the override fall through to the named table")
 
@@ -98,6 +98,8 @@ func test_legacy_single_table_api_unchanged() -> void:
 	assert_true(Strings.is_loaded())
 	assert_eq(Strings.get_string("key"), "value")
 	assert_eq(Strings.get_string("missing", "fallback"), "fallback")
+	_make_table("menu", "OV", "Override").install_text_override()
 	Strings.clear()
 	assert_false(Strings.is_loaded())
-	assert_null(Strings.get_override_table(), "clear() also resets the registry and override")
+	assert_eq(Strings.lookup("gametext", "menu", "OV"), "??menu:OV??",
+		"clear() also resets the registry and forgets the installed override")

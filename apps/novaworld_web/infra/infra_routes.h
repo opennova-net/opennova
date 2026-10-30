@@ -5,12 +5,14 @@
 // /api/admin/infrastructure, require_admin, the deployment as it runs now in
 // one reply. From the database, which every web replica reads alike: the lobby
 // instances (lobby_instances, with their sessions and listings), the fleet
-// process that leads (fleet_leader) and the fleet's machines
-// (fleet_machines: the live ones and the newest ended). From AWS, through
-// infra_status.h (kept for its cache window, so the page's polls cost AWS
-// nothing more): the programs' ECS services and their tasks, the balancer's
-// target groups, the database, the cache, the release, and each machine's zone
-// and EC2 state. Without AWS (the local stack) the cloud's sections say why and
+// process that leads (fleet_leader), the serve images the live hosted servers
+// run (hosted_servers) and the fleet's machines (fleet_machines: the live ones
+// and the newest ended, each with the build and image its hostd last reported).
+// From AWS, through infra_status.h (kept for its cache window, so the page's
+// polls cost AWS nothing more): the programs' ECS services and their tasks, the
+// balancer's target groups, the database, the cache, the release (its
+// revisions, images and their commits), and each machine's zone and EC2
+// state. Without AWS (the local stack) the cloud's sections say why and
 // hold nothing. Read only: no route here changes anything. Every refusal is an
 // error code with our own message, never database text; AWS's own error text
 // reaches the admin page (it names an action and a resource, never a
