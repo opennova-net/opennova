@@ -175,20 +175,6 @@ ClientSession::Config ClientSession::Config::lobby(const Protocol &protocol,
 	return c;
 }
 
-ClientSession::Config ClientSession::Config::game_protocol(const Protocol &protocol) {
-	Config c;
-	const ClientHello retail = make_protocol_client_hello(protocol, c.client_index);
-	c.co = retail.co;
-	c.ap = retail.ap;
-	c.bdat = retail.bdat;
-	c.pn = retail.pn;
-	c.pv1 = retail.pv1;
-	c.pv2 = retail.pv2;
-	c.pg = retail.pg;
-	c.use_default_pg = false;
-	return c;
-}
-
 ClientSession::ClientSession() : ClientSession(Config{}) {}
 
 ClientSession::ClientSession(Config config) : cfg_(std::move(config)) {}

@@ -83,14 +83,6 @@ bool decode_wire_key(const KeyChains &chains, std::string_view wire_key, std::st
 // The same inputs always give the same NWACT.
 std::string make_activation(
 		const KeyChains &chains, std::string_view wire_key, std::string_view fingerprint);
-// The client's reading of an NWACT on its own machine: the mix under its
-// fingerprint, then the registry chain decoded, giving the wire key it keeps.
-// False where the client's decode fails (its status -3).
-// [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe): the fingerprint @0x411ebb,
-//  the copy @0x411eca, NapiNP_EncryptStringWithPRNG @0x411ee9, CDKey_Decode under
-//  off_812EE8 @0x411f0a, the decoded value stored at +16 @0x411f37]
-bool read_activation(const KeyChains &chains, std::string_view nwact, std::string_view fingerprint,
-		std::string &wire_key);
 
 // The two CD-key values a player carries: the CDKIID and CDKIIDEXP1 its join
 // sends (player +724 / +728), or the host's own (g_CDKeyInfo +16 / +0x810).

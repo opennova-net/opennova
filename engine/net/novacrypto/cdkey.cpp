@@ -101,18 +101,6 @@ std::vector<uint8_t> bytes_of(std::string_view text) {
 	return std::vector<uint8_t>(text.begin(), text.end());
 }
 
-// A decoded value as the client keeps it: a C string, so up to its first NUL.
-// [orig: CDKey_WriteActivationFromNWACT @0x411f37 (dfx2.exe), Napi_CopyString to +16]
-std::string c_string_of(const std::vector<uint8_t> &bytes) {
-	std::string out;
-	for (const uint8_t b : bytes) {
-		if (b == 0)
-			break;
-		out.push_back(static_cast<char>(b));
-	}
-	return out;
-}
-
 } // namespace
 
 bool is_fingerprint(std::string_view text) {
@@ -153,20 +141,6 @@ std::string make_activation(
 	std::string registry = encode_key_chain(bytes_of(wire_key), chains.registry);
 	mix_up(registry, fingerprint);
 	return registry;
-}
-
-bool read_activation(const KeyChains &chains, std::string_view nwact, std::string_view fingerprint,
-		std::string &wire_key) {
-	wire_key.clear();
-	std::string registry(nwact);
-	mix_down(registry, fingerprint);
-	// [orig: CDKey_Decode @0x411af0 (dfx2.exe): NapiNP_DecodeEncryptedString under the
-	//  descriptor's +20 chain @0x411b38]
-	std::vector<uint8_t> plaintext;
-	if (!decode_key_chain(registry, chains.registry, plaintext, kDecodeRoom))
-		return false;
-	wire_key = c_string_of(plaintext);
-	return true;
 }
 
 LanJoinVerdict check_lan_join(const KeyChains &chains, const WireKeys &joiner, const WireKeys &host,

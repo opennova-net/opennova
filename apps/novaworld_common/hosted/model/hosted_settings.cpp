@@ -140,28 +140,6 @@ std::optional<SettingsRefusal> check_settings(
 	return std::nullopt;
 }
 
-std::string join_missions(const std::vector<std::string> &missions) {
-	std::string out;
-	for (const std::string &m : missions) {
-		if (!out.empty()) out.push_back('\n');
-		out += m;
-	}
-	return out;
-}
-
-std::vector<std::string> split_missions(const std::string &column) {
-	std::vector<std::string> out;
-	size_t pos = 0;
-	while (pos <= column.size()) {
-		const size_t end = column.find('\n', pos);
-		const std::string line = column.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
-		if (!line.empty()) out.push_back(line);
-		if (end == std::string::npos) break;
-		pos = end + 1;
-	}
-	return out;
-}
-
 std::string render_host_file(const HostedSettings &s, int64_t server_id) {
 	std::string out;
 	auto line = [&out](const std::string &text) {

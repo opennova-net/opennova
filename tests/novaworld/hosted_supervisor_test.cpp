@@ -273,9 +273,6 @@ int test_settings_rules() {
 		c.expansion_id = 2;
 		c.missions = { "second.bms", "ESCAL.BMS" };
 	})));
-
-	TEST_EXPECT(hosted::split_missions(hosted::join_missions(s.missions)) == s.missions);
-	TEST_EXPECT(hosted::split_missions("").empty());
 	return 0;
 }
 

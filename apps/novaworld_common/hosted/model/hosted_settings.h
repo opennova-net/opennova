@@ -115,10 +115,6 @@ std::optional<SettingsRefusal> check_settings(
 // MISSION ADD).
 bool is_mission_file_name(std::string_view name);
 
-// The missions column: one name per line.
-std::string join_missions(const std::vector<std::string> &missions);
-std::vector<std::string> split_missions(const std::string &column);
-
 // The working directory's file names.
 inline constexpr const char *kHostFileName = "server.host";
 inline constexpr const char *kCredentialsFileName = "credentials.txt";
