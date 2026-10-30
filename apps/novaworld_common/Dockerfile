@@ -50,12 +50,14 @@ ARG OPENNOVA_STAGING=OFF
 # lib deps. OPENNOVA_NOVAWORLD_SERVICE=ON defines the service and its
 # programs; BUILD_NOVAWORLD_HTTP=ON pulls Crow + standalone Asio via
 # FetchContent (web, the fleet, the worker and data build with it).
-# GDExtension is never touched (godot/src is its own project). Mirrors the
-# flags of ci.yml's `test-linux` job and of .github/workflows/net-linux.yml.
+# GDExtension is never touched (godot/src is its own project), nor the game
+# window (OPENNOVA_GAME, the SDL3 app). Mirrors the flags of
+# .github/workflows/net-linux.yml.
 RUN cmake -S . -B build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DOPENNOVA_NOVAWORLD_SERVICE=ON \
         -DBUILD_NOVAWORLD_HTTP=ON \
+        -DOPENNOVA_GAME=OFF \
         "-DOPENNOVA_VERSION=${OPENNOVA_VERSION}" "-DOPENNOVA_COMMIT=${OPENNOVA_COMMIT}" \
         "-DOPENNOVA_BUILD_TIME=${OPENNOVA_BUILD_TIME}" "-DOPENNOVA_STAGING=${OPENNOVA_STAGING}" \
     && cmake --build build --target opennova_novaworld_gate opennova_novaworld_lobby \

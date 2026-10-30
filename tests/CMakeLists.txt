@@ -6043,6 +6043,12 @@ add_test(NAME inmatch_tick_input_source COMMAND inmatch_tick_input_source_test)
 add_executable(inmatch_player_input_frame_test frame/player_input_frame_test.cpp)
 target_link_libraries(inmatch_player_input_frame_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_player_input_frame COMMAND inmatch_player_input_frame_test)
+# Its device over the platform's raw input and the binding table (inmatch::PlatformInputDevice,
+# ADR 0077 R4, the SDL3 app shell's): the key state and its queue, keypad Enter's 269, the focus
+# change's clear, the mouse rows' held words, the key scan's row.
+add_executable(inmatch_platform_input_device_test frame/platform_input_device_test.cpp)
+target_link_libraries(inmatch_platform_input_device_test PRIVATE opennova_runtime)
+add_test(NAME inmatch_platform_input_device COMMAND inmatch_platform_input_device_test)
 add_executable(controls_key_event_queue_test controls/key_event_queue_test.cpp)
 target_link_libraries(controls_key_event_queue_test PRIVATE opennova_runtime)
 add_test(NAME controls_key_event_queue COMMAND controls_key_event_queue_test)
@@ -6132,6 +6138,18 @@ add_executable(netsim_replica_walk_lookups_test netsim/replica_walk_lookups_test
 target_link_libraries(netsim_replica_walk_lookups_test PRIVATE opennova_net opennova_runtime)
 target_compile_features(netsim_replica_walk_lookups_test PRIVATE cxx_std_17)
 add_test(NAME netsim_replica_walk_lookups COMMAND netsim_replica_walk_lookups_test)
+
+# opennova-game (apps/game, ADR 0077 d9) smoke-run headless (SDL's dummy video and audio
+# drivers, no GPU) on the minted mission set's infantry mission for 120 frames: it boots through
+# the engine's load executor and runs logic ticks over the single player's session, then exits 0.
+# Only where the build has the game (OPENNOVA_GAME).
+if(TARGET opennova_game)
+    add_executable(opennova_game_smoke_test game/opennova_game_smoke_test.cpp)
+    target_link_libraries(opennova_game_smoke_test PRIVATE opennova_base)
+    target_include_directories(opennova_game_smoke_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_dependencies(opennova_game_smoke_test opennova_game)
+    add_test(NAME opennova_game_smoke COMMAND opennova_game_smoke_test $<TARGET_FILE:opennova_game>)
+endif()
 
 # Every executable above links the registration point (opennova_test_games, at this file's top).
 get_property(OPENNOVA_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)

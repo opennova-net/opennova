@@ -44,11 +44,12 @@ ARG OPENNOVA_STAGING=OFF
 
 # Configure the whole tree (cheap) but compile only the server and the agent
 # targets and their lib deps: the engine groups and apps/common, with no HTTP
-# layer and no Godot. The configure is .github/workflows/net-linux.yml's, which
-# builds and tests both on Linux, minus its NovaWorld service flags (neither links
-# the service; the agent links the service's core and agents' protocol, which build
-# without it on Linux and need no libpq).
-RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+# layer, no Godot and no game window (OPENNOVA_GAME, the SDL3 app). The configure
+# is .github/workflows/net-linux.yml's, which builds and tests both on Linux, minus
+# its NovaWorld service flags (neither links the service; the agent links the
+# service's core and agents' protocol, which build without it on Linux and need
+# no libpq).
+RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DOPENNOVA_GAME=OFF \
         "-DOPENNOVA_VERSION=${OPENNOVA_VERSION}" "-DOPENNOVA_COMMIT=${OPENNOVA_COMMIT}" \
         "-DOPENNOVA_BUILD_TIME=${OPENNOVA_BUILD_TIME}" "-DOPENNOVA_STAGING=${OPENNOVA_STAGING}" \
     && cmake --build build --target opennova_serve opennova_hostd

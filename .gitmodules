@@ -9,3 +9,7 @@
 	url = ../docs.git
 	update = none
 	branch = master
+[submodule "third_party/sdl3"]
+	path = third_party/sdl3
+	url = https://github.com/libsdl-org/SDL.git
+	shallow = true
