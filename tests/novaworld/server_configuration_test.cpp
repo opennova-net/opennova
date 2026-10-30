@@ -72,25 +72,46 @@ int main() {
 			std::string::npos);
 	// A settings edit sends only what it changes from the saved configuration (a weapon left at
 	// its saved availability keeps its word, the mission word among them), retail's WEAPON SET
-	// keywords, one WEAPON SET ALL when every selectable weapon ends at one of them, and a weapon
-	// set to "mission", which no keyword reaches, at the next launch.
-	const auto edit_of = [&](const char *text,
-								 const hosted::HostedSettings &saved) -> hosted::ConfigurationEdit {
+	// keywords, one WEAPON SET ALL when every selectable weapon ends at one of them and ALL's
+	// rows (the admin table's word) are the roster's, and a weapon set to "mission", which no
+	// keyword reaches, at the next launch.
+	const auto edit_of = [&](const char *text, const hosted::HostedSettings &saved,
+								 const gamecfg::WeaponRoster &roster) -> hosted::ConfigurationEdit {
 		io::JsonValue edit_patch;
 		if (!io::json_parse(text, edit_patch, error))
 			return { io::JsonValue::make_object(), { "unparsed" } };
-		return hosted::configuration_edit(edit_patch, saved, "jo", weapons);
+		return hosted::configuration_edit(edit_patch, saved, "jo", roster);
 	};
+	// The admin table's word known, the roster's selectable rows and no other.
+	const gamecfg::WeaponRoster known = { { "None", 0, "", 0 }, { "Rifle", 1, "", 1 },
+		{ "Grenade", 1, "", 1 } };
+	// A subclass row the admin table marks too (weapon.def's loadout_selectable on it), which the
+	// roster leaves out: ALL would set it as well.
+	gamecfg::WeaponRoster subclassed = known;
+	subclassed.push_back({ "Rifle_sub", 0, "", 1 });
 	hosted::HostedSettings saved;
-	auto edit = edit_of(R"({"options":{"weapons":{"Rifle":"mission","Grenade":"never"}}})", saved);
+	auto edit = edit_of(R"({"options":{"weapons":{"Rifle":"mission","Grenade":"never"}}})", saved, known);
 	TEST_EXPECT(edit.commands == std::vector<std::string>{ "WEAPON SET 2 NEVER" } &&
 			!edit.next_launch.get("options"));
-	edit = edit_of(R"({"options":{"weapons":{"Rifle":"always","Grenade":"always"}}})", saved);
+	const char *both_always = R"({"options":{"weapons":{"Rifle":"always","Grenade":"always"}}})";
+	edit = edit_of(both_always, saved, known);
 	TEST_EXPECT(edit.commands == std::vector<std::string>{ "WEAPON SET ALL ALWAYS" });
-	edit = edit_of(R"({"kill_limit":5,"options":{"weapons":{"Rifle":"armory"}}})", saved);
+	// ALL's rows differ from the roster's (a subclass row), or the admin word is not known (a
+	// roster stored before it): each row its own command.
+	const std::vector<std::string> each = { "WEAPON SET 1 ALWAYS", "WEAPON SET 2 ALWAYS" };
+	TEST_EXPECT(edit_of(both_always, saved, subclassed).commands == each);
+	TEST_EXPECT(edit_of(both_always, saved, weapons).commands == each);
+	// A tree's stored roster keeps the admin word; one stored before it reads it as not known.
+	gamecfg::WeaponRoster decoded;
+	TEST_EXPECT(hosted::decode_tree_weapons(hosted::encode_tree_weapons(subclassed), decoded) &&
+			decoded.size() == 4 && decoded[3].loadout_selectable == 0 &&
+			decoded[3].admin_loadout_selectable == 1 && decoded[1].admin_loadout_selectable == 1);
+	TEST_EXPECT(hosted::decode_tree_weapons(R"([{"name":"Rifle","selectable":true}])", decoded) &&
+			decoded.size() == 1 && decoded[0].admin_loadout_selectable == -1);
+	edit = edit_of(R"({"kill_limit":5,"options":{"weapons":{"Rifle":"armory"}}})", saved, known);
 	TEST_EXPECT(edit.commands == (std::vector<std::string>{ "SET KillLimit 5", "WEAPON SET 1 ARMORY" }));
 	TEST_EXPECT(io::json_parse(R"({"weapons":{"Rifle":"never"}})", saved.options, error));
-	edit = edit_of(R"({"options":{"weapons":{"Rifle":"mission","Grenade":"mission"}}})", saved);
+	edit = edit_of(R"({"options":{"weapons":{"Rifle":"mission","Grenade":"mission"}}})", saved, known);
 	TEST_EXPECT(edit.commands.empty() &&
 			edit.next_launch.get("options")->get("weapons")->get_string("Rifle", "") == "mission" &&
 			!edit.next_launch.get("options")->get("weapons")->get("Grenade"));

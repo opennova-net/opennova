@@ -896,6 +896,9 @@ std::string encode_tree_weapons(const gamecfg::WeaponRoster &weapons) {
         auto row = io::JsonValue::make_object();
         row.set("name", io::json_string(cp1252_to_utf8(w.name)));
         row.set("selectable", io::JsonValue::make_bool(w.loadout_selectable != 0));
+        // The remote admin's table's word (WEAPON SET ALL's rows), when the roster knows it.
+        if (w.admin_loadout_selectable >= 0)
+            row.set("admin_selectable", io::JsonValue::make_bool(w.admin_loadout_selectable != 0));
         out.push(std::move(row));
     }
     return io::json_write(out);
@@ -907,7 +910,9 @@ bool decode_tree_weapons(std::string_view text, gamecfg::WeaponRoster &out) {
     for (const auto &row : list.array) {
         std::string name;
         if (!utf8_to_cp1252(row.get_string("name", ""), name)) return false;
-        out.push_back({name, row.get_bool("selectable", false) ? 1 : 0});
+        const io::JsonValue *admin = row.get("admin_selectable");
+        out.push_back({ name, row.get_bool("selectable", false) ? 1 : 0, "",
+                admin != nullptr && admin->is_bool() ? (admin->boolean ? 1 : 0) : -1 });
     }
     return true;
 }

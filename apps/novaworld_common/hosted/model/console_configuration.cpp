@@ -28,13 +28,25 @@ const char *weapon_set_keyword(std::string_view name) {
 	return name == "always" ? "ALWAYS" : nullptr;
 }
 
+// Whether a WEAPON SET ALL sets exactly the weapons the roster offers: retail's ALL writes every
+// row whose admin-table word (+936, weapon.def's loadout_selectable, kept on a subclass row too)
+// is nonzero [orig: CAdminServer_HandleWeaponCommand @0x404850..0x404868, AdmDef_GetEntryByIndex
+// [234]; WeaponDefs_ParseLineCallback @0x544E11], while the roster's selectable rows leave the
+// subclass rows out (game_cfg_weapon_roster). So the two sets must agree, row for row, and the
+// admin word be known for every row.
+bool all_sets_roster(const gamecfg::WeaponRoster &weapons, size_t rows) {
+	for (size_t i = 1; i < rows; ++i)
+		if (weapons[i].admin_loadout_selectable < 0 ||
+				(weapons[i].admin_loadout_selectable != 0) != (weapons[i].loadout_selectable != 0))
+			return false;
+	return true;
+}
+
 // The weapons part of a settings edit: only the weapons whose availability the patch changes
 // from the saved configuration's (as a launch renders it), so a weapon left alone keeps its
 // word, the mission word or any other. A changed weapon's WEAPON SET, or one WEAPON SET ALL when
-// the edit leaves every selectable weapon at one keyword's availability (retail's ALL sets every
-// row with the loadout word, the rows the roster marks selectable [orig:
-// CAdminServer_HandleWeaponCommand @0x404850..0x404868, AdmDef_GetEntryByIndex +936]); a weapon
-// set to "mission" into `later`, the next launch's.
+// the edit leaves every selectable weapon at one keyword's availability and ALL sets exactly
+// those rows (all_sets_roster); a weapon set to "mission" into `later`, the next launch's.
 void weapon_edit(const Json &patch_weapons, const gamecfg::GameCfg &launched,
 		const gamecfg::WeaponRoster &weapons, std::vector<std::string> &commands, Json &later) {
 	const size_t rows =
@@ -69,7 +81,7 @@ void weapon_edit(const Json &patch_weapons, const gamecfg::GameCfg &launched,
 			one = uniform.empty() || target[i] == uniform;
 			uniform = target[i];
 		}
-	if (one && live.size() > 1) {
+	if (one && live.size() > 1 && all_sets_roster(weapons, rows)) {
 		commands.push_back(std::string("WEAPON SET ALL ") + weapon_set_keyword(uniform));
 		return;
 	}

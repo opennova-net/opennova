@@ -95,6 +95,14 @@ struct WeaponRosterEntry {
 	// ("" for none, a subclass row's) [orig: WeaponDef_ParseProperty @0x54D730 - the key
 	// @0x54DA25, GameText_GetString("WepDes", ..) into the row's +40].
 	std::string loadout_menu_textid;
+	// The row's loadout_selectable word as the remote admin's table keeps it: weapon.def's on
+	// every row, a subclass row's too, where `loadout_selectable` above is 0 for a subclass row
+	// (whose loadout keys the weapon table skips). WEAPON SET ALL sets the rows where it is
+	// nonzero. -1: not known (a roster read without it).
+	// [orig: WeaponDefs_ParseLineCallback @0x543680 - "loadout_selectable" atol stored at
+	//  [def+0x3A8] @0x544E11; CAdminServer_HandleWeaponCommand @0x4045A0 - the ALL loop over
+	//  AdmDef_GetEntryByIndex's [234] @0x404850..0x404868]
+	int32_t admin_loadout_selectable = -1;
 };
 using WeaponRoster = std::vector<WeaponRosterEntry>;
 

@@ -839,7 +839,9 @@ weapons use stable names; weapon availability is `always`, `never`, `armory` or 
 (the title's own words, the host screen's WEAPON_LIST names; server_settings.h
 weapon_availability_name), and a class is on or off. A settings edit sends only the weapons whose
 availability it changes from the saved configuration, with retail's `ALWAYS`, `NEVER` and
-`ARMORY` keywords (one `WEAPON SET ALL` when every selectable weapon ends at one of them); a
+`ARMORY` keywords (one `WEAPON SET ALL` when every selectable weapon ends at one of them and
+ALL's rows, the admin table's loadout_selectable rows, a subclass row's among them, are the
+roster's); a
 weapon set to `mission`, which no `WEAPON SET` keyword reaches, waits for the next launch. A
 command the server refuses stops the edit there: the fields before it are saved, the rest not
 sent, and the reply names it (`refused_command`). The route waits for an edit by its command
