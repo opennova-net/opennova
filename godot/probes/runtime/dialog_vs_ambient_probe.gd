@@ -6,20 +6,16 @@ extends GameProbe
 ## `ambient` is false), then plays the first `lines` resolvable .DBF dialog
 ## ids the way _route_mission_effects does, asserting for each line
 ##   spawn    play_dialog returned true and a dialog voice appeared
-##   audible  the Voice bus peak rises above the silence floor while playing
+##   audible  the dialog channel opens at a volume above 0
 ##   advance  the voice finishes and the serialized queue moves on
-## and reporting the Ambient/Master bus peaks while dialog plays (the masking
-## metric). `sim_ticks` > 0 first steps a bare Simulation of the mission and
+## and reporting the bed's loudest emitter channel against the dialog channel (the
+## masking metric) and the one stream's Master peak. `sim_ticks` > 0 first steps a bare Simulation of the mission and
 ## reports the effect kinds its startup ticks fire (delay-gated dialog) plus
 ## the player start the listener parks at. Runs on a menu launch: a loaded
-## world's own bed would share the buses.
+## world's own bed would share the mixer.
 
-const SILENCE_FLOOR_DB := -50.0
 const LINE_TIMEOUT_SLACK_S := 3.0
 const AMBIENT_SPIN_MS := 1200
-const CULL_RANGE_U := 240.0
-const NEAR_RANGE_U := 120.0
-const VOICE_STATE_SAMPLE := 5
 const DIALOG_TICK_LOG_CAP := 12
 const UNMEASURED_DB := -200.0
 
@@ -69,54 +65,29 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	data["setup"] = stats.to_json_value()
 
 	# The listener parks at the player start when the sim arm resolved one
-	# (the play-test position), else at the origin. A current Camera3D is the
-	# audio listener (a bare AudioListener3D in a script-built tree leaves 3D
-	# voices mixing at zero).
+	# (the play-test position), else at the origin.
 	var listen_pos := player_pos if player_pos.is_finite() else Vector3.ZERO
-	var previous_camera := ctx.camera()
-	var listener := Camera3D.new()
-	container.add_child(listener)
-	listener.global_position = listen_pos
-	listener.make_current()
-	ctx.defer_restore(func() -> void:
-		if is_instance_valid(previous_camera):
-			previous_camera.make_current())
-	# The game culls voices beyond 240 u from the camera each frame.
 	audio.tick(listen_pos, 0.2)
-	var marker_players: Array = container.find_children("*", "AudioStreamPlayer3D", true, false)
-	var near := 0
-	var near_close := 0
-	for p in marker_players:
-		var d := ((p as Node3D).global_position - listen_pos).length()
-		if d <= CULL_RANGE_U:
-			near += 1
-		if d <= NEAR_RANGE_U:
-			near_close += 1
-	ctx.log("ambient candidates=%d physical voices=%d (within %.0fu of listener: %d, within %.0fu: %d) listener=%s" % [
-			int(stats.ambient_candidates), marker_players.size(),
-			CULL_RANGE_U, near, NEAR_RANGE_U, near_close, str(listen_pos)])
-	data["physical_voices"] = marker_players.size()
-	data["voices_within_cull"] = near
-	data["voices_within_near"] = near_close
-	await _log_nearest_voice_states(marker_players, listen_pos)
+	# The emitter channels the bed binds (the engine mixer's 4..11) and their volume bytes.
+	var bed_volume := 0
+	var bound := audio.active_ambient_candidate_ids()
+	for id: Variant in bound:
+		bed_volume = maxi(bed_volume, audio.channel_volume(audio.ambient_channel_for_candidate(int(id))))
+	ctx.log("ambient candidates=%d bound channels=%d (loudest volume %d) listener=%s" % [
+			int(stats.ambient_candidates), bound.size(), bed_volume, str(listen_pos)])
+	data["bound_channels"] = bound.size()
+	data["bed_volume"] = bed_volume
 
-	var voice_bus := AudioServer.get_bus_index(&"Voice")
-	var ambient_bus := AudioServer.get_bus_index(&"Ambient")
+	# Let the ambient bed spin up, then sample the one stream's steady peak on Master.
 	var master_bus := AudioServer.get_bus_index(&"Master")
-	if voice_bus < 0:
-		_fail("Voice bus missing from the layout")
-
-	# Let the ambient bed spin up, then sample its steady peak.
-	var ambient_floor := UNMEASURED_DB
 	var master_floor := UNMEASURED_DB
 	var spin_until := Time.get_ticks_msec() + AMBIENT_SPIN_MS
 	while Time.get_ticks_msec() < spin_until and not ctx.cancelled:
 		await ctx.tree.process_frame
-		if ambient_bus >= 0:
-			ambient_floor = maxf(ambient_floor, AudioServer.get_bus_peak_volume_left_db(ambient_bus, 0))
+		audio.tick(listen_pos, 0.0)
 		master_floor = maxf(master_floor, AudioServer.get_bus_peak_volume_left_db(master_bus, 0))
-	ctx.log("pre-dialog peaks: ambient=%.1f dB master=%.1f dB" % [ambient_floor, master_floor])
-	data["pre_dialog_peaks"] = {"ambient_db": ambient_floor, "master_db": master_floor}
+	ctx.log("pre-dialog peak: master=%.1f dB" % master_floor)
+	data["pre_dialog_peaks"] = {"master_db": master_floor}
 
 	# The first N dialog ids whose first line resolves to a wave of the dialog bank.
 	var dialog_count := int(stats.dialogs)
@@ -132,7 +103,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	for id in ids:
 		if ctx.cancelled:
 			break
-		var line := await _play_line(audio, id, ambient, voice_bus, ambient_bus, master_bus)
+		var line := await _play_line(audio, id, ambient, bed_volume, master_bus, listen_pos)
 		(data["lines"] as Array).append(line)
 
 	data["failures"] = Array(_failures)
@@ -180,28 +151,8 @@ func _sim_arm(mission: MissionData, sim_ticks: int, data: Dictionary) -> Vector3
 	return player_pos
 
 
-## Per-voice state for the nearest few: distinguishes "not playing" from
-## "playing but mixed to nothing" (a headless 3D-audio artifact vs a bug).
-func _log_nearest_voice_states(marker_players: Array, listen_pos: Vector3) -> void:
-	var by_dist := marker_players.duplicate()
-	by_dist.sort_custom(func(a: Node3D, b: Node3D) -> bool:
-		return (a.global_position - listen_pos).length() < (b.global_position - listen_pos).length())
-	for i in range(mini(VOICE_STATE_SAMPLE, by_dist.size())):
-		var p := by_dist[i] as AudioStreamPlayer3D
-		var d := (p.global_position - listen_pos).length()
-		var pos0 := p.get_playback_position()
-		await _ctx.wait_frames(2)
-		if not is_instance_valid(p):
-			return
-		var pos1 := p.get_playback_position()
-		var length := p.stream.get_length() if p.stream != null else -1.0
-		_ctx.log("  voice d=%5.1fu playing=%s paused=%s pos %.3f->%.3f vol=%.1f dB unit=%.1f max=%.1f bus=%s stream_len=%.2f" % [
-				d, str(p.playing), str(p.stream_paused), pos0, pos1, p.volume_db, p.unit_size,
-				p.max_distance, p.bus, length])
-
-
-func _play_line(audio: MissionAudio, id: int, ambient: bool, voice_bus: int,
-		ambient_bus: int, master_bus: int) -> Dictionary:
+func _play_line(audio: MissionAudio, id: int, ambient: bool, bed_volume: int,
+		master_bus: int, listen_pos: Vector3) -> Dictionary:
 	var set_name := String(audio.resolve_dialog_wave(id))
 	var line := {"id": id, "set": set_name, "spawned": false, "audible": false, "advanced": false}
 	if not audio.play_dialog(id):
@@ -210,55 +161,40 @@ func _play_line(audio: MissionAudio, id: int, ambient: bool, voice_bus: int,
 	# The dialog's first line loads on the next dialog tick, which the world runs
 	# once a logic tick; the probe has no world, so it runs that tick itself.
 	audio.advance_dialog_tick()
-	var voice: AudioStreamPlayer = audio.dialog_voice()
-	if voice == null:
+	if not audio.is_dialog_voice_playing():
 		_fail("dlg%03d (%s): queued but no voice spawned" % [id, set_name])
 		return line
 	line["spawned"] = true
-	var length: float = voice.stream.get_length() if voice.stream != null else 0.0
-	var loop_mode := -1
-	if voice.stream is AudioStreamWAV:
-		loop_mode = (voice.stream as AudioStreamWAV).loop_mode
-	var deadline := Time.get_ticks_msec() + int((length + LINE_TIMEOUT_SLACK_S) * 1000.0)
-	var peak_voice := UNMEASURED_DB
-	var peak_ambient := UNMEASURED_DB
+	# The dialog channel (3): its volume byte, the line's through the dialogue option.
+	var dialog_volume := audio.channel_volume(3)
+	var started := Time.get_ticks_msec()
+	var deadline := started + int(LINE_TIMEOUT_SLACK_S * 1000.0) + 60000
 	var peak_master := UNMEASURED_DB
-	while audio.dialog_voice() != null and not _ctx.cancelled:
+	while audio.is_dialog_voice_playing() and not _ctx.cancelled:
 		if Time.get_ticks_msec() > deadline:
 			break
-		if voice_bus >= 0:
-			peak_voice = maxf(peak_voice, AudioServer.get_bus_peak_volume_left_db(voice_bus, 0))
-		if ambient_bus >= 0:
-			peak_ambient = maxf(peak_ambient, AudioServer.get_bus_peak_volume_left_db(ambient_bus, 0))
 		peak_master = maxf(peak_master, AudioServer.get_bus_peak_volume_left_db(master_bus, 0))
 		await _ctx.tree.process_frame
-	var advanced: bool = audio.dialog_voice() == null
-	var audible := peak_voice > SILENCE_FLOOR_DB
-	_ctx.log("dlg%03d set=%s len=%.2fs loop_mode=%d -> spawn=OK audible=%s (voice peak %.1f dB) advance=%s | ambient peak %.1f dB master peak %.1f dB" % [
-			id, set_name, length, loop_mode, str(audible), peak_voice, str(advanced),
-			peak_ambient, peak_master])
+		audio.tick(listen_pos, 0.0)
+	var advanced: bool = not audio.is_dialog_voice_playing()
+	var audible := dialog_volume > 0
+	var length := float(Time.get_ticks_msec() - started) / 1000.0
+	_ctx.log("dlg%03d set=%s played %.2fs volume %d -> spawn=OK audible=%s advance=%s | bed volume %d master peak %.1f dB" % [
+			id, set_name, length, dialog_volume, str(audible), str(advanced), bed_volume, peak_master])
 	line["length_s"] = length
-	line["loop_mode"] = loop_mode
 	line["audible"] = audible
 	line["advanced"] = advanced
-	line["peak_voice_db"] = peak_voice
-	line["peak_ambient_db"] = peak_ambient
+	line["dialog_volume"] = dialog_volume
 	line["peak_master_db"] = peak_master
 	if not audible:
-		_fail("dlg%03d (%s): voice never rose above %.0f dB on the Voice bus" % [id, set_name, SILENCE_FLOOR_DB])
+		_fail("dlg%03d (%s): the dialog channel opened at volume 0" % [id, set_name])
 	if not advanced:
-		_fail("dlg%03d (%s): voice never finished within len+%.0fs (queue jam)" % [id, set_name, LINE_TIMEOUT_SLACK_S])
-	# Masking: the bug class this pins is the ambient bed BURYING the dialog
-	# (pre-fix: +21.5 dB clipping wall vs -0.6 dB speech, inverted radius
-	# semantics). The per-voice levels are IDA-witnessed
-	# (SoundBank_CalcDistanceVolPan @ 0x75ca20), so the gate only asserts the
-	# bed stays below the speech peak and below clipping. Only meaningful when
-	# the 3D path actually mixed (a windowed run); headless mixes 3D voices to
-	# nothing.
-	if ambient and peak_ambient > UNMEASURED_DB + 20.0:
-		if peak_ambient >= peak_voice:
-			_fail("dlg%03d: ambient bed peak %.1f dB is above the dialog voice peak %.1f dB (dialog buried)" % [
-					id, peak_ambient, peak_voice])
-		elif peak_ambient >= 0.0:
-			_fail("dlg%03d: ambient bed peak %.1f dB is clipping" % [id, peak_ambient])
+		_fail("dlg%03d (%s): voice never finished in time (queue jam)" % [id, set_name])
+	# Masking: the bug class this pins is the ambient bed BURYING the dialog (pre-fix: a
+	# clipping wall against quiet speech, inverted radius semantics). The per-voice levels
+	# are IDA-witnessed (SoundBank_CalcDistanceVolPan @ 0x75ca20), so the gate only asserts
+	# the bed's loudest channel stays below the dialog channel.
+	if ambient and bed_volume > dialog_volume:
+		_fail("dlg%03d: the ambient bed's channel volume %d is above the dialog's %d (dialog buried)" % [
+				id, bed_volume, dialog_volume])
 	return line

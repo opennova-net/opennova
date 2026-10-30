@@ -932,14 +932,25 @@ target_link_libraries(ambient_emitters_test PRIVATE opennova_runtime)
 target_compile_features(ambient_emitters_test PRIVATE cxx_std_17)
 add_test(NAME ambient_emitters COMMAND ambient_emitters_test)
 
-# The sound-effects option's park (runtime/audio/effects_volume_park.h): saved only
-# when nothing is saved, restored once [orig: Sound_ParkEffectsVolume @ 0x5280b0;
+# The sound option words and the sound-effects option's park (runtime/audio/sound_options.h):
+# saved only when nothing is saved, restored once [orig: Sound_ParkEffectsVolume @ 0x5280b0;
 # Sound_RestoreEffectsVolume @ 0x5280d0].
-add_executable(effects_volume_park_test audio/effects_volume_park_test.cpp)
-target_link_libraries(effects_volume_park_test PRIVATE opennova_runtime)
-target_include_directories(effects_volume_park_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_features(effects_volume_park_test PRIVATE cxx_std_17)
-add_test(NAME effects_volume_park COMMAND effects_volume_park_test)
+add_executable(sound_options_test audio/sound_options_test.cpp)
+target_link_libraries(sound_options_test PRIVATE opennova_runtime)
+target_include_directories(sound_options_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(sound_options_test PRIVATE cxx_std_17)
+add_test(NAME sound_options COMMAND sound_options_test)
+
+# The software mixer (runtime/audio/mixer.h, ADR 0077 d4): the stereo blend table, the bearing
+# pans, the coefficients, the step and the four-tap box, the coefficient shift, the channel calls
+# and the allocator, the buses' tail and the stereo stage, the channel-zero meter, the doppler,
+# the music stream, the listener's pans, the scripted voice on channel zero, and a mixed-buffer
+# golden of the minted fixture wave (fixtures/lwf/tone.wav).
+add_executable(audio_mixer_test audio/mixer_test.cpp)
+target_link_libraries(audio_mixer_test PRIVATE opennova_runtime)
+target_include_directories(audio_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(audio_mixer_test PRIVATE cxx_std_17)
+add_test(NAME audio_mixer COMMAND audio_mixer_test)
 
 # S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
 # entity pools, the authored soundloop slots passed through unfiltered, walk order,

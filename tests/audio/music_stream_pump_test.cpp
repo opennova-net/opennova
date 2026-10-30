@@ -1,5 +1,5 @@
 // The music stream pump (runtime/audio/music_stream_pump.h) over scripts compiled from MUS text:
-// the script steps only once the track its last `play` selected has stopped sounding, a service
+// the script steps only once the track its last `play` selected has streamed out, a service
 // frame steps through section changes to the next `play` (at most seven updates), a signal's
 // handler whose run reaches a `play` starts it at once, the shipped handler's GFB empties the
 // stream so the next update steps over a track still sounding when its run ends short of the
@@ -25,16 +25,24 @@ static int failures = 0;
 
 namespace {
 
-// The device: the tracks started, in order, and whether the last one still sounds.
+// The device: the tracks started, in order; whether the last one still sounds (its bytes not yet
+// all queued, the queue full while it does) and whether a GFB emptied its bytes left.
 struct Device final : audio::MusicStreamDevice {
 	std::vector<uint32_t> tracks;
 	std::vector<std::string> sections;
 	bool sounding = false;
+	bool left = false;
+	int blocks = 0;
 	void start_track(uint32_t entry) override {
 		tracks.push_back(entry);
 		sounding = true;
+		left = true;
 	}
-	bool track_sounding() const override { return sounding; }
+	void flush() override { left = false; }
+	bool streaming() const override { return left && sounding; }
+	bool full = true;
+	bool queue_full() const override { return full; }
+	void stream_block() override { ++blocks; }
 	void section_entered(const char *name) override { sections.push_back(name ? name : ""); }
 };
 
@@ -187,6 +195,22 @@ void test_flush_steps_over_the_sounding_track() {
 	}
 }
 
+// With room in the queue an update streams a block: the frame's first update steps to the
+// `play`, the other six stream six blocks of the track [orig: AudioStream_Update @0x671CA4..
+// 0x671DB3, AudioStream_ServiceFrame @0x671DDC..0x671DE7].
+void test_streams_blocks_while_the_queue_has_room() {
+	Context c(kChainSrc);
+	CHECK(c.ok);
+	if (!c.ok) return;
+	c.device.full = false;
+	c.pump.service_frame(16);
+	CHECK(c.device.tracks == std::vector<uint32_t>({1}));
+	CHECK(c.device.blocks == 6);
+	c.device.full = true;
+	c.pump.service_frame(16);
+	CHECK(c.device.blocks == 6);
+}
+
 // A fresh context selects no track; end() and a VM that stops end the pumping.
 void test_context_bounds() {
 	Context c(kChainSrc);
@@ -215,6 +239,7 @@ int main() {
 	test_steps_on_track_completion();
 	test_frame_takes_seven_updates();
 	test_flush_steps_over_the_sounding_track();
+	test_streams_blocks_while_the_queue_has_room();
 	test_context_bounds();
 	if (failures != 0) {
 		std::printf("music_stream_pump: %d failure(s)\n", failures);

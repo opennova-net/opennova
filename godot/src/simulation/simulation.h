@@ -1,5 +1,6 @@
 #pragma once
 #include <runtime/audio/envs_markers.h>
+#include <runtime/audio/audio_out_meter.h> // AudioOutMeter (the mixer meter's words)
 #include <runtime/world/minefield.h>
 
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -243,6 +244,7 @@ private:
 	bool restart_boot_ = false; // set_restart_boot: the single player's restart (boot_mission)
 	bool render_arm_deferred_ = false; // set_render_arm_deferred: the world's device stages
 	opennova::world::ScriptVoiceChannel::SetResolver voice_set_resolver_;
+	opennova::world::ScriptVoiceChannel::DialogueVolume voice_dialogue_volume_;
 	SimulationPresentState present_;
 	SimulationPlayerState player_;
 	using PresentRowIdentity = SimulationPresentState::PresentRowIdentity;
@@ -1785,10 +1787,17 @@ public:
 	opennova::world::ScriptVoiceChannel::Frame script_voice_frame(const Vector3 &p_listener);
 	opennova::world::ScriptVoiceChannel::Frame script_voice_state(const Vector3 &p_listener) const;
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
-	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
+	// The set resolver and the dialogue option's reader the world's scripted voice reads.
+	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver,
+			opennova::world::ScriptVoiceChannel::DialogueVolume p_dialogue_volume);
 	bool play_script_wave(const String &p_filename);
-	// The mixer meter's device feed (engine audio::AudioOutMeter): seconds mixed, the script-voice bus's peak.
-	void advance_audio_out_meter(double p_seconds, float p_peak);
+	// The mixer's output meter words (engine audio::Mixer::meter) into the world's.
+	void set_audio_out_meter(const opennova::audio::AudioOutMeter &p_meter);
+	// The sound layer's reads of a channel's source (engine world::sound_source_place /
+	// sound_source_ridden / sound_spawn_ridden: a one-shot's owner id, an emitter's spawn serial).
+	bool sound_source_place(uint32_t p_sound_id, int32_t r_position[3]) const;
+	bool sound_source_ridden(uint32_t p_sound_id) const;
+	bool sound_spawn_ridden(uint64_t p_spawn_id) const;
 	// The world's one dialog table, which mission audio plays (runtime/audio/dialog_queue.h).
 	opennova::audio::DialogQueue *dialog_queue();
 	// One dialog tick over the world's table: the device loads and plays each line, then the

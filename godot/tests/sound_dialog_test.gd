@@ -7,7 +7,7 @@ extends GutTest
 ## naming a wave per line, and the shared IMA-ADPCM wave as dlg001's line.
 ## Replaces the retail 00TRg witness (its .DBF/.LWF and z00gr100.wav, an
 ## IMA-ADPCM dialog wave): every dialog id resolves to a wave of the dialog
-## bank, and the ADPCM wave decodes to 16-bit PCM without an audio device.
+## bank, and the ADPCM wave decodes and plays on the dialog channel.
 
 const MISSION := "synthdlg.bms"
 const DIALOG_BANK := "res://../fixtures/dbf/synth_bank.dbf"
@@ -82,16 +82,15 @@ func test_minted_mission_dialog_resolves() -> void:
 	assert_eq(resolved, dialog_count, "every dialog id resolves to a wave of the dialog bank")
 	assert_eq(audio.resolve_dialog_wave(1), ADPCM_NAME, "dlg001's line plays the ADPCM wave")
 
-	# Dialog/zone waves are IMA-ADPCM (audioFormat 0x11): they decode to a
-	# non-empty 16-bit stream (WavLoader once returned null -> silence).
+	# Dialog/zone waves are IMA-ADPCM (audioFormat 0x11): dlg001's decodes and plays on the
+	# dialog channel (a wave that failed to decode once left it silent; the decode's samples
+	# are the ctest `wav_pcm`).
 	var wbytes := root.read_file(ADPCM_NAME)
 	assert_false(wbytes.is_empty(), "the ADPCM wave is served from the root")
 	assert_eq(_wave_format(wbytes), 0x11, "the staged wave is IMA-ADPCM")
-	var stream := WavLoader.from_bytes(wbytes)
-	assert_not_null(stream, "IMA-ADPCM dialog wav decodes")
-	if stream != null:
-		assert_eq(stream.format, AudioStreamWAV.FORMAT_16_BITS)
-		assert_gt(stream.data.size(), 0, "decoded PCM is non-empty")
+	assert_true(audio.play_dialog(1))
+	audio.advance_dialog_tick()
+	assert_true(audio.is_dialog_voice_playing(), "IMA-ADPCM dialog wav decodes and plays")
 	audio.teardown()
 
 

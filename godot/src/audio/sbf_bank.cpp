@@ -4,7 +4,6 @@
 // archives via the same header + entry-table layout.
 
 #include "audio/sbf_bank.h"
-#include "audio/sbf_audio_stream.h"
 #include "util/data_format.h"
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -37,7 +36,6 @@ void SbfBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entries"), &SbfBank::get_entries);
 	ClassDB::bind_method(D_METHOD("has_entry", "name"), &SbfBank::has_entry);
 	ClassDB::bind_method(D_METHOD("get_entry_name", "index"), &SbfBank::get_entry_name);
-	ClassDB::bind_method(D_METHOD("get_stream_at", "index"), &SbfBank::get_stream_at);
 	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &SbfBank::load_from_path);
 	ClassDB::bind_static_method("SbfBank", D_METHOD("create_empty"), &SbfBank::create_empty);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &SbfBank::get_raw_file_bytes);
@@ -201,19 +199,6 @@ bool SbfBank::read_file_block(uint64_t p_offset, uint32_t p_size, PackedByteArra
 	r_block.resize(static_cast<int64_t>(p_size));
 	std::memcpy(r_block.ptrw(), _file_bytes.ptr() + p_offset, p_size);
 	return true;
-}
-
-Ref<SbfAudioStream> SbfBank::get_stream_at(int p_index) {
-	if (!_opened) {
-		return Ref<SbfAudioStream>();
-	}
-	if (p_index < 0 || (uint32_t)p_index >= _arc.header.entry_count) {
-		return Ref<SbfAudioStream>();
-	}
-	Ref<SbfAudioStream> stream;
-	stream.instantiate();
-	stream->configure(this, p_index);
-	return stream;
 }
 
 namespace {

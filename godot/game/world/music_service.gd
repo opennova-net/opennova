@@ -22,7 +22,7 @@ extends Node
 # mixer drains within a few frames.
 const PLAYBACK_DRAIN_TIMEOUT_MSEC := 1000
 
-# The service owns the one director (and thereby the AudioStreamPlayer pool).
+# The service owns the one director (and thereby the music stream over the mixer).
 var _director: MusicDirector = null
 # "", "menu" or "game" — which context is loaded (ADR 0018 read seam for tests).
 var _context := ""
@@ -161,17 +161,12 @@ func stop_context() -> void:
 	_script = null
 
 
-## Godot releases stopped streaming playbacks on a later audio/main-thread pass.
-## Orderly application shutdown must keep that pump alive until the extension's
-## playback objects are gone; stopping the VM alone does not release them.
-## The wait is bounded: AudioServer erases a stopped playback only inside its
-## mix step, and a WASAPI driver that lost its endpoint (or ended its thread
-## on a buffer error) never mixes again, so an unbounded wait would hold the
-## quit forever. A healthy mixer drains in a few frames; after
-## `timeout_msec` the caller quits with live playback (the forced-exit
-## ordering tracked in docs/world/npc-mission-completion.md "Runtime
-## shutdown"; docs/audio/mus-sbf-re.md "Godot playback shutdown"). Returns
-## false on that timeout.
+## Waits while a track still streams onto the engine mixer's music channels
+## (MusicDirector.has_pending_playback); the director's stop ends it at once.
+## The wait is bounded: after `timeout_msec` the caller quits with the track
+## streaming (the forced-exit ordering tracked in
+## docs/world/npc-mission-completion.md "Runtime shutdown"). Returns false on
+## that timeout.
 func await_playback_stopped(timeout_msec: int = PLAYBACK_DRAIN_TIMEOUT_MSEC) -> bool:
 	var deadline := Time.get_ticks_msec() + timeout_msec
 	while is_instance_valid(_director) and _director.has_pending_playback():

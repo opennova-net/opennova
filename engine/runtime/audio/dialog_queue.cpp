@@ -1,5 +1,7 @@
 #include <runtime/audio/dialog_queue.h>
 
+#include <runtime/audio/sound_options.h>
+
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -296,6 +298,11 @@ void DialogQueue::clear() {
 	slots_.clear();
 	history_.clear();
 	voices_.clear();
+}
+
+ChannelParams dialog_line_params(MixWaveRef wave, int line_volume, int32_t dialogue_option) {
+	const int32_t volume = scaled_volume(line_volume != 0 ? line_volume : kVolumeByteMax, dialogue_option);
+	return voice_params(std::move(wave), 0, static_cast<uint8_t>(volume), 0x10000);
 }
 
 } // namespace opennova::audio

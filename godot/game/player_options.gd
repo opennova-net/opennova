@@ -68,7 +68,7 @@ const SOUND_FX_VOLUME_CONTROL := "SOUNDFXVOLUME"
 const DIALOG_VOLUME_CONTROL := "DIALOGVOLUME"
 const MUSIC_VOLUME_CONTROL := "MUSICVOLUME"
 # Initial channel volumes come from the engine configuration defaults.
-const DEFAULT_VOLUME := SoundSelector.DEFAULT_CHANNEL_VOLUME
+const DEFAULT_VOLUME := AudioOut.DEFAULT_CHANNEL_VOLUME
 # One home for the crosshair art range, colour default / mask and spread
 # default: the native HudOverlay binding over the engine's HudLayout
 # (Config_SetDefaults @0x54d461 / @0x54d472 via hud_frame.h).
@@ -86,10 +86,6 @@ const DEFAULT_CROSSHAIR_SPREAD := HudOverlay.DEFAULT_CROSSHAIR_SPREAD != 0
 # it, as retail's first-launch video test does (fresh_profile_aspect_mode;
 # docs/mnu/menu-re.md, the 16x9DISPLAY paragraph).
 const DEFAULT_ASPECT_MODE := 0
-
-const SOUND_FX_BUSES := [&"SFX", &"Ambient"]
-const DIALOG_BUS := &"Voice"
-const MUSIC_BUS := &"Music"
 
 
 class State extends RefCounted:
@@ -251,10 +247,7 @@ func reload() -> void:
 ## The mouse words are the player profile's, which the mission start's session
 ## copy hands the Simulation itself (Simulation.use_player_profile).
 func apply(simulation: Simulation = null) -> void:
-	for bus_name: StringName in SOUND_FX_BUSES:
-		_set_bus_volume(bus_name, _state.sound_fx_volume)
-	_set_bus_volume(DIALOG_BUS, _state.dialog_volume)
-	_set_bus_volume(MUSIC_BUS, _state.music_volume)
+	AudioOut.set_option_volumes(_state.sound_fx_volume, _state.dialog_volume, _state.music_volume)
 	if simulation != null:
 		simulation.set_local_player_aspect_mode(_state.aspect_mode)
 
@@ -321,10 +314,3 @@ static func _clamp_to_control(value: int, control: String) -> int:
 		if String(range["control"]) == control:
 			return clampi(value, int(range["minimum"]), int(range["maximum"]))
 	return value
-
-
-static func _set_bus_volume(bus_name: StringName, volume: int) -> void:
-	var bus := AudioServer.get_bus_index(bus_name)
-	if bus >= 0:
-		AudioServer.set_bus_volume_db(bus,
-				SoundSelector.volume_db_from_255(volume))

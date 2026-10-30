@@ -61,13 +61,15 @@ int32_t emitter_layer_volume(int64_t dist_q16, int32_t falloff_u, int32_t min_u,
 }
 
 int32_t oneshot_layer_volume(int64_t dist_q16, int64_t min_q16, int64_t falloff_q16,
-                             int32_t member_vol, int32_t clamp_vol) {
+                             int32_t member_vol, int32_t clamp_vol, int32_t emitter_vol) {
     // No falloff radius: the RAW emitter volume — member volume is not
     // consulted [orig: @ 0x75cf88 the no-falloff branch].
     if (falloff_q16 <= 0) {
-        return 255;
+        return emitter_vol;
     }
-    int32_t vol = member_vol;
+    // [orig: `(sample_entry[3] * (emitter_info[2] + 1)) >> 8` @ 0x75cf17..0x75cf25]
+    int32_t vol = static_cast<int32_t>((static_cast<uint32_t>(member_vol) *
+            static_cast<uint32_t>(emitter_vol + 1)) >> 8);
     if (min_q16 > 0 && dist_q16 < min_q16) {
         // The proximity stage feeds the falloff stage; unlike the emitter
         // path, the arguments stay Q16 [orig: @ 0x75cf14..0x75cf8b].
@@ -399,7 +401,8 @@ void AmbientMixer::register_emitter(uint64_t source_spawn_id, int32_t lane,
                                     const float pos[3], int64_t source_bms_id,
                                     int32_t lifetime_ticks, int32_t pitch_q16,
                                     int32_t volume_q8_8,
-                                    std::vector<LayerDesc> layers) {
+                                    std::vector<LayerDesc> layers,
+                                    const int32_t *velocity) {
     // [orig: SoundEmitter_RegisterSetLayers @ 0x528340] — either zero field
     // routes to SoundEmitter_ClearByEntityAndSlot for this source/lane only.
     // The clear carries the source's pose to its other live lanes (the port's
@@ -428,6 +431,8 @@ void AmbientMixer::register_emitter(uint64_t source_spawn_id, int32_t lane,
     emitter.pos[1] = pos[1];
     emitter.pos[2] = pos[2];
     emitter.source_bms_id = source_bms_id;
+    // The velocity copied into the slots, zeros for none [orig: @ 0x528417..0x528451].
+    for (int i = 0; i < 3; ++i) emitter.velocity[i] = velocity != nullptr ? velocity[i] : 0;
     emitter.layers = std::move(layers);
     emitter.occl_stamp = -1;
     emitter.occl_dist_q16 = -1;
@@ -489,6 +494,8 @@ const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
                                          : s.lifetime - static_cast<int32_t>(delta);
         const float *source_pos = nullptr;
         int64_t source_bms_id = 0;
+        uint64_t source_spawn_id = 0;
+        const int32_t *source_velocity = nullptr;
         const LayerDesc *ld = nullptr;
         int64_t *occl_stamp = nullptr;
         int64_t *occl_dist_q16 = nullptr;
@@ -507,6 +514,8 @@ const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
             }
             source_pos = emitter.pos;
             source_bms_id = emitter.source_bms_id;
+            source_spawn_id = emitter.source_spawn_id;
+            source_velocity = emitter.velocity;
             ld = &emitter.layers[static_cast<size_t>(s.layer)];
             occl_stamp = &emitter.occl_stamp;
             occl_dist_q16 = &emitter.occl_dist_q16;
@@ -582,6 +591,9 @@ const std::vector<AmbientCandidate> &AmbientMixer::mix(const float listener[3],
         c.pos[0] = source_pos[0];
         c.pos[1] = source_pos[1];
         c.pos[2] = source_pos[2];
+        c.source_spawn_id = source_spawn_id;
+        if (source_velocity != nullptr)
+            for (int i = 0; i < 3; ++i) c.velocity[i] = source_velocity[i];
         mix_out_.push_back(c);
         // The original's candidate collect buffer holds 64 entries and the slot
         // walk BREAKS when it fills — slots past the 64th audible candidate never

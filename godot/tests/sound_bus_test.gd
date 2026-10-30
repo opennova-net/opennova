@@ -1,14 +1,11 @@
 extends GutTest
 
-## Guards the project audio bus layout (res://default_bus_layout.tres). A malformed
-## layout (e.g. the Master bus routed to itself) silently breaks the AudioServer bus
-## graph and silences ALL playback; this caught that class of bug headlessly, with no
-## audio device, after the first attempt shipped silent.
-
-const BUSES := ["Master", "SFX", "Music", "Ambient", "Voice", "ScriptVoice"]
+## Guards the project audio bus layout (res://default_bus_layout.tres): the Master bus
+## alone. The engine mixes every sound into one stream (ADR 0077 d4, AudioOut), which
+## plays on Master, whose gain is the only level Godot keeps.
 
 
-func test_default_bus_layout_defines_routed_buses() -> void:
+func test_default_bus_layout_is_master_alone() -> void:
 	var layout = ResourceLoader.load("res://default_bus_layout.tres")
 	assert_not_null(layout, "default_bus_layout.tres should load")
 	assert_true(layout is AudioBusLayout, "it is an AudioBusLayout resource")
@@ -16,22 +13,6 @@ func test_default_bus_layout_defines_routed_buses() -> void:
 	# Preserve and restore the live layout so this test doesn't perturb others.
 	var prev := AudioServer.generate_bus_layout()
 	AudioServer.set_bus_layout(layout)
-
-	for name in BUSES:
-		assert_true(AudioServer.get_bus_index(name) >= 0, "bus '%s' exists" % name)
-
-	# Master must NOT route to itself (the original bug); every other bus routes to Master.
-	var master_idx := AudioServer.get_bus_index("Master")
-	assert_ne(AudioServer.get_bus_send(master_idx), StringName("Master"),
-		"Master must not send to itself")
-	for name in ["SFX", "Music", "Ambient", "Voice"]:
-		var idx := AudioServer.get_bus_index(name)
-		assert_eq(AudioServer.get_bus_send(idx), StringName("Master"),
-			"bus '%s' routes to Master" % name)
-	# Channel zero's voices play on ScriptVoice, the bus the mixer meter reads, which
-	# routes to Voice so the dialog volume still applies.
-	var script_voice := AudioServer.get_bus_index("ScriptVoice")
-	assert_eq(AudioServer.get_bus_send(script_voice), StringName("Voice"),
-		"bus 'ScriptVoice' routes to Voice")
-
+	assert_eq(AudioServer.bus_count, 1, "the layout holds one bus")
+	assert_eq(AudioServer.get_bus_name(0), "Master", "the one bus is Master")
 	AudioServer.set_bus_layout(prev)
