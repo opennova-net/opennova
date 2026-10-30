@@ -1350,15 +1350,28 @@ void test_best_seat_walks_vehicle_children() {
     CHECK(selected.seat_index == 1);
     CHECK(selected.type == SeatType::Controller);
 
-    // Child control seats are never eligible; command 123 also narrows the
-    // walk to passenger seats without changing root/child weighting.
+    // Child control seats are never eligible; the occupant's own command 123
+    // narrows the walk to passenger seats without changing root/child weighting
+    // [orig: Entity_FindBestSeatSlot @0x4351F0 - the AI slot's command +0x94
+    //  @0x4353C8..0x4353E6].
     w.registry.get(root_h)->seats[1].occupant = EntityHandle::make(0, 3);
+    AiEntity *brain = w.ai.at(w.ai.attach(player_h));
+    CHECK(brain != nullptr);
+    brain->slot.f[37] = kCommandAttachPassengerOnly;
     selected = {};
-    CHECK(find_best_vehicle_seat(
-            w, root_h, player_h, selected,
-            SeatSelectionMode::PassengerOnly));
+    CHECK(find_best_vehicle_seat(w, root_h, player_h, selected));
     CHECK(selected.vehicle == root_h);
     CHECK(selected.seat_index == 0);
+    // With the passenger seat taken too, command 123 finds no seat (the child's
+    // gun is no passenger seat), and so the board admission refuses the carrier,
+    // as Entity_CanEnterVehicle's search does; any other command takes the gun.
+    w.registry.get(root_h)->seats[0].occupant = EntityHandle::make(0, 2);
+    selected = {};
+    CHECK(!find_best_vehicle_seat(w, root_h, player_h, selected));
+    brain->slot.f[37] = kCommandAttachSkipController;
+    selected = {};
+    CHECK(find_best_vehicle_seat(w, root_h, player_h, selected));
+    CHECK(selected.vehicle == child_h && selected.type == SeatType::Gunner);
 }
 
 // The root's proximity slice bounds the seat search; equal-weight child guns

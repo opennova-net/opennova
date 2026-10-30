@@ -3,7 +3,6 @@
 #include <cstdint>
 
 #include <runtime/world/entity.h>
-#include <runtime/world/vehicle_mount.h> // SeatSelectionMode default args
 #include <runtime/world/weather_state.h>  // WeatherColorTarget
 
 // EntityCommands: the shared host-authoritative command layer. Split from
@@ -309,19 +308,15 @@ public:
     bool group_alive(int group) const;
 
     // --- mount / emplacement (AttachToEmplaced) ---
-    // The AI board's mount (mount_boarding_command) and the shell's debug crew seams:
-    // request occupant_ssn into target_ssn's best free root/child seat. Reject if the
-    // occupant is already mounted or the target has no free seat. Returns false on any
-    // reject. The script mount is use_boarding_target.
+    // The AI board's mount ("Goto SSN and board", commands 123/124/125) and the shell's
+    // debug crew seams: request occupant_ssn into target_ssn's best free root/child seat,
+    // the occupant's own board command filtering the seats (find_best_vehicle_seat: 123
+    // only `sitex`, 124 no `ctrlx`). Reject if the occupant is already mounted or the
+    // target has no free seat. Returns false on any reject. The script mount is
+    // use_boarding_target.
     // [orig: Entity_UpdateInfantryAI -> Entity_FindBestSeatSlot @0x4BBDD4 ->
     //  Entity_RequestVehicleAttach @0x4BBDF2]
-    bool mount(EntityTarget occupant_ssn, EntityTarget target_ssn,
-               SeatSelectionMode mode = SeatSelectionMode::Any);
-    // Port-side helper for authored "Goto SSN and board" commands 123/124/125, not a retail
-    // symbol. Retail path: Entity_UpdateInfantryAI @0x4ba9ad -> Entity_FindBestSeatSlot
-    // @0x4351f0 -> Entity_RequestVehicleAttach @0x4364a0. FindBestSeatSlot applies the rules:
-    // 123 only accepts `sitex`, 124 rejects `ctrlx`, and 125 uses normal best-seat priority.
-    bool mount_boarding_command(EntityTarget occupant_ssn, EntityTarget target_ssn, uint8_t command_id);
+    bool mount(EntityTarget occupant_ssn, EntityTarget target_ssn);
 
     // WAC `ssnrelease` -- the release half of the AI boarding order.
     // [orig: WacCmd_SsnRelease @0x4f7420]

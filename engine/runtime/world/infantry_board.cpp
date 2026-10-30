@@ -432,9 +432,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 	int32_t radius = io::bam_add(target->bound_radius.q16, 0x10000); // `add edi, 10000h` @0x4BB344
 	if (entry_type && pc && vehicle_can_enter(world, self, *target)) {
 		VehicleSeatSelection best;
-		SeatSelectionMode mode = SeatSelectionMode::Any; // a non-attach command keeps Any
-		seat_selection_mode_for_command(command, mode);
-		if (find_best_vehicle_seat(world, th, e.handle, best, mode)) {
+		if (find_best_vehicle_seat(world, th, e.handle, best)) {
 			const Entity *carrier = world.registry.get(best.vehicle);
 			if (carrier)
 				seat_world_position(world, *carrier, carrier->seats[best.seat_index], goal);
@@ -494,7 +492,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 			++inf.board_entry_stage;
 		if (!self->mounted && radius < 0x640000 &&
 				(target->item_attrib & (kItemAttribPlayerControl | kItemAttribEweap)) != 0) {
-			world.commands.mount_boarding_command(self->net_id, ssn, static_cast<uint8_t>(command));
+			world.commands.mount(self->net_id, ssn);
 			if (!self->mounted) {
 				self->flags &= ~kEntityFlagMounted;
 				self->engine_flags &= ~kEntityFlagMounted;
