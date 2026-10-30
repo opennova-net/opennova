@@ -13,8 +13,9 @@
 //   (@ 0x677973..0x6779a7), so the fog begins at view depth 1000;
 // - type 0: EXP at density ln(64)/end, table fog or non-range vertex fog, so
 //   over the view depth (@ 0x6779be..0x677a48);
-// - every other type: vertex LINEAR from start to end with range fog on, so
-//   over the radial distance from the eye (@ 0x677a50..0x677a7f).
+// - every other type: vertex LINEAR from start to end with range fog on (the
+//   NORMAL and LITE RANGEFOGENABLE words @ 0x677a5d / @ 0x677a69), so over
+//   the radial distance from the eye (@ 0x677a50..0x677a7f).
 // There is no other guard: start != end keeps the linear divisor nonzero.
 // [orig: Render_SetFogState @ 0x58a950; CD3DDevice_SetFogParameters
 // @ 0x677960 (useLinear = fog_type != 0, exponential density ln(64)/end)]
