@@ -568,7 +568,8 @@ private:
 // AlphaGenValue factor of the _FFP families, the _MT Diffuse2 alpha, GPU
 // skinning, and the _FFP BLEND_ALPHA coverage blend (SRCALPHA/INVSRCALPHA of
 // the black over the white clear, a partial silhouette for a translucent
-// strip); a two-sided material culls nothing.
+// strip); the pass's device state, its blend and its cull, is
+// object_projected_shadow_pipeline_state's.
 enum SlotCaptureCommandFlag : uint32_t {
 	kSlotCaptureAlphaTest = 1u,
 	kSlotCaptureAlphaInvert = 2u,
@@ -584,8 +585,7 @@ struct SlotCaptureSurface {
 	ObjectProjectedShadowCoverage coverage = ObjectProjectedShadowCoverage::NoPass;
 	uint32_t flags = 0;
 	float alpha_test_value = 0.0f;
-	bool blend_coverage = false;
-	bool two_sided = false;
+	FixedFunctionState state{};
 };
 
 SlotCaptureSurface slot_capture_surface(const ObjectMaterialClassification &classification,

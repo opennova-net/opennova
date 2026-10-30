@@ -254,9 +254,6 @@ private:
 	void _on_tile_info_changed();
 	Ref<Shader> _load_terrain_shader();
 
-	static void _strip_to_list(const std::vector<uint16_t>& strip,
-	                           PackedInt32Array& out);
-
 
 protected:
 	static void _bind_methods();

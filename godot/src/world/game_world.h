@@ -759,6 +759,7 @@ public:
 	// (D-NET-1003). A synthetic driver stepping tick() banks its own delta.
 	double take_frame_elapsed_seconds();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
+	void on_wire_node_retired(int p_handle);
 	void on_frame_stats_capture_changed(bool p_active);
 	void on_nw_host_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);

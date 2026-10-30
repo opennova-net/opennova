@@ -14,6 +14,7 @@
 
 #include "object/object_shader_cache.h"
 #include "render/frame_fx.h"
+#include "render/q3_source_registry.h"
 #include "util/texture_path_resolver.h"
 
 #include <runtime/renderer/material_classify.h>
@@ -317,7 +318,16 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 	material->set_shader_parameter("u_local_light_intensity", 1.0f);
 	material->set_shader_parameter("u_local_light_atten_start", 0.0f);
 	material->set_shader_parameter("u_local_light_atten_end", 5.0f);
-	FrameFx::register_q3_object_material(material, q3_classification);
+	// The same draw values, handed to the focused Q3 compile as they are.
+	Q3ObjectMaterialValues q3_values;
+	q3_values.runtime = initial;
+	q3_values.diffuse = Ref<Texture2D>(bound_diffuse);
+	q3_values.diffuse_max_lod = opennova::texture_max_lod(bound_diffuse);
+	if (detail.is_valid()) {
+		q3_values.detail = detail;
+		q3_values.detail_max_lod = opennova::texture_max_lod(detail);
+	}
+	FrameFx::register_q3_object_material(material, q3_classification, q3_values);
 	// No shadow-receiver next pass on world models: retail's render-slot
 	// entity ground shadows drape TERRAIN-FOLLOWING patches only — a live
 	// silhouette never lands on another model [orig:

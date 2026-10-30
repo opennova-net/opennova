@@ -1,5 +1,6 @@
 #include "render/scene_overlay_compositor.h"
 #include "render/rd_glsl.h"
+#include "render/rd_pipeline_state.h"
 #include "render/rd_uniforms.h"
 #include "render/texture_filter_device.h"
 #include "util/string_convert.h"
@@ -19,11 +20,7 @@
 #include <string>
 #include <tuple>
 
-#include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
-#include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
-#include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_multisample_state.hpp>
-#include <godot_cpp/classes/rd_pipeline_rasterization_state.hpp>
 #include <godot_cpp/classes/rd_sampler_state.hpp>
 #include <godot_cpp/classes/rd_shader_source.hpp>
 #include <godot_cpp/classes/rd_shader_spirv.hpp>
@@ -51,7 +48,6 @@ using namespace godot;
 namespace {
 
 using opennova::renderer::SceneOverlayBatch;
-using opennova::renderer::SceneOverlayBlendFactor;
 using opennova::renderer::SceneOverlayDepth;
 using opennova::renderer::SceneOverlayFogTerm;
 using opennova::renderer::SceneOverlayGeometry;
@@ -210,22 +206,6 @@ std::uint32_t sampling_word(const SceneOverlayBatch &p_batch, const SceneOverlay
 	const std::uint32_t last_level =
 			static_cast<std::uint32_t>(std::clamp(max_lod, 0.0f, 255.0f) + 0.5f);
 	return filter_code | (last_level << 8);
-}
-
-RenderingDevice::BlendFactor blend_factor(SceneOverlayBlendFactor p_factor) {
-	switch (p_factor) {
-		case SceneOverlayBlendFactor::Zero:
-			return RenderingDevice::BLEND_FACTOR_ZERO;
-		case SceneOverlayBlendFactor::One:
-			return RenderingDevice::BLEND_FACTOR_ONE;
-		case SceneOverlayBlendFactor::SrcAlpha:
-			return RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
-		case SceneOverlayBlendFactor::InvSrcAlpha:
-			return RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		case SceneOverlayBlendFactor::DestColor:
-			return RenderingDevice::BLEND_FACTOR_DST_COLOR;
-	}
-	return RenderingDevice::BLEND_FACTOR_ONE;
 }
 
 // The textured stages that address past 1 (the ribbons' two coordinate sets)
@@ -793,45 +773,16 @@ RID SceneOverlayCompositorEffect::Device::pipeline_for(int64_t p_framebuffer_for
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
-	Ref<RDPipelineRasterizationState> raster;
-	raster.instantiate();
-	raster->set_cull_mode(RenderingDevice::POLYGON_CULL_DISABLED);
+	// The combine's witnessed state (renderer::scene_overlay_pipeline_state); the
+	// sample count is the view's.
+	const RdPipelineState state = rd_pipeline_state(
+			opennova::renderer::scene_overlay_pipeline_state({p_shading, p_depth_test}));
 	Ref<RDPipelineMultisampleState> multisample;
 	multisample.instantiate();
 	multisample->set_sample_count(RenderingDevice::TEXTURE_SAMPLES_1);
-	Ref<RDPipelineDepthStencilState> depth;
-	depth.instantiate();
-	// No overlay draw writes depth. LESSEQUAL on retail's forward depth is
-	// GREATER_OR_EQUAL on Godot's reversed depth; ALWAYS drops the test.
-	depth->set_enable_depth_write(false);
-	depth->set_enable_depth_test(p_depth_test);
-	depth->set_depth_compare_operator(RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
-	Ref<RDPipelineColorBlendStateAttachment> attachment;
-	attachment.instantiate();
-	attachment->set_enable_blend(true);
-	// The combine's witnessed SRCBLEND / DESTBLEND (renderer::scene_overlay_blend)
-	// on the colour; the alpha blends the same way under SRCALPHA / INVSRCALPHA
-	// and keeps the target's otherwise.
-	const opennova::renderer::SceneOverlayBlend blend_words =
-			opennova::renderer::scene_overlay_blend(p_shading);
-	attachment->set_src_color_blend_factor(blend_factor(blend_words.source));
-	attachment->set_dst_color_blend_factor(blend_factor(blend_words.dest));
-	const bool source_over = blend_words.source == SceneOverlayBlendFactor::SrcAlpha &&
-			blend_words.dest == SceneOverlayBlendFactor::InvSrcAlpha;
-	attachment->set_src_alpha_blend_factor(source_over ? RenderingDevice::BLEND_FACTOR_SRC_ALPHA
-													   : RenderingDevice::BLEND_FACTOR_ZERO);
-	attachment->set_dst_alpha_blend_factor(source_over
-					? RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
-					: RenderingDevice::BLEND_FACTOR_ONE);
-	attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
-	attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
-	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
-	attachments.push_back(attachment);
-	Ref<RDPipelineColorBlendState> blend;
-	blend.instantiate();
-	blend->set_attachments(attachments);
 	const RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format, vertex_format,
-			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster, multisample, depth, blend);
+			RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, state.rasterization, multisample,
+			state.depth_stencil, state.color_blend);
 	if (!pipeline.is_valid())
 		return RID();
 	pipelines.emplace(key, pipeline);

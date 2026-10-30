@@ -12,6 +12,8 @@
 #include <formats/threedi/threedi_panm.h>
 #include <formats/threedi/threedi_panm_pose.h>
 #include <runtime/renderer/render_order.h>
+#include <runtime/terrain_query/terrain_field_build.h>
+#include <runtime/terrain_query/terrain_raycast.h>
 
 #include "util/axes.h"
 #include "env/env_convert.h"
@@ -858,18 +860,28 @@ Dictionary Celestial::get_diagnostics() const {
 	return diag;
 }
 
-// Terrain line of sight between two Godot points, the glare and glint rays'
-// shared form: the ported boolean raycast; TerrainData.raycast_terrain reports
-// the miss as all-NAN, so clear = the hit is NAN. No terrain loaded = clear
-// (nothing occludes) — the editor-guard divergence from retail's null-atlas
-// return-HIT, kept deliberately: an unloaded world has nothing to block the
-// sun (docs/terrain/terrain-re.md §Runtime terrain queries).
-bool Celestial::_segment_clear(const Vector3 &p_from, const Vector3 &p_to) {
+// Terrain line of sight between two mission points, the glare and glint rays'
+// shared form: the game's boolean ray over the loaded terrain's runtime field
+// (the grid clamp and .trn wrap past the extent); with no terrain loaded the
+// ray is blocked, retail's null-atlas HIT (terrain_query/terrain_raycast.h
+// terrain_field_ray_hit carries the witness).
+bool Celestial::_segment_clear(const opennova::env::Vec3 &p_from,
+		const opennova::env::Vec3 &p_to) const {
+	const auto words = [](const opennova::env::Vec3 &p_point) {
+		return std::array<int32_t, 3>{
+			opennova::io::float_to_fp16_16_round_sat(static_cast<double>(p_point.x)),
+			opennova::io::float_to_fp16_16_round_sat(static_cast<double>(p_point.y)),
+			opennova::io::float_to_fp16_16_round_sat(static_cast<double>(p_point.z)),
+		};
+	};
+	const std::array<int32_t, 3> from = words(p_from);
+	const std::array<int32_t, 3> to = words(p_to);
 	if (terrain_data_.is_null() || !terrain_data_->is_loaded()) {
-		return true;
+		return !opennova::terrain::terrain_field_ray_hit(nullptr, from.data(), to.data());
 	}
-	const Vector3 hit = terrain_data_->raycast_terrain(p_from, p_to);
-	return std::isnan(hit.x);
+	const opennova::terrain::TerrainHeightField field = opennova::terrain::height_field_from(
+			terrain_data_->get_cpt(), terrain_data_->get_trn());
+	return !opennova::terrain::terrain_field_ray_hit(&field, from.data(), to.data());
 }
 
 void Celestial::_advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
@@ -877,7 +889,7 @@ void Celestial::_advance_glare_occlusion(const opennova::env::EnvironmentState &
 	opennova::env::advance_glare_occlusion(glare_occlusion_, godot_to_mission(p_cam_pos),
 			godot_to_mission(p_sun_dir), p_state.fog_level(),
 			[this](const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) {
-				return _segment_clear(mission_to_godot(p_from), mission_to_godot(p_to));
+				return _segment_clear(p_from, p_to);
 			},
 			[this](const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) {
 				return _entities_clear(p_from, p_to);
@@ -903,7 +915,7 @@ void Celestial::_advance_water_glint(
 			p_state, godot_to_mission(p_cam_pos), godot_to_mission(p_sun_dir),
 			godot_to_mission(p_forward), water_glint_,
 			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
-				return _segment_clear(mission_to_godot(a), mission_to_godot(b));
+				return _segment_clear(a, b);
 			},
 			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
 				return _entities_clear(a, b);
@@ -932,7 +944,7 @@ void Celestial::_advance_inset_water_glint(const opennova::env::EnvironmentState
 			p_state, godot_to_mission(eye.origin), godot_to_mission(p_sun_dir),
 			godot_to_mission(forward), water_glint_,
 			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
-				return _segment_clear(mission_to_godot(a), mission_to_godot(b));
+				return _segment_clear(a, b);
 			},
 			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
 				return _entities_clear(a, b);

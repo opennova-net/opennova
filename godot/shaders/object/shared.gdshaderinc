@@ -3,6 +3,7 @@
 // statically selected includes; this file contains no capability switches.
 
 #include "res://shaders/color.gdshaderinc"
+#include "res://shaders/device_fog.gdshaderinc"
 #include "res://shaders/viewmodel_pass.gdshaderinc"
 #include "res://shaders/texture_filter.gdshaderinc"
 
@@ -845,21 +846,12 @@ vec3 obj_add_local_light(vec3 lit, vec3 base_rgb, vec3 normal_ws) {
 			(u_local_light_intensity * ndotl * atten);
 }
 
-// Witnessed device fog policy shared with terrain and water. The pass start
-// is already Render_SetFogState's per-type start (the overcast fold rides
-// it: type 2 = (1 - density) * end * 0.5, type 3 = (1 - density) * end * 0.25
-// [orig: Render_SetFogState @ 0x58a9c5..0x58a9fe]).
-// [orig: Render_SetFogState @ 0x58A950; CD3DDevice_SetFogParameters @ 0x677960]
-float obj_fog_visibility(float dist, float fog_start, float fog_end, int fog_type) {
-	float safe_end = max(fog_end, 1.0);
-	if (fog_type == 0) {
-		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)), 0.0, 1.0);
-	}
-	return clamp((safe_end - dist) / max(safe_end - fog_start, 1.0), 0.0, 1.0);
-}
-
 // The pass fog visibility at this fragment; 1.0 while the pass has no fog.
-// The distance follows the fog path of the wrapper's retail NORMAL P0:
+// The pass start is already Render_SetFogState's per-type start (the overcast
+// fold rides it: type 2 = (1 - density) * end * 0.5, type 3 = (1 - density) *
+// end * 0.25 [orig: Render_SetFogState @ 0x58a9c5..0x58a9fe]); the laws are
+// the engine's (device_fog.gdshaderinc). The law follows the fog path of the
+// wrapper's retail NORMAL P0:
 // - OBJ_FOG_VERTEX_SHADER: a FOGMODE_SHADER* pass leaves the device's table
 //   and vertex fog OFF (CD3DDevice_SetFogAndBlendMode mode 8..11 @ 0x677783),
 //   so the fog factor is the VS oFog = 1 - (z - FogStart) * FogRangeRecip
@@ -896,14 +888,15 @@ float obj_scene_fog_visibility(vec3 camera_position_world) {
 	int fog_type = int(range.z);
 	float view_depth = max(v_fog_view_depth, 0.0);
 	#if defined(OBJ_FOG_VERTEX_SHADER)
-	float safe_end = max(range.y, 1.0);
-	return clamp((safe_end - view_depth) / max(safe_end - range.x, 1.0), 0.0, 1.0);
+	return vertex_shader_fog_visibility(view_depth, range.x, range.y);
 	#elif defined(OBJ_FOG_VERTEX_SHADER_DEVICE)
-	return obj_fog_visibility(view_depth, range.x, range.y, fog_type);
+	if (device_fog_exponential(range.x, range.y, fog_type)) {
+		return device_fog_visibility(view_depth, view_depth, range.x, range.y, fog_type, true);
+	}
+	return vertex_shader_fog_visibility(view_depth, range.x, range.y);
 	#else
-	float dist = fog_type == 0 ? view_depth
-			: distance(camera_position_world, v_world_pos);
-	return obj_fog_visibility(dist, range.x, range.y, fog_type);
+	return device_fog_visibility(view_depth, distance(camera_position_world, v_world_pos),
+			range.x, range.y, fog_type, true);
 	#endif
 }
 

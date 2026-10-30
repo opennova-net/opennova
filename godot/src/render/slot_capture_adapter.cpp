@@ -7,6 +7,7 @@
 #include "render/q3_source_registry.h"
 #include "render/q3_vertex_format.h"
 #include "render/rd_glsl.h"
+#include "render/rd_pipeline_state.h"
 #include "render/rd_timestamp_span.h"
 #include "render/rd_uniforms.h"
 #include "render/texture_filter_device.h"
@@ -30,11 +31,7 @@
 #include <godot_cpp/classes/multi_mesh.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node.hpp>
-#include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
-#include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
-#include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_multisample_state.hpp>
-#include <godot_cpp/classes/rd_pipeline_rasterization_state.hpp>
 #include <godot_cpp/classes/rd_sampler_state.hpp>
 #include <godot_cpp/classes/rd_shader_source.hpp>
 #include <godot_cpp/classes/rd_shader_spirv.hpp>
@@ -225,10 +222,10 @@ struct DeviceCommand {
 	float diffuse_max_lod = kQ3NoMipCeiling;
 	float detail_max_lod = kQ3NoMipCeiling;
 	std::uint32_t flags = 0;
-	bool two_sided = false;
-	// SRCALPHA/INVSRCALPHA over the clear (the _FFP alpha-blend variant)
-	// instead of the opaque replace.
-	bool blend_coverage = false;
+	// The PROJSHAD pass's device state (renderer::object_projected_shadow_pipeline_state):
+	// the cull per two-sidedness, SRCALPHA/INVSRCALPHA over the clear for the _FFP
+	// alpha-blend variant, else the opaque replace.
+	FixedFunctionState state{};
 };
 
 struct DeviceCapture {
@@ -326,6 +323,8 @@ enum class SurfaceAdmission { Unclassified, NoPass, NoStream, Admitted };
 struct AdmittedSurface {
 	Ref<ShaderMaterial> material;
 	ObjectMaterialClassification classification;
+	// The material's published draw values (Q3SourceRegistry::object_material).
+	Q3ObjectMaterialValues values;
 	Ref<Texture2D> diffuse;
 	Ref<Texture2D> detail;
 	// The engine's PROJSHAD draw for the surface (renderer::slot_capture_surface).
@@ -338,9 +337,9 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 		AdmittedSurface &r_surface) {
 	const Ref<Material> material = active_material(p_source, p_mesh, p_surface);
 	r_surface.material = material;
+	Q3ObjectMaterialValues &values = r_surface.values;
 	if (r_surface.material.is_null() ||
-			!Q3SourceRegistry::object_material_classification(material,
-					r_surface.classification)) {
+			!Q3SourceRegistry::object_material(material, r_surface.classification, values)) {
 		// An ArrayMesh surface whose material is not a registered
 		// object material (no ObjectMaterialClassification): retail
 		// submits no PROJSHAD pass for an effect without one, and no
@@ -349,8 +348,8 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 		// never reaches this test and is not counted.
 		return SurfaceAdmission::Unclassified;
 	}
-	r_surface.diffuse = texture_parameter(r_surface.material, "u_diffuse");
-	r_surface.detail = texture_parameter(r_surface.material, "u_detail");
+	r_surface.diffuse = values.diffuse;
+	r_surface.detail = values.detail;
 	// The engine decides the surface's PROJSHAD draw and its command state
 	// (renderer::slot_capture_surface); an unresolved secondary composes the
 	// no-detail technique.
@@ -371,10 +370,10 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 		static_cast<std::uint64_t>(p_array_mesh->get_rid().get_id())};
 	cache_request.geometry_generation = 1;
 	cache_request.pack.source = Q3Source::Object;
-	cache_request.pack.uv_u = vector3_parameter(r_surface.material,
-			"u_uv_transform_u", Vector3(1, 0, 0));
-	cache_request.pack.uv_v = vector3_parameter(r_surface.material,
-			"u_uv_transform_v", Vector3(0, 1, 0));
+	cache_request.pack.uv_u =
+			Vector3(values.runtime.uv.m00, values.runtime.uv.m10, values.runtime.uv.m20);
+	cache_request.pack.uv_v =
+			Vector3(values.runtime.uv.m01, values.runtime.uv.m11, values.runtime.uv.m21);
 	cache_request.pack.skin_channels = p_skinned;
 	r_surface.stream = r_cache.acquire(cache_request, [&](bool &r_read_back) {
 		return surface_arrays(p_array_mesh, p_surface, r_read_back);
@@ -400,13 +399,12 @@ class SlotCaptureAdapter::Impl {
 public:
 	struct PipelineKey {
 		int64_t framebuffer_format = -1;
-		bool two_sided = false;
-		bool blend_coverage = false;
+		// renderer::fixed_function_state_key of the command's state.
+		std::uint32_t state = 0;
 
 		bool operator<(const PipelineKey &p_other) const {
-			return std::tie(framebuffer_format, two_sided, blend_coverage) <
-					std::tie(p_other.framebuffer_format, p_other.two_sided,
-							p_other.blend_coverage);
+			return std::tie(framebuffer_format, state) <
+					std::tie(p_other.framebuffer_format, p_other.state);
 		}
 	};
 
@@ -592,8 +590,7 @@ public:
 	RID make_texture(int p_size, RenderingDevice::DataFormat p_format,
 			int64_t p_usage);
 	bool ensure_target(Target &r_target, int p_size);
-	RID pipeline_for(int64_t p_framebuffer_format, bool p_two_sided,
-			bool p_blend_coverage);
+	RID pipeline_for(int64_t p_framebuffer_format, const FixedFunctionState &p_state);
 	bool upload_stream(const Q3PackedStream &p_stream);
 	bool upload_bones(const std::vector<Transform3D> &p_bones);
 	RID uniform_for(const DeviceCommand &p_command);
@@ -735,54 +732,21 @@ bool SlotCaptureAdapter::Impl::ensure_target(Target &r_target, int p_size) {
 }
 
 RID SlotCaptureAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
-		bool p_two_sided, bool p_blend_coverage) {
-	const PipelineKey key{p_framebuffer_format, p_two_sided, p_blend_coverage};
+		const FixedFunctionState &p_state) {
+	const PipelineKey key{p_framebuffer_format, fixed_function_state_key(p_state)};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
-	Ref<RDPipelineRasterizationState> raster;
-	raster.instantiate();
-	// The wrappers' cull_back / cull_disabled per material two-sidedness; the
-	// stream keeps Godot's clockwise front faces like the Q3 adapter.
-	raster->set_cull_mode(p_two_sided ? RenderingDevice::POLYGON_CULL_DISABLED :
-			RenderingDevice::POLYGON_CULL_BACK);
+	// The engine's PROJSHAD state; the 4x MSAA is the capture's device fold
+	// (make_texture). Reverse-Z like Godot's own scene depth (the projection
+	// carries Projection::create_depth_correction): nearer = greater.
+	const RdPipelineState state = rd_pipeline_state(p_state);
 	Ref<RDPipelineMultisampleState> multisample;
 	multisample.instantiate();
 	multisample->set_sample_count(RenderingDevice::TEXTURE_SAMPLES_4);
-	Ref<RDPipelineDepthStencilState> depth;
-	depth.instantiate();
-	// Reverse-Z like Godot's own scene depth (the projection carries
-	// Projection::create_depth_correction): nearer = greater.
-	depth->set_enable_depth_test(true);
-	depth->set_enable_depth_write(true);
-	depth->set_depth_compare_operator(RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
-	// The PROJSHAD blend state per technique (object_projected_shadow_policy):
-	// the file effects and the _FFP BLEND_NONE / BLEND_MULT variants replace
-	// (ONE/ZERO; DESTCOLOR/SRCCOLOR of a black source is black too), the
-	// _FFP BLEND_ALPHA variant blends the black fragment by its coverage
-	// alpha (SRCALPHA/INVSRCALPHA), and the additive variants never reach the
-	// device (black adds nothing).
-	Ref<RDPipelineColorBlendStateAttachment> attachment;
-	attachment.instantiate();
-	attachment->set_enable_blend(p_blend_coverage);
-	if (p_blend_coverage) {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_color_blend_factor(
-				RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-		attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
-		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_alpha_blend_factor(
-				RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-		attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
-	}
-	Ref<RDPipelineColorBlendState> color_blend;
-	color_blend.instantiate();
-	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
-	attachments.push_back(attachment);
-	color_blend->set_attachments(attachments);
 	RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format,
-			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster,
-			multisample, depth, color_blend);
+			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, state.rasterization,
+			multisample, state.depth_stencil, state.color_blend);
 	if (!pipeline.is_valid())
 		set_failure("RenderingDevice rejected a slot capture pipeline");
 	else
@@ -915,8 +879,7 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 			return false;
 		const int64_t framebuffer_format = rd->framebuffer_get_format(target.framebuffer);
 		for (const DeviceCommand &command : capture.commands) {
-			if (!pipeline_for(framebuffer_format, command.two_sided,
-						command.blend_coverage).is_valid())
+			if (!pipeline_for(framebuffer_format, command.state).is_valid())
 				return false;
 		}
 		// Clear to the retail 0x00FFFFFF and the reverse-Z far depth, draw the
@@ -934,8 +897,7 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 				set_failure("RenderingDevice could not bind slot capture textures");
 				return false;
 			}
-			const RID pipeline = pipeline_for(framebuffer_format, command.two_sided,
-					command.blend_coverage);
+			const RID pipeline = pipeline_for(framebuffer_format, command.state);
 			rd->draw_list_bind_render_pipeline(draw_list, pipeline);
 			rd->draw_list_bind_uniform_set(draw_list, uniform, 0);
 			rd->draw_list_bind_uniform_set(draw_list, bone_uniform, 1);
@@ -1096,7 +1058,6 @@ void SlotCaptureAdapter::compile_frame(
 					case SurfaceAdmission::Admitted:
 						break;
 				}
-				const Ref<ShaderMaterial> &shader_material = admitted.material;
 				const SlotCaptureSurface &plan = admitted.surface;
 				const Ref<Texture2D> &diffuse = admitted.diffuse;
 				const Ref<Texture2D> &detail = admitted.detail;
@@ -1123,17 +1084,14 @@ void SlotCaptureAdapter::compile_frame(
 				command.detail_resource = detail;
 				command.diffuse = server_rid(diffuse);
 				command.detail = server_rid(detail);
-				command.alpha_mod = float_parameter(shader_material, "u_alpha_mod", 1.0f);
-				command.diffuse_max_lod = float_parameter(shader_material,
-						"u_diffuse_max_lod", kQ3NoMipCeiling);
-				command.detail_max_lod = float_parameter(shader_material,
-						"u_detail_max_lod", kQ3NoMipCeiling);
+				command.alpha_mod = admitted.values.runtime.alpha;
+				command.diffuse_max_lod = admitted.values.diffuse_max_lod;
+				command.detail_max_lod = admitted.values.detail_max_lod;
 				command.alpha_test_value = plan.alpha_test_value;
 				command.flags = plan.flags;
-				command.blend_coverage = plan.blend_coverage;
-				if (plan.blend_coverage)
+				command.state = plan.state;
+				if (command.state.blend.enabled)
 					++counters.blended_commands;
-				command.two_sided = plan.two_sided;
 				capture.commands.push_back(std::move(command));
 			}
 		}

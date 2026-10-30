@@ -634,7 +634,7 @@ int main() {
 		CHECK(detailed.policy == ObjectProjectedShadowPolicy::MaterialBlend);
 		CHECK(detailed.coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp);
 		CHECK(detailed.flags == (kSlotCaptureAlphaMod | kSlotCaptureDetailAlpha));
-		CHECK(!detailed.blend_coverage && !detailed.two_sided);
+		CHECK(!detailed.state.blend.enabled && detailed.state.cull == CullMode::CCW);
 		// An unresolved secondary composes the no-detail technique.
 		const SlotCaptureSurface downgraded = slot_capture_surface(ffp, false, false);
 		CHECK(downgraded.draws &&
@@ -648,7 +648,7 @@ int main() {
 		tested.alpha_test_value = 0.5f;
 		tested.is_two_sided = true;
 		const SlotCaptureSurface cut = slot_capture_surface(tested, true, true);
-		CHECK(cut.draws && cut.two_sided && cut.alpha_test_value == 0.5f);
+		CHECK(cut.draws && cut.state.cull == CullMode::None && cut.alpha_test_value == 0.5f);
 		CHECK((cut.flags & kSlotCaptureAlphaTest) != 0 && (cut.flags & kSlotCaptureAlphaInvert) != 0);
 		CHECK((cut.flags & kSlotCaptureSkinned) != 0);
 		// The _FFP BLEND_ALPHA variant blends its coverage; BLEND_ADD draws nothing.
@@ -657,7 +657,7 @@ int main() {
 		blended.alpha_test_invert = false;
 		blended.blend = ObjectBlendMode::AlphaBlend;
 		const SlotCaptureSurface translucent = slot_capture_surface(blended, true, false);
-		CHECK(translucent.draws && translucent.blend_coverage);
+		CHECK(translucent.draws && translucent.state.blend.enabled);
 		CHECK((translucent.flags & kSlotCaptureBlendCoverage) != 0);
 		blended.blend = ObjectBlendMode::Additive;
 		CHECK(!slot_capture_surface(blended, true, false).draws);

@@ -7,6 +7,7 @@
 // facts cross this interface.
 
 #include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/pipeline_state.h>
 
 #include <array>
 #include <cstddef>
@@ -377,6 +378,19 @@ struct Q3DrawCommand {
 	Q3WaterMaterialParameters water{};
 	Q3CelestialMaterialParameters celestial{};
 };
+
+// The device state a command draws under. The blend: a NormalCopy, a disc and
+// the glow take the material blend (_OP replaces with blending off, _AB
+// SRCALPHA / INVSRCALPHA, _AD ONE / ONE; Q3FrameCompiler rejects an unwitnessed
+// multiplicative copy, which would replace); the glass GLOW copy adds ONE / ONE
+// (Glass.fx RSAlphaMode(TRUE, ONE, ONE)); the NV water redraw blends ONE + dst x
+// SRCALPHA (g_WaterShaderBlendNV; the Water producer publishes only the
+// above-water call); every alpha pair adds ONE / ONE. An object copy culls CCW
+// unless its material is two-sided; the water, the discs and the glow draw both
+// sides. Every Q3 draw ends in the ordinary z-tested flush without a z-write
+// (LESSEQUAL); the discs and the glow reach it only through the far band
+// (q3_far_band_reverse_z).
+FixedFunctionState q3_pipeline_state(const Q3DrawCommand &command);
 
 struct Q3FrameDebugCounters {
 	std::size_t invisible_submissions = 0;

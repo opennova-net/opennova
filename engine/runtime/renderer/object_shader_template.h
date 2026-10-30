@@ -29,6 +29,7 @@
 //  @0x5AE120), kept per type by the switch @0x5AEB41]
 
 #include <runtime/renderer/material_classify.h>
+#include <runtime/renderer/pipeline_state.h>
 
 #include <cstdint>
 
@@ -230,6 +231,19 @@ ObjectProjectedShadowCoverage object_projected_shadow_coverage(
 // manifest's projected_shadow_contracts names the same table per technique.
 const char *object_projected_shadow_coverage_name(
 		ObjectProjectedShadowCoverage coverage) noexcept;
+
+// The device state a slot capture draws a surface's PROJSHAD pass under. The
+// blend per policy: a MaterialBlend technique's BLEND_ALPHA variant blends the
+// black fragment by its coverage, SRCALPHA / INVSRCALPHA on the colour and the
+// alpha; its BLEND_NONE (ONE / ZERO) and BLEND_MULT (DESTCOLOR / SRCCOLOR of a
+// black source is black too) variants and an Opaque technique's forced ONE /
+// ZERO replace, blending off. A NoPass technique and the BLEND_ADD variant
+// (black adds nothing) never reach the device; asked, this answers the
+// replace. The cull per material two-sidedness, NONE else CCW
+// [orig: CRenderBatchQueue_FlushBatches @ 0x5da0fa..0x5da137]; the depth
+// tested LESSEQUAL and written.
+FixedFunctionState object_projected_shadow_pipeline_state(ObjectProjectedShadowPolicy policy,
+		ObjectBlendMode blend, bool two_sided) noexcept;
 
 struct ObjectShaderPipelineDescriptor {
 	ObjectShaderKey key = 0;

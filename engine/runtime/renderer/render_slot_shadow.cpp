@@ -345,12 +345,11 @@ SlotCaptureSurface slot_capture_surface(const ObjectMaterialClassification &clas
 	if (skinned) {
 		surface.flags |= kSlotCaptureSkinned;
 	}
-	if (surface.policy == ObjectProjectedShadowPolicy::MaterialBlend &&
-			classification.blend == ObjectBlendMode::AlphaBlend) {
+	surface.state = object_projected_shadow_pipeline_state(surface.policy, classification.blend,
+			classification.is_two_sided);
+	if (surface.state.blend.enabled) {
 		surface.flags |= kSlotCaptureBlendCoverage;
-		surface.blend_coverage = true;
 	}
-	surface.two_sided = classification.is_two_sided;
 	return surface;
 }
 

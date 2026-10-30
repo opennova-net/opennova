@@ -3,6 +3,7 @@
 #include "particle/particle_convert.h"
 #include "particle/particle_effect.h"
 #include "particle/particle_renderer.h"
+#include "render/object_lod_frame.h"
 #include "resource_index/resource_root.h"
 #include "simulation/effect_section_source.h"
 #include "simulation/simulation.h"
@@ -759,10 +760,7 @@ void EffectWorld::advance_simulation_tick(double p_delta,
 		camera = viewport->get_camera_3d();
 	}
 	if (camera != nullptr) {
-		const Transform3D camera_transform = camera->get_camera_transform();
-		const Vector3 probe = camera_transform.origin -
-				camera_transform.basis.get_column(2) * (camera->get_near() + 1.0f);
-		scene_->set_view_frustum(camera->get_frustum(), probe);
+		scene_->set_view_frustum(ObjectLodFrame::camera_frustum(camera));
 	} else {
 		scene_->clear_view_frustum();
 	}
