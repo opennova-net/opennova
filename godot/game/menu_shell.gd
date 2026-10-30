@@ -199,7 +199,8 @@ func _process(delta: float) -> void:
 ## advance, and -- at the tail, the way the original orders it -- the deferred
 ## expansion remount. Public so a caller (and the GUT suite) can step the menu
 ## tick the way the mode loop does.
-## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
+## retail: Menu_UpdateFrame @ 0x5528a0 (the MainMenu mode descriptor @ 0x83b400, its
+## update slot @ 0x83b424).
 func update_menu_frame(delta: float = 0.0) -> void:
 	# Covered by a screen that is its own mode (the join screen), the menu's frame
 	# does not run: its pump, its clock and the deferred remount wait for it.
