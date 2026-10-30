@@ -815,14 +815,12 @@ ahead of the waiting polls, so a page never meets its own `console_busy`.
 | `GET .../settings` | `GET GAMESETTINGS` | live values, saved configuration, revision, title schema and pinned weapon catalog |
 | `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch |
 | `GET .../weapons` | `WEAPON LIST` | complete reply packets |
-| `POST .../command` | `{command}` | full ordered replies, delivery status, saved status and new revision |
 
-Owners and admins can use the full TCP command surface on hosted servers, including
-bulk player actions, weapon restrictions, inserted/one-shot missions, `CMD`, `GOTO`,
-and `QUIT`. `ADMINUSER`, `BANLIST`, and `SET LevelRestrict` remain retail stubs;
-the web shows the server's unsupported response. The console never connects to
-arbitrary external endpoints. Authentication, ownership, CSRF, admission and rate
-limits still apply. Password-bearing lines are redacted in persistent logs.
+No admin line passes through (ADR 0053 decision 9): every command is one the routes
+compose from checked arguments (`apps/novaworld_web/hosted/console_commands.h`), and a
+settings edit sends only the `SET` and `WEAPON SET` lines its saved fields map to.
+`CMD`, `GOTO`, `QUIT`, `MISSION CLEAR`, `ADMINUSER` and `BANLIST` never reach a hosted
+server from the site. Password-bearing lines are redacted in persistent logs.
 
 ## Saved server configuration
 

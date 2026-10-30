@@ -8127,11 +8127,17 @@ int test_hosted_console_routes(Harness &h) {
 	}
 
 	// Stopping: refused before the link, the console still read.
-	// The expanded routes enforce ownership and CSRF, and persist accepted TCP
-	// edits in the fleet independently of the caller's HTTP lifetime.
+	// The settings routes enforce ownership and CSRF, and persist accepted TCP
+	// edits in the fleet independently of the caller's HTTP lifetime. No admin line
+	// passes through (ADR 0053 d9): the raw command routes are gone.
 	TEST_EXPECT(get(me + "/settings", {with_session(other_s)}).code == 404);
-	TEST_EXPECT(post(me + "/command", {with_session(owner_s)}, R"({"command":"SET KillLimit 500"})").code == 403);
-	reply = post(base + "/command", {kBearer}, R"({"command":"SET KillLimit 500"})");
+	const std::string kill_limit_edit = "{\"settings_revision\":" +
+			std::to_string(hosted::find_server(*h.pool.acquire(), id)->settings_revision) +
+			",\"patch\":{\"kill_limit\":500}}";
+	TEST_EXPECT(h.send("PATCH", me + "/settings", {with_session(owner_s), kJson}, kill_limit_edit).code == 403);
+	TEST_EXPECT(post(me + "/command", as_owner_post, R"({"command":"SET KillLimit 500"})").code == 404);
+	TEST_EXPECT(post(base + "/command", {kBearer}, R"({"command":"QUIT"})").code == 404);
+	reply = h.send("PATCH", base + "/settings", {kBearer, kJson}, kill_limit_edit);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json["configuration_saved"].b());
 	const auto revision = json["settings_revision"].i();
@@ -8165,8 +8171,10 @@ int test_hosted_console_routes(Harness &h) {
 	fake.delay("", 0);
 	const auto sent_lines = fake.lines();
 	TEST_EXPECT(std::count(sent_lines.begin(),sent_lines.end(),"SET KillLimit 42") == 1);
-	reply = post(base + "/command", {kBearer}, R"({"command":"QUIT"})");
-	TEST_EXPECT(reply.code == 200);
+	// The service's own QUIT (the link's own command) ends the session; the link reconnects.
+	hosted::AdminCommandOptions quit_options;
+	quit_options.record = false;
+	(void)hosted::run_console_command(h.pool, id, "QUIT", quit_options, std::chrono::milliseconds(3000));
 	TEST_EXPECT(wait_until([&] { return h.links->find(id)->status().state == hosted::AdminLinkState::Up; }, 5000));
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(),id)->state == hosted::State::Running);
 	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test",

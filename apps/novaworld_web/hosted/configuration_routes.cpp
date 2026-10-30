@@ -1,10 +1,8 @@
 #include "console_routes.h"
 #include "hosted/model/console_queue.h"
-#include "hosted/model/console_configuration.h"
 #include "http_json.h"
 #include <base/io/cp1252.h>
 #include <net/admin/admin_protocol.h>
-#include <algorithm>
 
 namespace opennova::novaworld_server::hosted {
 namespace {
@@ -115,25 +113,23 @@ crow::response ConsoleRoutes::weapon_settings(const Caller &c) {
 			run_console_command(pool_, c.server_id, "WEAPON LIST", options, kCommandBudget));
 }
 
-crow::response ConsoleRoutes::configuration_command(
-		const Caller &c, const crow::request &req, bool edit) {
+crow::response ConsoleRoutes::configuration_edit(const Caller &c, const crow::request &req) {
 	io::JsonValue body;
 	std::string error;
 	if (!io::json_parse(req.body, body, error) || !body.is_object())
 		return json_error(400, "invalid_json");
 	AdminCommandOptions options;
 	options.actor = c.actor;
-	std::string line;
-	if (edit) {
-		const auto *revision = body.get("settings_revision"), *patch = body.get("patch");
-		if (!revision || !io::json_exact_whole_in(*revision, 1, io::kJsonSafeWholeMax) || !patch ||
-				!patch->is_object())
-			return json_error(
-					400, "invalid_field", "settings_revision and a settings patch are required.");
-		for (const char *key : { "product_id", "expansion_id", "rotation" })
-			if (patch->get(key))
-				return field_error(400, "invalid_field", key,
-						"Use the launcher or rotation controls to change this field.");
+	const auto *revision = body.get("settings_revision"), *patch = body.get("patch");
+	if (!revision || !io::json_exact_whole_in(*revision, 1, io::kJsonSafeWholeMax) || !patch ||
+			!patch->is_object())
+		return json_error(
+				400, "invalid_field", "settings_revision and a settings patch are required.");
+	for (const char *key : { "product_id", "expansion_id", "rotation" })
+		if (patch->get(key))
+			return field_error(400, "invalid_field", key,
+					"Use the launcher or rotation controls to change this field.");
+	{
 		auto lease = pool_.acquire();
 		const auto server = find_server(*lease, c.server_id);
 		if (!server)
@@ -151,56 +147,11 @@ crow::response ConsoleRoutes::configuration_command(
 			desired.missions.push_back(product.missions.front().file);
 		if (const auto why = check_settings(desired, { product }))
 			return field_error(400, "invalid_field", why->field.c_str(), why->reason);
-		options.expected_revision = static_cast<int64_t>(revision->number);
-		options.settings_patch = io::json_write(*patch);
-		line = "configuration edit";
-	} else {
-		const auto *command = body.get("command");
-		if (!command || !command->is_string() || !utf8_to_cp1252(command->string, line) ||
-				line.empty() ||
-				line.size() > ADMIN_SERVER_PACKET_MAX_BYTES - ADMIN_PACKET_HEADER_BYTES - 1 ||
-				std::any_of(line.begin(), line.end(), [](unsigned char c) {
-					return c < 32 ||
-							(c == 127 || c == 129 || c == 141 || c == 143 || c == 144 || c == 157);
-				}))
-			return json_error(400, "invalid_command",
-					"Enter one command, at most 1015 CP1252 bytes, without control characters.");
-		// Refuse text that could not be represented safely in the saved cfg.
-		// Unknown retail keys still reach the server and return its own usage.
-		const auto patch = console_settings_patch(line, {});
-		if (!patch.object.empty()) {
-			auto lease = pool_.acquire();
-			const auto server = find_server(*lease, c.server_id);
-			if (!server)
-				return json_error(404, "not_found");
-			const auto product = pinned_product(*lease, *server);
-			auto block = gamecfg::defaults({}, 0, 0, title_config_table(product.title));
-			auto flat = io::JsonValue::make_object();
-			for (const auto &m : patch.object) {
-				if (m.key == "options")
-					for (const auto &o : m.value.object)
-						flat.set(o.key, o.value);
-				else
-					flat.set(m.key, m.value);
-			}
-			std::string field;
-			if (!gamecfg::apply_server_settings(block, flat, true, {}, field, error))
-				return field_error(400, "invalid_field", field.c_str(), error);
-			// The drain saves an accepted SET into the configuration (console_settings_patch),
-			// so it takes a structured edit's rules too (check_settings: a name not blank and
-			// free of "Nova" while listed on NovaLogic's, a password of printable ASCII): the
-			// saved configuration stays one a later edit and a fresh start accept.
-			HostedSettings desired = server->settings;
-			if (!read_settings_document(patch, desired, field, error))
-				return field_error(400, "invalid_field", field.c_str(), error);
-			if (desired.missions.empty() && !product.missions.empty())
-				desired.missions.push_back(product.missions.front().file);
-			if (const auto why = check_settings(desired, { product }))
-				return field_error(400, "invalid_field", why->field.c_str(), why->reason);
-		}
 	}
-	return command_reply(
-			c.server_id, run_console_command(pool_, c.server_id, line, options, kCommandBudget));
+	options.expected_revision = static_cast<int64_t>(revision->number);
+	options.settings_patch = io::json_write(*patch);
+	return command_reply(c.server_id,
+			run_console_command(pool_, c.server_id, "configuration edit", options, kCommandBudget));
 }
 
 void ConsoleRoutes::register_configuration(WebApp &app) {
@@ -214,7 +165,7 @@ void ConsoleRoutes::register_configuration(WebApp &app) {
 					return std::move(*c.refusal);
 				return settings(c);
 			});
-	const auto handle = [this](const crow::request &req, uint64_t id, bool admin, bool edit,
+	const auto handle = [this](const crow::request &req, uint64_t id, bool admin,
 								bool weapons) -> crow::response {
 		auto access = admin ? access_.require_admin(req) : access_.require_user(req);
 		if (access.refusal)
@@ -223,31 +174,23 @@ void ConsoleRoutes::register_configuration(WebApp &app) {
 					   : owner_caller(*access.user, id, !weapons, !weapons);
 		if (c.refusal)
 			return std::move(*c.refusal);
-		return weapons ? weapon_settings(c) : configuration_command(c, req, edit);
+		return weapons ? weapon_settings(c) : configuration_edit(c, req);
 	};
 	CROW_ROUTE(app, "/api/me/servers/<uint>/settings")
 			.methods("PATCH"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, false, true, false);
+				return handle(req, id, false, false);
 			});
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>/settings")
 			.methods("PATCH"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, true, true, false);
-			});
-	CROW_ROUTE(app, "/api/me/servers/<uint>/command")
-			.methods("POST"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, false, false, false);
-			});
-	CROW_ROUTE(app, "/api/admin/hosted/<uint>/command")
-			.methods("POST"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, true, false, false);
+				return handle(req, id, true, false);
 			});
 	CROW_ROUTE(app, "/api/me/servers/<uint>/weapons")
 			.methods("GET"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, false, false, true);
+				return handle(req, id, false, true);
 			});
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>/weapons")
 			.methods("GET"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, true, false, true);
+				return handle(req, id, true, true);
 			});
 }
 } //namespace opennova::novaworld_server::hosted

@@ -5,9 +5,11 @@
 // (console_routes.h) may run on a hosted server's admin link (admin_link.h),
 // each composed here from checked arguments, and what each one's replies come
 // to. Service policy, not a witnessed limit: there is no passthrough of an
-// arbitrary admin line, and nothing reaches the server's files or config (SET,
-// WEAPON SET, CMD), its admin users and ban files (ADMINUSER, BANLIST), or its
-// session's end (GOTO, MISSION CLEAR, QUIT) outside the supervisor's stop.
+// arbitrary admin line (ADR 0053 d9). The settings edit's SET and WEAPON SET lines
+// are composed from a checked settings patch (hosted/model/console_configuration.h),
+// and nothing reaches the server's console (CMD), its admin users and ban files
+// (ADMINUSER, BANLIST), or its session's end (GOTO, MISSION CLEAR, QUIT) outside
+// the supervisor's stop.
 //
 // The owners' commands (owner_may_run):
 //   PLAYER LIST                 the players (read)
@@ -17,10 +19,11 @@
 //   PLAYER KILL <slot>          the player killed
 //   MISSION AVAILABLE           the mission catalog (read)
 //   MISSION LIST                the rotation (read)
-//   MISSION ADD <file> <0|1>    a map appended to the rotation, its sides swapped at the
-//                               half or not (no insert position: retail's insert leaves the
-//                               next-map cursor unset when the list grows; no ONESHOT), up
-//                               to kConsoleRotationMax entries
+//   MISSION ADD <file> <0|1> [<index> [ONESHOT]]
+//                               a map appended to the rotation, or inserted at <index>
+//                               (at most kConsoleRotationMax; ONESHOT plays it once), its
+//                               sides swapped at the half or not, up to kConsoleRotationMax
+//                               entries
 //   MISSION REMOVE <index>      an entry removed (never the last: the routes read the
 //                               rotation first, since an empty one ends the session)
 //   MISSION SETNEXT <index>     the next map (an index the rotation has: the routes check,
