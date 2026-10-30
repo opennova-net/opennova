@@ -27,6 +27,10 @@ struct ServerSetting {
 	bool core = false; // hosted launch's established top-level field
 	const char *note = "";
 	const char *depends_on = ""; // the toggle or count this setting does nothing without
+	// The retail host dialog's control that shows and reads back this setting, a
+	// MULTI_PLAYER_HOST control name (inmatch::host_dialog_controls); empty for a setting
+	// the dialog never touches, which only the file and the supplemental editor reach.
+	const char *host_control = "";
 };
 
 const std::vector<ServerSetting> &server_settings();

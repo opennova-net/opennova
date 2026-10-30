@@ -5,8 +5,8 @@
 // [orig: Audio_UpdateListenerPosition @0x527960, from the view each frame before the frame's
 // presentation fires its one-shots (Audio_UpdateListenerFromView @0x43B403..0x43B423); the pans of Sound_Play3DPositional @0x527DCF..0x527DF8, SoundEmitter_UpdateAndMixTop8
 // @0x5289A1..0x5289ED and @0x528B00..0x528B91, Audio_Play3DPositionalSound @0x4ECC80 and
-// Audio_UpdateAmbientStream @0x4EDAD8; the doppler Sound_Calculate3DAttenuation @0x527F60, a misnomer:
-// it moves the play factor]. Positions are the mission frame's 16.16 units (x, y on the ground, z up),
+// Audio_UpdateAmbientStream @0x4EDAD8; the doppler Sound_ApplyDopplerShift @0x527F60,
+// which moves the play factor]. Positions are the mission frame's 16.16 units (x, y on the ground, z up),
 // yaws and bearings 32-bit turns (BAM, counter-clockwise from +x as atan2 reads them).
 
 #include <cstdint>
@@ -42,7 +42,7 @@ uint8_t voice_pan(int32_t dx, int32_t dy, int32_t yaw);
 // 0x14A0000 by DialogSystem_Init @0x5275FC].
 inline constexpr int32_t kSoundSpeedQ16 = 0x14A0000;
 
-// An emitter channel's play factor through the doppler [orig: Sound_Calculate3DAttenuation
+// An emitter channel's play factor through the doppler [orig: Sound_ApplyDopplerShift
 // @0x527F60, called @0x52896A on each of the loudest eight]: with either velocity nonzero, the
 // distance now less the distance one velocity step on (each 16.16 unit over 65535), over the
 // divisor where it is 2 or more, is the closing rate R; at R of half the speed of sound a tick or

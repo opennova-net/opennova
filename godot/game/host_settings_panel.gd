@@ -1,15 +1,10 @@
 class_name HostSettingsPanel
 extends ConfirmationDialog
 
-# The authored MULTI_PLAYER_HOST dialog owns these controls. The supplemental
-# editor exposes the remaining file options and restrictions through the shared
-# engine schema, without a second set of rules or defaults in GDScript.
-const AUTHORED_KEYS := ["game_name", "game_password", "max_players", "time_limit",
-	"kill_limit", "max_score", "respawn", "start_delay", "team_ff", "server_message",
-	"country", "side_a_password", "side_b_password", "spectator_password",
-	"spectator_slots", "replay", "koth_limit", "max_friendly_kills", "capture_duration",
-	"capture_speed", "friendly_tags", "ff_warning", "team_choose", "team_trigger_claymore",
-	"tracers", "lan_only", "dedicated"]
+# The supplemental editor exposes the file options and restrictions the authored
+# MULTI_PLAYER_HOST dialog does not own (a schema row naming no host_control,
+# engine formats/gamecfg/server_settings.h), through the shared engine schema,
+# without a second set of rules or defaults in GDScript.
 
 var _fields: Dictionary = {}
 var _classes: Dictionary = {}
@@ -50,7 +45,7 @@ func _ready() -> void:
 	var values: Dictionary = document.values
 	for spec: Dictionary in document.schema:
 		var key := String(spec.key)
-		if key in AUTHORED_KEYS:
+		if not String(spec.host_control).is_empty():
 			continue
 		var row := _row(fields, "%s · %s" % [spec.group, spec.label])
 		var value: Variant = values.get(key, spec.default)

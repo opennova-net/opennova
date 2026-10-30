@@ -195,7 +195,7 @@ struct DeathMapView {
 // a waypoint instead of panning).
 // [orig: byte_252DD60 GRID CMap_OnGridCheckbox @0x547ff0; byte_252DD61 TEXT
 //  CMap_OnTextCheckbox @0x5481a0; byte_252DD62 WAYPOINTS CMap_OnWaypointsCheckbox @0x548080;
-//  byte_252DD63 CREATE_WAYPOINTS Settings_BuildDefaultProfile @0x548180]
+//  byte_252DD63 CREATE_WAYPOINTS CMap_OnCreateWaypointsCheckbox @0x548180]
 struct CommandMapToggles {
 	bool grid = true;
 	bool text = true;
@@ -242,7 +242,7 @@ struct CommandMapView {
 	// WAYPOINTS store the control's checked state (the embedder then checks
 	// both twins from the byte); CREATE_WAYPOINTS flips its byte.
 	// [orig: CMap_OnGridCheckbox @0x548000..0x548011; CMap_OnTextCheckbox @0x5481b0..0x5481c1;
-	//  CMap_OnWaypointsCheckbox @0x548090..0x5480a1; Settings_BuildDefaultProfile @0x548180
+	//  CMap_OnWaypointsCheckbox @0x548090..0x5480a1; CMap_OnCreateWaypointsCheckbox @0x548180
 	//  (`byte_252DD63 = byte_252DD63 == 0`)]
 	void toggle_changed(int which, bool checked);
 	bool toggle(int which) const;

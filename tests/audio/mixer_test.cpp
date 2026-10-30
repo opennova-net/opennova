@@ -8,7 +8,7 @@
 // AudioMixer_OutputStereo @0x7BD71A], the channel-zero meter [orig: @0x7BDE22..0x7BDE2C,
 // @0x7BEF16..0x7BEF55], the bearing pans [orig: Sound_Play3DPositional @0x527DA7..0x527DF8;
 // Audio_UpdateAmbientStream @0x4EDA90..0x4EDAD8] and the doppler [orig:
-// Sound_Calculate3DAttenuation @0x527F60]; and a mixed-buffer golden of the minted
+// Sound_ApplyDopplerShift @0x527F60]; and a mixed-buffer golden of the minted
 // fixtures/lwf/tone.wav (tests/fixtures/minimal_lwf_gen.cpp).
 #include <runtime/audio/mixer.h>
 #include <runtime/audio/music_stream.h>

@@ -212,8 +212,8 @@ void CommandMapController::on_activated_(MenuRuntime &menu, const std::string &n
 		return;
 	}
 	if (strutil::iequals(name, kCreate)) {
-		// The CREATE_WAYPOINTS byte flips [orig: Settings_BuildDefaultProfile @0x548180 (a
-		//  misnomer; registered @0x54af24) — byte_252DD63 = !byte_252DD63 @0x548194].
+		// The CREATE_WAYPOINTS byte flips [orig: CMap_OnCreateWaypointsCheckbox @0x548180
+		//  (registered @0x54af24) — byte_252DD63 = !byte_252DD63 @0x548194].
 		const int id = menu.widget_id(kCreate);
 		host_->toggle_changed(
 				hud::kCommandToggleCreateWaypoints, id >= 0 && menu.is_widget_checked(id));
@@ -229,7 +229,7 @@ void CommandMapController::on_activated_(MenuRuntime &menu, const std::string &n
 		confirm_waypoint_(menu);
 		return;
 	}
-	// [orig: CRenderManager_CreateLoadScreen @0x547910 (a misnomer; registered @0x54ae34): the box
+	// [orig: CMap_HandleWaypointCreateCancel @0x547910 (registered @0x54ae34): the box
 	//  unchecked @0x547937 and its byte cleared @0x54793c]
 	if (strutil::iequals(name, "WPNAME_CANCEL")) {
 		uncheck_create_waypoints_(menu);

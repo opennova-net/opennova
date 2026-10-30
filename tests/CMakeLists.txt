@@ -4458,6 +4458,12 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# Which server settings the retail host dialog owns (gamecfg server_settings.h host_control),
+# held against the dialog's own read of each control (inmatch/host_settings.h).
+add_executable(npruntime_host_dialog_schema_test npruntime/host_dialog_schema_test.cpp)
+target_link_libraries(npruntime_host_dialog_schema_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_host_dialog_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_host_dialog_schema COMMAND npruntime_host_dialog_schema_test)
 # The LAN multiplayer screens' controller (inmatch/lan_multiplayer_menu.h, mp.mnu, the shell's "lan"
 # delegate) headless over the menu runtime and a fake host: the LAN screen's activation, the search
 # state, the list's keep-selection rule and the join, the host screen's pool, rotation, gate and START.

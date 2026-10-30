@@ -13,3 +13,7 @@
 	path = third_party/sdl3
 	url = https://github.com/libsdl-org/SDL.git
 	shallow = true
+[submodule "third_party/mbedtls"]
+	path = third_party/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git
+	shallow = true

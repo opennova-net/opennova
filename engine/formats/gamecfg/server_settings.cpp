@@ -242,6 +242,52 @@ const std::vector<ServerSetting> &server_settings() {
 			for (auto &s : v)
 				if (std::string_view(s.key) == key)
 					s.depends_on = parent;
+		// The settings the retail host dialog owns: START reads each of these controls of
+		// MULTI_PLAYER_HOST back into the block's word the setting edits. Its other four
+		// (SERVER_PUNKBUSTER, CONNECTIONSPEED, ALLOW_AI, TOD_CONTINUITY) store words no
+		// setting offers.
+		// [orig: HostDialog_ReadSettings @0x555940 - GAME_NAME @0x555967, SERVER_PASSWORD
+		//  @0x555990, SERVER_MESSAGE @0x5559BC, SERVERTYPE @0x5559DE, GAME_LOCATION @0x555A72,
+		//  SERVER_LANONLY @0x555AC0, REPLAY @0x555B0A, DELAY @0x555B31, RESPAWN @0x555B58, TIME
+		//  @0x555B7F, KILL_LIMIT @0x555BA6, MAX_SCORE @0x555BCD, MAX_KOTH @0x555BF4, MAX_PLAYERS
+		//  @0x555C1B, MAX_FF_KILLS @0x555C54, TAKEOVER_TIME @0x555C7B, LFP_TAKEOVER @0x555CA0,
+		//  the mpattrib bits TEAM_FF 0x200 @0x555CBC, FRIENDLY_TAG 0x400 @0x555CF6, FF_WARNING 8
+		//  @0x555D30, TEAM_CHOOSE 4 @0x555D64, CLAYMORE_PREF 0x8000 @0x555D98, TRACERS 1
+		//  @0x555DD2, ALLOW_SPECTATORS @0x555E06..0x555E23, BLUE_PW @0x555E7F, RED_PW @0x555EA8,
+		//  SPECTATOR_PW @0x555ED1] (inmatch/host_settings.cpp)
+		const std::pair<const char *, const char *> host_controls[] = {
+			{ "game_name", "GAME_NAME" },
+			{ "game_password", "SERVER_PASSWORD" },
+			{ "server_message", "SERVER_MESSAGE" },
+			{ "dedicated", "SERVERTYPE" },
+			{ "country", "GAME_LOCATION" },
+			{ "lan_only", "SERVER_LANONLY" },
+			{ "replay", "REPLAY" },
+			{ "start_delay", "DELAY" },
+			{ "respawn", "RESPAWN" },
+			{ "time_limit", "TIME" },
+			{ "kill_limit", "KILL_LIMIT" },
+			{ "max_score", "MAX_SCORE" },
+			{ "koth_limit", "MAX_KOTH" },
+			{ "max_players", "MAX_PLAYERS" },
+			{ "max_friendly_kills", "MAX_FF_KILLS" },
+			{ "capture_duration", "TAKEOVER_TIME" },
+			{ "capture_speed", "LFP_TAKEOVER" },
+			{ "team_ff", "TEAM_FF" },
+			{ "friendly_tags", "FRIENDLY_TAG" },
+			{ "ff_warning", "FF_WARNING" },
+			{ "team_choose", "TEAM_CHOOSE" },
+			{ "team_trigger_claymore", "CLAYMORE_PREF" },
+			{ "tracers", "TRACERS" },
+			{ "spectator_slots", "ALLOW_SPECTATORS" },
+			{ "side_a_password", "BLUE_PW" },
+			{ "side_b_password", "RED_PW" },
+			{ "spectator_password", "SPECTATOR_PW" },
+		};
+		for (const auto &[key, control] : host_controls)
+			for (auto &s : v)
+				if (std::string_view(s.key) == key)
+					s.host_control = control;
 		return v;
 	}();
 	return settings;
@@ -335,6 +381,7 @@ io::JsonValue server_settings_schema(ConfigTable table, bool hosted) {
 		row.set("core", Json::make_bool(s.core));
 		row.set("note", io::json_string(s.note));
 		row.set("depends_on", io::json_string(s.depends_on));
+		row.set("host_control", io::json_string(s.host_control));
 		list.push(std::move(row));
 	}
 	return list;
