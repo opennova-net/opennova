@@ -168,27 +168,6 @@ bool Simulation::local_player_select_seat(int p_index) {
 	return changed;
 }
 
-bool Simulation::fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const {
-	r_labels.clear();
-	if (!kernel_) return false;
-	kernel_->local.collect_attach_labels(r_labels, is_joiner() ? joiner_role_ : nullptr);
-	return true;
-}
-
-bool Simulation::fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const {
-	// The friendly-tags gather (D-HUD-20): the role's world walk plus a
-	// joiner's roster walk (inmatch/role_feeds.h collect_friendly_tags); the
-	// overlay lifts, projects, and feeds the HUD compiler's element.
-	return opennova::inmatch::collect_friendly_tags(role_view(), r_tags);
-}
-
-opennova::inmatch::HudRoleFacts Simulation::hud_role_facts(uint32_t p_voice_menus) const {
-	// The breath bar's, the MP session lines', the HUDLS scan's and the asked-for
-	// F9 / F10 menus' facts for this client (inmatch/role_feeds.h hud_role_facts
-	// carries the witnesses).
-	return opennova::inmatch::hud_role_facts(role_view(), p_voice_menus);
-}
-
 bool Simulation::local_player_radio_request_icon_viewer() const {
 	if (!kernel_) {
 		return false;

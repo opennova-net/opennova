@@ -12,12 +12,11 @@
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/projection.hpp>
-#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 
 #include <formats/fnt/fnt.h>
 #include <runtime/hud/hud_config_tokens.h>
@@ -25,6 +24,8 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_layout_from_hudpos.h> // HudLayoutAssets (the names the fill hands back)
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass seam
+#include <runtime/hud/hud_texture_load_plan.h> // the set-up's planned loads
+#include <runtime/hud/hud_viewport.h> // the HUD projector's viewport
 #include <runtime/hud/hud_texture_names.h> // the crosshair styles
 #include <runtime/renderer/texture_load_rules.h> // MaterialColorStage
 
@@ -100,8 +101,18 @@ public:
 	Ref<ShaderMaterial> get_additive_material() const { return additive_material_; }
 	void set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<RtxtStringFile> &p_gametext);
     void set_player_context(const Ref<PlayerLocalView> &p_view);
-	void set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
-			const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,
+	// The frame's main viewport, the one every world point the HUD draws at projects through
+	// (engine hud/hud_viewport.h): the view's composed camera at its fov over this overlay's
+	// surface and aspect mode, and its view block's eye the labels measure from. A null view,
+	// or one with no composed camera, projects nothing until the next.
+	void set_view_frame(const Ref<PlayerLocalView> &p_view);
+	// The same viewport over an explicit view block (mission units, BAM angles, the yaw the
+	// heading; the horizontal fov in degrees): an embedder with no composed view.
+	void set_view_block(const Vector3 &p_eye, int64_t p_yaw_bam, int64_t p_pitch_bam,
+			int64_t p_roll_bam, float p_fov_h_deg);
+	// The combat feed off the view (world::fill_hud_combat_view), its points projected through
+	// the frame's viewport (set_view_frame), the gametext strings and the use key's label.
+	void set_combat_state(const Ref<PlayerLocalView> &view, const Ref<RtxtStringFile> &gametext,
 			const String &use_key);
 
 	// Select and (when configured) immediately reload the crosshair art;
@@ -273,11 +284,9 @@ public:
 	// The AAS zone status panel and the takeover dialog: shown, the session game
 	// type (the panel's conquest arm), the viewer's team (the blink reads the HUD
 	// frame counter, set_frame_clocks; the dialog's camp lines test it), the
-	// gametext table their strings resolve in (engine hud_lfp_panel.h /
-	// hud_takeover_status.h, retail's fallbacks; null = the fallbacks), and the
-	// Simulation the zone rows and the dialog's nearest entry are pulled from
-	// natively (Simulation::fill_lfp_zones / fill_takeover_facts). Pass null when
-	// hiding.
+	// gametext table their strings resolve in (null = retail's fallbacks), and the
+	// Simulation whose role the engine feed reads (inmatch::hud_lfp_panel_feed).
+	// Pass null when hiding.
 	void set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
 			const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
@@ -285,19 +294,15 @@ public:
 			float p_altitude_wu = 0.0f);
 	void clear_waypoint();
 	// The objectives panel: the sim's shown win-condition rows resolved
-	// through the mission text table (Simulation::fill_objectives); hidden,
+	// through the mission text table (world::fill_objective_rows); hidden,
 	// or no sim, clears the panel — the retail toggle's off state.
 	void set_objectives(bool p_shown, const Ref<RtxtStringFile> &p_mission_text,
 			const Ref<Simulation> &p_sim);
-	// The floating attach labels: the sim's selection (distance/LOS/occupancy/
-	// nearest, armory-zone mode; Simulation::fill_attach_labels) projected
-	// through the play camera (its global transform + projection) to overlay
-	// pixels, each with its label text resolved in the gametext table's
-	// Overlays section. Behind-camera points drop at projection, mirroring
-	// the frustum clip.
-	void set_attach_labels(const Transform3D &p_camera_xform,
-			const Projection &p_camera_projection, const Ref<RtxtStringFile> &p_gametext,
-			const Ref<Simulation> &p_sim);
+	// The floating attach labels: the local player's seat scan projected
+	// through the frame's viewport (set_view_frame), each with its label text
+	// resolved in the gametext table's Overlays section (engine
+	// hud/hud_world_labels.h fill_attach_labels carries the witness).
+	void set_attach_labels(const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim);
 	// The read seams over the projected labels (tests and probes): the count,
 	// the index of the full-bright nearest label (-1 = none) and a label's
 	// resolved text and screen-pixel anchor (which may be outside the viewport).
@@ -311,28 +316,23 @@ public:
 	// "" while the cheat word's 0x400 bit is down (engine hud/hud_frame.h HudFrameRateOverlay).
 	String get_frame_rate_overlay_text() const;
 	Vector2 get_attach_label_position(int p_index) const;
-	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
-	// (Simulation::fill_friendly_tags) lifted, projected through the play
-	// camera with its view distance and fed to the compiler's element; the
-	// environment's live fog distance rides along for the fog cull, and the
-	// mixer meter's first stage for the speaking tag's pulse
-	// (Simulation::audio_out_stage1). `shown` false, no sim, or the OFF mode
-	// clears the tags.
-	void set_friendly_tags(bool p_shown, const Transform3D &p_camera_xform,
-			const Projection &p_camera_projection, float p_fog_distance_units,
-			const Ref<Simulation> &p_sim);
+	// The overhead friendly tags (D-HUD-20): the role's gather projected
+	// through the frame's viewport (set_view_frame), the environment's live fog
+	// distance (world units; <= 0 disables the cull) and the mixer meter's
+	// first stage for the speaking tag's pulse (engine
+	// inmatch::hud_friendly_tags_feed). `shown` false, no sim, no viewport or
+	// the OFF mode clears the tags.
+	void set_friendly_tags(bool p_shown, float p_fog_distance_units, const Ref<Simulation> &p_sim);
 	// The radio-request icon's viewer gate, a per-frame local-player fact
 	// (engine world::friendly_tag_radio_request_viewer: a Controller/Driver
 	// seat or the player's own S2C 0x6D latch); the compiler ANDs it with
 	// each tag's own fold before drawing the icon cell.
 	void set_radio_request_icon_viewer(bool p_viewer);
-	// The HUD's per-frame role facts (Simulation::hud_role_facts ->
-	// inmatch::hud_role_facts): the breath bar's samples, seconds and
-	// round-over latch plus its Overlays/STROVER91 label; the MP session lines'
-	// facts plus their gametext strings (hud_session_text); the HUDLS slot
-	// bar's category scan with its icons, loaded only while the layout's
-	// HUDLS_SYSTEM draws the bar; the connection indicators' state. No sim
-	// leaves every one empty.
+	// The HUD's per-frame role facts (engine inmatch::hud_role_facts_feed):
+	// the breath bar, the MP session lines, the open voice menus, the
+	// connection indicators and the HUDLS slot bar's scan, whose icons this
+	// loads only while the layout's HUDLS_SYSTEM draws the bar. No sim leaves
+	// every one empty.
 	void set_role_facts(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
 	// The overlay-panel pass's key-toggled state (engine hud_toggles.h): the F9
 	// emotes and F10 radio menus' open flags, which make the next role-facts
@@ -405,10 +405,6 @@ public:
     void set_aspect_mode(int mode) { state_.aspect_mode = mode; queue_redraw(); }
 	int cycle_sight_scale();
 	int get_sight_scale_index() const;
-	// Per-frame environment feed: the fog cull distance in world units (<= 0
-	// disables; the 16.16 form is this seam's) and the speaking entity's voice
-	// level, the mixer meter's first stage 0..0x3FF.
-	void set_friendly_tag_env(float p_fog_distance_units, int32_t p_speaking_level);
 	// Device-facing minimap feeds. TerrainData is sampled once into the
 	// portable sector layout; snapshot is Simulation's versioned fixed-stride
 	// retained overlay buffer. The colormap is bound as the session's
@@ -592,6 +588,8 @@ private:
 	opennova::hud::HudFrameCompiler compiler_;
 	opennova::hud::HudLayout layout_;
 	opennova::hud::HudFrameState state_;
+	// The frame's main viewport (set_view_frame / set_view_block).
+	opennova::hud::HudViewport viewport_;
 	uint32_t voice_menus_ = 0; // inmatch::kHudVoiceMenu* bits (set_overlay_panel_windows)
 	// The role's inset friendly name (set_role_facts), set into the combat state
 	// set_combat_state copies from the view.
@@ -726,8 +724,10 @@ private:
 	Ref<Texture2D> load_hud_texture_(const String &p_name, ResourceRoot::TextureLoader p_loader,
 			bool p_generate_mipmaps = false, uint32_t p_material_word = 0) const;
 	void load_crosshair_texture_();
-	// The combat sprites' loads (the anchors are the engine fill's).
-	void configure_combat_(const opennova::hud::HudLayoutAssets &assets);
+	// One load of the engine's plan (hud_texture_load_plan.h) into its slot, the stdbox
+	// atlas's brush cell lifted into its own slot; returns what the load gave back.
+	opennova::hud::HudTextureSize load_planned_texture_(const opennova::hud::HudTextureLoad &p_load);
+	// The combat sprites' per-frame loads: a slot reloads when its name or loader changes.
 	void combat_texture_(int slot, const String &name, ResourceRoot::TextureLoader loader,
 			opennova::hud::HudSprite &sprite);
 	std::array<String, kTextureSlots> combat_texture_names_;

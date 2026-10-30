@@ -183,13 +183,14 @@ func test_kill_banner_retains_text_after_expiry() -> void:
 	presenter.set_hud_detail_level(start)
 
 
-func test_world_points_project_through_the_presenter_view_projection() -> void:
-	# The HUD's world-point consumers (the attach labels, the friendly tags)
-	# and the crosshair-toast pick ray read the FRAME's projection, never the
-	# gameplay camera's: while an aspect mode draws through the presenter's
-	# stretched target the gameplay camera carries only a CULLING SUPERSET of
-	# the frustum (LocalPlayerPresenter.view_projection), so its projection
-	# lands a label off on one axis, and its ray misses on one axis.
+func test_the_screen_projection_and_pick_ray_ride_the_presenter_target() -> void:
+	# The frame's screen projection and the crosshair-toast pick ray read the
+	# FRAME's projection, never the gameplay camera's: while an aspect mode
+	# draws through the presenter's stretched target the gameplay camera
+	# carries only a CULLING SUPERSET of the frustum
+	# (LocalPlayerPresenter.view_projection), so its ray misses on one axis.
+	# (The HUD's world points project through the engine's viewport,
+	# hud/hud_viewport.h, pinned by the hud_viewport ctest.)
 	var world := WorldFixture.boot_minimal(self)
 	var surface := SubViewport.new()
 	surface.size = Vector2i(1024, 600)
@@ -215,7 +216,7 @@ func test_world_points_project_through_the_presenter_view_projection() -> void:
 		player.teardown()
 		return
 
-	var projection := presenter.hud_view_projection(camera)
+	var projection := player.screen_projection()
 	assert_almost_eq(projection.x.x, 1.0 / tan(deg_to_rad(40.0)), 0.001,
 			"proj[0][0] = cot(fov_h/2) across the real width: the frame's projection")
 	assert_almost_eq(projection.y.y, 1.0 / (tan(deg_to_rad(40.0)) * 0.75), 0.001,
@@ -223,14 +224,13 @@ func test_world_points_project_through_the_presenter_view_projection() -> void:
 	assert_false(is_equal_approx(camera.get_camera_projection().x.x, projection.x.x),
 			"the gameplay camera carries only the culling superset, which the HUD never projects through")
 	# The frame draws through the surface's D3D9 half pixel (the third column's
-	# clip translation), and the HUD projects through the SCREEN projection, the
-	# original's, with it taken back out: the overlay places the original's
-	# window coordinates on this raster's pixel centres itself.
+	# clip translation), and the SCREEN projection, the original's, takes it
+	# back out.
 	assert_almost_eq(player.view_projection().z.x, -1.0 / 1024.0, 1e-6,
 			"the target camera draws half a surface pixel right")
 	assert_almost_eq(player.view_projection().z.y, 1.0 / 600.0, 1e-6,
 			"...and half a surface pixel down")
-	assert_almost_eq(projection.z.x, 0.0, 1e-6, "the HUD's projection takes the half pixel back out")
+	assert_almost_eq(projection.z.x, 0.0, 1e-6, "the screen projection takes the half pixel back out")
 	assert_almost_eq(projection.z.y, 0.0, 1e-6)
 
 	# The pick ray rides the same frame: a surface point maps into the
@@ -269,8 +269,6 @@ func test_world_points_project_through_the_presenter_view_projection() -> void:
 	assert_ne(catcher.last_pick.ray_dir_godot, camera.project_ray_normal(surface_point),
 			"...never through the gameplay camera, whose ray misses on one axis")
 	player.teardown()
-	assert_eq(presenter.hud_view_projection(camera).x.x, camera.get_camera_projection().x.x,
-			"without a live target the HUD projects through the camera's own projection")
 
 
 # The staged root with two scoped copies of the M4 row, WPN_HUD_INSET (the
