@@ -15,6 +15,7 @@
 #include <runtime/audio/script_voice_player.h>
 #include <runtime/audio/sound_listener.h>
 
+#include <base/io/sha256.h>
 #include <formats/lwf/wav_pcm.h>
 #include <formats/sbf/sbf.h>
 
@@ -405,6 +406,30 @@ void script_voice() {
 	expect(voice.handle() == 0 && !voice.frame().state.clip, "the stop forgets the clip");
 }
 
+// The tail and the stereo output stage against retail's own: the oracle that runs the original's
+// tail and output stage under emulation with controlled bus words (scripts/oracles/reverb_preset.py:
+// bus 0 (12000, -10000, 4000, 2000), bus 1 (3000, 5000, -2000, 1000) on the first frame, zero
+// after, the rings zeroed, 1024 frames) produced output bytes of this SHA-256 for every reverb
+// preset [orig: @0x7BEC79..0x7BEF93; AudioMixer_OutputStereo @0x7BD71A] (docs/audio/
+// lwf-dbf-sound-re.md, "Reverb selection and the mixer preset boundary"; the validation report of
+// 2026-09-18).
+void tail_against_retail() {
+	Mixer mixer;
+	std::vector<int16_t> out(2 * 1024);
+	const Mixer::Lanes silent;
+	Mixer::Lanes bus0;
+	Mixer::Lanes bus1;
+	bus0.w = { 12000, -10000, 4000, 2000 };
+	bus1.w = { 3000, 5000, -2000, 1000 };
+	mixer.render_buses(bus0, bus1, out.data());
+	for (size_t f = 1; f < 1024; ++f) mixer.render_buses(silent, silent, out.data() + 2 * f);
+	const std::string hash = io::sha256_hex(out.data(), out.size() * sizeof(int16_t));
+	expect(hash == "c51d1e7766544e5394f9ca3e415440f722392b575934f22bf2dc1c2f3fdcca03",
+			"the tail's 1024 frames are retail's, byte for byte");
+	if (hash != "c51d1e7766544e5394f9ca3e415440f722392b575934f22bf2dc1c2f3fdcca03")
+		std::printf("audio_mixer: tail sha256 %s\n", hash.c_str());
+}
+
 // A device that holds what it is pushed and plays nothing until told.
 class HeldDevice final : public platform::AudioDevice {
 public:
@@ -501,6 +526,7 @@ int main() {
 	listener_pans();
 	script_voice();
 	device_feed();
+	tail_against_retail();
 	golden();
 	if (test_expect::failures == 0) std::printf("audio_mixer: all passed\n");
 	return test_expect::failures == 0 ? 0 : 1;

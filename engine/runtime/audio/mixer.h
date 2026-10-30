@@ -180,6 +180,11 @@ public:
 	// The averaged sample a channel mixed in the last frame, the word its lanes multiply (0 for a
 	// channel that sat the call out) [orig: ebx @0x7BDDF6..0x7BDDFF].
 	int16_t last_sample(int channel) const { return channels_[size_t(channel)].sample; }
+	// One device frame of bus input through the tail and the output stage alone, the second half
+	// of render's frame (what the channels' sum feeds): bus 0's and bus 1's words in, the left and
+	// right samples out [orig: @0x7BEC79..0x7BEF6D]. The ctest runs it against retail's own tail
+	// on the same input.
+	void render_buses(const Lanes &bus0, const Lanes &bus1, int16_t out[2]);
 	// The blend table's entry for a pan byte: words 0..3 the dry lanes, 4..7 the delayed.
 	const std::array<int16_t, 8> &pan_entry(uint8_t pan) const { return pan_table_[pan]; }
 
