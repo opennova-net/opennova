@@ -667,7 +667,7 @@ void AdminConsole::handle_mission_add(const Args &args, std::vector<std::string>
 //  (dfx2.exe)].
 void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &replies) {
 	const world::WeaponTable *table = ctx_.world != nullptr ? &ctx_.world->tables.weapons : nullptr;
-	const int armory = protocol_in_match(ctx_.np_protocol.identity).armory_only_availability;
+	const int armory = protocol_in_match(ctx_.np_protocol.identity).s2c_66.armory_only_availability;
 	const auto listed = [&](int index) {
 		const world::WeaponTableEntry *row =
 				table != nullptr ? table->by_index(static_cast<uint8_t>(index)) : nullptr;

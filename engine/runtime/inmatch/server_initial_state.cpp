@@ -250,8 +250,8 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			ctx.world != nullptr && ctx.world->zones.has_spawn_zone();
 	// A DFX2 host sets bit 0 whatever the mission (DFX2-2) [orig: the flags byte's 1 in
 	//  NetPacket_WriteWorldStateLoad0x0F @0x4ffeed (dfx2.exe)].
-	const bool spawn_zone_flag =
-			has_spawn_zones || protocol_in_match(ctx.np_protocol.identity).spawn_zone_flag_always;
+	const bool spawn_zone_flag = has_spawn_zones ||
+			protocol_in_match(ctx.np_protocol.identity).s2c_0f.spawn_zone_flag_always;
 	uint8_t game_flags = spawn_zone_flag ? 0x01u : 0x00u;
 	// The session test is retail's is_in_session, 0 in its single player; ours reads the
 	// world's session fact, as the join's own 0x0A does (D-NET-817).
@@ -722,13 +722,13 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	st.chat_last_ms = 0;
 	// Bit 1, the pre-round loadout latch: set while the pre-round timer runs, always for DFX2.
 	conn.link.preround_loadout_latch =
-			world.preround_delay_seconds != 0 || in_match.join_state_fixed;
+			world.preround_delay_seconds != 0 || in_match.slot_state.join_state_fixed;
 	// Bit 0x10, undeployed: with deploy-selectable spawn zones (always for DFX2). Out of a
 	// session the hold shows nothing (its hidden bit and overlay bit both ride the per-frame
 	// 0x0A writer, which only a session runs), so the single player is never held.
 	const bool is_host_own = conn.type == NapiNPConnection::kTypeClientSide;
 	conn.link.respawn_pending =
-			(world.zones.has_spawn_zone() || in_match.join_state_fixed) &&
+			(world.zones.has_spawn_zone() || in_match.slot_state.join_state_fixed) &&
 			(!is_host_own || world.rules.mp_session);
 	// The roster row mirrors the undeployed bit, which event 25 reads [orig:
 	//  Server_UpdateCaptureZoneProximity @0x5087A2].

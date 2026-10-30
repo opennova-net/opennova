@@ -7,10 +7,12 @@ namespace opennova::games {
 namespace {
 
 // Jointops.exe's protocol: its network init's identity block over the 2009 generation, its
-// in-match branches and its NovaWorld values. Its engine build (1.7.5.7, its build dates) is no
-// protocol's: ONE's build fills those slots (Protocol, net/protocol/protocol.h).
+// in-match sheet and its NovaWorld values. Its engine build (1.7.5.7, its build dates) is no
+// protocol's: ONE's build fills those slots (Protocol, net/protocol/protocol.h). Every other
+// protocol copies this row and overrides it (dfx2_protocol.cpp).
 Protocol make() {
 	Protocol p;
+	// --- Identity: the network init's block over the 2009 generation.
 	p.code = "jo";
 	p.name = "JO";
 	// [orig: CNapiNetwork_Init @0x4ca790, the literal @0x7ca6c8]
@@ -28,19 +30,42 @@ Protocol make() {
 	// [orig: CNapiNetwork_Init @0x4ca83d..0x4ca85b]
 	p.pv3_tags = { 0x7C9730u, 0x7C9714u };
 	p.generation = &novalogic_2009();
-	// The in-match branches the DFX2 catalog reads against (docs/titles/dfx2-vs-jo-re.md §8):
-	// the 0x0A objective body's four values [orig: NetPacket_WritePlayerState @0x4ffc2d..0x4ffc99;
-	// NapiNPClientMsg_0x00A @0x430361..0x4303d0]; the 0x0F flags bit 0 only with spawn zones
-	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502da7..0x502db0]; armory-only 2 [orig:
-	// NetPacket_SerializeWeaponRestrictionTable @0x5102e0; NapiNPClientMsg_HandleWeaponRestrictions
-	// @0x42d51c; CAdminServer_HandleWeaponCommand @0x4046ba, @0x40482e]; the join's state byte 1,
-	// 3 in the pre-round, 0x10 with spawn zones, the deploy's 1 or 3 [orig: Server_OnPlayerJoin
-	// @0x51a6d3..0x51a6f2; Server_DeployPlayer @0x517803..0x517812]; the profile's 0x2F class
-	// [orig: NetPacket_SendLoadoutSubmit @0x42ceae]; no CD-key leg in the join check [orig:
-	// Server_ValidatePlayerJoinRequest @0x5122a9..0x5122f0]; the squad tag bare [orig:
-	// NapiNPServer_HandleChatMessage @0x513930]; the rules word as built [orig:
-	// CNapiGameSession_InitRandomSeedOrRequest @0x51e94b..0x51e957].
-	p.in_match = ProtocolInMatch{};
+
+	// --- The in-match sheet, by the message each knob shapes (net/protocol/protocol.h
+	// kProtocolDialect), the baseline docs/titles/dfx2-vs-jo-re.md §8 reads every row against.
+	// Each value is ProtocolInMatch's default, set here as the sheet.
+	ProtocolInMatch &m = p.in_match.emplace();
+	// S2C 0x0A (DFX2-1): the objective body's four values, no checkpoint after them.
+	// [orig: NetPacket_WritePlayerState @0x4ffc2d..0x4ffc99; NapiNPClientMsg_0x00A
+	//  @0x430361..0x4303d0]
+	m.s2c_0a.objective_checkpoint = false;
+	// S2C 0x0F (DFX2-2): the flags byte's bit 0 only with spawn zones.
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502da7..0x502db0]
+	m.s2c_0f.spawn_zone_flag_always = false;
+	// S2C 0x14 (DFX2-14): the squad tag bare. [orig: NapiNPServer_HandleChatMessage @0x513930]
+	m.s2c_14.chat_squad_tag_wrapped = false;
+	// S2C 0x64 (DFX2-18): the rules word as built.
+	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51e94b..0x51e957]
+	m.s2c_64.rules_word_bits = 0;
+	// S2C 0x66 (DFX2-10): armory-only 2, the mission's 3.
+	// [orig: NetPacket_SerializeWeaponRestrictionTable @0x5102e0;
+	//  NapiNPClientMsg_HandleWeaponRestrictions @0x42d51c; CAdminServer_HandleWeaponCommand
+	//  @0x4046ba, @0x40482e]
+	m.s2c_66.armory_only_availability = 2;
+	// C2S 0x2F (DFX2-12): the profile's class. [orig: NetPacket_SendLoadoutSubmit @0x42ceae]
+	m.c2s_2f.loadout_class_fixed = false;
+	// The slot state (DFX2-11): the join's byte 1, 3 in the pre-round, 0x10 with spawn zones; the
+	// deploy's 1 or 3.
+	// [orig: Server_OnPlayerJoin @0x51a6d3..0x51a6f2; Server_DeployPlayer @0x517803..0x517812]
+	m.slot_state.join_state_fixed = false;
+	// The person index (D-SIM-52): pool 0's 256, one byte names each.
+	// [orig: EntityPool_Allocate @0x442168 - pool 0's 256 @0x4421cd]
+	m.person_index.pool0_wire_capacity = 256;
+	// C2S 0x00 (DFX2-13): no CD-key leg in the join check.
+	// [orig: Server_ValidatePlayerJoinRequest @0x5122a9..0x5122f0]
+	p.cd_key = nullptr;
+
+	// --- NovaWorld.
 	// [orig: Lobby_UpdateServerInfo @0x4ff3ea / @0x4ff3ff; Mission_DeobfuscateDescription
 	//  @0x4cdb9f / @0x4cdbb6 - the literals @0x7c9730 / @0x7c9714]
 	p.ver1 = "3";

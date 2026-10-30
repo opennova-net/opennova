@@ -8,7 +8,7 @@
 #include <formats/def/reserved_items.h>
 #include <net/npwire/ingame_encode.h>   // encode_chat_broadcast / encode_player_downed_state / encode_play_sound
 #include <net/npwire/ingame_message_id.h>
-#include <net/protocol/protocol.h> // ProtocolInMatch::chat_squad_tag_wrapped
+#include <net/protocol/protocol.h> // ProtocolInMatch::s2c_14.chat_squad_tag_wrapped
 #include <runtime/audio/oneshot_play.h>  // SoundSetIndex (the loaded banks)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <runtime/inmatch/server_console.h>  // the client-less host's CHAT ring
@@ -261,7 +261,7 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	if (sender.squad_key != 0) {
 		if (const SquadRegistryNode *node = find_squad_registry_node(ctx, sender.squad_key))
 			formatted += chat_squad_tag_text(node->tag,
-					protocol_in_match(ctx.np_protocol.identity).chat_squad_tag_wrapped);
+					protocol_in_match(ctx.np_protocol.identity).s2c_14.chat_squad_tag_wrapped);
 	}
 	if (channel == 2) {
 		const int location = nearest_location_index(world, *sender_entity);

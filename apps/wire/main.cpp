@@ -186,7 +186,7 @@ inline FrameObjectiveBody gt_objective_body() {
 		std::fprintf(stderr, "opennova-wire: the capture's protocol is unknown: pass --game <code>\n");
 		std::exit(1);
 	}
-	return frame_objective_body(true, protocol_in_match(g_protocol).objective_checkpoint);
+	return frame_objective_body(true, protocol_in_match(g_protocol).s2c_0a.objective_checkpoint);
 }
 void learn_protocol(const std::vector<uint8_t> &raw) {
 	if (g_protocol_fixed || g_protocol != nullptr) return;

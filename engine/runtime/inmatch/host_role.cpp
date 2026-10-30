@@ -166,7 +166,7 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// authority then ORs the scope-zero bit 0x10000 into the word, in a session or out
 	// (DFX2-18) [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)].
 	const uint32_t rules_word = (in_session ? config.mp_attributes : GameConfig::kSpRulesWord) |
-			protocol_in_match(protocol).rules_word_bits;
+			protocol_in_match(protocol).s2c_64.rules_word_bits;
 	kernel.world.rules.mpattrib = rules_word;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
@@ -847,7 +847,7 @@ void HostRole::send_own_mission_status() {
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
 						weapons, &kernel.local.inventory, team,
 						kernel.local.inventory.current_slot));
-			if (protocol_in_match(protocol).loadout_class_fixed)
+			if (protocol_in_match(protocol).c2s_2f.loadout_class_fixed)
 				submit.player_class =
 						kernel.mission.header.mission_type == bms::MissionType::CombatVehicleMission
 						? uint8_t{7}

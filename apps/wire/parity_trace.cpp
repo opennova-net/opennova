@@ -401,7 +401,7 @@ void ParityTraceBuilder::emit_message(const InGameMessage &message, uint64_t ts_
 	FrameUpdate frame;
 	const bool clean = decode_frame_update(message.payload.data(), message.payload.size(), class_of,
 			frame, frame_objective_body(objective,
-					objective && protocol_in_match(protocol_).objective_checkpoint));
+					objective && protocol_in_match(protocol_).s2c_0a.objective_checkpoint));
 	ParityFrameState out;
 	out.frame = message.frame_index;
 	out.ts_ns = ts_ns;

@@ -94,7 +94,7 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
 // [orig: NapiNPClientMsg_HandleWeaponRestrictions @0x42D4C0, the test @0x42d51c]
 // [orig: @0x42f2ac (dfx2.exe)]
 void ClientReplicaPipeline::apply_weapon_restrictions(const std::vector<uint8_t> &body) {
-	const int32_t armory = protocol_in_match(protocol_).armory_only_availability;
+	const int32_t armory = protocol_in_match(protocol_).s2c_66.armory_only_availability;
 	state_.weapon_availability.fill(1);
 	io::ByteReader reader(body.data(), body.size());
 	const uint8_t count = reader.read_u8();

@@ -20,7 +20,8 @@
 //   Config_SetDefaults and post-load clamps), keyed by the Title's config_table: formats/ cannot
 //   see runtime/ either.
 // - The wire dialect (DFX2-1, 2, 10..14, 18) is the Protocol's (net/protocol/protocol.h
-//   ProtocolInMatch). DFX2-1's 0x0A fifth u32 stays there; DFX2-9's checkpoint RULES are here.
+//   ProtocolInMatch, by message). DFX2-1's 0x0A fifth u32 stays there; DFX2-9's checkpoint RULES
+//   are here.
 //
 // A knob marked "joiner-side" is read on a joiner's world or its replica, not only on the
 // authority: a change to one changes what a joiner does, so it bumps the game's protocol version

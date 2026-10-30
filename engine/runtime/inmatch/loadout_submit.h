@@ -176,7 +176,7 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 //  NetPacket_SendLoadoutSubmit @0x42CDC0 - the slot resolve @0x42CE2D..0x42CE8B, the name
 //  gate @0x42CF0B; dfx2.exe NetPacket_SendLoadoutSubmit @0x42EB40 (@0x42EC15..0x42EC3E)]
 // `protocol` is the session's (its client's view's: ClientReplicaPipeline::protocol), whose
-// loadout_class_fixed (DFX2-12) the sender's class follows.
+// c2s_2f.loadout_class_fixed (DFX2-12) the sender's class follows.
 LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &local,
 		const Protocol *protocol,
 		const std::vector<world::WeaponKitEntry> &kit, uint8_t armory_class, bool authority,

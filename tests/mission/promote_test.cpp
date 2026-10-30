@@ -1071,7 +1071,7 @@ static void test_bms_pool0_used_window_is_the_accepted_count() {
 // The running capacities size the load (world::set_pool_capacities): items past
 // retail's 1200 drop under retail's pools and all load under an expansion's scaled
 // ones, each capped at what the protocol's wire can name (wire_pool_capacities over
-// its pool0_wire_capacity: JO's 256); any other mount takes retail's. [orig: Game_Run
+// its person_index cap: JO's 256); any other mount takes retail's. [orig: Game_Run
 // @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5; Mission_LoadBMSFile @0x40F4E0, pool 1
 // @0x40f9bb..0x40f9c6]
 static void test_pool_capacities_size_the_load() {

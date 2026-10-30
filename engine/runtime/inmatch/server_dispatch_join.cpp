@@ -95,7 +95,7 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool m
 	write_u32(36, static_cast<uint32_t>(players > 251 ? 251 : players));
 	write_u32(40, config.game_type);
 	// A DFX2 authority ORs 0x10000 into the rules word [orig: @0x51b89e (dfx2.exe)].
-	write_u32(44, config.mp_attributes | protocol_in_match(protocol).rules_word_bits);
+	write_u32(44, config.mp_attributes | protocol_in_match(protocol).s2c_64.rules_word_bits);
 	write_u32(48, static_cast<uint32_t>(config.unlimited_vehicles));
 	write_fixed_string(52, config.server_name);
 	write_fixed_string(84, config.mission_file);

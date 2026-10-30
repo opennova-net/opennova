@@ -1021,7 +1021,7 @@ struct FrameObjectiveBlock {
 
 // The sub-block-3 objective body a host writes, two off-wire facts: none when its g_GameType
 // lacks 0x20000, else the four values, and the co-op checkpoint after them when the title's
-// writer appends it (ProtocolInMatch::objective_checkpoint, DFX2-1).
+// writer appends it (ProtocolInMatch::s2c_0a.objective_checkpoint, DFX2-1).
 enum class FrameObjectiveBody : uint8_t { None, Values, ValuesAndCheckpoint };
 inline constexpr FrameObjectiveBody frame_objective_body(bool objective_gametype,
 		bool title_checkpoint) {

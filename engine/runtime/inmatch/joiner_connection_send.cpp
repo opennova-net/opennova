@@ -437,7 +437,7 @@ std::optional<ProtocolMessage> JoinerConnection::take_world_stream_request() {
 }
 
 uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {
-	if (!protocol_in_match(protocol_).loadout_class_fixed) return profile_class;
+	if (!protocol_in_match(protocol_).c2s_2f.loadout_class_fixed) return profile_class;
 	constexpr std::size_t kMissionTypeOffset = offsetof(opennova::bms::Header, mission_type);
 	static_assert(kMissionTypeOffset == 0x22A, "the BMS header's mission type byte");
 	const bool gunner_mission = mission_header_bytes_.size() > kMissionTypeOffset &&

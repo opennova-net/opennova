@@ -323,8 +323,8 @@ gamecfg::ServerSettingsTitle server_settings_title(const Title& title) {
     gamecfg::ServerSettingsTitle out;
     out.table = title.config_table;
     out.max_players = title_player_caps(title).host_screen;
-    out.armory_word = in_match.armory_only_availability;
-    out.mission_word = in_match.mission_availability();
+    out.armory_word = in_match.s2c_66.armory_only_availability;
+    out.mission_word = in_match.s2c_66.mission_availability();
     return out;
 }
 

@@ -236,10 +236,11 @@ void join_build_values() {
 }
 
 void chat_squad_tag() {
-	expect(inmatch::chat_squad_tag_text("OPN", protocol_in_match(jo()).chat_squad_tag_wrapped) == "OPN",
+	expect(inmatch::chat_squad_tag_text("OPN",
+	               protocol_in_match(jo()).s2c_14.chat_squad_tag_wrapped) == "OPN",
 	       "JO's relay appends the squad tag bare");
-	expect(inmatch::chat_squad_tag_text("OPN", protocol_in_match(dfx2()).chat_squad_tag_wrapped) ==
-	               "<ch>OPN<co>",
+	expect(inmatch::chat_squad_tag_text("OPN",
+	               protocol_in_match(dfx2()).s2c_14.chat_squad_tag_wrapped) == "<ch>OPN<co>",
 	       "DFX2-14: DFX2's wraps it in <ch> and <co>");
 }
 

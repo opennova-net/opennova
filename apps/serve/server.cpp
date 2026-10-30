@@ -595,8 +595,9 @@ bool Server::mount(std::string &error) {
 	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion),
 	// each capped at what the title's protocol can name (resolve_title resolved it with its
 	// in-match branches) [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
-	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion(),
-			world::wire_pool_capacities(protocol_in_match(protocol_).pool0_wire_capacity)));
+	const uint32_t pool0_cap = protocol_in_match(protocol_).person_index.pool0_wire_capacity;
+	world::set_pool_capacities(world::pool_capacities_for_expansion(
+			index_.mounted_expansion(), world::wire_pool_capacities(pool0_cap)));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
 	gate_tag_ = protocol_gate_tag(*protocol_, &index_);

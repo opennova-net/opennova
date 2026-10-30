@@ -63,12 +63,12 @@ inline constexpr PoolCapacities kRetailPoolCapacity = {256, 1200, 1200, 768, 128
 // event's kill feed, medic and capture records, the 0x2D emote, the 0x6D radio call and
 // the 0x33 squad record; and 0x46 PLAYER_SYNC's entity byte, `entity_handle & 0xFF`),
 // so pool 0 holds retail's 256 here. A protocol whose records name more sets its own
-// (ProtocolInMatch::pool0_wire_capacity, D-SIM-52), which the embedder brings in
+// (ProtocolInMatch::person_index.pool0_wire_capacity, D-SIM-52), which the embedder brings in
 // through wire_pool_capacities: world never reads the protocol. The wire's widths are
 // the protocol's, so a scaled pool is capped at them rather than aliasing a row onto
 // another's name.
 inline constexpr PoolCapacities kWirePoolCapacity = {256, 4096, 4096, 4096, 4096};
-// kWirePoolCapacity with pool 0's cap `pool0` (the protocol's pool0_wire_capacity),
+// kWirePoolCapacity with pool 0's cap `pool0` (the protocol's person_index cap),
 // itself capped at 4096, the 12-bit handle slot every pool's handle carries.
 PoolCapacities wire_pool_capacities(std::size_t pool0);
 // Retail's capacities, each times `scale` (1: retail's own), each capped at its

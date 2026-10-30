@@ -1,6 +1,6 @@
 #include "dfx2.h"
 
-#include <games/novalogic_2009/generation.h>
+#include <games/jo/jo.h>
 #include <net/novacrypto/cdkey.h>
 
 namespace opennova::games {
@@ -22,12 +22,18 @@ const cdkey::KeyChains kCdKey = {
 	"",
 };
 
-// dfx2.exe's protocol over the 2009 generation. Its network init is the twin of
-// [orig: CNapiNetwork_Init @0x4ca4a0] at [orig: @0x4ca610 (dfx2.exe)]. Its engine build is JO's,
-// 1.7.5.7 (its dates its own), which ONE's build replaces in every slot (Protocol,
+// dfx2.exe's protocol: Jointops.exe's row (jo_protocol.cpp), the same code over different data
+// (docs/titles/dfx2-vs-jo-re.md §10), overridden where dfx2.exe's data differs: its identity, its
+// in-match sheet by message and its NovaWorld values, each override cited. What it keeps of JO's
+// row is dfx2.exe's too: the 2009 generation (NVS, CO, PV2 "16" and the join build, whose cites in
+// games/novalogic_2009 name both executables) and the person index's 256. Its network init is the
+// twin of [orig: CNapiNetwork_Init @0x4ca4a0] at [orig: @0x4ca610 (dfx2.exe)]. Its engine build is
+// JO's, 1.7.5.7 (its dates its own), which ONE's build replaces in every slot (Protocol,
 // net/protocol/protocol.h); its lobby protocol is JO's but for that date.
 Protocol make() {
-	Protocol p;
+	Protocol p = jo_protocol();
+
+	// --- Identity.
 	p.code = "dfx2";
 	p.name = "DFX2";
 	// [orig: @0x4ca900 (dfx2.exe)]
@@ -42,33 +48,39 @@ Protocol make() {
 	// literal @0x7c8524 (8160548), the version pair's own strings.
 	// [orig: the pushes @0x4ca9b2 / @0x4ca9ad, the sprintf @0x4ca9cb (dfx2.exe)]
 	p.pv3_tags = { 0x7C8540u, 0x7C8524u };
-	p.generation = &novalogic_2009();
-	// docs/titles/dfx2-vs-jo-re.md §7, the §8 rows each field names.
-	ProtocolInMatch in_match;
-	// DFX2-1: g_CoopCheckpointSlot after the four values.
+
+	// --- The in-match sheet: JO's, overridden by message (net/protocol/protocol.h
+	// kProtocolDialect; docs/titles/dfx2-vs-jo-re.md §7, the §8 row each names).
+	ProtocolInMatch &m = *p.in_match;
+	// S2C 0x0A (DFX2-1): g_CoopCheckpointSlot after the four values.
 	// [orig: NetPacket_WritePlayerState @0x4fcd84..0x4fcd9b (dfx2.exe); NapiNPClientMsg_0x00A
 	//  @0x431dee..0x431e01 (dfx2.exe)]
-	in_match.objective_checkpoint = true;
-	// DFX2-2: the flags byte starts at 1. [orig: NetPacket_WriteWorldStateLoad0x0F @0x4ffeed
-	//  (dfx2.exe)]
-	in_match.spawn_zone_flag_always = true;
-	// DFX2-10: 3 is armory-only. [orig: NetPacket_SerializeWeaponRestrictionTable @0x50d3b0 /
-	//  @0x50d3de (dfx2.exe); NapiNPClientMsg_HandleWeaponRestrictions @0x42f2ac (dfx2.exe);
+	m.s2c_0a.objective_checkpoint = true;
+	// S2C 0x0F (DFX2-2): the flags byte starts at 1.
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x4ffeed (dfx2.exe)]
+	m.s2c_0f.spawn_zone_flag_always = true;
+	// S2C 0x14 (DFX2-14): the squad tag between <ch> and <co>.
+	// [orig: NapiNPServer_HandleChatMessage @0x510b32..0x510b6a (dfx2.exe)]
+	m.s2c_14.chat_squad_tag_wrapped = true;
+	// S2C 0x64 (DFX2-18): the rules word ORed with 0x10000.
+	// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)]
+	m.s2c_64.rules_word_bits = 0x10000u;
+	// S2C 0x66 (DFX2-10): 3 is armory-only, the mission's 2.
+	// [orig: NetPacket_SerializeWeaponRestrictionTable @0x50d3b0 / @0x50d3de (dfx2.exe);
+	//  NapiNPClientMsg_HandleWeaponRestrictions @0x42f2ac (dfx2.exe);
 	//  CAdminServer_HandleWeaponCommand @0x40469a, @0x40480e (dfx2.exe)]
-	in_match.armory_only_availability = 3;
-	// DFX2-11: [orig: Server_OnPlayerJoin @0x517717 (dfx2.exe); Server_DeployPlayer @0x514a55
-	//  (dfx2.exe)]
-	in_match.join_state_fixed = true;
-	// DFX2-12: [orig: NetPacket_SendLoadoutSubmit @0x42ec1f..0x42ec3e (dfx2.exe)]
-	in_match.loadout_class_fixed = true;
-	// DFX2-14: [orig: NapiNPServer_HandleChatMessage @0x510b32..0x510b6a (dfx2.exe)]
-	in_match.chat_squad_tag_wrapped = true;
-	// DFX2-18: [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)]
-	in_match.rules_word_bits = 0x10000u;
-	p.in_match = in_match;
-	// DFX2-13: the LAN CD-key leg after the app id, under these chains.
+	m.s2c_66.armory_only_availability = 3;
+	// C2S 0x2F (DFX2-12): the class byte 8, or 7 in a mission of type 2.
+	// [orig: NetPacket_SendLoadoutSubmit @0x42ec1f..0x42ec3e (dfx2.exe)]
+	m.c2s_2f.loadout_class_fixed = true;
+	// The slot state (DFX2-11): the join's 0x13, every deploy's 3.
+	// [orig: Server_OnPlayerJoin @0x517717 (dfx2.exe); Server_DeployPlayer @0x514a55 (dfx2.exe)]
+	m.slot_state.join_state_fixed = true;
+	// C2S 0x00 (DFX2-13): the LAN CD-key leg after the app id, under these chains.
 	// [orig: Server_ValidatePlayerJoinRequest @0x50f3e2..0x50f565 (dfx2.exe)]
 	p.cd_key = &kCdKey;
+
+	// --- NovaWorld.
 	// [orig: @0x4fc4af, @0x4fc4c5 (dfx2.exe), the twin of Lobby_UpdateServerInfo @0x4fe8c0;
 	//  [VER1] @0x4cdc8c, [VER2] @0x4cdca3 in the twin of Mission_DeobfuscateDescription @0x4cdc30
 	//  (dfx2.exe)]
