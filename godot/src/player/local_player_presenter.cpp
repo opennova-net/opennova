@@ -1517,6 +1517,8 @@ void LocalPlayerPresenter::_bind_methods() {
 								 "menu_open"),
 			&LocalPlayerPresenter::before_world_tick, DEFVAL(false), DEFVAL(true), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("after_world_tick"), &LocalPlayerPresenter::after_world_tick);
+	ClassDB::bind_method(D_METHOD("present_fixed_weapon_tick", "events"),
+			&LocalPlayerPresenter::present_fixed_weapon_tick);
 	ClassDB::bind_method(D_METHOD("fixed_weapon_batches_consumed"),
 			&LocalPlayerPresenter::fixed_weapon_batches_consumed);
 	ClassDB::bind_method(D_METHOD("consume_use_hold"), &LocalPlayerPresenter::consume_use_hold);

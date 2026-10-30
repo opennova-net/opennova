@@ -1523,7 +1523,6 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 		renderer.procedural_fallback_enabled = true
 	var options := EffectSpawnOptions.new()
 	options.admission = EffectScene.ADMISSION_ALWAYS
-	options.binding = EffectScene.BINDING_WORLD
 	options.render_domain = EffectScene.RENDER_DOMAIN_WORLD
 	var receipt := effect_world.spawn_effect_request(
 			"puff", Transform3D(Basis.IDENTITY, Vector3(2.0, 1.0, 3.0)), options)

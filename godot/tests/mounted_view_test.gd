@@ -444,6 +444,7 @@ func test_minigun_flash_follows_the_mounted_muzzle() -> void:
 	if flash_id < 0:
 		return
 	var first_muzzle := Vector3.ZERO
+	var no_events: Array[PlayerWeaponEvent] = []
 	for pose_step in 2:
 		if pose_step == 1:
 			# Move the rendered carrier and articulate its gun without firing
@@ -452,6 +453,12 @@ func test_minigun_flash_follows_the_mounted_muzzle() -> void:
 			gun.set_ctrl_override("test:muzzle", "EWEAP_GUNYAW", 8192)
 			gun.set_ctrl_override("test:muzzle", "EWEAP_GUNPITCH", 4096)
 		gun.advance_runtime_frame(0.0)
+		# The follow is the weapon pump's, once per fixed tick (the live handle
+		# re-posed to the action's userpoint, PlayerWeaponEffects::
+		# follow_action_effects) [orig: WeaponAction_ProcessFrame @0x540edf ->
+		# CEffectEmitter_UpdatePositionAndParams @0x5f6810]: one tick's drain,
+		# past the gun's pose, moves the group before the frame draws it.
+		_presenter.present_fixed_weapon_tick(no_events)
 		effects.render_frame(GameWorld.current_frame_clock_ms())
 		var expected := part.to_global(muzzle.position)
 		var expected_forward := (part.global_basis * muzzle.rotation).normalized()
