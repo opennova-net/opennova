@@ -16,6 +16,10 @@
 //   - ACCEPT on a vehicle bay sends C2S 0x40 [u16 bay][u8 group]
 //     [orig: VehicleMenu_OnButton @0x563B60; NetPacket_SendVehicleSpawnRequest
 //     @0x42DB50].
+//   - The screen's controller (inmatch/vehicle_menu_controller.h) runs vehicle.mnu's VEHICLE over
+//     the menu runtime: the open lists the menu's rows with its selection, a refill shows again only
+//     what changed, ITEM_LIST's pick is the menu's row pick, ACCEPT and CANCEL click and close
+//     [orig: VehicleMenu_RegisterCallbacks @0x5641C0].
 // Every value below is an input or follows from the cited arithmetic.
 
 #include <formats/def/def.h>
@@ -27,6 +31,10 @@
 #include <net/npwire/session_keys.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/vehicle_menu.h>
+#include <runtime/inmatch/vehicle_menu_controller.h>
+#include <runtime/menu/menu_runtime.h>
+#include <runtime/menu/menu_state_frame.h>
+#include <formats/mnu/mnu.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
@@ -389,6 +397,83 @@ bool test_a_second_session_in_the_process_polls_from_its_first_frame() {
 			"no process state: the runtime's own, unarmed");
 }
 
+// vehicle.mnu's VEHICLE of the game's shape: the list and its two buttons.
+const char *kVehicleMnu = R"(<SCREEN><NAME>VEHICLE</NAME>
+<WINDOW type="window" name="MAIN"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+<WINDOW type="list" name="ITEM_LIST"><POSITION><LEFT>240</LEFT><TOP>80</TOP><RIGHT>560</RIGHT><BOTTOM>440</BOTTOM></POSITION></WINDOW>
+<WINDOW type="button" name="ACCEPT"><POSITION><LEFT>240</LEFT><TOP>470</TOP><RIGHT>390</RIGHT><BOTTOM>504</BOTTOM></POSITION></WINDOW>
+<WINDOW type="button" name="CANCEL"><POSITION><LEFT>410</LEFT><TOP>470</TOP><RIGHT>560</RIGHT><BOTTOM>504</BOTTOM></POSITION></WINDOW>
+</WINDOW></SCREEN>)";
+
+struct ScreenHost : inmatch::VehicleMenuController::Host {
+	Rig *rig = nullptr;
+	int closes = 0;
+	inmatch::VehicleMenuSession session() override {
+		inmatch::VehicleMenuSession out;
+		out.runtime = rig->rt.get();
+		out.world = rig->world.get();
+		out.items = &rig->items.file;
+		return out;
+	}
+	void close() override { ++closes; }
+};
+
+bool test_the_controller_runs_the_screen() {
+	Rig r;
+	mnu::Document doc;
+	std::string error;
+	if (!expect(mnu::parse(kVehicleMnu, doc, error), "controller: vehicle.mnu parses")) return false;
+	menu::MenuStateFrame frame;
+	frame.set_configure([&doc](const std::string &screen, menu::MenuFrameCompiler &compiler) {
+		const mnu::Screen *found = screen.empty() ? doc.first_screen() : doc.find_screen(screen);
+		compiler.configure(found);
+		return found != nullptr;
+	});
+	menu::MenuRuntime rt;
+	rt.set_frame(&frame);
+	inmatch::VehicleMenuController controller;
+	ScreenHost host;
+	host.rig = &r;
+	controller.set_host(&host);
+	// The shell's hand-off: the claimed controller hears its document's events.
+	rt.set_sink([&](const menu::MenuEvent &e) { controller.on_event(rt, e); });
+	if (!expect(rt.open_document(&doc, "vehicle.mnu", "VEHICLE"), "controller: the screen opens"))
+		return false;
+	const int list = rt.widget_id("ITEM_LIST");
+	controller.open(rt, "vehicle.mnu", rt.current_screen());
+	if (!expect(rt.item_count(list) == 0 && r.menu().poll_armed(),
+			"controller: the open runs the menu's init; no reply, no rows"))
+		return false;
+	r.reply({{1291, 2, 5}, {4242, 0xFF, 0xFF}});
+	controller.open(rt, "vehicle.mnu", rt.current_screen());
+	if (!expect(rt.item_count(list) == 2 && rt.item_text(list, 0) == "Buggy   (2/5)" &&
+					rt.item_text(list, 1) == "Null   (inf)" && rt.selected_row(list) == 0,
+			"controller: a later open lists the menu's rows, its selection shown"))
+		return false;
+	if (!expect(controller.preview_graphic() == "buggy.3di",
+			"controller: the preview is the selected group's model"))
+		return false;
+	// ITEM_LIST's pick is the menu's row pick.
+	rt.select_row(list, 1, true);
+	if (!expect(r.menu().selected_row() == 1 && r.menu().selection() == 2 &&
+					controller.preview_graphic().empty(),
+			"controller: the pick selects the row's group"))
+		return false;
+	controller.refresh(rt);
+	if (!expect(rt.selected_row(list) == 1, "controller: the refresh keeps the shown pick"))
+		return false;
+	// CANCEL closes and sends nothing; ACCEPT sends the 0x40 and closes.
+	rt.activate(rt.widget_id("CANCEL"));
+	if (!expect(host.closes == 1 && sent(r.frame(), c2s::VEHICLE_SPAWN_REQUEST).empty(),
+			"controller: CANCEL closes with no 0x40"))
+		return false;
+	rt.activate(rt.widget_id("ACCEPT"));
+	const std::vector<ProtocolMessage> picks = sent(r.frame(), c2s::VEHICLE_SPAWN_REQUEST);
+	return expect(host.closes == 2 && picks.size() == 1 && picks[0].payload.size() == 3 &&
+					picks[0].payload[2] == 2,
+			"controller: ACCEPT asks for the picked group, then closes");
+}
+
 } // namespace
 
 int main() {
@@ -401,6 +486,7 @@ int main() {
 	ok &= test_accept_sends_the_bay_and_the_group();
 	ok &= test_the_reply_and_the_poll_outlive_a_mission_reload();
 	ok &= test_a_second_session_in_the_process_polls_from_its_first_frame();
+	ok &= test_the_controller_runs_the_screen();
 	if (ok) std::printf("vehicle_menu: ok\n");
 	return ok ? 0 : 1;
 }

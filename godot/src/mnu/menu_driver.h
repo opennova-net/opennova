@@ -325,14 +325,6 @@ public:
 	int player_info_avatar_division() const { return avatars_.division; }
 	bool player_info_avatar_preview_changed() const { return avatars_.preview_changed; }
 	Ref<AvatarComboRow> player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const;
-	// The VEHICLE screen's ITEM_DISPLAY preview (engine inmatch::vehicle_preview_view): the eye
-	// for a model of `p_bounds` (its centre at the origin), the model's turn at `p_tick_ms`
-	// (the engine's render-space pose matrix, its x / z swapped into Godot's), the field across
-	// the rect's width in degrees, and the clear colour.
-	static Vector3 vehicle_preview_eye(const AABB &p_bounds);
-	static Basis vehicle_preview_model_basis(int64_t p_tick_ms);
-	static float vehicle_preview_fov();
-	static Color vehicle_preview_clear_color();
 	void preview_player_info_voice(const Ref<AvatarDatabase> &p_db, int p_voice);
 
 	MenuDriver();

@@ -202,6 +202,7 @@ add_library(opennova_bindings OBJECT
     hud/hud_map_pass_renderer.cpp
     hud/map_view_window.cpp
     hud/command_map_screen.cpp
+    hud/command_map_controller.cpp
     hud/hud_toggles.cpp
     hud/hud_chat_entry.cpp
     hud/end_round_transition.cpp
@@ -315,6 +316,8 @@ add_library(opennova_bindings OBJECT
     mnu/menu_driver.cpp
     mnu/player_info_loadout.cpp
     mnu/armory_loadout.cpp
+    mnu/pre_game_controller.cpp
+    mnu/vehicle_menu_controller.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp

@@ -121,6 +121,7 @@
 #include "hud/map_view_state.h"
 #include "hud/map_view_window.h"
 #include "hud/command_map_screen.h"
+#include "hud/command_map_controller.h"
 #include "hud/hud_toggles.h"
 #include "hud/hud_chat_entry.h"
 #include "hud/end_round_transition.h"
@@ -197,6 +198,8 @@
 #include "mnu/menu_driver.h"
 #include "mnu/player_info_loadout.h"
 #include "mnu/armory_loadout.h"
+#include "mnu/pre_game_controller.h"
+#include "mnu/vehicle_menu_controller.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
@@ -357,6 +360,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MapViewState);
 	GDREGISTER_CLASS(MapViewWindow);
 	GDREGISTER_CLASS(CommandMapScreen);
+	GDREGISTER_CLASS(CommandMapController);
 	GDREGISTER_CLASS(HudToggles);
 	GDREGISTER_CLASS(HudChatEntry);
 	GDREGISTER_CLASS(EndRoundTransition);
@@ -472,6 +476,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(PlayerInfoLoadout);
 	GDREGISTER_CLASS(ArmoryLoadout);
+	GDREGISTER_CLASS(PreGameController);
+	GDREGISTER_CLASS(VehicleMenuController);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	// The scenario driver's scripted input device (inert until a probe arms
 	// it), ahead of the binding model it attaches to.

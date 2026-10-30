@@ -98,6 +98,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/mod_list.cpp # the Mods list's rows, its pick's description and ACCEPT's pick (D-MNU-31)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_controller.cpp # the CMAP screen's controls by name, its show and the delete button
     # profile — the player profile's in-memory image (player.sav + weapon.sav),
     # its load and save (witness: docs/playerinfo/player-sav-re.md)
     ${CMAKE_CURRENT_SOURCE_DIR}/profile/player_profiles.cpp
@@ -507,6 +508,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/disconnect_reason.cpp  # retail's join/disconnect reason text over gameerr.bin
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/pre_game_menu.cpp  # the PreMenu join screen (pre.mnu PRE_GAME_MENU)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/pre_game_controller.cpp # the join screen's controls, panel and followed join
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_send.cpp  # the C2S framing and send-boundary pump of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp
@@ -581,6 +583,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/body_trace.cpp # the body readout's recording calls (an instrument; the body_trace probe)
     # --- parity lane L5 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-907)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu_controller.cpp # the vehicle screen's controls over the session's VehicleMenu
     # --- parity lane L7 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_mission_start.cpp # ClientRuntime's mission-start pump legs (split off client_runtime.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_usegun.cpp # the local player's UseGun transition leg (split off player_weapon.cpp)

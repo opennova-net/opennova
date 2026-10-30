@@ -1,10 +1,18 @@
 // The PreMenu join screen (pre.mnu PRE_GAME_MENU): the windows each panel state
 // shows, the host's S2C 0x03 queue record as the client folds it, and the
-// status line each join stage writes into MESSAGES.
+// status line each join stage writes into MESSAGES; and the screen's controller
+// (inmatch/pre_game_controller.h) over an authored pre.mnu through the menu runtime:
+// the open on the progress panel, the status line replacing MESSAGES, the failure's
+// panel, the choice walked by ACCEPT to the commit of the three controls, BACK and
+// ABORT_CANCEL abandoning the join, and the followed join's one-frame handoff.
 // [orig: UI_ShowPreGameMenuByState @0x568d10; NapiNPClientMsg_0x003 @0x425390;
-//  MultiPlayer_JoinSessionStateMachine @0x56a320]
+//  MultiPlayer_JoinSessionStateMachine @0x56a320; PreMenu_Init @0x5693E0]
 
+#include <formats/mnu/mnu.h>
+#include <runtime/inmatch/pre_game_controller.h>
 #include <runtime/inmatch/pre_game_menu.h>
+#include <runtime/menu/menu_runtime.h>
+#include <runtime/menu/menu_state_frame.h>
 
 #include <cstdio>
 #include <string>
@@ -218,12 +226,168 @@ bool run_the_choice_panels_follow_the_flag_word() {
 			"playing: the text is the side password, the spectator password kept");
 }
 
+namespace {
+
+// pre.mnu's PRE_GAME_MENU of the game's shape: the panels' wrappers and their controls.
+std::string pre_window(const char *type, const char *name, int top, const std::string &inner,
+		const char *attrs) {
+	char position[160];
+	std::snprintf(position, sizeof(position),
+			"<POSITION><LEFT>20</LEFT><TOP>%d</TOP><RIGHT>260</RIGHT><BOTTOM>%d</BOTTOM></POSITION>", top,
+			top + 20);
+	return std::string("<WINDOW type=\"") + type + "\" name=\"" + name + "\"" + attrs + ">" + inner +
+	       position + "</WINDOW>";
+}
+
+std::string pre_mnu() {
+	const auto w = pre_window;
+	const std::string body =
+			w("window", "GAME_PASSWORD_WRAPPER", 20, w("edit", "GAME_PASSWORD", 30, "", ""), " HIDDEN") +
+			w("window", "SPECTATE_WRAPPER", 60, w("checkbox", "SPECTATE", 70, "", ""), " HIDDEN") +
+			w("window", "TEAM_PASSWORD_WRAPPER", 100,
+					w("window", "TEAM_STATIC_WRAPPER", 110, "", " HIDDEN") +
+							w("window", "SPECTATOR_STATIC_WRAPPER", 130, "", " HIDDEN") +
+							w("edit", "TEAM_PASSWORD", 150, "", ""),
+					" HIDDEN") +
+			w("window", "ERROR_WRAPPER", 200, w("multiline_edit", "MESSAGES", 210, "", " READONLY"), " HIDDEN") +
+			w("window", "ABORT_WRAPPER", 300, w("button", "ABORT_CANCEL", 310, "", ""), " HIDDEN") +
+			w("window", "ABORTRETRY_WRAPPER", 400,
+					w("button", "BACK", 410, "", "") + w("button", "ACCEPT", 440, "", ""), " HIDDEN");
+	return "<SCREEN><NAME>PRE_GAME_MENU</NAME><WINDOW type=\"window\" name=\"MAIN\"><POSITION><LEFT>0</LEFT>"
+	       "<TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>" +
+	       body + "</WINDOW></SCREEN>";
+}
+
+struct JoinScreen : inmatch::PreGameController::Host {
+	mnu::Document doc;
+	menu::MenuStateFrame frame;
+	menu::MenuRuntime rt;
+	inmatch::PreGameController controller;
+	int cancels = 0;
+	std::vector<std::string> commits;
+
+	void cancelled() override { ++cancels; }
+	void committed(const std::string &game_password, bool spectate, const std::string &team_password) override {
+		commits.push_back(game_password + "|" + (spectate ? "1" : "0") + "|" + team_password);
+	}
+	bool open() {
+		std::string error;
+		if (!mnu::parse(pre_mnu(), doc, error)) return false;
+		frame.set_configure([this](const std::string &screen, menu::MenuFrameCompiler &compiler) {
+			const mnu::Screen *found = screen.empty() ? doc.first_screen() : doc.find_screen(screen);
+			compiler.configure(found);
+			return found != nullptr;
+		});
+		rt.set_frame(&frame);
+		// The shell's hand-off: the claimed controller hears its document's events.
+		rt.set_sink([this](const menu::MenuEvent &e) { controller.on_event(rt, e); });
+		controller.set_host(this);
+		if (!rt.open_document(&doc, "pre.mnu", "PRE_GAME_MENU")) return false;
+		controller.open(rt, "pre.mnu", rt.current_screen());
+		return true;
+	}
+	bool shown(const char *name) const { return rt.is_widget_shown(rt.widget_id(name)); }
+	std::string message() const { return rt.get_widget_text(rt.widget_id("MESSAGES")); }
+	void press(const char *name) { rt.activate(rt.widget_id(name)); }
+};
+
+bool run_the_controller_runs_the_screen() {
+	JoinScreen s;
+	if (!expect(s.open(), "controller: pre.mnu opens")) return false;
+	if (!expect(s.controller.panel() == PreGamePanel::Progress && s.shown("ERROR_WRAPPER") &&
+	                    s.shown("ABORT_WRAPPER") && !s.shown("ABORTRETRY_WRAPPER") && s.message().empty(),
+			"controller: the open is the progress panel, its line empty"))
+		return false;
+	s.controller.show_progress(s.rt, "Connecting to server...");
+	s.controller.show_progress(s.rt, "Verifying Session...");
+	if (!expect(s.message() == "Verifying Session...", "controller: the status line replaces the text"))
+		return false;
+	s.controller.show_failure(s.rt, "Your game is incompatible with this server. (NCC007)");
+	if (!expect(s.controller.panel() == PreGamePanel::Error && s.shown("ABORT_WRAPPER") &&
+	                    !s.shown("ABORTRETRY_WRAPPER") &&
+	                    s.message() == "Your game is incompatible with this server. (NCC007)",
+			"controller: a failure parks the reason with Cancel only"))
+		return false;
+	s.press("ABORT_CANCEL");
+	if (!expect(s.cancels == 1, "controller: ABORT_CANCEL abandons the join")) return false;
+	// The choice: a plain team game offers none; a server password, spectators and a spectator
+	// password walk GAME_PASSWORD, SPECTATE (checked) and the spectator password to the commit.
+	if (!expect(!s.controller.show_choice(s.rt, 0x1), "controller: a plain team game offers no choice"))
+		return false;
+	if (!expect(s.controller.show_choice(s.rt, 0x8 | 0x2000 | 0x4000) &&
+	                    s.controller.panel() == PreGamePanel::GamePassword &&
+	                    s.shown("GAME_PASSWORD_WRAPPER") && s.shown("ABORTRETRY_WRAPPER") &&
+	                    !s.shown("ERROR_WRAPPER"),
+			"controller: the server password opens GAME_PASSWORD"))
+		return false;
+	s.rt.set_widget_text(s.rt.widget_id("GAME_PASSWORD"), "srv");
+	s.press("ACCEPT");
+	if (!expect(s.controller.panel() == PreGamePanel::Spectate && s.shown("SPECTATE_WRAPPER"),
+			"controller: ACCEPT goes on to SPECTATE"))
+		return false;
+	s.rt.set_widget_checked(s.rt.widget_id("SPECTATE"), true);
+	s.press("ACCEPT");
+	if (!expect(s.controller.panel() == PreGamePanel::SpectatorPassword &&
+	                    s.shown("SPECTATOR_STATIC_WRAPPER") && !s.shown("TEAM_STATIC_WRAPPER"),
+			"controller: SPECTATE checked goes on to the spectator password"))
+		return false;
+	s.rt.set_widget_text(s.rt.widget_id("TEAM_PASSWORD"), "spec");
+	s.press("ACCEPT");
+	if (!expect(s.commits.size() == 1 && s.commits[0] == "srv|1|spec" &&
+	                    s.controller.panel() == PreGamePanel::Progress,
+			"controller: the last ACCEPT commits the three controls, back on the progress panel"))
+		return false;
+	// A side password off a plain player: SPECTATE unchecked goes on to TEAM_PASSWORD; BACK abandons.
+	if (!expect(s.controller.show_choice(s.rt, 0x2000 | 0x10), "controller: a side password's choice"))
+		return false;
+	s.rt.set_widget_checked(s.rt.widget_id("SPECTATE"), false);
+	s.press("ACCEPT");
+	if (!expect(s.controller.panel() == PreGamePanel::TeamPassword && s.shown("TEAM_STATIC_WRAPPER"),
+			"controller: SPECTATE unchecked goes on to TEAM_PASSWORD"))
+		return false;
+	s.press("BACK");
+	if (!expect(s.cancels == 2 && s.commits.size() == 1, "controller: BACK abandons the choice"))
+		return false;
+	// The followed join: its lines on the progress panel, the start's shown a frame, then the handoff.
+	using Step = inmatch::PreGameController::FollowStep;
+	s.controller.show_progress(s.rt, std::string());
+	s.controller.follow(true);
+	if (!expect(s.controller.follow_frame(s.rt, true, JoinScreenStage::Queued, "Waiting in line") ==
+	                            Step::Shown &&
+	                    s.message() == "Waiting in line",
+			"follow: the join's line"))
+		return false;
+	if (!expect(s.controller.follow_frame(s.rt, false, JoinScreenStage::Queued, "") == Step::Idle &&
+	                    s.message() == "Waiting in line",
+			"follow: no status, no line"))
+		return false;
+	if (!expect(s.controller.follow_frame(s.rt, true, JoinScreenStage::Starting, "Starting game...") ==
+	                            Step::Shown &&
+	                    s.message() == "Starting game...",
+			"follow: the start's line shows"))
+		return false;
+	if (!expect(s.controller.follow_frame(s.rt, true, JoinScreenStage::Starting, "Starting game...") ==
+	                            Step::HandOff &&
+	                    !s.controller.following(),
+			"follow: the next frame hands over"))
+		return false;
+	// A failure stops the follow.
+	s.controller.follow(true);
+	s.controller.show_failure(s.rt, "lost");
+	return expect(!s.controller.following() &&
+	                      s.controller.follow_frame(s.rt, true, JoinScreenStage::Joining, "x") == Step::Idle,
+			"follow: a failure follows no join");
+}
+
+} // namespace
+
 int main() {
 	bool ok = true;
 	ok = run_each_panel_shows_its_windows() && ok;
 	ok = run_the_queue_record_folds_like_retail() && ok;
 	ok = run_each_stage_writes_its_line() && ok;
 	ok = run_the_choice_panels_follow_the_flag_word() && ok;
+	ok = run_the_controller_runs_the_screen() && ok;
 	if (ok) std::printf("pre_game_menu_test: OK\n");
 	return ok ? 0 : 1;
 }
