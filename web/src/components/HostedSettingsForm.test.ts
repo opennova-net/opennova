@@ -26,6 +26,7 @@ function mountForm(
     baseId?: string;
     sharedFree?: number;
     ownMachinesFree?: number;
+    ownMachines?: number;
     previousOwnMachine?: boolean;
     addresses?: Address[];
     preferredAddressId?: number | null;
@@ -54,14 +55,116 @@ describe('HostedSettingsForm', () => {
     start.mockReset();
   });
 
-  it('opens advanced settings before focusing an invalid advanced field', async () => {
+  it('submits custom network tuning and keeps it when starting a previous server again', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested', own_machine: true }) });
+    // On a dedicated machine, where the frame pacing is the owner's to turn off.
+    const dedicated = { ownMachinesFree: 1, previousOwnMachine: true };
+    const wrapper = mountForm([JO], settings(), dedicated);
+    expect(wrapper.get('#hosted-settings-send_holdoff_ticks-hint').text()).toContain('Nominal 192 ms (5.21 updates/s in each direction)');
+    await wrapper.get('#hosted-settings-send_holdoff_ticks').setValue(2);
+    await wrapper.get('#hosted-settings-entity_send_budget').setValue(1200);
+    await wrapper.get('#hosted-settings-max_packet_size').setValue(1100);
+    await wrapper.get('#hosted-settings-lock_framerate').setValue(false);
+    expect(wrapper.get('#hosted-settings-send_holdoff_ticks-hint').text()).toContain('Nominal 32 ms (31.25 updates/s in each direction)');
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    const saved = start.mock.calls[0][0] as HostedSettings;
+    expect(saved).toMatchObject({ send_holdoff_ticks: 2, entity_send_budget: 1200, max_packet_size: 1100, lock_framerate: false });
+    const again = mountForm([JO], saved, dedicated);
+    expect((again.get('#hosted-settings-send_holdoff_ticks').element as HTMLInputElement).value).toBe('2');
+    expect((again.get('#hosted-settings-lock_framerate').element as HTMLInputElement).checked).toBe(false);
+    await again.get('form').trigger('submit');
+    await flushPromises();
+    expect(start.mock.calls[1][0]).toEqual(saved);
+    wrapper.unmount();
+    again.unmount();
+  });
+
+  it('paces a server on a shared machine, its box ticked and disabled with the reason beside it', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    const reason = 'Only a server on a dedicated machine can run unpaced.';
+    // Started again from an unpaced server, on a shared machine: paced, and no edit of the owner's.
+    const shared = mountForm([JO], settings({ lock_framerate: false }));
+    const box = shared.get('#hosted-settings-lock_framerate');
+    expect((box.element as HTMLInputElement).disabled).toBe(true);
+    expect((box.element as HTMLInputElement).checked).toBe(true);
+    expect(shared.get('#hosted-settings-lock_framerate-hint').text()).toBe(reason);
+    expect(box.attributes('aria-describedby')).toBe('hosted-settings-lock_framerate-hint');
+    expect(vi.mocked(useUnsavedChanges).mock.calls.at(-1)![0]()).toBe(false);
+    await shared.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ lock_framerate: true }), false, null);
+
+    // Every dedicated machine of the account's in use: a shared machine, paced too.
+    const allInUse = mountForm([JO], settings({ lock_framerate: false }), { ownMachines: 1, ownMachinesFree: 0 });
+    expect((allInUse.get('#hosted-settings-lock_framerate').element as HTMLInputElement).disabled).toBe(true);
+    expect(allInUse.get('#hosted-settings-lock_framerate-hint').text()).toBe(reason);
+    await allInUse.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ lock_framerate: true }), false, null);
+  });
+
+  it('lets a server on a dedicated machine run unpaced', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(4, { state: 'requested', own_machine: true }) });
+    // No server on shared machines free: it runs on the dedicated machine, the box the owner's.
+    const wrapper = mountForm([JO], settings(), { sharedFree: 0, ownMachinesFree: 1 });
+    const box = wrapper.get('#hosted-settings-lock_framerate');
+    expect((box.element as HTMLInputElement).disabled).toBe(false);
+    expect((box.element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.get('#hosted-settings-lock_framerate-hint').text()).toContain('On by default');
+    await box.setValue(false);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ lock_framerate: false }), true, null);
+  });
+
+  it('paces the server again when the owner unticks the box on a dedicated machine and then picks a shared one', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    const wrapper = mountForm([JO], settings(), { ownMachinesFree: 1 });
+    const box = () => wrapper.get('#hosted-settings-lock_framerate').element as HTMLInputElement;
+    // A shared machine first: paced.
+    expect(box().disabled).toBe(true);
+    await wrapper.get('#hosted-settings-own_machine').setValue(true);
+    expect(box().disabled).toBe(false);
+    await wrapper.get('#hosted-settings-lock_framerate').setValue(false);
+    expect(box().checked).toBe(false);
+    await wrapper.get('#hosted-settings-shared_machine').setValue();
+    expect(box().disabled).toBe(true);
+    expect(box().checked).toBe(true);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ lock_framerate: true }), false, null);
+    // Back on the dedicated machine: the box is the owner's again, ticked.
+    await wrapper.get('#hosted-settings-own_machine').setValue(true);
+    expect(box().disabled).toBe(false);
+    expect(box().checked).toBe(true);
+  });
+
+  it('opens network tuning for invalid values and marks a field refused by the service', async () => {
     const wrapper = mount(HostedSettingsForm, { props: { previous: settings(), products: [JO] }, attachTo: document.body });
-    const advanced = wrapper.get('[data-advanced-settings]').element as HTMLDetailsElement;
-    expect(advanced.open).toBe(false);
+    await wrapper.get('#hosted-settings-max_packet_size').setValue(16385);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).not.toHaveBeenCalled();
+    expect((wrapper.get('[data-advanced-settings]').element as HTMLDetailsElement).open).toBe(true);
+    expect(document.activeElement?.id).toBe('hosted-settings-max_packet_size');
+    expect(wrapper.get('#hosted-settings-max_packet_size-error').text()).toBe('Enter a whole number from 100 to 16384.');
+    await wrapper.get('#hosted-settings-max_packet_size').setValue(1300);
+    start.mockResolvedValue({ ok: false, error: { code: 'invalid_settings', status: 400, message: 'The server refused the settings.', field: 'send_holdoff_ticks' } });
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(wrapper.get('#hosted-settings-send_holdoff_ticks-error').text()).toBe(FIELD_RULES.send_holdoff_ticks);
+    await wrapper.get('#hosted-settings-send_holdoff_ticks').setValue(3);
+    expect(wrapper.find('#hosted-settings-send_holdoff_ticks-error').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('shows the rules openly and focuses an invalid one', async () => {
+    const wrapper = mount(HostedSettingsForm, { props: { previous: settings(), products: [JO] }, attachTo: document.body });
+    expect(wrapper.get('#hosted-settings-time_limit').element.closest('details')).toBeNull();
     await wrapper.get('#hosted-settings-time_limit').setValue(999);
     await wrapper.get('form').trigger('submit');
     await flushPromises();
-    expect(advanced.open).toBe(true);
     expect(document.activeElement?.id).toBe('hosted-settings-time_limit');
     expect(start).not.toHaveBeenCalled();
     wrapper.unmount();
@@ -85,7 +188,7 @@ describe('HostedSettingsForm', () => {
     const games = radios(wrapper, 'product_id');
     expect(games.map((g) => (g.element as HTMLInputElement).value)).toEqual([String(JO.id), String(DFX2.id)]);
     expect(wrapper.text()).toContain('Delta Force Xtreme 2');
-    expect(wrapper.text()).toContain('1.7.5.5');
+    expect(wrapper.text()).toContain('1.0.5');
     // Before any other field.
     const first = wrapper.get('form').element.querySelector('input');
     expect(first?.getAttribute('name')).toBe('hosted-settings-product_id');
@@ -96,7 +199,7 @@ describe('HostedSettingsForm', () => {
     expect(radios(wrapper, 'expansion_id')).toHaveLength(2);
     expect(wrapper.get('#hosted-settings-max_players').attributes('max')).toBe('64');
     expect(wrapper.get('#hosted-settings-max_players-hint').text()).toBe('players, 2 to 64');
-    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('1 to 500, 500 for no limit');
+    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('500 for no limit');
     expect(rotation(wrapper)).toEqual(['River Patrol', 'jo_two.bms']);
 
     // Its expansion: its missions join the rotation.
@@ -109,7 +212,7 @@ describe('HostedSettingsForm', () => {
     expect(radios(wrapper, 'expansion_id')).toHaveLength(0);
     expect(wrapper.get('#hosted-settings-max_players').attributes('max')).toBe('50');
     expect(wrapper.get('#hosted-settings-respawn').attributes('max')).toBe('60');
-    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('1 to 250, 250 for no limit');
+    expect(wrapper.get('#hosted-settings-kill_limit-hint').text()).toBe('500 for no limit');
     expect(rotation(wrapper)).toEqual(['Dust']);
 
     // Its limits apply to the check: 60 players is too many for DFX2.
@@ -167,7 +270,7 @@ describe('HostedSettingsForm', () => {
     );
     // One removed: it fits.
     start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
-    await wrapper.get('#hosted-settings-missions-remove-m0\\.bms').trigger('click');
+    await wrapper.get('#hosted-settings-missions-remove-0').trigger('click');
     await wrapper.get('form').trigger('submit');
     await flushPromises();
     expect(start).toHaveBeenCalledTimes(1);
@@ -379,12 +482,31 @@ describe('HostedSettingsForm', () => {
     expect(wrapper.get('#hosted-settings-game_name-hint').element.tagName).toBe('SPAN');
     expect(wrapper.get('#hosted-settings-time_limit-hint').element.parentElement!.querySelector('input')).not.toBeNull();
     expect(wrapper.get('#hosted-settings-respawn-hint').text()).toBe('seconds, 0 to 300');
-    expect(wrapper.find('p.text-xs.text-ink-muted').exists()).toBe(false);
+    expect(wrapper.get('#hosted-settings-game_password').attributes('title')).toContain('letters');
     const password = wrapper.get('#hosted-settings-game_password');
     expect(password.attributes('placeholder')).toBe('None: a public server');
     expect(password.attributes('title')).toContain('letters, digits and punctuation');
     expect(wrapper.find('#hosted-settings-game_password-hint').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('pre-1.0');
-    expect(wrapper.get('[data-advanced-settings] summary').text()).toBe('Advanced settings');
+    expect(wrapper.findAll('h2').map((h) => h.text())).toEqual(['Game', 'Server', 'Rotation', 'Rules']);
+    expect(wrapper.get('[data-more-settings] summary').text()).toBe('More settings');
+  });
+
+  it('puts the repeat beside the rotation and the other options in More settings', async () => {
+    const schema = [
+      { key: 'replay', label: 'Repeat rotation', group: 'Rotation', kind: 'boolean' as const, default: true, min: 0, max: 1, command: '', core: false, note: '', depends_on: '' },
+      { key: 'punt_vote', label: 'Allow kick votes', group: 'Players and access', kind: 'boolean' as const, default: false, min: 0, max: 1, command: 'PuntVote', core: false, note: '', depends_on: '' },
+      { key: 'vote_percent', label: 'Vote threshold', group: 'Players and access', kind: 'number' as const, default: 0.5, min: -2147483648, max: 2147483647, command: 'VotePercent', core: false, note: '', depends_on: 'punt_vote' },
+    ];
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    const wrapper = mountForm([{ ...JO, settings_schema: schema }], settings());
+    expect(wrapper.find('#hosted-settings-options-replay').exists()).toBe(false);
+    await wrapper.get('#hosted-settings-replay').setValue(false);
+    expect((wrapper.get('#hosted-settings-options-vote_percent').element as HTMLInputElement).disabled).toBe(true);
+    await wrapper.get('#hosted-settings-options-punt_vote').setValue(true);
+    expect((wrapper.get('#hosted-settings-options-vote_percent').element as HTMLInputElement).disabled).toBe(false);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start.mock.calls[0][0].options).toEqual({ replay: false, punt_vote: true });
   });
 });

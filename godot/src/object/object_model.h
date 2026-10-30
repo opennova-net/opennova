@@ -33,7 +33,6 @@
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/skin_reference.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
-#include <godot_cpp/classes/visible_on_screen_notifier3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/templates/hash_set.hpp>
@@ -511,6 +510,9 @@ private:
 	float interior_section_daylight_ = 0.0f;
 	uint32_t shadow_caster_layers_ = 0;
 	bool slot_shadow_person_ = false;
+	bool slot_captured_ = false;
+	// The process frame whose runtime frame last ran the render-derived work.
+	uint64_t drawn_frame_ = UINT64_MAX;
 	// Effective entity/model scale in signed Q16.16. Zero is retail's sentinel
 	// for an ordinary 1.0 matrix; kept on the model so every present writer
 	// composes the same scale instead of overwriting it with a pose transform.
@@ -530,7 +532,6 @@ private:
 	String graphic_name_; // the object graphic the placer built this model from
 	Ref<EntityRef> entity_ref_;
 	PresentationLayer presentation_layer_ = PRESENTATION_LAYER_WORLD;
-	bool on_screen_ = true;
 	// Two-bit visibility ownership (ADR 0043 d9): the entity presenter's
 	// placed walk owns the sim's intent, the render-occlusion frame owns its
 	// claim, and Node3D::visible is their product (each setter recomputes
@@ -545,7 +546,6 @@ private:
 	bool subpixel_hidden_ = false;
 	void set_subpixel_hidden(bool p_hidden);
 	void apply_node_visibility();
-	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool match_terrain_enabled_ = false;
 	// The foliage depth-mask wave this model's draws take
 	// (u_foliage_mask_side: 0 none, 1 far, 2 camera side) and the scene build
@@ -720,6 +720,9 @@ private:
 	// cleared when that plan drops the row; only planned models advance
 	// lifetime_generation_ when they die.
 	bool present_planned_ = false;
+	// The husk swap's models (set_husk_visual / set_final_husk_overlay).
+	ObjectID husk_visual_;
+	ObjectID final_husk_overlay_;
 
 	// --- core (object_model.cpp) ---
 	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
@@ -869,7 +872,6 @@ public:
 	uint32_t get_scene_build_serial() const { return scene_build_serial_; }
 
 private:
-	void sync_screen_notifier(const AABB &p_bounds);
 	AABB compute_transformed_mesh_bounds() const;
 
 protected:
@@ -895,6 +897,17 @@ public:
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
 	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
 	bool is_present_planned() const { return present_planned_; }
+	// The husk swap on this entity model (DestructionPresenter sets and clears
+	// both): the grafted husk drawn in its place and the swap stage's pending
+	// final husk drawn beside it, each null when none stands or once freed. The
+	// present walks read them straight off the model, as the draw reads the
+	// entity's husk words (engine: world::husk_present_value).
+	void set_husk_visual(ObjectID p_husk) { husk_visual_ = p_husk; }
+	ObjectID get_husk_visual_id() const { return husk_visual_; }
+	ObjectModel *get_husk_visual() const;
+	void set_final_husk_overlay(ObjectID p_overlay) { final_husk_overlay_ = p_overlay; }
+	ObjectID get_final_husk_overlay_id() const { return final_husk_overlay_; }
+	ObjectModel *get_final_husk_overlay() const;
 	// True while this model is in the shared awake set (the park/re-arm gate's
 	// observable — replaces the ex-per-node is_processing() the tests read).
 	bool is_runtime_frame_awake() const { return awake_; }
@@ -957,6 +970,20 @@ public:
 	// parsed but draws nothing in JO (render_slot_shadow.h, the blob leg).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
+	// Whether a render slot captured this caster in the latest slot frame
+	// (SlotShadow marks them): the slot draws the caster through its own
+	// render callback whatever any view's collect says, so the present walks
+	// pose it while it holds one (engine renderer/render_slot_shadow.h
+	// carries the witness).
+	void set_slot_captured(bool p_captured);
+	bool is_slot_captured() const { return slot_captured_; }
+	// A render slot captured this model after this frame's runtime frame ran
+	// without its render-derived work (no pass drew it then): the slot's own
+	// pass poses it now, ahead of its capture, as retail's shadow pass draws
+	// its caster through the caster's render callback (engine
+	// renderer/render_slot_shadow.h carries the witness). No-op for a model
+	// this frame already drew, or one not captured.
+	void pose_for_slot_capture();
 	void set_entity_uniform_scale_q16(int64_t p_scale_q16);
 	int64_t get_entity_uniform_scale_q16() const;
 	// Compose a renderer-owned entity pose with the effective authored scale.
@@ -1310,8 +1337,6 @@ public:
 	void refresh_render_order();
 	static void mark_render_order_dirty_all();
 	void advance_runtime_frame(double p_delta);
-	void set_on_screen(bool p_value);
-	bool is_on_screen() const { return on_screen_; }
 	// The two visibility owners' bits: the sim's present intent (default
 	// visible) and the render-occlusion frame's claim (default released).
 	void set_present_visible(bool p_visible);
@@ -1319,6 +1344,13 @@ public:
 	void set_occlusion_hidden(bool p_hidden);
 	bool is_occlusion_hidden() const { return occlusion_hidden_; }
 	bool is_subpixel_hidden() const { return subpixel_hidden_; }
+	// Whether a view the frame draws collected the model: the main scene's
+	// collect (its occlusion claim released), or the weapon Inset's or an open
+	// water mirror's own verdict admitting it (a view that gave none draws it
+	// by the main view's). The collects' answer, their passes' writer gate
+	// (engine inmatch/occlusion_collect.h carries the witness); the sim's own
+	// hide is the caller's.
+	bool is_view_collected() const;
 
 	// --- CTRL registers ---
 	void begin_ctrl_update();

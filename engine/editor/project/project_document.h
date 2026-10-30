@@ -25,8 +25,11 @@ inline constexpr const char *kImportSidecarSuffix = ".import";
 inline constexpr const char *kImportCacheFileName = "import_cache.json";
 inline constexpr const char *kBuildCacheFileName = "build_cache.json";
 inline constexpr const char *kTextureHeaderCacheFileName = "texture_headers.json";
-inline constexpr const char *kDefaultTargetGame = "jo";
 inline constexpr const char *kDefaultExportOutput = "build/export";
+
+// The game a project that names none targets: the default title's code (base/title/title.h
+// default_title).
+std::string default_target_game();
 
 // Which requirement groups the project turns on (ADR 0046 d7): the menu set is always
 // required, so no switch names it; the mission set only when the project enables missions.
@@ -83,7 +86,7 @@ struct ProjectDocument {
 	int schema_version = kProjectSchemaVersion;
 	std::string project_id;   // a UUID minted at creation, stable for the project's life
 	std::string title;
-	std::string target_game = kDefaultTargetGame; // a gameprofile code: jo, jodemo, dfx, dfx2, bhd
+	std::string target_game = default_target_game(); // a title code (base/title/title.h): jo, dfx2, ...
 	ProjectFeatures features;
 	ProjectExportSettings export_settings;
 	ProjectExpansion expansion; // `"expansion": {"name", "builds_on", "base_project"?}`, absent when standalone
@@ -164,7 +167,7 @@ bool save_project_document(const std::string &project_file, const ProjectDocumen
 // ask it with no install; the session asks again with the one it knows.
 bool project_overlaps_install(const std::string &root, const std::string &install, Diagnostic &error);
 
-// Whether a project could be made at `root` for `target_game` (a gameprofile code) as `expansion`
+// Whether a project could be made at `root` for `target_game` (a title code) as `expansion`
 // (the expansion's rule, check_project_expansion: what an install has is the caller's to weigh,
 // expansion_install_findings): the directory must not already hold a project file nor overlap a
 // game install (project_overlaps_install). Nothing is written; create_project asks the same first.
@@ -173,7 +176,7 @@ bool can_create_project(const std::string &root, const std::string &target_game,
 
 // Create a project at `root`: the directory (created if missing) must not already hold a
 // project file. Writes `project.opennova` and the self-ignoring cache directory, returns
-// the new document. `target_game` must be a gameprofile code; `novaworld` the NovaWorld project's
+// the new document. `target_game` must be a title code; `novaworld` the NovaWorld project's
 // key it is made for ("" none).
 bool create_project(const std::string &root, const std::string &title, const std::string &target_game,
                     ProjectDocument &out, Diagnostic &error,

@@ -8,9 +8,17 @@
 
 namespace opennova::inmatch {
 namespace {
+// The gun's window: the carrier def's per-seat arc, else the fallback off the gun's slot Def.
+// A row the joiner's world holds has a slot Def only once a class init bound it (the ewep row's,
+// an EWeap aircraft's), and reads the fallback only then, as the World's window does
+// (world::clamp_emplaced_gun_words_to_window): a gun of any other class gets none, whatever
+// weapon its def names. A row no world holds reads its def's weapon, the stamped spec limits.
+// [orig: Entity_GetWeaponTurretLimits @0x540D70 - the fallback off the slot's def
+//  @0x540E35..0x540E58; WeaponSlot_InitFromEntityDef @0x5466C0, called only by
+//  Entity_InitBoneReferences @0x441482 and Entity_InitAircraftWeaponBones @0x49017B]
 world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 		const replication::ClientState &state, const std::vector<mission::ItemSeatSpec> &specs,
-		const mission::ItemSeatSpec &spec) {
+		const mission::ItemSeatSpec &spec, bool slot_def_bound) {
 	const mission::ItemEmplacementAttachmentSpec *arc = nullptr;
 	// The carrier's row by its handle (ClientState::find's per-handle row, D-NET-1346).
 	const replication::ClientEntityState *carrier =
@@ -33,8 +41,8 @@ world::TurretWindow replica_window(const replication::ClientEntityState &mount,
 	const world::TurretWindow window = world::select_turret_window_bam(
 			arc != nullptr ? arc->down_limit_bam : 0, arc != nullptr ? arc->up_limit_bam : 0,
 			arc != nullptr ? arc->right_limit_bam : 0, arc != nullptr ? arc->left_limit_bam : 0,
-			spec.turret_limits_valid, spec.turret_yaw_range_bam, spec.turret_pitch_max_bam,
-			spec.turret_pitch_min_bam);
+			spec.turret_limits_valid && slot_def_bound, spec.turret_yaw_range_bam,
+			spec.turret_pitch_max_bam, spec.turret_pitch_min_bam);
 	return window;
 }
 
@@ -230,7 +238,7 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 						(local_mount != nullptr &&
 								mount.world_class_update ==
 										replication::ClientEntityState::WorldClassUpdate::Ewep);
-				const int32_t planar_rate = world.rules.title != gameprofile::GAME_DFX2 ? 0
+				const int32_t planar_rate = world.rules.title().emplaced_solo_planar_slew == 0 ? 0
 						: local_mount != nullptr
 						? world::emplaced_turret_planar_rate(world, *local_mount, look.is_local_player)
 						: world::kEmplacedTurretSlewPerTick;
@@ -248,10 +256,12 @@ void tick_replica_emplaced_channels(replication::ClientState &state,
 				if (counter) world::counter_rotate_emplaced_gun_channel(channel, frame_before, frame_posed);
 				// The class update's window leg sits behind the gun's slot Def (+0x2D4), as on
 				// the World's channel (world::tick_emplaced_weapon_channel carries the witness).
-				if (local_mount == nullptr || !local_mount->emplaced_update ||
-						world::emplaced_slot_def(world, *local_mount) != nullptr)
+				const bool slot_def_bound = local_mount == nullptr ||
+						world::emplaced_slot_def(world, *local_mount) != nullptr;
+				if (slot_def_bound || !local_mount->emplaced_update)
 					world::clamp_emplaced_gun_channel(channel, look, frame_posed[0],
-							frame_posed[1], replica_window(mount, state, specs, *spec));
+							frame_posed[1], replica_window(mount, state, specs, *spec,
+									slot_def_bound));
 				mount.emplaced_gun_yaw_word = channel.yaw;
 				mount.emplaced_gun_pitch_word = channel.pitch;
 				occupant.heading_bam = look.heading;

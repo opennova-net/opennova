@@ -10,9 +10,8 @@
 #include "listing_source.h"
 #include "net_sockets.h"
 
-#include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/punt_log.h>   // ConnectLog
 #include <runtime/inmatch/server_files.h>
@@ -79,7 +78,7 @@ uint16_t free_port() {
 
 int main() {
 	CHECK(net::startup() == 0);
-	const TitleIdentity &jo = *title_identity(gameprofile::GAME_JO);
+	const Protocol &jo = *title_protocol("jo");
 
 	// The default scan is the shipped block's quad.
 	const serve::ListerOptions defaults;
@@ -95,7 +94,8 @@ int main() {
 	CHECK(held.is_valid() && held_port != 0 && next != 0 && next != held_port);
 	EmptySource source;
 	serve::ListerOptions options;
-	options.title = &jo;
+	options.protocol = &jo;
+	options.game_title = opennova::title_by_code("jo");
 	options.gate_tag = jo.gate_tag;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = free_port();

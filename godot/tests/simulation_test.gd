@@ -3214,6 +3214,11 @@ func test_listen_snapshot_attachment_holds_its_resting_userpoint() -> void:
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1291]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
+	# The armory, as every peer holds it: the ewep child's class init binds its slot
+	# Def (WPN_EMPLCD50NA) and composes it on the carrier, which the spawn does not.
+	var armory := ResourceRoot.new()
+	assert_eq(armory.set_root_dir(DefFixture.directory()), OK)
+	assert_eq(sim.load_weapon_table(armory, "weapon.def"), OK)
 
 	# The first fold materializes the synthetic row; the later frames must keep
 	# it where it started.

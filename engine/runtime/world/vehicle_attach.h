@@ -94,8 +94,8 @@ bool seat_selection_mode_for_command(int command_id, SeatSelectionMode &out);
 // [orig: Entity_FindBestSeatSlot @0x4351F0]
 int32_t seat_priority_weight(SeatType type, bool root_seat);
 
-// FindBestSeatSlot's weighted root+child walk. The requested root is considered
-// first, followed by live entities whose ground_target is that root. Controller
+// FindBestSeatSlot walks the root's proximity slice, admitting its ground
+// children, then the root itself; equal weights retain the first seat. Controller
 // and Driver are root-only; lower weights win: root control/driver 0x2000,
 // Gunner 0x20000, root Passenger 0x200000, child Passenger 0x2000000. A seat
 // occupied by the requester remains eligible.

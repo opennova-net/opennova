@@ -14,10 +14,12 @@
 #include "products/product_repository.h"
 #include "program/server_config.h"
 
+#include <base/title/title.h>
 #include <base/io/cp1252.h>
 #include <net/novaworld/host_repository.h>
 
 #include <climits>
+#include <algorithm>
 #include <cstdio>
 #include <optional>
 #include <string>
@@ -59,22 +61,7 @@ void put_id(crow::json::wvalue &out, const char *key, std::optional<int64_t> id)
 }
 
 crow::json::wvalue settings_json(const HostedSettings &s) {
-	crow::json::wvalue out;
-	// A deleted product's row leaves the id 0: null.
-	put_id(out, "product_id", s.product_id != 0 ? std::optional<int64_t>(s.product_id) : std::nullopt);
-	put_id(out, "expansion_id", s.expansion_id);
-	out["game_name"] = s.game_name;
-	out["max_players"] = s.max_players;
-	out["game_password"] = s.game_password;
-	out["time_limit"] = s.time_limit;
-	out["kill_limit"] = s.kill_limit;
-	out["max_score"] = s.max_score;
-	out["respawn"] = s.respawn;
-	out["start_delay"] = s.start_delay;
-	out["team_ff"] = s.team_ff;
-	out["missions"] = text_list(s.missions);
-	out["list_on_novalogic"] = s.list_on_novalogic;
-	return out;
+	return crow::json::wvalue(crow::json::load(io::json_write(settings_document(s))));
 }
 
 crow::json::wvalue range_json(const SettingRange &range) {
@@ -193,12 +180,16 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 	out["id"] = d.id;
 	out["display_name"] = d.display_name;
 	out["title"] = d.title;
+	protocol_or_null(out, "protocol", d.title.empty() ? nullptr : title_protocol(d.title));
 	out["version"] = d.version;
 	// Whether a server on it may also list on NovaLogic's NovaWorld (Joint Operations' lobby
 	// alone; the list's novalogic_listing says whether the service offers it at all).
 	out["novalogic_listing"] = novalogic_lists(d);
 	out["missions"] = missions_json(d.missions);
-	const HostLimits &limits = host_limits_for_title(d.title);
+	out["settings_schema"] = crow::json::wvalue(
+			crow::json::load(io::json_write(hosted_settings_schema(title_config_table(d.title)))));
+	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(d.weapons)));
+	const HostLimits limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;
 	ranges["max_players"] = range_json(limits.max_players);
 	ranges["time_limit"] = range_json(limits.time_limit);
@@ -215,6 +206,7 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 		item["display_name"] = e.display_name;
 		item["version"] = e.version;
 		item["missions"] = missions_json(e.missions);
+		item["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(e.weapons)));
 		expansions.push_back(std::move(item));
 	}
 	out["expansions"] = std::move(expansions);
@@ -249,9 +241,11 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		e["address"] = nullptr;
 	}
 	e["settings"] = settings_json(s.settings);
-	// Its product ({id, key, display_name, title: its gameprofile code}) and
-	// expansion rows (null once a row is gone), the names the site shows, the
-	// trees it is pinned to and whether newer data waits.
+	e["settings_revision"] = s.settings_revision;
+	// Its product ({id, key, display_name, title: its title code, protocol: the
+	// {code, name, version} that title speaks}) and expansion rows (null once a
+	// row is gone), the names the site shows, the trees it is pinned to and
+	// whether newer data waits.
 	const auto base = s.settings.product_id != 0 ? find_product(db, s.settings.product_id) : std::nullopt;
 	const auto expansion = s.settings.expansion_id ? find_product(db, *s.settings.expansion_id) : std::nullopt;
 	if (base) {
@@ -260,6 +254,8 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		d["key"] = base->key;
 		d["display_name"] = base->display_name;
 		d["title"] = base->title;
+		protocol_or_null(
+				d, "protocol", base->title.empty() ? nullptr : title_protocol(base->title));
 		e["product"] = std::move(d);
 	} else {
 		e["product"] = nullptr;
@@ -606,9 +602,15 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // "expansion_id" (one of that product's offered expansions; absent or null:
 // the base game alone), "game_name" (required), "max_players", "game_password",
 // "time_limit", "kill_limit", "max_score", "respawn", "start_delay" (integers),
-// "team_ff" (true/false), "missions" (a list of .bms names among the product's
-// and the expansion's, the first the starting map; absent: every mission of
-// the base, then the expansion's), "list_on_novalogic" (true/false: also listed on
+// "send_holdoff_ticks" (integer 0..255, default 12), "entity_send_budget" (integer
+// 100..1600, default 600), "max_packet_size" (integer 100..16384, default 1300),
+// "lock_framerate" (boolean, default true; saved as sent, but a start on a shared machine
+// runs paced whatever it says: hosted_settings.h launched_settings),
+// "team_ff" (true/false), "rotation" (a list of {"file", "swap_sides"}: .bms names
+// among the product's and the expansion's, the first the starting map, a name
+// repeating with one side-switch flag; absent: every mission of the base, then the
+// expansion's), "options" (the schema's other settings, settings_document),
+// "list_on_novalogic" (true/false: also listed on
 // NovaLogic's NovaWorld; true only while the service offers it), "own_machine" (true: on one of the
 // account's dedicated machines, a paid one or an admin's; absent: false, a shared
 // machine), "address_id" (with own_machine: one of the account's ready static addresses,
@@ -656,32 +658,18 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	if (!body) return json_error(400, "invalid_json");
 	HostedSettings settings;
 	settings.product_id = offered.front().id;
-	if (auto v = body->integer("product_id")) settings.product_id = *v;
-	if (!body->null("expansion_id")) {
-		if (auto v = body->integer("expansion_id")) settings.expansion_id = *v;
-	}
-	if (auto v = body->text("game_name")) settings.game_name = *v;
-	if (auto v = body->text("game_password")) settings.game_password = *v;
-	// A number past an int reads as one no range admits.
-	auto number = [&body](const char *key, int &out) {
-		if (const auto v = body->integer(key))
-			out = (*v < INT_MIN || *v > INT_MAX) ? INT_MIN : static_cast<int>(*v);
-	};
-	number("max_players", settings.max_players);
-	number("time_limit", settings.time_limit);
-	number("kill_limit", settings.kill_limit);
-	number("max_score", settings.max_score);
-	number("respawn", settings.respawn);
-	number("start_delay", settings.start_delay);
-	if (auto v = body->flag("team_ff")) settings.team_ff = *v;
-	if (auto v = body->flag("list_on_novalogic")) settings.list_on_novalogic = *v;
-	if (auto v = body->text_list("missions")) {
-		settings.missions = *v;
-	} else if (const OfferedProduct *base = find_offered(offered, settings.product_id)) {
-		// Every mission of the base and the expansion, in the catalog's order.
-		settings.missions = default_rotation(*base,
-				settings.expansion_id ? find_offered_expansion(*base, *settings.expansion_id) : nullptr);
-	}
+    io::JsonValue document;
+    std::string field, error;
+    if (!io::json_parse(req.body, document, error)) return json_error(400, "invalid_json");
+    document.object.erase(std::remove_if(document.object.begin(), document.object.end(), [](const io::JsonMember &m) {
+        return m.key == "own_machine" || m.key == "address_id";
+    }), document.object.end());
+    if (!read_settings_document(document, settings, field, error))
+        return field_error(400, "invalid_settings", field.c_str(), error);
+    if (!document.get("rotation")) {
+        if (const auto *base = find_offered(offered, settings.product_id))
+            settings.missions = default_rotation(*base, settings.expansion_id ? find_offered_expansion(*base, *settings.expansion_id) : nullptr);
+    }
 	const bool own_machine = body->flag("own_machine").value_or(false);
 	// The static address it runs at: a dedicated-machine server's alone.
 	std::optional<int64_t> address_id;

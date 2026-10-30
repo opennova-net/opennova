@@ -50,8 +50,9 @@ scripts/build.sh
 - `scripts/build.sh --no-godot` skips the GDExtension for fast library-only iteration.
 - `scripts/build.sh --no-test` builds without running `ctest`; `-R <regex>` runs only the
   matching tests.
-- `scripts/build.sh --shard editor|rest` runs one of CI's two ctest shards (the rows
-  labelled `editor`, or the others) with its own attestation.
+- `scripts/build.sh --shard editor|rest` builds and runs one of CI's two ctest shards
+  (the rows labelled `editor`, or the others) with its own attestation. The rest
+  shard also builds the native apps; an unsharded build still builds everything.
 - `--jobs N` sets the build parallelism (`scripts/build.sh` and `scripts/build_godot.sh`).
 - Both scripts configure their build tree once and skip that step on later runs; the build
   re-runs CMake by itself when a `CMakeLists.txt` changes.
@@ -132,7 +133,7 @@ against it. The release DLLs that a release export loads (`opennova.dll` and
 `oneditor.dll`, elsewhere `template_release`-named) are not produced by
 this script at all: build them with `scripts/package_godot_windows.ps1`
 (`-ExportMode release`, without `-SkipBuild`) locally, or rely on CI's
-`build-gdextension-windows` `template_release` leg (master pushes and manual runs).
+`build-gdextension-windows` `template_release` leg (master and other non-staging branch runs).
 
 The artifacts land in `godot/bin/` alongside `godot/bin/opennova.gdextension`. **After a
 rebuild, fully restart the Godot editor.** GDExtension class registration does not
@@ -163,7 +164,7 @@ A build talks to its export mode's deployment (DEPLOY.md "Deployments: dev, stag
 prod"). A release build (`scripts/package_godot_windows.ps1`'s default: tagged releases
 and master pushes) is published to prod, whose service names `update.opennova.net` in its
 `OPENNOVA.WIZ`, and its NovaWorld menu's OpenNova target dials `nw.opennova.net`. A debug
-build (`-ExportMode debug`: what PR CI builds and publishes to staging) updates from
+build (`-ExportMode debug`: what PR and staging CI build; only staging CI publishes) updates from
 `update.staging.opennova.net` and dials `nw.staging.opennova.net`, so testing a PR's
 build never touches production. The update host is the `URL=` of the `OPENNOVA.WIZ` the
 deployment's service writes into the package; the gate is the exported build's own
@@ -188,7 +189,9 @@ alone. The OpenNova runtime is the game with no project: Publish
 (`.github/workflows/publish.yml`) ships each CI build to a deployment's downloads host and
 its update service at once (DEPLOY.md, "The downloads host").
 
-The version goes into the package's command file; no version file is read or written.
+The game version goes into the package's command file (`[HEADER] VERSION`); the release
+records the ONE that built it. The one version file is an expansion's `version.txt`, which the
+service writes at the build (ADR 0076); a base game carries none.
 A retail release also carries the removals since the stock install: it is packed from the
 stock revision's export by our own writer to the revision's, every file a row, each into
 the archive the stock install holds it in (a stock install's first update fetches its
@@ -199,7 +202,8 @@ built on publish from that whole package, from empty: the service keeps no stock
 The game product is `/game acidgambit`, `/game jo` or `/game dfx2`. Without `/game`,
 the launch folder's `UPDATE.WIZ` names it by its `CMD` (`JOPTR.CMD`, `DFX2.CMD`,
 `ACIDGAMBIT.CMD`); a folder with no wizard is OpenNova's, and one whose wizard names
-another game is refused (ADR 0067). OpenNova's product uses the JO engine profile. The
+another game is refused (ADR 0067). OP: Acid Gambit runs as its own title, `acidgambit`, whose
+protocol and rules are JO's (ADR 0076). The
 updater refuses a product the folder's wizard does not name, and installs OpenNova
 content only into OpenNova's own folder or an empty one. The selected product
 and its installed expansions update independently of the OpenNova runtime. A retail
@@ -450,6 +454,23 @@ Notes:
 The full cross-system suite can be flaky from shared state; if a run shows an unrelated
 red, re-run that single test file in isolation to confirm before treating it as real.
 
+### CI feedback
+
+PRs run the components selected by `scripts/ci/changes.py`: Godot, native tests,
+service/backend, web/stack, Blender, tools, or infrastructure. Shared engine/build inputs,
+unknown paths and an incomplete changed-file query select everything. Renames select
+both the old and new component. Repository gates always run, including docs-only PRs.
+Staging and master run every component. The existing required check names remain
+`test (windows-latest)` and `godot-tests (windows-latest)`; they now verify all selected
+jobs, including Linux and the web/stack checks, and reject unexpected skips.
+
+The two native Windows shards build only their targets, with separate compiler caches.
+Debug extension builds also supply the project CLI, so Godot tests do not wait for
+native tests. One service build supplies both image workflows and the local stack;
+one Release/static-CRT tools build supplies the Windows packages. Staging and master
+save compiler caches after successful compilation, even when later tests fail.
+PR build comments list the packages that were produced and their actual expiry.
+
 ## Lint and format checks
 
 CI's required gates are the `scripts/lint/*.py --enforce` checks in `ci.yml`'s `gates`
@@ -475,16 +496,37 @@ master or whose commit has no green master-push `ci.yml` run (it waits for one s
 running), so the release ships only what every required CI gate already passed; the
 package jobs then build the four apps' plain builds as the run's artifacts (the runtime's
 and the editor's zips, the Blender add-on's and the tools'), the runtime
-and the editor stamped with the tag's version (the exes' file versions), whatever
-`godot/project.godot`'s `config/version` says. Then `release.yml` creates the GitHub release
+and the editor stamped with the tag's version (ONE's build stamp, `engine/base/version/one_build.h`,
+and the exes' file versions), whatever `godot/project.godot`'s `config/version` says. Then `release.yml` creates the GitHub release
 (its generated notes) and starts Publish for prod
 (`.github/workflows/publish.yml` with deployment `prod`, the tag and its own run id; ADR
 0072), which waits for the prod environment's reviewers: prod's service packs and publishes
 the four apps, each release's VERSION the tag's (the version the updater shows a player),
 its downloads host offers them (DEPLOY.md, "The downloads host"), and Publish attaches the
-zips the host serves to the GitHub release. A pull request's CI run publishes its four
-builds to staging the same way, once its package jobs pass (`ci.yml`'s `publish-staging`;
-a branch of this repository's alone).
+zips the host serves to the GitHub release.
+
+Pushes to `staging` (and manual CI runs on that branch) build all ten service/hosting
+images and all four app packages from one commit. Once their component checks pass,
+`staging-components-ready` freezes the ten image digests and four package artifact IDs
+and checksums into a release manifest. Staging rollout deploys those images, then
+publishes those packages. Unrelated full-suite failures do not hold rollout back.
+PRs produce artifacts only and never deploy or publish them to staging.
+
+CI dispatches the rollout as a **Staging rollout** run of its own
+(`scripts/ci/staging_dispatch.py dispatch`), which GitHub allows only once the default
+branch carries `staging-rollout.yml` with its dispatch interface; the dispatch checks
+that first. Each staging CI run's first job cancels the older staging builds still
+running. A queued rollout skips if its source is no longer staging's head; an active
+rollout finishes, including publishing, even if another commit cancels its source build.
+
+For a deployment/publishing retry, rerun the independent **Staging rollout** workflow
+with its original source run, attempt, SHA and manifest artifact ID while artifacts
+remain available and the commit is still staging's head. To rebuild, start a **new CI
+run on staging**. Do not mix successful artifacts from an earlier CI attempt with
+rerun components; admission rejects them, and overwriting admitted artifacts would
+break an active rollout. Before dispatcher registration, start a new CI run for a
+rollout retry as well. The separate Deploy and Publish manual workflows remain
+production-only.
 
 ## Troubleshooting
 

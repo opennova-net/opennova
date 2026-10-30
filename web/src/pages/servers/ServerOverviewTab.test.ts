@@ -37,10 +37,10 @@ describe('ServerOverviewTab', () => {
     vi.clearAllMocks();
     confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     // The game holds a newer version than the server runs.
-    mine.mockResolvedValue({ ok: true, value: serversResponse([], { products: [{ ...JO, version: '1.7.5.9' }] }) });
+    mine.mockResolvedValue({ ok: true, value: serversResponse([], { products: [{ ...JO, version: '1.0.9' }] }) });
     adminProducts.mockResolvedValue({
       ok: true,
-      value: productsResponse({ products: [{ ...JO_PRODUCT, current_tree: { id: 15, version: '1.7.5.9', ready_at: null } }] }),
+      value: productsResponse({ products: [{ ...JO_PRODUCT, current_tree: { id: 15, version: '1.0.9', ready_at: null } }] }),
     });
   });
 
@@ -54,26 +54,33 @@ describe('ServerOverviewTab', () => {
     const page = await mountTab(
       hostedServer(1, {
         expansion: { id: 2, code: 'jox01', display_name: 'Escalation' },
-        data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: { tree_id: 12, version: '' } },
+        data: { base: { tree_id: 10, version: '1.0.5' }, expansion: { tree_id: 12, version: '' } },
       }),
     );
     const section = page.get('#hosted-server-1-data').element.closest('section')!;
     expect(section.textContent).toContain('Joint Operations');
-    expect(section.textContent).toContain('1.7.5.5');
+    expect(section.textContent).toContain('1.0.5');
     expect(section.textContent).toContain('Escalation');
     expect(section.textContent).toContain('No version');
+    // The protocol its game's title speaks.
+    expect(page.get('#hosted-server-protocol').text()).toBe('JO protocol 16');
     expect(page.find('#hosted-server-update').exists()).toBe(false);
   });
 
   it('folds in the settings it was started with, its rotation by mission name and its password as set or not', async () => {
     const page = await mountTab(
-      hostedServer(1, { settings: settings({ game_name: 'Server 1', game_password: 'hunter2', kill_limit: 500, missions: ['jo_one.bms', 'jo_two.bms'] }) }),
+      hostedServer(1, { settings: settings({ game_name: 'Server 1', game_password: 'hunter2', kill_limit: 500, missions: ['jo_one.bms', 'jo_two.bms'], send_holdoff_ticks: 3, entity_send_budget: 1200, max_packet_size: 1100, lock_framerate: false }) }),
     );
     const dl = page.get('.server-settings').text();
     expect(dl).toContain('Max players32');
     expect(dl).toContain('Game passwordSet');
     expect(dl).not.toContain('hunter2');
     expect(dl).toContain('Kill limitNo limit');
+    expect(dl).toContain('Send interval (ticks)3');
+    expect(dl).toContain('Nominal 48 ms (20.83 updates/s in each direction)');
+    expect(dl).toContain('Entity update budget (bytes)1200');
+    expect(dl).toContain('Packet size ceiling (bytes)1100');
+    expect(dl).toContain('Pace server framesOff');
     expect(page.findAll('.server-rotation li').map((li) => li.text())).toEqual(['River Patrol', 'jo_two.bms']);
   });
 
@@ -82,7 +89,7 @@ describe('ServerOverviewTab', () => {
     const page = await mountTab(hostedServer(1, { update_available: true }));
     expect(mine).toHaveBeenCalledTimes(1);
     const callout = page.get('#hosted-server-update');
-    expect(callout.text()).toContain('Joint Operations 1.7.5.9 available');
+    expect(callout.text()).toContain('Joint Operations 1.0.9 available');
     await callout.get('button').trigger('click');
     await flushPromises();
     expect(confirm).toHaveBeenCalledWith('Update Server 1? It restarts and its players drop.');
@@ -111,7 +118,7 @@ describe('ServerOverviewTab', () => {
     expect(mine).not.toHaveBeenCalled();
     expect(adminProducts).toHaveBeenCalledTimes(1);
     const callout = page.get('#hosted-server-update');
-    expect(callout.text()).toContain('Joint Operations 1.7.5.9 available');
+    expect(callout.text()).toContain('Joint Operations 1.0.9 available');
     expect(callout.find('button').exists()).toBe(false);
     // The admin's rotation lists the files.
     expect(page.findAll('.server-rotation li').map((li) => li.text())).toEqual(['jo_one.bms']);

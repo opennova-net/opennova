@@ -19,49 +19,21 @@ name: Local stack
 # and every program), stopped; and the attention list holding no danger).
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'apps/**'
-      - 'engine/base/**'
-      - 'engine/formats/**'
-      - 'engine/net/**'
-      - 'engine/runtime/**'
-      - 'engine/editor/**'
-      - 'CMakeLists.txt'
-      - 'backend/**'
-      - 'deploy/compose/**'
-      - 'web/**'
-      - 'scripts/dev_stack.sh'
-      - 'tests/novaworld/stack_smoke.cpp'
-      - 'tests/novaworld/lobby_client.h'
-      - 'tests/serve/serve_test_support.h'
-      - 'tests/novaworld/service_tests.cmake'
-      - '.github/workflows/local-stack.yml'
-  # Every pull request, whatever its base (stacked PRs included).
-  pull_request:
-    paths:
-      - 'apps/**'
-      - 'engine/base/**'
-      - 'engine/formats/**'
-      - 'engine/net/**'
-      - 'engine/runtime/**'
-      - 'engine/editor/**'
-      - 'CMakeLists.txt'
-      - 'backend/**'
-      - 'deploy/compose/**'
-      - 'web/**'
-      - 'scripts/dev_stack.sh'
-      - 'tests/novaworld/stack_smoke.cpp'
-      - 'tests/novaworld/lobby_client.h'
-      - 'tests/serve/serve_test_support.h'
-      - 'tests/novaworld/service_tests.cmake'
-      - '.github/workflows/local-stack.yml'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      service-artifact:
+        description: "Same-run Linux binary bundle; empty validates/builds a standalone run"
+        type: string
+        default: ""
+      web-artifact:
+        description: "Same-run tested web dist; empty builds the portal from source"
+        type: string
+        default: ""
 
 concurrency:
-  group: local-stack-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: local-stack-${{ github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -89,7 +61,6 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           lfs: false   # the stack's images and its synthetic install need no LFS object
 
       # The stack's script, as infra.yml checks the deploy toolbox's (which also
@@ -101,34 +72,79 @@ jobs:
 
       # And Ninja, which RunsOn's ubuntu24-full image leaves out.
       - name: Install libpq, hiredis and Ninja
+        if: inputs.service-artifact == ''
         run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
           libpq-dev libhiredis-dev libssl-dev ninja-build
 
       - name: Restore the compiler cache
+        if: inputs.service-artifact == ''
         uses: ./.github/actions/compiler-cache
         with:
           flavour: linux-root
           mode: restore
 
+      - name: The standalone ONE stamp
+        id: one
+        if: inputs.service-artifact == ''
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && github.run_number || '' }}
+        run: scripts/ci/one_stamp.sh "$HEAD_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
+
       # net-linux.yml's configure (the same flags, the same directory), so the
       # cached objects match.
       - name: Configure (OPENNOVA_NOVAWORLD_SERVICE=ON, BUILD_NOVAWORLD_HTTP=ON)
+        if: inputs.service-artifact == ''
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON
+          -DOPENNOVA_VERSION=${{ steps.one.outputs.version }}
+          -DOPENNOVA_STAGING=${{ steps.one.outputs.staging }}
+          -DOPENNOVA_COMMIT=${{ steps.one.outputs.commit }}
+          -DOPENNOVA_BUILD_TIME=${{ steps.one.outputs.time }}
           -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 
       - name: Build the programs, the machines' binaries and the smoke test
+        if: inputs.service-artifact == ''
         run: >-
           cmake --build build -j "$(nproc)" --target opennova_novaworld_gate
           opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_fleet
           opennova_novaworld_worker opennova_novaworld_data opennova_serve opennova_hostd
           opennova_novaworld_stack_smoke opennova_project opennova_update_tool
 
+      - name: Download the service build
+        if: inputs.service-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.service-artifact }}
+          path: build/bundle-download
+
+      - name: Verify the service build
+        if: inputs.service-artifact != ''
+        run: >-
+          python scripts/ci/service_bundle.py unpack --archive build/bundle-download/service-binaries.tar.gz
+          --to build/service-bundle --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
+
+      - name: Download the tested portal
+        if: inputs.web-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.web-artifact }}
+          path: build/portal-dist
+
       - name: Bring the stack up (hosted servers on a release of the synthetic install's project)
-        run: scripts/dev_stack.sh up --synthetic-data --prebuilt build
+        env:
+          SERVICE_ARTIFACT: ${{ inputs.service-artifact }}
+          WEB_ARTIFACT: ${{ inputs.web-artifact }}
+        run: |
+          tree=build
+          if [[ -n "$SERVICE_ARTIFACT" ]]; then tree=build/service-bundle/src/build; fi
+          args=(--synthetic-data --prebuilt "$tree")
+          if [[ -n "$WEB_ARTIFACT" ]]; then args+=(--web-dist build/portal-dist); fi
+          scripts/dev_stack.sh up "${args[@]}"
 
       - name: The smoke test
         run: scripts/dev_stack.sh smoke
@@ -147,5 +163,5 @@ jobs:
         run: scripts/dev_stack.sh reset || true
 
       - name: sccache stats
-        if: always()
+        if: always() && inputs.service-artifact == ''
         run: sccache --show-stats

@@ -303,10 +303,11 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 	}
 	ctx.round_end_announced = true;
 	// The linger is a session's: single player stores none (world.rules.mp_session is its
-	// is_in_session) [orig: Server_ProcessRoundEnd - `cmp is_in_session` @0x5166BC, the store
-	// @0x5166C4].
+	// is_in_session), and its length the title's (TitleRules::round_end_linger_ticks, DFX2-17)
+	// [orig: Server_ProcessRoundEnd - `cmp is_in_session` @0x5166BC, the store @0x5166C4 (2790)]
+	// [orig: Server_ProcessRoundEnd @0x513730 (@0x51391e) (dfx2.exe)].
 	ctx.round_end_linger_ticks =
-			world.rules.mp_session ? round_end_linger_ticks_for(ctx.config.title) : 0;
+			world.rules.mp_session ? ctx.config.title_rules().round_end_linger_ticks : 0;
 	return true;
 }
 
@@ -341,11 +342,11 @@ void arm_refused_capture_nags(NapiNPServerCtx &ctx, world::World &world) {
 // untouched. Both portable views of the Flags dword carry the bit because
 // both writers set it (ai_combat.cpp / infantry_combat.cpp).
 // [orig: EntityPool_ClearDirtyFlags @0x508E30 — pool 0 loop @0x508e59, pool 1
-//  loop @0x508e79, `&= ~0x4000`]
+//  loop @0x508e79, `&= ~0x4000`; each to its used count @0x508E36 / @0x508E64]
 void clear_priority_target_marks(world::World &world) {
 	for (const int pool : {0, 1}) {
-		const size_t capacity = world.registry.pool_capacity(pool);
-		for (size_t slot = 0; slot < capacity; ++slot) {
+		const size_t used = world.registry.pool_used(pool);
+		for (size_t slot = 0; slot < used; ++slot) {
 			world::Entity *e = world.registry.get(
 					world::EntityHandle::make(pool, static_cast<int>(slot)));
 			if (e == nullptr) continue;

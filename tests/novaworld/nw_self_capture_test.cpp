@@ -33,8 +33,7 @@
 // regenerate to make an unexplained diff pass.
 
 #include <runtime/inmatch/client_runtime.h>
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h> // the host owner loop (SAME loop the game's host runs)
 
 #include <net/npwire/idatagram_socket.h>
@@ -69,8 +68,8 @@
 #include <vector>
 #include <cstring>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 #ifndef SELF_CAPTURE_FIXTURE
 #define SELF_CAPTURE_FIXTURE ""
@@ -174,7 +173,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
-	host_cfg.title = &kJo;
+	host_cfg.protocol = &kJo;
 	host_cfg.config.server_name = "OpenNova self-capture host";
 	host_cfg.config.max_players = 16;
 	// The committed fixture pins message coverage, not retail's LAN subrate.
@@ -192,7 +191,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	// paced wait loops release as they would in real time, whatever the machine's speed.
 	uint64_t client_ms = 1;
 	inmatch::ClientRuntime client("SelfCapture", [&client_ms] { return client_ms; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	// The shell installs the mounted fresh profile; this script has no Avatars.def, so it
 	// installs the stock file's (the witnessed oracle, D-NET-833).
 	client.set_character_join_vars(inmatch::stock_fresh_profile_character_vars());

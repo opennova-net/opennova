@@ -9,8 +9,7 @@
 // dispatcher while movement stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
 #include <runtime/inmatch/host_role.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/local_role.h>
 #include <runtime/controls/controls.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -50,8 +49,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -115,8 +114,8 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		options.mp_session = mode != inmatch::SocketMode::Socketless;
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
-			cfg.config = inmatch::singleplayer_game_config(options.game_type, nullptr);
+			cfg.protocol = &kJo;
+			cfg.config = inmatch::singleplayer_game_config(*opennova::title_by_code("jo"), options.game_type, nullptr);
 			cfg.config.allow_sniper_scope_zoom = true;
 			cfg.socket_mode = mode;
 			cfg.serve_and_play = true;
@@ -185,7 +184,7 @@ void check_own_world_state_location_names(std::map<std::string, std::string> &fi
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "location_names";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -242,7 +241,7 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "deploy_convert";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -311,7 +310,7 @@ void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::s
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "head_preround";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -368,7 +367,7 @@ void check_listen_host_console_punts_only_through_server(
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "console_punt";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -441,7 +440,7 @@ void check_single_player_console_line_rides_the_loopback(
 	kernel.open_document(two_entity_mission(), "sp_console", source_over(&files));
 	ms::KernelBootOptions options;
 	options.game_type = mission_game_type(kernel.mission);
-	options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+	options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 	std::string error;
 	CHECK(kernel.boot(options, error));
 	CHECK(host.client_runtime != nullptr);
@@ -533,7 +532,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "server_rows";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -674,7 +673,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "server_rows_dedicated";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -715,6 +714,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		gamecfg::GameCfg block = gamecfg::defaults();
 		inmatch::AdminConsole::Seams seams;
 		seams.config_block = &block;
+		seams.config_title = opennova::title_by_code("jo");
 		seams.input_events = &role.input_events();
 		inmatch::AdminConsole console(role.state.host_owner.ctx, std::move(seams));
 		console.set_scene(inmatch::AdminScene::GameLoop);
@@ -752,7 +752,7 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 		inmatch::ClientProcessState process;
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "quality_report_runs_on";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -808,7 +808,7 @@ void check_serve_only_net_quality_indicators(std::map<std::string, std::string> 
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_indicators";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -883,7 +883,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_quality";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -915,7 +915,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_then_listen";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -995,7 +995,7 @@ int main() {
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
-		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 		// The synthetic source carries no items.def: the Player row it would give the
 		// local body, which the 0x0C needs (D-NET-487).
 		kernel.world.tables.player.has_item_def = true;
@@ -1163,7 +1163,7 @@ int main() {
 		kernel.open_document(two_entity_mission(), "tank_slots", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
-		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		for (int i = 0; i < 8; ++i) role.run_tick(tick_input(0));
@@ -1274,7 +1274,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "listen_host_test";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1353,7 +1353,7 @@ int main() {
         kernel.open_document(two_entity_mission(), "respawn", source_over(&files));
         ms::KernelBootOptions options;
         options.game_type = mission_game_type(kernel.mission);
-        options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+        options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
         std::string error;
         CHECK(kernel.boot(options, error));
         auto &lp = kernel.local;
@@ -1442,13 +1442,13 @@ int main() {
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
 		if (frame_kind == 0) {
-			options.bringup_net_session = [&] { host_storage->bring_up_singleplayer(); };
+			options.bringup_net_session = [&] { host_storage->bring_up_singleplayer(*opennova::title_by_code("jo")); };
 		} else if (frame_kind == 1) {
 			options.playable = false;
 			options.mp_session = true;
 			options.bringup_net_session = [&] {
 				inmatch::HostConfig cfg;
-				cfg.title = &kJo;
+				cfg.protocol = &kJo;
 				cfg.config.server_name = "gunner_walk";
 				cfg.config.max_players = 4;
 				cfg.config.game_type = options.game_type;
@@ -1544,7 +1544,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "fire_gate";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1623,11 +1623,11 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			if (!mp) {
-				role.bring_up_singleplayer();
+				role.bring_up_singleplayer(*opennova::title_by_code("jo"));
 				return;
 			}
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "respawn_key";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1691,7 +1691,7 @@ int main() {
 		kernel.open_document(two_entity_mission(), "stance", source_over(&files));
 		ms::KernelBootOptions options;
 		options.game_type = mission_game_type(kernel.mission);
-		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(*opennova::title_by_code("jo")); };
 		std::string error;
 		CHECK(kernel.boot(options, error));
 		opennova::inmatch::NullDatagramSocket socket;
@@ -1826,11 +1826,11 @@ int main() {
 				zone_marked = true;
 			}
 			if (!mp_session) {
-				role.bring_up_singleplayer();
+				role.bring_up_singleplayer(*opennova::title_by_code("jo"));
 				return;
 			}
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "deploy_hold";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;
@@ -1963,7 +1963,7 @@ int main() {
 		kernel.world.rules.difficulty = 1; // a previous word, never carried
 		options.bringup_net_session = [&] {
 			kernel.world.tables.player.item_hp = 100; // the Player def's hp
-			role.bring_up_singleplayer();
+			role.bring_up_singleplayer(*opennova::title_by_code("jo"));
 		};
 		std::string error;
 		CHECK(kernel.boot(options, error));
@@ -2008,7 +2008,7 @@ int main() {
 			int32_t spawn_word = 0;
 			options.bringup_net_session = [&] {
 				kernel.world.tables.player.item_hp = 100; // the Player def's hp
-				role.bring_up_singleplayer(&profile);
+				role.bring_up_singleplayer(*opennova::title_by_code("jo"), &profile);
 				spawn_word = kernel.world.rules.difficulty;
 			};
 			std::string error;
@@ -2046,7 +2046,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "quality_report";
 			cfg.config.max_players = 4;
 			cfg.config.game_type = options.game_type;

@@ -38,7 +38,6 @@
 #include "nw_udp_listener.h"
 #include "program/server_config.h"
 
-#include <base/gameprofile/gameprofile.h>
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
@@ -51,7 +50,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include "net_sockets.h"
 
@@ -84,7 +83,7 @@ namespace hostdb = opennova::hostdb;
 using Notice = opennova::ClientSession::Notice;
 using Clock = std::chrono::steady_clock;
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 // The one lobby address every instance announces (a deployment's load balancer's), and a gate's
 // fallback, an address of its own.

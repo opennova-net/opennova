@@ -28,6 +28,14 @@ function(opennova_add_parts name)
     endforeach()
 endfunction()
 
+# The tests' registration point (games/games.h): common/install_games.cpp, whose one
+# namespace-scope object calls games::install() ahead of the tests' own, so every title and
+# protocol a test reads is installed. An OBJECT library, so its object is always linked: every
+# executable this directory makes (service_tests.cmake's included) links it, by the walk at
+# this file's end, and tests/editor's opennova_add_editor_executable does the same.
+add_library(opennova_test_games OBJECT common/install_games.cpp)
+target_link_libraries(opennova_test_games PUBLIC opennova_games)
+
 # The mission rig the world/mission ctests share (common/mission_rig.h): one
 # mission (the minted mission set's, common/mission_set.h) booted through the
 # engine's own mission::MissionKernel (ADR 0042 d3) and ticked on the SP
@@ -88,6 +96,15 @@ target_link_libraries(project_manifest_test PRIVATE opennova_base)
 target_compile_features(project_manifest_test PRIVATE cxx_std_17)
 target_include_directories(project_manifest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME project_manifest COMMAND project_manifest_test)
+
+# Versions (base/version): the one parse rule (1 to 4 numbers between dots), text, retail_text
+# and packed, the BDAT date form against retail's two, ONE's wire version and label, the
+# combined line, and that this build's one_build() stamp reads back.
+add_executable(version_test version/version_test.cpp)
+target_link_libraries(version_test PRIVATE opennova_base)
+target_compile_features(version_test PRIVATE cxx_std_17)
+target_include_directories(version_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME version COMMAND version_test)
 
 # The child-process seam (base/proc): a child from an argv array with no shell, run
 # against the test binary itself (its path is the argument; `--child <mode>` makes it
@@ -967,11 +984,12 @@ target_link_libraries(pff_packer_rewrite_test PRIVATE opennova_formats)
 target_include_directories(pff_packer_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_packer_rewrite COMMAND pff_packer_rewrite_test)
 
-# Game profile table tests
-add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
-target_link_libraries(gameprofile_test PRIVATE opennova_base)
-target_include_directories(gameprofile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME gameprofile COMMAND gameprofile_test)
+# The title registry (engine/base/title) over the installed games: lookups, the default title,
+# the SCR policy seam, the command files and cfg tables.
+add_executable(title_test title/title_test.cpp)
+target_link_libraries(title_test PRIVATE opennova_base)
+target_include_directories(title_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME title COMMAND title_test)
 
 add_executable(required_resources_test gameprofile/required_resources_test.cpp)
 target_link_libraries(required_resources_test PRIVATE opennova_base)
@@ -3832,13 +3850,21 @@ target_link_libraries(protocol_message_test PRIVATE opennova_net)
 target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME protocol_message COMMAND protocol_message_test)
 
-# The title identity table (engine/net/title): JO's row and wire bytes, DFX2's witnessed values
-# and the refusal of the rest by name, the gt.ssc gate-tag override over a mount (minted by our
-# own encoder), and each consumer's refusal of a missing identity.
-add_executable(title_identity_test title/title_identity_test.cpp)
-target_link_libraries(title_identity_test PRIVATE opennova_runtime)
-target_include_directories(title_identity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME title_identity COMMAND title_identity_test)
+# The protocols (engine/net/protocol): JO's and its wire bytes, DFX2's witnessed values and the
+# refusal of the rest by name, the gt.ssc gate-tag override over a mount (minted by our own
+# encoder), and each consumer's refusal of a missing protocol.
+add_executable(protocol_test protocol/protocol_test.cpp)
+target_link_libraries(protocol_test PRIVATE opennova_runtime)
+target_include_directories(protocol_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME protocol COMMAND protocol_test)
+
+# The games games::install() registers (games/): every title resolves, JO's and DFX2's protocols
+# complete, OP: Acid Gambit's JO's very object, the unwitnessed titles refused by name; the rules
+# each title runs and each game's joiner-side knobs.
+add_executable(games_test games/games_test.cpp)
+target_link_libraries(games_test PRIVATE opennova_games)
+target_include_directories(games_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME games COMMAND games_test)
 
 add_executable(session_protocol_test novaworld/session_protocol_test.cpp)
 target_link_libraries(session_protocol_test PRIVATE opennova_net)
@@ -5930,3 +5956,12 @@ add_executable(netsim_replica_walk_lookups_test netsim/replica_walk_lookups_test
 target_link_libraries(netsim_replica_walk_lookups_test PRIVATE opennova_net opennova_runtime)
 target_compile_features(netsim_replica_walk_lookups_test PRIVATE cxx_std_17)
 add_test(NAME netsim_replica_walk_lookups COMMAND netsim_replica_walk_lookups_test)
+
+# Every executable above links the registration point (opennova_test_games, at this file's top).
+get_property(OPENNOVA_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(target IN LISTS OPENNOVA_TEST_TARGETS)
+    get_target_property(target_type ${target} TYPE)
+    if(target_type STREQUAL "EXECUTABLE")
+        target_link_libraries(${target} PRIVATE opennova_test_games)
+    endif()
+endforeach()

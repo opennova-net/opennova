@@ -909,12 +909,12 @@ public:
 	// The browse row's 0x81 record the join connects with (HK, SF, expansion and the
 	// browse's CI), built from the join target; a null target clears it.
 	void set_join_discovered_session(const Ref<JoinTarget> &p_target);
-	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
-	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
-	// Retained across runtime rebuilds like the character data.
+	// The install root whose loose expansion/<name>/version.txt feeds the JOIN VERSIONCRCSTRING
+	// checksum (D-NET-166); empty keeps the golden "0". Retained across runtime rebuilds.
 	void set_join_expansion_version_root(const String &p_game_root);
-	// C++ seam: the session's title, the mounted game's (simulation_net.cpp session_title).
-	void set_title(const opennova::TitleIdentity *p_title) { net_.title = p_title; }
+	// C++ seams: the protocol the session speaks and the title it runs as, the mounted game's.
+	void set_protocol(const opennova::Protocol *p_protocol) { net_.protocol = p_protocol; }
+	void set_game_title(const opennova::Title *p_title) { net_.game_title = p_title; }
 	// Load the process-scoped character-attribute table before the first join
 	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,
 	// matching Game_Run's continue-after-error behavior.
@@ -1851,9 +1851,9 @@ public:
 	// presents no entity (a dedicated host) empties them each ticked frame (engine
 	// world::discard_entity_presentation). NOT ClassDB-bound: MissionRoot's session step.
 	void discard_entity_presentation();
-	// NOT ClassDB-bound: the piece pool + frame draws; the NVG laser persons + ray clip.
+	// NOT ClassDB-bound: the piece pool + the main collect's draws; the NVG laser persons + ray clip.
 	void fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const;
-	const std::vector<opennova::world::DeathPieceDraw> &death_piece_draws() const;
+	const SceneCollectDraws &scene_draws() const;
 	void nvg_laser_sources(std::vector<NvgLaserSource> &r_sources) const;
 	int32_t nvg_laser_clip_distance(int p_handle, const int32_t p_origin[3], const int32_t p_dir[3]) const;
 	// Whether the collision world holds an instance for the placed entity
@@ -2145,8 +2145,8 @@ public:
 	// degrees; fog/water in mission units; force_indoors mirrors the mission
 	// attribute override (engine: formats/mission/bms.h). No near distance:
 	// the occlusion planes pass through the eye (engine: world/occlusion_camera.h).
-	// (engine: runtime/world/occlusion.cpp)
-	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
+	// True when its collect admitted the local player's body (engine: world/occlusion.cpp).
+	bool run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
 	                         double p_viewport_width, double p_viewport_height,
 	                         double p_fog_dist_units, double p_water_z_units,
 	                         bool p_force_indoors,

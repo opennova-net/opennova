@@ -32,10 +32,11 @@
 //          serve without licensed data: the serve tests' deathmatch map
 //          SERVETST.BMS and game text packed into the three base archives a
 //          game's tree holds (resource.pff, localres.pff, language.pff:
-//          apps/novaworld_common/products/tree_files.h), with a version.txt,
-//          as an install's root. What `dev_stack.sh up --synthetic-data` makes JO's
-//          project of (imported whole, then what a build needs besides made from
-//          scratch), pushes, releases and publishes, and CI hosts on.
+//          apps/novaworld_common/products/tree_files.h; no version.txt, which a
+//          base game's tree never holds), as an install's root. What
+//          `dev_stack.sh up --synthetic-data` makes JO's project of (imported
+//          whole, then what a build needs besides made from scratch), pushes,
+//          releases and publishes, and CI hosts on.
 //
 // Infrastructure only, POSIX only.
 
@@ -367,7 +368,7 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	note("its missions: " + (mission_text.empty() ? std::string("none") : mission_text));
 	std::string missions;
 	if (!o.mission.empty())
-		missions = ",\"missions\":[\"" + o.mission + "\"]";
+		missions = ",\"rotation\":[{\"file\":\"" + o.mission + "\",\"swap_sides\":false}]";
 	const std::string name = "Smoke " + random_hex(3);
 	reply = site.user("POST", "/api/me/servers",
 			"{\"product_id\":" + std::to_string(wanted) + ",\"game_name\":\"" + name +
@@ -658,10 +659,12 @@ bool write_archive(const fs::path &path,
 // and the game text a server's listing reads, packed into the retail boot
 // table's three archives (the mission in localres.pff, the texts in
 // language.pff, as the mission catalog reads a base's pair; resource.pff a
-// placeholder, since the table mounts no install without it) with a
-// version.txt. Its project's export packs the mission and the text into those
-// two archives again (their kinds' slots), so the tree its release makes lists
-// the mission as this install does.
+// placeholder, since the table mounts no install without it), and JO:CA's
+// UPDATE.WIZ naming its JOPTR.CMD (the install is Joint Operations',
+// boot_policy.h folder_product: a folder with no wizard is OP: Acid Gambit's);
+// no version.txt, which a base game's tree never holds. Its project's export
+// packs the mission and the text into those two archives again (their kinds'
+// slots), so the tree its release makes lists the mission as this install does.
 int write_synthetic_install(const fs::path &dir) {
 	std::error_code ec;
 	fs::create_directories(dir, ec);
@@ -680,13 +683,13 @@ int write_synthetic_install(const fs::path &dir) {
 													{ "STRNOVA11", "Yes" }, { "STRNOVA12", "No" } } },
 									{ "GateTypeAbbrev", { { "DM", "DM" } } },
 							}) } }) &&
-			serve_test::write_text(dir / "version.txt", "OpenNova Synthetic Data, V1.0.0.0; English\r\n");
+			serve_test::write_text(dir / "UPDATE.WIZ", "[HEADER]\r\nCMD=JOPTR.CMD\r\nPRODUCT_LOGIN=JOTRqq\r\n");
 	if (!written) {
 		std::fprintf(stderr, "cannot write the install to %s\n", dir.string().c_str());
 		return 1;
 	}
 	std::printf("the synthetic install (resource.pff, localres.pff with SERVETST.BMS, "
-				"language.pff with gametext.bin, version.txt) is in %s\n",
+				"language.pff with gametext.bin, UPDATE.WIZ) is in %s\n",
 			dir.string().c_str());
 	return 0;
 }

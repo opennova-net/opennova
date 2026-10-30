@@ -14,6 +14,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <vector>
 
 #include "devtools/frame_stats.h"
 #include "mission/mission_data.h"
@@ -205,6 +207,10 @@ public:
 	// world's effect directors subscribe to, and the perf probes'
 	// output-channel A/B seam. Null before setup.
 	EntityPresenter *get_entity_presenter() const;
+	// The casters a render slot newly captured this frame (SlotShadow::newly_captured)
+	// whose rows the frame's walks skipped: presented again over the rows the frame
+	// presented (EntityPresenter::present_slot_captures), ahead of the slot's capture.
+	void present_slot_captures(const std::vector<uint64_t> &p_captured);
 	// Re-key the placed-node index after a late placement (a joiner's
 	// streamed statics, placed once the host's world stream settles). The
 	// mission and wire presenters share this one index: the rebuild bumps its
@@ -318,6 +324,10 @@ private:
 	void for_each_present_node(const std::function<void(ObjectModel *)> &p_fn);
 
 	Ref<Simulation> sim_;
+	// The rows this frame's walks presented, held until the slot leg's
+	// present_slot_captures and let go before the next build (which then
+	// reuses the buffer in place).
+	std::shared_ptr<const SimulationPresentSnapshot> presented_rows_;
 	// THE entity presenter (ADR 0043 d9), the "Entities" child: its placed
 	// walk drives the authored nodes on every role (or a tooling/test
 	// preview); its wire walk, when set up, materializes un-placed network

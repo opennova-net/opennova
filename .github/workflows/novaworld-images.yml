@@ -8,99 +8,45 @@ name: NovaWorld images
 # second container in web's task) and the nightly backup task's
 # (ghcr.io/<owner>/opennova-novaworld-backup, deploy/backup). Each is tagged
 # sha-<short commit>, its branch and, on master, latest: `app deploy --tag`
-# pins every one from one tag (DEPLOY.md). All eight build as one bake
-# (apps/novaworld_common/docker-bake.hcl) while http-tests runs, and each
-# pushes once it has passed.
+# pins every one from one tag (DEPLOY.md). CI selects this reusable workflow
+# and supplies its shared, tested Linux build and web dist. Manual runs build
+# their own prerequisites. All eight runtime images assemble in one bake.
 
 on:
-  push:
-    branches: [master]
-    # Everything the images' binaries are built from (apps/novaworld_common/Dockerfile):
-    # the six programs and the data program's two tools (opennova-project, so the whole
-    # editor, and opennova-update-tool) link every engine group, apps/common and the
-    # third-party libs those groups link, with the CMake root and the build context's
-    # ignore list; plus the portal, the backup task and the http-tests' sources. Master's
-    # images so follow every change a deployed program runs (`app deploy --tag sha-<head>`
-    # finds them). scripts/ci/test_workflow_triggers.py checks the Dockerfile's targets
-    # against this list.
-    paths:
-      - 'engine/**'
-      - 'apps/novaworld_*/**'
-      - 'apps/common/**'
-      - 'apps/project/**'
-      - 'apps/update_tool/**'
-      - 'backend/**'
-      - 'deploy/backup/**'
-      - 'third_party/bcrypt/**'
-      - 'third_party/miniz/**'
-      - 'third_party/rgbcx/**'
-      - 'third_party/imgui/**'
-      - 'web/**'
-      - 'tests/novacrypto/**'
-      - 'tests/napi/**'
-      - 'tests/novaworld/**'
-      - 'CMakeLists.txt'
-      - '.dockerignore'
-      - '.github/workflows/net-linux.yml'
-      - '.github/workflows/novaworld-images.yml'
-  # Every pull request, whatever its base (stacked PRs included), that touches the
-  # images' own sources or packaging: the service's net libraries, the update wire and
-  # the titles' identities its programs speak, the data program's two tools. A PR into
-  # the rest of the engine reaches Linux through ci.yml's test-linux, which builds the
-  # same targets with the same flags (serve-image.yml draws the same line).
-  pull_request:
-    paths:
-      - 'apps/novaworld_*/**'
-      - 'apps/common/**'
-      - 'apps/project/**'
-      - 'apps/update_tool/**'
-      - 'engine/net/novaworld/**'
-      - 'engine/net/npwire/**'
-      - 'engine/net/napi/**'
-      - 'engine/net/novacrypto/**'
-      - 'engine/net/update/**'
-      - 'engine/net/title/**'
-      - 'backend/**'
-      - 'deploy/backup/**'
-      - 'web/**'
-      - 'CMakeLists.txt'
-      - '.dockerignore'
-      - '.github/workflows/novaworld-images.yml'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      service-artifact:
+        description: "Same-run Linux binary bundle; empty validates/builds a standalone run"
+        type: string
+        default: ""
+      web-artifact:
+        description: "Same-run tested web dist; empty builds the portal from source"
+        type: string
+        default: ""
 
-# A PR's newer push cancels its older run. Master's pushes queue instead of
-# cancelling, so no run is cut off between its pushes (one image's `latest`
-# and sha tag at the new commit, another's still at the old).
 concurrency:
-  group: nw-images-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Parent CI owns superseded-build cancellation. Master alone serializes its
+  # mutable master/latest aliases; queue:max keeps every full master build.
+  group: nw-images-${{ github.ref == 'refs/heads/master' && 'master' || github.run_id }}
+  queue: max
+  cancel-in-progress: false
 
 jobs:
-  # Gate the push on the net scope passing with the HTTP layer ON, on Linux
-  # (the deploy target): the job definition serve-image.yml calls too
-  # (.github/workflows/net-linux.yml; ci.yml's test-linux builds a superset of
-  # it its own way on every push and on every PR that changes more than the
-  # docs pointer and markdown), the same flag set the programs' images use,
-  # so a green here means the images will build.
+  # Standalone fallback. CI calls net-linux once for both image families and
+  # the local stack; every image consumer verifies the same-run bundle.
   http-tests:
+    if: inputs.service-artifact == ''
     uses: ./.github/workflows/net-linux.yml
 
-  # The eight images, one bake, run beside http-tests rather than after it:
-  # the one solve compiles the programs' shared build stage once, finishes the
-  # six program targets together and builds the portal and the backup image
-  # alongside. It pushes nothing. Push events and manual runs export the
-  # layer cache, each image to its own scope (mode=min: the final image's
-  # layers; the build stage's `COPY . .` and compile layers change with every
-  # commit, so mode=max would write blobs no later build could hit), which
-  # `push` then builds from. A PR's layers would be readable by that PR alone,
-  # so a PR's build only reads it.
-  #
-  # On the build legs' RunsOn runner (ci.yml's Linux label; DEPLOY.md "CI
-  # runners"): the bake compiles the programs' build stage with Ninja on every
-  # core. The layer cache (type=gha) goes to RunsOn's Magic Cache through the
-  # runs-on/action step, as actions/cache does. A fork's pull request builds on
-  # ubuntu-latest, cold.
+  # Assemble runtime layers from the tested binaries. Only trusted builds
+  # export the final-image cache; PRs read it. Cache misses still use the
+  # downloaded build, so neither this job nor the publishers compiles C++.
   build:
+    needs: http-tests
+    if: ${{ !cancelled() && (inputs.service-artifact != '' || needs.http-tests.result == 'success') }}
+    outputs:
+      service-artifact: ${{ inputs.service-artifact || needs.http-tests.outputs.artifact-name }}
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     permissions:
       contents: read
@@ -111,37 +57,48 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           lfs: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Download the service build
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.service-artifact || needs.http-tests.outputs.artifact-name }}
+          path: build/bundle-download
+
+      - name: Verify the service build
+        run: >-
+          python scripts/ci/service_bundle.py unpack --archive build/bundle-download/service-binaries.tar.gz
+          --to build/service-bundle --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT" --require-service-tests
+
+      - name: Download the tested portal
+        if: inputs.web-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.web-artifact }}
+          path: build/portal-build/app/dist
+
       - name: Build the images
         uses: docker/bake-action@v6
         env:
           GHA_CACHE: ${{ github.event_name != 'pull_request' && 'readwrite' || 'read' }}
+          SERVICE_CONTEXT: ./build/service-bundle
+          PORTAL_CONTEXT: ${{ inputs.web-artifact != '' && './build/portal-build' || '' }}
         with:
           source: .
           files: apps/novaworld_common/docker-bake.hcl
 
-  # On master's pushes and on a manual run (a branch's images for staging before
-  # it merges: its sha and branch tags, never `latest`), never a PR's (PRs from
-  # forks can't push to GHCR), once http-tests and the build have passed: each image pushed by a job of its own, its bake
-  # target built again with its tags. The checkout is the build's, so every
-  # step hits the layer cache the build exported for this commit and nothing
-  # compiles; each job only uploads (a missed cache costs time alone: the
-  # image builds again, the same). One target per job, not the eight in one
-  # bake: a bake whose targets share the build stage but read different cache
-  # scopes misses that stage and compiles it again. fail-fast is off so one
-  # failed push stops no other image's. On RunsOn too, since only a RunsOn job
-  # reaches the Magic Cache the build exported to; 4 vCPUs and 16 GB (a
-  # standard runner's), as each job only uploads. Never a pull request's, so
-  # no fork fallback.
+  # Publish only after the validated build succeeds, never on PRs. Retain the
+  # per-target cache/push layout and inspect each published digest: an earlier
+  # cached publication lost base layers. Digest records feed staging's release
+  # manifest, avoiding mutable tag lookups during its detached rollout.
   push:
     name: push (${{ matrix.target }})
-    needs: [http-tests, build]
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [build]
+    if: ${{ !cancelled() && needs.build.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: runs-on=${{ github.run_id }}/cpu=4/ram=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache
     permissions:
       contents: read
@@ -167,11 +124,31 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           lfs: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Download the service build
+        if: matrix.target != 'portal' && matrix.target != 'backup'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.service-artifact }}
+          path: build/bundle-download
+
+      - name: Verify the service build
+        if: matrix.target != 'portal' && matrix.target != 'backup'
+        run: >-
+          python scripts/ci/service_bundle.py unpack --archive build/bundle-download/service-binaries.tar.gz
+          --to build/service-bundle --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT" --require-service-tests
+
+      - name: Download the tested portal
+        if: matrix.target == 'portal' && inputs.web-artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.web-artifact }}
+          path: build/portal-build/app/dist
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -182,6 +159,19 @@ jobs:
 
       # The image's tags and labels as a bake file for the bake definition's
       # meta-<target> target.
+      - name: Only the current master updates mutable aliases
+        id: aliases
+        if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq .object.sha)"
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -190,13 +180,16 @@ jobs:
           bake-target: meta-${{ matrix.target }}
           tags: |
             type=sha,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/master' || steps.aliases.outputs.current == 'true' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' && steps.aliases.outputs.current == 'true' }}
 
       - name: Push the image
+        id: push
         uses: docker/bake-action@v6
         env:
           GHA_CACHE: read
+          SERVICE_CONTEXT: ${{ matrix.target != 'portal' && matrix.target != 'backup' && './build/service-bundle' || '' }}
+          PORTAL_CONTEXT: ${{ matrix.target == 'portal' && inputs.web-artifact != '' && './build/portal-build' || '' }}
         with:
           source: .
           push: true
@@ -212,8 +205,13 @@ jobs:
       - name: Check the pushed image holds its entrypoint
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          METADATA: ${{ steps.push.outputs.metadata }}
+          TARGET: ${{ matrix.target }}
         run: |
-          image="$IMAGE:sha-${GITHUB_SHA::7}"
+          set -euo pipefail
+          digest="$(jq -er --arg target "$TARGET" '.[$target]["containerimage.digest"]' <<< "$METADATA")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image="$IMAGE@$digest"
           docker pull --quiet "$image" >/dev/null
           entry="$(docker image inspect --format '{{index .Config.Entrypoint 0}}' "$image")"
           cid="$(docker create "$image")"
@@ -223,3 +221,16 @@ jobs:
             exit 1
           fi
           echo "$image holds $entry ($(docker image inspect --format '{{len .RootFS.Layers}}' "$image") layers)"
+          jq -n --arg image "$TARGET" --arg repository "$IMAGE" --arg digest "$digest" \
+            --arg source_sha "$GITHUB_SHA" --argjson run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '{image: $image, repository: $repository, digest: $digest, source_sha: $source_sha,
+              run_id: $run_id, run_attempt: $run_attempt}' > "$TARGET.json"
+
+      - name: Record the validated image digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ matrix.target }}-${{ github.run_attempt }}
+          path: ${{ matrix.target }}.json
+          retention-days: 7
+          if-no-files-found: error

@@ -19,12 +19,14 @@ DFX2 (`/game dfx2`, on LAN and through OpenNova's NovaWorld, 2026-10-14,
 ```text
 opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/exp <name>]
                [/d] [/game <code>] [/LAN] [--loose-root] [--lan-port <n>] [--log-debug]
+               [--rotation-first]
                [--master-host <gate>] [--master-gate-port <n>]
                [--credentials <file>] [--allow-public]
                [--also-master-host <gate>] [--also-master-gate-port <n>]
                [--also-credentials <file>]
                [--status-page on|off] [--stats-file <file>] [--exit-file <file>]
                [--second-listing-file <file>]
+               [--send-holdoff-ticks <n>] [--entity-send-budget <bytes>]
                [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG] [/NETLOG] [/INOUT]
                [/CONNECTLOG | /NOCONNECTLOG]
 ```
@@ -33,14 +35,17 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 |---|---|
 | `--resource-dir <dir>` | The install to serve from (its `.pff` set), as `opennova.exe` takes it. Required. |
 | `/HOST <file>` | The host file (below). Required. |
+| `--rotation-first` | Start at the first `Mission` entry. Hosted servers use this to play their saved rotation in order; without it, retail's last-entry starting behavior applies. |
 | `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as retail's switch does (a host file with no `MaxPlayers` line leaves it unread). |
 | `/exp <name>`, `/mod <name>` | Mount that expansion (for example `revx02`); `/mod` is the same switch, as in the game (the last one given wins). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
-| `/game <code>` | The data's game code, as the game's `/game`: its SCR keying and the title the server speaks (below). Default `jo`. |
+| `/game <code>` | The data's game code, as the game's `/game`: its SCR keying and the title the server runs as (below). Default: the game the folder's `UPDATE.WIZ` names, else `acidgambit`. |
 | `/LAN` | Every `game.cfg` read sets `mpnovaworldhostlanonly` to 1, as retail's switch does: a NovaWorld listing advertises LAN only. |
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
 | `--log-debug` | Print the engine's debug log lines. |
+| `--send-holdoff-ticks <n>` | OpenNova launch override: 0–255 simulation ticks between normal sends in both directions, dictated to clients. `0` or `1` sends every tick; `3` is nominally 48 ms / 20.83 Hz, `12` is 192 ms / 5.21 Hz. Omitted: the session type's period (NovaWorld 12; LAN follows `lanmode`). |
+| `--entity-send-budget <bytes>` | OpenNova launch override: 100–1600 bytes for each recipient's entity snapshot soft budget, including its header and projectile records. Default 600. The snapshot's hard cap and packet ceiling still apply. |
 | `--master-host <gate>` | The NovaWorld gate to list on (`127.0.0.1` for a NovaWorld service's gate on this machine). Without it the server serves LAN only (below). |
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |
 | `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which the NovaWorld service accepts. |
@@ -50,7 +55,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 | `--also-credentials <file>` | The second listing's account, in the `--credentials` file's form. |
 | `--status-page on\|off` | `on` (the default) prints the status page on standard output and takes standard input as its chat input (below); `off` does neither. |
 | `--stats-file <file>` | Rewrite the file once a minute with the last minute's tick health ("Supervised runs" below). |
-| `--exit-file <file>` | At a non-zero exit, write the error that ended the server to the file, one line ("Supervised runs" below). |
+| `--exit-file <file>` | Write the error at a non-zero exit, or `completed:rotation` / `completed:admin-session` at an intentional session completion, one line ("Supervised runs" below). |
 | `--second-listing-file <file>` | Rewrite the file whenever the second listing's state changes ("Supervised runs" below). |
 | `/PROFILE <path>` | Record every mission to a `.sph` server log (below). |
 | `/PUNTLOG`, `/PUNT.TXT` | Log the players the server punts to `_PUNT.TXT` (below). |
@@ -65,16 +70,27 @@ up until the match's next 62-frame check ends the mission with the NovaWorld exi
 second later; the server then sends the service the goodbye alone (no ClientStopHosting), its
 joiners no STOP goodbye, and exits with 3.
 
+Both network launch overrides stay in effect through map rotations. They expose existing
+engine controls; retail did not expose these command-line switches. The simulation quantum
+remains 16 ms. `game.cfg` supplies `mpmaxpacketsize` (default 1300, negotiated down to a
+client's limit) and `lock_framerate` (default 1, the main-loop pacing). Hosted launches render
+those two values into `game.cfg` and pass the send period and snapshot budget as arguments.
+
 ## Title
 
-The game code picks the title whose identity the server speaks: the in-match identity its
-LAN and NovaWorld joiners' hellos and joins must carry and its server-info replies write, and
-on NovaWorld the gate tag it probes with (the mounted data's `gt.ssc`, else the title's) and the
-version pair its listing publishes (`engine/net/title/title_identity.h`). The web pages and the
+The game code picks the title the server runs as and so the protocol it speaks: the in-match
+identity its LAN and NovaWorld joiners' hellos and joins must carry and its server-info replies
+write, and on NovaWorld the gate tag it probes with (the mounted data's `gt.ssc`, else the
+protocol's) and the version pair its listing publishes (`engine/net/protocol/protocol.h`, each
+game's in `games/<code>/<code>_protocol.cpp`). The web pages and the
 `pfid` its login and HOSTKEY fetch use are its lobby's, as the service's pages name them. Without
-`/game` the server speaks Joint Operations; `/game dfx2` speaks Delta Force: Xtreme 2. A code no
-title has, or a title whose identity is not yet witnessed in full (today every one but `jo` and
-`dfx2`), stops the start with exit code 1 and a message naming the unwitnessed fields. A listing
+`/game` the server runs as the game its folder's `UPDATE.WIZ` names, else OP: Acid Gambit, which
+speaks Joint Operations' protocol; `/game jo` speaks Joint Operations' and `/game dfx2` Delta
+Force: Xtreme 2's. A code no title has, or a title whose protocol is not yet witnessed in full
+(today every one but `jo`, `dfx2` and `acidgambit`), stops the start with exit code 1 and a
+message naming the unwitnessed fields. It logs its version line as it starts
+(`opennova-serve: <line>`: the game, the release its folder holds, ONE's build and the
+protocol). A listing
 that logs in (`--master-host` with `--credentials`) also needs the title's sign-in submit control
 (the title's web-flow part), and refuses the same way a title without it.
 
@@ -362,12 +378,16 @@ line by line.
   quantum behind: a slow frame before it, or a machine that gave the server no CPU). Once a
   minute the server
   rewrites the file (a new file renamed over the old) with that minute's frames as one JSON
-  line: `{"at": <Unix seconds>, "p50_ms", "p99_ms", "max_ms", "late", "frames"}`. It is
-  instrumentation only: the loop runs as it does without it.
+  line: `{"at": <Unix seconds>, "p50_ms", "p99_ms", "max_ms", "late", "frames"}`. The
+  minute's frames are counted, not kept (their times in 0.01 ms bins), so an unpaced loop
+  (`lock_framerate` 0), millions of frames a minute, holds no more memory than a paced one. It
+  is instrumentation only: the loop runs as it does without it.
 - **`--exit-file <file>`**: at a non-zero exit (the table below), the error the server
   logged as it ended, one line (`the session ended: ...`, `the NovaWorld listing did not
-  host: ...`), so its supervisor can say why without reading its log. A clean exit (0)
-  writes nothing.
+  host: ...`), so its supervisor can say why without reading its log. A completed rotation
+  or explicit admin session end exits with 0 and writes `completed:rotation` or
+  `completed:admin-session`, so the supervisor can distinguish it from a crash.
+  Other clean exits write nothing.
 - **`--second-listing-file <file>`**: the second listing's state ("Two listings" above), so
   its supervisor can show whether and why the server is listed there without reading its
   log. The server rewrites the file (a new file renamed over the old) whenever the state
@@ -410,7 +430,7 @@ expansion's tree at `/opt/game/expansion/<code>` (ADR 0064; `apps/hostd/README.m
 
 The image holds the binary and no game data. No retail byte goes into it, ever: the game
 data is a game folder you mount yourself, a licensed Joint Operations or Delta Force Xtreme 2
-install or OpenNova's own data, with `/game` naming its title (`jo` or `dfx2`).
+install or OpenNova's own data, with `/game` naming its title (`jo`, `dfx2` or `acidgambit`).
 
 | Path | What | Mount |
 |---|---|---|

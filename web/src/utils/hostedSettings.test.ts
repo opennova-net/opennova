@@ -14,6 +14,9 @@ import {
   missionLabel,
   NOVA_NAME_RULE,
   offersNovaLogicListing,
+  NETWORK_INT_FIELDS,
+  NETWORK_LIMITS,
+  sendCadenceText,
   type SettingsForm,
 } from './hostedSettings';
 
@@ -25,6 +28,19 @@ function form(overrides: Partial<SettingsForm> = {}): SettingsForm {
 }
 
 describe('checkSettings', () => {
+  it('checks network tuning ranges without depending on the game limits', () => {
+    for (const field of NETWORK_INT_FIELDS) {
+      const { min, max } = NETWORK_LIMITS[field];
+      for (const value of [min - 1, max + 1, 1.5, '']) {
+        expect(checkSettings(form({ [field]: value }), BOTH).errors[field]).toBe(`Enter a whole number from ${min} to ${max}.`);
+      }
+      for (const value of [min, max]) expect(checkSettings(form({ [field]: value }), BOTH).settings?.[field]).toBe(value);
+    }
+    expect(sendCadenceText(0)).toBe('Nominal 16 ms (62.5 updates/s in each direction)');
+    expect(sendCadenceText(1)).toBe(sendCadenceText(0));
+    expect(sendCadenceText('')).toBe('');
+  });
+
   it('passes good settings and sends the game and expansion by id', () => {
     const result = checkSettings(form({ expansion_id: ESCALATION, missions: ['jo_one.bms', 'jox_one.bms'] }), BOTH);
     expect(result.errors).toEqual({});
@@ -168,6 +184,17 @@ describe('the form a start begins with', () => {
     expect(formFrom(settings({ max_players: 12 }), JO, []).max_players).toBe(12);
   });
 
+  it("keeps only the last server's options the picked game still offers", () => {
+    const toggle = { group: 'Rules', kind: 'boolean' as const, default: true, min: 0, max: 1, command: '', core: false, note: '', depends_on: '' };
+    const schema = [{ ...toggle, key: 'replay', label: 'Repeat rotation' }, { ...toggle, key: 'punt_vote', label: 'Allow kick votes' }];
+    const game = { ...JO, settings_schema: schema, weapons: [{ name: 'M16', selectable: true }, { name: 'Knife', selectable: false }] };
+    const previous = settings({ options: { replay: false, punt_vote: true, dfx_category: 2, weapons: { m16: 'never', Gone: 'armory', Knife: 'never' } } });
+    // Of its own game: the schema's options and the roster's selectable weapons, in its spelling.
+    expect(formFrom(previous, game, []).options).toEqual({ replay: false, punt_vote: true, weapons: { M16: 'never' } });
+    // Another game (the last one no longer offered) starts from the defaults, as picking one does.
+    expect(formFrom(previous, { ...DFX2, settings_schema: schema }, []).options).toEqual({ replay: true });
+  });
+
   it("starts the listing on NovaLogic's NovaWorld off, or as the last server had it", () => {
     expect(DEFAULT_SETTINGS.list_on_novalogic).toBe(false);
     expect(formFrom(null, JO, []).list_on_novalogic).toBe(false);
@@ -182,7 +209,7 @@ describe('the form a start begins with', () => {
     expect(initialRotation(null, JO, ESCALATION)).toEqual({ missions: ['jo_one.bms', 'jo_two.bms', 'jox_one.bms'], dropped: [] });
     const last = settings({ missions: ['JO_TWO.BMS', 'gone.bms', 'jo_two.bms'] });
     // Its game: kept to the data's list in the list's spelling, each once, the rest dropped.
-    expect(initialRotation(last, JO, null)).toEqual({ missions: ['jo_two.bms'], dropped: ['gone.bms'] });
+    expect(initialRotation(last, JO, null)).toEqual({ missions: ['jo_two.bms', 'jo_two.bms'], dropped: ['gone.bms'] });
     // Another game: that game's every mission, nothing said dropped.
     expect(initialRotation(last, DFX2, null)).toEqual({ missions: ['dfx_one.bms'], dropped: [] });
     // Nothing of the last one kept: every mission.

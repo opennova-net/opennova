@@ -1351,7 +1351,7 @@ void test_best_seat_walks_vehicle_children() {
     CHECK(selected.type == SeatType::Controller);
 
     // Child control seats are never eligible; command 123 also narrows the
-    // walk to passenger seats without changing root-before-child weighting.
+    // walk to passenger seats without changing root/child weighting.
     w.registry.get(root_h)->seats[1].occupant = EntityHandle::make(0, 3);
     selected = {};
     CHECK(find_best_vehicle_seat(
@@ -1359,6 +1359,47 @@ void test_best_seat_walks_vehicle_children() {
             SeatSelectionMode::PassengerOnly));
     CHECK(selected.vehicle == root_h);
     CHECK(selected.seat_index == 0);
+}
+
+// The root's proximity slice bounds the seat search; equal-weight child guns
+// precede the root, and the live ground link is rechecked without rebuilding.
+// [orig: Entity_FindBestSeatSlot @ 0x4351F0, slice/root/filter/tie @ 0x43521E / @ 0x435228 / @ 0x435289 / @ 0x4352BC / @ 0x435417]
+void test_best_seat_uses_proximity_order() {
+    World w;
+    CollisionWorld collision;
+    w.collision = &collision;
+    w.registry.configure_pool(1, 9600); // revx02 allocation, only four live rows
+    Entity root;
+    root.kind = EntityKind::Item;
+    root.has_item_def = root.has_graphic_model = true;
+    root.item_type_index = 1;
+    root.item_type = 1;
+    Seat gun;
+    gun.type = SeatType::Gunner;
+    gun.bone_index = 1;
+    root.seats.push_back(gun);
+    const EntityHandle rh = w.registry.spawn(1, root);
+    Entity child = root;
+    child.ground_target = rh;
+    child.position = {1000.0f, 0.0f, 0.0f};
+    const EntityHandle distant = w.registry.spawn(1, child);
+    child.position = EntityPosition{}; // a bare {} is ambiguous to GCC (Vec3 / EntityPosition)
+    const EntityHandle near = w.registry.spawn(1, child);
+    const EntityHandle second = w.registry.spawn(1, child);
+    collision.build_initial_tables(w);
+    VehicleSeatSelection selected;
+    CHECK(find_best_vehicle_seat(w, rh, {}, selected));
+    CHECK(selected.vehicle == near); // distant child excluded; root loses equal weight
+    w.registry.get(near)->ground_target = {};
+    CHECK(find_best_vehicle_seat(w, rh, {}, selected));
+    CHECK(selected.vehicle == second); // list retained, live link changed
+    w.registry.get(second)->ground_target = {};
+    CHECK(find_best_vehicle_seat(w, rh, {}, selected));
+    CHECK(selected.vehicle == rh);
+    collision.forget_candidate_slices();
+    CHECK(find_best_vehicle_seat(w, rh, {}, selected));
+    CHECK(selected.vehicle == rh); // authoritative missing slice does not scan all pools
+    CHECK(w.registry.get(distant)->ground_target == rh);
 }
 
 // D-NET-557 / D-NET-580: the walk's per-entry gate, the entry admission and the
@@ -1646,7 +1687,11 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
 
 // A deploy/respawn after a completed proximity epoch rebuilds the new player's
 // source slice immediately. Waiting for the normal 17-tick cadence would make
-// USE and attach labels disappear just after spawning.
+// USE and attach labels disappear just after spawning. The add's slice build
+// follows its model init, the embedder's (MissionKernel::bind_spawned_body), which
+// this headless world stands in for (D-SIM-4).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel @0x43C492,
+//  Entity_BuildProximityListsFromPools @0x43C4EB]
 void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     World w;
     AiSystem &ai = w.ai;
@@ -1681,6 +1726,7 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     spawn.health = 100;
     const EntityHandle player_h = spawn_player(w, spawn);
     CHECK(player_h.valid());
+    cw.rebuild_slices_after_spawn(w);
     // The spawn faces +x; the seat is at -x, so look at it (the aim cone).
     look_at(w, player_h, entity_local_point_world(*w.registry.get(vehicle_h), seat.seat_local));
     const Entity *player = w.registry.get(player_h);
@@ -2458,6 +2504,52 @@ void test_ai_authored_entry_claim_and_stages() {
 	CHECK(r.player().mounted);
 }
 
+// A command-125 boarder tests its cached target first: a cached row still carrying the
+// target SSN is the target, with no pool scan and no E-point claim, even while a pool-0
+// row carrying the same SSN sits ahead of it in the scan; a miss clears the cache and
+// scans, the first match the target (claimed only from pools 1..3). 123/124 find the cache
+// cleared at the think head, so they scan every think.
+// [orig: Entity_UpdateInfantryAI @0x4B9910 - the think head's clear @0x4BA9AD..0x4BA9C7,
+//  the cache test @0x4BAE9C..0x4BAEAF, the clear @0x4BAEB5, the scans @0x4BAEBB..0x4BAF8E,
+//  the pool-0 hit past the claim @0x4BAEF1, the claim @0x4BAF9B..0x4BB185]
+void test_board_target_cache_is_tested_before_the_scan() {
+	for (const int32_t command : {125, 123}) {
+		Rig r;
+		r.w.cached.local_player = {};
+		r.player().net_id = 88;
+		Entity decoy; // a pool-0 row carrying the carrier's SSN, first in the scan
+		decoy.kind = EntityKind::Organic;
+		decoy.item_type_index = 3;
+		decoy.net_id = r.veh().net_id;
+		decoy.position = {300.0f, 300.0f, 10.0f};
+		const EntityHandle decoy_h = r.w.registry.spawn(0, decoy);
+		auto &brain = *r.sys.at(r.sys.attach(r.player_h));
+		brain.slot.f[37] = command;
+		brain.slot.f[38] = r.veh().net_id;
+		brain.slot.f[36] = int32_t(r.veh_h.packed) + 1;
+		brain.inf.board_entry_slot = 5; // a claim writes it
+		r.sys.infantry_think(brain, r.w);
+		if (command == 125) {
+			CHECK(brain.slot.f[36] == int32_t(r.veh_h.packed) + 1); // the hit, no scan
+			CHECK(brain.inf.board_entry_slot == 5);                  // and no claim
+		} else {
+			CHECK(brain.slot.f[36] == int32_t(decoy_h.packed) + 1); // scanned: pool 0 first
+			CHECK(brain.inf.board_entry_slot == 5);                  // a pool-0 hit claims nothing
+		}
+		// A miss: the scan finds the carrier in pool 1 and claims an E point.
+		r.w.registry.despawn(decoy_h);
+		brain.slot.f[37] = 125;
+		brain.slot.f[36] = 0;
+		r.sys.infantry_think(brain, r.w);
+		CHECK(brain.slot.f[36] == int32_t(r.veh_h.packed) + 1);
+		CHECK(brain.inf.board_entry_slot == 1);
+		// The next think hits the cache: no claim.
+		brain.inf.board_entry_slot = 5;
+		r.sys.infantry_think(brain, r.w);
+		CHECK(brain.inf.board_entry_slot == 5);
+	}
+}
+
 void test_ai_boarding_moving_and_destroyed_carrier_admission() {
 	Rig r;
 	r.w.cached.local_player = {};
@@ -3019,6 +3111,59 @@ void test_same_team_hold_scan_follows_the_session() {
     }
 }
 
+// An enemy body standing on an empty vehicle with a refNum: the hold scan walks
+// the vehicle's refNum group list, not the pools. A manned EWeap gun on the list,
+// standing on the vehicle, holds it and the team stays; the same gun off the list
+// (its refNum byte matches, it never joined) holds nothing and the body's team is
+// copied.
+// [orig: Entity_UpdateAllEntities -- the list read @0x4C2521..0x4C2545, the
+//  tests @0x4C2549..0x4C2572, the hold @0x4C2586, the team copy @0x4C25A4;
+//  the join Entity_SpawnFromBMSRecord @0x40EC23..0x40EC45]
+void test_hold_scan_walks_the_refnum_list() {
+    for (const bool member : {true, false}) {
+        Rig r;
+        r.veh().item_type = 1;
+        r.veh().item_attrib |= kItemAttribPlayerControl;
+        r.veh().team = 2;
+        r.veh().ref_num = 9;
+        r.player().team = 1;
+        Entity crew;
+        crew.kind = EntityKind::Organic;
+        crew.item_id = 2072;
+        crew.health = 150;
+        crew.alive = true;
+        crew.team = 2;
+        const EntityHandle crew_h = r.w.registry.spawn(0, crew);
+        Entity gun;
+        gun.kind = EntityKind::Item;
+        gun.has_item_def = true;
+        gun.item_type_index = 4;
+        gun.item_attrib = kItemAttribEweap;
+        gun.ref_num = 9;
+        gun.ref_group_member = member;
+        gun.ground_target = r.veh_h;
+        gun.primary_occupant = crew_h;
+        const EntityHandle gun_h = r.w.registry.spawn(1, gun);
+        CHECK(r.w.registry.ref_group(9).size() == (member ? 1u : 0u));
+        AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+        body.inf.active = true;
+        body.inf.is_local_player = true;
+        body.health = r.player().health;
+        body.team = 1;
+        r.player().ground_target = r.veh_h; // standing on it, not seated
+        TickContext ctx{};
+        ctx.world = &r.w;
+        ctx.is_authority = true;
+        ctx.logic_tick = 1;
+        r.w.logic_tick = 1;
+        r.w.update_all_entities(ctx);
+        CHECK(r.veh().team == (member ? 2 : 1));
+        // The destroy takes the gun off the list.
+        r.w.registry.despawn(gun_h);
+        CHECK(r.w.registry.ref_group(9).empty());
+    }
+}
+
 // The SP lose epilog runs a reduced entity update: every pool-1 row's pose is
 // copied into its saved pose, only the row a player drives is visited, and the
 // update is not counted; the pool-0 walk still runs (it wakes the driven
@@ -3452,8 +3597,11 @@ void test_ai_drive_leg() {
 // factor ((id + (counter<<8)) & 0x7FFF) + 0x4000 per tick, the counter being
 // the entity-update counter; a neighbor BEHIND does not
 // [orig: @0x48bd8f-0x48bf26; Entity_UpdateVehiclePhysics @0x48BF26].
-void test_ai_drive_avoid_brake() {
+void test_ai_drive_avoid_brake(size_t capacity) {
     Rig r(30.0f);
+    const Entity seed = r.veh();
+    r.w.registry.configure_pool(1, capacity);
+    CHECK(r.w.registry.spawn_at(r.veh_h, seed) == r.veh_h);
     const VehicleTraits t = truck_traits();
     r.w.vehicles.traits.set(r.veh().item_id, t);
     const int ai_idx = r.sys.attach(r.veh_h);
@@ -5469,7 +5617,7 @@ static void test_remote_rider_detach_pass_ends_at_the_mounted_site() {
     w.ai.is_authority = true;
     // A 4th tick: an on-foot standing body's selection counts its idle pass
     // [orig: @0x4B727B..0x4B7293].
-    w.ai.update_organic(body, w, 4);
+    w.ai.update_organic(body, w, 4, body_move_row(w, body, w.registry.get(body.handle)));
     CHECK(!rider.mounted);
     CHECK(rider.health == 100);
     CHECK(rider.position.words() == seated_at);
@@ -5963,6 +6111,8 @@ int main() {
     test_seated_body_claims_its_vehicle();
     test_epilog_entity_update();
     test_same_team_hold_scan_follows_the_session();
+    test_hold_scan_walks_the_refnum_list();
+    test_board_target_cache_is_tested_before_the_scan();
     test_remote_player_control_seat_preserves_wire_look();
     test_remote_passenger_keeps_its_wire_look();
     test_live_pose_provider_and_static_fallback();
@@ -5975,6 +6125,7 @@ int main() {
     test_binoculars_survive_all_but_the_camera_reset();
     test_action6_reads_ls_parent_with_retails_gates();
     test_best_seat_walks_vehicle_children();
+    test_best_seat_uses_proximity_order();
     test_seat_gates_read_the_dead_bit_alone();
     test_use_scan_reads_the_dead_bit_alone();
     test_label_pass_carrier_block_has_no_type_test();
@@ -6003,7 +6154,8 @@ int main() {
     test_sighted_vehicle_weapon_seeds_its_zero_pitch();
     test_entity_def_slot_init_seeds_the_zoom();
     test_ai_drive_leg();
-    test_ai_drive_avoid_brake();
+    test_ai_drive_avoid_brake(64);
+    test_ai_drive_avoid_brake(9600); // revx02 must not apply one neighbor's brake repeatedly
     test_ai_drive_avoid_quantized_footprints();
     test_stuck_check();
     test_min_ai_crew_clamp();

@@ -13,10 +13,10 @@
 #include <runtime/inmatch/punt_log.h> // ConnectLog and the client callbacks' line texts
 #include <net/npwire/session_keys.h>
 #include <net/novacrypto/crc32.h>
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <base/io/le.h>
 #include <base/io/log.h>
+#include <base/version/one_build.h>
 #include <base/vfs/vfs.h>
 #include <runtime/inmatch/join_character_profile.h> // fresh_profile_character_vars
 #include <runtime/inmatch/mission_exit.h> // ProcessDisconnectLatch (the connect start's clear)
@@ -159,7 +159,7 @@ JoinerConnection::JoinerConnection(std::string player_name,
 }
 
 std::vector<uint8_t> JoinerConnection::start() {
-	if (title_ == nullptr) {
+	if (protocol_ == nullptr) {
 		last_error_ = "no title identity to join with";
 		return {};
 	}
@@ -312,12 +312,12 @@ std::vector<uint8_t> JoinerConnection::build_client_hello() {
 	// into the organic-spawn named organic record by the host.
 	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - @0x61fcf5..0x61fd47;
 	//  CNapiGameSession_InitTransportConnection @0x4c9ec3 (the resolved address)]
-	return build_lan_discovery_probe(*title_, client_index_, host_address_.ip, host_address_.port);
+	return build_lan_discovery_probe(*protocol_, client_index_, host_address_.ip, host_address_.port);
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
-	ClientAuth auth = make_title_client_auth(
-			*title_, client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
+	ClientAuth auth = make_protocol_client_auth(
+			*protocol_, client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
 	// The session record's address and port: the host the reply came from.
 	// [orig: CNapiNPConnection_InitFromSession @0x6263ae..0x6263b7]
 	auth.sip = host_address_.ip;
@@ -338,7 +338,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// LITERAL constants of the 1.7.5.7 binary, not capture-specific values (witness 2026-07-24):
 	// BN==1 (DC=2 @0x512155), VN==2 (DC=3), MBN==20042002 (DC=4; the 0x131D112 immediate),
 	// SOPD==180 (DC=8) — the joiner's net config defaults, which the title row carries
-	// (TitleJoinBuild; JO's and DFX2's agree) [orig: NapiNetConfig_Init @0x4c3570].
+	// (JoinBuild; JO's and DFX2's agree) [orig: NapiNetConfig_Init @0x4c3570].
 	// BT is the account ban state (1/2 reject, DC=6/7; 0 for LAN). The rest are stored/display
 	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB). VERSIONSTRING is the binary's own
 	// sprintf("V%i.%i.%i.%i", ...), the title's profile's version text (JO's 1, 7, 5, 7)
@@ -356,9 +356,18 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// = atol(decoded CK) @0x569b8e; the host reads the APPID tag into the same
 	// field, NapiNetConfig_LoadFromConnTags @0x4c7260 (@0x4C7415), then
 	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122C3]
-	// The four build values are the title's (TitleJoinBuild: its net config's defaults, which
+	// The four build values are the title's (JoinBuild: its net config's defaults, which
 	// each title's host checks against its own), the same for JO and DFX2.
-	const TitleJoinBuild &build = title_join_build(title_);
+	const JoinBuild &build = protocol_join_build(protocol_);
+	// VERSIONSTRING, the engine build's version text: ONE's wire version ("V0.0.22.0") where
+	// retail's g_VersionText held its boot's "V%i.%i.%i.%i" over 1, 7, 5, 7, JO's and DFX2's
+	// alike. The host only stores it [orig: NapiNetConfig_LoadFromConnTags @0x4c73c8].
+	// [orig: Game_ParseCommandLineAndInit @ 0x4a7310 — ebx @ 0x4a737b, the menu's
+	//  @ 0x4a7d5c..0x4a7d6d (read by UI_OnStartupScreenActivate @ 0x555852), the session's
+	//  @ 0x4a7d75..0x4a7d90 (the ClientAuth copy @ 0x569b56)]
+	// [orig: dfx2.exe @ 0x4a7360 — ebx @ 0x4a73cb, the sprintfs @ 0x4a7d8c..0x4a7d9d and
+	//  @ 0x4a7da5..0x4a7dc0]
+	const std::string version_string = one_build().wire_version().retail_text();
 	for (const auto &field : {
 			std::pair<const char *, std::string>{"BT", "0"},
 			std::pair<const char *, std::string>{"VN", std::to_string(build.vn)},
@@ -366,8 +375,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			std::pair<const char *, std::string>{"DB", "0"},
 			std::pair<const char *, std::string>{"MBN", std::to_string(build.mbn)},
 			std::pair<const char *, std::string>{"SOPD", std::to_string(build.sopd)},
-			std::pair<const char *, std::string>{"VERSIONSTRING",
-					gameprofile::gameprofile_by_id(title_->game_id)->version_text},
+			std::pair<const char *, std::string>{"VERSIONSTRING", version_string},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}
@@ -555,7 +563,7 @@ JoinerConnection::ManagerPass JoinerConnection::manager_receive(const uint8_t *r
 	if (connect_logging())
 		connect_log_line(taken
 				? napi_got_protocol_text(unpacked_len, host_address_,
-						title_ != nullptr && title_->pn != nullptr ? title_->pn : "")
+						protocol_ != nullptr && protocol_->pn != nullptr ? protocol_->pn : "")
 				: napi_tossed_text(unpacked_len, host_address_, NapiTossReason::NoProtocol));
 	return out;
 }
@@ -666,8 +674,8 @@ bool JoinerConnection::server_hello_queues(const std::vector<uint8_t> &body) con
 		return false;
 	ServerHello sh;
 	if (!parse_server_hello(body.data(), body.size(), sh)) return false;
-	if (title_ == nullptr || sh.ci != client_index_) return false;
-	return server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_));
+	if (protocol_ == nullptr || sh.ci != client_index_) return false;
+	return server_hello_matches_identity(sh, make_protocol_client_hello(*protocol_, client_index_));
 }
 
 bool JoinerConnection::server_auth_queues(const std::vector<uint8_t> &body) const {
@@ -691,8 +699,8 @@ void JoinerConnection::on_server_hello(
 	// Then the host's identity block must be the title's, else the reply is dropped.
 	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533, the identity compares
 	//  @0x62758B / @0x627624 / @0x627643]
-	if (title_ == nullptr || sh.ci != client_index_) return;
-	if (!server_hello_matches_identity(sh, make_title_client_hello(*title_, client_index_))) return;
+	if (protocol_ == nullptr || sh.ci != client_index_) return;
+	if (!server_hello_matches_identity(sh, make_protocol_client_hello(*protocol_, client_index_))) return;
 	// The connect log's client callbacks (while it is on): after the client pump's NET GOT
 	// (pump_client_queue), the queued leg records the enumerated session, whose discovered
 	// callback (the enumerate's own, installed by InitTransportConnection) writes NET SESSION

@@ -8,7 +8,6 @@
 #include <net/napi/session.h>
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/lobby_identity.h>
-#include <net/title/title_identity.h> // TitleIdentity::game_id (the leg's cap)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (a GET's nocachefix tick)
 
 #include <chrono>
@@ -296,7 +295,7 @@ bool Lister::start() {
 		session_socket_ = std::make_unique<net::NetDatagramSocket>(session_udp_.get());
 		session = session_socket_.get();
 	}
-	lobby_.set_title(options_.title, options_.gate_tag);
+	lobby_.set_protocol(options_.protocol, options_.gate_tag);
 	lobby_.open(*gate_socket_, *session);
 	lobby_.probe(options_.master_host, options_.master_gate_port);
 	io::logf(LogLevel::kInfo, "%s[gate] probing %s:%u as %s (%s)", who(),
@@ -541,7 +540,7 @@ void Lister::request_host() {
 void Lister::sync_flow_context() {
 	const GateResponse &gate = lobby_.gate_response();
 	LobbyHttpContext ctx;
-	ctx.title = options_.title;
+	ctx.protocol = options_.protocol;
 	ctx.gate_tag = options_.gate_tag;
 	ctx.startup_url = gate.startup_url;
 	ctx.post_ip = ip4(gate.post_ip);
@@ -590,7 +589,7 @@ HostRegistration Lister::registration() const {
 	HostRegistration r = source_.registration();
 	r.lobby_name = lobby_.gate_response().lobby_name;
 	r.host_key = host_key_;
-	r.max_players = host_leg_max_players(r.max_players, !r.listen_host, options_.title->game_id);
+	r.max_players = host_leg_max_players(r.max_players, !r.listen_host, *options_.game_title);
 	r.country_name = identity_.country;
 	r.language = identity_.language;
 	r.tz_bias = strutil::parse_int(identity_.tz_bias).value_or(0);

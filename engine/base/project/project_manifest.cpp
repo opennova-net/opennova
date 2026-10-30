@@ -39,7 +39,7 @@ bool is_utf8(std::string_view text) {
 bool is_service_managed_file(std::string_view path) {
 	const size_t slash = path.find_last_of("/\\");
 	const std::string_view name = slash == std::string_view::npos ? path : path.substr(slash + 1);
-	return strutil::iequals(name, "gt.ssc");
+	return strutil::iequals(name, "gt.ssc") || strutil::iequals(name, "version.txt");
 }
 
 bool is_project_path(std::string_view path, std::string &why) {

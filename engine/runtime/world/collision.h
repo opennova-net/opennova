@@ -44,7 +44,6 @@
 #include <vector>
 
 #include <runtime/devtools/tick_profile.h>
-#include <base/gameprofile/gameprofile.h>
 #include <runtime/world/collision_model.h> // the model records, the matrix, the terrain helpers
 #include <runtime/world/collision_query.h> // the query records, the wire proxies, the projectile trace
 #include <runtime/world/entity.h>
@@ -305,7 +304,8 @@ public:
     // tick. The statics table (pool 2, [orig: Entity_BuildProximityLists_Pool2
     // @ 0x4b9430]: buildings first [0..static_building_count), all statics
     // [0..static_count), positions quantized (p + 0x8000) >> 16 as u16, radius
-    // padded +111876, cap 1200) is built at the first build and then only at retail's
+    // padded +111876, counted to pool 2's capacity less one, static_prox_count_bound)
+    // is built at the first build and then only at retail's
     // Pool2 calls: the load and the mission start (Entity_BuildAllProximityLists
     // @ 0x4c20f0: build_initial_tables, build_all_tables) and the teleports
     // (rebuild_statics), never per tick.
@@ -316,9 +316,21 @@ public:
     // such as portal setup and first-tick grounding. The 17-tick cadence only
     // governs steady-state rebuilds.
     void build_initial_tables(World &world);
-    // A spawn or registry rewind immediately republishes the pool-0 / pool-1 tables and
-    // every candidate slice; the statics stand (a Pool2 call is build_all_tables').
+    // Republishes the pool-0 / pool-1 tables and every candidate slice at once (the 17-tick
+    // phase restarted); the statics stand (a Pool2 call is build_all_tables'). The body of
+    // build_all_tables: no spawn or destroy runs it (a player's add and a lift operation
+    // build the slices alone, rebuild_slices_after_spawn; a deployable and a destroy nothing).
     void refresh_after_registry_change(World &world);
+    // A spawn's or a vehicle respawn's slice build: every source's slice over the published
+    // tables, the 17-tick phase restarted, no table published (the new row joins the tables
+    // at the next build). A world whose tables were never built keeps its registry
+    // fallbacks; one with tables but no slices yet takes the pre-logic snapshot
+    // (build_initial_tables).
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
+    //  Entity_SpawnFromAnimSlotProperty @0x43C4EB, HeliLift_SpawnPickup @0x4526EB,
+    //  HeliLift_SpawnFlyover @0x4529C0, Entity_RespawnVehicle @0x460133; none of them calls
+    //  Entity_BuildProximityLists_Pool01 @0x4B9340]
+    void rebuild_slices_after_spawn(World &world);
     // Every table: the statics, the pool-0 / pool-1 tables and every slice (or, before the
     // first slices, the pre-logic snapshot). The mission start's local-player block and a
     // restart's reload. [orig: Entity_BuildAllProximityLists @0x4C20F0, called by
@@ -330,8 +342,8 @@ public:
     void refresh_entity_proximity(World &world, Entity &entity);
     // The candidate-slice build alone, outside the 17-tick cadence (which it
     // restarts): every source's slice over the published pool tables.
-    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by
-    //  Entity_RespawnVehicle @0x460133]
+    // [orig: Entity_BuildProximityListsFromPools @0x4B8EB0, called by WacCmd_Tele
+    //  @0x4F2384, Entity_TeleportTeamToSpawn @0x43D502, Entity_ResetToSpawnState @0x4B98EB]
     void rebuild_candidate_slices(World &world);
     // The statics table alone (buildings first, then the rest), outside the instance and
     // registry edges that otherwise rebuild it: the teleport actions' Pool2 calls.
@@ -774,12 +786,13 @@ public:
     // decoded remote row that has NO world entity — retail runs remote
     // organics through the ordinary org movers whose shared tail calls the
     // resolver ungated [orig: Entity_UpdateInfantryPlayerBody call @0x4B7CF4;
-    // Entity_UpdateInfantryAI @0x4BF7FA]. The candidate slice is built AD HOC
-    // at the query position with the pool-0 rule (the exact caller-supplied
-    // authored bound radius + 4.0 u pad), person repulsion runs the
-    // world persons_ PLUS the caller-passed replica peer spheres through the
-    // SAME witnessed loop (a ClientState peer's "live re-read" is its staged
-    // snapshot — the row has no registry entity), and the Entity-side writes
+    // Entity_UpdateInfantryAI @0x4BF7FA]. The candidate slice is the row's own
+    // wire slice as its last build left it (none before its first build), the
+    // caller-supplied authored bound radius is the row's boundRadius word,
+    // person repulsion runs the world persons_ PLUS the caller-passed replica
+    // peer spheres through the SAME witnessed loop (a ClientState peer's "live
+    // re-read" is its staged snapshot — the row has no registry entity), and
+    // the Entity-side writes
     // (flag latches, blink, groundEntity) become the out_ground return.
     // is_authority is pinned false: a replica resolve never runs damage legs.
     struct ReplicaPeer {
@@ -827,8 +840,7 @@ public:
     // probes a remote body this way [orig: Entity_UpdateInfantryPlayerBody
     // @0x4B40E0 - the probes @0x4B6E41 / @0x4B6E5D / @0x4B6E98 / @0x4B6EB3 ->
     // Entity_RaycastGroundHeight @0x4142C0, over the body's proximity slice].
-    int32_t raycast_ground_replica(World &world, const int32_t pos[3],
-                                   int32_t source_bound_radius_q16, uint16_t row_handle,
+    int32_t raycast_ground_replica(World &world, const int32_t pos[3], uint16_t row_handle,
                                    uint32_t entity_flags, int32_t dx, int32_t dy,
                                    int32_t z_up, int32_t z_drop);
 
@@ -1026,7 +1038,8 @@ public:
 
 private:
     void build_tables(World &world, bool advance_candidate_slices);
-    // Drops the bindings (and candidate slices) whose registry lifetime ended.
+    // Drops the bindings (and candidate slices) whose registry lifetime ended; a no-op while
+    // the registry's occupancy and the bindings are as the last prune left them.
     void prune_stale_bindings(World &world);
     // The statics table over the pool-2 rows [orig: Entity_BuildProximityLists_Pool2
     //  @0x4B9430].
@@ -1079,7 +1092,9 @@ private:
         uint64_t registry_spawn_id = 0;
         std::vector<CollisionMatrix> section_matrices;
     };
-    const Instance *live_instance(const World &world, EntityHandle h) const;
+    // `entity_out`, when given, takes the registry row the test read.
+    const Instance *live_instance(const World &world, EntityHandle h,
+                                  const Entity **entity_out = nullptr) const;
     struct StaticSlot { // [orig: g_StaticProx* u16 tables + entity ptr array]
         uint16_t x = 0, y = 0, z = 0, radius = 0;
         EntityHandle h;
@@ -1105,9 +1120,6 @@ private:
     struct CandidateSlice {
         int32_t start = 0;
         int32_t count = 0;
-        // The source position the slice was built at (wire slices only): a
-        // row that has moved past its pad since then needs a fresh build.
-        int32_t built_pos[3] = {0, 0, 0};
         // The lifetime the slice was built for (a registry slot's spawn id, a
         // decoded row's spawn revision): the slot's words outlive a build the
         // gates skip, never a respawn into the slot.
@@ -1140,6 +1152,23 @@ private:
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch,
                                            bool husk_swap = true) const;
+    // The model a query against a row selects: its live instance, its registry row and the husk
+    // swap's pick. A candidate visit resolves it once for its bound gate and its view (not a
+    // retail claim: retail reads the row's own fields, no lookup).
+    struct TargetModel {
+        const Instance *instance = nullptr;
+        const Entity *entity = nullptr;
+        const CollisionModel *model = nullptr;
+        bool using_husk = false;
+    };
+    // False exactly when target_view would return null.
+    bool target_model(const World &world, EntityHandle h, TargetModel &out,
+                      bool husk_swap = true) const;
+    // target_view over a model target_model resolved for `h`.
+    const CollisionTargetView *target_view(const World &world, EntityHandle h,
+                                           const TargetModel &target,
+                                           CollisionTargetView &scratch,
+                                           std::vector<CollisionMatrix> &mat_scratch) const;
     // One candidate entity vs one radiused segment: the cheap-metadata broad
     // phase, then live section matrices for survivors (shared by sound and the
     // slice-scoped iris/entity sun casts).
@@ -1243,15 +1272,23 @@ private:
     // target_view's model selection without the section-matrix build: fills the
     // entity position and bound radius for the witnessed gate-before-view order.
     // False exactly when target_view would return null; solid_only also
-    // rejects models without a solid volume.
+    // rejects models without a solid volume. `resolved`, when given, takes the
+    // model for the survivor's view.
     bool target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
-                      int32_t &radius_out, bool solid_only) const;
+                      int32_t &radius_out, bool solid_only,
+                      TargetModel *resolved = nullptr) const;
+    // The section-matrix scratch of the movement resolve's candidate views and of the
+    // ground ray's, reused across calls instead of a vector per call (not a retail
+    // claim beyond retail's own reuse of one static buffer: BoneCallback_Simple
+    // @0x4E2600 writes g_BoneCallbackScratchMatrix @0x4E2679..0x4E267E).
+    std::vector<CollisionMatrix> resolve_mats_;
+    std::vector<CollisionMatrix> ground_ray_mats_;
 
     std::vector<CollisionModel> models_;
     std::unordered_map<uint16_t, Instance> instances_; // key: EntityHandle.packed
     IPoseProvider *pose_provider_ = nullptr; // non-owning embedder seam
 
-    std::vector<StaticSlot> statics_;   // cap 1199 counted [orig: g_StaticProx*]
+    std::vector<StaticSlot> statics_;   // pool 2's capacity less one counted [orig: g_StaticProx*]
     int32_t static_count_ = 0;
     int32_t static_building_count_ = 0;
     // Build state is independent of table contents: an empty-but-built table is
@@ -1260,6 +1297,13 @@ private:
     bool candidate_slices_built_ = false;
     // A pool-2 instance/registry edge since the statics table was last built.
     bool statics_dirty_ = true;
+    // The occupancy the last binding prune ran over (prune_stale_bindings): the registry, its
+    // spawn serial and its live count, and whether a binding was assigned since. Host
+    // bookkeeping, not a retail claim.
+    const EntityRegistry *pruned_registry_ = nullptr;
+    uint64_t pruned_spawn_serial_ = 0;
+    size_t pruned_live_count_ = 0;
+    bool bindings_dirty_ = true;
     // Candidate slices rebuild only every 17th tick — the counter increments per
     // tick and the rebuild fires (and resets it) once it reaches 16; pool tables
     // rebuild every tick. BSS-zero start: retail's first slice build lands on
@@ -1274,12 +1318,31 @@ private:
     // Server H used solely as local L's ordering key during proxy-enabled
     // person walks. Geometry and ignore logic continue to use L.
     uint16_t wire_local_player_handle_ = 0xFFFF;
+    // The person walks on a joiner holding person proxies (the repulsion, the projectile
+    // trace): retail's one pool-0 table in slot order, which ours merges from two (the
+    // registry persons, the local body at its wire slot, and the proxies at theirs). Built
+    // once per table build or proxy replace and local-player change, not per resolve or
+    // trace (not a retail claim: retail's table is built in that order). Const-callable
+    // for the trace, so the cache is mutable.
+    // [orig: Entity_BuildProximityLists_Pool01 @0x4B9340 builds the table;
+    //  Entity_MovementCollisionResolver @0x4B2BD0 walks it @0x4B3AC6..0x4B3C4C]
+    struct PersonOrderEntry {
+        uint16_t key = 0;
+        bool is_proxy = false;
+        uint32_t index = 0;
+    };
+    const std::vector<PersonOrderEntry> &person_proxy_order(const World &world) const;
+    mutable std::vector<PersonOrderEntry> person_proxy_order_;
+    mutable bool person_proxy_order_valid_ = false;
+    mutable EntityHandle person_proxy_order_local_;
     // The arena's 3000 entries and its fill count. A build refills it from 0
     // and leaves the entries past the fill as the last build that reached
     // them wrote them; a slice a later build skipped keeps its start and
-    // count, so it reads whatever the arena holds there now.
-    // [orig: g_ProxCandidateArena, g_ProxCandidateArenaUsed; the < 3000 tests
-    //  @0x4b8fd4 / @0x4b90bc / @0x4b9214 / @0x4b92fc]
+    // count, so it reads whatever the arena holds there now. 3000 is the
+    // arena's own literal, no pool's capacity or sum (pools 0..2 hold 2656).
+    // [orig: g_ProxCandidateArena, g_ProxCandidateArenaUsed; the `cmp ebx, 0BB8h`
+    //  tests @0x4b8fc2 / @0x4b90b6 / @0x4b9202 / @0x4b92f6, the `jge` past a full
+    //  arena e.g. @0x4b90bc / @0x4b92fc]
     static constexpr int32_t kCandidateArenaCap = 3000;
     std::vector<EntityHandle> arena_;
     int32_t arena_used_ = 0;
@@ -1344,11 +1407,13 @@ private:
     const int32_t *replica_saved_live_ = nullptr;
     // Staged like replica_flags_: the calling row's mounted latch (resolve_replica).
     bool replica_mounted_latch_ = false;
-    // resolve_replica's candidate staging under the reserved invalid key, which
-    // raycast_ground_replica shares; unstage drops it and the scratch arena tail.
-    size_t stage_replica_candidates(const int32_t pos[3], int32_t source_bound_radius_q16,
-                                    uint16_t exclude_handle);
+    // resolve_replica's candidate staging under the reserved invalid key (find_slice reads
+    // replica_slice_ there), which raycast_ground_replica shares; unstage drops it and the
+    // scratch arena tail.
+    size_t stage_replica_candidates(uint16_t row_handle);
     void unstage_replica_candidates(size_t arena_mark);
+    CandidateSlice replica_slice_;
+    bool replica_slice_staged_ = false;
 };
 
 } // namespace opennova::world

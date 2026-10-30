@@ -1,10 +1,9 @@
 // The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7, DFX2-8..DFX2-19):
-// the cfg block's table names the session's title, and dfx2.exe's caps, built-in score table and
-// fanfare pair, round-end linger, deploy protection, and its want of a medic revive, heal, the
-// downed-state resend and the death's revive window each branch on it. Jointops.exe's values stand
-// beside each.
+// the session runs as its title (GameConfig::set_title), and dfx2.exe's caps (its Title's), built-in
+// score table and fanfare pair, round-end linger, deploy protection, and its want of a medic
+// revive, heal, the downed-state resend and the death's revive window (its TitleRules' knobs,
+// games/dfx2/dfx2_rules.cpp) each read it. Jointops.exe's values stand beside each.
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_settings.h>
@@ -29,27 +28,34 @@ using namespace opennova::inmatch;
 
 namespace {
 
-constexpr int kJo = gameprofile::GAME_JO;
-constexpr int kDfx2 = gameprofile::GAME_DFX2;
+const Title *const kJo = title_by_code("jo");
+const Title *const kDfx2 = title_by_code("dfx2");
 
-// The block's table is its title's: a dfx2.exe block makes a dfx2.exe session, whose create takes
+// The rules a title runs.
+const world::TitleRules *rules_of(const Title *title) {
+	return &world::title_rules(title->code);
+}
+
+// The block's title is the session's: a dfx2.exe block makes a dfx2.exe session, whose create takes
 // the cap into 1..251. [orig: CNapiGameSession_BuildAndCreateSession @0x569554..0x56956C] [orig:
 //  @0x5676f5..0x56770e (dfx2.exe)]
 int session_title_from_the_cfg_table() {
 	gamecfg::GameCfg jo = gamecfg::defaults();
 	jo.mp_max_players = 200; // the host file's MaxPlayers, which no screen clamps
-	const HostScreenState jo_host = host_session_settings(jo);
-	TEST_EXPECT(jo_host.config.title == kJo && jo_host.player_limit == 65 && jo.mp_max_players == 65);
+	const HostScreenState jo_host = host_session_settings(jo, *kJo);
+	TEST_EXPECT(jo_host.config.title == kJo && jo_host.config.rules == rules_of(kJo) &&
+			jo_host.player_limit == 65 && jo.mp_max_players == 65);
 
 	gamecfg::GameCfg dfx2 = gamecfg::defaults({}, 0, 0, gamecfg::ConfigTable::Dfx2);
 	TEST_EXPECT(dfx2.mp_max_players == 16); // its table's default
 	dfx2.mp_max_players = 200;
 	dfx2.dedicated = 1;
-	HostScreenState host = host_session_settings(dfx2);
-	TEST_EXPECT(host.config.title == kDfx2 && host.player_limit == 200);
+	HostScreenState host = host_session_settings(dfx2, *kDfx2);
+	TEST_EXPECT(host.config.title == kDfx2 && host.config.rules == rules_of(kDfx2) &&
+			host.player_limit == 200);
 	TEST_EXPECT(host.config.max_players == 200u && host.config.player_slot_limit() == 201u);
 	dfx2.mp_max_players = 400;
-	host = host_session_settings(dfx2);
+	host = host_session_settings(dfx2, *kDfx2);
 	TEST_EXPECT(host.player_limit == 251 && dfx2.mp_max_players == 251);
 	TEST_EXPECT(host.config.player_slot_limit() == 252u); // the ceiling tests the pre-increment cap
 	return 0;
@@ -61,9 +67,9 @@ int session_title_from_the_cfg_table() {
 //  @0x52DC5F..0x52DC9F] [orig: @0x52aeb0, @0x52aec5 (dfx2.exe)]
 int score_table_seeds_by_title() {
 	const std::string bare = "VERSION 40\r\nGAMETYPE \"TDM\"\r\n";
-	for (const int title : {kJo, kDfx2}) {
+	for (const Title *title : {kJo, kDfx2}) {
 		GameConfig config;
-		config.title = title;
+		config.set_title(*title);
 		config.game_type = game_type::kTeamDeathmatch;
 		TEST_EXPECT(load_session_score_config(config, bare));
 		TEST_EXPECT(config.exp_fanfare == (title == kDfx2 ? 0x0A04 : 0));
@@ -79,8 +85,8 @@ int score_table_seeds_by_title() {
 
 // [orig: Server_ProcessRoundEnd @0x5164F0 (@0x5166c4)] [orig: @0x513730 (@0x51391e) (dfx2.exe)]
 int round_end_linger() {
-	TEST_EXPECT(round_end_linger_ticks_for(kJo) == 2790u);
-	TEST_EXPECT(round_end_linger_ticks_for(kDfx2) == 1550u);
+	TEST_EXPECT(rules_of(kJo)->round_end_linger_ticks == 2790u);
+	TEST_EXPECT(rules_of(kDfx2)->round_end_linger_ticks == 1550u);
 	return 0;
 }
 
@@ -100,13 +106,13 @@ int deploy_protection() {
 	crate.has_item_def = true;
 	crate.item_type = 5;
 	for (const world::Entity *target : {&vehicle, &zone, &crate}) {
-		TEST_EXPECT(deploy_spawn_protection_ticks(kJo, target) == 620);
+		TEST_EXPECT(deploy_spawn_protection_ticks(*rules_of(kJo), target) == 620);
 	}
-	TEST_EXPECT(deploy_spawn_protection_ticks(kJo, nullptr) == 620);
-	TEST_EXPECT(deploy_spawn_protection_ticks(kDfx2, &vehicle) == 310);
-	TEST_EXPECT(deploy_spawn_protection_ticks(kDfx2, &zone) == 310);
-	TEST_EXPECT(deploy_spawn_protection_ticks(kDfx2, &crate) == 620);
-	TEST_EXPECT(deploy_spawn_protection_ticks(kDfx2, nullptr) == 620);
+	TEST_EXPECT(deploy_spawn_protection_ticks(*rules_of(kJo), nullptr) == 620);
+	TEST_EXPECT(deploy_spawn_protection_ticks(*rules_of(kDfx2), &vehicle) == 310);
+	TEST_EXPECT(deploy_spawn_protection_ticks(*rules_of(kDfx2), &zone) == 310);
+	TEST_EXPECT(deploy_spawn_protection_ticks(*rules_of(kDfx2), &crate) == 620);
+	TEST_EXPECT(deploy_spawn_protection_ticks(*rules_of(kDfx2), nullptr) == 620);
 	return 0;
 }
 
@@ -117,10 +123,10 @@ int deploy_protection() {
 // [orig: @0x4e38d0 (nullsub_114 @0x4fcff0, nullsub_115 @0x4fd000);
 //  Server_TickUpdate @0x51a810 (dfx2.exe)]
 int no_revive_heal_or_downed_resend() {
-	for (const int title : {kJo, kDfx2}) {
+	for (const Title *title : {kJo, kDfx2}) {
 		auto storage = std::make_unique<world::World>();
 		world::World &w = *storage;
-		w.rules.title = title;
+		w.rules.title_rules = rules_of(title);
 		w.registry.configure_pool(0, 4);
 		world::Entity body;
 		body.kind = world::EntityKind::Organic;
@@ -141,7 +147,7 @@ int no_revive_heal_or_downed_resend() {
 		TEST_EXPECT(w.registry.get(victim)->health == 10); // no player slots: no heal in either
 
 		world::MatchRules rules;
-		rules.title = title;
+		rules.title_rules = rules_of(title);
 		rules.game_type = game_type::kTeamDeathmatch;
 		w.match.configure(rules);
 		w.team_downed_resend_countdown = 0;
@@ -156,10 +162,10 @@ int no_revive_heal_or_downed_resend() {
 // 0x54 and a zero downed byte (DFX2-20). [orig: GameEvent_PlayerDeath @0x516f4f, the 0x54 gate
 //  @0x517385] [orig: GameEvent_PlayerDeath @0x51419b, the gate @0x5145cb (dfx2.exe)]
 int no_revive_window_at_death() {
-	for (const int title : {kJo, kDfx2}) {
+	for (const Title *title : {kJo, kDfx2}) {
 		auto storage = std::make_unique<world::World>();
 		world::World &w = *storage;
-		w.rules.title = title;
+		w.rules.title_rules = rules_of(title);
 		w.rules.mp_session = true;
 		w.registry.configure_pool(0, 4);
 		w.tables.class_attribute_flags[(8u - 1u) & 0xFu] |= world::MissionTables::kCharAttrMedic;

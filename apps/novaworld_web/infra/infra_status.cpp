@@ -566,11 +566,16 @@ CloudSnapshot InfraStatus::read(const std::vector<std::string> &instance_ids) {
 				release.id = text_of(manifest, "id");
 				release.created = text_of(manifest, "created");
 				release.revision = text_of(manifest, "revision");
-				if (const JsonValue *defs =
-								member(manifest, "task_definitions", JsonValue::Type::Object))
-					for (const io::JsonMember &m : defs->object)
-						if (m.value.is_string())
-							release.task_definitions[m.key] = m.value.string;
+				const auto strings = [&manifest](const char *key,
+											 std::map<std::string, std::string> &out) {
+					if (const JsonValue *object = member(manifest, key, JsonValue::Type::Object))
+						for (const io::JsonMember &m : object->object)
+							if (m.value.is_string())
+								out[m.key] = m.value.string;
+				};
+				strings("task_definitions", release.task_definitions);
+				strings("images", release.images);
+				strings("image_commits", release.image_commits);
 			} else {
 				// A release before the programs (the single instance's id): it names
 				// no revision.

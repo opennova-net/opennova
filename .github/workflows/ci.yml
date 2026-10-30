@@ -1,10 +1,9 @@
 name: CI
 
 on:
-  # Master: its pushes are the runs that save the compiler caches
-  # (.github/actions/compiler-cache), which the pull requests then read.
+  # Both branches warm compiler caches and validate every component.
   push:
-    branches: [master]
+    branches: [master, staging]
   # Every pull request, whatever its base: a PR stacked on another PR's
   # branch gets the same checks as one targeting master.
   pull_request:
@@ -13,17 +12,15 @@ on:
 permissions:
   contents: read
 
-# On a PR, github.head_ref is the source branch, so a new push cancels the older
-# run (and prevents two runs racing to post the build-links comment). On push to
-# master, head_ref is empty and we fall back to the unique run_id, so master runs
-# are never cancelled.
+# PR updates cancel the older run. Branch runs keep unique groups: a staging run's
+# first job cancels the older staging builds still running (staging-cancel-older).
+# That never interrupts a deployment, which runs in a dispatched rollout run of its own.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The build and test legs (test-core, test-linux, both gdext builds, the
-# Godot package, and the tools' and the Blender add-on's packages in their
-# called workflows) run on RunsOn's 16-vCPU runners in the
+# The native, GDExtension, shared package-tool builds and Godot export run
+# on RunsOn's 16-vCPU runners in the
 # Organization's ci account (infra/ci; DEPLOY.md, "CI runners"): an EC2 spot
 # instance of its own per job, launched for it and ended after it, on RunsOn's
 # images: Windows Server 2025 with Visual Studio 2022 (windows-latest and the
@@ -44,40 +41,54 @@ concurrency:
 # runner's never share an entry either way: actions/cache versions an entry by
 # its path, and runner.temp differs between the two.
 jobs:
-  # A pull request that changes only the private docs pointer and markdown
-  # builds and tests nothing: no build or test reads those paths, and the lint
-  # gates that do read them still run in `gates` (reported through the required
-  # `test` check). Every other PR, and every
-  # push, runs everything. The two required checks (`test`,
-  # `godot-tests`) are jobs of their own that always run and judge their legs
-  # against `code`, never skipped matrix jobs: a skipped matrix job reports
-  # under its bare name, which would leave the required
-  # "<job> (windows-latest)" check pending forever.
+  # PRs select complete components; unknown paths run everything. A PR whose head is
+  # this repository's staging branch selects none: every staging push already runs
+  # the whole graph on that commit (changes.py staging_head). Stable required
+  # aggregate checks verify success/intentional skips, including Linux and web.
+  # It also takes the run's ONE stamp (engine/base/version/one_build.h,
+  # scripts/ci/one_stamp.sh), which every build of the run carries: a pull
+  # request's <latest tag>.<run number> and staging, named by its head (the merge
+  # commit its jobs check out is another commit), as publish.yml's staging release
+  # names it; a master push's latest tag alone.
   changes:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
     outputs:
-      code: ${{ steps.scope.outputs.code }}
+      one_version: ${{ steps.one.outputs.version }}
+      one_staging: ${{ steps.one.outputs.staging }}
+      one_commit: ${{ steps.one.outputs.commit }}
+      one_time: ${{ steps.one.outputs.time }}
+      native: ${{ steps.scope.outputs.native }}
+      godot: ${{ steps.scope.outputs.godot }}
+      service: ${{ steps.scope.outputs.service }}
+      web: ${{ steps.scope.outputs.web }}
+      blender: ${{ steps.scope.outputs.blender }}
+      infra: ${{ steps.scope.outputs.infra }}
+      stack: ${{ steps.scope.outputs.stack }}
+      tools: ${{ steps.scope.outputs.tools }}
     steps:
-      - name: Classify the changed paths
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          sparse-checkout: scripts/ci
+      - name: Select complete components from the PR diff
         id: scope
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          code=true
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            files="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate \
-              --jq '.[] | .filename, (.previous_filename // empty)')"
-            if [[ -n "$files" ]] && ! grep -qvxE 'docs|.*\.md' <<< "$files"; then
-              code=false
-              echo "Only the docs pointer and markdown changed: the builds and tests skip." >> "$GITHUB_STEP_SUMMARY"
-            fi
-          fi
-          echo "code=${code}" >> "$GITHUB_OUTPUT"
+        run: >-
+          python3 scripts/ci/changes.py --event "$GITHUB_EVENT_NAME"
+          --event-path "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY"
+          --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: The ONE stamp
+        id: one
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && github.run_number || '' }}
+        run: scripts/ci/one_stamp.sh "$HEAD_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
 
   # Formatting and per-language lint on the lines a change adds
   # (scripts/lint/format_lint.py: clang-format, ruff, gdlint/gdformat at the
@@ -107,8 +118,6 @@ jobs:
   gates:
     runs-on: windows-latest
     needs: [changes]
-    env:
-      CODE: ${{ needs.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -191,12 +200,9 @@ jobs:
   # runners at once, each its own build from the same compiler cache, and
   # `test` reporting them under the required check's name.
   #
-  # The suite is split by the `editor` ctest label (scripts/ci/
-  # test_suites.py SHARDS): `editor` runs tests/editor's rows, `rest` the
-  # others, and each attests its own selection (inventory == report). The two
-  # selections partition the suite by construction. Each shard builds the full
-  # tree, so both compile the same objects and either may save the cache; the
-  # editor shard does.
+  # The editor/rest labels partition the registered suite. Each shard builds its
+  # targets and their dependencies, then attests inventory == report. Separate
+  # cache flavours prevent one shard's pruning from evicting the other's objects.
   #
   # Built with Ninja + sccache (.github/actions/compiler-cache): the Visual
   # Studio generator ignores CMAKE_*_COMPILER_LAUNCHER. scripts/build.sh lets
@@ -210,7 +216,7 @@ jobs:
   test-core:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.native == 'true'
     permissions:
       contents: read
       actions: write   # the compiler cache's branch save replaces its older entries
@@ -230,7 +236,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
-          submodules: recursive
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
@@ -255,8 +260,9 @@ jobs:
       - name: Restore the compiler cache
         uses: ./.github/actions/compiler-cache
         with:
-          flavour: win-root
+          flavour: win-root-${{ matrix.shard }}
           mode: restore
+          fallback-flavour: win-root
 
       - name: Toolchain sanity (Ninja + cl + lld-link on PATH)
         shell: bash
@@ -268,18 +274,12 @@ jobs:
 
       - name: Build
         shell: bash
-        run: scripts/build.sh --no-godot --no-test --cmake-arg -DCMAKE_LINKER_TYPE=LLD
-
-      # The project tool the Godot shells shard's built-project boot test drives
-      # (godot/tests/game/built_project_boot_test.gd, ADR 0046 d8), from the one
-      # leg that saves the cache; godot-tests-core lays it where the test looks.
-      - name: Upload opennova-project
-        if: matrix.shard == 'editor'
-        uses: actions/upload-artifact@v4
-        with:
-          name: opennova-project-windows
-          if-no-files-found: error
-          path: build/apps/project/opennova-project.exe
+        run: >-
+          scripts/build.sh --no-godot --no-test --shard ${{ matrix.shard }} --cmake-arg -DCMAKE_LINKER_TYPE=LLD
+          --cmake-arg -DOPENNOVA_VERSION=${{ needs.changes.outputs.one_version }}
+          --cmake-arg -DOPENNOVA_STAGING=${{ needs.changes.outputs.one_staging }}
+          --cmake-arg -DOPENNOVA_COMMIT=${{ needs.changes.outputs.one_commit }}
+          --cmake-arg -DOPENNOVA_BUILD_TIME=${{ needs.changes.outputs.one_time }}
 
       # The minted install's writer (tests/editor/mint_install_main.cpp) for editor-e2e, a
       # master push's only.
@@ -296,6 +296,12 @@ jobs:
         if: always()
         shell: bash
         run: sccache --show-stats
+
+      - name: Save the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-root-${{ matrix.shard }}
+          mode: save
 
       # ctest starts the shard's longest rows first (.github/actions/ctest-costs).
       - name: Restore the ctest cost data
@@ -328,64 +334,28 @@ jobs:
             build/Testing/
             build/.ninja_log
 
-      # The one Windows leg that saves the win-root flavour: the rest shard
-      # builds the same objects and only reads it.
-      - name: Save the compiler cache
-        if: matrix.shard == 'editor'
-        uses: ./.github/actions/compiler-cache
-        with:
-          flavour: win-root
-          mode: save
 
-  # The required check "test (windows-latest)" (branch protection names it):
-  # green when the gates passed and both test shards passed (a matrix job's
-  # result is success only when every leg is) or were skipped for a docs-only
-  # change (no instance starts for one). It runs when a leg fails too, so a
-  # failure reports red, never skipped.
+  # Keep the branch-protection name while requiring every selected native,
+  # service, web, infrastructure and package component, plus repository gates.
   test:
     name: test (windows-latest)
     if: ${{ !cancelled() }}
-    needs: [changes, gates, test-core]
+    needs: [changes, gates, test-core, test-linux, service-build, service-images, serve-images, local-stack, web, infra, package-blender-windows, package-apps-windows]
     runs-on: ubuntu-latest
     steps:
-      - name: The Windows legs
-        shell: bash
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          sparse-checkout: scripts/ci
+      - name: Verify every selected component passed
         env:
-          CHANGES: ${{ needs.changes.result }}
-          GATES: ${{ needs.gates.result }}
-          CORE: ${{ needs.test-core.result }}
-          CODE: ${{ needs.changes.outputs.code }}
-        run: |
-          echo "gates: ${GATES}; test-core: ${CORE}"
-          if [[ "$CHANGES" != success ]]; then
-            echo "::error::a gate job did not pass (changes: ${CHANGES})"
-            exit 1
-          fi
-          if [[ "$GATES" != success ]]; then
-            echo "::error::gates: ${GATES}"
-            exit 1
-          fi
-          want=skipped
-          if [[ "$CODE" == true ]]; then want=success; fi
-          if [[ "$CORE" != "$want" ]]; then
-            echo "::error::test-core: ${CORE} (expected ${want})"
-            exit 1
-          fi
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/check_results.py --group native --needs "$NEEDS_JSON"
 
-  # The same build on Linux, configured with the NovaWorld service and its
-  # HTTP layer ON (the deploy target's flag set: the service target, the
-  # server app and their tests, which the Windows jobs leave out; the Crow
-  # sources join the server target and change no other object), so this job
-  # also covers the net leg .github/workflows/net-linux.yml runs for the
-  # NovaWorld images workflow. The two share the linux-root compiler cache.
-  # The service's database tests make a database per case on the PostgreSQL
-  # service container below (OPENNOVA_TEST_PG), and the HTTP layer's tests keep
-  # their keys on the Valkey one (OPENNOVA_TEST_REDIS); without them they skip,
-  # which the suite fails.
   test-linux:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.native == 'true'
     permissions:
       contents: read
       actions: write   # the compiler cache's branch save replaces its older entries
@@ -455,7 +425,7 @@ jobs:
           leg: linux-core
           mode: restore
 
-      - name: Build and test
+      - name: Build
         shell: bash
         # billing_stripe_e2e's Stripe test-mode key (infra/github, secrets.tf). A
         # fork's pull request gets none, and the vault's REPLACE_ME counts as none:
@@ -463,28 +433,14 @@ jobs:
         env:
           ONNET_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
         run: >-
-          scripts/build.sh --no-godot
+          scripts/build.sh --no-godot --no-test
           --cmake-arg -DOPENNOVA_NOVAWORLD_SERVICE=ON --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
           --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           --cmake-arg -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
-
-      # The project tool the Linux GUT run's built-project boot test drives
-      # (godot/tests/game/built_project_boot_test.gd, ADR 0046 d8), whatever the
-      # native tests did; godot-tests-linux lays it where the test looks.
-      - name: Upload opennova-project
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: opennova-project-linux
-          if-no-files-found: warn
-          path: build/apps/project/opennova-project
-
-      - name: Save the ctest cost data
-        if: always()
-        uses: ./.github/actions/ctest-costs
-        with:
-          leg: linux-core
-          mode: save
+          --cmake-arg -DOPENNOVA_VERSION=${{ needs.changes.outputs.one_version }}
+          --cmake-arg -DOPENNOVA_STAGING=${{ needs.changes.outputs.one_staging }}
+          --cmake-arg -DOPENNOVA_COMMIT=${{ needs.changes.outputs.one_commit }}
+          --cmake-arg -DOPENNOVA_BUILD_TIME=${{ needs.changes.outputs.one_time }}
 
       - name: sccache stats
         if: always()
@@ -496,6 +452,19 @@ jobs:
           flavour: linux-root
           mode: save
 
+      - name: Test the full Linux suite
+        env:
+          ONNET_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+        run: scripts/build.sh --no-godot
+
+      - name: Save the ctest cost data
+        if: always()
+        uses: ./.github/actions/ctest-costs
+        with:
+          leg: linux-core
+          mode: save
+
+
       - name: Upload Linux native core test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -504,8 +473,8 @@ jobs:
           if-no-files-found: warn
           path: build/Testing/
 
-  # Match the Windows flavours: PRs exercise the editor/debug extension;
-  # pushes (master) and manual runs also compile the release
+  # Match the Windows flavours: PRs and staging exercise the editor/debug extension;
+  # other branch runs (including master) also compile the release
   # extension. Both Linux flavours build as CMake Release (no debug info,
   # stripped): the template_debug .so only feeds godot-tests-linux, and
   # RelWithDebInfo made it a 674 MiB artifact and a compiler cache several
@@ -513,14 +482,14 @@ jobs:
   build-gdextension-linux:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+c8a+m7i+m7a/image=ubuntu24-full-x64/volume=100gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.godot == 'true'
     permissions:
       contents: read
       actions: write   # the compiler cache's branch save replaces its older entries
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ github.event_name == 'pull_request' && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
+        target: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
@@ -531,8 +500,11 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           lfs: false
+
+      - name: Initialize the Godot bindings
+        shell: bash
+        run: git submodule update --init third_party/godot-cpp
 
       # RunsOn's ubuntu24-full image leaves Ninja out (ubuntu-latest has it).
       - name: Install Ninja
@@ -548,6 +520,10 @@ jobs:
       - name: Build Linux GDExtension (${{ matrix.target }})
         env:
           GODOTCPP_TARGET: ${{ matrix.target }}
+          ONE_VERSION: ${{ needs.changes.outputs.one_version }}
+          ONE_STAGING: ${{ needs.changes.outputs.one_staging }}
+          ONE_COMMIT: ${{ needs.changes.outputs.one_commit }}
+          ONE_TIME: ${{ needs.changes.outputs.one_time }}
         run: |
           case "$GODOTCPP_TARGET" in
             template_debug) build_dir=build-godot-debug ;;
@@ -555,12 +531,26 @@ jobs:
             *) echo "unknown GODOTCPP_TARGET: $GODOTCPP_TARGET" >&2; exit 2 ;;
           esac
           cmake -S godot/src -B "$build_dir" -G Ninja \
-            -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE=Release
+            -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE=Release \
+            -DOPENNOVA_VERSION="$ONE_VERSION" -DOPENNOVA_STAGING="$ONE_STAGING" \
+            -DOPENNOVA_COMMIT="$ONE_COMMIT" -DOPENNOVA_BUILD_TIME="$ONE_TIME" \
+            -DOPENNOVA_GODOT_TEST_TOOLS="$([[ "$GODOTCPP_TARGET" == template_debug ]] && echo ON || echo OFF)"
           # Both variants, as on Windows (ADR 0046 d2): a source run such as GUT
           # loads the editor-enabled library through the plain .gdextension row.
-          cmake --build "$build_dir" --target opennova opennova_editor_gdext --parallel "$(nproc)"
+          targets=(opennova opennova_editor_gdext)
+          if [[ "$GODOTCPP_TARGET" == template_debug ]]; then targets+=(opennova_project); fi
+          cmake --build "$build_dir" --target "${targets[@]}" --parallel "$(nproc)"
           test -f "godot/bin/libopennova.linux.$GODOTCPP_TARGET.x86_64.so"
           test -f "godot/bin/libopennova_editor.linux.$GODOTCPP_TARGET.x86_64.so"
+
+      - name: Upload the Godot test project tool
+        if: matrix.target == 'template_debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova-project-linux
+          if-no-files-found: error
+          retention-days: 1
+          path: build-godot-debug/project/opennova-project
 
       - name: sccache stats
         if: always()
@@ -583,9 +573,8 @@ jobs:
 
   godot-tests-linux:
     runs-on: ubuntu-latest
-    # Skipped with the extension build on docs-only PRs; test-linux for its
-    # opennova-project build, run whatever the native tests did.
-    needs: [build-gdextension-linux, test-linux]
+    # The extension build also supplies the project CLI; native tests run independently.
+    needs: [build-gdextension-linux]
     if: ${{ !cancelled() && needs.build-gdextension-linux.result == 'success' }}
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -593,7 +582,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: false
-          submodules: recursive
+
+      - name: Initialize GUT
+        shell: bash
+        run: git submodule update --init third_party/gut
 
       - name: Pull Git LFS assets (fixtures/ only)
         run: |
@@ -625,19 +617,16 @@ jobs:
           name: gdext_linux_template_debug
           path: godot/bin
 
-      # Where built_project_boot_test.gd looks for the project tool (an artifact
-      # keeps no mode bits). A test-linux build that failed uploaded none, and the
-      # test then stays pending.
+      # Where built_project_boot_test.gd looks for the project tool. Artifacts
+      # keep no mode bits, so restore the executable bit after downloading.
       - name: Download opennova-project (Linux)
         id: project_tool
-        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: opennova-project-linux
           path: build/apps/project
 
       - name: Make opennova-project executable
-        if: steps.project_tool.outcome == 'success'
         run: chmod +x build/apps/project/opennova-project
 
       - name: Prime Godot import cache
@@ -683,7 +672,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: false
-          submodules: recursive
+
+      - name: Initialize GUT
+        shell: bash
+        run: git submodule update --init third_party/gut
 
       - name: Pull Git LFS assets (fixtures/ only)
         run: |
@@ -877,13 +869,12 @@ jobs:
           python -B scripts/mcp/editor_terrain_e2e.py --install "${{ steps.mint.outputs.install }}"
           --mission "$E2E_MISSION" --godot "${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
 
-  # Type-check + build the NovaWorld web portal (web/), after its unit tests
-  # (vitest, `npm test`). The built dist is an artifact only; production images
-  # bake it via web/Dockerfile (Track B).
+  # Test, type-check and build the portal once. Images and stack smoke consume
+  # this validated dist through a named Docker build context.
   web:
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -917,10 +908,10 @@ jobs:
   #   template_debug   -> what the Godot EDITOR loads (godot-tests, and the export
   #                       step's script scan) and what a --export-debug exe loads.
   #   template_release -> what a --export-release exe loads (the release zip).
-  # A pull request builds only template_debug and packages in debug export mode
+  # A pull request or staging run builds only template_debug and packages in debug export mode
   # (~4.7 min per flavour on a warm cache, mostly MSVC preprocessing on sccache
   # hits — halving the legs halves the wall-clock in front of godot-tests and the
-  # PR build links). Pushes (master) and manual runs also build
+  # PR build links). Other branch runs (including master) also build
   # template_release, in parallel, so the release flavour and release-mode
   # packaging stay continuously verified. sccache caches godot-cpp's objects across runs, so
   # after one warm-up only changed engine/ sources recompile. Windows must
@@ -928,7 +919,7 @@ jobs:
   build-gdextension-windows:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.godot == 'true'
     permissions:
       contents: read
       actions: write   # the compiler cache's branch save replaces its older entries
@@ -939,7 +930,7 @@ jobs:
         # config mapping lives in the build step, NOT in matrix.include: an
         # include entry whose target is absent from this list would be added as
         # an extra combination and resurrect the release leg on PRs.
-        target: ${{ github.event_name == 'pull_request' && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
+        target: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
@@ -950,8 +941,11 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
           lfs: false   # the build consumes no LFS game assets
+
+      - name: Initialize the Godot bindings
+        shell: bash
+        run: git submodule update --init third_party/godot-cpp
 
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -968,6 +962,10 @@ jobs:
         shell: pwsh
         env:
           GODOTCPP_TARGET: ${{ matrix.target }}
+          ONE_VERSION: ${{ needs.changes.outputs.one_version }}
+          ONE_STAGING: ${{ needs.changes.outputs.one_staging }}
+          ONE_COMMIT: ${{ needs.changes.outputs.one_commit }}
+          ONE_TIME: ${{ needs.changes.outputs.one_time }}
         run: |
           $ErrorActionPreference = "Stop"
           # First-run toolchain sanity: CMake must be >= 3.25 for the /Z7 flag, and
@@ -1000,16 +998,30 @@ jobs:
             "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" `
             "-DCMAKE_BUILD_TYPE=$buildType" `
             "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
-            "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
+            "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded" `
+            "-DOPENNOVA_VERSION=$env:ONE_VERSION" "-DOPENNOVA_STAGING=$env:ONE_STAGING" `
+            "-DOPENNOVA_COMMIT=$env:ONE_COMMIT" "-DOPENNOVA_BUILD_TIME=$env:ONE_TIME" `
+            "-DOPENNOVA_GODOT_TEST_TOOLS=$($env:GODOTCPP_TARGET -eq 'template_debug')"
           if ($LASTEXITCODE -ne 0) { throw "configure $env:GODOTCPP_TARGET failed" }
           # Both variants of the flavour from the one configure (ADR 0046 d2): the
           # runtime-only libopennova.* and the editor-enabled libopennova_editor.*.
-          cmake --build $buildDir --target opennova opennova_editor_gdext
+          $targets = @("opennova", "opennova_editor_gdext")
+          if ($env:GODOTCPP_TARGET -eq "template_debug") { $targets += "opennova_project" }
+          cmake --build $buildDir --target $targets
           if ($LASTEXITCODE -ne 0) { throw "build $env:GODOTCPP_TARGET failed" }
           $suffix = if ($env:GODOTCPP_TARGET -eq "template_debug") { "d" } else { "" }
           foreach ($dll in @("godot/bin/opennova$suffix.dll", "godot/bin/oneditor$suffix.dll")) {
             if (-not (Test-Path $dll)) { throw "missing GDExtension DLL: $dll" }
           }
+
+      - name: Upload the Godot test project tool
+        if: matrix.target == 'template_debug'
+        uses: actions/upload-artifact@v4
+        with:
+          name: opennova-project-windows
+          if-no-files-found: error
+          retention-days: 1
+          path: build-godot-debug/project/opennova-project.exe
 
       - name: sccache stats
         if: always()
@@ -1058,9 +1070,8 @@ jobs:
       matrix:
         shard: [shells, world]
     runs-on: windows-latest
-    # test-core for its opennova-project build: the shards run when the extension
-    # built, whatever the native tests did (their failure is test-core's to report).
-    needs: [build-gdextension-windows, test-core]
+    # The extension build also supplies the project CLI; native tests run independently.
+    needs: [build-gdextension-windows]
     if: ${{ !cancelled() && needs.build-gdextension-windows.result == 'success' }}
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -1068,7 +1079,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
-          submodules: recursive
+
+      - name: Initialize GUT
+        shell: bash
+        run: git submodule update --init third_party/gut
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
@@ -1106,11 +1120,9 @@ jobs:
           name: gdext_windows_template_debug
           path: godot/bin
 
-      # Where built_project_boot_test.gd looks for the project tool. A test-core
-      # build that failed uploaded none, and the test then stays pending.
+      # The extension build supplies the required project tool for shell tests.
       - name: Download opennova-project (Windows)
         if: matrix.shard == 'shells'
-        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: opennova-project-windows
@@ -1149,50 +1161,27 @@ jobs:
           if-no-files-found: warn
           path: build/Testing/
 
-  # The required check "godot-tests (windows-latest)" (branch protection names
-  # it): green when both Windows shards and the windowed scripts' software-GPU
-  # run (godot-tests-windowed) passed, or were skipped because there was
-  # nothing for them to run (a docs-only change). It runs when a leg or an
-  # extension build fails too, so a failure reports red, never skipped.
+  # Keep the branch-protection name while requiring both extension builds,
+  # Windows/Linux/windowed Godot tests and packaging when Godot is selected.
   godot-tests:
     name: godot-tests (windows-latest)
     if: ${{ !cancelled() }}
-    needs: [changes, godot-tests-core, godot-tests-windowed]
+    needs: [changes, build-gdextension-windows, build-gdextension-linux, godot-tests-core, godot-tests-linux, godot-tests-windowed, package-godot-windows]
     runs-on: ubuntu-latest
     steps:
-      - name: The Windows Godot shards and the windowed scripts
-        shell: bash
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          sparse-checkout: scripts/ci
+      - name: Verify every selected component passed
         env:
-          CHANGES: ${{ needs.changes.result }}
-          CORE: ${{ needs.godot-tests-core.result }}
-          WINDOWED: ${{ needs.godot-tests-windowed.result }}
-          CODE: ${{ needs.changes.outputs.code }}
-        run: |
-          echo "godot-tests-core: ${CORE}"
-          echo "godot-tests-windowed: ${WINDOWED}"
-          if [[ "$CHANGES" != success ]]; then
-            echo "::error::a gate job did not pass (changes: ${CHANGES})"
-            exit 1
-          fi
-          want=skipped
-          if [[ "$CODE" == true ]]; then want=success; fi
-          if [[ "$CORE" != "$want" ]]; then
-            echo "::error::godot-tests-core: ${CORE} (expected ${want})"
-            exit 1
-          fi
-          if [[ "$WINDOWED" != "$want" ]]; then
-            echo "::error::godot-tests-windowed: ${WINDOWED} (expected ${want})"
-            exit 1
-          fi
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/check_results.py --group godot --needs "$NEEDS_JSON"
 
-  # The runtime's and the editor's plain builds (ADR 0072): the runtime zip
-  # (opennova.exe and the updater pair) and the editor zip (oneditor.exe and the
-  # onplay.exe it plays a project with, one flat folder), neither with a wizard or
-  # a command file. The update service packs both; the game zips are rendered from
-  # its published runtime on the deployment's downloads host.
   package-godot-windows:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
-    needs: [build-gdextension-windows]
+    needs: [changes, build-gdextension-windows, package-tools]
+    if: ${{ !cancelled() && needs.changes.outputs.godot == 'true' && needs.build-gdextension-windows.result == 'success' && needs.package-tools.result == 'success' }}
     permissions:
       contents: read
     outputs:
@@ -1209,7 +1198,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: false   # the minimal package reads no game content
-          submodules: recursive
 
       - name: Cache Godot binary
         uses: actions/cache@v4
@@ -1230,44 +1218,42 @@ jobs:
             ~/AppData/Roaming/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable/windows_*_x86_64*
           key: godot-export-templates-windows-${{ env.GODOT_VERSION }}
 
-      # Every flavour this run built (template_debug only on a PR).
-      - name: Download GDExtension
+      - name: Download debug GDExtensions (without symbols)
         uses: actions/download-artifact@v4
         with:
-          pattern: gdext_windows_*
-          merge-multiple: true
+          name: gdext_windows_template_debug
           path: godot/bin
 
-      # Build the updater executables and the update tool (the smoke packages) with the root cache.
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Download release GDExtensions
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/staging'
+        uses: actions/download-artifact@v4
         with:
-          arch: x64
+          name: gdext_windows_template_release
+          path: godot/bin
 
-      - name: Restore the compiler cache
-        uses: ./.github/actions/compiler-cache
+      - name: Download package tools
+        uses: actions/download-artifact@v4
         with:
-          flavour: win-root
-          mode: restore
+          name: ${{ needs.package-tools.outputs.artifact_name }}
+          path: build/package-tools
 
-      # PRs export in debug mode (debug export template + the template_debug DLL,
-      # the development flavour); pushes and manual runs export in
-      # release mode like the release workflow.
+      # PRs and staging export in debug mode (the staging endpoints); other
+      # branch runs export in release mode like the release workflow.
       - name: Package Godot Windows apps
         shell: pwsh
-        env:
-          CMAKE_GENERATOR: Ninja
-          CMAKE_CXX_COMPILER_LAUNCHER: sccache
-          CMAKE_C_COMPILER_LAUNCHER: sccache
-        # -BuildCommit: the commit the main menu names (D-MNU-76), a pull request's head as the downloads
-        # page names it.
+        # The run's ONE stamp (the `changes` job's), which the GDExtensions carry too: the
+        # zips' version, the exes' VERSIONINFO and the updater tools' stamp. -BuildCommit is a
+        # pull request's head, as the downloads page names it.
         run: >-
-          scripts/package_godot_windows.ps1 -SkipBuild
-          -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+          scripts/package_godot_windows.ps1 -SkipBuild -PackageToolsDir build/package-tools
+          -ExportMode ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/staging') && 'debug' || 'release' }}
+          -Version ${{ needs.changes.outputs.one_version }}
           -BuildCommit ${{ github.event.pull_request.head.sha || github.sha }}
+          -BuildTime ${{ needs.changes.outputs.one_time }}
+          ${{ needs.changes.outputs.one_staging == 'ON' && '-Staging' || '' }}
 
       - name: Save Godot export templates
-        if: github.ref == 'refs/heads/master' && steps.templates-cache.outputs.cache-hit != 'true'
+        if: (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/staging') && steps.templates-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -1296,56 +1282,186 @@ jobs:
 
   # The same installable Blender package is built for PRs and tagged releases.
   package-blender-windows:
-    needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    needs: [changes, package-tools]
+    if: ${{ !cancelled() && needs.changes.outputs.blender == 'true' && needs.package-tools.result == 'success' }}
     uses: ./.github/workflows/package-blender-windows.yml
+    with:
+      package_tools_artifact: ${{ needs.package-tools.outputs.artifact_name }}
 
   # The tools, the native apps (opennova-3di, opennova-extract, opennova-lan-probe,
   # opennova-parity, opennova-serve, opennova-update-tool and opennova-wire)
   # in one zip, opennova-tools-windows.zip, built for PRs and tagged releases alike.
   # The NovaWorld server is Linux-only (its container image).
   package-apps-windows:
-    needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    needs: [changes, package-tools]
+    if: ${{ !cancelled() && needs.changes.outputs.tools == 'true' && needs.package-tools.result == 'success' }}
     permissions:
       contents: read
       actions: write   # its compiler cache's branch save replaces older entries
     uses: ./.github/workflows/package-apps-windows.yml
-
-  # Every same-repo pull request's run publishes its four builds to staging once
-  # the package jobs (and their boot smokes) pass, not the whole suite, so a flaky
-  # test never holds a build back (ADR 0072): Publish (publish.yml) has staging's
-  # service pack the runtime and the editor and publish all four, its downloads
-  # host then offers them (the game zips rendered from the runtime), and an
-  # installed editor or game updates in place. The newest run wins: one publish at
-  # a time, never cancelled once begun. A fork's run has no secrets and is
-  # skipped. Not a required check: until staging runs this branch's service, an
-  # app's build is refused there. The called job asks for no more than this
-  # grant (a called job never gets more than its caller's).
-  publish-staging:
-    needs: [package-godot-windows, package-blender-windows, package-apps-windows]
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    concurrency:
-      group: publish-staging
-      cancel-in-progress: false
-    permissions:
-      contents: write   # Publish's prod run attaches the release's zips; staging's writes nothing
-      actions: read     # this run's artifacts
-    uses: ./.github/workflows/publish.yml
     with:
-      deployment: staging
-      run_id: ${{ github.run_id }}
+      one_version: ${{ needs.changes.outputs.one_version }}
+      one_staging: ${{ needs.changes.outputs.one_staging }}
+      one_commit: ${{ needs.changes.outputs.one_commit }}
+      one_time: ${{ needs.changes.outputs.one_time }}
+      package_tools_artifact: ${{ needs.package-tools.outputs.artifact_name }}
+
+  # One static-CRT build supplies whichever Windows packages this run needs.
+  package-tools:
+    needs: changes
+    if: needs.changes.outputs.tools == 'true' || needs.changes.outputs.blender == 'true' || needs.changes.outputs.godot == 'true'
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/build-package-tools-windows.yml
+    with:
+      one_version: ${{ needs.changes.outputs.one_version }}
+      one_staging: ${{ needs.changes.outputs.one_staging }}
+      one_commit: ${{ needs.changes.outputs.one_commit }}
+      one_time: ${{ needs.changes.outputs.one_time }}
+      tools: ${{ needs.changes.outputs.tools == 'true' }}
+      blender: ${{ needs.changes.outputs.blender == 'true' }}
+      godot: ${{ needs.changes.outputs.godot == 'true' }}
+
+  service-build:
+    needs: changes
+    if: needs.changes.outputs.service == 'true' || needs.changes.outputs.stack == 'true'
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/net-linux.yml
+    with:
+      one_version: ${{ needs.changes.outputs.one_version }}
+      one_staging: ${{ needs.changes.outputs.one_staging }}
+      one_commit: ${{ needs.changes.outputs.one_commit }}
+      one_time: ${{ needs.changes.outputs.one_time }}
+      run-tests: ${{ needs.changes.outputs.service == 'true' }}
     secrets: inherit
 
-  # Surface the Windows packages on the PR as a single comment that updates
-  # in place after every package succeeds. A failed package leaves the previous
-  # comment untouched.
+  service-images:
+    needs: [changes, service-build, web]
+    if: ${{ !cancelled() && needs.changes.outputs.service == 'true' && needs.service-build.result == 'success' && needs.web.result == 'success' }}
+    permissions:
+      contents: read
+      actions: write
+      packages: write
+    uses: ./.github/workflows/novaworld-images.yml
+    with:
+      service-artifact: ${{ needs.service-build.outputs.artifact-name }}
+      web-artifact: web_dist
+    secrets: inherit
+
+  serve-images:
+    needs: [changes, service-build]
+    if: ${{ !cancelled() && needs.changes.outputs.service == 'true' && needs.service-build.result == 'success' }}
+    permissions:
+      contents: read
+      actions: write
+      packages: write
+    uses: ./.github/workflows/serve-image.yml
+    with:
+      service-artifact: ${{ needs.service-build.outputs.artifact-name }}
+    secrets: inherit
+
+  local-stack:
+    needs: [changes, service-build, web]
+    if: ${{ !cancelled() && needs.changes.outputs.stack == 'true' && needs.service-build.result == 'success' && needs.web.result == 'success' }}
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/local-stack.yml
+    with:
+      service-artifact: ${{ needs.service-build.outputs.artifact-name }}
+      web-artifact: web_dist
+
+  infra:
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    uses: ./.github/workflows/infra.yml
+
+  # A newer staging push supersedes the older staging builds still running: they are
+  # cancelled. A deploy runs in its own dispatched Staging rollout run, which no cancel of a
+  # CI run reaches.
+  staging-cancel-older:
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Cancel superseded staging builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/ci/staging_dispatch.py cancel-older --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --sha "$GITHUB_SHA"
+
+  # This ordinary success gate is independently verified by rollout admission.
+  # Unrelated native/Godot tests do not delay or invalidate a component release.
+  staging-components-ready:
+    name: staging-components-ready
+    needs: [service-images, serve-images, package-godot-windows, package-blender-windows, package-apps-windows]
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      manifest_id: ${{ steps.manifest.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Freeze validated images and packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/ci/staging_manifest.py create --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --sha "$GITHUB_SHA"
+          --out release.json
+      - name: Upload the immutable release manifest
+        id: manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-release-${{ github.run_attempt }}
+          path: release.json
+          retention-days: 3
+          if-no-files-found: error
+
+  # The release as a Staging rollout run of its own (staging-rollout.yml), which GitHub
+  # dispatches only as the default branch declares it.
+  staging-rollout:
+    needs: [staging-components-ready]
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Dispatch the independent staging rollout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_ID: ${{ needs.staging-components-ready.outputs.manifest_id }}
+        run: >-
+          python3 scripts/ci/staging_dispatch.py dispatch --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --sha "$GITHUB_SHA"
+          --manifest-id "$MANIFEST_ID"
+
+  # One comment lists this run's produced packages, including component-scoped
+  # PRs. Use the actual artifact expiry instead of assuming repository retention.
   pr-build-links:
     runs-on: ubuntu-latest
     needs: [package-godot-windows, package-blender-windows, package-apps-windows]
-    if: github.event_name == 'pull_request'
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.package-godot-windows.result == 'success' || needs.package-blender-windows.result == 'success' || needs.package-apps-windows.result == 'success') }}
     permissions:
       contents: read
+      actions: read
       pull-requests: write
     steps:
       - name: Post or update the build-links comment
@@ -1364,20 +1480,31 @@ jobs:
             const issue_number = context.payload.pull_request.number;
             const sha = (context.payload.pull_request.head.sha || '').slice(0, 7);
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner, repo, run_id: context.runId, per_page: 100,
+            });
+            const rows = [
+              ['Runtime', process.env.RUNTIME_URL],
+              ['Editor', process.env.EDITOR_URL],
+              ['Blender add-on', process.env.BLENDER_URL],
+              ['Tools', process.env.TOOLS_URL],
+            ].filter(([, url]) => url).map(([label, url]) => {
+              const id = Number(url.match(/artifacts\/(\d+)/)?.[1]);
+              const artifact = artifacts.find(a => a.id === id);
+              const expires = artifact?.expires_at?.slice(0, 10) || 'See artifact page';
+              return `| ${label} | [Download](${url}) | ${expires} |`;
+            });
             const body = [
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})). The runtime and the editor use the debug export template and template_debug GDExtension, and talk to OpenNova's staging service alone: its NovaWorld menu's OpenNova choice dials nw.staging.opennova.net. The Blender add-on and the tools are Release builds. This run publishes all four to staging once they pass (the publish-staging job; a fork's PR is skipped): staging's downloads host, downloads.staging.opennova.net, then offers the installable zips (each game's zip is this runtime with its game's wizards, updating from update.staging.opennova.net), and an installed editor or game updates in place. The runtime and editor zips below are the plain builds the service packs, with no wizard. Tagged releases publish every build to prod, with the runtime and the editor in release mode.`,
+              `Windows builds for commit \`${sha}\`, run [#${context.runNumber}](${runUrl}). Only packages affected by this PR are built. Runtime and editor builds use staging endpoints; Blender and tools are Release builds. These artifacts are not published to a deployment.`,
               '',
-              '| Build | Download |',
-              '| --- | --- |',
-              `| Runtime: opennova.exe, update.exe and revupdat.exe, the plain build the service packs as ONRUNTIME (the game zips on staging's downloads host are this runtime with each game's wizards) | [opennova-runtime-windows.zip](${process.env.RUNTIME_URL}) |`,
-              `| Editor: oneditor.exe and onplay.exe, the runtime it plays a project with, in one folder with the updater pair (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
-              `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
-              `| Tools: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-update-tool and opennova-wire | [opennova-tools-windows.zip](${process.env.TOOLS_URL}) |`,
+              '| Build | Download | Expires (UTC) |',
+              '| --- | --- | --- |',
+              ...rows,
               '',
-              'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',
+              'Downloading requires a GitHub login. This comment updates when this run produces packages.',
             ].join('\n');
             try {
               const comments = await github.paginate(github.rest.issues.listComments, {

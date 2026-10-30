@@ -23,7 +23,7 @@ describe('the projects view', () => {
     expect(projectKindLine(NIGHTOPS_PROJECT, PROJECT_GAMES)).toBe('A mod of Joint Operations');
     expect(projectKindLine(project('X', { kind: 'expansion', base: 'ACIDGAMBIT' }), PROJECT_GAMES)).toBe('A mod of OP: Acid Gambit');
     expect(projectKindLine(project('Z', { kind: 'expansion', base: null, game: 'jo' }), [])).toBe('A mod of Joint Operations');
-    expect(projectKindLine(RANGERS_PROJECT, [])).toBe('A game for Delta Force Xtreme 2');
+    expect(projectKindLine(RANGERS_PROJECT, [])).toBe('Runs as Delta Force Xtreme 2');
     expect(projectKindLine(project('Y', { game: '' }), [])).toBe('A game');
     expect(visibilityLine('public')).toBe('Public: anyone may get it.');
     expect(visibilityLine('private')).toBe("Private: only you and NovaWorld's admins may get it.");
@@ -48,7 +48,7 @@ describe('the projects view', () => {
 
   it("names a refused field's rule, and a project's page", () => {
     expect(fieldRule('key')).toBe('A key is 1 to 11 of A-Z, 0-9 and _, without "QQ".');
-    expect(fieldRule('version')).toBe('A version is one to four numbers between dots, such as 1.0 or 0.2.1.');
+    expect(fieldRule('version')).toBe('A game version is one to four numbers between dots, such as 0.2.0 or 1.0.');
     expect(fieldRule('expansion_code')).toBe('A short name is 1 to 8 lowercase letters and digits.');
     expect(fieldRule('kind')).toBeNull();
     expect(myProjectLink('NIGHTOPS')).toBe('/me/projects/NIGHTOPS');

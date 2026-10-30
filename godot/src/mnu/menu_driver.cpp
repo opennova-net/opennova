@@ -10,6 +10,7 @@
 #include "player/player_profiles.h"
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_document.h"
+#include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/deploy_rows.h"
@@ -27,8 +28,6 @@
 #include <godot_cpp/classes/input_event_joypad_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
-#include <godot_cpp/classes/os.hpp>
-#include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable.hpp>
 
@@ -394,19 +393,9 @@ bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<Resource
 	root_ = p_root;
 	style_ = p_style;
 	override_text_ = p_override_text;
-	// The mounted game picks the version text the STARTUP label shows, and an exported build names
-	// itself before it (D-MNU-76): its config/version, the commit packaging stamped
-	// (application/config/build_commit, scripts/package_godot_windows.ps1) and staging for a debug
-	// export. A source run names none.
-	runtime_.set_game_code(p_root.is_valid() ? to_std(p_root->game_code()) : std::string());
-	OS *os = OS::get_singleton();
-	ProjectSettings *settings = ProjectSettings::get_singleton();
-	runtime_.set_runtime_build(os != nullptr && settings != nullptr && os->has_feature("template")
-					? opennova::menu::runtime_build_label(
-							  to_std(String(settings->get_setting("application/config/version", ""))),
-							  to_std(String(settings->get_setting("application/config/build_commit", ""))),
-							  os->is_debug_build())
-					: std::string());
+	// The STARTUP label's line (D-MNU-76): the launch's game and its installed release, ONE's
+	// build and the protocol it speaks (LaunchFlags::version_line).
+	runtime_.set_version_line(to_std(LaunchFlags::version_line()));
 	return runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
 			to_std(p_menu_file), to_std(p_target_screen));
 }

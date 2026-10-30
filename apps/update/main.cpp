@@ -3,6 +3,8 @@
 #include "client.h"
 #include "platform.h"
 
+#include <games/games.h>
+
 #include <ctime>
 #include <fstream>
 
@@ -331,6 +333,7 @@ int show_dialog(const updater::Options &options, const VersionMark &start, const
 #endif
 
 int app_main(const std::vector<std::string> &args, const std::filesystem::path &executable) {
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	updater::Options options;
 	std::string error;
 	if (!updater::parse_options(args, executable, options, error)) {

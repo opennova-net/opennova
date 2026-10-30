@@ -81,6 +81,14 @@ func _row(fields: Dictionary) -> NovaWorldServerRow:
 	return row
 
 
+func _begin_configured_host(panel: NovaWorldPanel, mission := "alpha.bms") -> void:
+	var config := HostSessionConfig.new()
+	config.mission = mission
+	config.missions = [mission]
+	config.mission_launch_options = [0]
+	panel.begin_configured_host(config)
+
+
 func _make_panel_in_viewport(viewport_size: Vector2i) -> NovaWorldPanel:
 	var viewport := SubViewport.new()
 	viewport.size = viewport_size
@@ -346,7 +354,7 @@ func _panel_with_requests_in_flight() -> NovaWorldPanel:
 		for connection: Dictionary in held[signal_name]:
 			client.disconnect(signal_name, connection["callable"])
 	panel.press_join()
-	panel.press_host()
+	_begin_configured_host(panel)
 	for signal_name: String in held:
 		for connection: Dictionary in held[signal_name]:
 			client.connect(signal_name, connection["callable"])
@@ -563,7 +571,7 @@ func test_host_request_waits_for_the_service() -> void:
 	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
 	panel.select_mission(1)
 	watch_signals(panel)
-	panel.press_host()
+	_begin_configured_host(panel)
 	assert_signal_not_emitted(panel, "host_requested",
 		"no mission starts before the service's ServerHostResult")
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE,
@@ -581,7 +589,7 @@ func test_host_press_saves_the_profile_first() -> void:
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
 	var panel := _make_panel(PackedStringArray(["alpha.bms"]))
 	panel.select_mission(0)
-	panel.press_host()
+	_begin_configured_host(panel)
 	assert_true(FileAccess.file_exists(run_dir.path_join("player.sav")),
 		"the launch saved player.sav in the working directory")
 	assert_true(FileAccess.file_exists(run_dir.path_join(GameCfgStore.FILE_NAME)),
@@ -598,7 +606,7 @@ func test_hosting_started_hands_the_request_up() -> void:
 	for connection in client.get_signal_connection_list("host_failed"):
 		client.disconnect("host_failed", connection["callable"])
 	watch_signals(panel)
-	panel.press_host()
+	_begin_configured_host(panel, "bravo.bms")
 	client.emit_signal("hosting_started")
 	assert_signal_emitted(panel, "host_requested")
 	var config: HostSessionConfig = get_signal_parameters(panel, "host_requested")[0]
@@ -624,16 +632,8 @@ func _host_dialog_menu() -> String:
 	return MenuDriverFixture.screen_xml("MULTI_PLAYER_HOST", body)
 
 
-# The NovaWorld host is retail's host dialog with the page's map picker for its controls,
-# untouched: the dialog opens on the process's cfg block (its cap clamped to the screen's
-# 64 in the block) and START reads back every control as the mounted menu's screen shows
-# it, so the request is the block's: its name is game.cfg's, which the block keeps (the
-# page has no name of its own); with no pb\pbcl.dll the PunkBuster spin stores 0; a word
-# no spin row holds comes back as row 0's (replay 2 as NEXT's 0); the country comes back as
-# the matched row's own name ("us" as "US"). The launch's save then writes the block's
-# words, not the file's (engine inmatch/host_settings.h read_untouched_host_dialog carries
-# the witness).
-func test_host_request_is_the_untouched_host_dialog() -> void:
+# NovaWorld starts with the same rendered configuration as the LAN host screen.
+func test_host_request_uses_the_rendered_host_dialog() -> void:
 	var run_dir := OS.get_cache_dir().path_join("opennova_nw_panel_cfg_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
 	_root_dirs.append(run_dir)
@@ -649,11 +649,14 @@ func test_host_request_is_the_untouched_host_dialog() -> void:
 	var panel := _make_panel(PackedStringArray(["alpha.bms"]),
 			{NovaWorldPanel.HOST_DIALOG_MENU: _host_dialog_menu()})
 	panel.select_mission(0)
+	var driver := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, _host_dialog_menu()), "mp.mnu", "MULTI_PLAYER_HOST")
+	GameCfgStore.block().populate_host_screen(driver)
+	GameCfgStore.block().read_host_screen(driver)
 	var client := panel.client_for_test()
 	for connection in client.get_signal_connection_list("host_failed"):
 		client.disconnect("host_failed", connection["callable"])
 	watch_signals(panel)
-	panel.press_host()
+	_begin_configured_host(panel)
 	client.emit_signal("hosting_started")
 	assert_signal_emitted(panel, "host_requested")
 	var config: HostSessionConfig = get_signal_parameters(panel, "host_requested")[0]
@@ -715,12 +718,12 @@ func test_post_mission_error_shows_the_text() -> void:
 		"an empty disconnect text falls back to the unknown-error text")
 
 
-func test_host_pressed_reports_when_no_missions() -> void:
+func test_host_pressed_opens_shared_setup_before_starting() -> void:
 	var panel := _make_panel(PackedStringArray())
 	watch_signals(panel)
 	panel.press_host()
-	assert_signal_not_emitted(panel, "host_requested", "no missions -> no host request emitted")
-	assert_string_contains(panel.status_text(), "No missions", "the empty case is reported, not hung")
+	assert_signal_emitted(panel, "host_setup_requested")
+	assert_signal_not_emitted(panel, "host_requested", "the shared host dialog supplies the rotation before starting")
 
 
 # The browser table model is the engine's (net/novaworld/server_browser.h,
@@ -793,13 +796,14 @@ func test_sort_rows_text_numeric_and_ping() -> void:
 func test_details_lines_and_roster_seams() -> void:
 	var row := _row({"name": "Bravo", "msg": "Friday night co-op", "mission_name": "G11",
 			"game_type": "COOP", "players": 4, "max_players": 24, "mod": "escalation",
-			"ver1": "1.7.5.7", "dedicated": "Y", "password": "Y",
+			"ver1": "3", "dedicated": "Y", "password": "Y",
 			"player_names": PackedStringArray(["ljim", "walker"])})
 	var text := "\n".join(NovaWorldServerBrowser.details_lines(row))
 	assert_string_contains(text, "Message: Friday night co-op")
 	assert_string_contains(text, "Players: 4/24")
 	assert_string_contains(text, "Password protected")
 	assert_false(text.contains("Region:"), "empty fields are skipped")
+	assert_false(text.contains("Version"), "VER1, the protocol's NovaWorld value, gets no line")
 	assert_eq(row.player_names, PackedStringArray(["ljim", "walker"]),
 			"the roster rides the record")
 

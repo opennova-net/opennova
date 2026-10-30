@@ -24,7 +24,8 @@ function(opennova_add_editor_executable target)
         message(FATAL_ERROR "opennova_add_editor_executable(${target}): unknown arguments ${E_UNPARSED_ARGUMENTS}")
     endif()
     add_executable(${target} ${E_SOURCES})
-    target_link_libraries(${target} PRIVATE ${E_LIBS})
+    # The tests' registration point (tests/CMakeLists.txt opennova_test_games).
+    target_link_libraries(${target} PRIVATE ${E_LIBS} opennova_test_games)
     target_include_directories(${target} PRIVATE ${OPENNOVA_TESTS_SOURCE_DIR})
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${OPENNOVA_TESTS_BINARY_DIR})
 endfunction()
@@ -496,6 +497,12 @@ opennova_add_editor_test(place_model)
 # definition's AI slot alone, the poses following the records and the catalog live, the wire; a project
 # of minted missions over two tables, every person posed and held to the world init's.
 opennova_add_editor_test(mission_poses)
+
+# The mission view's collect (editor/preview/mission_collect): the game's main-view collect over the view's camera on
+# the mission's records as the game's load spawns them (the view draws and animates what the game's main view would):
+# a crate ahead of the eye admitted and one behind it dropped, by row; a record moved under a gesture collected where
+# it stands; no records, nothing; a closed collect drops nothing.
+opennova_add_editor_test(mission_collect)
 
 # An entity off the ground is a Problem with a fix (DI-28, editor/preview/mission_ground_rules and the
 # mission type's project check, mission_ground_check): each entity class grounded by the game's own

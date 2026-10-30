@@ -2,7 +2,7 @@
 """Publish's apps: a build's four apps released on a deployment's update service (ADR 0072).
 
 .github/workflows/publish.yml runs `publish` once per Publish over the run's artifacts in --from
-(a pull request's CI run, or a tag's release.yml run): each app's plain build, the artifact's zip
+(a staging-branch CI run, or a tag's release.yml run): each app's plain build, the artifact's zip
 as it is, uploaded through the deployment's admin API as a release of its product (looked up by
 its key), each waited until the service has made it a draft (an updatable app's packed with the
 OPENNOVA.WIZ it writes and validated; a download-only app's stored as uploaded), and only then

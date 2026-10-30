@@ -11,9 +11,10 @@
 #include "program/catalog_repository.h"
 
 #include <base/io/strutil.h>
+#include <base/title/title.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -63,12 +64,18 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 	id_or_null(out, "parent_id", d.parent_id);
 	out["expansion_code"] = d.expansion_code;
 	out["title"] = d.title;
+	// The protocol its title speaks: a game's own, an expansion's its parent game's; null for an
+	// app.
+	std::optional<ProductRow> parent;
+	if (d.kind == ProductKind::Expansion && d.parent_id)
+		parent = find_product(db, *d.parent_id);
+	const std::string &title = parent ? parent->title : d.title;
+	protocol_or_null(out, "protocol", title.empty() ? nullptr : title_protocol(title));
 	out["lobby"] = d.lobby;
 	out["lobby_locked"] = d.lobby_locked && !d.lobby.empty(); // a game with none still takes one
 	out["updater_login"] = d.updater_login;
 	out["command_file"] = d.command_file;
 	out["wizard_login"] = d.wizard_login;
-	out["retail"] = d.retail;
 	text_or_null(out, "visibility", d.visibility);
 	out["head"] = d.head;
 	id_or_null(out, "owner_id", d.owner_id);
@@ -95,6 +102,8 @@ crow::json::wvalue product_json(db::Database &db, const ProductRow &d) {
 		out["published_release"]["id"] = published->id;
 		out["published_release"]["name"] = published->name;
 		out["published_release"]["sha256"] = published->sha256;
+		out["published_release"]["version"] = published->version;
+		text_or_null(out["published_release"], "one_version", published->one_version);
 	} else {
 		out["published_release"] = nullptr;
 	}
@@ -117,8 +126,20 @@ bool valid_display_name(std::string_view name) {
 			!has_control_byte(name) && !has_c1_control(name);
 }
 
+std::vector<const char *> game_titles() {
+	std::vector<const char *> out;
+	std::string why;
+	for (size_t i = 0; i < title_count(); ++i)
+		if (resolve_title_protocol(title_at(i)->code, why) != nullptr)
+			out.push_back(title_at(i)->code);
+	return out;
+}
+
 bool valid_title(std::string_view title) {
-	return std::find(kTitles.begin(), kTitles.end(), title) != kTitles.end();
+	for (const char *code : game_titles())
+		if (title == code)
+			return true;
+	return false;
 }
 
 bool valid_expansion_code(std::string_view code) {
@@ -176,15 +197,21 @@ void ProductRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/products — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
-// (what a game may speak), "games" (the lobbies, each {slug, display_name}), "products"}:
-// every product (games, expansions, then apps), each {id, key, display_name, kind, parent_id,
-// expansion_code, title, lobby ("" for none), updater_login, command_file, wizard_login, retail,
-// visibility ("public", "private", or null for an app, which has no project), head (its project's
-// newest revision, 0 before the first push), owner_id and owner (the account whose own project it
-// is, its id and username; null for the service's own), download (its file's name on the
-// downloads host, "" for none), description, current_tree ({id, version, ready_at} or null),
-// published_release ({id, name, sha256} or null), servers_live, servers_outdated, trees (its
-// trees newest first, pruned ones left out, each as tree_json)}.
+// (what a game may run as, game_titles), "protocols" (the protocol each speaks, by its
+// code: {"jo": {code, name, version}, ...}, what a new game's lobbies are chosen by), "games"
+// (the lobbies, each {slug, display_name,
+// protocol}: protocol the {code, name, version} its clients speak, http_json.h
+// protocol_or_null), "products"}: every product (games, expansions, then apps), each {id, key,
+// display_name, kind, parent_id, expansion_code, title (the title a game runs as, "" for an
+// expansion and an app), protocol (its title's, an expansion's its parent game's; null for an
+// app), lobby ("" for none), updater_login, command_file, wizard_login, visibility ("public",
+// "private", or null for an app, which has no project), head (its project's newest
+// revision, 0 before the first push), owner_id and owner (the account whose own project it is,
+// its id and username; null for the service's own), download (its file's name on the downloads
+// host, "" for none), description, current_tree ({id, version, ready_at} or null),
+// published_release ({id, name, sha256, version, one_version (the ONE that built it, null for
+// none)} or null), servers_live, servers_outdated, trees (its trees newest first, pruned ones
+// left out, each as tree_json)}.
 crow::response ProductRoutes::list(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -195,8 +222,10 @@ crow::response ProductRoutes::list(const crow::request &req) {
 	else
 		out["store"] = nullptr;
 	std::vector<crow::json::wvalue> titles;
-	for (const char *title : kTitles)
+	for (const char *title : game_titles()) {
 		titles.push_back(crow::json::wvalue(title));
+		protocol_or_null(out["protocols"], title, title_protocol(title));
+	}
 	out["titles"] = std::move(titles);
 	try {
 		auto db_conn = pool_.acquire();
@@ -207,7 +236,7 @@ crow::response ProductRoutes::list(const crow::request &req) {
 			crow::json::wvalue g;
 			g["slug"] = game.slug;
 			g["display_name"] = game.display_name;
-			g["title"] = game.title;
+			protocol_or_null(g, "protocol", protocol_by_code(game.protocol));
 			games.push_back(std::move(g));
 		}
 		out["games"] = std::move(games);
@@ -222,7 +251,7 @@ crow::response ProductRoutes::list(const crow::request &req) {
 }
 
 // POST /api/admin/products — {display_name, kind, parent_id?, expansion_code?, title?, lobby?,
-// updater_login?, command_file?, retail?, key?, visibility?}: a new product, a game (title
+// updater_login?, command_file?, key?, visibility?}: a new product, a game (title
 // one of the titles, lobby a games slug) or expansion (parent_id a game, expansion_code
 // [a-z0-9]{1,8}, unique across every product without case); the updater's product both or
 // neither (a login of 1..32 printable characters, a command file of 1..15 ending .CMD, each
@@ -258,8 +287,6 @@ crow::response ProductRoutes::create(const crow::request &req) {
 	note("updater_login");
 	const auto command_file = body->text("command_file");
 	note("command_file");
-	const auto retail = body->flag("retail");
-	note("retail");
 	const auto key = body->text("key");
 	note("key");
 	const auto visibility = body->text("visibility");
@@ -288,7 +315,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		if (!title)
 			return field_error(400, "missing_field", "title", "a game speaks a title");
 		if (!valid_title(*title))
-			return field_error(400, "invalid_field", "title", "title is jo or dfx2");
+			return field_error(400, "invalid_field", "title", "title is one a game may run as");
 		if (!lobby)
 			return field_error(
 					400, "missing_field", "lobby", "a game lists in a lobby (a games slug)");
@@ -321,7 +348,6 @@ crow::response ProductRoutes::create(const crow::request &req) {
 		product.updater_login = *updater_login;
 		product.command_file = *command_file;
 	}
-	product.retail = retail.value_or(false);
 	if (!key)
 		return field_error(400, "missing_field", "key", "every product has a key");
 	if (!visibility)
@@ -373,8 +399,8 @@ crow::response ProductRoutes::create(const crow::request &req) {
 }
 
 // PATCH /api/admin/products/<id> — any of {display_name, lobby (a game's), updater_login,
-// command_file, retail, key, visibility (a game's or an expansion's: an app has no project)}, the
-// shapes as the create's; any product's, an account's own too (never made retail). A new key
+// command_file, key, visibility (a game's or an expansion's: an app has no project)}, the
+// shapes as the create's; any product's, an account's own too. A new key
 // renames the product in its row alone: the store names a project's objects by the product's id
 // (content/<id>/, project_repository.h), so none moves and a push begun under the old key lands
 // where the renamed project's readers look; a project file naming the old key no longer reaches
@@ -401,8 +427,6 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 	note("updater_login");
 	patch.command_file = body->text("command_file");
 	note("command_file");
-	patch.retail = body->flag("retail");
-	note("retail");
 	patch.key = body->text("key");
 	note("key");
 	patch.visibility = body->text("visibility");
@@ -442,9 +466,6 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 					"command_file is 1 to 15 characters ending in .CMD");
 		if (patch.visibility && row->kind == ProductKind::App)
 			return field_error(400, "invalid_field", "visibility", "an app has no project");
-		if (patch.retail.value_or(false) && row->owner_id)
-			return field_error(
-					400, "invalid_field", "retail", "an account's own project is no retail game");
 		const std::string key = patch.key.value_or(row->key);
 		const bool rename = key != row->key;
 		switch (update_product(*db_conn, row->id, patch, chooser_of(caller))) {
@@ -484,7 +505,7 @@ crow::response ProductRoutes::patch(const crow::request &req, uint64_t id) {
 // trees' rows and its project's history (they cascade), and, with a store, its objects removed by
 // the data program's product.purge (product_jobs.h delete_product_purged), enqueued in the
 // delete's transaction: its trees' prefixes and its project's files (content/<id>/), so the route
-// answers at once however many files a retail game's project holds. 404 not_found; 409 in_use
+// answers at once however many files a game's project holds. 404 not_found; 409 in_use
 // while a live server runs it, has_expansion while an expansion builds on it. 204.
 crow::response ProductRoutes::remove(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);

@@ -45,8 +45,7 @@
 
 #include "program_process.h"
 
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include <net/napi/envelope.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/gate_probe.h>
@@ -65,11 +64,11 @@ using namespace program_process;
 
 namespace {
 
-const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 // The JO demo's tag answers in JO's lobby with the reply that names the gate's POST pair and the
 // web endpoint (its live reply is unrecorded; JO's own answers in the live shape, D-NET-721).
-const opennova::TitleIdentity &kJoDemo =
-		*opennova::title_identity(opennova::gameprofile::GAME_JO_DEMO);
+const opennova::Protocol &kJoDemo =
+		*opennova::title_protocol("jodemo");
 
 constexpr const char *kWebHost = "web.example.test";
 

@@ -169,15 +169,17 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// not witnessed has none to join with, so the joiner does not dial.
 		bool join_identity = true;
 		if (needs_join_connection && p_options->get_resource_root().is_valid()) {
-			std::string title_error;
-			const opennova::TitleIdentity *title =
-					p_options->get_resource_root()->title_identity(title_error);
-			if (title == nullptr) {
+			std::string protocol_error;
+			const opennova::Protocol *protocol =
+					p_options->get_resource_root()->protocol(protocol_error);
+			if (protocol == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to join with: %s",
-						opennova::to_gd(title_error)));
+						opennova::to_gd(protocol_error)));
 				join_identity = false;
 			}
-			r_sim->set_title(title);
+			r_sim->set_protocol(protocol);
+			// The title it runs as, the mounted game's: its caps and its rules.
+			r_sim->set_game_title(&ResourceRoot::session_title(p_options->get_resource_root()));
 		}
 		if (needs_join_connection && p_options->get_join_character_profile().is_valid()) {
 			r_sim->set_join_character_profile(p_options->get_join_character_profile());
@@ -248,16 +250,18 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		// The title the mounted game speaks, the host's identity: a host without a
 		// witnessed one would answer no joiner, so it does not host.
 		if (p_options->get_resource_root().is_valid()) {
-			std::string title_error;
-			const opennova::TitleIdentity *title =
-					p_options->get_resource_root()->title_identity(title_error);
-			if (title == nullptr) {
+			std::string protocol_error;
+			const opennova::Protocol *protocol =
+					p_options->get_resource_root()->protocol(protocol_error);
+			if (protocol == nullptr) {
 				UtilityFunctions::push_warning(vformat("MissionRoot: no identity to host with: %s",
-						opennova::to_gd(title_error)));
+						opennova::to_gd(protocol_error)));
 				r_sim.unref();
 				return ERR_UNCONFIGURED;
 			}
-			r_sim->set_title(title);
+			r_sim->set_protocol(protocol);
+			// The title it runs as, the mounted game's: its caps and its rules.
+			r_sim->set_game_title(&ResourceRoot::session_title(p_options->get_resource_root()));
 		}
 		// The loose score.ini overlays the session's score table inside the
 		// boot, ahead of the bring-up (inmatch/host_boot.h).
@@ -608,6 +612,7 @@ int MissionRoot::join_wire_present_pending() const {
 }
 
 void MissionRoot::materialize_pending_wire_rows() {
+	presented_rows_.reset();
 	EntityPresenter *presenter = entities();
 	if (sim_.is_null() || presenter == nullptr) {
 		return;
@@ -666,6 +671,18 @@ EntityPresenter *MissionRoot::get_entity_presenter() const {
 	return entities();
 }
 
+void MissionRoot::present_slot_captures(const std::vector<uint64_t> &p_captured) {
+	EntityPresenter *presenter = entities();
+	if (p_captured.empty() || presenter == nullptr || !presented_rows_ || sim_.is_null()) {
+		return;
+	}
+	const SimulationPresentSnapshot &rows = *presented_rows_;
+	presenter->present_slot_captures(
+			{rows.rows.data(), static_cast<int64_t>(rows.rows.size())},
+			sim_->get_present_stride(), static_cast<int64_t>(rows.layout_revision),
+			rows.door_phases.data(), static_cast<int64_t>(rows.door_phases.size()), p_captured);
+}
+
 void MissionRoot::rebind_placed_entities(const Ref<MissionObjectPlacer> &p_placer) {
 	if (index_.is_null() || p_placer.is_null()) {
 		return;
@@ -705,6 +722,7 @@ bool MissionRoot::is_session_paused() const {
 }
 
 void MissionRoot::present_entity_rows(bool p_stats_on) {
+	presented_rows_.reset();
 	EntityPresenter *presenter = entities();
 	if (sim_.is_null() || presenter == nullptr) {
 		return;
@@ -716,6 +734,7 @@ void MissionRoot::present_entity_rows(bool p_stats_on) {
 	// Both walks consume the same immutable row buffer. Fetching it once also
 	// makes their topology revision refer to exactly the same layout.
 	const auto snapshot = sim_->build_present_snapshot();
+	presented_rows_ = snapshot;
 	const opennova::world::PresentRowsView rows{
 			snapshot->rows.data(), static_cast<int64_t>(snapshot->rows.size())};
 	const auto &door_phases = snapshot->door_phases;
@@ -1069,6 +1088,7 @@ Ref<Simulation> MissionRoot::release_simulation() {
 	Ref<Simulation> sim = sim_;
 	if (sim.is_valid()) sim->set_runtime_profiling_enabled(false);
 	sim_.unref();
+	presented_rows_.reset();
 	has_trace_stats_sampling_ = false;
 	return sim;
 }
@@ -1098,6 +1118,7 @@ void MissionRoot::_exit_tree() {
 	item_db_.unref();
 	resource_root_.unref();
 	sim_.unref();
+	presented_rows_.reset();
 	mission_.unref();
 }
 

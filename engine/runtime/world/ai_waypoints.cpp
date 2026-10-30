@@ -240,8 +240,9 @@ int32_t vehicle_avoid_brake(World &world, Entity &veh, int32_t heading,
     const int32_t sx = veh.position.x.q16;
     const int32_t sy = veh.position.y.q16;
     const int32_t sz = veh.position.z.q16;
-    const size_t cap = world.registry.pool_capacity(1);
-    for (size_t si = 0; si < cap; ++si) {
+    // [orig: Entity_UpdateVehiclePhysics @ 0x48AF00, pool-1 used read @ 0x48BD97]
+    const size_t used = world.registry.pool_used(1);
+    for (size_t si = 0; si < used; ++si) {
         const Entity *o =
                 world.registry.get(EntityHandle::make(1, static_cast<int>(si)));
         if (o == nullptr || o->handle == veh.handle) continue; // [orig: @0x48be19]
@@ -384,11 +385,12 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
     const int32_t py = veh.position.y.q16;
     const int32_t pz = veh.position.z.q16;
     const int32_t self_r = veh.bound_radius.q16; // [orig: entity+0]
-    // dfx2.exe keeps a hull alive for a body within 4 u, not 12, and starts
-    // the write-off past 1860 counts, not 3410; the 3720 kill is the same.
+    // The reach a body keeps a hull alive within and the count the write-off
+    // starts past are the title's: 12 u and 3410 counts, dfx2.exe's 4 u and 1860;
+    // the 3720 kill is the same (TitleRules, DFX2-32).
     // [orig: @0x46532c (0x40000), @0x4653ac (0x744) in the twin @0x4652a0 (dfx2.exe)]
-    const bool dfx2 = world.rules.title == gameprofile::GAME_DFX2;
-    const int32_t near_reach = dfx2 ? 0x40000 : 0xC0000; // [orig: @0x46531c]
+    const TitleRules &title = world.rules.title();
+    const int32_t near_reach = title.ai_vehicle_near_reach; // [orig: @0x46531c]
     if (n > 32) {
         // Anyone alive nearby keeps the hull from being written off: a live,
         // unhidden pool-0 body inside the (both radii + 12 u) box and sphere
@@ -411,7 +413,7 @@ void AiSystem::check_vehicle_stuck(World &world, Entity &veh) {
             if (di <= r) m.stuck_ticks = 0;            // [orig: @0x46538c]
         });
     }
-    if (m.stuck_ticks <= (dfx2 ? 1860 : 3410)) return; // [orig: @0x4653a6]
+    if (m.stuck_ticks <= title.ai_vehicle_write_off_count) return; // [orig: @0x4653a6]
 	// [orig: AI_CheckVehicleStuckState @0x4653AC..0x46542D]
 	int32_t pose[6] = { veh.spawn_position.x.q16, veh.spawn_position.y.q16,
 		veh.spawn_position.z.q16, 0, 0, 0 };
@@ -715,21 +717,23 @@ bool AiSystem::vehicle_waits_for_boarders(World &world, const Entity &veh) {
 	if (!vehicle_can_enter(world, nullptr, veh))
 		return false;
 
-	bool waiting = false;
-    world.registry.for_each([&](const Entity &e) {
-        if (waiting) return;
-        if (e.handle.pool() != 0) return;      // [orig: the pool-0 walk]
-        if (!e.has_item_def) return;           // [orig: entity[7] != 0]
-        // [orig: (entity[36] & 3) == 0 — hidden (bit0) or dead (bit1) are skipped]
-        if ((e.flags & 3u) != 0) return;
-        if (e.mounted) return;                 // [orig: !entity[90]]
-        const AiEntity *b = for_handle(e.handle);
-        if (b == nullptr) return;              // [orig: the aiSlot null test]
-        if (b->slot.f[37] != 125) return;      // not running the board order
-        if (b->slot.f[38] != static_cast<int32_t>(veh.net_id)) return; // not THIS hull
-        waiting = true;
-    });
-    return waiting;
+    // Pool 0 alone, up to its used count; the first waiting body ends the walk.
+    // [orig: Entity_UpdateVehiclePhysics @ 0x48AF00, pool-0 used read @ 0x48BF93;
+    //  the hit falls through to the hold @0x48BFE4]
+    const size_t used = world.registry.pool_used(0);
+    for (size_t slot = 0; slot < used; ++slot) {
+        const Entity *e = world.registry.get(EntityHandle::make(0, static_cast<int>(slot)));
+        if (e == nullptr || !e->has_item_def) continue;       // [orig: entity[7] != 0 @0x48BFB6]
+        // Hidden (bit 0) or dead (bit 1) [orig: (entity[36] & 3) == 0 @0x48BFBB]
+        if ((e->flags & 3u) != 0) continue;
+        const AiEntity *b = for_handle(e->handle);
+        if (b == nullptr) continue;                            // [orig: the aiSlot test @0x48BFC4]
+        if (b->slot.f[37] != 125) continue;                    // [orig: @0x48BFC8]
+        if (b->slot.f[38] != static_cast<int32_t>(veh.net_id)) continue; // [orig: @0x48BFD7]
+        if (e->mounted) continue;                              // [orig: !entity[90] @0x48BFDC]
+        return true;
+    }
+    return false;
 }
 
 void AiSystem::chel_ai_drive(World &world, Entity &veh, const Entity *controller,

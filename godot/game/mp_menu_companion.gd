@@ -27,6 +27,9 @@ signal lan_join_requested(target: JoinTarget)
 signal lan_join_refused(text: String)
 # START_GAME on the host screen, with the co-op-minimal host request (see _read_host_config).
 signal lan_host_start_requested(config: HostSessionConfig)
+signal novaworld_host_start_requested(config: HostSessionConfig)
+signal novaworld_host_cancelled
+var host_channel := HostSessionConfig.CHANNEL_LAN
 
 var _lan_session: LanSession = null  # injected by MainGame
 var _servers: Array = []       # last LAN browse result; rows for LAN_GAME_LIST
@@ -88,6 +91,9 @@ func _wire(_file: String, _screen: String) -> void:
 # _connectlog.txt (engine: net/npwire/lan_discovery.h drain_records carries the
 # witness, D-NET-956).
 func _on_screen_changed(screen_name: String) -> void:
+	if host_channel == HostSessionConfig.CHANNEL_NOVAWORLD and screen_name.nocasecmp_to("MULTI_PLAYER_HOST") != 0:
+		host_channel = HostSessionConfig.CHANNEL_LAN
+		novaworld_host_cancelled.emit()
 	if _driver == null or _driver.get_menu_file() != _wired_file:
 		return
 	if screen_name.nocasecmp_to("LAN_MULTI_PLAYER") != 0 or not _driver.has_widget("LAN_GAME_LIST"):
@@ -284,6 +290,10 @@ func _on_host_start() -> void:
 	if not _driver.can_start_host():
 		return
 	var config := _read_host_config()
+	config.channel = host_channel
+	if host_channel == HostSessionConfig.CHANNEL_NOVAWORLD:
+		novaworld_host_start_requested.emit(config)
+		return
 	GameCfgStore.save()
 	lan_host_start_requested.emit(config)
 

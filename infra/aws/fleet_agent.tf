@@ -33,9 +33,13 @@
 #
 # The service rolls hostd with each release before the fleet program (`app
 # deploy`: a revision of this task definition with the release's image pinned
-# by digest; the service ignores its task definition here), at most half the
-# machines at once (minimumHealthyPercent 50, the most a DAEMON service takes;
-# its maximum percent is ECS's fixed 100). It has no desired count, no Auto
+# by digest; the service ignores its task definition here), every machine at
+# once (minimumHealthyPercent 0). A DAEMON service's maximum percent is ECS's
+# fixed 100, so a machine's new task starts only after its old one stops; any
+# floor above 0 rounds up to the one task of a lone machine and ECS can neither
+# stop nor start it ("unable to stop or start tasks during a deployment because
+# of the service deployment configuration"). Only the agent restarts: the
+# servers it started keep running. It has no desired count, no Auto
 # Scaling target, and no place in local.programs, their precondition or their
 # alarms: it runs a task on each machine that registers, and only the
 # released worker launches machines.
@@ -247,9 +251,9 @@ resource "aws_ecs_service" "hostd" {
   task_definition     = aws_ecs_task_definition.hostd[0].arn
   launch_type         = "EC2"
   scheduling_strategy = "DAEMON"
-  # A bad revision reaches half the machines at most before the deploy
-  # points hostd back.
-  deployment_minimum_healthy_percent = 50
+  # 0, not 50: a lone machine's one task is above any other floor, which
+  # deadlocks every roll (the header above).
+  deployment_minimum_healthy_percent = 0
   enable_execute_command             = true
   enable_ecs_managed_tags            = true
   propagate_tags                     = "SERVICE"

@@ -41,9 +41,24 @@ float ClipTimeline::normalized_at(int32_t ticks) const {
 	if (!loop_ && first_end_tick_ >= 0 && ticks >= first_end_tick_) return kPark;
 	if (ticks == furthest_tick_) return furthest_time_;
 	const int32_t block = ticks / kCheckpointTicks;
-	float time = checkpoints_[static_cast<size_t>(block)];
-	for (int32_t i = block * kCheckpointTicks; i < ticks; ++i) step(time);
-	return time;
+	SeekBlock *cached = nullptr;
+	for (auto &entry : seek_blocks_) {
+		if (entry.index == block) { cached = &entry; break; }
+	}
+	if (cached == nullptr) {
+		cached = &seek_blocks_[next_seek_block_];
+		next_seek_block_ = (next_seek_block_ + 1) % seek_blocks_.size();
+		cached->index = block;
+		cached->filled = 0;
+		cached->times[0] = checkpoints_[static_cast<size_t>(block)];
+	}
+	const int32_t offset = ticks % kCheckpointTicks;
+	while (cached->filled < offset) {
+		float time = cached->times[static_cast<size_t>(cached->filled)];
+		step(time); // [orig: AnimChannel_AdvancePlayback @ 0x40B140, add/wrap/park @ 0x40B156..0x40B1B1]
+		cached->times[static_cast<size_t>(++cached->filled)] = time;
+	}
+	return cached->times[static_cast<size_t>(offset)];
 }
 
 // [orig: AnimChannel_AdvancePlayback @0x40B193..0x40B1B1 -- the loop wrap

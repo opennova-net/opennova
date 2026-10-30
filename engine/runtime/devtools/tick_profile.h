@@ -19,7 +19,6 @@
 #include <runtime/devtools/frame_stats_slots.h>
 
 #include <array>
-#include <chrono>
 #include <cstdint>
 
 namespace opennova::devtools {
@@ -73,16 +72,23 @@ public:
 			  slot_(slot),
 			  start_(profile_ != nullptr ? io::perf_now_us() : 0) {}
 	~ProfileScope() {
-		if (profile_ != nullptr)
-			profile_->add(slot_, static_cast<int64_t>(io::perf_now_us() - start_));
+		if (profile_ == nullptr) return;
+		const int64_t span = static_cast<int64_t>(io::perf_now_us() - start_);
+		profile_->add(slot_, span);
+		if (also_ != Slot::COUNT) profile_->add(also_, span);
 	}
 	ProfileScope(const ProfileScope &) = delete;
 	ProfileScope &operator=(const ProfileScope &) = delete;
+
+	// Land the whole span on `slot` as well when it closes, with no further
+	// read: a caller that learns mid-span that the span is one child row's.
+	void also(Slot slot) { also_ = slot; }
 
 private:
 	TickProfile *profile_;
 	Slot slot_;
 	uint64_t start_;
+	Slot also_ = Slot::COUNT;
 };
 
 // Sequential phases of one function: mark(slot) adds the time since the
@@ -111,36 +117,6 @@ public:
 private:
 	TickProfile *profile_;
 	uint64_t last_;
-};
-
-// Many short laps onto one slot, each a few microseconds, which a ProfileScope's microsecond
-// clock would truncate: the laps sum in nanoseconds and land on the slot once, when the sum
-// goes out of scope. A null or inactive profile runs each lap with no clock read.
-class ProfileNsSum {
-public:
-	ProfileNsSum(TickProfile *profile, Slot slot)
-			: profile_(profile != nullptr && profile->active() ? profile : nullptr), slot_(slot) {}
-	~ProfileNsSum() {
-		if (profile_ != nullptr) profile_->add(slot_, ns_ / 1000);
-	}
-	ProfileNsSum(const ProfileNsSum &) = delete;
-	ProfileNsSum &operator=(const ProfileNsSum &) = delete;
-	template <class F>
-	void lap(F &&fn) {
-		if (profile_ == nullptr) {
-			fn();
-			return;
-		}
-		const auto start = std::chrono::steady_clock::now();
-		fn();
-		ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(
-				std::chrono::steady_clock::now() - start).count();
-	}
-
-private:
-	TickProfile *profile_;
-	Slot slot_;
-	int64_t ns_ = 0;
 };
 
 }  // namespace opennova::devtools

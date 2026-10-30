@@ -12,6 +12,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <base/project/project_manifest.h>
@@ -35,14 +36,30 @@ struct NovaWorldApiError {
 // A size in a line's words: "3.9 GiB", "120.5 MiB", "12 KiB", "512 bytes".
 std::string novaworld_size_words(int64_t bytes);
 
-// A lobby offered by the service. The encoded file is supplied only with a project's
-// resolved lobby; the editor copies those bytes, never derives a gate tag itself.
+// A protocol as the service names it (a lobby's, a product's): its code ("jo"), its label ("JO")
+// and its version, PV2 ("16").
+struct RemoteProtocol {
+	std::string code;
+	std::string name;
+	std::string version;
+};
+// "JO protocol 16"; "" for a protocol the service names none of.
+std::string protocol_words(const RemoteProtocol &protocol);
+
+// A lobby offered by the service, one protocol's: games whose title speaks it share it. The encoded
+// file is supplied only with a project's resolved lobby; the editor copies those bytes, never
+// derives a gate tag itself.
 struct RemoteLobby {
 	std::string slug;
 	std::string display_name;
-	std::string title;
+	RemoteProtocol protocol;
 	std::string gate_tag_file; // base64 encoded gt.ssc
 };
+// The code of the protocol the title `title_code` speaks (net/protocol/protocol.h title_protocol:
+// OP: Acid Gambit's is JO's, "jo"); "" for an unknown title.
+std::string title_protocol_code(std::string_view title_code);
+// Whether `lobby` takes a game of the title `title_code`: it is the title's protocol's lobby.
+bool lobby_speaks(const RemoteLobby &lobby, std::string_view title_code);
 
 // A NovaWorld project as the service lists it.
 struct RemoteProject {
@@ -51,23 +68,33 @@ struct RemoteProject {
 	std::string key;
 	std::string title;
 	std::string kind; // "game" or "expansion"
-	std::string game; // the gameprofile code it runs as ("jo"), an expansion's its base game's
+	std::string game; // the title code it runs as ("jo"), an expansion's its base game's
 	std::string expansion_code; // an expansion's ("jox01"), "" for a game
 	std::string owner; // the account whose project it is, "" for the service's own (an admin's)
 	bool is_public = false;
-	bool retail = false;
 	std::string base; // its base game's project's key, "" for none
 	int64_t head = 0; // its newest revision, 0 before the first push
 	bool can_push = false; // the account may push it: its owner, or an admin
 	bool can_manage = false; // the account may rename it, make it public or private, or delete it
 	bool can_release = false; // the account may build and publish its releases: its owner, or an admin
-	// Its published release, the one players get: its id (0 for none) and version ("0.2.0").
+	// Its published release, the one players get: its id (0 for none), its game version ("0.2.0")
+	// and the ONE that built it ("0.0.22"; "" where the service names none).
 	int64_t release_id = 0;
 	std::string release_version;
+	std::string release_one_version;
+	// An expansion's version.txt as its release build writes it (base64; "" for a game, or an expansion
+	// with nothing published): the bytes a hosted server of it holds, whose CRC a joiner must match.
+	std::string version_file;
 };
 
+// Whether `project` is one of NovaLogic's games or expansions: the service's own and private, its
+// title one with a program of its own (Title::executable: Jointops.exe, dfx2.exe; OpenNova's games
+// run the runtime). Its files are a game install's, which NovaWorld keeps private, so a mod of it
+// is made on the install.
+bool novalogic_project(const RemoteProject &project);
+
 // A new project of the account's, as POST /api/products asks for one: its key and its name, a game
-// (`game` the gameprofile code it runs as) or an expansion (`base` its base game's project's key,
+// (`game` the title code it runs as) or an expansion (`base` its base game's project's key,
 // `expansion_code` its folder's name), public or private ("public", "private").
 struct NewRemoteProject {
 	std::string key;
@@ -82,7 +109,7 @@ struct NewRemoteProject {
 };
 
 // A game a new project of the account's may be a mod of (GET /api/me/projects' games): its
-// project's key, its name and the gameprofile code it runs as.
+// project's key, its name and the title code it runs as.
 struct RemoteGame {
 	std::string key;
 	std::string title;
@@ -95,7 +122,8 @@ struct RemoteGame {
 struct RemoteRelease {
 	int64_t id = 0;
 	std::string name;
-	std::string version;
+	std::string version; // its game version ("0.2.0")
+	std::string one_version; // the ONE that built it ("0.0.22"; "" where the service names none)
 	std::string status;
 	std::string review_note;
 	std::string error;
@@ -154,7 +182,7 @@ bool read_my_games(
 		const NovaWorldResponse &reply, std::vector<RemoteGame> &out, NovaWorldApiError &error);
 bool read_my_lobbies(
 		const NovaWorldResponse &reply, std::vector<RemoteLobby> &out, NovaWorldApiError &error);
-// The same reply's titles a new game of the account's may run as (gameprofile codes: "jo", "dfx2").
+// The same reply's titles a new game of the account's may run as (title codes: "jo", "dfx2").
 bool read_my_titles(
 		const NovaWorldResponse &reply, std::vector<std::string> &out, NovaWorldApiError &error);
 // Why `what` ("push", "release") would pass the account's storage (413 quota_exceeded {used, limit}:

@@ -12,8 +12,7 @@
 // the server writes its game.cfg and activesrvr.txt (ADR 0051 d2; the files
 // themselves are opennova_serve_game_cfg's).
 #include "server.h"
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
 
@@ -26,6 +25,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/server_admin_command.h>
+#include <runtime/replication/connection_fan.h>
 
 #include <cstdio>
 #include <filesystem>
@@ -34,8 +34,8 @@
 #include <string>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -97,12 +97,12 @@ int main() {
 		     << "Mission servetst.bms\r\n";
 	}
 
-	auto parse_options = [&](uint16_t port, serve::ServeOptions &out) {
+	auto parse_options = [&](uint16_t port, serve::ServeOptions &out, bool tuned = false) {
 		std::string error;
-		return serve::parse_serve_options(
-				{"--resource-dir", dir.string(), "/host", (dir / "test.host").string(), "--loose-root",
-						"--lan-port", std::to_string(port)},
-				out, error);
+		std::vector<std::string> args = {"--resource-dir", dir.string(), "/host",
+				(dir / "test.host").string(), "--loose-root", "--lan-port", std::to_string(port)};
+		if (tuned) args.insert(args.end(), {"--send-holdoff-ticks", "3", "--entity-send-budget", "1000"});
+		return serve::parse_serve_options(args, out, error);
 	};
 	{
 		serve::ServeOptions parsed;
@@ -132,16 +132,21 @@ int main() {
 		serve::Server served(dfx2);
 		std::string why;
 		CHECK(served.start(why));
-		CHECK(served.title() == title_identity(gameprofile::GAME_DFX2));
+		CHECK(served.protocol() == title_protocol("dfx2"));
 		CHECK(served.gate_tag() == "dfx2:0:cus:buffy");
-		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block's
-		// table is dfx2.exe's, so the session config and its World take its title, and the boot's
-		// score table seeds dfx2.exe's fanfare pair (no score.ini here).
+		// The session runs the title's rules (docs/titles/dfx2-vs-jo-re.md §7): the cfg block runs
+		// as dfx2.exe (its table dfx2.exe's), so the session config and its World take its title's
+		// rules, and the boot's score table seeds dfx2.exe's fanfare pair (no score.ini here).
 		const inmatch::NapiNPServerCtx &session = served.role().state.host_owner.ctx;
 		CHECK(served.game_cfg().table == gamecfg::ConfigTable::Dfx2);
-		CHECK(session.config.title == gameprofile::GAME_DFX2);
-		CHECK(session.world != nullptr && session.world->rules.title == gameprofile::GAME_DFX2);
+		CHECK(session.config.title == title_by_code("dfx2"));
+		CHECK(session.config.rules == &world::title_rules("dfx2"));
+		CHECK(session.world != nullptr &&
+				session.world->rules.title_rules == &world::title_rules("dfx2"));
 		CHECK(session.config.exp_fanfare == 0x0A04);
+		CHECK(session.config.effective_send_holdoff_ticks() == 12);
+		CHECK(session.config.entity_send_budget == 600);
+		CHECK(replication::entity_send_budget() == 600);
 		served.stop();
 		serve::ServeOptions bhd;
 		CHECK(parse_options(0, bhd) == 0);
@@ -161,7 +166,16 @@ int main() {
 	// --lan-port 0: the socket binds the port the OS picks, and bound_port()
 	// reports the port it holds from then on.
 	serve::ServeOptions options;
-	CHECK(parse_options(0, options) == 0 && options.port == 0);
+	CHECK(parse_options(0, options, true) == 0 && options.port == 0);
+	{
+		// The hosted launcher supplies these two choices in the working
+		// directory's game.cfg, beside the two CLI overrides above.
+		auto cfg = gamecfg::defaults();
+		cfg.mp_max_packet_size = 1100;
+		cfg.lock_framerate = 0;
+		std::string why;
+		CHECK(gamecfg::save_file((work / "game.cfg").string(), cfg, {}, why));
+	}
 	auto holder = std::make_unique<serve::Server>(options);
 	std::string error;
 	const bool started = holder->start(error);
@@ -174,7 +188,7 @@ int main() {
 	CHECK(started);
 	if (!started) return 1;
 	// No /game: JO's identity, and JO's gate tag (the mount carries no gt.ssc).
-	CHECK(server.title() == title_identity(gameprofile::GAME_JO));
+	CHECK(server.protocol() == title_protocol("jo"));
 	CHECK(server.gate_tag() == "jop:cus2");
 
 	// The host file reached the session: the name, the message, the cap (8; the
@@ -188,6 +202,11 @@ int main() {
 	CHECK(config.mission_file == "servetst.bms");
 	CHECK(config.mission_name == "Serve Test Map");
 	CHECK(config.game_type == game_type::kDeathmatch);
+	CHECK(config.effective_send_holdoff_ticks() == 3);
+	CHECK(config.entity_send_budget == 1000);
+	CHECK(replication::entity_send_budget() == 1000);
+	CHECK(config.max_packet_size == 1100);
+	CHECK(server.game_cfg().lock_framerate == 0);
 	CHECK(server.host_file_report().unknown_missions.size() == 1);
 	CHECK(server.rotation().list.count == 3);
 	CHECK(server.rotation().list.cursor == 0);
@@ -218,7 +237,7 @@ int main() {
 	// A joiner's body binds its items.def row at its spawn (D-NET-395).
 	CHECK(static_cast<bool>(server.role().state.host_owner.ctx.bind_spawned_body));
 	CHECK(server.bound_port() != 0);
-	// No game.cfg: remote_admin_port is 0, so no admin listener; the launch still truncates
+	// remote_admin_port is 0, so no admin listener; the launch still truncates
 	// admin_log.txt, as retail's static construction opens it [orig: Game_InitSubsystems
 	// @0x4A72C7..0x4A72D1; CAdminServer_Construct @0x402C84].
 	CHECK(server.admin_port() == 0);
@@ -262,7 +281,7 @@ int main() {
 	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
 	uint32_t tick = 1;
 	inmatch::ClientRuntime client("ServeJoiner", [&tick] { return uint64_t{tick} * 16u; });
-	client.set_title(&kJo);
+	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());
 	};
@@ -299,6 +318,23 @@ int main() {
 		++tick;
 	}
 	CHECK(client.is_deployed());
+	// The launch override must reach the real client's CS gate and the
+	// serializer, then survive both map changes on the kept connection.
+	auto check_network_tuning = [&] {
+		CHECK(client.send_holdoff_ticks() == 3);
+		CHECK(server.role().state.host_owner.ctx.config.effective_send_holdoff_ticks() == 3);
+		CHECK(server.role().state.host_owner.ctx.config.entity_send_budget == 1000);
+		CHECK(replication::entity_send_budget() == 1000);
+		CHECK(server.role().state.host_owner.ctx.config.max_packet_size == 1100);
+		CHECK(server.game_cfg().lock_framerate == 0);
+		for (const inmatch::NapiNPConnection &c : server.role().state.host_owner.ctx.np_protocol.connection_list) {
+			if (c.type == inmatch::NapiNPConnection::kTypeServerSide) {
+				CHECK(c.s2c_send_holdoff_dictated && c.s2c_send_holdoff_ticks == 3);
+				CHECK(c.timeouts.max_packet_bytes == 1100);
+			}
+		}
+	};
+	check_network_tuning();
 	// The host holds the joiner as its one remote (type-1) connection.
 	int remotes = 0;
 	world::EntityHandle body{};
@@ -356,6 +392,7 @@ int main() {
 	fs::remove(work / "game.cfg", removed);
 	CHECK(!fs::exists(work / "game.cfg"));
 	CHECK(play_round_end(2));
+	check_network_tuning();
 	CHECK(fs::exists(work / "game.cfg"));
 	CHECK(server.missions_played() == 2);
 	CHECK(server.rotation().list.cursor == 1);
@@ -389,6 +426,7 @@ int main() {
 	CHECK(server.role().state.host_owner.ctx.mission_metadata_transfer_id == 2);
 
 	CHECK(play_round_end(3));
+	check_network_tuning();
 	CHECK(server.rotation().list.cursor == 2);
 	CHECK(client.map_file() == "SERVETST.BMS");
 	std::printf("opennova_serve: joiner reloaded through %d missions on UDP %u\n",
@@ -420,6 +458,34 @@ int main() {
 	CHECK(client.has_disconnect_event() &&
 			client.last_disconnect_event().ddstr == "NP.C:SH:STOP");
 	server.stop();
+	// The hosted launcher writes play order, with no last-map workaround. Repeated
+	// entries survive and a non-repeating rotation starts at its first entry.
+	// Its network overrides coexist with that option; zero is an explicit
+	// per-tick period, not an omitted override selecting the session default.
+	{
+		std::ofstream f(dir / "ordered.host", std::ios::binary);
+		f << "Replay 0\r\nMission servetst.bms\r\nMission servetst.bms\r\nMission servets2.bms\r\n";
+		f.close();
+		serve::ServeOptions ordered_options;
+		CHECK(serve::parse_serve_options(
+				{"--resource-dir", dir.string(), "/host", (dir / "ordered.host").string(),
+						"--loose-root", "--lan-port", "0", "--rotation-first",
+						"--send-holdoff-ticks", "0", "--entity-send-budget", "1600"},
+				ordered_options, error) == 0);
+		serve::Server ordered(ordered_options);
+		CHECK(ordered.start(error));
+		CHECK(ordered.rotation().list.cursor == 0 && ordered.rotation().list.count == 3);
+		CHECK(ordered.rotation().list.map_file == "SERVETST.BMS");
+		CHECK(ordered.rotation().list.slots[0].catalog_index == ordered.rotation().list.slots[1].catalog_index);
+		CHECK(ordered.game_cfg().replay == 0);
+		const auto &ordered_config = ordered.role().state.host_owner.ctx.config;
+		CHECK(ordered_config.effective_send_holdoff_ticks() == 0);
+		CHECK(ordered_config.entity_send_budget == 1600);
+		CHECK(replication::entity_send_budget() == 1600);
+		CHECK(ordered_config.max_packet_size == 1100);
+		CHECK(ordered.game_cfg().lock_framerate == 0);
+		ordered.stop();
+	}
 	net::shutdown();
 	cwd.restore();
 	std::error_code ec;

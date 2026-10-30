@@ -10,8 +10,8 @@
 //  UI_ShowNetworkErrorByCode @0x5584A0]
 
 #include <net/napi/envelope.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
+#include <base/version/one_build.h>
 #include <net/napi/session.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/connect_or_host.h>
@@ -33,8 +33,8 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 
@@ -129,7 +129,7 @@ struct Rig {
 
 	explicit Rig(bool command_line_host = false)
 		: lobby(hooks(), environment(command_line_host)) {
-		lobby.set_title(&kJo, kJo.gate_tag);
+		lobby.set_protocol(&kJo, kJo.gate_tag);
 	}
 
 	static NwuLobbySession::Environment environment(bool command_line_host) {
@@ -1908,10 +1908,9 @@ void check_mission_start_id_report() {
 		inner.resize(inner_size);
 		std::string plain(inner.begin(), inner.end());
 		nwu_encrypt(reinterpret_cast<uint8_t *>(plain.data()), plain.size(), "1010101");
-		// GV is the session title's own version text (JO's "V1.7.5.7"), never a literal of ours.
-		// [orig: Game_ParseCommandLineAndInit - g_VersionText @0x4A7D90]
-		const std::string version = gameprofile::gameprofile_by_id(kJo.game_id)->version_text;
-		CHECK(version == "V1.7.5.7");
+		// GV is the engine build's version text, ONE's wire version ("V0.0.22.0") where retail's
+		// printed its own 1.7.5.7. [orig: Game_ParseCommandLineAndInit - g_VersionText @0x4A7D90]
+		const std::string version = one_build().wire_version().retail_text();
 		CHECK(plain == "METPROTOCOL 1\r\nBLOCK \"ID\"\r\n\tLABEL \"gate-label\"\r\n\tGCC \"us\"\r\n"
 				"\tGV \"" + version + "\"\r\n\tCOUNTRYNAME \"United States\"\r\n"
 				"\tLANG \"English\"\r\n\tTZB 300\r\nENDBLOCK\r\n");

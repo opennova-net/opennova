@@ -2,8 +2,7 @@
 // data. Exercise the shared kernel through boot, movement, late spawn, restore,
 // and the real joiner frame rather than a replacement root-motion provider.
 #include <base/io/strutil.h>
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/local_role.h>
@@ -25,8 +24,8 @@
 #include <stdexcept>
 #include <string>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 using namespace opennova;
@@ -220,7 +219,7 @@ void initialized_before_premission_and_retry(Assets &assets) {
         CHECK(entity->npc_respawns == 2);
         CHECK(body->inf.magazine == 19);
         CHECK(body->inf.clip_phase > 0 && body->inf.wpn_clip_phase > 0);
-        CHECK(entity->net_anim_phase > 0);
+        CHECK(w::wire_anim_ratio(body->inf, world.ai.root_motion) > 0);
     };
     verify();
     const auto initial = *world.ai.for_handle(handle);
@@ -315,7 +314,8 @@ void joiner_resolves_empty_registry(Assets &assets) {
 	h.boot(false, false);
 	QuietSocket socket;
 	inmatch::JoinerRole role;
-	role.set_title(&kJo);
+	role.set_rules(opennova::world::title_rules("jo"));
+	role.set_protocol(&kJo);
 	role.bind(*h.kernel);
 	role.set_socket(&socket, PeerAddr{});
 	role.create_runtime("AnimationTest", inmatch::JoinRole::Player, "", "");

@@ -28,9 +28,9 @@ func after_each() -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
 
 
-func test_product_defaults_to_opennova_using_jo_compatibility() -> void:
+func test_product_defaults_to_opennova_running_as_its_own_title() -> void:
 	assert_eq(LaunchFlags.product(), "acidgambit")
-	assert_eq(LaunchFlags.game(), "jo")
+	assert_eq(LaunchFlags.game(), "acidgambit")
 
 
 func test_explicit_retail_game_selects_its_compatibility_profile() -> void:
@@ -42,10 +42,10 @@ func test_explicit_retail_game_selects_its_compatibility_profile() -> void:
 func test_saved_game_is_ignored_by_the_next_launch() -> void:
 	ConfigStore.write(STATE_CONFIG_PATH, "resources", "game", "dfx2")
 	assert_eq(LaunchFlags.product(), "acidgambit")
-	assert_eq(LaunchFlags.game(), "jo")
+	assert_eq(LaunchFlags.game(), "acidgambit")
 
 
 func test_format_callers_can_request_an_explicit_profile_fallback() -> void:
 	assert_eq(LaunchFlags.game("jodemo"), "jodemo")
-	assert_eq(LaunchFlags.game(""), "jo")
+	assert_eq(LaunchFlags.game(""), "acidgambit")
 	assert_eq(LaunchFlags.game("JODEMO"), "jodemo")

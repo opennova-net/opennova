@@ -28,7 +28,8 @@
 #include <vector>
 
 namespace opennova {
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
+struct Title;    // base/title/title.h
 } // namespace opennova
 
 namespace godot {
@@ -110,20 +111,27 @@ public:
 	// when nothing is mounted); the menu's version label reads it.
 	const String &game_code() const { return game_code_; }
 	String get_game_code() const { return game_code_; }
-	// C++-side seam (not bound): the title the live mount speaks, game_code()'s
-	// (opennova::resolve_title_identity); null, with `error` saying why, when nothing is
-	// mounted or the title is unknown or its identity is not yet witnessed in full.
-	const opennova::TitleIdentity *title_identity(std::string &error) const;
-	// C++-side seam (not bound): the title a session over `root` speaks: the live mount's
-	// (title_identity), or, with no root, the game the process was launched as
-	// (LaunchFlags::game: `/game`'s, else the launch folder's product, as the boot mount picks
-	// it). Null, with `error` saying why, when that title's identity is not witnessed in full.
-	static const opennova::TitleIdentity *session_title(const Ref<ResourceRoot> &root,
+	// C++-side seam (not bound): the protocol the live mount's title speaks, game_code()'s
+	// (opennova::resolve_title_protocol); null, with `error` saying why, when nothing is
+	// mounted or the title is unknown or its protocol is not yet witnessed in full.
+	const opennova::Protocol *protocol(std::string &error) const;
+	// C++-side seam (not bound): the title code a session over `root` runs as: the live mount's
+	// (game_code), or, with no root, the game the process was launched as (LaunchFlags::game:
+	// `/game`'s, else the launch folder's product, as the boot mount picks it).
+	static std::string session_title_code(const Ref<ResourceRoot> &root);
+	// C++-side seam (not bound): the title a session over `root` runs as, session_title_code's
+	// (the default title's for an unknown code, as its rules are: world::title_rules): its player
+	// caps and its rules (inmatch::GameConfig::set_title, world::title_rules).
+	static const opennova::Title &session_title(const Ref<ResourceRoot> &root);
+	// C++-side seam (not bound): the protocol a session over `root` speaks, session_title_code's
+	// title's (the mount's: protocol()). Null, with `error` saying why, when it is not witnessed
+	// in full.
+	static const opennova::Protocol *session_protocol(const Ref<ResourceRoot> &root,
 			std::string &error);
-	// C++-side seam (not bound): the gate tag `title` probes the NovaWorld gate with over
-	// `root`: its own, or the mount's gt.ssc's (opennova::title_gate_tag); its own with no root.
+	// C++-side seam (not bound): the gate tag `protocol` probes the NovaWorld gate with over
+	// `root`: its own, or the mount's gt.ssc's (opennova::protocol_gate_tag); its own with no root.
 	static std::string session_gate_tag(const Ref<ResourceRoot> &root,
-			const opennova::TitleIdentity &title);
+			const opennova::Protocol &protocol);
 
 private:
 	static bool has_virtual_scheme(const String &path);
@@ -167,20 +175,20 @@ public:
 
 	// Loose-source mount: PFF archives are ignored. The explicit --loose-root fallback and
 	// format/runtime fixtures use this path over an unpacked game-data tree, mounted as
-	// `game_code` (the boot's the launch's game; "jo" when a caller names none).
+	// `game_code` (the boot's the launch's game; the default title's when a caller names none).
 	Error set_root_dir(const String &path, const String &game_code);
 	// Runtime mount: the PFF archives are the packed game data. At least one fixed-table archive
 	// must open; a loose-only directory is not a viable install, including under `/d`. `expansion`
 	// (e.g. "jox01") layers the expansion's archives over the base game. `/d` makes loose-first
 	// the session default; without it, retained loose roots are visible only to explicit retail
-	// force-loose-first calls. `game_code` (the `/game <code>` launch flag, default "jo") selects
-	// the SCR decode key so demo data decodes correctly.
+	// force-loose-first calls. `game_code` (the `/game <code>` launch flag; empty, the default
+	// title's, base/title/title.h) selects the SCR decode key so demo data decodes correctly.
 	// Safe to call on an already-mounted root: the mount is replaced, not layered (the index
 	// rebuilds, the resolver caches drop, and the epoch bump self-clears every epoch-keyed
 	// holder), so holders of this object move with it — the in-place expansion switch the
 	// LAN joiner performs (the Mods list's reload clears the root first, then mounts here).
 	Error mount_runtime(const String &path, const String &expansion = String(),
-	                    bool allow_loose_override = false, const String &game_code = "jo");
+	                    bool allow_loose_override = false, const String &game_code = String());
 	// C++ siblings only (not bound; the OpenNova Editor's devices): an embedder's own file set mounted
 	// in place of a directory (ResourceIndex::mount_source: the editor's project files, its open
 	// documents standing in for theirs), replacing the mount as the entry points above do. Every flat

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -87,6 +88,16 @@ private:
 	float delta_ = 0.0f;
 	static constexpr int32_t kCheckpointTicks = 128;
 	mutable std::vector<float> checkpoints_{0.0f};
+	// Shared clips repeatedly sample independent playheads (root channels,
+	// triggers, bodies). Keep a bounded set of exact checkpoint expansions;
+	// never replace retail's float recurrence with multiplication/modulo.
+	struct SeekBlock {
+		int32_t index = -1;
+		int32_t filled = 0;
+		std::array<float, kCheckpointTicks> times{};
+	};
+	mutable std::array<SeekBlock, 4> seek_blocks_{};
+	mutable std::size_t next_seek_block_ = 0;
 	mutable int32_t furthest_tick_ = 0;
 	mutable float furthest_time_ = 0.0f;
 	mutable int32_t first_end_tick_ = -1;

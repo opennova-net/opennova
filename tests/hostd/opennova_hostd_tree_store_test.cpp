@@ -89,10 +89,12 @@ uint64_t bytes_of(const Files &files) {
 	return n;
 }
 
+// A base game's tree holds no version.txt; an expansion's holds the one its release build
+// writes (tree_files.h expansion_version_file: "<name>, V<game version>; English").
 const Files kBase = { { "resource.pff", "RESOURCE" }, { "localres.pff", "LOCAL" },
-	{ "language.pff", "LANG" }, { "version.txt", "1.7.5.3\r\n" } };
+	{ "language.pff", "LANG" } };
 const Files kExpansion = { { "jox01.pff", "ESCALATION" }, { "jox01L.pff", "ESC-L" },
-	{ "version.txt", "1.0.0.1\r\n" } };
+	{ "version.txt", "Escalation, V1.0.0.1; English\r\n" } };
 
 // Records each start; the test ends the fetch under way with end().
 class FakeFetcher : public hostd::TreeFetcher {
@@ -219,7 +221,7 @@ int test_fetch_and_verify() {
 	TEST_EXPECT(rig.fetcher.starts.size() == 1 && rig.state(1) == TreeFetchState::Present);
 	TEST_EXPECT(rig.store->standings().size() == 1 &&
 			rig.store->standings().at(1).state == TreeFetchState::Present);
-	TEST_EXPECT(g_log.find("tree 1 is present (26 bytes, version 1.7.5.3)") != std::string::npos);
+	TEST_EXPECT(g_log.find("tree 1 is present (17 bytes, version 1.7.5.3)") != std::string::npos);
 	return 0;
 }
 

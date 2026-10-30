@@ -68,15 +68,15 @@
         <template v-if="newForm.kind === 'game'">
           <div>
             <label for="products-new-title" class="field-label">Title</label>
-            <select id="products-new-title" v-model="newForm.title" class="field" title="The game its servers speak">
-              <option v-for="t in data.titles" :key="t" :value="t">{{ titleName(t) }} ({{ t }})</option>
+            <select id="products-new-title" v-model="newForm.title" class="field" title="The retail game it runs as: its rules and the protocol it speaks">
+              <option v-for="t in data.titles" :key="t" :value="t">{{ titleName(t) }} ({{ protocolWords(data.protocols?.[t]) || t }})</option>
             </select>
             <p v-if="newErrors.title" class="mt-1 text-xs text-danger">{{ newErrors.title }}</p>
           </div>
           <div>
             <label for="products-new-lobby" class="field-label">Lobby</label>
             <select id="products-new-lobby" v-model="newForm.lobby" class="field" title="The server browser its servers list in">
-              <option v-if="newLobbies.length === 0" value="" disabled>No compatible lobbies available</option>
+              <option v-if="newLobbies.length === 0" value="" disabled>No lobbies for this protocol</option>
               <option v-for="g in newLobbies" :key="g.slug" :value="g.slug">{{ g.display_name }} ({{ g.slug }})</option>
             </select>
             <p v-if="newErrors.lobby" class="mt-1 text-xs text-danger">{{ newErrors.lobby }}</p>
@@ -139,10 +139,6 @@
           />
           <p v-if="newErrors.command_file" id="products-new-command_file-error" class="mt-1 text-xs text-danger">{{ newErrors.command_file }}</p>
         </div>
-        <label class="flex items-center gap-3 self-end text-sm text-ink">
-          <input id="products-new-retail" v-model="newForm.retail" type="checkbox" class="h-4 w-4" />
-          Retail (NovaLogic's download host)
-        </label>
       </div>
       <div class="flex flex-wrap gap-2">
         <button id="products-new-submit" type="submit" class="btn-primary" :disabled="busy">Create</button>
@@ -170,7 +166,10 @@
                   <ProductLink v-if="a.product" :product-ref="a.product.key || a.product.id" :name="a.product.display_name" />
                   <span v-else class="text-ink-muted">Unknown product</span>
                 </th>
-                <td class="whitespace-nowrap font-mono">{{ releaseLabel(a.release) }}</td>
+                <td class="whitespace-nowrap font-mono">
+                  {{ releaseLabel(a.release) }}
+                  <span v-if="a.release.one_version" class="block font-sans text-xs text-ink-muted">ONE {{ a.release.one_version }}</span>
+                </td>
                 <td class="whitespace-nowrap">
                   <PlayerLink v-if="a.product?.owner" :id="a.product.owner_id" :name="a.product.owner" />
                   <span v-else>OpenNova</span>
@@ -210,19 +209,21 @@
           <tr>
             <th scope="col">Product</th>
             <th scope="col">Kind</th>
+            <th scope="col">Protocol</th>
             <th scope="col">Owner</th>
             <th scope="col">Published</th>
             <th scope="col">Servers</th>
           </tr>
         </thead>
         <tbody>
-          <TableState v-if="products.length === 0" :colspan="5" :rows="data ? products : null" :loading="poll.loading.value" empty="No products yet." />
+          <TableState v-if="products.length === 0" :colspan="6" :rows="data ? products : null" :loading="poll.loading.value" empty="No products yet." />
           <tr v-for="g in products" :key="g.id" class="products-row">
             <th scope="row">
               <ProductLink :product-ref="g.key || g.id" :name="g.display_name" />
               <span v-if="g.key" class="block font-mono text-xs font-normal text-ink-muted">{{ g.key }}</span>
             </th>
             <td class="products-kind text-ink-muted">{{ kindLine(g, products, data?.games ?? []) }}</td>
+            <td class="products-protocol whitespace-nowrap text-ink-muted">{{ protocolWords(g.protocol) }}</td>
             <td class="products-owner whitespace-nowrap">
               <PlayerLink v-if="g.owner" :id="g.owner_id" :name="g.owner" />
               <span v-else>OpenNova</span>
@@ -230,6 +231,7 @@
             <td class="whitespace-nowrap">
               <span v-if="g.published_release" class="font-mono">{{ publishedLabel(g, releases) }}</span>
               <span v-else class="text-ink-muted">None</span>
+              <span v-if="publishedOneVersion(g, releases)" class="products-one block text-xs text-ink-muted">ONE {{ publishedOneVersion(g, releases) }}</span>
             </td>
             <td class="products-servers whitespace-nowrap">
               <template v-if="g.kind !== 'app'">
@@ -260,13 +262,14 @@ import { createProduct, fetchProducts, fetchReleases, publishRelease, rejectRele
 import { confirmAction } from '../../../composables/useConfirm';
 import { usePolling } from '../../../composables/usePolling';
 import type { NewProduct, ProductsResponse, Release } from '../../../types/products';
-import { titleName } from '../../../utils/games';
+import { lobbiesForTitle, protocolWords, titleName } from '../../../utils/games';
 import {
   KEY_RULE,
   awaitingApproval,
   kindLine,
   productLink,
   publishedLabel,
+  publishedOneVersion,
   releaseLabel,
   releaseProductId,
   releasesWorking,
@@ -390,7 +393,6 @@ interface NewForm {
   expansion_code: string;
   updater_login: string;
   command_file: string;
-  retail: boolean;
 }
 
 const creating = ref(false);
@@ -405,10 +407,10 @@ const newForm = reactive<NewForm>({
   expansion_code: '',
   updater_login: '',
   command_file: '',
-  retail: false,
 });
 const newErrors = ref<Partial<Record<keyof NewForm, string>>>({});
-const newLobbies = computed(() => (data.value?.games ?? []).filter((lobby) => lobby.title === newForm.title));
+// The lobbies of the protocol the picked title speaks.
+const newLobbies = computed(() => lobbiesForTitle(data.value?.games ?? [], newForm.title, data.value?.protocols));
 watch(newLobbies, (options) => {
   if (!options.some((lobby) => lobby.slug === newForm.lobby)) newForm.lobby = options[0]?.slug ?? '';
 });
@@ -426,12 +428,11 @@ function toggleNewForm() {
     key: '',
     visibility: 'private',
     title: d.titles[0] ?? '',
-    lobby: d.games.find((lobby) => lobby.title === d.titles[0])?.slug ?? '',
+    lobby: lobbiesForTitle(d.games, d.titles[0] ?? '', d.protocols)[0]?.slug ?? '',
     parent_id: bases.value[0]?.id ?? 0,
     expansion_code: '',
     updater_login: '',
     command_file: '',
-    retail: false,
   });
   newErrors.value = {};
   creating.value = true;
@@ -448,13 +449,13 @@ function checkNewForm(): NewProduct | null {
   const login = newForm.updater_login.trim();
   const commandFile = newForm.command_file.trim().toUpperCase();
   Object.assign(errors, updaterProblems(login, commandFile));
-  const body: NewProduct = { display_name: displayName, kind: newForm.kind, key, visibility: newForm.visibility, retail: newForm.retail };
+  const body: NewProduct = { display_name: displayName, kind: newForm.kind, key, visibility: newForm.visibility };
   if (login !== '') {
     body.updater_login = login;
     body.command_file = commandFile;
   }
   if (newForm.kind === 'game') {
-    if (!data.value?.titles.includes(newForm.title)) errors.title = 'Pick the title the game speaks.';
+    if (!data.value?.titles.includes(newForm.title)) errors.title = 'Pick the title the game runs as.';
     if (!newLobbies.value.some((g) => g.slug === newForm.lobby)) errors.lobby = 'Pick the lobby it lists in.';
     body.title = newForm.title;
     body.lobby = newForm.lobby;

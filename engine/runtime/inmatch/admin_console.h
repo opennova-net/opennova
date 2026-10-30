@@ -9,6 +9,7 @@
 // server view") and §5.70.8 (the MISSION verbs).
 // [orig: CAdminServer_DispatchCommand @0x406720; CAdminServer_HandleStatus @0x402E30]
 
+#include <base/title/title.h>
 #include <net/admin/admin_server.h>
 #include <runtime/controls/input_event_queue.h> // InputEventQueue (the walk's binding records)
 #include <runtime/inmatch/client_console.h> // ClientConsoleState (the console walk's debug words)
@@ -107,6 +108,10 @@ public:
 		// g_GameConfigState: the cfg block SET writes its shadows into and GET GAMESETTINGS reads
 		// its cfg rows from (ArmoryTimer, ServerName and the three passwords). Required.
 		gamecfg::GameCfg *config_block = nullptr;
+		// The title the block's process runs as (inmatch::GameConfigBlock::title): the session
+		// config the session-less and the joined consoles build from the block runs as it
+		// (RemoteAdminConsoles::bind, host_screen_from_block). Required with config_block.
+		const Title *config_title = nullptr;
 		// Game_SaveConfig: every accepted SET saves the block at once (opennova-serve's
 		// working-directory game.cfg). [orig: CAdminServer_HandleSetCommand @0x406185..0x4061AE]
 		std::function<void()> save_config;
@@ -153,11 +158,12 @@ public:
 		std::function<std::string(std::string_view section, std::string_view key)> game_text;
 		// The avatar registry PETERRABBIT SEXCHANGE picks its two combos from.
 		const CharacterRegistry *characters = nullptr;
-		// CMD VERSION's two texts, the binary's version and its title, each printed at its
-		// start [orig: Game_ParseCommandLineAndInit @0x4A7310 (the title off_8154D8's sprintf
-		//  @0x4A7D30..0x4A7D3C, "V%i.%i.%i.%i" into g_VersionText @0x4A7D75..0x4A7D90)].
-		std::string version_text;
-		std::string title_text;
+		// CMD VERSION's line: the game's versions, UTF-8 (base/version/version_line.h, the
+		// embedder's), where retail's two words were the binary's version and its title, each
+		// printed at its start [orig: Game_ParseCommandLineAndInit @0x4A7310 (the title
+		//  off_8154D8's sprintf @0x4A7D30..0x4A7D3C, "V%i.%i.%i.%i" into g_VersionText
+		//  @0x4A7D75..0x4A7D90)].
+		std::string versions;
 		// The SYSTEM ring (Chat_AddMessageChannel2) of a host that is not a session peer, which
 		// its CMD VERSION and its command walk post to; a session peer's lines are its own
 		// client's rings (ClientRuntime::console_command). A host with no client shows no SYSTEM

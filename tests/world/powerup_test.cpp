@@ -403,18 +403,18 @@ void test_infinite_med_pack_respawns() {
     CHECK(rig.get(rig.picker)->health == 10);
     CHECK(rig.world.out.fire_sounds.drain().empty());
     // No countdown off the authority.
-    powerup_tick(rig.world, rig.ctx(false));
+    powerup_tick_respawn(rig.world, *rig.get(med), false);
     CHECK(rig.get(med)->powerup_respawn_timer == 30 * 62);
-    for (int i = 0; i < 30 * 62; ++i) powerup_tick(rig.world, rig.ctx(true));
+    for (int i = 0; i < 30 * 62; ++i) powerup_tick_respawn(rig.world, *rig.get(med), true);
     m = rig.get(med);
     CHECK(m != nullptr && m->hidden && m->powerup_respawn_timer == 0);
-    powerup_tick(rig.world, rig.ctx(true)); // zero fires the respawn
+    powerup_tick_respawn(rig.world, *rig.get(med), true); // zero fires the respawn
     m = rig.get(med);
     CHECK(m != nullptr && !m->hidden && m->powerup_respawn_timer == -1);
     CHECK(m != nullptr && m->powerup_respawns_left == -2); // unlimited counts down past -1
     CHECK(rig.world.out.fire_sounds.drain().empty()); // the shipped respawn row has no sound
     // Idle rows stay idle.
-    powerup_tick(rig.world, rig.ctx(true));
+    powerup_tick_respawn(rig.world, *rig.get(med), true);
     CHECK(rig.get(med)->powerup_respawn_timer == -1);
     // And it can be taken again.
     powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
@@ -451,12 +451,49 @@ void test_counted_respawns() {
     CHECK(rig.get(med)->powerup_respawns_left == 1);
     powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
     CHECK(rig.get(med) != nullptr && rig.get(med)->hidden);
-    for (int i = 0; i <= 30 * 62; ++i) powerup_tick(rig.world, rig.ctx(true));
+    for (int i = 0; i <= 30 * 62; ++i) powerup_tick_respawn(rig.world, *rig.get(med), true);
     CHECK(rig.get(med) != nullptr && !rig.get(med)->hidden);
     CHECK(rig.get(med)->powerup_respawns_left == 0);
     rig.get(rig.picker)->health = 1;
     powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
     CHECK(rig.get(med) == nullptr);
+}
+
+// The countdown is the row's own +0x1C4 update, so it runs where that update runs: a
+// pool-1 row steps it at its pool-1 visit every tick, a pool-2 row only on its slot's
+// cohort of the pool-2 walk, one tick in 8 (its respawn takes 8x the ticks). Off the
+// authority neither steps.
+// [orig: Powerup_TickRespawn @0x442850 (the authority gate @0x442859, the decrement
+//  @0x442878), installed as +0x1C4 by PowerupEntity_InitFromDef @0x442D20;
+//  Entity_UpdatePool1Slot @0x4B8E53; Entity_UpdateAllEntities - the pool-2 cohort
+//  @0x4C225A, the update callback @0x4C22E7]
+void test_countdown_rides_the_pool_walks() {
+    Rig rig;
+    const EntityHandle in_pool1 = rig.spawn_powerup(2, 1);
+    const EntityHandle in_pool2 = rig.spawn_powerup(2, 2); // slot 0: the tick & 7 == 0 cohort
+    powerup_bind_entities(rig.world, rig.items);
+    for (const EntityHandle h : {in_pool1, in_pool2}) {
+        rig.get(rig.picker)->health = 10;
+        powerup_pickup(rig.world, h, rig.picker, rig.ctx(true));
+        CHECK(rig.get(h) != nullptr && rig.get(h)->powerup_respawn_timer == 30 * 62);
+    }
+    TickContext ctx = rig.ctx(true);
+    for (uint32_t t = 0; t < 16; ++t) {
+        rig.world.logic_tick = t;
+        ctx.logic_tick = t;
+        rig.world.update_all_entities(ctx);
+    }
+    CHECK(rig.get(in_pool1)->powerup_respawn_timer == 30 * 62 - 16);
+    CHECK(rig.get(in_pool2)->powerup_respawn_timer == 30 * 62 - 2); // ticks 0 and 8
+    ctx.is_authority = false;
+    rig.world.rules.logic_authority = false;
+    for (uint32_t t = 16; t < 32; ++t) {
+        rig.world.logic_tick = t;
+        ctx.logic_tick = t;
+        rig.world.update_all_entities(ctx);
+    }
+    CHECK(rig.get(in_pool1)->powerup_respawn_timer == 30 * 62 - 16);
+    CHECK(rig.get(in_pool2)->powerup_respawn_timer == 30 * 62 - 2);
 }
 
 // hp 25: the raise probes the ceiling, the grant is old + 25 with no clamp.
@@ -786,7 +823,7 @@ void test_action_particles() {
     Entity *r = rig.get(row);
     CHECK(r != nullptr && r->hidden);
     if (r != nullptr) r->powerup_respawn_timer = 0;
-    powerup_tick(rig.world, rig.ctx(true));
+    powerup_tick_respawn(rig.world, *rig.get(row), true);
     CHECK(rig.get(row) != nullptr && !rig.get(row)->hidden);
     CHECK(effects.size() == 1);
     if (effects.size() == 1) {
@@ -801,7 +838,7 @@ void test_action_particles() {
     powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
     CHECK(rig.get(rig.picker)->health == 100 && effects.empty());
     rig.get(med)->powerup_respawn_timer = 0;
-    powerup_tick(rig.world, rig.ctx(true));
+    powerup_tick_respawn(rig.world, *rig.get(med), true);
     CHECK(!rig.get(med)->hidden && effects.empty());
 }
 
@@ -1083,6 +1120,7 @@ int main() {
     test_infinite_med_pack_respawns();
     test_a_respawning_pickup_destroys_its_slot_group();
     test_counted_respawns();
+    test_countdown_rides_the_pool_walks();
     test_hp_add();
     test_class_grants_local();
     test_remote_player_grant();

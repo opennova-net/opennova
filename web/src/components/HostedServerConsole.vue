@@ -14,6 +14,7 @@
     <p v-else-if="trouble" class="text-xs text-warn">Last refresh failed: {{ trouble }}</p>
 
     <template v-if="!logOnly">
+    <ServerAdminPanel :target="target" />
     <!-- PLAYER LIST, with punt / ban / swap / kill for the owner. -->
     <section class="space-y-2" :aria-labelledby="ids.players">
       <div class="flex flex-wrap items-baseline gap-2">
@@ -93,7 +94,8 @@
       <p v-if="rotation === null" class="text-sm text-ink-muted">Reading…</p>
       <p v-else-if="rotationBetween" class="text-sm text-ink-muted">Between matches.</p>
       <p v-else-if="rotation.length === 0" class="text-sm text-ink-muted">Empty.</p>
-      <ol v-else :aria-labelledby="ids.rotation" class="card divide-y divide-border">
+      <!-- Capped, so a long rotation scrolls in place; play order puts the map playing now first. -->
+      <ol v-else :aria-labelledby="ids.rotation" class="card max-h-96 divide-y divide-border overflow-y-auto" tabindex="0">
         <li
           v-for="(entry, position) in playOrder"
           :key="entry.index"
@@ -137,6 +139,10 @@
           <input v-model="addSwap" type="checkbox" class="h-4 w-4 accent-accent" />
           Swap at half
         </label>
+        <label class="text-sm">Insert
+          <select v-model="addAt" class="field w-auto"><option :value="null">At end</option><option v-for="entry in rotation ?? []" :key="entry.index" :value="entry.index">Before {{ entry.index + 1 }}: {{ entry.file }}</option></select>
+        </label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="addOnce" type="checkbox" /> One play only</label>
         <button type="submit" :disabled="controlsOff || !addChoice || rotationFull" class="btn-primary btn-sm">Add</button>
         <p :id="ids.addHint" class="w-full text-xs text-ink-muted">
           <template v-if="rotationFull">Full: remove a map to add another.</template>
@@ -234,6 +240,7 @@ import { useConsoleQueue } from '../composables/useConsoleQueue';
 import { useHostedConsole, type ConsoleNotice } from '../composables/useHostedConsole';
 import type { ConsolePlayer, PlayerAction, RotationEntry, RotationEntryAction } from '../types/hostedServer';
 import Badge from './ui/Badge.vue';
+import ServerAdminPanel from './ServerAdminPanel.vue';
 import { cp1252Length, cp1252Problem } from '../utils/cp1252';
 import { MISSIONS_MAX, isMissionName } from '../utils/hostedSettings';
 import { formatUtc, isoTime, timeMs } from '../utils/format';
@@ -271,7 +278,7 @@ const emit = defineEmits<{
   (e: 'unauthorized'): void;
 }>();
 
-const isOwner = computed(() => props.mode === 'owner');
+const isOwner = computed(() => props.mode === 'owner' || props.mode === 'admin');
 const headingTag = computed(() => `h${props.headingLevel}`);
 const subheadingTag = computed(() => `h${props.headingLevel + 1}`);
 
@@ -418,15 +425,19 @@ function titleOf(entry: RotationEntry): string {
 // The rotation picker: the missions the server has whose file an add takes.
 const addChoice = ref('');
 const addSwap = ref(false);
+const addAt = ref<number | null>(null), addOnce = ref(false);
 const addable = computed(() => (missions.value ?? []).filter((m) => isMissionName(m.file)));
 const rotationFull = computed(() => (rotation.value?.length ?? 0) >= MISSIONS_MAX);
 
 async function onAdd() {
   const mission = addChoice.value;
   if (!mission || rotationFull.value) return;
-  if (await addMission(mission, addSwap.value)) {
+  if (await addMission(mission, addSwap.value, addAt.value, addOnce.value)) {
     addChoice.value = '';
     addSwap.value = false;
+    // The insert position names an entry of the rotation the add just changed.
+    addAt.value = null;
+    addOnce.value = false;
   }
 }
 

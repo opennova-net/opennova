@@ -53,6 +53,7 @@
 //
 // opennova-serve and the game shell each keep one block for the process.
 
+#include <base/title/title.h>
 #include <formats/gamecfg/game_cfg.h>
 
 #include <cstdint>
@@ -111,13 +112,18 @@ public:
 	// by Game_ParseCommandLineAndInit @0x4A74EB, read by every Game_LoadConfig
 	// @0x5514B1].
 	void set_lan_switch(bool on) { lan_switch_ = on; }
-	// The title's cfg table (gamecfg::config_var_rows): every read takes it, and the block as it
-	// stands takes it at once (its defaults, the table's).
-	void set_config_table(gamecfg::ConfigTable table) {
-		table_ = table;
-		if (cfg_.table != table)
-			cfg_ = gamecfg::defaults(texts_, cfg_.player_index, cfg_.hw3d_deviceno, table);
+	// The title the process runs as (CONTEXT.md "Title"): its cfg table (Title::config_table,
+	// gamecfg::config_var_rows), which every read takes and the block as it stands takes at once
+	// (its defaults, the table's), and the player caps its host screen clamps to
+	// (inmatch::title_player_caps). Null until set; the program sets the launch's before its
+	// start's read.
+	void set_title(const Title &title) {
+		title_ = &title;
+		table_ = title.config_table;
+		if (cfg_.table != table_)
+			cfg_ = gamecfg::defaults(texts_, cfg_.player_index, cfg_.hw3d_deviceno, table_);
 	}
+	const Title *title() const { return title_; }
 	gamecfg::ConfigTable config_table() const { return table_; }
 	bool lan_switch() const { return lan_switch_; }
 	// Game_SaveConfig. False (with `error`) when the file does not open, where
@@ -210,6 +216,7 @@ private:
 	bool video_test_ran_ = false;
 	bool lan_switch_ = false;
 	gamecfg::ConfigTable table_ = gamecfg::ConfigTable::Jo;
+	const Title *title_ = nullptr; // set_title
 };
 
 } // namespace opennova::inmatch

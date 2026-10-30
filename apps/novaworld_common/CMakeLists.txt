@@ -198,6 +198,8 @@ add_library(opennova_novaworld_hosting_model STATIC
     hosted/model/hosted_policy.cpp
     hosted/model/hosted_repository.cpp
     hosted/model/hosted_settings.cpp
+    hosted/model/settings_document.cpp
+    hosted/model/console_configuration.cpp
     hosted/model/limits_hold.cpp
     hosted/model/machine_profile.cpp
     hosted/model/net_cidr.cpp

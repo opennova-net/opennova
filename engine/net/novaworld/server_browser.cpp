@@ -137,7 +137,6 @@ std::vector<std::string> browser_details_lines(const GsbServerEntry &row) {
 	std::snprintf(players, sizeof(players), "Players: %d/%d", row.players, row.max_players);
 	lines.emplace_back(players);
 	push("Mod", row.mod);
-	push("Version", row.ver1);
 	push("Expansion", row.exp);
 	push("Region", row.region);
 	push("Country", row.country);

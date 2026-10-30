@@ -89,6 +89,10 @@ struct ServeOptions {
 	std::string resource_dir; // --resource-dir
 	std::string expansion;    // /exp or /mod <name>: the last one, its first 32 bytes
 	bool loose_override = false; // /d
+	// OpenNova launch overrides for the existing engine controls. Omitted: the
+	// session type's send period and the normal 600-byte snapshot budget.
+	std::optional<uint32_t> send_holdoff_ticks; // --send-holdoff-ticks, 0..255
+	std::optional<uint32_t> entity_send_budget; // --entity-send-budget, 100..1600
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
 	std::string host_file;    // /HOST <file>
@@ -127,6 +131,7 @@ struct ServeOptions {
 	// the error a non-zero exit ends on (--exit-file) and the second listing's state, rewritten
 	// whenever it changes (--second-listing-file; off for a run with none); "" writes no file.
 	bool status_page = true;
+	bool rotation_first = false; // --rotation-first: hosted rotations start at entry zero
 	std::string stats_file;
 	std::string exit_file;
 	std::string second_listing_file;
@@ -230,14 +235,18 @@ public:
 	uint16_t bound_port() const { return bound_port_; }
 	bool running() const { return running_; }
 	const ResourceIndex &index() const { return index_; }
-	// The launch's engine profile, chosen as the game's launch chooses it (/game, else the
+	// The title the launch runs as, chosen as the game's launch chooses it (/game, else the
 	// folder's UPDATE.WIZ, a folder with none being OpenNova's own: boot_policy.h
 	// launch_product), and whether the launch names no game: a folder whose UPDATE.WIZ names a
 	// game OpenNova does not play, with no /game (start() refuses it).
 	const std::string &game_code() const { return game_code_; }
 	bool foreign_folder() const { return foreign_folder_; }
+	// The server's versions on one line (base/version/version_line.h), which it logs as it starts
+	// and CMD VERSION posts: the launch's game and the release installed in its folder
+	// (boot_policy.h launch_product_version), ONE's build and the protocol its title speaks.
+	const std::string &version_line() const { return version_line_; }
 	// The title the server speaks and its gate tag (mount): null / empty before the mount.
-	const TitleIdentity *title() const { return title_; }
+	const Protocol *protocol() const { return protocol_; }
 	const std::string &gate_tag() const { return gate_tag_; }
 	const std::string &end_message() const { return end_message_; }
 	bool rotation_ended() const { return rotation_ended_; }
@@ -306,7 +315,7 @@ private:
 	// One update's admin pump [orig: CAdminServer_ProcessFrame @0x406F50 from
 	// Game_ProcessMainFrame @0x5268F1, the update callback].
 	void pump_admin();
-	// The title the server speaks: /game's, JO's without one (net/title/title_identity.h).
+	// The title the server speaks: /game's, JO's without one (net/protocol/protocol.h).
 	// False when its session identity is not witnessed in full, or when the listing logs in
 	// (--credentials) and its web flow is not.
 	bool resolve_title(std::string &error);
@@ -358,15 +367,16 @@ private:
 	// (begin: after the subsystems' game.cfg read); the listing only formats them with game.cfg's
 	// display mode.
 	HardwareIdentity device_identity_;
-	// The launch's engine profile (/game's, else the folder's UPDATE.WIZ's, JO's for none:
-	// launch_product), whether the folder is foreign with no /game, and the command file a
+	// The title the launch runs as (/game's, else the folder's UPDATE.WIZ's, the default title's
+	// for none: launch_product), whether the folder is foreign with no /game, and the command file a
 	// foreign folder's wizard names.
 	std::string game_code_;
 	bool foreign_folder_ = false;
 	std::string product_command_;
+	std::string version_line_; // version_line's
 	// The title the server speaks (the launch's: mount) and its gate tag, the
-	// title's or the mount's gt.ssc's (title_gate_tag).
-	const TitleIdentity *title_ = nullptr;
+	// title's or the mount's gt.ssc's (protocol_gate_tag).
+	const Protocol *protocol_ = nullptr;
 	std::string gate_tag_;
 	ResourceIndex index_;
 	// The mount's expansion text-override table, read once at the boot's

@@ -120,9 +120,7 @@ bool put_lines(const std::string &path, const std::vector<std::string> &lines) {
 
 Rows plant(Database &db, const std::string &logs) {
 	Rows r;
-	r.server = db.query("INSERT INTO hosted_servers (game_name, max_players, time_limit, "
-						"kill_limit, max_score, respawn, start_delay, missions, generation) "
-						"VALUES ('Logs', 16, 30, 0, 0, 0, 0, 'm.bms', 2) RETURNING id;")
+	r.server = db.query("INSERT INTO hosted_servers (generation, configuration) VALUES (2, jsonb_build_object('game_name', 'Logs', 'max_players', 16, 'time_limit', 30, 'kill_limit', 0, 'max_score', 0, 'respawn', 0, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'm.bms', 'swap_sides', false)))) RETURNING id;")
 					   .front()
 					   .as_int(0)
 					   .value_or(0);

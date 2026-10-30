@@ -2,7 +2,10 @@
 
 #include <algorithm>
 
+#include <base/version/one_build.h>
+#include <base/version/version_line.h>
 #include <editor/model/document.h>
+#include <net/protocol/protocol.h>
 #include <editor/project/project_document.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_operation.h>
@@ -13,6 +16,15 @@ const DocumentBase *DocumentsView::open_at(const std::string &path) const {
 	for (const std::shared_ptr<const DocumentBase> &document : open)
 		if (document && document->path() == path) return document.get();
 	return nullptr;
+}
+
+std::string editor_version_line(const SessionView &view) {
+	Versions versions;
+	versions.one = one_build();
+	// The open project's target title: its name and the protocol it speaks.
+	if (view.project.open && view.project.document)
+		title_versions(view.project.document->target_game, versions);
+	return version_line(versions);
 }
 
 std::string editor_window_title(const SessionView &view) {

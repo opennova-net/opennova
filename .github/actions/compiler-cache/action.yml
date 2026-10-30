@@ -2,7 +2,7 @@ name: Compiler cache
 description: >-
   sccache on a local disk directory carried between runs as ONE Actions cache
   entry per build flavour and branch: restored by every run, saved only by
-  pushes to (and manual runs on) master.
+  pushes to (and manual runs on) master and staging.
 
 # Why not sccache's own GitHub Actions backend: it stores one cache entry per
 # object file. Seven flavours times ~1.5k objects put the repository past the
@@ -30,7 +30,7 @@ description: >-
 # (infra/ci, 10 days) and the delete step, which lists GitHub's store, leaves
 # them alone.
 #
-# The cache branch is master (ci.yml's push trigger lists the same one). A pull
+# The cache branches are master and staging. A pull
 # request's own entry would be readable by that pull request alone, so pull
 # requests never save.
 #
@@ -44,6 +44,9 @@ inputs:
   flavour:
     description: The build tree's cache name (win-root, linux-root, win-gdext-debug, ...).
     required: true
+  fallback-flavour:
+    description: Optional previous superset cache used once when splitting a build flavour.
+    default: ''
   mode:
     description: "'restore' (also installs sccache) before the build, 'save' after it."
     required: true
@@ -78,7 +81,9 @@ runs:
       with:
         path: ${{ runner.temp }}/sccache
         key: cc-${{ inputs.flavour }}-${{ github.sha }}
-        restore-keys: cc-${{ inputs.flavour }}-
+        restore-keys: |
+          cc-${{ inputs.flavour }}-
+          ${{ inputs.fallback-flavour != '' && format('cc-{0}-', inputs.fallback-flavour) || format('cc-{0}-', inputs.flavour) }}
 
     # Restored files keep their archived times; anything not newer than this
     # stamp at save time went unused by this build.
@@ -97,7 +102,7 @@ runs:
         save=false
         if [[ "$EVENT" == "push" || "$EVENT" == "workflow_dispatch" ]]; then
           case "$GITHUB_REF" in
-            refs/heads/master) save=true ;;
+            refs/heads/master|refs/heads/staging) save=true ;;
           esac
         fi
         echo "save=${save}" >> "$GITHUB_OUTPUT"

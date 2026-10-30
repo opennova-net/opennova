@@ -6,8 +6,7 @@
 
 #include <formats/aip/aip.h>
 #include <formats/def/def.h>
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/entity_class.h>
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/ingame_decode.h>
@@ -41,8 +40,8 @@
 #include <string>
 #include "../common/test_expect.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -82,7 +81,8 @@ struct Harness {
 		role.bind(*kernel);
 		kernel->world.load_systems();
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("TankJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [] {};
 		role.kit_seams.reseed_on_side_change = [] { return false; };
@@ -523,6 +523,12 @@ bool run_resolved_attachment_runs_the_ewep_update() {
 	gun_seed.spawn_origin = (1u << 24) | 4u;
 	gun_seed.position = h.hull().position;
 	gun_seed.emplaced_update = true;
+	// The gun's slot Def: the ewep update reaches its matrix leg only behind it.
+	// [orig: Entity_UpdateTransformAndTurret @0x440E8E..0x440EA0]
+	world.tables.weapons.entries.emplace_back();
+	world.tables.weapons.entries.back().valid = true;
+	gun_seed.primary_weapon_slot_adm =
+			static_cast<uint8_t>(world.tables.weapons.entries.size() - 1);
 	gun_seed.emplacement_parent = h.tank;
 	gun_seed.emplacement_parent_spawn_id = h.hull().registry_spawn_id;
 	gun_seed.emplacement_pose_metadata_resolved = true;

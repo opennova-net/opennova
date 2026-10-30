@@ -158,9 +158,10 @@ void run_ground_cache_class_init(World &world, Entity &e) {
 
 void run_ground_cache_class_inits(World &world) {
 	// [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
-	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 after it]
+	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 after it, each pool to its used count
+	//  (the loads @0x40E52F, @0x40E568, @0x40E5AC, @0x40E5E0)]
 	for (const int pool : { 2, 3, 1, 0 }) {
-		for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
+		for (size_t i = 0; i < world.registry.pool_used(pool); ++i) {
 			if (Entity *e = world.registry.get(EntityHandle::make(pool, uint16_t(i))))
 				run_ground_cache_class_init(world, *e);
 		}
@@ -191,6 +192,7 @@ void mark_class_dead(Entity &target) {
 void land_class_husk(World &world, Entity &target) {
 	if ((target.engine_flags & kEntityFlagHusk) != 0) return;
 	target.engine_flags |= kEntityFlagHusk;
+	world.registry.list_fade_row(target.handle);
 	world.out.destruction.husk_swaps.push_back(husk_swap_event(target));
 	++world.out.destruction.items_destroyed;
 }
@@ -1044,11 +1046,13 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
 	}
 }
 
+// The update callback runs no swap-fade evaluation of its own: the walk's visit
+// evaluated it before this callback (update_item_destroy_fade), and only the upfx
+// leg below publishes again, as retail's does.
 // [orig: Entity_ApplyGravityAndGroundCheck @0x43FB30;
 // Entity_UpdateWaterPhysicsAndEffects @0x4A92E0]
 bool tick_item_class_motion(World &world, Entity &entity,
         const terrain::TerrainHeightField *terrain) {
-    update_item_destroy_fade(world, entity);
     if (tick_item_section_motion(world, entity)) return true;
     if (entity.death_motion == DeathMotionMode::CraneFalling) {
         int32_t ground = terrain != nullptr && terrain->valid()
@@ -1080,6 +1084,10 @@ bool tick_item_class_motion(World &world, Entity &entity,
     if ((entity.engine_flags & 6u) == 0 && world.rules.last_tick_of_batch)
         update_item_ambient_sound(world, entity);
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return true;
+    // The upfx row publishes the swap fade itself, then its husk leg reads the share
+    // [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - the def's physics word
+    //  @0x4A92E8, Flags & 4 @0x4A92F5, Entity_PublishSwapFadePhases @0x4A9304].
+    publish_swap_fade_phases(world, entity);
     upfx_husk_leg(world, entity, *traits, entity.destroy_progress);
     return true;
 }
@@ -1114,18 +1122,46 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
 //  @0x4C230C..0x4C2398: the cohort @0x4C2322, the clock @0x4C2369, the
 //  callback @0x4C2378, the -64 @0x4C237F..0x4C2382, the update callback
 //  @0x4C2393]
+// Each walk visits only its cohort, the slot tick & (stride - 1) and every stride
+// on, and ends at the pool's used count, never its capacity [orig: the used loads
+//  @0x4C2248 (pool 2) / @0x4C2310 (pool 3), the first slot tick & 7 @0x4C225A /
+//  tick & 0x3F @0x4C2322, their bound tests @0x4C2265 / @0x4C232D, the stride steps
+//  @0x4C2282..0x4C2285 / @0x4C2353..0x4C2356].
+// The swap fade's own pass rides the same walk: every tick, each row on the
+// registry's fade list (EntityRegistry::list_fade_row) is visited at its slot too,
+// in slot order between the cohort's, so its fade runs where a whole-pool visit
+// reached it and the husk swap events keep their order. A cohort visit lists or
+// unlists its row by the same test, so a husk bit no writer listed still fades
+// from its row's next cohort visit. Ours, not a retail claim: retail evaluates the
+// fade where it draws a husked model [orig: Render_SectorEntity @0x5C4190 -
+//  Entity_PublishSwapFadePhases @0x5C4200], and the sim's consumers (the delay's
+// restamp, the swap stage, the upfx leg, the collision's husk pick) read it per tick.
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;
-    const size_t cap = world.registry.pool_capacity(pool);
-    for (size_t slot = 0; slot < cap; ++slot) {
+    const size_t used =
+            std::min(world.registry.pool_used(pool), world.registry.pool_capacity(pool));
+    size_t cohort_slot = world.logic_tick & (stride - 1);
+    size_t from = 0;
+    for (;;) {
+        const size_t slot = std::min(cohort_slot, world.registry.next_fade_row(pool, from));
+        if (slot >= used) break;
+        from = slot + 1;
+        const bool cohort = slot == cohort_slot;
+        if (cohort) cohort_slot += stride;
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
         Entity *entity = world.registry.get(handle);
+        if (entity == nullptr) {
+            world.registry.unlist_fade_row(handle);
+            continue;
+        }
         // A row whose +0x1C type index is 0 takes no visit [orig: Entity_UpdateAllEntities
         //  - the pool-2 walk's test @0x4C2288..0x4C228F, the pool-3 walk's @0x4C2359..0x4C235D].
-        if (entity == nullptr || entity->item_type_index == 0) continue;
+        if (entity->item_type_index == 0) {
+            if (!entity->needs_destroy_fade()) world.registry.unlist_fade_row(handle);
+            continue;
+        }
         const uint64_t lifetime = entity->registry_spawn_id;
-        const bool cohort = (slot & (stride - 1)) == (world.logic_tick & (stride - 1));
         if (cohort && entity->minefield.think) {
             // [orig: Entity_LandmineThink @ 0x441A40 on the same cohort clock]
             if (!entity->hidden) {
@@ -1149,10 +1185,30 @@ void tick_item_event_pool(World &world, int pool) {
         if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
         // The renderer recomputes the fade timers every frame it draws a
         // husked entity, independent of the update cohort; the presenter
-        // reads the sim's copy [orig: Render_SectorEntity @0x5C4200].
-        update_item_destroy_fade(world, *entity);
+        // publishes the sim's copy for each husked row it submits
+        // [orig: Render_SectorEntity @0x5C4200]. An intact row with no fade
+        // state takes no evaluation (it would only zero its zeroes), and the
+        // row stays listed while it needs one.
+        if (entity->needs_destroy_fade()) update_item_destroy_fade(world, *entity);
+        if (entity->needs_destroy_fade())
+            world.registry.list_fade_row(handle);
+        else
+            world.registry.unlist_fade_row(handle);
         // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
         if (!cohort) continue;
+        // Pool 2 calls it (and the emitter update after it) only for a row with a def;
+        // pool 3 has no such test [orig: Entity_UpdateAllEntities @0x4C2100 - pool 2's
+        //  `cmp dword ptr [esi+20h], 0; jz` @0x4C22CF..0x4C22D3 ahead of the call @0x4C22E7;
+        //  pool 3's call @0x4C2388..0x4C2393 tests only the callback].
+        if (pool == 2 && !entity->has_item_def) continue;
+        // A pool-2 powerup row's update callback is its respawn countdown, so the
+        // countdown steps one tick in 8 [orig: Powerup_TickRespawn @0x442850
+        //  through @0x4C22E7].
+        if (entity->powerup_def_index >= 0) {
+            powerup_tick_respawn(world, *entity, world.rules.logic_authority);
+            entity = world.registry.get(handle);
+            if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
+        }
         if (entity->squib.motor) {
             tick_squib(world, *entity);
             continue;

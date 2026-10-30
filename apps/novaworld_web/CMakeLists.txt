@@ -45,6 +45,7 @@ add_library(opennova_novaworld_web_core STATIC
     hosted/address_routes.cpp
     hosted/console_commands.cpp
     hosted/console_routes.cpp
+    hosted/configuration_routes.cpp
     hosted/fleet_routes.cpp
     hosted/hosted_routes.cpp
     hosted/stats_routes.cpp
@@ -138,3 +139,6 @@ target_link_libraries(opennova_novaworld_web
         opennova_novaworld_service
 )
 set_target_properties(opennova_novaworld_web PROPERTIES OUTPUT_NAME "opennova-novaworld-web")
+
+# Every game's titles and protocols, which main.cpp installs at its start (games/games.h).
+target_link_libraries(opennova_novaworld_web PRIVATE opennova_games)

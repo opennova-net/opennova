@@ -13,9 +13,10 @@
 //                      (ONNET_DOWNLOADS_URL, the downloads bucket's top):
 //                        a game        the runtime's published package (the app whose login is
 //                                      ONRUNTIME) applied into an empty folder with its command
-//                                      file beside it, then a retail game's or an account's own
-//                                      game's UPDATE.WIZ (CMD its command file, URL this
-//                                      deployment's update host, PRODUCT_LOGIN its wizard login,
+//                                      file beside it, then the game's UPDATE.WIZ (one with an
+//                                      updater login, or an account's own; CMD its command
+//                                      file, URL this deployment's update host, PRODUCT_LOGIN
+//                                      its wizard login,
 //                                      or its updater login when it has none; an account's own
 //                                      game's GAME its title, our own key) and
 //                                      expansion/<code>/UPDATE.WIZ for each of its expansions of
@@ -31,14 +32,17 @@
 //                      the site reads):
 //
 //                        {"written": "<ISO 8601 UTC>",
-//                         "products": [{"key", "kind", "name", "description", "owner", "file",
-//                                       "size", "sha256", "version", "release", "published"}]}
+//                         "products": [{"key", "kind", "name", "description", "owner",
+//                                       "protocol", "file", "size", "sha256", "version",
+//                                       "release", "published"}]}
 //
 //                      every product the host offers listed in list_products' order (games,
 //                      expansions, apps; an account's own game once it has a published release:
 //                      no private one, no account's own expansion), owner the username of the
-//                      account whose game it is (null for the service's own), file its download's name
-//                      (null with none), size, sha256, version (its
+//                      account whose game it is (null for the service's own), protocol a game's
+//                      {code, name, version} (the protocol its title speaks, version its
+//                      protocol version; null for an expansion and an app), file its download's
+//                      name (null with none), size, sha256, version (its
 //                      release's, else its section's VERSION), release (its id) and published
 //                      (ISO 8601 UTC) null while it offers no rendered download. Every other
 //                      object on the host is removed after. A publish or retire that landed

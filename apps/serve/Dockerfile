@@ -33,9 +33,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
-# The build opennova-hostd reports to the service (serve-image.yml passes the
-# commit).
-ARG OPENNOVA_VERSION=dev
+# ONE's stamp (engine/base/version/one_build.h; serve-image.yml passes
+# scripts/ci/one_stamp.sh's, since the context holds no .git to take it from):
+# the release, the commit, the commit's time and the staging flag, which
+# opennova-hostd reports to the service as its build (one_build().label()).
+ARG OPENNOVA_VERSION=
+ARG OPENNOVA_COMMIT=
+ARG OPENNOVA_BUILD_TIME=0
+ARG OPENNOVA_STAGING=OFF
 
 # Configure the whole tree (cheap) but compile only the server and the agent
 # targets and their lib deps: the engine groups and apps/common, with no HTTP
@@ -44,7 +49,8 @@ ARG OPENNOVA_VERSION=dev
 # the service; the agent links the service's core and agents' protocol, which build
 # without it on Linux and need no libpq).
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        "-DOPENNOVA_HOSTD_VERSION=${OPENNOVA_VERSION}" \
+        "-DOPENNOVA_VERSION=${OPENNOVA_VERSION}" "-DOPENNOVA_COMMIT=${OPENNOVA_COMMIT}" \
+        "-DOPENNOVA_BUILD_TIME=${OPENNOVA_BUILD_TIME}" "-DOPENNOVA_STAGING=${OPENNOVA_STAGING}" \
     && cmake --build build --target opennova_serve opennova_hostd
 
 # ---- the docker CLI stage ---------------------------------------------------

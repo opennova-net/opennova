@@ -127,7 +127,7 @@ void test_sort_rows_text_numeric_and_ping() {
 void test_details_lines_and_tooltip() {
 	GsbServerEntry r = row(1, "Bravo", "G11", 4, 24, "COOP", "Y", "escalation");
 	r.msg = "Friday night co-op";
-	r.ver1 = "1.7.5.7";
+	r.ver1 = "3"; // JO's VER1
 	r.dedicated = "Y";
 	r.pb_server = "0";
 	r.region = "  ";
@@ -137,7 +137,8 @@ void test_details_lines_and_tooltip() {
 	CHECK(text.find("Message: Friday night co-op\n") != std::string::npos);
 	CHECK(text.find("Players: 4/24\n") != std::string::npos);
 	CHECK(text.find("Mod: escalation\n") != std::string::npos);
-	CHECK(text.find("Version: 1.7.5.7\n") != std::string::npos);
+	// VER1 is the protocol's NovaWorld value, no version a player reads: no line names it.
+	CHECK(text.find(": 3\n") == std::string::npos && text.find("Version") == std::string::npos);
 	CHECK(text.find("Dedicated server\n") != std::string::npos);
 	CHECK(text.find("Password protected\n") != std::string::npos);
 	CHECK(text.find("PunkBuster") == std::string::npos);

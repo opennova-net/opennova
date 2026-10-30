@@ -18,7 +18,116 @@ static int failures = 0;
         if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } \
     } while (0)
 
+// Pool_SetUsed can narrow the active row window without resizing storage.
+// Both the visited clear and the authority walk obey that window; the epilog
+// must not stamp a row beyond it either.
+// [orig: Pool_SetUsed @ 0x441F60; Entity_UpdateAllEntities @ 0x4C2100, used reads @ 0x4C2134 / @ 0x4C215E / @ 0x4C23A0]
+void test_entity_walk_used_window() {
+    World w;
+    w.registry.configure_pool(1, 9600);
+    Entity row;
+    row.kind = EntityKind::Item;
+    row.item_type_index = 1;
+    row.position = {10.0f, 20.0f, 30.0f};
+    const EntityHandle first = w.registry.spawn(1, row);
+    const EntityHandle outside = w.registry.spawn_at(EntityHandle::make(1, 3), row);
+    w.registry.set_pool_used(1, 1);
+    w.registry.get(outside)->pool1_visited = true;
+    TickContext ctx{};
+    ctx.world = &w;
+    ctx.is_authority = true;
+    w.update_all_entities(ctx);
+    CHECK(w.registry.get(first)->pool1_visited);
+    CHECK(w.registry.get(outside)->pool1_visited); // not cleared then skipped
+    CHECK(!w.registry.get(outside)->saved_live_valid);
+    w.registry.get(outside)->pool1_visited = false;
+    w.update_all_entities(ctx);
+    CHECK(!w.registry.get(outside)->pool1_visited);
+    w.epilog.screen_active = true;
+    w.update_all_entities(ctx);
+    CHECK(!w.registry.get(outside)->saved_live_valid);
+    w.epilog.screen_active = false;
+    w.registry.set_pool_used(1, 4);
+    w.update_all_entities(ctx);
+    CHECK(w.registry.get(outside)->pool1_visited);
+}
+
+// Every registry walk ends at the pool's used count, never its capacity: a row
+// the narrowing store leaves past it is outside the walks and the net-id find,
+// as in retail, and back in them once the count covers it again.
+// [orig: EntityPool_FindByNetId @0x4F0A20 - the used reads @0x4F0A2D /
+//  @0x4F0A68; Entity_ClearAllReferences @0x465670 - @0x465673 / @0x4656F0]
+void test_registry_walks_end_at_used() {
+    EntityRegistry r;
+    r.configure_pool(0, 2048);
+    r.configure_pool(1, 9600);
+    Entity row;
+    row.group_id = 5;
+    row.net_id = 300;
+    const EntityHandle inside = r.spawn(1, row);
+    row.net_id = 301;
+    const EntityHandle outside = r.spawn_at(EntityHandle::make(1, 3), row);
+    CHECK(r.pool_used(1) == 4);
+    r.set_pool_used(1, 1);
+    int pool_rows = 0;
+    r.for_each_in_pool(1, [&](const Entity &) { ++pool_rows; });
+    CHECK(pool_rows == 1);
+    int all_rows = 0;
+    r.for_each([&](const Entity &) { ++all_rows; });
+    CHECK(all_rows == 1);
+    CHECK(r.find_by_net_id(300) == inside);
+    CHECK(!r.find_by_net_id(301).valid());
+    std::vector<EntityHandle> group;
+    r.by_group(5, group);
+    CHECK(group.size() == 1 && group[0] == inside);
+    CHECK(r.get(outside) != nullptr); // still live, only unwalked
+    r.set_pool_used(1, 4);
+    CHECK(r.find_by_net_id(301) == outside);
+    r.by_group(5, group);
+    CHECK(group.size() == 2);
+}
+
+// The command walks stop at each pool's used count too: a live row past the
+// narrowing store takes no group team. [orig: Entity_SetTeamByNetId @0x43C680 -
+//  the used loads @0x43C698 (pool 2), @0x43C6C8 (0), @0x43C6F6 (1)]
+void test_command_walks_end_at_used() {
+    World w;
+    w.registry.configure_pool(1, 9600);
+    Entity row;
+    row.kind = EntityKind::Item;
+    row.group_id = 5;
+    row.team = 1;
+    const EntityHandle inside = w.registry.spawn(1, row);
+    const EntityHandle outside = w.registry.spawn_at(EntityHandle::make(1, 3), row);
+    w.registry.set_pool_used(1, 1);
+    CHECK(w.commands.set_group_team(5, 2) == 1);
+    CHECK(w.registry.get(inside)->team == 2);
+    CHECK(w.registry.get(outside)->team == 1);
+}
+
+// The script target walks read pool 3's used count: a marker the narrowing store
+// leaves past it is no target. [orig: WacCmd_SoundToTarget @0x4F7F60 - the used load
+// @0x4F7F73; EventAction_SpawnParticleEffect @0x4540E0 - @0x4540F6]
+void test_marker_walks_end_at_used() {
+    World w;
+    w.registry.configure_pool(3, 64);
+    Entity marker;
+    marker.kind = EntityKind::Marker;
+    marker.has_item_def = true;
+    marker.item_id = kParticleEffectMarkerTypeId;
+    marker.wp_number = 9;
+    w.registry.spawn_at(EntityHandle::make(3, 5), marker);
+    CHECK(w.commands.script_target(9) != nullptr);
+    w.registry.set_pool_used(3, 5);
+    CHECK(w.commands.script_target(9) == nullptr);
+    CHECK(w.commands.spawn_marker_particle_effects(9) == 0);
+}
+
 int main() {
+    test_entity_walk_used_window();
+    test_registry_walks_end_at_used();
+    test_command_walks_end_at_used();
+    test_marker_walks_end_at_used();
     World w;
     // The weather home starts unseeded, with retail's boot BSS: a 1024 m fog
     // reference/target, the 255.0 acceleration clamp, noon, clear weather.

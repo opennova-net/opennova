@@ -95,12 +95,20 @@
       </div>
 
       <div v-else class="sm:max-w-sm">
-        <label for="new-project-game" class="field-label">A game for</label>
-        <select id="new-project-game" v-model="form.game" :disabled="busy" :aria-invalid="errors.game ? 'true' : undefined" class="field">
+        <label for="new-project-game" class="field-label">Runs as</label>
+        <select
+          id="new-project-game"
+          v-model="form.game"
+          :disabled="busy"
+          :aria-invalid="errors.game ? 'true' : undefined"
+          :aria-describedby="form.game ? 'new-project-game-hint' : undefined"
+          class="field"
+        >
           <option v-if="titles.length === 0" value="" disabled>Nothing to pick</option>
-          <option v-for="t in titles" :key="t" :value="t">{{ titleName(t) }}</option>
+          <option v-for="t in titles" :key="t" :value="t">{{ titleOption(t) }}</option>
         </select>
         <p v-if="errors.game" class="mt-1 text-xs text-danger">{{ errors.game }}</p>
+        <p v-else-if="form.game" id="new-project-game-hint" class="mt-1 text-xs text-ink-muted">{{ playsWithLine(form.game) }}</p>
       </div>
 
       <ProjectLobbyPicker v-if="form.kind === 'game'" prefix="new-project" class="sm:max-w-sm"
@@ -146,7 +154,7 @@ import { useSession } from '../../composables/useSession';
 import { useUnsavedChanges } from '../../composables/useUnsavedChanges';
 import type { MyProjects, NewProject, ProjectVisibility } from '../../types/products';
 import type { Crumb } from '../../utils/adminNav';
-import { titleName } from '../../utils/games';
+import { lobbiesForTitle, playsWith, protocolWords, titleName } from '../../utils/games';
 import {
   KEY_HINT,
   NAME_MAX,
@@ -173,6 +181,17 @@ const router = useRouter();
 const { refresh: refreshSession, isAdmin } = useSession();
 
 const mine = ref<MyProjects | null>(null);
+// A title in the picker: its name and the protocol it speaks, "Joint Operations · JO protocol 16".
+function titleOption(title: string): string {
+  const protocol = protocolWords(mine.value?.protocols?.[title]);
+  return protocol ? `${titleName(title)} · ${protocol}` : titleName(title);
+}
+// Under the picker: whose rules and protocol it takes, and the titles it plays with (one protocol's).
+function playsWithLine(title: string): string {
+  const name = titleName(title);
+  const whose = /s$/i.test(name) ? `${name}'` : `${name}'s`;
+  return `Its rules and its protocol are ${whose}: it plays with ${playsWith(title, mine.value?.protocols)} players.`;
+}
 const loadError = ref('');
 const notice = ref('');
 const busy = ref(false);
@@ -198,7 +217,8 @@ const errors = ref<Partial<Record<Field, string>>>({});
 
 const bases = computed(() => mine.value?.games ?? []);
 const titles = computed(() => mine.value?.titles ?? []);
-const lobbies = computed(() => (mine.value?.lobbies ?? []).filter((lobby) => lobby.title === form.game));
+// The lobbies of the protocol the picked title speaks.
+const lobbies = computed(() => lobbiesForTitle(mine.value?.lobbies ?? [], form.game, mine.value?.protocols));
 watch(lobbies, (options) => {
   if (!options.some((lobby) => lobby.slug === form.lobby)) form.lobby = '';
 });

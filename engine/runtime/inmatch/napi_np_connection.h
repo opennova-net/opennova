@@ -1040,7 +1040,7 @@ struct UnstoppedServer {
 	// the host clock's: the 0x81's UT while host_running holds) and the 0x81's protocol words as
 	// the exit left them (identity, HK, SN, SF, P1 / P2, MP, SUS1 / SUS2): a 0x41 from any source
 	// reaches the held protocol's hello handler (receive_unstopped_server).
-	const TitleIdentity *identity = nullptr;
+	const Protocol *identity = nullptr;
 	uint32_t host_start_tick = 0;
 	ServerHello hello;
 	// A listen host's own client connection (+0xE60, type 2), held with its twin (the first node,

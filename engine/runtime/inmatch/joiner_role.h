@@ -138,9 +138,14 @@ public:
 	// The dialed socket and the host it reaches; null = socketless (every send
 	// dropped, nothing received — the headless tests).
 	void set_socket(opennova::IDatagramSocket *socket, const PeerAddr &host);
-	// The title identity every runtime this role creates speaks (ClientRuntime::set_title):
+	// The title's protocol every runtime this role creates speaks (ClientRuntime::set_protocol):
 	// configure before create_runtime. A runtime with none refuses to start.
-	void set_title(const TitleIdentity *title) { title_ = title; }
+	void set_protocol(const Protocol *protocol) { protocol_ = protocol; }
+	// The rules the title runs (world::title_rules), which the joiner's World (the bound kernel's
+	// and each one bind stamps) and every runtime's replica folds read (ClientRuntime::set_rules):
+	// configure before the mission load. A joiner's World reads none before they are set
+	// (world::SessionRules::title_rules).
+	void set_rules(const world::TitleRules &rules);
 	// The process-lived client words every runtime this role creates steps
 	// (ClientRuntime::use_process_state; null: each runtime its own): the 0x4C report
 	// count runs free across joins and missions as retail's global does (D-NET-602).
@@ -566,7 +571,8 @@ private:
 
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};
-	const TitleIdentity *title_ = nullptr; // set_title
+	const Protocol *protocol_ = nullptr; // set_protocol
+	const world::TitleRules *rules_ = nullptr; // set_rules
 	ClientProcessState *client_process_ = nullptr; // use_process_state
 	ServerLogs server_logs_{};                     // set_server_logs
 	PeerAddr local_address_{};                     // set_local_address

@@ -27,8 +27,7 @@
 //  Entity_UpdateAllEntities call @0x52674B; NetPacket_WritePlayerState --
 //  (+89912 & 0x10) @0x4FF7B8]
 #include <runtime/inmatch/host_role.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
@@ -55,7 +54,7 @@
 #include <string>
 #include <vector>
 
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -84,7 +83,7 @@ uint32_t mission_game_type(const bms::File &mission) {
 inmatch::HostBringup single_player_bringup(uint32_t game_type,
 		inmatch::ClientProcessState *process = nullptr) {
 	inmatch::HostConfig cfg;
-	cfg.title = &kJo;
+	cfg.protocol = &kJo;
 	cfg.config.server_name = "SINGLEPLAYERGAME";
 	cfg.config.max_players = 1;
 	cfg.config.game_type = game_type;
@@ -99,7 +98,7 @@ inmatch::HostBringup single_player_bringup(uint32_t game_type,
 // A Serve Only host's bring-up record (a LAN session, no local player), over `process`.
 inmatch::HostBringup serve_only_bringup(uint32_t game_type, inmatch::ClientProcessState *process) {
 	inmatch::HostConfig cfg;
-	cfg.title = &kJo;
+	cfg.protocol = &kJo;
 	cfg.config.server_name = "serve_only";
 	cfg.config.max_players = 4;
 	cfg.config.game_type = game_type;
@@ -196,7 +195,7 @@ void run_held_host() {
 			zone->is_spawn_point = true;
 		}
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "mission_start";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -322,7 +321,7 @@ void run_own_join_warms_the_wired_body() {
 	CHECK(options.game_type == game_type::kDeathmatch);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "own_join_warm_up";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -397,7 +396,7 @@ void run_own_mission_start_submits_its_kit() {
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "own_kit_pair";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -462,7 +461,7 @@ void run_single_player_mission_start_submits_no_kit() {
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "SINGLEPLAYERGAME";
 		cfg.config.max_players = 1;
 		cfg.config.game_type = options.game_type;
@@ -508,7 +507,7 @@ void run_first_round_init_seeds_the_own_buffer() {
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
-		cfg.title = &kJo;
+		cfg.protocol = &kJo;
 		cfg.config.server_name = "own_buffer_seed";
 		cfg.config.max_players = 4;
 		cfg.config.game_type = options.game_type;
@@ -525,7 +524,7 @@ void run_first_round_init_seeds_the_own_buffer() {
 					host.host_owner.ctx.np_protocol.connection_list)
 				if (conn.type == inmatch::NapiNPConnection::kTypeClientSide)
 					add_seeded_nothing = conn.reply.loadout_buffer.entries.empty();
-			kernel.local.loadout.spawn_kit() = w::weapon_kit_default(kernel.world.rules.title);
+			kernel.local.loadout.spawn_kit() = w::weapon_kit_default(kernel.world.rules.title());
 			round_init();
 		};
 	};
@@ -652,7 +651,7 @@ void run_single_player_class_is_the_missions_type() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "SINGLEPLAYERGAME";
 			cfg.config.max_players = 1;
 			cfg.config.game_type = options.game_type;
@@ -764,7 +763,7 @@ void run_single_player_restart_keeps_the_uptime_stamp() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
-			cfg.title = &kJo;
+			cfg.protocol = &kJo;
 			cfg.config.server_name = "SINGLEPLAYERGAME";
 			cfg.config.max_players = 1;
 			cfg.config.game_type = options.game_type;

@@ -25,8 +25,7 @@
 // test thread leases its own for every direct read or write.
 
 #include "admin_tcp_server.h"
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include "accounts/account_jobs.h"
 #include "accounts/auth.h"
 #include "accounts/mailer.h"
@@ -115,8 +114,13 @@
 #include <utility>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+static const opennova::cdkey::KeyChains &dfx2_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
+
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -231,7 +235,7 @@ int64_t seed_tree(opennova::db::Database &db, int64_t product_id, const std::str
 	namespace hosted = opennova::novaworld_server::hosted;
 	const int64_t id = hosted::create_tree(db, product_id, std::nullopt, "harness");
 	hosted::TreeReady ready;
-	ready.files = { { "resource.pff", 1000 }, { "version.txt", 20 } };
+	ready.files = { { "resource.pff", 1000 }, { "localres.pff", 20 } };
 	for (const std::string &m : missions) ready.missions.push_back({ m, "Map " + m });
 	ready.version_text = version;
 	ready.bytes = 1020;
@@ -2050,6 +2054,11 @@ int test_joiner_routes_admin_only(Harness &h) {
 	for (const auto &e : json["hosts"]) {
 		if (e["rid"].i() != kRid) continue;
 		seen = true;
+		// The protocol of the lobby it lists in (JO's), and no VER1 (a protocol's, never a
+		// version).
+		TEST_EXPECT(!e.has("ver1"));
+		TEST_EXPECT(str(e["protocol"]["code"]) == "jo" && str(e["protocol"]["name"]) == "JO" &&
+				str(e["protocol"]["version"]) == "16");
 		TEST_EXPECT(e["player_list"].size() == 1);
 		const auto &p = e["player_list"][0];
 		TEST_EXPECT(str(p["nwhandle"]) == "joiner_seen");
@@ -2090,9 +2099,11 @@ int test_menu_urls_name_bound_port(Harness &h) {
 	return 0;
 }
 
-// One lobby per title, over HTTP. /api/games lists every games row; each
+// One lobby per gate tag, keyed by protocol, over HTTP. /api/games lists every
+// games row with the protocol its clients speak ({code, name, version}); each
 // row's .gsb route lists the hosts registered under its LobbyName alone, a
-// column they reported nothing for showing the row's VER1 / Expbits; and a
+// column they reported nothing for showing its protocol's VER1 and the row's
+// Expbits; and a
 // retail page's GSB_SERVER is the requesting client's game's: the gate tag
 // /nwprepare.dll carries (and echoes as the GT cookie), else the GT cookie,
 // else the NWPF cookie's product family, else the page's prefix, else JO's.
@@ -2106,8 +2117,14 @@ int test_lobby_per_title(Harness &h) {
 	TEST_EXPECT(str(games["games"][0]["slug"]) == "acidgambit_0_consumer");
 	TEST_EXPECT(str(games["games"][0]["gateTag"]) == "acidgambit:0");
 	TEST_EXPECT(str(games["games"][0]["lobbyName"]) == "acidgambit_0_consumer");
-	TEST_EXPECT(str(games["games"][0]["title"]) == "jo");
-	TEST_EXPECT(str(games["games"][1]["title"]) == "dfx2");
+	const char *const protocols[][2] = { { "jo", "JO" }, { "dfx2", "DFX2" }, { "jo", "JO" } };
+	for (size_t i = 0; i < 3; ++i) {
+		const auto &game = games["games"][i];
+		TEST_EXPECT(!game.has("title") && !game.has("ver1") && !game.has("ver2"));
+		TEST_EXPECT(str(game["protocol"]["code"]) == protocols[i][0] &&
+				str(game["protocol"]["name"]) == protocols[i][1] &&
+				str(game["protocol"]["version"]) == "16");
+	}
 
 	// One host per lobby, none reporting VER1 or Expbits.
 	struct Listed {
@@ -2168,11 +2185,11 @@ int test_lobby_per_title(Harness &h) {
 	// A lobby added since the start, as an account's own game's first publish adds one (OP: Acid
 	// Gambit's columns under its own tag): its .gsb lists its host, its pages name its .gsb.
 	h.pool.acquire()->exec(
-			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
-			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
-			"glsvss_request, glsvss_rims, glsvss_agrms) "
-			"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', title, "
-			"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, pfid, "
+			"INSERT INTO games (slug, display_name, lobby_name, gate_tag, protocol, start_page, "
+			"host_page, gsb_path, join_lan_url, exp_bits, pfid, startup_query, glsvss_request, "
+			"glsvss_rims, glsvss_agrms) "
+			"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', protocol, "
+			"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, exp_bits, pfid, "
 			"startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
 			"WHERE slug = 'acidgambit_0_consumer';");
 	{
@@ -2404,7 +2421,7 @@ int test_dfx2_client_path(Harness &h) {
 	jar.keep(reply);
 	// An activated copy (dfx2_activation covers one that is not): the wire key its boot read
 	// decoded and its machine's fingerprint, the browser variables its NovaWorld connect set.
-	jar.cookies["NWCDKIID"] = opennova::cdkey::make_wire_key("DFX2-PATH-0001");
+	jar.cookies["NWCDKIID"] = opennova::cdkey::make_wire_key(dfx2_chains(), "DFX2-PATH-0001");
 	jar.cookies["NWCDKIIDEXP1"] = "";
 	jar.cookies["NWPSSK"] = "ABCDEFGHIJKLMNOPQRSTUVW";
 
@@ -2597,8 +2614,8 @@ int test_cd_key_routes(Harness &h) {
 		for (size_t i = 4; i < serial.size(); i += 5)
 			TEST_EXPECT(serial[i] == '-');
 		std::string inner;
-		TEST_EXPECT(str(k["wire_key"]) == cdkey::make_wire_key(serial));
-		TEST_EXPECT(cdkey::decode_wire_key(str(k["wire_key"]), inner) && inner == serial);
+		TEST_EXPECT(str(k["wire_key"]) == cdkey::make_wire_key(dfx2_chains(), serial));
+		TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), str(k["wire_key"]), inner) && inner == serial);
 		TEST_EXPECT(str(k["title"]) == "dfx2" && str(k["state"]) == "unassigned");
 		TEST_EXPECT(k["account"].t() == crow::json::type::Null &&
 				k["assigned_at"].t() == crow::json::type::Null);
@@ -2664,7 +2681,7 @@ int test_cd_key_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 201 && activated && !activated["reactivated"].b());
 	const std::string nwact = str(activated["nwact"]);
 	std::string wire;
-	TEST_EXPECT(cdkey::read_activation(nwact, kMachine, wire) &&
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact, kMachine, wire) &&
 			wire == str(made["keys"][0]["wire_key"]));
 	TEST_EXPECT(activated["key"]["activations"].i() == 1);
 	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
@@ -2908,11 +2925,11 @@ int test_dfx2_activation(Harness &h) {
 			!nwact_a.empty() && minted.size() > 5 && minted.substr(minted.size() - 5) == "|auto");
 	const std::string wire_key = minted.substr(0, minted.size() - 5);
 	std::string recovered;
-	TEST_EXPECT(cdkey::read_activation(nwact_a, kMachineA, recovered) && recovered == wire_key);
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_a, kMachineA, recovered) && recovered == wire_key);
 	std::string serial;
-	TEST_EXPECT(cdkey::decode_wire_key(recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
+	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
 	// Only that machine reads it.
-	TEST_EXPECT(!cdkey::read_activation(nwact_a, kMachineB, recovered));
+	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), nwact_a, kMachineB, recovered));
 
 	// The same machine again: the same NWACT, no second key; another machine its own.
 	login = retail_login(
@@ -2926,7 +2943,7 @@ int test_dfx2_activation(Harness &h) {
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
 	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
-	TEST_EXPECT(cdkey::read_activation(nwact_b, kMachineB, recovered) && recovered == wire_key);
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_b, kMachineB, recovered) && recovered == wire_key);
 	TEST_EXPECT(h.pool.acquire()
 						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
 								"= a.key_id "
@@ -2945,7 +2962,7 @@ int test_dfx2_activation(Harness &h) {
 	// with no key of ours: the login page, no NWACT and nothing minted.
 	const int64_t keyed = make_account(h, "act_keyed", "pw-act-keyed");
 	login = retail_login(minting.bound_port(), "act_keyed", "pw-act-keyed",
-			{ { "NWCDKIID", cdkey::make_wire_key("RETAIL-KEYED-COPY") }, { "NWCDKIIDEXP1", "" },
+			{ { "NWCDKIID", cdkey::make_wire_key(dfx2_chains(), "RETAIL-KEYED-COPY") }, { "NWCDKIIDEXP1", "" },
 					{ "NWPSSK", kMachineB } },
 			true);
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
@@ -3003,7 +3020,7 @@ int test_dfx2_activation(Harness &h) {
 					.code == 200);
 	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
 			unactivated(kMachineB), true);
-	TEST_EXPECT(cdkey::read_activation(
+	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), 
 			set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
 	TEST_EXPECT(recovered == str(key["keys"][0]["wire_key"]));
 
@@ -5985,15 +6002,16 @@ int test_hosted_server_routes(Harness &h) {
 	const Owner fay = owner("hosted_fay", "10.51.0.6");
 	const Owner gus = owner("hosted_gus", "10.51.0.7");
 	const Owner hal = owner("hosted_hal", "10.51.0.8");
-	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus, &hal })
+	const Owner ivy = owner("hosted_ivy", "10.51.0.9");
+	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus, &hal, &ivy })
 		TEST_EXPECT(o->id > 0 && !o->session.empty());
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
 	// header) draws nothing. Ana draws exactly six below (three starts, three
 	// stops), Dee six (the refused settings, then not_entitled), Eve four and Gus
 	// four (the product refusals, then an expansion start with no entitlement),
-	// Hal two (the NovaLogic listing's refusals), the others fewer: add a draw to
-	// one of them and it must move to a new account.
+	// Hal six (the NovaLogic and network-setting refusals), Ivy four (types/overflow),
+	// the others fewer: add a draw to one and it must move to a new account.
 
 	auto start = [&h](const Owner &o, const std::string &body, bool csrf = true) {
 		std::vector<std::string> headers = { kJson, with_session(o.session) };
@@ -6024,7 +6042,7 @@ int test_hosted_server_routes(Harness &h) {
 	};
 	const std::string settings =
 			"{\"game_name\":\"Ana's Server\",\"expansion_id\":null,\"max_players\":16,"
-			"\"missions\":[\"first.bms\",\"second.bms\"]}";
+			"\"rotation\":[{\"file\":\"first.bms\",\"swap_sides\":false},{\"file\":\"second.bms\",\"swap_sides\":false}]}";
 
 	// Logged out: 401; no CSRF header on a state change: 403, before any bucket.
 	TEST_EXPECT(h.send("GET", "/api/me/servers").code == 401);
@@ -6044,7 +6062,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(json["entitlement"]["tier"].t() == crow::json::type::Null && !json["entitlement"]["granted"].b());
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
 	// The products with data, bases by id (Joint Operations first; OpenNova's
-	// has no tree, so it is not offered): each one's id, name, title, version,
+	// has no tree, so it is not offered): each one's id, name, title, protocol, version,
 	// its tree's missions (the site's picker and the default rotation), its
 	// title's limits and its expansions with data.
 	TEST_EXPECT(json.has("products") && json["products"].size() == 2);
@@ -6052,21 +6070,23 @@ int test_hosted_server_routes(Harness &h) {
 		const auto &jo = json["products"][0];
 		const auto &dfx2 = json["products"][1];
 		TEST_EXPECT(jo["id"].i() == h.jo_id && str(jo["display_name"]) == "Joint Operations" &&
-				str(jo["title"]) == "jo" && str(jo["version"]) == "JO V1.7.5.3");
+				str(jo["title"]) == "jo" && str(jo["version"]) == "1.7.5.3");
+		TEST_EXPECT(str(jo["protocol"]["code"]) == "jo" && str(jo["protocol"]["name"]) == "JO" &&
+				str(jo["protocol"]["version"]) == "16");
 		TEST_EXPECT(jo["missions"].size() == 4 && str(jo["missions"][0]["file"]) == "a.bms" &&
 				str(jo["missions"][0]["title"]) == "Map a.bms" && str(jo["missions"][3]["file"]) == "second.bms");
 		TEST_EXPECT(jo["expansions"].size() == 1 && jo["expansions"][0]["id"].i() == h.jox_id &&
 				str(jo["expansions"][0]["code"]) == "jox01" &&
 				str(jo["expansions"][0]["display_name"]) == "Escalation" &&
-				str(jo["expansions"][0]["version"]) == "JOX V1.0" && jo["expansions"][0]["missions"].size() == 1 &&
+				str(jo["expansions"][0]["version"]) == "1.0" && jo["expansions"][0]["missions"].size() == 1 &&
 				str(jo["expansions"][0]["missions"][0]["file"]) == "escal.bms");
-		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 2 && jo["limits"]["max_players"]["max"].i() == 64);
-		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == 500 && jo["limits"]["start_delay"]["min"].i() == 0);
+		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 1 && jo["limits"]["max_players"]["max"].i() == 64);
+		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == INT32_MAX && jo["limits"]["start_delay"]["min"].i() == INT32_MIN);
 		TEST_EXPECT(dfx2["id"].i() == h.dfx2_id && str(dfx2["display_name"]) == "Delta Force Xtreme 2" &&
-				str(dfx2["title"]) == "dfx2");
+				str(dfx2["title"]) == "dfx2" && str(dfx2["protocol"]["code"]) == "dfx2");
 		TEST_EXPECT(dfx2["expansions"].size() == 0);
 		TEST_EXPECT(dfx2["missions"].size() == 2 && str(dfx2["missions"][1]["file"]) == "dfx2_b.bms");
-		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == 300);
+		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == INT32_MAX);
 		TEST_EXPECT(dfx2["limits"]["max_players"]["max"].i() == 100);
 	}
 	TEST_EXPECT(!json.has("default_missions"));
@@ -6082,11 +6102,11 @@ int test_hosted_server_routes(Harness &h) {
 		const char *field;
 	};
 	const Refused refused[] = {
-		{ "{\"game_name\":\"\",\"missions\":[\"a.bms\"]}", "invalid_settings", "game_name" },
-		{ "{\"game_name\":\"x\",\"max_players\":99,\"missions\":[\"a.bms\"]}", "invalid_settings",
+		{ "{\"game_name\":\"\",\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}]}", "invalid_settings", "game_name" },
+		{ "{\"game_name\":\"x\",\"max_players\":99,\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}]}", "invalid_settings",
 				"max_players" },
-		{ "{\"game_name\":\"x\",\"missions\":[\"../a.bms\"]}", "invalid_settings", "missions" },
-		{ "{\"game_name\":\"x\",\"max_players\":\"16\"}", "invalid_field", "" },
+		{ "{\"game_name\":\"x\",\"rotation\":[{\"file\":\"../a.bms\",\"swap_sides\":false}]}", "invalid_settings", "missions" },
+		{ "{\"game_name\":\"x\",\"max_players\":\"16\"}", "invalid_settings", "max_players" },
 		{ "not json", "invalid_json", "" },
 	};
 	for (const Refused &r : refused) {
@@ -6098,12 +6118,29 @@ int test_hosted_server_routes(Harness &h) {
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
 	// A NovaLogic listing this service does not offer, and a mistyped one (Hal's two draws).
-	reply = start(hal, "{\"game_name\":\"x\",\"missions\":[\"a.bms\"],\"list_on_novalogic\":true}");
+	reply = start(hal, "{\"game_name\":\"x\",\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}],\"list_on_novalogic\":true}");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_settings" && json &&
 			str(json["field"]) == "list_on_novalogic" && json.has("message"));
 	reply = start(hal, "{\"game_name\":\"x\",\"list_on_novalogic\":\"yes\"}");
-	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_settings");
+	const Refused tuning_refused[] = {
+		{ "{\"game_name\":\"x\",\"send_holdoff_ticks\":256}", "invalid_settings", "send_holdoff_ticks" },
+		{ "{\"game_name\":\"x\",\"entity_send_budget\":99}", "invalid_settings", "entity_send_budget" },
+		{ "{\"game_name\":\"x\",\"max_packet_size\":16385}", "invalid_settings", "max_packet_size" },
+		{ "{\"game_name\":\"x\",\"lock_framerate\":1}", "invalid_settings", "lock_framerate" },
+		{ "{\"game_name\":\"x\",\"send_holdoff_ticks\":\"12\"}", "invalid_settings", "send_holdoff_ticks" },
+		{ "{\"game_name\":\"x\",\"entity_send_budget\":true}", "invalid_settings", "entity_send_budget" },
+		{ "{\"game_name\":\"x\",\"max_packet_size\":1300.5}", "invalid_settings", "max_packet_size" },
+		{ "{\"game_name\":\"x\",\"send_holdoff_ticks\":4294967296}", "invalid_settings", "send_holdoff_ticks" },
+	};
+	for (size_t i = 0; i < std::size(tuning_refused); ++i) {
+		const auto &r = tuning_refused[i];
+		reply = start(i < 4 ? hal : ivy, r.body);
+		json = crow::json::load(body_text(reply));
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
+		TEST_EXPECT(json && str(json["field"]) == r.field);
+	}
 	// A valid start with no entitlement.
 	reply = start(dee, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
@@ -6118,13 +6155,13 @@ int test_hosted_server_routes(Harness &h) {
 		const char *field;
 	};
 	const RefusedBody product_refused[] = {
-		{ "{\"product_id\":999999,\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "product_id" },
-		{ "{\"product_id\":" + on + ",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "product_id" },
+		{ "{\"product_id\":999999,\"game_name\":\"x\",\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}]}", "invalid_settings", "product_id" },
+		{ "{\"product_id\":" + on + ",\"game_name\":\"x\",\"rotation\":[{\"file\":\"a.bms\",\"swap_sides\":false}]}", "invalid_settings", "product_id" },
 		{ "{\"product_id\":" + dfx2 + ",\"game_name\":\"x\",\"expansion_id\":" + jox + "}", "invalid_settings",
 				"expansion_id" },
-		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"escal.bms\"]}", "invalid_settings", "missions" },
-		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"dfx2_a.bms\"]}", "invalid_settings", "missions" },
-		{ "{\"product_id\":\"" + jo + "\",\"game_name\":\"x\"}", "invalid_field", "" },
+		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"rotation\":[{\"file\":\"escal.bms\",\"swap_sides\":false}]}", "invalid_settings", "missions" },
+		{ "{\"product_id\":" + jo + ",\"game_name\":\"x\",\"rotation\":[{\"file\":\"dfx2_a.bms\",\"swap_sides\":false}]}", "invalid_settings", "missions" },
+		{ "{\"product_id\":\"" + jo + "\",\"game_name\":\"x\"}", "invalid_settings", "product_id" },
 		{ "{\"game_name\":\"x\",\"own_machine\":1}", "invalid_field", "" },
 	};
 	size_t refusals = 0;
@@ -6140,7 +6177,7 @@ int test_hosted_server_routes(Harness &h) {
 	// Escalation's missions count with the expansion picked (the rotation then
 	// spans both), refused past the settings at the entitlement: gus has none yet.
 	reply = start(gus, "{\"product_id\":" + jo + ",\"expansion_id\":" + jox +
-							",\"game_name\":\"x\",\"missions\":[\"first.bms\",\"escal.bms\"]}");
+							",\"game_name\":\"x\",\"rotation\":[{\"file\":\"first.bms\",\"swap_sides\":false},{\"file\":\"escal.bms\",\"swap_sides\":false}]}");
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
 
 	// The comp grants: admin only (the token, or an admin session with the CSRF
@@ -6182,6 +6219,10 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
 	TEST_EXPECT(json["server"]["settings"].has("list_on_novalogic") &&
 			!json["server"]["settings"]["list_on_novalogic"].b());
+	TEST_EXPECT(json["server"]["settings"]["send_holdoff_ticks"].i() == 12 &&
+			json["server"]["settings"]["entity_send_budget"].i() == 600 &&
+			json["server"]["settings"]["max_packet_size"].i() == 1300 &&
+			json["server"]["settings"]["lock_framerate"].b());
 	// Not asked to list on NovaLogic's NovaWorld: no state of one.
 	TEST_EXPECT(json["server"].has("novalogic") &&
 			json["server"]["novalogic"].t() == crow::json::type::Null);
@@ -6201,8 +6242,8 @@ int test_hosted_server_routes(Harness &h) {
 	// first start pins it; nothing asked.
 	TEST_EXPECT(json["server"]["update_available"].b() && !json["server"]["update_requested"].b());
 	TEST_EXPECT(json["server"]["settings"]["max_players"].i() == 16);
-	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2);
-	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "first.bms");
+	TEST_EXPECT(json["server"]["settings"]["rotation"].size() == 2);
+	TEST_EXPECT(str(json["server"]["settings"]["rotation"][0]["file"]) == "first.bms");
 	TEST_EXPECT(json["server"]["listing"].t() == crow::json::type::Null);
 	reply = one(ana, ana_first);
 	json = crow::json::load(body_text(reply));
@@ -6216,15 +6257,25 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 	// The second takes every mission of its product's tree when it names none
 	// (with Escalation, the expansion's after the base's).
-	reply = start(ana, "{\"game_name\":\"Ana's Second\",\"expansion_id\":" + jox + "}");
+	reply = start(ana, "{\"game_name\":\"Ana's Second\",\"expansion_id\":" + jox +
+			",\"send_holdoff_ticks\":0,\"entity_send_budget\":1000,\"max_packet_size\":1200,\"lock_framerate\":false}");
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["missions"].size() == 5);
-	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "a.bms" &&
-			str(json["server"]["settings"]["missions"][4]) == "escal.bms");
+	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["rotation"].size() == 5);
+	TEST_EXPECT(str(json["server"]["settings"]["rotation"][0]["file"]) == "a.bms" &&
+			str(json["server"]["settings"]["rotation"][4]["file"]) == "escal.bms");
 	TEST_EXPECT(json["server"]["settings"]["expansion_id"].i() == h.jox_id &&
 			json["server"]["expansion"]["id"].i() == h.jox_id && str(json["server"]["expansion"]["code"]) == "jox01" &&
 			str(json["server"]["expansion_display_name"]) == "Escalation");
 	const int64_t ana_second = json["server"]["id"].i();
+	TEST_EXPECT(json["server"]["settings"]["send_holdoff_ticks"].i() == 0 &&
+			json["server"]["settings"]["entity_send_budget"].i() == 1000 &&
+			json["server"]["settings"]["max_packet_size"].i() == 1200 &&
+			!json["server"]["settings"]["lock_framerate"].b());
+	const auto saved_tuning = crow::json::load(body_text(one(ana, ana_second)));
+	TEST_EXPECT(saved_tuning && saved_tuning["server"]["settings"]["send_holdoff_ticks"].i() == 0 &&
+			saved_tuning["server"]["settings"]["entity_send_budget"].i() == 1000 &&
+			saved_tuning["server"]["settings"]["max_packet_size"].i() == 1200 &&
+			!saved_tuning["server"]["settings"]["lock_framerate"].b());
 	// The third: every shared server the grant allows is live.
 	reply = start(ana, settings);
 	json = crow::json::load(body_text(reply));
@@ -6247,8 +6298,8 @@ int test_hosted_server_routes(Harness &h) {
 	// Delta Force Xtreme 2's server takes its tree's missions.
 	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["product_id"].i() == h.dfx2_id);
 	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Delta Force Xtreme 2");
-	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2 &&
-			str(json["server"]["settings"]["missions"][0]) == "dfx2_a.bms");
+	TEST_EXPECT(json["server"]["settings"]["rotation"].size() == 2 &&
+			str(json["server"]["settings"]["rotation"][0]["file"]) == "dfx2_a.bms");
 	const int64_t cy_server = json["server"]["id"].i();
 	TEST_EXPECT(crow::json::load(body_text(list(ana)))["full"].b());
 	reply = start(fay, "{\"game_name\":\"Fay's\"}");
@@ -6346,7 +6397,7 @@ int test_hosted_server_routes(Harness &h) {
 	json = crow::json::load(body_text(one(ana, ana_second)));
 	TEST_EXPECT(!json["server"]["update_requested"].b() && !json["server"]["update_available"].b());
 	TEST_EXPECT(json["server"]["data"]["base"]["tree_id"].i() == h.jo_tree &&
-			str(json["server"]["data"]["base"]["version"]) == "JO V1.7.5.3" &&
+			str(json["server"]["data"]["base"]["version"]) == "1.7.5.3" &&
 			json["server"]["data"]["expansion"]["tree_id"].i() == h.jox_tree);
 	TEST_EXPECT(h.send("POST", "/api/admin/hosted/update-all", { with_session(ana.session), kCsrf }).code == 403);
 	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"product_id\":" + jo + "}");
@@ -6403,14 +6454,10 @@ int test_hosted_server_routes(Harness &h) {
 	{
 		auto db = h.pool.acquire();
 		for (int i = 0; i < 12; ++i) {
-			db->exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, "
-					 "kill_limit, max_score, respawn, start_delay, missions, ended_at) "
-					 "VALUES ($1, 'stopped', $2, 8, 30, 50, 5, 5, 0, 'a.bms', now());",
+			db->exec("INSERT INTO hosted_servers (owner_user_id, state, ended_at, configuration) VALUES ($1, 'stopped', now(), jsonb_build_object('game_name', $2::text, 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false))));",
 					{ opennova::db::BindValue(gus.id), opennova::db::BindValue("Gus ended " + std::to_string(i)) });
 		}
-		db->exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, "
-				 "kill_limit, max_score, respawn, start_delay, missions) "
-				 "VALUES ($1, 'running', 'Gus live', 8, 30, 50, 5, 5, 0, 'a.bms');",
+		db->exec("INSERT INTO hosted_servers (owner_user_id, state, configuration) VALUES ($1, 'running', jsonb_build_object('game_name', 'Gus live', 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false))));",
 				{ opennova::db::BindValue(gus.id) });
 	}
 	json = crow::json::load(body_text(list(gus)));
@@ -6834,6 +6881,8 @@ public:
 		} else if (is(0, "GET") && is(1, "GAMESETTINGS")) {
 			replies.emplace_back("AutoBalanceOnRecycle = 1\nServerName           = Console Test\n"
 								 "ServerPassword       = s3cret\n");
+		} else if (is(0, "SET")) {
+			replies.emplace_back("OK - Setting Changed.");
 		} else if (is(0, "PLAYER") && is(1, "LIST")) {
 			if (!in_game) {
 				replies.emplace_back("ERROR - Not in Game State.");
@@ -7139,9 +7188,11 @@ int test_admin_fleet_routes(Harness &h) {
 		TEST_EXPECT((*r)["players"].i() == 5 && (*r)["listing"]["rid"].i() == static_cast<int64_t>(rid));
 		TEST_EXPECT(str((*r)["listing"]["game_type"]) == "TDM");
 		TEST_EXPECT(str((*r)["state"]) == "running" && (*r)["generation"].i() == 1);
-		// Its game: the product's key and gameprofile title beside its name.
+		// Its game: the product's key, title and the protocol it speaks beside its name.
 		TEST_EXPECT((*r)["product"]["id"].i() == h.jo_id && str((*r)["product"]["key"]) == "JO" &&
 				str((*r)["product"]["title"]) == "jo" &&
+				str((*r)["product"]["protocol"]["code"]) == "jo" &&
+				str((*r)["product"]["protocol"]["version"]) == "16" &&
 				str((*r)["product"]["display_name"]) == "Joint Operations");
 	}
 	const crow::json::rvalue *w = server_in(json["servers"], waiting);
@@ -7710,6 +7761,10 @@ int test_hosted_console_routes(Harness &h) {
 	settings.product_id = h.jo_id;
 	settings.game_name = "Console Test";
 	settings.missions = { "alpha.bms" };
+	settings.send_holdoff_ticks = 0;
+	settings.entity_send_budget = 1000;
+	settings.max_packet_size = 1200;
+	settings.lock_framerate = false;
 	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, offered(h), 10,
 			nws::wall_now_s());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
@@ -8072,6 +8127,48 @@ int test_hosted_console_routes(Harness &h) {
 	}
 
 	// Stopping: refused before the link, the console still read.
+	// The expanded routes enforce ownership and CSRF, and persist accepted TCP
+	// edits in the fleet independently of the caller's HTTP lifetime.
+	TEST_EXPECT(get(me + "/settings", {with_session(other_s)}).code == 404);
+	TEST_EXPECT(post(me + "/command", {with_session(owner_s)}, R"({"command":"SET KillLimit 500"})").code == 403);
+	reply = post(base + "/command", {kBearer}, R"({"command":"SET KillLimit 500"})");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json["configuration_saved"].b());
+	const auto revision = json["settings_revision"].i();
+	const auto after_live_edit = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(after_live_edit->settings.kill_limit == 500 &&
+			after_live_edit->settings.send_holdoff_ticks == 0 &&
+			after_live_edit->settings.entity_send_budget == 1000 &&
+			after_live_edit->settings.max_packet_size == 1200 && !after_live_edit->settings.lock_framerate);
+	const std::string edit_body = "{\"settings_revision\":" + std::to_string(revision) +
+			",\"patch\":{\"send_holdoff_ticks\":2,\"entity_send_budget\":900,\"max_packet_size\":1250,"
+			"\"lock_framerate\":true,\"options\":{\"server_message\":\"Next launch\",\"replay\":false}}}";
+	reply = h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body);
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["configuration_saved"].b());
+	const auto persisted = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(persisted->settings.options.get_string("server_message", "") == "Next launch");
+	TEST_EXPECT(!persisted->settings.options.get_bool("replay", true));
+	TEST_EXPECT(persisted->settings.send_holdoff_ticks == 2 && persisted->settings.entity_send_budget == 900 &&
+			persisted->settings.max_packet_size == 1250 && persisted->settings.lock_framerate);
+	TEST_EXPECT(h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body).code == 409);
+	// A short-lived caller stops waiting after send; the drain still saves the reply.
+	fake.delay("SET KillLimit", 950);
+	hosted::AdminCommandOptions durable_options;
+	durable_options.record = true;
+	const auto timed = hosted::run_console_command(h.pool, id, "SET KillLimit 42", durable_options, std::chrono::milliseconds(100));
+	TEST_EXPECT(timed.delivery_unknown);
+	TEST_EXPECT(wait_until([&] { return hosted::find_server(*h.pool.acquire(),id)->settings.kill_limit == 42; }, 3000));
+	const auto after_delayed_edit = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(after_delayed_edit->settings.send_holdoff_ticks == 2 &&
+			after_delayed_edit->settings.entity_send_budget == 900 &&
+			after_delayed_edit->settings.max_packet_size == 1250 && after_delayed_edit->settings.lock_framerate);
+	fake.delay("", 0);
+	const auto sent_lines = fake.lines();
+	TEST_EXPECT(std::count(sent_lines.begin(),sent_lines.end(),"SET KillLimit 42") == 1);
+	reply = post(base + "/command", {kBearer}, R"({"command":"QUIT"})");
+	TEST_EXPECT(reply.code == 200);
+	TEST_EXPECT(wait_until([&] { return h.links->find(id)->status().state == hosted::AdminLinkState::Up; }, 5000));
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(),id)->state == hosted::State::Running);
 	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test",
 			hosted::StartCause::OwnerStop));
 	reply = get(me + "/players", as_owner);
@@ -9656,9 +9753,9 @@ int with_harness(const char *part) {
 			jox_id = product_named(*db, "Escalation");
 			dfx2_id = product_named(*db, "Delta Force Xtreme 2");
 			on_id = product_named(*db, "OP: Acid Gambit");
-			jo_tree = seed_tree(*db, jo_id, "JO V1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
-			jox_tree = seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" });
-			dfx2_tree = seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });
+			jo_tree = seed_tree(*db, jo_id, "1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
+			jox_tree = seed_tree(*db, jox_id, "1.0", { "escal.bms" });
+			dfx2_tree = seed_tree(*db, dfx2_id, "1.0", { "dfx2_a.bms", "dfx2_b.bms" });
 			TEST_EXPECT(jo_id > 0 && jox_id > 0 && dfx2_id > 0 && on_id > 0 && jo_tree > 0 && jox_tree > 0 &&
 					dfx2_tree > 0);
 		}

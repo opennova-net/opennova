@@ -2,7 +2,6 @@
 
 #include <runtime/world/angle.h>
 #include <runtime/world/ai.h>           // AiSystem, AiEntity
-#include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/geom.h>         // to_fixed
 #include <runtime/world/infantry.h>     // anim_state
@@ -33,7 +32,7 @@ uint8_t player_spawn_equipped_default(const World &world) {
     if (list != nullptr && list->set) {
         if (!list->entries.empty()) first = list->entries.front().name;
     } else {
-        const std::vector<WeaponKitEntry> initializer = weapon_kit_default(world.rules.title);
+        const std::vector<WeaponKitEntry> initializer = weapon_kit_default(world.rules.title());
         if (!initializer.empty()) first = initializer.front().name;
     }
     const int index = world.tables.weapons.index_of(first.c_str());
@@ -282,11 +281,11 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // player's entity [orig: PlayerClass_InitEntity @0x4b10d0..0x4b10de].
     if (is_local && player_class_init && world.local_player_state != nullptr)
         world.local_player_state->radar.lock_tone = 0;
-    // The registry edge's republish. An embedder that binds the body's def and
-    // model after this builds the slices again once the model init stamped
-    // its bound radius (MissionKernel::bind_spawned_body).
-    if (world.collision != nullptr)
-        world.collision->refresh_after_registry_change(world);
+    // No table or slice build here: the add's one slice build follows its model init, which
+    // stamps the bound radius the body's slice reads, and that is the embedder's
+    // (MissionKernel::bind_spawned_body, MissionKernel::spawn_local_player) (D-SIM-4).
+    // [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel called
+    //  @0x43C492, Entity_BuildProximityListsFromPools called @0x43C4EB]
     return h;
 }
 

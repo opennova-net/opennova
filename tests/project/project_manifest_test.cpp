@@ -158,6 +158,10 @@ static int test_service_managed_files() {
 			is_service_managed_file("C:\\install\\gt.ssc"));
 	TEST_EXPECT(!is_service_managed_file("gt.ssc.txt") && !is_service_managed_file("mygt.ssc") &&
 			!is_service_managed_file("gt.ssc/file.txt"));
+	// An expansion's version text, and a root one: NovaWorld's, never a project's.
+	TEST_EXPECT(is_service_managed_file("version.txt") && is_service_managed_file("VERSION.TXT") &&
+			is_service_managed_file("expansion/nifty/Version.txt"));
+	TEST_EXPECT(!is_service_managed_file("myversion.txt") && !is_service_managed_file("version.txt.bak"));
 	// This is an authorship rule, not a new manifest format: immutable historical revisions
 	// retain their original digest and can be read before their managed files are filtered.
 	const std::string old = encode_manifest({ { "GT.SSC", kShaA, 3 } });

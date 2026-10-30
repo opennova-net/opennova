@@ -122,11 +122,14 @@ int32_t CollisionWorld::resolve_vehicle_probes(World &world, Entity &source,
 		q.points = points.data();
 		q.radii = radii;
 		q.num_points = count;
+		// The survivor's view takes the model the bound gate resolved (one
+		// instance find, one registry get per candidate).
 		int32_t bound_pos[3], bound_radius = 0;
-		if (!target_bound(world, ch, bound_pos, bound_radius, false) ||
+		TargetModel resolved;
+		if (!target_bound(world, ch, bound_pos, bound_radius, false, &resolved) ||
 				!detail::contact_query_overlaps_bound(bound_pos, bound_radius, q))
 			continue;
-		const CollisionTargetView *target = target_view(world, ch, view, matrices);
+		const CollisionTargetView *target = target_view(world, ch, resolved, view, matrices);
 		if (target == nullptr)
 			continue;
 		for (int i = 0; i < count; ++i) {

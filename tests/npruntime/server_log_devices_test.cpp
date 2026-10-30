@@ -12,6 +12,7 @@
 //  @0x4A7CBC..0x4A7CD3]
 
 #include <base/resource_index/boot_policy.h>
+#include <base/version/one_build.h>
 #include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/punt_log.h>
 #include <runtime/inmatch/server_log_devices.h>
@@ -137,6 +138,13 @@ void run_the_connect_log() {
 	                       t + "NET SERVER DISABLING CONNECTLOG BECAUSE WE DON'T NEED IT ANYMORE.\r\n",
 	       "the header, a line, the disabling line, and nothing after it");
 	in.close();
+	// The header a launch writes: VERSION is the engine build's version text, ONE's wire
+	// version where retail's printed "V1.7.5.7", TITLE the title's own text.
+	const inmatch::ConnectLogHeader jo = inmatch::connect_log_header("jo");
+	expect(jo.version == opennova::one_build().wire_version().retail_text() &&
+					jo.title == "Joint Operations: Typhoon Rising" && jo.ver1 == "3" &&
+					jo.ver2 == "2345",
+			"the header's VERSION is ONE's wire version, its TITLE the title's text");
 	std::error_code ec;
 	fs::remove_all(dir, ec);
 }

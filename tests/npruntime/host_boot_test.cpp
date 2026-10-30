@@ -16,8 +16,7 @@
 //   - the host's session config carries the anti-cheat sources the boot
 //     computed from the mount (D-NET-181).
 #include <runtime/inmatch/host_boot.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 
 #include <base/gameprofile/game_type.h>
 #include <formats/cpt/cpt.h>
@@ -46,8 +45,8 @@
 #include <string>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 
@@ -156,7 +155,7 @@ struct Host {
 
 	inmatch::HostBootRequest request() {
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = deathmatch_mission();
 		r.mission_basename = "synth";
 		r.files = test_boot::source_over(&files);
@@ -720,7 +719,7 @@ int main() {
 		inmatch::Session session(role);
 		inmatch::HostBoot boot;
 		inmatch::HostBootRequest r;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.mission = deathmatch_mission();
 		r.mission_basename = "synth";
 		r.files = test_boot::source_over(&files);

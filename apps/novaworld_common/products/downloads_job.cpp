@@ -12,6 +12,7 @@
 #include <base/io/strutil.h>
 #include <formats/update/apply.h>
 #include <formats/update/update_wizard.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdio>
 #include <ctime>
@@ -249,7 +250,8 @@ private:
 		return Outcome::Ok;
 	}
 
-	// A game's folder: the runtime's, a retail game's or an account's own game's wizard, and its
+	// A game's folder: the runtime's, its own wizard (the game the runtime runs and the product
+	// its updater installs: every game the update service serves, and an account's own), and its
 	// expansions' of the service's own (an account's own mod is installed in game).
 	Outcome game(const ProductRow &p, const std::string &tree, std::string &why) {
 		std::error_code ec;
@@ -260,7 +262,7 @@ private:
 			why = "cannot copy the runtime for " + p.display_name + ": " + ec.message();
 			return Outcome::Transient;
 		}
-		if (p.retail || p.owner_id) {
+		if (!p.updater_login.empty() || p.owner_id) {
 			const Outcome step = write_wizard(p, update_host_, tree, why);
 			if (step != Outcome::Ok)
 				return step;
@@ -290,6 +292,22 @@ io::JsonValue string_or_null(const std::string &text, bool present) {
 	return present ? io::json_string(text) : io::JsonValue::make_null();
 }
 
+// A game's protocol as every route answers one (apps/novaworld_web/http_json.h protocol_or_null):
+// {code, name, version}, the protocol its title speaks, version its protocol version (PV2, null
+// where unwitnessed); null for an expansion, an app and a title with no protocol.
+io::JsonValue protocol_json(const ProductRow &p) {
+	const Protocol *protocol =
+			p.kind == ProductKind::Game && !p.title.empty() ? title_protocol(p.title) : nullptr;
+	if (protocol == nullptr || protocol->code == nullptr)
+		return io::JsonValue::make_null();
+	io::JsonValue out = io::JsonValue::make_object();
+	out.set("code", io::json_string(protocol->code));
+	out.set("name", io::json_string(protocol->name != nullptr ? protocol->name : protocol->code));
+	const char *version = protocol_version(*protocol);
+	out.set("version", version != nullptr ? io::json_string(version) : io::JsonValue::make_null());
+	return out;
+}
+
 std::string manifest_json(
 		const std::vector<Offered> &offered, const std::map<int64_t, Rendered> &rendered) {
 	io::JsonValue list = io::JsonValue::make_array();
@@ -308,6 +326,7 @@ std::string manifest_json(
 		// The account that made it, for a player's own game (the site's Players' games); null
 		// for the service's own.
 		item.set("owner", string_or_null(p.owner, p.owner_id.has_value()));
+		item.set("protocol", protocol_json(p));
 		item.set("file", string_or_null(p.download, !p.download.empty()));
 		item.set("size",
 				has ? io::json_number(static_cast<double>(it->second.size))

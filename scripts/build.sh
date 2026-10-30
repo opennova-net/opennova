@@ -10,7 +10,7 @@
 #   --jobs N         build/test parallelism (default: the machine's CPU count)
 #   --shard NAME     run one of the suite's two CI shards (editor: the rows
 #                    labelled `editor`, rest: the others; test_suites.py
-#                    SHARDS), attested on its own; the build is the full tree
+#                    SHARDS), building its test targets and attesting its run
 #   --no-test        build only; run no ctest
 #   -R REGEX         run only the suite's ctests matching REGEX; a partial run
 #                    skips the suite attestation (scripts/ci/test_suites.py),
@@ -76,7 +76,11 @@ echo "Building opennova libraries and tests..."
 if [[ ! -f "$root/build/CMakeCache.txt" || ${#cmake_args[@]} -gt 0 ]]; then
     cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release "${cmake_args[@]}"
 fi
-cmake --build "$root/build" --config Release -j "$jobs"
+build_targets=()
+if [[ -n "$shard" ]]; then
+    build_targets=(--target "opennova_tests_$shard")
+fi
+cmake --build "$root/build" --config Release -j "$jobs" "${build_targets[@]}"
 
 # The shard's ctest labels (none for the whole suite), from the one place that
 # defines them.

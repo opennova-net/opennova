@@ -231,6 +231,17 @@ void VehicleSystem::run_weapon_slot_class_init(Entity &entity) {
         if (bound && entity.has_graphic_model)
             split_weapon_slot_ammo(entity,
                     world.tables.weapons.by_index(entity.primary_weapon_slot_adm)->startrounds);
+        // The init's tail: a row on a ground entity with a def (an addeweap child on its
+        // carrier) takes its anchor index from that def's slot table (emplacement_bone, the
+        // spawn's stamp), then runs its class update once, whose matrix leg composes it on
+        // the carrier, behind the slot Def just bound. This is where a child first leaves
+        // its spawn record's words.
+        // [orig: Entity_InitBoneReferences @0x441470 - groundEntity and its def
+        //  @0x4415E1..0x4415EC, the slot byte @0x4415F1..0x4415FF,
+        //  Entity_UpdateTransformAndTurret called @0x44164B]
+        const Entity *ground = world.registry.get(entity.ground_target);
+        if (ground != nullptr && ground->has_item_def)
+            tick_emplaced_weapon_class_update(world, entity);
         return;
     }
     if (row->air_class_init && (entity.item_attrib & kItemAttribEweap) != 0) {
@@ -251,9 +262,10 @@ void VehicleSystem::run_weapon_slot_class_init(Entity &entity) {
 void VehicleSystem::run_weapon_slot_class_inits() {
     World &world = world_;
     // [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
-    //  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 @0x40E60B]
+    //  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 @0x40E60B, each pool to its used count
+    //  (the loads @0x40E52F, @0x40E568, @0x40E5AC, @0x40E5E0)]
     for (const int pool : { 2, 3, 1, 0 }) {
-        for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
+        for (size_t i = 0; i < world.registry.pool_used(pool); ++i) {
             if (Entity *e = world.registry.get(EntityHandle::make(pool, uint16_t(i))))
                 run_weapon_slot_class_init(*e);
         }

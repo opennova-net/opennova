@@ -14,7 +14,7 @@ The hosted servers (the fleet, its supervisor, the products, the console) are
 
 | Listener | Port | Protocol |
 | --- | --- | --- |
-| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: one per title" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
+| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: each game selects one" below); the same port is the advertised `POSTIPPORT`, the sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey` |
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> NOVAWORLDUDP containers; the opt-in JO game host (`ONNET_EMBEDDED_JO_HOST`) on a UDP port of its own |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 | `UpdateListener` (`apps/novaworld_web/updater/`) | TCP 20044, 20556, 21068, 21580 (`ONNET_UPDATE_PORTS`) | UPDATE.EXE's gateway and update server over the published releases, with `ONNET_UPDATE_HOST` set and an object store ([`hosted/README.md`](hosted/README.md) "The update listener") |
@@ -42,7 +42,7 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 
 | Program | Its parts | Scales by |
 | --- | --- | --- |
-| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: one per title" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
+| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: each game selects one" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
 | lobby (`apps/novaworld_lobby`) | one lobby instance: the NW UDP listener, its `ConnectionManager` tick, its lobby command drain, its session rows; its instance's registration, a row of its own, at the one lobby address ("Lobby instances" below) | more lobbies behind the one lobby address, each its own instance |
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the update listener (with `ONNET_UPDATE_HOST` and an object store), the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
@@ -393,13 +393,19 @@ program's own ("Background jobs" above). Service policy, not a port.
 
 ## Lobbies: each game selects one
 
-Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)). The rows
-are established by `backend/migrations/0003_project_lobbies.sql` for system games, and
+Each `games` row is a lobby ([`program/catalog_repository.h`](program/catalog_repository.h)),
+keyed by the protocol its clients speak (`protocol`, a protocol's code: `jo`, `dfx2`;
+`0008_lobbies_by_protocol.sql`). The rows are established by
+`backend/migrations/0003_project_lobbies.sql` for system games, and
 `0004_acidgambit_lobby_pages.sql` gives OP: Acid Gambit's its own pages and pfid.
-A new player's game selects an existing compatible lobby or creates a named lobby;
+A game lists in a lobby of the protocol its title speaks (`title_protocol`): Joint
+Operations' and OP: Acid Gambit's titles speak JO's protocol, Delta Force Xtreme 2's DFX2's.
+A new player's game selects an existing lobby of that protocol or creates a named lobby;
 the new row's ID determines its immutable tag (`on:<id>`), slug and LobbyName (`on_<id>`),
-and browser list (`/on_<id>.gsb`). Its protocol values come from Acid Gambit's row
-for `jo` or DFX2's for `dfx2`: its pages, pfid and version pair are that row's.
+and browser list (`/on_<id>.gsb`). Its pages, pfid and gate answer come from the
+protocol's template row, Acid Gambit's for JO's protocol or DFX2's for DFX2's. The version
+pair (VER1 / VER2) is no row's: it is the protocol's (`Protocol::ver1` / `ver2`,
+`engine/net/protocol`), as are the gate answer's shape and `gt.ssc`'s key chain.
 For now the site's and the editor's New project offer a game of its own to admins alone,
 players a mod alone: a player's lobby would show Acid Gambit's pages until each lobby has its
 own (the routes still take a player's game).
@@ -409,9 +415,9 @@ unlock it. Shared lobby rows outlive their projects; a created lobby a game move
 other game names, goes with the move. Public discovery lists system and published public game
 lobbies; project creation also offers the caller's own, but a player never a retail game's
 (the lobbies the original clients browse), and an admin every row. Internal routing
-still resolves unpublished lobbies for testing. `title` is the engine's game profile code the row's clients speak
-(`engine/base/gameprofile`), and the gate's per-row answer (`startup_query`,
-`glsvss_*`).
+still resolves unpublished lobbies for testing. The JSON routes answer a lobby's protocol as
+`{code, name, version}` (`"jo"`, `"JO"`, its protocol version `"16"`: "JO protocol 16"), the
+gate's per-row answer being `startup_query` and `glsvss_*`.
 
 The service generates `gt.ssc` from that selection for every game and expansion release;
 expansions inherit their parent's lobby. The editor excludes authored copies from imports,
@@ -419,14 +425,14 @@ build inputs and pushes, including copies in historical revisions. Project metad
 the generated bytes for editor Play, cached under `.opennova` for offline builds and written
 only into build output. A linked project without that cache must refresh its configuration.
 
-| Gate tag | Slug | LobbyName | Title | Start page | Browser list | pfid | Expansion bits |
+| Gate tag | Slug | LobbyName | Protocol | Start page | Browser list | pfid | Expansion bits |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `jop:cus2`, and `jopd:cus4` (the JO demo's) by alias | `jop_2_consumer` | `jop_2_consumer` | `jo` | `jop_2_start.htm` | `/jop_2.gsb` | 28 | 3 |
 | `dfx2:0:cus:buffy` | `dfx2_consumer` | `dfx2_0_consumer` | `dfx2` | `dfx2_0_start.htm` | `/dfx2_0.gsb` | 38 | 1 |
 | `acidgambit:0` | `acidgambit_0_consumer` | `acidgambit_0_consumer` | `jo` | `acidgambit_0_start.htm` | `/acidgambit_0.gsb` | 100 | 1 |
 
-The OpenNova row (ON data) speaks JO's wire identity, so its title, version pair
-(3 / 2345) and gate answer's shape are JO's; its gate tag, LobbyName, browser list,
+The OpenNova row (ON data) speaks JO's protocol, so its version pair (3 / 2345) and gate
+answer's shape are JO's; its gate tag, LobbyName, browser list,
 product family (pfid 100) and pages (`acidgambit_0_*`, JO's pages with its names) are its
 own, so anyone running ON data lands in its lobby. The player lobbies made from its row
 share its pages and pfid, each with its own tag, LobbyName and browser list.
@@ -437,7 +443,7 @@ bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, 
   `startupurl`'s query (`startup_query`) and the GLSVSS leg (`glsvss_*`; a row with none
   takes the configured `ONNET_GLSVSS_*`, none by default). DFX2's row carries the values
   NovaLogic's live gate answered for its tag, in that reply's shape too (the witness:
-  `docs/titles/dfx2-vs-jo-re.md` §6.5; `TitleIdentity::gate_reply_witnessed`, D-NET-721):
+  `docs/titles/dfx2-vs-jo-re.md` §6.5; `Protocol::gate_reply_witnessed`, D-NET-721):
   no `POSTIPADDRESS` / `POSTIPPORT` (its `udpnovaworld` line leaves the pair unread), a
   `startupurl` on `http://[domainname]/` (the client fills it from the lobby's SessionInit
   web domain) and a `TimeOnGateServer` line, the gate's UTC clock in asctime's shape, after
@@ -448,8 +454,8 @@ bit 0 alone (OP: Acid Gambit's `nifty` expansion, a product the baseline seeds, 
   game's lobby): a probe of a known tag never touches the database.
 - **Listings** carry the LobbyName the gate gave their host (`active_hosts.game`), so a
   host lands in its own game: `/api/lobbies` groups the hosts by it (one group per row),
-  and each row's `.gsb` route lists its own alone, showing the row's `ver1` and
-  `exp_bits` in a column the host reported nothing for.
+  and each row's `.gsb` route lists its own alone, showing its protocol's VER1 and the
+  row's `exp_bits` in a column the host reported nothing for.
 - **The `NW*.dll` pages** fill in the requesting client's game's values: its browser
   list as `GSB_SERVER`, its pages where the request names none, and its expansion bits
   (the login's `EXPBITS`, the join's requirement). The game is the gate tag the client
@@ -1007,8 +1013,13 @@ The site's admin page **Infrastructure** (`/admin/system/infrastructure`) shows 
 it runs, read on web (`apps/novaworld_web/infra/`) in one route,
 `GET /api/admin/infrastructure` (admin; `Cache-Control: no-store`). From the database,
 which every replica reads alike: the lobby instances with their sessions and listings, the
-fleet process that leads and the fleet's machines. From AWS, with web's task role
-(`infra/infra_status.*`): each program's ECS service (its counts, deployments, task
+fleet process that leads, the serve images the live hosted servers run (`serve_images`:
+each image and how many servers run it) and the fleet's machines, each with the build and
+image its hostd last reported (`agent_version`, ONE's label, and `agent_image`). From AWS,
+with web's task role (`infra/infra_status.*`): the release (its id, commit and revisions,
+and its `images` with their `image_commits`, the commit each image's own
+`org.opencontainers.image.revision` label names, as `app deploy` recorded them), each
+program's ECS service (its counts, deployments, task
 definition against the recorded release, newest events), its running and recently stopped
 tasks, the one-off tasks, the load balancer's target groups and their targets' health, the
 database's and the cache's status, each machine's EC2 state and image, and, with hosting
@@ -1017,7 +1028,16 @@ on, the fleet cluster: hostd's daemon service and each machine as its container 
 is connected, its tasks). A fleet roll's preview reads each machine's image from the same
 read (`GET /api/admin/fleet/roll`, `hosted/README.md`).
 
-The page is the service's hub. Each program has a card (its ECS service, and from
+The page leads with what code runs: the release (its id and build sha), then the build of
+each part, ONE's version and its build sha (`ONE 0.0.22.5922 b0c2b38`), or the sha alone
+where no version is known. A program's is what its tasks report with their usage samples
+(`GET /api/admin/programs`), else, for a task that has not reported, the sha of its
+container's image when that is the release's; the website's (web's portal container) and
+the hosted servers' serve image's are their images' shas; hostd's is what each machine's
+agent reports. Whether each is the release's is a note beside it; an ECS task revision
+appears only in a rolling program's list of deployments.
+
+The page is the service's hub. Each program has a card (its build, its ECS service, and from
 `GET /api/admin/programs` what its tasks use now and its tasks gone in 24 hours) opening the
 program's page (`/admin/programs/<name>`: its tasks, the usage charts of all of
 them or of one, and its log); hostd's card holds the fleet cluster's machines; the database,
@@ -1079,10 +1099,12 @@ memory, connections, network and IOPS, the cache's primary node's CPU, engine CP
 network and connections, the balancer's processed bytes, active flows and each target
 group's healthy hosts (`HealthyHostCount:<listener>`); the local stack's says why none.
 `GET /api/admin/programs` lists every program the service runs: its tasks running and
-desired and the revision its ECS service runs (none locally: running is the tasks
-reporting), what its reporting tasks use now, `restarts_24h` (its tasks that reported in
-the last 24 h and no longer do: a crash's, a deploy's replaced ones, a scale-in's) and each
-task, the reporting ones and the ones ECS runs.
+desired and the task definition its ECS service runs (`task_definition`; none locally:
+running is the tasks reporting), what its reporting tasks use now, `restarts_24h` (its
+tasks that reported in the last 24 h and no longer do: a crash's, a deploy's replaced ones,
+a scale-in's) and each task, the reporting ones and the ones ECS runs, with the ONE build
+its newest sample in 24 h names (`one_version`, `one_commit`: every program's sample
+carries its own `one_build()`, `program/program_usage.h`; null where none does).
 
 ### Logs
 

@@ -4,8 +4,10 @@
 #include <cstring>
 #include <optional>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/json.h>
+#include <base/title/title.h>
+#include <base/version/one_build.h>
+#include <base/version/version_line.h>
 #include <editor/novaworld/novaworld_account.h>
 #include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
@@ -15,6 +17,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
+#include <net/protocol/protocol.h>
 
 #include <imgui.h>
 
@@ -31,8 +34,8 @@ float field_width() { return ImGui::GetFontSize() * 28.0f; }
 float label_column() { return ImGui::GetFontSize() * 7.0f; }
 
 std::string game_display_name(const std::string &code) {
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
-	return profile != nullptr && profile->display_name ? profile->display_name : code;
+	const Title *title = title_by_code(code);
+	return title != nullptr && title->display_name ? title->display_name : code;
 }
 
 // What the project is, in a line, set when it was made (ADR 0074): a game of its own of its game, or a mod of its
@@ -71,6 +74,27 @@ void row_label(const char *label) {
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", label);
 	ImGui::SameLine(label_column());
+}
+
+// The versions the project is made for and with (base/version/version_line.h): the title it runs
+// as, the protocol that title speaks ("JO protocol 16"; none for a title whose protocol is
+// unwitnessed) and the ONE this editor is. A project has no release of its own: a release's
+// game version is typed at Build > Release.
+void version_rows(const ProjectDocument &doc) {
+	Versions versions;
+	title_versions(doc.target_game, versions);
+	row_label("Title");
+	ui_kit::clipped_text(versions.game.empty() ? doc.target_game : versions.game,
+			"The retail game the project runs as: its rules and the protocol it speaks.");
+	row_label("Protocol");
+	ui_kit::clipped_text(versions.protocol.empty()
+					? std::string("None witnessed")
+					: versions.protocol + " protocol " + versions.protocol_version,
+			"The in-match protocol the title speaks and its version (PV2), the revision a host "
+			"checks a joiner against.");
+	row_label("Engine");
+	ui_kit::clipped_text(one_build().label(),
+			"ONE, the OpenNova Engine this editor is: its release, commit and build.");
 }
 
 // Whether no Apply was answered after the one the SettingsApplied event at `seq` answers: the
@@ -164,6 +188,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	row_label("What it is");
 	ui_kit::clipped_text(what_it_is(v), "Set when the project was made. For another short name or another game, make a "
 	                                    "new project (File > New project...) and copy this one's files into its folder.");
+	version_rows(doc);
 	// A mod's base game's project: where its project file names it, found or missing, and Open.
 	if (doc.expansion.on_base_project()) {
 		const bool found = novaworld.missing_base.empty();

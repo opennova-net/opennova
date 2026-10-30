@@ -226,6 +226,7 @@ void test_negative_score_keys_at_the_prior() {
 	}
 	ns::LoopbackChannel ch;
 	ns::Connection conn{&ch, ns::TransportMode::Loopback, me, 0};
+	ns::size_priority_caches(conn, world.registry);
 	conn.s2c_entity_heading[a.slot()] = 0x80;
 	conn.s2c_entity_heading[b.slot()] = 0x00;
 	conn.s2c_entity_age[a.slot()] = 200; // the sweep makes it 201

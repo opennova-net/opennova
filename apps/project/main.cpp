@@ -2,6 +2,8 @@
 // (ADR 0046 d4, S13 A7). See cli_verbs.h for the verbs and exit codes.
 #include "cli_verbs.h"
 
+#include <games/games.h>
+
 #include <cstdio>
 
 #ifdef _WIN32
@@ -16,6 +18,7 @@
 #endif
 
 int main(int argc, char **argv) {
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 #ifdef _WIN32
 	// The arguments as UTF-8, the paths every verb takes (editor/project/project_files.h): the
 	// narrow argv is the ANSI code page's, which spells a folder named outside it as another or

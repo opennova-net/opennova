@@ -185,16 +185,18 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	}
 	last_connection_error_.unref();
 	// The title the mounted game speaks, the joiner's identity.
-	std::string title_error;
-	const opennova::TitleIdentity *title = resource_root->title_identity(title_error);
-	if (title == nullptr) {
+	std::string protocol_error;
+	const opennova::Protocol *protocol = resource_root->protocol(protocol_error);
+	if (protocol == nullptr) {
 		join_preload_sim_.unref();
 		clear_pending_session();
 		world_->emit_signal(kSignalLoadFailed,
-				String("join: no identity to join with: ") + opennova::to_gd(title_error));
+				String("join: no identity to join with: ") + opennova::to_gd(protocol_error));
 		return ERR_UNCONFIGURED;
 	}
-	join_preload_sim_->set_title(title);
+	join_preload_sim_->set_protocol(protocol);
+	// The title it runs as, the mounted game's: the rules its joiner's World runs.
+	join_preload_sim_->set_game_title(&ResourceRoot::session_title(resource_root));
 	// The process's client words: the 0x4C report count runs on across joins.
 	join_preload_sim_->use_client_process(&world_->client_process_);
 	// The process's log devices: the join's session key closes the connect log.

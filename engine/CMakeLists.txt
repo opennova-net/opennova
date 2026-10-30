@@ -9,7 +9,7 @@
 #                                          mission document model; its runtime half
 #                                          is runtime/mission)
 #   opennova_base               STATIC     base/{vfs,resource_index,gameprofile,pcapio,
-#                                          os_random,proc}
+#                                          os_random,proc,version}
 #   opennova_net                STATIC     net/* — the wire: novacrypto, napi, npwire,
 #                                          the novaworld session/gate legs
 #   opennova_runtime            STATIC     runtime/*, including the in-match session
@@ -29,7 +29,9 @@
 # below editor links or includes it: the game and the Play child never carry
 # editor code (ADR 0046 d2/d3).
 #
-# Both CMake roots (the repo root and godot/src) add this directory. Only the
+# Both CMake roots (the repo root and godot/src) add this directory, so both read
+# the ONE stamp's cache variables (OPENNOVA_VERSION, OPENNOVA_COMMIT,
+# OPENNOVA_STAGING, OPENNOVA_BUILD_TIME; base/CMakeLists.txt). Only the
 # repo root defines the service target, and only when OPENNOVA_NOVAWORLD_SERVICE
 # is on (engine/net finds the system libpq then). godot/src never turns the
 # option on.

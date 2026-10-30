@@ -395,8 +395,20 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 	auto &slot = e.slot;
 	// Cached board target and command dispatch [orig: @0x4BEE93..0x4BEEC6,
 	// @0x4BEEA5..0x4BEEAF, @0x4BEEBA].
+	// The cache (slot+0x90) is tested first: a cached row still carrying the
+	// target SSN is the target, with no scan and no claim. A miss clears it and
+	// scans pools 0..3 for the SSN (find_by_net_id, each pool below its used
+	// count). Only command 125 keeps the cache across thinks; 123/124 find it
+	// cleared at the think head and scan every think.
+	// [orig: the cache test @0x4BAE9C..0x4BAEAF (`jz loc_4BB187` past the scans and
+	//  the claim), the clear @0x4BAEB5, the scans @0x4BAEBB..0x4BAF8E; the think
+	//  head's clear @0x4BA9AD..0x4BA9C7]
 	const uint16_t ssn = static_cast<uint16_t>(slot.f[38]);
-	const auto th = world.registry.find_by_net_id(ssn);
+	const Entity *cached = slot.f[36] > 0
+			? world.registry.get(EntityHandle{static_cast<uint16_t>(slot.f[36] - 1)})
+			: nullptr;
+	const bool cache_hit = cached != nullptr && cached->net_id == ssn;
+	const EntityHandle th = cache_hit ? cached->handle : world.registry.find_by_net_id(ssn);
 	Entity *target = world.registry.get(th);
 	Entity *self = world.registry.get(e.handle);
 	if (target == nullptr || self == nullptr) {
@@ -407,7 +419,7 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 	// A re-resolved target claims an E point only from pools 1..3: the pool-0
 	// scan's hit jumps past the claim. [orig: `jnz loc_4BB187` @0x4BAEF1; the
 	// pool 1..3 scans @0x4BAEF7..0x4BAF95; the claim @0x4BAF9B..0x4BB185]
-	if (slot.f[36] != int32_t(th.packed) + 1 && th.pool() != 0)
+	if (!cache_hit && th.pool() != 0)
 		claim_entry(e, world, *target, command);
 	slot.f[36] = int32_t(th.packed) + 1;
 	if (self->mounted || !target->has_item_def)

@@ -14,7 +14,6 @@
 //  CNapiServerInfo_SerializeToSession @0x4c3650] [orig: @0x42ec1f..0x42ec3e, @0x42c25b..0x42c2c5,
 //  the twin @0x4c3730 (dfx2.exe)]
 
-#include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/npwire/flat_tlv.h>
@@ -26,7 +25,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/joiner_connection.h>
 
 #include "enumerated_join.h"
@@ -38,6 +37,11 @@
 #include <utility>
 #include <vector>
 #include "joiner_receive.h"
+
+// DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
+static const opennova::cdkey::KeyChains &dfx2_chains() {
+	return *opennova::title_protocol("dfx2")->cd_key;
+}
 
 using namespace opennova;
 
@@ -52,8 +56,8 @@ void expect(bool cond, const char *what) {
 	}
 }
 
-const TitleIdentity *jo() { return title_identity(gameprofile::GAME_JO); }
-const TitleIdentity *dfx2() { return title_identity(gameprofile::GAME_DFX2); }
+const Protocol *jo() { return title_protocol("jo"); }
+const Protocol *dfx2() { return title_protocol("dfx2"); }
 
 constexpr uint32_t kClientKey = 0x11223344u;
 constexpr uint32_t kServerKey = 0x55667788u;
@@ -78,14 +82,14 @@ bool decode_c2s(const std::vector<uint8_t> &datagram, const std::string &client_
 			decode_protocol_packet_plaintext(body.data(), body.size(), client_scrk, header, messages);
 }
 
-// The class byte of the 0x2F an in-match joiner speaking `title`, whose kit is a medic's (5),
+// The class byte of the 0x2F an in-match joiner speaking `protocol`, whose kit is a medic's (5),
 // re-submits when an S2C 0x50 moves its own entity, after the host's BMS header named a mission
 // of `mission_type` (0: no header). The sender fixes the class for every 0x2F (the armory's
 // takes it in inmatch::armory_accept_in_session, pinned by damage_class_bytes).
 // [orig: NapiNPClientMsg_TeamAssign @0x431910 - the reselect's submit @0x431AAD]
-int resubmit_class(const TitleIdentity *title, uint8_t mission_type) {
+int resubmit_class(const Protocol *protocol, uint8_t mission_type) {
 	inmatch::JoinerConnection joiner("Dfx2Loadout");
-	joiner.set_title(title);
+	joiner.set_protocol(protocol);
 	inmatch::JoinerConnection::LoadoutKit kit;
 	kit.player_class = 5;
 	joiner.set_loadout_kit(kit);
@@ -119,7 +123,7 @@ void loadout_class_byte() {
 	expect(resubmit_class(dfx2(), 2) == 7, "DFX2-12: 7 in a mission of type 2");
 }
 
-// Drive a joiner speaking `title` from its hello to its JOIN and return the JOIN's TLV names, its
+// Drive a joiner speaking `protocol` from its hello to its JOIN and return the JOIN's TLV names, its
 // CDKIID and GLSVSSREQUEST (each empty when it sent none), and the ClientAuth's CU (name, value)
 // pairs.
 struct JoinSent {
@@ -130,11 +134,11 @@ struct JoinSent {
 	bool ok = false;
 };
 
-JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const std::string &app_id,
+JoinSent join_of(const Protocol *protocol, const cdkey::WireKeys &ids, const std::string &app_id,
 		const std::string &glsvss_request = {}, const std::vector<uint8_t> &cd_cookie = {}) {
 	JoinSent out;
 	inmatch::JoinerConnection joiner("Dfx2Joiner");
-	joiner.set_title(title);
+	joiner.set_protocol(protocol);
 	joiner.set_cd_key_ids(ids);
 	if (!app_id.empty()) joiner.set_app_id(app_id);
 	joiner.set_glsvss_request(glsvss_request);
@@ -197,7 +201,7 @@ JoinSent join_of(const TitleIdentity *title, const cdkey::WireKeys &ids, const s
 }
 
 void join_carries_the_cd_key() {
-	const std::string key = cdkey::make_wire_key("OPENNOVA-0001");
+	const std::string key = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-0001");
 	const JoinSent lan = join_of(dfx2(), cdkey::WireKeys{key, ""}, "");
 	expect(lan.ok && lan.join_fields == std::vector<std::string>{"CDKIID", "VERSIONCRCSTRING"} &&
 	               lan.cdkiid == key,

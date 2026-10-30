@@ -1,102 +1,61 @@
-"""The workflows' triggers cover the sources their builds are made from.
+"""Delivery workflows are called once by CI and consume its validated builds."""
 
-The NovaWorld images (novaworld-images.yml): master's push builds and publishes every
-image `app deploy --tag sha-<head>` pins, so its path filter must hold every source the
-images' binaries are built from (apps/novaworld_common/Dockerfile); a merge touching only
-one it missed built no images at all.
-"""
-import fnmatch
+from pathlib import Path
 import re
 import unittest
-from pathlib import Path
+
+from service_bundle import BINARIES
+
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOWS = ROOT / ".github" / "workflows"
+WORKFLOWS = ROOT / '.github' / 'workflows'
 
 
-def trigger_paths(workflow: Path, event: str) -> list:
-    """The `paths:` list of `on: <event>:` in `workflow`, read line by line (stdlib, no YAML)."""
-    out = []
-    in_on = in_event = in_paths = False
-    for line in workflow.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip())
-        if indent == 0:
-            in_on = stripped == "on:"
-            in_event = in_paths = False
-            continue
-        if in_on and indent == 2:
-            in_event = stripped == event + ":"
-            in_paths = False
-            continue
-        if in_event and stripped == "paths:":
-            in_paths = True
-            continue
-        if in_paths:
-            match = re.match(r"-\s*'([^']+)'", stripped)
-            if match:
-                out.append(match.group(1))
-            else:
-                in_paths = False
-    return out
-
-
-def dockerfile_build_targets(dockerfile: Path) -> list:
-    """The opennova_* targets the Dockerfile's first `cmake --build build --target` compiles."""
-    text = dockerfile.read_text(encoding="utf-8")
-    start = text.index("cmake --build build --target")
+def dockerfile_build_targets(dockerfile):
+    text = dockerfile.read_text(encoding='utf-8')
+    start = text.index('cmake --build build --target')
     command = []
     for line in text[start:].splitlines():
-        command.append(line.rstrip("\\").strip())
-        if not line.rstrip().endswith("\\"):
+        command.append(line.rstrip('\\').strip())
+        if not line.rstrip().endswith('\\'):
             break
-    return [token for token in " ".join(command).split() if token.startswith("opennova_")]
+    return [token for token in ' '.join(command).split() if token.startswith('opennova_')]
 
 
-def target_directory(target: str) -> str:
-    """The repository directory whose CMakeLists.txt adds `target` as an executable."""
-    for cmake in sorted((ROOT / "apps").glob("*/CMakeLists.txt")):
-        if re.search(r"add_executable\(\s*" + re.escape(target) + r"\b", cmake.read_text(encoding="utf-8")):
-            return cmake.parent.relative_to(ROOT).as_posix()
-    raise AssertionError(f"no apps/*/CMakeLists.txt adds {target}")
+class SharedDeliveryBuild(unittest.TestCase):
+    def test_ci_owns_automatic_delivery_triggers(self):
+        for name in ('novaworld-images', 'serve-image', 'local-stack'):
+            with self.subTest(workflow=name):
+                text = (WORKFLOWS / f'{name}.yml').read_text(encoding='utf-8')
+                events = text.split('\non:\n', 1)[1].split('\nconcurrency:', 1)[0]
+                self.assertIn('  workflow_call:\n', events)
+                self.assertIn('  workflow_dispatch:\n', events)
+                self.assertNotRegex(events, re.compile(r'^  (push|pull_request):', re.M))
+                self.assertNotIn('submodules: recursive', text)
+
+    def test_all_native_image_targets_are_in_the_shared_bundle(self):
+        for dockerfile in ('apps/novaworld_common/Dockerfile', 'apps/serve/Dockerfile'):
+            for target in dockerfile_build_targets(ROOT / dockerfile):
+                directory = target.removeprefix('opennova_')
+                binary = 'opennova-' + directory.replace('_', '-')
+                self.assertIn(f'apps/{directory}/{binary}', BINARIES)
+
+    def test_image_consumers_require_unit_validated_same_run_binaries(self):
+        for name in ('novaworld-images', 'serve-image'):
+            text = (WORKFLOWS / f'{name}.yml').read_text(encoding='utf-8')
+            self.assertEqual(text.count('service_bundle.py unpack'), 2)
+            self.assertEqual(text.count('--require-service-tests'), 2)
+            self.assertEqual(text.count('--run-attempt "$GITHUB_RUN_ATTEMPT"'), 2)
+            self.assertIn("if: inputs.service-artifact == ''", text)
+            self.assertIn("github.event_name == 'push' || github.event_name == 'workflow_dispatch'", text)
+
+    def test_portal_dist_is_consumed_without_disabling_developer_builds(self):
+        bake = (ROOT / 'apps/novaworld_common/docker-bake.hcl').read_text(encoding='utf-8')
+        self.assertIn('contexts   = PORTAL_CONTEXT != "" ? { build = PORTAL_CONTEXT } : {}', bake)
+        dockerfile = (ROOT / 'web/Dockerfile').read_text(encoding='utf-8')
+        self.assertIn('RUN npm ci', dockerfile)
+        self.assertIn('RUN npm run build', dockerfile)
 
 
-def covered(path: str, patterns: list) -> bool:
-    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
-
-
-class NovaWorldImagesTrigger(unittest.TestCase):
-    def setUp(self):
-        self.workflow = WORKFLOWS / "novaworld-images.yml"
-        self.push = trigger_paths(self.workflow, "push")
-        self.pull_request = trigger_paths(self.workflow, "pull_request")
-
-    def test_the_lists_read(self):
-        self.assertIn(".github/workflows/novaworld-images.yml", self.push)
-        self.assertIn(".github/workflows/novaworld-images.yml", self.pull_request)
-
-    def test_master_builds_on_every_source_of_the_images_binaries(self):
-        targets = dockerfile_build_targets(ROOT / "apps" / "novaworld_common" / "Dockerfile")
-        self.assertIn("opennova_project", targets)
-        self.assertIn("opennova_update_tool", targets)
-        for target in targets:
-            source = target_directory(target) + "/main.cpp"
-            self.assertTrue(covered(source, self.push), f"{target}: {source} is in no push path")
-        # Every program links the engine's groups and the libraries they link.
-        for source in ("engine/base/io/le.h", "engine/formats/pff/pff.cpp", "engine/runtime/world/world.cpp",
-                       "engine/editor/session/session_core.cpp", "engine/net/update/update_server.cpp",
-                       "engine/net/title/title_identity.h", "apps/common/net_sockets.h", "third_party/miniz/miniz.c",
-                       "CMakeLists.txt", ".dockerignore"):
-            self.assertTrue(covered(source, self.push), f"{source} is in no push path")
-
-    def test_a_pull_request_builds_on_what_the_images_alone_build(self):
-        # The rest of the engine reaches Linux through ci.yml's test-linux.
-        for source in ("apps/project/main.cpp", "apps/update_tool/main.cpp", "engine/net/update/update_wire.cpp",
-                       "engine/net/title/title_identity.h", "apps/common/net_sockets.h", "apps/novaworld_data/main.cpp"):
-            self.assertTrue(covered(source, self.pull_request), f"{source} is in no pull_request path")
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

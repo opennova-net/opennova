@@ -144,8 +144,11 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
                                   uint32_t logic_tick) {
     if (tick_entity == nullptr) return;
     InfantryState &inf = e.inf;
-    // This tick's scope legs replace the last's (the view tick drains them).
-    world.out.water_scope_legs.count = 0;
+    // The local body's legs of this tick replace its last (the view tick drains them). Only the
+    // local body records any, so only it clears them: a remote body ticking after it on a listen
+    // host leaves them for the view tick. [orig: `cmp g_LocalPlayerEntity, esi` @0x4B8304, the
+    // eye leg's @0x4B837B]
+    if (e.handle == world.cached.local_player) world.out.water_scope_legs.count = 0;
     // The raw word, as org1's: no dry sentinel.
     const int32_t water = world.env.water_z;
     const uint32_t flags = tick_entity->flags | tick_entity->engine_flags;

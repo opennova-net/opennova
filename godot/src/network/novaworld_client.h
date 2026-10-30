@@ -109,7 +109,7 @@ public:
 
 	// The mounted game whose title the session speaks (its identity and its gate
 	// tag, the title's or the mount's gt.ssc's; the launch game's with none,
-	// ResourceRoot::session_title): start() refuses when the title's identity is
+	// ResourceRoot::session_protocol): start() refuses when the title's identity is
 	// not witnessed in full.
 	void set_resource_root(const Ref<ResourceRoot> &root) { resource_root_ = root; }
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }

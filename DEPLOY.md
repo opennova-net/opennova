@@ -53,7 +53,7 @@ There are three places the service runs, and nothing of one reaches another by a
 | Retail gate | the developer's LAN address | its own Elastic IP | the Elastic IP retail hosts files name (`gs.novaworld.net`), which prod adopts and never releases |
 | Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` (a debug game export's own) | `nw.<domain>` (a release export's own) |
 | Update service (OpenNova's `update.exe`) | none (`update.exe --server`) | `update.staging.<domain>` (a debug game zip's `OPENNOVA.WIZ`) | `update.<domain>` (a release zip's) |
-| Downloads host (the site's download buttons) | none (the buttons open the GitHub releases) | `downloads.staging.<domain>` (a pull request's debug builds, which talk to staging) | `downloads.<domain>` (the tagged releases) |
+| Downloads host (the site's download buttons) | none (the buttons open the GitHub releases) | `downloads.staging.<domain>` (the staging branch's debug builds, which talk to staging) | `downloads.<domain>` (the tagged releases) |
 | AWS credentials | none | its deploy user's key (vault `aws-staging`), or its GitHub environment's OIDC role | its deploy user's key (vault `aws-prod`), or its GitHub environment's OIDC role |
 | Stripe | test mode, the restricted key (`stripe-test/restricted_key`) | test mode (`stripe-test`) | live mode (`stripe-live`) |
 | Mail | none (no AWS credentials: logged as not sent) | its own SES identity, `staging.<domain>` (off unless `mail_sender` is set) | its own SES identity, `<domain>`, `support@<domain>` |
@@ -99,10 +99,11 @@ and rule, its database's dumps (`backup restore` takes the deployment's own alon
   or its webhook's signing secret.
 - Where the alarms, budgets and support mail go (`alerts/email`, `email/forward_to`).
 
-**How a change flows.** Local work on the dev stack; a pull request (CI builds and tests,
-and its merge publishes the images, tagged `sha-<commit>`); staging: `./deploy/run.sh
---deployment staging infra apply` for an infrastructure change, `--deployment staging app
-deploy --tag sha-<commit>` for the programs, then the rehearsal (the smoke tests); prod:
+**How a change flows.** Local work on the dev stack; a pull request (CI builds and tests);
+merge to `staging`: CI builds the complete image and app set, deploys services after
+their component checks and package smoke tests pass, then publishes the matching downloads.
+Infrastructure changes still need `./deploy/run.sh --deployment staging infra apply`;
+the operator toolbox remains available for recovery. After staging's rehearsal, prod:
 `--deployment prod infra apply` with the same commit's Terraform, and `--deployment prod
 app deploy --promote staging`, which pins exactly the images staging's current release
 runs, by digest (or the deploy workflow's `prod` run, which does the same after its
@@ -202,8 +203,9 @@ management account's administrator; the rest are the toolbox, `./deploy/run.sh`
    (section "CI runners").
 8. **The images** (section 5): a push to your repository's `master` that touches their
    paths publishes them (`.github/workflows/novaworld-images.yml`, `serve-image.yml`; a
-   manual run publishes its branch's, tagged by its short sha and branch name and never
-   `latest`, for staging before a branch merges); then make each GHCR package public. They
+   manual run publishes its branch's, tagged by its short sha and branch name, with
+   `latest` on master alone). Staging CI calls both workflows for every commit's complete
+   image set, without path filtering; then make each GHCR package public. They
    come before step 9: `db bootstrap` already runs the backup image.
 9. **Staging's infrastructure** (section 4), with `D='--deployment staging'`:
    `./deploy/run.sh $D secrets sync`, `infra plan`, `infra apply`, `db bootstrap`. Confirm
@@ -958,8 +960,10 @@ task has no execution role at all).
    its `desired` count, and its floor is raised to its `min` (the fleet, up before any
    lobby, starts no hosted server until a lobby runs:
    `apps/novaworld_common/hosted/README.md` "No lobby live"). hostd rolls before the
-   fleet program it reports to: its deployment replaces at most half the machines' agents
-   at once (no game server restarts: the containers are docker's, not the agent's), and
+   fleet program it reports to: its deployment replaces every machine's agent at once,
+   each stopped before its new one starts (a DAEMON service's floor is 0: any other
+   deadlocks a lone machine), with no game server restarts (the containers are docker's,
+   not the agent's), and
    once it completes the deploy waits up to 3 minutes for every ready machine's agent to
    report the release's hostd image (the admin fleet view's `agent_image`). If one does
    not, or hostd's deployment fails, the deploy points hostd back at the revision it ran
@@ -972,8 +976,10 @@ task has no execution role at all).
    which failed (a refused call by name, the admin API's status). Either way the deploy
    goes on;
 5. once every program runs it, registers the backup task's revision (the nightly run
-   takes the newest) and records the release: its manifest (the images by digest, each
-   revision, the previous release, the release it was promoted from) goes to
+   takes the newest) and records the release: its manifest (the images by digest, the
+   commit each was built from as its own `org.opencontainers.image.revision` label names
+   it, which the admin's infrastructure page shows, each revision, the previous release,
+   the release it was promoted from) goes to
    `s3://<ops bucket>/releases/<id>.json` and to `/opennova/<deployment>/release`. A
    deploy that stops records nothing: the release it was on stays the deployment's, and
    `app rollback --to <that id>` puts the programs it already moved back on it.
@@ -1051,13 +1057,32 @@ stack makes one per account, trusting only this repository's environment of the 
 name) through GitHub's OIDC. `infra/github` makes the two repository environments,
 `staging` (no reviewers) and `prod` (its required reviewers approve each run; protected
 branches alone), each with the variables `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION` and
-`AWS_ACCOUNT_ID` from the vault's `aws-<deployment>` items. Run it from the Actions tab:
+`AWS_ACCOUNT_ID` from the vault's `aws-<deployment>` items. Its two entry paths are:
 
-- `staging` with the tags (the toolbox's `--tag`, `--image`, `--serve-tag`,
-  `--hostd-tag`);
-- `prod` with no tag: a first job, in the `staging` environment, reads staging's current
+- `staging` through the Staging rollout run CI dispatches only: all ten images use that run's
+  explicit commit tag, resolved to digests by the toolbox. There are no arbitrary image overrides
+  in Actions. The current hosting-enabled setting is preserved.
+- `prod` from the Actions tab with no tag: a first job, in the `staging` environment, reads staging's current
   release (`app images`), and the second, in `prod` once approved, deploys exactly those
   images (`--images-from -`). Prod never runs images staging has not.
+
+Every push or manual CI run on `staging` builds all images and all four app packages
+from one commit. Their existing component tests and package smoke checks gate rollout;
+unrelated full-suite results do not. One lock spans service deployment and publishing
+the matching downloads. After acquiring it, a superseded staging commit skips without
+changing the deployment. An active rollout is never cancelled by a newer push.
+Deployment and publishing independently validate the current CI run's repository,
+workflow, branch, event and commit; PRs into staging are not staging-branch builds.
+
+A failed deployment stops publishing. A failed publish is reported without automatically
+rolling services back. Re-run **all jobs** of the staging CI run, or start CI again on
+staging, to retry with a fresh source check; a partial retry with an older attempt's check
+is refused. The summary names the commit, run, deployed digests and published app releases.
+The local toolbox and its rollback commands remain the operator recovery path.
+
+These restrictions are workflow-only: this change does not apply Terraform or change
+environment policies. Older branches must adopt these workflows to stop their previous
+PR-publishing behavior. Production's approval and staging-release read remain unchanged.
 
 A deployment's first release runs from the toolbox, never the workflow: it raises each
 program's task-count floor (Application Auto Scaling), which the role may not. The role
@@ -1077,7 +1102,7 @@ yet applied) logs the refused call, confirms nothing, and goes on.
 Each deployment serves its products' downloads at a host of its own (ADR 0070, ADR 0072),
 which the site's download buttons fetch: prod's `downloads.<domain>` prod's published releases
 (the tagged releases' release builds, which talk to prod), staging's
-`downloads.staging.<domain>` staging's (a pull request's debug builds, which talk to
+`downloads.staging.<domain>` staging's (the staging branch's debug builds, which talk to
 staging). `infra/aws/downloads.tf` makes it: a private bucket,
 `opennova-<deployment>-downloads-<account id>`, which a CloudFront distribution alone reads
 (origin access control; the account's S3 public access block stands), a certificate ACM
@@ -1104,7 +1129,8 @@ release, uploads each, writes the manifest last and removes what the set no long
 has, each with a short `Cache-Control` (five minutes, the manifest one), so the new set is
 what the host serves within minutes, with no invalidation. A game's zip is the runtime's
 published package applied into an empty folder with its `ONRUNTIME.CMD`, plus the
-`UPDATE.WIZ` naming a retail game's product and an `expansion/<code>/UPDATE.WIZ` for each of
+`UPDATE.WIZ` naming the game's product (one with an updater login, or an account's own) and an
+`expansion/<code>/UPDATE.WIZ` for each of
 its expansions with an updater login, every wizard naming this deployment's update host; the
 editor's is its package applied with its `ONEDITOR.CMD`; the others are their builds as
 uploaded. The data program's role may list, read, write and remove the bucket's objects
@@ -1133,13 +1159,13 @@ published release's, byte for byte, is left as it is. Its source:
   apps are published it waits for the host's manifest to list their new releases (`publish_apps.py
   attach`) and attaches every file the host serves to the tag's GitHub release, as
   `<name>-<tag>.zip`.
-- `staging`: a pull request's CI run, debug builds, which talk to staging, each release's
-  VERSION the head's `config/version` and the run's number (`0.0.22.123`: a VERSION is dotted
-  numbers alone) and its name `OpenNova <app> PR #<n> (<sha>)`. `ci.yml`'s `publish-staging`
-  calls it for every run of a branch of this repository once its package jobs pass, so the
-  newest run is what staging serves; a fork's run has no secrets and is skipped. From the
-  Actions tab (Publish, `staging`, a run id) a run publishes again. A master run is refused:
-  its builds are release builds, which talk to prod.
+- `staging`: a staging-branch CI run, debug builds, which talk to staging, each release's
+  VERSION the ONE stamp its builds carry, the latest tag reachable from the head and the run's
+  number (`0.0.22.123`: a VERSION is dotted numbers alone; `scripts/ci/one_stamp.sh`), and its
+  name `OpenNova <app> staging (<sha>)`. CI's serialized staging
+  rollout calls Publish after deploying that commit's services. It accepts artifacts
+  from that same CI run alone. PRs, master builds, release tags and standalone manual
+  Publish runs cannot publish to staging; retries go through staging CI.
 
 Every app's releases arrive from Publish alone (every game's are built from its project,
 "The games", section 7), with each environment's secret `ADMIN_API_TOKEN` (the vault's
@@ -1153,15 +1179,15 @@ repository variables the older workflows read (`PUBLISH_DOWNLOADS`,
 secret are read no more: delete them.
 
 An operator publishes the same way from the toolbox, with the deployment's admin token (the
-vault's `app-<deployment>/admin_api_token`) in a file, for instance a pull request's builds to
-staging before the workflow is on master. In `.scratch/` (git ignores it; the toolbox sees the
+vault's `app-<deployment>/admin_api_token`) in a file, as a recovery path for staging.
+Normal publishing goes through CI. In `.scratch/` (git ignores it; the toolbox sees the
 checkout as `/workspace`):
 
 ```bash
-gh run download <run id> --pattern 'opennova-*-windows*.zip' --dir .scratch/dl   # a pull request's CI run
+gh run download <run id> --pattern 'opennova-*-windows*.zip' --dir .scratch/dl   # a staging-branch CI run
 python scripts/publish_apps.py publish --url https://staging.<domain> \
     --token-file .scratch/staging.token --from .scratch/dl \
-    --version <its config/version>.<the run's number> --label 'PR #<n> (<sha>)'
+    --version <its ONE stamp: scripts/ci/one_stamp.sh <head sha> <run number>> --label 'staging (<sha>)'
 ```
 
 **Bringing it up**, once per deployment, staging first:
@@ -1177,7 +1203,7 @@ python scripts/publish_apps.py publish --url https://staging.<domain> \
 3. `--deployment staging app deploy` with images of this change or later: the data
    program writes the host, and the site's buttons read it.
 4. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
-   above), let a pull request's CI publish (or run Publish for `staging` with its run id),
+   above), let a staging-branch CI rollout deploy and publish,
    and check: the four apps' releases published on the admin's Products page, and `curl -s
    https://downloads.staging.<domain>/manifest.json`. A game's zip appears once the game's
    own release is published too.
@@ -1371,6 +1397,11 @@ Every release generates `gt.ssc` from the selected lobby, at the game root or
 the generated bytes for local Build/Play. Do not add a gate-tag file to project source.
 Release workers pass the artifact with `opennova-project export --gate-tag-file <file>`;
 retail stock comparisons use the stock title's tag while edited exports use the selected lobby.
+An expansion's `version.txt` (the checksum a host compares with its joiners) is generated the
+same way, beside its `gt.ssc`: the product row's `version_file` line when it names one
+(Escalation's retail line, `0010_expansion_version_file.sql`, so it joins retail hosts), else
+`<display name>, V<release version>; English`, ending in CRLF, passed with `--version-file` to
+the edited and the stock export alike. A base game gets none; a project holds neither file.
 
 A **release** is built from a revision: **Release r<head>...** on the game's page, or the
 editor's **Build > Release...** (`POST /api/products/<key>/releases`, an admin's or the
@@ -1396,7 +1427,7 @@ server's data, one immutable version of the files `opennova-serve` reads, never 
 | File | Kind | Why |
 |---|---|---|
 | `resource.pff`, `localres.pff`, `language.pff` | base (required) | the retail boot table it mounts |
-| `version.txt`, `score.ini`, `_NSTMOUT.TXT`, `gt.ssc` | base (when present) | the version joiners compare; the scoring table; the session timeout override; the gate-tag override, the lobby its servers list in |
+| `score.ini`, `_NSTMOUT.TXT`, `gt.ssc` | base (when present) | the scoring table; the session timeout override; the gate-tag override, the lobby its servers list in |
 | `<code>.pff`, `<code>L.pff`, `version.txt` | expansion (required) | the expansion's archives and the checksum joiners compare |
 | `gt.ssc` | expansion (when present) | its gate-tag override |
 
@@ -1562,27 +1593,23 @@ runtime, game and expansion) on the updater's four TCP ports (20044, 20556,
 21068 and 21580: `update_ports`, hardcoded in the updater) behind the load balancer, from
 everyone (`allowed_cidrs`): a listener per port, all four forwarding to one target group on
 web's server (ECS admits five target groups per service, and web holds three), so web
-serves every port and a task sees the updater on the first. Where the updater goes is the
-game's: with `retail` on, its SERVER.LST names `ftp.novaworld.com`, which a
-hosts-file line maps to the gate's address, the balancer's zone-a address, so a client
-with that line updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
-off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
-(web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off, as it
-does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
+serves every port and a task sees the updater on the first. Every product's SERVER.LST names
+`update.<domain>` (`update.<deployment>.<domain>` off prod), an unproxied CNAME to the balancer
+the deployment's apply makes with the zone (web's `ONNET_UPDATE_HOST`; without a zone it is
+empty and the listener stays off, as it does without an object store, hosting off). OpenNova's `update.exe` dials the gateways its
 `OPENNOVA.WIZ` names, else `update.opennova.net`. The data program writes that wizard into
 each updatable app's package (the runtime's, the editor's) naming web's `ONNET_UPDATE_HOST`,
 and refuses to pack one without it, so an install that takes an app's release takes the
 deployment its wizard names: prod's packages name `update.opennova.net`, staging's
-`update.staging.opennova.net`, and a game zip the host renders carries the runtime's. An
-OpenNova game (`retail` off) that no published release serves is refused, so an
-OpenNova first install fails until the runtime's release and its game's are published; a retail one with none is answered current, from a package web writes into its
-cache itself. A game's package is built by the data program from a revision of its project
+`update.staging.opennova.net`, and a game zip the host renders carries the runtime's. A
+product no published release serves is refused, so a first install fails until the runtime's
+release and its game's are published. A game's package is built by the data program from a revision of its project
 ("The games", above; ADR 0069 decision 5): the editor's **Build > Release...** or the game's
 admin page starts it, and the game's page publishes it. An updatable app's is packed by the
 data program from the plain build Publish uploads (`opennova-runtime-windows-v*.zip`,
 `opennova-editor-windows-v*.zip`), with its published release as `--previous`, and published
 by Publish once validated ("The downloads host", section 5): prod's for every release tag,
-staging's from a pull request's run. The packages are the games' published releases; web
+staging's from a staging-branch CI run. The packages are the games' published releases; web
 fetches one from the store the first time the updater asks for it, into its task's storage.
 
 ### Listing on NovaLogic's NovaWorld
@@ -1682,6 +1709,14 @@ games' files stay in the bucket).
 
 ### Operating notes
 
+- **Browser ping.** The retail NovaWorld browser measures each server's public IPv4
+  with ICMP echo requests. The machines' security group admits type 8, code 0 from
+  `allowed_cidrs`, for both shared and dedicated machines, even with NovaLogic listing
+  off. A server can list and accept game UDP traffic while its ping column stays blank
+  if ICMP is blocked. After applying this rule, verify an external ping to the listed
+  address and a numeric ping after refreshing the retail browser, then check joining.
+  Security-group rules reach existing machines without restarting their servers;
+  this change needs `infra apply`, with staging verified before production.
 - **A machine image.** The launch templates launch from the AMI the var-file's
   `fleet_ami` names (Amazon's ECS-optimized Amazon Linux 2023, x86_64, by its exact name,
   owner `amazon`), and the worker may launch that image alone. It carries docker and the
@@ -2066,30 +2101,34 @@ or secret is a change to the stack: add it, plan, apply.
 
 The build legs run on [RunsOn](https://runs-on.com)'s runners in the Organization's third
 account, `opennova-ci`, which holds them alone (`infra/ci`): `ci.yml`'s build and test legs
-(test-core, test-linux, both gdext builds, the Godot package), the tools' and the Blender
-add-on's packages (`package-apps-windows.yml`, `package-blender-windows.yml`, which
-`ci.yml` and `release.yml` call), a release's Godot package (`release.yml`: both
+(test-core, test-linux, both gdext builds, the Godot package and shared package-tools
+producer), standalone tools/Blender package builds, a release's Godot package (`release.yml`: both
 GDExtension flavours and the updater tools compiled from nothing), the Linux net leg
 (`net-linux.yml`), the local stack (`local-stack.yml`) and the image builds and pushes
 (`novaworld-images.yml`, `serve-image.yml`; their Docker layer cache, `type=gha`, lives in
 the Magic Cache as actions/cache's entries do). Each job gets an EC2 instance of its own
 with 16 vCPUs (4 for an image push, which only uploads what the build cached), spot unless
 spot is short (then on demand), launched when GitHub queues the job and ended when it
-finishes: nothing runs between jobs. The Godot tests (one test at a time, so more cores buy
+finishes: nothing runs between jobs. CI's tools/Blender consumers assemble and test the
+shared binaries on standard Windows runners; standalone release builds retain their
+compiler runners. The Godot tests (one test at a time, so more cores buy
 nothing) and every other job (the gates, the release's and Publish's API calls, the
 deploys, the infra checks) stay on GitHub's standard runners, free for a public repository,
 and so does every job of a pull request from a fork.
 
-What it costs: the instances by the minute (us-east-1 spot, about $0.014 a minute for a
-16-vCPU Windows instance with its license and $0.005 for Linux, against $0.082 and $0.042
-for GitHub's 16-core larger runners), about $15 a month for RunsOn's control plane (a small
-Fargate task, an API Gateway, Lambdas, queues, tables and secrets), the artifacts' upload
-to GitHub (about 0.3 GB a run, at $0.09 a GB), the legs' caches in RunsOn's S3 bucket
-(Magic Cache: about 2.2 GB of compiler caches a `master` push, kept 10 days, about $10 a
-month at twenty pushes a day and no transfer charge), and RunsOn's license (`runs-on/key`:
-a yearly fee, no per-minute one). A full run's legs come to about $0.60. The account's monthly budget (`budget_monthly_usd`, 300) emails
+Measure cost from the CI account's AWS costs and RunsOn reports: instance lifecycle
+(including boot/shutdown and spot versus on-demand), control plane, EBS, S3 cache and
+artifact upload traffic. RunsOn's job-price summaries are estimates; its comparison
+with GitHub larger runners is not a saving against this public repository's free
+standard runners. The RunsOn license is a separate annual expense. Master and staging
+both warm compiler caches, retained by the existing S3 lifecycle. The account's monthly
+AWS target and budget (`budget_monthly_usd`, 300) emails
 `alerts/email` at 80% spent and at a 100% forecast, RunsOn emails a weekly cost report
-there, and a job hung past 90 minutes is ended with its instance.
+there, and a job hung past 90 minutes is ended with its instance. Compare required-check
+latency and component-ready time separately from deployment duration; record runner
+startup delay, execution minutes and transferred artifacts before changing capacity.
+Keep the 16-core compilation default while removing duplicate work. A faster run is
+accepted only with complete test coverage; an AWS budget alert is not a hard spending cap.
 
 Once, in order:
 
@@ -2105,14 +2144,13 @@ Once, in order:
 3. **The license**: RunsOn's license key (runs-on.com) into the vault item `runs-on`, field
    `key` (the toolbox finds the item's title in any case).
 4. **[admin] The account's EC2 quotas** (the access portal, `OpenNovaAdmin` in
-   `opennova-ci`, Service Quotas): a pull request's `ci.yml` run takes 112 vCPUs at once
-   (seven 16-vCPU legs: the two test shards, test-linux, a gdext build per OS and the two
-   package workflows), a `master` push's 144 (nine: both gdext builds make debug and
-   release), and the Godot package another 16 once its gdext builds are done.
-   `serve-image.yml` and `novaworld-images.yml` each add two 16-vCPU legs (`net-linux.yml`
-   and the image build) when a change touches their paths, and on `master` their pushes
-   (4 vCPUs each, eight for the NovaWorld images); `local-stack.yml` adds one. A release
-   takes three (its Godot, tools and Blender packages).
+   `opennova-ci`, Service Quotas): a full debug CI run can start seven 16-vCPU
+   compilation legs (two native shards, full Linux, one extension per OS, shared Windows
+   package tools and the shared service build). Master also builds both release extension
+   flavours. Image assembly, local-stack and Godot packaging follow their producers;
+   image publishers use 4-vCPU runners. PRs select only affected components and their
+   prerequisites. Staging uses debug exports and builds all ten images; master validates
+   release exports as well. A tag release retains three standalone package builders.
    The quotas are the runners' spending ceiling: "All Standard (A, C, D, H, I, M, R, T,
    Z) Spot Instance Requests" (L-34B43A08) and "Running On-Demand Standard (A, C, D, H, I,
    M, R, T, Z) instances" (L-1216C47A, for when spot is short), 192 each in OpenNova's account:

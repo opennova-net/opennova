@@ -52,7 +52,8 @@ EditorRequest new_project_request(const WorkspaceView::NewProject &form, const N
 // window's). A mod: the NovaWorld game it changes (A mod of), its name and short name (the expansion it builds as,
 // checked as the game's rule takes it; one of the install's own expansions said so, "Escalation is installed: its
 // project is made from your game install."), the folder and the base game's project it is made on. A game of its
-// own: the title it runs as (A game for), its name and the folder (a retail game's project is one, its whole game
+// own: the title it runs as (Runs as: each title with its protocol, the titles it plays with said), its name and
+// the folder (a retail game's project is one, its whole game
 // install imported after, File > Import...). The game install (prefilled with the one the editor last chose,
 // checked as it is named, CheckInstall) is asked only where the game needs one, a mod of a retail game: the
 // editor's own, where it is that game's, said in a line with Change..., else the field, Browse... and what it

@@ -8,10 +8,11 @@
 #include <net/novaworld/lobby_vars.h> // parse_host_and_port
 #include <net/npwire/nw_session_framing.h> // advance_connection_index / make_random_session_u32
 #include <net/npwire/session_keys.h>      // the server-direction opcodes
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <base/io/le.h>
 #include <base/io/strutil.h>
+#include <base/version/one_build.h>
 
 #include <array>
 #include <cstdio>
@@ -290,7 +291,7 @@ std::string NwuLobbySession::gate_start_failed() {
 
 void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	if (gate_socket_ == nullptr) return;
-	if (title_ == nullptr) {
+	if (protocol_ == nullptr) {
 		if (hooks_.on_fatal) hooks_.on_fatal("no title identity to probe the gate with");
 		return;
 	}
@@ -315,7 +316,7 @@ void NwuLobbySession::probe(const std::string &gate_host, uint16_t gate_port) {
 	kept.gate_host = gate_host;
 	kept.gate_port = gate_port;
 	log_gate_service_start();
-	// The gate manager's tag: the title's, or the boot's gt.ssc (set_title).
+	// The gate manager's tag: the title's, or the boot's gt.ssc (set_protocol).
 	// [orig: CNapiGateManager_ProbeThreadProc @0x6339e0 - the tag's bytes @0x633aa1]
 	const std::vector<uint8_t> probe_dg = gate_probe_build(gate_tag_);
 	// The NWU payload rides the LSB-scatter CRC envelope the gate expects: retail's socket
@@ -1009,7 +1010,7 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 	//  index @0x62B282..0x62B296)]
 	uint32_t protocol_connections = 0;
 	client_index_ = advance_connection_index(protocol_connections);
-	ClientSession::Config cfg = ClientSession::Config::lobby(*title_, gate_tag_);
+	ClientSession::Config cfg = ClientSession::Config::lobby(*protocol_, gate_tag_);
 	cfg.client_index = client_index_;
 	cfg.connection_keys = env_.connection_keys;
 	cfg.max_packet_size = env_.max_packet_size;
@@ -1018,7 +1019,11 @@ std::vector<uint8_t> NwuLobbySession::begin_session() {
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - Napi_GetExeBasename called @0x4D4780;
 	//  Game_Run @0x4A7FB0 - _strupr called @0x4A7FCF]
 	cu.application = read_menu_exe_basename().substr(0, kLobbyApplicationChars);
-	cu.build_date_and_time = title_->lobby_bdat;
+	// BuildDateAndTime, the engine build's date: ONE's where retail's binary carried its lobby
+	// BDAT literal, JO's "Jul 21 2009 18:54:41" [orig: CNapiGameSession_ConnectToNovaWorld
+	// @0x4d479d, the literal @0x7cc760], DFX2's "Jul  7 2009 11:33:09" [orig: the twin of
+	// CNapiGameSession_ConnectToNovaWorld @0x4d4830 @0x4d498d (dfx2.exe)].
+	cu.build_date_and_time = one_build().date_text();
 	cu.gate_tag = cfg.na;
 	const GateResponse &gate = memory().response;
 	cu.met_tag = gate.met_label;

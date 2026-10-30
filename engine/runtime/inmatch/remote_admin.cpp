@@ -144,7 +144,7 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 	const bool single_player = binding.host == nullptr && binding.client == nullptr && binding.world != nullptr;
 	session_less_.world = single_player ? binding.world : nullptr;
 	if (single_player && !(bound_ == binding) && seams.config_block != nullptr)
-		session_less_.config = host_screen_from_block(*seams.config_block).config;
+		session_less_.config = host_screen_from_block(*seams.config_block, *seams.config_title).config;
 	bound_ = binding;
 	NapiNPServerCtx *ctx = binding.host;
 	if (ctx == nullptr && binding.client != nullptr) {
@@ -161,7 +161,8 @@ void RemoteAdminConsoles::bind(const RemoteAdminBinding &binding, AdminConsole::
 		// is empty (the start's clear leaves it unallocated off the authority).
 		// [orig: Game_ApplySessionSettingsToGlobals @0x551B6D..0x551DF1; Server_InitNewRoundState
 		//  @0x51C939 (PlayerSlotTable_ClearEntryArray), @0x51C946 (the authority's allocation)]
-		if (seams.config_block != nullptr) joined_.config = host_screen_from_block(*seams.config_block).config;
+		if (seams.config_block != nullptr)
+			joined_.config = host_screen_from_block(*seams.config_block, *seams.config_title).config;
 		ctx = &joined_;
 	}
 	seams.host_client = binding.client;

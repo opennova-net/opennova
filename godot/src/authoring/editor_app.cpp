@@ -27,7 +27,6 @@
 #include <vector>
 
 #include <runtime/devtools/imgui_pass.h>
-#include <runtime/menu/menu_runtime.h>
 
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
@@ -192,14 +191,8 @@ void EditorApp::ensure_session() {
 	});
 #if OPENNOVA_EDITOR_UI
 	windows_->set_view(&session_->view());
-	// The build Help names, as the game's STARTUP screen names its own (D-MNU-76): the exported editor's
-	// config/version, the commit packaging stamped and staging for a debug export; none for a source run.
-	ProjectSettings *project = ProjectSettings::get_singleton();
-	const std::string version = opennova::to_std(String(project->get_setting("application/config/version", "")));
-	const std::string commit = opennova::to_std(String(project->get_setting("application/config/build_commit", "")));
-	windows_->set_build_label(is_source_run()
-					? std::string()
-					: opennova::menu::runtime_build_label(version, commit, OS::get_singleton()->is_debug_build()));
+	// Help names the editor's versions (editor_version_line), and says whether it is a source run.
+	windows_->set_source_run(is_source_run());
 #endif
 }
 

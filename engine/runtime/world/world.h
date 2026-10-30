@@ -17,7 +17,6 @@
 #include <vector>
 #include <variant>
 
-#include <base/gameprofile/gameprofile.h> // SessionRules::title
 #include <runtime/audio/dialog_queue.h>
 #include <runtime/audio/oneshot_play.h> // kListenerView*
 #include <runtime/audio/sound_profile.h>
@@ -47,6 +46,7 @@
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/entity_update_transactions.h>
 #include <runtime/world/system.h>
+#include <runtime/world/title_rules.h> // SessionRules::title_rules
 #include <runtime/world/vehicle_system.h>
 #include <runtime/world/rotor_wash.h>
 #include <runtime/world/zone_system.h>
@@ -490,6 +490,10 @@ struct PlayerTemplate {
     // @0x439FDC; Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598;
     // the gate @0x43CC19].
     bool has_graphic_model = true;
+    // That graphic's radius word (model+0x14, the GHDR radius in 16.16), 0 when none
+    // loaded: a flying round bound to the row clips its model at four times it in the
+    // scene collect's RoundPool walk (OcclusionWorld::collect_round_draws).
+    int32_t graphic_model_radius_q16 = 0;
     // The Player row's hp word (itemDef+0x17C healthMax), 0 a real word: unset
     // until the traits sweep stores it (or a harness seeds one), and while unset
     // the spawn and the deploy take their fallbacks. A word of 0 makes the
@@ -679,11 +683,14 @@ struct MissionTables {
 // The session/game-option bits the host stamps at bring-up; the SP defaults
 // hold otherwise.
 struct SessionRules {
-	// The title whose rules the world runs (gameprofile::GameId; CONTEXT.md "Title"): Jointops.exe's
-	// unless the session names dfx2.exe's. The two executables are one engine, and the host rules
-	// that part are title branches, each cited on both binaries (docs/titles/dfx2-vs-jo-re.md §7,
-	// DFX2-8..DFX2-19). The host stamps it from its session config (inmatch configure_session_world).
-	int title = gameprofile::GAME_JO;
+	// The rules of the title the world runs as (title_rules.h; CONTEXT.md "Title"): the knobs the
+	// in-match code reads where dfx2.exe and Jointops.exe part, each cited on both binaries
+	// (docs/titles/dfx2-vs-jo-re.md §7, the §8 rows). Unset (unset_title_rules) until the embedder
+	// sets it from title_rules(code): the kernel's boot (mission::KernelBootOptions::title_rules),
+	// the host from its session config (inmatch configure_session_world), the joiner from its
+	// title (JoinerRole::set_rules). title() aborts while it is unset.
+	const TitleRules *title_rules = unset_title_rules();
+	const TitleRules &title() const { return require_title_rules(title_rules, "SessionRules"); }
 	// The live rules word. A role stamps it (HostRole: the config word in a
 	// session, 0x4204 out of one; a joiner its S2C 0x64 word); a world no
 	// role brings up keeps 0, which is no SP default.
@@ -1784,6 +1791,15 @@ private:
 // [orig: Score_CountMissionSubgoalsAndUnits (ex sub_509DC0) @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070,
 //  the pool walks @0x509e13..0x509e4a, called at Game_StartMission @0x525d5d]
 void count_mission_units(World &world);
+
+// One row's census leg: a non-player row with team >= 2 and a non-zero unit-class byte adds
+// one enemy unit to MissionKillStats's total and its class. The mission start's walk runs it
+// over pools 0 and 1, and an org1 respawn on the authority runs it on the respawned row, so
+// every respawn of an enemy grows the census.
+// [orig: Score_ClassifyEntityForCounts @0x4fd070, called by
+//  Score_CountMissionSubgoalsAndUnits @0x509e1d / @0x509e4a and Entity_UpdateInfantryAI
+//  @0x4ba055]
+void classify_entity_for_counts(World &world, const Entity &e);
 
 // The mission's defined-subgoal count: the leading run of authored win
 // conditions (slots 1..8) before the first 0 or 0xFF entry.

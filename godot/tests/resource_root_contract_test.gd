@@ -63,7 +63,7 @@ func test_loose_root_mounts_as_the_launch_game() -> void:
 	assert_eq(mounted.read_file("Alpha.trn").get_string_from_utf8(), "loose trn")
 	var fixture := ResourceRoot.new()
 	assert_eq(fixture.set_root_dir(root), OK)
-	assert_eq(fixture.get_game_code(), "jo", "a fixture mount names no game: JO's")
+	assert_eq(fixture.get_game_code(), "acidgambit", "a fixture mount names no game: the default title's")
 
 
 func test_runtime_mount_is_packed_with_optional_loose_override() -> void:

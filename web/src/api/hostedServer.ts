@@ -13,7 +13,9 @@
 
 import { isAxiosError, type AxiosInstance } from 'axios';
 import { parseServerAddress } from './addresses';
+import { configurationDocument, settingsFromDocument, parseSettingsSchema, parseWeapons, type SavedConfiguration } from '../utils/serverConfiguration';
 import { adminClient, apiClient } from './client';
+import { pickProtocol } from './products';
 import { formatRetryAfter, parseRetryAfter } from './session';
 import type {
   ConsoleLine,
@@ -42,7 +44,7 @@ import type {
   StartRequest,
   StartSettings,
 } from '../types/hostedServer';
-import { FIELD_RULES, INT_FIELDS, MISSIONS_MAX, isSettingsField, type SettingsField } from '../utils/hostedSettings';
+import { FIELD_RULES, INT_FIELDS, MISSIONS_MAX, NETWORK_INT_FIELDS, NETWORK_LIMITS, isSettingsField, type SettingsField } from '../utils/hostedSettings';
 
 // The server's `error` codes these routes answer with, plus `network` (no
 // reply at all) and `unknown` (a reply this client does not recognise).
@@ -254,7 +256,9 @@ function isHostedServerShape(value: unknown): value is HostedServer {
     typeof v.own_machine === 'boolean' &&
     typeof v.settings === 'object' &&
     v.settings !== null &&
-    Array.isArray((v.settings as Partial<HostedSettings>).missions)
+    Array.isArray((v.settings as unknown as SavedConfiguration).rotation) &&
+    (v.settings as unknown as SavedConfiguration).rotation.every((entry) => entry &&
+      typeof entry.file === 'string' && typeof entry.swap_sides === 'boolean')
   );
 }
 
@@ -341,12 +345,23 @@ function parseNovaLogic(value: unknown): NovaLogicListing | null {
 export function parseHostedServer(value: unknown): HostedServer | null {
   if (!isHostedServerShape(value)) return null;
   const v = value as unknown as Record<string, unknown>;
+  const settings = settingsFromDocument(value.settings as unknown as SavedConfiguration);
+  for (const field of NETWORK_INT_FIELDS) {
+    const number = settings[field];
+    if (!Number.isInteger(number) || number < NETWORK_LIMITS[field].min || number > NETWORK_LIMITS[field].max) return null;
+  }
+  if (typeof settings.lock_framerate !== 'boolean') return null;
   return {
     ...value,
+    settings,
     address: parseServerAddress(v.address),
     game_display_name: typeof v.game_display_name === 'string' ? v.game_display_name : '',
     expansion_display_name: typeof v.expansion_display_name === 'string' ? v.expansion_display_name : '',
-    product: parseNamed(v.product, (p) => ({ key: typeof p.key === 'string' ? p.key : '', title: typeof p.title === 'string' ? p.title : '' })),
+    product: parseNamed(v.product, (p) => ({
+      key: typeof p.key === 'string' ? p.key : '',
+      title: typeof p.title === 'string' ? p.title : '',
+      protocol: pickProtocol(p.protocol),
+    })),
     expansion: parseNamed(v.expansion, (e) => ({ code: typeof e.code === 'string' ? e.code : '' })),
     data: parseServerData(v.data),
     update_available: v.update_available === true,
@@ -403,6 +418,7 @@ function parseExpansion(value: unknown): HostedExpansionOption | null {
   return {
     id: v.id,
     code: v.code,
+    weapons: parseWeapons(v.weapons),
     display_name: typeof v.display_name === 'string' ? v.display_name : v.code,
     version: typeof v.version === 'string' ? v.version : '',
     missions: parseMissions(v.missions),
@@ -432,9 +448,12 @@ function parseProduct(value: unknown): HostedProduct | null {
     id: v.id,
     display_name: v.display_name,
     title: typeof v.title === 'string' ? v.title : '',
+    protocol: pickProtocol(v.protocol),
     version: typeof v.version === 'string' ? v.version : '',
     missions: parseMissions(v.missions),
     limits,
+    settings_schema: parseSettingsSchema(v.settings_schema),
+    weapons: parseWeapons(v.weapons),
     expansions: expansions as HostedExpansionOption[],
     novalogic_listing: v.novalogic_listing === true,
   };
@@ -503,8 +522,8 @@ export function startHostedServer(
   ownMachine = false,
   addressId: number | null = null,
 ): Promise<HostedResult<HostedServer>> {
-  const body: StartRequest = { ...settings, own_machine: ownMachine };
-  if (ownMachine && addressId !== null) body.address_id = addressId;
+  const body = { ...configurationDocument(settings), own_machine: ownMachine,
+    ...(ownMachine && addressId !== null ? { address_id: addressId } : {}) };
   return forServer(() => apiClient.post<unknown>('/me/servers', body));
 }
 
@@ -979,8 +998,10 @@ export function addRotationMission(
   target: ConsoleTarget,
   mission: string,
   swapSides: boolean,
+  insertAt: number | null = null,
+  oneShot = false,
 ): Promise<ConsoleResult<string>> {
-  return postCommand(target, 'rotation', { mission, swap_sides: swapSides });
+  return postCommand(target, 'rotation', { mission, swap_sides: swapSides, ...(insertAt === null ? {} : { insert_at: insertAt }), ...(oneShot ? { one_shot: true } : {}) });
 }
 
 // POST .../rotation/<index>/remove or /next: an entry removed (never the

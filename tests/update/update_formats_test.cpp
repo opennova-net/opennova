@@ -84,32 +84,6 @@ int test_wizard() {
 	TEST_EXPECT(wizard.product_login == "JOTRqq");
 	TEST_EXPECT(wizard.dir == "/pub/updates/JOTR/qq");
 	TEST_EXPECT(wizard.game.empty());
-	// The product a stock wizard's CMD names: JO:CA's, the Steam DFX2's and OpenNova
-	// content's; any other (BHD's, an expansion's) none.
-	const auto named = [](const char *cmd, const char *login = "", const char *game = "") {
-		UpdateWizard w;
-		w.cmd = cmd;
-		w.product_login = login;
-		w.game = game;
-		return wizard_product(w);
-	};
-	const WizardProduct jo = wizard_product(wizard);
-	TEST_EXPECT(jo.product == "jo" && jo.game == "jo" && !jo.native);
-	const WizardProduct dfx2 = named(" dfx2.cmd ");
-	TEST_EXPECT(dfx2.product == "dfx2" && dfx2.game == "dfx2" && !dfx2.native);
-	const WizardProduct own = named("ACIDGAMBIT.CMD");
-	TEST_EXPECT(own.product == "acidgambit" && own.game == "jo" && own.native);
-	TEST_EXPECT(named("DFBHD.CMD").product.empty() && named("JOEPTR.CMD").product.empty() &&
-			named("").product.empty());
-	// A player's game (ADR 0074): any other CMD with GAME jo or dfx2 and a login, named by its
-	// login lower-cased, native. GAME on a stock CMD changes nothing; another profile, no login
-	// or no CMD names none.
-	const WizardProduct player = named("MYGAME.CMD", " MyGame ", "DFX2");
-	TEST_EXPECT(player.product == "mygame" && player.game == "dfx2" && player.native);
-	TEST_EXPECT(named("JOPTR.CMD", "JOTRqq", "dfx2").game == "jo");
-	TEST_EXPECT(named("MYGAME.CMD", "MYGAME", "bhd").product.empty());
-	TEST_EXPECT(named("MYGAME.CMD", "", "jo").product.empty());
-	TEST_EXPECT(named("", "MYGAME", "jo").product.empty());
 
 	// cc.bin "usqq0409us": territory "us" over placeholder "qq".
 	const std::vector<uint8_t> cc = bytes("usqq0409us");
@@ -155,7 +129,7 @@ int test_wizard() {
 
 int test_command_file() {
 	const std::string text = "[HEADER]\r\nEXE=Jointops.exe\r\nPRODUCT=Joint Operations\r\n"
-							 "VERSION=1.7.5.8\r\n\r\n[COMMAND]\r\n"
+							 "VERSION=0.2.0\r\n\r\n[COMMAND]\r\n"
 							 "UPD=version.txt,1700000000,52,-123\r\n"
 							 "bogus=thing\r\n"
 							 "WIZ=update.wiz,1700000001\r\n" // no size: skipped
@@ -167,7 +141,7 @@ int test_command_file() {
 	const std::optional<CommandFile> file = read_command_file(text);
 	TEST_EXPECT(file.has_value());
 	TEST_EXPECT(file->exe == "Jointops.exe" && file->product == "Joint Operations");
-	TEST_EXPECT(file->version == "1.7.5.8");
+	TEST_EXPECT(file->version == "0.2.0");
 	TEST_EXPECT(file->rows.size() == 5);
 	TEST_EXPECT(file->rows[0].type == CommandType::Loose && file->rows[0].name == "version.txt");
 	TEST_EXPECT(file->rows[0].time == 1700000000 && file->rows[0].size == 52);

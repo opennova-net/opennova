@@ -708,6 +708,7 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 	MenuTrySource source;
 	source.files = &files;
 	source.vars = &style_vars_;
+	source.version_line = editor_version_line(view);
 	const std::string own = path().substr(path().find_last_of('/') + 1);
 	// A menu by its file name as the game reads it: this one as it would be saved now, another the
 	// project's file of the name (an open document standing in).

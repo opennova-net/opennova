@@ -132,6 +132,28 @@ void ThrowablePresenter::present_visuals(
 	}
 }
 
+void ThrowablePresenter::apply_round_draws(const std::vector<int64_t> &p_keys, bool p_inset) {
+	HashSet<int64_t> drawn;
+	for (const int64_t key : p_keys) {
+		drawn.insert(key);
+	}
+	for (const KeyValue<int64_t, ModelSlot> &kv : models_) {
+		if ((kv.key & opennova::world::kThrowableDeviceKeyBit) != 0 || !kv.value.node.is_valid()) {
+			continue;
+		}
+		ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(kv.value.node));
+		if (model == nullptr) {
+			continue;
+		}
+		const bool hidden = !drawn.has(kv.key);
+		if (p_inset) {
+			model->set_inset_occlusion_hidden(hidden);
+		} else if (model->is_occlusion_hidden() != hidden) {
+			model->set_occlusion_hidden(hidden);
+		}
+	}
+}
+
 void ThrowablePresenter::sync_fixed_tick_effects() {
 	Simulation *s = sim();
 	if (s == nullptr) {

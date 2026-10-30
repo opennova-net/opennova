@@ -49,6 +49,7 @@
 #include <net/novaworld/lobby_repository.h>
 #include <net/novaworld/relay_request.h>
 #include <net/novaworld/unknown_tracker.h>
+#include <net/protocol/protocol.h>
 
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
@@ -84,8 +85,13 @@ namespace opennova::novaworld_server {
 // /acidgambit_0.gsb, an account's own game's), served through the catch-all
 // route (register_static_routes) from the catalogue as it stands
 // (games_now), listing the hosts registered under its LobbyName; a column a
-// host reported nothing for shows its game's VER1 / Expbits.
+// host reported nothing for shows its protocol's VER1 (Protocol::ver1) and its
+// row's Expbits.
 crow::response HttpListener::gsb_reply(const catalog::GameRow &game) {
+	const Protocol *protocol = protocol_by_code(game.protocol);
+	const hostdb::GsbGameDefaults defaults{
+		protocol != nullptr && protocol->ver1 != nullptr ? protocol->ver1 : "", game.exp_bits
+	};
 	// Phase I.2: backed by active_hosts, filtered to the requested game
 	// (onnet serves each *.gsb from a per-game query — without the filter
 	// a DFX2 host would leak into the JO browser and vice versa).
@@ -108,9 +114,8 @@ crow::response HttpListener::gsb_reply(const catalog::GameRow &game) {
 			// Every FLDS column carries the host-reported value and the row
 			// tail carries the host's roster names (hostdb::gsb_entry_from_host).
 			const auto roster = rosters.find(h.rid);
-			entries.push_back(hostdb::gsb_entry_from_host(h,
-					roster == rosters.end() ? no_roster : roster->second,
-					{ game.ver1, game.exp_bits }));
+			entries.push_back(hostdb::gsb_entry_from_host(
+					h, roster == rosters.end() ? no_roster : roster->second, defaults));
 		}
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GSB list failed: %s\n", e.what());

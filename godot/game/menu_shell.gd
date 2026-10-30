@@ -106,6 +106,11 @@ const _LAN_MULTI_PLAYER := "LAN_MULTI_PLAYER"
 ## The LAN multiplayer entry (an authored SCREEN action to mp.mnu), which the
 ## update gate disables beside the NovaWorld controls while an update waits.
 @export var lan_entry_control_names := PackedStringArray([_LAN_MULTI_PLAYER])
+## True while a screen over the menu holds the keyboard; main_game hands it its
+## join screen's is_open. Retail's join screen is its own mode, so the menu it
+## opens over (the LAN screen binds the same Return and Escape) takes no keys
+## while it is up.
+var keyboard_covered := Callable()  # () -> bool
 
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
@@ -434,14 +439,19 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	# A backgrounded menu must not steal Esc from the world.
-	if _driver == null or not is_visible_in_tree():
+	# A backgrounded menu must not steal Esc from the world, nor a covered one
+	# the keys of the screen over it.
+	if _driver == null or not is_visible_in_tree() or _is_keyboard_covered():
 		return
 	if _options_controller != null and _options_controller.consume_input(event):
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and _driver.handle_key_input(event as InputEventKey):
 		get_viewport().set_input_as_handled()
+
+
+func _is_keyboard_covered() -> bool:
+	return keyboard_covered.is_valid() and bool(keyboard_covered.call())
 
 
 # --- Menu loading + navigation ------------------------------------------------
@@ -1071,8 +1081,8 @@ func menu_click_at(design_pos: Vector2) -> bool:
 
 func menu_key(keycode: int, unicode: int = 0) -> bool:
 	# The same guard as the real input paths: a hidden menu (a world is up)
-	# must not receive synthetic menu input either.
-	if _driver == null or not is_visible_in_tree():
+	# or a covered one must not receive synthetic menu input either.
+	if _driver == null or not is_visible_in_tree() or _is_keyboard_covered():
 		return false
 	var ev := InputEventKey.new()
 	ev.keycode = keycode as Key

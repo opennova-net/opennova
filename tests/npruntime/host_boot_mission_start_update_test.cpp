@@ -18,7 +18,6 @@
 //     the context, the old World gone with the teardown) and ahead of the window's first pump,
 //     which sends the kept joiner its S2C 0x25, and ahead of the next kernel and its terrain;
 //   - a boot with no update installed runs as before.
-#include <base/gameprofile/gameprofile.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -28,7 +27,7 @@
 #include <net/npwire/peer_addr.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/map_change.h>
@@ -59,7 +58,7 @@ namespace {
 using namespace opennova;
 namespace ns = opennova::replication;
 
-const TitleIdentity &kJo = *title_identity(gameprofile::GAME_JO);
+const Protocol &kJo = *title_protocol("jo");
 
 int failures = 0;
 #define CHECK(c)                                                                     \
@@ -155,7 +154,7 @@ struct DedicatedHost {
 		r.session = &session;
 		r.role = &role;
 		r.host = &role;
-		r.host_cfg.title = &kJo;
+		r.host_cfg.protocol = &kJo;
 		r.host_cfg.config.server_name = map_file == "MAPA.BMS" ? "Start A" : "Start B";
 		r.host_cfg.config.game_type = rotation.list.map_game_type;
 		r.host_cfg.config.mission_file = map_file;

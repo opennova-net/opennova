@@ -32,6 +32,10 @@ protected:
 	static void _bind_methods();
 
 public:
+	// The block runs as the game the process was launched as (ResourceRoot::session_title): its
+	// game.cfg table and its host screen's caps, ahead of the start's read.
+	GameConfigBlock();
+
 	opennova::inmatch::GameConfigBlock &native() { return block_; }
 	const opennova::inmatch::GameConfigBlock &native() const { return block_; }
 
@@ -85,6 +89,10 @@ public:
 	void populate_host_screen(const Ref<MenuDriver> &p_driver);
 	void read_host_screen(const Ref<MenuDriver> &p_driver);
 	void read_untouched_host_dialog(const Ref<MnuDocument> &p_doc);
+	// Shared typed server-settings schema, current values and mounted weapons.
+	String server_configuration_json() const;
+	// Empty on success; a field-specific validation message otherwise.
+	String apply_server_configuration_json(const String &p_json);
 	// Single player's mission start's block write after its save (the engine's
 	// GameConfigBlock::single_player_mission_start).
 	void single_player_mission_start() { block_.single_player_mission_start(); }

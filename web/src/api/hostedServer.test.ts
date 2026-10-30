@@ -7,12 +7,14 @@ import {
   fetchMyServer,
   fetchMyServers,
   linksToSupportTier,
+  parseHostedServer,
   startHostedServer,
   stopHostedServer,
   updateHostedServer,
 } from './hostedServer';
 import { hostedServer, serversResponse, settings } from '../test/hostedFixtures';
 import { FIELD_RULES } from '../utils/hostedSettings';
+import { configurationDocument } from '../utils/serverConfiguration';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn() },
@@ -23,8 +25,22 @@ const get = vi.mocked(apiClient.get);
 const post = vi.mocked(apiClient.post);
 const adminGet = vi.mocked(adminClient.get);
 
+describe('hosted network settings replies', () => {
+  it('requires canonical tuning fields and preserves explicit zero and disabled pacing', () => {
+    const server = hostedServer(1, { settings: settings({ send_holdoff_ticks: 0, entity_send_budget: 1600, max_packet_size: 100, lock_framerate: false }) });
+    expect(parseHostedServer(reply(server).data)?.settings).toEqual(server.settings);
+    const { send_holdoff_ticks: _ticks, entity_send_budget: _budget, max_packet_size: _packet, lock_framerate: _lock, ...older } = server.settings;
+    expect(parseHostedServer(reply({ ...server, settings: older }).data)).toBeNull();
+    expect(parseHostedServer(reply({ ...server, settings: { ...older, send_holdoff_ticks: '2' } }).data)).toBeNull();
+    expect(parseHostedServer(reply({ ...server, settings: { ...older, lock_framerate: 'false' } }).data)).toBeNull();
+  });
+});
+
 function reply(data: unknown, status = 200) {
-  return { status, data } as AxiosResponse;
+  // Fixtures are the UI model; HTTP carries the canonical ordered rotation.
+  const wire = JSON.parse(JSON.stringify(data, (_key, value) => value && !Array.isArray(value) &&
+    Array.isArray(value.missions) && typeof value.game_name === 'string' ? configurationDocument(value) : value)) as unknown;
+  return { status, data: wire } as AxiosResponse;
 }
 
 // A refusal as axios throws it.
@@ -112,7 +128,7 @@ describe('fetchMyServers', () => {
   it('reads the data a server runs on, with defaults for what a reply leaves out', async () => {
     const server = hostedServer(3, {
       expansion: { id: 2, code: 'jox01', display_name: 'Escalation' },
-      data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: { tree_id: 12, version: '1.7.5.5' } },
+      data: { base: { tree_id: 10, version: '1.0.5' }, expansion: { tree_id: 12, version: '1.0.5' } },
       update_available: true,
     });
     get.mockResolvedValue(reply(serversResponse([server])));

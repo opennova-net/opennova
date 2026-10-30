@@ -1,12 +1,12 @@
 #include <net/novaworld/nwu_host_role.h>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/log.h>
+#include <base/version/one_build.h>
 #include <net/novaworld/connect_or_host.h> // ConnectOrHost's lines
 #include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/lobby_update.h>
 #include <net/npwire/peer_addr.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 
 #include <string>
 #include <utility>
@@ -399,21 +399,21 @@ HostRegistration NwuHostRole::host_cfg() const {
 	// The CountryName / Lang / TZB trio follows the gate reply's METEXT (D-NET-347).
 	// [orig: CNapiGateManager_ProcessResponse @0x4cf2a1..0x4cf2c1 -> g_IsDedicatedServer]
 	cfg.met_ext = lobby_.gate_response().met_ext != 0;
-	// The title's version pair, and whether its host lists carry DFXCATEGORY1.
+	// The protocol's version pair, and whether its host lists carry DFXCATEGORY1.
 	// [orig: Lobby_UpdateServerInfo @0x4ff3ea / @0x4ff3ff; CNapiGameSession_BuildHostVarLists
 	//  @0x4d0b50]
-	if (const TitleIdentity *title = lobby_.title()) {
-		cfg.ver1 = title->ver1;
-		cfg.ver2 = title->ver2;
-		cfg.category_var = title->host_category_var;
-		// GV / Version, and every METPROTOCOL report's GV: g_VersionText, the boot's
-		// "V%i.%i.%i.%i" over the build's four numbers (GameProfile::version_text).
-		// [orig: Game_ParseCommandLineAndInit - the "V%i.%i.%i.%i" sprintf over 1, 7, 5, 7 into
-		//  g_VersionText @0x4A7D90; Lobby_UpdateServerInfo @0x4FF2B2 / @0x4FF2C8]
-		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id);
-		if (profile != nullptr && profile->version_text != nullptr)
-			cfg.version = profile->version_text;
+	if (const Protocol *protocol = lobby_.protocol()) {
+		cfg.ver1 = protocol->ver1;
+		cfg.ver2 = protocol->ver2;
+		cfg.category_var = protocol->host_category_var;
 	}
+	// GV / Version, and every METPROTOCOL report's GV: g_VersionText, the boot's
+	// "V%i.%i.%i.%i" over the engine build's four numbers, retail's 1, 7, 5, 7 in JO and DFX2
+	// alike, ONE's wire version here (OneBuild::wire_version: "V0.0.22.0"). The lobby lists it
+	// and no peer compares it.
+	// [orig: Game_ParseCommandLineAndInit - the "V%i.%i.%i.%i" sprintf over 1, 7, 5, 7 into
+	//  g_VersionText @0x4A7D90; Lobby_UpdateServerInfo @0x4FF2B2 / @0x4FF2C8]
+	cfg.version = one_build().wire_version().retail_text();
 	cfg.uptime_ms = phase_ == Phase::Hosting ? lobby_.clock_ms() - hosting_started_ms_ : 0u;
 	return cfg;
 }

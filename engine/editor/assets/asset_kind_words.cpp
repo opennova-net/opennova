@@ -3,8 +3,8 @@
 
 #include <iterator>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <net/protocol/protocol.h>
 
 namespace opennova::editor {
 namespace {
@@ -58,7 +58,7 @@ constexpr AssetKindWords kWords[] = {
 	{AssetKind::Shader, "An HLSL effect, stored encrypted: the shader techniques and passes that models' materials draw with.", "Read at boot as the renderer starts: every .fx in every mounted archive (or in a loose override folder), decrypted as it loads.", "[orig: HLSLEffect_InitAndLoadAll @ 0x5B0080 -> HLSLEffect_LoadAllFromPFFArchive @ 0x5AFED0 -> HLSLEffect_LoadFromFile @ 0x5AE690; ScriptFile_LoadAndDecrypt @ 0x5AE060]"},
 	{AssetKind::Config, "A settings file the game reads by name, such as game.cfg (the game's settings), admin.cfg (server administration) or gt.ssc (an encrypted override).", "Read by name at boot (game.cfg, again at the main menu; assets.cd; gt.ssc; admin.cfg), each skipped silently when missing, game.cfg then taking defaults.", "[orig: Game_LoadConfig @ 0x551480; Game_ReadAssetsCDFile @ 0x4A5800; Mission_LoadEncryptedConfig @ 0x4CDCD0; CAdminServer_LoadConfig @ 0x406D80]"},
 	{AssetKind::Score, "The scoring table: the points each event scores and the end-of-round scoreboard's columns, for each game type.", "Read loose by its bare name from the install's folder when the game types' default settings are made, and written there with the defaults when missing.", "[orig: GameType_CreateDefaultSettings @ 0x52DD00 -> ScoreConfig_LoadFile @ 0x52D8A0; ScoreConfig_SaveFile @ 0x52CDD0]"},
-	{AssetKind::Text, "Plain text the game reads by one of the names it knows, from its folder: earlyerr.txt (errors shown before the archives open), filter.txt (the chat filter), an expansion's version.txt and a few more.", "Read loose by its bare name: earlyerr.txt when an early error shows, filter.txt at boot, an expansion's version.txt for the checksum a joiner must match, hiscore.txt, banned.txt and a NovaWorld host's banlist.txt, _NSTMOUT.TXT's session timeout, and four marker files whose being there the game checks.", "[orig: Game_ShowEarlyError @ 0x4A68A0 -> Game_ReadLineFromFile @ 0x4A59A0; ChatFilter_LoadFromFile @ 0x4FD640; Expansion_LoadAssets @ 0x4A4858; HUD_LoadHighScoreText @ 0x5630E0; Server_InitNewRoundState @ 0x51CB3B; BanList_InitFromMission @ 0x5098F0; CNapiNetwork_Init @ 0x4CA9E1; Game_ParseCommandLineAndInit @ 0x4A7C7B; Game_RunVideoTestDialog @ 0x53EC4B]"},
+	{AssetKind::Text, "Plain text the game reads by one of the names it knows, from its folder: earlyerr.txt (errors shown before the archives open), filter.txt (the chat filter) and a few more; an expansion's version.txt is NovaWorld's, written as a release builds.", "Read loose by its bare name: earlyerr.txt when an early error shows, filter.txt at boot, an expansion's version.txt (NovaWorld's) for the checksum a joiner must match, hiscore.txt, banned.txt and a NovaWorld host's banlist.txt, _NSTMOUT.TXT's session timeout, and four marker files whose being there the game checks.", "[orig: Game_ShowEarlyError @ 0x4A68A0 -> Game_ReadLineFromFile @ 0x4A59A0; ChatFilter_LoadFromFile @ 0x4FD640; Expansion_LoadAssets @ 0x4A4858; HUD_LoadHighScoreText @ 0x5630E0; Server_InitNewRoundState @ 0x51CB3B; BanList_InitFromMission @ 0x5098F0; CNapiNetwork_Init @ 0x4CA9E1; Game_ParseCommandLineAndInit @ 0x4A7C7B; Game_RunVideoTestDialog @ 0x53EC4B]"},
 	{AssetKind::Notes, "A note for the people who make the project: a README, a licence, a list of sources, a Markdown file, a .txt of a name the game does not read, or a text with no extension.", "Nothing in the game reads it: the game's program holds no Markdown reader and reads only the .txt names it knows. The build leaves it out without a word, and the editor opens it as a text.", "engine/editor/assets/asset_kinds.cpp, kTextNames (the .txt names the game reads, each cited) and the Notes row's comment"},
 	{AssetKind::ImportSource, "A source file the project imports, such as a PNG the image importer turns into the game's PCX, marked by its import record beside it.", "The game never reads it: the editor's import converts it into game files named after it, and the build packs those outputs, never the source.", "engine/editor/assets/asset_kinds.cpp, the ImportSource row's comment (scan_project_assets); CONTEXT.md, Import / sidecar"},
 	{AssetKind::ImportInput, "A file an import reads besides its source, such as a terrain set's heightmap or colour image, marked by the import record that lists it.", "The game never reads it: the import makes the game's files from it, and a change to it imports them again; the build packs those, never it.", "engine/editor/assets/asset_kinds.cpp, the ImportInput row's comment (AssetScan's compose); CONTEXT.md, Terrain set"},
@@ -72,25 +72,25 @@ constexpr bool in_order() {
 }
 static_assert(in_order(), "one row per AssetKind, in the enum's order");
 
-// Every .def name a profile's binary opens, each where it opens it (the name's every push into a loader; the
-// binary holds no other .def name, and none it builds). Only a profile whose binary is witnessed has rows.
+// Every .def name Jointops.exe opens, each where it opens it (the name's every push into a loader; the binary
+// holds no other .def name, and none it builds): the rows of the titles that run its code, those that speak
+// Joint Operations' protocol. No other title's binary is witnessed for them.
 struct ReadDefName {
-	gameprofile::GameId game;
 	const char *name; // as the game opens it, compared without case
 	const char *cite;
 };
 constexpr ReadDefName kReadDefNames[] = {
-	{gameprofile::GAME_JO, "Avatars.def", "[orig: CAvatarDefs_Init @ 0x57B1D0]"},
-	{gameprofile::GAME_JO, "SndProf.def", "[orig: Game_InitSubsystems @ 0x4A713C; Game_ReloadExpansionAndMods @ 0x5527D9; Expansion_ReloadAllAssets @ 0x56841B; Expansion_SwitchTo @ 0x5689DD]"},
-	{gameprofile::GAME_JO, "ammo.def", "[orig: Game_StartMission @ 0x52548A]"},
-	{gameprofile::GAME_JO, "charattr.def", "[orig: CharAttr_LoadFromDef @ 0x412172]"},
-	{gameprofile::GAME_JO, "hudfx.def", "[orig: HUD_InitOverlaySystem @ 0x5A462E]"},
-	{gameprofile::GAME_JO, "hudpos.def", "[orig: HUD_InitOverlaySystem @ 0x5A492C]"},
-	{gameprofile::GAME_JO, "items.def", "[orig: Game_InitSubsystems @ 0x4A719E; Game_ReloadExpansionAndMods @ 0x5527E8; Expansion_ReloadAllAssets @ 0x56842F; Expansion_SwitchTo @ 0x5689EC]"},
-	{gameprofile::GAME_JO, "overcast.def", "[orig: Environment_LoadTimeOfDayConfig @ 0x57DBFD]"},
-	{gameprofile::GAME_JO, "powerup.def", "[orig: Game_StartMission @ 0x5256CD]"},
-	{gameprofile::GAME_JO, "reverb.def", "[orig: Audio_LoadReverbDefs @ 0x766D8E]"},
-	{gameprofile::GAME_JO, "weapon.def", "[orig: WeaponDef_LoadAll @ 0x54DD36; Game_StartMission @ 0x5254B8; Game_ReloadExpansionAndMods @ 0x552845]"},
+	{"Avatars.def", "[orig: CAvatarDefs_Init @ 0x57B1D0]"},
+	{"SndProf.def", "[orig: Game_InitSubsystems @ 0x4A713C; Game_ReloadExpansionAndMods @ 0x5527D9; Expansion_ReloadAllAssets @ 0x56841B; Expansion_SwitchTo @ 0x5689DD]"},
+	{"ammo.def", "[orig: Game_StartMission @ 0x52548A]"},
+	{"charattr.def", "[orig: CharAttr_LoadFromDef @ 0x412172]"},
+	{"hudfx.def", "[orig: HUD_InitOverlaySystem @ 0x5A462E]"},
+	{"hudpos.def", "[orig: HUD_InitOverlaySystem @ 0x5A492C]"},
+	{"items.def", "[orig: Game_InitSubsystems @ 0x4A719E; Game_ReloadExpansionAndMods @ 0x5527E8; Expansion_ReloadAllAssets @ 0x56842F; Expansion_SwitchTo @ 0x5689EC]"},
+	{"overcast.def", "[orig: Environment_LoadTimeOfDayConfig @ 0x57DBFD]"},
+	{"powerup.def", "[orig: Game_StartMission @ 0x5256CD]"},
+	{"reverb.def", "[orig: Audio_LoadReverbDefs @ 0x766D8E]"},
+	{"weapon.def", "[orig: WeaponDef_LoadAll @ 0x54DD36; Game_StartMission @ 0x5254B8; Game_ReloadExpansionAndMods @ 0x552845]"},
 	// hud.def's one push is in a loader nothing calls or points at, so JO never reads it [orig: @ 0x5BE21E, the
 	// function @ 0x5BE210], as the second hudpos.def push [orig: @ 0x5A246B, the function @ 0x5A2450].
 };
@@ -104,15 +104,11 @@ const AssetKindWords &asset_kind_words(AssetKind kind) {
 
 bool game_never_reads(AssetKind kind, const std::string &name, const std::string &game_code) {
 	if (kind != AssetKind::OtherDefs) return false;
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(game_code.c_str());
-	if (!profile) return false;
-	bool witnessed = false;
-	for (const ReadDefName &row : kReadDefNames) {
-		if (row.game != profile->id) continue;
-		witnessed = true;
+	const Protocol *protocol = title_protocol(game_code);
+	if (protocol == nullptr || protocol != title_protocol("jo")) return false;
+	for (const ReadDefName &row : kReadDefNames)
 		if (strutil::iequals(row.name, name)) return false;
-	}
-	return witnessed;
+	return true;
 }
 
 } // namespace opennova::editor

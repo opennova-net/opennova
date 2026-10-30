@@ -29,6 +29,7 @@ import type {
   ProjectPatch,
   ProjectRelease,
   ProjectRevision,
+  Protocol,
   PublishedRelease,
   Release,
   ReleaseSection,
@@ -43,6 +44,25 @@ const isCount = (v: unknown): v is number => Number.isInteger(v) && (v as number
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
 const textOrNull = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 const idOrNull = (v: unknown): number | null => (isCount(v) ? v : null);
+
+// A protocol as the service names it, {code, name, version}; null for anything else.
+export function pickProtocol(value: unknown): Protocol | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.code !== 'string' || v.code === '') return null;
+  return { code: v.code, name: text(v.name) || v.code.toUpperCase(), version: text(v.version) };
+}
+
+// The protocols a reply names by title code ({jo: {...}}), each read as pickProtocol reads it.
+function pickProtocols(value: unknown): Record<string, Protocol> | undefined {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+  const out: Record<string, Protocol> = {};
+  for (const [title, protocol] of Object.entries(v)) {
+    const picked = pickProtocol(protocol);
+    if (picked) out[title] = picked;
+  }
+  return out;
+}
 
 function pickCurrentTree(value: unknown): CurrentTree | null {
   const v = value as Record<string, unknown> | null;
@@ -68,11 +88,11 @@ function pickProduct(value: unknown): Product | null {
     parent_id: idOrNull(v.parent_id),
     expansion_code: text(v.expansion_code),
     title: text(v.title),
+    protocol: pickProtocol(v.protocol),
     lobby: text(v.lobby),
     lobby_locked: v.lobby_locked === true,
     updater_login: text(v.updater_login),
     command_file: text(v.command_file),
-    retail: v.retail === true,
     key: v.key,
     visibility: v.kind !== 'app' && (v.visibility === 'public' || v.visibility === 'private') ? v.visibility : null,
     head: isCount(v.head) ? v.head : 0,
@@ -85,10 +105,13 @@ function pickProduct(value: unknown): Product | null {
   };
 }
 
+// A lobby, one protocol's: one the service names no protocol of is left out.
 function pickLobby(value: unknown): LobbyOption | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || typeof v.slug !== 'string') return null;
-  return { slug: v.slug, display_name: text(v.display_name) || v.slug, title: text(v.title) };
+  const protocol = pickProtocol(v.protocol);
+  if (!protocol) return null;
+  return { slug: v.slug, display_name: text(v.display_name) || v.slug, protocol };
 }
 
 function pickProjectLobby(value: unknown): ProjectLobby | null {
@@ -103,6 +126,7 @@ function pickProductsResponse(data: unknown): ProductsResponse | null {
   if (products.some((d) => d === null)) return null;
   return {
     titles: Array.isArray(v.titles) ? v.titles.filter((t): t is string => typeof t === 'string') : [],
+    protocols: pickProtocols(v.protocols),
     games: Array.isArray(v.games) ? v.games.map(pickLobby).filter((g): g is LobbyOption => g !== null) : [],
     products: products as Product[],
   };
@@ -150,6 +174,7 @@ function pickRelease(value: unknown): Release | null {
     retired_at: textOrNull(v.retired_at),
     source: pickSource(v.source),
     version: text(v.version),
+    one_version: text(v.one_version),
     build_log: text(v.build_log),
   };
 }
@@ -173,7 +198,7 @@ function pickRevision(value: unknown): ProjectRevision | null {
 function pickProjectRelease(value: unknown): ProjectRelease | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || !isCount(v.id)) return null;
-  return { id: v.id, version: text(v.version) };
+  return { id: v.id, version: text(v.version), one_version: text(v.one_version) };
 }
 
 function pickProject(value: unknown): Project | null {
@@ -186,12 +211,12 @@ function pickProject(value: unknown): Project | null {
     title: text(v.title) || v.key,
     kind: v.kind,
     game: text(v.game),
+    protocol: pickProtocol(v.protocol),
     lobby: pickProjectLobby(v.lobby),
     lobby_locked: v.lobby_locked === true,
     expansion_code: text(v.expansion_code),
     // One the reply does not say is public is taken for private.
     visibility: v.visibility === 'public' ? 'public' : 'private',
-    retail: v.retail === true,
     base: textOrNull(v.base),
     product_id: v.product_id,
     head: isCount(v.head) ? v.head : 0,
@@ -234,6 +259,7 @@ function pickMyProjects(data: unknown): MyProjects | null {
     games: Array.isArray(v.games) ? v.games.map(pickProjectGame).filter((g): g is ProjectGame => g !== null) : [],
     lobbies: Array.isArray(v.lobbies) ? v.lobbies.map(pickLobby).filter((g): g is LobbyOption => g !== null) : [],
     titles: Array.isArray(v.titles) ? v.titles.filter((t): t is string => typeof t === 'string' && t !== '') : [],
+    protocols: pickProtocols(v.protocols),
   };
 }
 
@@ -274,7 +300,7 @@ export function createProduct(body: NewProduct): Promise<AdminResult<Product>> {
 }
 
 // PATCH /api/admin/products/<id>: its display name, lobby, updater login and
-// command file, retail updater flag, project key (a rename) or visibility.
+// command file, project key (a rename) or visibility.
 export function updateProduct(id: number, patch: ProductPatch): Promise<AdminResult<Product>> {
   return adminCall(() => adminClient.patch<unknown>(`/products/${id}`, patch), pickProductReply);
 }

@@ -25,7 +25,7 @@ namespace opennova::novaworld_server::hosted {
 // once the fleet program leads; 0 when driven by hand) and runs each on its
 // link (none: LinkDown), writing its answer to its row; the rows whose routes
 // went away (past their deadline a minute) are deleted, and those an earlier
-// generation claimed and left running are answered LinkDown, not sent.
+// generation claimed and left running are answered LinkDown with uncertain delivery.
 class ConsoleDrain {
 public:
 	// The most commands running at once; more wait queued.
@@ -51,7 +51,7 @@ private:
 	};
 
 	void run();
-	void execute(int64_t id, int64_t server_id, std::string line, AdminCommandOptions options,
+	void execute(int64_t id, int64_t server_id, int64_t server_generation, std::string line, AdminCommandOptions options,
 			std::chrono::milliseconds left);
 	// Joins the commands that answered; how many still run.
 	size_t reap();

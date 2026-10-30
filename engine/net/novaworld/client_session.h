@@ -7,6 +7,8 @@
 #include <net/npwire/nw_session_framing.h> // ConnectionKeys / manager_connection_keys
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
+#include <net/protocol/lobby_protocol.h>
+#include <net/protocol/napi_transport.h>
 
 #include <array>
 #include <cstdint>
@@ -99,8 +101,8 @@ public:
 		// The CI: the connection's index on its protocol (NwuLobbySession: the lobby protocol's
 		// counter, 1 at every connect).
 		uint32_t client_index = 1;
-		// The gate tag echoed in ClientAuth NA: the title's, or the mount's gt.ssc's
-		// (title_gate_tag), copied into the connection's parameters at the connect.
+		// The gate tag echoed in ClientAuth NA: the protocol's, or the mount's gt.ssc's
+		// (protocol_gate_tag), copied into the connection's parameters at the connect.
 		// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d494f - Napi_CopyString(params,
 		//  g_GateManager.protocol, 64), handed to CNapiGameSession_InitNPConnection @0x4d49b8]
 		std::string na;
@@ -111,27 +113,28 @@ public:
 		//   NVS  == the Milota NAPI-protocol version string (it is the protocol
 		//           version, NOT client identity),
 		//   PN   == the server game id "NOVAWORLDUDP",
-		//   PV1  == the title's lobby PV1 (JO's "0.0.0 2/10/2004 EM"),
+		//   PV1  == the lobby protocol's PV1 ("0.0.0 2/10/2004 EM", every title's),
 		//   PG   == the 16-byte protocol GUID (added in build_client_hello).
-		// CO/AP/BDAT are read but never validated. lobby() fills them as retail's lobby
-		// connection does: CO the company constant (TitleIdentity::co), AP the running
-		// executable's file name as the menu reads it (read_menu_exe_basename: uppercased by the
-		// main loop's entry) kept to 63 characters, BDAT the title's
-		// lobby BDAT; the title's PV1 is its lobby_pv1 (D-NET-722).
+		// The four defaults are the lobby protocol's (net/protocol/lobby_protocol.h,
+		// napi_transport.h). CO/AP/BDAT are read but never validated. lobby() fills them as
+		// retail's lobby connection does: CO the company constant (Generation::co), AP the
+		// running executable's file name as the menu reads it (read_menu_exe_basename:
+		// uppercased by the main loop's entry) kept to 63 characters, BDAT the engine build's
+		// date, ONE's (one_build().date_text(); D-NET-722).
 		// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 - CO @0x4d3cae, AP
 		//  Napi_GetExeBasename @0x4d3cc3 copied with Napi_CopyString(.., 0x40) @0x4d3cd2]
-		std::string nvs  = "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic";
+		std::string nvs  = kNapiNpVersion;
 		std::string co;
 		std::string ap;
-		std::string bdat;                            // the title's lobby BDAT (free field)
-		std::string pn   = "NOVAWORLDUDP";           // validated == server game id
-		std::string pv1;                             // the title's lobby PV1, validated
-		std::string pv2  = "1";
+		std::string bdat; // ONE's build date (free field)
+		std::string pn   = kLobbyProtocolName;       // validated == server game id
+		std::string pv1  = kLobbyPv1;                // validated
+		std::string pv2  = kLobbyPv2;
 
 		// The 16-byte protocol GUID emitted as PG in the hello and the auth. By
 		// default (use_default_pg) the builder picks the GUID for `pn`:
-		// NOVAWORLDUDP -> the lobby GUID, a title's in-match PN -> that title's
-		// game GUID (net/title/title_identity.h). Set
+		// NOVAWORLDUDP -> the lobby GUID, a protocol's in-match PN -> that protocol's
+		// game GUID (net/protocol/protocol.h). Set
 		// `pg` + use_default_pg=false to override with explicit bytes.
 		std::array<uint8_t, 16> pg{};
 		bool use_default_pg = true;
@@ -222,17 +225,17 @@ public:
 		//  installed by CNapiGameSession_InitNPConnection @0x4D3D7E]
 		std::function<void(uint8_t tag, std::size_t bytes)> on_unknown_message;
 
-		// The NovaWorld session connection of a title (complete:
-		// resolve_title_identity) whose gate manager holds `gate_tag`
-		// (title_gate_tag): NA, PV1 and BDAT set, the rest as defaulted.
-		static Config lobby(const TitleIdentity &title, std::string gate_tag);
+		// The NovaWorld session connection of a title's protocol (complete:
+		// resolve_title_protocol) whose gate manager holds `gate_tag`
+		// (protocol_gate_tag): NA, BDAT and CO set, the rest as defaulted.
+		static Config lobby(const Protocol &protocol, std::string gate_tag);
 
 		// Preset for the in-match game session: the ClientHello the client sends
 		// to a host after NWJoin, which flips the connection protocol from the
 		// lobby (NOVAWORLDUDP) to the title's game protocol (JO's
 		// JOINTOPERATIONS). The complete CO/AP/BDAT/PN/PG/PV1/PV2 identity is the
-		// title's CNapiNetwork_Init @ 0x4ca4a0 block (make_title_client_hello).
-		static Config game_protocol(const TitleIdentity &title);
+		// title's CNapiNetwork_Init @ 0x4ca4a0 block (make_protocol_client_hello).
+		static Config game_protocol(const Protocol &protocol);
 	};
 
 	// A server notification the owner acts on (state changes are already applied).
@@ -827,7 +830,7 @@ struct NovaWorldJoinCu {
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d4640 - Napi_GetExeBasename(.., 0x200)
 	//  @0x4d4780, the CU @0x4d4798]
 	std::string application;
-	// BuildDateAndTime: the title's lobby BDAT (TitleIdentity::lobby_bdat).
+	// BuildDateAndTime: the engine build's date, ONE's (one_build().date_text()), the lobby BDAT.
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d479d]
 	std::string build_date_and_time;
 	std::string gate_tag;        // GateTag  <- g_GateManager.protocol (== na)

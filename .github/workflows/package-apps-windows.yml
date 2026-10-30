@@ -2,6 +2,30 @@ name: Package apps
 
 on:
   workflow_call:
+    # ONE's stamp (engine/base/version/one_build.h): ci.yml passes its run's
+    # (scripts/ci/one_stamp.sh, its `changes` job); left out, CMake takes it from
+    # the checkout's git (a tag's run: the tag, its commit and its time).
+    inputs:
+      one_version:
+        type: string
+        required: false
+        default: ""
+      one_staging:
+        type: string
+        required: false
+        default: "OFF"
+      one_commit:
+        type: string
+        required: false
+        default: ""
+      one_time:
+        type: string
+        required: false
+        default: "0"
+      package_tools_artifact:
+        description: Shared package tools from this run; empty builds locally
+        type: string
+        default: ""
     outputs:
       artifact_id:
         description: ID of the Windows tools zip (opennova-tools-windows.zip)
@@ -14,13 +38,10 @@ permissions:
   contents: read
 
 jobs:
-  # The build legs' RunsOn runner (ci.yml's Windows label; DEPLOY.md "CI
-  # runners"); a fork's pull request runs on windows-latest (a called
-  # workflow's github context is its caller's). The win-mt compiler cache it
-  # saves lives in RunsOn's Magic Cache, where package-blender-windows.yml,
-  # on the same runner image, reads it.
+  # A shared producer leaves only packaging/smokes on a standard runner.
+  # Standalone calls (the release workflow) still compile on RunsOn.
   package:
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
+    runs-on: ${{ (inputs.package_tools_artifact != '' || github.event.pull_request.head.repo.fork) && 'windows-latest' || format('runs-on={0}/cpu=16/family=c7i+c7a+c8i+m7i+m8i/image=windows25-full-x64/volume=150gb/extras=s3-cache', github.run_id) }}
     permissions:
       contents: read
       actions: write   # the compiler cache's branch save replaces its older entries
@@ -35,6 +56,7 @@ jobs:
       # Magic Cache: this job's actions/cache calls go to the ci account's S3
       # bucket (a no-op on GitHub's runners, a fork's).
       - uses: runs-on/action@v2
+        if: inputs.package_tools_artifact == ''
 
       # The apps build from the root CMake project without godot-cpp or GUT,
       # so the submodules stay uninitialized.
@@ -45,7 +67,7 @@ jobs:
       # RunsOn's Windows image carries Python 3.14 alone; 3.11 would install.
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: ${{ inputs.package_tools_artifact != '' && '3.11' || '3.14' }}
 
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -53,14 +75,31 @@ jobs:
           arch: x64
 
       - name: Restore the compiler cache
+        if: inputs.package_tools_artifact == ''
         uses: ./.github/actions/compiler-cache
         with:
           flavour: win-mt
           mode: restore
 
+      - name: Download shared package tools
+        if: inputs.package_tools_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.package_tools_artifact }}
+          path: build/package-tools
+
       - name: Package apps
         shell: bash
-        run: scripts/package_apps.sh dist/opennova-tools-windows.zip
+        env:
+          ONE_VERSION: ${{ inputs.one_version }}
+          ONE_STAGING: ${{ inputs.one_staging }}
+          ONE_COMMIT: ${{ inputs.one_commit }}
+          ONE_TIME: ${{ inputs.one_time }}
+          PREBUILT: ${{ inputs.package_tools_artifact != '' && 'build/package-tools' || '' }}
+        run: >-
+          scripts/package_apps.sh dist/opennova-tools-windows.zip "$PREBUILT"
+          "-DOPENNOVA_VERSION=$ONE_VERSION" "-DOPENNOVA_STAGING=$ONE_STAGING"
+          "-DOPENNOVA_COMMIT=$ONE_COMMIT" "-DOPENNOVA_BUILD_TIME=$ONE_TIME"
 
       # Every exe runs without an installed VC++ runtime and reaches its usage
       # exit.
@@ -112,11 +151,12 @@ jobs:
           if-no-files-found: error
 
       - name: sccache stats
-        if: always()
+        if: always() && inputs.package_tools_artifact == ''
         shell: bash
         run: sccache --show-stats
 
       - name: Save the compiler cache
+        if: inputs.package_tools_artifact == ''
         uses: ./.github/actions/compiler-cache
         with:
           flavour: win-mt

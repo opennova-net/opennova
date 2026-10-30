@@ -48,7 +48,7 @@ public:
 	~LanSession() override;
 
 	// The mounted game whose title the browse speaks (the launch game's with none,
-	// ResourceRoot::session_title): its probes carry the title's in-match identity
+	// ResourceRoot::session_protocol): its probes carry the title's in-match identity
 	// and only hosts of the same identity list. A browse refuses to start when the
 	// title's identity is not witnessed in full.
 	void set_resource_root(const Ref<ResourceRoot> &root) { resource_root_ = root; }

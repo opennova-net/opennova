@@ -22,8 +22,8 @@
 #include "world/loading_screen_info.h" // the joiner's S2C 0x60 session block
 #include "util/string_convert.h"
 #include "resource_index/launch_flags.h" // the /NOPUNT switch the host session reads
-#include "resource_index/resource_root.h" // session_title (the launch game a bare session speaks)
-#include <net/title/title_identity.h> // TitleIdentity::game_id (the session's rules title)
+#include "resource_index/resource_root.h" // session_protocol (the launch game a bare session speaks)
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cmath>
@@ -81,14 +81,21 @@ using namespace sim_internal;
 namespace {
 
 // The title a session speaks, the listen host's (HostConfig::title) and the joiner's
-// (JoinerRole::set_title): the one the shell named (Simulation::set_title, the mounted
+// (JoinerRole::set_protocol): the one the shell named (Simulation::set_protocol, the mounted
 // game's), else, for a session no shell named one for, the game the process was launched
-// as (ResourceRoot::session_title with no root). Null when that title's identity is not
+// as (ResourceRoot::session_protocol with no root). Null when that title's protocol is not
 // witnessed in full; a joiner then does not dial and a host admits no joiner.
-const opennova::TitleIdentity *session_title(const opennova::TitleIdentity *named) {
+const opennova::Protocol *session_protocol(const opennova::Protocol *named) {
 	if (named != nullptr) return named;
 	std::string error;
-	return ResourceRoot::session_title(Ref<ResourceRoot>(), error);
+	return ResourceRoot::session_protocol(Ref<ResourceRoot>(), error);
+}
+
+// The title a session runs as, whose caps and rules its host config and its joiner take: the one
+// the shell named (Simulation::set_game_title, the mounted game's), else the game the process
+// was launched as (ResourceRoot::session_title with no root).
+const opennova::Title &session_game_title(const opennova::Title *named) {
+	return named != nullptr ? *named : ResourceRoot::session_title(Ref<ResourceRoot>());
 }
 
 } // namespace
@@ -109,8 +116,11 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 	source.sp_mission_file = p_sp_mission_file;
 	source.profile = player_.profile_record_set ? &player_.profile_record : nullptr;
 	source.cfg_block = net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr;
+	// The session runs as the mounted game: a LAN host's, and the single player's, which once
+	// never named one and so ran Joint Operations' rules whatever the game.
+	source.title = &session_game_title(net_.game_title);
 	inmatch::HostConfig cfg = inmatch::shell_host_config(source);
-	cfg.title = session_title(net_.title);
+	cfg.protocol = session_protocol(net_.protocol);
 	// The process's log devices: the switches retail's command line arms reach every host the
 	// process runs, a listen host's as a dedicated one's (base/resource_index boot_policy.h
 	// LogSwitches carries the witness).
@@ -474,12 +484,8 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	seams.input_events = host_role_ != nullptr ? &host_role_->input_events() : nullptr;
 	// The status report's gametext is the process's: GameWorld::remote_admin_seams sets it for
 	// every console (engine inmatch/remote_admin.h process_game_text).
-	const opennova::TitleIdentity *title = session_title(net_.title);
-	if (title != nullptr) {
-		const opennova::inmatch::ConnectLogHeader header = opennova::inmatch::connect_log_header(title);
-		seams.version_text = header.version;
-		seams.title_text = header.title;
-	}
+	// CMD VERSION's line: the launch's versions, as the STARTUP label shows them.
+	seams.versions = opennova::to_std(LaunchFlags::version_line());
 	return seams;
 }
 
@@ -487,12 +493,8 @@ void Simulation::install_console_seams() {
 	namespace inmatch = opennova::inmatch;
 	if (runtime_ == nullptr) return;
 	inmatch::ClientLocalCommandSeams seams;
-	const opennova::TitleIdentity *title = session_title(net_.title);
-	if (title != nullptr) {
-		const inmatch::ConnectLogHeader header = inmatch::connect_log_header(title);
-		seams.version_text = header.version;
-		seams.title_text = header.title;
-	}
+	// VERSION's line: the launch's versions, as the STARTUP label shows them.
+	seams.versions = opennova::to_std(LaunchFlags::version_line());
 	// SAVENFO: debug.nfo in text mode, each '\n' a CR LF on the disk (engine
 	// inmatch/client_console.h ClientLocalCommandSeams::save_nfo carries the witness).
 	seams.save_nfo = [this]() {
@@ -618,9 +620,8 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	// tables come from score.ini at each boot (inmatch/host_boot.h).
 	opennova::inmatch::GameConfig config = p_options->config();
 	config.mission_header_blob = std::move(net_.host_session_config.mission_header_blob);
-	// The rules the session runs are the title's it hosts as (session_title); none, Jointops.exe's.
-	const opennova::TitleIdentity *title = session_title(net_.title);
-	config.title = title != nullptr ? title->game_id : opennova::gameprofile::GAME_JO;
+	// The session runs as the mounted game (session_game_title): its caps and its rules.
+	config.set_title(session_game_title(net_.game_title));
 	net_.host_bind_port = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
 	net_.host_network_type = p_options->network_type();
 	config.spectator_slots = std::max(config.spectator_slots, -1);
@@ -657,7 +658,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	net_.host_serve_and_play = p_options->get_serve_and_play();
 	net_.host_max_players = static_cast<uint32_t>(opennova::inmatch::store_session_player_cap(
 			net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr,
-			p_options->get_max_players(), config.title));
+			p_options->get_max_players(), *config.title));
 	config.max_players = net_.host_max_players;
 	config.dedicated_server = !net_.host_serve_and_play;
 	net_.host_session_config = std::move(config);
@@ -774,12 +775,14 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// The joiner role, constructed with the loadout profile seams it keeps; the
 	// session's role switch is the gate: re-dialing a live mission is rejected
 	// without partially replacing its transport. A session with no title identity
-	// (session_title) has nothing to join with.
-	const opennova::TitleIdentity *title = session_title(net_.title);
-	if (title == nullptr) return false;
+	// (session_protocol) has nothing to join with.
+	const opennova::Protocol *protocol = session_protocol(net_.protocol);
+	if (protocol == nullptr) return false;
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
-	joiner_role_->set_title(title);
+	joiner_role_->set_protocol(protocol);
+	// The rules the joiner's World and its replica run, the mounted game's (session_game_title).
+	joiner_role_->set_rules(opennova::world::title_rules(session_game_title(net_.game_title).code));
 	// The process's 0x4C report count runs on across joins (ClientProcessState).
 	joiner_role_->use_process_state(net_.client_process);
 	// The process's log devices: a session destroy's stop of a held server writes its

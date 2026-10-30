@@ -32,6 +32,8 @@
 #include <net/napi/session.h>
 #include <net/novaworld/lobby_repository.h>
 
+#include <games/games.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -261,5 +263,6 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
+	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
 	return opennova::novaworld_server::program::run_program({ "fleet", configure, run });
 }

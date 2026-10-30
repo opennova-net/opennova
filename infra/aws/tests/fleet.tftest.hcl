@@ -10,9 +10,10 @@
 # unlimited CPU credits) and own (c7a.medium, no credit setting), each
 # terminating on shutdown, IMDSv2 with a hop limit of 1, one encrypted root
 # volume (40 GiB: the data trees hostd fetches live there) and no other; the
-# slots' game ports to everyone and admin ports to the fleet program alone,
-# the fleet's internal port to the machines alone. The worker's task role's
-# policy pins a launch to the two templates and their two types, IMDSv2, this
+# slots' game ports and browser ICMP echo requests to everyone, admin ports
+# to the fleet program alone, the fleet's internal port to the machines alone.
+# The worker's task role's policy pins a launch to the two templates and
+# their two types, IMDSv2, this
 # deployment's tags, gp3 volumes no larger than the root volume, the pinned
 # image by id; it ends only machines carrying both tags. It allocates a static
 # address only with this deployment's tags and no other tag, tags one only as
@@ -383,7 +384,11 @@ run "hosting_off" {
     error_message = "hosting off: no IAM"
   }
   assert {
-    condition     = length(aws_vpc_security_group_ingress_rule.machines_game) == 0 && length(aws_vpc_security_group_ingress_rule.fleet_from_machines) == 0
+    condition = (
+      length(aws_vpc_security_group_ingress_rule.machines_game) == 0 &&
+      length(aws_vpc_security_group_ingress_rule.machines_ping) == 0 &&
+      length(aws_vpc_security_group_ingress_rule.fleet_from_machines) == 0
+    )
     error_message = "hosting off: no rule, and nothing admitted to the fleet's internal port"
   }
   assert {
@@ -478,6 +483,17 @@ run "hosting_on" {
   assert {
     condition     = aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].from_port == 32768 && aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].to_port == 32773 && aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].ip_protocol == "udp"
     error_message = "the 6 slots' game UDP ports to everyone"
+  }
+  assert {
+    condition = (
+      length(aws_vpc_security_group_ingress_rule.machines_ping) == 1 &&
+      aws_vpc_security_group_ingress_rule.machines_ping["0.0.0.0/0"].security_group_id == "sg-0machines" &&
+      aws_vpc_security_group_ingress_rule.machines_ping["0.0.0.0/0"].ip_protocol == "icmp" &&
+      aws_vpc_security_group_ingress_rule.machines_ping["0.0.0.0/0"].from_port == 8 &&
+      aws_vpc_security_group_ingress_rule.machines_ping["0.0.0.0/0"].to_port == 0 &&
+      aws_vpc_security_group_ingress_rule.machines_ping["0.0.0.0/0"].cidr_ipv4 == "0.0.0.0/0"
+    )
+    error_message = "the shared and own machines admit only ICMP echo requests for browser pings"
   }
   assert {
     condition = (
@@ -774,10 +790,10 @@ run "hostd_daemon" {
       aws_ecs_service.hostd[0].name == "hostd" && aws_ecs_service.hostd[0].cluster == "arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod-fleet" &&
       aws_ecs_service.hostd[0].scheduling_strategy == "DAEMON" && aws_ecs_service.hostd[0].launch_type == "EC2" &&
       aws_ecs_service.hostd[0].desired_count == null &&
-      aws_ecs_service.hostd[0].deployment_minimum_healthy_percent == 50 &&
+      aws_ecs_service.hostd[0].deployment_minimum_healthy_percent == 0 &&
       aws_ecs_service.hostd[0].enable_execute_command
     )
-    error_message = "hostd is a DAEMON service of the fleet cluster on the EC2 launch type: no desired count, half the machines at most at once, ECS Exec on"
+    error_message = "hostd is a DAEMON service of the fleet cluster on the EC2 launch type: no desired count, a 0 floor (a lone machine can roll), ECS Exec on"
   }
   assert {
     condition     = !contains(keys(aws_appautoscaling_target.program), "hostd") && !contains(keys(aws_ecs_service.program), "hostd") && !contains(keys(local.programs), "hostd")
@@ -983,6 +999,47 @@ run "too_many_addresses_refused" {
   }
 
   expect_failures = [var.fleet_max_addresses]
+}
+
+run "restricted_ping_sources" {
+  command = plan
+
+  override_resource {
+    target          = aws_security_group.machines[0]
+    override_during = plan
+    values          = { id = "sg-0machines" }
+  }
+
+  variables {
+    hosted_enabled    = true
+    novalogic_listing = false
+    allowed_cidrs     = ["203.0.113.0/24", "198.51.100.7/32"]
+  }
+
+  assert {
+    condition = (
+      toset(keys(aws_vpc_security_group_ingress_rule.machines_ping)) == toset(var.allowed_cidrs) &&
+      alltrue([for cidr, rule in aws_vpc_security_group_ingress_rule.machines_ping :
+        rule.security_group_id == "sg-0machines" && rule.cidr_ipv4 == cidr &&
+        rule.ip_protocol == "icmp" && rule.from_port == 8 && rule.to_port == 0
+      ])
+    )
+    error_message = "browser pings follow allowed_cidrs even when the NovaLogic listing is off"
+  }
+}
+
+run "no_ping_sources" {
+  command = plan
+
+  variables {
+    hosted_enabled = true
+    allowed_cidrs  = []
+  }
+
+  assert {
+    condition     = length(aws_vpc_security_group_ingress_rule.machines_ping) == 0
+    error_message = "no allowed clients means no browser ping ingress"
+  }
 }
 
 run "four_slots" {

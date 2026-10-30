@@ -108,8 +108,10 @@ jobs:
           path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
-      # The builds carry the tag's version (its name without the "v"): the zips' and the
-      # exes' VERSIONINFO, whatever project.godot says. Publish stamps it on each release.
+      # The builds carry the tag's version (its name without the "v"): ONE's stamp in the
+      # GDExtensions and the updater tools (no staging; the tag's commit and its time), the
+      # zips' and the exes' VERSIONINFO, whatever project.godot says. Publish stamps it on
+      # each release.
       - name: Package Godot Windows apps
         shell: pwsh
         run: |

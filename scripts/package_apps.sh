@@ -5,35 +5,37 @@
 # tool. The NovaWorld server is not one of them: it is Linux-only and ships as its
 # container image (deploy/).
 #
-#   scripts/package_apps.sh [out.zip]
+#   scripts/package_apps.sh [out.zip] [prebuilt-tools-dir] [-D<VAR>=<value>...]
 #
-# out.zip defaults to build/opennova-tools-windows.zip.
+# out.zip defaults to build/opennova-tools-windows.zip. The -D arguments go to the
+# configure: CI's ONE stamp (OPENNOVA_VERSION, OPENNOVA_STAGING, OPENNOVA_COMMIT,
+# OPENNOVA_BUILD_TIME; engine/base/CMakeLists.txt), which git gives otherwise.
+# A prebuilt directory already carries its producer's stamp; it skips configure.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out="${1:-$root/build/opennova-tools-windows.zip}"
-build="$root/build/apps-package"
+shift $(( $# > 0 ? 1 : 0 ))
+tools=""
+if [[ $# -gt 0 && "$1" != -D* ]]; then
+    tools="$1"
+    shift
+fi
 
 # The apps/ directory of each shipped executable. An app in apps/<dir> builds
 # target opennova_<dir> as opennova-<dir, kebab-cased> (DEVELOPING.md).
 apps=(3di extract lan_probe parity serve update_tool wire)
 
-# The static MSVC runtime keeps the zip free of a VC++ runtime install, and a
-# separate build tree keeps it apart from development builds. No app links the
-# dev tools or the editor's windows, so they (and the Dear ImGui fetch they
-# bring) stay off.
-cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF \
-    -DOPENNOVA_EDITOR=OFF > /dev/null
-targets=()
-for dir in "${apps[@]}"; do targets+=("opennova_$dir"); done
-cmake --build "$build" --config Release --target "${targets[@]}"
+# CI passes the shared static-CRT build; standalone packaging still builds it.
+if [[ -z "$tools" ]]; then
+    tools="$root/build/package-tools"
+    bash "$root/scripts/build_package_tools.sh" --out "$tools" --tools "$@"
+fi
 
 exes=()
 for dir in "${apps[@]}"; do
     name="opennova-${dir//_/-}"
-    exe="$build/apps/$dir/Release/$name.exe"
-    [ -f "$exe" ] || exe="$build/apps/$dir/$name.exe"
+    exe="$tools/$name.exe"
     [ -f "$exe" ] || { echo "$name was not built" >&2; exit 1; }
     exes+=("$exe")
 done

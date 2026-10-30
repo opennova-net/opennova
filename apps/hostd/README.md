@@ -20,7 +20,7 @@ target: the agent at `/usr/local/bin/opennova-hostd`, `opennova-serve` beside it
 docker CLI, the AWS CLI v2 and nft, every one pinned). On a cloud machine it is the ECS
 daemon of the deployment's fleet cluster (`infra/aws/fleet_agent.tf`): one task per machine,
 root on the machine's network, which `app deploy` rolls with each release, before the fleet
-program, at most half the machines at once (`DEPLOY.md`). The servers' containers are
+program, every machine at once (`DEPLOY.md`). The servers' containers are
 docker's, started by the agent, never ECS tasks, so a new agent takes over the running
 servers as they are. The local stack's machines are themselves containers of that image,
 the agent their own process, with the process runtime (below).
@@ -65,7 +65,7 @@ opennova-hostd --check-alive [--state-dir <path>]
 | `--once` | | One pass, then exit: 0 when the sync was answered and read. |
 | `--check-alive` | | The ECS health check: exit 0 when a running agent's pass loop touched its alive file (`<state-dir>/alive`) within 120 s, 1 otherwise. The loop touches it at every pass and every 10 s of a wait, whether or not the service answers: a stuck loop is unhealthy, an unreachable service is not. |
 | `--verbose` | | Debug lines too. |
-| `--version` | | The build (`OPENNOVA_HOSTD_VERSION` at configure time; the image passes the commit). |
+| `--version` | | The build: ONE's it was built from (`opennova-hostd ONE 0.0.22.123 (a1b2c3d, staging)`, `base/version/one_build.h`), the `agent_version` it reports to the service. |
 
 The one variable the agent reads is the ECS agent's, `ECS_CONTAINER_METADATA_URI_V4`: on
 ECS it reads its own container's metadata once at its start, its `Image` (the reference the

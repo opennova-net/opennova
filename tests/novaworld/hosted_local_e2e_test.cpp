@@ -502,9 +502,9 @@ int main(int argc, char **argv) {
 		// tree (the manifest hashed, the missions read from the archives).
 		const fs::path jo_source = temp.path / "jo_source";
 		const fs::path dfx2_source = temp.path / "dfx2_source";
-		expect(hosted_trees::write_base_tree(jo_source, "SERVETST.BMS", "Serve Test Map", "JO V1.7.5.3"),
+		expect(hosted_trees::write_base_tree(jo_source, "SERVETST.BMS", "Serve Test Map"),
 				"Joint Operations' tree packs");
-		expect(hosted_trees::write_base_tree(dfx2_source, "DFXTEST.BMS", "DFX2 Test Map", "DFX2 V1.0"),
+		expect(hosted_trees::write_base_tree(dfx2_source, "DFXTEST.BMS", "DFX2 Test Map"),
 				"Delta Force Xtreme 2's tree packs");
 		nws::LocalObjectStore store((temp.path / "store").u8string());
 
@@ -518,8 +518,10 @@ int main(int argc, char **argv) {
 			jo_set = hosted_trees::seeded_product(*db, "Joint Operations");
 			dfx2_set = hosted_trees::seeded_product(*db, "Delta Force Xtreme 2");
 			expect(jo_set != 0 && dfx2_set != 0, "the seeded products are there");
-			jo_tree = hosted_trees::seed_ready_tree(*db, store, jo_set, hosted::ProductKind::Game, "", jo_source);
-			dfx2_tree = hosted_trees::seed_ready_tree(*db, store, dfx2_set, hosted::ProductKind::Game, "", dfx2_source);
+			jo_tree = hosted_trees::seed_ready_tree(
+					*db, store, jo_set, hosted::ProductKind::Game, "", jo_source, "1.7.5.3");
+			dfx2_tree = hosted_trees::seed_ready_tree(
+					*db, store, dfx2_set, hosted::ProductKind::Game, "", dfx2_source, "1.0");
 			expect(jo_tree != 0 && dfx2_tree != 0, "each product has a ready tree in the store");
 			const auto offered = hosted::offered_products(*db, std::nullopt);
 			expect(offered.size() == 2, "both products are offered");
@@ -613,7 +615,7 @@ int main(int argc, char **argv) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(session, true),
 					"{\"product_id\":" + std::to_string(jo_set) +
 							",\"game_name\":\"Hosted E2E\",\"max_players\":8,"
-							"\"missions\":[\"servetst.bms\"]}");
+							"\"rotation\":[{\"file\":\"servetst.bms\",\"swap_sides\":false}]}");
 			const auto json = crow::json::load(body_text(reply));
 			if (reply.code != 202) std::fprintf(stderr, "  start: %d %s\n", reply.code, body_text(reply).c_str());
 			const auto started = reply.code == 202 ? integer_at(json, { "server", "id" }) : std::nullopt;
@@ -666,7 +668,7 @@ int main(int argc, char **argv) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(second, true),
 					"{\"product_id\":" + std::to_string(dfx2_set) +
 							",\"game_name\":\"Hosted E2E DFX2\",\"max_players\":8,"
-							"\"missions\":[\"dfxtest.bms\"]}");
+							"\"rotation\":[{\"file\":\"dfxtest.bms\",\"swap_sides\":false}]}");
 			if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %d %s\n", reply.code, body_text(reply).c_str());
 			dfx2_id = reply.code == 202 ? integer_at(crow::json::load(body_text(reply)), { "server", "id" }).value_or(0)
 										: 0;

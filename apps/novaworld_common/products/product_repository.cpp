@@ -2,6 +2,7 @@
 #include "program/catalog_repository.h"
 
 #include <base/io/json.h>
+#include <base/io/cp1252.h>
 
 #include <array>
 
@@ -18,17 +19,17 @@ constexpr std::array<const char *, 8> kReleaseStatusNames = { "uploading", "vali
 
 constexpr const char *kProductColumns =
 		"id, display_name, kind, parent_id, expansion_code, title, lobby, updater_login, "
-		"command_file, retail, current_tree_id, published_release_id, created_by, created_at, "
+		"command_file, current_tree_id, published_release_id, created_by, created_at, "
 		"updated_at, product_name, product_exe, key, visibility, head, wizard_login, download, "
 		"description, owner_id, (SELECT o.username FROM players o WHERE o.id = products.owner_id), "
-		"lobby_locked";
+		"lobby_locked, version_file";
 constexpr const char *kTreeColumns =
 		"id, product_id, state, release_id, version_text, manifest::text, missions::text, bytes, "
-		"error, created_by, created_at, ready_at, pruned_at";
+		"error, created_by, created_at, ready_at, pruned_at, weapons::text";
 constexpr const char *kReleaseColumns =
 		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
 		"published_at, retired_at, product_id, revision, base_revision, version, "
-		"build_log, review_note";
+		"build_log, review_note, one_version";
 
 ProductRow row_to_product(const db::Row &r) {
 	ProductRow d;
@@ -41,23 +42,23 @@ ProductRow row_to_product(const db::Row &r) {
 	d.lobby = r.as_text(6).value_or("");
 	d.updater_login = r.as_text(7).value_or("");
 	d.command_file = r.as_text(8).value_or("");
-	d.retail = r.as_int(9).value_or(0) != 0;
-	d.current_tree_id = r.as_int(10);
-	d.published_release_id = r.as_int(11);
-	d.created_by = r.as_text(12).value_or("");
-	d.created_at = r.as_text(13).value_or("");
-	d.updated_at = r.as_text(14).value_or("");
-	d.product_name = r.as_text(15).value_or("");
-	d.product_exe = r.as_text(16).value_or("");
-	d.key = r.as_text(17).value_or("");
-	d.visibility = r.as_text(18).value_or("");
-	d.head = r.as_int(19).value_or(0);
-	d.wizard_login = r.as_text(20).value_or("");
-	d.download = r.as_text(21).value_or("");
-	d.description = r.as_text(22).value_or("");
-	d.owner_id = r.as_int(23);
-	d.owner = r.as_text(24).value_or("");
-	d.lobby_locked = r.as_int(25).value_or(0) != 0;
+	d.current_tree_id = r.as_int(9);
+	d.published_release_id = r.as_int(10);
+	d.created_by = r.as_text(11).value_or("");
+	d.created_at = r.as_text(12).value_or("");
+	d.updated_at = r.as_text(13).value_or("");
+	d.product_name = r.as_text(14).value_or("");
+	d.product_exe = r.as_text(15).value_or("");
+	d.key = r.as_text(16).value_or("");
+	d.visibility = r.as_text(17).value_or("");
+	d.head = r.as_int(18).value_or(0);
+	d.wizard_login = r.as_text(19).value_or("");
+	d.download = r.as_text(20).value_or("");
+	d.description = r.as_text(21).value_or("");
+	d.owner_id = r.as_int(22);
+	d.owner = r.as_text(23).value_or("");
+	d.lobby_locked = r.as_int(24).value_or(0) != 0;
+	d.version_file = r.as_text(25).value_or("");
 	return d;
 }
 
@@ -76,6 +77,7 @@ ProductTree row_to_tree(const db::Row &r) {
 	t.created_at = r.as_text(10).value_or("");
 	t.ready_at = r.as_text(11).value_or("");
 	t.pruned_at = r.as_text(12).value_or("");
+	decode_tree_weapons(r.as_text(13).value_or("[]"), t.weapons);
 	return t;
 }
 
@@ -98,6 +100,7 @@ ReleaseRow row_to_release(const db::Row &r) {
 	rel.version = r.as_text(14).value_or("");
 	rel.build_log = r.as_text(15).value_or("");
 	rel.review_note = r.as_text(16).value_or("");
+	rel.one_version = r.as_text(17).value_or("");
 	return rel;
 }
 
@@ -257,15 +260,15 @@ ProductOutcome create_product(db::Database &db, const NewProduct &product, int64
 	}
 	const auto rows = db.query(
 			"INSERT INTO products (display_name, kind, parent_id, expansion_code, title, lobby, "
-			"updater_login, command_file, retail, key, visibility, created_by, owner_id, download) "
-			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id;",
+			"updater_login, command_file, key, visibility, created_by, owner_id, download) "
+			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id;",
 			{ BindValue(product.display_name), BindValue(product_kind_name(product.kind)),
 					game ? BindValue(std::monostate{}) : db::int_or_null(product.parent_id),
 					BindValue(game ? std::string() : product.expansion_code),
 					BindValue(game ? product.title : std::string()),
 					BindValue(game ? lobby : std::string()),
 					BindValue(product.updater_login), BindValue(product.command_file),
-					BindValue(db::Bool{ product.retail }), BindValue(product.key),
+					BindValue(product.key),
 					db::text_or_null(product.visibility), BindValue(product.created_by),
 					db::int_or_null(product.owner_id), BindValue(product.download) });
 	id = rows.front().as_int(0).value_or(0);
@@ -306,8 +309,6 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 		row.updater_login = *patch.updater_login;
 	if (patch.command_file)
 		row.command_file = *patch.command_file;
-	if (patch.retail)
-		row.retail = *patch.retail;
 	if (patch.key)
 		row.key = *patch.key;
 	if (patch.visibility)
@@ -328,11 +329,10 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 					 .empty())
 		return ProductOutcome::DuplicateKey;
 	db.exec("UPDATE products SET display_name = $2, lobby = $3, updater_login = $4, "
-			"command_file = $5, retail = $6, key = $7, visibility = $8, updated_at = now() "
+			"command_file = $5, key = $6, visibility = $7, updated_at = now() "
 			"WHERE id = $1;",
 			{ BindValue(id), BindValue(row.display_name), BindValue(row.lobby),
-					BindValue(row.updater_login), BindValue(row.command_file),
-					BindValue(db::Bool{ row.retail }), BindValue(row.key),
+					BindValue(row.updater_login), BindValue(row.command_file), BindValue(row.key),
 					db::text_or_null(row.visibility) });
 	// A lobby a game created (an on_<id> row) that no product names any more goes with the move,
 	// so no change of lobby leaves a row behind for the catalog to load; a system lobby stays.
@@ -410,7 +410,7 @@ std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int
 	std::vector<OfferedProduct> out;
 	const auto rows = db.query(
 			"SELECT d.id, d.display_name, d.kind, d.parent_id, d.expansion_code, d.title, d.lobby, "
-			"t.id, t.version_text, t.missions::text "
+			"t.id, t.version_text, t.missions::text, t.weapons::text "
 			"FROM products d JOIN product_trees t ON t.id = d.current_tree_id "
 			"WHERE d.kind <> 'app' AND t.state = 'ready' "
 			"AND (d.owner_id IS NULL OR d.visibility = 'public' OR d.owner_id = $1) "
@@ -427,6 +427,7 @@ std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int
 			d.tree_id = r.as_int(7).value_or(0);
 			d.version = r.as_text(8).value_or("");
 			decode_tree_missions(r.as_text(9).value_or("[]"), d.missions);
+			decode_tree_weapons(r.as_text(10).value_or("[]"), d.weapons);
 			out.push_back(std::move(d));
 			continue;
 		}
@@ -441,6 +442,7 @@ std::vector<OfferedProduct> offered_products(db::Database &db, std::optional<int
 			e.tree_id = r.as_int(7).value_or(0);
 			e.version = r.as_text(8).value_or("");
 			decode_tree_missions(r.as_text(9).value_or("[]"), e.missions);
+			decode_tree_weapons(r.as_text(10).value_or("[]"), e.weapons);
 			d.expansions.push_back(std::move(e));
 		}
 	}
@@ -481,11 +483,11 @@ bool finish_tree(db::Database &db, int64_t id, const TreeReady &ready) {
 	db::Transaction tx(db);
 	const auto rows = db.query(
 			"UPDATE product_trees SET state = 'ready', ready_at = now(), error = '', "
-			"manifest = $2::jsonb, missions = $3::jsonb, version_text = $4, bytes = $5 "
+			"manifest = $2::jsonb, missions = $3::jsonb, version_text = $4, bytes = $5, weapons = $6::jsonb "
 			"WHERE id = $1 AND state = 'building' RETURNING product_id;",
 			{ BindValue(id), BindValue(encode_tree_files(ready.files)),
 					BindValue(encode_tree_missions(ready.missions)), BindValue(ready.version_text),
-					BindValue(ready.bytes) });
+					BindValue(ready.bytes), BindValue(encode_tree_weapons(ready.weapons)) });
 	if (rows.empty())
 		return false;
 	db.exec("UPDATE products SET current_tree_id = $2, updated_at = now() WHERE id = $1;",
@@ -525,24 +527,6 @@ int count_tree_pins(db::Database &db, int64_t id) {
 
 // --- releases ---
 
-bool valid_release_version(std::string_view version) {
-	if (version.empty() || version.size() > 32)
-		return false;
-	int dots = 0;
-	size_t digits = 0;
-	for (const char c : version) {
-		if (c >= '0' && c <= '9') {
-			++digits;
-			continue;
-		}
-		if (c != '.' || digits == 0)
-			return false;
-		++dots;
-		digits = 0;
-	}
-	return digits > 0 && dots < 4;
-}
-
 int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
 		const std::string &created_by, std::optional<int64_t> product_id,
 		const std::string &version) {
@@ -577,10 +561,11 @@ int64_t create_built_release(db::Database &db, const NewBuiltRelease &release) {
 	return id;
 }
 
-bool set_release_built(db::Database &db, int64_t id, const std::string &build_log) {
-	db.exec("UPDATE releases SET status = 'validating', build_log = $2 "
+bool set_release_built(db::Database &db, int64_t id, const std::string &build_log,
+		const std::string &one_version) {
+	db.exec("UPDATE releases SET status = 'validating', build_log = $2, one_version = $3 "
 			"WHERE id = $1 AND status = 'building';",
-			{ BindValue(id), BindValue(build_log) });
+			{ BindValue(id), BindValue(build_log), db::text_or_null(one_version) });
 	return db.changes() > 0;
 }
 
@@ -792,7 +777,7 @@ void set_section_tree(db::Database &db, int64_t release_id, int64_t product_id, 
 std::vector<PublishedSection> published_sections(db::Database &db) {
 	std::vector<PublishedSection> out;
 	for (const auto &r : db.query(
-				 "SELECT d.id, r.id, d.updater_login, s.command_file, s.expansion, r.sha256, d.retail "
+				 "SELECT d.id, r.id, d.updater_login, s.command_file, s.expansion, r.sha256 "
 				 "FROM products d JOIN releases r ON r.id = d.published_release_id "
 				 "JOIN release_sections s ON s.release_id = r.id AND s.product_id = d.id "
 				 "WHERE d.updater_login <> '' AND r.status = 'published' ORDER BY d.updater_login;")) {
@@ -803,7 +788,6 @@ std::vector<PublishedSection> published_sections(db::Database &db) {
 		p.command_file = r.as_text(3).value_or("");
 		p.expansion = r.as_text(4).value_or("");
 		p.sha256 = r.as_text(5).value_or("");
-		p.retail = r.as_int(6).value_or(0) != 0;
 		out.push_back(std::move(p));
 	}
 	return out;
@@ -894,6 +878,28 @@ bool decode_tree_files(std::string_view json, std::vector<TreeFile> &out) {
 		out.push_back(std::move(f));
 	}
 	return true;
+}
+
+std::string encode_tree_weapons(const gamecfg::WeaponRoster &weapons) {
+    auto out = io::JsonValue::make_array();
+    for (const auto &w : weapons) {
+        auto row = io::JsonValue::make_object();
+        row.set("name", io::json_string(cp1252_to_utf8(w.name)));
+        row.set("selectable", io::JsonValue::make_bool(w.loadout_selectable != 0));
+        out.push(std::move(row));
+    }
+    return io::json_write(out);
+}
+bool decode_tree_weapons(std::string_view text, gamecfg::WeaponRoster &out) {
+    io::JsonValue list; std::string error;
+    out.clear();
+    if (!io::json_parse(text, list, error) || !list.is_array()) return false;
+    for (const auto &row : list.array) {
+        std::string name;
+        if (!utf8_to_cp1252(row.get_string("name", ""), name)) return false;
+        out.push_back({name, row.get_bool("selectable", false) ? 1 : 0});
+    }
+    return true;
 }
 
 std::string encode_tree_missions(const std::vector<TreeMission> &missions) {

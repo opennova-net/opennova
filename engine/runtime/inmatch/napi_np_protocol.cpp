@@ -19,7 +19,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/session_ping.h> // the shared 0x45/0x85 body codec
-#include <net/title/title_identity.h> // the protocol's installed identity
+#include <net/protocol/protocol.h> // the protocol's installed identity
 
 #include <runtime/inmatch/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 #include <runtime/inmatch/server_console.h>    // the /INOUT player lines
@@ -193,7 +193,7 @@ void log_manager_dispatch(const NapiNPServerCtx &ctx, const PeerAddr &peer, int3
 		HandleResult &out) {
 	if (out.dispatch_logged) return;
 	out.dispatch_logged = true;
-	const TitleIdentity *identity = ctx.np_protocol.identity;
+	const Protocol *identity = ctx.np_protocol.identity;
 	connect_log_line(ctx, out.taken
 			? napi_got_protocol_text(unpacked_len, peer,
 					identity != nullptr && identity->pn != nullptr ? identity->pn : "")
@@ -679,7 +679,7 @@ std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_pack
 // the reconnect counts, then the state change's stamps and the new-connection callback's MPS
 // negotiation (OnStateChange, HandleNewConnection), each a store into the one node here.
 bool fill_joined_node(NapiNPConnection &conn, const ClientAuth &auth, const PeerAddr &peer,
-		const TitleIdentity &identity, uint32_t connection_id, const ConnectionKeys &server_keys,
+		const Protocol &identity, uint32_t connection_id, const ConnectionKeys &server_keys,
 		uint32_t receive_stamp_ms) {
 	// Retail stores the ClientAuth CU tags on the connection and only latches
 	// the live spectator flag at the game-layer join message; keep the same
@@ -896,7 +896,7 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	ClientHello hello;
 	if (!parse_client_hello(body.data(), body.size(), hello)) return;
 	// A protocol with no identity installed answers nothing (NapiNPProtocol::identity).
-	const TitleIdentity *identity = ctx.np_protocol.identity;
+	const Protocol *identity = ctx.np_protocol.identity;
 	if (identity == nullptr) return;
 	// A nonzero PM (a peer host's own announce) bypasses the NVS/PN/PG/PV1
 	// identity walk; only a PM-less probe is held to the host's title identity.
@@ -948,12 +948,12 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return;
 	}
 	if (!head_gate) return;
-	const TitleIdentity *identity = ctx.np_protocol.identity;
+	const Protocol *identity = ctx.np_protocol.identity;
 	if (identity == nullptr) return;
 	// Only the NVS/PN/PG/PV1 envelope is silent. The subsequent server-side
 	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750, gates @0x62bdf2]
-	if (!matches_title_identity(*identity, auth)) return;
+	if (!matches_protocol(*identity, auth)) return;
 	out.taken = true;
 	log_manager_dispatch(ctx, peer, unpacked_len, out);
 	// The PW and PV2 compares are case-insensitive C-string compares
@@ -966,7 +966,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	         !strutil::iequals(auth.pw, std::string_view(ctx.np_protocol.server_password.c_str()))) reject = 4;
 	// PV2 against the installed one. [orig: HandleClientJoin @0x62b750 - `proto+364 != PV2`
 	//  @0x62be40]
-	else if (!strutil::iequals(auth.pv2, identity->pv2)) reject = 7;
+	else if (!strutil::iequals(auth.pv2, protocol_version(*identity))) reject = 7;
 	else if (auth.na.empty()) reject = 5;
 	else if (ctx.np_protocol.reject_new_connections) reject = 6;
 	if (reject != 0) {
@@ -1599,7 +1599,7 @@ ServerHello host_server_hello(const NapiNPServerCtx &ctx, const ClientHello &hel
 	//  @0x620758..0x62078a); UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0, PV3 into
 	//  proto+0x1AC @0x4ca8bb..0x4ca8c2]
 	{
-		const ClientHello self = make_title_client_hello(*ctx.np_protocol.identity, 0);
+		const ClientHello self = make_protocol_client_hello(*ctx.np_protocol.identity, 0);
 		reply.co = self.co;
 		reply.ap = self.ap;
 		reply.bdat = self.bdat;

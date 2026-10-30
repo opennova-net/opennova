@@ -1,7 +1,11 @@
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
 #include <base/gameprofile/player_files.h>
+#include <base/io/cp1252.h>
 #include <base/proc/child_process.h>
+#include <base/version/one_build.h>
+#include <base/version/version_line.h>
+#include <net/protocol/protocol.h>
 #include <formats/tga/tga.h>
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -21,6 +25,9 @@ using opennova::to_std;
 
 std::vector<std::string> LaunchFlags::args_override_;
 bool LaunchFlags::args_override_set_ = false;
+std::string LaunchFlags::read_version_file_;
+std::optional<opennova::Version> LaunchFlags::read_version_;
+bool LaunchFlags::version_read_ = false;
 
 void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("loose_override_enabled"),
@@ -72,6 +79,10 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product_command_file"),
 			&LaunchFlags::product_command_file);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("product_name"), &LaunchFlags::product_name);
+	ClassDB::bind_static_method(
+			"LaunchFlags", D_METHOD("product_version"), &LaunchFlags::product_version);
+	ClassDB::bind_static_method(
+			"LaunchFlags", D_METHOD("version_line"), &LaunchFlags::version_line);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("game_given"), &LaunchFlags::game_given);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_update"), &LaunchFlags::no_update);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("after_update"), &LaunchFlags::after_update);
@@ -147,6 +158,39 @@ String LaunchFlags::product() { return to_gd(product_of(parse()).product); }
 bool LaunchFlags::product_supported() { return product_of(parse()).supported; }
 String LaunchFlags::product_command_file() { return to_gd(product_of(parse()).command); }
 String LaunchFlags::product_name() { return to_gd(product_of(parse()).name); }
+
+// Read once: a launch's command file is the updater's to change, with the game closed. A test's
+// args override is a new launch, which reads its own.
+std::optional<opennova::Version> LaunchFlags::product_version_of(
+		const opennova::LaunchFlags &flags) {
+	const std::string dir = launch_dir_of(flags);
+	const opennova::LaunchProduct product = product_of(flags);
+	const std::string file = opennova::boot_path_join(dir, product.command);
+	if (!version_read_ || file != read_version_file_) {
+		read_version_ = opennova::launch_product_version(dir, product);
+		read_version_file_ = file;
+		version_read_ = true;
+	}
+	return read_version_;
+}
+
+String LaunchFlags::product_version() {
+	const std::optional<opennova::Version> version = product_version_of(parse());
+	return version ? to_gd(version->text()) : String();
+}
+
+String LaunchFlags::version_line() {
+	const opennova::LaunchFlags flags = parse();
+	const opennova::LaunchProduct product = product_of(flags);
+	opennova::Versions versions;
+	// A player game's name is its command file's PRODUCT, the page's bytes.
+	versions.game = opennova::retail_text_to_utf8(product.name);
+	versions.game_version = product_version_of(flags);
+	versions.one = opennova::one_build();
+	// The title the launch runs as: its name where the product has none, the protocol it speaks.
+	opennova::title_versions(product.game, versions);
+	return to_gd(opennova::version_line(versions));
+}
 
 bool LaunchFlags::game_given() { return parse().game_given; }
 bool LaunchFlags::no_update() { return parse().no_update; }
@@ -282,6 +326,7 @@ void LaunchFlags::set_args_override(const PackedStringArray &args) {
 	args_override_.reserve(static_cast<size_t>(args.size()));
 	for (int64_t i = 0; i < args.size(); ++i) args_override_.push_back(to_std(args[i]));
 	args_override_set_ = true;
+	version_read_ = false; // a new launch reads its release again
 }
 
 String LaunchFlags::working_dir() {
@@ -298,6 +343,7 @@ String LaunchFlags::working_dir() {
 void LaunchFlags::clear_args_override() {
 	args_override_.clear();
 	args_override_set_ = false;
+	version_read_ = false;
 }
 
 bool LaunchFlags::has_args_override() {

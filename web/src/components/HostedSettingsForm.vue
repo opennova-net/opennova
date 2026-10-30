@@ -1,5 +1,5 @@
 <template>
-  <form class="card space-y-5 p-4 sm:p-5" novalidate :aria-label="retry ? 'Start your server again' : 'New server'" @submit.prevent="submit">
+  <form class="card space-y-6 p-4 sm:p-6" novalidate :aria-label="retry ? 'Start your server again' : 'New server'" @submit.prevent="submit">
     <!-- Live region, always in the form so a screen reader hears what lands in it. -->
     <p role="alert" class="sr-only">{{ alertText }}</p>
     <Notice v-if="alertText" :id="`${baseId}-alert`" tone="bad">
@@ -7,224 +7,121 @@
       <RouterLink v-if="alertLinksToTiers" to="/me/billing" class="link ml-1">Billing</RouterLink>
     </Notice>
 
-    <!-- The game the server runs, with the version of its data. -->
-    <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('product_id')">
-      <legend :id="fieldId('product_id')" tabindex="-1" class="field-label focus:outline-none">{{ FIELD_LABELS.product_id }}</legend>
-      <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <label v-for="option in products" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
-          <input
-            v-model="form.product_id"
-            type="radio"
-            :name="`${baseId}-product_id`"
-            :value="option.id"
-            :disabled="busy"
-            class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
-          />
-          {{ option.display_name }}
-        </label>
-        <span :id="hintId('product_id')" class="font-mono text-xs text-ink-muted" title="Version">{{ product?.version }}</span>
-      </div>
-      <p v-if="errors.product_id" :id="errorId('product_id')" class="text-xs text-danger">{{ errors.product_id }}</p>
-    </fieldset>
-    <Notice v-if="previousGameGone" tone="warn">Your last server's game is no longer hosted: pick another.</Notice>
-
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <!-- GameName -->
-      <div class="min-w-0 space-y-1">
-        <div class="flex items-baseline justify-between gap-2">
-          <label :for="fieldId('game_name')" class="field-label">{{ FIELD_LABELS.game_name }}</label>
-          <span :id="hintId('game_name')" class="text-xs text-ink-muted">{{ cp1252Length(form.game_name.trim()) }}/{{ GAME_NAME_MAX }}</span>
-        </div>
-        <input
-          :id="fieldId('game_name')"
-          v-model="form.game_name"
-          type="text"
-          class="field"
-          autocomplete="off"
-          :disabled="busy"
-          :maxlength="GAME_NAME_MAX * 2"
-          :aria-invalid="errors.game_name ? 'true' : undefined"
-          :aria-describedby="describedBy('game_name')"
-        />
-        <p v-if="errors.game_name" :id="errorId('game_name')" class="text-xs text-danger">{{ errors.game_name }}</p>
-      </div>
-
-      <!-- MPHostGamePassword -->
-      <div class="min-w-0 space-y-1">
-        <label :for="fieldId('game_password')" class="field-label">{{ FIELD_LABELS.game_password }} (optional)</label>
-        <div class="flex gap-2">
-          <input
-            :id="fieldId('game_password')"
-            v-model="form.game_password"
-            :type="showPassword ? 'text' : 'password'"
-            class="field min-w-0 flex-1 font-mono"
-            placeholder="None: a public server"
-            :title="`Up to ${GAME_PASSWORD_MAX} letters, digits and punctuation`"
-            autocomplete="off"
-            autocapitalize="none"
-            spellcheck="false"
-            :disabled="busy"
-            :maxlength="GAME_PASSWORD_MAX * 2"
-            :aria-invalid="errors.game_password ? 'true' : undefined"
-            :aria-describedby="describedBy('game_password', false)"
-          />
-          <button
-            type="button"
-            class="btn-secondary btn-sm"
-            :aria-pressed="showPassword ? 'true' : 'false'"
-            :aria-controls="fieldId('game_password')"
-            @click="showPassword = !showPassword"
-          >
-            {{ showPassword ? 'Hide' : 'Show' }}<span class="sr-only"> the game password</span>
-          </button>
-        </div>
-        <p v-if="errors.game_password" :id="errorId('game_password')" class="text-xs text-danger">{{ errors.game_password }}</p>
-      </div>
-
-      <!-- MaxPlayers -->
-      <div v-for="spec in NUMBER_FIELDS.slice(0, 1)" :key="spec.field" class="min-w-0 space-y-1">
-        <label :for="fieldId(spec.field)" class="field-label">{{ FIELD_LABELS[spec.field] }}</label>
-        <div class="flex items-center gap-2">
-          <input
-            :id="fieldId(spec.field)"
-            v-model.number="form[spec.field]"
-            type="number"
-            class="field w-24"
-            inputmode="numeric"
-            step="1"
-            :min="limitOf(spec.field)?.min"
-            :max="limitOf(spec.field)?.max"
-            :disabled="busy"
-            :aria-invalid="errors[spec.field] ? 'true' : undefined"
-            :aria-describedby="describedBy(spec.field)"
-          />
-          <span :id="hintId(spec.field)" class="text-xs text-ink-muted">{{ numberHint(spec) }}</span>
-        </div>
-        <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
-      </div>
-
-      <!-- Listed on NovaLogic's NovaWorld too: shown while the service offers it and the game takes it. -->
-      <div v-if="showNovaLogic" class="min-w-0 space-y-1 self-center sm:col-span-2 lg:col-span-3">
-        <label class="flex items-center gap-3 text-sm text-ink">
-          <input
-            :id="fieldId('list_on_novalogic')"
-            v-model="form.list_on_novalogic"
-            type="checkbox"
-            :disabled="busy"
-            :aria-invalid="errors.list_on_novalogic ? 'true' : undefined"
-            :aria-describedby="describedBy('list_on_novalogic', false)"
-            class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
-          />
-          {{ FIELD_LABELS.list_on_novalogic }}
-        </label>
-        <p v-if="errors.list_on_novalogic" :id="errorId('list_on_novalogic')" class="text-xs text-danger">
-          {{ errors.list_on_novalogic }}
-        </p>
-      </div>
-    </div>
-
-    <!-- /exp: shown when the game has an expansion to choose. -->
-    <fieldset v-if="expansions.length > 0" class="min-w-0 space-y-2" :aria-describedby="describedBy('expansion_id', expansionHint !== '')">
-      <legend :id="fieldId('expansion_id')" tabindex="-1" class="field-label focus:outline-none">{{ FIELD_LABELS.expansion_id }}</legend>
-      <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <label class="flex items-center gap-3 text-sm text-ink">
-          <input
-            v-model="form.expansion_id"
-            type="radio"
-            :name="`${baseId}-expansion_id`"
-            :value="null"
-            :disabled="busy"
-            class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
-          />
-          Base game
-        </label>
-        <label v-for="option in expansions" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
-          <input
-            v-model="form.expansion_id"
-            type="radio"
-            :name="`${baseId}-expansion_id`"
-            :value="option.id"
-            :disabled="busy"
-            class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
-          />
-          {{ option.display_name }}
-        </label>
-        <span v-if="expansionHint" :id="hintId('expansion_id')" class="text-xs text-ink-muted">{{ expansionHint }}</span>
-      </div>
-      <p v-if="errors.expansion_id" :id="errorId('expansion_id')" class="text-xs text-danger">{{ errors.expansion_id }}</p>
-    </fieldset>
-
-    <Notice v-if="droppedMissions.length > 0" tone="warn">
-      Left out, no longer in this game's data: <span class="break-all font-mono text-xs">{{ droppedMissions.join(', ') }}</span>
-    </Notice>
-
-    <MissionRotationPicker
-      ref="rotation"
-      v-model="form.missions"
-      :available="missions"
-      :base-id="`${baseId}-missions`"
-      :error="errors.missions"
-      :disabled="busy"
-    />
-
-    <!-- Where it runs, while one of the account's dedicated machines is free:
-         a choice while a server on shared machines is free too, else on the
-         dedicated machine. -->
-    <div v-if="ownMachinesFree > 0" class="grid gap-4 sm:grid-cols-2">
-      <fieldset v-if="sharedFree > 0" :id="`${baseId}-pool`" class="min-w-0 space-y-2">
-        <legend class="field-label">Where it runs</legend>
+    <section class="space-y-4" :aria-labelledby="`${baseId}-game-heading`">
+      <h2 :id="`${baseId}-game-heading`" class="section-heading">Game</h2>
+      <!-- The game the server runs, with the game version of its data (the release it runs). -->
+      <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('product_id')">
+        <legend :id="fieldId('product_id')" tabindex="-1" class="sr-only">{{ FIELD_LABELS.product_id }}</legend>
         <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <label class="flex items-center gap-2 text-sm text-ink">
+          <label v-for="option in products" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
             <input
-              :id="`${baseId}-shared_machine`"
-              v-model="ownMachine"
+              v-model="form.product_id"
               type="radio"
-              :name="`${baseId}-pool`"
-              :value="false"
+              :name="`${baseId}-product_id`"
+              :value="option.id"
               :disabled="busy"
-              :aria-describedby="`${baseId}-own_machine-hint`"
               class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
             />
-            Shared machine
+            {{ option.display_name }}
           </label>
-          <label class="flex items-center gap-2 text-sm text-ink">
-            <input
-              :id="`${baseId}-own_machine`"
-              v-model="ownMachine"
-              type="radio"
-              :name="`${baseId}-pool`"
-              :value="true"
-              :disabled="busy"
-              :aria-describedby="`${baseId}-own_machine-hint`"
-              class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
-            />
-            Dedicated machine
-          </label>
-          <span :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">{{ freeMachinesLine }}</span>
+          <span :id="hintId('product_id')" class="font-mono text-xs text-ink-muted" title="Game version">{{ product?.version }}</span>
+          <span v-if="product?.protocol" class="text-xs text-ink-muted" title="The protocol its title speaks">{{ protocolWords(product.protocol) }}</span>
         </div>
+        <p v-if="errors.product_id" :id="errorId('product_id')" class="text-xs text-danger">{{ errors.product_id }}</p>
       </fieldset>
-      <p v-else class="min-w-0 self-end text-sm text-ink">
-        <span :id="`${baseId}-pool`">On your dedicated machine</span>
-        <span :id="`${baseId}-own_machine-hint`" class="ml-2 text-xs text-ink-muted">{{ freeMachinesLine }}</span>
-      </p>
-      <!-- A static address for it: shown while one of the account's is free. -->
-      <div v-if="onDedicated && addresses.length > 0" class="min-w-0 space-y-1">
-        <label :for="`${baseId}-address_id`" class="field-label" title="The same address and name every time it starts">Static address</label>
-        <select :id="`${baseId}-address_id`" v-model="addressId" class="field w-auto max-w-full" :disabled="busy">
-          <option :value="null">No static address</option>
-          <option v-for="a in addresses" :key="a.id" :value="a.id">{{ a.hostname }}</option>
-        </select>
-      </div>
-    </div>
-    <!-- Every dedicated machine of the account's in use: it runs on a shared machine. -->
-    <p v-else-if="ownMachines > 0" :id="`${baseId}-pool`" class="text-sm text-ink">On a shared machine: your dedicated machines are all in use.</p>
+      <Notice v-if="previousGameGone" tone="warn">Your last server's game is no longer hosted: pick another.</Notice>
 
-    <details class="rounded-panel border border-border bg-surface p-4" data-advanced-settings>
-      <summary class="font-medium text-ink">Advanced settings</summary>
-      <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <!-- Time_Limit, KillLimit, MaxScore, Respawn, Delay -->
-        <div v-for="spec in NUMBER_FIELDS.slice(1)" :key="spec.field" class="min-w-0 space-y-1">
-          <label :for="fieldId(spec.field)" class="field-label" :title="spec.hint">{{ FIELD_LABELS[spec.field] }}</label>
+      <!-- /exp: shown when the game has an expansion to choose. -->
+      <fieldset v-if="expansions.length > 0" class="min-w-0 space-y-2" :aria-describedby="describedBy('expansion_id', expansionHint !== '')">
+        <legend :id="fieldId('expansion_id')" tabindex="-1" class="field-label focus:outline-none">{{ FIELD_LABELS.expansion_id }}</legend>
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <label class="flex items-center gap-3 text-sm text-ink">
+            <input
+              v-model="form.expansion_id"
+              type="radio"
+              :name="`${baseId}-expansion_id`"
+              :value="null"
+              :disabled="busy"
+              class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
+            />
+            Base game
+          </label>
+          <label v-for="option in expansions" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
+            <input
+              v-model="form.expansion_id"
+              type="radio"
+              :name="`${baseId}-expansion_id`"
+              :value="option.id"
+              :disabled="busy"
+              class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
+            />
+            {{ option.display_name }}
+          </label>
+          <span v-if="expansionHint" :id="hintId('expansion_id')" class="text-xs text-ink-muted">{{ expansionHint }}</span>
+        </div>
+        <p v-if="errors.expansion_id" :id="errorId('expansion_id')" class="text-xs text-danger">{{ errors.expansion_id }}</p>
+      </fieldset>
+
+    </section>
+
+    <section class="space-y-4 border-t border-border pt-5" :aria-labelledby="`${baseId}-server-heading`">
+      <h2 :id="`${baseId}-server-heading`" class="section-heading">Server</h2>
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <!-- GameName -->
+        <div class="min-w-0 space-y-1">
+          <div class="flex items-baseline justify-between gap-2">
+            <label :for="fieldId('game_name')" class="field-label">{{ FIELD_LABELS.game_name }}</label>
+            <span :id="hintId('game_name')" class="text-xs text-ink-muted">{{ cp1252Length(form.game_name.trim()) }}/{{ GAME_NAME_MAX }}</span>
+          </div>
+          <input
+            :id="fieldId('game_name')"
+            v-model="form.game_name"
+            type="text"
+            class="field"
+            autocomplete="off"
+            :disabled="busy"
+            :maxlength="GAME_NAME_MAX * 2"
+            :aria-invalid="errors.game_name ? 'true' : undefined"
+            :aria-describedby="describedBy('game_name')"
+          />
+          <p v-if="errors.game_name" :id="errorId('game_name')" class="text-xs text-danger">{{ errors.game_name }}</p>
+        </div>
+
+        <!-- MPHostGamePassword -->
+        <div class="min-w-0 space-y-1">
+          <label :for="fieldId('game_password')" class="field-label">{{ FIELD_LABELS.game_password }} (optional)</label>
+          <div class="flex gap-2">
+            <input
+              :id="fieldId('game_password')"
+              v-model="form.game_password"
+              :type="showPassword ? 'text' : 'password'"
+              class="field min-w-0 flex-1 font-mono"
+              placeholder="None: a public server"
+              :title="`Up to ${GAME_PASSWORD_MAX} letters, digits and punctuation`"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              :disabled="busy"
+              :maxlength="GAME_PASSWORD_MAX * 2"
+              :aria-invalid="errors.game_password ? 'true' : undefined"
+              :aria-describedby="describedBy('game_password', false)"
+            />
+            <button
+              type="button"
+              class="btn-secondary btn-sm"
+              :aria-pressed="showPassword ? 'true' : 'false'"
+              :aria-controls="fieldId('game_password')"
+              @click="showPassword = !showPassword"
+            >
+              {{ showPassword ? 'Hide' : 'Show' }}<span class="sr-only"> the game password</span>
+            </button>
+          </div>
+          <p v-if="errors.game_password" :id="errorId('game_password')" class="text-xs text-danger">{{ errors.game_password }}</p>
+        </div>
+
+        <!-- MaxPlayers -->
+        <div v-for="spec in NUMBER_FIELDS.slice(0, 1)" :key="spec.field" class="min-w-0 space-y-1">
+          <label :for="fieldId(spec.field)" class="field-label">{{ FIELD_LABELS[spec.field] }}</label>
           <div class="flex items-center gap-2">
             <input
               :id="fieldId(spec.field)"
@@ -244,18 +141,200 @@
           <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
         </div>
 
-        <!-- TeamFF -->
-        <label class="flex items-center gap-3 self-end pb-2 text-sm text-ink">
-          <input
-            :id="fieldId('team_ff')"
-            v-model="form.team_ff"
-            type="checkbox"
-            :disabled="busy"
-            class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
-          />
-          {{ FIELD_LABELS.team_ff }}
-        </label>
+        <!-- Listed on NovaLogic's NovaWorld too: shown while the service offers it and the game takes it. -->
+        <div v-if="showNovaLogic" class="min-w-0 space-y-1 self-center sm:col-span-2 lg:col-span-3">
+          <label class="flex items-center gap-3 text-sm text-ink">
+            <input
+              :id="fieldId('list_on_novalogic')"
+              v-model="form.list_on_novalogic"
+              type="checkbox"
+              :disabled="busy"
+              :aria-invalid="errors.list_on_novalogic ? 'true' : undefined"
+              :aria-describedby="describedBy('list_on_novalogic', false)"
+              class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+            />
+            {{ FIELD_LABELS.list_on_novalogic }}
+          </label>
+          <p v-if="errors.list_on_novalogic" :id="errorId('list_on_novalogic')" class="text-xs text-danger">
+            {{ errors.list_on_novalogic }}
+          </p>
+        </div>
       </div>
+
+      <!-- Where it runs, while one of the account's dedicated machines is free:
+           a choice while a server on shared machines is free too, else on the
+           dedicated machine. -->
+      <div v-if="ownMachinesFree > 0" class="grid gap-4 sm:grid-cols-2">
+        <fieldset v-if="sharedFree > 0" :id="`${baseId}-pool`" class="min-w-0 space-y-2">
+          <legend class="field-label">Where it runs</legend>
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label class="flex items-center gap-2 text-sm text-ink">
+              <input
+                :id="`${baseId}-shared_machine`"
+                v-model="ownMachine"
+                type="radio"
+                :name="`${baseId}-pool`"
+                :value="false"
+                :disabled="busy"
+                :aria-describedby="`${baseId}-own_machine-hint`"
+                class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
+              />
+              Shared machine
+            </label>
+            <label class="flex items-center gap-2 text-sm text-ink">
+              <input
+                :id="`${baseId}-own_machine`"
+                v-model="ownMachine"
+                type="radio"
+                :name="`${baseId}-pool`"
+                :value="true"
+                :disabled="busy"
+                :aria-describedby="`${baseId}-own_machine-hint`"
+                class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
+              />
+              Dedicated machine
+            </label>
+            <span :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">{{ freeMachinesLine }}</span>
+          </div>
+        </fieldset>
+        <p v-else class="min-w-0 self-end text-sm text-ink">
+          <span :id="`${baseId}-pool`">On your dedicated machine</span>
+          <span :id="`${baseId}-own_machine-hint`" class="ml-2 text-xs text-ink-muted">{{ freeMachinesLine }}</span>
+        </p>
+        <!-- A static address for it: shown while one of the account's is free. -->
+        <div v-if="onDedicated && addresses.length > 0" class="min-w-0 space-y-1">
+          <label :for="`${baseId}-address_id`" class="field-label" title="The same address and name every time it starts">Static address</label>
+          <select :id="`${baseId}-address_id`" v-model="addressId" class="field w-auto max-w-full" :disabled="busy">
+            <option :value="null">No static address</option>
+            <option v-for="a in addresses" :key="a.id" :value="a.id">{{ a.hostname }}</option>
+          </select>
+        </div>
+      </div>
+      <!-- Every dedicated machine of the account's in use: it runs on a shared machine. -->
+      <p v-else-if="ownMachines > 0" :id="`${baseId}-pool`" class="text-sm text-ink">On a shared machine: your dedicated machines are all in use.</p>
+
+    </section>
+
+    <section class="space-y-4 border-t border-border pt-5" :aria-labelledby="`${baseId}-rotation-heading`">
+      <h2 :id="`${baseId}-rotation-heading`" class="section-heading">Rotation</h2>
+      <Notice v-if="droppedMissions.length > 0" tone="warn">
+        Left out, no longer in this game's data: <span class="break-all font-mono text-xs">{{ droppedMissions.join(', ') }}</span>
+      </Notice>
+
+      <MissionRotationPicker
+        ref="rotation"
+        v-model="form.missions"
+        v-model:swap-sides="form.mission_options"
+        :available="missions"
+        :base-id="`${baseId}-missions`"
+        :error="errors.missions"
+        :disabled="busy"
+      />
+
+      <label class="flex items-center gap-3 text-sm text-ink">
+        <input
+          :id="`${baseId}-replay`"
+          :checked="form.options.replay !== false"
+          type="checkbox"
+          :disabled="busy"
+          class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+          @change="form.options.replay = ($event.target as HTMLInputElement).checked"
+        />
+        Repeat the rotation after its last map
+      </label>
+    </section>
+
+    <section class="space-y-4 border-t border-border pt-5" :aria-labelledby="`${baseId}-rules-heading`">
+      <h2 :id="`${baseId}-rules-heading`" class="section-heading">Rules</h2>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <!-- Time_Limit, KillLimit, MaxScore, Respawn, Delay -->
+          <div v-for="spec in NUMBER_FIELDS.slice(1)" :key="spec.field" class="min-w-0 space-y-1">
+            <label :for="fieldId(spec.field)" class="field-label" :title="spec.hint">{{ FIELD_LABELS[spec.field] }}</label>
+            <div class="flex items-center gap-2">
+              <input
+                :id="fieldId(spec.field)"
+                v-model.number="form[spec.field]"
+                type="number"
+                class="field w-24"
+                inputmode="numeric"
+                step="1"
+                :min="limitOf(spec.field)?.min"
+                :max="limitOf(spec.field)?.max"
+                :disabled="busy"
+                :aria-invalid="errors[spec.field] ? 'true' : undefined"
+                :aria-describedby="describedBy(spec.field)"
+              />
+              <span :id="hintId(spec.field)" class="text-xs text-ink-muted">{{ numberHint(spec) }}</span>
+            </div>
+            <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
+          </div>
+
+          <!-- TeamFF -->
+          <label class="flex items-center gap-3 self-end pb-2 text-sm text-ink">
+            <input
+              :id="fieldId('team_ff')"
+              v-model="form.team_ff"
+              type="checkbox"
+              :disabled="busy"
+              class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+            />
+            {{ FIELD_LABELS.team_ff }}
+          </label>
+        </div>
+    </section>
+
+    <details class="rounded-panel border border-border bg-surface p-4" data-more-settings>
+      <summary class="cursor-pointer font-medium text-ink">More settings</summary>
+      <p class="mt-1 text-xs text-ink-muted">Access, teams, more rules, classes and weapons.</p>
+      <p v-if="errors.options" role="alert" class="mt-3 text-sm text-danger">{{ errors.options }}</p>
+      <ServerSettingsFields v-model="form.options" class="mt-4" :schema="extraSettings" :weapons="weapons" :disabled="busy" :base-id="`${baseId}-options`" />
+    </details>
+
+    <details class="rounded-panel border border-border bg-surface p-4" data-advanced-settings>
+      <summary class="cursor-pointer font-medium text-ink">Network tuning</summary>
+      <fieldset class="mt-5 min-w-0 space-y-3 border-t border-border pt-4" data-network-settings>
+        <legend class="sr-only">Network tuning</legend>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div v-for="spec in NETWORK_FIELDS" :key="spec.field" class="min-w-0 space-y-1">
+            <label :for="fieldId(spec.field)" class="field-label">{{ FIELD_LABELS[spec.field] }}</label>
+            <input
+              :id="fieldId(spec.field)"
+              v-model.number="form[spec.field]"
+              type="number"
+              class="field w-28"
+              inputmode="numeric"
+              step="1"
+              :min="NETWORK_LIMITS[spec.field].min"
+              :max="NETWORK_LIMITS[spec.field].max"
+              :disabled="busy"
+              :aria-invalid="errors[spec.field] ? 'true' : undefined"
+              :aria-describedby="describedBy(spec.field)"
+            />
+            <div :id="hintId(spec.field)" class="text-xs text-ink-muted">
+              <span v-if="spec.field === 'send_holdoff_ticks' && sendCadenceText(form.send_holdoff_ticks)" class="block">{{ sendCadenceText(form.send_holdoff_ticks) }}.</span>
+              {{ spec.hint }}
+            </div>
+            <p v-if="errors[spec.field]" :id="errorId(spec.field)" class="text-xs text-danger">{{ errors[spec.field] }}</p>
+          </div>
+        </div>
+        <div class="space-y-1">
+          <label class="flex items-center gap-3 text-sm text-ink">
+            <input
+              :id="fieldId('lock_framerate')"
+              v-model="form.lock_framerate"
+              type="checkbox"
+              :disabled="busy || !onDedicated"
+              :aria-invalid="errors.lock_framerate ? 'true' : undefined"
+              :aria-describedby="describedBy('lock_framerate')"
+              class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+            />
+            {{ FIELD_LABELS.lock_framerate }}
+          </label>
+          <div v-if="onDedicated" :id="hintId('lock_framerate')" class="text-xs text-ink-muted">On by default to let the server sleep between updates. Turn off to experiment with an unpaced loop that may use more CPU; the logic tick stays 16 ms.</div>
+          <div v-else :id="hintId('lock_framerate')" class="text-xs text-ink-muted">Only a server on a dedicated machine can run unpaced.</div>
+          <p v-if="errors.lock_framerate" :id="errorId('lock_framerate')" class="text-xs text-danger">{{ errors.lock_framerate }}</p>
+        </div>
+      </fieldset>
     </details>
 
     <div class="flex justify-end border-t border-border pt-4">
@@ -274,7 +353,8 @@
 // the start when the server started again ran on one), or with no server on
 // shared machines free runs it on the dedicated machine; there, a pick of the
 // account's free static addresses (the one `preferredAddressId` names first)
-// while any is. While the service offers it, a box lists the server on
+// while any is, and the frame pacing box (anywhere else the server goes paced,
+// the box ticked and disabled). While the service offers it, a box lists the server on
 // NovaLogic's NovaWorld too; else the start sends it off.
 // The game (a base game the service offers, by its product id) comes first and drives
 // the rest: the expansions it offers (expansion games with data), the
@@ -287,6 +367,7 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import MissionRotationPicker from './MissionRotationPicker.vue';
+import ServerSettingsFields from './ServerSettingsFields.vue';
 import Notice from './ui/Notice.vue';
 import { linksToSupportTier, startHostedServer, type HostedError } from '../api/hostedServer';
 import type { Address } from '../types/addresses';
@@ -298,6 +379,7 @@ import type {
   SettingRange,
 } from '../types/hostedServer';
 import { cp1252Length } from '../utils/cp1252';
+import { protocolWords } from '../utils/games';
 import { useUnsavedChanges } from '../composables/useUnsavedChanges';
 import {
   allowsExpansion,
@@ -312,7 +394,10 @@ import {
   initialProduct,
   initialRotation,
   offersNovaLogicListing,
+  NETWORK_LIMITS,
+  sendCadenceText,
   type IntField,
+  type NetworkIntField,
   type SettingsErrors,
   type SettingsField,
 } from '../utils/hostedSettings';
@@ -398,6 +483,12 @@ const NUMBER_FIELDS: { field: IntField; unit?: string; hint?: string; noLimit?: 
   { field: 'start_delay', unit: 'seconds', hint: 'The wait before each round starts.' },
 ];
 
+const NETWORK_FIELDS: { field: NetworkIntField; hint: string }[] = [
+  { field: 'send_holdoff_ticks', hint: '0 to 255 ticks. Lower values send more often; 0 and 1 send every 16 ms logic tick. Actual spacing depends on server and client performance.' },
+  { field: 'entity_send_budget', hint: '100 to 1600 bytes per recipient’s snapshot. A larger budget allows more entity state; packet and snapshot caps still apply.' },
+  { field: 'max_packet_size', hint: '100 to 16384 bytes. The negotiated ceiling also respects the client’s limit, so raising this alone may not make packets larger.' },
+];
+
 // The fields in the order the page shows them: the first refused one takes
 // the keyboard.
 const FIELD_ORDER: SettingsField[] = [
@@ -414,6 +505,10 @@ const FIELD_ORDER: SettingsField[] = [
   'respawn',
   'start_delay',
   'team_ff',
+  'send_holdoff_ticks',
+  'entity_send_budget',
+  'max_packet_size',
+  'lock_framerate',
 ];
 
 // The game a fresh form picks (the last server's while still offered), and
@@ -430,6 +525,19 @@ function rotationFor(productId: number, expansionId: number | null) {
 const firstForm = formFrom(props.previous, findProduct(props.products, firstProduct), []);
 firstForm.missions = rotationFor(firstProduct, firstForm.expansion_id).missions;
 const form = reactive(firstForm);
+// Frame pacing is the owner's choice on a dedicated machine alone: an unpaced
+// server keeps a CPU busy that the other servers of a shared machine need, so
+// anywhere else it goes paced (and the service launches it paced there), also
+// after the owner unticked it on a dedicated machine and then picked a shared
+// one. Before the snapshot below: a last server's unpaced setting forced on
+// here is no edit of the owner's.
+watch(
+  onDedicated,
+  (own) => {
+    if (!own) form.lock_framerate = true;
+  },
+  { immediate: true },
+);
 const submitted = ref(false);
 const settingsSnapshot = () => JSON.stringify({ settings: form, ownMachine: ownMachine.value, addressId: addressId.value });
 const initialSettings = settingsSnapshot();
@@ -439,10 +547,16 @@ const product = computed(() => findProduct(props.products, form.product_id));
 const showNovaLogic = computed(() => offersNovaLogicListing(product.value, props.novalogicListing));
 const expansions = computed<HostedExpansionOption[]>(() => product.value?.expansions ?? []);
 const missions = computed(() => availableMissions(product.value, form.expansion_id));
+const weapons = computed(() => expansions.value.find((e) => e.id === form.expansion_id)?.weapons?.length
+  ? expansions.value.find((e) => e.id === form.expansion_id)!.weapons : product.value?.weapons ?? []);
+// More settings: the game's options beyond the form's own fields and the rotation's repeat.
+const extraSettings = computed(() => (product.value?.settings_schema ?? []).filter((s) => !s.core && s.key !== 'replay'));
 const freeMachinesLine = computed(() =>
   props.ownMachinesFree === 1 ? 'One of your dedicated machines is free.' : `${props.ownMachinesFree} of your dedicated machines are free.`,
 );
-// The picked expansion's version; players need it installed to join.
+// The picked expansion's version; players need it installed to join (a host checks a joiner's copy
+// of the expansion's version.txt, which carries its release, GDC047/048). A base game's version is
+// no join check: it is the release the server runs alone.
 const expansionHint = computed(() => {
   const picked = expansions.value.find((e) => e.id === form.expansion_id);
   if (!picked) return '';
@@ -460,6 +574,8 @@ watch(
     const picked = findProduct(props.products, id);
     if (!picked || !allowsExpansion(picked, form.expansion_id)) form.expansion_id = null;
     form.missions = rotationFor(id, form.expansion_id).missions;
+    form.mission_options = form.missions.map(() => false);
+    form.options = { replay: true };
   },
 );
 
@@ -469,6 +585,8 @@ watch(
   () => form.expansion_id,
   (expansionId) => {
     form.missions = rotationFor(form.product_id, expansionId).missions;
+    form.mission_options = form.missions.map(() => false);
+    delete form.options.weapons;
   },
 );
 
@@ -480,7 +598,8 @@ function limitOf(field: IntField): SettingRange | null {
 // "no limit" where it means that.
 function numberHint(spec: { field: IntField; unit?: string; noLimit?: boolean }): string {
   const range = limitOf(spec.field);
-  const span = range ? `${range.min} to ${range.max}${spec.noLimit ? `, ${range.max} for no limit` : ''}` : '';
+  const span = range && range.max < 2147483647 ? `${range.min} to ${range.max}` : '';
+  if (spec.noLimit) return '500 for no limit';
   return [spec.unit, span].filter(Boolean).join(', ');
 }
 

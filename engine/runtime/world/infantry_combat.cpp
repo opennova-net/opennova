@@ -60,7 +60,9 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
     candidates.reserve(128);
     const auto descending = [](const Candidate &a, const Candidate &b) { return a.score > b.score; };
     for (int pool = 0; pool <= 2; ++pool) {
-        for (size_t slot = 0; slot < world.registry.pool_capacity(pool); ++slot) {
+        // [orig: Entity_FindTargets @ 0x53A610, used reads @ 0x53A703 / @ 0x53A910 / @ 0x53AB09]
+        const size_t used = world.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const EntityHandle h = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *c = world.registry.get(h);
             if (c == nullptr || c->item_id == 0 || h == e.handle) continue;

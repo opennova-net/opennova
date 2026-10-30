@@ -68,6 +68,8 @@ struct FacialDraw {
 
 class FacialSystem {
 public:
+	// The face table's own 256 (append-only, freed slots never reused), not pool 0's capacity
+	// [orig: FaceAnim_AllocEntitySlot `cmp esi, 100h` @0x57FDF9].
 	static constexpr size_t kCapacity = 256;
 	static constexpr size_t kModelCapacity = 64;
 

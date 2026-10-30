@@ -98,13 +98,14 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 		// Napi_CopyString(.., serverName_3A5, 32); Game_ApplySessionSettingsToGlobals
 		// @0x551FEB strncpy(g_ServerNameStr, serverName_3A5, 0x1F)].
 		host.config = *source.lan_config;
+		host.config.set_title(*source.title);
 		host.config.max_players = source.lan_max_players;
 		host.config.dedicated_server = !source.lan_serve_and_play;
 		host.socket_mode = SocketMode::Lan;
 		host.serve_and_play = source.lan_serve_and_play;
 		host.network_type = source.lan_network_type;
 	} else {
-		host.config = singleplayer_game_config(source.sp_game_type, source.profile);
+		host.config = singleplayer_game_config(*source.title, source.sp_game_type, source.profile);
 		// [orig: SinglePlayer_StartMission @0x561AF0 (the copy into g_MapFileName
 		//  @0x561B69..0x561B80)]
 		if (!source.sp_mission_file.empty()) host.config.mission_file = source.sp_mission_file;
@@ -124,29 +125,25 @@ HostConfig shell_host_config(const ShellHostSource &source) {
 	return host;
 }
 
-int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, int title) {
+int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, const Title &title) {
 	const int32_t cap = session_player_cap(requested, title);
 	if (block != nullptr) block->mp_max_players = cap;
 	return cap;
 }
 
-HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
+HostScreenState host_session_settings(gamecfg::GameCfg &cfg, const Title &title) {
 	// In session, the cap goes into 1..65 (dfx2.exe: 1..251) before the apply,
 	// written back into the block (store_session_player_cap carries the witness).
-	const int title = cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2
-	                                                         : gameprofile::GAME_JO;
 	(void)store_session_player_cap(&cfg, cfg.mp_max_players, title);
-	return host_screen_from_block(cfg);
+	return host_screen_from_block(cfg, title);
 }
 
-HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg) {
-	// The block's table is its title's (gamecfg::config_var_rows): dfx2.exe's
-	// carries the one row Jointops.exe's lacks, so the session runs that title.
-	const int title = cfg.table == gamecfg::ConfigTable::Dfx2 ? gameprofile::GAME_DFX2
-	                                                         : gameprofile::GAME_JO;
+HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg, const Title &title) {
+	// The session runs as the host's title, the block's (whose table is the title's
+	// config_table): its caps and its rules.
 	HostScreenState host;
 	GameConfig &config = host.config;
-	config.title = title;
+	config.set_title(title);
 	host.player_limit = cfg.mp_max_players;
 	// SERVERTYPE: the cfg's `dedicated` word [orig: dedicatedServer_400, read
 	// by the apply's cap @0x551B30].
@@ -176,7 +173,7 @@ NextMissionStage stage_next_mission(const GameConfig &session, const gamecfg::Ga
 	out.config = session;
 	apply_mission_start_session_config(out.config, block, rotation, mission_name);
 	out.player_limit = static_cast<int32_t>(block != nullptr
-			? host_player_slot_limit(block->mp_max_players, block->dedicated == 0, session.title)
+			? host_player_slot_limit(block->mp_max_players, block->dedicated == 0, *session.title)
 			: session.player_slot_limit());
 	return out;
 }

@@ -10,8 +10,6 @@
 #include <runtime/world/world.h>
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the console guard's clock)
 
-#include <base/gameprofile/gameprofile.h> // VERSION's version text
-#include <net/title/title_identity.h> // the title the VERSION line reads
 #include <base/io/le.h>
 #include <base/io/tick_rate.h>
 
@@ -2163,19 +2161,6 @@ bool ClientRuntime::console_command(const std::string &line) {
 	                                              : view_.mp_session();
 	ClientLocalCommandSeams seams = local_command_seams_;
 	seams.in_session = in_session;
-	const TitleIdentity *title = joiner_ != nullptr ? joiner_->title() : view_.title();
-	if (seams.version_text.empty() && title != nullptr) {
-		const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_id(title->game_id);
-		if (profile != nullptr && profile->version_text != nullptr)
-			seams.version_text = profile->version_text;
-	}
-	// VERSION's title is the start-up title text, g_TitleText (the connect log's
-	// TITLE line reads the same word) [orig: Client_ProcessLocalCommand @0x520BF0 - the
-	// VERSION test @0x520D8E, the words dword_3342E6C / dword_3342E68 @0x520D9A..0x520DA0;
-	// Game_ParseCommandLineAndInit @0x4A7310 - &g_TitleText @0x4A7CFB, the title sprintf
-	// from off_8154D8 @0x4A7D30..0x4A7D3C].
-	if (seams.title_text.empty() && title != nullptr && title->connect_log_title != nullptr)
-		seams.title_text = title->connect_log_title;
 	seams.version_line = [this](const std::string &text) {
 		pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
 				0xFFFFFFFFu, text, false});

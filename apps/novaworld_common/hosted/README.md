@@ -46,9 +46,9 @@ this directory's.
 - **Products** (`../products/product_repository.*`, `../products/tree_files.*`,
   `backend/migrations/0001_baseline.sql`, `0002_players_projects.sql`, `0003_project_lobbies.sql`). A product is a row named by its `key`, one **game**
   (the baseline seeds the catalog's, an admin may make more, and any signed-in account its own:
-  "Products" below): a base game (kind `game`: its `title`, the `gameprofile` code
-  `opennova-serve` speaks with `/game`, `jo` or `dfx2`, and its `lobby`, the `games` row whose
-  lobby it lists in, selected when the game is created) or an **expansion**
+  "Products" below): a base game (kind `game`: its `title`, the title it runs as and
+  `opennova-serve`'s `/game` (`jo`, `dfx2`, `acidgambit`), and its `lobby`, the `games` row whose
+  lobby it lists in, one of its title's protocol, selected when the game is created) or an **expansion**
   of one (its `expansion_code`, `/exp jox01`, unique across every game); a third kind, `app`, is
   one of OpenNova's own programs with no
   tree and no project ("Products" below). Every game and expansion has a **project** (its
@@ -65,6 +65,19 @@ this directory's.
   (`base_tree_id`, `expansion_tree_id`), kept through a crash restart or a move, until its
   owner asks for the update (`update_requested`: placed again on the current trees, no
   restart counted). One whose product has no data at its placement fails there.
+- **Launch-time network and frame settings** (`model/hosted_settings.*`): the start form and
+  `POST /api/me/servers` accept `send_holdoff_ticks` (0..255, default 12; both 0 and 1 permit
+  a send each logic tick), `entity_send_budget` (100..1600 bytes, default 600),
+  `max_packet_size` (100..16384 bytes, default 1300), and `lock_framerate` (boolean,
+  default true). These are stored with the server and reused on crash restarts, moves and data
+  updates. Only a dedicated machine runs `lock_framerate` as saved: a start on a shared machine
+  always renders it on (`launched_settings`), since an unpaced loop keeps a CPU busy that the
+  machine's other servers need, so a saved unpaced server moved or restarted onto a shared
+  machine runs paced there and never fails its start over it (the start form disables the box
+  off a dedicated machine). Omitted fields and rows created before migration `0007_hosted_network_tuning.sql`
+  keep the previous defaults. The canonical configuration document keeps these fields at its
+  top level; the migration moves older `options.max_packet_size` values to that field with the
+  same effective game.cfg clamp. Settings edits save them for the next launch.
 
 ## The fleet
 
@@ -328,17 +341,17 @@ this directory's.
   Each slot's `game.cfg` pins `mpnovaworldportmin` = `max` to its game port, and the
   containers run on the machine's own network (`--network host`).
 - **The working directory** is rendered from scratch at every start (`model/hosted_settings.*`),
-  in retail's formats: the host file (`server.host`: the owner's settings, `Replay 1` so
-  the rotation never ends the session, the owner's first map last since the last line is
-  the starting map; cp1252, CR LF), `game.cfg` (through the format's own writer, the
-  NovaWorld network type and the slot's ports), `admin.cfg` (user `svc`, a 31-character
-  random password, rights `7F`, `ip_restrict` the fleet's network) and the
-  `--credentials` file. All but `game.cfg` are secret: sent to the agent only until it
+  in retail's formats: the host file (`server.host`: the owner's settings and replay preference, maps in play order with `--rotation-first` selecting entry zero; cp1252, CR LF), `game.cfg` (through the format's own writer, the
+  NovaWorld network type, the slot's ports, and the owner's `mpmaxpacketsize` and
+  `lock_framerate`, the latter always on for a shared machine's slot), `admin.cfg` (user `svc`, a 31-character
+  random password, rights `8000007F`, `ip_restrict` the fleet's network) and the
+  `--credentials` file. All four files are secret: sent to the agent only until it
   has reported the container, written owner-only, never logged; the admin login lives in
   the row's own columns, read by `hosted::admin_login_of` alone. `opennova-serve` runs
   with `/HOST server.host --credentials credentials.txt --master-host <host>
   --master-gate-port <port> --status-page off --stats-file tick-stats.json --exit-file
-  exit.txt /game <title>` and `/exp <code>` with an expansion: no status page (it would
+  exit.txt --send-holdoff-ticks <ticks> --entity-send-budget <bytes> --rotation-first /game <title>`
+  and `/exp <code>` with an expansion: no status page (it would
   stream the players' names and chat into the server's log every 200 ms), and the two
   files the machine's agent reads in the slot's directory, the server's tick health and the
   error a non-zero exit ended on (`apps/serve/README.md`, "Supervised runs"). A server whose
@@ -498,7 +511,7 @@ minutes and hours in the shape every subject shares ([`../README.md`](../README.
   command's replies are read by the dispatcher's per-verb count (`admin_reply_plan`), with
   a 200 ms quiet gap only where the line cannot tell. The link polls `GET GAMESTATE` every
   15 s, reconnects with a backoff (1 s doubling to 4 s), runs the queued commands (16 at
-  most; `QUIT` is refused, the link's own) and ends with `QUIT`. The password is a log
+  most), supports `QUIT` by closing and reconnecting its admin session, and ends with `QUIT`. The password is a log
   secret for the link's lifetime and never reaches a log line, a console line or a reply.
 - **The console** is the table `hosted_server_console`, a capped ring of each server's
   newest 500 lines: the commands the routes ask a link to record (with their sender,
@@ -567,9 +580,9 @@ writes need the CSRF header.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `products` (each with its version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, its `product` (`id`, `key`, `display_name` and `title`, the game's gameprofile code), pins, `update_available`, restarts, times, `listing` (its RID, name, mission, `game_type`, players and address; null while it holds none), its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) `novalogic` (for an owner who asked to be listed on NovaLogic's NovaWorld, while it is live: that listing's `state` as its agent last reported it, `off`, `trying`, `listed`, `retrying` or `not_listed`, with `try` and `tries` while trying or retrying, `next_try_at` while retrying, the server's `reason` while retrying or not listed, and the console `player_slots` of the players that service sent; an admin's view adds the NWEC `tag`; null otherwise, and while no report carries it) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
+| `GET /api/me/servers` | a website session | `enabled`, `full` (the cap reached, or no fleet room in any pool the account has a free place in), the account's `entitlement` (`max_servers` and `used`, and per pool `shared_servers` and `shared_used`, `own_machines` and `own_used`), the offered `products` (each with its `title`, `protocol`, version, missions, limits and expansions) and its `servers` (the live ones, then its newest 10 ended), each with its settings, its `product` (`id`, `key`, `display_name`, `title`, the game's title code, and `protocol`, the `{code, name, version}` that title speaks), pins, `update_available`, restarts, times, `listing` (its RID, name, mission, `game_type`, players and address; null while it holds none), its `phase` (where its start stands: `queued`, `restarting` n of 3 after a `crash` or a `timeout` (its `cause`), `moving`, `data_unavailable` (its last start's data could not be fetched: placed again shortly, no restart counted), `launches_held`, `launching_machine`, `waiting_for_slot`, `waiting_for_address` (its dedicated machine does not show its static address yet), `downloading_data` with its bytes so far of the total, `downloading_server`, `starting_server`, `signing_in`, or the state; `model/server_phase.*`) `novalogic` (for an owner who asked to be listed on NovaLogic's NovaWorld, while it is live: that listing's `state` as its agent last reported it, `off`, `trying`, `listed`, `retrying` or `not_listed`, with `try` and `tries` while trying or retrying, `next_try_at` while retrying, the server's `reason` while retrying or not listed, and the console `player_slots` of the players that service sent; an admin's view adds the NWEC `tag`; null otherwise, and while no report carries it) and `stopped_because` (an ended server's last run: its cause (`owner_stop`, `admin_stop` and `stop` say who stopped it), a limits stop's `limit` (`kind` and `count`; null for any other end), exit code, OOM flag and the server's own last line; never the agent's reason a start never ran, which `GET /api/admin/hosted/<id>` alone carries, there in `phase.line` too) |
 | `GET /api/me/servers/<id>` | a website session | one of the account's servers with its newest 50 `events`; 404 for another account's |
-| `POST /api/me/servers` | a website session | the settings (`game_name` required; `product_id`, `expansion_id` and `missions` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
+| `POST /api/me/servers` | a website session | the settings (`game_name` required; `product_id`, `expansion_id` and `rotation` defaulted), `own_machine` and `address_id` (a static address of the account's, with `own_machine`): 202 `requested`; 400 `invalid_json`, `invalid_field`, `invalid_settings` (with the `field`); 403 `not_entitled`, `payment_past_due`; 409 `server_limit` (with `shared_servers` and `shared_used`), `no_own_machine` (with `own_machines` and `own_used`), `at_capacity`, `address_unavailable`; 429 (6, then one every 20 s, shared with the stop); 503 `hosting_disabled` |
 | `GET /api/me/addresses` | a website session | `enabled`, the `zone`, how many bought addresses are `unnamed`, and the account's `addresses` (each with its name, hostname, state, IP and port, source, subscription, the live server using it, reason, why it lapsed and times) |
 | `POST /api/me/addresses` | a website session | `{"name"}`: the account's next bought address named, then allocated by a worker: 201 `{"address"}`; 400 `invalid_json`, `invalid_field`, `invalid_name`; 404; 409 `name_taken`, `no_address`; 503 `addresses_disabled` |
 | `POST /api/me/servers/<id>/stop` | a website session | 202 `stopping` (or `stopped`); 404; 409 `not_live`; 429 |
@@ -629,7 +642,8 @@ naming its title, `GAME=`) and its expansions' of the service's own
 `expansion/<code>/UPDATE.WIZ`, each naming `ONNET_UPDATE_HOST`; the editor's its own package
 with its `ONEDITOR.CMD`; a download-only app's its build as uploaded), then `manifest.json`
 (the service's products and the accounts' public games with a published release, each one's `key`,
-`kind`, `name`, `description`, `file`, `size`, `sha256`, `version`, `release`, its release's
+`kind`, `name`, `description`, `protocol` (a game's `{code, name, version}`, null for an expansion
+and an app), `file`, `size`, `sha256`, `version`, `release`, its release's
 name, and `published`, the file's fields null while it offers none), then every other object
 removed. The jobs a route
 enqueues (`release.build`, `release.validate`, `release.apply`, `tree.prune`, `product.purge`, `downloads.publish`; the service
@@ -664,11 +678,12 @@ limit. A file its store got through its own URL is counted before it is held (pa
 that is no admin has one release building or validating at a time (409
 `release_in_progress`), starts at most 5 a UTC day (429 `too_many_releases`, `release_starts`:
 a deleted one still counts) and none while its usage is at the quota (413 `quota_exceeded`).
-A game selects an existing compatible lobby or names a new one when created. A player's
+A game selects an existing lobby of the protocol its title speaks or names a new one when
+created (lobbies are keyed by protocol: `../README.md` "Lobbies: each game selects one"). A player's
 choices are the lobbies of system games, public games with a published release, or the
 caller's games, never a retail game's (Joint Operations' and Delta Force Xtreme 2's, which the
 original `Jointops.exe` and `dfx2.exe` browse); an admin may select any lobby of the game's
-title. An unpublished lobby remains reachable for testing but is unlisted publicly. Starting the
+protocol. An unpublished lobby remains reachable for testing but is unlisted publicly. Starting the
 first release build of a game with a lobby locks the selection, including when a mod first
 builds on the game; failed or deleted releases do not unlock it, and admins obey the same lock
 (a locked game with no lobby still takes one). A mod inherits its base game's lobby. Sharing a
@@ -686,11 +701,11 @@ change with the CSRF header):
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/products` | the projects the caller may read (the public ones, its own, every one for an admin), by key, each `{key, title, kind, game, expansion_code, visibility, retail, base, product_id, head, owner, can_push, can_manage, can_release, release, lobby, lobby_locked}` (`release` its published release's `{id, version}`, null for none; `lobby` the resolved `{slug, display_name, title, gate_tag_file}`, null if unconfigured, with generated file bytes in base64; mods inherit both lobby fields) and, for one it may manage, `storage` |
+| `GET /api/products` | the projects the caller may read (the public ones, its own, every one for an admin), by key, each `{key, title, kind, game, protocol, expansion_code, visibility, retail, base, product_id, head, owner, can_push, can_manage, can_release, release, lobby, lobby_locked}` (`game` the title it runs as; `protocol` the `{code, name, version}` that title speaks, version its protocol version, PV2: `{"code": "jo", "name": "JO", "version": "16"}`; `release` its published release's `{id, version, one_version}`, `one_version` the ONE that built it or null, null for none; `lobby` the resolved `{slug, display_name, protocol, gate_tag_file}`, null if unconfigured, with generated file bytes in base64; mods inherit both lobby fields) and, for one it may manage, `storage` |
 | `POST /api/products` | `{key, display_name, kind, game?, base?, expansion_code?, visibility, lobby?, new_lobby_name?}`: a game (`game` a title) requires exactly one existing `lobby` slug or `new_lobby_name` (1 to 64 visible characters); an expansion (`base` a game of the service's or the caller's own, `expansion_code` as the admin's) inherits its lobby and accepts neither field. The caller owns it; its key is 1 to 11 of `A-Z0-9_` with no `QQ`: 201 `{project}`; 400 `invalid_field`, `missing_field` (with the `field`); 403 `too_many_projects` (with the `limit`); 404 `no_such_base`; 409 `duplicate_key`, `duplicate_expansion` (`field` `expansion_code`: another mod, of any game, has the code); 429 (5, then one a minute) |
 | `PATCH /api/products/<key>` | `{display_name?, visibility?, lobby?, new_lobby_name?}` by its owner or an admin; the mutually exclusive lobby fields change a game's selection before its first release build: 200 `{project}`; 400; 403 `forbidden`; 404; 409 `lobby_locked` |
 | `DELETE /api/products/<key>` | by its owner or an admin, its objects' `product.purge` queued: 204; 403 `forbidden`; 404; 409 `in_use`, `has_expansion` |
-| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`: their stores and their releases' packages, `release_bytes`: the packages alone) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`: the service's and its own), the `titles` a game of its may speak, and the `lobbies` it may select (`{slug, display_name, title}`; a player's never a retail game's, an admin's every one; selection must match the game's title) |
+| `GET /api/me/projects` | the account's own `projects`, their `usage` (`projects`, `bytes`: their stores and their releases' packages, `release_bytes`: the packages alone) and the `limits`, the `games` a mod of its may build on (`{key, title, game}`: the service's and its own), the `titles` a game of its may run as with the protocol each speaks (`protocols`, as the admin's), and the `lobbies` it may select (`{slug, display_name, protocol}`; a player's never a retail game's, an admin's every one; selection must match the game's title) |
 | `POST /api/products/<key>/missing` | 413 `quota_exceeded` `{used, limit}` when an account's own project's files to upload, or those its store got through its own URLs, would take its projects past 10 GiB (none is signed or held then); the directory store's `PUT .../blobs/<sha256>` and the push alike |
 | `GET /api/products/<key>/releases` | its releases, newest first, each as the admin's (`Release`), for its owner or an admin: 200 `{releases}`; 403; 404 |
 | `POST /api/products/<key>/releases` | `{version, revision?, base_revision?}`: a release built from the revision (the head when none is named) and, an expansion's, its base game's (its head), `created_by` `user <name>` or `admin <name>`: 201 `{release}`, `building`; 400 `invalid_field`, `no_revision`; 403; 404; 409 `release_in_progress`; 413 `quota_exceeded` `{used, limit}`; 429 `too_many_releases` `{limit}` with `Retry-After` (the seconds to the next UTC midnight); 503 (an admin's start takes none of the three limits) |
@@ -700,11 +715,11 @@ change with the CSRF header):
 
 | Route | Replies |
 | --- | --- |
-| `GET /api/admin/products` | the store's kind, the titles, every lobby (`games`: `{slug, display_name, title}`) and every product (games, expansions, then apps), each with its `key`, its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `lobby_locked`, `wizard_login`, `download` and `description`, and its trees |
-| `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`, unique across every game without case), a `display_name`, the updater's `updater_login` and `command_file` both or neither (each unique without case), `retail` (a retail game: its SERVER.LST names `ftp.novaworld.com` instead of `ONNET_UPDATE_HOST`, and its project's revision 1 is the stock install), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
-| `PATCH /api/admin/products/<id>` | any product's (an account's own too, never made `retail`): the name, a game's compatible `lobby` before its first release build, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `lobby_locked` |
+| `GET /api/admin/products` | the store's kind, the titles a game may run as with the protocol each speaks (`protocols`: `{<title code>: {code, name, version}}`), every lobby (`games`: `{slug, display_name, protocol}`) and every product (games, expansions, then apps), each with its `key`, its `title` and `protocol` (its title's, an expansion's its parent game's, null for an app), its `published_release` (`{id, name, sha256, version, one_version}` or null), its project's `visibility` (null for an app) and `head`, its `owner_id` and `owner` (the account whose own project it is, null for the service's own), its `lobby_locked`, `wizard_login`, `download` and `description`, and its trees |
+| `POST /api/admin/products` | a game (a title, a `lobby`, a `games` slug) or an expansion (a game's `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`, unique across every game without case), a `display_name`, the updater's `updater_login` and `command_file` both or neither (each unique without case), and its `key` (1 to 16 of `A-Z0-9_`) and its project's `visibility` (`public`, `private`), both required: 201; 400; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `duplicate_expansion`, `no_such_parent` |
+| `PATCH /api/admin/products/<id>` | any product's (an account's own too): the name, a game's compatible `lobby` before its first release build, the updater's fields, the `key` (a rename, of its row alone: the store keeps a project's files under its product's id, `content/<id>/`, so none moves; editors find a project by its key, so a project file naming the old key reads 404 `not_found`) and a game's `visibility` (an app has no project): 200; 400; 404; 409 `duplicate_login`, `duplicate_command_file`, `duplicate_key`, `lobby_locked` |
 | `DELETE /api/admin/products/<id>` | any product (an account's own too): the game, its trees, its releases and its project's history, at once; its objects (its trees' prefixes, its project's files under `content/<id>/` and its releases' packages) removed by the data program's `product.purge`, queued in the delete's transaction to run 75 minutes after it (past every presigned transfer handed out before and the jobs then on its trees): 204; 404; 409 `in_use` (a live server runs it), `has_expansion` (an expansion builds on it) |
-| `GET /api/admin/releases` | the releases, newest first, each naming its product (`product_id`), its `version`, its `review_note` and, for a game's, its `source` revision |
+| `GET /api/admin/releases` | the releases, newest first, each naming its product (`product_id`), its `version` (the game version its package carries), its `one_version` (the ONE that built it from a revision: the data program's `one_build()`, null for an upload), its `review_note` and, for a game's, its `source` revision |
 | `POST /api/admin/releases` | `{"name"?, "size", "product_id", "version"}`: an app's release `uploading` (`version` one to four numbers between dots) and its build's multipart upload: 201; 400; 409 `built_from_project` (the product is a game); 503 |
 | `PUT /api/admin/releases/<id>/parts/<n>?upload_id=<u>` | a part (at most 32 MiB) handed to the store: 200 `{"etag"}`; 400; 404; 409 `not_uploading`, `built_from_project`; 413; 502; 503 |
 | `POST /api/admin/releases/<id>/complete` | the upload completed, then the release `building` with its `release.build` job: 202; 400; 404; 409 `not_uploading`, `built_from_project`; 502; 503 |
@@ -743,13 +758,9 @@ by the stall watchdog; a second refreshes its catalog (`release_catalog.*`) from
 every 30 s: each product with an updater login serves the section of its published
 release that carries its command file, the package fetched into the cache and the section
 unpacked beside it, streamed from disk (a connection's next replies are made only while
-less than 64 KiB wait unsent). `SERVER.LST` names one host: `ftp.novaworld.com` for a retail
-game's product (its `retail` column: a retail install reaches it
-through a hosts-file line), else `ONNET_UPDATE_HOST`. A login no published release
-serves is refused when it is OpenNova's own (not retail), so a first install fails rather than finding
-nothing; a retail product (`JOTRus`, `JOEus`, `DFX2`) with none is served as current, from
-a package of its command file alone that the catalog writes into its cache. Logged under
-`[update]`.
+less than 64 KiB wait unsent). `SERVER.LST` names one host, `ONNET_UPDATE_HOST`. A login no
+published release serves is refused, so a first install fails rather than finding nothing.
+Logged under `[update]`.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -759,15 +770,13 @@ a package of its command file alone that the catalog writes into its cache. Logg
 
 ## The console routes
 
-**The console routes** (`console_routes.*`) run the curated commands on a hosted server's
+**The console routes** (`console_routes.*`, `configuration_routes.cpp`) run structured and raw commands on a hosted server's
 admin link, which the fleet program holds: a route writes its command to
 `hosted_console_commands` with the deadline its budget allows and reads its row until it
 is done; the fleet's console drain (`apps/novaworld_fleet/hosted/console_drain.*`) claims the queued commands
 (`FOR UPDATE SKIP LOCKED`), runs each on its link and writes the outcome and each reply
 packet (`hosted_console_replies`); the route reads them and deletes the row. A command
-still queued when the route's wait ends is withdrawn, never sent; only a done row says a
-command went out; one whose fleet leader went away is answered link down by the next
-leader's drain. The owner's routes act on the caller's own servers by id (another
+still queued when the route's wait ends is withdrawn, never sent. A claimed command keeps running after the HTTP deadline; an uncertain result is explicitly marked `delivery_unknown` and is never replayed. A new leader also marks unfinished work uncertain. The owner's routes act on the caller's own servers by id (another
 account's answers as no server's does); the admin's (`/api/admin/hosted/<id>/...`) on any.
 In order: the session or admin check (401; 403 without the CSRF header on a `POST`); the
 arguments (400, before anything is read or sent); the server (404 `not_found`, 409
@@ -797,22 +806,56 @@ ahead of the waiting polls, so a page never meets its own `console_busy`.
 | `POST /api/me/servers/<id>/players/<slot>/punt`, `/ban`, `/swap`, `/kill` | `PLAYER PUNT` / `BAN` / `SWAPTEAM` / `KILL <slot>` | the result; 400 `invalid_slot` (1..255); 404 `player_not_found`; 409 `no_pcid`, `not_connected` |
 | `GET /api/me/servers/<id>/missions` | `MISSION AVAILABLE` | the missions |
 | `GET /api/me/servers/<id>/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none) | the rotation with its current and next; 409 `not_in_game` |
-| `POST /api/me/servers/<id>/rotation` | `MISSION LIST`, then `MISSION ADD <file> <0\|1>` | `{"mission", "swap_sides"}` appended; 400; 404 `mission_not_found`; 409 `rotation_full` (128 maps, policy), `not_in_game` |
+| `POST /api/me/servers/<id>/rotation` | `MISSION LIST`, then `MISSION ADD <file> <0\|1>` | `{"mission", "swap_sides", "insert_at", "one_shot"}`; omitted position appends; 400; 404 `mission_not_found`; 409 `rotation_full` (128 maps, policy), `not_in_game` |
 | `POST /api/me/servers/<id>/rotation/<index>/remove`, `/next` | `MISSION LIST`, then `MISSION REMOVE` / `SETNEXT <index>` | 400 `invalid_index`; 404 `no_such_entry` (the server answers OK for any index, so the rotation is read first); 409 `last_mission` (an empty rotation ends the session), `not_in_game` |
 | `POST /api/me/servers/<id>/rotation/cycle` | `MISSION CYCLE` | the round ends now; 409 `not_in_game` |
 | `GET /api/me/servers/<id>/chat` | `CHAT GET` | the chat window, oldest first |
 | `POST /api/me/servers/<id>/chat` | `CHAT SEND <text>` | `{"text"}`: cp1252, no control character, not blank, at most 59 characters; 400 `invalid_text` |
 | `GET /api/me/servers/<id>/console` | none | the console ring in any state, with the link's state (`?limit=`, `?after=`); 404 |
-| `GET /api/admin/hosted/<id>/settings` (admin only) | `GET GAMESETTINGS` | the settings, in the server's order |
+| `GET .../settings` | `GET GAMESETTINGS` | live values, saved configuration, revision, title schema and pinned weapon catalog |
+| `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch |
+| `GET .../weapons` | `WEAPON LIST` | complete reply packets |
+| `POST .../command` | `{command}` | full ordered replies, delivery status, saved status and new revision |
 
-**The console's commands are a curated list** (policy, ADR 0053 d9;
-`console_commands.h`): owners get exactly the commands above but `GET GAMESETTINGS`;
-admins get that one wider read besides. There is no passthrough of an arbitrary admin
-line: every line is composed from checked arguments (a slot 1..255, since the server
-compares `(u8)atol` and 256 would be its own slot 0; an index 0..127; a `.bms` name of
-letters, digits, `_` and `-`; chat text as above), so nothing reaches the server's files or
-config (`SET`, `WEAPON SET`, `CMD`), its admin users or ban files (`ADMINUSER`, `BANLIST`)
-or its session's end (`GOTO`, `MISSION CLEAR`, `QUIT`) outside the supervisor's stop.
-`MISSION ADD` takes no insert position and no `ONESHOT`, and no `PLAYER ... ALL` form is on
-the list. The commands that change the server are recorded in the console with their
-sender; the reads are not.
+Owners and admins can use the full TCP command surface on hosted servers, including
+bulk player actions, weapon restrictions, inserted/one-shot missions, `CMD`, `GOTO`,
+and `QUIT`. `ADMINUSER`, `BANLIST`, and `SET LevelRestrict` remain retail stubs;
+the web shows the server's unsupported response. The console never connects to
+arbitrary external endpoints. Authentication, ownership, CSRF, admission and rate
+limits still apply. Password-bearing lines are redacted in persistent logs.
+
+## Saved server configuration
+
+`engine/formats/gamecfg/server_settings.*` describes the title-aware fields, defaults,
+types, validation and live setters shared by the website and in-game host editor. It
+offers only the settings something in the runtime acts on (a game.cfg key nothing reads
+stays in the format, not the schema), and a row's `depends_on` names the toggle or count
+it does nothing without, which the editors show it beneath.
+NovaWorld and LAN use the same authored host screen, with a supplemental options panel.
+
+`hosted_servers.configuration` is the canonical JSONB document. Existing core fields
+remain at the top level, advanced fields live under `options`, and `rotation` is an
+ordered array of `{file, swap_sides}` entries, including repeated maps. A map's side-switch
+flag applies to every occurrence, as in retail. Classes and
+weapons use stable names; weapon availability is `always`, `never` or `armory`.
+A product tree carries its weapon catalog, so published updates cannot reinterpret
+an already running server's restrictions by another tree's numeric indexes.
+
+The fleet serializes queued operations per server and fences them by process generation
+and configuration revision. It saves accepted live changes and command completion in
+one transaction, retries database persistence without resending TCP commands, and
+finishes independently of the browser. Structured edits require the current revision;
+stale edits return 409. File-only options are saved for the next launch without forcing
+a restart. One-shot missions are excluded from saved rotations. QUIT closes only the
+admin session; exhausted non-repeating rotations and explicit session ends release the
+allocation without consuming a crash restart.
+
+Deployment requires `0005_server_configuration.sql`. It migrates existing settings
+and rotations, removes their old columns, and queues catalog backfills for ready trees.
+Deploy the matching service binaries together with that schema (old binaries cannot
+use the removed columns); update the serve/hostd runtime and fleet before exposing the
+new web UI. Let `tree.server_catalog` jobs finish before configuring weapons on existing
+trees. The migration preserves existing servers' repeat-rotation behavior.
+`0006_server_options_honored.sql` then drops from saved options the keys the schema no
+longer offers (the settings nothing in the runtime reads, and `lan_mode`, which the
+hosted NovaWorld channel ignores) and turns a numeric `listing_ping` into its toggle.

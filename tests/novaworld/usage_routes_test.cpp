@@ -15,9 +15,10 @@
 //     task alone, the reporting tasks' limits;
 //   - an AWS resource: none on the local stack (and why), a deployment's metrics as
 //     CloudWatch gives them;
-//   - the programs: each in order, running from the tasks reporting (desired and release
-//     unknown) on the local stack and from ECS on a deployment's, what the reporting tasks
-//     use now, the tasks gone in 24 h, each task with its ECS facts.
+//   - the programs: each in order, running from the tasks reporting (desired and the task
+//     definition unknown) on the local stack and from ECS on a deployment's, what the
+//     reporting tasks use now, the tasks gone in 24 h, each task with the ONE build its newest
+//     minute names (none where it named none) and its ECS facts.
 
 #include "accounts/auth.h"
 #include "hosted/model/fleet_repository.h"
@@ -117,10 +118,7 @@ std::string ago(int minutes) {
 
 Rows plant(Database &db) {
 	Rows r;
-	r.server = db.query("INSERT INTO hosted_servers (game_name, max_players, time_limit, "
-						"kill_limit, max_score, respawn, start_delay, missions, generation, "
-						"state) VALUES ('Usage', 16, 30, 0, 0, 0, 0, 'm.bms', 1, 'running') "
-						"RETURNING id;")
+	r.server = db.query("INSERT INTO hosted_servers (generation, state, configuration) VALUES (1, 'running', jsonb_build_object('game_name', 'Usage', 'max_players', 16, 'time_limit', 30, 'kill_limit', 0, 'max_score', 0, 'respawn', 0, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'm.bms', 'swap_sides', false)))) RETURNING id;")
 					   .front()
 					   .as_int(0)
 					   .value_or(0);
@@ -187,6 +185,12 @@ Rows plant(Database &db) {
 	sample("web", kTaskA, 1, 60, 0.5, 460000000, 106000);
 	sample("web", "bbbb1111", 70, 100, 0.25, 200000000, 9000);
 	sample("worker", "cccc2222", 1, 5, 0.5, 100000000, 3000);
+	// Task a's newest minute names its build (its older ones, written before, name none);
+	// the worker's names none.
+	db.exec("UPDATE program_samples SET one_version = '0.0.22.123', one_commit = 'a1b2c3d' "
+			"WHERE task_id = $1 AND at = " +
+					ago(1) + ";",
+			{ BindValue(std::string(kTaskA)) });
 	db.exec("INSERT INTO program_hourly (program, task_id, hour, cpu_avg, cpu_max, "
 			"memory_peak_bytes, net_in_bytes, net_out_bytes) VALUES ('web', $1, "
 			"date_trunc('hour', now()) - interval '3 hours', 20, 70, 500000000, 360000, 36000), "
@@ -328,11 +332,17 @@ int test_programs(Harness &h) {
 	const auto *web = program_named(programs, "web");
 	TEST_EXPECT(web != nullptr);
 	TEST_EXPECT((*web)["running"].i() == 1 && is_null((*web)["desired"]) &&
-			is_null((*web)["release"]) && (*web)["restarts_24h"].i() == 1);
+			is_null((*web)["task_definition"]) && (*web)["restarts_24h"].i() == 1);
 	TEST_EXPECT(near((*web)["cpu_percent"].d(), 60) && near((*web)["cpu_limit"].d(), 0.5) &&
 			(*web)["memory_bytes"].i() == 460000000 && near((*web)["net_in_bps"].d(), 100));
 	TEST_EXPECT((*web)["tasks"].size() == 1 && str((*web)["tasks"][0]["id"]) == kTaskA &&
 			(*web)["tasks"][0]["reporting"].b() && is_null((*web)["tasks"][0]["last_status"]));
+	TEST_EXPECT(str((*web)["tasks"][0]["one_version"]) == "0.0.22.123" &&
+			str((*web)["tasks"][0]["one_commit"]) == "a1b2c3d");
+	const auto *worker = program_named(programs, "worker");
+	TEST_EXPECT(worker != nullptr && (*worker)["tasks"].size() == 1 &&
+			is_null((*worker)["tasks"][0]["one_version"]) &&
+			is_null((*worker)["tasks"][0]["one_commit"]));
 	const auto *gate = program_named(programs, "gate");
 	TEST_EXPECT(gate != nullptr && (*gate)["running"].i() == 0 && is_null((*gate)["cpu_percent"]) &&
 			(*gate)["tasks"].size() == 0);
@@ -343,15 +353,19 @@ int test_programs(Harness &h) {
 	const auto *cweb = program_named(cloud["programs"], "web");
 	TEST_EXPECT(cweb != nullptr);
 	TEST_EXPECT((*cweb)["running"].i() == 1 && (*cweb)["desired"].i() == 2 &&
-			str((*cweb)["release"]) == "opennova-prod-web:43" && !(*cweb)["on_release"].b());
+			str((*cweb)["task_definition"]) == "opennova-prod-web:43" &&
+			!(*cweb)["on_release"].b());
 	const auto &tasks = (*cweb)["tasks"];
 	TEST_EXPECT(tasks.size() == 2);
 	TEST_EXPECT(str(tasks[0]["id"]) == kTaskA && tasks[0]["reporting"].b() &&
 			str(tasks[0]["last_status"]) == "RUNNING" && str(tasks[0]["health"]) == "HEALTHY" &&
-			str(tasks[0]["task_definition"]) == "opennova-prod-web:42");
+			str(tasks[0]["task_definition"]) == "opennova-prod-web:42" &&
+			str(tasks[0]["one_version"]) == "0.0.22.123");
+	// A task ECS runs that never reported: no build is known.
 	TEST_EXPECT(str(tasks[1]["id"]) == "3333cccc3333cccc3333cccc3333cccc" &&
 			!tasks[1]["reporting"].b() && is_null(tasks[1]["cpu_percent"]) &&
-			str(tasks[1]["last_status"]) == "PENDING");
+			str(tasks[1]["last_status"]) == "PENDING" && is_null(tasks[1]["one_version"]) &&
+			is_null(tasks[1]["one_commit"]));
 	const auto *cgate = program_named(cloud["programs"], "gate");
 	TEST_EXPECT(cgate != nullptr && (*cgate)["on_release"].b() && (*cgate)["desired"].i() == 1);
 	return 0;

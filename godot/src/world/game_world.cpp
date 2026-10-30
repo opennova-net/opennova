@@ -1,3 +1,4 @@
+#include <net/admin/admin_protocol.h>
 #include "world/game_world.h"
 
 #include <formats/admincfg/admin_cfg.h>
@@ -17,7 +18,7 @@
 #include "network/net_session_policy.h"
 #include "object/object_shader_cache.h" // load_effect_set (the renderer's start)
 #include "resource_index/launch_flags.h" // the server log switches
-#include "resource_index/resource_root.h" // session_title (the connect log header)
+#include "resource_index/resource_root.h" // session_title_code (the connect log header)
 #include "rtxt/rtxt_string_file.h" // installed_text_override (the admin's process gametext)
 #include <runtime/mission/runtime_boot.h> // boot_files_from_index (the admin's process gametext)
 #include "util/string_convert.h"
@@ -86,10 +87,9 @@ void GameWorld::_ready() {
 		log_devices_ = std::make_unique<opennova::inmatch::ServerLogDevices>(
 				opennova::to_std(LaunchFlags::working_dir()));
 		// `/CONNECTLOG`'s header names the game the process was launched as.
-		std::string title_error;
 		log_devices_->arm(LaunchFlags::parsed().log_switches,
 				opennova::inmatch::connect_log_header(
-						ResourceRoot::session_title(Ref<ResourceRoot>(), title_error)));
+						ResourceRoot::session_title_code(Ref<ResourceRoot>())));
 		// The NovaWorld menu's gate and connect lines write the same log (D-NET-956).
 		NovaWorldClient::set_process_connect_log(&log_devices_->connect());
 		// The NovaWorld session's _inout.txt line under `/INOUT` (D-NET-956).
@@ -588,7 +588,7 @@ bool GameWorld::open_remote_admin() {
 	admin_server_ = std::make_unique<opennova::AdminServer>(std::move(config), admin_consoles_,
 			admin_rand_, [&files](std::string_view p_line) {
 				(void)files.write(opennova::inmatch::kAdminLogFileName,
-						opennova::inmatch::admin_log_file_text(p_line), /*append=*/true);
+						opennova::inmatch::admin_log_file_text(opennova::admin_log_redacted(p_line)), /*append=*/true);
 			});
 	admin_pump_ = std::make_unique<AdminTcpPump>(*admin_server_);
 	const uint16_t port = opennova::inmatch::remote_admin_listen_port(game_config_->native().cfg());
@@ -609,6 +609,8 @@ opennova::inmatch::AdminConsole::Seams GameWorld::remote_admin_seams(const Ref<S
 		seams.config_block = cfg;
 		seams.save_config = std::move(save);
 	}
+	// The title the block runs as (GameConfigBlock: the launch's).
+	seams.config_title = game_config_->native().title();
 	// The process's gametext, the menus' console included: the shell's mount (else the last
 	// load's root) and its installed override table (engine inmatch/remote_admin.h
 	// process_game_text).

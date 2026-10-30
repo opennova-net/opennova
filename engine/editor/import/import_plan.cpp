@@ -12,9 +12,9 @@
 #include <system_error>
 #include <utility>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
@@ -89,7 +89,7 @@ bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocumen
 		for (const InstallFile &file : install_.files()) names_.emplace(pff::normalized_logical_name(file.name), file.name);
 		return true;
 	}
-	vfs_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(document.target_game.c_str()));
+	vfs_.set_scr_policy(title_scr_policy_for_code(document.target_game.c_str()));
 	if (!vfs_.set_primary_archive(path)) {
 		error = "Could not open archive: " + path;
 		return false;
@@ -805,7 +805,7 @@ private:
 	// (menu::load_shell_style), each the selection's copy where it brings one, else the
 	// project's.
 	void read_stylesheets() {
-		const int policy = gameprofile::gameprofile_scr_policy_for_code(document_.target_game.c_str());
+		const int policy = title_scr_policy_for_code(document_.target_game.c_str());
 		const menu::ShellStyle style = menu::load_shell_style([&](const std::string &name, std::string &text) {
 			std::vector<uint8_t> bytes;
 			if (!stylesheet_bytes(name, bytes)) return false;

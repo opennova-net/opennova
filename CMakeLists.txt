@@ -47,6 +47,9 @@ endif()
 
 # Native engine group libraries.
 add_subdirectory(engine)
+# Every game's own code (games/CLAUDE.md): opennova_games, which each program links and fills the
+# engine's registries from (games::install()).
+add_subdirectory(games)
 
 # The NovaWorld service's HTTP layer (novaworld_web, novaworld_fleet, and with
 # them novaworld_worker and novaworld_data).
@@ -102,3 +105,7 @@ add_subdirectory(apps/wire)
 
 enable_testing()
 add_subdirectory(tests)
+
+# CI compiles each Windows test shard's targets, while an ordinary build still
+# builds everything. Collect after all directories have registered their targets.
+include(scripts/ci/native_targets.cmake)

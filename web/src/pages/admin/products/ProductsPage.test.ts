@@ -61,14 +61,18 @@ describe('ProductsPage', () => {
     expect(page.find('#products-awaiting').exists()).toBe(false);
 
     const table = page.findAll('table').at(-1)!;
-    expect(table.findAll('thead th').map((th) => th.text())).toEqual(['Product', 'Kind', 'Owner', 'Published', 'Servers']);
+    expect(table.findAll('thead th').map((th) => th.text())).toEqual(['Product', 'Kind', 'Protocol', 'Owner', 'Published', 'Servers']);
     const rows = page.findAll('tr.products-row');
     expect(rows.map((r) => r.get('th a').text())).toEqual(['Joint Operations', 'Escalation', 'Delta Force Xtreme 2', 'OpenNova runtime']);
     expect(rows.map((r) => r.get('th a').attributes('href'))).toEqual(['/admin/products/JO', '/admin/products/JOX01', '/admin/products/DFX2', '/admin/products/ONRUNTIME']);
     expect(rows[0].get('.products-kind').text()).toBe('Game Joint Operations, lobby Joint Operations');
     expect(rows[1].get('.products-kind').text()).toBe('Expansion jox01 of Joint Operations');
     expect(rows[3].get('.products-kind').text()).toBe('App, built by CI');
-    expect(rows[0].text()).toContain('1.7.5.9');
+    // The protocol each game's title speaks; an app speaks none.
+    expect(rows.map((r) => r.get('.products-protocol').text())).toEqual(['JO protocol 16', 'JO protocol 16', 'DFX2 protocol 16', '']);
+    // The published release's game version and the ONE that built it.
+    expect(rows[0].get('.products-one').text()).toBe('ONE 0.0.22');
+    expect(rows[0].text()).toContain('1.0.9');
     expect(rows[2].text()).toContain('None');
     expect(rows[3].text()).toContain('v0.0.21');
     // Servers: the live count to the servers filtered to the product, and the outdated ones.
@@ -176,7 +180,6 @@ describe('ProductsPage', () => {
       kind: 'expansion',
       key: 'JOX02',
       visibility: 'public',
-      retail: false,
       updater_login: 'JOEus2',
       command_file: 'JOE2PTR.CMD',
       parent_id: 1,

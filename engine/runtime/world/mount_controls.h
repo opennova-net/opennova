@@ -150,10 +150,11 @@ struct EmplacedWeaponControls {
 	uint16_t spin = 0;
 };
 
-// The ewep class update tail, before pool-0 attachment poses and the global
-// weapon-action pump. Read/decrement the inline slot kick byte even without
-// an occupant, then integrate the wrapping angle word. The later weapon pump
-// also decays that SAME byte. The audio catch-up gate never gates spin.
+// The ewep class update tail, after its matrix leg (the trail-off sound plays
+// at the composed Position) and before the global weapon-action pump.
+// Read/decrement the inline slot kick byte even without an occupant, then
+// integrate the wrapping angle word. The later weapon pump also decays that
+// SAME byte. The audio catch-up gate never gates spin.
 // docs/threedi/3di-gp-format-re.md (D-3DI-4).
 // [orig: Entity_UpdateTransformAndTurret @0x44139D..0x441447]
 inline void tick_emplaced_weapon_animation(World &world, Entity &mount) {
@@ -190,12 +191,6 @@ inline void tick_emplaced_weapon_animation(World &world, Entity &mount) {
 inline constexpr int32_t kEmplacedTurretSlewPerTick = 0x92CF34;
 inline constexpr int32_t kEmplacedLocalGunnerYawTether = 0x3FFFFFC0;
 inline constexpr int32_t kEmplacedNpcGunnerYawTether = 0x2D82D80;
-// dfx2.exe's IsTurret traverse holds the step's length on the yaw / pitch plane to the rate,
-// not each axis (DFX2-26), and a slower rate while the local player mans a gun whose carrier
-// counts one occupied seat at most (emplaced_carrier_occupied_seats).
-// [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - the rate 0x92CF34 @0x440937,
-//  0x3AB948 @0x440941 under the gate @0x440875..0x4408A7]
-inline constexpr int32_t kDfx2EmplacedTurretSoloSlewPerTick = 0x3AB948;
 
 // The turret-phase limit clamp, transliterated: the 0x1FFFF admission band,
 // second write wins. Retail runs this every entity update so a phase implied
@@ -391,28 +386,33 @@ inline void advance_emplaced_gun_channel(EmplacedGunChannel &channel,
 			bam_add(bam_sub(pitch_step, gunner.recoil_pitch), prev_pitch));
 }
 
-// dfx2.exe's planar traverse rate for a gun (0: Jointops.exe's per-axis one): the slower one
-// while the local player mans it and the gun's +0x28 carrier counts one occupied seat at most;
-// a gun with no +0x28 (whose count retail reads through a null pointer) takes the full one.
+// The title's planar traverse rate for a gun (0: Jointops.exe's per-axis one; DFX2-26,
+// TitleRules::emplaced_solo_planar_slew): dfx2.exe's holds the step's length on the yaw / pitch
+// plane to the rate, not each axis, at the slower solo rate while the local player mans it and the
+// gun's +0x28 carrier counts one occupied seat at most; a gun with no +0x28 (whose count retail
+// reads through a null pointer) takes the full one.
 // [orig: Entity_UpdateChildAttachment @0x4407A0 (dfx2.exe) - `cmp eax, g_LocalPlayerEntity`
-//  @0x440875, Entity_CountOccupiedSeats(+0x28) @0x44088E, `cmp eax, 1; jg` @0x44089A]
+//  @0x440875, Entity_CountOccupiedSeats(+0x28) @0x44088E, `cmp eax, 1; jg` @0x44089A, the rate
+//  0x92CF34 @0x440937]
 inline int32_t emplaced_turret_planar_rate(const World &world, const Entity &mount,
 		bool local_gunner) {
-	if (world.rules.title != gameprofile::GAME_DFX2) return 0;
+	const int32_t solo = world.rules.title().emplaced_solo_planar_slew;
+	if (solo == 0) return 0;
 	const Entity *carrier = entity_ground_word(world, mount);
 	if (local_gunner && carrier != nullptr && emplaced_carrier_occupied_seats(world, *carrier) <= 1)
-		return kDfx2EmplacedTurretSoloSlewPerTick;
+		return solo;
 	return kEmplacedTurretSlewPerTick;
 }
 
 // The frame the gun's slew reads: its Yaw / Pitch words ahead of this tick's class update. The
 // gun's ai-fn (the slew, both paths) runs in its pool-1 visit ahead of its class update, which
 // composes an attached child on its carrier after it, so the slew reads the frame the last compose
-// left. Ours composes an attached child ahead of its gunner's channel (pose_emplacement_attachments),
+// left. Ours composes an attached child ahead of its gunner's channel (compose_emplaced_child),
 // and a compose on a carrier userpoint stamps savedLivePose from the words it replaces first, as
 // the class update copies +4..+0x18 to +0x80..+0x94 ahead of its euler: such a child's slew reads
 // that stamp. Any other gun's frame is the one it stands in: an unanchored child keeps its words
-// under a carrier whose matrix is built, or copies the root pose of a carrier no mover moved.
+// under a carrier whose matrix is built, or copies the root pose of a carrier no mover moved, and
+// a child the class update does not compose (emplaced_update_composes) holds its last frame.
 // Both titles; dfx2.exe's counter-rotation then turns the slewed words to the composed frame.
 // [orig: Entity_UpdatePool1Slot @0x4B8DD0 - the +0x1C8 call @0x4B8E3C ahead of the +0x1C4 call
 //  @0x4B8E53; Entity_UpdateChildAttachment @0x4409A0 - gun.Pitch @0x440A51, gun.Yaw @0x440A58,
@@ -420,9 +420,10 @@ inline int32_t emplaced_turret_planar_rate(const World &world, const Entity &mou
 //  savedLivePose @0x4410A2..0x4410D7 ahead of Math_FixedPointMatrixToEulerAngles @0x4410DD;
 //  dfx2.exe's Entity_UpdatePool1Slot @0x4B8EB0 - @0x4B8F1C ahead of @0x4B8F33, its
 //  Entity_UpdateChildAttachment @0x4407A0 - @0x44084E / @0x44085D, @0x4409B6 / @0x4409BC]
+inline bool emplaced_update_composes(const World &world, const Entity &child);
 inline bool emplaced_slew_reads_saved_frame(const World &world, const Entity &mount) {
-	return mount.saved_live_valid && mount.emplacement_pose_metadata_resolved &&
-			mount.emplacement_bone != 0 && world.registry.get(mount.emplacement_parent) != nullptr;
+	return mount.saved_live_valid && mount.emplacement_bone != 0 &&
+			emplaced_update_composes(world, mount);
 }
 
 inline void tick_emplaced_gun_words(const World &world, Entity &mount, const Entity &occupant,
@@ -676,8 +677,19 @@ inline bool emplaced_carrier_is_dead_hull(const Entity *carrier) {
 			((carrier->flags | carrier->engine_flags) & kEntityFlagDead) != 0;
 }
 
+// The class update reaches its matrix leg on a live carrier (compose_emplaced_child): an ewep row
+// resolved on its carrier, the carrier no dead PlayerControl hull, the slot Def bound.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the dead-hull exit @0x440CBF..0x440CE1, the
+//  slot Def exit with a carrier @0x440E8E..0x440EA0, ahead of the matrix @0x440F04..0x4411BC]
+inline bool emplaced_update_composes(const World &world, const Entity &child) {
+	if (!child.emplaced_update || !child.emplacement_pose_metadata_resolved) return false;
+	const Entity *carrier = world.registry.get(child.emplacement_parent);
+	return carrier != nullptr && !emplaced_carrier_is_dead_hull(carrier) &&
+			emplaced_slot_def(world, child) != nullptr;
+}
+
 // dfx2.exe's class update turns an IsTurret child's gun words against the turn its rebuilt
-// attachment matrix took (DFX2-25), so the gun holds its world aim on a turning carrier: the old
+// attachment matrix took (DFX2-25, TitleRules::emplaced_turret_update), so the gun holds its world aim on a turning carrier: the old
 // matrix's inverse times the new one, that delta's yaw added to the yaw word and its pitch taken
 // from the pitch word, each rounded to the word; the update's window leg then clamps the turned
 // words. Only an occupied child posed on a carrier userpoint takes it (the root copy rebuilds no
@@ -695,7 +707,8 @@ inline bool emplaced_carrier_is_dead_hull(const Entity *carrier) {
 //  @0x440FC4, the euler @0x440FD6, the words @0x440FDB..0x440FFE, then the window leg
 //  @0x4410EA..0x4411D9]
 inline bool emplaced_counter_rotates_frame(const World &world, const Entity &child) {
-	if (world.rules.title != gameprofile::GAME_DFX2 || !child.emplacement_pose_metadata_resolved)
+	if (world.rules.title().emplaced_turret_update != EmplacedTurretUpdate::CounterRotate ||
+			!child.emplacement_pose_metadata_resolved)
 		return false;
 	// The ewep class update's (the physics-table row @0x82ABE0) alone.
 	if (!child.emplaced_update) return false;
@@ -783,6 +796,51 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 				occupant.anim_slot);
 }
 
+// The ewep class update's matrix leg: the child's matrix rebuilt from its
+// carrier, inside the child's own pool-1 visit, after the publication (the
+// bone frame reads the published gun words). The walk reaches the carrier
+// first, as the child's ground entity (+0x28) is its carrier, so the child
+// composes on the carrier's pose of this tick, and every row the walk reaches
+// after it reads its fresh frame. Reuse the mounted-pose provider: a resolved
+// USRP bone follows live PANM; bone zero takes pose_mounted_occupant's
+// parent-root/local fallback. A stock streamed child carries an exact absolute
+// spawn pose: only a resolved attachment row (its subType's slot on the
+// carrier's def) may replace that wire pose with a userpoint pose.
+// [orig: Entity_UpdateTransformAndTurret @0x440CA0 - the carrier read off
+//  +0x28 @0x440CBF, the publication @0x440F04..0x441020, then
+//  Bone_BuildAttachmentMatrix @0x44109D or the root copy @0x4410EA..0x4411BC;
+//  Entity_UpdateAllEntities - the ground-entity chain visits
+//  @0x4C2188..0x4C21E0 ahead of the row's own @0x4C21E9]
+// Only this leg composes an attached child, past the update's gates
+// (emplaced_update_composes): a child whose move function is not ewep runs
+// its own +0x1C4 (a genx child its parent-follow ride, a null child nothing),
+// a child with no slot Def ends the update ahead of the leg, and a dead
+// PlayerControl hull's child is hidden and holds its last frame until the
+// hull's respawn, whose vehicle block clears the hide; a dead carrier of any
+// other kind keeps its children riding the wreck. Destroying the carrier's
+// row destroys every child whose def carries EWeap, as the child shares the
+// carrier's refNum (EntityCommands::remove_ssn). A child without EWeap keeps
+// its pointer to the freed row: it takes that zeroed row's pose (the update's
+// root copy) and rides whatever entity is next allocated there.
+// [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53 (the row's own +0x1C4);
+//  the genx row @0x82AC10 -> Entity_UpdateParentTransform @0x4A88B0;
+//  Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1 (the hide and the
+//  return ahead of the matrix), the slot Def exit @0x440EA0, the clear
+//  @0x440EB3, the root copy @0x4410EA..0x4411BC; Entity_Destroy @0x43E810
+//  (the refNum walk @0x43E9CD -> EntityReference_DestroyEWeapGroup @0x546F30,
+//  memset @0x43EA70)]
+inline void compose_emplaced_child(World &world, Entity &child, const Entity &carrier) {
+	if (!child.emplacement_pose_metadata_resolved) return;
+	const devtools::ProfileScope compose_scope(world.profile, devtools::Slot::SIM_WALK_EWEP_COMPOSE);
+	Seat anchor;
+	anchor.type = SeatType::Gunner;
+	anchor.bone_index = child.emplacement_bone;
+	anchor.seat_local = child.emplacement_local;
+	anchor.yaw_offset = child.emplacement_yaw_offset;
+	anchor.attachment_frame = true;
+	world.vehicles.pose_mounted_occupant(child, carrier, anchor);
+}
+
 // The ewep class update's every-tick legs outside the occupied channel, in
 // retail order. A dead PlayerControl carrier hides the child and ends the
 // update. With a live carrier the update needs the inline slot Def; on a
@@ -794,8 +852,9 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 // attachments (compose_vehicle_pose_controls), as the matrix build's own
 // def+0x144 call does. Then
 // the parent-brain publication, and the child's matrix rebuilt from its
-// carrier, marked by the matrix bit (Flags 0x20000, homed on engine_flags).
-// The spin tail runs last, behind the slot Def, with or without a carrier.
+// carrier (compose_emplaced_child), marked by the matrix bit (Flags 0x20000,
+// homed on engine_flags). The spin tail runs last, behind the slot Def, with
+// or without a carrier: its trail-off sound reads the composed Position.
 // An occupied gun publishes again from tick_emplaced_weapon_channel once its
 // producer has refreshed the words, so the brain ends the tick on the fresh
 // words.
@@ -804,8 +863,9 @@ inline void tick_emplaced_weapon_channel(World &world, Entity &mount,
 //  @0x440E8C..0x440EA0; def type 1 @0x440EA6..0x440EB1, `and [child+24h],
 //  0FFFFFFF8h` @0x440EB3, the Health word @0x440EB7..0x440EBE, the quad
 //  @0x440EC5..0x440EEF, the def+0x144 call @0x440EF5..0x440EFF; the
-//  publication @0x440f04..0x441020; the matrix copy @0x4411BC and the OR
-//  @0x4411C2; the spin tail @0x44139D..0x441447]
+//  publication @0x440f04..0x441020; Bone_BuildAttachmentMatrix @0x44109D or
+//  the root copy @0x4410EA..0x4411BC, and the OR @0x4411C2; the spin tail
+//  @0x44139D..0x441447 (the trail-off sound at [child+4] @0x441423)]
 inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 	if (!mount.emplaced_update) return;
 	const Entity *carrier = world.registry.get(mount.emplacement_parent);
@@ -841,6 +901,7 @@ inline void tick_emplaced_weapon_class_update(World &world, Entity &mount) {
 			for (int i = 0; i < 4; ++i) mount.blink_hits[i] = carrier->blink_hits[i];
 		}
 		publish_emplaced_gun_words_to_parent(world, mount);
+		compose_emplaced_child(world, mount, *carrier);
 		mount.engine_flags |= kEntityFlagMatrixBuilt;
 	} else if (mount.emplacement_parent.valid()) {
 		// The carrier's row was destroyed under the child, which only a child

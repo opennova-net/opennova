@@ -32,6 +32,7 @@
 // hosted sources directly, so it runs on every build.
 
 #include "hosted_fleet_rig.h"
+#include "server_completion.h"
 
 #include "accounts/web_session.h"
 #include "core/random_secret.h"
@@ -39,8 +40,8 @@
 #include "hosted/model/address_jobs.h"
 #include "hosted/model/address_repository.h"
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/cp1252.h>
+#include <base/title/title.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/gamecfg/game_cfg.h>
 
@@ -81,7 +82,7 @@ std::vector<hosted::OfferedProduct> offered_for_rules() {
 	jo.title = "jo";
 	jo.lobby = "jop_2_consumer";
 	jo.tree_id = 10;
-	jo.version = "JO V1.7.5.3";
+	jo.version = "1.7.5.3";
 	jo.missions = { { "SERVETST.BMS", "Serve Test" }, { "second.bms", "Second" }, { "ASH_G11A.BMS", "Ash" },
 		{ "x-y_1.bms", "XY" }, { "map.bms", "Map" } };
 	hosted::OfferedExpansion jox;
@@ -170,13 +171,28 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.game_password = "has space"; }), "game_password"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_password = "q\"uote"; }), "game_password"));
 	TEST_EXPECT(!check(with([](auto &c) { c.game_password = "Secret!16-chars."; })));
-	TEST_EXPECT(refused(with([](auto &c) { c.max_players = 1; }), "max_players"));
+	TEST_EXPECT(!check(with([](auto &c) { c.max_players = 1; })));
 	TEST_EXPECT(refused(with([](auto &c) { c.max_players = 65; }), "max_players"));
-	TEST_EXPECT(refused(with([](auto &c) { c.time_limit = 0; }), "time_limit"));
-	TEST_EXPECT(refused(with([](auto &c) { c.kill_limit = 501; }), "kill_limit"));
-	TEST_EXPECT(refused(with([](auto &c) { c.max_score = 0; }), "max_score"));
+	TEST_EXPECT(!check(with([](auto &c) { c.time_limit = 0; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.kill_limit = 501; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.max_score = 0; })));
 	TEST_EXPECT(refused(with([](auto &c) { c.respawn = -1; }), "respawn"));
-	TEST_EXPECT(refused(with([](auto &c) { c.start_delay = 301; }), "start_delay"));
+	TEST_EXPECT(!check(with([](auto &c) { c.start_delay = 301; })));
+	TEST_EXPECT(s.send_holdoff_ticks == 12 && s.entity_send_budget == 600 &&
+			s.max_packet_size == 1300 && s.lock_framerate);
+	for (int value : { 0, 1, 255 })
+		TEST_EXPECT(!check(with([value](auto &c) { c.send_holdoff_ticks = value; })));
+	for (int value : { -1, 256 })
+		TEST_EXPECT(refused(with([value](auto &c) { c.send_holdoff_ticks = value; }), "send_holdoff_ticks"));
+	for (int value : { 100, 1600 })
+		TEST_EXPECT(!check(with([value](auto &c) { c.entity_send_budget = value; })));
+	for (int value : { 99, 1601 })
+		TEST_EXPECT(refused(with([value](auto &c) { c.entity_send_budget = value; }), "entity_send_budget"));
+	for (int value : { 100, 16384 })
+		TEST_EXPECT(!check(with([value](auto &c) { c.max_packet_size = value; })));
+	for (int value : { 99, 16385 })
+		TEST_EXPECT(refused(with([value](auto &c) { c.max_packet_size = value; }), "max_packet_size"));
+	TEST_EXPECT(!check(with([](auto &c) { c.lock_framerate = false; })));
 	// The expansion: one of the product's with data.
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion_id = 99; }), "expansion_id"));
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion_id = 1; }), "expansion_id")); // the base itself
@@ -216,11 +232,11 @@ int test_settings_rules() {
 		const auto r = hosted::check_settings(dfx2, jo_only);
 		TEST_EXPECT(r && r->field == "product_id" && r->reason == "is no game this service offers");
 		TEST_EXPECT(!hosted::check_settings(s, jo_only));
-		const hosted::HostLimits &jo = hosted::host_limits_for_title("jo");
+		const hosted::HostLimits jo = hosted::host_limits_for_title("jo");
 		hosted::HostedSettings big = s;
 		big.max_players = jo.max_players.max + 1;
 		const auto too_many = hosted::check_settings(big, offered);
-		TEST_EXPECT(too_many && too_many->field == "max_players" && too_many->reason == "must be 2 to 64");
+		TEST_EXPECT(too_many && too_many->field == "max_players" && too_many->reason == "must be 1 to 64");
 		hosted::HostedSettings escalation = s;
 		escalation.product_id = 3;
 		escalation.expansion_id = 2;
@@ -238,6 +254,14 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.missions = { "two words.bms" }; }), "missions"));
 	TEST_EXPECT(!check(with([](auto &c) { c.missions = { "ASH_G11A.BMS", "x-y_1.bms" }; })));
 	TEST_EXPECT(!check(with([](auto &c) { c.missions = { "servetst.BMS", "Second.BMS" }; })));
+	TEST_EXPECT(!check(with([](auto &c) {
+		c.missions = { "map.bms", "MAP.BMS" };
+		c.mission_options = { 1, 1 };
+	})));
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.missions = { "map.bms", "MAP.BMS" };
+		c.mission_options = { 0, 1 };
+	}), "rotation"));
 	{
 		const auto unknown = check(with([](auto &c) { c.missions = { "second.bms", "unknown.bms" }; }));
 		TEST_EXPECT(unknown && unknown->field == "missions" &&
@@ -272,8 +296,8 @@ int test_renders() {
 		"GameName \"Caf\xE9 Night\"\r\n", "MaxPlayers 24\r\n", "MPHostGamePassword \"letmein\"\r\n",
 		"Time_Limit 45\r\n", "KillLimit 100\r\n", "MaxScore 7\r\n", "Respawn 10\r\n", "Delay 15\r\n",
 		"TeamFF 1\r\n", "Replay 1\r\n",
-		// The first map's line last: the last Mission line is the starting map.
-		"Mission second.bms 0\r\nMission third.bms 0\r\nMission first.bms 0\r\n",
+		// The service starts the first entry with --rotation-first.
+		"Mission first.bms 0\r\nMission second.bms 0\r\nMission third.bms 0\r\n",
 	};
 	for (const char *line : want) {
 		if (!contains(host, line)) std::fprintf(stderr, "  the host file lacks %s", line);
@@ -287,20 +311,21 @@ int test_renders() {
 	plan.admin_port = hosted::slot_admin_port(3);
 	plan.admin_allowed_ip = "10.1.2.3";
 	TEST_EXPECT(plan.game_port == 32771 && plan.admin_port == 32803);
-	const std::string cfg_text = hosted::render_game_cfg(plan);
+	const std::string cfg_text = hosted::render_game_cfg(plan, s);
 	const auto cfg = opennova::gamecfg::load(cfg_text.data(), cfg_text.size(), {});
 	TEST_EXPECT(!cfg.version_reset);
 	TEST_EXPECT(cfg.cfg.networkconnecttype == 1);
 	TEST_EXPECT(cfg.cfg.mp_novaworld_port_min == 32771 && cfg.cfg.mp_novaworld_port_max == 32771);
 	TEST_EXPECT(cfg.cfg.remote_admin_port == 32803);
 	TEST_EXPECT(cfg.cfg.mp_novaworld_host_lan_only == 0);
+	TEST_EXPECT(cfg.cfg.mp_max_packet_size == 1300 && cfg.cfg.lock_framerate == 1);
 
 	const std::string admin_password = nws::random_secret(hosted::kAdminPasswordChars);
 	const std::string admin_text = hosted::render_admin_cfg(plan, admin_password);
 	const auto admin = opennova::admincfg::parse(admin_text.data(), admin_text.size());
 	TEST_EXPECT(admin.users.size() == 1);
 	TEST_EXPECT(admin.users[0].name == "svc" && admin.users[0].password == admin_password);
-	TEST_EXPECT(admin.users[0].rights == 0x7Fu);
+	TEST_EXPECT(admin.users[0].rights == 0x8000007Fu);
 	TEST_EXPECT(admin.ip_restrictions == std::vector<std::string>{ "10.1.2.3" });
 
 	const std::string creds = hosted::render_credentials("srv-12", "pw");
@@ -326,15 +351,85 @@ int test_renders() {
 	const hosted::LaunchSpec spec = hosted::render_launch(s, "jo", "jox01", in);
 	TEST_EXPECT(spec.server_id == 12 && spec.files.size() == 4);
 	for (const auto &f : spec.files) {
-		const bool secret = f.name != "game.cfg"; // the host file carries the game password
-		TEST_EXPECT(f.secret == secret);
+		TEST_EXPECT(f.secret); // game.cfg also contains gameplay passwords
 	}
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"/game", "jo", "/exp", "jox01" };
+		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
 	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597, in.novalogic) == args);
+	{
+		hosted::HostedSettings tuned = s;
+		tuned.send_holdoff_ticks = 0;
+		tuned.entity_send_budget = 1000;
+		tuned.max_packet_size = 1200;
+		tuned.lock_framerate = false;
+		tuned.options.set("server_message", opennova::io::json_string("Keep this setting"));
+		tuned.mission_options = { 1, 0, 1 };
+		hosted::HostedSettings copy;
+		std::string field, error;
+		TEST_EXPECT(hosted::read_settings_document(hosted::settings_document(tuned), copy, field, error));
+		TEST_EXPECT(copy.send_holdoff_ticks == 0 && copy.entity_send_budget == 1000 &&
+				copy.max_packet_size == 1200 && !copy.lock_framerate &&
+				copy.mission_options == tuned.mission_options &&
+				copy.options.get_string("server_message", "") == "Keep this setting");
+		{
+			auto patch = opennova::io::JsonValue::make_object();
+			auto options = opennova::io::JsonValue::make_object();
+			options.set("max_packet_size", opennova::io::json_number(2000));
+			patch.set("options", std::move(options));
+			TEST_EXPECT(!hosted::read_settings_document(patch, copy, field, error) && field == "max_packet_size");
+			TEST_EXPECT(copy.max_packet_size == 1200 && !copy.options.get("max_packet_size"));
+			patch = opennova::io::JsonValue::make_object();
+			patch.set("max_packet_size", opennova::io::json_number(2000));
+			TEST_EXPECT(hosted::read_settings_document(patch, copy, field, error));
+			TEST_EXPECT(copy.max_packet_size == 2000 && !copy.lock_framerate &&
+					copy.entity_send_budget == 1000 && copy.send_holdoff_ticks == 0 &&
+					copy.options.get_string("server_message", "") == "Keep this setting");
+		}
+		for (const auto table : { opennova::gamecfg::ConfigTable::Jo, opennova::gamecfg::ConfigTable::Dfx2 }) {
+			const auto schema = hosted::hosted_settings_schema(table);
+			const auto packet = std::find_if(schema.array.begin(), schema.array.end(),
+					[](const auto &row) { return row.get_string("key", "") == "max_packet_size"; });
+			TEST_EXPECT(packet != schema.array.end());
+			TEST_EXPECT(packet->get("core")->boolean && packet->get("min")->number == 100 &&
+					packet->get("max")->number == 16384 && packet->get("default")->number == 1300);
+		}
+		// On a dedicated machine the owner's unpaced loop runs as asked.
+		hosted::RenderInputs own_in = in;
+		own_in.machine_kind = hosted::MachineKind::Own;
+		const hosted::LaunchSpec launch = hosted::render_launch(tuned, "jo", "jox01", own_in);
+		const auto game_cfg_text = [](const hosted::LaunchSpec &spec) {
+			const auto file = std::find_if(spec.files.begin(), spec.files.end(),
+					[](const auto &f) { return f.name == "game.cfg"; });
+			return file == spec.files.end() ? std::string() : file->content;
+		};
+		const std::string custom_text = game_cfg_text(launch);
+		TEST_EXPECT(!custom_text.empty());
+		const auto custom = opennova::gamecfg::load(custom_text.data(), custom_text.size(), {});
+		TEST_EXPECT(custom.cfg.mp_max_packet_size == 1200 && custom.cfg.lock_framerate == 0 &&
+				custom.cfg.servermsg == "Keep this setting");
+		auto want_args = args;
+		*std::next(std::find(want_args.begin(), want_args.end(), "--send-holdoff-ticks")) = "0";
+		*std::next(std::find(want_args.begin(), want_args.end(), "--entity-send-budget")) = "1000";
+		TEST_EXPECT(launch.serve_args == want_args);
+		// On a shared machine (the inputs' default) every server runs paced, the rest of its
+		// tuning as asked; the saved setting stays the owner's.
+		TEST_EXPECT(in.machine_kind == hosted::MachineKind::Shared);
+		const hosted::LaunchSpec shared_launch = hosted::render_launch(tuned, "jo", "jox01", in);
+		const std::string paced_text = game_cfg_text(shared_launch);
+		TEST_EXPECT(!paced_text.empty());
+		const auto paced = opennova::gamecfg::load(paced_text.data(), paced_text.size(), {});
+		TEST_EXPECT(paced.cfg.mp_max_packet_size == 1200 && paced.cfg.lock_framerate == 1 &&
+				paced.cfg.servermsg == "Keep this setting");
+		TEST_EXPECT(shared_launch.serve_args == want_args);
+		TEST_EXPECT(!tuned.lock_framerate);
+		TEST_EXPECT(hosted::launched_settings(tuned, hosted::MachineKind::Shared).lock_framerate &&
+				!hosted::launched_settings(tuned, hosted::MachineKind::Own).lock_framerate &&
+				hosted::launched_settings(s, hosted::MachineKind::Own).lock_framerate);
+	}
 
 	// The NovaLogic listing: only for an owner who asked, on a service that offers it (the
 	// gate and the project's account), with the account's file beside the server's own.
@@ -404,11 +499,12 @@ int test_renders() {
 	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"/game", "dfx2" };
+		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--rotation-first", "/game", "dfx2" };
 	TEST_EXPECT(dfx2.serve_args == dfx2_args);
 	const hosted::LaunchSpec on = hosted::render_launch(s, "jo", "", in);
-	TEST_EXPECT(on.serve_args.size() == 16 && on.serve_args[14] == "/game" &&
-			on.serve_args[15] == "jo");
+	TEST_EXPECT(on.serve_args.size() == 21 && on.serve_args[18] == "--rotation-first" &&
+			on.serve_args[19] == "/game" && on.serve_args[20] == "jo");
 	return 0;
 }
 
@@ -448,7 +544,7 @@ int test_no_data() {
 
 	// The product row gone (its id set NULL on the server's row): named as such.
 	const int64_t on = seeded_product(rig.db, "OP: Acid Gambit");
-	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
+	TEST_EXPECT(seed_tree(rig.db, on, "0.1", { "on.bms" }) != 0);
 	hosted::HostedSettings on_settings = valid_settings(on);
 	on_settings.missions = { "on.bms" };
 	const int64_t orphan = rig.request("gone_row_owner", on_settings);
@@ -467,13 +563,14 @@ int test_no_data() {
 // (offered_products: the bases with a ready current tree, each with its
 // expansions that have one), over the rig's seeded rows.
 int test_products() {
-	const hosted::HostLimits &jo = hosted::host_limits_for_title("jo");
-	const hosted::HostLimits &dfx2 = hosted::host_limits_for_title("dfx2");
-	TEST_EXPECT(jo.max_players.min == 2 && jo.max_players.max == 64 && jo.time_limit.max == 300 &&
-			jo.kill_limit.max == 500 && jo.max_score.max == 500 && jo.respawn.min == 0 && jo.start_delay.max == 300);
-	TEST_EXPECT(dfx2.max_players.max == 100 && dfx2.time_limit.max == 300 && dfx2.kill_limit.max == 500);
-	// Every title this service hosts runs Joint Operations' rules but DFX2's cap.
-	TEST_EXPECT(&hosted::host_limits_for_title("opennova") == &jo && &hosted::host_limits_for_title("") == &jo);
+	const hosted::HostLimits jo = hosted::host_limits_for_title("jo");
+	const hosted::HostLimits dfx2 = hosted::host_limits_for_title("dfx2");
+	TEST_EXPECT(jo.max_players.min == 1 && jo.max_players.max == 64 && jo.time_limit.max == INT32_MAX &&
+			jo.kill_limit.max == INT32_MAX && jo.max_score.max == INT32_MAX && jo.respawn.min == 0 && jo.start_delay.max == INT32_MAX);
+	TEST_EXPECT(dfx2.max_players.max == 100 && dfx2.time_limit.max == INT32_MAX && dfx2.kill_limit.max == INT32_MAX);
+	// An unknown code's limits are the default title's (OpenNova's own game, whose caps are JO's).
+	TEST_EXPECT(hosted::host_limits_for_title("opennova").max_players.max == jo.max_players.max &&
+			hosted::host_limits_for_title("").max_players.max == jo.max_players.max);
 
 	Rig rig("hosted_products");
 	const std::vector<hosted::OfferedProduct> offered = rig.offered();
@@ -483,7 +580,7 @@ int test_products() {
 	if (offered.size() != 2) return 1;
 	TEST_EXPECT(offered[0].id == rig.data.jo && offered[0].title == "jo" && offered[0].lobby == "jop_2_consumer" &&
 			offered[0].display_name == "Joint Operations" && offered[0].tree_id == rig.data.jo_tree &&
-			offered[0].version == "JO V1.7.5.3" && offered[0].missions.size() == 3 &&
+			offered[0].version == "1.7.5.3" && offered[0].missions.size() == 3 &&
 			offered[0].missions[1].file == "SERVETST.BMS" && offered[0].missions[1].title == "Map SERVETST.BMS");
 	TEST_EXPECT(offered[0].expansions.size() == 1 && offered[0].expansions[0].id == rig.data.jox &&
 			offered[0].expansions[0].code == "jox01" && offered[0].expansions[0].display_name == "Escalation" &&
@@ -494,13 +591,14 @@ int test_products() {
 	TEST_EXPECT(hosted::find_offered(offered, rig.data.jo) != nullptr && hosted::find_offered(offered, on) == nullptr);
 	TEST_EXPECT(hosted::find_offered_expansion(offered[0], rig.data.jox) != nullptr &&
 			hosted::find_offered_expansion(offered[0], rig.data.jo) == nullptr);
-	// Each title is a gameprofile code opennova-serve's /game takes.
+	// Each title is a title code opennova-serve's /game takes.
 	for (const hosted::OfferedProduct &d : offered)
-		TEST_EXPECT(opennova::gameprofile::gameprofile_by_code(d.title.c_str()) != nullptr);
-	// A ready tree offers OpenNova's data, speaking Joint Operations' title.
-	TEST_EXPECT(seed_tree(rig.db, on, "ON V0.1", { "on.bms" }) != 0);
+		TEST_EXPECT(opennova::title_by_code(d.title) != nullptr);
+	// A ready tree offers OpenNova's data, as its own title (which speaks Joint Operations' protocol).
+	TEST_EXPECT(seed_tree(rig.db, on, "0.1", { "on.bms" }) != 0);
 	const std::vector<hosted::OfferedProduct> now = rig.offered();
-	TEST_EXPECT(now.size() == 3 && now[2].id == on && now[2].title == "jo" && now[2].version == "ON V0.1");
+	TEST_EXPECT(now.size() == 3 && now[2].id == on && now[2].title == "acidgambit" &&
+			now[2].version == "0.1");
 	return 0;
 }
 
@@ -524,7 +622,7 @@ int test_pins_and_updates() {
 
 	// Newer data for the base: the server is outdated, runs on, and a crash
 	// restart keeps its pins (its generation moves on, its restart counted).
-	const int64_t jo_tree2 = seed_tree(db, rig.data.jo, "JO V1.7.5.4", { "second.bms", "SERVETST.BMS" });
+	const int64_t jo_tree2 = seed_tree(db, rig.data.jo, "1.7.5.4", { "second.bms", "SERVETST.BMS" });
 	TEST_EXPECT(jo_tree2 != 0 && hosted::server_outdated(db, id));
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Running && rig.server(id)->base_tree_id == rig.data.jo_tree);
@@ -577,7 +675,7 @@ int test_pins_and_updates() {
 		TEST_EXPECT(c && c->desired.base_tree == jo_tree2 && c->desired.expansion_tree == rig.data.jox_tree);
 		const FakeAgent *agent = rig.agent_of(id);
 		TEST_EXPECT(agent && agent->last.trees.count(jo_tree2) == 1 &&
-				agent->last.trees.at(jo_tree2).version == "JO V1.7.5.4");
+				agent->last.trees.at(jo_tree2).version == "1.7.5.4");
 	}
 	TEST_EXPECT(has_event(db, id, "with tree " + std::to_string(jo_tree2)));
 
@@ -587,7 +685,7 @@ int test_pins_and_updates() {
 	dfx2.missions = { "dfx2_a.bms" };
 	const int64_t other = rig.request("pins_other", dfx2);
 	TEST_EXPECT(other > 0 && !rig.to_running(other, 9305).empty());
-	const int64_t jox_tree2 = seed_tree(db, rig.data.jox, "JOX V1.1", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
+	const int64_t jox_tree2 = seed_tree(db, rig.data.jox, "1.1", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
 	TEST_EXPECT(jox_tree2 != 0 && hosted::server_outdated(db, id) && !hosted::server_outdated(db, other));
 	TEST_EXPECT(hosted::request_update_all(db, std::nullopt) == 1);
 	rig.step();
@@ -599,7 +697,7 @@ int test_pins_and_updates() {
 	TEST_EXPECT(rig.server(other)->generation == 1 && rig.server(other)->base_tree_id == rig.data.dfx2_tree);
 
 	// A pinned tree pruned: a crash restart falls back to the current tree.
-	const int64_t dfx2_tree2 = seed_tree(db, rig.data.dfx2, "DFX2 V1.1", { "dfx2_a.bms", "dfx2_b.bms" });
+	const int64_t dfx2_tree2 = seed_tree(db, rig.data.dfx2, "1.1", { "dfx2_a.bms", "dfx2_b.bms" });
 	TEST_EXPECT(dfx2_tree2 != 0);
 	hosted::mark_tree_pruned(db, rig.data.dfx2_tree);
 	rig.agent_of(other)->exit_with(rig.container(other), 1);
@@ -1000,14 +1098,15 @@ int test_lifecycle_and_stop() {
 				agent->last.trees.count(rig.data.jox_tree) == 1);
 		if (agent && agent->last.trees.count(rig.data.jox_tree) == 1) {
 			const hosted::TreeSpec &jox = agent->last.trees.at(rig.data.jox_tree);
-			TEST_EXPECT(jox.url == tree_url_of(rig.data.jox_tree) && jox.version == "JOX V1.0" &&
+			TEST_EXPECT(jox.url == tree_url_of(rig.data.jox_tree) && jox.version == "1.0" &&
 					jox.files.size() == 3 && jox.files[0].name == "jox01.pff" && jox.files[0].size == 1000);
 		}
 	}
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"/game", "jo", "/exp", "jox01" };
+		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(c->desired.args == args);
 	{
 		Database *db = &rig.db;
@@ -1111,17 +1210,26 @@ int test_two_servers_one_machine() {
 // A dedicated machine: the server gets a machine of its own (one slot,
 // reserved for it, its own kind's template), never a shared one's slot, while a
 // shared server of the same owner goes to a shared machine; the dedicated machine
-// ends when its server stops.
+// ends when its server stops. Both saved unpaced: the dedicated machine's runs so,
+// the shared machine's paced.
 int test_own_machine() {
 	Rig rig("hosted_own");
 	Database *db = &rig.db;
 	const int64_t owner = make_player(*db, "own_owner", 0);
 	subscribe(*db, owner, 2, "active", "sub_own");
 	subscribe_machines(*db, owner, 1, "sub_own_machine");
-	const int64_t own = rig.request_as(owner, rig.settings(), true);
-	const int64_t shared = rig.request_as(owner);
+	auto unpaced = rig.settings();
+	unpaced.lock_framerate = false;
+	const int64_t own = rig.request_as(owner, unpaced, true);
+	const int64_t shared = rig.request_as(owner, unpaced);
 	TEST_EXPECT(own > 0 && shared > 0);
 	TEST_EXPECT(!rig.to_running(own, 5201).empty() && !rig.to_running(shared, 5202).empty());
+	const auto lock_of = [&rig](int64_t id) {
+		const std::string text = file_of(rig, id, "game.cfg");
+		return text.empty() ? -1 : opennova::gamecfg::load(text.data(), text.size(), {}).cfg.lock_framerate;
+	};
+	TEST_EXPECT(lock_of(own) == 0 && lock_of(shared) == 1);
+	TEST_EXPECT(!rig.server(own)->settings.lock_framerate && !rig.server(shared)->settings.lock_framerate);
 	TEST_EXPECT(rig.fake.launches == 2);
 	const auto own_machine = rig.machine(rig.machine_of(own));
 	const auto shared_machine = rig.machine(rig.machine_of(shared));
@@ -1503,9 +1611,19 @@ int test_stop_paths() {
 
 int test_exits_and_crash_restarts() {
 	Rig rig("hosted_restarts");
-	// opennova-serve exiting 0 while it should run (its rotation's end, the
-	// admin's GOTO MENUSTATE) is no stop: only the supervisor stops a server, so
-	// it is a crash, restarted and counted.
+	// Intentional completion ends the allocation without consuming a restart.
+	for (const auto reason : {opennova::kRotationCompleted, opennova::kAdminSessionEnded}) {
+		const int64_t completed = rig.request(reason == opennova::kRotationCompleted ? "rotation_done" : "admin_done");
+		const auto container = rig.to_running(completed, 7099);
+		TEST_EXPECT(!container.empty());
+		auto *agent = rig.agent_of(completed);
+		agent->exit_with(container, 0);
+		agent->containers.at(container).report.reason = reason;
+		rig.sync_all(); rig.tick();
+		TEST_EXPECT(rig.state(completed) == State::Stopped && rig.server(completed)->restarts == 0);
+		hostdb::remove_host_by_rid(rig.db,7099);
+	}
+	// An unexplained zero exit remains a failure.
 	const int64_t zero = rig.request("exit_zero");
 	const std::string c0 = rig.to_running(zero, 7001);
 	TEST_EXPECT(!c0.empty());
@@ -1559,9 +1677,35 @@ int test_exits_and_crash_restarts() {
 
 	// A crash (here the ServerStopHosting exit, 3, while the server should run)
 	// restarts, a new generation with a new password, until the limit (2) is used up.
-	const int64_t id = rig.request("exit_crash");
+	// Its tuning goes with every start; on this shared machine it runs paced although its
+	// owner saved it unpaced (launched_settings), and the saved setting stays theirs.
+	auto tuned = rig.settings();
+	tuned.send_holdoff_ticks = 0;
+	tuned.entity_send_budget = 1000;
+	tuned.max_packet_size = 1200;
+	tuned.lock_framerate = false;
+	const int64_t id = rig.request("exit_crash", tuned);
 	const std::string c1 = rig.to_running(id, 7002);
 	TEST_EXPECT(!c1.empty());
+	const auto tuning_kept = [&rig, id]() {
+		const auto row = rig.server(id);
+		const auto *container = rig.running_container(id);
+		if (!row || !container) return false;
+		const auto &s = row->settings;
+		const auto &args = container->desired.args;
+		const auto arg_is = [&args](const char *name, const char *value) {
+			const auto at = std::find(args.begin(), args.end(), name);
+			return at != args.end() && std::next(at) != args.end() && *std::next(at) == value;
+		};
+		const std::string text = file_of(rig, id, "game.cfg");
+		const auto cfg = opennova::gamecfg::load(text.data(), text.size(), {});
+		return s.send_holdoff_ticks == 0 && s.entity_send_budget == 1000 &&
+				s.max_packet_size == 1200 && !s.lock_framerate &&
+				arg_is("--send-holdoff-ticks", "0") && arg_is("--entity-send-budget", "1000") &&
+				cfg.cfg.mp_max_packet_size == 1200 && cfg.cfg.lock_framerate == 1;
+	};
+	TEST_EXPECT(rig.machine(rig.machine_of(id))->kind == hosted::MachineKind::Shared);
+	TEST_EXPECT(tuning_kept());
 	const int64_t service = *rig.server(id)->service_user_id;
 	const std::string first_password = credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_PASS");
 	const std::string first_admin = hosted::admin_login_of(rig.db, id)->password;
@@ -1586,6 +1730,7 @@ int test_exits_and_crash_restarts() {
 	const std::string second_password = credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_PASS");
 	TEST_EXPECT(!second_password.empty() && second_password != first_password);
 	TEST_EXPECT(hosted::admin_login_of(rig.db, id)->password != first_admin);
+	TEST_EXPECT(tuning_kept());
 	{
 		Database *db = &rig.db;
 		const std::string name = "srv-" + std::to_string(id);
@@ -2297,7 +2442,10 @@ int test_own_machines_cut() {
 	TEST_EXPECT(hosted::record_allocation(*db, address, "eipalloc-cut", ip) &&
 			hosted::record_dns_upsert(*db, address, "cut-place", "c1"));
 	const int64_t older = rig.request_as(owner, rig.settings(), true);
-	const auto requested = hosted::request_server(*db, owner, rig.settings(), rig.offered(), rig.config.cap,
+	// The newer one saved unpaced: so on its dedicated machine, paced once moved to a shared one.
+	auto unpaced = rig.settings();
+	unpaced.lock_framerate = false;
+	const auto requested = hosted::request_server(*db, owner, unpaced, rig.offered(), rig.config.cap,
 			rig.wall, true, &rig.config.placement, address);
 	TEST_EXPECT(requested.outcome == hosted::RequestOutcome::Created);
 	const int64_t newer = requested.id;
@@ -2312,6 +2460,11 @@ int test_own_machines_cut() {
 	TEST_EXPECT(!rig.to_running(older, 6101).empty() && !rig.to_running(newer, 6102).empty() &&
 			!rig.to_running(shared, 6103).empty());
 	TEST_EXPECT(rig.fake.launches == 3);
+	const auto lock_of = [&rig](int64_t id) {
+		const std::string text = file_of(rig, id, "game.cfg");
+		return text.empty() ? -1 : opennova::gamecfg::load(text.data(), text.size(), {}).cfg.lock_framerate;
+	};
+	TEST_EXPECT(lock_of(newer) == 0);
 	const int64_t older_machine = rig.machine_of(older);
 	const int64_t shared_machine = rig.machine_of(shared);
 	TEST_EXPECT(rig.machine(newer_machine)->kind == hosted::MachineKind::Own &&
@@ -2351,6 +2504,7 @@ int test_own_machines_cut() {
 	hostdb::remove_host_by_rid(*db, 6102);
 	TEST_EXPECT(!rig.to_running(newer, 6104).empty());
 	TEST_EXPECT(rig.machine_of(newer) == shared_machine && rig.server(newer)->restarts == 0);
+	TEST_EXPECT(lock_of(newer) == 1 && !rig.server(newer)->settings.lock_framerate);
 	TEST_EXPECT(rig.fake.launches == 3); // no machine launched for the move
 	{
 		// A new start on the shared machine, the one before it on its dedicated machine

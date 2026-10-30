@@ -12,7 +12,7 @@
 #include <runtime/inmatch/session_transport.h>
 
 namespace opennova {
-struct TitleIdentity; // net/title/title_identity.h
+struct Protocol; // net/protocol/protocol.h
 }
 
 namespace opennova::replication {
@@ -105,6 +105,16 @@ const world::Entity *owned_entity_for_emit(const world::World &w, const Connecti
 // the zeroed entry (owned_entity_for_emit) (D-NET-449).
 const world::Entity &destroyed_entry_body();
 
+// Sizes `conn`'s priority caches (age, heading, speed) to one entry per slot of the
+// registry's pool 0 then pool 1, as retail's block holds pool 0's capacity then pool 1's
+// [orig: Server_BuildEntityPriorityList @0x50E590 - the 0x5B0-byte block @0x50E601 (256
+// + 1200, EntityPool_Allocate @0x4421CD / @0x44219C), pool 1's +0x100 @0x50EDB3]. Caches
+// already of that layout stand; any other layout (a connection that never emitted, a
+// pool reconfigured since) is zeroed at the new size, as a fresh slot's are [orig:
+// Server_PlayerAdd - memset(slot, 0, 0x188E8) @0x51CD06]. Every emit runs it ahead of
+// the priority build.
+void size_priority_caches(Connection &conn, const world::EntityRegistry &registry);
+
 // The fan's phases lap onto the SIM_REPLICATION_* rows of the world's profile
 // (ADR 0043 d5); an inactive profile keeps selection and encoding free of
 // clock reads.
@@ -114,7 +124,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          std::size_t max_frame_body_bytes = 0,
                          int32_t server_fps = 0,
                          int32_t server_cpu_percent = 0,
-                         const TitleIdentity *title = nullptr);
+                         const Protocol *protocol = nullptr);
 
 // The same frame, built but NOT sent: every per-recipient state advance (phase,
 // age, cache, watermark) happens here and the 0x0A body lands in `frame_out`.
@@ -132,7 +142,7 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 // the sub-block carries as min(share, 0xFF), compared unsigned, so a negative
 // share crosses as 0xFF [orig: Server_TickUpdate @0x51D7EA..0x51D7FB ->
 // g_ServerCpuPct; NetPacket_WritePlayerState @0x4FFA76..0x4FFA7C].
-// `title` is the title the host speaks (null: JO's), whose 0x0A objective body
+// `protocol` is the protocol the host speaks (null: JO's), whose 0x0A objective body
 // carries the co-op checkpoint after its four values (DFX2-1).
 // `despawned` (when given) receives the handles the priority list's tracked-slot
 // walk cleared, in order: the caller sends each to this recipient, once, as an
@@ -145,7 +155,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           std::size_t max_frame_body_bytes = 0,
                           int32_t server_fps = 0,
                           int32_t server_cpu_percent = 0,
-                          const TitleIdentity *title = nullptr,
+                          const Protocol *protocol = nullptr,
                           std::vector<uint16_t> *despawned = nullptr);
 
 // The co-op checkpoint a DFX2 host's 0x0A objective body carries (DFX2-1): the

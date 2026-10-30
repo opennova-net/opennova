@@ -1,23 +1,28 @@
 // A release built from a revision of its game's project
 // (apps/novaworld_common/products/release_build.h, ADR 0069 d7) on a migrated database of the
 // test's own and a local object store, the data program's jobs run on this thread with the real
-// tools (opennova-project's export, opennova-update-tool's builder, as child processes). A retail
-// game's stock import of a minted install pushed as revision 1 and an edit as revision 2: the
-// build exports both and packs the revision whole (every file a row, the stock install's removals
-// counted from revision 1, the runtime's own files left out), a package release.validate makes a
-// draft of, its one section the game's; published, release.apply builds the game's tree from
+// tools (opennova-project's export, opennova-update-tool's builder, as child processes). Joint
+// Operations' import of a minted install pushed as revision 1 and an edit as revision 2: the
+// build exports the edit alone and packs it whole (every file a row, the runtime's own files left
+// out), a package release.validate makes a
+// draft of, its one section the game's, the release recording the ONE that built it (the data
+// program's one_build()); published, release.apply builds the game's tree from
 // nothing out of it alone, every archive (resource.pff, localres.pff, language.pff) coming back
 // equal to the edited revision's export. Our own game's first revision: a full package whose
 // tree holds the UPDATE.WIZ naming its product. An account's own game's: its UPDATE.WIZ naming
 // the title it runs as too (GAME=jo), and a gt.ssc carrying its own lobby's gate tag under JO's
-// key chain, whatever gt.ssc its project held. A retail expansion over its base game's revision
-// from folders named neither by the projects' keys nor side by side (the base laid out by its
-// key, the expansion's base_project pointed at it). And the refusals: a game that names no
+// key chain, whatever gt.ssc its project held. An expansion's version.txt generated beside its
+// gt.ssc (our own mod's from its name and the release's version, Escalation's its row's retail
+// line), its tree holding it; a base game's package none. Escalation over its base game's
+// revision from folders named neither by the projects' keys nor
+// side by side (the base laid out by its key, the expansion's base_project pointed at it). And
+// the refusals: a game that names no
 // updater product, a revision that is no project (its export fails, what the tool said kept as
 // the build's log), and an expansion whose project names no base game's project. The apps'
 // releases from their uploaded builds: the editor's unpacked, its OPENNOVA.WIZ written from its
 // row, packed whole with every file of the build (update.exe, revupdat.exe and README.txt among
-// them) and validated into a draft of its one section; refused with no update host, and for a
+// them) and validated into a draft of its one section, recording no ONE (its build is the
+// upload's); refused with no update host, and for a
 // build that is no zip; the tools' kept as uploaded under their digest, a draft of no section,
 // published to their product alone, the same bytes again refused; each upload removed once its
 // release is made. The downloads host (products/downloads_job.h) written from the published
@@ -25,8 +30,8 @@
 // served ONRUNTIME.CMD, its UPDATE.WIZ and Escalation's (an account's own mod of it never); an
 // account's own public game's the runtime's with its UPDATE.WIZ naming its title (GAME=jo), a
 // private one's none; the editor's its package with its ONEDITOR.CMD; the tools' as uploaded; the
-// manifest every product of the service's and an account's public game, no private one and no
-// account's mod; a retire drops its zip.
+// manifest every product of the service's and an account's public game (a game with the protocol
+// its title speaks), no private one and no account's mod; a retire drops its zip.
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -51,12 +56,14 @@
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
+#include <base/version/one_build.h>
 #include <formats/pff/pff.h>
 #include <formats/update/command_file.h>
 #include <formats/update/nlz.h>
 #include <formats/update/sfs.h>
 #include <net/novacrypto/pubcrypto.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/gate_tag.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -171,14 +178,16 @@ struct Rig {
 	}
 
 	// Our own game's project as the seeds key it (its updater product's login) with the game's
-	// command file and name, whatever the game is called.
+	// command file and name, whatever the game is called: the one game the runtime's executable
+	// runs (NovaLogic's run their own).
 	struct OwnGame {
 		std::string key, command_file, name;
 	};
 	OwnGame own_game() {
 		const auto rows = db.query(
 				"SELECT key, command_file, display_name FROM products "
-				"WHERE kind = 'game' AND updater_login <> '' AND NOT retail AND key IS NOT NULL;");
+				"WHERE kind = 'game' AND updater_login <> '' AND product_exe = 'opennova.exe' "
+				"AND key IS NOT NULL;");
 		OwnGame own;
 		if (rows.size() == 1) {
 			own.key = rows.front().as_text(0).value_or("");
@@ -278,11 +287,11 @@ std::map<std::string, std::vector<uint8_t>> archive_contents(const std::string &
 
 } // namespace
 
-// A retail game's stock import as revision 1 and an edit as revision 2: the revision packed whole,
-// so the jointops zip installs the game into an empty folder from it (ADR 0067 d6 as amended
+// Joint Operations' import as revision 1 and an edit as revision 2: the revision packed whole, so
+// the jointops zip installs the game into an empty folder from it (ADR 0067 d6 as amended
 // 2026-10-25).
-static int test_retail_whole() {
-	Rig rig("opennova_release_build_retail");
+static int test_import_whole() {
+	Rig rig("opennova_release_build_import");
 	const std::string install = rig.temp.file("install"), project = rig.temp.file("JO");
 	std::string minted;
 	TEST_EXPECT(minted_install::mint(install, minted));
@@ -313,7 +322,10 @@ static int test_retail_whole() {
 				release->error.c_str(), release->build_log.c_str());
 	TEST_EXPECT(release->status == hosted::ReleaseStatus::Draft);
 	TEST_EXPECT(release->build_log.find("$ ") != std::string::npos &&
-			release->build_log.find("laid out JO r1") != std::string::npos);
+			release->build_log.find("laid out JO r2") != std::string::npos);
+	// The ONE that built it from the revision: the data program's own.
+	TEST_EXPECT(!release->one_version.empty() &&
+			release->one_version == opennova::one_build().version.text());
 	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
 	const auto set = hosted::find_product_by_key(rig.db, "JO");
 	TEST_EXPECT(sections.size() == 1 && set && sections[0].product_id == set->id &&
@@ -373,7 +385,7 @@ static int test_retail_whole() {
 		TEST_EXPECT(!built.empty() && built == want);
 		entries += built.size();
 	}
-	std::printf("retail whole: JO r2, %zu file row(s) of which weapon.def the edit's, a draft; "
+	std::printf("import whole: JO r2, %zu file row(s) of which weapon.def the edit's, a draft; "
 				"its tree built from nothing, %zu archive entries back\n",
 			copies, entries);
 	return 0;
@@ -426,9 +438,11 @@ static int test_own_full(bool legacy_tag) {
 			update::nlz_decode(gate->data.data(), gate->data.size(), bytes) !=
 					update::NlzDecode::Corrupt);
 	std::string tag, why;
-	const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", why);
+	const opennova::Protocol *jo = opennova::resolve_title_protocol("jo", why);
 	TEST_EXPECT(jo && opennova::decode_gate_tag_file(bytes, jo->gate_tag_keys, tag) &&
 			tag == "acidgambit:0");
+	// A base game has no version.txt (ADR 0067 d8).
+	TEST_EXPECT(entry_named(package.sections[0], "version.txt") == nullptr);
 	const auto product = hosted::find_product_by_key(rig.db, own.key);
 	TEST_EXPECT(product && hosted::publish_release(rig.db, id) &&
 			hosted::enqueue_release_apply(rig.db, id, product->id) > 0);
@@ -445,8 +459,8 @@ static int test_own_full(bool legacy_tag) {
 			stored == std::string(bytes.begin(), bytes.end()));
 	if (legacy_tag) {
 		const std::string mod = rig.temp.file("Nifty");
-		TEST_EXPECT(rig.project({ "new", mod, "--title", "Nifty", "--game", "jo", "--expansion",
-							"nifty", "--base-project", "../Own" }) == 0);
+		TEST_EXPECT(rig.project({ "new", mod, "--title", "Nifty", "--game", "acidgambit",
+							"--expansion", "nifty", "--base-project", "../Own" }) == 0);
 		TEST_EXPECT(rig.project({ "create-missing", mod }) == 0);
 		// The updater reconstructs archives from their entries; give the language pair a
 		// real table of its own, besides the expansion metadata that is shipped loose.
@@ -474,6 +488,14 @@ static int test_own_full(bool legacy_tag) {
 						update::NlzDecode::Corrupt &&
 				opennova::decode_gate_tag_file(mod_bytes, jo->gate_tag_keys, tag) &&
 				tag == "acidgambit:0");
+		// Its version.txt generated beside it: its name and the release's version, retail's shape.
+		const std::string nifty_version = "OP: Nifty Package, V0.1.0; English\r\n";
+		const auto *mod_version = entry_named(mod_package.sections[0], "version.txt");
+		std::vector<uint8_t> version_bytes;
+		TEST_EXPECT(mod_version &&
+				update::nlz_decode(mod_version->data.data(), mod_version->data.size(),
+						version_bytes) != update::NlzDecode::Corrupt &&
+				std::string(version_bytes.begin(), version_bytes.end()) == nifty_version);
 		const auto mod_product = hosted::find_product_by_key(rig.db, "NIFTY");
 		TEST_EXPECT(mod_product && hosted::publish_release(rig.db, mod_release_id) &&
 				hosted::enqueue_release_apply(rig.db, mod_release_id, mod_product->id) > 0);
@@ -487,6 +509,12 @@ static int test_own_full(bool legacy_tag) {
 									"gt.ssc"),
 							stored, why) &&
 				stored == std::string(mod_bytes.begin(), mod_bytes.end()));
+		// The hosted tree carries it: the checksum its server's joiners must match.
+		TEST_EXPECT(io::read_file_text(
+							rig.store.path_of(hosted::tree_prefix(*mod_published->current_tree_id) +
+									"version.txt"),
+							stored, why) &&
+				stored == nifty_version);
 	}
 	std::printf("own game: %s r1 packed whole, its UPDATE.WIZ among its rows\n", own.key.c_str());
 	return 0;
@@ -526,7 +554,7 @@ static int test_player_game(bool existing_lobby) {
 	TEST_EXPECT(rig.project({ "create-missing", project }) == 0);
 	{
 		std::string error;
-		const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", error);
+		const opennova::Protocol *jo = opennova::resolve_title_protocol("jo", error);
 		const std::string other = "acidgambit:0";
 		TEST_EXPECT(jo != nullptr &&
 				io::write_file_atomic(io::utf8_join(project, "gt.ssc"),
@@ -563,7 +591,7 @@ static int test_player_game(bool existing_lobby) {
 			wiz.find("PRODUCT_LOGIN=MAKERGAME\r\n") != std::string::npos &&
 			wiz.find("GAME=jo\r\n") != std::string::npos);
 	std::string tag, error;
-	const opennova::TitleIdentity *jo = opennova::resolve_title_identity("jo", error);
+	const opennova::Protocol *jo = opennova::resolve_title_protocol("jo", error);
 	TEST_EXPECT(jo != nullptr &&
 			opennova::decode_gate_tag_file(unpacked("gt.ssc"), jo->gate_tag_keys, tag) &&
 			tag == expected_tag);
@@ -574,7 +602,7 @@ static int test_player_game(bool existing_lobby) {
 	return 0;
 }
 
-// A retail expansion's release over its base game's revision, its author's folders named neither by
+// Escalation's release over its base game's revision, its author's folders named neither by
 // the projects' keys nor side by side as the keys would be ("Joint Operations" and "Escalation"): the
 // build lays the base out by its key and points the expansion's base_project at it, the package the
 // expansion's section alone. An expansion whose project names no base game's project is refused.
@@ -612,12 +640,33 @@ static int test_expansion_folders() {
 	const auto *gate = entry_named(package.sections[0], "gt.ssc");
 	std::vector<uint8_t> bytes;
 	std::string tag, why;
-	const auto *title = opennova::resolve_title_identity("jo", why);
+	const auto *protocol = opennova::resolve_title_protocol("jo", why);
 	TEST_EXPECT(gate &&
 			update::nlz_decode(gate->data.data(), gate->data.size(), bytes) !=
 					update::NlzDecode::Corrupt &&
-			title && opennova::decode_gate_tag_file(bytes, title->gate_tag_keys, tag) &&
+			protocol && opennova::decode_gate_tag_file(bytes, protocol->gate_tag_keys, tag) &&
 			tag == "jop:cus2");
+	// Its version.txt is its row's retail line (0010_expansion_version_file.sql), whatever the
+	// release's version, so a retail Escalation host takes its checksum; no row removes it.
+	const std::string escalation = "Joint Operations: Escalation, V1.3.0.0; English\r\n";
+	const auto *version = entry_named(package.sections[0], "version.txt");
+	std::vector<uint8_t> version_bytes;
+	TEST_EXPECT(version &&
+			update::nlz_decode(version->data.data(), version->data.size(), version_bytes) !=
+					update::NlzDecode::Corrupt &&
+			std::string(version_bytes.begin(), version_bytes.end()) == escalation);
+	TEST_EXPECT(release->build_log.find("generated version.txt: Joint Operations: Escalation, "
+										"V1.3.0.0; English") != std::string::npos);
+	const auto *command = entry_named(package.sections[0], "JOEPTR.CMD");
+	TEST_EXPECT(command != nullptr);
+	if (command) {
+		const auto cmd = update::read_command_file(
+				std::string(command->data.begin(), command->data.end()));
+		TEST_EXPECT(cmd.has_value());
+		for (const update::CommandRow &row : cmd ? cmd->rows : std::vector<update::CommandRow>{})
+			TEST_EXPECT(!(row.type == update::CommandType::Remove &&
+					strutil::iequals(row.name, "version.txt")));
+	}
 
 	// An expansion project on the game install's base game: no base game's project to lay out.
 	const std::string loose = rig.temp.file("Loose");
@@ -707,6 +756,8 @@ static int test_app_build() {
 		return 1;
 	}
 	TEST_EXPECT(!rig.holds(hosted::release_source_key(id)));
+	// An app's package holds its own uploaded build, which no ONE of the service's made.
+	TEST_EXPECT(release->one_version.empty());
 	const std::vector<hosted::ReleaseSection> sections = hosted::list_sections(rig.db, id);
 	TEST_EXPECT(sections.size() == 1 && sections[0].command_file == "ONEDITOR.CMD" &&
 			sections[0].version == "0.0.22");
@@ -772,7 +823,8 @@ static int test_download_only() {
 	const auto release = hosted::find_release(rig.db, id);
 	TEST_EXPECT(release && release->status == hosted::ReleaseStatus::Draft &&
 			release->sha256 == sha256 && release->bytes == static_cast<int64_t>(size) &&
-			release->version == "0.0.22" && hosted::list_sections(rig.db, id).empty());
+			release->version == "0.0.22" && hosted::list_sections(rig.db, id).empty() &&
+			release->one_version.empty());
 	TEST_EXPECT(rig.holds(hosted::release_download_key(sha256)) &&
 			!rig.holds(hosted::release_source_key(id)));
 	TEST_EXPECT(hosted::publish_release(rig.db, id));
@@ -917,6 +969,21 @@ static int test_downloads() {
 			jo_entry->get_string("published", "").size() == 20 &&
 			!jo_entry->get_string("description", "").empty() && jo_entry->get("owner") &&
 			jo_entry->get("owner")->is_null());
+	// A game's protocol, the one its title speaks (OP: Acid Gambit's JO's); none for an
+	// expansion or an app.
+	const io::JsonValue *jo_protocol = jo_entry ? jo_entry->get("protocol") : nullptr;
+	TEST_EXPECT(jo_protocol && jo_protocol->get_string("code", "") == "jo" &&
+			jo_protocol->get_string("name", "") == "JO" &&
+			jo_protocol->get_string("version", "") == "16");
+	const io::JsonValue *ag_entry = entry_of(manifest, "ACIDGAMBIT");
+	const io::JsonValue *dfx2_entry = entry_of(manifest, "DFX2");
+	TEST_EXPECT(ag_entry && ag_entry->get("protocol") &&
+			ag_entry->get("protocol")->get_string("code", "") == "jo" && dfx2_entry &&
+			dfx2_entry->get("protocol") &&
+			dfx2_entry->get("protocol")->get_string("code", "") == "dfx2");
+	TEST_EXPECT(entry_of(manifest, "JOX01") && entry_of(manifest, "JOX01")->get("protocol") &&
+			entry_of(manifest, "JOX01")->get("protocol")->is_null() &&
+			entry_of(manifest, "ONRUNTIME")->get("protocol")->is_null());
 	TEST_EXPECT(unoffered(manifest, "DFX2") && unoffered(manifest, "ACIDGAMBIT") &&
 			unoffered(manifest, "ONBLENDER") && unoffered(manifest, "ONRUNTIME") &&
 			entry_of(manifest, "ONRUNTIME")->get("file")->is_null() &&
@@ -1006,7 +1073,7 @@ static int test_downloads() {
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	int failures = 0;
-	failures += test_retail_whole();
+	failures += test_import_whole();
 	failures += test_own_full(false);
 	failures += test_own_full(true);
 	failures += test_player_game(false);

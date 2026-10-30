@@ -38,8 +38,11 @@ bool is_sha256_hex(std::string_view text);
 // nothing past U+10FFFF. A path's rule, and a revision's message's.
 bool is_utf8(std::string_view text);
 
-// Service-generated output, never an authored project file. Keep this separate from
-// manifest validity: historical revisions containing these files still verify and decode.
+// Service-generated output, never an authored project file: gt.ssc (the lobby's gate tag) and
+// version.txt (an expansion's version text, which a release build writes from its game version:
+// the bytes whose checksum a joiner must match). A project holds neither; an import skips them, a
+// scan lists none, a push refuses them. Keep this separate from manifest validity: historical
+// revisions containing these files still verify and decode.
 bool is_service_managed_file(std::string_view path);
 
 // Whether `path` is a path a project's file may have: non-empty, at most kMaxPathBytes, valid

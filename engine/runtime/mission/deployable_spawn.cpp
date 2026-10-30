@@ -188,13 +188,23 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 	for (EntityHandle child : children.handles) {
 		mission::resolve_item_traits(world, *table, item_wire_class_, &assets(), child);
 		ensure_collision_instance(world, child);
-		// Each child's class init after its models: an ewep child binds and seeds its
-		// MountSlot [orig: Entity_SpawnAddEWeapChildren @0x40F300 - the +0x30 store
-		//  @0x40F422, the def+0x148 call @0x40F43E -> Entity_InitBoneReferences @0x441470].
-		if (Entity *spawned = world.registry.get(child))
-			world.vehicles.run_weapon_slot_class_init(*spawned);
+		// Each child's class init after its def and models: an ewep child binds and seeds
+		// its MountSlot and composes on its carrier, whose class update copies a vehicle
+		// carrier's Health word; the spawner then stores the def's healthMax over it.
+		// [orig: Entity_SpawnAddEWeapChildren @0x40F300 - the +0x30 store @0x40F422, the
+		//  def+0x148 call @0x40F43E -> Entity_InitBoneReferences @0x441470 (the update
+		//  @0x44164B); Health = def+0x17C @0x40F46F..0x40F476]
+		Entity *spawned = world.registry.get(child);
+		if (spawned == nullptr) continue;
+		world.vehicles.run_weapon_slot_class_init(*spawned);
+		if (const def::DefItemDef *child_def =
+						mission::find_item_def(*table, int(spawned->item_id) + kItemIdOffset))
+			spawned->health = world::retail_signed_i16(child_def->hp);
 	}
-	collision.refresh_after_registry_change(world);
+	// The spawn builds no proximity table and no slice: the row and its children join the
+	// tables at the next tick's build and the slices at the next 17-tick one (D-SIM-6).
+	// [orig: Entity_SpawnDeployable @0x51C2B0 - no Entity_BuildProximityListsFromPools
+	//  @0x4B8EB0 or Entity_BuildProximityLists_Pool01 @0x4B9340 among its callees]
 	return handle;
 }
 

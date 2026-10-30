@@ -5,12 +5,13 @@
 #include <system_error>
 #include <utility>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
+#include <base/title/title.h>
+#include <base/version/version.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_check.h>
 #include <editor/import/import_run.h>
@@ -47,26 +48,6 @@ bool empty_folder(const std::string &dir) {
 		if (entry.path().filename() != ".opennova")
 			return false;
 	return !ec;
-}
-
-// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as the service's
-// route takes it (apps/novaworld_web/products/project_routes.cpp valid_version).
-bool release_version(const std::string &version) {
-	if (version.empty() || version.size() > 32)
-		return false;
-	int dots = 0;
-	size_t digits = 0;
-	for (const char c : version) {
-		if (c >= '0' && c <= '9') {
-			++digits;
-			continue;
-		}
-		if (c != '.' || digits == 0)
-			return false;
-		++dots;
-		digits = 0;
-	}
-	return digits > 0 && dots < 4;
 }
 
 // An expansion's code as the service takes one (apps/novaworld_web/products/product_routes.cpp
@@ -188,11 +169,11 @@ std::string release_refusal(
 	return plain(error);
 }
 
-// A game's name by its gameprofile code ("Joint Operations"), the code for one the editor has no
-// profile of.
+// A game's name by its title code ("Joint Operations"), the code for one the editor has no title
+// of.
 std::string game_words(const std::string &code) {
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.c_str());
-	return profile && profile->display_name ? profile->display_name : code;
+	const Title *title = title_by_code(code);
+	return title && title->display_name ? title->display_name : code;
 }
 
 // A listed project by its key, null for none: one the account may not read is never listed.
@@ -408,9 +389,9 @@ NovaWorldView::PutPlan NovaWorldController::put_plan() const {
 		plan.refusal = "NovaWorld names a mod by 1 to 8 small letters and digits: rename " +
 				doc.expansion.name + " in Project settings (its Short name) first.";
 	// Its base game's key: the base game's project's own, else the game install's game (its
-	// UPDATE.WIZ's, install_game) as NovaWorld lists the retail games, else as the games a new
-	// project of the account's may be a mod of name it (one alone of that game, or the one keyed by
-	// its code).
+	// UPDATE.WIZ's, install_game) as NovaWorld lists NovaLogic's games (novalogic_project), else as
+	// the games a new project of the account's may be a mod of name it (one alone of that game, or
+	// the one keyed by its code).
 	if (doc.expansion.on_base_project()) {
 		ProjectDocument base;
 		Diagnostic unread;
@@ -421,12 +402,12 @@ NovaWorldView::PutPlan NovaWorldController::put_plan() const {
 	const NovaWorldView &view = core_.view().novaworld;
 	const std::string game = install_game(core_.game_install());
 	if (plan.base.empty()) {
-		std::vector<std::string> retail;
+		std::vector<std::string> novalogic;
 		for (const RemoteProject &project : view.projects)
-			if (project.kind == "game" && project.retail && project.game == game)
-				retail.push_back(project.key);
-		if (retail.size() == 1)
-			plan.base = retail.front();
+			if (project.kind == "game" && novalogic_project(project) && project.game == game)
+				novalogic.push_back(project.key);
+		if (novalogic.size() == 1)
+			plan.base = novalogic.front();
 	}
 	if (plan.base.empty()) {
 		std::vector<std::string> games;
@@ -471,6 +452,10 @@ void NovaWorldController::take_remote(const NovaWorldJob &job) {
 void NovaWorldController::cache_lobby(const ProjectPaths &paths, const RemoteProject &project) {
 	const NovaWorldPaths cache = NovaWorldPaths::for_project(paths, account_.server);
 	std::string error;
+	// An expansion's version.txt, the answer's or none: an older one never stands for a newer release.
+	if (!cache_novaworld_version_file(cache, project.key, project.version_file, error))
+		core_.note("NovaWorld version file was not cached: " + error);
+	error.clear();
 	if (project.lobby && cache_novaworld_lobby(cache, project.key, *project.lobby, error)) {
 		show_lobby();
 		return;
@@ -492,13 +477,18 @@ void NovaWorldController::refresh_lobby() {
 
 void NovaWorldController::show_lobby() {
 	NovaWorldView &view = core_.view().novaworld;
-	std::string file;
-	if (core_.view().project.open && !core_.view().project.document->novaworld.empty())
-		file = cached_novaworld_gate_tag(NovaWorldPaths::for_project(core_.paths(), account_.server),
-				core_.view().project.document->novaworld, core_.view().project.document->target_game);
-	if (file == view.gate_tag_file)
+	std::string file, version;
+	if (core_.view().project.open && !core_.view().project.document->novaworld.empty()) {
+		const NovaWorldPaths cache = NovaWorldPaths::for_project(core_.paths(), account_.server);
+		const ProjectDocument &doc = *core_.view().project.document;
+		file = cached_novaworld_gate_tag(cache, doc.novaworld, title_protocol_code(doc.target_game));
+		// The service answers one for an expansion alone; a build of one ships it (SessionCore::build_target).
+		version = cached_novaworld_version_file(cache, doc.novaworld);
+	}
+	if (file == view.gate_tag_file && version == view.version_file)
 		return;
 	view.gate_tag_file = std::move(file);
+	view.version_file = std::move(version);
 	core_.touch(ViewConcern::NovaWorld);
 }
 
@@ -845,8 +835,9 @@ void NovaWorldController::release(const EditorRequest &request) {
 		refuse(release_rights_text(view.key));
 		return;
 	}
-	if (!release_version(request.version)) {
-		refuse("A release names its version: one to four numbers between dots (0.2.0).");
+	// The release route's rule (Version's one): one to four numbers between dots.
+	if (!Version::parse(request.version)) {
+		refuse("A release names its game version: one to four numbers between dots (0.2.0, 1.0).");
 		return;
 	}
 	if (view.revision <= 0) {
@@ -1362,6 +1353,7 @@ void NovaWorldController::forget_project() {
 	view.remote_known = false;
 	view.remote = RemoteProject();
 	view.gate_tag_file.clear();
+	view.version_file.clear();
 	view.put = NovaWorldView::PutPlan();
 	view.checked = false;
 	view.head_known = false;
@@ -1455,7 +1447,7 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 				Diagnostic unread;
 				const std::string game = ::opennova::editor::open_project(dir, mod, unread)
 						? mod.target_game
-						: std::string(kDefaultTargetGame);
+						: default_target_game();
 				const RemoteProject *base = listed_project(view, base_key);
 				std::string why;
 				if (make_base(BaseSetup{ base_dir, base_key,
@@ -1654,11 +1646,11 @@ void NovaWorldController::new_mod(const EditorRequest &request) {
 	const std::string title = game->title.empty() ? game->key : game->title;
 	// A short name that is one of the game install's own expansions (jox01 on JO's): that expansion's project, its
 	// files imported from the install as they ship (new_project's all, as the stock import makes one), never a
-	// mod standing in for it. It is NovaWorld's retail project already: put nowhere as it is made.
+	// mod standing in for it. NovaWorld holds it as NovaLogic's already: put nowhere as it is made.
 	EditorRequest asked = request;
 	const RemoteProject *listed_game = listed_project(core_.view().novaworld, game->key);
 	const std::string from = request.game_install.empty() ? core_.game_install() : request.game_install;
-	if ((!listed_game || listed_game->retail) && !from.empty())
+	if ((!listed_game || novalogic_project(*listed_game)) && !from.empty())
 		for (const std::string &name : vfs_list_expansions(absolute_install_path(from)))
 			if (strutil::iequals(name, request.expansion)) {
 				asked.all = true;
@@ -1705,12 +1697,12 @@ bool NovaWorldController::make_base(
 		BaseSetup setup, const std::string &game, const std::string &install, std::string &why) {
 	const RemoteProject *listed = listed_project(core_.view().novaworld, setup.key);
 	std::unique_ptr<BaseSetupOperation> operation;
-	if (listed && !listed->retail) {
+	if (listed && !novalogic_project(*listed)) {
 		auto pull = std::make_unique<NovaWorldPull>(*transport_, account_,
 				ProjectPaths::for_root(setup.dir), "", NovaWorldWorkingCopy{ setup.key, 0 });
 		operation = std::make_unique<BaseSetupOperation>(*this, std::move(setup), std::move(pull));
 	} else {
-		// A retail game's files are the game install's (private on NovaWorld, which players cannot get).
+		// NovaLogic's game's files are the install's (private on NovaWorld, which players cannot get).
 		if (install.empty() || install_game(install) != game) {
 			why = setup.title + "'s project is made from a " + game_words(game) + " install, and the editor's " +
 					(install.empty() ? std::string("game install is none.")
@@ -1743,7 +1735,7 @@ std::string NovaWorldController::local_base(const std::string &dir, const Remote
 		if (entry.is_directory(ec))
 			roots.push_back(io::utf8_generic_path(entry.path()));
 	const RemoteProject *listed = listed_project(core_.view().novaworld, game.key);
-	const bool imported = !listed || listed->retail;
+	const bool imported = !listed || novalogic_project(*listed);
 	std::string owned;
 	for (const std::string &root : roots) {
 		ProjectDocument doc;
@@ -1792,7 +1784,7 @@ void NovaWorldController::show_new_base() {
 			found.dir = io::utf8_generic_path(
 					io::os_path(form.dir).lexically_normal().parent_path() / io::os_path(key));
 		const RemoteProject *listed = listed_project(view, key);
-		found.from_install = !found.found && (!listed || listed->retail);
+		found.from_install = !found.found && (!listed || novalogic_project(*listed));
 	}
 	core_.view().novaworld.new_base = found;
 	core_.touch(ViewConcern::NovaWorld);

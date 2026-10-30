@@ -20,8 +20,7 @@
 
 #include <net/novaworld/browser_cache.h>
 #include <net/novaworld/client_session.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
@@ -49,8 +48,8 @@
 #include <string_view>
 #include <vector>
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova;
 
@@ -1071,8 +1070,8 @@ void test_client_reads_the_server_hello_as_retail() {
 void test_play_uses_current_http_cookies() {
 	LobbyHttpFlow flow;
 	LobbyHttpContext context;
-	context.title = &kJo;
-	context.gate_tag = context.title->gate_tag;
+	context.protocol = &kJo;
+	context.gate_tag = context.protocol->gate_tag;
 	context.startup_url = "http://gs.opennova.test/NWStart.dll?prepare=1";
 	context.identity_vars = make_lobby_identity_vars(LobbyIdentityParams{});
 	flow.set_context(context);
@@ -1886,8 +1885,8 @@ void test_host_leg_gates() {
 	expect(host_leg_refusal(true, 0x1Au, true, lobby) == nullptr &&
 	               host_leg_refusal(true, 0x10Au, true, lobby) == nullptr,
 	       "host leg: a verified (or playing) session sends its request");
-	const int jo = opennova::gameprofile::GAME_JO;
-	const int dfx2 = opennova::gameprofile::GAME_DFX2;
+	const opennova::Title &jo = *opennova::title_by_code("jo");
+	const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
 	expect(host_leg_max_players(0, false, jo) == 1 && host_leg_max_players(80, false, jo) == 64 &&
 	               host_leg_max_players(80, true, jo) == 65 && host_leg_max_players(16, false, jo) == 16,
 	       "host leg: MaxPlayers clamps to 1..64 / 1..65 dedicated");
@@ -2473,7 +2472,7 @@ int main() {
 			// The host leg: the role forwards the command to on_command. The lobby is
 			// constructed and never opened; the Command notice touches neither it nor the phase.
 			NwuLobbySession dormant(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
-			dormant.set_title(&kJo, kJo.gate_tag);
+			dormant.set_protocol(&kJo, kJo.gate_tag);
 			NwuHostRole::Hooks hooks;
 			std::optional<ServerCommand> seen;
 			hooks.on_command = [&seen](const ServerCommand &c) { seen = c; };

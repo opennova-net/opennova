@@ -117,9 +117,10 @@ constexpr const char *kExpVersionUpdated = "Synthetic Expansion, V1.0.0.11; Engl
 // A base product's tree at `dir` as an install holds it: the boot table's three archives,
 // version.txt and score.ini. `updated` is the tree a release takes it to: an entry changed
 // and one added in resource.pff, one dropped; a mission added to localres.pff with its title
-// in language.pff; version.txt bumped; score.ini gone; _NSTMOUT.TXT added; and readme.txt and
-// loose.bms, loose files no tree holds (the second a mission the loose leg of an install's
-// catalog lists, D-MNU-25, which the tree's mission list must not).
+// in language.pff; version.txt bumped; score.ini gone; _NSTMOUT.TXT added; and readme.txt,
+// loose.bms and the root version.txt, loose files no tree holds (loose.bms a mission the loose
+// leg of an install's catalog lists, D-MNU-25, which the tree's mission list must not; a base
+// game's tree has no version.txt, ADR 0067 d8).
 bool make_base_tree(const std::string &dir, bool updated) {
 	std::vector<pff::PffEditEntry> resource = { { "keep.def", bytes("kept"), 1100000000 },
 		{ "wpn.def", bytes(updated ? "rifle 2" : "rifle 1"),
@@ -295,8 +296,8 @@ struct Rig {
 			return 0;
 		return id;
 	}
-	// The synthetic retail games the package's command files name (their packages put where a
-	// build hands them on): the base and its expansion.
+	// The synthetic games the package's command files name (their packages put where a build
+	// hands them on): the base and its expansion.
 	bool make_synthetic_products(int64_t &base, int64_t &expansion) {
 		NewProduct b;
 		b.display_name = "Synthetic";
@@ -305,7 +306,6 @@ struct Rig {
 		b.lobby = "jop_2_consumer";
 		b.updater_login = "SYNus";
 		b.command_file = "SYNPTR.CMD";
-		b.retail = true;
 		b.key = "SYN";
 		b.visibility = "private";
 		b.created_by = "admin";
@@ -321,18 +321,20 @@ struct Rig {
 		e.expansion_code = "jox01";
 		e.updater_login = "SYNEus";
 		e.command_file = "SYNEPTR.CMD";
-		e.retail = true;
 		e.key = "SYNX";
 		e.visibility = "private";
 		e.created_by = "admin";
 		return create_product(db, e, expansion) == ProductOutcome::Ok;
 	}
 	// The package opennova-update-tool builds from `root`'s from and to trees (`full`: every file
-	// of `to` a row, as every release now is): false when it builds none.
+	// of `to` a row, as every release now is; `previous` the release before it, whose rows the
+	// tree lacks it carries as removals): false when it builds none.
 	bool build_package(const std::string &root, std::vector<update_tool::ProductSpec> products,
-			bool full, update::SfsPackage &package) {
+			bool full, update::SfsPackage &package, const update::SfsPackage *previous = nullptr) {
 		update_tool::BuildSpec spec;
 		spec.full = full;
+		if (previous != nullptr)
+			spec.previous = *previous;
 		spec.from = io::os_path(root + "/from");
 		spec.to = io::os_path(root + "/to");
 		spec.package_product = "Synthetic Product";
@@ -370,8 +372,9 @@ struct Rig {
 	// game `product_id` built from its project's revision 1, the package where an upload lands,
 	// validated by the job: its id.
 	int64_t built_release(const std::string &root, const char *name, int64_t product_id,
-			std::vector<update_tool::ProductSpec> products, update::SfsPackage &package) {
-		if (!build_package(root, std::move(products), true, package))
+			std::vector<update_tool::ProductSpec> products, update::SfsPackage &package,
+			const update::SfsPackage *previous = nullptr) {
+		if (!build_package(root, std::move(products), true, package, previous))
 			return 0;
 		NewBuiltRelease made;
 		made.name = name;
@@ -381,7 +384,7 @@ struct Rig {
 		made.version = "1.0";
 		const int64_t id = create_built_release(db, made);
 		if (!put(release_upload_key(id), update::sfs_write(package)) ||
-				!set_release_built(db, id, "built") || enqueue_release_validate(db, id) == 0)
+				!set_release_built(db, id, "built", "") || enqueue_release_validate(db, id) == 0)
 			return 0;
 		run_jobs();
 		return id;
@@ -565,6 +568,45 @@ int test_native_first_release() {
 	return 0;
 }
 
+// A release built over the one before it, as release.build builds every later release: the
+// earlier release's rows the tree no longer has come after the archives' rows as removals, a
+// root file's under `TARGET .`, and the package validates to a draft.
+int test_built_over_previous() {
+	Rig rig("product_jobs_built_over_previous");
+	TEST_EXPECT(make_base_tree(rig.temp.file("to"), true));
+	const int64_t native = rig.seeded("OP: Acid Gambit");
+	const std::vector<update_tool::ProductSpec> products = {
+		{ "", "", "ACIDGAMBIT.CMD", "OpenNova", "1.0", "opennova.exe" }
+	};
+	update::SfsPackage first;
+	TEST_EXPECT(rig.built_release(rig.temp.root(), "first", native, products, first) != 0);
+	std::error_code ec;
+	TEST_EXPECT(std::filesystem::remove(io::os_path(rig.temp.file("to") + "/readme.txt"), ec));
+	update::SfsPackage second;
+	const int64_t id = rig.built_release(rig.temp.root(), "second", native, products, second, &first);
+	TEST_EXPECT(id != 0);
+	if (id == 0)
+		return 1;
+	// The second package's command file ends `TARGET .` then `REMOVE readme.txt`.
+	std::optional<update::CommandFile> cmd;
+	for (const update::SfsSection &section : second.sections)
+		for (const update::SfsEntry &entry : section.entries)
+			if (entry.name == "ACIDGAMBIT.CMD")
+				cmd = update::read_command_file(std::string(entry.data.begin(), entry.data.end()));
+	TEST_EXPECT(cmd && cmd->rows.size() >= 2);
+	if (!cmd || cmd->rows.size() < 2)
+		return 1;
+	const update::CommandRow &target = cmd->rows[cmd->rows.size() - 2];
+	const update::CommandRow &remove = cmd->rows.back();
+	TEST_EXPECT(target.type == update::CommandType::Target && target.name == ".");
+	TEST_EXPECT(remove.type == update::CommandType::Remove && remove.name == "readme.txt");
+	const auto release = find_release(rig.db, id);
+	TEST_EXPECT(release && release->status == ReleaseStatus::Draft);
+	if (release && release->status != ReleaseStatus::Draft)
+		std::fprintf(stderr, "  release: %s\n", release->error.c_str());
+	return 0;
+}
+
 // The runtime, a game with no project: its package uploaded (naming no game, so it becomes its
 // section's), published, served and built into no tree; a second of the same version (a staging
 // build of an unchanged version) is a draft too.
@@ -637,19 +679,19 @@ int test_apply() {
 		return 1;
 	}
 	TEST_EXPECT(tree->release_id == release);
-	const char *names[] = { "_NSTMOUT.TXT", "language.pff", "localres.pff", "resource.pff",
-		"version.txt" };
-	TEST_EXPECT(tree->files.size() == 5);
-	for (size_t i = 0; i < 5 && i < tree->files.size(); ++i)
+	const char *names[] = { "_NSTMOUT.TXT", "language.pff", "localres.pff", "resource.pff" };
+	TEST_EXPECT(tree->files.size() == 4);
+	for (size_t i = 0; i < 4 && i < tree->files.size(); ++i)
 		TEST_EXPECT(tree->files[i].name == names[i]);
 	TEST_EXPECT(file_named(tree->files, "score.ini") == nullptr &&
 			file_named(tree->files, "readme.txt") == nullptr &&
-			file_named(tree->files, "loose.bms") == nullptr);
+			file_named(tree->files, "loose.bms") == nullptr &&
+			file_named(tree->files, "version.txt") == nullptr);
 	// The loose files byte for byte, the archives entry for entry, as the updated tree holds
 	// them: made from nothing, so the entries the release left as they were (keep.def) are there
 	// beside the changed and added ones; the stray object gone.
 	const std::string to = root + "/to";
-	TEST_EXPECT(rig.get(tree_prefix(building) + "version.txt") == read_bytes(to + "/version.txt"));
+	TEST_EXPECT(!rig.has(tree_prefix(building) + "version.txt"));
 	TEST_EXPECT(
 			rig.get(tree_prefix(building) + "_NSTMOUT.TXT") == read_bytes(to + "/_NSTMOUT.TXT"));
 	for (const char *archive : { "resource.pff", "localres.pff", "language.pff" }) {
@@ -684,6 +726,10 @@ int test_apply() {
 		return 1;
 	}
 	TEST_EXPECT(tree->files.size() == 3 && tree->version_text == "1.0.0.11");
+	// Its version.txt, the checksum a joiner compares, as the release's row wrote it.
+	TEST_EXPECT(file_named(tree->files, "version.txt") != nullptr &&
+			rig.get(tree_prefix(tree->id) + "version.txt") ==
+					read_bytes(to + "/expansion/jox01/version.txt"));
 	TEST_EXPECT(tree->missions.size() == 2 && tree->missions[0].file == "DELTA.BMS" &&
 			tree->missions[0].title == "Delta Op" && tree->missions[1].file == "EXP.BMS");
 	for (const char *archive : { "jox01.pff", "jox01L.pff" })
@@ -838,6 +884,7 @@ int main(int argc, char **argv) {
 		{ "validate", test_validate },
 		{ "runtime_release", test_runtime_release },
 		{ "native_first_release", test_native_first_release },
+		{ "built_over_previous", test_built_over_previous },
 		{ "apply", test_apply },
 		{ "apply_incomplete", test_apply_incomplete },
 		{ "prune", test_prune },

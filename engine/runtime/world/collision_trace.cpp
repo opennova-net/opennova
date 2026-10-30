@@ -21,14 +21,11 @@ namespace opennova::world {
 
 using namespace detail; // the shared fixed-point helpers, unqualified as before
 
-const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
-                                                       CollisionTargetView &scratch,
-                                                       std::vector<CollisionMatrix> &mats,
-                                                       bool husk_swap) const {
-    const Instance *instance = live_instance(world, h);
-    if (instance == nullptr) return nullptr;
-    const Entity *e = world.registry.get(h);
-    if (e == nullptr) return nullptr;
+bool CollisionWorld::target_model(const World &world, EntityHandle h, TargetModel &out,
+                                  bool husk_swap) const {
+    const Entity *e = nullptr;
+    const Instance *instance = live_instance(world, h, &e);
+    if (instance == nullptr || e == nullptr) return false;
     // The husk collision swap: a destroyed entity (Flags & 4) collides with its
     // husk-stage model when one is attached; no husk -> the intact model keeps
     // serving, the witnessed fallback [orig: Flags & 4 && huskModel picks
@@ -36,10 +33,34 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // @ 0x538720; the contact pick @ 0x4ae233].
     const bool using_husk = husk_swap &&
             (e->engine_flags & kEntityFlagHusk) != 0 && instance->held_husk(*e) >= 0;
-    int32_t model_id =
-            using_husk ? instance->held_husk(*e) : instance->model_id;
-    const CollisionModel *m = model(model_id);
-    if (m == nullptr || !m->valid()) return nullptr;
+    const CollisionModel *m =
+            model(using_husk ? instance->held_husk(*e) : instance->model_id);
+    if (m == nullptr || !m->valid()) return false;
+    out.instance = instance;
+    out.entity = e;
+    out.model = m;
+    out.using_husk = using_husk;
+    return true;
+}
+
+const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
+                                                       CollisionTargetView &scratch,
+                                                       std::vector<CollisionMatrix> &mats,
+                                                       bool husk_swap) const {
+    TargetModel target;
+    if (!target_model(world, h, target, husk_swap)) return nullptr;
+    return target_view(world, h, target, scratch, mats);
+}
+
+const CollisionTargetView *CollisionWorld::target_view(const World &world, EntityHandle h,
+                                                       const TargetModel &target,
+                                                       CollisionTargetView &scratch,
+                                                       std::vector<CollisionMatrix> &mats) const {
+    const Instance *instance = target.instance;
+    const Entity *e = target.entity;
+    const CollisionModel *m = target.model;
+    const bool using_husk = target.using_husk;
+    const int32_t model_id = using_husk ? instance->held_husk(*e) : instance->model_id;
 
     int32_t p[3];
     entity_pos_fixed(*e, p);
@@ -354,25 +375,20 @@ static bool round_broad_phase(const float p0[3], const float p1[3], const float 
 }
 
 bool CollisionWorld::target_bound(const World &world, EntityHandle h, int32_t pos_out[3],
-                                  int32_t &radius_out, bool solid_only) const {
+                                  int32_t &radius_out, bool solid_only,
+                                  TargetModel *resolved) const {
     // target_view's model selection (live identity, the husk swap, validity)
     // WITHOUT the section-matrix build — bound-gate metadata only, so callers
     // can run the witnessed cheap gate first and build the full view for gate
     // survivors alone. Returns false exactly when target_view would return
     // null; `solid_only` additionally rejects models without a solid volume
     // (the LOS / stable-candidate callers).
-    const Instance *instance = live_instance(world, h);
-    if (instance == nullptr) return false;
-    const Entity *e = world.registry.get(h);
-    if (e == nullptr) return false;
-    const bool using_husk =
-            (e->engine_flags & kEntityFlagHusk) != 0 && instance->held_husk(*e) >= 0;
-    const CollisionModel *m =
-            model(using_husk ? instance->held_husk(*e) : instance->model_id);
-    if (m == nullptr || !m->valid()) return false;
-    if (solid_only && !m->has_solid_volume) return false;
-    entity_pos_fixed(*e, pos_out);
-    radius_out = entity_proximity_radius(*this, *e, m);
+    TargetModel target;
+    if (!target_model(world, h, target)) return false;
+    if (solid_only && !target.model->has_solid_volume) return false;
+    entity_pos_fixed(*target.entity, pos_out);
+    radius_out = entity_proximity_radius(*this, *target.entity, target.model);
+    if (resolved != nullptr) *resolved = target;
     return true;
 }
 
@@ -1213,15 +1229,6 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         consider(eh, hit_distance, aim);
     };
 
-    // The motor sweep's pools-2/1-only contract: no person leg at all, local
-    // or proxied [orig: Projectile_RaycastProximitySlots(2/1) only
-    // @ 0x444619..0x444667].
-    struct PersonWalkEntry {
-        uint16_t key = 0;
-        bool is_proxy = false;
-        uint32_t index = 0;
-    };
-    std::vector<PersonWalkEntry> person_walk;
     // The bone-section walk over one posed person: bones descend, the first
     // qualifying (highest-index) bone is primary, and its COBJ radius
     // controls both tolerance and hit distance; the final overlap is ray[32].
@@ -1276,40 +1283,26 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         }
         return person_hit;
     };
-    if (trace.walk_persons && !person_faces_only) {
-        const bool merge_proxies =
-            trace.include_wire_proxies && !wire_person_proxies_.empty();
-        person_walk.reserve(persons_.size() +
-                            (merge_proxies ? wire_person_proxies_.size()
-                                           : size_t{0}));
-        for (size_t i = 0; i < persons_.size(); ++i) {
-            const PersonSlot &slot = persons_[i];
-            const uint16_t key =
-                (wire_local_player_handle_ != EntityHandle::kInvalid &&
-                 slot.h == world.cached.local_player)
-                    ? wire_local_player_handle_
-                    : slot.h.packed;
-            person_walk.push_back({key, false, static_cast<uint32_t>(i)});
-        }
-        if (merge_proxies) {
-            for (size_t i = 0; i < wire_person_proxies_.size(); ++i) {
-                person_walk.push_back(
-                    {wire_person_proxies_[i].wire_handle, true,
-                     static_cast<uint32_t>(i)});
-            }
-            // persons_ arrives in registry pool/slot order, which is the wire
-            // order only while no key is substituted — L's server H can sort
-            // anywhere, so a two-pointer merge over the raw inputs would visit
-            // out of order. Sorting the materialized plan keeps the walk in
-            // ascending wire order; equal keys keep the person ahead of the
-            // proxy (stable, persons appended first).
-            std::stable_sort(person_walk.begin(), person_walk.end(),
-                             [](const PersonWalkEntry &a, const PersonWalkEntry &b) {
-                                 return a.key < b.key;
-                             });
-        }
-    }
-    for (const PersonWalkEntry &entry : person_walk) {
+    // The motor sweep's pools-2/1-only contract: no person leg at all, local
+    // or proxied [orig: Projectile_RaycastProximitySlots(2/1) only
+    // @ 0x444619..0x444667]. Otherwise the persons in their table order, or,
+    // merged with the wire proxies, the pool-0 order person_proxy_order keeps:
+    // persons_ arrives in registry pool/slot order, which is the wire order
+    // only while no key is substituted (L's server H can sort anywhere), so
+    // the merge is the sorted plan, built once per table build or proxy
+    // replace rather than per trace (not a retail claim).
+    const bool walk_persons = trace.walk_persons && !person_faces_only;
+    const std::vector<PersonOrderEntry> *merged_walk =
+        walk_persons && trace.include_wire_proxies && !wire_person_proxies_.empty()
+            ? &person_proxy_order(world)
+            : nullptr;
+    const size_t person_walk_count = !walk_persons ? size_t{0}
+        : merged_walk != nullptr ? merged_walk->size()
+                                 : persons_.size();
+    for (size_t walk_index = 0; walk_index < person_walk_count; ++walk_index) {
+        const PersonOrderEntry entry = merged_walk != nullptr
+            ? (*merged_walk)[walk_index]
+            : PersonOrderEntry{0, false, static_cast<uint32_t>(walk_index)};
         if (entry.is_proxy) {
             const WirePersonCollisionProxy &proxy =
                 wire_person_proxies_[entry.index];
@@ -1374,7 +1367,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                             mats.size() == person_model->sections.size();
                 if (live_pose &&
                     !walk_posed_bones(*person_model, mats.data(), 0u,
-                                      person_extra_radius(world.rules.title, proxy.player,
+                                      person_extra_radius(world.rules.title(), proxy.player,
                                                           proxy.mounted, proxy.moving,
                                                           effective_radius),
                                       eh, hit_distance))
@@ -1443,7 +1436,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         if (posed != nullptr && posed->live_section_pose) {
             live_pose_available = true;
             const int32_t target_radius =
-                    person_extra_radius(world.rules.title, *e, effective_radius);
+                    person_extra_radius(world.rules.title(), *e, effective_radius);
             person_hit = walk_posed_bones(*posed->model, posed->matrices,
                                           e->section_mask, target_radius, eh,
                                           hit_distance);

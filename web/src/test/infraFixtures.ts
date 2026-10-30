@@ -3,13 +3,17 @@
 // tests: a deployment mid-deploy, as tests/novaworld/infra_aws_stub.h has AWS
 // answer it (web rolling out revision 43 beside 42, an earlier task of it
 // stopped, the nightly backup running, 443 with an unhealthy target), and the
-// local stack's view, which reads no AWS. NOW is the reply's `at`.
+// local stack's view, which reads no AWS. NOW is the reply's `at`. The release
+// pins every program's image (the tasks run them) with each one's commit, and
+// the machines' hostd and the hosted servers run its hostd and serve images.
 
 import type {
   InfraCloudRead,
+  InfraContainer,
   InfraLobby,
   InfraMachine,
   InfraOverview,
+  InfraRelease,
   InfraService,
   InfraTask,
 } from '../types/infra';
@@ -22,9 +26,45 @@ export function ago(seconds: number): string {
 }
 
 const DIGEST = 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+export const PORTAL_IMAGE = 'ghcr.io/opennova-net/novaworld-web@sha256:aaaa0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab';
+export const HOSTD_IMAGE = 'ghcr.io/opennova-net/opennova-hostd@sha256:4567456745674567456745674567456745674567456745674567456745674567';
+export const SERVE_IMAGE = 'ghcr.io/opennova-net/opennova-serve@sha256:89ab89ab89ab89ab89ab89ab89ab89ab89ab89ab89ab89ab89ab89ab89ab89ab';
+
+// The image a program's task runs, the release's.
+export function programImage(name: string): string {
+  return `ghcr.io/opennova-net/opennova-novaworld-${name}@${DIGEST}`;
+}
+
+// The release: its images and the commit each image's label names.
+export function release(overrides: Partial<InfraRelease> = {}): InfraRelease {
+  const programs = ['gate', 'lobby', 'web', 'fleet', 'worker', 'data', 'backup'];
+  return {
+    id: '20261017T120000Z-abc1234',
+    created: '2026-10-17T12:00:00Z',
+    revision: 'abc1234def56',
+    images: {
+      ...Object.fromEntries(programs.map((p) => [p, programImage(p)])),
+      portal: PORTAL_IMAGE,
+      hostd: HOSTD_IMAGE,
+      serve: SERVE_IMAGE,
+    },
+    image_commits: {
+      ...Object.fromEntries(programs.map((p) => [p, 'abc1234'])),
+      portal: 'abc1234',
+      hostd: 'abc1234',
+      serve: 'abc1234',
+    },
+    ...overrides,
+  };
+}
 
 export function task(id: string, program: string | null, overrides: Partial<InfraTask> = {}): InfraTask {
   const name = program ?? 'backup';
+  // Web's task runs the portal (the website) beside it.
+  const portal: InfraContainer[] =
+    name === 'web'
+      ? [{ name: 'portal', image: PORTAL_IMAGE, image_digest: null, last_status: 'RUNNING', health: 'HEALTHY', exit_code: null, reason: null }]
+      : [];
   return {
     id,
     program,
@@ -54,6 +94,7 @@ export function task(id: string, program: string | null, overrides: Partial<Infr
         exit_code: null,
         reason: null,
       },
+      ...portal,
     ],
     ...overrides,
   };
@@ -184,7 +225,7 @@ export function cloud(overrides: Partial<InfraCloudRead> = {}): InfraCloudRead {
     cluster: 'opennova-prod',
     region: 'us-east-1',
     error: null,
-    release: { id: '20261017T120000Z-abc1234', created: '2026-10-17T12:00:00Z', revision: 'abc1234def56' },
+    release: release(),
     release_none: false,
     release_error: null,
     services: [
@@ -326,6 +367,8 @@ export function machine(id: number, overrides: Partial<InfraMachine> = {}): Infr
     zone: 'us-east-1b',
     ec2_state: 'running',
     image_id: 'ami-0aaa',
+    agent_version: 'ONE 0.0.22.5922 (b0c2b38, staging)',
+    agent_image: HOSTD_IMAGE,
     ...overrides,
   };
 }
@@ -336,6 +379,7 @@ export function overview(overrides: Partial<InfraOverview> = {}): InfraOverview 
     cloud: cloud(),
     lobbies: [lobby(1), lobby(2, { state: 'draining', live: false, last_seen_at: ago(120), seen_ago_seconds: 120, sessions: 0, listings: 0 })],
     fleet: { leader: 'fleet-1234abcd', generation: 3, elected_at: ago(3600) },
+    serve_images: [{ image: SERVE_IMAGE, servers: 4 }],
     hosting: { enabled: true, provider: 'ec2' },
     machines: [
       machine(1),
@@ -349,6 +393,7 @@ export function overview(overrides: Partial<InfraOverview> = {}): InfraOverview 
         zone: null,
         ec2_state: null,
         image_id: null,
+        agent_version: 'ONE 0.0.21.5800 (0f0f0f0, staging)',
       }),
     ],
     ...overrides,

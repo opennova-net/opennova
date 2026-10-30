@@ -14,10 +14,12 @@ namespace opennova::novaworld_server {
 // The games catalogue: one `games` row per lobby (the system lobbies
 // backend/migrations/0003_project_lobbies.sql writes, OP: Acid Gambit's given its own
 // pages and pfid by 0004_acidgambit_lobby_pages.sql, and those players' games create,
-// create_lobby). A client's gate tag selects its row, and the row decides the
-// LobbyName and the start page the gate answers, the .gsb list its browser
-// fetches, the per-game values the NW*.dll pages fill in, and the game its
-// listings land under (active_hosts.game holds the listing's LobbyName).
+// create_lobby), keyed by the protocol its clients speak (0008_lobbies_by_protocol.sql).
+// A client's gate tag selects its row, and the row decides the LobbyName and the start
+// page the gate answers, the .gsb list its browser fetches, the per-game values the
+// NW*.dll pages fill in, and the game its listings land under (active_hosts.game holds
+// the listing's LobbyName); its protocol's row (net/protocol/protocol.h) the version
+// pair, the gate's reply shape and gt.ssc's key chain.
 //
 // The gate and HTTP listeners each load a GameCatalog once, in start(), so the
 // gate's receive thread answers a probe without touching the database; a change to
@@ -31,9 +33,9 @@ struct GameRow {
 	std::string display_name;
 	std::string lobby_name;
 	std::string gate_tag;
-	// The engine's game profile code the row's clients speak ('jo', 'dfx2';
-	// engine/base/gameprofile). The OpenNova row speaks JO's.
-	std::string title;
+	// The code of the protocol the row's clients speak ('jo', 'dfx2': Protocol::code,
+	// net/protocol/protocol.h protocol_by_code). The OpenNova row speaks JO's.
+	std::string protocol;
 	std::string start_page; // the gate's startupurl `url=` page
 	std::string host_page;
 	std::string gsb_path; // e.g. "jop_2.gsb?a=1"
@@ -41,8 +43,6 @@ struct GameRow {
 	// with the discovered server's GSID in place of @GSID@ (DFX2's); empty when NULL
 	// (no page of the row's sets the global).
 	std::string join_lan_url;
-	std::string ver1;
-	std::string ver2;
 	// The expansion bits a listing that reports none requires, and that an
 	// account with no access row of its own owns.
 	std::string exp_bits;
@@ -82,15 +82,21 @@ struct LobbyChooser {
 };
 // The lobbies `chooser` may select for a game, in slug order: an admin's, every games row (a
 // system lobby a migration added, one every game has left); a player's, the available_games rows
-// of its account but those a retail product names (Joint Operations' and Delta Force Xtreme 2's,
-// the lobbies the original Jointops.exe and dfx2.exe browse).
+// of its account but those whose gate tag is their protocol's own (Joint Operations' and Delta
+// Force Xtreme 2's, the lobbies the original Jointops.exe and dfx2.exe browse).
 std::vector<GameRow> selectable_lobbies(opennova::db::Database &db, const LobbyChooser &chooser);
-// Whether `chooser` may select the lobby `slug` for a game speaking `title`.
+// Whether `chooser` may select the lobby `slug` for a game that runs as title `title`: one whose
+// protocol is the one the title speaks (title_protocol). OP: Acid Gambit's title speaks JO's
+// protocol, so its games list in JO-protocol lobbies.
 bool lobby_available(opennova::db::Database &db, std::string_view slug, std::string_view title,
 		const LobbyChooser &chooser);
-// A fresh lobby with an immutable identity allocated from games.id. Empty if title is unknown.
+// A fresh lobby with an immutable identity allocated from games.id, for a game that runs as title
+// `title`: its protocol the title's, its pages, pfid and gate answer copied from that protocol's
+// template lobby (for JO's protocol OP: Acid Gambit's, for DFX2's Delta Force Xtreme 2's). Empty
+// for a title whose protocol has no template.
 std::string create_lobby(opennova::db::Database &db, std::string_view name, std::string_view title);
-// The server-generated gt.ssc bytes, shared by project metadata and release builds.
+// The server-generated gt.ssc bytes, shared by project metadata and release builds: the row's
+// gate tag under its protocol's key chain (Protocol::gate_tag_keys).
 bool gate_tag_file(const GameRow &game, std::string &bytes, std::string &why);
 
 // A gate tag with no row of its own that answers as another tag's game: the

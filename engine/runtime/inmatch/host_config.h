@@ -85,20 +85,20 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext,
 // (Game_StartMission), which the embedder sets from the rotation.
 // [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0;
 //  Game_ApplySessionSettingsToGlobals @0x551500; per field in host_config.cpp]
-HostScreenState host_session_settings(gamecfg::GameCfg &cfg);
+HostScreenState host_session_settings(gamecfg::GameCfg &cfg, const Title &title);
 // The session create's cap over the process block: `requested` clamped into the title's 1..65
 // (session_player_cap) and the clamp stored back into the block's mpmaxplayers, so the next
 // populate and the next game.cfg save read it (null `block`: none to store into). Both hosts
 // run it: host_session_settings over the block's own word and the game's host request.
 // [orig: CNapiGameSession_BuildAndCreateSession @0x569554 (in session), @0x56955F (below 1 -> 1
 //  into maxPlayers_3F4), @0x56956C (above 65 -> 65 into maxPlayers_3F4)]
-int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, int title);
+int32_t store_session_player_cap(gamecfg::GameCfg *block, int32_t requested, const Title &title);
 // The same mapping over the block as it stands, its cap unclamped: the game
 // shell's host request, which the session create clamps when it runs
 // (session_player_cap), as retail's create reads the block its host screen
 // wrote [orig: UI_HandleHostSessionStart @0x556E36 / @0x556E72 ->
 // CNapiGameSession_BuildAndCreateSession @0x5694D0].
-HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg);
+HostScreenState host_screen_from_block(const gamecfg::GameCfg &cfg, const Title &title);
 // The block's session words onto `config` (host_screen_from_block's mapping without the title,
 // the cap and the server type): every first-load mission start applies the block again, so the
 // game shell's listen host takes the block as it stands at a map change, where what a remote
@@ -305,6 +305,8 @@ struct ShellHostSource {
 	std::string sp_mission_file;
 	const playersav::ProfileRecord *profile = nullptr;
 	const gamecfg::GameCfg *cfg_block = nullptr;
+	// The title the session runs as (GameConfig::set_title): the mounted game's. Required.
+	const Title *title = nullptr;
 };
 
 // The game shell's in-process host record, the faithful §5.0 mode-3 listen
@@ -313,7 +315,7 @@ struct ShellHostSource {
 // profile record's session words (singleplayer_game_config), socketless and
 // always serve-and-play. Either takes the cfg block's create words
 // (apply_session_create_words) and the profile's inverse OPTIONS_AUTOMEDIC
-// word. The embedder adds its own values (the title it speaks, the game
+// word. The embedder adds its own values (the protocol it speaks, the game
 // root, its character selection).
 // [orig: SinglePlayer_StartMission @0x561af0; the dedicated word the slot
 //  limit adds the host's own slot for, Game_ApplySessionSettingsToGlobals

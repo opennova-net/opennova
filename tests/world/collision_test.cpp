@@ -26,6 +26,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/collision_debug_rows.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/iris_march.h>
 #include <runtime/world/vehicle_collision_damage.h>
@@ -232,7 +233,27 @@ struct Rig {
         s->position = {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)};
         rebuild();
     }
+
+    // Decoded pool-0 rows, each sourcing its wire slice at its pose on the next 17-tick
+    // build: retail's client resolves a decoded row against the slice its last build left,
+    // and a row no build has given one walks none. [orig: Entity_BuildProximityListsFromPools
+    // @0x4B8EB0; Entity_MovementCollisionResolver @0x4B2BD0 - +0x1BC @0x4B2DA7, +0x1C0
+    // @0x4B2F42]
+    void build_wire_slices(const std::vector<WireSliceRow> &rows) {
+        cw.replace_wire_collision_proxies({}, {}, 0xFFFF, rows);
+        rebuild();
+    }
 };
+
+WireSliceRow wire_row(uint16_t handle, double x, double y, double z, double bound) {
+    WireSliceRow row;
+    row.wire_handle = handle;
+    row.lifetime = 1;
+    row.pool0_source = true;
+    row.position_q16 = FixedVec3{fx(x), fx(y), fx(z)};
+    row.bound_radius_q16 = fx(bound);
+    return row;
+}
 
 
 // The resolver's path-state byte must reach the common movement selector;
@@ -1066,8 +1087,9 @@ void test_candidate_range_reads_the_raw_bound_radius() {
 }
 
 // The vehicle respawn rebuilds every source's slice with the vehicle at its
-// respawn point, restarting the 17-tick phase. [orig: Entity_RespawnVehicle
-//  @0x45FF40 - the Entity_BuildProximityListsFromPools call @0x460133]
+// respawn point, restarting the 17-tick phase; a never-built world keeps its
+// fallbacks. [orig: Entity_RespawnVehicle @0x45FF40 - the
+//  Entity_BuildProximityListsFromPools call @0x460133]
 void test_vehicle_respawn_rebuilds_the_candidate_slices() {
     World world;
     world.registry.configure_pool(1, 8);
@@ -1100,6 +1122,18 @@ void test_vehicle_respawn_rebuilds_the_candidate_slices() {
     CHECK(collision.candidate_count(vehicle) == 1);
     collision.build_tick_tables(world);
     CHECK(collision.candidate_count(vehicle) == 0);
+
+    // The respawn's build is the spawns' slice build: a world whose tables were
+    // never built (headless) keeps its registry fallbacks through it, and builds
+    // no slice epoch.
+    auto headless = std::make_unique<World>();
+    headless->registry.configure_pool(1, 8);
+    auto never_built = std::make_unique<CollisionWorld>();
+    headless->ai.collision = never_built.get();
+    const EntityHandle hull = headless->registry.spawn(1, vehicle_seed);
+    headless->vehicles.respawn(*headless->registry.get(hull));
+    CHECK(!never_built->tick_tables_ready());
+    CHECK(!never_built->attach_candidate_slices_authoritative());
 }
 
 // ---------------------------------------------------------------------------
@@ -1356,6 +1390,7 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
         pack->has_item_def = true;
         pack->has_graphic_model = true;
         pack->item_attrib = kItemAttribPowerup;
+        remote.build_wire_slices({wire_row(0x0042, 12.8, 10.0, 0.0, 0.4)});
         CollisionWorld::ResolveState state;
         const auto resolve_at = [&](double x, uint32_t tick) {
             int32_t pos[3] = {fx(x), fx(10.0), 0};
@@ -1376,6 +1411,54 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
         }
         CHECK(remote.cw.take_powerup_contacts().empty());
     }
+}
+
+// D-SIM-3: a corpse's expiry builds no table. Its destroy runs inside the pool-0 walk, after
+// earlier bodies' resolves recorded the tick's contacts, which the walk's tail drains: they
+// stand, and so does the 17-tick slice phase, every slice keeping what the last build gave it.
+// [orig: Entity_UpdateInfantryAI @0x4B9F93 -> Entity_Destroy @0x43E810 (no proximity builder
+//  among its callees); Entity_UpdateAllEntities @0x4C2100 - the slice gate @0x4C240F]
+void test_corpse_expiry_keeps_contacts_and_slice_phase() {
+    Rig rig(box_model(1, 0, 2.0, 2.0, 3.0));
+    rig.world.ai.collision = &rig.cw;
+    Entity *pack = rig.world.registry.get(rig.building);
+    pack->has_item_def = true;
+    pack->has_graphic_model = true;
+    pack->item_attrib = kItemAttribPowerup;
+    Entity body;
+    body.kind = EntityKind::Organic;
+    body.position = {30.0f, 30.0f, 0.0f};
+    body.flags = body.engine_flags = kEntityFlagDead;
+    body.corpse_timer = 1;
+    const EntityHandle corpse = rig.world.registry.spawn(0, body);
+    // An earlier body of the walk steps onto the pack: its resolve records the pickup.
+    rig.move_soldier(12.8, 10.0, 0.0);
+    int32_t pos[3] = {fx(12.8), fx(10.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 0, 43, 1u, health);
+    rig.world.registry.get(rig.soldier)->position.x = 11.6f;
+    rig.rebuild();
+    pos[0] = fx(11.6);
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 1, 43, 1u, health);
+    const int32_t slice = rig.cw.candidate_count(rig.soldier);
+    CHECK(slice > 0);
+    // The soldier leaves the pack behind: only a slice build would empty its slice.
+    rig.world.registry.get(rig.soldier)->position.x = 60.0f;
+    Entity *dead = rig.world.registry.get(corpse);
+    CHECK(dead != nullptr);
+    if (dead == nullptr) return;
+    CHECK(step_npc_corpse(rig.world, rig.world.ai, *dead) == NpcCorpseStep::Removed);
+    CHECK(rig.world.registry.get(corpse) == nullptr);
+    CHECK(rig.cw.take_powerup_contacts().size() == 1);
+    CHECK(rig.cw.candidate_count(rig.soldier) == slice);
+    for (int i = 0; i < 16; ++i) rig.cw.build_tick_tables(rig.world);
+    CHECK(rig.cw.candidate_count(rig.soldier) == slice);
+    rig.cw.build_tick_tables(rig.world);
+    CHECK(rig.cw.candidate_count(rig.soldier) == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1717,10 +1800,12 @@ void test_resolver_rotor_gate_and_strike_sound() {
         rig.world.out.fire_sounds.set_listener(Vec3{10.0f, 10.0f, 0.5f});
         Entity *soldier = rig.world.registry.get(rig.soldier);
         if (dead && !replica) soldier->flags |= kEntityFlagDead;
-        if (replica)
+        if (replica) {
             rig.move_soldier(60.0, 60.0, 0.0);
-        else
+            rig.build_wire_slices({wire_row(0x0123, 10.0, 10.0, 0.5, 1.0)});
+        } else {
             rig.move_soldier(10.0, 10.0, 0.5);
+        }
         int32_t pos[3] = {fx(10.0), fx(10.0), fx(0.5)};
         int32_t vel[3] = {0, 0, 0};
         int16_t health = 100;
@@ -2927,12 +3012,15 @@ void test_replica_peer_index_matches_full_walk() {
 void test_replica_resolve_candidates_ground_and_peers() {
     // The replica seam (net-re §5.38e, D-NET-196): a decoded remote row with
     // NO world entity resolves through the SAME movement collision resolver —
-    // an ad-hoc candidate slice at the query position feeds both the contact
-    // passes and the ground probe (standing on buildings), the peer spheres
-    // ride the witnessed repulsion loop with self-exclusion, and the staged
-    // tables restore afterwards. [orig: remote org rows run the ordinary
+    // the row's own wire slice, as its last build left it, feeds both the
+    // contact passes and the ground probe (standing on buildings), the peer
+    // spheres ride the witnessed repulsion loop with self-exclusion, and the
+    // staged tables restore afterwards. [orig: remote org rows run the ordinary
     // resolver @0x4b2bd0 through the shared mover tails]
     Rig rig(box_model(1, 0, 3.0, 3.0, 1.0));
+    // 0x0042's slice is built at the building; 0x0043's 30 u away, which holds nothing.
+    rig.build_wire_slices({wire_row(0x0042, 10.0, 10.0, 0.0, 1.0),
+                           wire_row(0x0043, 40.0, 40.0, 0.0, 1.0)});
     const int32_t soldier_count_before = rig.cw.candidate_count(rig.soldier);
 
     // (a) Ground THROUGH the candidate model: feet just above the box top.
@@ -2944,12 +3032,35 @@ void test_replica_resolve_candidates_ground_and_peers() {
         EntityHandle ground;
         const int32_t clearance = rig.cw.resolve_replica(
             rig.world, state, pos, vel, vel_z, 0, fx(1.8), fx(1.0), true, 0, 43, 0u,
-            nullptr, 0, 0xFFFF, nullptr, &ground);
+            nullptr, 0, 0x0042, nullptr, &ground);
         CHECK(ground == rig.building);
         CHECK(clearance > 0 && clearance <= fx(0.06)); // ~0.05 u over the top
     }
 
-    // (b) Wall push-out from the ad-hoc candidates: a capsule against the box
+    // (a2) The resolve reads the slice its row's last build left, however far the row has
+    // moved since, and builds none of its own: a row whose slice was built 30 u away, and a
+    // row no build has given one, stand at the same spot without the building under them.
+    // [orig: Entity_MovementCollisionResolver @0x4B2BD0 - +0x1BC @0x4B2DA7, +0x1C0 @0x4B2F42;
+    //  NapiNPClientMsg_0x00C @0x42E730 - the memset @0x42E7E9..0x42E7F1]
+    for (const uint16_t row : {uint16_t{0x0043}, uint16_t{0x0044}}) {
+        CollisionWorld::ResolveState state;
+        int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.05)};
+        int32_t vel[2] = {0, 0};
+        int32_t vel_z = 0;
+        EntityHandle ground;
+        rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, 0, fx(1.8), fx(1.0), true, 0,
+                               43, 0u, nullptr, 0, row, nullptr, &ground);
+        CHECK(ground != rig.building);
+        // The ground ray walks the same slice: the building's top for 0x0042, the terrain
+        // for the other two.
+        const int32_t probe[3] = {fx(10.0), fx(10.0), fx(1.05)};
+        CHECK(rig.cw.raycast_ground_replica(rig.world, probe, 0x0042, 0u, 0, 0, 0x4000,
+                                            0x20000) > fx(0.9));
+        CHECK(rig.cw.raycast_ground_replica(rig.world, probe, row, 0u, 0, 0, 0x4000,
+                                            0x20000) < fx(0.1));
+    }
+
+    // (b) Wall push-out from the slice's candidates: a capsule against the box
     // side face is pushed away (the building spans x 7..13 at y 10).
     {
         CollisionWorld::ResolveState state;
@@ -2958,7 +3069,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         int32_t vel_z = 0;
         EntityHandle ground;
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
-                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0x0042,
                                nullptr, &ground);
         CHECK(pos[0] < fx(6.6)); // pushed out of the face, never inward
     }
@@ -2976,7 +3087,7 @@ void test_replica_resolve_candidates_ground_and_peers() {
         uint32_t flags = kEntityFlagIndoors;
         EntityHandle ground;
         rig.cw.resolve_replica(rig.world, state, pos, vel, vel_z, fx(0.4),
-                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0xFFFF,
+                               fx(1.8), fx(1.0), true, 0, 43, 0u, nullptr, 0, 0x0042,
                                &flags, &ground, nullptr, nullptr, 0, /*mounted_latch=*/true);
         CHECK(pos[0] == fx(6.6)); // no push out of the face
         CHECK((flags & kEntityFlagIndoors) == 0); // the resolve-start clear still ran
@@ -4610,6 +4721,51 @@ void test_reused_registry_slot_rejects_old_collision_identity() {
     CHECK(hit.primary_section == 14);
     CHECK(collision.ensure_entity_instance(world, reused));
     CHECK(provider.ensure_calls == 1);
+}
+
+// D-SIM-7: a table build skips the binding prune over an unchanged registry, and still prunes
+// after every occupancy change: a despawn alone (the live count), a binding assigned to no live
+// row, and a restore whose registry matches the last prune's serial and live count.
+void test_binding_prune_follows_every_occupancy_change() {
+    auto wp = std::make_unique<World>();
+    World &world = *wp;
+    world.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.position = Vec3{5.0f, 0.0f, 0.0f};
+    const EntityHandle a = world.registry.spawn(0, seed);
+    const EntityHandle b = world.registry.spawn(0, seed);
+    CollisionWorld collision;
+    CollisionModel model;
+    model.sections.resize(1);
+    model.sections[0].radius = fx(1.0);
+    const int32_t id = collision.add_model(std::move(model));
+    collision.assign_entity(a, id, world.registry.get(a)->registry_spawn_id);
+    collision.assign_entity(b, id, world.registry.get(b)->registry_spawn_id);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 2);
+    collision.build_tick_tables(world); // unchanged: both bindings stand
+    CHECK(collision.has_instance(world, a) && collision.has_instance(world, b));
+    world.registry.despawn(b);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && collision.has_instance(a));
+    collision.assign_entity(b, id); // no live row holds b
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && !collision.has_instance(b));
+    // A row spawned and bound after the baseline, then a's despawn: the live count is the
+    // baseline's again and the restore keeps the serial, so only the restore's rebuild
+    // prunes c's binding.
+    world.collision = &collision;
+    const auto baseline = std::make_unique<World::Snapshot>(world.snapshot());
+    const EntityHandle c = world.registry.spawn(0, seed);
+    collision.assign_entity(c, id, world.registry.get(c)->registry_spawn_id);
+    collision.build_tick_tables(world);
+    world.registry.despawn(a);
+    collision.build_tick_tables(world);
+    CHECK(collision.instance_count() == 1 && collision.has_instance(c));
+    world.restore(*baseline);
+    CHECK(world.registry.get(a) != nullptr && world.registry.get(c) == nullptr);
+    CHECK(collision.instance_count() == 0);
 }
 
 struct PersonSectionsFixture {
@@ -6845,6 +7001,7 @@ int main() {
     test_infantry_detour_rays_see_items();
     test_infantry_route_walks_around_wall();
     test_resolver_move_callback_contact_replaces_solid_push();
+    test_corpse_expiry_keeps_contacts_and_slice_phase();
     test_mounted_resolver_keeps_touch_without_parent_pushout();
     test_secondary_vertical_force_is_full_strength();
     test_ladder_contact_uses_positive_authored_pitch();
@@ -6898,6 +7055,7 @@ int main() {
     test_projectile_trace_cache_observes_published_pose_same_tick();
     test_projectile_trace_cache_observes_husk_assignment_same_tick();
     test_reused_registry_slot_rejects_old_collision_identity();
+    test_binding_prune_follows_every_occupancy_change();
     test_person_section_reverse_scan_and_mask();
     test_person_section_retail_radius_rules();
     test_face_raycast_rolled_entity();

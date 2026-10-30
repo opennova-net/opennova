@@ -36,7 +36,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "env_allowlist.json"
-SCAN_PREFIXES = ("engine/", "godot/", "apps/", "tests/", "scripts/", "web/src/",
+SCAN_PREFIXES = ("engine/", "games/", "godot/", "apps/", "tests/", "scripts/", "web/src/",
                  "backend/", "deploy/", "infra/")
 HARD_EXCLUDES = ("third_party/", "godot/addons/", "/build/", "scripts/lint/env_lint.py",
                  "scripts/lint/env_allowlist.json")

@@ -15,8 +15,8 @@
 // so the encrypted 0x83 replies decode without any test accessor.
 
 #include <runtime/inmatch/napi_np_protocol.h>
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
+#include <base/version/one_build.h>
 #include <runtime/inmatch/host_config.h> // host_session_settings (the Serve Only cap)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <runtime/inmatch/integrity_sources.h>
@@ -61,8 +61,8 @@
 #include "../common/test_expect.h"
 #include "lent_transport_tick.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 using namespace opennova::def;
 
@@ -70,6 +70,12 @@ namespace {
 
 using namespace opennova;
 namespace inmatch = opennova::inmatch;
+
+// The JO PV3 our joiner and host write: its bracket pair over ONE's build (one_build()), where
+// retail wrote its own 1.7.5.7 and build date.
+std::string one_pv3() {
+	return protocol_version3(kJo, one_build().wire_version(), one_build().date_text());
+}
 
 // The host advertises this key in ServerHello.hk; the join leg checks ClientAuth.hk against it, so
 // crafted joiners echo it. [orig: NapiNPProtocol_HandleClientJoin @0x62b750 HK gate]
@@ -168,7 +174,7 @@ void add_retail_game_environment(ClientAuth &auth) {
 
 ClientAuth make_valid_client_auth(uint32_t ci, uint32_t ck, uint32_t hk,
                                   std::string_view name, std::string_view scrk) {
-	ClientAuth auth = make_title_client_auth(kJo, ci, ck, hk, name, scrk);
+	ClientAuth auth = make_protocol_client_auth(kJo, ci, ck, hk, name, scrk);
 	add_retail_game_environment(auth);
 	return auth;
 }
@@ -269,7 +275,7 @@ bool handshake(inmatch::NapiNPServerCtx &ctx, const PeerAddr &peer, std::string_
                bool complete_game_admission = true,
                std::vector<ProtocolMessage> *out_post_handshake = nullptr) {
 	const std::size_t connections_before_hello = inmatch::connection_count(ctx);
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	hello.co = "TestJoiner";
 	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto rh = inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
@@ -404,19 +410,22 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 			{0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
 			 0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};
 	if (!expect(decoded_probe.nvs ==
-	                    "NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 NovaLogic" &&
-	            decoded_probe.co == "NovaLogic Inc, Calabasas CA U.S.A." &&
-	            decoded_probe.ap == read_exe_basename().substr(0, kLobbyApChars) &&
-	            decoded_probe.bdat == "Jul 21 2009 18:54:42" &&
-	            decoded_probe.pv1 == "0.0.0 1/12/2004 EM" && decoded_probe.pv2 == "16" &&
-	            decoded_probe.pg_present && decoded_probe.pg == direct_join_pg,
-	            "LAN discovery probe matches the exact retail JO identity")) return false;
-	// D-NET-520: the announce carries the JO build string as PV3 and names its own
+								"NAPI NP Version 0.0.1 1/12/2004 - 2/20/2004 Milota Copyright 2004 "
+								"NovaLogic" &&
+						decoded_probe.co == "NovaLogic Inc, Calabasas CA U.S.A." &&
+						decoded_probe.ap == read_exe_basename().substr(0, kLobbyApChars) &&
+						decoded_probe.bdat == one_build().date_text() &&
+						decoded_probe.pv1 == "0.0.0 1/12/2004 EM" && decoded_probe.pv2 == "16" &&
+						decoded_probe.pg_present && decoded_probe.pg == direct_join_pg,
+				"LAN discovery probe matches the retail JO identity, ONE's build date"))
+		return false;
+	// D-NET-520: the announce carries the JO build string (ONE's build) as PV3 and names its own
 	// destination as EIP / EPN [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3
 	//  @0x61fc68..0x61fc9a, EIP / EPN @0x61fcf5..0x61fd47; CNapiNetwork_Init @0x4ca8bb].
-	if (!expect(decoded_probe.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42" &&
-	            decoded_probe.eip == 0xFFFFFFFFu && decoded_probe.epn == 32786u,
-	            "LAN discovery probe carries PV3 and its destination as EIP / EPN")) return false;
+	if (!expect(decoded_probe.pv3 == one_pv3() && decoded_probe.eip == 0xFFFFFFFFu &&
+						decoded_probe.epn == 32786u,
+				"LAN discovery probe carries PV3 and its destination as EIP / EPN"))
+		return false;
 
 	const PeerAddr scanner{0x0100007Fu, 32100};
 	const std::size_t before_scan = inmatch::connection_count(ctx);
@@ -455,9 +464,9 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	// The host echoes the announce's EIP / EPN and writes its own PV3 (D-NET-520)
 	// [orig: NapiNPProtocol_HandleClientHello @0x621756 / @0x621774 ->
 	//  NapiNPProtocol_SendServerInfoPacket @0x620baa..0x620c0c; PV3 @0x620758..0x62078a].
-	if (!expect(foreign.eip == 0xFFFFFFFFu && foreign.epn == 32786u &&
-	            foreign.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42",
-	            "the 0x81 echoes EIP / EPN and carries the host's PV3")) return false;
+	if (!expect(foreign.eip == 0xFFFFFFFFu && foreign.epn == 32786u && foreign.pv3 == one_pv3(),
+				"the 0x81 echoes EIP / EPN and carries the host's PV3"))
+		return false;
 	foreign.pn = "NOVAWORLDUDP";
 	const std::vector<uint8_t> foreign_reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
@@ -1395,7 +1404,7 @@ bool run_never_template_disables_reap_and_is_advertised() {
 
 	const PeerAddr peer{0x0100007Fu, 30740};
 	const std::string client_scrk = "NEVRCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
 	ClientAuth auth = make_valid_client_auth(1, 0xC0FFEE55u, kHostKey, "TestJoiner", client_scrk);
@@ -1447,7 +1456,7 @@ bool run_configured_max_packet_size_lands_in_cs_field_13() {
 			kHostKey, nullptr, config);
 	const PeerAddr peer{0x0100007Fu, 30741};
 	const std::string client_scrk = "MTUSCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
 	ClientAuth auth = make_valid_client_auth(1, 0xC0FFEE56u, kHostKey, "TestJoiner", client_scrk);
@@ -1489,10 +1498,10 @@ bool run_mps_negotiates_the_connection_ceiling() {
 		const PeerAddr peer{0x0100007Fu, port++};
 		const std::string client_scrk =
 				"MPSNCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
-		ClientHello hello = make_title_client_hello(kJo, 1);
+		ClientHello hello = make_protocol_client_hello(kJo, 1);
 		auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 		(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
-		ClientAuth auth = make_title_client_auth(kJo, 1, 0xC0FFEE60u, kHostKey,
+		ClientAuth auth = make_protocol_client_auth(kJo, 1, 0xC0FFEE60u, kHostKey,
 				"TestJoiner", client_scrk);
 		for (const auto &field : {std::pair{"BT", "0"}, std::pair{"VN", "2"},
 				std::pair{"BN", "1"}, std::pair{"DB", "0"}, std::pair{"MBN", "20042002"},
@@ -2010,13 +2019,13 @@ bool run_non_jo_peer_is_ignored() {
 		return expect(r.outbound.empty() && inmatch::connection_count(ctx) == 0, message);
 	};
 	{
-		ClientHello hello = make_title_client_hello(kJo, 1);
+		ClientHello hello = make_protocol_client_hello(kJo, 1);
 		hello.nvs = "wrong";
 		if (!reject_hello(hello, 2, "wrong-NVS 0x41 is dropped")) return false;
-		hello = make_title_client_hello(kJo, 1);
+		hello = make_protocol_client_hello(kJo, 1);
 		hello.pg[0] ^= 0xFFu;
 		if (!reject_hello(hello, 3, "wrong-PG 0x41 is dropped")) return false;
-		hello = make_title_client_hello(kJo, 1);
+		hello = make_protocol_client_hello(kJo, 1);
 		hello.pv1 = "wrong";
 		if (!reject_hello(hello, 4, "wrong-PV1 0x41 is dropped")) return false;
 	}
@@ -2173,7 +2182,7 @@ bool run_handshake_rejected_when_host_down() {
 	if (!expect(ctx.np_protocol.host_running == 0, "host not running before create_session")) return false;
 	const PeerAddr peer{0x0100007Fu, 31100};
 
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	hello.co = "EarlyBird";
 	auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
@@ -2201,7 +2210,7 @@ bool run_listen_host_lifecycle() {
 
 	const PeerAddr peer{0x0100007Fu, 31200};
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	hello.co = "RemoteJoiner";
 	auto h = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	auto rh = inmatch::handle_server_datagram(ctx, peer, h.data(), h.size(), 1);
@@ -2750,7 +2759,7 @@ bool run_scrkless_join_keys_the_session_crypt() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr stranger{0x0100007Fu, 30815};
-	ClientHello hello = make_title_client_hello(kJo, 1);
+	ClientHello hello = make_protocol_client_hello(kJo, 1);
 	auto hello_dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 	(void)inmatch::handle_server_datagram(ctx, stranger, hello_dg.data(), hello_dg.size(), 1);
 	auto early = craft_session("", 0, 1,
@@ -2857,7 +2866,7 @@ bool run_host_server_hello_writes_its_own_identity() {
 	ctx.np_protocol.host_run_duration_ms = 123456u;
 	// A probe that passes the gate only through retail's own case-insensitive / PM-bypass
 	// leniency: its PN / PV1 / PV2 spellings must not come back.
-	ClientHello probe = make_title_client_hello(kJo, 0x0BADF00Du);
+	ClientHello probe = make_protocol_client_hello(kJo, 0x0BADF00Du);
 	probe.pn = "jointoperations";
 	probe.pv1 = "0.0.0 1/12/2004 em";
 	probe.pv2 = "17";
@@ -2876,18 +2885,19 @@ bool run_host_server_hello_writes_its_own_identity() {
 	                    nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
 	                    op == SESSION_OPCODE_SERVER_HELLO && parse_server_hello(body.data(), body.size(), sh),
 	            "the probe draws one 0x81")) return false;
-	const ClientHello self = make_title_client_hello(kJo, 0);
+	const ClientHello self = make_protocol_client_hello(kJo, 0);
 	if (!expect(sh.co == self.co && sh.ap == read_exe_basename().substr(0, kLobbyApChars) &&
-	                    sh.bdat == "Jul 21 2009 18:54:42",
-	            "the 0x81 carries the host's own CO / AP / BDAT")) return false;
+						sh.bdat == one_build().date_text(),
+				"the 0x81 carries the host's own CO / AP / BDAT"))
+		return false;
 	if (!expect(sh.pn == "JOINTOPERATIONS" && sh.pv1 == self.pv1 && sh.pv2 == "16" && sh.pg == self.pg,
 	            "the 0x81 carries the host's own PN / PG / PV1 / PV2, not the prober's")) return false;
 	// D-NET-520: the JO protocol's PV3 is the build string CNapiNetwork_Init installs, the
 	// host's own, not the prober's [orig: CNapiNetwork_Init @0x4ca7e6..0x4ca8c2;
 	//  NapiNPProtocol_SendServerInfoPacket @0x620758..0x62078a].
-	if (!expect(sh.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42" &&
-	            sh.pv3 == self.pv3,
-	            "the 0x81 carries the host's own PV3 build string")) return false;
+	if (!expect(sh.pv3 == one_pv3() && sh.pv3 == self.pv3,
+				"the 0x81 carries the host's own PV3 build string"))
+		return false;
 	// The announce's EIP / EPN come back as the reply's [orig: NapiNPProtocol_HandleClientHello
 	//  @0x621756 / @0x621774; SendServerInfoPacket @0x620baa..0x620c0c].
 	if (!expect(sh.eip == 0x0200A8C0u && sh.epn == 32786u,
@@ -3561,7 +3571,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	cfg.unlimited_vehicles = 0;
 	// The gate's bare cap: the lineup queue off (stock 1 / 100 would admit the third).
 	cfg.mp_use_lineup_queue = 0;
-	const inmatch::HostScreenState serve_only = inmatch::host_session_settings(cfg);
+	const inmatch::HostScreenState serve_only = inmatch::host_session_settings(cfg, *opennova::title_by_code("jo"));
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, serve_only.config);
@@ -3613,7 +3623,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 		gamecfg::GameCfg queued = gamecfg::defaults();
 		queued.mp_max_players = 2;
 		queued.dedicated = 1;
-		const inmatch::HostScreenState stock = inmatch::host_session_settings(queued);
+		const inmatch::HostScreenState stock = inmatch::host_session_settings(queued, *opennova::title_by_code("jo"));
 		inmatch::NapiNPServerCtx queued_ctx;
 		inmatch::test::bring_up_host(queued_ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, kHostKey, nullptr, stock.config);
@@ -3632,7 +3642,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 
 	cfg.dedicated = 0;
 	cfg.unlimited_vehicles = 2;
-	const inmatch::HostScreenState listen = inmatch::host_session_settings(cfg);
+	const inmatch::HostScreenState listen = inmatch::host_session_settings(cfg, *opennova::title_by_code("jo"));
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx listen_ctx;
 	inmatch::test::bring_up_host(listen_ctx, inmatch::ConnectionMode::HostClient,

@@ -16,6 +16,7 @@
 #include "host_limits.h"
 #include "machine_driver.h"
 #include "products/product_repository.h"
+#include <formats/gamecfg/server_settings.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -33,8 +34,11 @@ inline constexpr size_t kGamePasswordMaxBytes = 16;
 // expansion, more than 32 for Joint Operations with Escalation).
 inline constexpr size_t kMissionsMax = 128;
 inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
+inline constexpr SettingRange kSendHoldoffTicksRange{ 0, 255 };
+inline constexpr SettingRange kEntitySendBudgetRange{ 100, 1600 };
+inline constexpr SettingRange kMaxPacketSizeRange{ 100, 16384 };
 
-// The owner's settings, as stored (hosted_servers' columns); text in UTF-8.
+// The owner's settings, stored in hosted_servers.configuration; text in UTF-8.
 struct HostedSettings {
 	// The product it runs (products.id, a game: its title opennova-serve
 	// speaks with /game, and its lobby, the games row it lists in) and the expansion of
@@ -52,10 +56,31 @@ struct HostedSettings {
 	bool team_ff = false;                 // TeamFF
 	// The rotation in play order: the first map is the one the server starts on.
 	std::vector<std::string> missions;
+	std::vector<int> mission_options; // per entry's side-switch flag; absent entries are zero
+	io::JsonValue options = io::JsonValue::make_object();
 	// Also list the server on NovaLogic's NovaWorld (opennova-serve's second listing,
 	// --also-master-host), at each start while the service offers it (NovaLogicListing).
 	bool list_on_novalogic = false;
+	// Launch-time network/frame tuning. Defaults preserve the existing hosted behavior.
+	int send_holdoff_ticks = 12;           // 0 and 1 both permit a send each logic tick
+	int entity_send_budget = 600;         // 0x0A update byte budget, including its header
+	int max_packet_size = 1300;           // game.cfg mpmaxpacketsize
+	bool lock_framerate = true;           // game.cfg lock_framerate
 };
+
+// One canonical persisted document, also used for API settings. Core settings
+// retain their public names; the additional server fields live in options.
+// Hosted packet tuning is a core setting with the runtime's packet-size limits.
+io::JsonValue hosted_settings_schema(gamecfg::ConfigTable table);
+io::JsonValue settings_document(const HostedSettings &settings);
+bool read_settings_document(const io::JsonValue &document, HostedSettings &settings,
+		std::string &field, std::string &error);
+gamecfg::GameCfg settings_block(const HostedSettings &settings, std::string_view title,
+		const gamecfg::WeaponRoster &weapons = {});
+// The game.cfg table a hosted server of title `title` runs (base/title/title.h
+// Title::config_table): Delta Force Xtreme 2's for dfx2, Joint Operations' for jo and
+// acidgambit; the default title's for a code no title has.
+gamecfg::ConfigTable title_config_table(std::string_view title);
 
 // Why check_settings refused: the field (its JSON name) and the reason.
 struct SettingsRefusal {
@@ -70,7 +95,7 @@ struct SettingsRefusal {
 // names 1..kMissionsMax missions, each among the base's tree's missions plus
 // the expansion's (by file name, without case). A name is 1..kGameNameMaxBytes
 // bytes once in cp1252 (the host's code page), not blank, with no control byte
-// (C1 included) and no double quote (the host file quotes it and has no
+// or undefined cp1252 byte and no double quote (the host file quotes it and has no
 // escape); a password is printable ASCII with no space or double quote; a
 // mission is a .bms file name of letters, digits, '_' and '-'.
 std::optional<SettingsRefusal> check_settings(
@@ -93,9 +118,9 @@ inline constexpr const char *kNovaLogicCredentialsFileName = "novalogic.txt";
 inline constexpr const char *kAdminCfgFileName = "admin.cfg";
 inline constexpr const char *kGameCfgFileName = "game.cfg";
 // The remote-admin user admin.cfg grants the service, with every verb's right
-// (GET..GOTO, 0x7F).
+// (GET..GOTO and PETERRABBIT).
 inline constexpr const char *kAdminUser = "svc";
-inline constexpr uint32_t kAdminRights = 0x7F;
+inline constexpr uint32_t kAdminRights = 0x8000007F;
 // The admin login's password: the 31 characters the console keeps of the field
 // (engine/net/admin/admin_protocol.h ADMIN_LOGIN_FIELD_MAX_CHARS).
 inline constexpr size_t kAdminPasswordChars = 31;
@@ -163,6 +188,7 @@ struct NovaLogicListing {
 // What a start renders, beside the settings.
 struct RenderInputs {
 	int64_t server_id = 0;
+	gamecfg::WeaponRoster weapons;
 	SlotPlan plan; // the slot's ports and the address admin.cfg admits
 	std::string service_username; // NOVAWORLD_USER
 	std::string service_password; // NOVAWORLD_PASS
@@ -170,19 +196,34 @@ struct RenderInputs {
 	std::string master_host;      // --master-host: where the server reaches NovaWorld
 	uint16_t master_gate_port = 0;
 	NovaLogicListing novalogic;   // the second listing, for a server whose owner asked
+	// The kind of machine the slot is on: only a dedicated one runs the owner's lock_framerate
+	// (launched_settings); a shared one, the default, runs every server paced.
+	MachineKind machine_kind = MachineKind::Shared;
 };
 
+// The settings a start on a machine of `kind` runs: the owner's, paced (lock_framerate on)
+// unless the machine is a dedicated one. An unpaced loop keeps one CPU busy, which the other
+// servers of a shared machine need; a dedicated machine runs its one server alone. Service
+// policy: the saved setting stays the owner's, so a server moved to a shared machine (or
+// restarted on one) runs paced there and unpaced again on a dedicated machine, and never fails
+// its start over it.
+HostedSettings launched_settings(const HostedSettings &settings, MachineKind kind);
+
 // The host file, in the host's cp1252 bytes and CR LF lines (the tokenizer
-// splits on the pair alone): the settings' keys, Replay 1 (so the rotation
-// starts over and the session never ends by itself) and one Mission line per
-// map, the first map's line last (the last line is the starting map).
+// splits on the pair alone): the settings' keys, Replay from the options' replay
+// (on by default: the rotation starts over and the session never ends by itself;
+// off, the rotation's end ends the session and frees the slot) and one Mission
+// line per entry with its side-switch flag, in play order: the server starts on
+// the first (render_serve_args' --rotation-first).
 std::string render_host_file(const HostedSettings &settings, int64_t server_id);
-// game.cfg: the defaults (Config_SetDefaults), on the NovaWorld network type,
+// game.cfg: the defaults (Config_SetDefaults), with the owner's packet ceiling and frame lock,
+// on the NovaWorld network type,
 // the NovaWorld port range pinned to `plan.game_port` (the slot's: NovaWorld
 // lists a server at its datagrams' source port, so a stock client joins each
 // slot of a machine on its own port), and the remote admin on
 // `plan.admin_port`; written by the format's own writer.
-std::string render_game_cfg(const SlotPlan &plan);
+std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings = {},
+        std::string_view title = "jo", const gamecfg::WeaponRoster &weapons = {});
 // admin.cfg: kAdminUser with `admin_password` and kAdminRights, and one
 // ip_restrict line admitting `plan.admin_allowed_ip`.
 std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_password);
@@ -190,7 +231,7 @@ std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_pass
 std::string render_credentials(const std::string &username, const std::string &password);
 
 // opennova-serve's arguments for a server whose product speaks `title` (its
-// base row's gameprofile code) with the expansion `expansion_code` ("" for
+// base row's title code) with the expansion `expansion_code` ("" for
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
 // page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the
 // title, and /exp with the code; for a server whose owner asked to be listed on
@@ -205,9 +246,10 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 // Whether a start of `settings` lists on NovaLogic's NovaWorld: its owner asked and the
 // service offers it.
 bool lists_on_novalogic(const HostedSettings &settings, const NovaLogicListing &novalogic);
-// The whole start of a server speaking `title` with `expansion_code`: the four
-// files (every one but game.cfg secret: the host file carries the game
-// password), the NovaLogic account's for a server that lists there
+// The whole start of a server speaking `title` with `expansion_code`, from its
+// launched_settings on `inputs.machine_kind`: the four
+// secret files (the host file and game.cfg also carry gameplay passwords),
+// the NovaLogic account's for a server that lists there
 // (lists_on_novalogic), and render_serve_args.
 LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
 		std::string_view expansion_code, const RenderInputs &inputs);

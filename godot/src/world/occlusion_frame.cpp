@@ -112,6 +112,24 @@ Celestial *OcclusionFrame::celestial() const { return live<Celestial>(celestial_
 Water *OcclusionFrame::water() const { return live<Water>(water_id_); }
 MissionEnvironment *OcclusionFrame::environment() const { return live<MissionEnvironment>(env_id_); }
 SlotShadow *OcclusionFrame::slot_shadow() const { return live<SlotShadow>(slot_shadow_id_); }
+ObjectModel *OcclusionFrame::local_avatar() const { return live<ObjectModel>(local_avatar_id_); }
+
+void OcclusionFrame::set_local_avatar(ObjectModel *p_avatar) {
+	const ObjectID id = p_avatar != nullptr ? ObjectID(p_avatar->get_instance_id()) : ObjectID();
+	if (id == local_avatar_id_) {
+		return;
+	}
+	release_local_avatar();
+	local_avatar_id_ = id;
+}
+
+void OcclusionFrame::release_local_avatar() {
+	if (ObjectModel *avatar = local_avatar()) {
+		if (avatar->is_occlusion_hidden()) {
+			avatar->set_occlusion_hidden(false);
+		}
+	}
+}
 
 opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_forces_indoors) {
 	Simulation *s = sim();
@@ -189,8 +207,8 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 	const bool stats_on = frame_stats_.is_valid() && frame_stats_->is_capture_active();
 	const bool timing = probe_timing_ || stats_on;
 	const int64_t native_start = timing ? ticks_usec() : 0;
-	s->run_occlusion_frame(p_camera_xform, fov_h, p_viewport_width, p_viewport_height, fog, water_z,
-			p_forces_indoors, p_object_detail);
+	const bool local_collected = s->run_occlusion_frame(p_camera_xform, fov_h, p_viewport_width,
+			p_viewport_height, fog, water_z, p_forces_indoors, p_object_detail);
 	const int64_t native_end = timing ? ticks_usec() : 0;
 	int64_t building_query_us = 0;
 	int64_t building_apply_us = 0;
@@ -260,6 +278,19 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 			}
 		}
 	}
+	// The main view's drops the scene's water mirror admitted take that mirror's
+	// explicit admit (Simulation's view_admissions_since carries the rule).
+	if (mirror_active_[Simulation::MIRROR_MAIN]) {
+		apply_mirror_admissions(Simulation::MIRROR_MAIN);
+	}
+	// The local player's body takes the main collect's own verdict (no
+	// local-player exception in the walk).
+	if (ObjectModel *avatar = local_avatar()) {
+		const bool hidden = !local_collected;
+		if (avatar->is_occlusion_hidden() != hidden) {
+			avatar->set_occlusion_hidden(hidden);
+		}
+	}
 	// The same collector gate over the rows the entity presenter's wire walk
 	// draws (remote organics and runtime spawns with no placed identity), keyed
 	// by wire handle: retail's client walks its wire-built pools exactly like
@@ -277,9 +308,11 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 		}
 	}
 	// The frame's death-piece draws land on the destruction pass's piece
-	// models (the collect rides the same native frame).
+	// models, and its flying-round draws on the throwable pass's round models
+	// (the collect rides the same native frame).
 	if (EntityPresenter *presenter_for_pieces = entities()) {
-		presenter_for_pieces->present_death_piece_draws_native(s->death_piece_draws());
+		presenter_for_pieces->present_death_piece_draws_native(s->scene_draws().death_pieces);
+		presenter_for_pieces->present_round_draws(s->scene_draws().rounds);
 	}
 	if (timing) {
 		cull_apply_us = ticks_usec() - cull_apply_start;
@@ -475,10 +508,30 @@ void OcclusionFrame::apply_inset_frame(Camera3D *p_camera, float p_viewport_widt
 			}
 		}
 	}
+	// The main view's drops it admitted take its explicit admit (Simulation's
+	// view_admissions_since carries the rule), and its water mirror's likewise.
+	for (int64_t i = 0; i < inset.admitted_changes.size(); ++i) {
+		const int32_t bms_id = inset.admitted_changes[i];
+		if (ObjectModel *node = occlusion_node(registry, bms_id)) {
+			note(node);
+			node->set_inset_occlusion_hidden(false);
+		} else if (statics != nullptr) {
+			statics->set_static_instance_inset_occlusion_hidden(bms_id, false);
+		}
+	}
+	if (mirror_active_[Simulation::MIRROR_INSET]) {
+		apply_mirror_admissions(Simulation::MIRROR_INSET);
+	}
+	// The local player's body, by the Inset collect's own verdict.
+	if (ObjectModel *avatar = local_avatar()) {
+		note(avatar);
+		avatar->set_inset_occlusion_hidden(!inset.local_collected);
+	}
 	// The same collect over the rows the wire walk draws, keyed by handle,
-	// and its own death-piece draws.
+	// and its own death-piece and flying-round draws.
 	if (EntityPresenter *presenter = entities()) {
-		presenter->present_death_piece_draws_inset(inset.death_piece_draws);
+		presenter->present_death_piece_draws_inset(inset.draws.death_pieces);
+		presenter->present_round_draws_inset(inset.draws.rounds);
 		presenter->set_wire_inset_view(true);
 		if (ScarPresenter *scars = presenter->scar_presenter()) {
 			scars->set_inset_view(true, request.camera.origin);
@@ -544,6 +597,10 @@ void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_wate
 			}
 		}
 	}
+	// The local player's body, by this mirror's own verdict.
+	if (ObjectModel *avatar = local_avatar()) {
+		avatar->set_mirror_occlusion_hidden(p_view, !view.local_collected);
+	}
 	// The same collect over the rows the wire walk draws, keyed by handle, and
 	// the subscene's own death-piece draws.
 	if (EntityPresenter *presenter = entities()) {
@@ -558,6 +615,24 @@ void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_wate
 			for (int64_t i = 2 + added; i < wire.size(); ++i) {
 				presenter->set_render_culled_mirror(p_view, wire[i], false);
 			}
+		}
+	}
+}
+
+void OcclusionFrame::apply_mirror_admissions(int p_view) {
+	Simulation *s = sim();
+	EntityIndex *registry = entity_index();
+	if (s == nullptr || registry == nullptr) {
+		return;
+	}
+	MissionObjectPlacer *statics = placer();
+	const PackedInt32Array &admitted =
+			s->mirror_occlusion(static_cast<Simulation::MirrorView>(p_view)).admitted_changes;
+	for (int64_t i = 0; i < admitted.size(); ++i) {
+		if (ObjectModel *node = occlusion_node(registry, admitted[i])) {
+			node->set_mirror_occlusion_hidden(p_view, false);
+		} else if (statics != nullptr) {
+			statics->set_static_instance_mirror_occlusion_hidden(p_view, admitted[i], false);
 		}
 	}
 }
@@ -648,6 +723,7 @@ void OcclusionFrame::release_overrides(bool /*p_reset_semantics*/) {
 		}
 	}
 	occlusion_node_cache_.clear();
+	release_local_avatar();
 	if (MissionObjectPlacer *statics = placer()) {
 		statics->clear_static_instance_occlusion();
 	}

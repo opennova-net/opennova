@@ -194,11 +194,10 @@ const BlankFactory k_factories[] = {
 	// S23 B: the HUD effects, now the engine reads and writes them.
 	{ "hudfx_def", AssetKind::HudFxDefs, make_blank_hudfx,
 	  "the HUD effects with no model line: the game reads nothing of it, as with none", false },
-	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list, and its version text.
+	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list (its version text is
+	// NovaWorld's, written at a release build).
 	{ "expansion_table", AssetKind::Strings, make_blank_expansion_table,
 	  "the expansion's text table: its name in the Mods list (the project's title) and an empty description", false },
-	{ "expansion_version", AssetKind::Text, make_blank_expansion_version,
-	  "the expansion's version text (the project's title), whose checksum a joiner must match", false },
 	// Free-form: a new file of a kind whose required files are all specific (Create
 	// menu, Create table, a font of another name, a missing texture's placeholder).
 	{ "", AssetKind::Strings, make_blank_empty_strings, "an empty string table", true },

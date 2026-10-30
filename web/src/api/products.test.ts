@@ -71,7 +71,7 @@ describe('the products', () => {
     get.mockResolvedValue(
       reply({
         titles: ['jo'],
-        games: [{ slug: 'jop_2_consumer', display_name: 'Joint Operations' }],
+        games: [{ slug: 'jop_2_consumer', display_name: 'Joint Operations', protocol: { code: 'jo', name: 'JO', version: '16' } }],
         products: [
           { id: 4, display_name: 'OP: Acid Gambit', kind: 'game', title: 'jo', lobby: 'acidgambit_0_consumer', key: 'ACIDGAMBIT', visibility: 'public', head: 14, owner: null },
           { id: 9, display_name: 'OpenNova runtime', kind: 'app', key: 'ONRUNTIME', visibility: null, head: 0, current_tree: null, published_release: null },
@@ -84,6 +84,9 @@ describe('the products', () => {
     const [game, runtime] = result.value.products;
     expect([game.key, game.visibility, game.head, game.current_tree, game.published_release, game.owner]).toEqual(['ACIDGAMBIT', 'public', 14, null, null, null]);
     expect([runtime.kind, runtime.key, runtime.visibility, runtime.head]).toEqual(['app', 'ONRUNTIME', null, 0]);
+    // A product the reply names no protocol of has none; the lobby keeps its protocol.
+    expect([game.protocol, runtime.protocol]).toEqual([null, null]);
+    expect(result.value.games[0].protocol.code).toBe('jo');
 
     get.mockResolvedValue(reply({ titles: [], games: [], products: [{ id: 'x' }] }));
     const bad = await fetchProducts();
@@ -106,7 +109,6 @@ describe('the products', () => {
       expansion_code: 'jox01',
       updater_login: 'JOEus',
       command_file: 'JOEPTR.CMD',
-      retail: false,
       key: 'JOX01',
       visibility: 'private' as const,
     };
@@ -195,11 +197,11 @@ describe('the projects', () => {
       title: 'RANGERS',
       kind: 'game',
       game: '',
+      protocol: null,
       lobby: null,
       lobby_locked: false,
       expansion_code: '',
       visibility: 'private',
-      retail: false,
       base: null,
       product_id: 22,
       head: 0,
@@ -250,12 +252,15 @@ describe('the projects', () => {
   });
 
   it('reads lobby compatibility, resolved artifacts and the durable lock, and sends lobby selections', async () => {
-    const lobby = { slug: 'on_42_consumer', display_name: 'Rangers', title: 'dfx2', gate_tag_file: 'YWJj' };
+    const lobby = { slug: 'on_42_consumer', display_name: 'Rangers', protocol: { code: 'dfx2', name: 'DFX2', version: '16' }, gate_tag_file: 'YWJj' };
     const configured = project('RANGERS', { game: 'dfx2', lobby, lobby_locked: true });
-    publicGet.mockResolvedValue(reply({ ...myProjects({ projects: [configured] }), lobbies: [lobby, null, { display_name: 'missing slug' }] }));
+    // A lobby with no slug, or with no protocol, is left out.
+    publicGet.mockResolvedValue(
+      reply({ ...myProjects({ projects: [configured] }), lobbies: [lobby, null, { display_name: 'missing slug' }, { slug: 'old', title: 'jo' }] }),
+    );
     const result = await fetchMyProjects();
     expect(result.ok && result.value.projects[0]).toEqual(configured);
-    expect(result.ok && result.value.lobbies).toEqual([{ slug: lobby.slug, display_name: lobby.display_name, title: 'dfx2' }]);
+    expect(result.ok && result.value.lobbies).toEqual([{ slug: lobby.slug, display_name: lobby.display_name, protocol: { code: 'dfx2', name: 'DFX2', version: '16' } }]);
 
     publicPost.mockResolvedValue(reply({ project: configured }, 201));
     const body = { key: 'RANGERS', display_name: 'Rangers', kind: 'game' as const, game: 'dfx2', new_lobby_name: 'Rangers', visibility: 'public' as const };
@@ -323,13 +328,13 @@ describe('the releases', () => {
 
   it("builds one from a revision through the project's own route, and says why one is not built", async () => {
     publicPost.mockResolvedValue(reply({ release: release(9, { status: 'building', sections: [] }) }, 201));
-    const built = await buildRelease('JO', { version: '1.7.5.9', revision: 2 });
-    expect(publicPost).toHaveBeenCalledWith('/products/JO/releases', { version: '1.7.5.9', revision: 2 });
+    const built = await buildRelease('JO', { version: '1.0.9', revision: 2 });
+    expect(publicPost).toHaveBeenCalledWith('/products/JO/releases', { version: '1.0.9', revision: 2 });
     expect(post).not.toHaveBeenCalled();
     expect(built.ok && built.value.status).toBe('building');
     const refusals: [number, Record<string, unknown>, string, string][] = [
       [400, { error: 'no_revision' }, 'no_revision', "There is no such revision to build from. A mod also needs its game's project to have one pushed."],
-      [400, { error: 'invalid_field', field: 'version' }, 'invalid_field', 'A version is one to four numbers between dots, such as 1.0 or 0.2.1.'],
+      [400, { error: 'invalid_field', field: 'version' }, 'invalid_field', 'A game version is one to four numbers between dots, such as 0.2.0 or 1.0.'],
       [403, { error: 'forbidden' }, 'forbidden', "Only its owner and NovaWorld's admins may change that project."],
       [409, { error: 'release_in_progress' }, 'release_in_progress', 'One of your releases is still building or being checked. Start the next once it is done.'],
       [429, { error: 'too_many_releases' }, 'too_many_releases', 'Your account has started as many releases today as it may. Try again tomorrow.'],

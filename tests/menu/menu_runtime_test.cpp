@@ -2433,12 +2433,12 @@ void test_table_columns_and_sort() {
 	CHECK(keys.size() == 3 && keys[0] == 0 && keys[1] == 2 && keys[2] == -1);
 }
 
-// The STARTUP screen's activate sets its VERSION label to the build's version text,
-// found the way retail finds it: the first screen of that name (case-insensitive),
-// pre-order, each window before its children, an unnamed window's subtree unsearched
-// (retail's main.mnu carries two VERSION statics: the empty right-justified one the
-// version fills, then the copyright line, which keeps its text).
-// [orig: UI_OnStartupScreenActivate @0x5557f0; UI_FindScreenControl @0x63ae80;
+// The STARTUP screen's activate sets its VERSION label to the build's version text (ours: the
+// line of the game's versions, set_version_line), found the way retail finds it: the first screen
+// of that name (case-insensitive), pre-order, each window before its children, an unnamed window's
+// subtree unsearched (retail's main.mnu carries two VERSION statics: the empty right-justified one
+// the version fills, then the copyright line, which keeps its text). [orig:
+// UI_OnStartupScreenActivate @0x5557f0; UI_FindScreenControl @0x63ae80;
 //  CWnd_FindChildByName @0x646850]
 void test_startup_version() {
 	mnu::Document doc;
@@ -2479,48 +2479,40 @@ void test_startup_version() {
 	// Another screen's activate leaves every label alone.
 	CHECK(rt.get_widget_text(3) == "other" && rt.get_widget_text(9).empty());
 
+	// No line set: the label is left empty, the rest as authored.
 	CHECK(rt.show_screen("STARTUP"));
-	CHECK(rt.get_widget_text(9) == "V1.7.5.7");
+	CHECK(rt.get_widget_text(9).empty());
 	CHECK(rt.get_widget_text(10) == "(c) 2009, NovaLogic, Inc.");
 	CHECK(rt.get_widget_text(7) == "hidden");
 	CHECK(rt.get_widget_text(3) == "other");
+
+	// The game's versions on one line (D-MNU-76), held in the menu's cp1252: the middle dot is its
+	// byte 0xB7.
+	const std::string line =
+			"OP: Acid Gambit 0.1.4 \xC2\xB7 ONE 0.0.22 (a1b2c3d) \xC2\xB7 JO protocol 16";
+	const std::string label = "OP: Acid Gambit 0.1.4 \xB7 ONE 0.0.22 (a1b2c3d) \xB7 JO protocol 16";
+	MenuRuntime lined;
+	lined.set_version_line(line);
+	CHECK(lined.open_document(&doc, "main.mnu", "OTHER") && lined.show_screen("STARTUP"));
+	CHECK(lined.get_widget_text(9) == label);
+	CHECK(lined.get_widget_text(10) == "(c) 2009, NovaLogic, Inc.");
+	CHECK(lined.get_widget_text(3) == "other");
+
 	// The frame draws it: version is the Startup screen's pre-order index 4, the
 	// only label written.
 	FakeFrame frame;
 	MenuRuntime framed;
 	framed.set_frame(&frame);
+	framed.set_version_line(line);
 	CHECK(framed.open_document(&doc, "main.mnu", "Startup"));
 	CHECK(framed.frame_index(9) == 4);
-	CHECK(frame.texts.size() == 1 && frame.texts.count(4) == 1 && frame.texts[4] == "V1.7.5.7");
+	CHECK(frame.texts.size() == 1 && frame.texts.count(4) == 1 && frame.texts[4] == label);
 
-	// Each game shows its own binary's text; an unwitnessed one shows none, never JO's
-	// [orig: Game_ParseCommandLineAndInit @0x4a7d5c (JO 1.7.5.7); jodemo.exe @0x48b440
-	//  (1.0.0.9); DFX.EXE @0x4a6b93 (1.7.1.9); dfx2.exe @0x4a7d8c (1.7.5.7)].
-	for (const auto &[code, text] : std::vector<std::pair<std::string, std::string>>{
-				 {"jo", "V1.7.5.7"}, {"", "V1.7.5.7"}, {"JODEMO", "V1.0.0.9"}, {"dfx", "V1.7.1.9"},
-				 {"dfx2", "V1.7.5.7"}, {"bhd", ""}}) {
-		MenuRuntime game;
-		game.set_game_code(code);
-		CHECK(game.open_document(&doc, "main.mnu", "OTHER") && game.show_screen("STARTUP"));
-		CHECK(game.get_widget_text(9) == text);
-	}
-
-	// An exported runtime names its build before the game's text (D-MNU-76), a debug export's as
-	// staging's; one with no commit leaves it out; a game with no text shows the build alone.
-	CHECK(runtime_build_label("0.0.20", "8999cef", true) == "OpenNova 0.0.20 (8999cef, staging)");
-	CHECK(runtime_build_label("0.0.21", "abc1234", false) == "OpenNova 0.0.21 (abc1234)");
-	CHECK(runtime_build_label("0.0.20", "", true) == "OpenNova 0.0.20 (staging)");
-	CHECK(runtime_build_label("0.0.21", "", false) == "OpenNova 0.0.21");
-	for (const auto &[code, text] : std::vector<std::pair<std::string, std::string>>{
-				 {"jo", "OpenNova 0.0.20 (8999cef, staging)   V1.7.5.7"},
-				 {"bhd", "OpenNova 0.0.20 (8999cef, staging)"}}) {
-		MenuRuntime built;
-		built.set_game_code(code);
-		built.set_runtime_build(runtime_build_label("0.0.20", "8999cef", true));
-		CHECK(built.open_document(&doc, "main.mnu", "OTHER") && built.show_screen("STARTUP"));
-		CHECK(built.get_widget_text(9) == text);
-		CHECK(built.get_widget_text(10) == "(c) 2009, NovaLogic, Inc.");
-	}
+	// A character cp1252 has no byte for (a player's game name) is '?', the rest kept.
+	MenuRuntime foreign;
+	foreign.set_version_line("Game \xE6\x97\xA5 \xC2\xB7 ONE 0.0.22");
+	CHECK(foreign.open_document(&doc, "main.mnu", "Startup"));
+	CHECK(foreign.get_widget_text(9) == "Game ? \xB7 ONE 0.0.22");
 
 	// A STARTUP screen whose VERSION sits only under an unnamed window draws none.
 	mnu::Document bare;

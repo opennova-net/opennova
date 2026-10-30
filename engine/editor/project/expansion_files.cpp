@@ -16,8 +16,6 @@ constexpr ExpansionFileRow kRows[] = {
 	// read takes the same loose file first (docs/vfs/vfs-pff-mount-re.md § Expansions item 1).
 	{ R::Table, "expansion_table", AssetKind::Strings, P::Folder,
 	  "the expansion's text table, which its strings override the game's by and the Mods list names it by" },
-	{ R::Version, "expansion_version", AssetKind::Text, P::Folder,
-	  "the expansion's version text, whose CRC a joiner must match" },
 	{ R::MenuMusicBank, "expansion_menumus_sbf", AssetKind::MusicBank, P::Folder, "the expansion's menu music bank" },
 	{ R::MenuMusicScript, "expansion_menumus_bin", AssetKind::MusicScript, P::ByKind,
 	  "the expansion's menu music script" },

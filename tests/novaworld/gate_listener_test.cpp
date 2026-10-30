@@ -35,8 +35,7 @@
 // drained, it answers nothing again.
 
 #include "gate_listener.h"
-#include <net/title/title_identity.h>
-#include <base/gameprofile/gameprofile.h>
+#include <net/protocol/protocol.h>
 #include "net_sockets.h"
 #include "program/server_config.h"
 
@@ -66,10 +65,10 @@
 namespace net = opennova::net;
 namespace nws = opennova::novaworld_server;
 
-// The JO and JO demo titles' gate tags (net/title/title_identity.h), the probes' payloads.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
-static const opennova::TitleIdentity &kJoDemo =
-		*opennova::title_identity(opennova::gameprofile::GAME_JO_DEMO);
+// The JO and JO demo titles' gate tags (net/protocol/protocol.h), the probes' payloads.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
+static const opennova::Protocol &kJoDemo =
+		*opennova::title_protocol("jodemo");
 
 namespace {
 
@@ -129,7 +128,7 @@ constexpr const char *kAcidGambitQuery =
 
 // One lobby's answer: its LobbyName, startupurl query and GLSVSS leg (an
 // empty request: none), and whether its title's live reply is witnessed
-// (TitleIdentity::gate_reply_witnessed: JO's and DFX2's, not the JO demo's).
+// (Protocol::gate_reply_witnessed: JO's and DFX2's, not the JO demo's).
 struct Lobby {
 	std::string name;
 	std::string query;
@@ -337,12 +336,13 @@ int main(int argc, char **argv) {
 		const uint16_t lport = later.bound_port();
 		TEST_EXPECT(!probe_text(lport, "mygame:0", 400).has_value());
 		pool.acquire()->exec(
-				"INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
-				"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+				"INSERT INTO games (slug, display_name, lobby_name, gate_tag, protocol, "
+				"start_page, "
+				"host_page, gsb_path, join_lan_url, exp_bits, pfid, startup_query, "
 				"glsvss_request, glsvss_rims, glsvss_agrms) "
-				"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', title, "
-				"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, "
-				"pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+				"SELECT 'mygame_0_consumer', 'My game', 'mygame_0_consumer', 'mygame:0', protocol, "
+				"start_page, host_page, 'mygame_0.gsb?a=1', join_lan_url, exp_bits, pfid, "
+				"startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
 				"WHERE slug = 'acidgambit_0_consumer';");
 		const Lobby mine{ "mygame_0_consumer", kAcidGambitQuery, "", "", "", true };
 		if (expect_lobby(lport, "mygame:0", mine) != 0)

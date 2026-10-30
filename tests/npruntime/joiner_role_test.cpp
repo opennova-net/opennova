@@ -9,8 +9,7 @@
 // requests and the matching seat overlays run through the production frame.
 
 #include <net/npwire/ingame_decode.h>
-#include <base/gameprofile/gameprofile.h>
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
@@ -75,8 +74,8 @@
 #include <vector>
 #include "../common/test_expect.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -170,7 +169,8 @@ struct Harness {
 		kernel->world.registry.configure_pool(0, 16);
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("BridgeJoiner", inmatch::JoinRole::Player, "", "");
 		role.kit_seams.apply_authoritative = [this] { seams.push_back("loadout"); };
 		role.kit_seams.reseed_on_side_change = [this] {
@@ -1596,6 +1596,10 @@ bool run_replica_turret_channel() {
  twin.kind = w::EntityKind::Item;
  twin.item_id = 123;
  twin.emplaced_ctrl_publisher = true;
+ // The twin's slot Def, its class init's bind: the window's fallback reads it.
+ world.tables.weapons.entries.resize(2);
+ world.tables.weapons.entries[1].valid = true;
+ twin.primary_weapon_slot_adm = 1;
  auto &state = h.role.runtime->state();
  if (!expect(test_common::materialize_twin(h.role.materializer(), state, world, 1, twin,
      EntityClass::NoNetworkCallback).packed == 0x1000,

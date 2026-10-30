@@ -4,9 +4,10 @@
 #include <cstring>
 #include <iterator>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/json.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
+#include <base/version/version_line.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
@@ -18,6 +19,8 @@
 #include <editor/ui/novaworld_put_dialog.h>
 #include <editor/ui/novaworld_window.h>
 #include <editor/ui/ui_kit.h>
+
+#include <net/protocol/protocol.h>
 
 #include <imgui.h>
 
@@ -175,10 +178,47 @@ const RemoteGame *novaworld_game(const NovaWorldView &novaworld, const std::stri
 	return nullptr;
 }
 
-// A game's name by its gameprofile code (Joint Operations), JO's for none.
+// A game's name by its title code (Joint Operations), the default title's for none.
 std::string game_name(const std::string &code) {
-	const gameprofile::GameProfile *profile = gameprofile::gameprofile_by_code(code.empty() ? kDefaultTargetGame : code.c_str());
-	return profile && profile->display_name ? profile->display_name : code;
+	const Title *title = code.empty() ? &default_title() : title_by_code(code);
+	return title && title->display_name ? title->display_name : code;
+}
+
+// The protocol title `code` speaks, in words ("JO protocol 16"); "" for a title with no complete protocol
+// (title_versions).
+std::string protocol_line(const std::string &code) {
+	Versions versions;
+	title_versions(code, versions);
+	return versions.protocol.empty() ? std::string() : versions.protocol + " protocol " + versions.protocol_version;
+}
+
+// A title as Runs as offers it: "Joint Operations · JO protocol 16", its name alone with no complete protocol.
+std::string runs_as_option(const std::string &code) {
+	const std::string protocol = protocol_line(code);
+	return protocol.empty() ? game_name(code) : game_name(code) + " \xC2\xB7 " + protocol;
+}
+
+// A name's possessive: "Delta Force Xtreme 2's", "Joint Operations'".
+std::string possessive(const std::string &name) {
+	return !name.empty() && (name.back() == 's' || name.back() == 'S') ? name + "'" : name + "'s";
+}
+
+// The titles that speak the protocol title `code` speaks (the one Protocol object: OP: Acid Gambit speaks JO's), by
+// name in the registry's order, joined "and": "Joint Operations and OP: Acid Gambit"; the title's own name where it
+// speaks none.
+std::string plays_with(const std::string &code) {
+	const Protocol *protocol = title_protocol(code);
+	std::vector<std::string> names;
+	for (size_t i = 0; protocol && i < title_count(); ++i) {
+		const Title *title = title_at(i);
+		if (title && title->code && title->display_name && title_protocol(title->code) == protocol)
+			names.push_back(title->display_name);
+	}
+	if (names.empty()) return game_name(code);
+	std::string out;
+	for (size_t i = 0; i < names.size(); ++i)
+		out += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
+	return out;
 }
 
 // A NovaWorld project or game in a list: its name, then its key.
@@ -187,10 +227,11 @@ std::string key_words(const std::string &title, const std::string &key) {
 }
 
 // Whether a mod of NovaWorld's game `key` is made on a project imported from the game install, as the session's
-// make_base takes it: a retail game's (its files the install's), or one the account may not read (never listed).
+// make_base takes it: NovaLogic's game's (its files the install's), or one the account may not read
+// (never listed).
 bool base_from_install(const NovaWorldView &novaworld, const std::string &key) {
 	const RemoteProject *project = listed_project(novaworld, key);
-	return !project || project->retail;
+	return !project || novalogic_project(*project);
 }
 
 // A mod's short name as NovaWorld takes one (the service's expansion code): 1 to 8 of a-z and 0-9.
@@ -215,7 +256,7 @@ std::string new_game_title(const WorkspaceView::NewProject &form, const NovaWorl
 	return !form.game.empty() || novaworld.titles.empty() ? form.game : novaworld.titles.front();
 }
 
-// What the form's choice comes to: the game install it needs (`install_game` its gameprofile code, "" none: a mod
+// What the form's choice comes to: the game install it needs (`install_game` its title code, "" none: a mod
 // of a game NovaWorld gives, a new game), what it makes in a line (a Set up...'s summary), and why it cannot be
 // made yet ("" it can).
 struct Chosen {
@@ -245,7 +286,9 @@ Chosen chosen_of(const WorkspaceView::NewProject &form, const NovaWorldView &nov
 			out.why = "NovaWorld lists no title yet: Refresh its list.";
 			break;
 		}
-		out.words = "A game for " + game_name(title) + ", named " + form.title;
+		const std::string protocol = protocol_line(title);
+		out.words = form.title + ", a game that runs as " + game_name(title) +
+		            (protocol.empty() ? std::string() : " (" + protocol + ")");
 		break;
 	}
 	}
@@ -403,13 +446,15 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		}
 		case Making::Game: {
 			const std::string title = new_game_title(form, novaworld);
-			if (ImGui::BeginCombo("A game for", title.empty() ? "No title listed" : game_name(title).c_str())) {
+			if (ImGui::BeginCombo("Runs as", title.empty() ? "No title listed" : runs_as_option(title).c_str())) {
 				for (const std::string &each : novaworld.titles)
-					if (ImGui::Selectable(game_name(each).c_str(), each == title) && each != title)
+					if (ImGui::Selectable(runs_as_option(each).c_str(), each == title) && each != title)
 						set("game", io::JsonValue::make_string(each));
 				ImGui::EndCombo();
 			}
-			ui_kit::tooltip("The game it runs as: its menus, its wire and its updater are that game's.");
+			if (!title.empty())
+				ui_kit::tooltip("Its rules and its protocol are " + possessive(game_name(title)) + ": it plays with " +
+				                plays_with(title) + " players.");
 			name_field();
 			break;
 		}
@@ -502,23 +547,28 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			if (form.making == Making::Game) {
 				const std::string game = new_game_title(form, novaworld);
 				const RemoteLobby *chosen_lobby = nullptr;
-				for (const auto &lobby : novaworld.lobbies)
-					if (lobby.slug == form.lobby && lobby.title == game)
+				bool any = false;
+				for (const auto &lobby : novaworld.lobbies) {
+					any = any || lobby_speaks(lobby, game);
+					if (lobby.slug == form.lobby && lobby_speaks(lobby, game))
 						chosen_lobby = &lobby;
+				}
 				if (ImGui::BeginCombo("Lobby",
 							chosen_lobby ? chosen_lobby->display_name.c_str()
 										 : "Create a separate lobby")) {
 					if (ImGui::Selectable("Create a separate lobby", form.lobby.empty()))
 						set("lobby", io::json_string(""));
 					for (const auto &lobby : novaworld.lobbies)
-						if (lobby.title == game &&
+						if (lobby_speaks(lobby, game) &&
 								ImGui::Selectable((lobby.display_name + "##" + lobby.slug).c_str(),
 										lobby.slug == form.lobby))
 							set("lobby", io::json_string(lobby.slug));
+					if (!any)
+						ImGui::TextDisabled("No lobbies for this protocol");
 					ImGui::EndCombo();
 				}
 				if (!form.lobby.empty() && !chosen_lobby)
-					why = "Choose a lobby for this game's title.";
+					why = "Choose a lobby for this game's protocol.";
 				if (form.lobby.empty()) {
 					lobby_name_.follow(form.new_lobby_name);
 					if (ImGui::InputTextWithHint("Lobby name", form.title.c_str(), lobby_name_.text,

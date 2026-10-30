@@ -38,10 +38,9 @@
 #include <runtime/mission/mission_kernel.h>
 #include <base/io/le.h>
 #include <base/gameprofile/game_type.h>
-#include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_server.h> // AdminSession
-#include <net/title/title_identity.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
 
@@ -63,8 +62,8 @@
 #include <vector>
 #include "../common/test_expect.h"
 
-// JO's title identity (net/title/title_identity.h), the identity these tests speak.
-static const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+// JO's title identity (net/protocol/protocol.h), the identity these tests speak.
+static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
 namespace {
 
@@ -163,7 +162,7 @@ struct Harness {
 	// released mission start right after the 0x1A's frame (push_released_mission_start).
 	bool load_declared = false;
 
-	Harness() { client.set_title(&kJo); }
+	Harness() { client.set_protocol(&kJo); }
 
 	// One client frame on the 16 ms clock, with `incoming` delivered first.
 	std::vector<std::vector<uint8_t>> frame(
@@ -867,12 +866,13 @@ struct RoleHarness {
 		kernel->world.load_systems();
 		role.bind(*kernel);
 		role.set_socket(&socket, PeerAddr{});
-		role.set_title(&kJo);
+		role.set_protocol(&kJo);
+		role.set_rules(opennova::world::title_rules("jo"));
 		role.create_runtime("LoadingPump", inmatch::JoinRole::Player, "", "");
 		// The role's runtime on the virtual clock, configured as create_runtime does.
 		role.runtime = std::make_unique<inmatch::ClientRuntime>(
 				"LoadingPump", [this] { return now_ms; });
-		role.runtime->set_title(&kJo);
+		role.runtime->set_protocol(&kJo);
 		role.runtime->set_weapon_table(&kernel->world.tables.weapons);
 		return *role.runtime;
 	}
@@ -1963,6 +1963,7 @@ bool run_the_joiner_mission_start_keeps_the_folded_round_clock() {
 	inmatch::RemoteAdminConsoles consoles;
 	inmatch::AdminConsole::Seams seams;
 	seams.config_block = &cfg;
+	seams.config_title = opennova::title_by_code("jo");
 	inmatch::RemoteAdminBinding joined;
 	joined.client = &h.client;
 	joined.session = 1;

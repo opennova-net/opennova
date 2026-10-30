@@ -3,6 +3,8 @@
 
 import type { ServerAddress } from './addresses';
 import type { TierNumber } from './billing';
+import type { ServerOptions, ServerSetting, ServerWeapon } from '../utils/serverConfiguration';
+import type { Protocol } from './products';
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
@@ -38,12 +40,19 @@ export interface HostedSettings {
   respawn: number;
   start_delay: number;
   team_ff: boolean;
+  // Launch-time network tuning. Send periods count 16 ms logic ticks; 0 and 1 send every tick.
+  send_holdoff_ticks: number;
+  entity_send_budget: number;
+  max_packet_size: number;
+  lock_framerate: boolean;
   // The server is also listed on NovaLogic's NovaWorld, not only on
   // OpenNova's; a start may ask for it only while the service offers it
   // (HostedServersResponse.novalogic_listing).
   list_on_novalogic: boolean;
   // The rotation in play order: the first is the map the server starts on.
   missions: string[];
+  mission_options?: boolean[];
+  options?: ServerOptions;
 }
 
 // The settings in POST /api/me/servers's body: every field but game_name may
@@ -84,19 +93,21 @@ export interface HostedExpansionOption {
   display_name: string;
   version: string;
   missions: HostedMission[];
+  weapons?: ServerWeapon[];
 }
 
 // A base game the service offers hosted servers of (one with a ready
-// current tree; ADR 0064): the title it speaks, the version of its current
+// current tree; ADR 0064): the title it runs as, the version of its current
 // tree, the missions that tree holds, its expansions and the host screen's
 // ranges.
 export interface HostedProduct {
   // The value of HostedSettings.product_id.
   id: number;
   display_name: string;
-  // The title it speaks ('jo', 'dfx2').
+  // The title it runs as ('jo', 'dfx2', 'acidgambit') and the protocol that title speaks.
   title: string;
-  // Its current tree's version.txt.
+  protocol?: Protocol | null;
+  // Its current tree's game version: the release it was built from ('0.1.4').
   version: string;
   // The missions a rotation may hold (with an expansion's), in catalog order;
   // a start naming none takes all of them.
@@ -107,15 +118,19 @@ export interface HostedProduct {
   // Whether a server on it may also list on NovaLogic's NovaWorld (Joint
   // Operations alone). A reply that leaves it out reads as false.
   novalogic_listing?: boolean;
+  settings_schema?: ServerSetting[];
+  weapons?: ServerWeapon[];
 }
 
 // A game a server runs, as its row names it: its key (JO, ACIDGAMBIT) and
-// the title it speaks on the wire (jo, dfx2).
+// the title it runs as (jo, dfx2, acidgambit).
 export interface HostedServerProduct {
   id: number;
   key: string;
   title: string;
   display_name: string;
+  // The protocol its title speaks.
+  protocol?: Protocol | null;
 }
 
 export interface HostedServerExpansion {

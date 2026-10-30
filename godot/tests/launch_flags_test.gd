@@ -10,10 +10,10 @@ func after_each() -> void:
 	LaunchFlags.clear_args_override()
 
 
-func test_product_defaults_to_opennova_with_an_explicit_compatibility_profile() -> void:
+func test_product_defaults_to_opennova_as_its_own_title() -> void:
 	LaunchFlags.set_args_override(PackedStringArray([]))
 	assert_eq(LaunchFlags.product(), "acidgambit")
-	assert_eq(LaunchFlags.game(), "jo")
+	assert_eq(LaunchFlags.game(), "acidgambit")
 	assert_true(LaunchFlags.product_supported())
 	assert_false(LaunchFlags.no_update())
 	assert_false(LaunchFlags.after_update())
@@ -25,12 +25,12 @@ func test_product_defaults_to_opennova_with_an_explicit_compatibility_profile() 
 	assert_true(LaunchFlags.no_update())
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "acidgambit"]))
 	assert_eq(LaunchFlags.product(), "acidgambit")
-	assert_eq(LaunchFlags.game(), "jo")
+	assert_eq(LaunchFlags.game(), "acidgambit")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "unknown"]))
 	assert_false(LaunchFlags.product_supported())
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx"]))
 	assert_false(LaunchFlags.product_supported())
-	assert_eq(LaunchFlags.game(), "dfx", "format tools can still name other engine profiles")
+	assert_eq(LaunchFlags.game(), "dfx", "format tools can still name other titles")
 	LaunchFlags.set_args_override(PackedStringArray(["/game"]))
 	assert_false(LaunchFlags.product_supported())
 
@@ -43,7 +43,7 @@ func test_a_launch_without_game_takes_its_folders_wizard() -> void:
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
 	assert_eq(LaunchFlags.launch_directory(), dir)
 	assert_eq(LaunchFlags.product(), "acidgambit", "no wizard: OpenNova's own folder")
-	for row in [["JOPTR.CMD", "jo", "jo"], ["DFX2.CMD", "dfx2", "dfx2"], ["ACIDGAMBIT.CMD", "acidgambit", "jo"]]:
+	for row in [["JOPTR.CMD", "jo", "jo"], ["DFX2.CMD", "dfx2", "dfx2"], ["ACIDGAMBIT.CMD", "acidgambit", "acidgambit"]]:
 		TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=%s\r\n" % row[0])
 		assert_eq(LaunchFlags.product(), row[1], row[0])
 		assert_eq(LaunchFlags.game(), row[2], row[0])
@@ -52,7 +52,7 @@ func test_a_launch_without_game_takes_its_folders_wizard() -> void:
 	assert_eq(LaunchFlags.product(), "")
 	assert_false(LaunchFlags.product_supported())
 	assert_false(LaunchFlags.game_given())
-	assert_eq(LaunchFlags.game(), "jo", "a foreign folder still resolves an engine profile")
+	assert_eq(LaunchFlags.game(), "acidgambit", "a foreign folder still resolves a title: the default")
 	LaunchFlags.set_args_override(PackedStringArray(["/game", "jo", "--resource-dir", dir]))
 	assert_true(LaunchFlags.game_given())
 	assert_eq(LaunchFlags.product(), "jo")
@@ -86,6 +86,43 @@ func test_a_player_games_folder_plays_its_game() -> void:
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
 	assert_eq(LaunchFlags.product_command_file(), "DFBHD.CMD",
 			"a foreign folder's, what its wizard names")
+	TestFs.remove_dir_recursive(dir)
+
+
+# The product's installed release is its command file's VERSION in the launch folder (the file the
+# updater's version mark reads), and the version line names it with the product, ONE's build and
+# the protocol its title speaks; a launch with no such file names no release, a title whose
+# protocol is unwitnessed no protocol.
+func test_the_product_version_and_the_version_line() -> void:
+	var dir := TestFs.cache_dir(self, "launch_product_version")
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
+	assert_eq(LaunchFlags.product_version(), "", "no command file: no release")
+	var line := LaunchFlags.version_line()
+	assert_true(line.begins_with("OP: Acid Gambit · ONE "), line)
+	var acid := "[HEADER]\r\nPRODUCT=OP: Acid Gambit\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n"
+	TestFs.write_text(self, dir.path_join("ACIDGAMBIT.CMD"), acid)
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
+	assert_eq(LaunchFlags.product_version(), "0.1.4")
+	line = LaunchFlags.version_line()
+	assert_true(line.begins_with("OP: Acid Gambit 0.1.4 · ONE "), line)
+	assert_true(line.ends_with(" · JO protocol 16"), "OP: Acid Gambit speaks JO's protocol")
+	var jo := "[HEADER]\r\nVERSION=1.0.1\r\n\r\n[COMMAND]\r\n"
+	TestFs.write_text(self, dir.path_join("UPDATE.WIZ"), "[HEADER]\r\nCMD=JOPTR.CMD\r\n")
+	TestFs.write_text(self, dir.path_join("JOPTR.CMD"), jo)
+	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", dir]))
+	assert_eq(LaunchFlags.product_version(), "1.0.1")
+	line = LaunchFlags.version_line()
+	assert_true(line.begins_with("Joint Operations 1.0.1 · ONE "), line)
+	assert_true(line.ends_with(" · JO protocol 16"), "the protocol JO speaks, its PV2")
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx2", "--resource-dir", dir]))
+	assert_eq(LaunchFlags.product_version(), "", "another game's command file is not in the folder")
+	line = LaunchFlags.version_line()
+	assert_true(line.begins_with("Delta Force Xtreme 2 · ONE "), line)
+	assert_true(line.ends_with(" · DFX2 protocol 16"), line)
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "jodemo", "--resource-dir", dir]))
+	line = LaunchFlags.version_line()
+	assert_true(line.begins_with("Joint Operations (Demo) · ONE "), line)
+	assert_false(line.contains("protocol"), "the demo's protocol is unwitnessed: no protocol part")
 	TestFs.remove_dir_recursive(dir)
 
 

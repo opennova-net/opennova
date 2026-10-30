@@ -105,6 +105,7 @@ void ConsoleRoutes::set_handler_threads(size_t threads) {
 void ConsoleRoutes::register_routes(WebApp &app) {
 	register_owner(app);
 	register_admin(app);
+	register_configuration(app);
 }
 
 std::optional<crow::response> ConsoleRoutes::check_server(
@@ -328,9 +329,10 @@ std::optional<std::vector<std::string>> ConsoleRoutes::run(const Caller &c, cons
 			log(result.sent ? "admin_timeout (sent)" : "admin_timeout (dropped)");
 			crow::json::wvalue out;
 			out["error"] = "admin_timeout";
-			out["message"] = result.sent ? "the server did not answer in time; the command went out"
+			out["message"] = result.delivery_unknown ? "The command is still pending or its delivery is uncertain. Reload before retrying." : result.sent ? "the server did not answer in time; the command went out"
 										 : "the server did not answer in time; the command was not sent";
 			out["sent"] = result.sent;
+			out["delivery_unknown"] = result.delivery_unknown;
 			refusal = json_reply(504, out);
 			return std::nullopt;
 		}
@@ -342,6 +344,14 @@ std::optional<std::vector<std::string>> ConsoleRoutes::run(const Caller &c, cons
 			return std::nullopt;
 		case AdminCommandOutcome::LinkDown:
 		case AdminCommandOutcome::Stopped:
+			if (result.sent || result.delivery_unknown) {
+				crow::json::wvalue out;
+				out["error"] = "delivery_unknown";
+				out["message"] = "The result is uncertain. Reload saved settings and live state before retrying.";
+				out["sent"] = result.sent; out["delivery_unknown"] = true;
+				refusal = json_reply(503, out);
+				return std::nullopt;
+			}
 			return unavailable("admin_unavailable", "the server's admin link is not up; try again shortly");
 	}
 	const ConsoleOutcome outcome = console_outcome(command.verb, result.replies);
@@ -536,23 +546,6 @@ crow::response ConsoleRoutes::chat_send(const Caller &c, const ConsoleCommand &c
 	return json_reply(200, out);
 }
 
-crow::response ConsoleRoutes::settings(const Caller &c) {
-	std::optional<crow::response> refusal;
-	const auto replies = run(c, *console_command(ConsoleVerb::GameSettings), refusal);
-	if (!replies) return std::move(*refusal);
-	std::vector<crow::json::wvalue> rows;
-	for (const auto &row : admin_parse_game_settings(replies->front())) {
-		crow::json::wvalue e;
-		e["key"] = utf8(row.first);
-		e["value"] = utf8(row.second);
-		rows.push_back(std::move(e));
-	}
-	crow::json::wvalue out;
-	out["server_id"] = c.server_id;
-	out["settings"] = std::move(rows);
-	return no_store(json_reply(200, out));
-}
-
 // The server's console ring (hosted_server_console) and its link's status: the
 // newest `limit` lines (kConsoleLinesShown by default, kConsoleKeep at most)
 // with an id past `after` (0), oldest first. No admin traffic.
@@ -676,11 +669,16 @@ void ConsoleRoutes::register_owner(WebApp &app) {
 				if (!body) return json_error(400, "invalid_json");
 				const auto mission = body->text("mission");
 				const bool swap_sides = body->flag("swap_sides").value_or(false);
+				const auto insert_at = body->integer("insert_at");
+				const bool one_shot = body->flag("one_shot").value_or(false);
 				if (body->wrong_type()) return json_error(400, "invalid_field");
 				if (!mission) return json_error(400, "missing_field", "\"mission\" (a .bms file name) is required");
 				ConsoleRefusal why;
-				const auto command = console_mission_add(*mission, swap_sides, why);
+				auto command = console_mission_add(*mission, swap_sides, why);
 				if (!command) return refused(why);
+				if (insert_at && (*insert_at < 0 || *insert_at > kConsoleRotationMax))
+					return json_error(400, "invalid_index");
+				if (insert_at || one_shot) command->line += " " + std::to_string(insert_at.value_or(kConsoleRotationMax)) + (one_shot ? " ONESHOT" : "");
 				Caller c = owner_caller(*access.user, id, true, true);
 				if (c.refusal) return std::move(*c.refusal);
 				return rotation_add(c, *command, *mission);
@@ -809,11 +807,16 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 				if (!body) return json_error(400, "invalid_json");
 				const auto mission = body->text("mission");
 				const bool swap_sides = body->flag("swap_sides").value_or(false);
+				const auto insert_at = body->integer("insert_at");
+				const bool one_shot = body->flag("one_shot").value_or(false);
 				if (body->wrong_type()) return json_error(400, "invalid_field");
 				if (!mission) return json_error(400, "missing_field", "\"mission\" (a .bms file name) is required");
 				ConsoleRefusal why;
-				const auto command = console_mission_add(*mission, swap_sides, why);
+				auto command = console_mission_add(*mission, swap_sides, why);
 				if (!command) return refused(why);
+				if (insert_at && (*insert_at < 0 || *insert_at > kConsoleRotationMax))
+					return json_error(400, "invalid_index");
+				if (insert_at || one_shot) command->line += " " + std::to_string(insert_at.value_or(kConsoleRotationMax)) + (one_shot ? " ONESHOT" : "");
 				Caller c = admin_caller(access, id, true);
 				if (c.refusal) return std::move(*c.refusal);
 				return rotation_add(c, *command, *mission);

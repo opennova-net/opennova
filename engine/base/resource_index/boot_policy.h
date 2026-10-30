@@ -11,8 +11,8 @@
 //   /game <code>  the product: "acidgambit", "jo", "dfx2", or the launch folder's
 //                 player game by its login (ADR 0074). Without it the launch
 //                 folder's UPDATE.WIZ names it (folder_product below); a folder
-//                 with no wizard is OpenNova's. OpenNova uses JO's engine profile,
-//                 a player's game its wizard's GAME.
+//                 with no wizard is OpenNova's, run as its own title (the default,
+//                 base/title/title.h), a player's game as its wizard's GAME.
 //   --no-update  disable update checks and the updater's launch (editor Play and tests).
 //   --after-update
 //                 the launch update.exe relaunches after a first-run install: a game
@@ -115,6 +115,12 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <base/version/version.h>
+
+namespace opennova::update {
+struct UpdateWizard; // formats/update/update_wizard.h
+} // namespace opennova::update
 
 namespace opennova {
 
@@ -396,19 +402,34 @@ bool launch_token_breaks_at(char c);
 std::string launch_expansion_name(const std::string &token);
 // A launch flag always wins over a persisted (possibly stale) fallback.
 std::string launch_expansion(const LaunchFlags &flags, const std::string &fallback);
-// The engine compatibility profile: `/game`'s, else `fallback`'s, OpenNova's
-// own using JO's. The runtime's is its launch product's (launch_product);
+// The title the launch runs as (a title code): `/game`'s, else `fallback`'s, else the default
+// title's (OP: Acid Gambit's). The runtime's is its launch product's (launch_product);
 // format/tool callers pass their own fallback.
 std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
+// The product a wizard names. A stock title's by its CMD (the title whose command_file it is,
+// ASCII case-blind, as the updater opens the file: JO's, DFX2's, OP: Acid Gambit's); a player's
+// game (ADR 0074) by any other CMD with GAME a stock title ("jo", "dfx2", "acidgambit": a title with
+// a command file) and a login: its login, lower-cased,
+// the way /game names it. A wizard naming another game (BHD's DFBHD.CMD, an expansion's
+// JOEPTR.CMD) names none: `product` empty.
+struct WizardProduct {
+    std::string product; // a title's code ("jo", "dfx2", "acidgambit") or a player game's login, lower-cased
+    std::string game; // the title it runs as: a stock title's own code, a player game's GAME
+    // OpenNova's own: every release is a whole install, its rows all installed (D-UPD-6). OP:
+    // Acid Gambit (a title with no program of its own) and a player's game; JO's and DFX2's are
+    // retail's.
+    bool native = false;
+};
+WizardProduct wizard_product(const update::UpdateWizard &wizard);
 // The product a game folder holds, from its UPDATE.WIZ (the file found
 // case-insensitively): JO's, DFX2's, OP: Acid Gambit's or a player's game
-// (formats/update/update_wizard.h wizard_product). A folder with no wizard (a
+// (wizard_product). A folder with no wizard (a
 // fresh download, an authoring export, a test root) holds none; a wizard naming
 // a game OpenNova does not play (BHD's DFBHD.CMD) is foreign. ADR 0067 d2,
 // ADR 0074.
 struct FolderProduct {
     std::string product; // wizard_product's: "jo", "dfx2", "acidgambit", a player game's login
-    std::string game;    // its engine profile, wizard_product's
+    std::string game;    // the title it runs as, wizard_product's
     std::string command; // the wizard's CMD ("" with no wizard)
     // A player game's name: its installed command file's PRODUCT, else its login as the
     // wizard writes it (a fresh download holds no command file yet); "" for the others.
@@ -421,8 +442,7 @@ FolderProduct folder_product(const std::string &dir);
 // foreign folder. Nothing persisted ever selects it.
 struct LaunchProduct {
     std::string product; // "acidgambit", "jo", "dfx2", a player game's; "" for a foreign folder
-    // The engine profile it runs as: the folder's own when it is the folder's product, else
-    // launch_game's.
+    // The title it runs as: the folder's when it is the folder's product, else launch_game's.
     std::string game;
     // Its command file: the folder's wizard's CMD when the launch takes the folder's product (or
     // the folder is foreign: what its wizard names), else the stock product's.
@@ -435,6 +455,12 @@ struct LaunchProduct {
     bool supported = false;
 };
 LaunchProduct launch_product(const LaunchFlags &flags, const FolderProduct &folder);
+// The release of the launch's product installed in the launch directory `dir`: the [HEADER]
+// VERSION of its command file there (`dir`/product.command), the file the updater's version mark
+// reads (apps/update/client.cpp version_mark), so the runtime names the release the updater
+// sees. nullopt when that file is absent or names no VERSION Version::parse takes (a Play run, a
+// hosted tree, a /game launched in another game's folder). The runtime reads it once, at boot.
+std::optional<Version> launch_product_version(const std::string &dir, const LaunchProduct &product);
 // `dir/name`, with an empty dir yielding the bare name and a trailing
 // separator not doubled.
 std::string boot_path_join(const std::string &dir, const std::string &name);

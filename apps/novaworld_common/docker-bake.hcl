@@ -20,6 +20,16 @@ variable "GHA_CACHE" {
   default = ""
 }
 
+# CI supplies the already tested native build and portal dist. Empty contexts
+# preserve ordinary developer builds from source.
+variable "SERVICE_CONTEXT" {
+  default = ""
+}
+
+variable "PORTAL_CONTEXT" {
+  default = ""
+}
+
 function "cache_from" {
   params = [scope]
   result = GHA_CACHE != "" ? ["type=gha,scope=${scope}"] : []
@@ -28,6 +38,25 @@ function "cache_from" {
 function "cache_to" {
   params = [scope]
   result = GHA_CACHE == "readwrite" ? ["type=gha,scope=${scope},mode=min"] : []
+}
+
+# ONE's stamp for standalone source builds (engine/base/version/one_build.h,
+# the Dockerfile's ARGs). CI's prebuilt bundle already carries its shared stamp.
+# Empty (a local bake) builds 0.0.0 with no commit.
+variable "OPENNOVA_VERSION" {
+  default = ""
+}
+
+variable "OPENNOVA_COMMIT" {
+  default = ""
+}
+
+variable "OPENNOVA_BUILD_TIME" {
+  default = "0"
+}
+
+variable "OPENNOVA_STAGING" {
+  default = "OFF"
 }
 
 group "default" {
@@ -46,6 +75,13 @@ target "meta-backup" {}
 target "_program" {
   context    = "."
   dockerfile = "apps/novaworld_common/Dockerfile"
+  args = {
+    OPENNOVA_VERSION    = OPENNOVA_VERSION
+    OPENNOVA_COMMIT     = OPENNOVA_COMMIT
+    OPENNOVA_BUILD_TIME = OPENNOVA_BUILD_TIME
+    OPENNOVA_STAGING    = OPENNOVA_STAGING
+  }
+  contexts   = SERVICE_CONTEXT != "" ? { build = SERVICE_CONTEXT } : {}
 }
 
 target "gate" {
@@ -95,6 +131,7 @@ target "portal" {
   inherits   = ["meta-portal"]
   context    = "web"
   dockerfile = "Dockerfile"
+  contexts   = PORTAL_CONTEXT != "" ? { build = PORTAL_CONTEXT } : {}
   cache-from = cache_from("novaworld-web")
   cache-to   = cache_to("novaworld-web")
 }

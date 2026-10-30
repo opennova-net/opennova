@@ -13,6 +13,7 @@
 // db::Error on a database failure. Service policy, not a port.
 
 #include "program/catalog_repository.h"
+#include <formats/gamecfg/game_cfg.h>
 
 #include <net/novaworld/db/database.h>
 
@@ -39,7 +40,7 @@ struct ProductRow {
 	ProductKind kind = ProductKind::Game;
 	std::optional<int64_t> parent_id; // an expansion's base game
 	std::string expansion_code; // an expansion's /exp code: "jox01"
-	std::string title; // a game's gameprofile code: "jo", "dfx2"
+	std::string title; // a game's title code: "jo", "dfx2", "acidgambit"
 	std::string lobby; // a game's games slug (its lobby; "" for none)
 	// Durable once a game with a lobby, or its expansion, starts a release build: the selection is
 	// fixed (a game without one may still take one, locked or not).
@@ -49,15 +50,12 @@ struct ProductRow {
 	// The login its stock UPDATE.WIZ names before the territory ("JOTRqq"; "" when it is
 	// updater_login itself).
 	std::string wizard_login;
-	// A retail game (NovaLogic's install): its updater's SERVER.LST names ftp.novaworld.com, and
-	// its project's revision 1 is the stock install.
-	bool retail = false;
 	// Its project (project_repository.h), a game's and an expansion's alone: who may read it
 	// ("public", "private"; "" for an app) and its newest revision (0 before the first push).
 	std::string visibility;
 	int64_t head = 0;
-	// The account whose own project it is (a game or an expansion an account made: never an app,
-	// never a retail game) and that account's username; none for the service's own.
+	// The account whose own project it is (a game or an expansion an account made: never an app)
+	// and that account's username; none for the service's own.
 	std::optional<int64_t> owner_id;
 	std::string owner;
 	// The updater product as its packages name it (the command file's PRODUCT) and the executable
@@ -67,6 +65,9 @@ struct ProductRow {
 	// Its file's stable name on the downloads host ("" for none) and the words beside it.
 	std::string download;
 	std::string description;
+	// An expansion's version.txt line where its row names one (Escalation's retail line), else ""
+	// (tree_files.h expansion_version_file: its display name and the release's version).
+	std::string version_file;
 	std::optional<int64_t> current_tree_id;
 	std::optional<int64_t> published_release_id;
 	std::string created_by;
@@ -97,6 +98,7 @@ struct ProductTree {
 	std::string version_text;
 	std::vector<TreeFile> files;
 	std::vector<TreeMission> missions;
+	gamecfg::WeaponRoster weapons;
 	int64_t bytes = 0;
 	std::string error;
 	std::string created_by;
@@ -146,6 +148,10 @@ struct ReleaseRow {
 	std::string build_log;
 	// Why an admin sent it back to draft from awaiting its approval ("" for none).
 	std::string review_note;
+	// The ONE (CONTEXT.md "ONE") that built it from a revision: the data program's
+	// one_build().version ("0.0.22"); "" for an upload, an app's packed build and a release built
+	// before the column (NULL).
+	std::string one_version;
 };
 
 struct ReleaseSection {
@@ -185,7 +191,6 @@ struct NewProduct {
 	std::string new_lobby_name;
 	std::string updater_login;
 	std::string command_file;
-	bool retail = false;
 	// Its file's name on the downloads host ("" for none; an account's own game's own_download).
 	std::string download;
 	// Its key and its project's visibility (an admin makes games and expansions alone, each with
@@ -193,8 +198,8 @@ struct NewProduct {
 	std::string key;
 	std::string visibility;
 	std::string created_by;
-	// The account whose own project it is (a game or an expansion, never a retail one); none for
-	// the service's own, an admin's.
+	// The account whose own project it is (a game or an expansion); none for the service's own,
+	// an admin's.
 	std::optional<int64_t> owner_id;
 };
 
@@ -230,7 +235,6 @@ struct ProductPatch {
 	std::optional<std::string> new_lobby_name;
 	std::optional<std::string> updater_login; // with command_file, both or neither
 	std::optional<std::string> command_file;
-	std::optional<bool> retail;
 	// Its key (a rename moves no object: the store names a project's files by the product's id,
 	// project_repository.h) and its project's visibility (a game's or an expansion's).
 	std::optional<std::string> key;
@@ -271,6 +275,7 @@ struct OfferedExpansion {
 	int64_t tree_id = 0;
 	std::string version;
 	std::vector<TreeMission> missions;
+	gamecfg::WeaponRoster weapons;
 };
 struct OfferedProduct {
 	int64_t id = 0;
@@ -280,6 +285,7 @@ struct OfferedProduct {
 	int64_t tree_id = 0;
 	std::string version;
 	std::vector<TreeMission> missions;
+	gamecfg::WeaponRoster weapons;
 	std::vector<OfferedExpansion> expansions;
 };
 // What the account `caller` may start (none: what any account may): the service's own products,
@@ -317,6 +323,7 @@ bool set_tree_state(db::Database &db, int64_t id, TreeState from, TreeState to,
 struct TreeReady {
 	std::vector<TreeFile> files;
 	std::vector<TreeMission> missions;
+	gamecfg::WeaponRoster weapons;
 	std::string version_text;
 	int64_t bytes = 0;
 };
@@ -333,10 +340,6 @@ void mark_tree_pruned(db::Database &db, int64_t id);
 int count_tree_pins(db::Database &db, int64_t id);
 
 // --- releases ---
-
-// A release's version: one to four numbers between dots ("0.2.0", "1.7.5.8"), as a command
-// file's VERSION reads.
-bool valid_release_version(std::string_view version);
 
 // An uploaded release (uploading): an app's build of version `version` when `product_id` names
 // the app (the release routes'), else a package that names its product once validated.
@@ -358,9 +361,11 @@ struct NewBuiltRelease {
 	std::string version;
 };
 int64_t create_built_release(db::Database &db, const NewBuiltRelease &release);
-// building -> validating, its package uploaded (release_upload_key) and `build_log` kept; false
-// when the row left building.
-bool set_release_built(db::Database &db, int64_t id, const std::string &build_log);
+// building -> validating, its package uploaded (release_upload_key), `build_log` kept and
+// `one_version` recorded (ReleaseRow::one_version: the ONE that built it from a revision, "" for
+// an app's packed upload); false when the row left building.
+bool set_release_built(
+		db::Database &db, int64_t id, const std::string &build_log, const std::string &one_version);
 // building -> invalid with `error` and `build_log`; false when the row left building.
 bool set_release_build_failed(
 		db::Database &db, int64_t id, const std::string &error, const std::string &build_log);
@@ -429,8 +434,7 @@ bool delete_release(db::Database &db, int64_t id);
 void set_section_tree(db::Database &db, int64_t release_id, int64_t product_id, int64_t tree_id);
 
 // What the update listener serves for a product login: the published release's sha (its
-// package's key), the section (by command file and expansion) and where SERVER.LST sends
-// the client.
+// package's key) and the section (by command file and expansion).
 struct PublishedSection {
 	int64_t product_id = 0;
 	int64_t release_id = 0;
@@ -438,7 +442,6 @@ struct PublishedSection {
 	std::string command_file;
 	std::string expansion;
 	std::string sha256;
-	bool retail = false;
 };
 // Every product with a login and a published release, by login.
 std::vector<PublishedSection> published_sections(db::Database &db);
@@ -474,6 +477,8 @@ std::optional<CurrentTrees> current_trees_of(db::Database &db, int64_t product_i
 // "size"}]}`).
 std::string encode_tree_files(const std::vector<TreeFile> &files);
 bool decode_tree_files(std::string_view json, std::vector<TreeFile> &out);
+std::string encode_tree_weapons(const gamecfg::WeaponRoster &weapons);
+bool decode_tree_weapons(std::string_view json, gamecfg::WeaponRoster &out);
 std::string encode_tree_missions(const std::vector<TreeMission> &missions);
 bool decode_tree_missions(std::string_view json, std::vector<TreeMission> &out);
 

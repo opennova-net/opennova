@@ -116,10 +116,12 @@ hosted::TreeSpec spec_of(const Files &files, const std::string &url, const std::
 	return spec;
 }
 
+// A base game's tree holds no version.txt; an expansion's holds the one its release build
+// writes (tree_files.h expansion_version_file: "<name>, V<game version>; English").
 const Files kBase = { { "resource.pff", "RESOURCE" }, { "localres.pff", "LOCAL" },
-	{ "language.pff", "LANG" }, { "version.txt", "1.7.5.3\r\n" } };
+	{ "language.pff", "LANG" } };
 const Files kExpansion = { { "jox01.pff", "ESCALATION" }, { "jox01L.pff", "ESC-L" },
-	{ "version.txt", "1.0.0.1\r\n" } };
+	{ "version.txt", "Escalation, V1.0.0.1; English\r\n" } };
 // Tree 1 is stock JO (on the machine from the start), 2 Escalation, 3 a JO
 // tree whose fetch fails.
 const std::map<int64_t, hosted::TreeSpec> kSpecs = {
@@ -950,10 +952,10 @@ int test_sync() {
 			ra->waiting == hosted::ContainerWait::None);
 	// The machine's one tree stands present in its store, and the report says so.
 	TEST_EXPECT(rig.trees->state_of(1) && rig.trees->state_of(1)->state == hostd::TreeFetchState::Present &&
-			rig.trees->state_of(1)->bytes == 26u);
+			rig.trees->state_of(1)->bytes == 17u);
 	TEST_EXPECT(rig.service.last.trees.size() == 1 &&
 			rig.service.last.trees.at(1).state == hosted::TreeReportState::Ready &&
-			rig.service.last.trees.at(1).bytes == 26u &&
+			rig.service.last.trees.at(1).bytes == 17u &&
 			rig.service.last.trees.at(1).reason.empty());
 	TEST_EXPECT(rig.service.last.image_id == "ami-0123456789abcdef0" &&
 			rig.service.last.log_stream == "hostd/hostd/0123456789abcdef");
@@ -1293,7 +1295,7 @@ int test_trees() {
 	rig.step();
 	TEST_EXPECT(rig.service.reported("srv-1-g1")->state == ContainerState::Running);
 	TEST_EXPECT(rig.trees->state_of(2)->state == hostd::TreeFetchState::Present &&
-			rig.trees->state_of(2)->bytes == 24u);
+			rig.trees->state_of(2)->bytes == 46u);
 	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs);
 
 	// A fetch that fails: the store holds the tree failed with the reason at once,

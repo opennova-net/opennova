@@ -49,9 +49,9 @@ ExpansionPlace route_for_expansion(AssetKind kind);
 // ExpansionPlacement::Folder: `<b>.bin`, the override table, whose path-qualified query no archive
 // entry matches, so only the loose file serves it [orig: TextResource_LoadOverrideTable @ 0x4a49de
 // through File_LoadResource @ 0x75b540], and which serves the Mods list's name and description too,
-// loose first [orig: Expansion_ScanAndRegister @ 0x4a43d0, the search path @ 0x4a4492]; `version.txt`;
-// the music banks), and `gt.ssc`, read loose first from the folder [orig: Mission_LoadEncryptedConfig
-// @ 0x4cdcf4].
+// loose first [orig: Expansion_ScanAndRegister @ 0x4a43d0, the search path @ 0x4a4492]; the music
+// banks), and `gt.ssc`, read loose first from the folder [orig: Mission_LoadEncryptedConfig @ 0x4cdcf4]
+// (NovaWorld's, as the expansion's version.txt is: BuildTarget's, never a project file).
 // With `record`, a file it names whose kind packs into one of the two archives goes into the one it names
 // (Language <b>L.pff, the others <b>.pff), the expansion's own table too, which the rows below would copy
 // loose: the install held it there.

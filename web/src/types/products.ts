@@ -15,6 +15,15 @@
 
 export type ProductKind = 'game' | 'expansion' | 'app';
 
+// A protocol (CONTEXT.md "Protocol"): the in-match wire protocol a title speaks, by its code
+// ('jo'), its label ('JO') and its version, PV2 ('16'): shown as "JO protocol 16" (utils/games.ts
+// protocolWords). Games whose titles speak one protocol share its lobbies.
+export interface Protocol {
+  code: string;
+  name: string;
+  version: string;
+}
+
 export type ProjectVisibility = 'public' | 'private';
 
 // A tree is the internal form of a hosted server's data, built from a
@@ -42,8 +51,11 @@ export interface Product {
   parent_id: number | null;
   // An expansion's /exp code ('jox01'); '' otherwise.
   expansion_code: string;
-  // A game's title ('jo', 'dfx2'); '' for an expansion (it speaks its parent's).
+  // A game's title ('jo', 'dfx2'): the retail game it runs as; '' for an expansion (it runs as
+  // its parent's).
   title: string;
+  // The protocol its title speaks (an expansion's, its parent's); null for an app.
+  protocol: Protocol | null;
   // A game's games slug, the lobby it lists in; '' for an expansion.
   lobby: string;
   lobby_locked: boolean;
@@ -51,9 +63,6 @@ export interface Product {
   // does not serve it.
   updater_login: string;
   command_file: string;
-  // SERVER.LST names NovaLogic's ftp.novaworld.com rather than this service's
-  // update host.
-  retail: boolean;
   // Its key (1 to 16 of A-Z, 0-9 and _: its project's, a game's), who may get
   // its project, and its newest revision (0 before the first push); visibility
   // is null for an app, which has no project.
@@ -72,10 +81,11 @@ export interface Product {
   owner_id: number | null;
 }
 
+// A lobby, one protocol's: the games whose titles speak it list their servers there.
 export interface LobbyOption {
   slug: string;
   display_name: string;
-  title: string;
+  protocol: Protocol;
 }
 
 export interface ProjectLobby extends LobbyOption {
@@ -85,8 +95,11 @@ export interface ProjectLobby extends LobbyOption {
 
 // GET /api/admin/products.
 export interface ProductsResponse {
-  // The titles a game may speak.
+  // The titles a game may run as.
   titles: string[];
+  // The protocol each of `titles` speaks, by the title's code: a new game's lobbies are its
+  // protocol's.
+  protocols?: Record<string, Protocol>;
   // The lobbies a game may list in (the reply's `games`).
   games: LobbyOption[];
   products: Product[];
@@ -103,7 +116,6 @@ export interface NewProduct {
   lobby?: string;
   updater_login?: string;
   command_file?: string;
-  retail?: boolean;
   key?: string;
   visibility?: ProjectVisibility;
 }
@@ -115,7 +127,6 @@ export interface ProductPatch {
   lobby?: string;
   updater_login?: string;
   command_file?: string;
-  retail?: boolean;
   key?: string;
   visibility?: ProjectVisibility;
 }
@@ -131,12 +142,13 @@ export interface Project {
   // The game it runs as ('jo', 'dfx2'): a game's title, an expansion's base
   // game's.
   game: string;
+  // The protocol that title speaks.
+  protocol?: Protocol | null;
   lobby: ProjectLobby | null;
   lobby_locked: boolean;
   // An expansion's short name ('jox01'); '' for a game.
   expansion_code: string;
   visibility: ProjectVisibility;
-  retail: boolean;
   // An expansion's base game's key; null for a game.
   base: string | null;
   product_id: number;
@@ -157,7 +169,9 @@ export interface Project {
 
 export interface ProjectRelease {
   id: number;
+  // Its game version ('0.2.0') and the ONE that built it ('0.0.22').
   version: string;
+  one_version?: string;
 }
 
 export interface ProjectStorage {
@@ -185,6 +199,8 @@ export interface MyProjects {
   games: ProjectGame[];
   lobbies: LobbyOption[];
   titles: string[];
+  // The protocol each of `titles` speaks, by the title's code.
+  protocols?: Record<string, Protocol>;
 }
 
 // POST /api/products's body: a project of the caller's own. A game names the
@@ -275,9 +291,11 @@ export interface Release {
   created_at: string;
   published_at: string | null;
   retired_at: string | null;
-  // A built release's source, null for an upload; its version; what the build's
-  // tools said ('' for an upload).
+  // A built release's source, null for an upload; its version (a game's game version, an app's
+  // release); the ONE that built it ('0.0.22'; '' for an upload); what the build's tools said
+  // ('' for an upload).
   source: ReleaseSource | null;
   version: string;
+  one_version: string;
   build_log: string;
 }

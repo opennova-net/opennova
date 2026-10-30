@@ -2,8 +2,8 @@
 
 #include <filesystem>
 
-#include <base/gameprofile/gameprofile.h>
 #include <base/io/hash.h>
+#include <base/title/title.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
@@ -26,7 +26,7 @@ std::string flat_name(const std::string &name) {
 
 void ProjectAssetSource::set_scan(const std::string &root, const AssetScan &scan, const std::string &target_game) {
 	root_ = root;
-	scr_policy_ = gameprofile::gameprofile_scr_policy_for_code(target_game.c_str());
+	scr_policy_ = title_scr_policy_for_code(target_game.c_str());
 	files_.clear();
 	for (const AssetEntry &asset : scan.entries) {
 		// What the build packs, and nothing else: an import source stays out (its outputs

@@ -73,12 +73,18 @@ describe('the usage client', () => {
     const local = pickPrograms({
       at: '2026-10-18T12:00:00Z',
       cloud: { configured: false, unavailable: 'AWS is not read here: no cluster', error: null },
-      programs: [{ name: 'web', running: 1, desired: null, release: null, on_release: null, restarts_24h: 0, tasks: [{ id: 'abc123', reporting: true }] }],
+      programs: [
+        { name: 'web', running: 1, desired: null, task_definition: null, on_release: null, restarts_24h: 0, tasks: [{ id: 'abc123', reporting: true }] },
+      ],
     });
     expect(local?.cloud).toEqual({ configured: false, unavailable: 'AWS is not read here: no cluster', error: null });
     expect(local?.programs[0].desired).toBeNull();
     expect(local?.programs[0].cpu_percent).toBeNull();
     expect(local?.programs[0].tasks[0].last_status).toBeNull();
+    // A task that names no build (a sample from before the build was sampled).
+    expect(local?.programs[0].tasks[0].one_version).toBeNull();
+    expect(local?.programs[0].tasks[0].one_commit).toBeNull();
+    expect(local?.programs[0].task_definition).toBeNull();
     expect(pickPrograms({ at: 'x', programs: [{ name: 'web' }] })).toBeNull();
   });
 

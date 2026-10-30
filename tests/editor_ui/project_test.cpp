@@ -403,7 +403,7 @@ void test_welcome_install_and_first_steps() {
 	ui.frames(2);
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(text.find("Game install") != std::string::npos && text.find("Needs a Delta Force: Xtreme 2 install") != std::string::npos,
+	CHECK(text.find("Game install") != std::string::npos && text.find("Needs a Delta Force Xtreme 2 install") != std::string::npos,
 	      "another game than the editor's install's: the field, and what it needs");
 	ui.activate(item_id(welcome, {"Make the project"}));
 	CHECK(only(ui.drain(), EditorRequestKind::NewProject) == nullptr, "Create held back");

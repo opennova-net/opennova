@@ -97,7 +97,7 @@ export function machineFlags(
   if (m.lost_held) out.push({ text: 'Lost, held by the brake', bad: true });
   if (m.protocol_mismatch_since) {
     const held = formatDuration(Math.max(0, now - timeMs(m.protocol_mismatch_since)));
-    out.push({ text: `Protocol ${m.agent_protocol ?? 'unknown'} mismatch, held ${held}`, bad: true });
+    out.push({ text: `Agent protocol ${m.agent_protocol ?? 'unknown'} mismatch, held ${held}`, bad: true });
   }
   if (m.outdated === true) {
     const why = outdatedReasons(m);

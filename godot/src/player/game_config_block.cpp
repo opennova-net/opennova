@@ -11,6 +11,9 @@
 
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_settings.h>
+#include <formats/gamecfg/server_settings.h>
+#include <base/io/cp1252.h>
+#include <net/protocol/protocol.h> // the armory-only value (DFX2-10)
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -56,6 +59,8 @@ void take_launch_switches(inmatch::GameConfigBlock &p_block) {
 } // namespace
 
 void GameConfigBlock::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("server_configuration_json"), &GameConfigBlock::server_configuration_json);
+	ClassDB::bind_method(D_METHOD("apply_server_configuration_json", "json"), &GameConfigBlock::apply_server_configuration_json);
 	ClassDB::bind_method(D_METHOD("set_path", "path"), &GameConfigBlock::set_path);
 	ClassDB::bind_method(D_METHOD("get_path"), &GameConfigBlock::get_path);
 	ClassDB::bind_method(D_METHOD("load"), &GameConfigBlock::load);
@@ -83,6 +88,42 @@ void GameConfigBlock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("read_host_screen", "driver"), &GameConfigBlock::read_host_screen);
 	ClassDB::bind_method(D_METHOD("read_untouched_host_dialog", "doc"),
 			&GameConfigBlock::read_untouched_host_dialog);
+}
+
+GameConfigBlock::GameConfigBlock() {
+	// The launch's title, whose cfg table every read and save walks: a DFX2 launch's game.cfg
+	// keeps its mpdfxcategory row, which a block left on the default table once dropped.
+	block_.set_title(ResourceRoot::session_title(Ref<ResourceRoot>()));
+}
+
+String GameConfigBlock::server_configuration_json() const {
+	using namespace opennova;
+	auto out = io::JsonValue::make_object();
+	out.set("schema", gamecfg::server_settings_schema(block_.config_table(), false));
+	auto values = gamecfg::server_settings_values(block_.cfg(), false);
+	auto weapons = io::JsonValue::make_array(), availability = io::JsonValue::make_object();
+	const auto &roster = block_.weapon_roster();
+	for (size_t i = 1; i < roster.size() && i < gamecfg::kWeaponAvailabilityCount; ++i) {
+		if (!roster[i].loadout_selectable) continue;
+		const auto name = cp1252_to_utf8(roster[i].name);
+		weapons.push(io::json_string(name));
+		const auto value = block_.cfg().weapon_availability[i];
+		// The armory-only value is the protocol's (DFX2-10: JO's 2, DFX2's 3).
+		const int armory = protocol_in_match(title_protocol(block_.title()->code)).armory_only_availability;
+		availability.set(name, io::json_string(value == 0 ? "never" : value == armory ? "armory" : "always"));
+	}
+	values.set("weapons", std::move(availability));
+	out.set("values", std::move(values)); out.set("weapons", std::move(weapons));
+	return to_gd(io::json_write(out));
+}
+
+String GameConfigBlock::apply_server_configuration_json(const String &p_json) {
+	using namespace opennova;
+	io::JsonValue patch; std::string error, field;
+	if (!io::json_parse(to_std(p_json), patch, error)) return to_gd(error);
+	if (!gamecfg::apply_server_settings(block_.cfg(), patch, false, block_.weapon_roster(), field, error))
+		return to_gd(field + ": " + error);
+	return {};
 }
 
 void GameConfigBlock::set_path(const String &p_path) {
@@ -152,7 +193,7 @@ void GameConfigBlock::set_word(const String &p_key, int p_value) {
 }
 
 void GameConfigBlock::populate_host_dialog() {
-	inmatch::populate_host_dialog(block_.cfg());
+	inmatch::populate_host_dialog(block_.cfg(), *block_.title());
 }
 
 String GameConfigBlock::host_dialog_value(const String &p_control) const {
@@ -160,20 +201,21 @@ String GameConfigBlock::host_dialog_value(const String &p_control) const {
 }
 
 bool GameConfigBlock::apply_host_dialog_control(const String &p_control, const String &p_value) {
-	return inmatch::apply_host_dialog_control(
-			block_.cfg(), opennova::to_std(p_control), opennova::to_std(p_value));
+	return inmatch::apply_host_dialog_control(block_.cfg(), *block_.title(),
+			opennova::to_std(p_control), opennova::to_std(p_value));
 }
 
 void GameConfigBlock::populate_host_screen(const Ref<MenuDriver> &p_driver) {
-	if (p_driver.is_valid()) inmatch::populate_host_screen(p_driver->runtime(), block_.cfg());
+	if (p_driver.is_valid()) inmatch::populate_host_screen(p_driver->runtime(), block_.cfg(), *block_.title());
 }
 
 void GameConfigBlock::read_host_screen(const Ref<MenuDriver> &p_driver) {
-	if (p_driver.is_valid()) inmatch::read_host_screen(p_driver->runtime(), block_.cfg());
+	if (p_driver.is_valid()) inmatch::read_host_screen(p_driver->runtime(), block_.cfg(), *block_.title());
 }
 
 void GameConfigBlock::read_untouched_host_dialog(const Ref<MnuDocument> &p_doc) {
-	inmatch::read_untouched_host_dialog(block_.cfg(), p_doc.is_valid() ? &p_doc->get_native() : nullptr);
+	inmatch::read_untouched_host_dialog(block_.cfg(), *block_.title(),
+			p_doc.is_valid() ? &p_doc->get_native() : nullptr);
 }
 
 void GameConfigBlock::join_choice(const Ref<GameConfigBlock> &p_block,

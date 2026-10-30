@@ -128,9 +128,9 @@ ObjectModel *LocalPlayerVisuals::build_local_player_held_weapon(const String &p_
 
 void LocalPlayerVisuals::present_local_player_person_overlays(PersonOverlayModels &p_overlays,
 		const opennova::world::PersonOverlays &p_state, ObjectModel *p_avatar,
-		PersonOverlayModels::Presentation p_presentation) {
+		bool p_body_drawn, PersonOverlayModels::Presentation p_presentation) {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
-	p_overlays.present(p_state, p_avatar, true, mission_placer.ptr(), world_node3d(),
+	p_overlays.present(p_state, p_avatar, p_body_drawn, mission_placer.ptr(), world_node3d(),
 			p_presentation);
 }
 

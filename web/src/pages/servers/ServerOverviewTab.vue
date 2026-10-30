@@ -45,6 +45,10 @@
         <dl class="card grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 p-4 text-sm">
           <dt class="text-ink-muted">{{ gameName(server) }}</dt>
           <dd>{{ versionText(server.data.base) }}</dd>
+          <template v-if="server.product?.protocol">
+            <dt class="text-ink-muted">Protocol</dt>
+            <dd id="hosted-server-protocol">{{ protocolWords(server.product.protocol) }}</dd>
+          </template>
           <template v-if="server.expansion || server.data.expansion">
             <dt class="text-ink-muted">{{ expansionName }}</dt>
             <dd>{{ versionText(server.data.expansion) }}</dd>
@@ -103,6 +107,14 @@
           <dd>{{ server.settings.start_delay }} s</dd>
           <dt class="text-ink-muted">{{ FIELD_LABELS.team_ff }}</dt>
           <dd>{{ server.settings.team_ff ? 'On' : 'Off' }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.send_holdoff_ticks }}</dt>
+          <dd>{{ server.settings.send_holdoff_ticks }}<span class="block text-xs text-ink-muted">{{ sendCadenceText(server.settings.send_holdoff_ticks) }}</span></dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.entity_send_budget }}</dt>
+          <dd>{{ server.settings.entity_send_budget }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.max_packet_size }}</dt>
+          <dd>{{ server.settings.max_packet_size }}</dd>
+          <dt class="text-ink-muted">{{ FIELD_LABELS.lock_framerate }}</dt>
+          <dd>{{ server.settings.lock_framerate ? 'On' : 'Off' }}</dd>
           <template v-if="server.settings.list_on_novalogic">
             <dt class="text-ink-muted">NovaLogic listing</dt>
             <dd>On</dd>
@@ -152,8 +164,8 @@ import { fetchProducts } from '../../api/products';
 import { fetchMyServers, updateHostedServer } from '../../api/hostedServer';
 import { confirmAction } from '../../composables/useConfirm';
 import type { HostedEvent, HostedProduct, HostedServer, PinnedTree } from '../../types/hostedServer';
-import { gameName, serverName } from '../../utils/games';
-import { FIELD_LABELS } from '../../utils/hostedSettings';
+import { gameName, protocolWords, serverName } from '../../utils/games';
+import { FIELD_LABELS, sendCadenceText } from '../../utils/hostedSettings';
 import {
   OWNER_START_STEPS,
   SLOW_PHASE_TEXT,
@@ -242,7 +254,7 @@ const current = computed(() => {
   return versions ? { base: versions.get(productId ?? -1) ?? '', expansion: versions.get(expansionId ?? -1) ?? '' } : null;
 });
 
-// "Joint Operations 1.7.5.9 available" (and the expansion's, when it is the
+// "Joint Operations 1.0.9 available" (and the expansion's, when it is the
 // newer one); without the versions, "Update available".
 const updateText = computed(() => {
   const now = current.value;

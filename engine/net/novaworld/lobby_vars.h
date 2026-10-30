@@ -61,7 +61,7 @@ struct HostRegistration {
 	std::string access_code_list;             // AccessCodeList
 	std::string expansion;                    // Exp (g_ExpansionName); PLoad is always empty
 	int lan_only = 0;                         // LAN (hostLanOnly_340)
-	// DFXCATEGORY1, a title's host lists' var after LAN (TitleIdentity::host_category_var, which
+	// DFXCATEGORY1, a title's host lists' var after LAN (Protocol::host_category_var, which
 	// NwuHostRole sets): the game.cfg `mpdfxcategory` word printed "%ld", on HostSetup and on the
 	// Host list alike. [orig: the twin of CNapiGameSession_BuildHostVarLists @0x4d0b50 at
 	//  @0x4d0ce0 (dfx2.exe) - HostSetup @0x4d0e8a..0x4d0eb1, Host @0x4d0faf..0x4d0fd5]
@@ -93,8 +93,8 @@ struct HostRegistration {
 	int round_time_remaining_ticks = -1;
 	bool tracers = true;                      // Tracers: (g_RulesFlags & 1) == 0
 	std::string country = "XX";               // Country (str1; "XX" while locked; "XX"/empty -> " ")
-	// AllowPing 'y'/'n': game.cfg `ping`, default 1, copied to g_NWAllowPing.
-	// OpenNova has no game.cfg surface, so the stock default holds.
+	// AllowPing 'y'/'n': game.cfg `ping` nonzero, default 1, copied to g_NWAllowPing; the
+	// embedder fills it from its cfg block (opennova-serve's listing columns).
 	// [orig: Config_SetDefaults @0x54D324 (ping = 1); Game_ApplySessionSettingsToGlobals
 	//  @0x551D4F -> g_NWAllowPing; Lobby_UpdateServerInfo read @0x4FEF72]
 	bool allow_ping = true;
@@ -107,7 +107,7 @@ struct HostRegistration {
 	// tick; the embedder sets it, and the first mission's METPROTOCOL ID report prints it too.
 	// [orig: Server_InitServerTicks @0x5018C0 - Game_ReadCCBinFile @0x5018E8]
 	std::string gcc;
-	// GV and Version (g_VersionText): NwuHostRole sets it from the title's version text.
+	// GV and Version (g_VersionText): NwuHostRole sets it to ONE's wire version text.
 	std::string version;
 	// The gate reply's METEXT (g_IsDedicatedServer, a misnomer: its one writer is the gate parse):
 	// set, the Host list carries the CountryName / Lang / TZB trio, whatever the dedicated mode
@@ -120,7 +120,7 @@ struct HostRegistration {
 	std::string language;                     // Lang (LOCALE_SENGLANGUAGE)
 	int tz_bias = 0;                          // TZB (TIME_ZONE_INFORMATION.Bias)
 	bool pb_server = false;                   // PBServer "1"/"0" (game_settings.reserved_D4)
-	// Ver1 / Ver2: the title's version pair (TitleIdentity::ver1 / ver2); NwuHostRole sets it from
+	// Ver1 / Ver2: the title's version pair (Protocol::ver1 / ver2); NwuHostRole sets it from
 	// its session's title. [orig: Lobby_UpdateServerInfo @0x4ff3ea / @0x4ff3ff]
 	std::string ver1;
 	std::string ver2;

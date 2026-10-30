@@ -79,7 +79,9 @@ struct HostBringup {
 // the mission start leaves out of a session (world::mission_start_difficulty),
 // which overwrites the profile's before any serializer reads it [orig:
 // Game_StartMission @0x525CDD].
-GameConfig singleplayer_game_config(uint32_t game_type,
+// The session runs as `title` (GameConfig::set_title): its rules, which single player once never
+// set, so a single-player session ran Joint Operations' whatever the game.
+GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 		const playersav::ProfileRecord *profile = nullptr);
 
 // Dialog_UpdatePlayback's load of a line on the authority: the line's chat legs on its own
@@ -254,7 +256,7 @@ public:
 	// The SP listen server: SINGLEPLAYERGAME, one player, the mission's own
 	// game type, socketless, its session words the profile record's
 	// (singleplayer_game_config) [orig: SinglePlayer_StartMission @0x561af0].
-	void bring_up_singleplayer(const playersav::ProfileRecord *profile = nullptr);
+	void bring_up_singleplayer(const Title &title, const playersav::ProfileRecord *profile = nullptr);
 	// The session create of a fresh session, ahead of its first mission's World and of the
 	// mission start (the host boot runs it at its head, ahead of the mission-start update and the
 	// loads): the reset of a server an earlier error-arm exit left unstopped, a fresh owner over
@@ -367,11 +369,11 @@ private:
 	// The mission's World under the created session: the context's world and mission, the
 	// process's CRT stream onto the World, the rule words.
 	void bind_session_world(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
-			const TitleIdentity *title);
-	// The rule words the world reads at tick time, from the session config and the title the
+			const Protocol *protocol);
+	// The rule words the world reads at tick time, from the session config and the protocol the
 	// session speaks (null: JO's).
 	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
-			const TitleIdentity *title);
+			const Protocol *protocol);
 	// The context's spawn-time body bind over this role's kernel
 	// (NapiNPServerCtx::bind_spawned_body), installed at a fresh session's bring-up, with
 	// the kernel's round init (install_round_init).

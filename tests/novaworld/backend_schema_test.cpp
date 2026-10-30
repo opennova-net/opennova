@@ -145,13 +145,14 @@ int test_migrations_create_expected_tables() {
 		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok",
 		"fleet_machines.launch_refused", "fleet_machines.was_draining",
 		"fleet_slot_reports.oom",
+		"hosted_console_commands.configuration_saved", "hosted_console_commands.delivery_unknown",
 		"hosted_console_commands.record", "hosted_console_commands.sent",
 		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
 		"hosted_server_samples.mission_started", "hosted_server_starts.oom",
 		"hosted_servers.list_on_novalogic", "hosted_servers.own_machine",
-		"hosted_servers.team_ff", "hosted_servers.update_requested", "lobby_sessions.hosting",
+		"hosted_servers.update_requested", "lobby_sessions.hosting",
 		"lobby_sessions.listed",
-		"products.lobby_locked", "products.retail",
+		"products.lobby_locked",
 		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
@@ -160,6 +161,35 @@ int test_migrations_create_expected_tables() {
 	TEST_EXPECT(db.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'unknown_messages' "
 						 "AND column_name = 'sample' AND data_type = 'bytea';")
 						.size() == 1);
+	return 0;
+}
+
+int test_server_configuration_upgrade_keeps_existing_values() {
+	TestDatabase scratch({ /*migrate=*/false });
+	auto db = scratch.open();
+	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend/migrations";
+	for (const char *name : {"0001_baseline.sql", "0002_players_projects.sql", "0003_project_lobbies.sql"})
+		db.exec_script(test_io::read_file_text((migrations / name).string()));
+	db.exec("INSERT INTO players (username,password_hash,pcid,nwh,nwhandle) VALUES ('upgrade','x','0e140001','1','Upgrade');");
+	db.exec("INSERT INTO hosted_servers(owner_user_id,state,game_name,max_players,time_limit,kill_limit,max_score,respawn,start_delay,team_ff,missions) "
+			"SELECT id,'stopped','Preserved',32,30,500,5,5,0,true,E'a.bms\\na.bms\\nb.bms' FROM players WHERE username='upgrade';");
+	db.exec_script(test_io::read_file_text((migrations / "0005_server_configuration.sql").string()));
+	const auto rows = db.query("SELECT configuration->>'game_name', configuration->>'kill_limit', configuration->'rotation'->1->>'file', "
+			"configuration->'rotation'->2->>'swap_sides', configuration->'options'->>'replay', settings_revision FROM hosted_servers;");
+	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0) == "Preserved" && rows[0].as_text(1) == "500");
+	TEST_EXPECT(rows[0].as_text(2) == "a.bms" && rows[0].as_text(3) == "false" && rows[0].as_text(4) == "true" && rows[0].as_int(5) == 1);
+	TEST_EXPECT(!has_column(db,"hosted_servers","missions"));
+	// 0006 drops the options the schema no longer offers and keeps the rest.
+	db.exec("UPDATE hosted_servers SET configuration = jsonb_set(configuration, '{options}', "
+			"'{\"replay\":true,\"wind\":3,\"lan_mode\":2,\"fat_bullets\":true}');");
+	db.exec_script(
+			test_io::read_file_text((migrations / "0006_server_options_honored.sql").string()));
+	const auto options = db.query("SELECT (configuration->'options' ? 'wind')::int, "
+								  "(configuration->'options' ? 'lan_mode')::int, "
+								  "configuration->'options'->>'fat_bullets', "
+								  "configuration->'options'->>'replay' FROM hosted_servers;");
+	TEST_EXPECT(options.size() == 1 && options[0].as_int(0) == 0 && options[0].as_int(1) == 0);
+	TEST_EXPECT(options[0].as_text(2) == "true" && options[0].as_text(3) == "true");
 	return 0;
 }
 
@@ -187,7 +217,7 @@ int test_lobbies_and_seed() {
 	}
 
 	auto games =
-			db.query("SELECT slug, gate_tag, title, lobby_name, pfid FROM games ORDER BY slug;");
+			db.query("SELECT slug, gate_tag, protocol, lobby_name, pfid FROM games ORDER BY slug;");
 	TEST_EXPECT(games.size() == 3);
 	TEST_EXPECT(games[1].as_text(0).value() == "dfx2_consumer");
 	TEST_EXPECT(games[1].as_text(1).value() == "dfx2:0:cus:buffy");
@@ -444,14 +474,15 @@ int test_web_sessions_and_roles() {
 	return 0;
 }
 
-// The OpenNova row, every column as the hosted-titles program decided it and
-// 0004_acidgambit_lobby_pages.sql left it: its own tag, LobbyName, .gsb, pages
-// and product family (pfid 100); JO's wire identity (title, version pair); no
-// expansion (the base bit alone).
+// The OpenNova row, every column as the hosted-titles program decided it,
+// 0004_acidgambit_lobby_pages.sql and 0008_lobbies_by_protocol.sql left it: its own
+// tag, LobbyName, .gsb, pages and product family (pfid 100); JO's protocol (its
+// version pair the protocol's, no column of the row's); no expansion (the base bit
+// alone).
 int expect_opennova_row(Database &db) {
 	const auto on = db.query(
-			"SELECT display_name, lobby_name, gate_tag, title, start_page, host_page, gsb_path, "
-			"join_lan_url IS NULL, ver1, ver2, exp_bits, pfid FROM games "
+			"SELECT display_name, lobby_name, gate_tag, protocol, start_page, host_page, gsb_path, "
+			"join_lan_url IS NULL, exp_bits, pfid FROM games "
 			"WHERE slug = 'acidgambit_0_consumer';");
 	TEST_EXPECT(on.size() == 1);
 	TEST_EXPECT(on[0].as_text(0).value() == "OP: Acid Gambit");
@@ -462,10 +493,8 @@ int expect_opennova_row(Database &db) {
 	TEST_EXPECT(on[0].as_text(5).value() == "acidgambit_0_host1.htm");
 	TEST_EXPECT(on[0].as_text(6).value() == "acidgambit_0.gsb?a=1");
 	TEST_EXPECT(on[0].as_int(7).value() == 1);
-	TEST_EXPECT(on[0].as_text(8).value() == "3");
-	TEST_EXPECT(on[0].as_text(9).value() == "2345");
-	TEST_EXPECT(on[0].as_text(10).value() == "1");
-	TEST_EXPECT(on[0].as_text(11).value() == "100");
+	TEST_EXPECT(on[0].as_text(8).value() == "1");
+	TEST_EXPECT(on[0].as_text(9).value() == "100");
 	return 0;
 }
 
@@ -501,23 +530,73 @@ int expect_gate_rows(Database &db) {
 	return 0;
 }
 
-// The games' title column: the migrations write every system lobby with its title, the OpenNova
-// row among them, and the seed after them (the boot's order) changes none.
-int test_games_title_fresh() {
+// The games' protocol column: the migrations write every system lobby with the code of the
+// protocol its clients speak, the OpenNova row among them, and the seed after them (the boot's
+// order) changes none. No row holds a version pair (the protocol's) or a title (a game's).
+int test_games_protocol_fresh() {
 	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
 	TestDatabase scratch;
 	Database db = scratch.open();
-	TEST_EXPECT(has_column(db, "games", "title"));
-	TEST_EXPECT(!has_column(db, "games", "executable_name")); // the launcher's, retired
+	TEST_EXPECT(has_column(db, "games", "protocol"));
+	for (const char *gone : { "title", "ver1", "ver2", "executable_name" }) // executable_name the
+		TEST_EXPECT(!has_column(db, "games", gone)); // launcher's, retired
 	apply_seeds(db, source_dir / "backend" / "seed");
-	const auto titles = db.query("SELECT slug, title FROM games ORDER BY slug;");
-	TEST_EXPECT(titles.size() == 3);
-	TEST_EXPECT(titles[0].as_text(1).value() == "jo");
-	TEST_EXPECT(titles[1].as_text(1).value() == "dfx2");
-	TEST_EXPECT(titles[2].as_text(1).value() == "jo");
+	const auto protocols = db.query("SELECT slug, protocol FROM games ORDER BY slug;");
+	TEST_EXPECT(protocols.size() == 3);
+	TEST_EXPECT(protocols[0].as_text(1).value() == "jo");
+	TEST_EXPECT(protocols[1].as_text(1).value() == "dfx2");
+	TEST_EXPECT(protocols[2].as_text(1).value() == "jo");
 	if (expect_gate_rows(db) != 0)
 		return 1;
 	return expect_opennova_row(db);
+}
+
+// 0008_lobbies_by_protocol.sql over a deployed database: every lobby keeps its protocol under the
+// column's new name (a system row's, a player's own lobby copied from Acid Gambit's), a row a
+// title code names (OP: Acid Gambit's) takes its protocol's code, and the version pair goes. And
+// 0009_release_one_version.sql: a release built before it records no ONE.
+int test_protocol_migrations_upgrade() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = scratch.open();
+	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+	for (const char *name :
+			{ "0001_baseline.sql", "0002_players_projects.sql", "0003_project_lobbies.sql",
+					"0004_acidgambit_lobby_pages.sql", "0005_server_configuration.sql",
+					"0006_server_options_honored.sql", "0007_hosted_network_tuning.sql" })
+		db.exec_script(test_io::read_file_text((migrations / name).string()));
+	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid, startup_query, "
+			"glsvss_request, glsvss_rims, glsvss_agrms) SELECT 'on_77', 'Mine', 'on_77', 'on:77', "
+			"title, start_page, host_page, 'on_77.gsb?a=1', join_lan_url, ver1, ver2, exp_bits, "
+			"pfid, startup_query, glsvss_request, glsvss_rims, glsvss_agrms FROM games "
+			"WHERE slug = 'acidgambit_0_consumer';");
+	db.exec("INSERT INTO games (slug, display_name, lobby_name, gate_tag, title, start_page, "
+			"host_page, gsb_path, ver1, ver2, exp_bits) VALUES ('on_78', 'Named', 'on_78', "
+			"'on:78', 'acidgambit', 'acidgambit_0_start.htm', 'acidgambit_0_host1.htm', "
+			"'on_78.gsb?a=1', '3', '2345', '1');");
+	db.exec("INSERT INTO releases (status, name, version) VALUES ('draft', 'Old', '0.1.4');");
+	for (const char *name : { "0008_lobbies_by_protocol.sql", "0009_release_one_version.sql" })
+		db.exec_script(test_io::read_file_text((migrations / name).string()));
+	TEST_EXPECT(has_column(db, "games", "protocol") && !has_column(db, "games", "title") &&
+			!has_column(db, "games", "ver1") && !has_column(db, "games", "ver2"));
+	const auto rows = db.query("SELECT slug, protocol FROM games ORDER BY slug;");
+	const std::vector<std::pair<std::string, std::string>> expected = {
+		{ "acidgambit_0_consumer", "jo" }, { "dfx2_consumer", "dfx2" }, { "jop_2_consumer", "jo" },
+		{ "on_77", "jo" }, { "on_78", "jo" }
+	};
+	TEST_EXPECT(rows.size() == expected.size());
+	for (size_t i = 0; i < rows.size() && i < expected.size(); ++i)
+		TEST_EXPECT(rows[i].as_text(0) == expected[i].first &&
+				rows[i].as_text(1) == expected[i].second);
+	// Every other column as it was: Acid Gambit's pages on the copied row.
+	TEST_EXPECT(db.query("SELECT 1 FROM games WHERE slug = 'on_77' AND pfid = '100' AND "
+						 "start_page = 'acidgambit_0_start.htm' AND exp_bits = '1';")
+						.size() == 1);
+	TEST_EXPECT(has_column(db, "releases", "one_version"));
+	TEST_EXPECT(
+			db.query("SELECT 1 FROM releases WHERE name = 'Old' AND one_version IS NULL;").size() ==
+			1);
+	return 0;
 }
 
 // A new account starts at credentials generation 0, a retail login's session
@@ -756,41 +835,63 @@ int test_hosted_server_game() {
 	Database db = scratch.open();
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 	        "VALUES ('host_game', 'x', '0e140001', '1', 'HostGame');");
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
-	        "max_score, respawn, start_delay, missions) "
-	        "SELECT id, 'stopped', 'Default', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_game';");
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, configuration) SELECT id, 'stopped', jsonb_build_object('game_name', 'Default', 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false))) FROM players WHERE username = 'host_game';");
 	// A server runs a product by row: the seeded Joint Operations and its Escalation; no game
 	// or expansion column.
-	const auto rows = db.query("SELECT product_id, team_ff, own_machine, update_requested FROM hosted_servers "
-	                           "WHERE game_name = 'Default';");
+	const auto rows = db.query("SELECT product_id, COALESCE((configuration->>'team_ff')::boolean, false), own_machine, update_requested FROM hosted_servers "
+	                           "WHERE configuration->>'game_name' = 'Default';");
 	TEST_EXPECT(rows.size() == 1 && rows[0].is_null(0));
 	TEST_EXPECT(rows[0].as_int(1) == 0 && rows[0].as_int(2) == 0 && rows[0].as_int(3) == 0);
 	TEST_EXPECT(!has_column(db, "hosted_servers", "game") && !has_column(db, "hosted_servers", "expansion"));
 	// A slot's report carries why its container never started.
 	TEST_EXPECT(has_column(db, "fleet_slot_reports", "reason"));
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, product_id, expansion_id, game_name, "
-	        "max_players, time_limit, kill_limit, max_score, respawn, start_delay, missions) "
-	        "SELECT p.id, 'stopped', b.id, e.id, 'Own', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players p, "
-	        "products b, products e WHERE p.username = 'host_game' AND b.lobby = 'jop_2_consumer' "
-	        "AND e.parent_id = b.id AND e.expansion_code = 'jox01';");
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, product_id, expansion_id, configuration) SELECT p.id, 'stopped', b.id, e.id, jsonb_build_object('game_name', 'Own', 'max_players', 8, 'time_limit', 30, 'kill_limit', 50, 'max_score', 5, 'respawn', 5, 'start_delay', 0, 'rotation', jsonb_build_array(jsonb_build_object('file', 'a.bms', 'swap_sides', false))) FROM players p, products b, products e WHERE p.username = 'host_game' AND b.lobby = 'jop_2_consumer' AND e.parent_id = b.id AND e.expansion_code = 'jox01';");
 	const auto own = db.query("SELECT d.lobby, e.expansion_code FROM hosted_servers s "
 	                          "JOIN products d ON d.id = s.product_id JOIN products e ON e.id = s.expansion_id "
-	                          "WHERE s.game_name = 'Own';");
+	                          "WHERE s.configuration->>'game_name' = 'Own';");
 	TEST_EXPECT(own.size() == 1 && own[0].as_text(0).value() == "jop_2_consumer" && own[0].as_text(1).value() == "jox01");
-	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET product_id = 99999 WHERE game_name = 'Own';"));
-	db.exec("UPDATE hosted_servers SET state = 'running' WHERE game_name = 'Own';");
-	db.exec("UPDATE hosted_servers SET state = 'running', own_machine = true WHERE game_name = 'Default';");
+	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET product_id = 99999 WHERE configuration->>'game_name' = 'Own';"));
+	db.exec("UPDATE hosted_servers SET state = 'running' WHERE configuration->>'game_name' = 'Own';");
+	db.exec("UPDATE hosted_servers SET state = 'running', own_machine = true WHERE configuration->>'game_name' = 'Default';");
 	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE state = 'running';").size() == 2);
 	TEST_EXPECT(!has_index(db, "hosted_servers", "idx_hosted_servers_one_live"));
 	return 0;
 }
 
+// A populated deployment gets the same tuning as an omitted field on a new request.
+int test_hosted_tuning_migration_preserves_defaults() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = scratch.open();
+	const auto migrations = std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations";
+	for (const char *name : { "0001_baseline.sql", "0002_players_projects.sql", "0003_project_lobbies.sql",
+			"0004_acidgambit_lobby_pages.sql", "0005_server_configuration.sql", "0006_server_options_honored.sql" })
+		db.exec_script(test_io::read_file_text((migrations / name).string()));
+	db.exec("INSERT INTO hosted_servers (configuration) VALUES "
+			"('{\"game_name\":\"Existing\",\"options\":{\"replay\":false}}'::jsonb), "
+			"('{\"game_name\":\"Low\",\"options\":{\"max_packet_size\":64}}'::jsonb), "
+			"('{\"game_name\":\"Custom\",\"options\":{\"max_packet_size\":2000}}'::jsonb), "
+			"('{\"game_name\":\"High\",\"options\":{\"max_packet_size\":65507}}'::jsonb);");
+	db.exec_script(test_io::read_file_text((migrations / "0007_hosted_network_tuning.sql").string()));
+	const auto rows = db.query("SELECT (configuration->>'send_holdoff_ticks')::bigint, "
+			"(configuration->>'entity_send_budget')::bigint, (configuration->>'max_packet_size')::bigint, "
+			"(configuration->>'lock_framerate')::boolean, (configuration->'options'->>'replay')::boolean "
+			"FROM hosted_servers WHERE configuration->>'game_name' = 'Existing';");
+	TEST_EXPECT(rows.size() == 1 && rows[0].as_int(0) == 12 && rows[0].as_int(1) == 600 &&
+			rows[0].as_int(2) == 1300 && rows[0].as_int(3) == 1 && rows[0].as_int(4) == 0);
+	const auto ceilings = db.query("SELECT (configuration->>'max_packet_size')::bigint FROM hosted_servers "
+			"WHERE configuration->>'game_name' <> 'Existing' ORDER BY configuration->>'game_name';");
+	TEST_EXPECT(ceilings.size() == 3 && ceilings[0].as_int(0) == 2000 &&
+			ceilings[1].as_int(0) == 16384 && ceilings[2].as_int(0) == 100);
+	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE configuration->'options' ? 'max_packet_size';").empty());
+	return 0;
+}
+
 // Every product keyed, in the seeded order (ids 1 to 6 as before the apps, then the apps); a game's
-// and an expansion's project on its products row (our own public, the retail ones private), an
+// and an expansion's project on its products row (our own public, NovaLogic's private), an
 // app with none; a key unique and of its shape, a game's visibility never cleared, an app given
 // none. The project tables and the releases name the product by its row. An account's own project
-// is a game (in no lobby) or an expansion, never retail and never an app, and goes with the
-// account.
+// is a game (in no lobby) or an expansion, never an app, and goes with the account. No product
+// carries a retail flag (0012_drop_product_retail.sql).
 int test_game_projects() {
 	TestDatabase scratch;
 	Database db = scratch.open();
@@ -815,7 +916,7 @@ int test_game_projects() {
 	TEST_EXPECT(refused(db, "UPDATE products SET download = 'jointops-game-windows.zip' "
 	                        "WHERE key = 'DFX2';"));
 	TEST_EXPECT(refused(db, "UPDATE products SET key = NULL WHERE key = 'ONTOOLS';"));
-	TEST_EXPECT(!has_column(db, "products", "retail_updater") && has_column(db, "products", "retail") &&
+	TEST_EXPECT(!has_column(db, "products", "retail_updater") && !has_column(db, "products", "retail") &&
 	            !has_column(db, "products", "baseline_tree_id") &&
 	            !has_column(db, "product_trees", "baseline_tree_id") &&
 	            !has_column(db, "product_trees", "source") && has_column(db, "releases", "product_id") &&
@@ -831,7 +932,7 @@ int test_game_projects() {
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key = 'DFX2X';").size() == 1);
 	TEST_EXPECT(refused(db, "INSERT INTO product_trees (product_id, state) SELECT id, 'uploading' "
 	                        "FROM products WHERE key = 'JO';"));
-	// An account's own: a game in no lobby and an expansion of it, never retail and never an app,
+	// An account's own: a game in no lobby and an expansion of it, never an app,
 	// gone with the account (the game and its expansion in the one delete). Every seeded row is
 	// the service's own.
 	TEST_EXPECT(has_column(db, "products", "owner_id") &&
@@ -865,7 +966,6 @@ int test_game_projects() {
 	// An account's releases started on a UTC day go with the account.
 	TEST_EXPECT(
 			has_column(db, "release_starts", "day") && has_column(db, "release_starts", "started"));
-	TEST_EXPECT(refused(db, "UPDATE products SET retail = true WHERE key = 'MINE';"));
 	TEST_EXPECT(refused(db,
 			"INSERT INTO products (key, display_name, kind, owner_id) "
 			"SELECT 'MYAPP', 'App', 'app', id FROM players "
@@ -873,6 +973,19 @@ int test_game_projects() {
 	TEST_EXPECT(refused(db, "UPDATE products SET owner_id = 99999 WHERE key = 'MINE';"));
 	db.exec("DELETE FROM players WHERE username = 'maker';");
 	TEST_EXPECT(db.query("SELECT 1 FROM products WHERE key IN ('MINE', 'MINEX');").empty());
+	return 0;
+}
+
+// An expansion's version.txt text (0010_expansion_version_file.sql): a column every product has,
+// NULL but Escalation's, which keeps retail's line (docs/update/updater-re.md §2) so a retail
+// Escalation host takes our build's checksum.
+int test_expansion_version_file() {
+	TestDatabase scratch;
+	Database db = scratch.open();
+	TEST_EXPECT(has_column(db, "products", "version_file"));
+	const auto set = db.query("SELECT key, version_file FROM products WHERE version_file IS NOT NULL;");
+	TEST_EXPECT(set.size() == 1 && set[0].as_text(0) == "JOX01" &&
+			set[0].as_text(1) == "Joint Operations: Escalation, V1.3.0.0; English");
 	return 0;
 }
 
@@ -1163,18 +1276,23 @@ int test_lobby_live_view_tables() {
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	if (test_migrations_create_expected_tables() != 0) return 1;
+	if (test_server_configuration_upgrade_keeps_existing_values() != 0) return 1;
 	if (test_lobbies_and_seed() != 0) return 1;
 	if (test_seed_is_idempotent() != 0) return 1;
 	if (test_lobby_migration_preserves_existing_identity() != 0)
 		return 1;
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
-	if (test_games_title_fresh() != 0)
+	if (test_games_protocol_fresh() != 0)
+		return 1;
+	if (test_protocol_migrations_upgrade() != 0)
 		return 1;
 	if (test_host_keys_and_account_deletes() != 0) return 1;
 	if (test_credentials_generation() != 0) return 1;
 	if (test_hosted_server_game() != 0) return 1;
+	if (test_hosted_tuning_migration_preserves_defaults() != 0) return 1;
 	if (test_game_projects() != 0) return 1;
+	if (test_expansion_version_file() != 0) return 1;
 	if (test_cd_keys_fresh() != 0)
 		return 1;
 	if (test_billing_tables() != 0) return 1;
@@ -1190,8 +1308,8 @@ int main(int argc, char **argv) {
 	if (test_fleet_tables() != 0)
 		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
-				"web sessions + roles, games titles, host keys, credentials generation, hosted "
-				"server games, "
+				"web sessions + roles, lobbies by protocol, host keys, credentials generation, "
+				"hosted server games, "
 				"cd keys, billing, account email, jobs, fleet state, the lobby live view, the "
 				"lobby goodbyes; the one baseline)\n");
 	return 0;

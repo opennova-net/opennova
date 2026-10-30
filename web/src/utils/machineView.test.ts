@@ -46,7 +46,7 @@ describe('machineFlags', () => {
     );
     expect(flags.map((f) => f.bad)).toEqual([true, true, false]);
     expect(flags[0].text).toBe('Lost, held by the brake');
-    expect(flags[1].text).toBe('Protocol 2 mismatch, held 5 minutes');
+    expect(flags[1].text).toBe('Agent protocol 2 mismatch, held 5 minutes');
     expect(flags[2].text).toBe('Older than the release: machine image ami-0old');
     expect(machineFlags(machine('3', { state: 'ended', lost_held: true }), NOW)).toEqual([]);
   });

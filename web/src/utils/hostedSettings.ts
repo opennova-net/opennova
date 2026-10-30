@@ -8,6 +8,7 @@
 
 import type { HostedExpansionOption, HostedIntField, HostedMission, HostedProduct, HostedSettings, SettingRange } from '../types/hostedServer';
 import { cp1252Length, cp1252Problem } from './cp1252';
+import { settingProblem, type ServerOptions } from './serverConfiguration';
 
 export type SettingsField = keyof HostedSettings;
 
@@ -33,6 +34,23 @@ export const INT_FIELDS: readonly IntField[] = [
   'start_delay',
 ];
 
+// Network tuning has the same ranges for every hosted game.
+export const NETWORK_LIMITS = {
+  send_holdoff_ticks: { min: 0, max: 255 },
+  entity_send_budget: { min: 100, max: 1600 },
+  max_packet_size: { min: 100, max: 16384 },
+} as const;
+export type NetworkIntField = keyof typeof NETWORK_LIMITS;
+export const NETWORK_INT_FIELDS = Object.keys(NETWORK_LIMITS) as NetworkIntField[];
+
+export function sendCadenceText(value: number | string): string {
+  const period = wholeNumber(value);
+  if (period === null || period < 0 || period > 255) return '';
+  const ticks = Math.max(1, period);
+  const rate = Number((62.5 / ticks).toFixed(2));
+  return `Nominal ${ticks * 16} ms (${rate} updates/s in each direction)`;
+}
+
 // The backend's defaults for a field a start leaves out (HostedSettings); the
 // game's is the first the service offers (0 stands for none here).
 export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
@@ -47,8 +65,14 @@ export const DEFAULT_SETTINGS: Readonly<HostedSettings> = {
   respawn: 5,
   start_delay: 0,
   team_ff: false,
+  send_holdoff_ticks: 12,
+  entity_send_budget: 600,
+  max_packet_size: 1300,
+  lock_framerate: true,
   list_on_novalogic: false,
   missions: [],
+  mission_options: [],
+  options: { replay: true },
 };
 
 // The names the page shows for each field.
@@ -64,8 +88,14 @@ export const FIELD_LABELS: Record<SettingsField, string> = {
   respawn: 'Respawn time',
   start_delay: 'Pre-round delay',
   team_ff: 'Friendly fire',
+  send_holdoff_ticks: 'Send interval (ticks)',
+  entity_send_budget: 'Entity update budget (bytes)',
+  max_packet_size: 'Packet size ceiling (bytes)',
+  lock_framerate: 'Pace server frames',
   list_on_novalogic: "Also list on NovaLogic's NovaWorld",
   missions: 'Mission rotation',
+  mission_options: 'Map side switching',
+  options: 'Server options',
 };
 
 // Each field's rule in a sentence, for a refusal the backend gave on a field
@@ -84,8 +114,14 @@ export const FIELD_RULES: Record<SettingsField, string> = {
   respawn: 'The respawn time is a whole number of seconds in the range the game allows.',
   start_delay: 'The pre-round delay is a whole number of seconds in the range the game allows.',
   team_ff: 'Friendly fire is on or off.',
+  send_holdoff_ticks: 'The send interval is a whole number from 0 to 255 ticks; 0 and 1 send every tick.',
+  entity_send_budget: 'The entity update budget is a whole number from 100 to 1600 bytes.',
+  max_packet_size: 'The packet size ceiling is a whole number from 100 to 16384 bytes.',
+  lock_framerate: 'Server frame pacing is on or off.',
   list_on_novalogic: "Listing on NovaLogic's NovaWorld is not available right now. Untick the box to start your server.",
   missions: `A rotation is 1 to ${MISSIONS_MAX} missions of the game and its expansion. Pick them from the list.`,
+  mission_options: 'Choose whether each map swaps sides at the half.',
+  options: 'Check the highlighted server options.',
 };
 
 // A whole-number field's rule with its range.
@@ -211,8 +247,14 @@ export interface SettingsForm {
   respawn: number | string;
   start_delay: number | string;
   team_ff: boolean;
+  send_holdoff_ticks: number | string;
+  entity_send_budget: number | string;
+  max_packet_size: number | string;
+  lock_framerate: boolean;
   list_on_novalogic: boolean;
   missions: string[];
+  mission_options: boolean[];
+  options: ServerOptions;
 }
 
 // A fresh form for the game `product`: the given settings (a previous
@@ -220,9 +262,17 @@ export interface SettingsForm {
 // the game offers it, with the rotation `missions`.
 export function formFrom(settings: HostedSettings | null, product: HostedProduct | null, missions: string[]): SettingsForm {
   const base = settings ?? DEFAULT_SETTINGS;
+  // Match occurrences, not indexes: filtering unavailable maps must carry each
+  // remaining entry's side-switch flag with it, including repeated maps.
+  const remaining = base.missions.map((file, i) => ({ file, swap: base.mission_options?.[i] === true }));
+  const flags = missions.map((file) => {
+    const index = remaining.findIndex((entry) => entry.file.toLowerCase() === file.toLowerCase());
+    return index < 0 ? false : remaining.splice(index, 1)[0]!.swap;
+  });
+  const expansionId = product && allowsExpansion(product, base.expansion_id) ? base.expansion_id : null;
   return {
     product_id: product?.id ?? 0,
-    expansion_id: product && allowsExpansion(product, base.expansion_id) ? base.expansion_id : null,
+    expansion_id: expansionId,
     game_name: base.game_name,
     max_players: base.max_players,
     game_password: base.game_password,
@@ -232,9 +282,44 @@ export function formFrom(settings: HostedSettings | null, product: HostedProduct
     respawn: base.respawn,
     start_delay: base.start_delay,
     team_ff: base.team_ff,
+    send_holdoff_ticks: base.send_holdoff_ticks,
+    entity_send_budget: base.entity_send_budget,
+    max_packet_size: base.max_packet_size,
+    lock_framerate: base.lock_framerate,
     list_on_novalogic: base.list_on_novalogic === true,
     missions: [...missions],
+    mission_options: flags,
+    options: offeredOptions(base, product, expansionId),
   };
+}
+
+// The previous server's options a start of `product` can take: none from another game (as
+// picking another game resets them), and of its own game only the options its schema offers
+// and the weapons its roster names, in the roster's spelling. The backend refuses a start
+// naming any other ("options.<key>", "options.weapons.<name>"), which the form cannot show.
+function offeredOptions(base: HostedSettings, product: HostedProduct | null, expansionId: number | null): ServerOptions {
+  const options = JSON.parse(JSON.stringify(base.options ?? { replay: true })) as ServerOptions;
+  if (!product) return options;
+  if (base !== DEFAULT_SETTINGS && base.product_id !== product.id) return { replay: true };
+  const schema = product.settings_schema ?? [];
+  if (schema.length > 0) {
+    const offered = new Set(schema.filter((s) => !s.core).map((s) => s.key));
+    for (const key of Object.keys(options))
+      if (key !== 'classes' && key !== 'weapons' && !offered.has(key)) delete options[key];
+  }
+  const expansion = product.expansions.find((e) => e.id === expansionId);
+  const roster = expansion?.weapons?.length ? expansion.weapons : product.weapons ?? [];
+  const chosen = options.weapons;
+  if (roster.length > 0 && chosen && typeof chosen === 'object') {
+    const names = new Map(roster.filter((w) => w.selectable).map((w) => [w.name.toLowerCase(), w.name] as const));
+    const kept: Record<string, string | boolean> = {};
+    for (const [name, value] of Object.entries(chosen)) {
+      const spelled = names.get(name.toLowerCase());
+      if (spelled) kept[spelled] = value;
+    }
+    options.weapons = kept;
+  }
+  return options;
 }
 
 // The rotation a form starts with for the game `product` and expansion
@@ -253,7 +338,7 @@ export function initialRotation(
   const known = new Map(offered.map((m) => [m.toLowerCase(), m] as const));
   const kept: string[] = [];
   const dropped: string[] = [];
-  for (const m of uniqueMissions(previous.missions)) {
+  for (const m of previous.missions) {
     const name = known.get(m.toLowerCase());
     if (name) kept.push(name);
     else dropped.push(m);
@@ -359,6 +444,11 @@ export function checkSettings(
     errors.game_name = NOVA_NAME_RULE;
   const password = passwordProblem(form.game_password);
   if (password) errors.game_password = password;
+  for (const spec of product?.settings_schema ?? []) {
+    if (spec.core || form.options[spec.key] === undefined) continue;
+    const problem = settingProblem(spec, form.options[spec.key]);
+    if (problem) { errors.options = `${spec.label}: ${problem}`; break; }
+  }
   const numbers = {} as Record<IntField, number>;
   for (const field of INT_FIELDS) {
     const value = wholeNumber(form[field]);
@@ -368,6 +458,13 @@ export function checkSettings(
     } else {
       errors[field] = range ? `Enter a whole number from ${range.min} to ${range.max}.` : 'Enter a whole number.';
     }
+  }
+  const network = {} as Record<NetworkIntField, number>;
+  for (const field of NETWORK_INT_FIELDS) {
+    const value = wholeNumber(form[field]);
+    const range = NETWORK_LIMITS[field];
+    if (value !== null && value >= range.min && value <= range.max) network[field] = value;
+    else errors[field] = `Enter a whole number from ${range.min} to ${range.max}.`;
   }
   const expansionOk = product ? allowsExpansion(product, form.expansion_id) : true;
   if (!expansionOk && product) errors.expansion_id = fieldRule('expansion_id', product);
@@ -382,9 +479,13 @@ export function checkSettings(
       game_name: form.game_name.trim(),
       game_password: form.game_password,
       ...numbers,
+      ...network,
       team_ff: form.team_ff,
+      lock_framerate: form.lock_framerate,
       list_on_novalogic: offersNovaLogicListing(product, novalogicListing) && form.list_on_novalogic,
       missions: [...form.missions],
+      mission_options: [...form.mission_options],
+      options: JSON.parse(JSON.stringify(form.options)) as ServerOptions,
     },
   };
 }

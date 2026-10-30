@@ -1,0 +1,105 @@
+name: Staging rollout
+run-name: Staging release from CI ${{ inputs.run_id }} attempt ${{ inputs.source_attempt }}
+
+# staging-dispatch-protocol: 1
+# CI's staging-rollout job dispatches this once a staging push's components are ready
+# (scripts/ci/staging_dispatch.py dispatch): a run of its own, so cancelling the source
+# build never reaches a deploy. GitHub dispatches a workflow only as the default branch
+# declares it, so the default branch carries this file with these four inputs (the
+# dispatch checks the protocol line above and the inputs first).
+# The lock spans source admission, service deployment, and matching downloads.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Source staging CI run
+        required: true
+        type: string
+      source_attempt:
+        description: Source CI attempt
+        required: true
+        type: string
+      source_sha:
+        description: Full source staging commit
+        required: true
+        type: string
+      manifest_id:
+        description: Immutable staging release artifact ID
+        required: true
+        type: string
+
+concurrency:
+  group: staging-rollout
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      current: ${{ steps.source.outputs.current }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Admit the immutable release after acquiring the rollout lock
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.run_id }}
+          SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          MANIFEST_ID: ${{ inputs.manifest_id }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/staging ]] || { echo "::error::dispatch staging rollout on the staging branch"; exit 1; }
+          source="$(python scripts/ci/staging_manifest.py read --repository "$GITHUB_REPOSITORY" \
+            --run-id "$SOURCE_RUN" --attempt "$SOURCE_ATTEMPT" --sha "$SOURCE_SHA" \
+            --manifest-id "$MANIFEST_ID" --latest)"
+          current="$(jq -r .current <<<"$source")"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Staging rollout: $SOURCE_SHA"
+            echo "Source: [$SOURCE_RUN, attempt $SOURCE_ATTEMPT]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/attempts/$SOURCE_ATTEMPT)"
+            echo "Release manifest artifact: $MANIFEST_ID"
+            if [[ "$current" == false ]]; then
+              echo "Skipped: a newer commit is already on staging."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: source
+    if: needs.source.outputs.current == 'true'
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      deployment: staging
+      source_run_id: ${{ inputs.run_id }}
+      staging_attempt: ${{ inputs.source_attempt }}
+      source_sha: ${{ inputs.source_sha }}
+      manifest_id: ${{ inputs.manifest_id }}
+    secrets: inherit
+
+  publish:
+    needs: [source, deploy]
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/publish.yml
+    with:
+      deployment: staging
+      run_id: ${{ inputs.run_id }}
+      staging_attempt: ${{ inputs.source_attempt }}
+      source_sha: ${{ inputs.source_sha }}
+      manifest_id: ${{ inputs.manifest_id }}
+    secrets: inherit
