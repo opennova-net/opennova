@@ -29,15 +29,6 @@ using namespace sim_internal;
 
 namespace {
 
-// The rules the mission's World runs from its load (KernelBootOptions::title_rules): the title the
-// shell named for the session (Simulation::set_game_title), else the mounted root's game, the
-// launch's with no root. A role's session stamps the same over it.
-const opennova::world::TitleRules &boot_title_rules(const opennova::Title *named,
-		const godot::Ref<godot::ResourceRoot> &root) {
-	return opennova::world::title_rules(
-			(named != nullptr ? *named : godot::ResourceRoot::session_title(root)).code);
-}
-
 // The BMS admission limits (promote.cpp's player_limit/team_count gates). A
 // host admits against its live slot limit (host_player_slot_limit over the
 // configure_host_session clamp, net.host_max_players: a dedicated host's own
@@ -52,17 +43,17 @@ const opennova::world::TitleRules &boot_title_rules(const opennova::Title *named
 // host-equivalent defaults. Retail joiners never promote the .bms (admission
 // is host-only), so the joiner leg is a port decision with no binary witness.
 void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
-		const godot::SimulationNetState &net, bool host_listening,
-		const opennova::inmatch::ClientRuntime *joined) {
+		const godot::SimulationNetState &net, const godot::Ref<godot::ResourceRoot> &root,
+		bool host_listening, const opennova::inmatch::ClientRuntime *joined) {
 	// The cfg block's Shadow Quality word, which gates the face slots (engine
 	// KernelBootOptions::shadow_quality carries the witness).
 	if (net.game_config.is_valid())
 		options.shadow_quality = net.game_config->native().cfg().shadow_quality;
 	// The host's caps are its session's title's; a listen host no host screen configured runs as
-	// the launch's game.
+	// the session's game (session_title).
 	const opennova::Title &host_title = net.host_session_config.title != nullptr
 			? *net.host_session_config.title
-			: ResourceRoot::session_title(Ref<ResourceRoot>());
+			: session_title(net, root);
 	options.player_limit = host_listening
 			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
 					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play,
@@ -132,7 +123,8 @@ void Simulation::reset_world() {
 	kernel_ = std::move(next_kernel);
 	// The title's rules from the World's creation (a weapon-table load ahead of any boot seeds
 	// the single-player kit by them); the boot restamps them, and the role's bind stamps its own.
-	kernel_->world.rules.title_rules = &boot_title_rules(net_.game_title, assets_.root);
+	kernel_->world.rules.title_rules =
+			&opennova::world::title_rules(session_title(net_, assets_.root).code);
 	role_->bind(*kernel_);
 	// The retained .til (set_terrain_til_data, the boot's) onto the fresh
 	// store's placed-tile overlay; a file boot replaces it with its own.
@@ -620,7 +612,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 				p_terrain_til.ptr() + p_terrain_til.size());
 	request.wire_header_world = p_mission->is_wire_header_only();
 	ms::KernelBootOptions &options = request.boot_options;
-	options.title_rules = &boot_title_rules(net_.game_title, p_resource_root);
+	options.title_rules =
+			&opennova::world::title_rules(session_title(net_, p_resource_root).code);
 	options.music_globals = wac_music_globals();
 	options.playable = p_playable;
 	options.joiner = is_joiner();
@@ -635,7 +628,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	options.wac = !p_wac_basename.is_empty();
 	options.wac_basename = opennova::to_std(p_wac_basename);
 	options.game_type = mission_game_type;
-	stamp_admission_limits(options, net_, is_host_listening(),
+	stamp_admission_limits(options, net_, p_resource_root, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	// A map change's next map gates its placements on the slot limit its staging took from the
 	// cfg block (engine inmatch::stage_next_mission, GameConfig::mission_slot_limit), as
@@ -740,13 +733,14 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		kernel_->set_items_table(&pending_item_db->native_items());
 	}
 	opennova::mission::KernelBootOptions options;
-	options.title_rules = &boot_title_rules(net_.game_title, assets_.root);
+	options.title_rules =
+			&opennova::world::title_rules(session_title(net_, assets_.root).code);
 	options.music_globals = wac_music_globals();
 	options.playable = false; // callers spawn explicitly (or a host role's round init spawns)
 	options.joiner = is_joiner();
 	options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
-	stamp_admission_limits(options, net_, is_host_listening(),
+	stamp_admission_limits(options, net_, assets_.root, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;

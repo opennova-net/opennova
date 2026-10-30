@@ -136,4 +136,14 @@ using opennova::world::model_bound_radius_from_3di;
 // The host screen's START over the mounted catalog (simulation_rotation.cpp).
 void seed_host_rotation(SimulationNetState &p_net, const Ref<ResourceRoot> &p_root);
 
+// The title a session runs as (its caps and its rules) and the protocol it speaks, for the
+// World's boot, the host config and the joiner alike: the one the shell named
+// (Simulation::set_game_title / set_protocol, the mounted game's), else the game `p_root`
+// mounts, the launch's with no root (ResourceRoot::session_title / session_protocol). The
+// protocol is null when that title's is not witnessed in full; a joiner then does not dial
+// and a host admits no joiner.
+const opennova::Title &session_title(const SimulationNetState &p_net, const Ref<ResourceRoot> &p_root);
+const opennova::Protocol *session_protocol(
+		const SimulationNetState &p_net, const Ref<ResourceRoot> &p_root);
+
 } // namespace sim_internal

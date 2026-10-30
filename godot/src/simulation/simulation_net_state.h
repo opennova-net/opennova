@@ -140,7 +140,7 @@ struct SimulationNetState {
 	// The title the session speaks (set_protocol); null until the shell names one.
 	const opennova::Protocol *protocol = nullptr;
 	// The title the session runs as (set_game_title): its player caps and its rules; null until
-	// the shell names one (simulation_net.cpp session_game_title then reads the launch's).
+	// the shell names one (sim_internal::session_title then reads the mounted root's game).
 	const opennova::Title *game_title = nullptr;
 	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
 	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.

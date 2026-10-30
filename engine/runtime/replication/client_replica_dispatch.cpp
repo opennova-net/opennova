@@ -137,7 +137,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// records, the last one's slot kept (DFX2-9, TitleRules::route_done_records).
 			// [orig: NapiNPClientMsg_0x00F @0x42fe82, @0x42ffe7..0x42fffc (dfx2.exe)]
 			ws.waypoint_done_stored =
-					(rules_ != nullptr ? *rules_ : world::title_rules({})).route_done_records;
+					world::require_title_rules(rules_, "ClientReplicaPipeline").route_done_records;
 			if (ws.waypoint_done_stored) {
 				state_.coop_checkpoint = kCoopCheckpointNone;
 				for (const WorldStateWaypoint &wp : ws.waypoints)
