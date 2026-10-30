@@ -447,8 +447,8 @@ public:
 	// powerup pickup and death-piece slot reuse destroy so; every other release detaches
 	// [orig: Effect_DestroyEmitterIfLive @ 0x5F6A20 -> CEffectGroup_DestroyChildren @ 0x5E57C0 (each child
 	//  virtual-deleted, @ 0x5E5823); CEffectEmitter_ReleaseSafe @ 0x5F69F0 /
-	//  Entity_ReleaseEffectEmitter @ 0x5F75D0 -> sub_5E5ED0 @ 0x5E5ED0 (each child's vtable +60,
-	//  the detach)].
+	//  Entity_ReleaseEffectEmitter @ 0x5F75D0 -> CEffectGroup_StopChildEmitters @ 0x5E5ED0
+	//  (each child's vtable +60, the detach)].
 	void destroy(EffectGroupId group);
 	void destroy_slot(EffectSlotToken slot);
 

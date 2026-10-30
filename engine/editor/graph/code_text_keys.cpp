@@ -400,7 +400,7 @@ const CodeTextKey kRows[] = {
 	{"GAMETEXT.BIN", "Overlays", "STROVER_SLOTTITLE_SAVE", "sub_5B74B0", 0x5B74F9},
 	{"GAMETEXT.BIN", "Overlays", "STROVER_SPECTATOR_SUFFIX", "CMap_UpdatePlayerListUI", 0x547E95},
 	{"GAMETEXT.BIN", "Overlays", "STROVER_SPECTATORSPAWN", "UI_UpdateDeathScreenContent", 0x553763},
-	{"GAMETEXT.BIN", "Overlays", "STROVER_SPMISSIONHOWTO", "sub_5B9210", 0x5B9299},
+	{"GAMETEXT.BIN", "Overlays", "STROVER_SPMISSIONHOWTO", "HUD_DrawSinglePlayerHowTo", 0x5B9299},
 	{"GAMETEXT.BIN", "Overlays", "STROVER_TAKINGNEUTRALCAMP", "HUD_DrawTakeoverStatus", 0x59BBA5},
 	{"GAMETEXT.BIN", "Overlays", "STROVER_TAKINGOVERBLD", "HUD_DrawTakeoverStatus", 0x59B999},
 	{"GAMETEXT.BIN", "Overlays", "STROVER_TAKINGOVERBLDPSP", "HUD_DrawTakeoverStatus", 0x59B948},

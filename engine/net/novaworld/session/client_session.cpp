@@ -27,7 +27,7 @@ namespace {
 // The 16-byte NOVAWORLDUDP protocol GUID the real server validates (16 bytes
 // at proto+284 in BOTH HandleClientHello @ 0x6213B0 and HandleClientJoin @
 // 0x62B750). Built by CNapiGameSession_InitNPConnection @ 0x4d3be0 via
-//   sub_62E750(dst, -655487758, 58574, 17549, 144,180,29,66,179,100,171,113)
+//   Napi_BuildGuid(dst, -655487758, 58574, 17549, 144,180,29,66,179,100,171,113)
 // which lays out [u32 version LE][u16 port_a LE][u16 port_b LE][8 bytes].
 // Computed from those literals so the byte order is exact regardless of host.
 std::array<uint8_t, 16> novaworldudp_pg() {
