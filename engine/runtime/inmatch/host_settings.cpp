@@ -177,10 +177,17 @@ std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view cont
 
 namespace {
 
-// A control as both walks find it, -1 when the screen lacks it (the walk
-// skips it). [orig: UI_FindScreenControl @0x63AE80]
-int host_screen_control(const menu::MenuRuntime& screen, std::string_view control) {
-    return screen.find_screen_control(std::string(kHostDialogScreen), std::string(control));
+// A control on the title's own host screen (Title::host_screen), as both walks and the restriction
+// lists find it: -1 when the screen lacks it (the walk skips it) or the title names no screen.
+// [orig: UI_FindScreenControl @0x63AE80 - "MULTI_PLAYER_HOST" at each control of
+//  UI_PopulateHostSettingsFromConfig @0x555FE0 (GAME_NAME @0x556010) and HostDialog_ReadSettings
+//  @0x555940 (GAME_NAME @0x555962), and @0x556611 / @0x556712]
+// [orig: "NW_MULTI_PLAYER" at each control of UI_PopulateHostSettingsFromConfig @0x554190
+//  (GAME_NAME @0x5541ae .. TOD_CONTINUITY @0x554781) and HostDialog_ReadSettings @0x553af0
+//  (GAME_NAME @0x553b00 .. TOD_CONTINUITY @0x554093), and @0x5547c1 / @0x5548c2 (dfx2.exe)]
+int host_screen_control(const menu::MenuRuntime& screen, const Title& title, std::string_view control) {
+    if (title.host_screen == nullptr) return -1;
+    return screen.find_screen_control(std::string(title.host_screen), std::string(control));
 }
 
 mnu::WindowType host_control_kind(const menu::MenuRuntime& screen, int id) {
@@ -193,7 +200,7 @@ void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, cons
     // The clamp lands in the block ahead of MAX_PLAYERS' show, the one word it moves.
     populate_host_dialog(cfg, title);
     for (std::string_view control : host_dialog_controls()) {
-        const int id = host_screen_control(screen, control);
+        const int id = host_screen_control(screen, title, control);
         if (id < 0) continue;
         std::string value = host_dialog_value(cfg, control);
         if (control == "SERVER_PUNKBUSTER") {
@@ -235,7 +242,7 @@ void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, cons
     //  ("STATIC_MAXPLAYERS_RECOMMENDATION") @0x55619C, UIStringTable_LookupAndDup("menutxt.bin",
     //  "MAX_PLAYERS") @0x5561BC, UI_MapSliderIndexToMaxPlayers(nwiSpType_540) @0x5561CF, sprintf
     //  @0x5561DB, the SetText vtable+0x4C call @0x5561F1, the free @0x5561F8]
-    const int label = host_screen_control(screen, "STATIC_MAXPLAYERS_RECOMMENDATION");
+    const int label = host_screen_control(screen, title, "STATIC_MAXPLAYERS_RECOMMENDATION");
     if (label >= 0) {
         const std::string format = screen.table_string("menutxt.bin", "MAX_PLAYERS");
         screen.set_widget_text(label, hud::hud_sprintf(format,
@@ -256,7 +263,7 @@ int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_scree
 
 void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title) {
     for (std::string_view control : host_dialog_controls()) {
-        const int id = host_screen_control(screen, control);
+        const int id = host_screen_control(screen, title, control);
         if (id < 0) continue;
         std::string value = screen.get_widget_text(id);
         switch (host_control_kind(screen, id)) {
@@ -308,14 +315,6 @@ std::string class_word_token(const hud::GameTextLookup& menu_ui, int32_t word) {
 constexpr int kRestrictionCell = 1; // the token's column [orig: CTableWnd_SetCellText(.., 1) @0x5566BF]
 constexpr size_t kClassWordCount = gamecfg::kClassAvailabilityCount;
 
-// A restriction list on the title's own host screen (Title::host_screen), -1 when the screen lacks
-// it or the title names none. [orig: UI_FindScreenControl @0x63AE80 - "MULTI_PLAYER_HOST"
-// @0x556611 / @0x556712; "NW_MULTI_PLAYER" @0x5547c1 / @0x5548c2 (dfx2.exe)]
-int host_screen_list(const menu::MenuRuntime& screen, const Title& title, std::string_view list) {
-    if (title.host_screen == nullptr) return -1;
-    return screen.find_screen_control(std::string(title.host_screen), std::string(list));
-}
-
 } // namespace
 
 gamecfg::ServerSettingsTitle server_settings_title(const Title& title) {
@@ -345,7 +344,7 @@ void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg
     //  @0x5566BF]
     // [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0 - NW_MULTI_PLAYER's WEAPON_LIST
     //  @0x5547c1, the token's switch @0x554805 (dfx2.exe)]
-    const int list = host_screen_list(screen, title, "WEAPON_LIST");
+    const int list = host_screen_control(screen, title, "WEAPON_LIST");
     if (list < 0) return;
     const gamecfg::ServerSettingsTitle words = server_settings_title(title);
     screen.table_clear_rows(list);
@@ -371,7 +370,7 @@ void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg&
     //  classes 5..9 @0x5548e1 (dfx2.exe)]
     static constexpr const char* kClassKeys[] = {"CHARCLASS_MEDIC", "CHARCLASS_SNIPER",
         "CHARCLASS_GUNNER", "CHARCLASS_RIFLEMAN", "CHARCLASS_ENGINEER"};
-    const int list = host_screen_list(screen, title, "CLASS_LIST");
+    const int list = host_screen_control(screen, title, "CLASS_LIST");
     if (list < 0) return;
     screen.table_clear_rows(list);
     for (int cls = gamecfg::kClassMedic; cls <= gamecfg::kClassEngineer; ++cls) {
@@ -388,7 +387,7 @@ bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& 
     if (column != kRestrictionCell) return false;
     const bool weapons = widget == "WEAPON_LIST";
     if (!weapons && widget != "CLASS_LIST") return false;
-    const int list = host_screen_list(screen, title, widget);
+    const int list = host_screen_control(screen, title, widget);
     if (list < 0 || row < 0 || row >= screen.table_row_count(list)) return false;
     const int32_t index = screen.table_row_value(list, row);
     if (weapons) {
@@ -458,7 +457,7 @@ bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog&
         //  NW_MULTI_PLAYER's WEAPON_LIST @0x555b99, every row's cell @0x555bac..0x555bbd (dfx2.exe)]
         for (size_t i = 0; i < weapons.size() && i < gamecfg::kWeaponAvailabilityCount; ++i)
             if (weapons[i].loadout_selectable != 0) cfg.weapon_availability[i] = radio->word;
-        const int list = host_screen_list(screen, title, "WEAPON_LIST");
+        const int list = host_screen_control(screen, title, "WEAPON_LIST");
         if (list >= 0) {
             const std::string token = weapon_word_token(menu_ui, radio->word, words);
             for (int row = 0; row < screen.table_row_count(list); ++row)
@@ -473,7 +472,7 @@ bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog&
     //  words @0x555c03..0x555c30, NW_MULTI_PLAYER's CLASS_LIST @0x555c95, its START_GAME gate
     //  @0x555cdc (dfx2.exe)]
     std::fill(std::begin(cfg.class_availability), std::end(cfg.class_availability), radio->word);
-    const int list = host_screen_list(screen, title, "CLASS_LIST");
+    const int list = host_screen_control(screen, title, "CLASS_LIST");
     if (list >= 0) {
         const std::string token = class_word_token(menu_ui, radio->word);
         for (int row = 0; row < screen.table_row_count(list); ++row)

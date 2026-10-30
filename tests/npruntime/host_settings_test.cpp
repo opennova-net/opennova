@@ -107,13 +107,13 @@ mnu::Document host_dialog_document() {
 //  0 on a miss @0x64BA82); CButtonWnd_SetLabel @0x6572F0 (the {hot} cut @0x657451..0x657480);
 //  UI_HandleHostSessionStart - HostDialog_ReadSettings @0x556E36; HostDialog_ReadSettings -
 //  CSpinListWnd_GetSelectedValue @0x5559DE, the location's strncpy @0x555A72]
-// The screen opened over `doc` (null: no screen, every control lacking) and START pressed with
-// nothing changed: the populate, then the read.
-void open_and_start(gamecfg::GameCfg& cfg, const mnu::Document* doc) {
+// The screen opened over `doc` (null: no screen, every control lacking) on `title`'s host screen
+// and START pressed with nothing changed: the populate, then the read.
+void open_and_start(gamecfg::GameCfg& cfg, const mnu::Document* doc, const opennova::Title& title = kJo) {
     auto screen = std::make_unique<opennova::menu::MenuRuntime>();
-    if (doc != nullptr) screen->open_document(doc, std::string(), std::string(kHostDialogScreen));
-    populate_host_screen(*screen, cfg, kJo);
-    read_host_screen(*screen, cfg, kJo);
+    if (doc != nullptr) screen->open_document(doc, std::string(), std::string(title.host_screen));
+    populate_host_screen(*screen, cfg, title);
+    read_host_screen(*screen, cfg, title);
 }
 
 int untouched_dialog() {
@@ -151,15 +151,39 @@ int untouched_dialog() {
     TEST_EXPECT(cfg.sv_punkbuster == 1 && cfg.replay == 2 && cfg.mp_max_players == 64);
     // The LAN screen: the open, the player's edit, START's read; PunkBuster's spin is disabled.
     auto screen = std::make_unique<opennova::menu::MenuRuntime>();
-    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kJo.host_screen)));
     populate_host_screen(*screen, cfg, kJo);
-    const int name = screen->find_screen_control(std::string(kHostDialogScreen), "GAME_NAME");
-    const int punkbuster = screen->find_screen_control(std::string(kHostDialogScreen), "SERVER_PUNKBUSTER");
+    const int name = screen->find_screen_control(std::string(kJo.host_screen), "GAME_NAME");
+    const int punkbuster = screen->find_screen_control(std::string(kJo.host_screen), "SERVER_PUNKBUSTER");
     TEST_EXPECT(name >= 0 && screen->get_widget_text(name) == "NightOps");
     TEST_EXPECT(punkbuster >= 0 && screen->is_widget_disabled(punkbuster));
     screen->set_widget_text(name, "Renamed");
     read_host_screen(*screen, cfg, kJo);
     TEST_EXPECT(cfg.game_name == "Renamed" && cfg.sv_punkbuster == 0 && cfg.replay == 0);
+
+    // dfx2.exe's walks find every control on NW_MULTI_PLAYER: JO's MULTI_PLAYER_HOST holds none of
+    // them for it (the clamp alone writes), its own screen every one, under its cap 100.
+    // [orig: UI_PopulateHostSettingsFromConfig @0x554190 (GAME_NAME @0x5541ae, MAX_PLAYERS
+    //  @0x5544f4); HostDialog_ReadSettings @0x553af0 (GAME_NAME @0x553b00) (dfx2.exe)]
+    mnu::Document nw = host_dialog_document();
+    nw.screens[0].name = "NW_MULTI_PLAYER";
+    gamecfg::GameCfg dfx2;
+    dfx2.table = gamecfg::ConfigTable::Dfx2;
+    dfx2.game_name = "Night{hot}Ops";
+    dfx2.sv_punkbuster = 1;
+    dfx2.mp_max_players = 120;
+    open_and_start(dfx2, &doc, kDfx2);
+    TEST_EXPECT(dfx2.game_name == "Night{hot}Ops" && dfx2.sv_punkbuster == 1 && dfx2.mp_max_players == 100);
+    open_and_start(dfx2, &nw, kDfx2);
+    TEST_EXPECT(dfx2.game_name == "NightOps" && dfx2.sv_punkbuster == 0 && dfx2.mp_max_players == 100);
+    auto nw_screen = std::make_unique<opennova::menu::MenuRuntime>();
+    TEST_EXPECT(nw_screen->open_document(&nw, std::string(), "NW_MULTI_PLAYER"));
+    populate_host_screen(*nw_screen, dfx2, kDfx2);
+    const int nw_name = nw_screen->find_screen_control("NW_MULTI_PLAYER", "GAME_NAME");
+    TEST_EXPECT(nw_name >= 0 && nw_screen->get_widget_text(nw_name) == "NightOps");
+    nw_screen->set_widget_text(nw_name, "Renamed");
+    read_host_screen(*nw_screen, dfx2, kDfx2);
+    TEST_EXPECT(dfx2.game_name == "Renamed");
     return 0;
 }
 // The connection speed's recommended player count: rows 0..17 the table under the title's
@@ -183,6 +207,10 @@ int max_players_recommendation() {
             {{"28.8", ""}, {"LAN", "18"}}));
     doc.screens[0].roots[0].children.push_back(
             control("STATIC_MAXPLAYERS_RECOMMENDATION", mnu::WindowType::Static));
+    // dfx2.exe's host screen, the same controls under its own name.
+    mnu::Screen nw = doc.screens[0];
+    nw.name = "NW_MULTI_PLAYER";
+    doc.screens.push_back(nw);
     opennova::menu::MenuTextTables tables;
     auto menutxt = std::make_shared<opennova::rtxt::File>();
     menutxt->sections.push_back({"Menu", 1});
@@ -197,8 +225,8 @@ int max_players_recommendation() {
     });
     auto screen = std::make_unique<opennova::menu::MenuRuntime>();
     screen->set_frame(&frame);
-    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
-    const int label = screen->find_screen_control(std::string(kHostDialogScreen),
+    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kJo.host_screen)));
+    const int label = screen->find_screen_control(std::string(kJo.host_screen),
                                                   "STATIC_MAXPLAYERS_RECOMMENDATION");
     TEST_EXPECT(label >= 0);
     gamecfg::GameCfg cfg;
@@ -211,14 +239,19 @@ int max_players_recommendation() {
     gamecfg::GameCfg dfx2;
     dfx2.table = gamecfg::ConfigTable::Dfx2;
     dfx2.nwisptype = 18;
-    populate_host_screen(*screen, dfx2, kDfx2);
-    TEST_EXPECT(screen->get_widget_text(label) == "Up to 100 players");
+    auto nw_screen = std::make_unique<opennova::menu::MenuRuntime>();
+    nw_screen->set_frame(&frame);
+    TEST_EXPECT(nw_screen->open_document(&doc, std::string(), "NW_MULTI_PLAYER"));
+    const int nw_label = nw_screen->find_screen_control("NW_MULTI_PLAYER", "STATIC_MAXPLAYERS_RECOMMENDATION");
+    TEST_EXPECT(nw_label >= 0);
+    populate_host_screen(*nw_screen, dfx2, kDfx2);
+    TEST_EXPECT(nw_screen->get_widget_text(nw_label) == "Up to 100 players");
     // A frame with no menutxt.bin: the key itself, sprintf'd as the format.
     auto bare = std::make_unique<opennova::menu::MenuRuntime>();
-    TEST_EXPECT(bare->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    TEST_EXPECT(bare->open_document(&doc, std::string(), std::string(kJo.host_screen)));
     cfg.nwisptype = 13;
     populate_host_screen(*bare, cfg, kJo);
-    const int bare_label = bare->find_screen_control(std::string(kHostDialogScreen),
+    const int bare_label = bare->find_screen_control(std::string(kJo.host_screen),
                                                      "STATIC_MAXPLAYERS_RECOMMENDATION");
     TEST_EXPECT(bare_label >= 0 && bare->get_widget_text(bare_label) == "MAX_PLAYERS");
     return 0;
@@ -248,9 +281,9 @@ int restriction_lists() {
     for (const char* radio : {"WPN_NEVER", "WPN_MISSION", "CLASS_NEVER", "CLASS_ALWAYS"})
         children.push_back(control(radio, mnu::WindowType::Radio));
     opennova::menu::MenuRuntime screen;
-    TEST_EXPECT(screen.open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    TEST_EXPECT(screen.open_document(&doc, std::string(), std::string(kJo.host_screen)));
     const auto find = [&](const char* name) {
-        return screen.find_screen_control(std::string(kHostDialogScreen), name);
+        return screen.find_screen_control(std::string(kJo.host_screen), name);
     };
     const opennova::hud::GameTextLookup gametext = [](const char* section, const char* key,
                                                        const char* fallback) {

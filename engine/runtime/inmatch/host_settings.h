@@ -31,10 +31,15 @@ namespace opennova::inmatch {
 //  (networkConnectType_480 == 1) @0x556E47; HostDialog_ReadSettings - GAME_NAME
 //  @0x555962, SERVER_PUNKBUSTER @0x555A9B]
 //
-// The screen both walks find every control on. [orig: UI_FindScreenControl
-// @0x63AE80 (g_GameMenu, "MULTI_PLAYER_HOST", the control's name) at each
-// control of UI_PopulateHostSettingsFromConfig and HostDialog_ReadSettings]
-inline constexpr std::string_view kHostDialogScreen = "MULTI_PLAYER_HOST";
+// Both walks find every control on the title's own host screen (Title::host_screen): Jointops.exe's
+// MULTI_PLAYER_HOST, dfx2.exe's NW_MULTI_PLAYER, which dfx2.exe's walks name at every control (it
+// names MULTI_PLAYER_HOST only for its LAN screen's show of four location and LAN-only controls,
+// unported). [orig: UI_FindScreenControl @0x63AE80 (g_GameMenu, the screen, the control's name)
+// at each control of UI_PopulateHostSettingsFromConfig and HostDialog_ReadSettings]
+// [orig: UI_PopulateHostSettingsFromConfig @0x554190 (GAME_NAME @0x5541ae); HostDialog_ReadSettings
+//  @0x553af0 (GAME_NAME @0x553b00); UI_InitLANMultiplayerScreen @0x554ae0 - MULTI_PLAYER_HOST's
+//  STATIC_GAME_LOCATION, GAME_LOCATION, STATIC_SERVER_LANONLY, SERVER_LANONLY @0x554b9b..0x554c01
+//  (dfx2.exe)]
 // The controls, in the read's order. [orig: HostDialog_ReadSettings @0x555940]
 const std::vector<std::string_view>& host_dialog_controls();
 // One control's selected spin value or raw edit string into the block, as the
@@ -66,7 +71,7 @@ std::string host_dialog_value(const gamecfg::GameCfg& cfg, std::string_view cont
 // checkbox (the shipped screen has none) checked on a nonzero word. A control
 // the screen lacks is skipped.
 // [orig: UI_PopulateHostSettingsFromConfig @0x555FE0 - per control in
-//  host_settings.cpp]
+//  host_settings.cpp] [orig: UI_PopulateHostSettingsFromConfig @0x554190 (dfx2.exe)]
 void populate_host_screen(menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title);
 // The player count the host screen recommends for a CONNECTIONSPEED row (the block's
 // nwisptype): rows 0..17 map to 1, 2, 2, 2, 3, 3, 4, 5, 6, 8, 9, 11, 14, 16, 21, 23, 26, 32
@@ -80,7 +85,7 @@ int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_scree
 // read's order through apply_host_dialog_control: a spin list its selected
 // row's value= (GAME_LOCATION the row's name), an edit its text, a checkbox
 // 1 or 0.
-// [orig: HostDialog_ReadSettings @0x555940]
+// [orig: HostDialog_ReadSettings @0x555940] [orig: HostDialog_ReadSettings @0x553af0 (dfx2.exe)]
 void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title);
 // What the settings schema takes of `title` (gamecfg::ServerSettingsTitle): its cfg table, its
 // host screen's MAX_PLAYERS cap and the availability words of the protocol it speaks. A title code
