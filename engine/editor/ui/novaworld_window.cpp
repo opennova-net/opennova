@@ -103,20 +103,28 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 		if (!project.is_public) tip += std::string(tip.empty() ? "" : " ") + "Only its owner and admins see it.";
 		ui_kit::clipped_text(line, tip.empty() ? std::string() : line + "\n" + tip);
 		ImGui::TableNextColumn();
-		if (project.head == 0 && project.can_push && (project.owner.empty() || project.owner == v.novaworld.username)) {
-			const bool sets_up = v.allows(EditorRequestKind::NewProject);
-			ImGui::BeginDisabled(!sets_up);
-			if (ImGui::SmallButton("Set up...") && sets_up) set_up(workspace, project);
-			ImGui::EndDisabled();
-			ui_kit::tooltip("Fills New project for " + project.key + ": create it, then push its files.");
-		} else if (const auto copies = local_copies(v, project.key); !copies.empty()) {
-			// A copy of it on this computer already: opened, not got again.
+		const std::vector<const ProjectView::RecentProject *> copies = local_copies(v, project.key);
+		const bool open_here = v.project.open && std::any_of(copies.begin(), copies.end(), [&v](const auto *copy) {
+			return copy->root == v.project.root;
+		});
+		if (open_here) {
+			// The project open now: nothing to open, or to get.
+			ImGui::TextDisabled("Open now");
+			ui_kit::tooltip("This project is the one open.");
+		} else if (!copies.empty()) {
+			// A copy of it on this computer already, an empty project's too: opened, not got or set up again.
 			const bool opens = v.allows(EditorRequestKind::OpenProject);
 			ImGui::BeginDisabled(!opens);
 			if (ImGui::SmallButton("Open") && opens) workspace.request(request::open_project(copies.front()->root));
 			ImGui::EndDisabled();
 			ui_kit::tooltip("Opens your copy in " + copies.front()->root + "." +
 			                (copies.size() > 1 ? " You have " + counted(copies.size() - 1, "more") + " here." : ""));
+		} else if (project.head == 0 && project.can_push && (project.owner.empty() || project.owner == v.novaworld.username)) {
+			const bool sets_up = v.allows(EditorRequestKind::NewProject);
+			ImGui::BeginDisabled(!sets_up);
+			if (ImGui::SmallButton("Set up...") && sets_up) set_up(workspace, project);
+			ImGui::EndDisabled();
+			ui_kit::tooltip("Fills New project for " + project.key + ": create it, then push its files.");
 		} else {
 			const bool can = gets && project.head > 0;
 			ImGui::BeginDisabled(!can);
@@ -127,7 +135,8 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 			}
 			ImGui::EndDisabled();
 			ui_kit::tooltip(project.head > 0 ? "Downloads the project into a folder named " + project.key +
-			                                           " inside the one you choose, then opens it."
+			                                           " inside the one you choose, then opens it" +
+			                                           (v.project.open ? " in place of this one." : ".")
 			                                 : "Nothing has been pushed to it yet.");
 		}
 		ImGui::PopID();
@@ -449,12 +458,14 @@ void NovaWorldWindow::draw_push(const NovaWorldView &c) {
 	// The message stays while there is a change to push: a push refused (the store moved on) keeps it.
 	ImGui::SetNextItemWidth(-1.0f);
 	ImGui::InputTextWithHint("##message", "What changed", message_, sizeof(message_));
+	const bool behind = c.head_known && c.head > c.revision;
 	const bool pushes = v.allows(EditorRequestKind::NovaWorldPush) && message_[0] && (!c.checked || !c.changes.empty()) &&
-	                    c.conflicts.empty() && !novaworld_holds_no_revision(c);
+	                    c.conflicts.empty() && !behind;
 	ImGui::BeginDisabled(!pushes);
 	const bool pushed = ImGui::Button("Push") && pushes;
 	ImGui::EndDisabled();
 	const std::string why = novaworld_holds_no_revision(c)  ? "Pull first: the folder holds no revision of the project yet."
+	                  : behind               ? "Pull r" + std::to_string(c.head) + " first: NovaWorld is past this folder."
 	                  : c.checked && c.changes.empty() ? "Nothing to push."
 	                  : !message_[0]         ? "Say what changed first."
 	                  : !c.conflicts.empty() ? "Settle every conflict first."

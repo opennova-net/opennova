@@ -61,6 +61,7 @@ void recent_row(Workspace &workspace, const std::string &root, const ProjectView
 		if (!details->expansion.empty())
 			what += ", as the expansion " + details->expansion +
 			        (details->builds_on.empty() ? std::string() : " on " + details->builds_on);
+		if (!details->novaworld.empty()) what += ", on NovaWorld";
 	}
 	what += (what.empty() ? "" : "   ") + root;
 	ImGui::TextDisabled("%s", ui_kit::fit_middle(what, ImGui::GetContentRegionAvail().x).c_str());
@@ -69,7 +70,10 @@ void recent_row(Workspace &workspace, const std::string &root, const ProjectView
 	ImGui::BeginDisabled(!forgets);
 	if (ImGui::SmallButton("Forget") && forgets) workspace.request(request::forget_recent(root));
 	ImGui::EndDisabled();
-	ui_kit::tooltip("Take it off this list; the project stays where it is.");
+	ui_kit::tooltip(!found ? "Take it off this list."
+	                : details && !details->novaworld.empty()
+	                        ? "Take it off this list. The folder stays, and the NovaWorld list still opens it."
+	                        : "Take it off this list; the project stays where it is.");
 	ImGui::PopID();
 }
 

@@ -207,10 +207,25 @@ void test_two_services() {
 	SessionView v = tracked_view();
 	NovaWorldView &c = v.novaworld;
 	CHECK(editor_window_title(v) == "My Mod - OpenNova Editor (novaworld.test)", "the window's title names the service");
-	c.revision = 0;
-	c.other_copies = {{"staging.test", 12}};
+	// The project open now, in the list under it: nothing to open.
+	ProjectView::RecentProject here;
+	here.root = v.project.root;
+	here.found = true;
+	here.novaworld = "MOD";
+	v.project.working_copies = {here};
 	ui.windows.set_view(&v);
 	ui.focus("NovaWorld");
+	ui.frames(2);
+	ui.activate(novaworld_item({"Other projects on NovaWorld"}));
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Open now") != std::string::npos, "the open project's row says so");
+	ui.activate(novaworld_item({"Other projects on NovaWorld"}));
+	ui.drain();
+	v.project.working_copies.clear();
+
+	c.revision = 0;
+	c.other_copies = {{"staging.test", 12}};
 	ui.frames(2);
 	ui.away();
 	std::string text = logged_frame(ui);
@@ -264,9 +279,15 @@ void test_working_copy() {
 	ImGui::GetIO().AddInputCharactersUTF8("Fix the armory");
 	ui.frames(2);
 	ui.activate(novaworld_item({"Push"}));
+	CHECK(ui.drain().empty(), "behind: Push waits for a pull");
+	v.novaworld.head = 3;
+	ui.frames(2);
+	ui.activate(novaworld_item({"Push"}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *push = one(raised, EditorRequestKind::NovaWorldPush);
 	CHECK(push && push->message == "Fix the armory", "Push: one novaworld_push with the message");
+	v.novaworld.head = 5;
+	ui.frames(2);
 
 	// Release r3 waits for a game version; typed, it raises novaworld_release with it. Above it, the release players
 	// get and the protocol the project's title speaks.
@@ -388,8 +409,12 @@ void test_working_copy() {
 	              read_only.find("Players update to 0.1.0, built by ONE 0.0.22.") != std::string::npos,
 	      "a player's own project: no read-only line, its Release and the release players get, with the ONE that "
 	      "built it");
+	v.novaworld.head = 3; // caught up: Push waits for nothing
+	ui.frames(2);
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldPush), "a player's own project: Push");
+	v.novaworld.head = 5;
+	ui.frames(2);
 	const uint64_t before_menu = v.events.next_seq();
 	CHECK(choose(ui, "Build", {"###release"}).empty() && v.events.next_seq() > before_menu,
 	      "a player's own project: Build > Release... brings the NovaWorld window forward");
@@ -688,6 +713,16 @@ void test_get_a_project() {
 	CHECK(one(ui.drain(), EditorRequestKind::PickDirectory), "no copy found: Get...");
 	ui.windows.deliver_pick(PickPurpose::NovaWorldFolder, "C:/mods");
 	ui.drain();
+	// An empty project this computer has a copy of (put, nothing pushed): Open, never a second folder.
+	ProjectView::RecentProject empty_copy = copy;
+	empty_copy.root = "C:/mods/Mine";
+	empty_copy.novaworld = "EMPTY";
+	v.project.working_copies = {empty_copy};
+	ui.frames(2);
+	ui.activate(novaworld_item({"novaworld_opennova", "EMPTY", "Open"}));
+	raised = ui.drain();
+	opened = one(raised, EditorRequestKind::OpenProject);
+	CHECK(opened && opened->dir == "C:/mods/Mine", "an empty project's copy: Open before Set up...");
 	v.project.working_copies.clear();
 	ui.frames(2);
 	// Set up...: the New project form filled for the empty project, a mod of its code (the workspace's, as the
