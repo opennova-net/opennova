@@ -278,13 +278,15 @@ std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg,
 	                            static_cast<uint32_t>(info_body.size()), offset);
 }
 
-// tag=0x64 chunked mission-metadata transfer. [orig: NapiNPClientMsg_HandleMissionDataChunk (0x64) @0x432410]
+// tag=0x64 chunked mission-metadata transfer: the session's block, else (the World-less unit
+// path) one built for it, under the protocol the session speaks.
+// [orig: NapiNPClientMsg_HandleMissionDataChunk (0x64) @0x432410]
 std::vector<uint8_t> build_tag64_mission_metadata(
-		const GameConfig &cfg, const MissionMetadataBlob *session_blob,
+		const GameConfig &cfg, const MissionMetadataBlob *session_blob, const Protocol *protocol,
 		uint32_t transfer_id, uint32_t offset) {
 	MissionMetadataBlob fallback{};
 	if (session_blob == nullptr) {
-		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server, nullptr,
+		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server, protocol,
 				context_session_title(nullptr, cfg)); // no ctx
 		session_blob = &fallback;
 	}
@@ -737,6 +739,8 @@ void dispatch_mission_chunk_request(const GameConfig &config, const ProtocolMess
 			s2c::MISSION_DATA_CHUNK,
 			build_tag64_mission_metadata(
 					config, inputs.mission_metadata_blob,
+					inputs.server_ctx != nullptr ? inputs.server_ctx->np_protocol.identity
+					                             : nullptr,
 					inputs.mission_metadata_transfer_id,
 					chunk_request_offset(msg.payload, inputs.mission_metadata_transfer_id))));
 }

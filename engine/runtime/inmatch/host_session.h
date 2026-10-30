@@ -152,7 +152,7 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 struct HostConfig {
 	// The title's protocol the host speaks (net/protocol/protocol.h): the 0x81 it writes and the
 	// 0x41 / 0x42 it admits. The embedder resolves a complete one (resolve_title_protocol) and
-	// refuses to host without; with none, the host answers no hello and admits no join.
+	// refuses to host without: a host with none aborts at its create (protocol_in_match).
 	const Protocol *protocol = nullptr;
 	// The ONE consolidated GameConfig (ADR 0013): §6.4 identity (server name / max players / passwords /
 	// game type) + the §6.9 rule globals + the §5.1 reactive-reply config (mission / player / spawn).

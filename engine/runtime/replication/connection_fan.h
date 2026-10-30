@@ -120,11 +120,11 @@ void size_priority_caches(Connection &conn, const world::EntityRegistry &registr
 // clock reads.
 bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
-                         uint32_t game_type = 0,
-                         std::size_t max_frame_body_bytes = 0,
-                         int32_t server_fps = 0,
-                         int32_t server_cpu_percent = 0,
-                         const Protocol *protocol = nullptr);
+                         uint32_t game_type,
+                         std::size_t max_frame_body_bytes,
+                         int32_t server_fps,
+                         int32_t server_cpu_percent,
+                         const Protocol *protocol);
 
 // The same frame, built but NOT sent: every per-recipient state advance (phase,
 // age, cache, watermark) happens here and the 0x0A body lands in `frame_out`.
@@ -142,8 +142,8 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 // the sub-block carries as min(share, 0xFF), compared unsigned, so a negative
 // share crosses as 0xFF [orig: Server_TickUpdate @0x51D7EA..0x51D7FB ->
 // g_ServerCpuPct; NetPacket_WritePlayerState @0x4FFA76..0x4FFA7C].
-// `protocol` is the protocol the host speaks (null: JO's), whose 0x0A objective body
-// carries the co-op checkpoint after its four values (DFX2-1).
+// `protocol` is the protocol the host speaks, whose 0x0A objective body carries the
+// co-op checkpoint after its four values (DFX2-1).
 // `despawned` (when given) receives the handles the priority list's tracked-slot
 // walk cleared, in order: the caller sends each to this recipient, once, as an
 // S2C 0x12 ahead of the frame (D-NET-349) [orig: Server_BuildEntityPriorityList
@@ -151,11 +151,11 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 bool build_connection_s2c(const world::World &w, Connection &conn,
                           const std::vector<GameEntitySnapshot> &ents,
                           std::vector<uint8_t> &frame_out,
-                          uint32_t game_type = 0,
-                          std::size_t max_frame_body_bytes = 0,
-                          int32_t server_fps = 0,
-                          int32_t server_cpu_percent = 0,
-                          const Protocol *protocol = nullptr,
+                          uint32_t game_type,
+                          std::size_t max_frame_body_bytes,
+                          int32_t server_fps,
+                          int32_t server_cpu_percent,
+                          const Protocol *protocol,
                           std::vector<uint16_t> *despawned = nullptr);
 
 // The co-op checkpoint a DFX2 host's 0x0A objective body carries (DFX2-1): the

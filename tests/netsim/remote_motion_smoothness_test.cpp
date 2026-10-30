@@ -36,6 +36,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -130,6 +131,11 @@ void seed_row(ns::ClientReplicaPipeline &view, uint16_t handle, uint16_t type_id
 	view.state().upsert(handle).type_id = type_id;
 }
 
+// The joiner speaks JO's protocol, which its 0x0A folds read.
+void speak_jo(ns::ClientReplicaPipeline &view) {
+	view.set_protocol(nw::title_protocol("jo"));
+}
+
 // Drive kWarmupTicks + kMeasureTicks client ticks against the PORTED mover:
 // fold (staging), then tick_remote_motion (the chase), then sample — the
 // production per-tick order (recv fold first, movers after; §5.38e §6).
@@ -196,12 +202,14 @@ bool run_leg(const char *label, uint16_t handle, int32_t step_fx,
 // walk-speed equilibrium sits exactly on the org2 ladder's tuned 7-bucket.
 bool run_control_full_rate_is_smooth() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	return run_leg("control", 0x0006, 4096, /*vehicle=*/false, /*gap=*/1, view);
 }
 
 bool run_remote_player_glides_between_subrate_records() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	// 0.0625 m/tick = 3.9 m/s — infantry run speed.
 	return run_leg("player", 0x0005, 4096, /*vehicle=*/false, kGapTicks, view);
@@ -209,6 +217,7 @@ bool run_remote_player_glides_between_subrate_records() {
 
 bool run_remote_vehicle_glides_between_subrate_records() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	// Spawn the boat as a placed pool-1 entity first (the 0x0D world stream).
 	nw::PoolSpawnRecord spawn;
@@ -232,6 +241,7 @@ bool run_remote_vehicle_glides_between_subrate_records() {
 // prediction legs live in world/vehicle_motor and are pinned separately).
 bool run_vehicle_fast_speed_snaps_not_stalls() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x1008;
 	seed_row(view, handle, kVehicleType);
@@ -274,6 +284,7 @@ bool run_vehicle_fast_speed_snaps_not_stalls() {
 // branch), not a long glide [orig: @0x4b9a8c dist>0x20000 / org2 @0x4B4470+].
 bool run_player_large_jump_snaps_in_one_tick() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x0009;
 	seed_row(view, handle, kPlayerType);
@@ -297,6 +308,7 @@ bool run_player_large_jump_snaps_in_one_tick() {
 // live pose does not creep on tiny deltas.
 bool run_player_deadband_ignores_jitter() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x000A;
 	seed_row(view, handle, kPlayerType);
@@ -320,6 +332,7 @@ bool run_player_deadband_ignores_jitter() {
 // Death -> respawn stays a SNAP (D-NET-66): no corpse-to-spawn glide.
 bool run_respawn_snaps_without_glide() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x000B;
 	seed_row(view, handle, kPlayerType);
@@ -357,6 +370,7 @@ bool run_respawn_snaps_without_glide() {
 //  Entity_ResetToSpawnState called @0x4C113C; the reset's release @0x4B97CB..0x4B97F5]
 bool run_respawn_releases_the_corpse_group() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x000B;
 	seed_row(view, handle, kPlayerType);
@@ -393,6 +407,7 @@ bool run_respawn_releases_the_corpse_group() {
 // @0x4B9610 - Roll @0x4B97E3]
 bool run_respawn_keeps_the_torso_roll_and_lean() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x000C;
 	seed_row(view, handle, kPlayerType);
@@ -438,6 +453,7 @@ bool run_org2_bucket_ladder_is_verbatim() {
 	uint16_t next_handle = 0x0020;
 	for (const Probe &p : probes) {
 		ns::ClientReplicaPipeline view(class_of);
+		speak_jo(view);
 		view.set_remote_motion_mode(true);
 		const uint16_t handle = next_handle++;
 		seed_row(view, handle, kPlayerType);
@@ -468,6 +484,7 @@ bool run_org2_bucket_ladder_is_verbatim() {
 // {6,8,10,15,20,25,30}]: 0x9000 sits in [0x8000,0x10000) -> 20.
 bool run_vehicle_bucket_ladder_is_verbatim() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x1030;
 	seed_row(view, handle, kVehicleType);
@@ -496,6 +513,7 @@ bool run_vehicle_bucket_ladder_is_verbatim() {
 // return @0x4b9a03; Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
 bool run_vehicle_bit0_record_keeps_chasing() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x1031;
 	seed_row(view, handle, kVehicleType);
@@ -528,6 +546,7 @@ bool run_vehicle_starvation_decay_is_signed_untruncated() {
 	uint16_t next_handle = 0x1040;
 	for (const Probe &p : probes) {
 		ns::ClientReplicaPipeline view(class_of);
+		speak_jo(view);
 		view.set_remote_motion_mode(true);
 		const uint16_t handle = next_handle++;
 		seed_row(view, handle, kVehicleType);
@@ -565,6 +584,7 @@ bool run_vehicle_starvation_decay_is_signed_untruncated() {
 // branch of @0x4B4470..0x4B46C0; Pitch += step while progress < 12].
 bool run_player_pitch_chases_wire_byte() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x0031;
 	seed_row(view, handle, kPlayerType);
@@ -607,6 +627,7 @@ bool run_infantry_first_record_does_not_swing_to_zero() {
 		return type_id == 0x0777 ? nw::EntityClass::Infantry
 		                         : nw::EntityClass::Unknown;
 	});
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x0032;
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
@@ -733,6 +754,7 @@ struct FlatTerrain {
 // @0x4B7CFE..0x4B7D0A]
 bool run_crouch_transition_stays_on_terrain() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	StanceSource src;
 	FlatTerrain terrain(50);
@@ -799,6 +821,7 @@ bool run_infantry_crouch_transition_stays_on_terrain() {
 		return type_id == 0x0777 ? nw::EntityClass::Infantry
 		                         : nw::EntityClass::Unknown;
 	});
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	StanceSource src;
 	FlatTerrain terrain(50);
@@ -868,6 +891,7 @@ bool run_terrain_settle_respects_retail_probe_window() {
 
 	auto tick_at_origin = [&](uint16_t handle, int32_t origin_z, int state) {
 		ns::ClientReplicaPipeline view(class_of);
+		speak_jo(view);
 		view.set_remote_motion_mode(true);
 		view.set_root_motion_source(&src);
 		view.set_remote_motion_terrain(&terrain.field);
@@ -909,6 +933,7 @@ bool run_terrain_settle_respects_retail_probe_window() {
 // Entity_UpdateInfantryPlayerBody correction @0x4B7CFE..0x4B7D0A]
 bool run_terrain_settle_wraps_the_fixedpoint_seam() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	// The replica water channel compares the raw plane (no dry sentinel): set it
 	// below this scenario's rows so the channel stays out of it.
@@ -944,6 +969,7 @@ bool run_terrain_settle_wraps_the_fixedpoint_seam() {
 // per-update history clear at @0x40B637, before same-state test @0x40B643]
 bool run_reset_bottom_state_keeps_raw_vertical_root() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	// The replica water channel compares the raw plane (no dry sentinel): set it
 	// below this scenario's rows so the channel stays out of it.
@@ -976,6 +1002,7 @@ bool run_reset_bottom_state_keeps_raw_vertical_root() {
 // @0x4B49A1..0x4B49A6/@0x4B49C4..0x4B49C9; twist clamp @0x4B4A21..0x4B4A43]
 bool run_leg_chase_exact_half_turn_matches_x86_abs() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	StanceSource src;
 	view.set_root_motion_source(&src);
@@ -1012,6 +1039,7 @@ bool run_leg_chase_exact_half_turn_matches_x86_abs() {
 // the chase-only value, and the presented playhead is the sim channel.
 bool run_player_root_motion_dead_reckons() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	WalkSource src;
 	view.set_root_motion_source(&src);
@@ -1077,6 +1105,7 @@ bool run_player_root_motion_dead_reckons() {
 // the carrier attach, and a seated player row keeps its channel (D-NET-330).
 bool run_player_on_ground_carrier_keeps_chasing() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	WalkSource src;
 	view.set_root_motion_source(&src);
@@ -1165,6 +1194,7 @@ bool run_player_on_ground_carrier_keeps_chasing() {
 // the root motion walks the starved row forever.
 bool run_starved_row_forces_idle() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	WalkSource src;
 	view.set_root_motion_source(&src);
@@ -1246,6 +1276,7 @@ bool run_starved_rows_hold_their_pose() {
 // the row chase is the 48/512 soft reconciliation only).
 bool run_self_row_gets_no_root_add() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	WalkSource src;
 	view.set_root_motion_source(&src);
@@ -1278,6 +1309,7 @@ bool run_self_row_gets_no_root_add() {
 // static - a sign-flipped rotation cannot pass this and the +X leg at once.
 bool run_root_rotation_follows_heading() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	WalkSource src;
 	view.set_root_motion_source(&src);
@@ -1341,6 +1373,7 @@ bool run_replica_root_step_takes_the_world_pair() {
 	bool ok = true;
 	{
 		ns::ClientReplicaPipeline view(class_of);
+		speak_jo(view);
 		view.set_remote_motion_mode(true);
 		WalkSource src;
 		view.set_root_motion_source(&src);
@@ -1369,6 +1402,7 @@ bool run_replica_root_step_takes_the_world_pair() {
 		ns::ClientReplicaPipeline view([](uint16_t type_id) {
 			return type_id == 0x0777 ? nw::EntityClass::Infantry : nw::EntityClass::Unknown;
 		});
+		speak_jo(view);
 		view.set_remote_motion_mode(true);
 		WalkSource src;
 		view.set_root_motion_source(&src);
@@ -1416,6 +1450,7 @@ bool run_infantry_root_motion_dead_reckons() {
 		return type_id == 0x0777 ? nw::EntityClass::Infantry
 		                         : nw::EntityClass::Unknown;
 	});
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	WalkSource src;
 	view.set_root_motion_source(&src);
@@ -1451,6 +1486,7 @@ bool run_infantry_root_motion_dead_reckons() {
 // 10-frame window instead of stopping dead.
 bool run_root_transition_blends() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	WalkSource src;
 	view.set_root_motion_source(&src);
@@ -1500,6 +1536,7 @@ bool run_root_transition_blends() {
 // the next pass]
 bool run_dead_row_takes_its_death_clip_and_respawn_rearms() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	// The replica water channel compares the raw plane (no dry sentinel): set it
 	// below this scenario's rows so the channel stays out of it.
@@ -1585,6 +1622,7 @@ bool run_dead_row_takes_its_death_clip_and_respawn_rearms() {
 // before the dead jz @0x4c1005; org2 top gate bit0-only @0x4b411e].
 bool run_corpse_follows_its_records() {
 	ns::ClientReplicaPipeline view(class_of);
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x004A;
 	seed_row(view, handle, kPlayerType);
@@ -1626,6 +1664,7 @@ bool run_entity_death_parks_the_death_anim() {
 		return type_id == 0x0777 ? nw::EntityClass::Infantry
 		                         : nw::EntityClass::Unknown;
 	});
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x0033;
 	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
@@ -1671,6 +1710,7 @@ bool run_entity_death_restages_from_the_hit_record() {
 		return type_id == 0x0777 ? nw::EntityClass::Infantry
 		                         : nw::EntityClass::Unknown;
 	});
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	opennova::world::HitRecord record;
 	view.set_replica_hit_record_resolver(
@@ -1737,6 +1777,7 @@ bool run_dead_tail_counts_down_and_decays() {
 		return type_id == kAiType || type_id == kKeepType ? nw::EntityClass::Infantry
 		                                                  : nw::EntityClass::Unknown;
 	});
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	view.set_replica_death_traits_resolver(
 			[](uint16_t type_id, ns::ClientReplicaPipeline::ReplicaDeathTraits &out) {
@@ -1833,6 +1874,7 @@ bool run_org1_corpse_is_destroyed_at_zero() {
 		               ? nw::EntityClass::Infantry
 		               : nw::EntityClass::Unknown;
 	});
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	view.set_replica_death_traits_resolver(
 			[](uint16_t type_id, ns::ClientReplicaPipeline::ReplicaDeathTraits &out) {
@@ -1911,6 +1953,7 @@ bool run_player_death_edge_drops_the_carried_flag() {
 		if (type_id == kPlayerType) return nw::EntityClass::Player;
 		return type_id == kAiType ? nw::EntityClass::Infantry : nw::EntityClass::Unknown;
 	});
+	speak_jo(view);
 	view.set_remote_motion_mode(true);
 	const uint16_t player = 0x0048, other = 0x0049, ai = 0x0035;
 	const uint16_t flag = 0x1007, other_flag = 0x1008, ai_flag = 0x1009;

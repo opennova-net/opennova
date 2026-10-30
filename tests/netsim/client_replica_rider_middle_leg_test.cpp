@@ -18,6 +18,7 @@
 #include <net/npwire/entity_class.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -112,6 +113,7 @@ bool on_hull(const ns::ClientEntityState &rider, const Pose &hull, int32_t lx) {
 struct View {
 	ns::ClientReplicaPipeline view;
 	explicit View(bool split) {
+		view.set_protocol(nw::title_protocol("jo"));
 		view.set_remote_motion_mode(true);
 		view.set_self_body_split(split);
 		view.set_item_class_resolver([](uint16_t type)

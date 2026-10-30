@@ -43,6 +43,7 @@
 #include <net/npwire/replication_model.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <runtime/terrain_query/height_field.h>
 
@@ -250,6 +251,7 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
 	ctx.np_protocol.connection_list.push_back(make_seeded_conn(
 			2, 1, &remote_wire, ns::TransportMode::Client, shooter, true));
@@ -336,6 +338,7 @@ bool run_death_feed_classifier_matrix() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.respawn_timeout = 3;
 	ctx.config.death_messages = 1;
 	auto &roster = ctx.np_protocol.connection_list;
@@ -2086,11 +2089,14 @@ int main() {
 	ns::UdpSessionTransport client_c_in(ns::UdpSessionTransport::Role::Client);
 	ns::ClientReplicaPipeline client_b_view;
 	ns::ClientReplicaPipeline client_c_view;
+	client_b_view.set_protocol(title_protocol("jo"));
+	client_c_view.set_protocol(title_protocol("jo"));
 
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.respawn_timeout = 5;
 	ctx.config.death_messages = 1;
 	ctx.config.max_players = 3; // the C2S 0x22 pull answers slots inside the table only
@@ -2675,10 +2681,13 @@ int main() {
 		return 1;
 	std::vector<ProtocolMessage> default_pick{
 			make_protocol_message(0x0E, {0xFF, 0xFF})};
+	// The deploy reads the session's protocol through the server context.
+	inmatch::ServerDispatchInputs deploy_inputs;
+	deploy_inputs.server_ctx = &ctx;
 	auto request_client_respawn = [&]() {
 		return inmatch::dispatch_session_replies(
 				ctx.config, roster[2], default_pick, world.logic_tick,
-				roster, &world);
+				roster, &world, deploy_inputs);
 	};
 	if (!expect(request_client_respawn().empty() &&
 	                    world.registry.get(hc)->health == 0,
@@ -2813,7 +2822,7 @@ int main() {
 		// [orig: Input_HandleActionBinding case 12 @0x49b17b, no authority test].
 		(void)inmatch::dispatch_session_replies(
 				ctx.config, roster[0], {make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF})},
-				world.logic_tick, roster, &world);
+				world.logic_tick, roster, &world, deploy_inputs);
 		host = world.registry.get(ha);
 		if (!expect(host->health == 150, "respawn restores template health")) return 1;
 		if (!expect(std::fabs(host->position.x - 60.0f) < 0.01f,
@@ -2878,7 +2887,7 @@ int main() {
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(0x0E, {0xFF, 0xFF})); // param-0 pick (base deploy)
 		std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
+				inmatch::GameConfig{}, conn, msgs, 100, roster, &world, deploy_inputs);
 
 		bool saw_5a = false, saw_61 = false;
 		for (const ProtocolMessage &m : replies) {
@@ -2942,7 +2951,7 @@ int main() {
 		je = world.registry.get(jb);
 		je->position = {40.0f, 40.0f, 0.0f};
 		const std::vector<ProtocolMessage> out_of_session = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, conn, msgs, 102, roster, &world);
+				inmatch::GameConfig{}, conn, msgs, 102, roster, &world, deploy_inputs);
 		world.rules.mp_session = true;
 		bool seeded = false, loadout = false;
 		for (const ProtocolMessage &m : out_of_session) {

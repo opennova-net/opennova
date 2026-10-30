@@ -3,8 +3,8 @@
 // engine build's slots, ONE's (the hello's BDAT and PV3; retail's PV3 pinned over its own build),
 // DFX2's witnessed values with the rest refused by name, the
 // gt.ssc gate-tag override over a mount (net/protocol/gate_tag.h; each file minted by our own
-// encoder), and the consumers' refusal of a missing protocol: the joiner, the game host, the
-// NovaWorld lobby driver and the web flow.
+// encoder), and the consumers' refusal of a missing protocol: the joiner, the NovaWorld lobby
+// driver and the web flow.
 
 #include <net/protocol/protocol.h>
 
@@ -307,9 +307,9 @@ void gate_tag_over_mount() {
 	fs::remove_all(dir, ec);
 }
 
-// The consumers refuse a missing identity: the joiner does not start, the game host answers no
-// hello (and a host of JO answers no other title's), the lobby driver does not probe, and the web
-// flow requests nothing.
+// The consumers refuse a missing identity: the joiner does not start, the lobby driver does not
+// probe, and the web flow requests nothing. A game host never runs without one (create_session
+// reads it), and a host of JO answers no other title's hello.
 void consumers_refuse_without_identity() {
 	const Protocol &jo = *title_protocol("jo");
 
@@ -323,21 +323,19 @@ void consumers_refuse_without_identity() {
 	const PeerAddr peer{0x0100007Fu, 30740};
 	const std::vector<uint8_t> hello =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(make_protocol_client_hello(jo, 1)));
-	for (const Protocol *installed : {static_cast<const Protocol *>(nullptr), &jo}) {
+	{
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Lan);
 		inmatch::SessionStartup startup;
-		startup.protocol = installed;
+		startup.protocol = &jo;
 		startup.host_key = 0x5EED;
 		inmatch::GameConfig config;
 		config.max_players = 2;
 		inmatch::create_session(ctx, config, startup, nullptr);
-		CHECK(ctx.np_protocol.identity == installed);
+		CHECK(ctx.np_protocol.identity == &jo);
 		const inmatch::HandleResult reply =
 				inmatch::handle_server_datagram(ctx, peer, hello.data(), hello.size(), 1);
-		CHECK(reply.outbound.empty() == (installed == nullptr));
-		if (installed == nullptr) continue;
 		uint8_t opcode = 0;
 		std::vector<uint8_t> body;
 		ServerHello sh;

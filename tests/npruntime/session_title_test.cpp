@@ -12,6 +12,7 @@
 #include <base/gameprofile/game_type.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/session_vars.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -135,6 +136,7 @@ void test_the_mission_block_carries_the_session_title() {
 	config.mission_file = "CO01.BMS";
 	config.server_name = "Cfg Host";
 	inmatch::SessionStartup startup;
+	startup.protocol = title_protocol("jo");
 	startup.text_override = &override_table;
 	inmatch::NapiNPServerCtx ctx;
 	CHECK(inmatch::create_session(ctx, config, startup) == inmatch::CreateSessionResult::Created);

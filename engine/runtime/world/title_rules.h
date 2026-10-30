@@ -236,8 +236,8 @@ struct TitleRulesRow {
 void install_title_rules(const TitleRulesRow *rows, size_t count);
 
 // The rules title `title_code` runs, compared case-insensitively: the default title's
-// (base/title/title.h default_title) for an empty or unknown code, as protocol_in_match runs the
-// default title's for a session with no protocol.
+// (base/title/title.h default_title) for an empty or unknown code. (A session's protocol has no
+// such default: protocol_in_match aborts for a session with none.)
 const TitleRules &title_rules(std::string_view title_code);
 
 // The rules a holder (SessionRules, MatchRules, WaypointCycleContext, inmatch::GameConfig) starts

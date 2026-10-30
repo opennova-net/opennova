@@ -178,9 +178,10 @@ std::string protocol_refusal(const Protocol &protocol, ProtocolPart part);
 // (protocol_missing(.., WebFlow)).
 const Protocol *resolve_title_protocol(std::string_view title_code, std::string &error);
 
-// The in-match branches a session's protocol takes, and its 0x42 build values. A host or joiner
-// brought up with no protocol (an in-process test that skips the hello, which a host with no
-// protocol never answers) runs the default title's (base/title/title.h default_title).
+// The in-match branches a session's protocol takes, and its 0x42 build values. Every host and
+// joiner runs its title's protocol, set before its first in-match read: a read with none, or with
+// a protocol that leaves the part unwitnessed, aborts naming the invariant. No session runs a
+// default title's.
 const ProtocolInMatch &protocol_in_match(const Protocol *protocol);
 const JoinBuild &protocol_join_build(const Protocol *protocol);
 

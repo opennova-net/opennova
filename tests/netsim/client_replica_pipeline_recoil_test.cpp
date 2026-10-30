@@ -9,6 +9,7 @@
 
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdio>
 #include "../common/test_expect.h"
@@ -97,6 +98,7 @@ int main() {
 	// compact update overwrites it from the real coarse yaw while retaining the
 	// byte exactly for codec identity.
 	ns::ClientReplicaPipeline wire_view;
+	wire_view.set_protocol(nw::title_protocol("jo"));
 	wire_view.set_item_class_resolver(&classify);
 	// The spawn stream's row: a compact 0x0A never creates one
 	// [orig: NapiNPClientMsg_0x00A @0x42FEC0, pre-apply check @0x4307B1..0x4307FA].

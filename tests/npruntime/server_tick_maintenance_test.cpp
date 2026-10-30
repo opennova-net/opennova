@@ -53,6 +53,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // DisconnectEvent (the punts' descriptions)
+#include <net/protocol/protocol.h>
 
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/ai.h>
@@ -99,6 +100,13 @@ w::PlayerSpawn player_spawn(float x, float y, float z, uint8_t team = 1) {
 	s.position = {x, y, z};
 	s.team = team;
 	return s;
+}
+
+// A session start speaking JO's protocol.
+inmatch::SessionStartup jo_startup() {
+	inmatch::SessionStartup startup;
+	startup.protocol = title_protocol("jo");
+	return startup;
 }
 
 // Advance the host until the shared one-second service fires (inclusive).
@@ -196,6 +204,7 @@ bool check_spawn_protection_seeded_at_creation() {
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config.max_players = 4;
 		w::World world;
 		world.rules.mp_session = true;
@@ -265,6 +274,7 @@ bool check_spawn_protection_countdown_and_gates() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.network_quality_broadcast_countdown = 100;
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	w::World world;
@@ -389,7 +399,8 @@ bool check_deploy_seeds_protection_and_armory_state() {
 	inmatch::GameConfig config;
 	world.preround_delay_seconds = 4;
 	const std::vector<ProtocolMessage> replies =
-			inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
+			inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF, nullptr,
+					title_protocol("jo"));
 	if (!expect(!replies.empty() && entity->health > 0 && entity->damage_state == 620,
 			"the deploy leg seeds the 620-tick protection after the spawn-state reset"))
 		return false;
@@ -401,7 +412,8 @@ bool check_deploy_seeds_protection_and_armory_state() {
 	entity->alive = false;
 	entity->health = 0;
 	entity->flags |= w::kEntityFlagDead;
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF, nullptr,
+			title_protocol("jo"));
 	return expect(!conn.link.preround_loadout_latch,
 			"a deploy outside pre-round leaves the latch clear");
 }
@@ -584,6 +596,7 @@ bool check_flag_refresh_round_robin() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
 	ns::LoopbackChannel host_wire;
@@ -673,6 +686,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type_value;
 	ctx.config.flag_reset_seconds = 3;
 	ctx.config.permanent_death = true; // keep the dead slot past the t7 punt
@@ -782,6 +796,7 @@ bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool up
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kCaptureTheFlag;
 	ctx.config.flag_reset_seconds = 1;
 	ctx.config.permanent_death = true; // keep the dead slot past the t7 punt
@@ -872,6 +887,7 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kCaptureTheFlag;
 	ctx.config.flag_reset_seconds = 1;
 	ctx.config.permanent_death = true;
@@ -923,6 +939,7 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kCaptureTheFlag;
 	ctx.config.flag_reset_seconds = 1;
 	ctx.config.permanent_death = true;
@@ -991,6 +1008,7 @@ bool check_team_downed_resend() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ctx.config.permanent_death = true;
 	ns::UdpSessionTransport victim_wire(ns::UdpSessionTransport::Role::Host);
@@ -1152,6 +1170,7 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ctx.config.death_messages = 1;
 	ns::UdpSessionTransport head_wire(ns::UdpSessionTransport::Role::Host);
@@ -1308,6 +1327,7 @@ bool check_armory_reuse_cooldown() {
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config = config;
 		ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
 		ctx.np_protocol.connection_list.push_back(conn);
@@ -1398,7 +1418,7 @@ bool check_model_page_cursor_wraps_at_the_list_count() {
 		inmatch::GameConfig config;
 		config.max_players = 4;
 		config.allow_custom_skins = allow_custom_skins;
-		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+		inmatch::create_session(ctx, config, jo_startup(), nullptr);
 		auto heap = std::make_unique<w::World>();
 		w::World &world = *heap;
 		world.rules.mp_session = true;
@@ -1450,7 +1470,7 @@ bool check_quartet_skips_a_spectator_slot() {
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
 	config.max_players = 4;
-	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;
 	world.rules.mp_session = true;
@@ -1502,7 +1522,7 @@ bool check_silence_punt_falls_through_to_the_countdown() {
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
 	config.max_players = 4;
-	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	ctx.loaded_model_list_count = 305;
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;
@@ -1597,7 +1617,7 @@ bool check_integrity_family_draws_once_per_send() {
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
 	config.max_players = 4;
-	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;
 	world.rules.mp_session = true;
@@ -1691,7 +1711,7 @@ bool check_entity_state_fan_runs_out_of_session() {
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
 	config.max_players = 4;
-	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;
 	world.rules.mp_session = true;
@@ -1741,7 +1761,7 @@ bool check_a_loading_joiner_takes_no_proximity_or_census_place() {
 	inmatch::GameConfig config;
 	config.max_players = 4;
 	config.game_type = game_type::kTeamDeathmatch;
-	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;
 	world.rules.mp_session = true;
@@ -1819,7 +1839,7 @@ bool check_slot_team_readers_ignore_a_body_team_write() {
 	inmatch::GameConfig config;
 	config.max_players = 4;
 	config.game_type = game_type::kTeamDeathmatch;
-	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;
 	world.rules.mp_session = true;
@@ -1879,7 +1899,7 @@ bool check_host_quality_samples_ahead_of_the_receive_pump() {
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 		inmatch::GameConfig config;
 		config.max_players = 4;
-		inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+		inmatch::create_session(ctx, config, jo_startup(), nullptr);
 		auto heap = std::make_unique<w::World>();
 		w::World &world = *heap;
 		world.rules.mp_session = true;
@@ -1928,7 +1948,7 @@ bool check_designator_round_marks_and_notifies_the_team() {
 	inmatch::GameConfig config;
 	config.max_players = 4;
 	config.game_type = game_type::kTeamDeathmatch;
-	inmatch::create_session(ctx, config, inmatch::SessionStartup{}, nullptr);
+	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;
 	world.rules.mp_session = true;
@@ -2007,6 +2027,7 @@ bool check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() {
 	inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	auto heap = std::make_unique<w::World>();
 	w::World &world = *heap;
@@ -2155,6 +2176,7 @@ bool check_kit_weight_recompute() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	w::MatchRules rules;
 	rules.game_type = ctx.config.game_type;
@@ -2354,7 +2376,8 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 		body->flags |= w::kEntityFlagDead;
 		body->alive = false;
 		body->health = 0;
-		return inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
+		return inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF,
+				nullptr, title_protocol("jo"));
 	};
 	auto loadout_body = [](const std::vector<ProtocolMessage> &replies) {
 		for (const ProtocolMessage &m : replies)
@@ -2414,7 +2437,8 @@ bool check_deploy_rebuilds_an_unsubmitted_slot_empty() {
 	body->flags |= w::kEntityFlagDead;
 	body->alive = false;
 	body->health = 0;
-	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
+	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF, nullptr,
+			title_protocol("jo"));
 	return expect(slots_of(world, conn).empty() && conn.reply.ammo_pools[0] == 0,
 			"an unsubmitted slot's deploy leaves no row and no pool");
 }
@@ -2458,7 +2482,8 @@ bool check_deploy_rebuilds_the_listen_hosts_local_table() {
 	body->flags |= w::kEntityFlagDead;
 	body->alive = false;
 	body->health = 0;
-	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
+	(void)inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF, nullptr,
+			title_protocol("jo"));
 	body = world.registry.get(host);
 	const w::WeaponInventorySlot *rifle = local.inventory.slot(3 * 65 + 2);
 	return expect(body != nullptr && (body->carry_flags & 0x18u) == 0u &&
@@ -2809,7 +2834,8 @@ bool check_loadout_sub_variant_rows() {
 	body->alive = false;
 	body->health = 0;
 	const std::vector<ProtocolMessage> replies =
-			inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
+			inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF, nullptr,
+					title_protocol("jo"));
 	WeaponLoadout deployed;
 	bool decoded = false;
 	for (const ProtocolMessage &m : replies)
@@ -2997,6 +3023,17 @@ bool check_try_queue_evicts_on_failed_pick() {
 // C2S 0x0E: the Conquer & Control auto-pick rejection and the handle-0 admission.
 // --------------------------------------------------------------------------
 
+// The server context a pick's dispatch passes: the deploy reads the session's protocol, JO's,
+// from it.
+struct PickServer {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::ServerDispatchInputs inputs;
+	PickServer() {
+		ctx.np_protocol.identity = title_protocol("jo");
+		inputs.server_ctx = &ctx;
+	}
+};
+
 bool check_respawn_pick_admission() {
 	w::World world;
 	world.registry.configure_pool(0, 4);
@@ -3037,9 +3074,11 @@ bool check_respawn_pick_admission() {
 		conn.link.respawn_delay_seconds = 0;
 		conn.link.spawn_target_hold_seconds = 0;
 	};
+	PickServer server;
 	auto dispatch = [&](const std::vector<uint8_t> &body) {
 		return inmatch::dispatch_session_replies(config, conn,
-				{make_protocol_message(c2s::RESPAWN_REQUEST, body)}, 100, roster, &world);
+				{make_protocol_message(c2s::RESPAWN_REQUEST, body)}, 100, roster, &world,
+				server.inputs);
 	};
 
 	reset_player();
@@ -3073,7 +3112,8 @@ bool check_respawn_pick_admission() {
 	conn.link.owned_entity = second;
 	auto dispatch_empty = [&](const std::vector<uint8_t> &body) {
 		return inmatch::dispatch_session_replies(config, conn,
-				{make_protocol_message(c2s::RESPAWN_REQUEST, body)}, 100, roster, &empty_world);
+				{make_protocol_message(c2s::RESPAWN_REQUEST, body)}, 100, roster, &empty_world,
+				server.inputs);
 	};
 	conn.link.respawn_pending = true;
 	return expect(dispatch_empty({0x00, 0x00}).empty() &&
@@ -3136,11 +3176,12 @@ bool check_revived_pick_takes_no_target() {
 		conn.reply.revive_pos[1] = 8 << 16;
 		conn.reply.revive_pos[2] = 9 << 16;
 	};
+	PickServer server;
 	auto dispatch = [&](uint16_t pick) {
 		return inmatch::dispatch_session_replies(config, conn,
 				{make_protocol_message(c2s::RESPAWN_REQUEST,
 						{static_cast<uint8_t>(pick), static_cast<uint8_t>(pick >> 8)})},
-				100, roster, &world);
+				100, roster, &world, server.inputs);
 	};
 	auto has_tag = [](const std::vector<ProtocolMessage> &replies, uint8_t tag) {
 		for (const ProtocolMessage &m : replies)
@@ -3247,11 +3288,12 @@ bool check_spectator_pick_legs() {
 		conn.link.spawn_target_hold_seconds = 0;
 		world.zones.spawn_waves.remove_player(player);
 	};
+	PickServer server;
 	auto dispatch = [&](uint16_t pick) {
 		return inmatch::dispatch_session_replies(config, conn,
 				{make_protocol_message(c2s::RESPAWN_REQUEST,
 						{static_cast<uint8_t>(pick), static_cast<uint8_t>(pick >> 8)})},
-				100, roster, &world);
+				100, roster, &world, server.inputs);
 	};
 	auto has_tag = [](const std::vector<ProtocolMessage> &replies, uint8_t tag) {
 		for (const ProtocolMessage &m : replies)
@@ -3355,11 +3397,12 @@ bool check_split_slot_team_pick_legs() {
 		conn.link.respawn_delay_seconds = 0;
 		conn.link.spawn_target_hold_seconds = 0;
 	};
+	PickServer server;
 	auto dispatch = [&](uint16_t pick) {
 		return inmatch::dispatch_session_replies(config, conn,
 				{make_protocol_message(c2s::RESPAWN_REQUEST,
 						{static_cast<uint8_t>(pick), static_cast<uint8_t>(pick >> 8)})},
-				100, roster, &world);
+				100, roster, &world, server.inputs);
 	};
 	const w::Entity *body = world.registry.get(player);
 	// Slot team 1, entity team 2: the frontier is team 1's zone, which the resolve refuses.
@@ -3498,8 +3541,10 @@ bool check_split_slot_team_default_spawn_pose() {
 	conn.link.respawn_pending = true;
 	conn.assigned_team = 1;
 	conn.assigned_team_valid = true;
+	PickServer server;
 	(void)inmatch::dispatch_session_replies(config, conn,
-			{make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF})}, 100, roster, &world);
+			{make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF})}, 100, roster, &world,
+			server.inputs);
 	const w::Entity *body = world.registry.get(player);
 	return expect(body->health > 0 && body->position.x == 100.0f,
 			"a split slot's Default Spawn lands on the slot team's start marker");
@@ -3671,6 +3716,7 @@ bool check_guidance_leads_the_next_frame() {
     inmatch::NapiNPServerCtx ctx;
     inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
     ctx.is_in_session=1;
+    ctx.np_protocol.identity=title_protocol("jo");
     ctx.network_quality_broadcast_countdown=100;
     ctx.config.game_type=game_type::kTeamDeathmatch;
     w::World world;
