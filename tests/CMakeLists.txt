@@ -2096,6 +2096,14 @@ target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
 
+# The game font's glyph advance (runtime/hud/game_font.h): the space and an empty
+# record advance by their own record and the spacing pad, decoded text by its
+# code-page byte's record.
+add_executable(hud_game_font_test hud/game_font_test.cpp)
+target_link_libraries(hud_game_font_test PRIVATE opennova_runtime)
+target_include_directories(hud_game_font_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_game_font COMMAND hud_game_font_test)
+
 # The flat HUD residual elements (GAMEINFO/ZONEINFO, CLOCK, TEAMID, HUDLS, the
 # objectives panel, /NOHUD, the squad colours, the clip-flash key).
 add_executable(hud_frame_elements_test hud/hud_frame_elements_test.cpp)

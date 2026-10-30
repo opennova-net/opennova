@@ -55,7 +55,6 @@
 		"FileAccess",
 		"FileDialog",
 		"Font",
-		"FontFile",
 		"GDExtension",
 		"GDScript",
 		"GeometryInstance3D",
