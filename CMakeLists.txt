@@ -51,13 +51,13 @@ add_subdirectory(engine)
 # engine's registries from (games::install()).
 add_subdirectory(games)
 
-# opennova-game (apps/game, ADR 0077 d9): the app shell over the SDL3 backend (backend/sdl3, the
+# opennova-game (apps/game, ADR 0077 d9): the app shell over the SDL3 backend (backends/sdl3, the
 # engine's platform API over SDL3 and, from R5, its GPU API over SDL_GPU). SDL3 is the pinned
-# submodule third_party/sdl3, built static here with SDL's own CMake; nothing but backend/sdl3
+# submodule third_party/sdl3, built static here with SDL's own CMake; nothing but backends/sdl3
 # links it. On Linux SDL needs the X11 or Wayland development headers (DEVELOPING.md
 # "Prerequisites"); a tree that builds no game window (the server images, the NovaWorld
 # service's jobs) configures with -DOPENNOVA_GAME=OFF.
-option(OPENNOVA_GAME "Build opennova-game (apps/game) and its SDL3 backend (backend/sdl3)" ON)
+option(OPENNOVA_GAME "Build opennova-game (apps/game) and its SDL3 backend (backends/sdl3)" ON)
 if(OPENNOVA_GAME)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl3/CMakeLists.txt")
         message(FATAL_ERROR "OPENNOVA_GAME needs the SDL3 submodule: run "
@@ -74,7 +74,7 @@ if(OPENNOVA_GAME)
     set(SDL_RENDER OFF CACHE BOOL "" FORCE)
     set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
     add_subdirectory(third_party/sdl3 EXCLUDE_FROM_ALL)
-    add_subdirectory(backend/sdl3)
+    add_subdirectory(backends/sdl3)
 endif()
 
 # The NovaWorld service's HTTP layer (novaworld_web, novaworld_fleet, and with

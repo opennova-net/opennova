@@ -41,7 +41,7 @@ TARGET level are the two structural seams:
      (games::install(), REQUIRED_GAMES) links opennova_games.
 
   4. SDL3 containment (ADR 0077 d9): the SDL3 platform backend
-     opennova_backend_sdl3 (backend/sdl3) is the ONLY library that links
+     opennova_backend_sdl3 (backends/sdl3) is the ONLY library that links
      SDL3 (third_party/sdl3's static SDL3::SDL3-static); a target reaching it
      links the backend directly (opennova-game, apps/game). No engine group,
      no game's code, the editor's core and the service never link the backend.
@@ -87,7 +87,7 @@ SCAN_ROOTS = (
     "CMakeLists.txt",
     "engine",
     "games",
-    "backend",
+    "backends",
     "apps",
     "tests",
     "tools",

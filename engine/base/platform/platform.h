@@ -10,10 +10,10 @@
 // The platform the app hands the engine (ADR 0077 d1, d2): one backend's devices, each an
 // interface of this directory, owned by the backend and outliving every engine object that holds
 // this record. The engine owns everything above them (the loop, the input frame, the mix, the
-// game flow); a backend implements them and nothing else: SDL3 (backend/sdl3, apps/game), the
+// game flow); a backend implements them and nothing else: SDL3 (backends/sdl3, apps/game), the
 // headless test backend (tests/null_backend), Godot's bindings while the Godot build ships.
 //
-// The SDL3 backend (backend/sdl3) builds this record and opennova-game (apps/game) takes it, as
+// The SDL3 backend (backends/sdl3) builds this record and opennova-game (apps/game) takes it, as
 // tests/null_backend's headless backend does; the R3 engine frontend (runtime/frontend) takes it
 // over from the app shell.
 //

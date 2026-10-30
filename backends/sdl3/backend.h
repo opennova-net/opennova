@@ -13,7 +13,7 @@
 // converts SDL's events, states and calls into the engine's own codes and back. Platform plumbing,
 // not a port.
 //
-// No SDL type reaches past backend/sdl3 (scripts/lint/include_graph_check.py rule 11): this header
+// No SDL type reaches past backends/sdl3 (scripts/lint/include_graph_check.py rule 11): this header
 // and gpu.h are the backend's public face, and the devices' SDL halves live in its own .cpp files.
 namespace opennova::sdl3 {
 

@@ -39,11 +39,7 @@ def classify(paths: list[str] | None) -> dict[str, bool]:
             selected.update(('native', 'web', 'stack'))
         elif path.startswith('tests/'):
             selected.add('native')
-        elif (re.match(r'apps/novaworld_[^/]+/', path)
-              or path.startswith(('backend/migrations/', 'backend/seed/'))):
-            # The service's programs and its database (backend/README.md). The rest of
-            # backend/ is the game's platform backends (backend/sdl3, ADR 0077 d9): native
-            # code, which runs the whole graph below.
+        elif re.match(r'apps/novaworld_[^/]+/', path) or path.startswith('backend/'):
             selected.update(SERVICE)
             if path.startswith('apps/novaworld_common/hosted/cloud/machine/'):
                 selected.add('infra')

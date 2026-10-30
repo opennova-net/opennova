@@ -1,9 +1,7 @@
 # backend/
 
-Two things share this directory: the game's platform backends (`sdl3/`, the engine's
-platform API over SDL3 and the SDL_GPU device, ADR 0077 d9; its own CMakeLists.txt says
-what it builds) and, in `migrations/` and `seed/`, the persistence layer for the
-standalone novaworld server: its PostgreSQL 17 schema and seed data.
+Persistence layer for the standalone novaworld server: its PostgreSQL 17
+schema and seed data. (The game's platform backends are `backends/`, ADR 0077.)
 
 Contents:
 - `migrations/` — PostgreSQL DDL, applied on server boot by
