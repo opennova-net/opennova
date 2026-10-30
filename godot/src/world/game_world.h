@@ -42,7 +42,6 @@
 #include "env/precipitation.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
-#include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "hud/player_hud_weapon_def.h"
@@ -731,10 +730,6 @@ public:
 	Water *get_water_node() const { return water_; }
 	Celestial *get_celestial_node() const { return celestial_; }
 	SkyDome *get_sky_dome_node() const { return sky_dome_; }
-	SunShadow *get_sun_shadow_node() const { return sun_shadow_; }
-	// Whether this world advances the env presenters (weather, sun shadow,
-	// sky, celestial, water) itself instead of their own _process.
-	bool drives_environment_presenters() const { return env_presenters_world_driven_; }
 	WorldEnvironment *get_clear_color_node() const { return clear_color_; }
 	MissionAudio *get_mission_audio() const;
 
@@ -1026,12 +1021,7 @@ private:
 	SkyDome *sky_dome_ = nullptr;
 	WorldEnvironment *clear_color_ = nullptr;
 	FoliageDispatcher *dispatcher_ = nullptr;
-	SunShadow *sun_shadow_ = nullptr;
 	SlotShadow *slot_shadow_ = nullptr;
-	// True once the env presenters' own _process is off and this world
-	// advances them from render_environment_nodes_frame (the render
-	// diagnostics report it).
-	bool env_presenters_world_driven_ = false;
 
 	// --- the mission state ---
 	Ref<TerrainData> terrain_data_;

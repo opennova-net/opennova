@@ -1,12 +1,11 @@
 class_name ShadowAttributionCaptureSession
 extends RefCounted
 
-## Transactional public seam for the opt-in directional-shadow attribution
-## profile. It changes only viewport debug mode, the dynamic directional
-## light's shadow switch, the terrain page-shadow provider controls, and
-## explicitly named ObjectModel dynamic-caster bits. Visible batch geometry is
-## never edited. The original state is restored between variants and at
-## finish().
+## Transactional public seam for the opt-in shadow attribution profile. It
+## changes only viewport debug mode, the terrain page-shadow provider
+## controls, and explicitly named ObjectModel dynamic-caster bits (the
+## render-slot ground-shadow group). Visible batch geometry is never edited.
+## The original state is restored between variants and at finish().
 
 const CaptureVariant := preload("res://probes/render/render_capture_variant.gd")
 const CasterDiagnostic := preload(
@@ -14,10 +13,8 @@ const CasterDiagnostic := preload(
 
 var _world: GameWorld
 var _viewport: Viewport
-var _dynamic_shadow: DirectionalLight3D
 var _terrain: Terrain
 var _original_debug_draw := Viewport.DEBUG_DRAW_DISABLED
-var _original_dynamic_shadow_enabled := false
 var _original_static_terrain_shadow_enabled := true
 var _original_suppressed_static_bms_ids := PackedInt32Array()
 var _original_dynamic_caster_states: Dictionary = {}
@@ -31,16 +28,13 @@ func begin(world: GameWorld, viewport: Viewport) -> Error:
 	if world == null or not is_instance_valid(world) \
 			or viewport == null or not is_instance_valid(viewport):
 		return ERR_INVALID_PARAMETER
-	var dynamic := world.get_node_or_null("SunShadow") as DirectionalLight3D
 	var terrain := world.get_terrain_node()
-	if dynamic == null or terrain == null:
+	if terrain == null:
 		return ERR_UNCONFIGURED
 	_world = world
 	_viewport = viewport
-	_dynamic_shadow = dynamic
 	_terrain = terrain
 	_original_debug_draw = viewport.debug_draw
-	_original_dynamic_shadow_enabled = dynamic.shadow_enabled
 	_original_static_terrain_shadow_enabled = \
 			terrain.is_static_terrain_shadow_enabled()
 	_original_suppressed_static_bms_ids = \
@@ -74,7 +68,6 @@ func apply_variant(variant: RenderCaptureVariant) -> Error:
 			return ERR_DOES_NOT_EXIST
 
 	_viewport.debug_draw = variant.debug_draw
-	_dynamic_shadow.shadow_enabled = variant.dynamic_shadow_enabled
 	_terrain.set_static_terrain_shadow_enabled(
 			variant.static_terrain_shadow_enabled)
 	for model: ObjectModel in targets:
@@ -97,7 +90,6 @@ func apply_variant(variant: RenderCaptureVariant) -> Error:
 func get_variant_diagnostics() -> RenderCaptureVariant:
 	if not _active or _current_variant == null \
 			or _viewport == null or not is_instance_valid(_viewport) \
-			or _dynamic_shadow == null or not is_instance_valid(_dynamic_shadow) \
 			or _terrain == null or not is_instance_valid(_terrain):
 		return null
 	var dynamic_ids := PackedInt32Array(
@@ -109,7 +101,6 @@ func get_variant_diagnostics() -> RenderCaptureVariant:
 	return CaptureVariant.new(
 			String(_current_variant.id),
 			int(_viewport.debug_draw),
-			bool(_dynamic_shadow.shadow_enabled),
 			bool(_terrain.is_static_terrain_shadow_enabled()),
 			dynamic_ids,
 			static_ids)
@@ -216,14 +207,11 @@ func finish() -> void:
 	_restore_suppressed_static_casters()
 	if _viewport != null and is_instance_valid(_viewport):
 		_viewport.debug_draw = _original_debug_draw
-	if _dynamic_shadow != null and is_instance_valid(_dynamic_shadow):
-		_dynamic_shadow.shadow_enabled = _original_dynamic_shadow_enabled
 	if _terrain != null and is_instance_valid(_terrain):
 		_terrain.set_static_terrain_shadow_enabled(
 				_original_static_terrain_shadow_enabled)
 	_world = null
 	_viewport = null
-	_dynamic_shadow = null
 	_terrain = null
 	_current_variant = null
 	_active = false

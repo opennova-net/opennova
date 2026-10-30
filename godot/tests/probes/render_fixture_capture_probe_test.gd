@@ -1356,13 +1356,6 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 			},
 			"renderer": {"debug_draw": int(variant.debug_draw)},
 			"shadows": {
-				"dynamic": {
-					"available": true,
-					"visible": true,
-					"visible_in_tree": true,
-					"processing": true,
-					"shadow_enabled": bool(variant.dynamic_shadow_enabled),
-				},
 				"static_terrain": {
 					"available": true,
 					"enabled": bool(variant.static_terrain_shadow_enabled),
@@ -1373,7 +1366,6 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 		var realized_variant := {
 			"id": String(variant.id),
 			"debug_draw": int(variant.debug_draw),
-			"dynamic_shadow_enabled": bool(variant.dynamic_shadow_enabled),
 			"static_terrain_shadow_enabled": bool(
 					variant.static_terrain_shadow_enabled),
 			"suppressed_dynamic_caster_bms_ids": [],
@@ -1382,12 +1374,6 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 		assert_true(RenderFixtureContract.capture_variant_matches_diagnostics(
 				variant, diagnostics, realized_variant),
 				"variant %s must accept its exact realized state" % variant.id)
-		var stale_dynamic: Dictionary = diagnostics.duplicate(true)
-		stale_dynamic.shadows.dynamic.shadow_enabled = \
-				not bool(variant.dynamic_shadow_enabled)
-		assert_false(RenderFixtureContract.capture_variant_matches_diagnostics(
-				variant, stale_dynamic, realized_variant),
-				"variant %s must reject stale dynamic-shadow state" % variant.id)
 		var stale_static: Dictionary = diagnostics.duplicate(true)
 		stale_static.shadows.static_terrain.enabled = \
 				not bool(variant.static_terrain_shadow_enabled)
@@ -1403,9 +1389,7 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 			["world", "presented"],
 			["terrain", "visible"],
 			["terrain", "visible_in_tree"],
-			["shadows", "dynamic", "visible"],
-			["shadows", "dynamic", "visible_in_tree"],
-			["shadows", "dynamic", "processing"],
+			["shadows", "static_terrain", "available"],
 		]:
 			var hidden: Dictionary = diagnostics.duplicate(true)
 			if hidden_path.size() == 2:
@@ -1419,19 +1403,12 @@ func test_every_capture_variant_must_match_its_post_capture_renderer_state() -> 
 
 
 func test_selected_caster_variants_require_exact_independently_realized_suppression() -> void:
-	var variant = RenderFixtureContract.shadow_attribution_variants(PackedInt32Array([58]))[3]
+	var variant = RenderFixtureContract.shadow_attribution_variants(PackedInt32Array([58]))[2]
 	var diagnostics := {
 		"world": {"loaded": true, "visible": true, "presented": true},
 		"terrain": {"available": true, "visible": true, "visible_in_tree": true},
 		"renderer": {"debug_draw": int(variant.debug_draw)},
 		"shadows": {
-			"dynamic": {
-				"available": true,
-				"visible": true,
-				"visible_in_tree": true,
-				"processing": true,
-				"shadow_enabled": bool(variant.dynamic_shadow_enabled),
-			},
 			"static_terrain": {
 				"available": true,
 				"enabled": bool(variant.static_terrain_shadow_enabled),
@@ -1442,7 +1419,6 @@ func test_selected_caster_variants_require_exact_independently_realized_suppress
 	var realized_variant := {
 		"id": String(variant.id),
 		"debug_draw": int(variant.debug_draw),
-		"dynamic_shadow_enabled": bool(variant.dynamic_shadow_enabled),
 		"static_terrain_shadow_enabled": bool(
 				variant.static_terrain_shadow_enabled),
 		"suppressed_dynamic_caster_bms_ids": [],
@@ -1461,17 +1437,14 @@ func test_selected_caster_variants_require_exact_independently_realized_suppress
 			variant, stale_provider, realized_variant),
 			"captured renderer diagnostics must independently carry the exact static set")
 
-	var dynamic_variant = RenderFixtureContract.shadow_attribution_variants()[3]
+	var dynamic_variant = RenderFixtureContract.shadow_attribution_variants()[2]
 	var dynamic_diagnostics: Dictionary = diagnostics.duplicate(true)
-	dynamic_diagnostics.shadows.dynamic.shadow_enabled = \
-			bool(dynamic_variant.dynamic_shadow_enabled)
 	dynamic_diagnostics.shadows.static_terrain.enabled = \
 			bool(dynamic_variant.static_terrain_shadow_enabled)
 	dynamic_diagnostics.shadows.static_terrain.suppressed_bms_ids = []
 	var dynamic_realized := {
 		"id": String(dynamic_variant.id),
 		"debug_draw": int(dynamic_variant.debug_draw),
-		"dynamic_shadow_enabled": bool(dynamic_variant.dynamic_shadow_enabled),
 		"static_terrain_shadow_enabled": bool(
 				dynamic_variant.static_terrain_shadow_enabled),
 		"suppressed_dynamic_caster_bms_ids": [58],
@@ -1504,21 +1477,14 @@ func test_shadow_attribution_profile_is_opt_in_and_scratch_only() -> void:
 	assert_eq(attribution_variants.map(func(row): return row.id), [
 		"both_shadow_systems",
 		"dynamic_shadow_only",
-		"static_terrain_shadow_only",
 		"dynamic_without_bms58",
-		"shadows_off",
 	])
-	assert_true(attribution_variants[0].dynamic_shadow_enabled)
 	assert_true(attribution_variants[0].static_terrain_shadow_enabled)
-	assert_true(attribution_variants[1].dynamic_shadow_enabled)
 	assert_false(attribution_variants[1].static_terrain_shadow_enabled)
-	assert_false(attribution_variants[2].dynamic_shadow_enabled)
-	assert_true(attribution_variants[2].static_terrain_shadow_enabled)
-	assert_eq(Array(attribution_variants[3].suppressed_dynamic_caster_bms_ids),
+	assert_false(attribution_variants[2].static_terrain_shadow_enabled)
+	assert_eq(Array(attribution_variants[2].suppressed_dynamic_caster_bms_ids),
 			[58])
-	assert_eq(Array(attribution_variants[3].suppressed_static_caster_bms_ids), [])
-	assert_false(attribution_variants[4].dynamic_shadow_enabled)
-	assert_false(attribution_variants[4].static_terrain_shadow_enabled)
+	assert_eq(Array(attribution_variants[2].suppressed_static_caster_bms_ids), [])
 	assert_true(RenderFixtureContract.capture_output_is_allowed(
 			attribution, "C:/repo/.scratch/shadow-attribution/cp12",
 			"C:/repo/.scratch"))
@@ -1542,12 +1508,10 @@ func test_shadow_attribution_profile_is_opt_in_and_scratch_only() -> void:
 	assert_eq(selected_variants.map(func(row): return row.id), [
 		"both_shadow_systems",
 		"dynamic_shadow_only",
-		"static_terrain_shadow_only",
 		"static_without_selected",
 		"dynamic_without_bms58",
-		"shadows_off",
 	])
-	assert_eq(Array(selected_variants[3].suppressed_static_caster_bms_ids),
+	assert_eq(Array(selected_variants[2].suppressed_static_caster_bms_ids),
 			[58, 77], "comma-separated scratch selection is sorted and deduplicated")
 	assert_true(RenderFixtureContract.select_capture_profile(
 			"shadow_attribution", "58,nope").has("error"),

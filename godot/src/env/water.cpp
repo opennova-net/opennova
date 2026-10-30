@@ -143,9 +143,6 @@ void Water::_bind_methods() {
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_DYNAMIC_SHADOW_CASTER", VISUAL_LAYER_DYNAMIC_SHADOW_CASTER);
 	ClassDB::bind_integer_constant(get_class_static(), "",
-			"VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER",
-			VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER);
-	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_WORLD_NO_MIRROR", VISUAL_LAYER_WORLD_NO_MIRROR);
 	ClassDB::bind_integer_constant(get_class_static(), "",
 			"VISUAL_LAYER_TERRAIN_FOLIAGE", VISUAL_LAYER_TERRAIN_FOLIAGE);

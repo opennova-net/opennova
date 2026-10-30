@@ -41,6 +41,4 @@ environment_path = NodePath("../MissionEnvironment")
 environment_path = NodePath("../MissionEnvironment")
 environment_capture_layer_mask = 1024
 
-[node name="SunShadow" type="SunShadow" parent="."]
-
 [node name="SlotShadow" type="SlotShadow" parent="."]
