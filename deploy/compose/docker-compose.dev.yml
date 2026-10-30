@@ -195,7 +195,7 @@ services:
   # (the `vite` profile).
   portal-vite:
     profiles: ["vite"]
-    image: node:21-alpine
+    image: node:22-alpine
     restart: unless-stopped
     working_dir: /app
     command: sh -c "npm install && npm run dev"
