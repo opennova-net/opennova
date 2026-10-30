@@ -7,7 +7,9 @@ extends Node
 ##    gametext, vmacros, keyhelp) plus per-mission/menu tables
 ##    [orig: Game_InitSubsystems @ 0x4A6CD0].
 ##  - One override table consulted before every lookup — the original loads
-##    the active expansion's text bin there (expansion\<exp>\<exp>.bin)
+##    the active expansion's text bin there (expansion\<exp>\<exp>.bin); the
+##    engine holds it (rtxt::text_override, RtxtStringFile.install_text_override),
+##    and this registry only installs the one the mounted root carries
 ##    [orig: TextResource_LoadOverrideTable @ 0x75D5C0].
 ##  - lookup(table, section, key) misses resolve to "??section:key??", the
 ##    marker the original formats for its error table
@@ -19,8 +21,9 @@ extends Node
 ## the registry and keeps working unchanged; it reads the default table.
 
 # The lookup-miss marker and the override-first ordering are the engine's
-# RtxtStringFile.format_miss_marker / lookup_with_override statics — the
-# witnesses live at the engine home, engine/formats/rtxt rtxt.h.
+# RtxtStringFile.format_miss_marker / lookup_with_override statics, over the
+# engine's one installed override table — the witnesses live at the engine
+# home, engine/formats/rtxt rtxt.h.
 
 ## The named tables (the registry below carries the witness) and the RTXT
 ## sections the game reads by name; every caller spells them through these.
@@ -46,7 +49,6 @@ const SECTION_MENU := "Menu"
 
 var _table: RtxtStringFile
 var _tables: Dictionary = {}
-var _override_table: RtxtStringFile
 ## The root whose expansion override table is installed (track_expansion_override).
 var _override_source: ResourceRoot
 
@@ -76,8 +78,7 @@ func clear() -> void:
 	_table = null
 	_tables.clear()
 	_untrack_override_source()
-	_override_table = null
-	_publish_override()
+	RtxtStringFile.clear_text_override()
 	# The installed "Keys" table goes with the registry: every binding label
 	# falls back to its literal until the next keyhelp registration.
 	RtxtStringFile.clear_key_strings()
@@ -122,17 +123,6 @@ func load_rtxt(root: ResourceRoot, file: String) -> RtxtStringFile:
 
 ## --- Override table [orig: TextResource_LoadOverrideTable @ 0x75D5C0] ---
 
-## Sets the table consulted before every lookup (the original engine loads the
-## active expansion's text bin here). Pass null to clear.
-func set_override_table(table: RtxtStringFile) -> void:
-	_override_table = table
-	_publish_override()
-
-
-func get_override_table() -> RtxtStringFile:
-	return _override_table
-
-
 ## Installs the expansion override table `root` carries and follows the root:
 ## every later mount of it (the menu's expansion switch, a join's) installs the
 ## table that mount left. Which file serves the table, and when, is the engine's
@@ -148,24 +138,15 @@ func track_expansion_override(root: ResourceRoot) -> void:
 	_install_override_from_source()
 
 
+# The engine holds the one table every lookup searches first (the menus', the
+# HUD's, the join screen's and this registry's alike): the root's, or none.
 func _install_override_from_source() -> void:
 	var bytes := PackedByteArray()
 	if _override_source != null:
 		bytes = _override_source.get_expansion_override_table()
-	if bytes.is_empty():
-		_override_table = null
-		_publish_override()
-		return
 	var table := RtxtStringFile.new()
-	_override_table = table if table.load_from_byte_array(bytes) == OK else null
-	_publish_override()
-
-
-# The engine's game-text lookups (game_text_lookup in the GDExtension: the HUD's
-# and the waypoint names' among them) search the same table first.
-func _publish_override() -> void:
-	if _override_table != null:
-		_override_table.install_text_override()
+	if not bytes.is_empty() and table.load_from_byte_array(bytes) == OK:
+		table.install_text_override()
 	else:
 		RtxtStringFile.clear_text_override()
 
@@ -186,8 +167,7 @@ func _untrack_override_source() -> void:
 ## (returns "" — the earlier .gd version returned the miss marker for an
 ## authored empty string).
 func lookup(table_name: String, section: String, key: String) -> String:
-	return RtxtStringFile.lookup_with_override(_override_table,
-			_tables.get(table_name.to_lower()), section, key)
+	return RtxtStringFile.lookup_with_override(_tables.get(table_name.to_lower()), section, key)
 
 
 ## The override table's entry, else the named table's own, or `fallback` when

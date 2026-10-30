@@ -1542,7 +1542,7 @@ void LocalPlayerPresenter::_bind_methods() {
 			&LocalPlayerPresenter::fixed_weapon_batches_consumed);
 	ClassDB::bind_method(D_METHOD("consume_use_hold"), &LocalPlayerPresenter::consume_use_hold);
 	ClassDB::bind_method(D_METHOD("is_use_held"), &LocalPlayerPresenter::is_use_held);
-	ClassDB::bind_method(D_METHOD("special_key", "session", "vk", "yes_vk", "no_vk", "restart_vk"),
+	ClassDB::bind_method(D_METHOD("special_key", "session", "vk"),
 			&LocalPlayerPresenter::special_key);
 	ClassDB::bind_method(D_METHOD("queue_pick_event", "param"), &LocalPlayerPresenter::queue_pick_event);
 	ClassDB::bind_method(D_METHOD("set_record_leg", "leg"), &LocalPlayerPresenter::set_record_leg);

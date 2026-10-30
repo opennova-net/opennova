@@ -61,7 +61,8 @@ var _model_root: Node3D
 var _hovered := false
 var _zoom_blend := 0.0      # 0 at rest, damped toward 1 while hovered
 var _yaw_bam := 0           # the model's yaw, a signed 32-bit BAM word
-var _update_bank := 0.0     # seconds not yet run as a menu update
+# The menu updates' frame-time bank (the engine's world::TickAccumulator).
+var _update_bank := TickAccumulator.new()
 var _menu_center := Vector3.ZERO
 var _menu_radius := 1.0
 var _menu_framed := false
@@ -367,7 +368,7 @@ func _frame_menu_pose(bounds: AABB) -> void:
 	# BAM (runtime/menu/player_info_avatars.h carries the witness); the motion
 	# in _process steps from this starting facing.
 	_yaw_bam = AvatarDatabase.preview_initial_yaw_bam()
-	_update_bank = 0.0
+	_update_bank.reset()
 	_apply_yaw()
 	_menu_framed = true
 	_apply_menu_camera()  # initial pose; _process re-poses each frame with the zoom blend
@@ -423,11 +424,9 @@ func advance(delta: float) -> void:
 				_hovered = hov
 	# The zoom blend toward the hover, the yaw's rest spin or hovered sway, one
 	# step a drained update (engine menu::player_info_preview_blend_step /
-	# _yaw_step, D-PLAYERINFO-37).
-	# The bank holds at most 500 ms, as the game's loop clamps its own.
-	_update_bank = minf(_update_bank + delta, 0.5)
-	while _update_bank >= Simulation.tick_dt():
-		_update_bank -= Simulation.tick_dt()
+	# _yaw_step, D-PLAYERINFO-37), the updates the game loop's bank drains
+	# (engine world::TickAccumulator: its clamp, smoothing and 4 ms drain).
+	for _update in _update_bank.bank(delta):
 		_zoom_blend = AvatarDatabase.preview_blend_step(_zoom_blend, _hovered)
 		_yaw_bam = AvatarDatabase.preview_yaw_step(_yaw_bam, _hovered, Time.get_ticks_msec())
 	_apply_yaw()

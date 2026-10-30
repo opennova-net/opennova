@@ -159,16 +159,16 @@ func test_kill_banner_retains_text_after_expiry() -> void:
 	var sim := world.get_sim()
 	var start := presenter.hud_detail_level()
 	presenter.set_hud_detail_level(3)
-	presenter.tick(false)
+	presenter.tick()
 	var baseline: int = hud.get_draw_list_stats().glyphs
 	var now := sim.get_logic_tick()
 	sim.retain_feed_announcement("ABC", now)
-	presenter.tick(false)
+	presenter.tick()
 	assert_eq(hud.get_draw_list_stats().glyphs, baseline + 3,
 			"the banner is drawn through the presenter even at detail 3")
 	now = sim.get_logic_tick()
 	sim.retain_feed_announcement("XYZ", now - 187)
-	presenter.tick(false)
+	presenter.tick()
 	assert_eq(hud.get_draw_list_stats().glyphs, baseline,
 			"the presenter expires the banner on the logic tick")
 	assert_eq(sim.get_kill_announcement_text(), "XYZ",
@@ -177,7 +177,7 @@ func test_kill_banner_retains_text_after_expiry() -> void:
 	# one glyph as the game draws it, and reads back as its character (D-HUD-57).
 	now = sim.get_logic_tick()
 	sim.retain_feed_announcement("Café", now)
-	presenter.tick(false)
+	presenter.tick()
 	assert_eq(hud.get_draw_list_stats().glyphs, baseline + 4, "one glyph a byte, the é one byte")
 	assert_eq(sim.get_kill_announcement_text(), "Café", "and it reads back as written")
 	presenter.set_hud_detail_level(start)

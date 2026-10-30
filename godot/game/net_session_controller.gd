@@ -11,9 +11,11 @@ extends Node
 # launch flags.
 
 var _shell: MainGame  # start_world_load / current_resource_root
-# The NovaWorld servers that refused this install this session (rid -> reason),
-# and the rid the current NovaWorld join went to (note_join_failure).
-var _refused_servers: Dictionary = {}
+# The NovaWorld servers that refused this install this process, with each
+# refusal's text: the one record (engine BrowserRefusals), handed to every panel
+# this controller opens; and the rid the current NovaWorld join went to
+# (note_join_failure).
+var _refusals := NovaWorldServerBrowser.new()
 var _joining_rid := 0
 var _joining_novaworld_server := false
 var _world: GameWorld
@@ -579,9 +581,8 @@ func open_novaworld_panel(start_client := true) -> void:
 	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
 	# own root is null until a mission loads). Set BEFORE add_child so _ready can populate the scene.
 	_novaworld_panel.resource_root = _resource_root()
+	_novaworld_panel.refusals = _refusals
 	_panel_layer.add_child(_novaworld_panel)
-	for rid: int in _refused_servers:
-		_novaworld_panel.mark_refused(rid, String(_refused_servers[rid]))
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
 	# --lan-join launch use); the panel emits the same typed JoinTarget load_mission_as_joiner
@@ -627,8 +628,7 @@ func note_join_failure(error: ConnectionError) -> void:
 	_joining_novaworld_server = false
 	if error == null or not error.refuses_this_install():
 		return
-	_refused_servers[_joining_rid] = error.reason_text(Strings.get_override_table(),
-			Strings.get_table(Strings.TABLE_GAMEERR))
+	_refusals.note_refusal(_joining_rid, error.reason_text(Strings.get_table(Strings.TABLE_GAMEERR)))
 
 
 func _dismiss_novaworld_panel() -> void:

@@ -1258,7 +1258,7 @@ func begin_join_enumerate(abort: Callable) -> void:
 		return
 	_join_enumerate_abort = abort
 	_join_screen.show_progress(JoinScreenStatus.stage_text(JoinScreenStatus.STAGE_ENUMERATING,
-			Strings.get_override_table(), Strings.get_table(Strings.TABLE_GAMEERR)))
+			Strings.get_table(Strings.TABLE_GAMEERR)))
 
 
 ## The enumerate ended (a session answered, or the join was abandoned): its
@@ -1590,8 +1590,7 @@ func _on_world_load_failed(reason: String) -> void:
 		var error: ConnectionError = _world.get_last_connection_error() if _world != null else null
 		var text := reason
 		if error != null and error.is_set():
-			text = error.reason_text(Strings.get_override_table(),
-					Strings.get_table(Strings.TABLE_GAMEERR))
+			text = error.reason_text(Strings.get_table(Strings.TABLE_GAMEERR))
 		_net.note_join_failure(error)
 		_join_screen.show_failure(text)
 		return
@@ -1681,21 +1680,48 @@ func _run_escape_action() -> bool:
 	return _hud_presenter != null and _hud_presenter.handle_escape()
 
 
-# Whether the open pass-through screen's word holds, so the update runs the input
-# frame under it: death.mnu's DEATH (its show raises the word, the exit
-# confirmation lowers it and the confirmation's NO raises it again) and stat.mnu's
-# STAT (raised for the whole screen). The frame's dead-player, deploy-overlay and
-# round-over gates are the action head's (engine world::pass_through_close_axis and
-# KeyboardPass carry the witness). The tools window's interact mode keeps the
-# input, as it does over live play.
-func _screen_input_frame() -> bool:
-	if _world_load_pending or (is_dev_tools_open() and not _dev_tools.is_game_playing()):
-		return false
+## The in-mission menu screen up, the one map from this shell's state to the
+## engine's screen (menu::MissionScreen): INGAME (the pause), WEAPON (the armory),
+## CMAP, VEHICLE, STAT (the end of round) or DEATH (the deploy screen). Which of
+## them holds the input frame and which passes it through is the engine's
+## (menu/mission_screen.h).
+func _mission_screen() -> MenuDriver.MissionScreen:
+	match _state:
+		State.PAUSED:
+			return MenuDriver.MISSION_SCREEN_INGAME
+		State.ARMORY:
+			return MenuDriver.MISSION_SCREEN_WEAPON
+		State.COMMAND_MAP:
+			return MenuDriver.MISSION_SCREEN_COMMAND_MAP
+		State.VEHICLE:
+			return MenuDriver.MISSION_SCREEN_VEHICLE
+		State.END_ROUND:
+			return MenuDriver.MISSION_SCREEN_STAT
+		State.DEPLOY:
+			return MenuDriver.MISSION_SCREEN_DEATH
+	return MenuDriver.MISSION_SCREEN_NONE
+
+
+## The menu's pass-through word as the screen up holds it: death.mnu's DEATH (its
+## show raises the word, the exit confirmation lowers it and the confirmation's NO
+## raises it again) and stat.mnu's STAT (raised for the whole screen).
+func _screen_pass_through_word() -> bool:
 	if _state == State.DEPLOY:
 		return _deploy_presenter != null and _deploy_presenter.is_input_pass_through()
 	if _state == State.END_ROUND:
 		return _end_round_presenter != null and _end_round_presenter.is_input_pass_through()
 	return false
+
+
+# Whether the screen up passes its input through, so the update runs the input
+# frame under it (engine menu::mission_screen_passes_input). The frame's
+# dead-player, deploy-overlay and round-over gates are the action head's (engine
+# world::pass_through_close_axis and KeyboardPass carry the witness). The tools
+# window's interact mode keeps the input, as it does over live play.
+func _screen_input_frame() -> bool:
+	if _world_load_pending or (is_dev_tools_open() and not _dev_tools.is_game_playing()):
+		return false
+	return MenuDriver.mission_screen_passes_input(_mission_screen(), _screen_pass_through_word())
 
 
 # Whether this frame's input frame runs its keyboard pass: over live play (a
@@ -1730,25 +1756,22 @@ func _run_keyboard_pass() -> void:
 		_keys.drain(self)
 
 
-## A menu screen with no input frame is up: INGAME (the pause), WEAPON (the
-## armory), CMAP (the command map), VEHICLE, or the deploy screen that does not
-## pass input through. The frame head reads it, and the player input router reads
-## it again at each update's input-frame head, so a screen one update's keyboard
-## pass opens (the escape row's INGAME) gates the frame's later updates.
+## A menu screen that holds the input frame is up (engine
+## menu::mission_screen_holds_input: INGAME, WEAPON, CMAP, VEHICLE, or a DEATH
+## whose input does not pass through). The frame head reads it, and the player
+## input router reads it again at each update's input-frame head, so a screen one
+## update's keyboard pass opens (the escape row's INGAME) gates the frame's later
+## updates.
 func _input_frame_menu_open() -> bool:
-	return (_state == State.PAUSED or _state == State.ARMORY or _state == State.COMMAND_MAP
-			or _state == State.VEHICLE or (_state == State.DEPLOY
-					and not _deploy_presenter.is_input_pass_through()))
+	return MenuDriver.mission_screen_holds_input(_mission_screen(), _screen_pass_through_word())
 
 
-## An in-game menu screen is up, any of them: INGAME (the pause), WEAPON, the
-## deploy screen (DEATH), STAT, CMAP or VEHICLE. A remote admin's GOTO MENUSTATE
-## closes it ahead of its exit, so the close's input reset drops what the exit's
-## disconnect queued (engine inmatch/remote_admin.h ExitSite::AdminOverMenuScreen
-## carries the witness).
+## An in-game menu screen is up, any of them (engine menu::mission_screen_open). A
+## remote admin's GOTO MENUSTATE closes it ahead of its exit, so the close's input
+## reset drops what the exit's disconnect queued (engine inmatch/remote_admin.h
+## ExitSite::AdminOverMenuScreen carries the witness).
 func _menu_screen_open() -> bool:
-	return _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND,
-			State.COMMAND_MAP, State.VEHICLE]
+	return MenuDriver.mission_screen_open(_mission_screen())
 
 
 ## An open chat line takes the queue's key (the keyboard pass's capture branch);
@@ -2218,8 +2241,7 @@ static func post_mission_error_text(route: PostMissionRoute) -> String:
 		# (engine: inmatch/disconnect_reason.h).
 		var connection_error := route.connection_error
 		if connection_error != null and connection_error.is_set():
-			return connection_error.reason_text(Strings.get_override_table(),
-					Strings.get_table(Strings.TABLE_GAMEERR))
+			return connection_error.reason_text(Strings.get_table(Strings.TABLE_GAMEERR))
 		return route.error_text
 	var text := Strings.lookup_or(Strings.TABLE_GAMEERR, Strings.SECTION_GENERIC_ERRORS, key, "")
 	if text.is_empty() and key == "STRE_BADMISSION":
@@ -2307,8 +2329,7 @@ func _process(delta: float) -> void:
 	var dev_tools_open := is_dev_tools_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	var dev_tools_interacting := dev_tools_open and not _dev_tools.is_game_playing()
-	var screen_state: bool = _state in [State.PAUSED, State.ARMORY, State.DEPLOY,
-			State.END_ROUND, State.COMMAND_MAP, State.VEHICLE]
+	var screen_state := _menu_screen_open()
 	if screen_state or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			# A game screen's free cursor starts at the re-centre point every gameplay
@@ -2424,9 +2445,9 @@ func _process(delta: float) -> void:
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
 	var skip_hud := probe_enabled and _perf_probe.skip_hud
 	if _hud_presenter != null and not skip_hud \
-			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND,
-					State.COMMAND_MAP, State.VEHICLE]:
-		_hud_presenter.tick(is_gameplay_input_active() or _screen_input_frame())
+			and (_state == State.WORLD or (_menu_screen_open()
+					and _mission_screen() != MenuDriver.MISSION_SCREEN_INGAME)):
+		_hud_presenter.tick()
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	if timing:

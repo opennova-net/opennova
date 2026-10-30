@@ -43,9 +43,9 @@ public:
 	int get_disconnect_param() const { return static_cast<int>(record_.disconnect_param); }
 	// The gameerr entry the reason reads ("NCC007"), "" when the record is empty.
 	String reason_key() const;
-	// Retail's reason text (inmatch::disconnect_reason_string).
-	String reason_text(const Ref<RtxtStringFile> &p_override_table,
-			const Ref<RtxtStringFile> &p_gameerr) const;
+	// Retail's reason text (inmatch::disconnect_reason_string), the process's
+	// text-override table (rtxt::text_override) searched before `p_gameerr`.
+	String reason_text(const Ref<RtxtStringFile> &p_gameerr) const;
 	// OpenNova browser policy, not a retail witness: the server refused this
 	// build or install outright (another protocol version (PV2) or join build, an
 	// expansion mismatch, or a banned address), so retrying the same server cannot work.

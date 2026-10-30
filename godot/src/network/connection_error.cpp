@@ -42,11 +42,10 @@ String ConnectionError::reason_key() const {
 			opennova::inmatch::disconnect_reason_key(absent_ ? nullptr : &record_).key.c_str());
 }
 
-String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_override_table,
-		const Ref<RtxtStringFile> &p_gameerr) const {
+String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_gameerr) const {
+	const std::shared_ptr<const opennova::rtxt::File> override_table = opennova::rtxt::text_override();
 	return opennova::cp1252_to_gd(opennova::inmatch::disconnect_reason_string(
-			absent_ ? nullptr : &record_,
-			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr,
+			absent_ ? nullptr : &record_, override_table.get(),
 			p_gameerr.is_valid() ? &p_gameerr->get_native() : nullptr));
 }
 
@@ -72,7 +71,7 @@ void ConnectionError::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_disconnect_code"), &ConnectionError::get_disconnect_code);
 	ClassDB::bind_method(D_METHOD("get_disconnect_param"), &ConnectionError::get_disconnect_param);
 	ClassDB::bind_method(D_METHOD("reason_key"), &ConnectionError::reason_key);
-	ClassDB::bind_method(D_METHOD("reason_text", "override_table", "gameerr"),
+	ClassDB::bind_method(D_METHOD("reason_text", "gameerr"),
 			&ConnectionError::reason_text);
 	ClassDB::bind_method(D_METHOD("refuses_this_install"), &ConnectionError::refuses_this_install);
 }
