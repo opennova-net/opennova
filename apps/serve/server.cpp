@@ -626,7 +626,9 @@ bool Server::mount(std::string &error) {
 			rtxt::parse(text_override_table_.data(), text_override_table_.size(), text_override_,
 					override_error);
 	assets_ = std::make_unique<assets::AssetStore>(&index_);
-	catalog_ = mission_catalog::build(index_, have_text_override_ ? &text_override_ : nullptr);
+	// In the title's order (Title::mission_list_order carries the witness).
+	catalog_ = mission_catalog::build(index_, have_text_override_ ? &text_override_ : nullptr,
+			title_by_code(game_code_)->mission_list_order);
 	// The avatar registry, which the admin console's PETERRABBIT SEXCHANGE walks; an install
 	// without Avatars.def leaves it empty [orig: CAvatarDefs_Init @0x57B180 opens
 	// "Avatars.def"].

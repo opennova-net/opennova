@@ -34,6 +34,14 @@ bool file_less(const Row &a, const Row &b) {
 	return cp1252_stricmp(utf8_to_retail_text(a.file), utf8_to_retail_text(b.file)) < 0;
 }
 
+// dfx2.exe's comparator: the same stricmp over the two rows' display titles (entry+1044), the
+// table's [Info] TITLE or the header's mission name, folded the same way (D-MNU-39).
+// [orig: CompareFunction @0x561840 - _stricmp(String1 + 1044, String2 + 1044) @0x561863
+//  (dfx2.exe)]
+bool title_less(const Row &a, const Row &b) {
+	return cp1252_stricmp(utf8_to_retail_text(a.title), utf8_to_retail_text(b.title)) < 0;
+}
+
 // [orig: Path_ReplaceOrAppendExtension @ 0x53c780, called with "bin" @ 0x56345b and
 //  @ 0x562c1b — the extension after the FIRST '.' is replaced, ".bin" appended when
 //  there is none]
@@ -178,7 +186,8 @@ void walk_pair(const ResourceIndex &index, int mission_slot, int text_slot,
 
 } // namespace
 
-std::vector<Row> build(const ResourceIndex &index, const rtxt::File *text_override) {
+std::vector<Row> build(
+		const ResourceIndex &index, const rtxt::File *text_override, MissionListOrder order) {
 	std::vector<Row> rows;
 	// The loose leg: the install root's `.bms` files, whatever the mount (a packed
 	// install's stray one too; one under the mounted expansion's folder never), flagged
@@ -212,8 +221,9 @@ std::vector<Row> build(const ResourceIndex &index, const rtxt::File *text_overri
 	// [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0, no dedupe]
 	// The CRT's qsort is a platform primitive the port does not reproduce, and it is not
 	// stable: two rows with the same name (a loose copy of an archived mission, or one
-	// name in both pairs) come out in its order in retail, in walk order here.
-	sort_rows(rows);
+	// name in both pairs) come out in its order in retail, in walk order here. The comparator
+	// is the title's (sort_rows).
+	sort_rows(rows, order);
 	return rows;
 }
 
@@ -275,8 +285,8 @@ std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms
 	return rows;
 }
 
-void sort_rows(std::vector<Row> &rows) {
-	std::stable_sort(rows.begin(), rows.end(), file_less);
+void sort_rows(std::vector<Row> &rows, MissionListOrder order) {
+	std::stable_sort(rows.begin(), rows.end(), order == MissionListOrder::Title ? title_less : file_less);
 }
 
 uint32_t game_type_of(const Row &row) {

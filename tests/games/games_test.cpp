@@ -62,6 +62,9 @@ void retail_protocols_complete() {
 	CHECK(jo == &games::jo_protocol() && dfx2 == &games::dfx2_protocol());
 	CHECK(&games::jo_title() == title_by_code("jo") &&
 			&games::dfx2_title() == title_by_code("dfx2"));
+	// DFX2-22: each title's mission catalog order.
+	CHECK(games::jo_title().mission_list_order == MissionListOrder::FileName &&
+			games::dfx2_title().mission_list_order == MissionListOrder::Title);
 	for (const Protocol *protocol : { jo, dfx2 }) {
 		CHECK(protocol != nullptr);
 		if (protocol == nullptr)
@@ -95,6 +98,7 @@ void acidgambit_speaks_jo() {
 	CHECK(std::string(ag.display_name) == "OP: Acid Gambit" &&
 			std::string(ag.title_text) == "OP: Acid Gambit");
 	CHECK(std::string(ag.command_file) == "ACIDGAMBIT.CMD" && ag.executable == nullptr);
+	CHECK(ag.mission_list_order == games::jo_title().mission_list_order);
 	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == title_protocol("dfx2"));
 	// The updater login the service serves OpenNova's own content under is its title's; a retail
 	// title's folder names its own (Title::updater_login).

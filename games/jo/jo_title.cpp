@@ -81,6 +81,9 @@ Title make() {
 	t.expansions = true;
 	t.read_defs = kReadDefs;
 	t.hud_fonts = &kHudFonts;
+	// The catalog sorted by file name [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 - the
+	//  qsort @ 0x5635f0 over Mission_CompareMapNames @ 0x5628e0].
+	t.mission_list_order = MissionListOrder::FileName;
 	return t;
 }
 

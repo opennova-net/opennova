@@ -219,7 +219,7 @@ int main() {
 			opennova::VfsArchiveDiscovery::RetailTable));
 	TEST_EXPECT(index.mounted_expansion() == "jox01");
 
-	const std::vector<catalog::Row> rows = catalog::build(index, nullptr);
+	const std::vector<catalog::Row> rows = catalog::build(index, nullptr, opennova::MissionListOrder::FileName);
 	// alpha, kilo, mike, oscar, zulu (loose); exp, pack (expansion pair); bad, lonely,
 	// pack (base pair).
 	TEST_EXPECT(rows.size() == 10u);
@@ -314,7 +314,7 @@ int main() {
 	// A loose-only mount has no archive slots: its loose files alone.
 	opennova::ResourceIndex loose_index;
 	TEST_EXPECT(loose_index.scan(root.string(), "", opennova::VfsMountMode::LooseOnly));
-	const std::vector<catalog::Row> loose_rows = catalog::build(loose_index, nullptr);
+	const std::vector<catalog::Row> loose_rows = catalog::build(loose_index, nullptr, opennova::MissionListOrder::FileName);
 	TEST_EXPECT(loose_rows.size() == 5u);
 	for (const catalog::Row &row : loose_rows) TEST_EXPECT(row.loose);
 
@@ -327,7 +327,7 @@ int main() {
 	opennova::ResourceIndex packed_index;
 	TEST_EXPECT(packed_index.scan(root.string(), "jox01", opennova::VfsMountMode::Packed,
 			opennova::VfsArchiveDiscovery::RetailTable));
-	const std::vector<catalog::Row> packed_rows = catalog::build(packed_index, nullptr);
+	const std::vector<catalog::Row> packed_rows = catalog::build(packed_index, nullptr, opennova::MissionListOrder::FileName);
 	TEST_EXPECT(packed_rows.size() == 10u);
 	const catalog::Row *packed_zulu = find_row(packed_rows, "zulu.bms", true);
 	TEST_EXPECT(packed_zulu != nullptr &&
@@ -365,7 +365,14 @@ int main() {
 				own[0].game_mode == static_cast<uint32_t>(AttribFlags::Coop));
 		TEST_EXPECT(own[1].file == "Able.BMS" && own[1].title == "Able Header Name");
 		TEST_EXPECT(own[2].file == "gone.bms" && own[2].title.empty() && own[2].game_mode == 0u);
-		catalog::sort_rows(own);
+		// dfx2.exe's order is the display title's: the untitled row (its header named none) first,
+		// then "Able Header Name", then "Bravo Op". [orig: CompareFunction @0x561840 - _stricmp on
+		// entry+1044 (dfx2.exe)]
+		std::vector<catalog::Row> by_title = own;
+		catalog::sort_rows(by_title, opennova::MissionListOrder::Title);
+		TEST_EXPECT(by_title[0].file == "gone.bms" && by_title[1].file == "Able.BMS" &&
+				by_title[2].file == "Bravo.bms");
+		catalog::sort_rows(own, opennova::MissionListOrder::FileName);
 		TEST_EXPECT(own[0].file == "Able.BMS" && own[1].file == "Bravo.bms" && own[2].file == "gone.bms");
 		TEST_EXPECT(catalog::game_type_of(own[1]) ==
 				opennova::game_type::for_mission_mode(static_cast<uint32_t>(AttribFlags::Coop)));
@@ -399,7 +406,7 @@ int main() {
 		folded[0].file = "\xC3\xA9" "b.bms";
 		folded[1].file = "\xC9" "a.bms";
 		folded[2].file = "\x8C" "z.bms";
-		catalog::sort_rows(folded);
+		catalog::sort_rows(folded, opennova::MissionListOrder::FileName);
 		TEST_EXPECT(folded[0].file == "\x8C" "z.bms" && folded[1].file == "\xC9" "a.bms" &&
 				folded[2].file == "\xC3\xA9" "b.bms");
 	}
@@ -424,7 +431,7 @@ int main() {
 		TEST_EXPECT(opennova::pff::pff_open(&texts, (exp / "jox01L.pff").string().c_str()) == 0);
 		std::vector<catalog::Row> pair = catalog::archive_rows(missions, &texts, nullptr);
 		TEST_EXPECT(pair.size() == 2u);
-		catalog::sort_rows(pair);
+		catalog::sort_rows(pair, opennova::MissionListOrder::FileName);
 		TEST_EXPECT(pair.size() == 2u && pair[0].file == "EXP.BMS" && pair[1].file == "PACK.BMS");
 		TEST_EXPECT(pair.size() == 2u && pair[0].title == "Expansion Op" &&
 				pair[0].briefing == "From the expansion." && !pair[0].loose &&
@@ -460,7 +467,7 @@ int main() {
 		opennova::ResourceIndex tdh_index;
 		TEST_EXPECT(tdh_index.scan(tdh.string(), "", opennova::VfsMountMode::PackedWithLooseOverride,
 				opennova::VfsArchiveDiscovery::RetailTable));
-		const std::vector<catalog::Row> listed = catalog::build(tdh_index, nullptr);
+		const std::vector<catalog::Row> listed = catalog::build(tdh_index, nullptr, opennova::MissionListOrder::FileName);
 		TEST_EXPECT(listed.size() == 2u && listed[0].file == "TDH_G11A.BMS" &&
 				listed[1].file == "TDH_I3A.BMS" && listed[0].title == "TDH G11A");
 		// The host's rotation names TDH_I3A first, then TDH_G11A, in lower case.

@@ -34,6 +34,16 @@ struct TitleHudFonts {
 	int32_t large_divisor = 0;
 };
 
+// The order a title's mission catalog takes (runtime/mission/mission_catalog.h sort_rows), the
+// comparator its boot scan's qsort is handed: by file name, Jointops.exe's; by the [Info] TITLE
+// (the row's display title), dfx2.exe's. Each case-insensitive.
+// [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 - qsort(.., 0x11E8,
+//  Mission_CompareMapNames) @ 0x5635e4..0x5635f0; Mission_CompareMapNames @ 0x5628e0, stricmp on
+//  entry+0] [orig: MissionList_ScanAndBuildFromFiles @0x5620d0 - qsort(.., 0x11E8,
+//  CompareFunction) @0x562544..0x562550; CompareFunction @0x561840, _stricmp on entry+1044
+//  (dfx2.exe)]
+enum class MissionListOrder : uint8_t { FileName, Title };
+
 // A title (CONTEXT.md "Title"): the retail game a game runs as, by its short code (the `/game
 // <code>` launch flag, a project's target game). Its rows live in games/<code>/<code>_title.cpp,
 // which games::install() hands to install_titles; engine/ holds the type and the lookups alone.
@@ -104,6 +114,9 @@ struct Title {
 	// The HUD's label fonts by screen width (TitleHudFonts); null where no binary of the title was
 	// read for them, which loads none (the HUD's slots fall back to its hudpos font).
 	const TitleHudFonts *hud_fonts = nullptr;
+	// DFX2-22: the order its mission catalog takes (MissionListOrder above): every list the
+	// catalog feeds, the single-player screen's among them, shows it.
+	MissionListOrder mission_list_order = MissionListOrder::FileName;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

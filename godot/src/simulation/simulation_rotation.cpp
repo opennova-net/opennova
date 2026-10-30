@@ -39,8 +39,8 @@ void seed_host_rotation(SimulationNetState &p_net, const Ref<ResourceRoot> &p_ro
 	if (p_root.is_null()) return;
 	const std::shared_ptr<const opennova::rtxt::File> text_override =
 			RtxtStringFile::installed_text_override();
-	p_net.rotation_catalog =
-			opennova::mission_catalog::build(p_root->native_index(), text_override.get());
+	p_net.rotation_catalog = opennova::mission_catalog::build(p_root->native_index(),
+			text_override.get(), ResourceRoot::session_title(p_root).mission_list_order);
 	const std::vector<opennova::mission_catalog::Row> &catalog = p_net.rotation_catalog;
 	std::vector<std::string> files = p_net.rotation_missions;
 	std::vector<int32_t> switches = p_net.rotation_launch_options;

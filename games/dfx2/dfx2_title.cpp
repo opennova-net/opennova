@@ -82,6 +82,9 @@ Title make() {
 	//  WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 (@0x565bcf..0x565be5)].
 	t.death_screen_loadout = true;
 	t.hud_fonts = &kHudFonts;
+	// DFX2-22: the catalog sorted by title [orig: MissionList_ScanAndBuildFromFiles @0x5620d0 -
+	//  the qsort @0x562550 over CompareFunction @0x561840, _stricmp on entry+1044 (dfx2.exe)].
+	t.mission_list_order = MissionListOrder::Title;
 	return t;
 }
 

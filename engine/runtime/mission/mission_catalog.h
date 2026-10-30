@@ -10,13 +10,18 @@
 // Each 0x11E8-byte retail table entry carries the filename (+0), the display
 // title (+1044), the [Info] BRIEFING text pointer (+1300), the loose-scan
 // flag (+4380: 1 for loose finds, 0 for archive entries), and the session
-// game-type code word (+4392). The list is qsorted case-insensitively by
-// FILENAME [orig: Mission_CompareMapNames @ 0x5628e0 — stricmp on entry+0].
+// game-type code word (+4392). The list is qsorted case-insensitively by the
+// title's key (Title::mission_list_order): Jointops.exe's FILENAME
+// [orig: Mission_CompareMapNames @ 0x5628e0 — stricmp on entry+0], dfx2.exe's
+// display title [orig: CompareFunction @0x561840 (dfx2.exe), _stricmp on
+// entry+1044].
 
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
+
+#include <base/title/title.h> // MissionListOrder (the title's catalog order)
 
 namespace opennova {
 class ResourceIndex;
@@ -64,8 +69,10 @@ struct Row {
 // The .npj/.npz map-project legs are not ported (D-MNU-25, D-MIS-7): retail's
 // archive walk matches a .npj or .npz entry as it does a .bms, and the
 // shipped localres.pff carries ASP_G7.npz and the JOX jox01.pff nine more,
-// which retail lists and OpenNova cannot load.
-std::vector<Row> build(const ResourceIndex &index, const rtxt::File *text_override);
+// which retail lists and OpenNova cannot load. The rows end in `order`, the
+// title's (sort_rows).
+std::vector<Row> build(
+		const ResourceIndex &index, const rtxt::File *text_override, MissionListOrder order);
 
 // One row of the loose leg as build() makes it, from what an embedder read itself (the editor's
 // project, whose files are its own): `file` the `.bms` name, `bms` its bytes (its header read only
@@ -92,10 +99,14 @@ std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms
 // [orig: Mission_BuildMapListFromPFF @ 0x562910, the entry walk @ 0x56295f..0x562d51]
 std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArchive *texts,
 		const rtxt::File *text_override);
-// The catalog's order: by file name without case, rows of the same name in the order they came.
+// The catalog's order, the title's (Title::mission_list_order): by file name without case
+// (Jointops.exe's), or by display title without case (dfx2.exe's), rows of the same key in the
+// order they came.
 // [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0 -- Mission_CompareMapNames
 //  @ 0x5628e0, stricmp on entry+0; build() says why the port's sort is stable]
-void sort_rows(std::vector<Row> &rows);
+// [orig: qsort(list, count, 0x11E8, CompareFunction) @0x562550 -- CompareFunction @0x561840,
+//  _stricmp on entry+1044 (dfx2.exe)]
+void sort_rows(std::vector<Row> &rows, MissionListOrder order);
 // The session game-type code word the retail table stamps per row: game_type::for_mission_mode over
 // the row's mode bit [orig: entry+4392, the AI_GetTaskTypeFromFlags switch @ 0x5631f0..].
 uint32_t game_type_of(const Row &row);

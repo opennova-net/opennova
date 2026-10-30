@@ -59,8 +59,10 @@ TypedArray<MissionCatalogRow> MissionCatalog::rows(const Ref<ResourceRoot> &p_ro
 	// The titles search the process's override table first (D-NET-675).
 	const std::shared_ptr<const opennova::rtxt::File> text_override =
 			RtxtStringFile::installed_text_override();
+	// In the mounted title's order (engine Title::mission_list_order carries the witness).
 	for (const opennova::mission_catalog::Row &row :
-			opennova::mission_catalog::build(p_root->engine_index(), text_override.get())) {
+			opennova::mission_catalog::build(p_root->engine_index(), text_override.get(),
+					ResourceRoot::session_title(p_root).mission_list_order)) {
 		// The session code-word stamp the retail table carries per row.
 		out.push_back(MissionCatalogRow::create(opennova::to_gd(row.file),
 				opennova::to_gd(row.title),
@@ -79,7 +81,8 @@ PackedStringArray MissionCatalog::mission_names(const Ref<ResourceRoot> &p_root)
 	const std::shared_ptr<const opennova::rtxt::File> text_override =
 			RtxtStringFile::installed_text_override();
 	for (const opennova::mission_catalog::Row &row :
-			opennova::mission_catalog::build(p_root->engine_index(), text_override.get())) {
+			opennova::mission_catalog::build(p_root->engine_index(), text_override.get(),
+					ResourceRoot::session_title(p_root).mission_list_order)) {
 		names.push_back(opennova::to_gd(row.file));
 	}
 	return names;
