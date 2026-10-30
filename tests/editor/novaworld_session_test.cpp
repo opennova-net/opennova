@@ -726,7 +726,15 @@ static int test_get_again() {
 	Session s(&service);
 	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
 	const std::string copy = dir.file("Copy");
-	s.send(request::novaworld_sync("MOD", copy));
+	// Over the wire, as the MCP sends it.
+	opennova::io::JsonValue wire = opennova::io::JsonValue::make_object();
+	wire.set("kind", opennova::io::json_string("novaworld_sync"));
+	wire.set("project_key", opennova::io::json_string("MOD"));
+	wire.set("dir", opennova::io::json_string(copy));
+	const opennova::io::JsonValue answer = s.session.handle_json(wire);
+	TEST_EXPECT(answer.get_bool("ok", false));
+	s.session.run_operations();
+	TEST_EXPECT(s.session.view().project.open && s.novaworld().key == "MOD");
 	const size_t downloads = service.downloads;
 	TEST_EXPECT(s.novaworld().tracked && downloads == 2);
 	s.send(request::close_project());
