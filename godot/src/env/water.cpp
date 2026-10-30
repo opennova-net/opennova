@@ -269,7 +269,12 @@ void Water::release_runtime_renderer_resources() {
 			material->set_shader_parameter("u_noise_normal", Variant());
 		}
 	}
+	// The Q3 registry's copy of the block holds the noise and reflection
+	// textures too: publish the empty block while the strip's record is still
+	// found, so the registry lets go of them with the materials (the shell's
+	// exit frees every texture before the RenderingServer goes).
 	night_vision_q3_ = Q3WaterMaterialValues();
+	_publish_night_vision_q3();
 	for (MeshInstance3D **strip :
 			{&mesh_instance_, &night_vision_mesh_instance_, &inset_mesh_instance_}) {
 		if (*strip == nullptr) {
