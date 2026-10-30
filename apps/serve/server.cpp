@@ -1599,8 +1599,8 @@ void Server::open_admin() {
 	admin_consoles_.use_process_state(&client_process_);
 	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_consoles_, admin_rand_,
 			[this](std::string_view line) {
-				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(admin_log_redacted(line)),
-						/*append=*/true);
+				(void)files_.write(
+						inmatch::kAdminLogFileName, inmatch::admin_log_file_text(line), /*append=*/true);
 			});
 	admin_tcp_ = std::make_unique<net::AdminTcpServer>(*admin_server_);
 	const uint16_t port = inmatch::remote_admin_listen_port(config_.cfg());

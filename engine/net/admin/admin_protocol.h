@@ -66,7 +66,11 @@ bool admin_reply_text(const std::vector<uint8_t> &payload, std::string &out);
 bool admin_login_accepted(std::string_view reply);
 // An "ERROR - " or "USAGE - " reply rather than the command's answer.
 bool admin_reply_is_error(std::string_view reply);
-// Redact password fields before an embedder persists an admin command or reply.
+// `text` with each line naming a password (any case) redacted, before an embedder persists an
+// admin command or reply: a "<key> = <value>" line keeps its key, a SET line its verb and key,
+// any other such line is replaced whole. Ours (D-NET-1472, PERMANENT): retail's admin_log.txt
+// writes every command verbatim [orig: CAdminServer_DispatchCommand @0x406720 - @0x40675D,
+// @0x40676B].
 std::string admin_log_redacted(std::string_view text);
 
 // How many reply packets one command draws: the server's dispatcher answers each command line

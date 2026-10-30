@@ -383,24 +383,31 @@ std::vector<std::string> admin_parse_chat_window(std::string_view reply) {
 }
 
 std::string admin_log_redacted(std::string_view text) {
-    std::string out;
-    size_t pos = 0;
-    do {
-        const auto end = text.find('\n', pos);
-        auto line = text.substr(pos, end == text.npos ? text.size() - pos : end - pos);
-        if (strutil::ifind(line, "password") != line.npos) {
-            const auto equals = line.find('=');
-            if (equals != line.npos) out += std::string(line.substr(0, equals + 1)) + " [redacted]";
-            else {
-                const auto args = admin_split_command(line);
-                if (args.size() >= 2 && strutil::iequals(args[0], "SET")) out += "SET " + std::string(args[1]) + " [redacted]";
-                else out += "[password-bearing output redacted]";
-            }
-        } else out += line;
-        if (end == text.npos) break;
-        out += '\n'; pos = end + 1;
-    } while (pos < text.size());
-    return out;
+	std::string out;
+	size_t pos = 0;
+	do {
+		const auto end = text.find('\n', pos);
+		const auto line = text.substr(pos, end == text.npos ? text.size() - pos : end - pos);
+		if (strutil::ifind(line, "password") != line.npos) {
+			const auto equals = line.find('=');
+			if (equals != line.npos) {
+				out += std::string(line.substr(0, equals + 1)) + " [redacted]";
+			} else {
+				const auto args = admin_split_command(line);
+				if (args.size() >= 2 && strutil::iequals(args[0], "SET"))
+					out += "SET " + std::string(args[1]) + " [redacted]";
+				else
+					out += "[password-bearing output redacted]";
+			}
+		} else {
+			out += line;
+		}
+		if (end == text.npos)
+			break;
+		out += '\n';
+		pos = end + 1;
+	} while (pos < text.size());
+	return out;
 }
 
 } // namespace opennova
