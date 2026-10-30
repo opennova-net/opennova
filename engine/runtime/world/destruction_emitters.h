@@ -25,15 +25,15 @@ struct DestructionEffectEvent;
 // family 0, holds none. Family 4, the vehicle smoke, is the entity's +0x1CC slot
 // (entity_effect_slot, ItemEmitterSystem::store_damage_smoke).
 inline constexpr uint64_t kDestructionEffectSlotDomain = 0x2000000000000000ull;
-inline particle::EffectSlotToken destruction_effect_slot(uint16_t packed_handle, uint8_t family,
-		uint8_t bank_slot) {
-	return {kDestructionEffectSlotDomain | (uint64_t(packed_handle) << 16) |
-			(uint64_t(family) << 8) | bank_slot};
+inline particle::EffectSlotToken destruction_effect_slot(
+		uint16_t packed_handle, uint8_t family, uint8_t bank_slot) {
+	return { kDestructionEffectSlotDomain | (uint64_t(packed_handle) << 16) |
+		(uint64_t(family) << 8) | bank_slot };
 }
 // A death piece's trail handle (piece+0x8C) as a scene slot, by its pool slot.
 inline constexpr uint64_t kDeathPieceTrailSlotDomain = 0x1000000000000000ull;
 inline particle::EffectSlotToken death_piece_trail_slot(int piece_slot) {
-	return {kDeathPieceTrailSlotDomain | uint64_t(uint32_t(piece_slot))};
+	return { kDeathPieceTrailSlotDomain | uint64_t(uint32_t(piece_slot)) };
 }
 
 class DestructionEmitters {
@@ -46,8 +46,8 @@ public:
 	// The death bank's per-tick re-pose: the slot's group moved to its point, its aim kept.
 	// [orig: Entity_UpdateDeadWreckEffects @ 0x493140 - CEffectEmitter_UpdatePositionAndParams
 	//  @ 0x49321E (Dead), @ 0x4932FD (Fire), @ 0x4933BF (Other), each with no direction]
-	void move_bank(World &world, const Entity &entity, uint8_t family, uint8_t slot,
-			const Vec3 &position);
+	void move_bank(
+			World &world, const Entity &entity, uint8_t family, uint8_t slot, const Vec3 &position);
 	// The vehicle's critical fire (+0x400), re-posed at the head of its mover: the vehicle's
 	// position, aimed along its matrix's third row.
 	// [orig: Entity_UpdateVehiclePhysics @ 0x48AF00 - the matrix @ 0x48AF27..0x48AF30, its third
@@ -61,8 +61,8 @@ public:
 	//  Entity_SpawnDeathPieces @ 0x493400 - the submit @ 0x493813..0x493822, the store @ 0x49382A,
 	//  the death callback @ 0x493840..0x493847]
 	void destroy_piece_trail(World &world, int piece_slot);
-	void spawn_piece_trail(World &world, int piece_slot, const DeathPiece &piece,
-			const char *effect);
+	void spawn_piece_trail(
+			World &world, int piece_slot, const DeathPiece &piece, const char *effect);
 	// Its re-pose to the piece's position while airborne above the water, and its release.
 	// [orig: Entity_ProcessDeathPiecePhysics @ 0x492DD0 - the re-pose @ 0x493068; the releases
 	//  @ 0x492E2D (the water crossing), @ 0x492EA4 (the free under water), @ 0x492FC9 (the bounce

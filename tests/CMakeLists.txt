@@ -1719,6 +1719,12 @@ target_link_libraries(weather_seed_test PRIVATE opennova_runtime opennova_net)
 target_include_directories(weather_seed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME weather_seed COMMAND weather_seed_test)
 
+# The weather's FLICKER / SWING CTRL registers (runtime/environment/weather_ctrl_registers):
+# the frame's pair and the wave rings a model hashes its position onto.
+add_executable(weather_ctrl_registers_test environment/weather_ctrl_registers_test.cpp)
+target_link_libraries(weather_ctrl_registers_test PRIVATE opennova_runtime)
+add_test(NAME weather_ctrl_registers COMMAND weather_ctrl_registers_test)
+
 # The weather home (runtime/world/weather_state): the WAC handler math, the
 # mission-start initializer, the wire sample apply, and the sim tick against a
 # scripted world.
@@ -1732,12 +1738,20 @@ target_include_directories(weather_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME weather_state COMMAND weather_state_test)
 
 # The per-item ITEMS.DEF particlefx law (runtime/world/item_effects): the
-# pool / controller attrib gates, the identity aliases, and the matched-
-# userpoint / origin-fallback attach plan over a synthetic model.
+# pool / controller attrib gates and the matched-userpoint / origin-fallback
+# attach plan over a synthetic model.
 add_executable(item_effects_test world/item_effects_test.cpp)
 target_link_libraries(item_effects_test PRIVATE opennova_runtime)
 target_include_directories(item_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME item_effects COMMAND item_effects_test)
+
+# The world's effect producers in the shared scene (ADR 0077 R2): slot A and its
+# walk, the claim edges, the particle switch's retry and the +0x1CC re-pose
+# (ItemEmitterSystem); the destruction rows' handles (DestructionEmitters); the
+# rounds' move emitters (RoundEmitters); the scene's group re-pose.
+add_executable(item_emitters_test world/item_emitters_test.cpp)
+target_link_libraries(item_emitters_test PRIVATE opennova_runtime)
+add_test(NAME item_emitters COMMAND item_emitters_test)
 
 # The present passes' shared law (runtime/world/present_passes): the husk
 # RENDER pick (husk first, apart from the piece pick), the destroyed entity's

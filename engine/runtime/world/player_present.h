@@ -163,12 +163,13 @@ bool action_particle_uses_mounted_gun(bool borrowed_usegun_slot,
 // bone every tick, releasing it only on death [orig: ActionSlot_SpawnEffect
 // handle/action record @ 0x40208f/0x402092 -> the +0x18 tracker leg in
 // WeaponAction_ProcessFrame @ 0x540edf -> CEffectEmitter_UpdatePositionAndParams
-// @ 0x5f6810]. The presenter analog is an owner-bound group whose anchor
-// resolver re-reads the live userpoint pose; a re-fire while the group lives
-// is suppressed by the slot (one live handle per action slot).
+// @ 0x5f6810]. The holder keeps the handle and re-poses its group to the live
+// userpoint pose every fixed tick (particle::EffectScene::move_group); a
+// re-fire while the group lives is suppressed by the slot (one live handle per
+// action slot).
 struct ActionEffectSpawnPolicy {
     bool suppress_while_owned = true; // one live handle per action slot
-    bool follow_owner = true;         // the anchor re-read law above
+    bool follow_owner = true;         // the per-tick re-anchor law above
     bool world_render_domain = true;  // never the first-person domain
 };
 inline constexpr ActionEffectSpawnPolicy kActionEffectSpawnPolicy{};

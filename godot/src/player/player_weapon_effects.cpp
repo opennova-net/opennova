@@ -124,8 +124,8 @@ void PlayerWeaponEffects::release_action_effects() {
 	action_effects_.clear();
 }
 
-// [orig: the actionEffectHandle per-tick tracker in WeaponAction_ProcessFrame @ 0x540edf ->
-//  CEffectEmitter_UpdatePositionAndParams @ 0x5f6810]
+// The per-tick re-anchor of the live handles (engine world/player_present.h
+// kActionEffectSpawnPolicy carries the witness).
 void PlayerWeaponEffects::follow_action_effects() {
 	EffectWorld *fx = effect_world();
 	if (fx == nullptr) {

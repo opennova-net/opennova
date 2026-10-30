@@ -33,6 +33,7 @@
 #include "render/object_lod_frame.h"
 #include "util/axes.h"
 #include "util/texture_path_resolver.h"
+#include <runtime/environment/weather_ctrl_registers.h>
 #include <runtime/renderer/foliage_frame.h>
 #include <runtime/renderer/model_panm_cache.h>
 #include <runtime/renderer/object_lod.h>
@@ -767,7 +768,7 @@ void ObjectModel::set_authored_occluders_enabled(bool p_enabled) {
 
 opennova::renderer::ControlRegisterValues ObjectModel::runtime_ctrl_values() {
 	int32_t flicker = 0, swing = 0;
-	ObjectData::weather_ctrl_registers(flicker, swing);
+	opennova::env::weather_ctrl_registers().pair(flicker, swing);
 	return controls_.runtime_values(flicker, swing);
 }
 
@@ -1587,7 +1588,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		const std::array<int32_t, 3> p = godot_to_mission_q16(get_global_position());
 		int32_t flicker = 0;
 		int32_t swing = 0;
-		if (ObjectData::weather_ctrl_registers_at(p[0], p[1], p[2], flicker, swing)) {
+		if (opennova::env::weather_ctrl_registers().sample_at(p[0], p[1], p[2], flicker, swing)) {
 			controls_.sample_weather(flicker, swing);
 		} else {
 			// No rings stand. The absent set clears them once a weather

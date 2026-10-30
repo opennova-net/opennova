@@ -17,7 +17,7 @@ class World;
 
 inline constexpr uint64_t kRoundMoveSlotDomain = 0x0800000000000000ull;
 inline particle::EffectSlotToken round_move_slot(int64_t presentation_key) {
-	return {kRoundMoveSlotDomain | (uint64_t(presentation_key) & (kRoundMoveSlotDomain - 1))};
+	return { kRoundMoveSlotDomain | (uint64_t(presentation_key) & (kRoundMoveSlotDomain - 1)) };
 }
 
 class RoundEmitters {
