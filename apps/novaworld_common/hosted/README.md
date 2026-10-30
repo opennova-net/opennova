@@ -835,7 +835,14 @@ NovaWorld and LAN use the same authored host screen, with a supplemental options
 remain at the top level, advanced fields live under `options`, and `rotation` is an
 ordered array of `{file, swap_sides}` entries, including repeated maps. A map's side-switch
 flag applies to every occurrence, as in retail. Classes and
-weapons use stable names; weapon availability is `always`, `never` or `armory`.
+weapons use stable names; weapon availability is `always`, `never`, `armory` or `mission`
+(server_settings.h weapon_availability_name). A settings edit sends only the weapons whose
+availability it changes from the saved configuration, with retail's `ALWAYS`, `NEVER` and
+`ARMORY` keywords (one `WEAPON SET ALL` when every selectable weapon ends at one of them); a
+weapon set to `mission`, which no `WEAPON SET` keyword reaches, waits for the next launch. A
+command the server refuses stops the edit there: the fields before it are saved, the rest not
+sent, and the reply names it (`refused_command`). The route waits for an edit by its command
+count (console_routes.h edit_budget).
 A product tree carries its weapon catalog, so published updates cannot reinterpret
 an already running server's restrictions by another tree's numeric indexes.
 
