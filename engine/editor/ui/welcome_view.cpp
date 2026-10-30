@@ -8,6 +8,7 @@
 #include <base/io/strutil.h>
 #include <base/title/title.h>
 #include <base/version/version_line.h>
+#include <base/project/project_manifest.h> // is_expansion_code
 #include <editor/project/expansion_name.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
@@ -234,17 +235,12 @@ bool base_from_install(const NovaWorldView &novaworld, const std::string &key) {
 	return !project || novalogic_project(*project);
 }
 
-// A mod's short name as NovaWorld takes one (the service's expansion code): 1 to 8 of a-z and 0-9.
-bool short_name_ok(const std::string &name) {
-	return !name.empty() && name.size() <= 8 &&
-	       std::all_of(name.begin(), name.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
-}
-
-// The short name a mod named `title` is offered, as the website offers it: its letters and digits, small, at most 8.
+// The short name a mod named `title` is offered, as the website offers it: its letters and digits, small, at most
+// project::kMaxExpansionCodeChars.
 std::string short_name_for(const std::string &title) {
 	std::string name;
 	for (const char c : title) {
-		if (name.size() == 8) break;
+		if (name.size() == project::kMaxExpansionCodeChars) break;
 		if (c >= 'A' && c <= 'Z') name += char(c - 'A' + 'a');
 		else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) name += c;
 	}
@@ -463,7 +459,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	}
 	// A mod's short name, as the game's rule takes it (its own form's, or one a set up project names).
 	if (why.empty() && form.making == Making::Mod) {
-		const std::string problem = !short_name_ok(form.expansion)
+		const std::string problem = !project::is_expansion_code(form.expansion)
 		                                    ? std::string("A short name is up to 8 lowercase letters and digits.")
 		                                    : expansion_name_problem(form.expansion, ExpansionNameUse::Own);
 		if (!problem.empty()) {

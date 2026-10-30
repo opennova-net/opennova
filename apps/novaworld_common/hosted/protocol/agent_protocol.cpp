@@ -4,6 +4,7 @@
 #include <base/io/base64.h>
 #include <base/io/json.h>
 #include <base/io/sha256.h>
+#include <base/project/project_manifest.h> // is_expansion_code
 
 #include <algorithm>
 #include <set>
@@ -519,7 +520,7 @@ bool read_desired(const JsonValue &v, DesiredContainer &out, std::string &error)
 		return false;
 	if (out.expansion_tree.has_value() != !out.expansion_code.empty())
 		return fail(error, "a desired container's expansion tree and code come together");
-	if (!out.expansion_code.empty() && !is_expansion_code(out.expansion_code))
+	if (!out.expansion_code.empty() && !project::is_expansion_code(out.expansion_code))
 		return fail(error, "a desired container's expansion code is not one");
 	const JsonValue *args = v.get("args");
 	if (!args || !read_args(*args, out.args, error))
@@ -593,11 +594,6 @@ bool is_image_reference(std::string_view image) {
 
 bool is_tree_file_name(std::string_view name) {
 	return is_slot_file_name(name);
-}
-
-bool is_expansion_code(std::string_view code) {
-	return !code.empty() && code.size() <= kMaxExpansionCodeChars &&
-			all_of(code, [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
 }
 
 bool is_tree_url(std::string_view url) {

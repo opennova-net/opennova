@@ -45,6 +45,12 @@ bool is_utf8(std::string_view text);
 // revisions containing these files still verify and decode.
 bool is_service_managed_file(std::string_view path);
 
+// A project's expansion code, a mod's short name and its expansion folder's and /exp's name as
+// NovaWorld issues it (ADR 0074): 1 to kMaxExpansionCodeChars of a-z and 0-9. OpenNova's own rule,
+// the one the service's routes, the machine agents' protocol and the editor check.
+inline constexpr size_t kMaxExpansionCodeChars = 8;
+bool is_expansion_code(std::string_view code);
+
 // Whether `path` is a path a project's file may have: non-empty, at most kMaxPathBytes, valid
 // UTF-8, its parts '/'-separated (none empty, "." or "..", none past kMaxPartBytes), no backslash,
 // control character or character a Windows name refuses (< > : " | ? *), no part ending in a dot or

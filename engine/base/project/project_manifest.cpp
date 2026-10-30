@@ -36,6 +36,11 @@ bool is_utf8(std::string_view text) {
 	return opennova::is_valid_utf8(text);
 }
 
+bool is_expansion_code(std::string_view code) {
+	return !code.empty() && code.size() <= kMaxExpansionCodeChars &&
+			std::all_of(code.begin(), code.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
+}
+
 bool is_service_managed_file(std::string_view path) {
 	const size_t slash = path.find_last_of("/\\");
 	const std::string_view name = slash == std::string_view::npos ? path : path.substr(slash + 1);

@@ -185,7 +185,6 @@ inline constexpr size_t kMaxContainerReasonBytes = 200;
 inline constexpr size_t kMaxReplyTrees = 32;
 inline constexpr size_t kMaxTreeFiles = 64;
 inline constexpr size_t kMaxTreeUrlBytes = 512;
-inline constexpr size_t kMaxExpansionCodeChars = 8;
 // The trees a report may name (the store keeps an unnamed tree a while).
 inline constexpr size_t kMaxReportedTrees = 2 * kMaxReplyTrees;
 
@@ -210,7 +209,7 @@ std::string agent_secret_digest(std::string_view secret);
 // or digit first); an image reference (letters, digits and ./:@_-, at most 255,
 // a letter or digit first); a working-directory file name and a tree's file
 // name (1..64 of letters, digits, '.', '_', '-', never "." or ".."); an
-// expansion code (1..kMaxExpansionCodeChars of a-z, 0-9); a tree's fetch URL
+// expansion code (base/project's is_expansion_code); a tree's fetch URL
 // (s3://... or file:///..., printable ASCII, at most kMaxTreeUrlBytes); an
 // environment name (a letter or '_' first, then letters, digits and '_', at
 // most 128); a log stream, the agent's own or a container's (1..512 of
@@ -224,7 +223,6 @@ bool is_container_name(std::string_view name);
 bool is_image_reference(std::string_view image);
 bool is_slot_file_name(std::string_view name);
 bool is_tree_file_name(std::string_view name);
-bool is_expansion_code(std::string_view code);
 bool is_tree_url(std::string_view url);
 bool is_env_name(std::string_view name);
 bool is_log_stream_name(std::string_view name);

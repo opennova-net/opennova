@@ -58,11 +58,10 @@ std::vector<const char *> game_titles();
 
 // The shapes a product's fields take, the admin's routes' and an owner's alike
 // (products/project_routes.h): a display name of 1 to 64 characters with no control character and
-// no space at either end; a title a game may run as (game_titles); an expansion code of 1 to 8 of
-// a-z and 0-9; a visibility, public or private.
+// no space at either end; a title a game may run as (game_titles); a visibility, public or private.
+// An expansion code is base/project's is_expansion_code.
 bool valid_display_name(std::string_view name);
 bool valid_title(std::string_view title);
-bool valid_expansion_code(std::string_view code);
 bool valid_visibility(std::string_view visibility);
 
 // A delete's refusals, the admin's and an owner's alike: 409 in_use while a live server runs the
@@ -80,7 +79,6 @@ public:
 	static constexpr size_t kDisplayNameMax = 64;
 	static constexpr size_t kUpdaterLoginMax = 32;
 	static constexpr size_t kCommandFileMax = 15;
-	static constexpr size_t kExpansionCodeMax = 8;
 
 	ProductRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
 

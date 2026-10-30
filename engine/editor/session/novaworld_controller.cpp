@@ -50,17 +50,6 @@ bool empty_folder(const std::string &dir) {
 	return !ec;
 }
 
-// An expansion's code as the service takes one (apps/novaworld_web/products/product_routes.cpp
-// valid_expansion_code): 1 to 8 of a-z and 0-9.
-bool expansion_code(const std::string &name) {
-	if (name.empty() || name.size() > 8)
-		return false;
-	for (const char c : name)
-		if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')))
-			return false;
-	return true;
-}
-
 // Why a get of the project `key` gets nothing: it has no revision yet (the NovaWorld window offers
 // Set up... for one the account may push, and no Get).
 std::string no_revision_text(const std::string &key) {
@@ -385,7 +374,7 @@ NovaWorldView::PutPlan NovaWorldController::put_plan() const {
 	}
 	plan.kind = "expansion";
 	plan.expansion_code = doc.expansion.name;
-	if (!expansion_code(doc.expansion.name))
+	if (!project::is_expansion_code(doc.expansion.name))
 		plan.refusal = "NovaWorld names a mod by 1 to 8 small letters and digits: rename " +
 				doc.expansion.name + " in Project settings (its Short name) first.";
 	// Its base game's key: the base game's project's own, else the game install's game (its
