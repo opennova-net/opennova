@@ -362,8 +362,6 @@ void test_a_fixed_class_protocol_writes_its_class_before_the_page() {
 	CHECK(reassigned.spawn_kit().size() == 1 && reassigned.spawn_kit()[0].name == "WPN_M4");
 }
 
-} // namespace
-
 // A client's S2C 0x5A apply selects as its protocol has it (DFX2-35, ProtocolInMatch::s2c_5a):
 // JO's the weapon the body holds, DFX2's the grant's last primary row.
 // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4;
@@ -374,6 +372,8 @@ void test_the_grant_apply_select_is_the_protocols() {
 	CHECK(inmatch::grant_apply_select(opennova::title_protocol("dfx2")) ==
 			w::LoadoutApplySelect::LastPrimaryRow);
 }
+
+} // namespace
 
 int main() {
 	test_a_dedicated_host_keeps_the_initializers_first_weapon();

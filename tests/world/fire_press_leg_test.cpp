@@ -146,8 +146,9 @@ void test_a_driver_seat_refuses_after_the_latch() {
 
 // A title whose lone gunner holds fire (DFX2-37, TitleRules::emplaced_solo_holds_fire): from a
 // gunner's seat on an IsTurret gun whose +0x28 carrier counts one occupied seat at most, the press
-// leg latches nothing and the release leg ends the windup and requests no throw; a second occupant
-// on the carrier fires, and so does JO's title with the lone gunner.
+// leg latches nothing, the release leg ends the windup and requests no throw, and the pump refuses
+// a sourceless press (the press leg's mirror); a second occupant on the carrier fires, and so
+// does JO's title with the lone gunner.
 // [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0 (dfx2.exe) - @0x4DD8FE..0x4DD92C,
 //  @0x4DDABB..0x4DDADB; Input_HandleActionBinding_0 @0x4E0420 - @0x4E085C..0x4E086F,
 //  @0x4E09CB..0x4E0A06]
@@ -184,9 +185,17 @@ void test_a_lone_gunner_holds_fire_under_dfx2s_title() {
 	f.weapon.power_throw_start_tick = 1;
 	CHECK(!local_weapon_release_fire(f.world, f.weapon));
 	CHECK(f.weapon.power_throw_start_tick == 0 && !f.weapon.power_throw_released);
+	// A sourceless press meets the same gate in the pump (the press leg's mirror).
+	f.weapon.fire_pressed = true;
+	f.pump(true);
+	CHECK(f.weapon.fired_serial == 0 && f.weapon.slot.clip == 30);
 	// A driver aboard: two occupied seats, the gun fires.
 	carrier.seats[0].occupant = EntityHandle::make(0, 7);
 	CHECK(!local_solo_turret_holds_fire(f.world));
+	f.weapon.fire_pressed = true;
+	f.weapon.fire_press_dispatched = false;
+	f.pump(true);
+	CHECK(f.weapon.fired_serial == 1);
 	CHECK(f.press());
 	f.weapon.power_throw_start_tick = 1;
 	CHECK(local_weapon_release_fire(f.world, f.weapon));
