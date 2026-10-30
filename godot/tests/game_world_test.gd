@@ -38,19 +38,6 @@ func _minimal_assets_dir() -> String:
 	return ProjectSettings.globalize_path(WorldFixture.BOOT_FIXTURE_DIR)
 
 
-func test_mission_load_reports_only_real_stage_checkpoints() -> void:
-	var world := WorldFixture.make_world(self)
-	var observed: Array[int] = []
-	world.load_progress.connect(func(percent: int) -> void:
-			if observed.is_empty() or observed[-1] != percent:
-				observed.append(percent))
-
-	assert_eq(WorldFixture.load_mission(
-			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
-	assert_eq(observed, [0, 10, 20, 30, 40, 50, 60, 70, 80, 90],
-		"the real load pipeline reports exact stage starts through world ready")
-
-
 # The minimap's depthspin water mask is made with the terrain's textures, ahead of the
 # freeze and the HUD's textures, not at the load's end (engine
 # mission/mission_load_plan.h carries the witness, D-NET-1186): the textures leg

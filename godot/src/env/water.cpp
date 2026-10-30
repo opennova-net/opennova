@@ -293,7 +293,7 @@ void Water::release_runtime_renderer_resources() {
 	water_material_.unref();
 	night_vision_material_.unref();
 	inset_material_.unref();
-	noise_counter_valid_ = false;
+	noise_clock_.invalidate();
 	cached_cam_id_ = ObjectID();
 	built_ = false;
 }
@@ -407,8 +407,7 @@ bool Water::is_inset_water_pass_active() const {
 }
 
 void Water::set_noise_frame_counter(uint32_t p_counter) {
-	frame_counter_ = static_cast<int>(p_counter);
-	frame_counter_fed_ = true;
+	noise_clock_.feed(p_counter);
 }
 
 void Water::_sync_render_activity() {
@@ -670,7 +669,7 @@ void Water::build() {
 			Image::FORMAT_RGBA8, water_core_->get_normal_rgba8());
 	noise_color_tex_ = ImageTexture::create_from_image(noise_color_img_);
 	noise_normal_tex_ = ImageTexture::create_from_image(noise_normal_img_);
-	noise_counter_valid_ = false;
+	noise_clock_.invalidate();
 	for (const Ref<ShaderMaterial> &material :
 			{water_material_, night_vision_material_, inset_material_}) {
 		material->set_shader_parameter("u_noise_color", noise_color_tex_);
@@ -829,55 +828,40 @@ void Water::advance_frame(double) {
 	// global_position does not. Classify and march from the same effective
 	// eye the drawing viewport actually renders.
 	const Vector3 cam_pos = view_cam->get_camera_transform().get_origin();
-	// The two callers of Render_WaterSurface: the beauty pass per side, gated
-	// on g_WaterActive (no visible terrain at or below the water and no
-	// Blink-visible water last frame means no prerender and no strip), and the
-	// FrameFX bloom pass's nightvision redraw, which is the above-water call
-	// alone and not gated on g_WaterActive. Both skip an eye exactly on the
-	// plane (environment/water_frame.h water_surface_sides). The scene's
-	// water letter label reaches the beauty strip alone, through its layer
-	// (set_blink_water_views; renderer/scene_pass_gates.h scene_water_visible):
-	// neither the mirror nor the redraw reads it.
-	const opennova::env::WaterSurfaceSides sides =
-			opennova::env::water_surface_sides(static_cast<float>(cam_pos.y),
-					water_height_);
-	const bool beauty_active =
-			is_water_pass_active() && (sides.above || sides.underwater);
-	const bool night_vision_active = sides.above;
-	if (!beauty_active) {
+	// Which of the scene's water passes run (engine environment/water_frame.h
+	// water_frame_passes carries the witnesses): the beauty strip on the eye's
+	// side under g_WaterActive, the bloom's nightvision redraw above the
+	// plane, the mirror ahead of the strip. The scene's water letter label
+	// reaches the beauty strip alone, through its layer (set_blink_water_views;
+	// renderer/scene_pass_gates.h scene_water_visible).
+	const opennova::env::WaterFramePasses passes = opennova::env::water_frame_passes(
+			static_cast<float>(cam_pos.y), water_height_, is_water_pass_active());
+	if (!passes.beauty) {
 		_clear_strip_surfaces();
 	}
-	if (!night_vision_active) {
+	if (!passes.night_vision) {
 		_clear_night_vision_surfaces();
 	}
-	if (!beauty_active && !night_vision_active) {
+	// The mirror camera refreshes before this frame's strip rebuild: the
+	// SubViewport renders ahead of the main view, like the prerender.
+	if (passes.refresh_mirror) {
+		_update_reflection_camera(view_cam, drawing.projection, drawing.frame_perspective);
+	}
+	if (!passes.any()) {
 		_sync_render_activity();
 		return;
 	}
 
-	// env #30: refresh the mirror camera before this frame's strip rebuild —
-	// the SubViewport renders ahead of the main view, like the witnessed
-	// prerender (itself gated on g_WaterActive alone, the letter
-	// notwithstanding: the strip marches under a skipping label too, so the
-	// mirror the bloom's redraw samples still renders).
-	if (beauty_active) {
-		_update_reflection_camera(view_cam, drawing.projection, drawing.frame_perspective);
-	}
-
-	// Regenerate the animated noise pair once per rendered water frame, at
-	// the world's entity-update count when one is fed (set_noise_frame_counter),
-	// else at this Water's own render-frame count. Every Render_WaterSurface
-	// call regenerates it at the same counter, so one update serves the frame.
-	// [orig: Render_WaterSurface @0x5c3326 -> Water_GenerateNoiseTextures
-	//  @0x5C0360, its counter @0x5C0366]
-	if (!frame_counter_fed_) frame_counter_ += 1;
-	noise_counter_valid_ = false;
+	// The noise pair at this rendered water frame's counter (engine
+	// environment/water_frame.h WaterNoiseClock).
+	noise_clock_.advance_rendered_frame();
 	_regenerate_noise();
 
 	const MarchInputs inputs = _march_inputs(env);
 
-	if (beauty_active) {
-		const int rows = _march_strip(drawing, sides.underwater, false, inputs, water_material_);
+	if (passes.beauty) {
+		const int rows = _march_strip(drawing, passes.sides.underwater, false, inputs,
+				water_material_);
 		if (rows < 2) {
 			// Plane off-screen or a sub-2-row march — nothing submits.
 			_clear_strip_surfaces();
@@ -891,10 +875,10 @@ void Water::advance_frame(double) {
 			// material, underwater -> the opaque one — ported as the shader's
 			// u_underwater_view branch.
 			water_material_->set_shader_parameter("u_underwater_view",
-					sides.underwater);
+					passes.sides.underwater);
 		}
 	}
-	if (night_vision_active) {
+	if (passes.night_vision) {
 		// The bloom pass's call is Render_WaterSurface(0, 1): the above-water
 		// march with the nightvision row colors (flat 0.1 base, no specular
 		// RGB) (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d;
@@ -923,6 +907,7 @@ Water::MarchInputs Water::_march_inputs(MissionEnvironment *p_env) {
 			opennova::env::build_water_frame_inputs(
 					p_env != nullptr ? &p_env->state() : nullptr, water_alpha_);
 	MarchInputs out;
+	out.frame = inputs;
 	out.murk = inputs.murk;
 	out.fog_end = inputs.fog_end;
 	// The strip's per-vertex depth curve from the smoothed fog distance's
@@ -932,7 +917,6 @@ Water::MarchInputs Water::_march_inputs(MissionEnvironment *p_env) {
 	out.depth_curve = opennova::env::water_depth_curve(out.fog_end);
 	out.lit = Color(inputs.lit.r, inputs.lit.g, inputs.lit.b);
 	if (inputs.env_loaded && p_env != nullptr) {
-		out.env_data = p_env->get_environment_data();
 		for (const Ref<ShaderMaterial> &material :
 				{water_material_, night_vision_material_, inset_material_}) {
 			if (material.is_null()) {
@@ -948,12 +932,10 @@ Water::MarchInputs Water::_march_inputs(MissionEnvironment *p_env) {
 }
 
 void Water::_regenerate_noise() {
-	if (noise_counter_valid_ && noise_counter_ == frame_counter_) {
+	if (!noise_clock_.take_regeneration()) {
 		return;
 	}
-	noise_counter_ = frame_counter_;
-	noise_counter_valid_ = true;
-	water_core_->update(frame_counter_);
+	water_core_->update(static_cast<int>(noise_clock_.counter()));
 	const int size = water_core_->get_texture_size();
 	noise_color_img_->set_data(size, size, false, Image::FORMAT_RGBA8,
 			water_core_->get_color_rgba8());
@@ -987,9 +969,14 @@ void Water::advance_inset_frame(Camera3D *p_camera, const Transform3D &p_view_bl
 	}
 	Viewport *inset_view = p_camera->get_viewport();
 	const Vector2 inset_size = inset_view->get_visible_rect().size;
-	const bool active = is_inset_water_pass_active();
+	// The Inset's own passes (engine environment/water_frame.h
+	// inset_water_frame_passes): its mirror under its own g_WaterActive, its
+	// strip past its own water letter on the eye's side.
+	const opennova::env::WaterFramePasses passes = opennova::env::inset_water_frame_passes(
+			static_cast<float>(p_camera->get_camera_transform().get_origin().y), water_height_,
+			is_inset_water_pass_active(), inset_view_water_);
 	inset_mirror_rendered_ = false;
-	if (active && mirror_enabled_ && inset_mirror_.viewport != nullptr &&
+	if (passes.refresh_mirror && mirror_enabled_ && inset_mirror_.viewport != nullptr &&
 			inset_mirror_.camera != nullptr && inset_size.x > 1.0f && inset_size.y > 1.0f) {
 		const auto to_vec3 = [](const Vector3 &v) {
 			return opennova::env::Vec3{static_cast<float>(v.x),
@@ -1021,10 +1008,7 @@ void Water::advance_inset_frame(Camera3D *p_camera, const Transform3D &p_view_bl
 	inset_material_->set_shader_parameter("u_has_reflection", inset_mirror_rendered_);
 
 	bool drawn = false;
-	const opennova::env::WaterSurfaceSides sides = opennova::env::water_surface_sides(
-			static_cast<float>(p_camera->get_camera_transform().get_origin().y), water_height_);
-	if (active && inset_view_water_ && (sides.above || sides.underwater) &&
-			inset_size.x > 1.0f && inset_size.y > 1.0f) {
+	if (passes.beauty && inset_size.x > 1.0f && inset_size.y > 1.0f) {
 		_regenerate_noise();
 		const MarchInputs inputs = _march_inputs(_env_node());
 		DrawingView view;
@@ -1034,10 +1018,11 @@ void Water::advance_inset_frame(Camera3D *p_camera, const Transform3D &p_view_bl
 				inset_size.x / inset_size.y, p_camera->get_near(), p_camera->get_far(),
 				p_camera->get_keep_aspect_mode() == Camera3D::KEEP_WIDTH);
 		view.frame_perspective = true;
-		const int rows = _march_strip(view, sides.underwater, false, inputs, inset_material_);
+		const int rows = _march_strip(view, passes.sides.underwater, false, inputs,
+				inset_material_);
 		if (rows >= 2) {
 			_upload_strip(inset_mesh_instance_, _strip_arrays(), inset_material_);
-			inset_material_->set_shader_parameter("u_underwater_view", sides.underwater);
+			inset_material_->set_shader_parameter("u_underwater_view", passes.sides.underwater);
 			drawn = true;
 		}
 	}
@@ -1370,12 +1355,9 @@ int Water::_march_strip(const DrawingView &p_view, bool p_underwater, bool p_nig
 	if (vp_size.x <= 1 || vp_size.y <= 1) {
 		return 0;
 	}
-	MissionEnvironment *env = _env_node();
-	float pass_fog_end = EnvFile::fog_end_above_water(p_inputs.fog_end,
-			env != nullptr ? env->get_overcast_blend() : 0.0f);
-	if (p_underwater && p_inputs.env_data.is_valid()) {
-		pass_fog_end = p_inputs.env_data->get_fog_end_underwater();
-	}
+	// The side's pass fog end (engine environment/water_frame.h
+	// water_pass_fog_end carries the witness).
+	const float pass_fog_end = opennova::env::water_pass_fog_end(p_inputs.frame, p_underwater);
 	// The adjusted camera transform includes Camera3D h/v offsets, keeping
 	// the screen-marched row coordinates registered to the view that draws
 	// the strip (the surface, or the live aspect-mode or NVG target whose

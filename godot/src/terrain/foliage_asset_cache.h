@@ -10,6 +10,9 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <cstdint>
+#include <vector>
+
+#include <runtime/renderer/foliage_frame.h>
 
 namespace godot {
 
@@ -35,9 +38,16 @@ public:
   int entry_count();
   // Resolve each def's `graphic` name to the first Mesh built from its .3di.
   // Returns an Array parallel to `defs`; a null entry disables that retail
-  // slot. The cache never manufactures placeholder geometry.
+  // slot. The cache never manufactures placeholder geometry. The script seam:
+  // the load configures from resolve_slot_geometry.
   Array resolve_slot_meshes(const Ref<ResourceRoot> &p_resource_root,
                             const Array &p_defs);
+  // Each def's slot geometry as the engine builds it from the model
+  // (engine runtime/assets/foliage_assets.h foliage_slot_geometry), parallel
+  // to `defs`; `r_supplied` says which slots resolved a model.
+  std::vector<opennova::renderer::FoliageSlotGeometry> resolve_slot_geometry(
+      const Ref<ResourceRoot> &p_resource_root, const Array &p_defs,
+      std::vector<bool> &r_supplied);
   // Build the per-def ":fd" textures. Returns an Array parallel to `defs`;
   // unsupported diffuses fall back to the raw texture (the retail filter's
   // wrap masks assume pow2 dimensions of at least four), null entries stay
@@ -54,7 +64,7 @@ public:
                                  const String &p_graphic);
   // Resolve a graphic name (e.g. "mveg5" or "mveg5.3di") to one Mesh
   // containing every surface of every LOD0 submesh built from the matching
-  // top-level .3di. Returns null if not resolvable.
+  // top-level .3di (the script seam). Returns null if not resolvable.
   Ref<Mesh> load_mesh(const Ref<ResourceRoot> &p_resource_root,
                       const String &p_graphic);
   // Merge all geometry that build_lod_submeshes(0) emits. ArrayMesh surface
@@ -72,6 +82,14 @@ private:
   // The caches, keyed "<root dir>|<root instance id>|<basename>" so two live
   // mounts of one directory never alias.
   HashMap<String, Ref<Mesh>> mesh_cache_;
+  // One graphic's model asset: the engine's slot geometry and the diffuse
+  // its :fd binding bakes from (null when the model has none).
+  struct ModelAsset {
+    opennova::renderer::FoliageSlotGeometry geometry;
+    Ref<Texture2D> diffuse;
+    bool loaded = false;
+  };
+  HashMap<String, ModelAsset> model_assets_;
   HashMap<String, Ref<Texture2D>> fd_texture_cache_;
   HashMap<String, String> model_path_cache_;
   // The roots whose *veg*.3di graphics _list_graphics has recorded.
@@ -80,7 +98,12 @@ private:
   // built under; any root mount/rescan/clear moves it and the next access
   // self-clears.
   uint64_t epoch_ = 0;
-  static Ref<Texture2D> _mesh_albedo_texture(const Ref<Mesh> &p_mesh);
+  // The graphic's model asset, loaded once per root + graphic (a null
+  // pointer when the graphic names no model).
+  const ModelAsset *_load_asset(const Ref<ResourceRoot> &p_resource_root,
+                                const String &p_graphic);
+  Ref<ObjectData> _open_model(const Ref<ResourceRoot> &p_resource_root,
+                              const String &p_basename);
   // Load the diffuse (slot 1, falling back to detail slot 2) texture for a
   // .3di material, the same row resolution ObjectModel's material builder
   // uses. Returns null if the material has no resolvable texture.

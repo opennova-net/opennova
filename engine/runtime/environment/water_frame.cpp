@@ -62,7 +62,10 @@ WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 		float murk_default) {
 	WaterFrameInputs inputs;
 	inputs.murk = murk_default;
+	const float overcast = env != nullptr ? env->overcast_blend() : 0.0f;
 	if (env == nullptr || !env->is_loaded()) {
+		inputs.pass_fog_end_above = fog_end_above_water(inputs.fog_end, overcast);
+		inputs.pass_fog_end_underwater = inputs.pass_fog_end_above;
 		return inputs;
 	}
 	inputs.env_loaded = true;
@@ -73,6 +76,10 @@ WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 	if (env->config() != nullptr) {
 		inputs.murk = env->config()->water_murk;
 	}
+	// [orig: Environment_GetFogEndDistance @ 0x57e426 (above) / @ 0x57e40d
+	// (underwater: the murk visibility curve of the loaded .env's water_murk)]
+	inputs.pass_fog_end_above = fog_end_above_water(inputs.fog_end, overcast);
+	inputs.pass_fog_end_underwater = fog_end_underwater(env->water_murk());
 	return inputs;
 }
 
@@ -83,6 +90,25 @@ WaterSurfaceSides water_surface_sides(float eye_y, float water_height) {
 	sides.above = eye_y > water_height;
 	sides.underwater = eye_y < water_height;
 	return sides;
+}
+
+WaterFramePasses water_frame_passes(float eye_y, float water_height, bool water_pass_active) {
+	WaterFramePasses passes;
+	passes.sides = water_surface_sides(eye_y, water_height);
+	passes.beauty = water_pass_active && (passes.sides.above || passes.sides.underwater);
+	passes.night_vision = passes.sides.above;
+	passes.refresh_mirror = water_pass_active;
+	return passes;
+}
+
+WaterFramePasses inset_water_frame_passes(float eye_y, float water_height,
+		bool water_pass_active, bool view_water_letter) {
+	WaterFramePasses passes;
+	passes.sides = water_surface_sides(eye_y, water_height);
+	passes.refresh_mirror = water_pass_active;
+	passes.beauty = water_pass_active && view_water_letter &&
+			(passes.sides.above || passes.sides.underwater);
+	return passes;
 }
 
 uint8_t underwater_murk_overlay_alpha_byte(float murk) {

@@ -135,6 +135,7 @@ add_library(opennova_bindings OBJECT
     render/q3_frame_adapter.cpp
     render/q3_geometry_cache.cpp
     render/q3_source_registry.cpp
+    render/rd_pipeline_state.cpp
     render/retained_array_mesh.cpp
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp

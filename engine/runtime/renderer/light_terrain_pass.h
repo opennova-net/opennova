@@ -371,7 +371,8 @@ struct TerrainLightPassInputs {
 	// g_EffectWorldAmbientScale{R,G,B} — the modulator unpack the presenter
 	// already feeds the object pass (the env light-state gain).
 	std::array<float, 3> ambient_scale{1.0f, 1.0f, 1.0f};
-	// flt_2732DA{C,8,4} — terrain_per_channel_factor(the loaded recip).
+	// flt_2732DA{C,8,4} — terrain_per_channel_factor(the loaded recip), unpacked
+	// once per tick [orig: EffectWorld_TickInstancesAndLightScale @0x5aa1ef..0x5aa23f].
 	std::array<float, 3> terrain_factor{1.0f, 1.0f, 1.0f};
 	LightFlickerInputs flicker{};
 	// Adapter caps bit 0x100: the ps.1.1 pass (0.4/r, the unfolded c0)

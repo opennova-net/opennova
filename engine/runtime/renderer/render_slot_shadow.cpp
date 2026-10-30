@@ -311,6 +311,48 @@ bool slot_entity_flags_zero(uint32_t flags, uint32_t engine_flags, int item_type
 	return (flags | engine_flags | vehicle_reflectable) == 0;
 }
 
+SlotCaptureSurface slot_capture_surface(const ObjectMaterialClassification &classification,
+		bool detail_resolved, bool skinned) {
+	SlotCaptureSurface surface;
+	ObjectShaderKey key = build_object_shader_key(classification);
+	if (!detail_resolved) {
+		key &= ~OSCAP_DETAIL;
+	}
+	const ObjectShaderPipelineDescriptor pipeline = describe_object_shader_pipeline(key);
+	surface.policy = object_projected_shadow_policy(pipeline.technique);
+	surface.coverage = object_projected_shadow_coverage(pipeline.technique);
+	if (surface.policy == ObjectProjectedShadowPolicy::NoPass ||
+			surface.coverage == ObjectProjectedShadowCoverage::NoPass ||
+			(surface.policy == ObjectProjectedShadowPolicy::MaterialBlend &&
+					classification.blend == ObjectBlendMode::Additive)) {
+		return surface;
+	}
+	surface.draws = true;
+	surface.alpha_test_value = classification.alpha_test_value;
+	if (classification.alpha_test) {
+		surface.flags |= kSlotCaptureAlphaTest;
+	}
+	if (classification.alpha_test_invert) {
+		surface.flags |= kSlotCaptureAlphaInvert;
+	}
+	if (surface.coverage == ObjectProjectedShadowCoverage::DiffuseAlphaFfp ||
+			surface.coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp) {
+		surface.flags |= kSlotCaptureAlphaMod;
+	}
+	if (surface.coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp) {
+		surface.flags |= kSlotCaptureDetailAlpha;
+	}
+	if (skinned) {
+		surface.flags |= kSlotCaptureSkinned;
+	}
+	surface.state = object_projected_shadow_pipeline_state(surface.policy, classification.blend,
+			classification.is_two_sided);
+	if (surface.state.blend.enabled) {
+		surface.flags |= kSlotCaptureBlendCoverage;
+	}
+	return surface;
+}
+
 std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		const std::array<float, 3> &direction,
 		const std::function<float(float, float)> &terrain_height,

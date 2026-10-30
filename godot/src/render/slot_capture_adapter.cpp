@@ -7,6 +7,7 @@
 #include "render/q3_source_registry.h"
 #include "render/q3_vertex_format.h"
 #include "render/rd_glsl.h"
+#include "render/rd_pipeline_state.h"
 #include "render/rd_timestamp_span.h"
 #include "render/rd_uniforms.h"
 #include "render/texture_filter_device.h"
@@ -30,11 +31,7 @@
 #include <godot_cpp/classes/multi_mesh.hpp>
 #include <godot_cpp/classes/multi_mesh_instance3d.hpp>
 #include <godot_cpp/classes/node.hpp>
-#include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
-#include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
-#include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_multisample_state.hpp>
-#include <godot_cpp/classes/rd_pipeline_rasterization_state.hpp>
 #include <godot_cpp/classes/rd_sampler_state.hpp>
 #include <godot_cpp/classes/rd_shader_source.hpp>
 #include <godot_cpp/classes/rd_shader_spirv.hpp>
@@ -64,16 +61,13 @@ namespace {
 
 // mat4 + vec4: the per-draw block below.
 constexpr std::uint32_t kPushConstantBytes = 96u;
-// Push flag bits (params.z) the shaders decode.
-constexpr std::uint32_t kFlagAlphaTest = 1u;
-constexpr std::uint32_t kFlagAlphaInvert = 2u;
-constexpr std::uint32_t kFlagAlphaMod = 4u;
-constexpr std::uint32_t kFlagDetailAlpha = 8u;
-constexpr std::uint32_t kFlagSkinned = 16u;
-// The _FFP material-blend PROJSHAD variant of an alpha-blend material: the
-// fragment carries its coverage as alpha for the SRCALPHA/INVSRCALPHA
-// pipeline instead of the opaque pass's alpha 1.
-constexpr std::uint32_t kFlagBlendCoverage = 32u;
+// The push flag bits (params.z) the shaders decode are the engine's
+// renderer::SlotCaptureCommandFlag (render_slot_shadow.h); the shaders below
+// spell the same values.
+static_assert(kSlotCaptureAlphaTest == 1u && kSlotCaptureAlphaInvert == 2u &&
+				kSlotCaptureAlphaMod == 4u && kSlotCaptureDetailAlpha == 8u &&
+				kSlotCaptureSkinned == 16u && kSlotCaptureBlendCoverage == 32u,
+		"the capture shaders decode the engine's command flag bits");
 constexpr std::uint32_t kBoneMatrixBytes = 64u;
 
 // The black PROJSHAD pass over the retail 0x00FFFFFF clear: the geometry
@@ -228,10 +222,10 @@ struct DeviceCommand {
 	float diffuse_max_lod = kQ3NoMipCeiling;
 	float detail_max_lod = kQ3NoMipCeiling;
 	std::uint32_t flags = 0;
-	bool two_sided = false;
-	// SRCALPHA/INVSRCALPHA over the clear (the _FFP alpha-blend variant)
-	// instead of the opaque replace.
-	bool blend_coverage = false;
+	// The PROJSHAD pass's device state (renderer::object_projected_shadow_pipeline_state):
+	// the cull per two-sidedness, SRCALPHA/INVSRCALPHA over the clear for the _FFP
+	// alpha-blend variant, else the opaque replace.
+	FixedFunctionState state{};
 };
 
 struct DeviceCapture {
@@ -284,21 +278,16 @@ std::vector<Transform3D> skin_palette(MeshInstance3D *p_instance) {
 // (retail's seat children render inside the parent's slot). The auxiliary
 // duplicates (the BmTxMirrT P3 postmultiply instance) re-submit the same
 // strip and carry no classified material; retail's single PROJSHAD pass per
-// effect is the registered P0/P1 instance. An ObjectModel counts with the
-// render-occlusion claim lifted (its present intent — the sim's hide,
-// retail's Flags & 1 — still hides it): the slot pass never consults the
-// render-occlusion gate, so a caster the blink or
-// outdoors gate hides still casts (retail: RenderSlot_RenderEntityAndChildren
-// @0x5d7690 has no visibility test; RenderSlot_SortAndAssign gates only
-// Flags & 1 @0x5d657d). Every other node keeps its own visible flag (the
+// effect is the registered P0/P1 instance. An ObjectModel counts by the
+// engine's rule (renderer::slot_draw_shown: the render claims lifted, its
+// present intent kept). Every other node keeps its own visible flag (the
 // inactive RLOD levels, hidden parts).
 void collect_visible_geometry(Node *p_node,
 		std::vector<GeometryInstance3D *> &r_instances) {
 	if (p_node == nullptr)
 		return;
 	if (const ObjectModel *model = Object::cast_to<ObjectModel>(p_node)) {
-		if (!(model->is_occlusion_hidden() ? model->is_present_visible()
-										   : model->is_visible()))
+		if (!slot_draw_shown(slot_draw_visibility(*model)))
 			return;
 	} else if (const Node3D *spatial = Object::cast_to<Node3D>(p_node)) {
 		if (!spatial->is_visible())
@@ -338,8 +327,8 @@ struct AdmittedSurface {
 	Q3ObjectMaterialValues values;
 	Ref<Texture2D> diffuse;
 	Ref<Texture2D> detail;
-	ObjectProjectedShadowPolicy policy = ObjectProjectedShadowPolicy::NoPass;
-	ObjectProjectedShadowCoverage coverage = ObjectProjectedShadowCoverage::NoPass;
+	// The engine's PROJSHAD draw for the surface (renderer::slot_capture_surface).
+	SlotCaptureSurface surface;
 	std::shared_ptr<const Q3PackedStream> stream;
 };
 
@@ -361,22 +350,12 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 	}
 	r_surface.diffuse = values.diffuse;
 	r_surface.detail = values.detail;
-	ObjectShaderKey key = build_object_shader_key(r_surface.classification);
-	if (r_surface.detail.is_null()) {
-		// The runtime's missing-detail downgrade: an unresolved
-		// secondary composes the no-detail technique
-		// (object_model_materials.cpp).
-		key &= ~OSCAP_DETAIL;
-	}
-	const ObjectShaderPipelineDescriptor pipeline = describe_object_shader_pipeline(key);
-	r_surface.policy = object_projected_shadow_policy(pipeline.technique);
-	r_surface.coverage = object_projected_shadow_coverage(pipeline.technique);
-	if (r_surface.policy == ObjectProjectedShadowPolicy::NoPass ||
-			r_surface.coverage == ObjectProjectedShadowCoverage::NoPass ||
-			(r_surface.policy == ObjectProjectedShadowPolicy::MaterialBlend &&
-					r_surface.classification.blend == ObjectBlendMode::Additive)) {
-		// No PROJSHAD declaration, or the _FFP material-blend pass
-		// of an additive material: black added to the RT is a no-op.
+	// The engine decides the surface's PROJSHAD draw and its command state
+	// (renderer::slot_capture_surface); an unresolved secondary composes the
+	// no-detail technique.
+	r_surface.surface = slot_capture_surface(r_surface.classification,
+			r_surface.detail.is_valid(), p_skinned);
+	if (!r_surface.surface.draws) {
 		return SurfaceAdmission::NoPass;
 	}
 	// Keyed on the mesh as well as the node: an ObjectModel surface
@@ -404,17 +383,28 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 
 } // namespace
 
+namespace godot {
+
+SlotCasterVisibility slot_draw_visibility(const ObjectModel &p_model) {
+	SlotCasterVisibility visibility;
+	visibility.present_visible = p_model.is_present_visible();
+	visibility.draw_visible = p_model.is_visible();
+	visibility.render_claimed = p_model.is_occlusion_hidden() || p_model.is_subpixel_hidden();
+	return visibility;
+}
+
+} // namespace godot
+
 class SlotCaptureAdapter::Impl {
 public:
 	struct PipelineKey {
 		int64_t framebuffer_format = -1;
-		bool two_sided = false;
-		bool blend_coverage = false;
+		// renderer::fixed_function_state_key of the command's state.
+		std::uint32_t state = 0;
 
 		bool operator<(const PipelineKey &p_other) const {
-			return std::tie(framebuffer_format, two_sided, blend_coverage) <
-					std::tie(p_other.framebuffer_format, p_other.two_sided,
-							p_other.blend_coverage);
+			return std::tie(framebuffer_format, state) <
+					std::tie(p_other.framebuffer_format, p_other.state);
 		}
 	};
 
@@ -600,8 +590,7 @@ public:
 	RID make_texture(int p_size, RenderingDevice::DataFormat p_format,
 			int64_t p_usage);
 	bool ensure_target(Target &r_target, int p_size);
-	RID pipeline_for(int64_t p_framebuffer_format, bool p_two_sided,
-			bool p_blend_coverage);
+	RID pipeline_for(int64_t p_framebuffer_format, const FixedFunctionState &p_state);
 	bool upload_stream(const Q3PackedStream &p_stream);
 	bool upload_bones(const std::vector<Transform3D> &p_bones);
 	RID uniform_for(const DeviceCommand &p_command);
@@ -743,54 +732,21 @@ bool SlotCaptureAdapter::Impl::ensure_target(Target &r_target, int p_size) {
 }
 
 RID SlotCaptureAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
-		bool p_two_sided, bool p_blend_coverage) {
-	const PipelineKey key{p_framebuffer_format, p_two_sided, p_blend_coverage};
+		const FixedFunctionState &p_state) {
+	const PipelineKey key{p_framebuffer_format, fixed_function_state_key(p_state)};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
-	Ref<RDPipelineRasterizationState> raster;
-	raster.instantiate();
-	// The wrappers' cull_back / cull_disabled per material two-sidedness; the
-	// stream keeps Godot's clockwise front faces like the Q3 adapter.
-	raster->set_cull_mode(p_two_sided ? RenderingDevice::POLYGON_CULL_DISABLED :
-			RenderingDevice::POLYGON_CULL_BACK);
+	// The engine's PROJSHAD state; the 4x MSAA is the capture's device fold
+	// (make_texture). Reverse-Z like Godot's own scene depth (the projection
+	// carries Projection::create_depth_correction): nearer = greater.
+	const RdPipelineState state = rd_pipeline_state(p_state);
 	Ref<RDPipelineMultisampleState> multisample;
 	multisample.instantiate();
 	multisample->set_sample_count(RenderingDevice::TEXTURE_SAMPLES_4);
-	Ref<RDPipelineDepthStencilState> depth;
-	depth.instantiate();
-	// Reverse-Z like Godot's own scene depth (the projection carries
-	// Projection::create_depth_correction): nearer = greater.
-	depth->set_enable_depth_test(true);
-	depth->set_enable_depth_write(true);
-	depth->set_depth_compare_operator(RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
-	// The PROJSHAD blend state per technique (object_projected_shadow_policy):
-	// the file effects and the _FFP BLEND_NONE / BLEND_MULT variants replace
-	// (ONE/ZERO; DESTCOLOR/SRCCOLOR of a black source is black too), the
-	// _FFP BLEND_ALPHA variant blends the black fragment by its coverage
-	// alpha (SRCALPHA/INVSRCALPHA), and the additive variants never reach the
-	// device (black adds nothing).
-	Ref<RDPipelineColorBlendStateAttachment> attachment;
-	attachment.instantiate();
-	attachment->set_enable_blend(p_blend_coverage);
-	if (p_blend_coverage) {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_color_blend_factor(
-				RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-		attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
-		attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_alpha_blend_factor(
-				RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-		attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
-	}
-	Ref<RDPipelineColorBlendState> color_blend;
-	color_blend.instantiate();
-	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
-	attachments.push_back(attachment);
-	color_blend->set_attachments(attachments);
 	RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format,
-			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster,
-			multisample, depth, color_blend);
+			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, state.rasterization,
+			multisample, state.depth_stencil, state.color_blend);
 	if (!pipeline.is_valid())
 		set_failure("RenderingDevice rejected a slot capture pipeline");
 	else
@@ -923,8 +879,7 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 			return false;
 		const int64_t framebuffer_format = rd->framebuffer_get_format(target.framebuffer);
 		for (const DeviceCommand &command : capture.commands) {
-			if (!pipeline_for(framebuffer_format, command.two_sided,
-						command.blend_coverage).is_valid())
+			if (!pipeline_for(framebuffer_format, command.state).is_valid())
 				return false;
 		}
 		// Clear to the retail 0x00FFFFFF and the reverse-Z far depth, draw the
@@ -942,8 +897,7 @@ bool SlotCaptureAdapter::Impl::draw(const DeviceFrame &p_frame) {
 				set_failure("RenderingDevice could not bind slot capture textures");
 				return false;
 			}
-			const RID pipeline = pipeline_for(framebuffer_format, command.two_sided,
-					command.blend_coverage);
+			const RID pipeline = pipeline_for(framebuffer_format, command.state);
 			rd->draw_list_bind_render_pipeline(draw_list, pipeline);
 			rd->draw_list_bind_uniform_set(draw_list, uniform, 0);
 			rd->draw_list_bind_uniform_set(draw_list, bone_uniform, 1);
@@ -1104,11 +1058,9 @@ void SlotCaptureAdapter::compile_frame(
 					case SurfaceAdmission::Admitted:
 						break;
 				}
-				const ObjectMaterialClassification &classification = admitted.classification;
+				const SlotCaptureSurface &plan = admitted.surface;
 				const Ref<Texture2D> &diffuse = admitted.diffuse;
 				const Ref<Texture2D> &detail = admitted.detail;
-				const ObjectProjectedShadowPolicy policy = admitted.policy;
-				const ObjectProjectedShadowCoverage coverage = admitted.coverage;
 				const std::shared_ptr<const Q3PackedStream> &stream = admitted.stream;
 				DeviceCommand command;
 				command.stream = stream;
@@ -1126,7 +1078,6 @@ void SlotCaptureAdapter::compile_frame(
 					}
 					command.first_bone = first_bone;
 					command.bone_count = static_cast<std::uint32_t>(palette.size());
-					command.flags |= kFlagSkinned;
 					++counters.skinned_commands;
 				}
 				command.diffuse_resource = diffuse;
@@ -1136,27 +1087,11 @@ void SlotCaptureAdapter::compile_frame(
 				command.alpha_mod = admitted.values.runtime.alpha;
 				command.diffuse_max_lod = admitted.values.diffuse_max_lod;
 				command.detail_max_lod = admitted.values.detail_max_lod;
-				command.alpha_test_value = classification.alpha_test_value;
-				if (classification.alpha_test)
-					command.flags |= kFlagAlphaTest;
-				if (classification.alpha_test_invert)
-					command.flags |= kFlagAlphaInvert;
-				if (coverage == ObjectProjectedShadowCoverage::DiffuseAlphaFfp ||
-						coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp)
-					command.flags |= kFlagAlphaMod;
-				if (coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp)
-					command.flags |= kFlagDetailAlpha;
-				if (policy == ObjectProjectedShadowPolicy::MaterialBlend &&
-						classification.blend == ObjectBlendMode::AlphaBlend) {
-					// The _FFP BLEND_ALPHA variant: black blended by the
-					// coverage (Diffuse1.a x AlphaGenValue x Diffuse2.a)
-					// over the white clear, a partial silhouette for a
-					// translucent strip.
-					command.flags |= kFlagBlendCoverage;
-					command.blend_coverage = true;
+				command.alpha_test_value = plan.alpha_test_value;
+				command.flags = plan.flags;
+				command.state = plan.state;
+				if (command.state.blend.enabled)
 					++counters.blended_commands;
-				}
-				command.two_sided = classification.is_two_sided;
 				capture.commands.push_back(std::move(command));
 			}
 		}

@@ -20,8 +20,10 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
+#include <runtime/renderer/light_spawn.h>
 #include <runtime/world/present_drains.h>
 
 #include "lights/effect_light_report.h"
@@ -65,12 +67,8 @@ class EffectLightDirector : public RefCounted {
 	GDCLASS(EffectLightDirector, RefCounted)
 
 public:
-	// Model gather half-extent around the camera. Light ranges are authored
-	// small (atten_end 8 on the fire barrels), so any model a pool light
-	// could touch sits well inside this radius.
-	static constexpr float QUERY_RADIUS = 512.0f;
-
 	EffectLightDirector();
+	~EffectLightDirector() override;
 
 	void setup(Node *p_world, const Ref<MissionObjectPlacer> &p_placer);
 	// The C++ world's wiring (ADR 0043 slice G10): the same three seams as
@@ -99,6 +97,10 @@ public:
 	// Wire/late spawns route here through the world's spawn router (shared
 	// with the item-effect director).
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
+	// A wire entity left the live present rows (the presenter's retirement,
+	// retail's Entity_Destroy): its cached lease retires
+	// (renderer::LightSpawner::destroy_entity).
+	void on_wire_entity_destroyed(int p_wire_handle);
 	// One authored light record (ObjectData.get_light_info's ModelLight)
 	// becomes one pool instance. Public: the GUT seam test feeds records
 	// directly. The owner attach is decided by the portable policy the
@@ -173,44 +175,31 @@ public:
 	// that final authored lease instead of allocating the 1.5-unit
 	// muzzle-color light.
 	void on_muzzle_fire(int64_t p_shooter_handle, const Vector3 &p_world_pos);
-	// One presented round impact whose ammo authors light_impact [orig:
-	// AmmoDef_ProcessImpactEffect @ 0x40a2b3 — spawned radius/2 above the
-	// impact, mode 2 fade, render flag 0x100]. The 0x100 flag's one witnessed
-	// reader is the corona walk: the billboards re-center radius/2 below the
-	// light, back onto the impact point (engine: runtime/renderer/light_scene.h).
+	// One presented round impact whose ammo authors light_impact
+	// (renderer::impact_flash_spawn carries the witness: radius/2 above the
+	// impact, mode 2 fade, render flag 0x100, whose one reader is the corona
+	// walk).
 	void on_impact_light(const Vector3 &p_world_pos, float p_radius, const Color &p_color,
 			int p_duration_ticks);
-	// One husk death flash [orig: Entity_SpawnDeathPieces @ 0x49351a — at the
-	// entity position, 2x the piece model radius, corona disabled].
+	// One husk death flash (renderer::death_flash_spawn carries the witness:
+	// at the entity position, 2x the piece model radius, corona disabled).
 	void on_death_light(const Vector3 &p_world_pos, float p_radius);
 	// The in-flight light_move glows, diffed against the sim's live rows
-	// [orig: RoundData_SpawnRound @ 0x4ec8da spawn (mode 1, radius/2 up,
-	// terrain disabled), the per-tick follow @ 0x4eaa9f, Projectile_ReleaseEffects
-	// clear]. Rows: world::RoundGlowRow from Simulation::fill_round_glows; the lift
-	// law is the engine's (renderer/light_scene.h round_glow_spawn_lift /
-	// kRoundGlowFollowLift).
+	// (renderer::LightSpawner::sync_round_glows carries the witness). Rows:
+	// world::RoundGlowRow from Simulation::fill_round_glows.
 	void sync_round_glows(const std::vector<opennova::world::RoundGlowRow> &p_rows);
 	// The bound data leg: the same sync over test-authored RoundGlowRow records.
 	void sync_round_glow_records(const Array &p_rows);
 	Ref<EffectLightReport> get_report();
 
-	// The bound signal targets: a spawned wire node leaving the tree, and
-	// the MissionObjects container's membership changing.
-	void _on_wire_node_exiting(int64_t p_node_id);
+	// The bound signal target: the MissionObjects container's membership
+	// changing (the walk registry rebuilds).
 	void _on_container_membership_changed(Node *p_node);
 
 protected:
 	static void _bind_methods();
 
 private:
-	// One wire node whose authored lights this director spawned: the node,
-	// the light owner id it was scoped to, and the one-shot tree_exiting
-	// callback bound to it.
-	struct SpawnedNode {
-		ObjectID node;
-		int64_t owner_id = 0;
-		Callable tree_exiting;
-	};
 	// The blink-box owner at one world point: the containing building's
 	// owner id + section, owner 0 outdoors.
 	struct BlinkOwner {
@@ -229,12 +218,9 @@ private:
 	MissionEnvironment *_environment() const;
 	Weather *_weather() const;
 	Node *_mission_objects() const;
-	void _disconnect_wire_node_exit(const SpawnedNode &p_record);
-	Vector<int64_t> _spawn_model_lights(const Ref<ObjectData> &p_data,
-			const Transform3D &p_world_transform, int64_t p_owner_id,
-			const BlinkOwner &p_blink_owner, bool p_spawner_is_building);
-	int64_t _spawn_node_lights(ObjectModel *p_node, int64_t p_owner_id,
-			const BlinkOwner &p_blink_owner, bool p_spawner_is_building);
+	// A live entity's BMS id into the interior-owner registry (a static's
+	// tagged id, registered first, wins).
+	void _register_entity(ObjectModel *p_node, int64_t p_owner_id);
 	int64_t _spawn_light_at(const Ref<ModelLight> &p_info, const Vector3 &p_world_pos,
 			int64_t p_owner_id, const BlinkOwner &p_blink_owner, bool p_spawner_is_building);
 	BlinkOwner _blink_owner_at(const Vector3 &p_world_pos);
@@ -243,7 +229,7 @@ private:
 	// record family (engine: mission::placed_record_is_building).
 	bool _record_is_building(int p_kind, int p_item_id) const;
 	void _render_static_light_rows(const Vector3 &p_gain, Weather *p_weather, int p_time_ms);
-	void _rebuild_static_light_rows();
+	void _rebuild_static_light_rows(int64_t p_revision);
 	void _ensure_model_registry(Node *p_container);
 	void _rebuild_model_registry(const TypedArray<Node> &p_models);
 	// The models the per-model pass walks: the world's MissionObjects
@@ -271,35 +257,17 @@ private:
 	ObjectID scene_environment_;
 	ObjectID scene_weather_;
 	Ref<MissionObjectPlacer> placer_provider_;
-	// The packed static atlas rows, rebuilt only when the placer's
-	// draw-source revision (rows appended, table reset, carve state) or the
-	// static source snapshot changes. Rows are immutable identities; only
-	// the light SELECTION over them runs per frame, as retail's per-batch
-	// select does.
+	// The static atlas rows' revision (the placer's draw-source revision: rows
+	// appended, table reset, carve state); the rows are handed to the scene
+	// only when it moves, and only the light SELECTION over them runs per
+	// frame, as retail's per-batch select does.
 	int64_t static_rows_revision_ = -1;
-	PackedVector3Array static_rows_positions_;
-	PackedInt32Array static_rows_bound_radii_q16_;
-	PackedInt64Array static_rows_owner_entities_;
-	PackedInt32Array static_rows_owner_sections_;
-	PackedInt64Array static_rows_interior_owners_;
-	PackedInt32Array static_rows_interior_sections_;
-	PackedByteArray static_rows_active_;
-	PackedVector4Array static_rows_entity_lights_;
 	Ref<LightScene> scene_;
-	HashMap<int, Vector<int64_t>> spawned_static_;
+	// The pool's spawners and entity lifecycle over scene_'s engine pool: the
+	// LGHT walks, each entity's cached word, the round glows and the
+	// interior-owner registry.
+	std::unique_ptr<opennova::renderer::LightSpawner> spawner_;
 	std::vector<opennova::mission::StaticEffectSource> static_sources_snapshot_;
-	HashMap<int, int64_t> static_owner_by_bms_;
-	HashMap<uint64_t, SpawnedNode> spawned_nodes_;
-	// Entity owner id -> its ONE cached EffectWorld handle. Retail does not
-	// own a model-light handle array: every LGHT spawn overwrites
-	// entity+0x1B4, the MF_Light muzzle path reuses that same word, and
-	// Entity_Destroy clears only its final value [orig: Entity_SpawnGlowEffects
-	// @0x56c925..0x56c92c; Entity_UpdateMuzzleGlowEffect @0x56c965..0x56c9d5;
-	// Entity_Destroy @0x43e903..0x43e916]. Earlier model lights intentionally
-	// remain in the pool until mission teardown, matching retail's lifecycle.
-	HashMap<int64_t, int64_t> entity_effect_handles_;
-	// round presentation id -> pool light handle (the light_move follow).
-	HashMap<int64_t, int64_t> round_handles_;
 	// This frame's corona quads for the post-particle overlay stage, from the
 	// portable corona walk (engine: runtime/renderer/light_scene.h).
 	std::vector<opennova::renderer::LightCoronaQuad> coronas_;
@@ -322,11 +290,9 @@ private:
 	// portable in renderer::corona_texture_argb; this only wraps the bytes in
 	// a texture, once per director.
 	Ref<ImageTexture> corona_texture_;
-	// Containing-building bms_id -> owner id. Owner identity is fixed for a
-	// node's tree lifetime (entity_ref is stamped once at creation), so the
-	// cache survives across frames and clears on container membership
-	// change, reset, and reattach.
-	HashMap<int, int64_t> blink_owner_cache_;
+	// The report census's camera box: a diagnostic of the pool, no retail
+	// rule (the gameplay pass selects per drawn entity).
+	static constexpr float kCensusRadius = 512.0f;
 	// The report-only census skipped this frame (F3 capture off);
 	// run_census_now refreshes it on demand with the last frame's camera and clock.
 	bool census_stale_ = false;
