@@ -25,10 +25,16 @@
 // [orig: CDKey_ReadRegistry @0x411b90 (dfx2.exe)]. The serial nests inside the
 // wire key, so an activated copy also passes another copy's LAN join check.
 //
-// Joint Operations keeps a CDKIID too, but validates nothing with it: its
-// registry read only feeds the NovaWorld NWCDKIID form field, which the live
-// service accepted empty, and its host has no CD-key leg [orig:
-// CDKey_ReadFromRegistryByProduct @ 0x411d30; Server_ValidatePlayerJoinRequest
+// Joint Operations keeps a CDKIID too, but validates nothing with it. Its boot
+// reads the Typhoon Rising value under that product's own chain, with no mix, and
+// a value that decodes feeds two places: the NovaWorld verify Cookie's NWCDKIID,
+// which the live service accepted empty, and a LAN JOIN's CDKIID TLV, which a JO
+// host stores and never tests (its join check has no CD-key leg). No code of
+// Jointops.exe writes the +0x810 CDKIIDEXP1 its JOIN would carry too. The read is
+// not ported, so OpenNova's JO sends neither [orig: CDKey_ReadFromRegistryByProduct
+// @ 0x411d30, product 0 @ 0x4a7e26..0x4a7e32; CNapiGameSession_OnNovaWorldConnected
+// @ 0x4d16e3..0x4d1702; NapiNP_WriteClientAuthPayload @ 0x42a1cd..0x42a235, a LAN
+// session's (network type 2 @ 0x42a1c4); Server_ValidatePlayerJoinRequest
 // @ 0x512100]. Nothing here is JO's.
 
 #include <cstddef>
