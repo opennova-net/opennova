@@ -88,8 +88,11 @@ void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, co
 gamecfg::ServerSettingsTitle server_settings_title(const Title& title);
 gamecfg::ServerSettingsTitle server_settings_title(std::string_view title_code);
 // The screen's restriction lists from the block, as the dialog's init fills them after its
-// populate, and the LAN screen's activation fills WEAPON_LIST again. WEAPON_LIST: cleared, then a
-// row per loadout_selectable weapon in the table's order, its text the weapon's WepDes name
+// populate, and the LAN screen's activation fills WEAPON_LIST again. Each list, and each radio
+// below, is the one on the title's own host screen (Title::host_screen: Jointops.exe's
+// MULTI_PLAYER_HOST, dfx2.exe's NW_MULTI_PLAYER); a title that names none has no lists.
+// WEAPON_LIST: cleared, then a row per loadout_selectable weapon in the table's order, its text
+// the weapon's WepDes name
 // (`gametext`, its loadout_menu_textid; "" with none), its value its table row, its column 1 the
 // word's Game.bin "Menu" token (`menu_ui`): -1 and the mission word MISSION, 0 NEVER, the
 // armory-only word ARMORY, any other ALWAYS. CLASS_LIST: cleared, a row per class 5..9 (Game.bin's
@@ -98,26 +101,34 @@ gamecfg::ServerSettingsTitle server_settings_title(std::string_view title_code);
 // [orig: UI_InitHostSettingsDialog @0x558960 - @0x5589CC, @0x5589D1; UI_InitLANMultiplayerScreen
 //  @0x556930 - @0x5569CC; HostDialog_PopulateWeaponRestrictionList @0x556600;
 //  HostDialog_PopulateClassListCombo @0x556700; TextResource_GetStringWithFallback @0x562EE0]
+// [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0; HostDialog_PopulateClassListCombo
+//  @0x5548b0 (dfx2.exe)]
 void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg, const Title& title,
                                const gamecfg::WeaponRoster& weapons, const hud::GameTextLookup& gametext,
                                const hud::GameTextLookup& menu_ui);
-void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
+void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg, const Title& title,
                               const hud::GameTextLookup& menu_ui);
 // A press on a restriction list's row in its column 1 (the 0x8000001 cell event, its press or
-// double-click form): WEAPON_LIST steps the row's weapon word 0 -> 1 -> 2 -> 3 -> 0, CLASS_LIST
-// the row's class word 0 -> 1 -> 2 -> 0 and then the START gate (`dialog`, set_class_words); the
-// cell shows the new token. False for another widget or column, or a row past the list.
+// double-click form): WEAPON_LIST steps the row's weapon word up to the title's mission word and
+// back to 0 (Jointops.exe 0 -> 1 -> 2 -> 3 -> 0, dfx2.exe 0 -> 1 -> 2 -> 0, its ARMORY 3 never
+// reached), CLASS_LIST the row's class word 0 -> 1 -> 2 -> 0 and then the START gate (`dialog`,
+// set_class_words); the cell shows the new token. False for another widget or column, or a row
+// past the list.
 // [orig: HostDialog_WeaponRestrictionCycleHandler @0x5576c0; HostDialog_OnClassAvailabilityListClick
 //  @0x5577d0]
+// [orig: @0x5558a0; HostDialog_OnWeaponRestrictionListClick @0x5559b0 (dfx2.exe)]
 bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
                                    gamecfg::GameCfg& cfg, const Title& title, std::string_view widget, int row,
                                    int column, const hud::GameTextLookup& menu_ui);
-// A press on a radio that sets every word: WPN_ALWAYS 1, WPN_NEVER 0, WPN_ARMORY 2 and WPN_MISSION 3
+// A press on a radio that sets every word: WPN_ALWAYS 1, WPN_NEVER 0, WPN_ARMORY the title's
+// armory-only word and WPN_MISSION its mission word (Jointops.exe's 2 and 3, dfx2.exe's 3 and 2)
 // over each loadout_selectable weapon, every WEAPON_LIST row's cell relabelled; CLASS_ALWAYS 1,
 // CLASS_NEVER 0 and CLASS_MISSION 2 over the ten class words, every CLASS_LIST row's cell
 // relabelled, then the START gate. False for another control.
 // [orig: UI_RegisterHostSettingsCallbacks @0x5580f0 (the controls and their values);
-//  HostDialog_SetAllWeaponAvailability @0x557910; HostDialog_SetAllWeaponRestrictions @0x557a10]
+//  HostDialog_SetAllWeaponAvailability @0x557910; HostDialog_SetAllClassAvailability @0x557a10]
+// [orig: @0x5562c0 (the controls and their values); @0x555af0; HostDialog_SetAllWeaponRestrictions
+//  @0x555bf0 (dfx2.exe)]
 bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
                                     gamecfg::GameCfg& cfg, const Title& title,
                                     const gamecfg::WeaponRoster& weapons, std::string_view control,

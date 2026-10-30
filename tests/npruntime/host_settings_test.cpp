@@ -230,7 +230,7 @@ int max_players_recommendation() {
 // [orig: HostDialog_PopulateWeaponRestrictionList @0x556600; HostDialog_PopulateClassListCombo
 //  @0x556700; HostDialog_WeaponRestrictionCycleHandler @0x5576c0;
 //  HostDialog_OnClassAvailabilityListClick @0x5577d0; HostDialog_SetAllWeaponAvailability
-//  @0x557910; HostDialog_SetAllWeaponRestrictions @0x557a10; UI_RegisterHostSettingsCallbacks
+//  @0x557910; HostDialog_SetAllClassAvailability @0x557a10; UI_RegisterHostSettingsCallbacks
 //  @0x5580f0; HostDialog_AddRemoveSelectedMissions @0x557c10 - the class words @0x557F24..0x557F43]
 int restriction_lists() {
     const auto table = [](const char* name, int columns) {
@@ -274,7 +274,7 @@ int restriction_lists() {
     cfg.class_availability[gamecfg::kClassSniper] = 2;
     cfg.class_availability[gamecfg::kClassGunner] = 0;
     populate_host_weapon_list(screen, cfg, kJo, weapons, gametext, menu_ui);
-    populate_host_class_list(screen, cfg, menu_ui);
+    populate_host_class_list(screen, cfg, kJo, menu_ui);
     const int list = find("WEAPON_LIST");
     TEST_EXPECT(screen.table_row_count(list) == 2);
     TEST_EXPECT(screen.table_cell_text(list, 0, 0) == "M16A2" && screen.table_row_value(list, 0) == 1);
@@ -314,6 +314,47 @@ int restriction_lists() {
     TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "CLASS_ALWAYS", menu_ui));
     TEST_EXPECT(cfg.class_availability[0] == 1 && screen.is_widget_disabled(start)); // no mission yet
     TEST_EXPECT(!host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "START_GAME", menu_ui));
+
+    // dfx2.exe's lists and radios are NW_MULTI_PLAYER's and its words ARMORY 3, MISSION 2: a press
+    // steps 0 -> 1 -> 2 -> 0, never reaching ARMORY, which WPN_ARMORY alone sets.
+    // [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0 (@0x5547c1); @0x5558a0 (the step past
+    //  2 @0x55590f); @0x5562c0 (WPN_ARMORY 3 @0x5563ed, WPN_MISSION 2 @0x55640b);
+    //  HostDialog_OnWeaponRestrictionListClick @0x5559b0 (the class step) (dfx2.exe)]
+    mnu::Document nw = host_dialog_document();
+    nw.screens[0].name = "NW_MULTI_PLAYER";
+    auto& nw_children = nw.screens[0].roots[0].children;
+    nw_children.push_back(table("WEAPON_LIST", 2));
+    nw_children.push_back(table("CLASS_LIST", 2));
+    nw_children.push_back(control("START_GAME", mnu::WindowType::Button));
+    opennova::menu::MenuRuntime nw_screen;
+    TEST_EXPECT(nw_screen.open_document(&nw, std::string(), "NW_MULTI_PLAYER"));
+    const int nw_list = nw_screen.find_screen_control("NW_MULTI_PLAYER", "WEAPON_LIST");
+    const int nw_classes = nw_screen.find_screen_control("NW_MULTI_PLAYER", "CLASS_LIST");
+    TEST_EXPECT(nw_list >= 0 && nw_classes >= 0);
+    gamecfg::GameCfg dfx = gamecfg::defaults({}, 0, 0, gamecfg::ConfigTable::Dfx2);
+    // JO's lists are MULTI_PLAYER_HOST's: none on this screen.
+    populate_host_weapon_list(nw_screen, dfx, kJo, weapons, gametext, menu_ui);
+    TEST_EXPECT(nw_screen.table_row_count(nw_list) == 0);
+    TEST_EXPECT(!host_restriction_list_pressed(nw_screen, dialog, dfx, kJo, "WEAPON_LIST", 0, 1, menu_ui));
+    populate_host_weapon_list(nw_screen, dfx, kDfx2, weapons, gametext, menu_ui);
+    populate_host_class_list(nw_screen, dfx, kDfx2, menu_ui);
+    TEST_EXPECT(nw_screen.table_row_count(nw_list) == 2 && nw_screen.table_row_count(nw_classes) == 5);
+    TEST_EXPECT(nw_screen.table_cell_text(nw_list, 0, 1) == "Mission"); // dfx2.exe's default word 2
+    opennova::menu::HostDialog nw_dialog;
+    for (const int32_t stepped : {0, 1, 2, 0}) {
+        TEST_EXPECT(host_restriction_list_pressed(nw_screen, nw_dialog, dfx, kDfx2, "WEAPON_LIST", 0, 1, menu_ui));
+        TEST_EXPECT(dfx.weapon_availability[1] == stepped);
+    }
+    TEST_EXPECT(nw_screen.table_cell_text(nw_list, 0, 1) == "Never");
+    TEST_EXPECT(host_restriction_radio_pressed(nw_screen, nw_dialog, dfx, kDfx2, weapons, "WPN_ARMORY", menu_ui));
+    TEST_EXPECT(dfx.weapon_availability[1] == 3 && dfx.weapon_availability[3] == 3 &&
+                nw_screen.table_cell_text(nw_list, 0, 1) == "??ARMORY??");
+    TEST_EXPECT(host_restriction_radio_pressed(nw_screen, nw_dialog, dfx, kDfx2, weapons, "WPN_MISSION", menu_ui));
+    TEST_EXPECT(dfx.weapon_availability[1] == 2 && nw_screen.table_cell_text(nw_list, 1, 1) == "Mission");
+    // The class list is NW_MULTI_PLAYER's too, its step the same 0 -> 1 -> 2 -> 0.
+    TEST_EXPECT(host_restriction_list_pressed(nw_screen, nw_dialog, dfx, kDfx2, "CLASS_LIST", 0, 1, menu_ui));
+    TEST_EXPECT(dfx.class_availability[gamecfg::kClassMedic] == 2 &&
+                nw_screen.table_cell_text(nw_classes, 0, 1) == "Mission");
     return 0;
 }
 } // namespace

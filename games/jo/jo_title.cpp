@@ -36,6 +36,10 @@ Title make() {
 	//  UI_PopulateHostSettingsFromConfig @ 0x555fe0 (@0x55631d, @0x55635a)]
 	t.max_players = 64;
 	t.max_players_host_screen = 64;
+	// [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 (@0x556611);
+	//  HostDialog_PopulateClassListCombo @0x556700 (@0x556712); UI_RegisterHostSettingsCallbacks
+	//  @0x5580f0 (each restriction control's screen)]
+	t.host_screen = "MULTI_PLAYER_HOST";
 	return t;
 }
 

@@ -28,7 +28,7 @@ const CodeTextKey kRows[] = {
 	{"GAME.BIN", "Menu", "HOME", "UI_UpdateDeathScreenContent", 0x553B07},
 	{"GAME.BIN", "Menu", "NEVER", "HostDialog_PopulateClassListCombo", 0x5567FE},
 	{"GAME.BIN", "Menu", "NEVER", "HostDialog_OnClassAvailabilityListClick", 0x557880},
-	{"GAME.BIN", "Menu", "NEVER", "HostDialog_SetAllWeaponRestrictions", 0x557A96},
+	{"GAME.BIN", "Menu", "NEVER", "HostDialog_SetAllClassAvailability", 0x557A96},
 	{"GAME.BIN", "Menu", "NONE", "PlayerInfo_PopulateWeaponSlotLists", 0x56057C},
 	{"GAME.BIN", "Menu", "NONE", "UI_PopulateThreeCategoryLists", 0x566F05},
 	{"GAMEERR.BIN", "Generic Error Strings", "STRE_CANTHOST", "UI_ShowSessionErrorMessage", 0x56931F},

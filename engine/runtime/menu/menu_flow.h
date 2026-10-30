@@ -66,7 +66,7 @@ public:
 	// the ten class words first (all 0 disables it), then the SELECTED_MISSIONS rows.
 	// [orig: HostDialog_AddRemoveSelectedMissions @0x557c10 - the class words @0x557F24..
 	//  0x557F43, the row count @0x557F4E..0x557F5F; HostDialog_OnClassAvailabilityListClick
-	//  @0x5577d0; HostDialog_SetAllWeaponRestrictions @0x557a10]
+	//  @0x5577d0; HostDialog_SetAllClassAvailability @0x557a10]
 	bool can_start() const { return any_class_ && !selected_.empty(); }
 	// The block's ten class words as the gate reads them, the gate run again.
 	void set_class_words(MenuRuntime &menu, const int32_t *words, size_t count);

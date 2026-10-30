@@ -308,8 +308,12 @@ std::string class_word_token(const hud::GameTextLookup& menu_ui, int32_t word) {
 constexpr int kRestrictionCell = 1; // the token's column [orig: CTableWnd_SetCellText(.., 1) @0x5566BF]
 constexpr size_t kClassWordCount = gamecfg::kClassAvailabilityCount;
 
-int host_screen_list(const menu::MenuRuntime& screen, std::string_view list) {
-    return screen.find_screen_control(std::string(kHostDialogScreen), std::string(list));
+// A restriction list on the title's own host screen (Title::host_screen), -1 when the screen lacks
+// it or the title names none. [orig: UI_FindScreenControl @0x63AE80 - "MULTI_PLAYER_HOST"
+// @0x556611 / @0x556712; "NW_MULTI_PLAYER" @0x5547c1 / @0x5548c2 (dfx2.exe)]
+int host_screen_list(const menu::MenuRuntime& screen, const Title& title, std::string_view list) {
+    if (title.host_screen == nullptr) return -1;
+    return screen.find_screen_control(std::string(title.host_screen), std::string(list));
 }
 
 } // namespace
@@ -339,7 +343,9 @@ void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg
     //  text WeaponDef_ParseProperty's loadout_menu_textid resolves, none without one),
     //  CTableWnd_AddRow(name, index, 0, -1) @0x5566B2, CTableWnd_SetCellText(row, token, 1)
     //  @0x5566BF]
-    const int list = host_screen_list(screen, "WEAPON_LIST");
+    // [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0 - NW_MULTI_PLAYER's WEAPON_LIST
+    //  @0x5547c1, the token's switch @0x554805 (dfx2.exe)]
+    const int list = host_screen_list(screen, title, "WEAPON_LIST");
     if (list < 0) return;
     const gamecfg::ServerSettingsTitle words = server_settings_title(title);
     screen.table_clear_rows(list);
@@ -355,15 +361,17 @@ void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg
     }
 }
 
-void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
+void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg, const Title& title,
                               const hud::GameTextLookup& menu_ui) {
     // [orig: HostDialog_PopulateClassListCombo @0x556700 - UI_FindScreenControl("MULTI_PLAYER_HOST",
     //  "CLASS_LIST") @0x556712, CTableWnd_RemoveRow(-1) @0x556728, classes 5..9 @0x556731, the
     //  CHARCLASS_* names @0x556741..0x556798, CTableWnd_AddRow(name, class, 0, -1) @0x5567B5, the
     //  token @0x5567C1..0x5567FE, CTableWnd_SetCellText(row, token, 1) @0x556814]
+    // [orig: HostDialog_PopulateClassListCombo @0x5548b0 - NW_MULTI_PLAYER's CLASS_LIST @0x5548c2,
+    //  classes 5..9 @0x5548e1 (dfx2.exe)]
     static constexpr const char* kClassKeys[] = {"CHARCLASS_MEDIC", "CHARCLASS_SNIPER",
         "CHARCLASS_GUNNER", "CHARCLASS_RIFLEMAN", "CHARCLASS_ENGINEER"};
-    const int list = host_screen_list(screen, "CLASS_LIST");
+    const int list = host_screen_list(screen, title, "CLASS_LIST");
     if (list < 0) return;
     screen.table_clear_rows(list);
     for (int cls = gamecfg::kClassMedic; cls <= gamecfg::kClassEngineer; ++cls) {
@@ -380,24 +388,33 @@ bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& 
     if (column != kRestrictionCell) return false;
     const bool weapons = widget == "WEAPON_LIST";
     if (!weapons && widget != "CLASS_LIST") return false;
-    const int list = host_screen_list(screen, widget);
+    const int list = host_screen_list(screen, title, widget);
     if (list < 0 || row < 0 || row >= screen.table_row_count(list)) return false;
     const int32_t index = screen.table_row_value(list, row);
     if (weapons) {
         // [orig: HostDialog_WeaponRestrictionCycleHandler @0x5576c0 - the cell event's press forms
         //  and column 1 @0x5576D3..0x5576EE, CTableWnd_GetRowValue @0x55771A, the step past 3 to 0
         //  @0x55772F..0x557731, the token's switch @0x55774B, CTableWnd_SetCellText @0x5577A6]
+        // [orig: @0x5558a0 - NW_MULTI_PLAYER's WEAPON_LIST @0x5558db, CTableWnd_GetRowValue
+        //  @0x5558fa, the step past 2 to 0 @0x55590f..0x555911, the token's switch @0x55592b
+        //  (dfx2.exe)]
+        // The step's last word is the title's mission word, past which it goes back to NEVER:
+        // Jointops.exe's 3 (ARMORY 2 on the way), dfx2.exe's 2, so a dfx2.exe press never reaches its
+        // ARMORY 3 (WPN_ARMORY alone sets it).
         if (index < 0 || index >= static_cast<int32_t>(gamecfg::kWeaponAvailabilityCount)) return false;
+        const gamecfg::ServerSettingsTitle words = server_settings_title(title);
         int32_t& word = cfg.weapon_availability[index];
-        if (++word > 3) word = 0;
-        screen.table_set_cell_text(list, row, kRestrictionCell,
-                weapon_word_token(menu_ui, word, server_settings_title(title)));
+        if (++word > words.mission_word) word = 0;
+        screen.table_set_cell_text(list, row, kRestrictionCell, weapon_word_token(menu_ui, word, words));
         return true;
     }
     // [orig: HostDialog_OnClassAvailabilityListClick @0x5577d0 - the press forms and column 1
     //  @0x5577E3, the event's own list @0x557805, CTableWnd_GetRowValue @0x557815, the step past 2
     //  to 0 @0x55782C..0x55782E, the token @0x557839..0x557880, CTableWnd_SetCellText @0x557897,
     //  the START gate @0x5578B1..0x557907]
+    // [orig: HostDialog_OnWeaponRestrictionListClick @0x5559b0 (a misnomer: CLASS_LIST's, registered
+    //  @0x556339) - CTableWnd_GetRowValue @0x5559f5, the step past 2 to 0 @0x555a0c,
+    //  NW_MULTI_PLAYER's START_GAME gate @0x555a91 (dfx2.exe)]
     if (index < 0 || index >= static_cast<int32_t>(kClassWordCount)) return false;
     int32_t& word = cfg.class_availability[index];
     if (++word > 2) word = 0;
@@ -411,40 +428,52 @@ bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog&
                                     const gamecfg::WeaponRoster& weapons, std::string_view control,
                                     const hud::GameTextLookup& menu_ui) {
     // [orig: UI_RegisterHostSettingsCallbacks @0x5580f0 - CLASS_ALWAYS 1, CLASS_NEVER 0,
-    //  CLASS_MISSION 2 to HostDialog_SetAllWeaponRestrictions; WPN_ALWAYS 1, WPN_NEVER 0,
+    //  CLASS_MISSION 2 to HostDialog_SetAllClassAvailability; WPN_ALWAYS 1, WPN_NEVER 0,
     //  WPN_ARMORY 2, WPN_MISSION 3 to HostDialog_SetAllWeaponAvailability @0x557910]
+    // [orig: @0x5562c0 - CLASS_ALWAYS 1 @0x556357, CLASS_NEVER 0 @0x556375, CLASS_MISSION 2
+    //  @0x556393 to HostDialog_SetAllWeaponRestrictions @0x555bf0; WPN_ALWAYS 1 @0x5563b1,
+    //  WPN_NEVER 0 @0x5563cf, WPN_ARMORY 3 @0x5563ed, WPN_MISSION 2 @0x55640b to @0x555af0
+    //  (dfx2.exe)]
+    // WPN_ARMORY and WPN_MISSION set the title's armory-only and mission words.
     struct Radio {
         std::string_view control;
         bool weapons;
         int32_t word;
     };
-    static constexpr Radio kRadios[] = {
+    const gamecfg::ServerSettingsTitle words = server_settings_title(title);
+    const Radio radios[] = {
         {"CLASS_ALWAYS", false, 1}, {"CLASS_NEVER", false, 0}, {"CLASS_MISSION", false, 2},
-        {"WPN_ALWAYS", true, 1}, {"WPN_NEVER", true, 0}, {"WPN_ARMORY", true, 2}, {"WPN_MISSION", true, 3},
+        {"WPN_ALWAYS", true, 1}, {"WPN_NEVER", true, 0}, {"WPN_ARMORY", true, words.armory_word},
+        {"WPN_MISSION", true, words.mission_word},
     };
     const Radio* radio = nullptr;
-    for (const Radio& r : kRadios)
+    for (const Radio& r : radios)
         if (r.control == control) radio = &r;
     if (radio == nullptr) return false;
     if (radio->weapons) {
         // [orig: HostDialog_SetAllWeaponAvailability @0x557910 - every loadout_selectable row's word
         //  @0x55792F..0x55794B, the value's token @0x557956, every WEAPON_LIST row's cell
         //  @0x5579B9..0x5579DD]
+        // [orig: @0x555af0 - every row's word @0x555b0f..0x555b2b, the token's switch @0x555b36,
+        //  NW_MULTI_PLAYER's WEAPON_LIST @0x555b99, every row's cell @0x555bac..0x555bbd (dfx2.exe)]
         for (size_t i = 0; i < weapons.size() && i < gamecfg::kWeaponAvailabilityCount; ++i)
             if (weapons[i].loadout_selectable != 0) cfg.weapon_availability[i] = radio->word;
-        const int list = host_screen_list(screen, "WEAPON_LIST");
+        const int list = host_screen_list(screen, title, "WEAPON_LIST");
         if (list >= 0) {
-            const std::string token = weapon_word_token(menu_ui, radio->word, server_settings_title(title));
+            const std::string token = weapon_word_token(menu_ui, radio->word, words);
             for (int row = 0; row < screen.table_row_count(list); ++row)
                 screen.table_set_cell_text(list, row, kRestrictionCell, token);
         }
         return true;
     }
-    // [orig: HostDialog_SetAllWeaponRestrictions @0x557a10 - the ten class words @0x557A23..
+    // [orig: HostDialog_SetAllClassAvailability @0x557a10 - the ten class words @0x557A23..
     //  0x557A50, the token @0x557A70 / @0x557A96, every CLASS_LIST row's cell @0x557AB5..0x557AD9,
     //  the START gate @0x557AFC..0x557B4C]
+    // [orig: HostDialog_SetAllWeaponRestrictions @0x555bf0 (a misnomer: the class words') - the ten
+    //  words @0x555c03..0x555c30, NW_MULTI_PLAYER's CLASS_LIST @0x555c95, its START_GAME gate
+    //  @0x555cdc (dfx2.exe)]
     std::fill(std::begin(cfg.class_availability), std::end(cfg.class_availability), radio->word);
-    const int list = host_screen_list(screen, "CLASS_LIST");
+    const int list = host_screen_list(screen, title, "CLASS_LIST");
     if (list >= 0) {
         const std::string token = class_word_token(menu_ui, radio->word);
         for (int row = 0; row < screen.table_row_count(list); ++row)

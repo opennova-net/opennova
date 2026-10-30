@@ -19,6 +19,7 @@ Title make() {
 	// keeps Joint Operations', as it runs Joint Operations' rules.
 	t.max_players = jo_title().max_players;
 	t.max_players_host_screen = jo_title().max_players_host_screen;
+	t.host_screen = jo_title().host_screen;
 	return t;
 }
 

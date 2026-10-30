@@ -190,7 +190,7 @@ void GameConfigBlock::populate_host_restrictions(const Ref<MenuDriver> &p_driver
 		const Ref<RtxtStringFile> &p_gametext, const Ref<RtxtStringFile> &p_menu_ui) {
 	if (p_driver.is_null()) return;
 	populate_host_weapon_list(p_driver, p_gametext, p_menu_ui);
-	inmatch::populate_host_class_list(p_driver->runtime(), block_.cfg(), game_text_lookup(p_menu_ui));
+	inmatch::populate_host_class_list(p_driver->runtime(), block_.cfg(), *block_.title(), game_text_lookup(p_menu_ui));
 	const auto &classes = block_.cfg().class_availability;
 	p_driver->host_dialog().set_class_words(p_driver->runtime(), classes, std::size(classes));
 }
