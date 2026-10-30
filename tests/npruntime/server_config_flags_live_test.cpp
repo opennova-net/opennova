@@ -40,6 +40,7 @@
 #include <runtime/inmatch/napi_np_protocol.h> // host_server_hello
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_initial_state.h>
+#include <runtime/inmatch/server_info.h> // read_session_listing_columns (the published cap)
 #include <runtime/inmatch/server_session.h>
 
 #include <cstdio>
@@ -271,6 +272,13 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	if (!expect(ctx->config.live_slot_limit() == 9 &&
 	                    ctx->config.total_player_slot_capacity() == session.player_slot_limit(),
 	            "the map change moves the live slot limit and keeps the slot table's capacity"))
+		return false;
+	// The lobby's published cap reads it [orig: Lobby_UpdateServerInfo @0x4FE8C0 -
+	//  dword_24D211C @0x4FEB03].
+	opennova::HostRegistration listing;
+	inmatch::read_session_listing_columns(listing, *ctx, opennova::hud::GameTextLookup{});
+	if (!expect(listing.published_cap == 9,
+	            "the map change's slot limit reaches the lobby's published cap"))
 		return false;
 	return expect((ctx->config.mp_attributes & kTeamChoose) != 0 &&
 	                      ctx->config.round_time_limit_minutes == 30 &&

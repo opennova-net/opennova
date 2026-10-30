@@ -601,7 +601,12 @@ struct GameConfig {
 	// its rows to it; nothing advertises or admits against it.
 	// [orig: dword_24D211C - Entity_SpawnFromBMSRecord @0x40EA86, Lobby_UpdateServerInfo
 	//  @0x4FEB03, Client_BuildMissionDataRequestBlock @0x51E897, Server_DrawStatusScreen
-	//  @0x50A49A, Server_BuildStatusString @0x4FDF10, Server_InitPlayerSlotSystem @0x4243B2]
+	//  @0x50A49A] One reader more sizes the listen host's own client roster from it at every
+	// mission start, at most 251 rows [orig: Server_InitPlayerSlotSystem @0x4243A0 (from
+	// Game_StartMission @0x5248C1) - the read @0x4243B2, PlayerSlotTable_Reallocate @0x434B90];
+	// ours sizes no client roster (replication::ClientState::roster's fixed rows) and rebuilds
+	// the host's client runtime at each bring-up, as the reallocation clears it.
+	// (Server_BuildStatusString @0x4FDEC0 reads it too, and has no caller.)
 	uint32_t live_slot_limit() const { return mission_slot_limit.value_or(player_slot_limit()); }
 
 	// The fixed player-slot table: the slot limit alone, a spectator taking an
