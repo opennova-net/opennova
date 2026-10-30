@@ -225,6 +225,10 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		std::string line = novaworld_host(novaworld.server) + ": " + standing.line;
 		if (novaworld.remote_known) line += novaworld.remote.is_public ? ", Public" : ", Private";
 		ui_kit::clipped_text(line, standing.tip);
+		if (ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_NoAutoOpenOnLog)) {
+			ui_kit::clipped_text("Key: " + novaworld.key, "How NovaWorld and every copy of the project name it.");
+			ImGui::TreePop();
+		}
 		if (novaworld.remote_known && novaworld.remote.lobby) {
 			ui_kit::clipped_text("Lobby: " + novaworld.remote.lobby->display_name);
 			ui_kit::quiet_text(novaworld.remote.lobby_locked

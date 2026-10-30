@@ -167,7 +167,7 @@ NovaWorldJobProgress NovaWorldPull::progress() const {
 		case Phase::AskHead:
 			if (restore_)
 				return { "Reading the base's files", 0, 0, false };
-			return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
+			return { "Asking NovaWorld for the newest revision", 0, 0, false };
 		case Phase::ReadManifest:
 			return { "Reading revision " + std::to_string(remote_.head) + "'s file list", 0, 0, false };
 		case Phase::Scan:
@@ -294,7 +294,7 @@ NovaWorldJobState NovaWorldPull::step(uint64_t budget) {
 					return fail("the session ended: sign in again");
 				NovaWorldApiError error;
 				if (!read_remote(call_.reply(), head_, error))
-					return fail("cannot read " + copy_.key + ": " + error.line());
+					return fail("cannot read the project: " + error.line());
 				call_ = NovaWorldCall();
 				if (remote_.head < copy_.revision || head_replaced(novaworld_paths_, head_, copy_.revision))
 					return end_reset();
@@ -448,7 +448,7 @@ void NovaWorldCheck::cancel() {
 
 NovaWorldJobProgress NovaWorldCheck::progress() const {
 	if (phase_ == Phase::AskHead)
-		return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
+		return { "Asking NovaWorld for the newest revision", 0, 0, false };
 	if (!scan_ || scan_->listing())
 		return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0, false };
 	return { "Reading the folder's files", scan_->bytes_hashed(), scan_->bytes_to_hash(), true };
@@ -526,7 +526,7 @@ void NovaWorldTrack::cancel() {
 
 NovaWorldJobProgress NovaWorldTrack::progress() const {
 	if (phase_ == Phase::AskHead)
-		return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
+		return { "Asking NovaWorld for the newest revision", 0, 0, false };
 	if (phase_ == Phase::ReadManifest)
 		return { "Reading revision " + std::to_string(remote_.head) + "'s file list", 0, 0, false };
 	if (!scan_ || scan_->listing())
@@ -563,7 +563,7 @@ NovaWorldJobState NovaWorldTrack::step(uint64_t budget) {
 					return fail("the session ended: sign in again");
 				NovaWorldApiError error;
 				if (!read_remote(call_.reply(), head_, error))
-					return fail("cannot read " + copy_.key + ": " + error.line());
+					return fail("cannot read the project: " + error.line());
 				call_ = NovaWorldCall();
 				if (remote_.head == 0)
 					return write({}, 0); // no revision yet: every file of the folder is its first push
@@ -630,7 +630,7 @@ void NovaWorldPush::cancel() {
 NovaWorldJobProgress NovaWorldPush::progress() const {
 	switch (phase_) {
 		case Phase::AskHead:
-			return { "Asking NovaWorld for " + copy_.key + "'s newest revision", 0, 0, false };
+			return { "Asking NovaWorld for the newest revision", 0, 0, false };
 		case Phase::Scan:
 			if (!scan_ || scan_->listing())
 				return { "Listing files (" + grouped(scan_ ? scan_->files_listed() : 0) + ")", 0, 0,
@@ -708,10 +708,10 @@ NovaWorldJobState NovaWorldPush::step(uint64_t budget) {
 				std::optional<RemoteRevision> head;
 				NovaWorldApiError error;
 				if (!read_remote(call_.reply(), head, error))
-					return fail("cannot read " + copy_.key + ": " + error.line());
+					return fail("cannot read the project: " + error.line());
 				call_ = NovaWorldCall();
 				if (!remote_.can_push)
-					return fail(novaworld_push_refusal(copy_.key));
+					return fail(novaworld_push_refusal());
 				head_ = remote_.head;
 				if (head_ < copy_.revision || head_replaced(novaworld_paths_, head, copy_.revision))
 					return end_reset();

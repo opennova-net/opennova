@@ -146,6 +146,10 @@ private:
 	void account_changed();
 	// The project list asked of the service (the account's view of it).
 	void list_projects();
+	// The project `key` in a person's words: its name as listed or as the service last answered, the open
+	// project's as its file has it, and the key only where nothing says more. The key is the identity
+	// underneath, and no window's word for a project.
+	std::string project_name(const std::string &key) const;
 	// The open project's export folder (ProjectPaths::export_dir), which no scan of it reads.
 	std::string export_dir() const;
 	// The open project's working copy on the account's service: the state there of the key its

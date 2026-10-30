@@ -52,20 +52,27 @@ std::vector<const RemoteProject *> empty_projects(const SessionView &view) {
 	return out;
 }
 
-// A project's words in a list: its title, then its key.
-std::string project_words(const RemoteProject &project) {
-	return project.title.empty() || project.title == project.key ? project.key : project.title + " (" + project.key + ")";
-}
-
-// A base game's words by its key: its name, as the games or the projects list it, then its key.
+// A base game's words by its key: its name, as the games or the projects list it.
 std::string base_words(const NovaWorldView &novaworld, const std::string &key) {
 	for (const RemoteGame &game : novaworld.games)
-		if (game.key == key) return game.title.empty() || game.title == key ? key : game.title + " (" + key + ")";
+		if (game.key == key) return game.title.empty() ? key : game.title;
 	const RemoteProject *project = listed(novaworld, key);
-	return project ? project_words(*project) : key;
+	return project ? novaworld_project_words(novaworld, *project) : key;
 }
 
 } // namespace
+
+std::string novaworld_project_words(const NovaWorldView &novaworld, const RemoteProject &project) {
+	const std::string name = project.title.empty() ? project.key : project.title;
+	size_t named = 0, owned = 0;
+	for (const RemoteProject &other : novaworld.projects)
+		if ((other.title.empty() ? other.key : other.title) == name) {
+			++named;
+			owned += other.owner == project.owner ? 1 : 0;
+		}
+	if (named < 2) return name;
+	return owned < 2 && !project.owner.empty() ? name + ", " + project.owner + "'s" : name + " (" + project.key + ")";
+}
 
 std::string novaworld_key_for(const std::string &title, bool player) {
 	const size_t most = player ? kPlayerKeyMost : 16;
@@ -154,11 +161,12 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 			copy_text(key_, sizeof(key_), novaworld_key_for(title_, player));
 		ui_kit::tooltip("The project's name on NovaWorld.");
 		const char *key_rule = player ? "Up to 11 of A-Z, 0-9 and _, without \"QQ\"." : "Up to 16 of A-Z, 0-9 and _.";
-		if (new_here_.empty()) {
+		if (new_here_.empty() && ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_NoAutoOpenOnLog)) {
 			ImGui::SetNextItemWidth(width);
 			if (ImGui::InputText("Key", key_, sizeof(key_), ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
 				key_typed_ = true;
-			ui_kit::tooltip(std::string("How NovaWorld and every copy of the project name it. ") + key_rule);
+			ui_kit::tooltip(std::string("How NovaWorld and every copy of the project name it, made from its name. ") + key_rule);
+			ImGui::TreePop();
 		}
 		// Who gets it, as the website asks it: public first.
 		ui_kit::quiet_text("Who gets it");
@@ -229,14 +237,18 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 			if (why.empty()) why = c.put.refusal;
 		}
 		if (why.empty() && !title_[0]) why = "Name it first.";
+		if (why.empty() && !key_[0]) why = "Name it with letters or digits.";
 		if (why.empty() && !(player ? novaworld_player_key(key_) : is_novaworld_key(key_)))
-			why = std::string("Its key: ") + key_rule;
+			why = std::string("Its key, under Details: ") + key_rule;
 	} else {
 		ImGui::SetNextItemWidth(width);
 		const RemoteProject *chosen = listed(c, empty_);
-		if (ImGui::BeginCombo("Project", chosen ? project_words(*chosen).c_str() : "Choose one")) {
-			for (const RemoteProject *project : empty)
-				if (ImGui::Selectable(project_words(*project).c_str(), project->key == empty_)) empty_ = project->key;
+		if (ImGui::BeginCombo("Project", chosen ? novaworld_project_words(c, *chosen).c_str() : "Choose one")) {
+			for (const RemoteProject *project : empty) {
+				ImGui::PushID(project->key.c_str());
+				if (ImGui::Selectable(novaworld_project_words(c, *project).c_str(), project->key == empty_)) empty_ = project->key;
+				ImGui::PopID();
+			}
 			ImGui::EndCombo();
 		}
 		ui_kit::tooltip("A project on NovaWorld with nothing pushed yet that this project is (a game or a mod, of its "

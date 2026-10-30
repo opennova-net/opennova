@@ -272,6 +272,7 @@ void test_working_copy() {
 	      "the changes, each with what it did");
 	CHECK(text.find("novaworld.test: r3, 2 changed, 2 incoming") != std::string::npos, "the status bar's standing");
 	CHECK(text.find("Bind") == std::string::npos, "no Bind");
+	CHECK(text.find("MOD") == std::string::npos, "the key is no word of the window's");
 	for (const std::string &offender : overflowing()) CHECK(false, ("tracked: " + offender).c_str());
 
 	// Push waits for a message; typed, it raises novaworld_push with it.
@@ -512,6 +513,8 @@ void test_put_and_sign_in() {
 	CHECK(text.find("Runs as Joint Operations (JO protocol 16)") != std::string::npos &&
 	              text.find("Who gets it") != std::string::npos,
 	      "what it makes, and who gets it, shown");
+	CHECK(text.find("Details") != std::string::npos && text.find("MYMOD") == std::string::npos,
+	      "its key made from its name, kept under Details");
 	ui.activate(put_item({"Put"}));
 	std::vector<EditorRequest> raised = ui.drain();
 	const EditorRequest *made = one(raised, EditorRequestKind::NovaWorldPut);
@@ -567,7 +570,7 @@ void test_put_and_sign_in() {
 	ui.frames(2);
 	ui.drain();
 	ui.away();
-	CHECK(logged_frame(ui).find("A mod of Joint Operations (JO), as mymod") != std::string::npos,
+	CHECK(logged_frame(ui).find("A mod of Joint Operations, as mymod") != std::string::npos,
 	      "a mod's base game, by its name");
 	ui.activate(put_item({"Cancel"}));
 	ui.drain();
@@ -665,10 +668,10 @@ void test_get_a_project() {
 	ui.frames(3);
 	ui.away();
 	const std::string home = logged_frame(ui);
-	CHECK(home.find("Get a project from NovaWorld") != std::string::npos && home.find("A mod  MOD r5") != std::string::npos,
+	CHECK(home.find("Get a project from NovaWorld") != std::string::npos && home.find("A mod  r5") != std::string::npos,
 	      "the welcome page lists the store's projects");
 	CHECK(home.find("OpenNova's") != std::string::npos && home.find("Players'") != std::string::npos &&
-	              home.find("Theirs  THEIRS r5") != std::string::npos && home.find("Mine  EMPTY, empty") != std::string::npos,
+	              home.find("Theirs  r5") != std::string::npos && home.find("Mine, empty") != std::string::npos,
 	      "in groups by whose they are: OpenNova's, other players'");
 	// The NovaWorld window shown over the welcome page lists them too; Get... asks for a folder.
 	auto *content = const_cast<devtools::Window *>(find_window(ui.windows.pass(), "NovaWorld"));
@@ -742,7 +745,7 @@ void test_get_a_project() {
 	ui.focus("Document");
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("For NovaWorld project EMPTY") != std::string::npos, "the form says what it is for");
+	CHECK(logged_frame(ui).find("For NovaWorld project Mine") != std::string::npos, "the form says what it is for");
 	const ImGuiID welcome = item_id(Ui::window_id("Document"), {"welcome"});
 	ui.activate(item_id(welcome, {"Make the project"}));
 	raised = ui.drain();

@@ -94,8 +94,8 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 		ImGui::PushID(project.key.c_str());
 		ImGui::TableNextRow();
 		ImGui::TableNextColumn();
-		std::string line = (project.title.empty() ? project.key : project.title) + "  " + project.key;
-		line += project.head > 0 ? " r" + std::to_string(project.head) : std::string(", empty");
+		std::string line = novaworld_project_words(v.novaworld, project);
+		line += project.head > 0 ? "  r" + std::to_string(project.head) : std::string(", empty");
 		if (!project.is_public) line += ", private";
 		std::string tip = project.kind == "expansion" && !project.base.empty() ? "A mod of " + project.base + "."
 		                                                                       : std::string();
@@ -124,7 +124,7 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 			ImGui::BeginDisabled(!sets_up);
 			if (ImGui::SmallButton("Set up...") && sets_up) set_up(workspace, project);
 			ImGui::EndDisabled();
-			ui_kit::tooltip("Fills New project for " + project.key + ": create it, then push its files.");
+			ui_kit::tooltip("Fills New project for it: create it, then push its files.");
 		} else {
 			const bool can = gets && project.head > 0;
 			ImGui::BeginDisabled(!can);
@@ -134,8 +134,8 @@ void project_rows(Workspace &workspace, const char *table, const std::vector<con
 				workspace.request(std::move(pick));
 			}
 			ImGui::EndDisabled();
-			ui_kit::tooltip(project.head > 0 ? "Downloads the project into a folder named " + project.key +
-			                                           " inside the one you choose, then opens it" +
+			ui_kit::tooltip(project.head > 0 ? std::string("Downloads the project into a folder of its own inside the one "
+			                                               "you choose, then opens it") +
 			                                           (v.project.open ? " in place of this one." : ".")
 			                                 : "Nothing has been pushed to it yet.");
 		}
@@ -534,8 +534,8 @@ void NovaWorldWindow::draw_release(const NovaWorldView &c) {
 	// The project's releases, newest first: what each came to, a draft's Submit (Publish, an admin's).
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Open on the site", v.allows(EditorRequestKind::NovaWorldOpenSite),
-	                 admin(c) ? "Opens the admin's Products page for " + c.key + " in your browser."
-	                          : "Opens " + c.key + "'s page under Projects in your browser: its releases, its history."))
+	                 admin(c) ? "Opens the admin's Products page for this project in your browser."
+	                          : "Opens its page under Projects in your browser: its releases, its history."))
 		workspace_.request(request::novaworld_open_site("project"));
 	if (!c.releases_error.empty()) ui_kit::refusal_text(c.releases_error);
 	const bool submits = v.allows(EditorRequestKind::NovaWorldSubmit) && !c.calling;

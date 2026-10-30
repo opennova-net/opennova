@@ -77,7 +77,7 @@ bool BaseSetupOperation::step(const StepBudget &budget) {
 		if (pull_->state() != NovaWorldJobState::Done)
 			return fail(pull_->error().empty() ? "the get was cancelled" : pull_->error());
 		if (pull_->up_to_date())
-			return fail(setup_.key + " has no revision yet");
+			return fail(setup_.title + " has no revision yet");
 		return finished();
 	}
 	if (!started_) {

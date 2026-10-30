@@ -59,8 +59,8 @@ inline std::string transfer_text(
 
 // Why the account may not push the project `key` (the service's can_push for it): a push's refusal,
 // the job's and the session's alike.
-inline std::string novaworld_push_refusal(const std::string &key) {
-	return "Only its owner and NovaWorld's admins push " + key + ".";
+inline std::string novaworld_push_refusal() {
+	return "Only its owner and NovaWorld's admins push this project.";
 }
 
 enum class NovaWorldJobState : uint8_t {

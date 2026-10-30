@@ -65,13 +65,12 @@ bool expansion_code(const std::string &name) {
 	return true;
 }
 
-// Why a get of the project `key` gets nothing: it has no revision yet (the NovaWorld window offers
+// Why a get of the project `name` gets nothing: it has no revision yet (the NovaWorld window offers
 // Set up... for one the account may push, and no Get).
-std::string no_revision_text(const std::string &key) {
-	return key +
+std::string no_revision_text(const std::string &name) {
+	return name +
 			" has no revision yet, so there is nothing to get: set up a new project for it "
-			"(Set up...) or put an open project on NovaWorld as " +
-			key + ", then push its first revision.";
+			"(Set up...) or put an open project on it, then push its first revision.";
 }
 
 // Why a request finds no working copy where the view showed one: its state gone since.
@@ -97,9 +96,9 @@ std::string noun_of(OperationKind kind, bool get) {
 	return noun;
 }
 
-// Why the service shows the account no project `key` (a 404): one it lacks, or a private one.
-std::string unreadable_text(const std::string &key, const std::string &server) {
-	return key + " is not on " + novaworld_host(server) +
+// Why the service shows the account no project `name` (a 404): one it lacks, or a private one.
+std::string unreadable_text(const std::string &name, const std::string &server) {
+	return name + " is not on " + novaworld_host(server) +
 			", or is private: sign in with an account that may read it, or on the NovaWorld server it is "
 			"on.";
 }
@@ -129,9 +128,9 @@ std::string plain(const NovaWorldApiError &error) {
 std::string created_refusal(
 		const NovaWorldApiError &error, const std::string &key, const std::string &code) {
 	if (error.code == "duplicate_key")
-		return "NovaWorld has a project " + key + " already: choose another key.";
+		return "NovaWorld has a project of this name already: choose another name.";
 	if (error.code == "invalid_field" && error.field == "key")
-		return "NovaWorld takes no key " + key + ": up to 11 of A-Z, 0-9 and _, without \"QQ\".";
+		return "NovaWorld takes no such key as " + key + ": name it with letters or digits.";
 	// A mod's short name is NovaWorld's own across every game (expansion\<code>\ in any install).
 	if (error.code == "duplicate_expansion" ||
 			(error.status == 409 && error.field == "expansion_code"))
@@ -148,9 +147,9 @@ std::string created_refusal(
 	return plain(error);
 }
 
-// Why the account may not release the project `key` (the service's can_release for it).
-std::string release_rights_text(const std::string &key) {
-	return "Only its owner and NovaWorld's admins release " + key + ".";
+// Why the account may not release the project (the service's can_release for it).
+std::string release_rights_text() {
+	return "Only its owner and NovaWorld's admins release this project.";
 }
 
 // Why the service would not build a release of the project `key` (POST /api/products/<key>/releases),
@@ -158,7 +157,7 @@ std::string release_rights_text(const std::string &key) {
 std::string release_refusal(
 		const NovaWorldApiError &error, const NovaWorldResponse &reply, const std::string &key) {
 	if (error.code == "forbidden")
-		return release_rights_text(key);
+		return release_rights_text();
 	if (error.code == "release_in_progress")
 		return "a release of the account's is building already, and NovaWorld builds one at a time "
 			   "for an account: release again once it is done.";
@@ -220,16 +219,17 @@ bool novaworld_player_key(const std::string &key) {
 
 std::string novaworld_put_mismatch(const ProjectDocument &doc, const RemoteProject &project) {
 	const bool mod = !doc.expansion.standalone();
+	const std::string name = project.title.empty() ? project.key : project.title;
 	if (project.kind != (mod ? "expansion" : "game"))
-		return project.key + " is " + (project.kind == "expansion" ? "a mod" : "a game") +
+		return name + " is " + (project.kind == "expansion" ? "a mod" : "a game") +
 				" on NovaWorld, and the project is " + (mod ? "a mod" : "a game") +
 				": put it on an empty " + (mod ? "mod" : "game") + ", or as a new project.";
 	if (project.game != doc.target_game)
-		return project.key + " is a project of " + game_words(project.game) + ", and this one of " +
+		return name + " is a project of " + game_words(project.game) + ", and this one of " +
 				game_words(doc.target_game) +
 				": put it on an empty project of its game, or as a new project.";
 	if (mod && !strutil::iequals(project.expansion_code, doc.expansion.name))
-		return project.key + " is the mod " + project.expansion_code + ", and this one is " +
+		return name + " is the mod " + project.expansion_code + ", and this one is " +
 				doc.expansion.name + ": give the expansion the Short name " + project.expansion_code +
 				" in Project settings, or put it on as a new project.";
 	return {};
@@ -291,9 +291,8 @@ void NovaWorldController::account_changed() {
 	if (put_.started() || put_waiting_) {
 		put_ = NovaWorldCall();
 		put_waiting_ = false;
-		view.last = "The put of " + put_key_ +
-				" on NovaWorld was given up: the account changed before it finished. Put the project on "
-				"again.";
+		view.last = "The put on NovaWorld was given up: the account changed before it finished. Put the "
+				"project on again.";
 		core_.note("NovaWorld: " + view.last);
 	}
 	// A pull stopped on its conflicts holds the last account, and its service's base.
@@ -327,6 +326,17 @@ void NovaWorldController::account_changed() {
 		track(false);
 }
 
+std::string NovaWorldController::project_name(const std::string &key) const {
+	const NovaWorldView &view = core_.view().novaworld;
+	if (const RemoteProject *listed = listed_project(view, key); listed && !listed->title.empty())
+		return listed->title;
+	if (view.remote_known && view.remote.key == key && !view.remote.title.empty())
+		return view.remote.title;
+	if (core_.view().project.open && core_.view().project.document->novaworld == key)
+		return core_.view().project.document->title;
+	return key;
+}
+
 void NovaWorldController::refuse(const std::string &why) {
 	core_.refuse_request(CoreFinding::NovaWorldRefused, why);
 }
@@ -356,7 +366,7 @@ bool NovaWorldController::ready(bool project, bool tracked) {
 	if (!view.tracked) {
 		refuse(!view.head_error.empty()
 						? view.head_error
-						: "The folder is not set up as " + view.key + "'s working copy on " +
+						: "The folder is not set up as a working copy on " +
 								novaworld_host(account_.server) + " yet: Check sets it up.");
 		return false;
 	}
@@ -498,7 +508,7 @@ void NovaWorldController::take_remote(const NovaWorldJob &job) {
 		view.remote = RemoteProject();
 		view.remote_known = false;
 		view.head_known = false;
-		view.head_error = unreadable_text(view.key, account_.server);
+		view.head_error = unreadable_text(project_name(view.key), account_.server);
 		view.head_missing = true;
 	}
 }
@@ -712,7 +722,7 @@ void NovaWorldController::put(const EditorRequest &request) {
 	const bool new_here = !doc.novaworld.empty() && doc.novaworld == request.project_key &&
 			request.create && core_.view().novaworld.head_missing;
 	if (!doc.novaworld.empty() && !new_here) {
-		refuse("The project is on NovaWorld already, as " + doc.novaworld + ".");
+		refuse("The project is on NovaWorld already.");
 		return;
 	}
 	if (!is_novaworld_key(request.project_key)) {
@@ -785,16 +795,15 @@ void NovaWorldController::finish_put() {
 	if (!core_.view().project.open || core_.paths().root != put_root_ ||
 			(!core_.view().project.document->novaworld.empty() &&
 					core_.view().project.document->novaworld != key))
-		return failed(key +
-				" is on NovaWorld, but its project closed or changed before its key was "
-				"written: open it and put it on NovaWorld again.");
+		return failed("The project is on NovaWorld, but it closed or changed before its file could say so: "
+				"open it and put it on NovaWorld again.");
 	// The key written as Project settings' Apply writes the project file.
 	ProjectDocument project = *core_.view().project.document;
 	Diagnostic error;
 	if (project.novaworld != key) {
 		project.novaworld = key;
 		if (!core_.write_project(project, error))
-			return failed(key + " is on NovaWorld, but the project file was not written (" +
+			return failed("The project is on NovaWorld, but its file was not written (" +
 					error.message + "): put it on NovaWorld again.");
 	}
 	// The folder its working copy at revision 0 on the service the put was sent to: no base, every
@@ -804,8 +813,8 @@ void NovaWorldController::finish_put() {
 	if (!write_novaworld_base(paths, {}, why) ||
 			!write_novaworld_state(paths, NovaWorldWorkingCopy{ key, 0 }, why)) {
 		show_copy();
-		return failed("The project is on NovaWorld as " + key +
-				", but its working copy is not set up (" + why + "): Check sets it up.");
+		return failed("The project is on NovaWorld, but its working copy is not set up (" + why +
+				"): Check sets it up.");
 	}
 	view.remote = put_project_;
 	cache_lobby(core_.paths(), put_project_);
@@ -815,7 +824,7 @@ void NovaWorldController::finish_put() {
 	view.head_error.clear();
 	view.head_missing = false;
 	show_copy();
-	view.last = "The project is on NovaWorld as " + key + ": push its files as the first revision.";
+	view.last = "The project is on NovaWorld: push its files as the first revision.";
 	core_.note("NovaWorld: " + view.last);
 	// Its files counted as the first push's changes; the projects listed again, a new one with
 	// them.
@@ -880,7 +889,7 @@ void NovaWorldController::push(const EditorRequest &request) {
 	}
 	// The service's word on it as it last answered; the push asks again as it starts.
 	if (view.remote_known && !view.remote.can_push) {
-		refuse(novaworld_push_refusal(view.key));
+		refuse(novaworld_push_refusal());
 		return;
 	}
 	if (!project::is_utf8(request.message) || request.message.empty() ||
@@ -911,7 +920,7 @@ void NovaWorldController::release(const EditorRequest &request) {
 	// The service's word on it as it last answered (its owner and the admins release it); the release
 	// route weighs it again.
 	if (view.remote_known && !view.remote.can_release) {
-		refuse(release_rights_text(view.key));
+		refuse(release_rights_text());
 		return;
 	}
 	// The release route's rule (Version's one): one to four numbers between dots.
@@ -1067,7 +1076,7 @@ void NovaWorldController::poll() {
 			view.head_known = read;
 			view.head = read ? remote.head : 0;
 			view.head_error = read		  ? std::string()
-					: error.status == 404 ? unreadable_text(view.key, account_.server)
+					: error.status == 404 ? unreadable_text(project_name(view.key), account_.server)
 										  : plain(error);
 			view.head_missing = !read && error.status == 404;
 			// A project the account may read, its folder no working copy of it here yet: set up.
@@ -1103,13 +1112,13 @@ void NovaWorldController::poll() {
 		const bool same_open = core_.view().project.open && core_.paths().root == put_root_;
 		if (!read)
 			refused = put_create_		  ? created_refusal(error, put_key_, put_code_)
-					: error.status == 404 ? unreadable_text(put_key_, put_server_)
+					: error.status == 404 ? unreadable_text(project_name(put_key_), put_server_)
 										  : plain(error);
 		else if (!put_create_ && project.head > 0)
 			refused = put_key_ +
 					" has revisions already, so it is no empty project: get it (Get...) instead.";
 		else if (!project.can_push)
-			refused = novaworld_push_refusal(put_key_);
+			refused = novaworld_push_refusal();
 		else if (!put_create_ && same_open)
 			refused = novaworld_put_mismatch(*core_.view().project.document, project);
 		if (!refused.empty()) {
@@ -1300,13 +1309,13 @@ void NovaWorldController::make_own() {
 	project.novaworld.clear();
 	Diagnostic error;
 	if (!core_.write_project(project, error)) {
-		refuse("The project file was not written (" + error.message + "): it still names " + key + ".");
+		refuse("The project file was not written (" + error.message + "): the folder is still on NovaWorld.");
 		return;
 	}
 	paused_.reset();
 	show_conflicts();
 	project_opened(); // its place on NovaWorld read again: none
-	view_last("The project names " + key + " no longer: Rejoin takes the folder back to it.");
+	view_last("The folder left its NovaWorld project: Rejoin takes it back.");
 }
 
 void NovaWorldController::keep_folder() {
@@ -1338,14 +1347,14 @@ void NovaWorldController::rejoin() {
 	project.novaworld = key;
 	Diagnostic error;
 	if (!core_.write_project(project, error)) {
-		refuse("The project file was not written (" + error.message + "): the folder did not go back to " + key + ".");
+		refuse("The project file was not written (" + error.message + "): the folder did not go back.");
 		return;
 	}
 	paused_.reset();
 	show_conflicts();
 	project_opened(); // its place on NovaWorld read again: the working copy it left, or its setup
 	core_.remember_working_copy(core_.paths().root);
-	view_last("The folder is back on " + key + ".");
+	view_last("The folder is back on NovaWorld.");
 }
 
 void NovaWorldController::make_missing_base(const EditorRequest &request) {
@@ -1393,7 +1402,7 @@ void NovaWorldController::submit(const EditorRequest &request) {
 		return;
 	const NovaWorldView &view = core_.view().novaworld;
 	if (!account_.signed_in() || (view.remote_known && !view.remote.can_release)) {
-		refuse(release_rights_text(view.key));
+		refuse(release_rights_text());
 		return;
 	}
 	const RemoteRelease *draft = nullptr;
@@ -1401,7 +1410,7 @@ void NovaWorldController::submit(const EditorRequest &request) {
 		if (!draft && release.status == "draft" && release.version == request.version)
 			draft = &release;
 	if (!draft) {
-		refuse(view.key + " has no draft release " + request.version +
+		refuse("The project has no draft release " + request.version +
 				" to submit: a release is a draft once NovaWorld has built and checked it.");
 		return;
 	}
@@ -1409,7 +1418,7 @@ void NovaWorldController::submit(const EditorRequest &request) {
 		refuse("A release is being submitted already.");
 		return;
 	}
-	submit_name_ = draft->name.empty() ? view.key + " " + draft->version : draft->name;
+	submit_name_ = draft->name.empty() ? project_name(view.key) + " " + draft->version : draft->name;
 	submit_ = NovaWorldCall(*transport_, novaworld_api::submit_release(account_, view.key, draft->id));
 	show_calls();
 }
@@ -1447,13 +1456,13 @@ void NovaWorldController::show_calls() {
 			project_.started() || put_.started() || release_.started() || history_.started() ||
 			releases_.started() || submit_.started();
 	// The one most worth saying, a person's own ask first.
-	const std::string waiting = put_.started() ? "Putting " + put_key_ + " on NovaWorld..."
-			: release_.started() ? "Asking NovaWorld to build " + release_key_ + " " + release_version_ + "..."
+	const std::string waiting = put_.started() ? std::string("Putting the project on NovaWorld...")
+			: release_.started() ? "Asking NovaWorld to build version " + release_version_ + "..."
 			: submit_.started()	 ? "Submitting " + submit_name_ + "..."
 			: login_.started()	 ? "Signing in to " + novaworld_host(login_server_) + "..."
-			: history_.started() ? "Listing " + view.key + "'s revisions..."
+			: history_.started() ? std::string("Listing the project's revisions...")
 			: projects_.started() || games_.started() ? std::string("Listing NovaWorld's projects...")
-			: project_.started() ? "Asking NovaWorld for " + project_key_ + "..."
+			: project_.started() ? "Asking NovaWorld for " + project_name(project_key_) + "..."
 								 : std::string();
 	if (view.calling != calling || view.waiting != waiting) {
 		view.calling = calling;
@@ -1558,7 +1567,7 @@ void NovaWorldController::forget_project() {
 
 void NovaWorldController::reset_found(int64_t head) {
 	NovaWorldView &view = core_.view().novaworld;
-	view.last = "NovaWorld was reset: " + view.key + " is at revision " + std::to_string(head) +
+	view.last = "NovaWorld was reset: the project is at revision " + std::to_string(head) +
 			", with other files than the folder's revision " + std::to_string(view.revision) +
 			". The folder is set up as its working copy again.";
 	core_.note("NovaWorld: " + view.last);
@@ -1587,7 +1596,7 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 			// list said): nothing written, no working copy.
 			get_dir_.clear();
 			get_base_key_.clear();
-			view.last = no_revision_text(pull.remote().key);
+			view.last = no_revision_text(project_name(pull.remote().key));
 			refuse(view.last);
 			return;
 		}
@@ -1637,12 +1646,12 @@ void NovaWorldController::finish_pull(NovaWorldPull &pull) {
 									  base && !base->title.empty() ? base->title : base_key,
 									  request::open_project(dir) },
 							game, core_.game_install(), why)) {
-					view.last += " Making its base game's project, " + base_key + ", in " + base_dir + ".";
-					core_.note("NovaWorld: Making " + base_key + "'s project in " + base_dir +
+					view.last += " Making its base game's project, " + project_name(base_key) + ", in " + base_dir + ".";
+					core_.note("NovaWorld: Making " + project_name(base_key) + "'s project in " + base_dir +
 							" for the mod to build on.");
 					return;
 				}
-				const std::string skipped = "Its base game's project, " + base_key + ", is not got: " +
+				const std::string skipped = "Its base game's project, " + project_name(base_key) + ", is not got: " +
 						why + " Name one in Project settings, then the NovaWorld window's Make the base game's project makes "
 						"it in " + base_dir + ".";
 				view.last += " " + skipped;
@@ -1799,8 +1808,7 @@ OperationOutcome NovaWorldController::finish_job(
 				view.checked = false;
 				view.changes.clear();
 				view.problems.clear();
-				view.last = "The folder is " + copy.key + "'s working copy on " +
-						novaworld_host(account_.server) +
+				view.last = "The folder is a working copy on " + novaworld_host(account_.server) +
 						(tracked.keeps_folder()
 								? ", over revision " + std::to_string(copy.revision) +
 										": each difference is a change for your next push."

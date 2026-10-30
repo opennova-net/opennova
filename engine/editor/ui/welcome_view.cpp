@@ -372,9 +372,12 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	// says (its kind, its game, its name and short name) is not asked again.
 	const bool set_up = !form.novaworld.empty();
 	if (set_up) {
-		ui_kit::clipped_text("For NovaWorld project " + form.novaworld,
-		                     "Make the project writes " + form.novaworld + " in the project's file: the folder is then its "
-		                     "working copy, ready to push.");
+		std::string named = form.novaworld;
+		for (const RemoteProject &project : novaworld.projects)
+			if (project.key == form.novaworld && !project.title.empty()) named = project.title;
+		ui_kit::clipped_text("For NovaWorld project " + named,
+		                     "Make the project ties the project's file to it: the folder is then its working copy, ready "
+		                     "to push.");
 		ImGui::SameLine();
 		if (ImGui::SmallButton("x##novaworld")) set("novaworld", io::JsonValue::make_string(""));
 		ui_kit::tooltip("Makes the project for no NovaWorld project: every field the form's again.");
@@ -586,11 +589,14 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			const std::string made_key = novaworld_key_for(form.title, player);
 			put_key_.follow(form.put_key);
 			ImGui::Indent();
-			if (ImGui::InputTextWithHint("Key", made_key.c_str(), put_key_.text, sizeof(put_key_.text),
-			                             ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
-				set("put_key", io::JsonValue::make_string(put_key_.sent()));
 			const char *key_rule = player ? "Up to 11 of A-Z, 0-9 and _, without \"QQ\"." : "Up to 16 of A-Z, 0-9 and _.";
-			ui_kit::tooltip("How NovaWorld and every copy of the project name it (left empty, " + made_key + "). " + key_rule);
+			if (ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_NoAutoOpenOnLog)) {
+				if (ImGui::InputTextWithHint("Key", made_key.c_str(), put_key_.text, sizeof(put_key_.text),
+				                             ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
+					set("put_key", io::JsonValue::make_string(put_key_.sent()));
+				ui_kit::tooltip("How NovaWorld and every copy of the project name it (left empty, " + made_key + "). " + key_rule);
+				ImGui::TreePop();
+			}
 			ui_kit::quiet_text("Who gets it");
 			ImGui::SameLine();
 			if (ImGui::RadioButton("Public", form.put_public) && !form.put_public) set("put_public", io::JsonValue::make_bool(true));
