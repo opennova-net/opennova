@@ -1491,7 +1491,8 @@ void GameWorld::apply_scene_environment_frame() {
 	ObjectShaderCache *shader_cache = ObjectShaderCache::get_singleton();
 	if (water_active) {
 		const float water_height = water_->get_water_height();
-		shader_cache->set_water_plane(water_height, eye_y >= water_height);
+		shader_cache->set_water_plane(water_height,
+				opennova::renderer::scene_camera_above_water(eye_y, water_height));
 	} else {
 		shader_cache->clear_water_plane();
 	}

@@ -1510,7 +1510,8 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	const std::uint32_t world_divisor = strides.main_view;
 
 	const ParticleCameraFrame world_camera = particle_camera_frame(camera);
-	const bool camera_above_water = world_camera.position.y >= water_height_;
+	const bool camera_above_water = opennova::renderer::scene_camera_above_water(
+			world_camera.position.y, water_height_);
 	impl_->refresh_environment(get_environment_source());
 	// The main scene hands its particle passes the frame's thermal byte; every
 	// other scene call passes zero (renderer::particle_thermal_material).
@@ -1664,7 +1665,9 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		const ParticleCameraFrame second_camera =
 				particle_camera_frame(second_scene_camera);
 		compile_secondary_pair(second_camera,
-				second_camera.position.y >= water_height_, kSecondSceneFarSide,
+				opennova::renderer::scene_camera_above_water(
+						second_camera.position.y, water_height_),
+				kSecondSceneFarSide,
 				kSecondSceneCameraSide, impl_->second_scene_effects, strides.inset);
 	} else {
 		impl_->retire_view_pair(impl_->second_scene_effects, kSecondSceneFarSide,

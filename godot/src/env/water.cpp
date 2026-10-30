@@ -334,7 +334,8 @@ void Water::_push_water_split_height() {
 		Camera3D *cam = Object::cast_to<Camera3D>(
 				ObjectDB::get_instance(cached_cam_id_));
 		const bool camera_above = cam == nullptr ||
-				cam->get_camera_transform().get_origin().y >= water_height_;
+				opennova::renderer::scene_camera_above_water(
+						cam->get_camera_transform().get_origin().y, water_height_);
 		++global_writes_; // the shader cache's water plane, process-wide too
 		ObjectShaderCache::get_singleton()->set_water_plane(
 				water_height_, camera_above);
