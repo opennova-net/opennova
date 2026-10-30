@@ -456,48 +456,51 @@ void Mixer::render(int16_t *interleaved, uint32_t frames) {
 				bus1.w[l] = adds(bus1.w[l], mulhi(c.delayed.w[l], sample));
 			}
 		}
-		// The buses' 256-frame box: the sum of the last 256 inputs (dword lanes), its average
-		// rounded, and the input 128 frames late less it [orig: @0x7BEC79..0x7BEE2C; the ring mask
-		// dword_798880 0xFF, the late index dword_798884 0x80, the rounding dword_798878 0x80].
-		const uint32_t at = frame_ & 0xFFu;
-		const uint32_t late = (frame_ + 0x80u) & 0xFFu;
-		Lanes avg0;
-		Lanes high0;
-		Lanes high1;
-		const auto stage = [&](const Lanes &bus, std::array<std::array<int32_t, 4>, 256> &ring,
-				std::array<int32_t, 4> &sum, Lanes &avg, Lanes &high) {
-			for (size_t l = 0; l < 4; ++l) {
-				const int32_t x = bus.w[l];
-				sum[l] = int32_t(uint32_t(sum[l]) - uint32_t(ring[at][l]) + uint32_t(x));
-				ring[at][l] = x;
-				avg.w[l] = sat16(int32_t(uint32_t(sum[l]) + 0x80u) >> 8);
-				high.w[l] = subs(sat16(ring[late][l]), avg.w[l]);
-			}
-		};
-		stage(bus0, ring0_, sum0_, avg0, high0);
-		Lanes avg1;
-		stage(bus1, ring1_, sum1_, avg1, high1);
-		// The block stage every 0x400th frame [orig: @0x7BEF16..0x7BEF55].
-		if ((frame_ & 0x3FFu) == 0) {
-			meter_.stage(follower_);
-			follower_ = 0;
-		}
-		// The stereo output stage [orig: AudioMixer_OutputStereo @0x7BD71A, the stereo mode's
-		// g_AudioMixerOutputStage @0x7BD3A2]: bus 1's high band 256 frames back, two frames each
-		// halved, the newest in.
-		const uint32_t back = frame_ & 0xFFu;
-		const uint32_t after = (frame_ + 1u) & 0xFFu;
-		const Lanes oldest = history_[back];
-		const Lanes next = history_[after];
-		history_[back] = high1;
-		for (size_t l = 0; l < 2; ++l) {
-			int16_t out = adds(high0.w[l], sra(oldest.w[l], 1));
-			out = adds(out, sra(next.w[l], 1));
-			out = adds(out, avg0.w[3]);
-			interleaved[size_t(f) * 2 + l] = out;
-		}
-		++frame_;
+		render_buses(bus0, bus1, interleaved + size_t(f) * 2);
 	}
+}
+
+void Mixer::render_buses(const Lanes &bus0, const Lanes &bus1, int16_t out[2]) {
+	// The buses' 256-frame box: the sum of the last 256 inputs (dword lanes), its average
+	// rounded, and the input 128 frames late less it [orig: @0x7BEC79..0x7BEE2C; the ring mask
+	// dword_798880 0xFF, the late index dword_798884 0x80, the rounding dword_798878 0x80].
+	const uint32_t at = frame_ & 0xFFu;
+	const uint32_t late = (frame_ + 0x80u) & 0xFFu;
+	Lanes avg0;
+	Lanes high0;
+	Lanes high1;
+	const auto stage = [&](const Lanes &bus, std::array<std::array<int32_t, 4>, 256> &ring,
+			std::array<int32_t, 4> &sum, Lanes &avg, Lanes &high) {
+		for (size_t l = 0; l < 4; ++l) {
+			const int32_t x = bus.w[l];
+			sum[l] = int32_t(uint32_t(sum[l]) - uint32_t(ring[at][l]) + uint32_t(x));
+			ring[at][l] = x;
+			avg.w[l] = sat16(int32_t(uint32_t(sum[l]) + 0x80u) >> 8);
+			high.w[l] = subs(sat16(ring[late][l]), avg.w[l]);
+		}
+	};
+	stage(bus0, ring0_, sum0_, avg0, high0);
+	Lanes avg1;
+	stage(bus1, ring1_, sum1_, avg1, high1);
+	// The block stage every 0x400th frame [orig: @0x7BEF16..0x7BEF55].
+	if ((frame_ & 0x3FFu) == 0) {
+		meter_.stage(follower_);
+		follower_ = 0;
+	}
+	// The stereo output stage [orig: AudioMixer_OutputStereo @0x7BD71A, the stereo mode's
+	// g_AudioMixerOutputStage @0x7BD3A2]: bus 1's high band 256 frames back, two frames each
+	// halved, the newest in.
+	const uint32_t back = frame_ & 0xFFu;
+	const uint32_t after = (frame_ + 1u) & 0xFFu;
+	const Lanes oldest = history_[back];
+	const Lanes next = history_[after];
+	history_[back] = high1;
+	for (size_t l = 0; l < 2; ++l) {
+		int16_t word = adds(high0.w[l], sra(oldest.w[l], 1));
+		word = adds(word, sra(next.w[l], 1));
+		out[l] = adds(word, avg0.w[3]);
+	}
+	++frame_;
 }
 
 platform::AudioSpec mix_audio_spec() {
