@@ -18,6 +18,8 @@ var _root_dir := ""
 
 func before_all() -> void:
 	_root_dir = TestFs.stage_terrain_root("region_patch")
+	# The Tmap's foliage on every texel, for the foliage regrowth below.
+	TestFs.stage_tmap_foliage(_root_dir)
 
 
 func after_all() -> void:
@@ -244,23 +246,13 @@ func test_refusals_change_nothing() -> void:
 			"an index that is no tile is refused")
 
 
-func _sample_height(_world_x: float, _world_z: float) -> float:
-	return 10.0
-
-
-func _sample_foliage(_world_x: float, _world_z: float) -> int:
-	return 1
-
-
-func _dispatcher(terrain: Terrain) -> FoliageDispatcher:
+# A dispatcher over the terrain's data, configured as a mission's load configures it.
+func _dispatcher(terrain: Terrain, data: TerrainData) -> FoliageDispatcher:
 	var dispatcher := FoliageDispatcher.new()
 	terrain.get_parent().add_child(dispatcher)
-	var definition := TerrainFoliageDef.new()
-	definition.graphic = "region_patch"
-	definition.match = PackedInt32Array([1])
-	dispatcher.configure_slots([definition], [BoxMesh.new()], [])
-	dispatcher.height_sampler = Callable(self, "_sample_height")
-	dispatcher.foliage_sampler = Callable(self, "_sample_foliage")
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(_root_dir), OK, "the staged terrain root mounts")
+	dispatcher.configure_for_terrain(root, data, null)
 	dispatcher.set_terrain(terrain)
 	return dispatcher
 
@@ -280,7 +272,7 @@ func test_the_foliage_over_a_refreshed_region_grows_again() -> void:
 	var terrain := _terrain(data)
 	terrain.build()
 	var camera := _camera(terrain)
-	var dispatcher := _dispatcher(terrain)
+	var dispatcher := _dispatcher(terrain, data)
 	var steady: FoliageFrameStats = null
 	for _frame_index in 3:
 		steady = _frame(terrain, dispatcher, camera)

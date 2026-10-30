@@ -5036,7 +5036,7 @@ target_include_directories(asset_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME asset_store COMMAND asset_store_test)
 
 # A foliage definition's model asset (runtime/assets/foliage_assets.h): the slot bounds as the
-# terrain load takes them, the LOD0 geometry, the :fd material and the model key.
+# terrain load takes them, the LOD0 geometry, the :fd material row, the slot's status and the model key.
 add_executable(foliage_assets_test assets/foliage_assets_test.cpp)
 target_link_libraries(foliage_assets_test PRIVATE opennova_runtime opennova_formats)
 target_include_directories(foliage_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

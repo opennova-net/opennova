@@ -3,20 +3,13 @@ extends GutTest
 
 
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
-# assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
+# assets it names, with the foliage its definitions draw on every texel; one
+# root per test file (TestFs.staged_foliage_tmap), removed at the end.
 const TMAP_STAGE := "foliage_tile_cache"
 
 
 func after_all() -> void:
 	TestFs.release_staged_tmap(TMAP_STAGE)
-
-
-func _sample_height(_world_x: float, _world_z: float) -> float:
-	return 10.0
-
-
-func _sample_foliage(_world_x: float, _world_z: float) -> int:
-	return 1
 
 
 func _visible_detail_draws(dispatcher: FoliageDispatcher) -> Array:
@@ -52,7 +45,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 	add_child_autofree(viewport)
 
 	var data := TerrainData.new()
-	data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
+	data.set_trn_path(TestFs.staged_foliage_tmap(TMAP_STAGE))
 	assert_eq(data.load(), OK, "the Tmap fixture terrain must load")
 
 	var terrain := Terrain.new()
@@ -68,12 +61,7 @@ func test_runtime_detail_foliage_borrows_terrains_ready_page_binding() -> void:
 
 	var dispatcher := FoliageDispatcher.new()
 	viewport.add_child(dispatcher)
-	var definition := TerrainFoliageDef.new()
-	definition.graphic = "tile_cache_contract"
-	definition.match = PackedInt32Array([1])
-	dispatcher.configure_slots([definition], [BoxMesh.new()], [])
-	dispatcher.height_sampler = Callable(self, "_sample_height")
-	dispatcher.foliage_sampler = Callable(self, "_sample_foliage")
+	dispatcher.configure_for_terrain(TestFs.staged_tmap_root(TMAP_STAGE), data, null)
 	dispatcher.set_terrain(terrain)
 
 	# Retail's first terrain frame claims no page record (every record was last

@@ -53,8 +53,7 @@ class TerrainTileInfo;
 // gate, both retail placement algorithms, per-identity vertex expansion, the
 // MODEL tier's GridPlacementVS instance blocks, the per-submission uniform
 // state, the water sides and ladder rungs, and both wind clocks. This node
-// applies the typed FoliageDrawList: source Mesh extraction at configure
-// time, sampler bindings, ArrayMesh uploads for the detail builds, one
+// applies the typed FoliageDrawList: ArrayMesh uploads for the detail builds, one
 // MultiMesh per MODEL submission over the slot's normalized mesh, retained
 // scenario-instance pooling, material binding, and the opaque-pass depth
 // masks (FoliageMaskPass).
@@ -75,14 +74,11 @@ public:
   FoliageDispatcher();
   ~FoliageDispatcher();
 
-  // Configure the four retail definition slots in one atomic operation.
-  // Arrays are parallel; a missing definition or triangle mesh disables that
-  // slot. No placeholder geometry is manufactured.
-  void configure_slots(const Array &p_defs, const Array &p_meshes,
-                       const Array &p_fd_textures);
-  // The same over each slot's engine geometry (the load's path:
-  // FoliageAssetCache::resolve_slot_geometry); `p_supplied` says which slots
-  // resolved a model.
+  // Configure the four retail definition slots in one atomic operation over
+  // each slot's engine geometry (FoliageAssetCache::resolve_slot_geometry);
+  // `p_supplied` says which slots resolved a model, and engine
+  // assets::foliage_slot_status decides which draw. No placeholder geometry is
+  // manufactured.
   void configure_slot_geometry(const Array &p_defs,
                                std::vector<opennova::renderer::FoliageSlotGeometry> p_geometry,
                                const std::vector<bool> &p_supplied,
@@ -90,33 +86,26 @@ public:
 
   // --- The vegetation asset resolver (the former veg_assets.gd, ADR 0043
   //     slice G10): the dispatcher's FoliageAssetCache (foliage_asset_cache.h)
-  //     holds the caches, its verbs bound here for the shell and the GUT pins. ---
-  // The load plan's foliage stage: resolve every def's mesh and :fd texture
-  // through this dispatcher's caches, then configure_slots over the three
-  // parallel arrays.
+  //     holds the caches. ---
+  // The load plan's foliage stage: resolve every def's model geometry and :fd
+  // texture through this dispatcher's caches, then configure_slot_geometry.
   void configure_slots_from_defs(const Ref<ResourceRoot> &p_resource_root,
                                  const Array &p_defs);
   // A terrain's foliage set up as a mission's load sets it: `p_data` as the
   // runtime source (height, detail/model foliage indices, colormap and change
   // invalidation at once), `p_tiles` as the placed tiles retail's candidate
-  // blocker reads, then every one of the terrain's foliage defs' mesh and :fd
+  // blocker reads, then every one of the terrain's foliage defs' model and :fd
   // texture through `p_resource_root` (configure_slots_from_defs);
   // get_slot_diagnostics reports each slot after. A null `p_data` binds no
   // terrain and configures nothing. GameWorld's load and the editor's terrain
-  // and mission previews set their dispatchers up through here.
+  // and mission previews set their dispatchers up through here, and the GUT
+  // suite drives the same path.
   void configure_for_terrain(const Ref<ResourceRoot> &p_resource_root,
                              const Ref<TerrainData> &p_data,
                              const Ref<TerrainTileInfo> &p_tiles);
-  // The cache's verbs (FoliageAssetCache: clear, entry_count,
-  // resolve_slot_meshes, resolve_slot_fd_textures, load_mesh).
+  // The cache's verbs (FoliageAssetCache: clear, entry_count).
   void clear_asset_cache();
   int asset_cache_entry_count();
-  Array resolve_slot_meshes(const Ref<ResourceRoot> &p_resource_root,
-                            const Array &p_defs);
-  Array resolve_slot_fd_textures(const Ref<ResourceRoot> &p_resource_root,
-                                 const Array &p_defs);
-  Ref<Mesh> load_mesh(const Ref<ResourceRoot> &p_resource_root,
-                      const String &p_graphic);
 
   // The owning Terrain, wired by the game at world load. Supplies the native
   // detail-cell handoff and composed surface textures when available.
@@ -144,8 +133,10 @@ public:
   void set_detail_passes_drawn(bool p_drawn);
   bool is_detail_passes_drawn() const { return detail_passes_drawn_; }
 
-  // Runtime fast path. Height, authored foliage-map, and terrain-atlas
-  // projection all come directly from this resource.
+  // The terrain the frame samples: height, the authored foliage map (the
+  // detail tier's flat atlas lookup and the MODEL tier's sector-routed one),
+  // the colormap and the terrain-atlas projection all come from it. Without
+  // one the frame finds no ground and no foliage.
   void set_terrain_data(const Ref<TerrainData> &p_data);
   Ref<TerrainData> get_terrain_data() const;
 
@@ -153,22 +144,6 @@ public:
   // candidate blocker.
   void set_tile_info(const Ref<TerrainTileInfo> &p_info);
   Ref<TerrainTileInfo> get_tile_info() const;
-
-  // Optional atlas/colormap source for callers without an owning Terrain.
-  // Height and palette sampling can remain live through the Callables below.
-  void set_colormap_source(const Ref<TerrainData> &p_data);
-  Ref<TerrainData> get_colormap_source() const;
-
-  // Optional samplers: (x, z) -> height / foliage palette index. Detail uses
-  // retail's flat wrapped map lookup at the candidate's source-atlas
-  // position; foliage_sampler retains the
-  // sector-routed MODEL lookup and is the compatibility fallback for detail.
-  void set_height_sampler(const Callable &p_sampler);
-  Callable get_height_sampler() const;
-  void set_detail_foliage_sampler(const Callable &p_sampler);
-  Callable get_detail_foliage_sampler() const;
-  void set_foliage_sampler(const Callable &p_sampler);
-  Callable get_foliage_sampler() const;
 
   // Anchors for the distant silhouette/depth-mask tier: the visible
   // crouched/prone infantry standing on terrain, supplied per frame by the
@@ -319,7 +294,7 @@ private:
       source_geometry_{};
   std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> fd_textures_{};
   // Foliagemap pixel -> slot mask, the engine remap evaluated for every
-  // pixel value once per configure_slots (foliage_pixel_masks).
+  // pixel value once per configure_slot_geometry (foliage_pixel_masks).
   std::array<uint8_t, 256> palette_masks_{};
   Array slot_diagnostics_;
   int authored_slot_count_ = 0;
@@ -339,10 +314,6 @@ private:
   Ref<TerrainTileInfo> tile_info_;
   // The placed tiles as the cells were grown over them: what a change of the tile info is compared with.
   std::vector<opennova::TilOverlayEntry> tile_entries_;
-  Ref<TerrainData> colormap_source_;
-  Callable height_sampler_;
-  Callable detail_foliage_sampler_;
-  Callable foliage_sampler_;
   PackedVector3Array silhouette_anchors_;
 
   Ref<Shader> detail_high_shader_;
@@ -434,8 +405,6 @@ private:
   int64_t backend_server_writes() const;
   int64_t total_frame_calls_ = 0;
 
-  opennova::renderer::FoliageSlotGeometry
-  _extract_source_geometry(const Ref<Mesh> &p_mesh) const;
   void _ensure_visuals();
   void _update_materials();
   void _refresh_model_meshes();
@@ -455,7 +424,6 @@ private:
                        size_t p_first, bool p_model_tier);
   void _on_terrain_data_changed();
   void _on_tile_info_changed();
-  void _on_colormap_source_changed();
 
   opennova::renderer::FoliageViewInput
   _view_input(const Transform3D &p_camera_xform, int64_t p_time_ms) const;

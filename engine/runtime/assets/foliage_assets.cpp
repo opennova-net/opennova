@@ -52,6 +52,13 @@ FoliageModelAsset foliage_model_asset(const threedi::Threedi3di3 &model) {
 	const std::vector<renderer::PreparedMeshSurface> surfaces = renderer::prepare_model_mesh(model, 0);
 	if (!surfaces.empty()) {
 		asset.fd_material_array_index = surfaces.front().material_array_index;
+		// The :fd source is the material's row 0 [orig: Foliage_LoadDefAssets
+		// @ 0x60161b, the name at the runtime material's +0x20].
+		const int material = asset.fd_material_array_index;
+		if (material >= 0 && static_cast<uint32_t>(material) < model.material_count &&
+				model.materials[material].texture_count > 0) {
+			asset.fd_texture_row = 0;
+		}
 	}
 	renderer::FoliageSlotGeometry &geometry = asset.geometry;
 	for (const renderer::PreparedMeshSurface &surface : surfaces) {
@@ -101,6 +108,17 @@ FoliageModelAsset foliage_model_asset(const threedi::Threedi3di3 &model) {
 	}
 	foliage_slot_bounds(geometry);
 	return asset;
+}
+
+FoliageSlotStatus foliage_slot_status(bool has_definition, bool model_loaded,
+		const renderer::FoliageSlotGeometry &geometry) {
+	if (!has_definition) {
+		return FoliageSlotStatus::MissingDefinition;
+	}
+	if (!model_loaded) {
+		return FoliageSlotStatus::MissingModel;
+	}
+	return geometry.valid ? FoliageSlotStatus::Enabled : FoliageSlotStatus::InvalidGeometry;
 }
 
 std::string foliage_model_basename(const std::string &graphic) {

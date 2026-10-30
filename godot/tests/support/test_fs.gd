@@ -10,6 +10,9 @@ extends RefCounted
 const TMAP_FIXTURE_DIR := "res://../fixtures/terrain/tmap"
 static var BOOT_FIXTURE_DIR := RuntimeFixture.directory()
 const TMAP_TRN := "Tmap.trn"
+## The synthetic models staged under the Tmap's two foliage graphics.
+const FOLIAGE_MODEL_BUSH1 := "res://../fixtures/threedi/synth/bird.3di"
+const FOLIAGE_MODEL_BUSH2 := "res://../fixtures/threedi/synth/house.3di"
 
 
 ## Stage a runtime root under the cache dir: every tmap fixture file, then
@@ -41,6 +44,51 @@ static func staged_tmap(label: String) -> String:
 	if not _staged_tmaps.has(label):
 		_staged_tmaps[label] = stage_terrain_root(label)
 	return String(_staged_tmaps[label]).path_join(TMAP_TRN)
+
+
+## The synthetic Tmap staged as staged_tmap(label) stages it, with the foliage
+## its two definitions draw (stage_tmap_foliage); returns the staged Tmap.trn
+## path. Released with release_staged_tmap(label).
+static func staged_foliage_tmap(label: String) -> String:
+	if not _staged_tmaps.has(label):
+		var root := stage_terrain_root(label)
+		stage_tmap_foliage(root)
+		_staged_tmaps[label] = root
+	return String(_staged_tmaps[label]).path_join(TMAP_TRN)
+
+
+## The synthetic models the Tmap's two foliage definitions name and their
+## diffuses (bush1.3di the bird, bush2.3di the house, as
+## foliage_dispatcher_assets_test stages them), written into the staged terrain
+## root `root`; with `code` >= 0 the foliage map (Tmap_f.pcx) is painted `code`
+## on every texel, so every candidate the frame weighs matches the definition
+## naming it (254: bush1) wherever the terrain collects a cell. A
+## dispatcher configured over the root (FoliageDispatcher.configure_for_terrain)
+## draws the foliage as a mission's load configures it.
+static func stage_tmap_foliage(root: String, code := 254) -> void:
+	DirAccess.copy_absolute(ProjectSettings.globalize_path(FOLIAGE_MODEL_BUSH1),
+			root.path_join("bush1.3di"))
+	DirAccess.copy_absolute(ProjectSettings.globalize_path(FOLIAGE_MODEL_BUSH2),
+			root.path_join("bush2.3di"))
+	for texture in ["bird.tga", "wall.tga", "roof.tga", "wood.tga"]:
+		_store(root.path_join(texture), tga_bytes(Vector2i(64, 64), Color(0.25, 0.5, 0.25, 1.0)))
+	if code >= 0:
+		_store(root.path_join("Tmap_f.pcx"), TestPcx.solid_indexed(256, 256, code))
+
+
+## A ResourceRoot over the root staged_foliage_tmap(label) (or staged_tmap)
+## staged.
+static func staged_tmap_root(label: String) -> ResourceRoot:
+	var root := ResourceRoot.new()
+	root.set_root_dir(String(_staged_tmaps.get(label, "")))
+	return root
+
+
+static func _store(path: String, bytes: PackedByteArray) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file != null:
+		file.store_buffer(bytes)
+		file.close()
 
 
 ## Remove the root staged_tmap(label) staged (a no-op when it never staged).
