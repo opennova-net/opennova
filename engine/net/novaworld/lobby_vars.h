@@ -9,6 +9,7 @@
 
 #include <net/napi/session.h> // ClientVar / NapiMessage / make_client_host_request / make_client_host_update
 #include <net/novaworld/lobby_update.h> // LobbyStatusBlob (the POST status heartbeat)
+#include <net/protocol/protocol.h> // FingerprintSerialMix (NWPSSK's serial term)
 
 // P7 Part 2 (B2) — the NovaWorld lobby var-builders + identity set, moved out of the Godot bindings
 // so they become pure pumps (ADR 0010 / .agents/README.md: lobby payloads belong in engine/net/novaworld,
@@ -230,7 +231,10 @@ struct LobbyMachineTokens {
 	std::string nwusid;
 };
 
-LobbyMachineTokens make_retail_machine_tokens(const RetailMachineInputs &in);
+// The two tokens over `in`, NWPSSK's fourth dword under the executable's serial term `mix`
+// (Protocol::nwpssk_mix).
+LobbyMachineTokens make_retail_machine_tokens(
+		const RetailMachineInputs &in, const FingerprintSerialMix &mix);
 
 // Inputs for the NW-S5 identity "Cookie" set. Environment collection belongs to the embedder
 // (the locale, make_retail_machine_tokens over the machine's inputs or fallback_machine_tokens);

@@ -149,6 +149,18 @@ inline constexpr ProtocolDialectRow kProtocolDialect[] = {
 	{ 'C', 0x2F, "slot_state.join_state_fixed", "DFX2-11" },
 };
 
+// The volume serial's term the machine fingerprint XORs into its fourth dword: NWPSSK, the token
+// the NovaWorld verify Cookie carries and the key a CD-key activation's hardware mix runs under
+// (make_retail_machine_tokens). Each executable compiles its own: Jointops.exe's
+// (serial ^ word) >> 3, dfx2.exe's (serial >> 3) ^ word.
+struct FingerprintSerialMix {
+	uint32_t word = 0;
+	bool shift_first = false; // (serial >> 3) ^ word; else (serial ^ word) >> 3
+	uint32_t apply(uint32_t serial) const {
+		return shift_first ? (serial >> 3) ^ word : (serial ^ word) >> 3;
+	}
+};
+
 struct Protocol {
 	// OpenNova's short name for the protocol ("jo", "dfx2"), and its label ("JO", shown as
 	// "JO protocol 16").
@@ -191,6 +203,8 @@ struct Protocol {
 	// witnessed difference rather than an unwitnessed value: absent from JO's lists, present in
 	// DFX2's (docs/titles/dfx2-vs-jo-re.md DFX2-7).
 	bool host_category_var = false;
+	// The machine fingerprint's serial term (FingerprintSerialMix): the executable's NWPSSK.
+	std::optional<FingerprintSerialMix> nwpssk_mix;
 	// The sign-in page's submit control (its template's form-post button): the one the
 	// executable's LOGIN callbacks and its login validation name when it is "LOGIN"
 	// (LobbyHttpFlow::sign_in_submit_enabled, D-NET-1335).

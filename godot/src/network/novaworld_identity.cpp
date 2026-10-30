@@ -104,14 +104,14 @@ void sample_device_identity(const opennova::gamecfg::GameCfg &cfg) {
 	if (!sample) sample = read_device_identity(cfg);
 }
 
-opennova::LobbyMachineTokens machine_tokens() {
+opennova::LobbyMachineTokens machine_tokens(const opennova::FingerprintSerialMix &mix) {
 	// Retail derives these tokens from stable volume/MAC data. Off Windows, Godot's
 	// platform-stable opaque ID stands in: hashed into the words retail's inputs would supply,
 	// then retail's own encoders (engine fallback_machine_tokens), so no raw machine identifier
 	// reaches the wire.
 	opennova::RetailMachineInputs machine;
 	if (opennova::read_retail_machine_inputs(machine))
-		return opennova::make_retail_machine_tokens(machine);
+		return opennova::make_retail_machine_tokens(machine, mix);
 	OS *os = OS::get_singleton();
 	// The stand-in tokens' machine words take the renderer's adapter name (the model name, then
 	// "OpenNova", where it has none).
@@ -128,17 +128,18 @@ opennova::LobbyMachineTokens machine_tokens() {
 		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());
 	}
 	stable_identity += "|" + adapter_name;
-	return opennova::fallback_machine_tokens(stable_identity);
+	return opennova::fallback_machine_tokens(stable_identity, mix);
 }
 
 opennova::cdkey::WireKeys machine_activation_cd_keys(const opennova::Protocol *protocol) {
-	if (protocol == nullptr || protocol->cd_key == nullptr)
+	if (protocol == nullptr || protocol->cd_key == nullptr || !protocol->nwpssk_mix)
 		return {};
-	return opennova::activation_cd_keys(
-			protocol->cd_key, opennova::process_menu_browser().jar, machine_tokens().nwpssk);
+	return opennova::activation_cd_keys(protocol->cd_key, opennova::process_menu_browser().jar,
+			machine_tokens(*protocol->nwpssk_mix).nwpssk);
 }
 
-opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::gamecfg::GameCfg &cfg) {
+opennova::LobbyIdentityParams collect_lobby_identity_params(
+		const opennova::gamecfg::GameCfg &cfg, const opennova::Protocol &protocol) {
 	opennova::LobbyIdentityParams out;
 
 	OS *os = OS::get_singleton();
@@ -175,7 +176,7 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::game
 			hw.display_height);
 	out.nwhwi = opennova::make_nwhwi(hw);
 
-	const opennova::LobbyMachineTokens tokens = machine_tokens();
+	const opennova::LobbyMachineTokens tokens = machine_tokens(*protocol.nwpssk_mix);
 	out.nwpssk = tokens.nwpssk;
 	out.nwusid = tokens.nwusid;
 

@@ -98,6 +98,10 @@ void jo_row() {
 			"CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
 	CHECK(std::string(kLobbyPv1) == "0.0.0 2/10/2004 EM");
 	CHECK(std::string(jo->ver1) == "3" && std::string(jo->ver2) == "2345");
+	// NWPSSK's serial term, (serial ^ 0x0B24B390) >> 3. [orig: CDKey_GenerateHardwareFingerprint
+	//  @0x4a4a00 (@0x4a4b1f)]
+	CHECK(jo->nwpssk_mix.has_value() && jo->nwpssk_mix->word == 0x0B24B390u &&
+			!jo->nwpssk_mix->shift_first && jo->nwpssk_mix->apply(0x12345678u) == 0x03221CBDu);
 	CHECK(std::string(jo->product_code) == "jop");
 	CHECK(std::string(jo->gate_tag) == "jop:cus2");
 	CHECK(std::string(jo->gate_tag_keys) == "jop:2:oyez");
@@ -170,6 +174,10 @@ void dfx2_row() {
 	CHECK(std::string(dfx2->gate_tag) == "dfx2:0:cus:buffy");
 	CHECK(std::string(dfx2->gate_tag_keys) == "dfx2:0:buffy");
 	CHECK(dfx2->host_category_var);
+	// NWPSSK's serial term, (serial >> 3) ^ 0x32944845. [orig: CDKey_GenerateHardwareFingerprint
+	//  @0x4a4a60 (@0x4a4b7f, @0x4a4b89) (dfx2.exe)]
+	CHECK(dfx2->nwpssk_mix.has_value() && dfx2->nwpssk_mix->word == 0x32944845u &&
+			dfx2->nwpssk_mix->shift_first && dfx2->nwpssk_mix->apply(0x12345678u) == 0x30D2C28Au);
 	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == dfx2);
 	CHECK(protocol_complete(*dfx2, ProtocolPart::Session));
 	std::string error;

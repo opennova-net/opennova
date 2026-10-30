@@ -560,9 +560,12 @@ void Lister::sync_flow_context() {
 std::vector<std::pair<std::string, std::string>> Lister::cookie_vars() {
 	if (identity_vars_.empty()) {
 		read_locale_identity(identity_);
-		LobbyMachineTokens tokens = fallback_machine_tokens(stable_identity());
+		// NWPSSK under the served protocol's serial term (its session part is complete).
+		const FingerprintSerialMix &mix = *options_.protocol->nwpssk_mix;
+		LobbyMachineTokens tokens = fallback_machine_tokens(stable_identity(), mix);
 		RetailMachineInputs machine;
-		if (read_retail_machine_inputs(machine)) tokens = make_retail_machine_tokens(machine);
+		if (read_retail_machine_inputs(machine))
+			tokens = make_retail_machine_tokens(machine, mix);
 		identity_.nwpssk = tokens.nwpssk;
 		identity_.nwusid = tokens.nwusid;
 		identity_.nwhwi = options_.hardware_identity;

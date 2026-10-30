@@ -5,12 +5,9 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/novaworld/lobby_vars.h>
+#include <net/protocol/protocol.h> // Protocol, FingerprintSerialMix
 
 #include <godot_cpp/variant/vector2i.hpp>
-
-namespace opennova {
-struct Protocol;
-} // namespace opennova
 
 namespace godot {
 
@@ -31,14 +28,16 @@ void sample_device_identity(const opennova::gamecfg::GameCfg &cfg);
 // verify Cookie: NWHWI formats the boot's device facts with `cfg`'s display
 // mode (the process's game.cfg block). Protocol shape stays in
 // engine/net/novaworld; OS/renderer access stays at this Godot binding boundary.
-opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::gamecfg::GameCfg &cfg);
+opennova::LobbyIdentityParams collect_lobby_identity_params(
+		const opennova::gamecfg::GameCfg &cfg, const opennova::Protocol &protocol);
 
 // This machine's NWPSSK and NWUSID: retail's encoders over the volume and first Ethernet adapter
 // it reads (engine make_retail_machine_tokens) where the platform has them (Windows), else over a
 // hash of Godot's platform-stable id and the renderer's adapter name (fallback_machine_tokens,
-// D-NET-981). The verify Cookie's two tokens, and the fingerprint the DFX2 activation is bound to
-// (engine make_retail_machine_tokens carries the witness).
-opennova::LobbyMachineTokens machine_tokens();
+// D-NET-981), NWPSSK under `mix`, the protocol's serial term (Protocol::nwpssk_mix). The verify
+// Cookie's two tokens, and the fingerprint the DFX2 activation is bound to (engine
+// make_retail_machine_tokens carries the witness).
+opennova::LobbyMachineTokens machine_tokens(const opennova::FingerprintSerialMix &mix);
 
 // The CD-key ids this machine's activation gives a session of `protocol` (engine
 // activation_cd_keys over the process's menu-browser jar and machine_tokens().nwpssk): the CDKIID

@@ -79,6 +79,10 @@ Protocol make() {
 	p.gate_tag_keys = "jop:2:oyez";
 	// The host lists end at LAN. [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50]
 	p.host_category_var = false;
+	// NWPSSK's fourth dword takes (serial ^ 0x0B24B390) >> 3.
+	// [orig: CDKey_GenerateHardwareFingerprint @0x4a4a00 - `xor eax, 0B24B390h` @0x4a4b1f,
+	//  `shr eax, 3` @0x4a4b24, into the dword @0x4a4b2a]
+	p.nwpssk_mix = FingerprintSerialMix{ 0x0B24B390u, /*shift_first=*/false };
 	// jop_2_login.mnx's submit is ACCEPT: no LOGIN control.
 	p.sign_in_submit = "ACCEPT";
 	return p;

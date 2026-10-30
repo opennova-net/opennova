@@ -733,9 +733,12 @@ void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
 // engine flow, so cookies issued during login/NWJoin reach the UDP session too.
 std::vector<std::pair<std::string, std::string>> NovaWorldClient::make_cookie_vars() {
 	if (identity_vars_.empty()) {
+		// The lobby speaks its protocol, whose session part (NWPSSK's serial term among it) is
+		// complete: the connect refused any other.
 		const opennova::LobbyIdentityParams idp = collect_lobby_identity_params(
 				game_config_.is_valid() ? game_config_->native().cfg()
-										: opennova::gamecfg::defaults());
+										: opennova::gamecfg::defaults(),
+				*lobby_.protocol());
 		identity_vars_ = opennova::make_lobby_identity_vars(idp);
 	}
 	sync_flow_context();

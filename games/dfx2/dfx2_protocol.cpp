@@ -97,6 +97,10 @@ Protocol make() {
 	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0ce0 (dfx2.exe) - the HostSetup list's
 	//  DFXCATEGORY1 @0x4d0e8a..0x4d0eb1, the Host list's @0x4d0faf..0x4d0fd5]
 	p.host_category_var = true;
+	// NWPSSK's fourth dword takes (serial >> 3) ^ 0x32944845, where JO's takes (serial ^ word)
+	// >> 3. [orig: CDKey_GenerateHardwareFingerprint @0x4a4a60 (dfx2.exe) - `shr eax, 3` @0x4a4b7f,
+	//  `xor eax, 32944845h` @0x4a4b89, stored @0x4a4b8e]
+	p.nwpssk_mix = FingerprintSerialMix{ 0x32944845u, /*shift_first=*/true };
 	// dfx2_0_login.mnx's submit is LOGIN (its FORM_POST to NWLogin.dll).
 	p.sign_in_submit = "LOGIN";
 	return p;
