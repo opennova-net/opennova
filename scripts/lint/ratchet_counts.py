@@ -21,9 +21,11 @@ in maturity_baseline.json:
                         behavior and never overrides a private. Non-increasing;
                         the baseline is the sanctioned interface-fake residue.
   engine_uncited_src_files  engine/<group>/<lib> source files (post-flatten:
-                        no src/ level) with zero "[orig" citations, excluding
-                        the allowlisted infra libs (citation is inapplicable
-                        there) -- the faithful-port rule's coverage floor.
+                        no src/ level) and games/ source files with zero
+                        "[orig" citations, excluding the allowlisted infra
+                        libs (citation is inapplicable there; a games/ row is
+                        spelled from the repo root) -- the faithful-port
+                        rule's coverage floor.
                         An allowlist row that exempts no uncited file is
                         stale and fails --enforce (delete it): a file it
                         names that loses its cites must be counted.
@@ -286,6 +288,24 @@ def engine_uncited_src_files(allowlist: set[str]) -> tuple[int, list[str]]:
                 live.update(covering)
             else:
                 count += 1
+    # games/: every title's rows, whose retail values carry their cites (games/CLAUDE.md);
+    # an allowlist row for a file or a title's directory there is spelled from the repo root.
+    for path in sorted((REPO / "games").rglob("*")):
+        if path.suffix.lower() not in (".c", ".cc", ".cpp"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "[orig:" in text:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        covering = [prefix for prefix in prefixes
+                    if rel == prefix or rel.startswith(prefix.rstrip("/") + "/")]
+        if covering:
+            live.update(covering)
+        else:
+            count += 1
     return count, sorted(allowlist - live)
 
 
