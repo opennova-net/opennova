@@ -8,6 +8,7 @@
 // the protocol's version (games/CLAUDE.md).
 
 #include <base/title/title.h>
+#include <formats/gamecfg/game_cfg.h>
 #include <games/acidgambit/acidgambit.h>
 #include <games/dfx2/dfx2.h>
 #include <games/jo/jo.h>
@@ -332,6 +333,23 @@ void bump_rule_sheet_per_protocol() {
 		CHECK(sheet(code) == "no in-match protocol");
 }
 
+// DFX2-10's mission word sits on two axes: the protocol's (the S2C 0x66 group's armory-only word,
+// the mission's the other) and the game.cfg defaults' (Config_SetDefaults fills every weapon with
+// the mission's word, keyed by the title's config table, as formats/gamecfg cannot read a
+// protocol). Each title's config table fills its protocol's mission word, so the two never part.
+// [orig: Config_SetDefaults @0x54D030 - memset32(3, 0xFF) @0x54D410]
+// [orig: Config_SetDefaults @0x54a2c0 - memset32(dword_254F25C, 2, 0xFF) (dfx2.exe)]
+void config_table_fills_the_protocols_mission_word() {
+	for (size_t i = 0; i < title_count(); ++i) {
+		const Title *title = title_at(i);
+		const Protocol *protocol = title != nullptr ? title_protocol(title->code) : nullptr;
+		if (protocol == nullptr || !protocol->in_match.has_value())
+			continue;
+		const gamecfg::GameCfg cfg = gamecfg::defaults({}, 0, 0, title->config_table);
+		CHECK(cfg.weapon_availability[0] == protocol->in_match->s2c_66.mission_availability());
+	}
+}
+
 // A version line's title parts (title_versions): the title's name where the line names no game,
 // the protocol it speaks with its PV2 where its session part is witnessed; OP: Acid Gambit's is
 // JO's; an unwitnessed protocol and an unknown title add no protocol.
@@ -367,6 +385,7 @@ int main() {
 	every_title_runs_rules();
 	retail_rules_values();
 	bump_rule_sheet_per_protocol();
+	config_table_fills_the_protocols_mission_word();
 	title_parts_of_the_version_line();
 	if (g_failures == 0) {
 		std::printf("games: all checks passed\n");
