@@ -15,7 +15,7 @@
 // page or past MAX_PATH reads and writes as any other. A desktop backend derives from it and
 // supplies the two directories (SDL_GetBasePath, SDL_GetPrefPath). Platform file I/O, not a port.
 //
-// STAGED, NOT WIRED: the R4 SDL3 backend's Files (backend/sdl3) derives from it.
+// The SDL3 backend's Files (backend/sdl3/backend.cpp) derives from it.
 namespace opennova::platform {
 
 class DiskFileStream final : public FileStream {

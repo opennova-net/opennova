@@ -5,9 +5,9 @@
 //
 //   1. the platform pump: the OS's events into the devices, the input device's raw events into
 //      the engine's input frame (local_input.h);
-//   2. the engine frame: the main loop's clock (inmatch::MainLoopClock, retail's GetTickCount
-//      bank and frame lock) and the session's advance, its updates running the logic ticks with
-//      the input frame's rows applied;
+//   2. the engine frame: the main loop's clock (inmatch::MainLoopClock over the platform's
+//      clock, retail's GetTickCount bank and frame lock) and the session's advance, its updates
+//      running the logic ticks with the input frame's rows applied;
 //   3. the GPU frame: R5's render frame encodes its passes here (runtime/gpu over SDL_GPU); until
 //      then the swapchain is cleared;
 //   4. present: the frame's commands submitted, then the render callback's re-base stamp.
@@ -160,7 +160,13 @@ int run(const AppOptions &options, const LaunchFlags &flags, std::vector<std::st
 	// The process's cfg block: Config_SetDefaults' until the frontend reads game.cfg (R3). Its
 	// lock_framerate word (1) locks each frame to 16 ms of banked time.
 	const gamecfg::GameCfg cfg = gamecfg::defaults();
-	inmatch::MainLoopClock clock;
+	// The main loop's clock and the session's frame lock over the platform's clock (GetTickCount's
+	// steps and Sleep(1), inmatch::PlatformFrameLockClock), one clock for the frame's stamp, its
+	// lock and its CPU share; restarted past the load, which is never banked.
+	inmatch::PlatformFrameLockClock lock_clock(*platform.clock);
+	inmatch::MainLoopClock clock(&lock_clock);
+	mission.session().set_frame_lock_clock(&lock_clock);
+	clock.restart();
 	int64_t frames = 0;
 	int64_t ticks = 0;
 	int code = 0;
