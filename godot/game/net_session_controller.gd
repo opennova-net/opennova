@@ -79,7 +79,8 @@ func _open_novaworld_host_setup() -> void:
 		return
 	_host_return_file = _menu_shell.get_current_menu_file()
 	_host_return_screen = _menu_shell.get_driver().get_current_screen()
-	if not _menu_shell.open_menu("mp.mnu", "MULTI_PLAYER_HOST"):
+	# The title's own host screen (engine Title::host_screen), the one the populate fills.
+	if not _menu_shell.open_menu("mp.mnu", GameCfgStore.block().host_screen()):
 		return
 	_mp_companion.host_channel = HostSessionConfig.CHANNEL_NOVAWORLD
 	_novaworld_panel.hide()

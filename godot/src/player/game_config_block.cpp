@@ -80,6 +80,7 @@ void GameConfigBlock::_bind_methods() {
 			&GameConfigBlock::single_player_mission_start);
 	ClassDB::bind_method(D_METHOD("apply_host_dialog_control", "control", "value"),
 			&GameConfigBlock::apply_host_dialog_control);
+	ClassDB::bind_method(D_METHOD("host_screen"), &GameConfigBlock::host_screen);
 	ClassDB::bind_method(D_METHOD("populate_host_screen", "driver"), &GameConfigBlock::populate_host_screen);
 	ClassDB::bind_method(D_METHOD("read_host_screen", "driver"), &GameConfigBlock::read_host_screen);
 	ClassDB::bind_method(D_METHOD("populate_host_restrictions", "driver", "gametext", "menu_ui"),
@@ -180,6 +181,11 @@ bool GameConfigBlock::apply_host_dialog_control(const String &p_control, const S
 
 void GameConfigBlock::populate_host_screen(const Ref<MenuDriver> &p_driver) {
 	if (p_driver.is_valid()) inmatch::populate_host_screen(p_driver->runtime(), block_.cfg(), *block_.title());
+}
+
+String GameConfigBlock::host_screen() const {
+	const auto *title = block_.title();
+	return title != nullptr && title->host_screen != nullptr ? String(title->host_screen) : String();
 }
 
 void GameConfigBlock::read_host_screen(const Ref<MenuDriver> &p_driver) {

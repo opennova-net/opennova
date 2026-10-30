@@ -94,7 +94,8 @@ func _wire(_file: String, _screen: String) -> void:
 # _connectlog.txt (engine: net/npwire/lan_discovery.h drain_records carries the
 # witness, D-NET-956).
 func _on_screen_changed(screen_name: String) -> void:
-	if host_channel == HostSessionConfig.CHANNEL_NOVAWORLD and screen_name.nocasecmp_to("MULTI_PLAYER_HOST") != 0:
+	if host_channel == HostSessionConfig.CHANNEL_NOVAWORLD \
+			and screen_name.nocasecmp_to(GameCfgStore.block().host_screen()) != 0:
 		host_channel = HostSessionConfig.CHANNEL_LAN
 		novaworld_host_cancelled.emit()
 	if _driver == null or _driver.get_menu_file() != _wired_file:
@@ -237,7 +238,7 @@ func _on_lan_join() -> void:
 	lan_join_requested.emit(target)
 
 
-# --- Host-settings screen (MULTI_PLAYER_HOST) ---------------------------------
+# --- Host-settings screen (the title's host screen: MULTI_PLAYER_HOST, DFX2's NW_MULTI_PLAYER) ---
 # Mission rotation and filtering are the native menu host-dialog model.
 
 

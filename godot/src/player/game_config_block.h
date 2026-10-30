@@ -80,9 +80,13 @@ public:
 	void populate_host_dialog();
 	String host_dialog_value(const String &p_control) const;
 	bool apply_host_dialog_control(const String &p_control, const String &p_value);
+	// The launch's title's host screen (Title::host_screen: JO's MULTI_PLAYER_HOST, DFX2's
+	// NW_MULTI_PLAYER), the mp.mnu screen the shell opens for a host and the populate below
+	// fills; "" for a title that names none.
+	String host_screen() const;
 	// The whole screen over the block (the engine's populate_host_screen /
-	// read_host_screen): the menu's MULTI_PLAYER_HOST controls shown from the
-	// block, and START's read of them into it.
+	// read_host_screen): the controls of the title's host screen (host_screen) shown
+	// from the block, and START's read of them into it.
 	void populate_host_screen(const Ref<MenuDriver> &p_driver);
 	void read_host_screen(const Ref<MenuDriver> &p_driver);
 	// The screen's restriction lists over the block (the engine's populate_host_weapon_list /
