@@ -13,7 +13,7 @@
 // the cache; a second release published, served after a refresh.
 
 #include "core/local_object_store.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 #include "products/product_repository.h"
 #include "updater/update_listener.h"
 

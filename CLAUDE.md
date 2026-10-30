@@ -28,10 +28,11 @@ easier to relay than to rediscover.
 - `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
   `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"), except `update/` and
   `revupdat/`, which build retail's names, `update.exe` and `revupdat.exe`. `common/` is
-  the shared socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap
-  I/O lives in `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working
-  directory; `game/` (opennova-game, ADR 0077 d9) is the game over the SDL3 backend, which
-  becomes `opennova.exe` at R8.
+  the remote-admin TCP pump, the update listener and the command runner, deliberately
+  app-layer over the engine's sockets (`engine/net/socket`; the HTTP exchange is
+  `engine/net/http`, ADR 0077 d2; pcap I/O lives in `engine/base/pcapio`); `serve/`
+  (ADR 0051) keeps its files in its working directory; `game/` (opennova-game, ADR 0077 d9)
+  is the game over the SDL3 backend, which becomes `opennova.exe` at R8.
 - `backend/` — the game's platform backends: `sdl3/` (`opennova_backend_sdl3`, the engine's
   `engine/base/platform` API over SDL3 and the SDL_GPU device; the one library linking SDL3,
   and no SDL header outside it), beside the NovaWorld service's database (`migrations/`,

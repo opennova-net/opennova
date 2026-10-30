@@ -3,7 +3,7 @@
 #include <net/npwire/lan_discovery.h>
 #include <net/npwire/net_ports.h>
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <cstdint>
 #include <string>

@@ -4,7 +4,7 @@
 #include "core/text_util.h"
 #include "ec2_machine_driver.h"
 #include "hosted/protocol/agent_protocol.h"
-#include "net_http.h"
+#include <net/http/http_exchange.h>
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>

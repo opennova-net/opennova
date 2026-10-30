@@ -32,7 +32,7 @@
 
 #include "joiner_mission_start.h" // the harness's end of a released mission start
 #include "net_datagram_socket.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <algorithm>
 #include <cstdio>

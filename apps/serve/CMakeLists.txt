@@ -28,7 +28,7 @@ target_link_libraries(opennova_serve_core
     PUBLIC
         opennova_runtime     # MissionKernel, inmatch::HostRole / Session, the host file
         opennova_net         # the NWU session, the host role, the lobby HTTP machines
-        opennova_app_common  # the UDP socket and the HTTP exchange (PUBLIC-links ws2_32 on Windows)
+        opennova_app_common  # the listeners (and opennova_net: the sockets, the HTTP exchange)
         Threads::Threads     # the lister's HTTP exchange runs on a worker thread
 )
 

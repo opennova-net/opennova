@@ -26,7 +26,7 @@
 
 #include "command_runner.h"
 #include "core/ecs_metadata.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <base/io/file_io.h>
 

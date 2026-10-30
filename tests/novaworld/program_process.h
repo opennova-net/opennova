@@ -8,8 +8,8 @@
 // failure path leaves one running, and on Linux PR_SET_PDEATHSIG kills it
 // should ctest kill the test. POSIX only (fork, execve, kill).
 
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 
 #include <net/novaworld/db/database.h>
 
