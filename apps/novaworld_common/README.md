@@ -1005,7 +1005,7 @@ Enabled; Static addresses, `/admin/billing/addresses`; AWS costs, `/admin/billin
 and **System** (`/admin/system`: the NovaWorld sign-in, maintenance mode and the lobby
 instances; Infrastructure, `/admin/system/infrastructure`; Jobs, `/admin/system/jobs`, a
 job's page `/admin/jobs/<id>`; a program's page `/admin/programs/<name>`, an AWS
-resource's `/admin/resources/<id>`). The old paths lead to their new pages.
+resource's `/admin/resources/<id>`).
 
 The site's admin page **Infrastructure** (`/admin/system/infrastructure`) shows the deployment as
 it runs, read on web (`apps/novaworld_web/infra/`) in one route,
