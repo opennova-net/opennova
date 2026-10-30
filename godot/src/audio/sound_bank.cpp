@@ -96,11 +96,11 @@ PackedStringArray SoundBank::get_set_names() const {
 	return out;
 }
 
-TypedArray<AmbientLayer> SoundBank::describe_ambient(const String &p_name) {
-	TypedArray<AmbientLayer> out;
-	const opennova::audio::SetLocation loc = _find_set(p_name);
+std::vector<opennova::audio::AmbientLayerRow> SoundBank::ambient_layer_rows(
+		const std::string &p_name) const {
+	const opennova::audio::SetLocation loc = index_.find(p_name);
 	if (!loc.valid()) {
-		return out;
+		return {};
 	}
 	const opennova::lwf::File &bank = _bank_at(loc);
 	const opennova::lwf::Multi &set = bank.multis[static_cast<size_t>(loc.set)];
@@ -114,8 +114,12 @@ TypedArray<AmbientLayer> SoundBank::describe_ambient(const String &p_name) {
 		return resource_root_.is_valid() &&
 				resource_root_->has_file(opennova::to_gd(p_wave).get_file());
 	};
-	for (const opennova::audio::AmbientLayerRow &layer :
-			opennova::audio::ambient_layer_rows(bank, set, has_wave)) {
+	return opennova::audio::ambient_layer_rows(bank, set, has_wave);
+}
+
+TypedArray<AmbientLayer> SoundBank::describe_ambient(const String &p_name) {
+	TypedArray<AmbientLayer> out;
+	for (const opennova::audio::AmbientLayerRow &layer : ambient_layer_rows(opennova::to_std(p_name))) {
 		Ref<AmbientLayer> row;
 		row.instantiate();
 		row->set_wav_path(opennova::to_gd(layer.wave));
@@ -128,11 +132,15 @@ TypedArray<AmbientLayer> SoundBank::describe_ambient(const String &p_name) {
 	return out;
 }
 
+Ref<AudioStreamWAV> SoundBank::resolve_ambient_wave(const String &p_wav_path) {
+	return _resolve_stream(p_wav_path);
+}
+
 Ref<AudioStreamWAV> SoundBank::resolve_ambient_stream(const Ref<AmbientLayer> &p_layer) {
 	if (p_layer.is_null()) {
 		return Ref<AudioStreamWAV>();
 	}
-	return _resolve_stream(p_layer->get_wav_path());
+	return resolve_ambient_wave(p_layer->get_wav_path());
 }
 
 void SoundBank::configure_ambient_player(AudioStreamPlayer3D *p_player,

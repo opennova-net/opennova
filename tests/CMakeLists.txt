@@ -905,6 +905,26 @@ target_link_libraries(ambient_channel_pool_test PRIVATE opennova_runtime)
 target_compile_features(ambient_channel_pool_test PRIVATE cxx_std_17)
 add_test(NAME ambient_channel_pool COMMAND ambient_channel_pool_test)
 
+# The mission's ambient emitters (runtime/audio/ambient_emitters.h), moved out of the
+# Godot mission audio (ADR 0077 R2) with its GUT logic pins: envs markers described
+# through the bank chain, the loudest eight bound (incumbents kept, entrants restarted),
+# the time-of-day slot and crossfade, one occlusion query per raw-audible marker, the
+# entity-attached lanes replayed at their producer ticks with their ids retired and
+# recycled, the unresolvable entrant cached out, the world clock's latch.
+add_executable(ambient_emitters_test audio/ambient_emitters_test.cpp)
+target_link_libraries(ambient_emitters_test PRIVATE opennova_runtime)
+target_compile_features(ambient_emitters_test PRIVATE cxx_std_17)
+add_test(NAME ambient_emitters COMMAND ambient_emitters_test)
+
+# The sound-effects option's park (runtime/audio/effects_volume_park.h): saved only
+# when nothing is saved, restored once [orig: Sound_ParkEffectsVolume @ 0x5280b0;
+# Sound_RestoreEffectsVolume @ 0x5280d0].
+add_executable(effects_volume_park_test audio/effects_volume_park_test.cpp)
+target_link_libraries(effects_volume_park_test PRIVATE opennova_runtime)
+target_include_directories(effects_volume_park_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(effects_volume_park_test PRIVATE cxx_std_17)
+add_test(NAME effects_volume_park COMMAND effects_volume_park_test)
+
 # S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
 # entity pools, the authored soundloop slots passed through unfiltered, walk order,
 # and the BMS type-id -> items.def id offset. [orig: @0x82ABD4 -> @0x4a8080]

@@ -20,6 +20,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/remote_body_state.cpp
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_channel_pool.cpp # the eight physical voices the mix rows bind to
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_emitters.cpp # the mission's markers, lanes, clock and channel plan
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/audio_out_meter.cpp # the mixer's output meter (the speaking kick, TALK, the tag pulse)
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/bank_chain.cpp
