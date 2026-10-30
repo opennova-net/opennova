@@ -9,6 +9,7 @@
 #include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <net/protocol/gate_tag.h> // kGateTagFileMaxBytes
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
@@ -346,7 +347,7 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 				target.is_expansion() ? "expansion/" + target.expansion + "/gt.ssc" : "gt.ssc";
 		std::error_code ec;
 		file.size_bytes = std::filesystem::file_size(system_path(file.source_path), ec);
-		if (ec || file.size_bytes == 0 || file.size_bytes > 8191) {
+		if (ec || file.size_bytes == 0 || file.size_bytes > kGateTagFileMaxBytes) {
 			const auto failure = make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error,
 					"The server-generated lobby file cannot be read: " + file.source_path);
 			plan.diagnostics.push_back(failure);
@@ -370,7 +371,7 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		std::string refusal;
 		if (!target.is_expansion())
 			refusal = "Only an expansion has a version.txt; the base game's build takes none: " + file.source_path;
-		else if (ec || file.size_bytes == 0 || file.size_bytes > 8191)
+		else if (ec || file.size_bytes == 0 || file.size_bytes > project::kServiceVersionFileMaxBytes)
 			refusal = "The server-generated version file cannot be read: " + file.source_path;
 		if (!refusal.empty()) {
 			const auto failure = make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error, refusal);

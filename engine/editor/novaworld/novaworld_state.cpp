@@ -7,6 +7,7 @@
 #include <base/io/json.h>
 #include <base/io/base64.h>
 #include <base/io/sha256.h>
+#include <net/protocol/gate_tag.h> // kGateTagFileMaxBytes
 #include <editor/novaworld/novaworld_account.h>
 #include <editor/novaworld/novaworld_api.h>
 #include <editor/project/project_document.h>
@@ -130,7 +131,7 @@ bool write_novaworld_base(const NovaWorldPaths &paths, const std::vector<project
 bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
 		const RemoteLobby &lobby, std::string &error) {
 	const std::string &encoded = lobby.gate_tag_file;
-	if (encoded.empty() || encoded.size() > 10924) {
+	if (encoded.empty() || encoded.size() > project::base64_text_max(kGateTagFileMaxBytes)) {
 		error = "the service's lobby file is missing or too large";
 		return false;
 	}
@@ -141,7 +142,7 @@ bool cache_novaworld_lobby(const NovaWorldPaths &paths, const std::string &key,
 		return false;
 	}
 	if (!is_novaworld_key(key) || lobby.slug.empty() || lobby.protocol.code.empty() ||
-			bytes.empty() || bytes.size() > 8191) {
+			bytes.empty() || bytes.size() > kGateTagFileMaxBytes) {
 		error = "the service's lobby file is missing or invalid";
 		return false;
 	}
@@ -178,15 +179,12 @@ std::string cached_novaworld_gate_tag(
 		return {};
 	const std::string path = join_path(paths.service_dir, "lobbies/" + sha + "/gt.ssc");
 	std::vector<uint8_t> bytes;
-	if (!io::read_file_bytes(path, bytes, error) || bytes.empty() || bytes.size() > 8191 ||
+	if (!io::read_file_bytes(path, bytes, error) || bytes.empty() || bytes.size() > kGateTagFileMaxBytes ||
 			io::sha256_hex(bytes.data(), bytes.size()) != sha)
 		return {};
 	return path;
 }
 
-
-// The same bound as the lobby file's: the service writes one line.
-constexpr size_t kVersionFileMax = 8191;
 
 bool cache_novaworld_version_file(const NovaWorldPaths &paths, const std::string &key,
 		const std::string &encoded, std::string &error) {
@@ -200,8 +198,9 @@ bool cache_novaworld_version_file(const NovaWorldPaths &paths, const std::string
 		return true;
 	}
 	std::vector<uint8_t> bytes;
-	if (encoded.size() > 10924 || !io::base64_decode_strict(encoded, bytes) || bytes.empty() ||
-			bytes.size() > kVersionFileMax || !is_novaworld_key(key)) {
+	if (encoded.size() > project::base64_text_max(project::kServiceVersionFileMaxBytes) ||
+			!io::base64_decode_strict(encoded, bytes) || bytes.empty() ||
+			bytes.size() > project::kServiceVersionFileMaxBytes || !is_novaworld_key(key)) {
 		fs::remove(system_path(paths.version_state), ignored);
 		error = "the service's version file is missing or invalid";
 		return false;
@@ -234,7 +233,8 @@ std::string cached_novaworld_version_file(const NovaWorldPaths &paths, const std
 		return {};
 	const std::string path = join_path(paths.service_dir, "versions/" + sha + "/version.txt");
 	std::vector<uint8_t> bytes;
-	if (!io::read_file_bytes(path, bytes, error) || bytes.empty() || bytes.size() > kVersionFileMax ||
+	if (!io::read_file_bytes(path, bytes, error) || bytes.empty() ||
+			bytes.size() > project::kServiceVersionFileMaxBytes ||
 			io::sha256_hex(bytes.data(), bytes.size()) != sha)
 		return {};
 	return path;
