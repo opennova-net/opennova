@@ -10,6 +10,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <base/version/one_build.h>
 #include <base/version/version.h>
@@ -35,5 +36,9 @@ struct Versions {
 // installed release is "Joint Operations · ONE 0.0.22 · JO protocol 16", no protocol ends at
 // ONE's label.
 std::string version_line(const Versions &versions);
+
+// A protocol in words, the version line's protocol part: "<name> protocol <version>" ("JO
+// protocol 16"), "<name> protocol" with no version known, empty with no name.
+std::string protocol_words(std::string_view name, std::string_view version);
 
 } // namespace opennova

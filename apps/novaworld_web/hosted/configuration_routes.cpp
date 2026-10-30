@@ -9,10 +9,6 @@
 
 namespace opennova::novaworld_server::hosted {
 namespace {
-crow::json::wvalue json(const io::JsonValue &v) {
-	return crow::json::wvalue(crow::json::load(io::json_write(v)));
-}
-
 // A running server keeps its pinned catalog even after a newer release is published.
 OfferedProduct pinned_product(db::Database &db, const HostedServer &server) {
 	OfferedProduct p;
@@ -87,12 +83,12 @@ crow::response ConsoleRoutes::settings(db::Database &db, const HostedServer &ser
 	const OfferedProduct product = pinned_product(db, server);
 	crow::json::wvalue out;
 	out["server_id"] = server.id;
-	out["saved"] = json(settings_document(server.settings));
+	out["saved"] = to_crow(settings_document(server.settings));
 	out["settings_revision"] = server.settings_revision;
-	out["schema"] = json(hosted_settings_schema(title_config_table(product.title)));
+	out["schema"] = to_crow(hosted_settings_schema(title_config_table(product.title)));
 	const auto &weapons = server_weapon_roster(product.weapons,
 			product.expansions.empty() ? nullptr : &product.expansions.front().weapons);
-	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(weapons)));
+	out["weapons"] = to_crow(encode_tree_weapons(weapons));
 	return no_store(json_reply(200, out));
 }
 

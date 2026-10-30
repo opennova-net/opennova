@@ -21,12 +21,8 @@ std::string version_line(const Versions &versions) {
 		parts.push_back(std::move(game));
 	}
 	parts.push_back(versions.one.label());
-	if (!versions.protocol.empty()) {
-		std::string protocol = versions.protocol + " protocol";
-		if (!versions.protocol_version.empty())
-			protocol += " " + versions.protocol_version;
-		parts.push_back(std::move(protocol));
-	}
+	if (!versions.protocol.empty())
+		parts.push_back(protocol_words(versions.protocol, versions.protocol_version));
 	std::string line;
 	for (const std::string &part : parts) {
 		if (!line.empty())
@@ -34,6 +30,15 @@ std::string version_line(const Versions &versions) {
 		line += part;
 	}
 	return line;
+}
+
+std::string protocol_words(std::string_view name, std::string_view version) {
+	if (name.empty())
+		return std::string();
+	std::string words = std::string(name) + " protocol";
+	if (!version.empty())
+		words += " " + std::string(version);
+	return words;
 }
 
 } // namespace opennova
