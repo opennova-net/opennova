@@ -1,6 +1,5 @@
 #pragma once
 
-#include <godot_cpp/classes/font_file.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -53,8 +52,6 @@ public:
 
 	int get_pixel_alpha(int p_page, int p_x, int p_y) const;
 	Error set_pixel_alpha(int p_page, int p_x, int p_y, int p_alpha);
-
-	Ref<FontFile> to_font_file() const;
 
 	// The parsed font a binding lays glyph runs out over (hud::GameFont); null while none is held.
 	const opennova::fnt::fnt_font_t *parsed_font() const { return _has_valid_font() ? &font_ : nullptr; }

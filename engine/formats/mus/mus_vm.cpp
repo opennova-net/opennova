@@ -1183,13 +1183,15 @@ static int32_t intrinsic_gsdv(MusVM *vm, int top) {
     return fixed;
 }
 
-/* [orig: AudioVM_Intrinsic_GFB @ 0x672150] `mov dword_31C37EC, 0; retn` -- takes
+/* [orig: AudioVM_Intrinsic_GFB @ 0x672150] `mov g_AudioStreamBytesLeft, 0; retn` -- takes
    NO args (does not deref the &TOS pointer) and sets no eax, so `method` pushes the
    handler's own address, the eax it was called through (@ 0x672D08 call eax) (D-MUS-26).
-   Side effect: clears the fade-base global dword_31C37EC, which the VM does not model. */
+   Side effect: empties the music stream (the bytes left of the track the last play selected,
+   which AudioVM_SelectStream @ 0x671BF0 seeds and AudioStream_Update @ 0x671C76 tests), the
+   stream pump's state: the embedder's on_flush_buffer. */
 static int32_t intrinsic_gfb(MusVM *vm, int top) {
-    (void)vm;
     (void)top;
+    if (vm->hooks.on_flush_buffer) vm->hooks.on_flush_buffer(vm->hooks.user);
     return kGfbAddr;
 }
 

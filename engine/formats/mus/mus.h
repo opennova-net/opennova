@@ -433,6 +433,11 @@ typedef struct MusVMHooks {
     /* GSV / GSDV set master / right-channel volumes in 16.16 fixed point.
        Witnessed: [orig: AudioVM_Intrinsic_GSV @ 0x6720E0], [orig: AudioVM_Intrinsic_GSDV @ 0x672120]. */
     void (*on_volume_changed) (void *user, int32_t left_16_16, int32_t right_16_16);
+    /* GFB empties the music stream: the bytes left of the track the last play
+       selected go to 0, so the stream pump's next update steps the script
+       (runtime/audio music_stream_pump.h).
+       Witnessed: [orig: AudioVM_Intrinsic_GFB @ 0x672150 -- `mov g_AudioStreamBytesLeft, 0`]. */
+    void (*on_flush_buffer)   (void *user);
 } MusVMHooks;
 
 /* Allocate a new VM instance. Returns NULL on OOM. State starts at STOPPED;

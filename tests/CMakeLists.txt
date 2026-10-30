@@ -897,6 +897,15 @@ target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
 add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
 
+# The music stream pump (runtime/audio/music_stream_pump.h): the VM steps once
+# the track its last play selected stops sounding, a service frame's seven
+# updates, GFB's emptied stream, the context's begin and end.
+add_executable(music_stream_pump_test audio/music_stream_pump_test.cpp)
+target_link_libraries(music_stream_pump_test PRIVATE opennova_runtime)
+target_include_directories(music_stream_pump_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(music_stream_pump_test PRIVATE cxx_std_17)
+add_test(NAME music_stream_pump COMMAND music_stream_pump_test)
+
 # The ambient channel pool (runtime/audio/ambient_channel_pool.h): rank-order
 # binds up to the budget, incumbents keep their channel, dropouts release,
 # unresolvable entrants cached out, a pinned pool never grows.
@@ -2094,6 +2103,14 @@ add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
+
+# The game font's glyph advance (runtime/hud/game_font.h): the space and an empty
+# record advance by their own record and the spacing pad, decoded text by its
+# code-page byte's record.
+add_executable(hud_game_font_test hud/game_font_test.cpp)
+target_link_libraries(hud_game_font_test PRIVATE opennova_runtime)
+target_include_directories(hud_game_font_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_game_font COMMAND hud_game_font_test)
 
 # The flat HUD residual elements (GAMEINFO/ZONEINFO, CLOCK, TEAMID, HUDLS, the
 # objectives panel, /NOHUD, the squad colours, the clip-flash key).
