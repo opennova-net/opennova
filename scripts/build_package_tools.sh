@@ -22,9 +22,10 @@ done
 [[ ${#apps[@]} -gt 0 ]] || { echo "select --tools, --blender or --godot" >&2; exit 2; }
 mapfile -t apps < <(printf '%s\n' "${apps[@]}" | sort -u)
 
+# No package carries opennova-game yet (OPENNOVA_GAME, the SDL3 app, ADR 0077 d9).
 cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF \
-    -DOPENNOVA_EDITOR=OFF "${cmake_args[@]}"
+    -DOPENNOVA_EDITOR=OFF -DOPENNOVA_GAME=OFF "${cmake_args[@]}"
 targets=()
 for app in "${apps[@]}"; do targets+=("opennova_$app"); done
 cmake --build "$build" --config Release --target "${targets[@]}"

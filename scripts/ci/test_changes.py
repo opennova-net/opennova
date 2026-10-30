@@ -26,6 +26,7 @@ class ComponentSelection(unittest.TestCase):
             'tests/blender/test_model.py': {'blender'},
             'web/src/App.vue': {'web', 'stack'},
             'backend/migrations/001.sql': changes.SERVICE,
+            'backend/seed/0002_dev_users.sql': changes.SERVICE,
             'apps/novaworld_web/main.cpp': changes.SERVICE,
             'infra/ci/runners.tf': {'infra'},
             'deploy/compose/docker-compose.yml': changes.SERVICE | {'infra'},
@@ -38,6 +39,7 @@ class ComponentSelection(unittest.TestCase):
     def test_shared_and_unknown_inputs_select_everything(self):
         for path in ('engine/net/codec.cpp', 'apps/common/sockets.h', 'CMakeLists.txt',
                      '.github/workflows/ci.yml', 'fixtures/new.bin', 'tests/fixtures/mint.cpp',
+                     'backend/sdl3/sdl3_platform.cpp', 'third_party/sdl3', 'apps/game/main.cpp',
                      'scripts/build.sh', 'new-component/file.txt', '../web/a.ts'):
             with self.subTest(path=path):
                 self.assertEqual(self.selected(path), set(changes.COMPONENTS))
