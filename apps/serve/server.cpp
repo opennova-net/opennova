@@ -20,6 +20,7 @@
 #include <formats/avatars/avatars.h>
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
+#include <net/novacrypto/cdkey.h>
 #include <net/novaworld/lobby_identity.h> // the NWHWI device reads
 #include <net/protocol/gate_tag.h>
 #include <net/protocol/protocol.h>
@@ -425,6 +426,16 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 		stop();
 		return false;
 	}
+	// The boot's CD-key read, for a protocol that keeps one: the record whose ids the LAN join
+	// check refuses as the host's own (code 12) and the verify Cookie carries. The value is the
+	// machine's registry's; where the platform has none, the stand-in is the working directory's,
+	// where the server keeps every file the game keeps beside itself (ADR 0051). Retail reads it in
+	// its command-line parse, ahead of game.cfg; nothing between reads the record.
+	// [orig: Game_ParseCommandLineAndInit @0x4a7e62 (dfx2.exe), CDKey_ReadRegistry called]
+	if (protocol_->cd_key != nullptr && protocol_->nwpssk_mix)
+		(void)cdkey::read_registry(cdkey::process_key_info(), *protocol_->cd_key,
+				machine_tokens(*protocol_->nwpssk_mix).nwpssk,
+				cdkey::machine_key_store(*protocol_->cd_key, "."));
 	// The renderer's start and its device creation, after that game.cfg read: the device facts
 	// NWHWI prints (sample_device_identity), read once.
 	device_identity_ = sample_device_identity(config_.cfg(), options_);
@@ -818,6 +829,10 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.role = role_.get();
 	request.host = role_.get();
 	request.host_cfg.protocol = protocol_;
+	// The host's own CD-key ids, the boot read's record: a DFX2 LAN host refuses a joiner sending
+	// them (code 12; NapiNPServerCtx::host_cd_keys carries the witness).
+	if (protocol_->cd_key != nullptr)
+		request.host_cfg.host_cd_keys = cdkey::process_key_info().keys;
 	request.host_cfg.config = config;
 	request.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	// A listed server's session runs on the NovaWorld network type, whose

@@ -287,6 +287,7 @@ empty, `admin.cfg`, read once at the start, and the ban lists `banned.txt` and
 | `admin_log.txt` | never | emptied at every launch, then one line per admin event |
 | `banned.txt` | when the session starts | at the exit, when an in-game ban added an entry |
 | `banlist.txt` | when a NovaWorld session starts (a missing one is created) | by every ban or unban on a NovaWorld session (`PLAYER BAN`, `CMD BAN`, `CMD UNBAN`) |
+| `cdkiid.dat` (`/game dfx2`, off Windows) | at the start: the machine's CD-key activation, which Windows keeps in the registry value DFX2 keeps it in. Its key is the server's own, which its LAN join check refuses a joiner sending and its NovaWorld verify carries | never |
 
 ## Remote admin
 
