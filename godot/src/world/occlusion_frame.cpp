@@ -64,7 +64,7 @@ double camera_fov_h_deg(const Camera3D *p_camera, double p_default) {
 
 } // namespace
 
-OcclusionViewInputs occlusion_view_inputs(const Camera3D *p_camera, const MissionEnvironment *p_env,
+OcclusionViewInputs godot::occlusion_view_inputs(const Camera3D *p_camera, const MissionEnvironment *p_env,
 		const Water *p_water) {
 	OcclusionViewInputs in;
 	in.fov_h_deg = camera_fov_h_deg(p_camera, in.fov_h_deg);
