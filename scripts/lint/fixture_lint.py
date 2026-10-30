@@ -22,8 +22,9 @@ Rules (each hit names the file and the rule):
                 scripts/lint/fixture_allowlist.json "size_exceptions" carries
                 the few oversize assets with a reason
   referenced    every fixtures/ file is referenced (by path, parent directory
-                or basename) from tests/, godot/tests/, tests/CMakeLists.txt,
-                .github/workflows/, scripts/ or fixtures/README.md (never
+                or basename) from tests/, godot/tests/, godot/probes/,
+                tests/CMakeLists.txt, .github/workflows/, scripts/ or
+                fixtures/README.md (never
                 docs/: the private docs submodule CI does not check out)
   provenance    every fixtures/ file is MINTED (its path or parent directory
                 is named by a tests/fixtures/*_gen.cpp, or a "minted_by" row
