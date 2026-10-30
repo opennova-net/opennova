@@ -134,11 +134,11 @@ bool Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_h
 	// The main scene's collect runs over the main view's frame words.
 	kernel_->occlusion.select_view(opennova::world::OcclusionView::kMain);
 	const uint64_t occl_build_start =
-			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
+			profiling_.runtime_profiling_enabled ? opennova::io::perf_now_us() : 0;
 	kernel_->occlusion.build_frame(kernel_->world, kernel_->collision, cam);
 	const uint64_t occl_probe_start =
-			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
-	if (runtime_profiling_enabled_)
+			profiling_.runtime_profiling_enabled ? opennova::io::perf_now_us() : 0;
+	if (profiling_.runtime_profiling_enabled)
 		present_.last_occlusion_build_us = occl_probe_start - occl_build_start;
 
 	// The entity collectors' render gates over the non-building entities the
@@ -155,7 +155,7 @@ bool Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_h
 					joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr},
 			present_.wire_occlusion_latch, cam, present_.occlusion_culled_bms,
 			present_.occlusion_culled_wire, present_.foliage_mask_anchors, local_collected);
-	if (runtime_profiling_enabled_)
+	if (profiling_.runtime_profiling_enabled)
 		present_.last_occlusion_probe_us = opennova::io::perf_now_us() - occl_probe_start;
 	return local_collected;
 }

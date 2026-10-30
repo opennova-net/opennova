@@ -12,6 +12,7 @@
 #include <formats/update/apply.h>
 #include <formats/update/update_wizard.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <system_error>
@@ -79,7 +80,27 @@ bool write_mod_wizard(const std::string &game_root, const std::string &runtime_d
 		error = "Cannot make " + dir + ": " + ec.message();
 		return false;
 	}
-	return io::write_file_atomic(boot_path_join(dir, "UPDATE.WIZ"), text, error);
+	return io::write_file_atomic(boot_path_join(dir, "UPDATE.WIZ"), text, error) &&
+			io::write_file_atomic(boot_path_join(dir, kModMarkFileName), mod.key + "\n", error);
+}
+
+bool mod_folder_marked(const std::string &game_root, const std::string &code) {
+	if (!expansion_code_valid(code)) return false;
+	std::error_code ec;
+	return fs::is_regular_file(io::os_path(boot_path_join(vfs_expansion_dir(game_root, code), kModMarkFileName)), ec);
+}
+
+std::vector<std::string> marked_mod_folders(const std::string &game_root) {
+	std::vector<std::string> codes;
+	std::error_code ec;
+	for (const fs::directory_entry &entry :
+			fs::directory_iterator(io::os_path(boot_path_join(game_root, "expansion")), ec)) {
+		std::error_code kind;
+		const std::string code = io::utf8_path(entry.path().filename());
+		if (entry.is_directory(kind) && mod_folder_marked(game_root, code)) codes.push_back(code);
+	}
+	std::sort(codes.begin(), codes.end());
+	return codes;
 }
 
 bool remove_mod_folder(const std::string &game_root, const std::string &code, std::string &error) {
@@ -89,6 +110,10 @@ bool remove_mod_folder(const std::string &game_root, const std::string &code, st
 	}
 	const std::string dir = vfs_expansion_dir(game_root, code);
 	std::error_code ec;
+	if (fs::exists(io::os_path(dir), ec) && !mod_folder_marked(game_root, code)) {
+		error = "\"" + code + "\" is no mod the Mods page installed: its folder stays.";
+		return false;
+	}
 	fs::remove_all(io::os_path(dir), ec);
 	if (ec) {
 		error = "Cannot remove " + dir + ": " + ec.message();

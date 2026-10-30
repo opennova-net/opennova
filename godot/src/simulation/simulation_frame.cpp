@@ -228,15 +228,15 @@ void Simulation::after_tick() {
 }
 
 bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
-	const bool profiling = runtime_profiling_enabled_;
-	last_net_tick_us_ = static_cast<uint64_t>(p_tick.net_us);
-	if (profiling) frame_sim_us_ += p_tick.tick_us;
+	const bool profiling = profiling_.runtime_profiling_enabled;
+	profiling_.last_net_tick_us = static_cast<uint64_t>(p_tick.net_us);
+	if (profiling) profiling_.frame_sim_us += p_tick.tick_us;
 	if (session_tick_sink_ == nullptr) return true;
 	const int64_t sink_start =
 			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
 	const bool accepted = session_tick_sink_->on_session_tick(p_tick);
 	if (profiling)
-		frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
+		profiling_.frame_sink_us += Time::get_singleton()->get_ticks_usec() - sink_start;
 	return accepted;
 }
 
@@ -246,8 +246,8 @@ bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
 opennova::inmatch::FrameInput Simulation::begin_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
 	end_loaded_join_mission_start();
-	frame_sim_us_ = 0;
-	frame_sink_us_ = 0;
+	profiling_.frame_sim_us = 0;
+	profiling_.frame_sink_us = 0;
 	if (kernel_ != nullptr) kernel_->profile.reset();
 	opennova::inmatch::FrameInput input;
 	if (p_input.is_valid()) {
@@ -301,7 +301,7 @@ Ref<MissionFrameOutcome> Simulation::advance_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
 	// The marshalling's two halves, timed for the board (fold_frame_phases): the typed input
 	// ahead of the session frame, the fold and the outcome after it.
-	const bool timing = runtime_profiling_enabled_ && frame_stats_.is_valid();
+	const bool timing = profiling_.runtime_profiling_enabled && profiling_.frame_stats.is_valid();
 	Time *time = timing ? Time::get_singleton() : nullptr;
 	const int64_t head_start = time != nullptr ? static_cast<int64_t>(time->get_ticks_usec()) : 0;
 	const opennova::inmatch::FrameInput input = begin_session_frame(p_input);

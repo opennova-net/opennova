@@ -1995,26 +1995,20 @@ bool EntityCommands::group_dead(int group) const {
 
 // --- mount / emplacement (AttachToEmplaced) ---
 
-bool EntityCommands::mount(EntityTarget occupant_ssn, EntityTarget target_ssn, SeatSelectionMode mode) {
+bool EntityCommands::mount(EntityTarget occupant_ssn, EntityTarget target_ssn) {
     // The AI board's mount: resolve both; reject already-mounted / seatless; pick
-    // the best seat; request it [orig: Entity_UpdateInfantryAI @0x4BBDD4 -> @0x4BBDF2].
+    // the best seat (the occupant's own board command filters it); request it
+    // [orig: Entity_UpdateInfantryAI @0x4BBDD4 -> @0x4BBDF2].
     EntityHandle oh = resolve_target(occupant_ssn);
     EntityHandle th = resolve_target(target_ssn);
     Entity *occ = world_.registry.get(oh);
     Entity *tgt = world_.registry.get(th);
     if (!occ || !tgt || occ->mounted) return false;
     VehicleSeatSelection selection;
-    if (!find_best_vehicle_seat(world_, th, oh, selection, mode)) return false;
+    if (!find_best_vehicle_seat(world_, th, oh, selection)) return false;
     // The request [orig: @0x4BBDF2]. The shell's debug crew seams
     // (Simulation::debug_crew_*) request through here too, a path retail lacks.
     return world_.vehicles.request_attach(oh, selection);
-}
-
-bool EntityCommands::mount_boarding_command(EntityTarget occupant_ssn, EntityTarget target_ssn,
-                                            uint8_t command_id) {
-    SeatSelectionMode mode = SeatSelectionMode::Any;
-    if (!seat_selection_mode_for_command(command_id, mode)) return false;
-    return mount(occupant_ssn, target_ssn, mode);
 }
 
 // WAC `ssnrelease` -- the RELEASE half of the AI boarding order, and the reason a
@@ -2061,10 +2055,8 @@ bool EntityCommands::use_boarding_target(EntityTarget occupant) {
     if (entity == nullptr || entity->item_type_index == 0 || ai == nullptr ||
             ai->slot.f[36] == 0 || entity->mount_target.valid()) return false;
     const EntityHandle target{uint16_t(ai->slot.f[36] - 1)};
-    SeatSelectionMode mode = SeatSelectionMode::Any; // a non-attach command keeps Any
-    seat_selection_mode_for_command(ai->slot.f[37], mode);
     VehicleSeatSelection selected;
-    const bool available = find_best_vehicle_seat(world_, target, handle, selected, mode);
+    const bool available = find_best_vehicle_seat(world_, target, handle, selected);
     ai->slot.f[36] = available ? int32_t(selected.vehicle.packed) + 1 : 0;
     // The script mount's request [orig: WacScript_TryMountEntityToVehicle @0x4F7186].
     if (available) world_.vehicles.request_attach(handle, selected);

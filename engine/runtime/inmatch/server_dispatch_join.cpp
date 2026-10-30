@@ -91,7 +91,7 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool m
 	// +36: the slot limit less a non-peer (dedicated) host's own slot, at most 251: the
 	// session's cap on every host; +48: the cfg's raw unlimited-vehicles word dword_24D2258.
 	// [orig: Client_BuildMissionDataRequestBlock @0x51E897..0x51E8B9, @0x51E8C5..0x51E8CB]
-	const int32_t players = static_cast<int32_t>(config.player_slot_limit()) - !mp_session_peer;
+	const int32_t players = static_cast<int32_t>(config.live_slot_limit()) - !mp_session_peer;
 	write_u32(36, static_cast<uint32_t>(players > 251 ? 251 : players));
 	write_u32(40, config.game_type);
 	// A DFX2 authority ORs 0x10000 into the rules word [orig: @0x51b89e (dfx2.exe)].

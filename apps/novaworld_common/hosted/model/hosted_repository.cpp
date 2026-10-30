@@ -6,7 +6,6 @@
 #include <net/novaworld/host_repository.h>
 
 #include <array>
-#include <stdexcept>
 #include <utility>
 
 namespace opennova::novaworld_server::hosted {
@@ -42,12 +41,15 @@ HostedServer row_to_server(const db::Row &r) {
 	s.service_user_id = r.as_int(2);
 	s.state = state_from_name(r.as_text(3).value_or("")).value_or(State::Failed);
 	HostedSettings &st = s.settings;
-    io::JsonValue document;
-    std::string field, error;
-    if (!io::json_parse(r.as_text(4).value_or("{}"), document, error) ||
-            !read_settings_document(document, st, field, error))
-        throw std::runtime_error("invalid stored hosted server configuration");
-    s.settings_revision = r.as_int(5).value_or(1);
+	// A configuration that does not read leaves this row's settings the defaults and says why:
+	// one row never stops the rows read with it (the supervisor fails that server alone).
+	io::JsonValue document;
+	std::string field, error;
+	if (!io::json_parse(r.as_text(4).value_or("{}"), document, error))
+		s.settings_error = "the stored document is no JSON: " + error;
+	else if (!read_settings_document(document, st, field, error))
+		s.settings_error = field.empty() ? error : field + ": " + error;
+	s.settings_revision = r.as_int(5).value_or(1);
 	s.provider = r.as_text(6).value_or("");
 	s.container = r.as_text(7).value_or("");
 	s.machine_address = r.as_text(8).value_or("");

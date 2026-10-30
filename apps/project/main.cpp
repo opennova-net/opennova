@@ -18,7 +18,8 @@
 #endif
 
 int main(int argc, char **argv) {
-	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
+	opennova::games::install_rules(); // and the rules each runs: the editor's previews run a World
 #ifdef _WIN32
 	// The arguments as UTF-8, the paths every verb takes (editor/project/project_files.h): the
 	// narrow argv is the ANSI code page's, which spells a folder named outside it as another or

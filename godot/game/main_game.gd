@@ -310,7 +310,7 @@ func _ready() -> void:
 	_menu_shell.set_player_options(_player_options)
 	# The join screen comes up over the menu the join started from, and its keys
 	# are its own while it is open.
-	_menu_shell.keyboard_covered = _join_screen.is_open
+	_menu_shell.covered = _join_screen.is_open
 	var debug_adapter := get_game_debug_adapter()
 	add_child(debug_adapter)
 	debug_adapter.start_runtime_endpoint()

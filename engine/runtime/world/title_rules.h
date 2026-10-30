@@ -2,8 +2,8 @@
 // and the protocol it speaks): TitleRules, one named knob per difference the DFX2 catalog records
 // between dfx2.exe and Jointops.exe in the host's and the joiner's in-match code
 // (docs/titles/dfx2-vs-jo-re.md §7, the §8 row each knob names), and its registry keyed by title
-// code. Each title's row lives in games/<code>/<code>_rules.cpp, which games::install() hands to
-// install_title_rules; engine/ holds the type and the lookups alone, and several titles may run one
+// code. Each title's row lives in games/<code>/<code>_rules.cpp, which games::install_rules() hands
+// to install_title_rules; engine/ holds the type and the lookups alone, and several titles may run one
 // TitleRules object (OP: Acid Gambit runs Joint Operations').
 //
 // A default-constructed TitleRules is Jointops.exe's: JO is the baseline every port here was
@@ -36,11 +36,17 @@
 
 namespace opennova::world {
 
-// Jointops.exe's built-in score table: the 39 VAR values of a game type's row, as
+// A game type's score row: its 39 VAR values, the 0x9C bytes GameType_CreateDefaultSettings
+// zeroes per row before it stores them (S2C 0x58 carries the same 39).
+// [orig: GameType_CreateDefaultSettings @0x52DD00] [orig: GameType_CreateDefaultSettings
+//  @0x52ae80 - the row's memset(.., 0x9C) @0x52afd0 (dfx2.exe)]
+using ScoreValues = std::array<int32_t, 39>;
+
+// Jointops.exe's built-in score table: the VAR values of a game type's row, as
 // GameType_CreateDefaultSettings stores them (match_score_table.cpp, which carries the rows'
 // witness; MatchRules::score_values). TitleRules::score_values' default.
 // [orig: GameType_CreateDefaultSettings @0x52DD00]
-std::array<int32_t, 39> builtin_score_values(uint32_t game_type);
+ScoreValues builtin_score_values(uint32_t game_type);
 
 // DFX2-9: what a fired event's waypoint hook marks done, on the authority (the hook returns at
 // once off it [orig: the is_authority test @0x452ce0]).
@@ -67,8 +73,8 @@ enum class EmplacedTurretUpdate : uint8_t {
 	CounterRotate,
 };
 
-// A title's built-in score table: game type -> the row's 39 VAR values (builtin_score_values).
-using ScoreValuesTable = std::array<int32_t, 39> (*)(uint32_t game_type);
+// A title's built-in score table: game type -> the row's VAR values (builtin_score_values).
+using ScoreValuesTable = ScoreValues (*)(uint32_t game_type);
 // A title's person hit-zone -> bullet damage scale (hit_zone_damage_multiplier).
 using HitZoneScaleTable = double (*)(int32_t hit_zone);
 
@@ -210,8 +216,8 @@ struct TitleRules {
 	//  twin @0x4652a0 (dfx2.exe)]
 	int32_t ai_vehicle_near_reach = 0xC0000;
 	// The stuck count past which the write-off starts; the 3720 kill is the same in both.
-	// [orig: AI_CheckVehicleStuckState @0x465290 (@0x4653a6)] [orig: @0x4653a6, @0x4653ac (0x744)
-	//  in the twin @0x4652a0 (dfx2.exe)]
+	// [orig: AI_CheckVehicleStuckState @0x465290 (`cmp [esi+148h], 0D52h` @0x46539c)] [orig:
+	//  `cmp [esi+148h], 744h` @0x4653ac in the twin @0x4652a0 (dfx2.exe)]
 	int32_t ai_vehicle_write_off_count = 3410;
 
 	// --- DFX2-33: the profile-less spawn kit. ----------------------------------------------------
@@ -232,7 +238,7 @@ struct TitleRulesRow {
 
 // Fills the registry with `rows` (each TitleRules outliving the program); a second call replaces
 // the first. The lookup below aborts on an EMPTY registry, naming the invariant: a program that
-// reaches it calls games::install() at its start (games/games.h).
+// reaches it calls games::install_rules() at its start (games/games.h, opennova_games_rules).
 void install_title_rules(const TitleRulesRow *rows, size_t count);
 
 // The rules title `title_code` runs, compared case-insensitively: the default title's

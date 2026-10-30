@@ -1560,6 +1560,9 @@ void GameWorld::apply_occlusion_frame() {
 		occlusion_->set_local_avatar(presenter != nullptr ? presenter->avatar() : nullptr);
 		occlusion_->apply_frame(image_camera(), surface_width(), surface_height(), render_camera_xform(),
 				mission_forces_indoors(), object_detail_, main_mirror_collect_eye());
+		// The collect ran the draw's husk leg; what it changed draws this frame (retail's
+		// draw publishes, then draws, in one call: engine world::run_draw_husk_leg).
+		occlusion_->apply_draw_husk_leg();
 	}
 }
 

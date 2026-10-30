@@ -699,11 +699,14 @@ static int test_expansion_staging() {
 	for (const char *name : {"language.pff", "localres.pff", "resource.pff", "intro.bik", "menumus.sbf", "nwother.mnx"})
 		TEST_EXPECT(fs::equivalent(run + "/" + name, install + "/" + name, ec)); // linked: the game only reads it
 	const std::pair<const char *, const char *> copied[] = {
-	        {"cc.bin", "us"}, {"nw_cdata.coo", "cookies"}, {"SCORE.INI", "scores"}, {"earlyerr.txt", "early"}};
+	        {"cc.bin", "us"}, {"SCORE.INI", "scores"}, {"earlyerr.txt", "early"}};
 	for (const auto &[name, held] : copied)
 		TEST_EXPECT(fs::exists(run + "/" + name) && !fs::equivalent(run + "/" + name, install + "/" + name, ec) &&
 		            opennova::io::read_file_text(run + "/" + name, text, io_error) && text == held); // copied: the game may write it
 	TEST_EXPECT(!fs::exists(run + "/nwmain.mnx")); // the expansion packs its own: /d would read this one over it
+	// The install's NovaWorld cookie jar is the player's (their saved login): no loose file of the game's to
+	// stage, the game makes its own in the run directory.
+	TEST_EXPECT(!fs::exists(run + "/nw_cdata.coo"));
 	TEST_EXPECT(!fs::exists(run + "/Readme.txt") && !fs::exists(run + "/expansion/jox01") && !fs::exists(run + "/build.json"));
 	TEST_EXPECT(fs::is_directory(run + "/expansion/jxm") && !fs::is_symlink(run + "/expansion/jxm"));
 	for (const char *name : {"jxm.pff", "jxmL.pff", "header.bik"})
@@ -730,18 +733,17 @@ static int test_expansion_staging() {
 	            write_as_the_game(run + "/expansion/jxm/version.txt", "edited"));
 	TEST_EXPECT(editor_test::tree_digest(build) == build_tree && editor_test::tree_digest(install) == install_tree);
 	// Staged again into the same run directory (run/run_directory.h: the run keeps the game's files): each
-	// staged file put back by its name (the cookie jar the install's, the expansion's version.txt the
-	// build's), the files the game reads by name kept as the game rewrote them (seeded where the run had
+	// staged file put back by its name (the expansion's version.txt the build's), the files the game reads by name kept as the game rewrote them (seeded where the run had
 	// none, never staged), and its expansion's weapon.sav kept; what was staged named, each path under the
 	// run directory.
 	{
 		std::vector<std::string> staged;
 		TEST_EXPECT(prepare_expansion_run(install, build, "jxm", run, cache, error, opennova::io::link_file, &staged));
 		const auto named = [&staged](const char *path) { return std::find(staged.begin(), staged.end(), path) != staged.end(); };
-		TEST_EXPECT(named("language.pff") && named("intro.bik") && named("nw_cdata.coo") && named("cc.bin") &&
+		TEST_EXPECT(named("language.pff") && named("intro.bik") && named("cc.bin") &&
 		            named("expansion/jxm/jxm.pff") && named("expansion/jxm/version.txt"));
-		TEST_EXPECT(!named("SCORE.INI") && !named("earlyerr.txt") && !named("expansion/jxm/weapon.sav") && !named("nwmain.mnx"));
-		TEST_EXPECT(opennova::io::read_file_text(run + "/nw_cdata.coo", text, io_error) && text == "cookies");
+		TEST_EXPECT(!named("SCORE.INI") && !named("earlyerr.txt") && !named("expansion/jxm/weapon.sav") && !named("nwmain.mnx") &&
+		            !named("nw_cdata.coo"));
 		TEST_EXPECT(opennova::io::read_file_text(run + "/expansion/jxm/version.txt", text, io_error) && text == "1.0");
 		TEST_EXPECT(opennova::io::read_file_text(run + "/SCORE.INI", text, io_error) && text == "written by the game");
 		TEST_EXPECT(opennova::io::read_file_text(run + "/earlyerr.txt", text, io_error) && text == "written by the game");

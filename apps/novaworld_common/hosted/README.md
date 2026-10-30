@@ -812,32 +812,40 @@ ahead of the waiting polls, so a page never meets its own `console_busy`.
 | `GET /api/me/servers/<id>/chat` | `CHAT GET` | the chat window, oldest first |
 | `POST /api/me/servers/<id>/chat` | `CHAT SEND <text>` | `{"text"}`: cp1252, no control character, not blank, at most 59 characters; 400 `invalid_text` |
 | `GET /api/me/servers/<id>/console` | none | the console ring in any state, with the link's state (`?limit=`, `?after=`); 404 |
-| `GET .../settings` | `GET GAMESETTINGS` | live values, saved configuration, revision, title schema and pinned weapon catalog |
-| `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch |
+| `GET .../settings` | none (the database) | saved configuration, revision, title schema and pinned weapon catalog, in any state |
+| `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch; an edit with no live command is saved with no admin line, its link up or not (`next_launch_only`), one with a live command needs the server running and its link up (409 `server_not_running`, 503 `admin_unavailable`) |
 | `GET .../weapons` | `WEAPON LIST` | complete reply packets |
-| `POST .../command` | `{command}` | full ordered replies, delivery status, saved status and new revision |
 
-Owners and admins can use the full TCP command surface on hosted servers, including
-bulk player actions, weapon restrictions, inserted/one-shot missions, `CMD`, `GOTO`,
-and `QUIT`. `ADMINUSER`, `BANLIST`, and `SET LevelRestrict` remain retail stubs;
-the web shows the server's unsupported response. The console never connects to
-arbitrary external endpoints. Authentication, ownership, CSRF, admission and rate
-limits still apply. Password-bearing lines are redacted in persistent logs.
+No admin line passes through (ADR 0053 decision 9): every command is one the routes
+compose from checked arguments (`apps/novaworld_web/hosted/console_commands.h`), and a
+settings edit sends only the `SET` and `WEAPON SET` lines its saved fields map to.
+`CMD`, `GOTO`, `QUIT`, `MISSION CLEAR`, `ADMINUSER` and `BANLIST` never reach a hosted
+server from the site. Password-bearing lines are redacted in persistent logs.
 
 ## Saved server configuration
 
 `engine/formats/gamecfg/server_settings.*` describes the title-aware fields, defaults,
-types, validation and live setters shared by the website and in-game host editor. It
-offers only the settings something in the runtime acts on (a game.cfg key nothing reads
-stays in the format, not the schema), and a row's `depends_on` names the toggle or count
-it does nothing without, which the editors show it beneath.
-NovaWorld and LAN use the same authored host screen, with a supplemental options panel.
+types, validation and live setters the website's server forms read. It offers only the
+settings something in the runtime acts on (a game.cfg key nothing reads stays in the format,
+not the schema), and a row's `depends_on` names the toggle or count it does nothing without,
+which the form shows it beneath. The game's own host is the authored MULTI_PLAYER_HOST
+screen alone, NovaWorld's and LAN's alike; a game.cfg-only setting is edited in game.cfg.
 
 `hosted_servers.configuration` is the canonical JSONB document. Existing core fields
 remain at the top level, advanced fields live under `options`, and `rotation` is an
 ordered array of `{file, swap_sides}` entries, including repeated maps. A map's side-switch
 flag applies to every occurrence, as in retail. Classes and
-weapons use stable names; weapon availability is `always`, `never` or `armory`.
+weapons use stable names; weapon availability is `always`, `never`, `armory` or `mission`
+(the title's own words, the host screen's WEAPON_LIST names; server_settings.h
+weapon_availability_name), and a class is on or off. A settings edit sends only the weapons whose
+availability it changes from the saved configuration, with retail's `ALWAYS`, `NEVER` and
+`ARMORY` keywords (one `WEAPON SET ALL` when every selectable weapon ends at one of them and
+ALL's rows, the admin table's loadout_selectable rows, a subclass row's among them, are the
+roster's); a
+weapon set to `mission`, which no `WEAPON SET` keyword reaches, waits for the next launch. A
+command the server refuses stops the edit there: the fields before it are saved, the rest not
+sent, and the reply names it (`refused_command`). The route waits for an edit by its command
+count (console_routes.h edit_budget).
 A product tree carries its weapon catalog, so published updates cannot reinterpret
 an already running server's restrictions by another tree's numeric indexes.
 
@@ -846,7 +854,7 @@ and configuration revision. It saves accepted live changes and command completio
 one transaction, retries database persistence without resending TCP commands, and
 finishes independently of the browser. Structured edits require the current revision;
 stale edits return 409. File-only options are saved for the next launch without forcing
-a restart. One-shot missions are excluded from saved rotations. QUIT closes only the
+a restart, also while the server restarts or its admin link is down. One-shot missions are excluded from saved rotations. QUIT closes only the
 admin session; exhausted non-repeating rotations and explicit session ends release the
 allocation without consuming a crash restart.
 

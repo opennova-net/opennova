@@ -89,7 +89,7 @@ import TableState from './ui/TableState.vue';
 import { fetchRollPlan, rollFleet } from '../api/admin';
 import type { RollPlan } from '../types/hostedServer';
 import { machineKindLabel, machineStateLabel } from '../utils/adminView';
-import { countLabel } from '../utils/infraView';
+import { countLabel } from '../utils/format';
 
 const emit = defineEmits<{
   // A roll went in: the fleet's lists change.

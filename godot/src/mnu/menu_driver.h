@@ -356,6 +356,9 @@ public:
 	void set_widget_clip_rect(int p_id, const Rect2i &p_rect);
 	// The engine runtime, for native screen companions (C++ only).
 	opennova::menu::MenuRuntime &runtime() { return runtime_; }
+	// The host screen's mission rotation and START gate (C++ only: the cfg block's restriction
+	// lists, GameConfigBlock).
+	opennova::menu::HostDialog &host_dialog() { return host_dialog_; }
 
 	// --- activation / actions ---
 	void activate(int p_id);

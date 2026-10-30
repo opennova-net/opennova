@@ -44,6 +44,18 @@ bool is_utf8(std::string_view text);
 // scan lists none, a push refuses them. Keep this separate from manifest validity: historical
 // revisions containing these files still verify and decode.
 bool is_service_managed_file(std::string_view path);
+// The service's version.txt is its one line; the editor takes one of at most this many bytes, the
+// gate tag file's bound (net/protocol/gate_tag.h kGateTagFileMaxBytes) chosen for it. OpenNova's own
+// bound: retail reads the whole file [orig: Expansion_LoadAssets @ 0x4a4862..0x4a4885].
+inline constexpr size_t kServiceVersionFileMaxBytes = 0x1FFF;
+// The base64 text of at most `bytes` bytes: four characters per three bytes, the last group padded.
+constexpr size_t base64_text_max(size_t bytes) { return (bytes + 2) / 3 * 4; }
+
+// A project's expansion code, a mod's short name and its expansion folder's and /exp's name as
+// NovaWorld issues it (ADR 0074): 1 to kMaxExpansionCodeChars of a-z and 0-9. OpenNova's own rule,
+// the one the service's routes, the machine agents' protocol and the editor check.
+inline constexpr size_t kMaxExpansionCodeChars = 8;
+bool is_expansion_code(std::string_view code);
 
 // Whether `path` is a path a project's file may have: non-empty, at most kMaxPathBytes, valid
 // UTF-8, its parts '/'-separated (none empty, "." or "..", none past kMaxPartBytes), no backslash,

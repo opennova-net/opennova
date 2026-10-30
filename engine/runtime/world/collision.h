@@ -934,10 +934,14 @@ public:
     // between "no candidates near" and "this world never ran the table build"
     // (headless callers), which keep whole-registry fallbacks.
     bool tick_tables_ready() const { return tick_tables_built_; }
-    // Attach scans switch from their compatibility registry walk only after a
-    // real candidate-slice epoch exists. Initial table snapshots deliberately
-    // precede the retail 17-tick slice cadence, so treating those as an empty
-    // authoritative slice would make nearby seats temporarily disappear.
+    // Whether the candidate slices have been built: the attach scans read them
+    // from then on. A mission load builds them with the tables, as retail's does
+    // (MissionKernel::occlusion_init_mission -> build_initial_tables) [orig:
+    // Game_StartMission @0x524360 - Entity_InitAllFromModels @0x52567F ->
+    // Entity_BuildAllProximityLists @0x40E5A1, and the direct call @0x525C90], so
+    // only a world that never ran that build (a tool's or a test rig's, whose
+    // per-tick builds publish no slice before the 17-tick cadence) keeps the
+    // registry walk.
     bool attach_candidate_slices_authoritative() const {
         return candidate_slices_built_;
     }

@@ -410,8 +410,9 @@ players a mod alone: a player's lobby would show Acid Gambit's pages until each 
 own (the routes still take a player's game).
 Selection locks when the first release build of a game with a
 lobby starts, including a build of the game's expansion. Failed or deleted releases do not
-unlock it. Shared lobby rows outlive their projects; a created lobby a game moves off, which no
-other game names, goes with the move. Public discovery lists system and published public game
+unlock it. Shared lobby rows outlive their projects, as does a released game's own (its
+installs carry its gt.ssc); a created lobby a game moves off, or a never-built game's when it is
+deleted, which no other game names, goes with it. Public discovery lists system and published public game
 lobbies; project creation also offers the caller's own, but a player never a retail game's
 (the lobbies the original clients browse), and an admin every row. Internal routing
 still resolves unpublished lobbies for testing. The JSON routes answer a lobby's protocol as
@@ -1509,7 +1510,7 @@ it ([`CMakeLists.txt`](CMakeLists.txt) says what each holds):
 | `opennova_novaworld_jobs` | `jobs/` | core | web, the fleet, the worker, data |
 | `opennova_novaworld_accounts` | `accounts/` | core, program, jobs | web, the fleet, the worker |
 | `opennova_novaworld_billing` | `billing/` | core, jobs | web, the fleet, the worker |
-| `opennova_novaworld_products` | `products/` | core, jobs | web, the fleet, the worker, data |
+| `opennova_novaworld_products` | `products/` | core, program, jobs | web, the fleet, the worker, data |
 | `opennova_novaworld_hosting_model` | `hosted/model/` | core, program, jobs, billing, products, hosting_protocol | web, the fleet, the worker |
 | `opennova_novaworld_hosting_cloud` | `hosted/cloud/` | core, jobs, billing, hosting_protocol, hosting_model | the worker alone |
 

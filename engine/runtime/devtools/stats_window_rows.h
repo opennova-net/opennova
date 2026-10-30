@@ -30,7 +30,6 @@ inline constexpr Slot k_ai_infantry_collision_unattributed[] = {Slot::SIM_AI_INF
 inline constexpr Slot k_ai_infantry_unattributed[] = {Slot::SIM_AI_INFANTRY_ITEM_MOVERS, Slot::SIM_AI_INFANTRY_ANIMATION, Slot::SIM_AI_INFANTRY_PLAYER, Slot::SIM_AI_INFANTRY_CORPSE, Slot::SIM_AI_INFANTRY_MOTION, Slot::SIM_AI_INFANTRY_THINK, Slot::SIM_AI_INFANTRY_COMBAT, Slot::SIM_AI_INFANTRY_SELECT, Slot::SIM_AI_INFANTRY_ATTENTION, Slot::SIM_AI_INFANTRY_SEAT, Slot::SIM_AI_INFANTRY_FIRE, Slot::SIM_AI_INFANTRY_COLLISION, Slot::SIM_AI_INFANTRY_FINISH};
 inline constexpr Slot k_update_walks_other[] = {Slot::SIM_AI_INFANTRY, Slot::SIM_WALK_VISIT, Slot::SIM_WALK_THINK, Slot::SIM_WALK_MOTOR, Slot::SIM_WALK_EWEP, Slot::SIM_WALK_POWERUPS, Slot::SIM_WALK_ITEMS, Slot::SIM_WALK_DEVICES, Slot::SIM_WALK_MOUNTED, Slot::SIM_WALK_REPLICA_ROWS, Slot::SIM_WALK_REPLICA_POOL0, Slot::SIM_WALK_CLAIMS};
 inline constexpr Slot k_update_entities_unattributed[] = {Slot::SIM_UPDATE_WALKS, Slot::SIM_UPDATE_ATTACHMENTS, Slot::SIM_UPDATE_HELILIFT_FACES, Slot::SIM_UPDATE_PRECIPITATION, Slot::SIM_UPDATE_PIECES_EVENTS, Slot::SIM_UPDATE_PROJECTILES, Slot::SIM_UPDATE_EXPLOSIONS, Slot::SIM_UPDATE_PROXIMITY, Slot::SIM_UPDATE_CONTACTS, Slot::SIM_UPDATE_EPILOG, Slot::SIM_UPDATE_BODY_TRACE};
-inline constexpr Slot k_attachment_unattributed[] = {Slot::SIM_ATTACHMENT_RIDERS};
 inline constexpr Slot k_world_unattributed[] = {Slot::SIM_WORLD_SETUP, Slot::SIM_WORLD_SCRIPTS, Slot::SIM_UPDATE_ENTITIES, Slot::SIM_WORLD_HOUSEKEEPING};
 inline constexpr Slot k_replication_query_grid_unattributed[] = {Slot::SIM_REPLICATION_QUERY_GRID_SPAN, Slot::SIM_REPLICATION_QUERY_GRID_BUCKET, Slot::SIM_REPLICATION_QUERY_GRID_WORKSPACE};
 inline constexpr Slot k_replication_query_unattributed[] = {Slot::SIM_REPLICATION_QUERY_COLLECT, Slot::SIM_REPLICATION_QUERY_GRID};
@@ -112,9 +111,7 @@ inline constexpr StatsRow kRows[] = {
 	{"walk_replica_proxies", "Proxies' live words", 10, RowKind::SPAN, Slot::SIM_WALK_REPLICA_PROXIES, nullptr, 0},
 	{"walk_claims", "Pool-0 bodies' vehicle claims", 9, RowKind::SPAN, Slot::SIM_WALK_CLAIMS, nullptr, 0},
 	{"update_walks_other", "Walk remainder", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_WALKS, k_update_walks_other, 12},
-	{"update_attachments", "Attached children's riders + view reset", 8, RowKind::SPAN, Slot::SIM_UPDATE_ATTACHMENTS, nullptr, 0},
-	{"attachment_riders", "Mounted-rider refresh", 9, RowKind::SPAN, Slot::SIM_ATTACHMENT_RIDERS, nullptr, 0},
-	{"attachment_unattributed", "Attachment unattributed", 9, RowKind::RESIDUAL, Slot::SIM_UPDATE_ATTACHMENTS, k_attachment_unattributed, 1},
+	{"update_attachments", "Query-view reset after the walk", 8, RowKind::SPAN, Slot::SIM_UPDATE_ATTACHMENTS, nullptr, 0},
 	{"update_helilift_faces", "HeliLift + facial interpolation", 8, RowKind::SPAN, Slot::SIM_UPDATE_HELILIFT_FACES, nullptr, 0},
 	{"update_precipitation", "Precipitation fall", 8, RowKind::SPAN, Slot::SIM_UPDATE_PRECIPITATION, nullptr, 0},
 	{"update_pieces_events", "Death pieces + timed AI events", 8, RowKind::SPAN, Slot::SIM_UPDATE_PIECES_EVENTS, nullptr, 0},

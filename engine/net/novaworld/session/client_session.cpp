@@ -27,7 +27,7 @@ namespace {
 // The 16-byte NOVAWORLDUDP protocol GUID the real server validates (16 bytes
 // at proto+284 in BOTH HandleClientHello @ 0x6213B0 and HandleClientJoin @
 // 0x62B750). Built by CNapiGameSession_InitNPConnection @ 0x4d3be0 via
-//   sub_62E750(dst, -655487758, 58574, 17549, 144,180,29,66,179,100,171,113)
+//   Napi_BuildGuid(dst, -655487758, 58574, 17549, 144,180,29,66,179,100,171,113)
 // which lays out [u32 version LE][u16 port_a LE][u16 port_b LE][8 bytes].
 // Computed from those literals so the byte order is exact regardless of host.
 std::array<uint8_t, 16> novaworldudp_pg() {
@@ -172,20 +172,6 @@ ClientSession::Config ClientSession::Config::lobby(const Protocol &protocol,
 	//  Game_Run @0x4A7FB0 - _strupr called @0x4A7FCF]
 	c.co = protocol.generation->co;
 	c.ap = read_menu_exe_basename().substr(0, kLobbyApChars);
-	return c;
-}
-
-ClientSession::Config ClientSession::Config::game_protocol(const Protocol &protocol) {
-	Config c;
-	const ClientHello retail = make_protocol_client_hello(protocol, c.client_index);
-	c.co = retail.co;
-	c.ap = retail.ap;
-	c.bdat = retail.bdat;
-	c.pn = retail.pn;
-	c.pv1 = retail.pv1;
-	c.pv2 = retail.pv2;
-	c.pg = retail.pg;
-	c.use_default_pg = false;
 	return c;
 }
 

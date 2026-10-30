@@ -116,6 +116,18 @@ class CitationAllowlist(unittest.TestCase):
     def test_the_count_is_unchanged_by_the_check(self):
         self.assertEqual(self.uncited(set())[0], 3)
 
+    def test_games_files_count_and_take_repo_rooted_rows(self):
+        self.FILES = {**self.FILES,
+                      "games/jo/jo_rules.cpp": "// [orig: Score_Table @0x401300]\n",
+                      "games/acidgambit/acidgambit_title.cpp": "// OpenNova's own\n",
+                      "games/games.cpp": "// the registration\n"}
+        # pcapio's and the service subtree's rows aside, the uncited engine file and both games files
+        self.assertEqual(self.uncited({"pcapio", "net/novaworld/service"}), (3, []))
+        self.assertEqual(self.uncited({"pcapio", "net/novaworld/service", "games/acidgambit", "games/games.cpp"}),
+                         (1, []))
+        self.assertEqual(self.uncited({"pcapio", "net/novaworld/service", "games/jo/jo_rules.cpp"})[1],
+                         ["games/jo/jo_rules.cpp"])
+
 
 class EditorWrappedText(unittest.TestCase):
     FILES = {

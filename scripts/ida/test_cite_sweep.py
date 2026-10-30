@@ -159,6 +159,137 @@ class GodotLegs(unittest.TestCase):
         self.assertFalse(cite_sweep.godot_leg_named(line, "godot/src/world/world_scene.cpp", self.read))
 
 
+class MarkerSubjects(unittest.TestCase):
+    """A marker's first address is the function it is about; the rest are the sites and callees
+    its prose names."""
+
+    def test_the_first_address_of_each_marker(self):
+        lines = ["// [orig: Foo_Bar @0x500000 - the call Baz_Qux @0x500010]; [orig: Qux_Quux @0x600000]"]
+        got = [(tok, subject) for _, _, tok, _, _, subject in cite_sweep.extract_lines("engine/x.cpp", lines)]
+        self.assertEqual(got, [("Foo_Bar", True), ("Baz_Qux", False), ("Qux_Quux", True)])
+
+    def test_a_record_cites_outside_markers(self):
+        # a docs table cell and a backticked prose cite are joined; a bare prose @0x is not
+        line = "| D-SND-8 | `Sound_ApplyDopplerShift` @ 0x527f60 doppler, the call @ 0x52896a |"
+        got = [(tok, addr) for _, _, tok, addr, _, _ in cite_sweep.extract_lines("docs/audio/x-re.md", [line])]
+        self.assertEqual(got, [("Sound_ApplyDopplerShift", "0x527f60")])
+        # a field's offset in a record's prose is no cite
+        self.assertEqual(list(cite_sweep.extract_lines("docs/x-re.md", ["`randomized_timeout_ms`@0x1194 (int)"])), [])
+        # code joins markers only
+        self.assertEqual(list(cite_sweep.extract_lines("engine/x.cpp", ["// Foo_Bar @0x500000"])), [])
+
+    def test_a_wrapped_markers_lines_are_read_once(self):
+        # the continuation lines of a wrapped marker are its own, never an unmarked record line
+        lines = ["the item's z (`[orig: JOTACmed.exe sub_44E640 @", "0x44e640, from MIS_SaveDocument @ 0x4546b5; sub_44E6A0 @",
+                 "0x44e6a0]`); then `Foo_Bar @0x401000`"]
+        got = [(tok, n, ctx) for _, n, tok, _, ctx, _ in cite_sweep.extract_lines("docs/x-re.md", lines)]
+        self.assertEqual([g[0] for g in got], ["sub_44E640", "MIS_SaveDocument", "sub_44E6A0", "Foo_Bar"])
+        self.assertTrue(all(ctx == "(other-image) JOTACmed.exe" for tok, n, ctx in got if tok != "Foo_Bar"))
+
+    def test_a_wrapped_qualifier_binds_its_cite(self):
+        lines = ["exchanged as 16.16 (`sub_401C23 @0x401C23", "(Nile.exe)`), each a 16.16 value.",
+                 "The loader `Foo_Bar @0x401000` reads them."]
+        got = [(tok, ctx) for _, n, tok, _, ctx, _ in cite_sweep.extract_lines("docs/world/x-re.md", lines)]
+        self.assertEqual(got, [("sub_401C23", "(other-image) Nile.exe"), ("Foo_Bar", "")])
+
+    def test_a_record_section_names_its_default_image(self):
+        lines = ["## 1. Launch", "`UI_LaunchUpdateProcess @ 0x55b0b0`", "## 2. Inputs", "`Cupdate2Dlg_ReadWizard @ 0x405000`"]
+        got = [ctx for *_, ctx, _ in cite_sweep.extract_lines("docs/update/updater-re.md", lines)]
+        self.assertEqual(got, ["", "(other-image) UPDATE.EXE"])
+
+    def test_a_bare_site_marker_is_its_own_subject(self):
+        got = [subject for *_, subject in cite_sweep.extract_lines("engine/x.cpp", ["// [orig: @0x500010]"])]
+        self.assertEqual(got, [True])
+
+
+class ReverseLinks(unittest.TestCase):
+    """classify_reimpl: an IDB `reimpl:` link joined against the tree, with the planned rewrite."""
+
+    START, END = "0x7671b0", "0x767200"   # AudioChannel_InitAll's range in these rows
+
+    def classify(self, link, pairs, tracked, held=()):
+        rows = [[self.START, self.START, self.END, "AudioChannel_InitAll", 0, "reimpl: " + link]]
+        n, out, edits = cite_sweep.classify_reimpl(rows, pairs, tracked,
+                                                   history=lambda paths: set(paths) & set(held))
+        return [(r[0], r[4]) for r in out], edits
+
+    @staticmethod
+    def cite(path, addr, subject):
+        return (path, 1, "AudioChannel_InitAll", addr, "", subject)
+
+    def test_a_path_no_landed_commit_held_is_unlanded(self):
+        rows, _ = self.classify("Mixer::init_all @ engine/runtime/audio/mixer.cpp", [], [])
+        self.assertEqual(rows, [("reimpl-unlanded", "")])
+
+    def test_a_path_the_history_held_is_stale(self):
+        held = ["engine/runtime/audio/mixer.cpp"]
+        rows, _ = self.classify("Mixer::init_all @ engine/runtime/audio/mixer.cpp", [], [], held)
+        self.assertEqual(rows, [("reimpl-stale", "")])
+
+    def test_an_include_root_path_is_its_engine_path(self):
+        tracked = ["engine/base/platform/input_sample.h"]
+        pairs = [self.cite("engine/base/platform/input_sample.h", "0x7671c0", True)]
+        rows, _ = self.classify("InputState @ base/platform/input_sample.h", pairs, tracked)
+        self.assertEqual(rows, [])
+        # gone under both spellings, and held under its engine path: stale, not unlanded
+        rows, _ = self.classify("InputState @ base/platform/input_sample.h", [], [],
+                                ["engine/base/platform/input_sample.h"])
+        self.assertEqual(rows, [("reimpl-stale", "")])
+
+    def test_a_mention_in_another_functions_marker_is_no_home(self):
+        # world.h names AudioChannel_InitAll @0x7671B0 inside Input_HandleActionBinding's marker
+        tracked = ["engine/runtime/world/world.h"]
+        pairs = [("engine/runtime/world/world.h", 1, "Input_HandleActionBinding", "0x49ad40", "", True),
+                 self.cite("engine/runtime/world/world.h", "0x7671b0", False)]
+        rows, edits = self.classify("Mixer::init_all @ engine/runtime/audio/mixer.cpp", pairs, tracked)
+        self.assertEqual(rows, [("reimpl-unlanded", "")])
+        self.assertEqual(edits, [])
+
+    def test_the_file_whose_marker_is_about_the_function_is_the_home(self):
+        tracked = ["engine/runtime/world/world.h", "engine/runtime/audio/channels.cpp"]
+        pairs = [self.cite("engine/runtime/world/world.h", "0x7671b0", False),
+                 self.cite("engine/runtime/audio/channels.cpp", "0x7671b0", True)]
+        rows, edits = self.classify("Mixer::init_all @ engine/runtime/audio/mixer.cpp", pairs, tracked)
+        self.assertEqual(rows, [("reimpl-unlanded", "engine/runtime/audio/channels.cpp")])
+        self.assertEqual(edits, [(self.START, 0, "reimpl: Mixer::init_all @ engine/runtime/audio/channels.cpp")])
+
+    def test_the_editor_is_no_home_for_a_port(self):
+        # the blank menu factory's marker says why its screens keep a close command: no port
+        tracked = ["engine/editor/blank/blank_mission_menus.cpp"]
+        pairs = [self.cite("engine/editor/blank/blank_mission_menus.cpp", "0x7671b0", True)]
+        rows, edits = self.classify("x @ engine/runtime/menu/death_screen.cpp", pairs, tracked)
+        self.assertEqual((rows, edits), ([("reimpl-unlanded", "")], []))
+
+    def test_a_moved_link_follows_only_a_lone_engine_home(self):
+        tracked = ["godot/src/audio/old_home.cpp", "engine/runtime/audio/channels.cpp"]
+        pairs = [self.cite("engine/runtime/audio/channels.cpp", "0x7671d0", True)]
+        rows, _ = self.classify("x @ godot/src/audio/old_home.cpp", pairs, tracked)
+        self.assertEqual(rows, [("reimpl-moved", "engine/runtime/audio/channels.cpp")])
+        pairs = [self.cite("engine/runtime/audio/channels.cpp", "0x7671d0", False)]
+        rows, _ = self.classify("x @ godot/src/audio/old_home.cpp", pairs, tracked)
+        self.assertEqual(rows, [("reimpl-moved", "")])
+
+
+class RecordHistory(unittest.TestCase):
+    """A record's rename log or (ex Old) line names the old name on purpose."""
+
+    LINES = ["- **D-NET-100** [naming, FIXED] `Player_MaybeGetLocalSessionId @0x4c6d40` -> **`NapiNP_GetLocalConnectionId`**:",
+             "  the class roster; the chat input line (`HUD_DrawChatInputLine`, ex",
+             "  `StdCtype_Destructor @0x5b8f30`, at (50, 480)); the quit dialog",
+             "  `Sound_Calculate3DAttenuation @ 0x527f60` doppler"]
+
+    def read(self, path):
+        return self.LINES
+
+    def test_a_rename_log_and_an_ex_form_are_history(self):
+        self.assertTrue(cite_sweep.record_names_both("docs/x.md", 1, "NapiNP_GetLocalConnectionId", "", self.read))
+        self.assertTrue(cite_sweep.record_names_both("docs/x.md", 3, "HUD_DrawChatInputLine", "", self.read))
+
+    def test_a_stale_name_alone_is_not(self):
+        self.assertFalse(cite_sweep.record_names_both("docs/x.md", 4, "Sound_ApplyDopplerShift", "", self.read))
+        self.assertFalse(cite_sweep.record_names_both("docs/x.md", 4, "sub_527F60", "", self.read))
+
+
 class Unchanged(unittest.TestCase):
     def test_the_accepted_forms(self):
         self.assertEqual(classify("Foo_Bar", "0x500000", cite_sweep.entry_info("Foo_Bar", "0x500000")), "ok")

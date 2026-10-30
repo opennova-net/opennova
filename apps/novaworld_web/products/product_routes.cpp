@@ -11,6 +11,7 @@
 #include "program/catalog_repository.h"
 
 #include <base/io/strutil.h>
+#include <base/project/project_manifest.h> // is_expansion_code
 #include <base/title/title.h>
 #include <net/protocol/protocol.h>
 
@@ -140,12 +141,6 @@ bool valid_title(std::string_view title) {
 		if (title == code)
 			return true;
 	return false;
-}
-
-bool valid_expansion_code(std::string_view code) {
-	return !code.empty() && code.size() <= ProductRoutes::kExpansionCodeMax &&
-			std::all_of(code.begin(), code.end(),
-					[](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
 }
 
 bool valid_visibility(std::string_view visibility) {
@@ -329,7 +324,7 @@ crow::response ProductRoutes::create(const crow::request &req) {
 			return field_error(400, "missing_field", "parent_id", "an expansion has a game for parent");
 		if (!expansion_code)
 			return field_error(400, "missing_field", "expansion_code", "an expansion has a code");
-		if (!valid_expansion_code(*expansion_code))
+		if (!project::is_expansion_code(*expansion_code))
 			return field_error(400, "invalid_field", "expansion_code",
 					"expansion_code is 1 to 8 of a-z and 0-9");
 		product.parent_id = *parent_id;

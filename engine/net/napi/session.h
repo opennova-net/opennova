@@ -12,18 +12,17 @@
 
 namespace opennova {
 
-// Session-level shapes for the NAPI NovaWorld handshake. Witnessed in
-// jodemo.exe:
-//   CNapiGameSession_ConnectOrHost@0x4b08e0  (state polling + error map)
-//   CNapiGameSession_SendConnected@0x4add40  ("ClientConnected" sender)
-//   CNapiGameSession_SendHostRequest@0x4af7d0 ("ClientHostRequest")
-//   CNetClient_SendHostUpdate@0x4af8b0       ("ClientHostUpdate")
-//   CNapiGameSession_SendPlayRequest@0x4d3920 ("ClientPlayRequest", retail —
-//     the prior 0x4af990 citation was Entity_CheckTripleLOS, a wrong anchor)
-//   CNapiGameSession_SendStopHosting@0x4ae320 ("ClientStopHosting")
-//   CNapiGameSession_SendStopPlaying@0x4ae3b0 ("ClientStopPlaying")
-//   CNapiNetwork_MintAppId@0x4a6d50          (jodemo's per-session AppId random;
-//     retail Jointops equivalent is @0x4c4d80 — see SESSION_APPID_RANDOM_*)
+// Session-level shapes for the NAPI NovaWorld handshake, witnessed in Jointops.exe (first in
+// jodemo.exe, whose twins sit at other addresses):
+//   [orig: CNapiGameSession_ConnectOrHost @0x4d4f10]       (state polling + error map)
+//   [orig: CNapiGameSession_SendClientConnected @0x4cfe30] ("ClientConnected" @0x4cfe58)
+//   [orig: CNapiGameSession_SendHostRequest @0x4d3700]     ("ClientHostRequest" @0x4d373d)
+//   [orig: CNapiGameSession_SendHostUpdate @0x4d3860]      ("ClientHostUpdate" @0x4d3886)
+//   [orig: CNapiGameSession_SendPlayRequest @0x4d3920]     ("ClientPlayRequest" @0x4d395d)
+//   [orig: CNapiGameSession_SendStopHosting @0x4d04e0]     ("ClientStopHosting" @0x4d04fe)
+//   [orig: CNapiGameSession_SendStopPlaying @0x4d0560]     ("ClientStopPlaying" @0x4d057e)
+//   [orig: CNapiNetwork_MintAppId @0x4c4d80]               (the per-registration AppId random;
+//     see SESSION_APPID_RANDOM_*)
 
 // Session state codes as witnessed in `dword_989574` polling loops inside
 // CNapiGameSession_ConnectOrHost. The values match the jodemo globals so

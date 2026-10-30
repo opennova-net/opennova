@@ -8,6 +8,7 @@
 #include <runtime/inmatch/host_settings.h>
 #include "common/test_expect.h"
 #include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_state_frame.h>
 #include <runtime/menu/menu_text_tables.h>
@@ -106,6 +107,15 @@ mnu::Document host_dialog_document() {
 //  0 on a miss @0x64BA82); CButtonWnd_SetLabel @0x6572F0 (the {hot} cut @0x657451..0x657480);
 //  UI_HandleHostSessionStart - HostDialog_ReadSettings @0x556E36; HostDialog_ReadSettings -
 //  CSpinListWnd_GetSelectedValue @0x5559DE, the location's strncpy @0x555A72]
+// The screen opened over `doc` (null: no screen, every control lacking) on `title`'s host screen
+// and START pressed with nothing changed: the populate, then the read.
+void open_and_start(gamecfg::GameCfg& cfg, const mnu::Document* doc, const opennova::Title& title = kJo) {
+    auto screen = std::make_unique<opennova::menu::MenuRuntime>();
+    if (doc != nullptr) screen->open_document(doc, std::string(), std::string(title.host_screen));
+    populate_host_screen(*screen, cfg, title);
+    read_host_screen(*screen, cfg, title);
+}
+
 int untouched_dialog() {
     const mnu::Document doc = host_dialog_document();
     gamecfg::GameCfg cfg;
@@ -118,7 +128,7 @@ int untouched_dialog() {
     cfg.enable_ai = 2;
     cfg.dedicated = 1;
     cfg.mp_novaworld_host_lan_only = 5;
-    read_untouched_host_dialog(cfg, kJo, &doc);
+    open_and_start(cfg, &doc);
     TEST_EXPECT(cfg.game_name == "NightOps");
     TEST_EXPECT(cfg.country == "US");
     TEST_EXPECT(cfg.sv_punkbuster == 0 && cfg.replay == 0 && cfg.enable_ai == 0);
@@ -128,28 +138,52 @@ int untouched_dialog() {
     // copies its NUL alone.
     cfg.country = "USA";
     cfg.replay = 1;
-    read_untouched_host_dialog(cfg, kJo, &doc);
+    open_and_start(cfg, &doc);
     TEST_EXPECT(cfg.country.empty() && cfg.replay == 1);
     cfg.country = "de";
-    read_untouched_host_dialog(cfg, kJo, &doc);
+    open_and_start(cfg, &doc);
     TEST_EXPECT(cfg.country == "DE");
     // No screen: the clamp alone.
     cfg.sv_punkbuster = 1;
     cfg.replay = 2;
     cfg.mp_max_players = 80;
-    read_untouched_host_dialog(cfg, kJo, nullptr);
+    open_and_start(cfg, nullptr);
     TEST_EXPECT(cfg.sv_punkbuster == 1 && cfg.replay == 2 && cfg.mp_max_players == 64);
     // The LAN screen: the open, the player's edit, START's read; PunkBuster's spin is disabled.
     auto screen = std::make_unique<opennova::menu::MenuRuntime>();
-    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kJo.host_screen)));
     populate_host_screen(*screen, cfg, kJo);
-    const int name = screen->find_screen_control(std::string(kHostDialogScreen), "GAME_NAME");
-    const int punkbuster = screen->find_screen_control(std::string(kHostDialogScreen), "SERVER_PUNKBUSTER");
+    const int name = screen->find_screen_control(std::string(kJo.host_screen), "GAME_NAME");
+    const int punkbuster = screen->find_screen_control(std::string(kJo.host_screen), "SERVER_PUNKBUSTER");
     TEST_EXPECT(name >= 0 && screen->get_widget_text(name) == "NightOps");
     TEST_EXPECT(punkbuster >= 0 && screen->is_widget_disabled(punkbuster));
     screen->set_widget_text(name, "Renamed");
     read_host_screen(*screen, cfg, kJo);
     TEST_EXPECT(cfg.game_name == "Renamed" && cfg.sv_punkbuster == 0 && cfg.replay == 0);
+
+    // dfx2.exe's walks find every control on NW_MULTI_PLAYER: JO's MULTI_PLAYER_HOST holds none of
+    // them for it (the clamp alone writes), its own screen every one, under its cap 100.
+    // [orig: UI_PopulateHostSettingsFromConfig @0x554190 (GAME_NAME @0x5541ae, MAX_PLAYERS
+    //  @0x5544f4); HostDialog_ReadSettings @0x553af0 (GAME_NAME @0x553b00) (dfx2.exe)]
+    mnu::Document nw = host_dialog_document();
+    nw.screens[0].name = "NW_MULTI_PLAYER";
+    gamecfg::GameCfg dfx2;
+    dfx2.table = gamecfg::ConfigTable::Dfx2;
+    dfx2.game_name = "Night{hot}Ops";
+    dfx2.sv_punkbuster = 1;
+    dfx2.mp_max_players = 120;
+    open_and_start(dfx2, &doc, kDfx2);
+    TEST_EXPECT(dfx2.game_name == "Night{hot}Ops" && dfx2.sv_punkbuster == 1 && dfx2.mp_max_players == 100);
+    open_and_start(dfx2, &nw, kDfx2);
+    TEST_EXPECT(dfx2.game_name == "NightOps" && dfx2.sv_punkbuster == 0 && dfx2.mp_max_players == 100);
+    auto nw_screen = std::make_unique<opennova::menu::MenuRuntime>();
+    TEST_EXPECT(nw_screen->open_document(&nw, std::string(), "NW_MULTI_PLAYER"));
+    populate_host_screen(*nw_screen, dfx2, kDfx2);
+    const int nw_name = nw_screen->find_screen_control("NW_MULTI_PLAYER", "GAME_NAME");
+    TEST_EXPECT(nw_name >= 0 && nw_screen->get_widget_text(nw_name) == "NightOps");
+    nw_screen->set_widget_text(nw_name, "Renamed");
+    read_host_screen(*nw_screen, dfx2, kDfx2);
+    TEST_EXPECT(dfx2.game_name == "Renamed");
     return 0;
 }
 // The connection speed's recommended player count: rows 0..17 the table under the title's
@@ -173,6 +207,10 @@ int max_players_recommendation() {
             {{"28.8", ""}, {"LAN", "18"}}));
     doc.screens[0].roots[0].children.push_back(
             control("STATIC_MAXPLAYERS_RECOMMENDATION", mnu::WindowType::Static));
+    // dfx2.exe's host screen, the same controls under its own name.
+    mnu::Screen nw = doc.screens[0];
+    nw.name = "NW_MULTI_PLAYER";
+    doc.screens.push_back(nw);
     opennova::menu::MenuTextTables tables;
     auto menutxt = std::make_shared<opennova::rtxt::File>();
     menutxt->sections.push_back({"Menu", 1});
@@ -187,8 +225,8 @@ int max_players_recommendation() {
     });
     auto screen = std::make_unique<opennova::menu::MenuRuntime>();
     screen->set_frame(&frame);
-    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
-    const int label = screen->find_screen_control(std::string(kHostDialogScreen),
+    TEST_EXPECT(screen->open_document(&doc, std::string(), std::string(kJo.host_screen)));
+    const int label = screen->find_screen_control(std::string(kJo.host_screen),
                                                   "STATIC_MAXPLAYERS_RECOMMENDATION");
     TEST_EXPECT(label >= 0);
     gamecfg::GameCfg cfg;
@@ -201,16 +239,155 @@ int max_players_recommendation() {
     gamecfg::GameCfg dfx2;
     dfx2.table = gamecfg::ConfigTable::Dfx2;
     dfx2.nwisptype = 18;
-    populate_host_screen(*screen, dfx2, kDfx2);
-    TEST_EXPECT(screen->get_widget_text(label) == "Up to 100 players");
+    auto nw_screen = std::make_unique<opennova::menu::MenuRuntime>();
+    nw_screen->set_frame(&frame);
+    TEST_EXPECT(nw_screen->open_document(&doc, std::string(), "NW_MULTI_PLAYER"));
+    const int nw_label = nw_screen->find_screen_control("NW_MULTI_PLAYER", "STATIC_MAXPLAYERS_RECOMMENDATION");
+    TEST_EXPECT(nw_label >= 0);
+    populate_host_screen(*nw_screen, dfx2, kDfx2);
+    TEST_EXPECT(nw_screen->get_widget_text(nw_label) == "Up to 100 players");
     // A frame with no menutxt.bin: the key itself, sprintf'd as the format.
     auto bare = std::make_unique<opennova::menu::MenuRuntime>();
-    TEST_EXPECT(bare->open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    TEST_EXPECT(bare->open_document(&doc, std::string(), std::string(kJo.host_screen)));
     cfg.nwisptype = 13;
     populate_host_screen(*bare, cfg, kJo);
-    const int bare_label = bare->find_screen_control(std::string(kHostDialogScreen),
+    const int bare_label = bare->find_screen_control(std::string(kJo.host_screen),
                                                      "STATIC_MAXPLAYERS_RECOMMENDATION");
     TEST_EXPECT(bare_label >= 0 && bare->get_widget_text(bare_label) == "MAX_PLAYERS");
+    return 0;
+}
+// The restriction lists over the block: WEAPON_LIST a row per loadout_selectable weapon (its WepDes
+// name, "" with no textid; its value the table row), CLASS_LIST the five classes; column 1 each
+// word's Game.bin token, "??KEY??" on a miss. A column-1 press steps the word (weapons past 3 to 0,
+// classes past 2 to 0), a radio sets every word; START stays off while every class word is 0.
+// [orig: HostDialog_PopulateWeaponRestrictionList @0x556600; HostDialog_PopulateClassListCombo
+//  @0x556700; HostDialog_WeaponRestrictionCycleHandler @0x5576c0;
+//  HostDialog_OnClassAvailabilityListClick @0x5577d0; HostDialog_SetAllWeaponAvailability
+//  @0x557910; HostDialog_SetAllClassAvailability @0x557a10; UI_RegisterHostSettingsCallbacks
+//  @0x5580f0; HostDialog_AddRemoveSelectedMissions @0x557c10 - the class words @0x557F24..0x557F43]
+int restriction_lists() {
+    const auto table = [](const char* name, int columns) {
+        mnu::Window w = control(name, mnu::WindowType::Table);
+        w.table_data.column.has_count = true;
+        w.table_data.column.count = columns;
+        return w;
+    };
+    mnu::Document doc = host_dialog_document();
+    auto& children = doc.screens[0].roots[0].children;
+    children.push_back(table("WEAPON_LIST", 2));
+    children.push_back(table("CLASS_LIST", 2));
+    children.push_back(table("SELECTED_MISSIONS", 3));
+    children.push_back(control("START_GAME", mnu::WindowType::Button));
+    for (const char* radio : {"WPN_NEVER", "WPN_MISSION", "CLASS_NEVER", "CLASS_ALWAYS"})
+        children.push_back(control(radio, mnu::WindowType::Radio));
+    opennova::menu::MenuRuntime screen;
+    TEST_EXPECT(screen.open_document(&doc, std::string(), std::string(kJo.host_screen)));
+    const auto find = [&](const char* name) {
+        return screen.find_screen_control(std::string(kJo.host_screen), name);
+    };
+    const opennova::hud::GameTextLookup gametext = [](const char* section, const char* key,
+                                                       const char* fallback) {
+        return std::string(section) == "WepDes" && std::string(key) == "WD_M16" ? std::string("M16A2")
+                                                                               : std::string(fallback);
+    };
+    const opennova::hud::GameTextLookup menu_ui = [](const char* section, const char* key,
+                                                      const char* fallback) {
+        const std::string k = key;
+        if (std::string(section) != "Menu") return std::string(fallback);
+        if (k == "NEVER") return std::string("Never");
+        if (k == "ALWAYS") return std::string("Always");
+        if (k == "MISSION") return std::string("Mission");
+        if (k == "CHARCLASS_MEDIC") return std::string("Medic");
+        return std::string(fallback);
+    };
+    const gamecfg::WeaponRoster weapons = {
+        {"None", 0, ""}, {"WPN_M16", 1, "WD_M16"}, {"WPN_KNIFE", 0, "WD_KNIFE"}, {"WPN_X", 1, ""}};
+    gamecfg::GameCfg cfg = gamecfg::defaults();
+    cfg.weapon_availability[3] = 2;
+    cfg.class_availability[gamecfg::kClassSniper] = 2;
+    cfg.class_availability[gamecfg::kClassGunner] = 0;
+    populate_host_weapon_list(screen, cfg, kJo, weapons, gametext, menu_ui);
+    populate_host_class_list(screen, cfg, kJo, menu_ui);
+    const int list = find("WEAPON_LIST");
+    TEST_EXPECT(screen.table_row_count(list) == 2);
+    TEST_EXPECT(screen.table_cell_text(list, 0, 0) == "M16A2" && screen.table_row_value(list, 0) == 1);
+    TEST_EXPECT(screen.table_cell_text(list, 0, 1) == "Mission"); // the default 3
+    TEST_EXPECT(screen.table_cell_text(list, 1, 0).empty() && screen.table_row_value(list, 1) == 3);
+    TEST_EXPECT(screen.table_cell_text(list, 1, 1) == "??ARMORY??"); // the token missing
+    const int classes = find("CLASS_LIST");
+    TEST_EXPECT(screen.table_row_count(classes) == 5 && screen.table_row_value(classes, 0) == 5);
+    TEST_EXPECT(screen.table_cell_text(classes, 0, 0) == "Medic" &&
+                screen.table_cell_text(classes, 1, 0) == "??CHARCLASS_SNIPER??");
+    TEST_EXPECT(screen.table_cell_text(classes, 0, 1) == "Always" &&
+                screen.table_cell_text(classes, 1, 1) == "Mission" &&
+                screen.table_cell_text(classes, 2, 1) == "Never");
+
+    opennova::menu::HostDialog dialog;
+    // A press steps the word: column 1 only, past 3 to 0.
+    TEST_EXPECT(!host_restriction_list_pressed(screen, dialog, cfg, kJo, "WEAPON_LIST", 0, 0, menu_ui));
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, kJo, "WEAPON_LIST", 0, 1, menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 0 && screen.table_cell_text(list, 0, 1) == "Never");
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, kJo, "WEAPON_LIST", 0, 1, menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 1 && screen.table_cell_text(list, 0, 1) == "Always");
+    // A class steps past 2 to 0.
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, kJo, "CLASS_LIST", 1, 1, menu_ui));
+    TEST_EXPECT(cfg.class_availability[gamecfg::kClassSniper] == 0);
+    TEST_EXPECT(!host_restriction_list_pressed(screen, dialog, cfg, kJo, "SELECTED_MISSIONS", 0, 1, menu_ui));
+    // The radios: every loadout_selectable weapon, every class word.
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "WPN_MISSION", menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 3 && cfg.weapon_availability[3] == 3 &&
+                cfg.weapon_availability[2] == 3 && screen.table_cell_text(list, 1, 1) == "Mission");
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "WPN_NEVER", menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 0 && cfg.weapon_availability[2] == 3);
+    // Every class word 0: START off whatever the missions; one set: START follows them.
+    const int start = find("START_GAME");
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "CLASS_NEVER", menu_ui));
+    TEST_EXPECT(cfg.class_availability[0] == 0 && cfg.class_availability[9] == 0 && !dialog.can_start());
+    TEST_EXPECT(screen.is_widget_disabled(start) && screen.table_cell_text(classes, 4, 1) == "Never");
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "CLASS_ALWAYS", menu_ui));
+    TEST_EXPECT(cfg.class_availability[0] == 1 && screen.is_widget_disabled(start)); // no mission yet
+    TEST_EXPECT(!host_restriction_radio_pressed(screen, dialog, cfg, kJo, weapons, "START_GAME", menu_ui));
+
+    // dfx2.exe's lists and radios are NW_MULTI_PLAYER's and its words ARMORY 3, MISSION 2: a press
+    // steps 0 -> 1 -> 2 -> 0, never reaching ARMORY, which WPN_ARMORY alone sets.
+    // [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0 (@0x5547c1); @0x5558a0 (the step past
+    //  2 @0x55590f); @0x5562c0 (WPN_ARMORY 3 @0x5563ed, WPN_MISSION 2 @0x55640b);
+    //  HostDialog_OnWeaponRestrictionListClick @0x5559b0 (the class step) (dfx2.exe)]
+    mnu::Document nw = host_dialog_document();
+    nw.screens[0].name = "NW_MULTI_PLAYER";
+    auto& nw_children = nw.screens[0].roots[0].children;
+    nw_children.push_back(table("WEAPON_LIST", 2));
+    nw_children.push_back(table("CLASS_LIST", 2));
+    nw_children.push_back(control("START_GAME", mnu::WindowType::Button));
+    opennova::menu::MenuRuntime nw_screen;
+    TEST_EXPECT(nw_screen.open_document(&nw, std::string(), "NW_MULTI_PLAYER"));
+    const int nw_list = nw_screen.find_screen_control("NW_MULTI_PLAYER", "WEAPON_LIST");
+    const int nw_classes = nw_screen.find_screen_control("NW_MULTI_PLAYER", "CLASS_LIST");
+    TEST_EXPECT(nw_list >= 0 && nw_classes >= 0);
+    gamecfg::GameCfg dfx = gamecfg::defaults({}, 0, 0, gamecfg::ConfigTable::Dfx2);
+    // JO's lists are MULTI_PLAYER_HOST's: none on this screen.
+    populate_host_weapon_list(nw_screen, dfx, kJo, weapons, gametext, menu_ui);
+    TEST_EXPECT(nw_screen.table_row_count(nw_list) == 0);
+    TEST_EXPECT(!host_restriction_list_pressed(nw_screen, dialog, dfx, kJo, "WEAPON_LIST", 0, 1, menu_ui));
+    populate_host_weapon_list(nw_screen, dfx, kDfx2, weapons, gametext, menu_ui);
+    populate_host_class_list(nw_screen, dfx, kDfx2, menu_ui);
+    TEST_EXPECT(nw_screen.table_row_count(nw_list) == 2 && nw_screen.table_row_count(nw_classes) == 5);
+    TEST_EXPECT(nw_screen.table_cell_text(nw_list, 0, 1) == "Mission"); // dfx2.exe's default word 2
+    opennova::menu::HostDialog nw_dialog;
+    for (const int32_t stepped : {0, 1, 2, 0}) {
+        TEST_EXPECT(host_restriction_list_pressed(nw_screen, nw_dialog, dfx, kDfx2, "WEAPON_LIST", 0, 1, menu_ui));
+        TEST_EXPECT(dfx.weapon_availability[1] == stepped);
+    }
+    TEST_EXPECT(nw_screen.table_cell_text(nw_list, 0, 1) == "Never");
+    TEST_EXPECT(host_restriction_radio_pressed(nw_screen, nw_dialog, dfx, kDfx2, weapons, "WPN_ARMORY", menu_ui));
+    TEST_EXPECT(dfx.weapon_availability[1] == 3 && dfx.weapon_availability[3] == 3 &&
+                nw_screen.table_cell_text(nw_list, 0, 1) == "??ARMORY??");
+    TEST_EXPECT(host_restriction_radio_pressed(nw_screen, nw_dialog, dfx, kDfx2, weapons, "WPN_MISSION", menu_ui));
+    TEST_EXPECT(dfx.weapon_availability[1] == 2 && nw_screen.table_cell_text(nw_list, 1, 1) == "Mission");
+    // The class list is NW_MULTI_PLAYER's too, its step the same 0 -> 1 -> 2 -> 0.
+    TEST_EXPECT(host_restriction_list_pressed(nw_screen, nw_dialog, dfx, kDfx2, "CLASS_LIST", 0, 1, menu_ui));
+    TEST_EXPECT(dfx.class_availability[gamecfg::kClassMedic] == 2 &&
+                nw_screen.table_cell_text(nw_classes, 0, 1) == "Mission");
     return 0;
 }
 } // namespace
@@ -219,6 +396,7 @@ int main() {
     if (title_caps() != 0) return 1;
     if (untouched_dialog() != 0) return 1;
     if (max_players_recommendation() != 0) return 1;
+    if (restriction_lists() != 0) return 1;
     gamecfg::GameCfg cfg;
     const auto read = [&](const char* name, const char* value) {
         return apply_host_dialog_control(cfg, kJo, name, value);

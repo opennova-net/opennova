@@ -449,13 +449,12 @@ Ref<LoadingScreenInfo> GameWorld::map_change_loading_info(
 	// and mode. The host's serializer writes it and its self-parse reads it back before the
 	// screen draws (engine: inmatch/host_config.h stage_next_mission, npwire/session_vars.h),
 	// and its band is the first map's rule (LoadingScreenInfo::for_host).
-	const opennova::inmatch::NextMissionStage stage = opennova::inmatch::stage_next_mission(
+	const opennova::inmatch::GameConfig next = opennova::inmatch::stage_next_mission(
 			p_kept->config(), game_config_.is_valid() ? &game_config_->native().cfg() : nullptr,
 			host_rotation_.list, std::string());
-	return LoadingScreenInfo::for_host(resource_root_, opennova::to_gd(stage.config.mission_file),
-			opennova::cp1252_to_gd(stage.config.server_name),
-			static_cast<int>(stage.config.game_type), false,
-			opennova::cp1252_to_gd(stage.config.custom_text));
+	return LoadingScreenInfo::for_host(resource_root_, opennova::to_gd(next.mission_file),
+			opennova::cp1252_to_gd(next.server_name), static_cast<int>(next.game_type), false,
+			opennova::cp1252_to_gd(next.custom_text));
 }
 
 int GameWorld::load_next_mission(const String &p_bms_name) {
@@ -588,7 +587,7 @@ bool GameWorld::open_remote_admin() {
 	admin_server_ = std::make_unique<opennova::AdminServer>(std::move(config), admin_consoles_,
 			admin_rand_, [&files](std::string_view p_line) {
 				(void)files.write(opennova::inmatch::kAdminLogFileName,
-						opennova::inmatch::admin_log_file_text(opennova::admin_log_redacted(p_line)), /*append=*/true);
+						opennova::inmatch::admin_log_file_text(p_line), /*append=*/true);
 			});
 	admin_pump_ = std::make_unique<AdminTcpPump>(*admin_server_);
 	const uint16_t port = opennova::inmatch::remote_admin_listen_port(game_config_->native().cfg());

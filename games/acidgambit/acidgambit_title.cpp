@@ -24,6 +24,7 @@ Title make() {
 	// Its player caps are Joint Operations', as its rules are (acidgambit_rules.cpp).
 	t.max_players = jo_title().max_players;
 	t.max_players_host_screen = jo_title().max_players_host_screen;
+	t.host_screen = jo_title().host_screen;
 	// Its expansions and the .def names it opens are Joint Operations', as its code is.
 	t.expansions = jo_title().expansions;
 	t.read_defs = jo_title().read_defs;

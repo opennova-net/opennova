@@ -247,11 +247,6 @@ void AdminConsole::set_rules_flags(uint32_t word) {
 
 namespace {
 
-// strncpy(field, value, 0x11): a 17-character value keeps no terminator (D-NET-359).
-std::string password_field(const std::string &value) {
-	return value.substr(0, 17);
-}
-
 // The protocol's copies after a password change: the join PW and game_settings (Napi_CopyString
 // 32 of the 17-byte field), then the advertised flag words recomputed.
 // [orig: CAdminServer_HandleSetCommand — Napi_CopyString(np_protocol->log_buffer, ...) and
@@ -412,16 +407,13 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		c.armory_reuse_time = static_cast<uint32_t>(v);
 		if (block != nullptr) block->armory_reuse_time = v;
 	} else if (strutil::iequals(key, "ServerName")) {
-		// Rebuilt from every value token, each followed by one space, a token skipped when it
-		// would take the name past 30 characters; then the protocol's session name.
-		// [orig: @0x4060BF..0x40615A]
-		std::string name;
-		for (size_t i = 1; i < args.size(); ++i)
-			if (args[i].size() + name.size() + 2 < 0x20) name += args[i] + " ";
+		// Rebuilt from every value token (admin_server_name), then the protocol's session name.
+		const std::string name =
+				admin_server_name(std::vector<std::string_view>(args.begin() + 1, args.end()));
 		if (block != nullptr) block->game_name = name;
 		if (protocol_up) ctx_.np_protocol.session_name = name;
 	} else if (strutil::iequals(key, "ServerPassword")) {
-		const std::string pw = password_field(value);
+		const std::string pw = admin_password_field(value);
 		if (block != nullptr) block->mp_host_game_password = pw;
 		if (protocol_up) {
 			// [orig: Napi_CopyString(+0x300) @0x4061F8, CAITask_SetName @0x40620A]
@@ -430,7 +422,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 			republish_flags(ctx_);
 		}
 	} else if (strutil::iequals(key, "SideAPassword")) {
-		const std::string pw = password_field(value);
+		const std::string pw = admin_password_field(value);
 		if (block != nullptr) block->mp_host_side_password_a = pw;
 		// The block's word the remote add reads live (D-NET-1105) [orig: @0x406230].
 		c.cfg_side_a_password = pw;
@@ -439,7 +431,7 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 			republish_flags(ctx_);
 		}
 	} else if (strutil::iequals(key, "SideBPassword")) {
-		const std::string pw = password_field(value);
+		const std::string pw = admin_password_field(value);
 		if (block != nullptr) block->mp_host_side_password_b = pw;
 		c.cfg_side_b_password = pw; // [orig: @0x406268]
 		if (protocol_up) {

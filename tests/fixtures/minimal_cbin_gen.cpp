@@ -165,7 +165,7 @@ Credits::Line make_newline() {
 
 // The list in the CBIN form, its string table in the order the game's writer interns it, each string
 // at its first use as the writer lays the form out: the label names, then the entry names, then the
-// string values [orig: the ConfigFile writer @0x75e250 - its intern sub_75E090 called @0x75e3a0
+// string values [orig: the ConfigFile writer @0x75e250 - its intern ConfigFile_InternString called @0x75e3a0
 // (the labels), @0x75e450 (the names), @0x75e53f (the values)].
 opennova::cbin::BinaryConfig credits_config(const Credits &c) {
 	using opennova::cbin::BinaryConfig;

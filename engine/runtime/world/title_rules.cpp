@@ -38,7 +38,7 @@ void install_title_rules(const TitleRulesRow *rows, size_t count) {
 const TitleRules &title_rules(std::string_view title_code) {
 	const std::vector<TitleRulesRow> &rows = registry();
 	if (rows.empty()) {
-		std::fputs("no title rules installed: the program must call games::install()\n", stderr);
+		std::fputs("no title rules installed: the program must call games::install_rules()\n", stderr);
 		std::abort();
 	}
 	const std::string_view fallback = default_title().code;
@@ -46,7 +46,7 @@ const TitleRules &title_rules(std::string_view title_code) {
 		for (const TitleRulesRow &row : rows)
 			if (strutil::iequals(row.title_code, code))
 				return *row.rules;
-	std::fputs("the default title has no rules: games::install() registers every title's\n", stderr);
+	std::fputs("the default title has no rules: games::install_rules() registers every title's\n", stderr);
 	std::abort();
 }
 

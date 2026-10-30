@@ -787,7 +787,7 @@ if(BUILD_NOVAWORLD_HTTP)
         novalogic_listing lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
         static_address_brake comp_address_lapse stop_paths exits_and_crash_restarts last_good_pass
         launch_failure launch_refused_mid_pass restart_window timeouts_and_health listing_lost
-        machine_lost_replaces
+        machine_lost_replaces unreadable_configuration
         listing_waits_while_lost waits_for_lobby owner_changes limit_at_provisioning owner_limits
         own_machines_cut own_machines_cut_no_room own_cut_at_provisioning pools_cut mass_stop_hold hold_releases
         reconciliation relist_grace console_ring admin_links_follow_running)

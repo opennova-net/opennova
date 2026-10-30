@@ -1,6 +1,7 @@
 #include "acidgambit.h"
 
 #include <games/jo/jo.h>
+#include <runtime/world/title_rules.h>
 
 namespace opennova::games {
 

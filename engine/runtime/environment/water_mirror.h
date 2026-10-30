@@ -92,7 +92,7 @@ inline constexpr int kReflectionRttSize = 512;
 // focal is the target side's over the scene view's horizontal half-angle,
 // while its frame scale is the screen width's (g_OverlayCtx).
 // [orig: Terrain_RenderSectorEntities hands Render_SectorEntity the list entry's
-//  stored radius (@0x5C7C99 / @0x5C7D13), which the sub-pixel floor
+//  stored radius (the live call @0x5C7D13), which the sub-pixel floor
 //  (@0x5C42D8) and Model_SelectRlodLevel (@0x5C42EB) read; the collectors store
 //  g_MainViewportProjectedRadiusQ16 per entry (@0x5C71C5..0x5C71D8, @0x5C903B..0x5C904E);
 //  Render_MainScene sets the viewport to the target (Render_SetViewport

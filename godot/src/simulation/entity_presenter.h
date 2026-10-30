@@ -427,6 +427,12 @@ public:
 	// Simulation::scene_draws); the typed form is the tests' data leg.
 	void present_death_piece_draws_native(
 			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
+	// The frame's draw-leg output (Simulation::take_draw_husk_output), at the occlusion leg's
+	// end: its husk swaps through the destruction pass, and each changed row's swap-fade slots
+	// re-stamped on its model, so the collect's publication draws this frame, as retail's draw
+	// publishes and then draws in one call (engine world::run_draw_husk_leg).
+	void present_draw_husk_leg(const std::vector<opennova::world::HuskSwapEvent> &p_swaps,
+			const std::vector<opennova::world::DrawFadeStamp> &p_fades);
 	void present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws);
 	// The weapon Inset pass's own piece draws (OcclusionFrame::apply_inset_frame).
 	void present_death_piece_draws_inset(
@@ -676,6 +682,9 @@ private:
 	// work. `published` is the row's edge: -1 unknown (a cold row releases),
 	// 0 nothing held, 1 published.
 	void stamp_destroy_phases(ObjectModel *model, const float *p, int base,
+			int32_t &published);
+	// The same stamp from the values themselves (the husk bit and the six phases).
+	void stamp_destroy_values(ObjectModel *model, bool husked, const int32_t *phases,
 			int32_t &published);
 	// The mounted right-hand collapse rides its own packed field, edge-gated
 	// to the value change; true when the model was written.

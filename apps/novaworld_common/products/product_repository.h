@@ -247,7 +247,9 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 		const catalog::LobbyChooser &chooser = {});
 // The row deleted (its trees' rows and its project's revisions and files cascade: their objects
 // are the caller's to remove, the trees' prefixes and content/<id>/, product_jobs.h product.purge;
-// lobby identities remain available to existing installs and other games); InUse while a live
+// lobby identities remain available to existing installs and other games, but for a lobby the
+// game created whose selection never locked, which no install names and no other product
+// does: it goes with the game); InUse while a live
 // server names it, HasExpansion while an expansion has it as parent.
 ProductOutcome delete_product(db::Database &db, int64_t id);
 

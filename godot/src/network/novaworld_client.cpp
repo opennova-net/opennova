@@ -114,6 +114,8 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop"), &NovaWorldClient::stop);
 	ClassDB::bind_method(D_METHOD("escape_connect"), &NovaWorldClient::escape_connect);
 	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("is_novaworld_domain_host", "host"),
+			&NovaWorldClient::is_novaworld_domain_host);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
 			&NovaWorldClient::forget_gate_response);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("create_cookie_jar", "dir"),
@@ -430,6 +432,10 @@ void NovaWorldClient::start() {
 	enter_state(STATE_GATE_PROBING);
 	probe_frame_ = Engine::get_singleton()->get_process_frames();
 	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
+}
+
+bool NovaWorldClient::is_novaworld_domain_host(const String &host) {
+	return opennova::is_novaworld_domain_host(host.utf8().get_data());
 }
 
 void NovaWorldClient::forget_gate_response() {

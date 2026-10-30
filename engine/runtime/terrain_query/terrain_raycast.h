@@ -104,6 +104,8 @@ struct TerrainRaycastSampler {
 };
 
 // The coarse segment march [orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80].
+// Its no-normal wrapper, the sun glare's and the water glint's terrain test, is
+// this march with no hit out [orig: Terrain_RaycastLoResNoNormal @ 0x610860].
 // start/end are (x, y, z = height) in 16.16 world units. Returns true on HIT
 // (retail returns 0 = HIT, 1 = CLEAR; the polarity is flipped to bool here).
 //

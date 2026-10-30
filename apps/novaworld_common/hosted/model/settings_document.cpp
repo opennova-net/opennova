@@ -1,6 +1,6 @@
 #include "hosted_settings.h"
 #include <base/io/cp1252.h>
-#include <base/title/title.h>
+#include <runtime/inmatch/host_settings.h> // server_settings_title
 #include <stdexcept>
 
 namespace opennova::novaworld_server::hosted {
@@ -19,8 +19,8 @@ constexpr IntField integers[] = { { "max_players", &HostedSettings::max_players 
 	{ "max_packet_size", &HostedSettings::max_packet_size } };
 } //namespace
 
-io::JsonValue hosted_settings_schema(gamecfg::ConfigTable table) {
-	Json schema = gamecfg::server_settings_schema(table, true);
+io::JsonValue hosted_settings_schema(std::string_view title) {
+	Json schema = gamecfg::server_settings_schema(inmatch::server_settings_title(title), true);
 	for (auto &row : schema.array) {
 		if (row.get_string("key", "") != "max_packet_size") continue;
 		row.set("core", Json::make_bool(true));
@@ -155,17 +155,19 @@ bool read_settings_document(
 	return true;
 }
 
-gamecfg::ConfigTable title_config_table(std::string_view title) {
-	const Title *row = title_by_code(title);
-	return (row != nullptr ? *row : default_title()).config_table;
+const gamecfg::WeaponRoster &server_weapon_roster(
+		const gamecfg::WeaponRoster &base, const gamecfg::WeaponRoster *expansion) {
+	return expansion != nullptr && !expansion->empty() ? *expansion : base;
 }
 
 gamecfg::GameCfg settings_block(
 		const HostedSettings &s, std::string_view title, const gamecfg::WeaponRoster &weapons) {
-	auto cfg = gamecfg::defaults({}, 0, 0, title_config_table(title));
+	const gamecfg::ServerSettingsTitle settings_title = inmatch::server_settings_title(title);
+	auto cfg = gamecfg::defaults({}, 0, 0, settings_title.table);
 	std::string field, error;
 	// Request validation precedes rendering. A missing override keeps retail's default.
-	if (!gamecfg::apply_server_settings(cfg, s.options, true, weapons, field, error))
+	if (!gamecfg::apply_server_settings(
+				cfg, s.options, true, weapons, settings_title, field, error))
 		throw std::invalid_argument("server configuration " + field + ": " + error);
 	(void)utf8_to_cp1252(s.game_name, cfg.game_name);
 	(void)utf8_to_cp1252(s.game_password, cfg.mp_host_game_password);

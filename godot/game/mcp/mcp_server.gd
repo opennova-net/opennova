@@ -235,7 +235,8 @@ func _handle_initialize(conn: McpHttpConnection, id: Variant, params: Dictionary
 		"serverInfo": {
 			"name": server_name,
 			"title": server_title,
-			"version": str(ProjectSettings.get_setting("application/config/version", "0.0.0")),
+			# ONE's own build (base/version/one_build.h), never project.godot's placeholder.
+			"version": LaunchFlags.one_version(),
 		},
 	}
 	if not instructions.is_empty():

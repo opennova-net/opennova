@@ -7,7 +7,7 @@
 
 import { badgeClass } from './tone';
 import type { Job, JobGroupRetry, JobSchedule, JobWorker } from '../types/jobs';
-import { formatDuration, formatRelative, timeMs } from './format';
+import { countLabel, formatDuration, formatRelative, timeMs } from './format';
 
 // What last_error says of a job an admin cancelled
 // (apps/novaworld_web/jobs/job_admin.h kCancelledByAdmin).
@@ -68,17 +68,18 @@ export function secondsLabel(seconds: number): string {
   return formatDuration(seconds * 1000);
 }
 
-function plural(n: number, unit: string): string {
-  return n === 1 ? unit : `${n} ${unit}s`;
+// "minute", "5 minutes": an interval's unit alone when it is one.
+function unitCount(n: number, unit: string): string {
+  return n === 1 ? unit : countLabel(n, unit);
 }
 
 // "every 30 seconds", "every minute", "every 5 minutes", "every hour", "every
 // day": a schedule's interval.
 export function everyLabel(seconds: number): string {
-  if (seconds > 0 && seconds % 86_400 === 0) return `every ${plural(seconds / 86_400, 'day')}`;
-  if (seconds > 0 && seconds % 3600 === 0) return `every ${plural(seconds / 3600, 'hour')}`;
-  if (seconds > 0 && seconds % 60 === 0) return `every ${plural(seconds / 60, 'minute')}`;
-  return `every ${plural(seconds, 'second')}`;
+  if (seconds > 0 && seconds % 86_400 === 0) return `every ${unitCount(seconds / 86_400, 'day')}`;
+  if (seconds > 0 && seconds % 3600 === 0) return `every ${unitCount(seconds / 3600, 'hour')}`;
+  if (seconds > 0 && seconds % 60 === 0) return `every ${unitCount(seconds / 60, 'minute')}`;
+  return `every ${unitCount(seconds, 'second')}`;
 }
 
 // "2 of 5": a job's attempts so far out of what it may use.

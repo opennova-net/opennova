@@ -730,7 +730,8 @@ are unwitnessed and refused by name): its rules, the **protocol** it speaks and 
 carries (its name and title text, executable, command file and game.cfg table). A `Title`
 row in `engine/base/title`'s registry (`title_by_code`), each game's in
 `games/<code>/<code>_title.cpp`, its rules in `<code>_rules.cpp`; `games::install()` fills the
-registries, and `engine/` holds the types and lookups and names no title (ADR 0076). OP: Acid
+title and protocol registries, `games::install_rules()` the rules registry (a program that runs a
+match), and `engine/` holds the types and lookups and names no title (ADR 0076). OP: Acid
 Gambit is its own title, whose protocol and rules are JO's, and the default one: a launch, a
 project or a session that names none runs as it. Titles are in scope as data (ADR 0055); an
 unwitnessed field is refused where it is needed, never filled with JO's value. The editor and the

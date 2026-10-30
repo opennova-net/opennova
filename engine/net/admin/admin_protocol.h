@@ -66,7 +66,11 @@ bool admin_reply_text(const std::vector<uint8_t> &payload, std::string &out);
 bool admin_login_accepted(std::string_view reply);
 // An "ERROR - " or "USAGE - " reply rather than the command's answer.
 bool admin_reply_is_error(std::string_view reply);
-// Redact password fields before an embedder persists an admin command or reply.
+// `text` with each line naming a password (any case) redacted, before an embedder persists an
+// admin command or reply: a "<key> = <value>" line keeps its key, a SET line its verb and key,
+// any other such line is replaced whole. Ours (D-NET-1472, PERMANENT): retail's admin_log.txt
+// writes every command verbatim [orig: CAdminServer_DispatchCommand @0x406720 - @0x40675D,
+// @0x40676B].
 std::string admin_log_redacted(std::string_view text);
 
 // How many reply packets one command draws: the server's dispatcher answers each command line
@@ -104,6 +108,16 @@ struct AdminReplyPlan {
 //  25-token cap `cmp esi, 19h; jge` @0x4067A0..0x4067A3, the walk @0x4067A0..0x4067EB, `movsx`
 //  @0x4067AD, isspace @0x4067B5 -> @0x76B964; CRT_init_ctype's mirror copy @0x784C59]
 std::vector<std::string_view> admin_split_command(std::string_view line);
+
+// SET ServerName's name: the value tokens, each followed by one space, a token skipped when it
+// would take the name past 30 characters (so a name ends in a blank).
+// [orig: CAdminServer_HandleSetCommand @0x405A60 - @0x4060BF..0x40615A]
+std::string admin_server_name(const std::vector<std::string_view> &values);
+// A SET password's field: strncpy(field, value, 0x11), its first 17 bytes, case kept (a
+// 17-character value keeps no terminator, D-NET-359).
+// [orig: CAdminServer_HandleSetCommand @0x405A60 - ServerPassword @0x4061D3..0x4061DB,
+//  SideAPassword @0x406228..0x406230, SideBPassword @0x406260]
+std::string admin_password_field(std::string_view value);
 
 // The plan for one command line, split as the dispatcher splits it (admin_split_command) with
 // its verbs and sub-verbs compared case aside. Every verb not named below, and every verb a
@@ -169,9 +183,5 @@ std::vector<AdminRotationEntry> admin_parse_mission_list(std::string_view reply)
 // CHAT GET: the window's lines, oldest first, each non-empty one followed by "\r\n".
 // [orig: CAdminServer_HandleChatCommand @0x404B0F..0x404BB3]
 std::vector<std::string> admin_parse_chat_window(std::string_view reply);
-
-// GET GAMESETTINGS: its "<Key padded to 21> = <value>\n" rows as (key, value), in order.
-// [orig: CAdminServer_HandleGet @0x403434..0x403D42]
-std::vector<std::pair<std::string, std::string>> admin_parse_game_settings(std::string_view reply);
 
 } // namespace opennova

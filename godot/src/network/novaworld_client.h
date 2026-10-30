@@ -149,6 +149,9 @@ public:
 	// forgotten, so the next start() probes the gate again
 	// (opennova::NwuLobbySession::GateMemory::forget, D-NET-706).
 	static void forget_gate_response();
+	// Whether `host` names NovaLogic's NovaWorld: novaworld.net or a name under it, a root
+	// label's dot allowed (engine: net/novaworld/gate_probe.h is_novaworld_domain_host).
+	static bool is_novaworld_domain_host(const String &host);
 	// The menu's creation (the process's first main menu, and the menu made anew after a mods
 	// reload): the process's menu browser state made anew, its jar emptied and loaded from
 	// nw_cdata.coo in `dir`, the game's working directory, under the current volume's key

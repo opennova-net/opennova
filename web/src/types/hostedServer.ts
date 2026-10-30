@@ -381,11 +381,6 @@ export interface HostedServersResponse {
   servers: HostedServer[];
 }
 
-// GET /api/me/servers/<id>, and the start and stop replies.
-export interface HostedServerReply {
-  server: HostedServer;
-}
-
 // The owner named in the fleet view, with their support tier (null for
 // none) and whether an admin grants them hosting (both may hold).
 export interface FleetOwner {
@@ -588,12 +583,6 @@ export interface FleetQuery {
   // An owner's username.
   owner?: string;
   state?: 'live' | 'ended' | 'all';
-}
-
-// POST /api/admin/hosted/stop-all.
-export interface StopAllReply {
-  // How many live servers were asked to stop.
-  stopping: number;
 }
 
 // The console routes (apps/novaworld_web/hosted/console_routes.cpp, README

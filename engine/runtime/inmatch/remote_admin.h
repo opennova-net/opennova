@@ -67,8 +67,11 @@ inline constexpr uint32_t kPlayerPreviewTodFixed24 = 0x10000000u;
 //  @0x4A72CE..0x4A72D1 (the nonzero test), CAdminServer_Listen @0x4A72D9]
 uint16_t remote_admin_listen_port(const gamecfg::GameCfg &cfg);
 
-// One admin_log.txt line as retail's text-mode stream writes it: each "\n" reaches the file as
-// CR LF. [orig: CAdminServer_Construct @0x402C84, fopen(.., "w"), a text-mode stream]
+// One admin_log.txt line as ours writes it: a line naming a password redacted
+// (admin_log_redacted, D-NET-1472: retail writes every line verbatim [orig:
+// CAdminServer_DispatchCommand @0x406720 - "User command (%s) - %s\n" @0x40675D, the fprintf
+// @0x40676B]), then each "\n" as CR LF, as retail's text-mode stream writes it.
+// [orig: CAdminServer_Construct @0x402C84, fopen(.., "w"), a text-mode stream]
 std::string admin_log_file_text(std::string_view line);
 
 // The process's gametext for AdminConsole::Seams::game_text: g_TextGameText, which the process

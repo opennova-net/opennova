@@ -346,10 +346,13 @@ ProductOutcome update_product(db::Database &db, int64_t id, const ProductPatch &
 
 ProductOutcome delete_product(db::Database &db, int64_t id) {
 	db::Transaction tx(db);
-	const auto row = db.query("SELECT owner_id, lobby, key FROM products WHERE id = $1 FOR UPDATE;",
+	const auto row = db.query(
+			"SELECT owner_id, lobby, key, lobby_locked FROM products WHERE id = $1 FOR UPDATE;",
 			{ BindValue(id) });
 	if (row.empty())
 		return ProductOutcome::NotFound;
+	const std::string lobby = row.front().as_text(1).value_or("");
+	const bool lobby_locked = row.front().as_int(3).value_or(0) != 0;
 	if (count_live_servers_of(db, id) > 0)
 		return ProductOutcome::InUse;
 	if (!db.query("SELECT 1 FROM products WHERE parent_id = $1;", { BindValue(id) }).empty())
@@ -358,7 +361,14 @@ ProductOutcome delete_product(db::Database &db, int64_t id) {
 			"WHERE id = $1;",
 			{ BindValue(id) });
 	db.exec("DELETE FROM products WHERE id = $1;", { BindValue(id) });
-	// Lobby identities outlive projects and may be shared by other games or local installs.
+	// A lobby a released game's installs carry, or one shared, outlives the game. A lobby this
+	// game created (an on_<id> row) whose selection never locked (no release build of it ever
+	// started, so no install names it) and no other product names goes with it, as a move off
+	// it does (update_product).
+	if (!lobby_locked && !lobby.empty())
+		db.exec("DELETE FROM games WHERE slug = $1 AND starts_with(slug, 'on_') "
+				"AND NOT EXISTS (SELECT 1 FROM products WHERE lobby = $1);",
+				{ BindValue(lobby) });
 	tx.commit();
 	return ProductOutcome::Ok;
 }
@@ -886,6 +896,9 @@ std::string encode_tree_weapons(const gamecfg::WeaponRoster &weapons) {
         auto row = io::JsonValue::make_object();
         row.set("name", io::json_string(cp1252_to_utf8(w.name)));
         row.set("selectable", io::JsonValue::make_bool(w.loadout_selectable != 0));
+        // The remote admin's table's word (WEAPON SET ALL's rows), when the roster knows it.
+        if (w.admin_loadout_selectable >= 0)
+            row.set("admin_selectable", io::JsonValue::make_bool(w.admin_loadout_selectable != 0));
         out.push(std::move(row));
     }
     return io::json_write(out);
@@ -897,7 +910,9 @@ bool decode_tree_weapons(std::string_view text, gamecfg::WeaponRoster &out) {
     for (const auto &row : list.array) {
         std::string name;
         if (!utf8_to_cp1252(row.get_string("name", ""), name)) return false;
-        out.push_back({name, row.get_bool("selectable", false) ? 1 : 0});
+        const io::JsonValue *admin = row.get("admin_selectable");
+        out.push_back({ name, row.get_bool("selectable", false) ? 1 : 0, "",
+                admin != nullptr && admin->is_bool() ? (admin->boolean ? 1 : 0) : -1 });
     }
     return true;
 }

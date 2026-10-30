@@ -61,7 +61,7 @@ void put_id(crow::json::wvalue &out, const char *key, std::optional<int64_t> id)
 }
 
 crow::json::wvalue settings_json(const HostedSettings &s) {
-	return crow::json::wvalue(crow::json::load(io::json_write(settings_document(s))));
+	return to_crow(settings_document(s));
 }
 
 crow::json::wvalue range_json(const SettingRange &range) {
@@ -186,9 +186,8 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 	// alone; the list's novalogic_listing says whether the service offers it at all).
 	out["novalogic_listing"] = novalogic_lists(d);
 	out["missions"] = missions_json(d.missions);
-	out["settings_schema"] = crow::json::wvalue(
-			crow::json::load(io::json_write(hosted_settings_schema(title_config_table(d.title)))));
-	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(d.weapons)));
+	out["settings_schema"] = to_crow(hosted_settings_schema(d.title));
+	out["weapons"] = to_crow(encode_tree_weapons(d.weapons));
 	const HostLimits limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;
 	ranges["max_players"] = range_json(limits.max_players);
@@ -206,7 +205,7 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 		item["display_name"] = e.display_name;
 		item["version"] = e.version;
 		item["missions"] = missions_json(e.missions);
-		item["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(e.weapons)));
+		item["weapons"] = to_crow(encode_tree_weapons(e.weapons));
 		expansions.push_back(std::move(item));
 	}
 	out["expansions"] = std::move(expansions);

@@ -13,6 +13,7 @@
 #include <net/protocol/protocol.h>
 #include <net/novaworld/db/database.h>
 
+#include "common/cdkey_oracle.h"
 #include "common/test_database.h"
 #include "common/test_expect.h"
 
@@ -57,7 +58,7 @@ bool is_upper_hex(char c) {
 // The NWACT, read on `machine` the way the client reads it, is the key's wire key.
 bool activates(const std::string &nwact, const char *machine, const std::string &wire_key) {
 	std::string wire;
-	return cdkey::read_activation(dfx2_chains(), nwact, machine, wire) && wire == wire_key;
+	return cdkey_oracle::read_activation(dfx2_chains(), nwact, machine, wire) && wire == wire_key;
 }
 
 int serial_format() {

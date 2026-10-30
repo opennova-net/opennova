@@ -590,7 +590,7 @@ crow::response ProjectRoutes::create(const crow::request &req) {
 			return field_error(400, "missing_field", "base", "an expansion builds on a game");
 		if (!expansion_code)
 			return field_error(400, "missing_field", "expansion_code", "an expansion has a code");
-		if (!hosted::valid_expansion_code(*expansion_code))
+		if (!project::is_expansion_code(*expansion_code))
 			return field_error(400, "invalid_field", "expansion_code",
 					"expansion_code is 1 to 8 of a-z and 0-9");
 	}

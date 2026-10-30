@@ -56,8 +56,9 @@ func test_a_join_install_marks_its_server_once() -> void:
 	assert_eq(both.count("--novaworld-join"), 1)
 
 
-# A mod's folder is its install (expansion/<code>/); its removal deletes it. An
-# install the updater cannot start writes nothing.
+# A mod's folder is its install (expansion/<code>/); its removal deletes it, when the
+# Mods page installed it (its OPENNOVA.MOD mark). An install the updater cannot start
+# writes nothing.
 func test_a_mods_folder_is_its_install() -> void:
 	var dir := TestFs.cache_dir(self, "runtime_mods")
 	var listed: Array[ModListing] = []
@@ -72,10 +73,21 @@ func test_a_mods_folder_is_its_install() -> void:
 	assert_false(RuntimeUpdates.install_mod(listed[0]))
 	assert_eq(RuntimeUpdates.last_error, "update.exe is missing from the OpenNova installation.")
 	assert_false(DirAccess.dir_exists_absolute(RuntimeUpdates.mod_dir("mymod")), "nothing written")
+	# The install's own first write (engine mod_listing.h write_mod_wizard): the folder's
+	# UPDATE.WIZ and the Mods page's mark, which makes the folder the page's to remove.
+	assert_eq(listed[0].write_wizard(dir, dir.path_join("runtime")), "")
 	TestFs.write_text(self, RuntimeUpdates.mod_dir("mymod").path_join("mymod.pff"), "archive")
 	assert_true(RuntimeUpdates.has_mod("mymod"))
+	assert_true(RuntimeUpdates.can_remove_mod("mymod"))
 	assert_true(RuntimeUpdates.remove_mod("mymod"))
 	assert_false(RuntimeUpdates.has_mod("mymod"))
+	# A folder the page did not install (the game's own expansion, no mark): refused, kept.
+	TestFs.write_text(self, RuntimeUpdates.mod_dir("jox01").path_join("jox01.pff"), "archive")
+	assert_true(RuntimeUpdates.has_mod("jox01"))
+	assert_false(RuntimeUpdates.can_remove_mod("jox01"))
+	assert_false(RuntimeUpdates.remove_mod("jox01"))
+	assert_string_contains(RuntimeUpdates.last_error, "no mod the Mods page installed")
+	assert_true(RuntimeUpdates.has_mod("jox01"), "its folder stays")
 	assert_false(RuntimeUpdates.remove_mod(".."), "no folder outside expansion/")
 	assert_string_contains(RuntimeUpdates.last_error, "no mod folder's name")
 	TestFs.remove_dir_recursive(dir)

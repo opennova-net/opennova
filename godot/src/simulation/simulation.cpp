@@ -29,15 +29,6 @@ using namespace sim_internal;
 
 namespace {
 
-// The rules the mission's World runs from its load (KernelBootOptions::title_rules): the title the
-// shell named for the session (Simulation::set_game_title), else the mounted root's game, the
-// launch's with no root. A role's session stamps the same over it.
-const opennova::world::TitleRules &boot_title_rules(const opennova::Title *named,
-		const godot::Ref<godot::ResourceRoot> &root) {
-	return opennova::world::title_rules(
-			(named != nullptr ? *named : godot::ResourceRoot::session_title(root)).code);
-}
-
 // The BMS admission limits (promote.cpp's player_limit/team_count gates). A
 // host admits against its live slot limit (host_player_slot_limit over the
 // configure_host_session clamp, net.host_max_players: a dedicated host's own
@@ -52,17 +43,17 @@ const opennova::world::TitleRules &boot_title_rules(const opennova::Title *named
 // host-equivalent defaults. Retail joiners never promote the .bms (admission
 // is host-only), so the joiner leg is a port decision with no binary witness.
 void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
-		const godot::SimulationNetState &net, bool host_listening,
-		const opennova::inmatch::ClientRuntime *joined) {
+		const godot::SimulationNetState &net, const godot::Ref<godot::ResourceRoot> &root,
+		bool host_listening, const opennova::inmatch::ClientRuntime *joined) {
 	// The cfg block's Shadow Quality word, which gates the face slots (engine
 	// KernelBootOptions::shadow_quality carries the witness).
 	if (net.game_config.is_valid())
 		options.shadow_quality = net.game_config->native().cfg().shadow_quality;
 	// The host's caps are its session's title's; a listen host no host screen configured runs as
-	// the launch's game.
+	// the session's game (session_title).
 	const opennova::Title &host_title = net.host_session_config.title != nullptr
 			? *net.host_session_config.title
-			: ResourceRoot::session_title(Ref<ResourceRoot>());
+			: session_title(net, root);
 	options.player_limit = host_listening
 			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
 					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play,
@@ -132,15 +123,16 @@ void Simulation::reset_world() {
 	kernel_ = std::move(next_kernel);
 	// The title's rules from the World's creation (a weapon-table load ahead of any boot seeds
 	// the single-player kit by them); the boot restamps them, and the role's bind stamps its own.
-	kernel_->world.rules.title_rules = &boot_title_rules(net_.game_title, assets_.root);
+	kernel_->world.rules.title_rules =
+			&opennova::world::title_rules(session_title(net_, assets_.root).code);
 	role_->bind(*kernel_);
 	// The retained .til (set_terrain_til_data, the boot's) onto the fresh
 	// store's placed-tile overlay; a file boot replaces it with its own.
 	kernel_->set_placed_tiles(net_.terrain_til_data);
 	kernel_->set_assets(
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
-	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
-	kernel_->profile.set_active(runtime_profiling_enabled_);
+	kernel_->collision.set_trace_profile_enabled(profiling_.runtime_profiling_enabled);
+	kernel_->profile.set_active(profiling_.runtime_profiling_enabled);
 	// player_.weapon is player-scoped and outlives every load [orig:
 	// PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup path, not
 	// Game_StartMission], as the spawn buffer is process-scoped (the role binds the
@@ -158,8 +150,8 @@ void Simulation::reset_world() {
 	sync_class_attribute_flags();
 	apply_session_rules();
 	world_installed_ = false;
-	last_sim_tick_us_ = 0;
-	last_net_tick_us_ = 0;
+	profiling_.last_sim_tick_us = 0;
+	profiling_.last_net_tick_us = 0;
 	present_.last_occlusion_build_us = 0;
 	present_.last_occlusion_probe_us = 0;
 	present_.last_snapshot_us = 0;
@@ -620,7 +612,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 				p_terrain_til.ptr() + p_terrain_til.size());
 	request.wire_header_world = p_mission->is_wire_header_only();
 	ms::KernelBootOptions &options = request.boot_options;
-	options.title_rules = &boot_title_rules(net_.game_title, p_resource_root);
+	options.title_rules =
+			&opennova::world::title_rules(session_title(net_, p_resource_root).code);
 	options.music_globals = wac_music_globals();
 	options.playable = p_playable;
 	options.joiner = is_joiner();
@@ -635,12 +628,13 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	options.wac = !p_wac_basename.is_empty();
 	options.wac_basename = opennova::to_std(p_wac_basename);
 	options.game_type = mission_game_type;
-	stamp_admission_limits(options, net_, is_host_listening(),
+	stamp_admission_limits(options, net_, p_resource_root, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	// A map change's next map gates its placements on the slot limit its staging took from the
-	// cfg block (engine inmatch::stage_next_mission), as opennova-serve's does.
-	if (next_mission && net_.staged_player_limit > 0) options.player_limit = net_.staged_player_limit;
-	net_.staged_player_limit = 0;
+	// cfg block (engine inmatch::stage_next_mission, GameConfig::mission_slot_limit), as
+	// opennova-serve's does.
+	if (next_mission && net_.host_session_config.mission_slot_limit.has_value())
+		options.player_limit = static_cast<int32_t>(*net_.host_session_config.mission_slot_limit);
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
 			: opennova::to_std(p_infantry_adm);
@@ -739,13 +733,14 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		kernel_->set_items_table(&pending_item_db->native_items());
 	}
 	opennova::mission::KernelBootOptions options;
-	options.title_rules = &boot_title_rules(net_.game_title, assets_.root);
+	options.title_rules =
+			&opennova::world::title_rules(session_title(net_, assets_.root).code);
 	options.music_globals = wac_music_globals();
 	options.playable = false; // callers spawn explicitly (or a host role's round init spawns)
 	options.joiner = is_joiner();
 	options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
-	stamp_admission_limits(options, net_, is_host_listening(),
+	stamp_admission_limits(options, net_, assets_.root, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
@@ -791,16 +786,16 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 }
 
 void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
-	if (runtime_profiling_enabled_ == p_enabled) return;
-	runtime_profiling_enabled_ = p_enabled;
-	last_trace_profile_ = opennova::world::CollisionWorld::TraceProfile{};
-	last_sim_tick_us_ = 0;
-	last_net_tick_us_ = 0;
+	if (profiling_.runtime_profiling_enabled == p_enabled) return;
+	profiling_.runtime_profiling_enabled = p_enabled;
+	profiling_.last_trace_profile = opennova::world::CollisionWorld::TraceProfile{};
+	profiling_.last_sim_tick_us = 0;
+	profiling_.last_net_tick_us = 0;
 	present_.last_snapshot_us = 0;
 	present_.last_occlusion_build_us = 0;
 	present_.last_occlusion_probe_us = 0;
-	frame_sim_us_ = 0;
-	frame_sink_us_ = 0;
+	profiling_.frame_sim_us = 0;
+	profiling_.frame_sink_us = 0;
 	if (kernel_ != nullptr) {
 		kernel_->profile.reset();
 		kernel_->profile.set_active(p_enabled);
@@ -809,7 +804,7 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 }
 
 Vector4i Simulation::get_last_projectile_trace_times_us() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector4i(trace_profile_lane(tp.terrain_us),
 			trace_profile_lane(tp.static_us),
 			trace_profile_lane(tp.dynamic_us),
@@ -817,7 +812,7 @@ Vector4i Simulation::get_last_projectile_trace_times_us() const {
 }
 
 Vector4i Simulation::get_last_projectile_trace_counts() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector4i(trace_profile_lane(tp.calls),
 			trace_profile_lane(tp.static_survivors),
 			trace_profile_lane(tp.dynamic_survivors),
@@ -826,12 +821,12 @@ Vector4i Simulation::get_last_projectile_trace_counts() const {
 
 void Simulation::take_projectile_trace_profile() {
 	if (kernel_ == nullptr) return;
-	last_trace_profile_ = kernel_->collision.trace_profile();
+	profiling_.last_trace_profile = kernel_->collision.trace_profile();
 	kernel_->collision.clear_trace_profile();
 }
 
 Vector2i Simulation::get_last_projectile_trace_faces() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector2i(trace_profile_lane(tp.static_faces),
 			trace_profile_lane(tp.dynamic_faces));
 }
@@ -842,15 +837,15 @@ Dictionary Simulation::get_runtime_perf_counters() const {
 	out["listen_server"] = listen_server_;
 	out["ai_count"] = kernel_ ? kernel_->world.ai.count() : 0;
 	out["present_entity_count"] = present_.last_entity_count;
-	out["sim_tick_us"] = static_cast<int64_t>(last_sim_tick_us_);
-	out["net_tick_us"] = static_cast<int64_t>(last_net_tick_us_);
+	out["sim_tick_us"] = static_cast<int64_t>(profiling_.last_sim_tick_us);
+	out["net_tick_us"] = static_cast<int64_t>(profiling_.last_net_tick_us);
 	out["present_snapshot_us"] = static_cast<int64_t>(present_.last_snapshot_us);
 	out["occlusion_build_us"] = static_cast<int64_t>(present_.last_occlusion_build_us);
 	out["occlusion_probe_us"] = static_cast<int64_t>(present_.last_occlusion_probe_us);
-	out["runtime_profiling_enabled"] = runtime_profiling_enabled_;
+	out["runtime_profiling_enabled"] = profiling_.runtime_profiling_enabled;
 	// The last tick's projectile-trace attribution (collision.h TraceProfile), as the
 	// tick's sink took it (take_projectile_trace_profile).
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	out["trace_profiling_enabled"] = kernel_->collision.trace_profile_enabled();
 	out["trace_calls"] = tp.calls;
 	out["trace_terrain_us"] = tp.terrain_us;

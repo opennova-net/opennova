@@ -192,7 +192,6 @@ void mark_class_dead(Entity &target) {
 void land_class_husk(World &world, Entity &target) {
 	if ((target.engine_flags & kEntityFlagHusk) != 0) return;
 	target.engine_flags |= kEntityFlagHusk;
-	world.registry.list_fade_row(target.handle);
 	world.out.destruction.husk_swaps.push_back(husk_swap_event(target));
 	++world.out.destruction.items_destroyed;
 }
@@ -707,24 +706,44 @@ DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ti
     return fade;
 }
 
-// [orig: Entity_PublishSwapFadePhases @0x5C3F40]
-void update_item_destroy_fade(World &world, Entity &entity) {
-    entity.destroy_phases_q16.fill(0);
-    entity.destroy_progress = 0;
+// See destruction.h. [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38
+//  @0x5C41F9, Entity_PublishSwapFadePhases @0x5C4200 and the swap @0x5C420A..0x5C42D3]
+bool update_item_destroy_fade(World &world, Entity &entity) {
+    const std::array<int32_t, 6> phases_before = entity.destroy_phases_q16;
+    const double progress_before = entity.destroy_progress;
+    const size_t swaps_before = world.out.destruction.husk_swaps.size();
     if ((entity.engine_flags & kEntityFlagHusk) == 0) {
         // An entity back intact (an emplaced gun's revive; a vehicle respawn clears the
-        // word itself) draws no pending final husk.
+        // word itself) carries no fade and draws no pending final husk.
+        entity.destroy_phases_q16.fill(0);
+        entity.destroy_progress = 0;
         if (entity.final_husk_overlay) {
             entity.final_husk_overlay = false;
             HuskSwapEvent hide = husk_swap_event(entity);
             hide.final_overlay = HuskSwapEvent::Overlay::kHide;
             world.out.destruction.husk_swaps.push_back(hide);
         }
-        return;
+    } else if (entity.holds_final_husk()) {
+        publish_swap_fade_phases(world, entity);
+        if (const auto *traits = world.tables.item_death_traits.get(entity.item_id))
+            update_husk_swap_stage(world, entity, *traits);
     }
-    publish_swap_fade_phases(world, entity);
-    if (const auto *traits = world.tables.item_death_traits.get(entity.item_id))
-        update_husk_swap_stage(world, entity, *traits);
+    // A husked row holding no final husk (none loaded, or promoted) keeps what was last
+    // written for it: retail's draw publishes nothing for it, and its model reads the
+    // process-wide bus's last value, while a per-model array carries only what was written for
+    // that model (D-3DI-2): the upfx row's own publication, the last one before a promotion,
+    // or zero when nothing was.
+    return entity.destroy_phases_q16 != phases_before || entity.destroy_progress != progress_before ||
+            world.out.destruction.husk_swaps.size() != swaps_before;
+}
+
+void run_draw_husk_leg(World &world, Entity &entity) {
+    if (!update_item_destroy_fade(world, entity)) return;
+    DrawFadeStamp stamp;
+    stamp.handle = entity.handle.packed;
+    stamp.husked = (entity.engine_flags & kEntityFlagHusk) != 0;
+    stamp.phases_q16 = entity.destroy_phases_q16;
+    world.out.destruction.draw_fades.push_back(stamp);
 }
 
 HuskSwapEvent husk_swap_event(const Entity &entity) {
@@ -1046,9 +1065,9 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
 	}
 }
 
-// The update callback runs no swap-fade evaluation of its own: the walk's visit
-// evaluated it before this callback (update_item_destroy_fade), and only the upfx
-// leg below publishes again, as retail's does.
+// The update callback runs no swap-fade evaluation of its own, as retail's runs none: the
+// draw evaluates it (update_item_destroy_fade), and only the upfx leg below publishes on
+// the tick.
 // [orig: Entity_ApplyGravityAndGroundCheck @0x43FB30;
 // Entity_UpdateWaterPhysicsAndEffects @0x4A92E0]
 bool tick_item_class_motion(World &world, Entity &entity,
@@ -1127,42 +1146,24 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
 //  @0x4C2248 (pool 2) / @0x4C2310 (pool 3), the first slot tick & 7 @0x4C225A /
 //  tick & 0x3F @0x4C2322, their bound tests @0x4C2265 / @0x4C232D, the stride steps
 //  @0x4C2282..0x4C2285 / @0x4C2353..0x4C2356].
-// The swap fade's own pass rides the same walk: every tick, each row on the
-// registry's fade list (EntityRegistry::list_fade_row) is visited at its slot too,
-// in slot order between the cohort's, so its fade runs where a whole-pool visit
-// reached it and the husk swap events keep their order. A cohort visit lists or
-// unlists its row by the same test, so a husk bit no writer listed still fades
-// from its row's next cohort visit. Ours, not a retail claim: retail evaluates the
-// fade where it draws a husked model [orig: Render_SectorEntity @0x5C4190 -
-//  Entity_PublishSwapFadePhases @0x5C4200], and the sim's consumers (the delay's
-// restamp, the swap stage, the upfx leg, the collision's husk pick) read it per tick.
+// The swap fade is no part of the walk: retail evaluates it where it draws a husked
+// model (update_item_destroy_fade, from the view collects), and in the upfx row's own
+// update callback below [orig: Render_SectorEntity @0x5C4190 - Entity_PublishSwapFadePhases
+//  @0x5C4200; Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - the call @0x4A9304].
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;
     const size_t used =
             std::min(world.registry.pool_used(pool), world.registry.pool_capacity(pool));
-    size_t cohort_slot = world.logic_tick & (stride - 1);
-    size_t from = 0;
-    for (;;) {
-        const size_t slot = std::min(cohort_slot, world.registry.next_fade_row(pool, from));
-        if (slot >= used) break;
-        from = slot + 1;
-        const bool cohort = slot == cohort_slot;
-        if (cohort) cohort_slot += stride;
+    for (size_t slot = world.logic_tick & (stride - 1); slot < used; slot += stride) {
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
         Entity *entity = world.registry.get(handle);
-        if (entity == nullptr) {
-            world.registry.unlist_fade_row(handle);
-            continue;
-        }
+        if (entity == nullptr) continue;
         // A row whose +0x1C type index is 0 takes no visit [orig: Entity_UpdateAllEntities
         //  - the pool-2 walk's test @0x4C2288..0x4C228F, the pool-3 walk's @0x4C2359..0x4C235D].
-        if (entity->item_type_index == 0) {
-            if (!entity->needs_destroy_fade()) world.registry.unlist_fade_row(handle);
-            continue;
-        }
+        if (entity->item_type_index == 0) continue;
         const uint64_t lifetime = entity->registry_spawn_id;
-        if (cohort && entity->minefield.think) {
+        if (entity->minefield.think) {
             // [orig: Entity_LandmineThink @ 0x441A40 on the same cohort clock]
             if (!entity->hidden) {
                 if (entity->minefield.age > 0)
@@ -1170,7 +1171,7 @@ void tick_item_event_pool(World &world, int pool) {
                 else
                     world.minefields.think(world, *entity);
             }
-        } else if (cohort && !runs_brain_class_row(world, *entity)) {
+        } else if (!runs_brain_class_row(world, *entity)) {
             if (entity->class_think_ticks <= 0) {
                 if (pool == 2 && world.ai.collision != nullptr)
                     world.ai.collision->refresh_blink(world, *entity);
@@ -1183,19 +1184,7 @@ void tick_item_event_pool(World &world, int pool) {
         }
         entity = world.registry.get(handle);
         if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
-        // The renderer recomputes the fade timers every frame it draws a
-        // husked entity, independent of the update cohort; the presenter
-        // publishes the sim's copy for each husked row it submits
-        // [orig: Render_SectorEntity @0x5C4200]. An intact row with no fade
-        // state takes no evaluation (it would only zero its zeroes), and the
-        // row stays listed while it needs one.
-        if (entity->needs_destroy_fade()) update_item_destroy_fade(world, *entity);
-        if (entity->needs_destroy_fade())
-            world.registry.list_fade_row(handle);
-        else
-            world.registry.unlist_fade_row(handle);
-        // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
-        if (!cohort) continue;
+        // The update callback [orig: @0x4C22E7 / @0x4C2393].
         // Pool 2 calls it (and the emitter update after it) only for a row with a def;
         // pool 3 has no such test [orig: Entity_UpdateAllEntities @0x4C2100 - pool 2's
         //  `cmp dword ptr [esi+20h], 0; jz` @0x4C22CF..0x4C22D3 ahead of the call @0x4C22E7;

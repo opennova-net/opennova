@@ -739,7 +739,7 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	if (ctx.world == nullptr) return;
 	const world::WeaponTable &table = ctx.world->tables.weapons;
 	const int32_t armory = protocol_in_match(ctx.np_protocol.identity).armory_only_availability;
-	const int32_t mission_value = armory == 2 ? 3 : 2;
+	const int32_t mission_value = protocol_in_match(ctx.np_protocol.identity).mission_availability();
 	std::vector<std::pair<std::string, int32_t>> pairs;
 	if (ctx.mission != nullptr) pairs = mission::mission_availability_pairs(*ctx.mission);
 	world::WeaponAvailability mission_words;

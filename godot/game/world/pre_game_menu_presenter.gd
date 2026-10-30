@@ -245,7 +245,7 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 
 # The password edits and the screen's authored hotkeys use the same keyboard
 # path as MenuShell; the passive frame only forwards mouse events. The menu the
-# screen opened over takes no keys while it is up (MenuShell.keyboard_covered).
+# screen opened over takes no keys while it is up (MenuShell.covered).
 # ACCEPT's Return and BACK's Escape can close the screen inside the call, as a
 # click can in the pump: the local keeps the driver alive until it returns.
 func _unhandled_key_input(event: InputEvent) -> void:

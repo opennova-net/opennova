@@ -50,6 +50,11 @@ struct Title {
 	// game.cfg rows and ceilings keyed by config_table stay formats/gamecfg's. 0 unwitnessed.
 	int32_t max_players = 0;
 	int32_t max_players_host_screen = 0;
+	// The mp.mnu screen the host dialog's restriction lists and their radios live on, the one the
+	// title's executable names at each of them (runtime/inmatch/host_settings.h): Jointops.exe's
+	// MULTI_PLAYER_HOST, dfx2.exe's NW_MULTI_PLAYER, the same code over other data
+	// (docs/titles/dfx2-vs-jo-re.md §10). Null unwitnessed: the lists are found on no screen.
+	const char *host_screen = nullptr;
 	// The roles of the boot's required resources (base/gameprofile/required_resources.h) the
 	// title's stock data never ships and its program still reads unchecked: each is optional for
 	// the title. Null-terminated; null for none.

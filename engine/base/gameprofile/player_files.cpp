@@ -16,6 +16,7 @@ namespace {
 std::string manifest_words(const std::string &role) {
 	if (role == "player_sav" || role == "weapon_sav") return "the player's saved profiles";
 	if (role == "epass_bin" || role == "passgen_bin") return "the player's stored NovaWorld credentials";
+	if (role == "nw_cdata") return "the player's NovaWorld cookies";
 	if (role == "hiscore_txt") return "the high scores the game writes";
 	if (role == "admin_cfg") return "the admin server's configuration";
 	return "this machine's configuration of the game";

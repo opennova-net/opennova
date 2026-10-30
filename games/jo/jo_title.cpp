@@ -59,6 +59,10 @@ Title make() {
 	//  UI_PopulateHostSettingsFromConfig @ 0x555fe0 (@0x55631d, @0x55635a)]
 	t.max_players = 64;
 	t.max_players_host_screen = 64;
+	// [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 (@0x556611);
+	//  HostDialog_PopulateClassListCombo @0x556700 (@0x556712); UI_RegisterHostSettingsCallbacks
+	//  @0x5580f0 (each restriction control's screen)]
+	t.host_screen = "MULTI_PLAYER_HOST";
 	// Jointops.exe mounts the expansion its command line names (`/exp` and `/mod` are one name, the
 	// last one wins), its archives over the base game's [orig: Game_ParseCommandLineAndInit
 	// @ 0x4a76ac (/exp, /mod), Expansion_LoadAssets @ 0x4a4730].

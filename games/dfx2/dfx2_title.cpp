@@ -48,6 +48,10 @@ Title make() {
 	//  NWHL replace @0x5575ce in UI_ProcessLANSessionStateMachine @0x556ff0 (dfx2.exe)]
 	t.max_players = 250;
 	t.max_players_host_screen = 100;
+	// [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0 (@0x5547c1);
+	//  HostDialog_PopulateClassListCombo @0x5548b0 (@0x5548c2); @0x5562c0 (each restriction
+	//  control's registration, @0x556318..0x55640b) (dfx2.exe)]
+	t.host_screen = "NW_MULTI_PLAYER";
 	return t;
 }
 

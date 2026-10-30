@@ -16,7 +16,7 @@ const state: ConfigurationState = {
     time_limit: 30, kill_limit: 50, max_score: 5, respawn: 5, start_delay: 0, team_ff: false,
     send_holdoff_ticks: 12, entity_send_budget: 600, max_packet_size: 1100, lock_framerate: true,
     list_on_novalogic: false, rotation: [], options: { server_message: 'Welcome' } },
-  settings_revision: 7, settings: [{ key: 'ServerPassword', value: 'secret' }], weapons: [],
+  settings_revision: 7, weapons: [],
   schema: [{ key: 'server_message', label: 'Server message', group: 'Server', kind: 'text', default: '',
     min: 0, max: 127, command: '', core: false, note: '', depends_on: '' }],
 };
@@ -29,7 +29,7 @@ function page() {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(readConfiguration).mockResolvedValue(state);
-  const result = { outcome: 'answered', sent: true, delivery_unknown: false, configuration_saved: true, settings_revision: 8, replies: ['OK'] };
+  const result = { outcome: 'answered', sent: true, delivery_unknown: false, configuration_saved: true, settings_revision: 8, replies: ['OK'], refused_command: null, next_launch_only: false };
   vi.mocked(editConfiguration).mockResolvedValue(result);
   vi.mocked(confirmAction).mockResolvedValue(true);
 });
@@ -58,6 +58,48 @@ it('sends only edited settings with the revision and masks live passwords', asyn
   await flushPromises();
   expect(editConfiguration).toHaveBeenCalledWith({kind: 'owner', id: 1}, 7, {options: {server_message: 'New message'}});
   expect(wrapper.text()).toContain('Accepted changes saved');
+  wrapper.unmount();
+});
+it('shows a weapon at its mission word and sends only the weapons the user changed', async () => {
+  vi.mocked(readConfiguration).mockResolvedValue({ ...state,
+    weapons: [{ name: 'M16', selectable: true }, { name: 'Knife', selectable: true }],
+    saved: { ...state.saved, options: { ...state.saved.options, weapons: { M16: 'mission', Knife: 'never' } } } });
+  const wrapper = page();
+  const details = wrapper.get('details');
+  details.element.open = true; await details.trigger('toggle'); await flushPromises();
+  const m16 = wrapper.findAll('label').find((l) => l.text().startsWith('M16'))!.get('select');
+  expect((m16.element as HTMLSelectElement).value).toBe('mission');
+  expect(m16.findAll('option').map((o) => o.text())).toEqual(['Mission default', 'Always available', 'Armory only', 'Unavailable']);
+  await m16.setValue('armory');
+  await wrapper.findAll('button').find((b) => b.text() === 'Apply and save changes')!.trigger('click');
+  await flushPromises();
+  expect(editConfiguration).toHaveBeenCalledWith({ kind: 'owner', id: 1 }, 7, { options: { weapons: { M16: 'armory' } } });
+  wrapper.unmount();
+});
+it('names the change the server refused instead of reading as saved', async () => {
+  vi.mocked(editConfiguration).mockResolvedValue({ outcome: 'answered', sent: true, delivery_unknown: false,
+    configuration_saved: true, settings_revision: 8, replies: ['OK - Setting Changed.', 'ERROR - Bad Value.'],
+    refused_command: 'SET MaxScore 12', next_launch_only: false });
+  const wrapper = page();
+  const details = wrapper.get('details');
+  details.element.open = true; await details.trigger('toggle'); await flushPromises();
+  await wrapper.get('#live-settings-1-server_message').setValue('New message');
+  await wrapper.findAll('button').find((b) => b.text() === 'Apply and save changes')!.trigger('click');
+  await flushPromises();
+  expect(wrapper.text()).toContain('The server refused "SET MaxScore 12"');
+  expect(wrapper.text()).not.toContain('Accepted changes saved');
+  wrapper.unmount();
+});
+it('says an edit no admin line applies is saved for the next launch', async () => {
+  vi.mocked(editConfiguration).mockResolvedValue({ outcome: 'answered', sent: false, delivery_unknown: false,
+    configuration_saved: true, settings_revision: 8, replies: [], refused_command: null, next_launch_only: true });
+  const wrapper = page();
+  const details = wrapper.get('details');
+  details.element.open = true; await details.trigger('toggle'); await flushPromises();
+  await wrapper.get('#live-settings-1-server_message').setValue('New message');
+  await wrapper.findAll('button').find((b) => b.text() === 'Apply and save changes')!.trigger('click');
+  await flushPromises();
+  expect(wrapper.text()).toContain('Saved. The changes apply at the next launch.');
   wrapper.unmount();
 });
 it('offers the settings editor alone, with no raw command console', async () => {

@@ -28,7 +28,13 @@
     "editor/",
     "formats/png",
     "formats/pcx/pcx_quantize.cpp",
-    "formats/tga/tga_source.cpp"
+    "formats/tga/tga_source.cpp",
+    "games/acidgambit",
+    "games/bhd",
+    "games/dfx/dfx_rules.cpp",
+    "games/dfx/dfx_title.cpp",
+    "games/games.cpp",
+    "games/games_rules.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,

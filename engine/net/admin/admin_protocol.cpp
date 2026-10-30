@@ -382,38 +382,44 @@ std::vector<std::string> admin_parse_chat_window(std::string_view reply) {
 	return out;
 }
 
-// Each row is the key left-justified in 21 columns, "= ", the value.
-std::vector<std::pair<std::string, std::string>> admin_parse_game_settings(std::string_view reply) {
-	std::vector<std::pair<std::string, std::string>> out;
-	for (std::string_view line : split_lines(reply)) {
-		const size_t eq = line.find("= ");
-		if (eq == std::string_view::npos) continue;
-		const std::string_view key = strutil::trim_view(line.substr(0, eq));
-		if (key.empty()) continue;
-		out.emplace_back(std::string(key), std::string(line.substr(eq + 2)));
-	}
-	return out;
+std::string admin_server_name(const std::vector<std::string_view> &values) {
+	std::string name;
+	for (const std::string_view value : values)
+		if (value.size() + name.size() + 2 < 0x20)
+			name += std::string(value) + " ";
+	return name;
+}
+
+std::string admin_password_field(std::string_view value) {
+	return std::string(value.substr(0, 17));
 }
 
 std::string admin_log_redacted(std::string_view text) {
-    std::string out;
-    size_t pos = 0;
-    do {
-        const auto end = text.find('\n', pos);
-        auto line = text.substr(pos, end == text.npos ? text.size() - pos : end - pos);
-        if (strutil::ifind(line, "password") != line.npos) {
-            const auto equals = line.find('=');
-            if (equals != line.npos) out += std::string(line.substr(0, equals + 1)) + " [redacted]";
-            else {
-                const auto args = admin_split_command(line);
-                if (args.size() >= 2 && strutil::iequals(args[0], "SET")) out += "SET " + std::string(args[1]) + " [redacted]";
-                else out += "[password-bearing output redacted]";
-            }
-        } else out += line;
-        if (end == text.npos) break;
-        out += '\n'; pos = end + 1;
-    } while (pos < text.size());
-    return out;
+	std::string out;
+	size_t pos = 0;
+	do {
+		const auto end = text.find('\n', pos);
+		const auto line = text.substr(pos, end == text.npos ? text.size() - pos : end - pos);
+		if (strutil::ifind(line, "password") != line.npos) {
+			const auto equals = line.find('=');
+			if (equals != line.npos) {
+				out += std::string(line.substr(0, equals + 1)) + " [redacted]";
+			} else {
+				const auto args = admin_split_command(line);
+				if (args.size() >= 2 && strutil::iequals(args[0], "SET"))
+					out += "SET " + std::string(args[1]) + " [redacted]";
+				else
+					out += "[password-bearing output redacted]";
+			}
+		} else {
+			out += line;
+		}
+		if (end == text.npos)
+			break;
+		out += '\n';
+		pos = end + 1;
+	} while (pos < text.size());
+	return out;
 }
 
 } // namespace opennova

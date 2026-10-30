@@ -47,8 +47,9 @@ endif()
 
 # Native engine group libraries.
 add_subdirectory(engine)
-# Every game's own code (games/CLAUDE.md): opennova_games, which each program links and fills the
-# engine's registries from (games::install()).
+# Every game's own code (games/CLAUDE.md): opennova_games (titles and protocols,
+# games::install()), which each program links, and opennova_games_rules (the rules each title
+# runs, games::install_rules()), which a program that runs a match links too.
 add_subdirectory(games)
 
 # The NovaWorld service's HTTP layer (novaworld_web, novaworld_fleet, and with

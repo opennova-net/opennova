@@ -215,14 +215,14 @@ int main() {
 		       "CHAT GET: the lines, a continuation's two spaces kept");
 		expect(admin_parse_chat_window("").empty(), "an empty window");
 
-		const auto settings = admin_parse_game_settings("AutoBalanceOnRecycle = 1\n"
-		                                                "VotePercent          = 0.600000\n"
-		                                                "ServerName           = My = Server\n"
-		                                                "ServerPassword       = \n");
-		expect(settings.size() == 4 && settings[0] == std::make_pair(std::string("AutoBalanceOnRecycle"), std::string("1")) &&
-		               settings[2].second == "My = Server" && settings[3].first == "ServerPassword" &&
-		               settings[3].second.empty(),
-		       "GET GAMESETTINGS: each key and value");
+		// SET's two text rules, the game's and the service's one home.
+		expect(admin_server_name({ "A", "new", "name" }) == "A new name ", "ServerName: each token and a blank");
+		expect(admin_server_name({ std::string_view("aaaaaaaaaaaaaaaaaaaaaaaaaaa"), "bbb", "c" }) ==
+		               "aaaaaaaaaaaaaaaaaaaaaaaaaaa c ",
+		       "ServerName: a token past 30 characters skipped, a later one kept");
+		expect(admin_password_field("abcdefghijklmnopqrs") == "abcdefghijklmnopq" &&
+		               admin_password_field("Short") == "Short",
+		       "a password field: its first 17 bytes, case kept");
 	}
 
 	// The reply plan: how many packets each command draws (§6.9's dispatcher), split as it

@@ -17,6 +17,7 @@
 #include "machine_driver.h"
 #include "products/product_repository.h"
 #include <formats/gamecfg/server_settings.h>
+#include <runtime/inmatch/game_config.h> // the engine's send ranges
 
 #include <cstddef>
 #include <cstdint>
@@ -34,8 +35,11 @@ inline constexpr size_t kGamePasswordMaxBytes = 16;
 // expansion, more than 32 for Joint Operations with Escalation).
 inline constexpr size_t kMissionsMax = 128;
 inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
-inline constexpr SettingRange kSendHoldoffTicksRange{ 0, 255 };
-inline constexpr SettingRange kEntitySendBudgetRange{ 100, 1600 };
+// The engine's: the send-holdoff override's ceiling (D-NET-1473) and the BANDWIDTH clamp.
+inline constexpr SettingRange kSendHoldoffTicksRange{ 0,
+	static_cast<int>(inmatch::kSendHoldoffTicksMax) };
+inline constexpr SettingRange kEntitySendBudgetRange{ inmatch::kEntitySendBudgetMin,
+	inmatch::kEntitySendBudgetMax };
 inline constexpr SettingRange kMaxPacketSizeRange{ 100, 16384 };
 
 // The owner's settings, stored in hosted_servers.configuration; text in UTF-8.
@@ -71,16 +75,19 @@ struct HostedSettings {
 // One canonical persisted document, also used for API settings. Core settings
 // retain their public names; the additional server fields live in options.
 // Hosted packet tuning is a core setting with the runtime's packet-size limits.
-io::JsonValue hosted_settings_schema(gamecfg::ConfigTable table);
+// `title` the code of the title the server runs (inmatch::server_settings_title: its cfg table,
+// its host screen's cap and its availability words).
+io::JsonValue hosted_settings_schema(std::string_view title);
 io::JsonValue settings_document(const HostedSettings &settings);
 bool read_settings_document(const io::JsonValue &document, HostedSettings &settings,
 		std::string &field, std::string &error);
 gamecfg::GameCfg settings_block(const HostedSettings &settings, std::string_view title,
 		const gamecfg::WeaponRoster &weapons = {});
-// The game.cfg table a hosted server of title `title` runs (base/title/title.h
-// Title::config_table): Delta Force Xtreme 2's for dfx2, Joint Operations' for jo and
-// acidgambit; the default title's for a code no title has.
-gamecfg::ConfigTable title_config_table(std::string_view title);
+// The weapon roster a server's settings name weapons from: its expansion tree's when the server
+// runs one that lists any (an expansion's weapon.def replaces the base game's), else its base
+// tree's. `expansion` null for a server with no expansion.
+const gamecfg::WeaponRoster &server_weapon_roster(
+		const gamecfg::WeaponRoster &base, const gamecfg::WeaponRoster *expansion);
 
 // Why check_settings refused: the field (its JSON name) and the reason.
 struct SettingsRefusal {
@@ -105,10 +112,6 @@ std::optional<SettingsRefusal> check_settings(
 // at most kMissionNameMaxBytes bytes (check_settings' rule, and the console's
 // MISSION ADD).
 bool is_mission_file_name(std::string_view name);
-
-// The missions column: one name per line.
-std::string join_missions(const std::vector<std::string> &missions);
-std::vector<std::string> split_missions(const std::string &column);
 
 // The working directory's file names.
 inline constexpr const char *kHostFileName = "server.host";

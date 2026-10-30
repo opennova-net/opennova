@@ -1,6 +1,7 @@
 #include "downloads_job.h"
 
 #include "core/loggable.h"
+#include "core/protocol_json.h"
 #include "core/zip_files.h"
 #include "jobs/job_queue.h"
 #include "product_jobs.h"
@@ -292,20 +293,11 @@ io::JsonValue string_or_null(const std::string &text, bool present) {
 	return present ? io::json_string(text) : io::JsonValue::make_null();
 }
 
-// A game's protocol as every route answers one (apps/novaworld_web/http_json.h protocol_or_null):
-// {code, name, version}, the protocol its title speaks, version its protocol version (PV2, null
-// where unwitnessed); null for an expansion, an app and a title with no protocol.
-io::JsonValue protocol_json(const ProductRow &p) {
-	const Protocol *protocol =
-			p.kind == ProductKind::Game && !p.title.empty() ? title_protocol(p.title) : nullptr;
-	if (protocol == nullptr || protocol->code == nullptr)
-		return io::JsonValue::make_null();
-	io::JsonValue out = io::JsonValue::make_object();
-	out.set("code", io::json_string(protocol->code));
-	out.set("name", io::json_string(protocol->name != nullptr ? protocol->name : protocol->code));
-	const char *version = protocol_version(*protocol);
-	out.set("version", version != nullptr ? io::json_string(version) : io::JsonValue::make_null());
-	return out;
+// A game's protocol (core/protocol_json.h), the one its title speaks; null for an expansion, an
+// app and a title with no protocol.
+io::JsonValue game_protocol_json(const ProductRow &p) {
+	return protocol_json(
+			p.kind == ProductKind::Game && !p.title.empty() ? title_protocol(p.title) : nullptr);
 }
 
 std::string manifest_json(
@@ -326,7 +318,7 @@ std::string manifest_json(
 		// The account that made it, for a player's own game (the site's Players' games); null
 		// for the service's own.
 		item.set("owner", string_or_null(p.owner, p.owner_id.has_value()));
-		item.set("protocol", protocol_json(p));
+		item.set("protocol", game_protocol_json(p));
 		item.set("file", string_or_null(p.download, !p.download.empty()));
 		item.set("size",
 				has ? io::json_number(static_cast<double>(it->second.size))

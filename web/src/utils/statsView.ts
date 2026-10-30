@@ -76,10 +76,3 @@ export function playerValues(stats: HostedStats): (number | null)[] {
   return stats.series.points.map((p) => (p.running ? p.players : null));
 }
 
-// The step in words, for a chart's description: "each point is 5 minutes".
-export function stepWords(stats: HostedStats): string {
-  const minutes = Math.round(stats.series.step_seconds / 60);
-  if (minutes < 60) return minutes === 1 ? 'each point is a minute' : `each point is ${minutes} minutes`;
-  const hours = Math.round(minutes / 60);
-  return hours === 1 ? 'each point is an hour' : `each point is ${hours} hours`;
-}

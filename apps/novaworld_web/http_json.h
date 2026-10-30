@@ -6,6 +6,8 @@
 // 500; JsonBody reads a body that must be an object member by member, typed, so
 // a malformed request is a 400 instead.
 
+#include "core/protocol_json.h"
+#include <base/io/json.h>
 #include <net/protocol/protocol.h>
 
 #include <crow.h>
@@ -54,20 +56,19 @@ inline void id_or_null(crow::json::wvalue &out, const char *key, std::optional<i
 		out[key] = nullptr;
 }
 
-// `key` is `protocol` as the routes answer one (CONTEXT.md "Protocol"): {code ("jo"), name ("JO"),
-// version (its protocol version, PV2: "16"; null where unwitnessed)}, shown as "JO protocol 16";
-// null for none.
+// The service's own JSON (io::JsonValue) as a Crow reply's value.
+inline crow::json::wvalue to_crow(const io::JsonValue &value) {
+	return crow::json::wvalue(crow::json::load(io::json_write(value)));
+}
+// The same, for JSON text the service wrote itself (encode_tree_weapons).
+inline crow::json::wvalue to_crow(const std::string &json_text) {
+	return crow::json::wvalue(crow::json::load(json_text));
+}
+
+// `key` is `protocol` as the routes answer one (core/protocol_json.h): {code, name, version}, null
+// for none.
 inline void protocol_or_null(crow::json::wvalue &out, const char *key, const Protocol *protocol) {
-	if (protocol == nullptr || protocol->code == nullptr) {
-		out[key] = nullptr;
-		return;
-	}
-	out[key]["code"] = protocol->code;
-	out[key]["name"] = protocol->name != nullptr ? protocol->name : protocol->code;
-	if (const char *version = protocol_version(*protocol))
-		out[key]["version"] = version;
-	else
-		out[key]["version"] = nullptr;
+	out[key] = to_crow(protocol_json(protocol));
 }
 
 // {"error": <code>}, with "message" beside it when one is given.

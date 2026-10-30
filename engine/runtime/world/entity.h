@@ -57,11 +57,6 @@ using PoolCapacities = std::array<std::size_t, kEntityPoolCount>;
 //  @0x44219c/@0x4421a2 (pools 1/2, 1200), @0x442203 (pool 3, 768),
 //  @0x44221e (pool 4, 128)]
 inline constexpr PoolCapacities kRetailPoolCapacity = {256, 1200, 1200, 768, 128};
-constexpr std::size_t retail_pool_capacity(int pool) {
-    return pool >= 0 && pool < kEntityPoolCount
-            ? kRetailPoolCapacity[pool]
-            : 0;
-}
 // The widest each pool may be configured and still be named on the wire: a handle
 // carries a 12-bit slot (EntityHandle, 4096 slots), and the S2C person records name a
 // person by its pool-0 slot's one byte, 0xFF for none (pool0_index_byte: the 0x1E
@@ -1113,18 +1108,6 @@ struct Entity {
     //  @0x4407D0 (the test @0x4408C8)]
     bool collapse_waits_on_final_husk = false;
     bool holds_final_husk() const { return final_husk_loaded && !husk_promoted; }
-    // The swap fade has work on the row (world::update_item_destroy_fade): it is husked,
-    // draws a pending final husk, or still carries a husked evaluation's phases. An intact
-    // row with none of them keeps its zeroes and emits nothing, so the walks skip it and
-    // the item walk's fade list (EntityRegistry::list_fade_row) holds only these rows.
-    // Ours, not a retail claim.
-    bool needs_destroy_fade() const {
-        if ((engine_flags & kEntityFlagHusk) != 0 || final_husk_overlay || destroy_progress != 0.0)
-            return true;
-        for (const int32_t phase : destroy_phases_q16)
-            if (phase != 0) return true;
-        return false;
-    }
     uint32_t last_state_sent_ms = 0; // entity+560; authority 0x26 send clock
     bool objective_death_scored = false;
     int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay

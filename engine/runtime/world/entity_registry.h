@@ -163,20 +163,6 @@ public:
     }
     void set_ref_group_member(EntityHandle h, bool member);
 
-    // The fade list: the pool-2/3 rows whose swap fade the item walk evaluates every
-    // tick (tick_item_event_pool), in slot order -- each row Entity::needs_destroy_fade
-    // holds for. A spawn lists a row whose seed needs it, a despawn unlists it, every
-    // later writer of the husk bit lists its row, and the walk's visit lists or unlists
-    // the row it visits by the same test. Rows of other pools are never listed. Ours,
-    // not a retail claim: retail's walks visit only their cohort, and its draw evaluates
-    // the fade for a husked model [orig: Entity_UpdateAllEntities @0x4C2100;
-    // Render_SectorEntity @0x5C4190 - Entity_PublishSwapFadePhases @0x5C4200].
-    void list_fade_row(EntityHandle h);
-    void unlist_fade_row(EntityHandle h);
-    bool fade_row_listed(EntityHandle h) const;
-    // The first listed slot of `pool` at or past `from`, else SIZE_MAX.
-    size_t next_fade_row(int pool, size_t from) const;
-
     // Named, first-class non-entity addressables.
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
     // authored record id [orig: zone record dword @0].
@@ -290,9 +276,6 @@ private:
         std::vector<char> freed_by_destroy;
         // The refNum list the row is on (ref_groups_), 0 for none.
         std::vector<uint8_t> ref_joined;
-        // The fade list's rows (list_fade_row), ascending, and each row's membership.
-        std::vector<uint32_t> fade_rows;
-        std::vector<char> fade_listed;
         size_t live = 0;
         size_t used_count = 0; // g_PoolList[pool].used, the high-water mark (pool_used)
     };

@@ -128,7 +128,7 @@ import { cancelJob, fetchJobs, pruneJobs, retryJob } from '../../../api/jobs';
 import { confirmAction } from '../../../composables/useConfirm';
 import { usePolling } from '../../../composables/usePolling';
 import type { Job, JobPage, JobQuery, JobState } from '../../../types/jobs';
-import { formatCount } from '../../../utils/format';
+import { countLabel, formatCount } from '../../../utils/format';
 import {
   attemptsLabel,
   jobKindLabel,
@@ -344,12 +344,11 @@ async function cancel(j: Job) {
 async function prune() {
   if (busy.value) return;
   const days = keepDays.value;
-  const plural = days === 1 ? '' : 's';
-  if (!await confirmAction(`Delete every job that finished more than ${days} day${plural} ago? Their history is gone for good.`)) return;
+  if (!await confirmAction(`Delete every job that finished more than ${countLabel(days, 'day')} ago? Their history is gone for good.`)) return;
   busy.value = true;
   const result = await pruneJobs(days);
   busy.value = false;
-  emit('notice', result.ok ? { ok: true, text: `Pruning jobs older than ${days} day${plural} (job ${result.value.id}).` } : { ok: false, text: result.error.message });
+  emit('notice', result.ok ? { ok: true, text: `Pruning jobs older than ${countLabel(days, 'day')} (job ${result.value.id}).` } : { ok: false, text: result.error.message });
   await poll.readAgain();
   emit('changed');
 }
