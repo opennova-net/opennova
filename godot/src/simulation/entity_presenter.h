@@ -390,7 +390,6 @@ public:
 	// Built per call (the live census).
 	Ref<ThrowablePresentStats> get_throwable_present_stats() const;
 	Ref<ScarPresentStats> get_scar_present_stats() const;
-	bool has_active_wreck_fire(const String &p_owner_key) const;
 	void warm_fire_pipelines(const Vector3 &p_position);
 	// The load's forced frame's warm of the wire walk's cold spawns (GameWorld::
 	// build_person_pipeline_warm): one model per visual identity (type word, character id) among
