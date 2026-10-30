@@ -8,7 +8,10 @@
 
 #include <runtime/terrain_query/terrain_raycast.h>
 
+#include <runtime/terrain_query/height_field.h>
+
 #include <cstdio>
+#include <vector>
 
 using namespace opennova::terrain;
 
@@ -533,6 +536,41 @@ int main() {
         TerrainRaycastSampler s2 = uniform_sampler(f2);
         const int32_t start2[3] = { 0, 0, U };
         check(terrain_raycast_los_clear(s2, start2, end), "(k) above the empty floor clears");
+    }
+
+    // ---------------------------------------------------------------- (l)
+    // The game's boolean ray over the loaded terrain (terrain_field_ray_hit):
+    // no terrain loaded HITS [orig: the null-atlas test @ 0x60cce8..0x60ccf7];
+    // over a uniform 10-unit field a ray above it clears and one through it
+    // hits; past the authored extent the runtime routing keeps meeting the
+    // terrain it clamps or wraps to, where the editor's bounds-rejecting
+    // sampler sees none.
+    {
+        const int32_t above_a[3] = { 0, 0, 20 * U };
+        const int32_t above_b[3] = { 64 * U, 32 * U, 30 * U };
+        check(terrain_field_ray_hit(nullptr, above_a, above_b), "(l) no terrain loaded hits");
+        const TerrainHeightField empty;
+        check(terrain_field_ray_hit(&empty, above_a, above_b),
+              "(l) an empty field is no terrain: hits");
+        constexpr int kDim = 1024;
+        std::vector<uint16_t> heights(static_cast<size_t>(kDim) * kDim, 10 * 256);
+        std::vector<int> sector_grid(256, 1);
+        TerrainHeightField field;
+        field.heightmap = heights.data();
+        field.dim = kDim;
+        field.layout.sector_grid = sector_grid.data();
+        field.layout.origin_x = -4;
+        field.layout.origin_y = -4;
+        field.layout.sector_count = 16;
+        field.layout.sector_rows = 16;
+        check(!terrain_field_ray_hit(&field, above_a, above_b), "(l) a ray above the terrain clears");
+        const int32_t down_b[3] = { 64 * U, 32 * U, 0 };
+        check(terrain_field_ray_hit(&field, above_a, down_b), "(l) a ray into the terrain hits");
+        // 20000 units east: far past the 16-sector grid (8192 units).
+        const int32_t far_a[3] = { 20000 * U, 0, 5 * U };
+        const int32_t far_b[3] = { 20064 * U, 0, 5 * U };
+        check(terrain_field_ray_hit(&field, far_a, far_b),
+              "(l) past the authored extent the runtime routing still meets the terrain");
     }
 
     if (g_fail) {
