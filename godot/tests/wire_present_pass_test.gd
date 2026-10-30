@@ -186,8 +186,10 @@ func _rig_body(body: ObjectModel) -> void:
 	var rig := SkeletalAnim.new()
 	var rig_root := ResourceRoot.new()
 	rig_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
-	assert_true(rig.load_from_resource_root(rig_root, "soldier.adm"),
-			"soldier.adm fixture loads: %s" % rig.get_last_error())
+	assert_true(rig.load_from_resource_root(rig_root, "rig19.adm"),
+			"rig19.adm fixture loads: %s" % rig.get_last_error())
+	assert_gt(rig.get_bone_count(), EntityPresenter.HELD_WEAPON_BONE_INDEX,
+			"the 19-bone person rig carries every attach bone")
 	body.set_skeletal_anim(rig)
 
 
