@@ -308,7 +308,7 @@ int test_renders() {
 	plan.admin_port = hosted::slot_admin_port(3);
 	plan.admin_allowed_ip = "10.1.2.3";
 	TEST_EXPECT(plan.game_port == 32771 && plan.admin_port == 32803);
-	const std::string cfg_text = hosted::render_game_cfg(plan, s);
+	const std::string cfg_text = hosted::render_game_cfg(plan, s, "jo");
 	const auto cfg = opennova::gamecfg::load(cfg_text.data(), cfg_text.size(), {});
 	TEST_EXPECT(!cfg.version_reset);
 	TEST_EXPECT(cfg.cfg.networkconnecttype == 1);

@@ -224,9 +224,10 @@ std::string render_host_file(const HostedSettings &settings, int64_t server_id);
 // the NovaWorld port range pinned to `plan.game_port` (the slot's: NovaWorld
 // lists a server at its datagrams' source port, so a stock client joins each
 // slot of a machine on its own port), and the remote admin on
-// `plan.admin_port`; written by the format's own writer.
-std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings = {},
-        std::string_view title = "jo", const gamecfg::WeaponRoster &weapons = {});
+// `plan.admin_port`; written by the format's own writer, under the server's game `title` (its
+// settings' table and words: inmatch::server_settings_title).
+std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings,
+        std::string_view title, const gamecfg::WeaponRoster &weapons = {});
 // admin.cfg: kAdminUser with `admin_password` and kAdminRights, and one
 // ip_restrict line admitting `plan.admin_allowed_ip`.
 std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_password);
