@@ -517,17 +517,17 @@ void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
 	marker_uv(input, icon, u0, v0, u1, v1);
 }
 
-int32_t spinmap_zoom_step(int32_t zoom_q16, int direction) {
+int32_t spinmap_zoom_step(int32_t zoom_q16, int direction, int32_t zoom_max) {
 	// direction 0 never reaches here: HudMapControl::zoom_step owns the reset
 	// (the mission-scaled spawn zoom), so a constant-default branch would be
 	// dead — and wrong post mission scaling.
 	// Zoom OUT multiplies the world extent up; IN shrinks it.
-	// [orig: case 361 x1.15 max 0x100000 @0x49beaf; case 360 x0.85 min 4096
+	// [orig: case 361 x1.15 to the cap (Jointops.exe 0x100000) @0x49beaf; case 360 x0.85 min 4096
 	//  @0x49bcb0]
 	if (direction > 0) {
 		const int32_t next = static_cast<int32_t>(
 				static_cast<double>(zoom_q16) * 1.15);
-		return std::min(next, kSpinmapZoomMax);
+		return std::min(next, zoom_max);
 	}
 	const int32_t next = static_cast<int32_t>(
 			static_cast<double>(zoom_q16) * 0.85);

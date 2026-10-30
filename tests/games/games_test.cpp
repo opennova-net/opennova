@@ -149,6 +149,7 @@ void retail_rules_values() {
 	CHECK(!jo.bms_table_warnings && jo.bms_loadout_sanitized && jo.mission_start_sets_difficulty);
 	CHECK(jo.part_spin.full == 186413 && jo.part_spin.mid == 163110 && jo.part_spin.low == 139809 &&
 			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
+	CHECK(jo.map_zoom_max_q16 == 0x100000); // section 7.12
 
 	const world::TitleRules &dfx2 = world::title_rules("dfx2");
 	CHECK(dfx2.waypoint_completion == world::WaypointCompletion::CoopCheckpoint); // DFX2-9
@@ -175,6 +176,7 @@ void retail_rules_values() {
 	size_t kit = 0;
 	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
 	CHECK(kit == 8 && std::string(dfx2.spawn_kit[2]) == "WPN_MK23");
+	CHECK(dfx2.map_zoom_max_q16 == 0x80000); // section 7.12
 }
 
 // A protocol's in-match sheet: every knob of its ProtocolInMatch, and its CD key (Protocol::cd_key,

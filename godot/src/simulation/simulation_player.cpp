@@ -171,9 +171,11 @@ int64_t Simulation::get_local_player_heading_bam() const {
 
 int Simulation::request_hud_radar_zoom(int p_direction) {
 	// The engine control routes the step to the big-map pair while a mode
-	// is up (witness at hud::HudMapControl::zoom_step).
+	// is up, a zoom-out to the title's cap (witnesses at
+	// hud::HudMapControl::zoom_step, world::TitleRules::map_zoom_max_q16).
 	const int step = p_direction < 0 ? -1 : (p_direction > 0 ? 1 : 0);
-	return kernel_->local.hud_map_control.zoom_step(step);
+	return kernel_->local.hud_map_control.zoom_step(
+			step, kernel_->world.rules.title().map_zoom_max_q16);
 }
 
 int Simulation::get_hud_radar_zoom_q16() const {

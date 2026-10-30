@@ -700,16 +700,33 @@ void test_spinmap_projection_zoom_and_clip() {
 	CHECK(!opennova::hud::project_spinmap_point(input, 200 << 16, 0,
 			true, x, y) && std::fabs(y - (657.0f - 103.0f)) < 0.01f,
 			"edge clamp lands on the stencil circle");
-	// Zoom OUT grows the world-extent value x1.15 toward 0x100000; IN shrinks
-	// x0.85 toward 4096. [orig: cases 361/360 @0x49beaf/@0x49bcb0]
-	CHECK(opennova::hud::spinmap_zoom_step(65536, 1) == 75366,
+	// Zoom OUT grows the world-extent value x1.15 toward the title's cap
+	// (Jointops.exe's 0x100000); IN shrinks x0.85 toward 4096.
+	// [orig: cases 361/360 @0x49beaf/@0x49bcb0]
+	const int32_t jo_max = opennova::hud::kSpinmapZoomMax;
+	CHECK(opennova::hud::spinmap_zoom_step(65536, 1, jo_max) == 75366,
 			"zoom out applies the retail x1.15 truncation");
-	CHECK(opennova::hud::spinmap_zoom_step(65536, -1) == 55705,
+	CHECK(opennova::hud::spinmap_zoom_step(65536, -1, jo_max) == 55705,
 			"zoom in applies the retail x0.85 truncation");
-	CHECK(opennova::hud::spinmap_zoom_step(4096, -1) == 4096,
+	CHECK(opennova::hud::spinmap_zoom_step(4096, -1, jo_max) == 4096,
 			"zoom clamps at 4096");
-	CHECK(opennova::hud::spinmap_zoom_step(0x100000, 1) == 0x100000,
+	CHECK(opennova::hud::spinmap_zoom_step(0x100000, 1, jo_max) == 0x100000,
 			"zoom clamps at 0x100000");
+	// dfx2.exe's zoom-out stops at 0x80000, where Jointops.exe's goes on to
+	// 0x100000; the step and the floor are the same.
+	// [orig: Input_HandleActionBinding @0x49ad50 - case 361, `cmp eax, 80000h`
+	//  @0x49bf27 / @0x49bf57 (dfx2.exe)]
+	CHECK(opennova::hud::spinmap_zoom_step(0x7A000, 1, 0x80000) == 0x80000 &&
+			opennova::hud::spinmap_zoom_step(0x7A000, 1, jo_max) == 0x8C4CC,
+			"dfx2.exe's zoom-out caps at 0x80000");
+	opennova::hud::HudMapControl map;
+	map.zoom_q16 = 0x7A000;
+	map.big_zoom_q16 = 0x7A000;
+	CHECK(map.zoom_step(1, 0x80000) == 0x80000 && map.big_zoom_q16 == 0x7A000,
+			"the radar's zoom takes the title's cap with no map up");
+	map.cycle();
+	CHECK(map.zoom_step(1, 0x80000) == 0x80000 && map.zoom_q16 == 0x80000,
+			"the big map's zoom takes it while a map mode is up");
 
 	// The live retail probe observes 00TRa's authored 0.61 as the
 	// complementary 0.39 Q16 value. The per-frame scale divides that value

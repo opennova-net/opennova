@@ -304,6 +304,16 @@ struct TitleRules {
 	//  (dfx2.exe) - the release leg's @0x4DD8FE..0x4DD92C, the press leg's @0x4DDABB..0x4DDADB,
 	//  each `cmp eax, ebx; jle` with ebx 1 @0x4DD4E6]
 	bool emplaced_solo_holds_fire = false;
+
+	// --- Section 7.12: the radar and big-map zoom cap (the local player's own view). -------------
+	// The zoom-out key's cap (Q16, a world-extent multiplier) over the corner radar's zoom and, while
+	// a map mode is up, the big map's (hud::HudMapControl::zoom_step); the x1.15 / x0.85 steps and
+	// the 0x1000 floor are the same in both. Read on the local player's input alone, it changes no
+	// peer's view of anything, so it is no joiner-side knob.
+	// [orig: Input_HandleActionBinding @0x49ad40 - case 361, `cmp eax, 100000h` @0x49beba (the
+	//  radar's) / @0x49beea (the big map's)] [orig: Input_HandleActionBinding @0x49ad50 - case
+	//  361, `cmp eax, 80000h` @0x49bf27 / @0x49bf57, the stores @0x49bf37 / @0x49bf67 (dfx2.exe)]
+	int32_t map_zoom_max_q16 = 0x100000;
 };
 
 // One registry row: a title's code and the rules it runs.

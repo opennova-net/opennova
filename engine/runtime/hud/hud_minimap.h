@@ -644,13 +644,15 @@ struct HudMapPass {
 };
 
 // One radar-zoom input step over the active zoom value. direction > 0 zooms
-// OUT (x1.15 toward 0x100000), direction < 0 zooms IN (x0.85 toward 4096).
-// The value is a world-extent multiplier: bigger shows more world.
+// OUT (x1.15 toward `zoom_max`, the title's cap: world::TitleRules::
+// map_zoom_max_q16, Jointops.exe's kSpinmapZoomMax), direction < 0 zooms IN
+// (x0.85 toward 4096). The value is a world-extent multiplier: bigger shows
+// more world.
 // [orig: Input_HandleActionBinding @0x49AD40 — radarout row 48 = case 361
 //  (dbl_7C7AA8 = 1.15 @0x49beaf), radarin row 49 = case 360
 //  (dbl_7C7AB0 = 0.85 @0x49bcb0)]
 // direction == 0 restores the spawn value (Player_InitPlayer semantics).
-int32_t spinmap_zoom_step(int32_t zoom_q16, int direction);
+int32_t spinmap_zoom_step(int32_t zoom_q16, int direction, int32_t zoom_max);
 
 // One TSDicon strip cell's UV rect (30 square cells, half-texel insets from
 // the loaded strip's physical size) -- shared by the map blips and the
@@ -774,18 +776,19 @@ struct HudMapControl {
 		return mode;
 	}
 	// The radar keys step the big-map zoom while a mode is up, the corner
-	// spinmap's otherwise. [orig: the mode-gated zoom-case reads
+	// spinmap's otherwise, a zoom-out to the title's `zoom_max` (world::
+	// TitleRules::map_zoom_max_q16). [orig: the mode-gated zoom-case reads
 	//  @0x49bc98/@0x49be97]
-	int32_t zoom_step(int direction) {
+	int32_t zoom_step(int direction, int32_t zoom_max) {
 		if (mode != 0) {
 			big_zoom_q16 = direction == 0
 					? spawn_big_zoom_q16
-					: spinmap_zoom_step(big_zoom_q16, direction);
+					: spinmap_zoom_step(big_zoom_q16, direction, zoom_max);
 			return big_zoom_q16;
 		}
 		zoom_q16 = direction == 0
 				? spawn_zoom_q16
-				: spinmap_zoom_step(zoom_q16, direction);
+				: spinmap_zoom_step(zoom_q16, direction, zoom_max);
 		return zoom_q16;
 	}
 	// Spawn/respawn: the mission-scaled zoom defaults return and the mode
