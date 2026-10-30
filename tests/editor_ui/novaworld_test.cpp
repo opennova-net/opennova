@@ -258,6 +258,56 @@ void test_two_services() {
 	std::printf("content: the service named, Replace with this folder asked first, Put on its host\n");
 }
 
+// The controls that rewrite a folder's place on NovaWorld follow the gate: while a build holds the project, each stays
+// held back, and takes its request once it ends. (gate_test.cpp's walk stands on a view with no NovaWorld project.)
+void test_controls_wait_for_the_gate() {
+	Ui ui;
+	SessionView v = tracked_view();
+	NovaWorldView &c = v.novaworld;
+	c.key.clear();
+	c.tracked = false;
+	c.former_key = "MOD";
+	ui.windows.set_view(&v);
+	ui.focus("NovaWorld");
+	ui.frames(2);
+
+	OperationStatus building;
+	building.id = 1;
+	building.kind = OperationKind::Build;
+	building.reads = operation_kind_row(OperationKind::Build).reads;
+	building.writes = operation_kind_row(OperationKind::Build).writes;
+	const auto with_build = [&](bool running) {
+		v.activity.operation = running ? building : OperationStatus();
+		v.revisions.touch(ViewConcern::Operation);
+		ui.frames(2);
+		ui.drain();
+	};
+	with_build(true);
+	CHECK(!v.allows(EditorRequestKind::NovaWorldRejoin) && !v.allows(EditorRequestKind::NovaWorldMakeOwn) &&
+	              !v.allows(EditorRequestKind::NovaWorldKeepFolder),
+	      "a build holds the folder's place on NovaWorld");
+	ui.activate(novaworld_item({"Rejoin"}));
+	CHECK(ui.drain().empty(), "Rejoin waits for the build");
+	with_build(false);
+	ui.activate(novaworld_item({"Rejoin"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldRejoin), "Rejoin after it");
+
+	c.key = "MOD";
+	c.tracked = true;
+	c.revision = 0;
+	c.former_key.clear();
+	with_build(true);
+	ui.activate(novaworld_item({"Replace with this folder..."}));
+	ui.frames(2);
+	CHECK(ui.drain().empty(), "Replace with this folder... waits for the build");
+	with_build(false);
+	ui.activate(novaworld_item({"Replace with this folder..."}));
+	ui.frames(2);
+	ui.activate(replace_item({"Replace with this folder"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldKeepFolder), "Replace with this folder after it");
+	std::printf("content: what rewrites a folder's place on NovaWorld waits for the gate\n");
+}
+
 void test_working_copy() {
 	Ui ui;
 	SessionView v = tracked_view();
@@ -1024,6 +1074,7 @@ void run_novaworld_tests() {
 	test_standing();
 	test_make_own();
 	test_two_services();
+	test_controls_wait_for_the_gate();
 	test_working_copy();
 	test_put_and_sign_in();
 	test_get_a_project();
