@@ -30,7 +30,8 @@ struct Locale {
 // The locale as one "language_COUNTRY" tag ("en_US"; "en" with no country, "" with neither), the
 // form the engine's NovaWorld session takes.
 inline std::string locale_tag(const Locale &locale) {
-	if (locale.language.empty()) return std::string();
+	if (locale.language.empty())
+		return std::string();
 	return locale.country.empty() ? locale.language : locale.language + "_" + locale.country;
 }
 
@@ -49,7 +50,8 @@ public:
 
 	// A child started from `options` (base/proc SpawnOptions: an argv array, no shell); null with
 	// `error` when it did not start.
-	virtual std::unique_ptr<Process> spawn(const proc::SpawnOptions &options, std::string &error) = 0;
+	virtual std::unique_ptr<Process> spawn(
+			const proc::SpawnOptions &options, std::string &error) = 0;
 
 	// `url` handed to the system's handler for it (the browser for http/https); false when the
 	// system took none.

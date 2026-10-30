@@ -53,6 +53,8 @@ easier to relay than to rediscover.
   `acidgambit`, `jo`, or `dfx2`; without it the folder's `UPDATE.WIZ` names the game
   (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `ACIDGAMBIT.CMD` or no wizard OP: Acid Gambit; ADR 0067 d2).
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
+  `tests/null_backend` is the headless platform backend (ADR 0077 d8, `opennova_null_backend`):
+  every `engine/base/platform` interface over simulated time and scripted input.
 - `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a
   `blender_<name>` row when Blender 5.x is on PATH, run against the source-tree add-on;
   the Blender packaging workflow runs them against the installed zip

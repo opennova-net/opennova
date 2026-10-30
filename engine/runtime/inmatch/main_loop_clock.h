@@ -31,6 +31,10 @@ namespace opennova::gamecfg {
 struct GameCfg;
 }
 
+namespace opennova::platform {
+class Clock;
+}
+
 namespace opennova::inmatch {
 
 struct FrameInput;
@@ -39,6 +43,22 @@ struct FrameInput;
 // system timer's steps (world::frame_tick_count_ms). The session's frame lock and every
 // MainLoopClock read them unless a test hands its own.
 world::FrameLockClock &main_loop_tick_count_clock();
+
+// The same primitives over a platform backend's clock (base/platform/clock.h): Sleep(1) as the
+// platform's 1 ms sleep, GetTickCount as the tick count over its microseconds
+// (world::frame_tick_count_ms(const platform::Clock &)). An embedder that runs on a platform hands
+// it to its MainLoopClock and its Session alike, so the frame's stamp, its lock and its CPU share
+// read one clock. `clock` outlives it.
+// [orig: Game_MainLoop @0x52B630 - Sleep(1) @0x52B8B2, the frame lock's GetTickCount @0x52B8B8]
+class PlatformFrameLockClock final : public world::FrameLockClock {
+public:
+	explicit PlatformFrameLockClock(platform::Clock &clock) : clock_(clock) {}
+	void sleep_one_ms() override;
+	uint32_t now_ms() override;
+
+private:
+	platform::Clock &clock_;
+};
 
 // Whether the process's cfg block locks the main loop's frames: its lock_framerate word, which
 // the loop reads every frame, a Serve Only host's as a player's (Config_SetDefaults stores 1).

@@ -61,7 +61,8 @@ public:
 	virtual void set_title(const std::string &title) = 0;
 	// The windowed client size in pixels (a fullscreen window keeps it for its return).
 	virtual void set_size(int32_t width, int32_t height) = 0;
-	// The client area's size in pixels now (the drawable's: a fullscreen window's is its display's).
+	// The client area's size in pixels now (the drawable's: a fullscreen window's is its
+	// display's).
 	virtual WindowSize size() const = 0;
 
 	virtual void set_mode(WindowMode mode) = 0;

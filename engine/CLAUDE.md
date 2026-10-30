@@ -97,10 +97,12 @@
 - Group targets (ADR 0029, ADR 0046): six STATIC group targets, no per-lib ones:
   `opennova_formats` (every formats/ lib, the mission FORMAT lib included, which keeps the
   partition acyclic), `opennova_base` (project, vfs, resource_index, gameprofile, title,
-  pcapio, os_random, proc, version; `project` is a project revision's manifest, shared by the
-  service and the editor, ADR 0069; `title` the Title type and its registry; `version` is
-  `Version`'s one parse rule and ONE's build, `one_build()`, whose `one_build.cpp` is the one TU
-  the CMake stamp compiles into: nothing else carries a version literal of ONE's), `opennova_net`
+  pcapio, os_random, proc, version, and the header-only `platform`, the platform API a backend
+  implements, ADR 0077 d2: Window, InputDevice, Clock, Files, Os, AudioDevice; `project` is a
+  project revision's manifest, shared by the service and the editor, ADR 0069; `title` the
+  Title type and its registry; `version` is `Version`'s one parse rule and ONE's build,
+  `one_build()`, whose `one_build.cpp` is the one TU the CMake stamp compiles into: nothing else
+  carries a version literal of ONE's), `opennova_net`
   (novacrypto, napi, npwire, admin, protocol, update and the novaworld session/gate: the wire),
   `opennova_runtime` (the rest of runtime/, `inmatch` and
   `replication` included),
