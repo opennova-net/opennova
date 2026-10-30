@@ -1111,16 +1111,15 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 		light_patch_bounds[i] = opennova::renderer::terrain_patch_light_bounds(
 				aabb_min, aabb_max, draw.sector_ox, draw.sector_oz);
 	}
-	// EffectWorld_AmbientScale = the env light-state gain (the modulator
-	// unpack the object pass feeds too); the recip factor unpacks the loaded
-	// g_EnvTerrainColorRecip [orig: @0x5aa1ef..0x5aa23f].
+	// EffectWorld_AmbientScale = the engine's light block gain
+	// (EnvironmentState::light_gain, the modulator unpack the object pass
+	// feeds too); the recip factor unpacks the loaded g_EnvTerrainColorRecip
+	// [orig: @0x5aa1ef..0x5aa23f].
 	Vector3 gain(1.0f, 1.0f, 1.0f);
 	uint32_t recip_packed = opennova::renderer::kTerrainFactorDefaultPacked;
 	if (cached_env_node != nullptr) {
-		const Ref<EnvLightState> light_state = cached_env_node->get_light_state();
-		if (light_state.is_valid() && light_state->get_values().is_valid()) {
-			gain = light_state->get_values()->get_gain();
-		}
+		const opennova::env::Rgb light_gain = cached_env_node->state().light_gain();
+		gain = Vector3(light_gain.r, light_gain.g, light_gain.b);
 		if (cached_env_node->is_loaded()) {
 			recip_packed = cached_env_node->state().terrain_color_recip_packed();
 		}
