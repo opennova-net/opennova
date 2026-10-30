@@ -954,10 +954,12 @@ browser variable, and its LAN host checks the wire `CDKIID` that value decodes t
   Every serial is unique, so two accounts' copies never meet at codes 12 and 13. No `/MP`
   tail and no `CDKIIDEXP1` are issued (nothing in `dfx2.exe` writes a `CDKIIDEXP1`). An
   account holds at most one live key per title; a revoked key activates no machine.
-- **The activation** of one machine is `NWACT = mix_up(encode(wire key, registry chain),
-  NWPSSK)`: machine-bound, A to Z, and the same every time that machine asks
+- **The activation** of one machine is `NWACT = mix_up(encode(wire key + NUL, registry
+  chain), NWPSSK)`: machine-bound, A to Z, and the same every time that machine asks
   (`cd_key_activations` keeps one row per key and machine). The client's own leg (the mix
-  down under its fingerprint, the registry chain decoded) gives back the wire key.
+  down under its fingerprint, the registry chain decoded) gives back the wire key. The NUL
+  is encoded with it because `dfx2.exe`'s decode writes none: its copy of the decoded value
+  runs to the first NUL, which without one lies past the chain's CRC bytes.
 - **The hand-off.** A DFX2 client sets `NWCDKIID` (what its boot read's decode left: the
   wire key, or empty when it has no `CDKIID`) and `NWPSSK` (its 23-letter fingerprint) as
   browser variables when it connects to NovaWorld, so every web request carries them as
