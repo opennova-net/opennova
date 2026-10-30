@@ -111,16 +111,11 @@ void WeatherRuntime::run_mission_start_boundary(EnvironmentState *env,
 	//  (dword_24D5A04) @0x5253B7, Environment_SetTodRate(dword_24D5A08) @0x5253C3, else the
 	//  header's @0x5253CA..0x5253E2] [orig: Game_StartMission @0x521530 - @0x522582..0x522594
 	//  (dfx2.exe)]
-	// The night phase is the kept clock's too: retail's lvalue keeps the old mission's last tick's
-	// value until the new mission's first tick computes it (the eager WAC pass reads it ahead of
-	// that), and that tick ran on the clock the teardown kept [orig: g_EnvIsNightPhase @0x26C645C,
-	// written only by Environment_ComputeTimeOfDayColors @0x57DE40 (from
-	// Environment_UpdateWeatherTick @0x57E9C7) and the WAC set; Game_StartMission - the eager WAC
-	// pass @0x525CB3 ahead of Environment_MissionStartInit @0x525CB8].
+	// The night phase is neither path's: the World keeps the one the last mission left (the
+	// kernel's carry, WeatherState::seed): after a map change, the phase its last tick computed.
 	if (kept_clock != nullptr) {
 		mission_state->set_current_time(kept_clock->tod_fixed24);
 		mission_state->set_tod_advance_per_tick(kept_clock->tod_advance_per_tick);
-		mission_state->compute_night_phase();
 	}
 	bind_render();
 	resync_colors();

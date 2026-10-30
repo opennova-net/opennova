@@ -110,8 +110,12 @@ void WeatherState::seed(const WeatherSeed &seed) {
     cloud_scroll_rate_target = seed.cloud_scroll_rate_target;
     tod_fixed24 = seed.tod_fixed24 % kTodDayFixed24;
     tod_keyframed = seed.tod_keyframed;
-    night_phase = 0;
-    compute_night_phase();
+    // The night phase is left as it stands: no mission start writes it, so the World starts on
+    // the phase the process's last mission left (MissionKernel::carry_across_load_from), 0 in a
+    // fresh process, until a tick computes it (tick_sim). [orig: g_EnvIsNightPhase @0x26C645C
+    //  (0 in the image), written only by Environment_ComputeTimeOfDayColors @0x57DEAE..0x57E061
+    //  and the WAC set (the named-value table @0x82EFAC); Environment_SnapStateToTargets
+    //  @0x57D1E0 does not touch it]
     tod_advance_per_tick = seed.tod_advance_per_tick;
     // The mission start sets its clock through Environment_SetCurrentTime, which leaves the
     // minute counter at 10 (Environment_SnapStateToTargets touches neither).

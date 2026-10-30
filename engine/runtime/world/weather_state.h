@@ -188,7 +188,9 @@ struct WeatherState {
     // its emptying and the environment cube its six-face refresh; the render devices answer a
     // change of the count. A count, so a device that reads it once a frame misses no step.
     uint32_t time_set_resets = 0;
-    // Script lvalue, preserved until a keyframed TOD computation writes 0/1.
+    // Script lvalue, preserved until a keyframed TOD computation writes 0/1, across missions too:
+    // no mission start writes it (seed leaves it; MissionKernel::carry_across_load_from hands it
+    // to the next World).
     // [orig: WacCmd_Set @ 0x4ED520; Environment_ComputeTimeOfDayColors @ 0x57DE40]
     int32_t night_phase = 0; // g_EnvIsNightPhase @ 0x26C645C
     bool tod_keyframed = false;

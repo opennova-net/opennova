@@ -637,11 +637,16 @@ void test_the_clock_carries_across_a_map_change_with_continuity() {
 			return;
 		// The first mission starts on its header's clock: no map change kept one.
 		CHECK(inmatch::kept_mission_clock(host.boot) == nullptr);
+		// A fresh process's night phase is 0 (the image's).
+		CHECK(host.kernel->world.weather.night_phase == 0);
 		const uint32_t header_time = host.kernel->world.weather.tod_fixed24;
 		const uint32_t header_advance = host.kernel->world.weather.tod_advance_per_tick;
 		CHECK(header_time != kKept);
 		host.kernel->world.weather.tod_fixed24 = kKept;
 		host.kernel->world.weather.tod_advance_per_tick = 0;
+		// The first mission ends at night (a WAC set: these maps carry no TOD keyframes, so no tick
+		// computes the phase).
+		host.kernel->world.weather.night_phase = 1;
 		host.ctx().mission_exit_reason = inmatch::kMissionExitMapCycle;
 		for (int f = 0; f < 64 && host.map_changes == 0; ++f)
 			host.frame();
@@ -659,6 +664,9 @@ void test_the_clock_carries_across_a_map_change_with_continuity() {
 			CHECK(host.kernel->world.weather.tod_fixed24 == header_time &&
 					host.kernel->world.weather.tod_advance_per_tick == header_advance);
 		}
+		// Either way the next mission starts on the last one's night phase, and with no keyframes
+		// keeps it through its settle [orig: g_EnvIsNightPhase @0x26C645C].
+		CHECK(host.kernel->world.weather.night_phase == 1);
 	}
 	// A joiner's boot names no host: it takes no kept clock.
 	inmatch::HostBoot joiner;

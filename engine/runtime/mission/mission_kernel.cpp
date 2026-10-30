@@ -1015,6 +1015,12 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	//  Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B), each periodic second:
 	//  the next mission reads the last count until its first recount]
 	world.server_num_players = previous.world.server_num_players;
+	// [orig: g_EnvIsNightPhase @0x26C645C, zero-initialized data whose writers are
+	//  Environment_ComputeTimeOfDayColors @0x57DEAE..0x57E061 (a keyframed mission's every
+	//  weather tick) and the WAC set alone: no mission start resets it, so the next mission's
+	//  eager WAC pass (Game_StartMission @0x525CB3) reads the last mission's phase, and a mission
+	//  with no TOD keyframes keeps it throughout] [orig: g_EnvIsNightPhase @0x26C77D4 (dfx2.exe)]
+	world.weather.night_phase = previous.world.weather.night_phase;
 	// [orig: dword_26970F4, whose only live writer is the cine render pass
 	//  Cine_RenderOverlays @0x570C66]
 	world.epilog.frame_drawn = previous.world.epilog.frame_drawn;
