@@ -966,7 +966,10 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	# The bloom's redraw draws through its own material, over the mirror the
 	# frame rendered last (environment/water_mirror.h bloom_water_mirror_image).
 	var water_material := water.get_night_vision_material()
-	water_material.set_shader_parameter("u_water_color", Vector3.ZERO)
+	# The black reflection stand-in through the producer's own setter (the
+	# Q3 redraw takes the lit colour from the water's published values, its
+	# noise pair and reflection from the material's bindings).
+	water.set_lit_water_color(Vector3.ZERO)
 	water_material.set_shader_parameter("u_has_reflection", false)
 	water_material.set_shader_parameter("u_noise_normal",
 			_solid_texture(Color(0.5, 0.5, 1.0, 1.0)))

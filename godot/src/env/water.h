@@ -225,6 +225,12 @@ public:
 	// Its material: the water program sampling the mirror the frame rendered
 	// last (environment/water_mirror.h bloom_water_mirror_image).
 	Ref<ShaderMaterial> get_night_vision_material() const { return night_vision_material_; }
+	// The lit water colour every strip's material takes (u_water_color: the
+	// reflection's t2 stand-in a reflection-less owner draws) and the
+	// night-vision strip's Q3 values: the march inputs' lit colour each frame
+	// an environment is loaded; an envless owner (a headless run, a device
+	// test) sets its own.
+	void set_lit_water_color(const Vector3 &p_lit);
 	SubViewport *get_reflection_viewport() const { return mirror_.viewport; }
 	Camera3D *get_reflection_camera() const { return mirror_.camera; }
 	// The weapon Inset pass's own mirror and strip (advance_inset_frame).
@@ -364,7 +370,7 @@ private:
 	// The night-vision strip's Q3 block, kept beside each write of its
 	// material and published to the focused Q3 compile
 	// (_publish_night_vision_q3): the compile never reads the material back.
-	Q3WaterMaterialValues night_vision_q3_;
+	opennova::renderer::Q3WaterMaterialParameters night_vision_q3_{};
 	Ref<ShaderMaterial> inset_material_;
 	// The main frame's mirror and the weapon Inset pass's own.
 	MirrorRig mirror_;
