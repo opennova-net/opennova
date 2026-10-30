@@ -5,6 +5,7 @@
 #include "render/q3_vertex_format.h"
 #include "render/object_lod_frame.h"
 #include "render/rd_glsl.h"
+#include "render/rd_pipeline_state.h"
 #include "render/rd_uniforms.h"
 #include "render/texture_filter_device.h"
 #include "render/visual_layers.h"
@@ -25,11 +26,7 @@
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
-#include <godot_cpp/classes/rd_pipeline_color_blend_state.hpp>
-#include <godot_cpp/classes/rd_pipeline_color_blend_state_attachment.hpp>
-#include <godot_cpp/classes/rd_pipeline_depth_stencil_state.hpp>
 #include <godot_cpp/classes/rd_pipeline_multisample_state.hpp>
-#include <godot_cpp/classes/rd_pipeline_rasterization_state.hpp>
 #include <godot_cpp/classes/rd_sampler_state.hpp>
 #include <godot_cpp/classes/rd_shader_source.hpp>
 #include <godot_cpp/classes/rd_shader_spirv.hpp>
@@ -60,13 +57,6 @@ using namespace opennova::renderer;
 namespace {
 
 constexpr std::uint32_t kPushConstantBytes = 128u;
-
-enum class Q3DeviceBlend : std::uint8_t {
-	Replace,
-	Alpha,
-	Add,
-	Water,
-};
 
 std::atomic<std::uint64_t> g_frame_id{1};
 
@@ -455,59 +445,18 @@ MissionEnvironment *environment_in_scope(Node *p_root,
 	return nullptr;
 }
 
-Q3DeviceBlend blend_for(const Q3DrawCommand &p_command) {
-	switch (p_command.technique) {
-		case Q3Technique::NormalCopy:
-			switch (p_command.object.classification.blend) {
-				case ObjectBlendMode::Opaque:
-					return Q3DeviceBlend::Replace;
-				case ObjectBlendMode::AlphaBlend:
-					return Q3DeviceBlend::Alpha;
-				case ObjectBlendMode::Additive:
-					return Q3DeviceBlend::Add;
-				case ObjectBlendMode::Multiplicative:
-					break; // Q3FrameCompiler rejects this unwitnessed combination.
-			}
-			return Q3DeviceBlend::Replace;
-		case Q3Technique::RotatedSpecularGlass:
-			return Q3DeviceBlend::Add;
-		case Q3Technique::WaterNightVision:
-			// The bloom pass's redraw is the above-water call only
-			// (g_WaterShaderBlendNV, ONE + dst*SRCALPHA); the Water producer
-			// never publishes it underwater.
-			return Q3DeviceBlend::Water;
-		case Q3Technique::CelestialBody:
-		case Q3Technique::SunGlow:
-			// The body's own material blend, mapped like NormalCopy's: the
-			// glow's submit flags never override it (runtime/renderer/q3_frame.h).
-			switch (p_command.celestial.blend) {
-				case ObjectBlendMode::Opaque:
-					return Q3DeviceBlend::Replace;
-				case ObjectBlendMode::AlphaBlend:
-					return Q3DeviceBlend::Alpha;
-				case ObjectBlendMode::Additive:
-					return Q3DeviceBlend::Add;
-			}
-			return Q3DeviceBlend::Replace;
-		case Q3Technique::Count:
-			break;
-	}
-	return Q3DeviceBlend::Replace;
-}
-
 } // namespace
 
 class Q3FrameAdapter::Impl {
 public:
 	struct PipelineKey {
 		int64_t framebuffer_format = -1;
-		Q3DeviceBlend blend = Q3DeviceBlend::Replace;
-		bool two_sided = true;
+		// renderer::fixed_function_state_key of the command's q3_pipeline_state.
+		std::uint32_t state = 0;
 
 		bool operator<(const PipelineKey &p_other) const {
-			return std::tie(framebuffer_format, blend, two_sided) <
-					std::tie(p_other.framebuffer_format, p_other.blend,
-							p_other.two_sided);
+			return std::tie(framebuffer_format, state) <
+					std::tie(p_other.framebuffer_format, p_other.state);
 		}
 	};
 
@@ -796,56 +745,20 @@ MissionEnvironment *Q3FrameAdapter::Impl::scope_environment(Node *p_scope,
 
 RID Q3FrameAdapter::Impl::pipeline_for(int64_t p_framebuffer_format,
 		const Q3DrawCommand &p_command) {
-	const bool object_technique = p_command.technique == Q3Technique::NormalCopy ||
-			p_command.technique == Q3Technique::RotatedSpecularGlass;
-	const bool two_sided = !object_technique ||
-			p_command.object.classification.is_two_sided;
-	// Every Q3 draw ends in the ordinary z-tested flush; the discs and the
-	// sun glow only reach it through the far-band viewport remap in the
-	// vertex shader.
-	const PipelineKey key{p_framebuffer_format, blend_for(p_command), two_sided};
+	// The command's fixed-function state (renderer::q3_pipeline_state); the
+	// sample count is the altbuffer pass's.
+	const FixedFunctionState fixed_function = q3_pipeline_state(p_command);
+	const PipelineKey key{p_framebuffer_format, fixed_function_state_key(fixed_function)};
 	const auto found = pipelines.find(key);
 	if (found != pipelines.end())
 		return found->second;
-	Ref<RDPipelineRasterizationState> raster;
-	raster.instantiate();
-	raster->set_cull_mode(two_sided ? RenderingDevice::POLYGON_CULL_DISABLED :
-			RenderingDevice::POLYGON_CULL_BACK);
+	const RdPipelineState state = rd_pipeline_state(fixed_function);
 	Ref<RDPipelineMultisampleState> multisample;
 	multisample.instantiate();
 	multisample->set_sample_count(RenderingDevice::TEXTURE_SAMPLES_1);
-	Ref<RDPipelineDepthStencilState> depth;
-	depth.instantiate();
-	depth->set_enable_depth_test(true);
-	depth->set_enable_depth_write(false);
-	depth->set_depth_compare_operator(RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
-	Ref<RDPipelineColorBlendStateAttachment> attachment;
-	attachment.instantiate();
-	const Q3DeviceBlend blend = key.blend;
-	attachment->set_enable_blend(blend != Q3DeviceBlend::Replace);
-	if (blend == Q3DeviceBlend::Alpha) {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-		attachment->set_dst_color_blend_factor(
-				RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-	} else if (blend == Q3DeviceBlend::Add) {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-	} else if (blend == Q3DeviceBlend::Water) {
-		attachment->set_src_color_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-		attachment->set_dst_color_blend_factor(RenderingDevice::BLEND_FACTOR_SRC_ALPHA);
-	}
-	attachment->set_src_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-	attachment->set_dst_alpha_blend_factor(RenderingDevice::BLEND_FACTOR_ONE);
-	attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
-	attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
-	Ref<RDPipelineColorBlendState> color_blend;
-	color_blend.instantiate();
-	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
-	attachments.push_back(attachment);
-	color_blend->set_attachments(attachments);
 	RID pipeline = create_rd_render_pipeline(rd, shader, p_framebuffer_format,
-			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, raster,
-			multisample, depth, color_blend);
+			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES, state.rasterization,
+			multisample, state.depth_stencil, state.color_blend);
 	if (!pipeline.is_valid())
 		set_failure("RenderingDevice rejected a focused Q3 pipeline");
 	else
