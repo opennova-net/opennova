@@ -30,6 +30,21 @@ const char *weapon_set_keyword(std::string_view name) {
 	return name == "always" ? "ALWAYS" : nullptr;
 }
 
+// Whether `SET ServerName <name>` leaves the server holding `name` as typed: the server rebuilds
+// the name from the line's value tokens, each followed by a blank, a token skipped once it would
+// take the name to 32 characters, so a name it cannot carry (a token of 30 or more characters,
+// a name past 29, a run of blanks) comes out cut or blank. Such a name waits for the next launch,
+// whose host file keeps it whole.
+// [orig: CAdminServer_HandleSetCommand @0x405A60 - the token test `cmp edx, 20h` @0x4060FF]
+bool server_name_survives_set(const std::string &name) {
+	const std::string line = "SET ServerName " + name;
+	const auto args = admin_split_command(line);
+	if (args.size() < 2)
+		return false;
+	return admin_server_name(std::vector<std::string_view>(args.begin() + 2, args.end())) ==
+			name + " ";
+}
+
 // Whether a WEAPON SET ALL sets exactly the weapons the roster offers: retail's ALL writes every
 // row whose admin-table word (+936, weapon.def's loadout_selectable, kept on a subclass row too)
 // is nonzero [orig: CAdminServer_HandleWeaponCommand @0x404850..0x404868, AdmDef_GetEntryByIndex
@@ -167,6 +182,11 @@ ConfigurationEdit configuration_edit(const Json &patch, const HostedSettings &sa
 			std::string argument;
 			if (value.is_string()) {
 				(void)utf8_to_cp1252(value.string, argument);
+				if (std::string_view(spec->command) == "ServerName" &&
+						!server_name_survives_set(argument)) {
+					(option ? later : edit.next_launch).set(key, value);
+					return;
+				}
 			} else if (value.is_bool()) {
 				argument = value.boolean ? "1" : "0";
 			} else {

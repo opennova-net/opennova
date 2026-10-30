@@ -121,6 +121,20 @@ int main() {
 			saved, known);
 	TEST_EXPECT(edit.commands == (std::vector<std::string>{ "SET GameTime 25", "SET KillLimit 61",
 										 "SET MaxScore 12", "WEAPON SET 1 ARMORY" }));
+	// A name SET ServerName carries as typed goes out live; one its rebuild would cut (a token
+	// past the 32-character test, a name past 29, a run of blanks) waits for the next launch,
+	// whose host file keeps it whole [orig: CAdminServer_HandleSetCommand @0x405A60 - @0x4060FF].
+	edit = edit_of(R"({"game_name":"A new name"})", saved, known);
+	TEST_EXPECT(edit.commands == std::vector<std::string>{ "SET ServerName A new name" } &&
+			!edit.next_launch.get("game_name"));
+	for (const char *uncarried : { R"({"game_name":"OpenNova Dedicated Server East1"})",
+				 R"({"game_name":"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123"})", R"({"game_name":"Two  blanks"})" }) {
+		io::JsonValue named;
+		TEST_EXPECT(io::json_parse(uncarried, named, error));
+		edit = edit_of(uncarried, saved, known);
+		TEST_EXPECT(edit.commands.empty() &&
+				edit.next_launch.get_string("game_name", "") == named.get_string("game_name", "?"));
+	}
 	TEST_EXPECT(io::json_parse(R"({"weapons":{"Rifle":"never"}})", saved.options, error));
 	edit = edit_of(R"({"options":{"weapons":{"Rifle":"mission","Grenade":"mission"}}})", saved, known);
 	TEST_EXPECT(edit.commands.empty() &&
