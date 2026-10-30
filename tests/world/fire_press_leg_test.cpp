@@ -12,7 +12,9 @@
 //  Player_RequestPrimaryFire @0x4E0A06, nextAction = 5 @0x4E0A1E]
 #include <cstdio>
 
+#include <formats/def/def.h>
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/title_rules.h>
 #include <runtime/world/world.h>
 
 using namespace opennova::world;
@@ -142,6 +144,59 @@ void test_a_driver_seat_refuses_after_the_latch() {
 	CHECK(f.world.script.weapon_input.fire_requested(kCategory));
 }
 
+// A title whose lone gunner holds fire (DFX2-37, TitleRules::emplaced_solo_holds_fire): from a
+// gunner's seat on an IsTurret gun whose +0x28 carrier counts one occupied seat at most, the press
+// leg latches nothing and the release leg ends the windup and requests no throw; a second occupant
+// on the carrier fires, and so does JO's title with the lone gunner.
+// [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0 (dfx2.exe) - @0x4DD8FE..0x4DD92C,
+//  @0x4DDABB..0x4DDADB; Input_HandleActionBinding_0 @0x4E0420 - @0x4E085C..0x4E086F,
+//  @0x4E09CB..0x4E0A06]
+void test_a_lone_gunner_holds_fire_under_dfx2s_title() {
+	Fixture f;
+	f.world.registry.configure_pool(1, 4);
+	Entity carrier_seed;
+	carrier_seed.kind = EntityKind::Item;
+	carrier_seed.has_item_def = true;
+	carrier_seed.has_graphic_model = true;
+	carrier_seed.graphic_model_userpoints = 4;
+	Seat driver;
+	driver.type = SeatType::Driver;
+	Seat gunner;
+	gunner.type = SeatType::Gunner;
+	carrier_seed.seats = {driver, gunner};
+	const EntityHandle carrier_h = f.world.registry.spawn(1, carrier_seed);
+	Entity gun_seed;
+	gun_seed.kind = EntityKind::Item;
+	gun_seed.has_item_def = true;
+	gun_seed.item_attrib2 = opennova::def::DEF_ITEM_ATTRIB2_ISTURRET;
+	gun_seed.emplacement_parent = carrier_h;
+	const EntityHandle gun_h = f.world.registry.spawn(1, gun_seed);
+	Entity *body = f.world.registry.get(f.player);
+	body->mounted = true;
+	body->mount_target = gun_h;
+	body->mount_type = SeatType::Gunner;
+	Entity &carrier = *f.world.registry.get(carrier_h);
+	carrier.seats[1].occupant = f.player;
+	f.world.rules.title_rules = &title_rules("dfx2");
+	CHECK(local_solo_turret_holds_fire(f.world));
+	CHECK(!f.press());
+	CHECK(!f.weapon.fire_pressed);
+	f.weapon.power_throw_start_tick = 1;
+	CHECK(!local_weapon_release_fire(f.world, f.weapon));
+	CHECK(f.weapon.power_throw_start_tick == 0 && !f.weapon.power_throw_released);
+	// A driver aboard: two occupied seats, the gun fires.
+	carrier.seats[0].occupant = EntityHandle::make(0, 7);
+	CHECK(!local_solo_turret_holds_fire(f.world));
+	CHECK(f.press());
+	f.weapon.power_throw_start_tick = 1;
+	CHECK(local_weapon_release_fire(f.world, f.weapon));
+	CHECK(f.weapon.power_throw_released);
+	// JO's title has no such test.
+	carrier.seats[0].occupant = EntityHandle{};
+	f.world.rules.title_rules = &title_rules("jo");
+	CHECK(!local_solo_turret_holds_fire(f.world));
+}
+
 } // namespace
 
 int main() {
@@ -151,6 +206,7 @@ int main() {
 	test_the_flags_are_the_equipped_slot_defs();
 	test_only_fire_locked_without_a_lock_dry_clicks();
 	test_a_driver_seat_refuses_after_the_latch();
+	test_a_lone_gunner_holds_fire_under_dfx2s_title();
 	if (failures != 0) {
 		std::printf("fire_press_leg: %d failure(s)\n", failures);
 		return 1;

@@ -14,6 +14,7 @@
 #include <runtime/world/infantry.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/mount_controls.h> // the IsTurret gun's carrier and its occupied seats
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_table_build.h>
@@ -1078,6 +1079,9 @@ bool local_weapon_release_fire(World &world, LocalPlayerWeapon &w) {
 	const int32_t held = static_cast<int32_t>(local_weapon_input_tick(world) -
 			w.power_throw_start_tick); // @0x4E07F7..0x4E07FC
 	w.power_throw_start_tick = 0; // @0x4E0801
+	// A lone gunner's release ends the windup and requests nothing (DFX2-37; the declaration
+	// carries the witness).
+	if (local_solo_turret_holds_fire(world)) return false;
 	w.pending_throw_charge = power_throw_charge_from_hold(held);
 	w.power_throw_released = true; // the request @0x4E086F, the pump's
 	if (w.active && weapon_fsm_fire_request_taken(w.def, *active_local_weapon_slot(world, w)))
@@ -1136,6 +1140,18 @@ std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w) 
 		out.push_back(w.trace[(first + i) % w.trace.size()]);
 	}
 	return out;
+}
+
+bool local_solo_turret_holds_fire(const World &world) {
+	const Entity *player = world.registry.get(world.cached.local_player);
+	const Entity *mount = player != nullptr && player->mounted
+			? world.registry.get(player->mount_target) : nullptr;
+	if (mount == nullptr || !mount->has_item_def ||
+			(mount->item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) == 0)
+		return false;
+	if (!world.rules.title().emplaced_solo_holds_fire) return false;
+	const Entity *carrier = entity_ground_word(world, *mount);
+	return carrier != nullptr && emplaced_carrier_occupied_seats(world, *carrier) <= 1;
 }
 
 LocalWeaponInputBlock local_weapon_input_block(const World &world,
@@ -1309,6 +1325,12 @@ bool local_weapon_press_fire(World &world, LocalPlayerWeapon &w, const PlayerVie
 		dry = body == nullptr || (body->slot.f[2] & 1) == 0; // @0x4E09BD..0x4E09C9
 	}
 	if (local_weapon_input_block(world, w) != LocalWeaponInputBlock::kNone) return false;
+	// From a seat other than the Controller's (the Driver's refused above), a lone gunner
+	// latches no press (DFX2-37; local_solo_turret_holds_fire carries the witness).
+	const Entity *seated = world.registry.get(world.cached.local_player);
+	if (seated != nullptr && seated->mount_type != SeatType::Controller &&
+			local_solo_turret_holds_fire(world))
+		return false;
 	local_weapon_set_input(w, view, true, true, false);
 	w.fire_press_dispatched = true;
 	w.fire_press_dry = dry;
@@ -1446,6 +1468,9 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			const WeaponTableEntry *def =
 					slot_has_def ? world.tables.weapons.by_index(slot_adm) : nullptr;
 			if (def != nullptr && !world.script.weapon_input.record_fire_request(def->category))
+				in.fire_pressed = false;
+			// So does the press leg's lone-gunner gate (DFX2-37, local_solo_turret_holds_fire).
+			if (player->mount_type != SeatType::Controller && local_solo_turret_holds_fire(world))
 				in.fire_pressed = false;
 		}
 		// A release whose windup ran on into this slot (a UseGun mount, a ToSpecial switch:

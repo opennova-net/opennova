@@ -229,6 +229,18 @@ struct TitleRules {
 	// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x833BF8, 2048) @ 0x5246be / @ 0x5519e4]
 	// [orig: the page at 0x832368 @0x52188f / @0x54ec2a (dfx2.exe)]
 	const char *const *spawn_kit = nullptr;
+
+	// --- DFX2-37: a lone gunner holds fire. ------------------------------------------------------
+	// joiner-side: the fire row's release leg, and its press leg from a seat other than the
+	// Driver's and the Controller's, request nothing while the local player rides (+0x16C) an
+	// IsTurret gun whose +0x28 carrier counts one occupied seat at most
+	// (emplaced_carrier_occupied_seats), the gunner's own included
+	// (world::local_solo_turret_holds_fire). Its own input legs, so every peer's local player
+	// alike.
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 (no such test)] [orig: the twin @0x4DD4C0
+	//  (dfx2.exe) - the release leg's @0x4DD8FE..0x4DD92C, the press leg's @0x4DDABB..0x4DDADB,
+	//  each `cmp eax, ebx; jle` with ebx 1 @0x4DD4E6]
+	bool emplaced_solo_holds_fire = false;
 };
 
 // One registry row: a title's code and the rules it runs.

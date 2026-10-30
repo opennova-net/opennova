@@ -187,6 +187,9 @@ world::TitleRules make() {
 	r.ai_vehicle_write_off_count = 1860;
 	// DFX2-33: the page above.
 	r.spawn_kit = kSpawnKit;
+	// DFX2-37: the lone gunner's fire [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0
+	// (dfx2.exe) - @0x4DD8FE..0x4DD92C, @0x4DDABB..0x4DDADB].
+	r.emplaced_solo_holds_fire = true;
 	return r;
 }
 

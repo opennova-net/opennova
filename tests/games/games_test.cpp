@@ -142,7 +142,8 @@ void retail_rules_values() {
 	CHECK(jo.round_end_linger_ticks == 2790u && jo.deploy_target_protection_ticks == 620);
 	CHECK(jo.medic_heal_and_revive && jo.downed_state_resend && jo.revive_window);
 	CHECK(jo.emplaced_turret_update == world::EmplacedTurretUpdate::Plain &&
-			jo.emplaced_solo_planar_slew == 0 && !jo.narrow_still_player_radius);
+			jo.emplaced_solo_planar_slew == 0 && !jo.narrow_still_player_radius &&
+			!jo.emplaced_solo_holds_fire);
 	CHECK(jo.ai_vehicle_near_reach == 0xC0000 && jo.ai_vehicle_write_off_count == 3410 &&
 			jo.spawn_kit == nullptr);
 
@@ -160,6 +161,7 @@ void retail_rules_values() {
 	CHECK(!dfx2.medic_heal_and_revive && !dfx2.downed_state_resend && !dfx2.revive_window); // 19, 20
 	CHECK(dfx2.emplaced_turret_update == world::EmplacedTurretUpdate::CounterRotate && // DFX2-25
 			dfx2.emplaced_solo_planar_slew == 0x3AB948 && dfx2.narrow_still_player_radius); // 26, 31
+	CHECK(dfx2.emplaced_solo_holds_fire); // DFX2-37
 	CHECK(dfx2.ai_vehicle_near_reach == 0x40000 && dfx2.ai_vehicle_write_off_count == 1860); // 32
 	size_t kit = 0;
 	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
@@ -244,6 +246,7 @@ std::string joiner_rules_row(const world::TitleRules &r) {
 			std::to_string(static_cast<int>(r.emplaced_turret_update)) +
 			" emplaced_solo_planar_slew=" + std::to_string(r.emplaced_solo_planar_slew) +
 			" narrow_still_player_radius=" + std::to_string(r.narrow_still_player_radius) +
+			" emplaced_solo_holds_fire=" + std::to_string(r.emplaced_solo_holds_fire) +
 			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit);
 }
 
@@ -302,7 +305,8 @@ void bump_rule_sheet_per_protocol() {
 			"slot_state.join_state_fixed=0\n"
 			"joiner: waypoint_goals_met_advance=1 waypoint_advance_needs_done=0 "
 			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
-			"narrow_still_player_radius=0 spawn_kit=jo_single_player_page";
+			"narrow_still_player_radius=0 emplaced_solo_holds_fire=0 "
+			"spawn_kit=jo_single_player_page";
 	const std::string dfx2 =
 			"S 0x0A: s2c_0a.objective_checkpoint=1 slot_state.join_state_fixed=1\n"
 			"S 0x0F: s2c_0f.spawn_zone_flag_always=1 s2c_0f.deploy_screen_always=1\n"
@@ -321,7 +325,8 @@ void bump_rule_sheet_per_protocol() {
 			"slot_state.join_state_fixed=1\n"
 			"joiner: waypoint_goals_met_advance=0 waypoint_advance_needs_done=1 "
 			"route_done_records=1 emplaced_turret_update=1 emplaced_solo_planar_slew=3848520 "
-			"narrow_still_player_radius=1 spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
+			"narrow_still_player_radius=1 emplaced_solo_holds_fire=1 "
+			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
 			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE";
 	CHECK(sheet("jo") == jo);
 	CHECK(sheet("dfx2") == dfx2);
