@@ -1148,10 +1148,10 @@ int main() {
 		// The device evaluation over that pair: unfogged at the start,
 		// fully fogged at the end.
 		ok &= expect(near(opennova::renderer::device_fog_visibility(
-								values.fog_start, values.fog_start,
+								values.fog_start, values.fog_start, values.fog_start,
 								values.fog_end, values.fog_type, true), 1.0f) &&
 						near(opennova::renderer::device_fog_visibility(
-								values.fog_end, values.fog_start,
+								values.fog_end, values.fog_end, values.fog_start,
 								values.fog_end, values.fog_type, true), 0.0f),
 				"the corona fold's linear range runs start..end of the device pair");
 		// The sky dome is the one consumer that does NOT take the scaled end:

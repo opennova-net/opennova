@@ -595,11 +595,12 @@ func test_pruned_q3_source_frees_its_device_buffer_on_an_empty_frame() -> void:
 	renderer.shutdown()
 
 
-func test_object_material_parameter_write_reaches_q3_through_its_invalidation() -> void:
-	# An object surface's material block (u_diffuse, u_rgb_mod, ...) is read
-	# once into its record; a stable frame reads no material. ObjectModel's
-	# runtime writes name the material (FrameFx.invalidate_q3_object_material),
-	# and the surfaces on it re-read the block exactly at their next sight.
+func test_object_material_parameter_write_reaches_q3_through_its_publish() -> void:
+	# An object surface's material block (Diffuse1, SelfLumColor, ...) is read
+	# once into its record from the values its producer published; a stable
+	# frame reads no material. ObjectModel's runtime writes publish the new
+	# values (FrameFx.set_q3_object_self_lum here), and the surfaces on it
+	# re-read the block exactly at their next sight.
 	var view := _q3_lum_view(true)
 	var renderer := view.terminal as FrameFx
 	var bulb := _first_visible_mesh(view.model)
@@ -622,8 +623,8 @@ func test_object_material_parameter_write_reaches_q3_through_its_invalidation() 
 	renderer.advance_frame()
 	var unnamed := renderer.get_backend_report()
 	assert_eq(int(unnamed.get("q3_material_reads_this_frame", -1)), 0,
-			"a write that names no material is not re-read per frame")
-	FrameFx.invalidate_q3_object_material(material)
+			"a material write the producer does not publish is never read")
+	FrameFx.set_q3_object_self_lum(material, Vector3(0.25, 0.25, 0.25))
 	var dim_image: Image = await _render_q3_frame(renderer)
 	var named := renderer.get_backend_report()
 	assert_gte(int(named.get("q3_material_reads_this_frame", 0)), 1,
@@ -1239,15 +1240,16 @@ func test_lum_q3_copy_stops_at_the_stage_textures_last_retail_mip_level() -> voi
 	var pixel := Vector2i(camera.unproject_position(
 			bulb.global_transform * bulb.get_aabb().get_center()))
 	var material := bulb.get_active_material(0) as ShaderMaterial
-	material.set_shader_parameter("u_diffuse", _red_level0_texture())
+	var red_level0 := _red_level0_texture()
+	material.set_shader_parameter("u_diffuse", red_level0)
 	material.set_shader_parameter("u_diffuse_max_lod", 1000.0)
-	FrameFx.invalidate_q3_object_material(material)
+	FrameFx.set_q3_object_diffuse(material, red_level0, 1000.0)
 	var unbounded: Image = await _render_q3_frame(renderer)
 	if not bool(renderer.get_backend_report().get("rd_available", false)):
 		pending("RenderingDevice unavailable under this Godot renderer")
 		return
 	material.set_shader_parameter("u_diffuse_max_lod", 0.0)
-	FrameFx.invalidate_q3_object_material(material)
+	FrameFx.set_q3_object_diffuse(material, red_level0, 0.0)
 	var ceiling: Image = await _render_q3_frame(renderer)
 	assert_not_null(unbounded)
 	assert_not_null(ceiling)

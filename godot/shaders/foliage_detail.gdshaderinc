@@ -1,4 +1,5 @@
 #include "res://shaders/color.gdshaderinc"
+#include "res://shaders/device_fog.gdshaderinc"
 #include "res://shaders/foliage_fd_sampling.gdshaderinc"
 
 // Expanded detail foliage. Retail emits the source model once per accepted
@@ -62,13 +63,10 @@ varying float v_fog;
 // vertex fog modes off). Retail g_FoliageWindSwayVS literal @ 0x7de648;
 // Foliage_SetupVertexShaderConstants @ 0x6005ee..0x600652;
 // CD3DDevice_SetFogAndBlendMode(8) @ 0x677768..0x67779a.
+// The law is the engine's vertex-shader oFog (device_fog.gdshaderinc): c5.y =
+// 1/0 on a start == end pair steps the fog at the start distance.
 float foliage_vertex_fog(float eye_depth) {
-	float range = opennova_fog_end - opennova_fog_start;
-	if (range == 0.0) {
-		// c5.y = 1/0: the vertex fog steps at the start distance.
-		return eye_depth < opennova_fog_start ? 1.0 : 0.0;
-	}
-	return clamp((opennova_fog_end - eye_depth) / range, 0.0, 1.0);
+	return vertex_shader_fog_visibility(eye_depth, opennova_fog_start, opennova_fog_end);
 }
 
 // g_FoliageWindSwayVS's sine of the sway angle, by its own series: the angle in

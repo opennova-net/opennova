@@ -5,6 +5,7 @@
 #include <runtime/terrain/terrain_frame.h>
 
 #include <formats/cpt/cpt.h>
+#include <runtime/renderer/triangle_strip.h>
 #include <runtime/terrain_query/coords.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 #include <formats/trn/trn.h>
@@ -34,7 +35,7 @@ terrain::CoordsQuadrantLocks locks_from_trn(const TrnConfig &trn) {
 int converted_index_count(const CptTileLOD &lod, std::vector<uint32_t> &scratch) {
 	if (lod.is_strip) {
 		scratch.clear();
-		strip_to_list(lod.indices, scratch, 0);
+		renderer::triangle_strip_to_list(lod.indices, 0, scratch);
 		return static_cast<int>(scratch.size());
 	}
 	return static_cast<int>(lod.indices.size() / 3) * 3;

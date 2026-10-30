@@ -128,6 +128,20 @@ enum class TransparentQueue : uint8_t {
 	AboveWater,
 	BelowWater,
 };
+
+// The camera's side of the water every pass split of a scene takes: the scene
+// core compares the eye's z with g_EnvWaterHeightFixed by setnl, so an eye at
+// the plane is above. Its passes read that one flag: the transparent queues'
+// far/camera-side flushes, the sector-entity waves, the foliage detail passes
+// and the particle passes' water subsets (EffectWorld_RenderParticlePass's
+// below flag). The water surface's own draw gate is another test
+// (environment/water_frame.h water_surface_sides: at the plane neither side
+// draws). [orig: Terrain_RenderWorldScene @ 0x5c93a1..0x5c93b0; the flag's
+// readers @ 0x5c9518, @ 0x5c9588, the particle passes @ 0x5c959d..0x5c95b5 and
+// @ 0x5c968d..0x5c9690]
+constexpr bool scene_camera_above_water(float camera_y, float water_height) {
+	return camera_y >= water_height;
+}
 TransparentQueue transparent_queue_for(float world_height, float water_height);
 
 // The frame's transparent ordering ladder, applied by the Godot layer as

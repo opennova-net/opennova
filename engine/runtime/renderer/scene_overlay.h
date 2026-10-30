@@ -18,6 +18,7 @@
 
 #include <runtime/environment/precipitation.h>
 #include <runtime/renderer/light_scene.h>
+#include <runtime/renderer/pipeline_state.h>
 #include <runtime/renderer/precipitation_frame.h>
 #include <runtime/renderer/texture_filter.h>
 #include <runtime/renderer/tracer_frame.h>
@@ -211,23 +212,11 @@ enum class SceneOverlayShading : uint8_t {
 	RibbonSmoke = 7,
 };
 
-// The framebuffer blend factors of a combine, as the device's D3DBLEND words.
-enum class SceneOverlayBlendFactor : uint8_t {
-	Zero = 1,
-	One = 2,
-	SrcAlpha = 5,
-	InvSrcAlpha = 6,
-	DestColor = 9,
-};
-
-struct SceneOverlayBlend {
-	SceneOverlayBlendFactor source = SceneOverlayBlendFactor::One;
-	SceneOverlayBlendFactor dest = SceneOverlayBlendFactor::Zero;
-};
-
 // The SRCBLEND / DESTBLEND pair each combine draws with (the shading
-// comments above carry each one's witness).
-SceneOverlayBlend scene_overlay_blend(SceneOverlayShading shading);
+// comments above carry each one's witness), blending on. The alpha blends
+// the same way under SRCALPHA / INVSRCALPHA and keeps the target's otherwise
+// (ZERO / ONE).
+BlendState scene_overlay_blend(SceneOverlayShading shading);
 
 // One device pipeline state an overlay batch draws under: its combine and
 // whether it tests depth (SceneOverlayDepth below: TestNoWrite and FarBand both
@@ -257,12 +246,18 @@ inline constexpr std::array<SceneOverlayPipelineState, 9> kSceneOverlayPipelineS
 	{SceneOverlayShading::RibbonSmoke, true},
 }};
 
+// The device state of one pipeline state: its combine's blend, both sides
+// drawn, no z-write, and the LESSEQUAL test when it tests depth (ZFUNC ALWAYS
+// with z-write off neither rejects nor writes: no test).
+FixedFunctionState scene_overlay_pipeline_state(const SceneOverlayPipelineState &state);
+
 // How a tracer-pool batch's per-vertex fog term reads (SceneOverlayVertex::fog).
 // The pass fog the device runs [orig: CD3DDevice_SetFogParameters @ 0x677960;
 // CD3DDevice_SetFogAndBlendMode @ 0x677740, the primary fog state's case 0]:
 // the linear modes are vertex fog by the range (FOGTABLEMODE NONE, FOGVERTEXMODE
 // LINEAR, RANGEFOGENABLE on: @ 0x677a50..0x677aa7), the factor computed and
-// clamped at each vertex and interpolated; the exponential mode is table fog by
+// clamped at each vertex and interpolated (as is the parked linear range of a
+// start == end pair, by the eye depth; renderer/device_fog.h); the exponential mode is table fog by
 // the eye depth on a device whose +0x8C flag is set (the test @ 0x6779be;
 // FOGTABLEMODE EXP at density ln(64) / end, @ 0x6779e4..0x677a10), evaluated at
 // each pixel, as the scene's other fogged effect draws take it

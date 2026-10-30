@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -18,48 +19,26 @@
 #include "object/env_light_state.h"
 #include "object/object_model.h"
 
-#include <runtime/environment/water_mirror.h>
-#include <runtime/renderer/light_runtime.h>
+#include <runtime/renderer/light_draw_frame.h>
 
 namespace godot {
 
 namespace {
 
-// The objects-target select inputs both light legs (the point-light select
-// and the per-model draw select) build: the flicker ring from the weather
-// oscillator, the ambient scale, and the objects-target options.
-struct ObjectSelectInputs {
-	opennova::renderer::LightFlickerInputs flicker;
-	std::array<float, 3> ambient{};
-	opennova::renderer::LightSelectionOptions options;
-};
-
-ObjectSelectInputs object_select_inputs(int p_time_ms, const Weather *weather,
+// The objects-target select's frame inputs: the env light-state gain and the
+// weather's flicker ring (renderer::LightFrameInputs).
+opennova::renderer::LightFrameInputs frame_inputs(int p_time_ms, const Weather *p_weather,
 		const Vector3 &p_ambient_scale) {
-	ObjectSelectInputs sel;
-	sel.flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	if (weather != nullptr) {
-		const opennova::env::WeatherOscillator &oscillator =
-				weather->runtime().core().oscillator;
-		sel.flicker.amp_ring = oscillator.amp_ring;
-		sel.flicker.amp_ring_size =
-				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
-		sel.flicker.ring_index = oscillator.ring_index;
-	}
-	sel.ambient = {
+	opennova::renderer::LightFrameInputs inputs;
+	inputs.flicker = opennova::renderer::light_flicker_inputs(
+			p_weather != nullptr ? &p_weather->runtime().core().oscillator : nullptr,
+			static_cast<uint32_t>(p_time_ms));
+	inputs.ambient = {
 		static_cast<float>(p_ambient_scale.x),
 		static_cast<float>(p_ambient_scale.y),
 		static_cast<float>(p_ambient_scale.z),
 	};
-	sel.options.target = opennova::renderer::LightSelectionTarget::Objects;
-	sel.options.admit_owned_unscoped = false;
-	return sel;
-}
-
-opennova::renderer::LightDrawContext entity_draw_context(
-		const Vector3 &position, int32_t bound_radius_q16) {
-	return opennova::renderer::entity_light_draw_context({
-			godot_to_mission_q16(position), bound_radius_q16});
+	return inputs;
 }
 
 void collect_entity_light_models(ObjectModel *model, std::vector<ObjectModel *> &out) {
@@ -97,19 +76,6 @@ void collect_view_draw_parts(ObjectModel *model, bool inset_view,
 		out.push_back(ObjectModel::PointLightDrawPart{robj, AABB()});
 }
 
-void fill_flicker(opennova::renderer::LightFlickerInputs &flicker, int p_time_ms,
-		const Weather *p_weather) {
-	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	if (p_weather != nullptr) {
-		const opennova::env::WeatherOscillator &oscillator =
-				p_weather->runtime().core().oscillator;
-		flicker.amp_ring = oscillator.amp_ring;
-		flicker.amp_ring_size =
-				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
-		flicker.ring_index = oscillator.ring_index;
-	}
-}
-
 uint8_t color_byte(float channel) {
 	const float clamped = CLAMP(channel, 0.0f, 1.0f);
 	return static_cast<uint8_t>(Math::round(clamped * 255.0f));
@@ -136,14 +102,6 @@ opennova::renderer::LightHandle decode_handle(int64_t token) {
 		static_cast<uint32_t>(bits >> 16),
 	};
 }
-
-// Every object delivery path publishes the Light_GetPointLightParams colour:
-// retail's shader passes receive exactly that through PointLightColor /
-// PointLightColorArray (retail CRenderBatchQueue_FlushBatches @0x5da6a8 /
-// @0x5da8ae), and the D3D fill's 1.5 (retail Light_FillD3DPointLight
-// @0x5aa4b2) reaches only the fixed-function D3D lights, which the FF shader
-// helper applies itself. The render-slot pick reads the params directly too.
-constexpr bool kObjectLightD3DFill = false;
 
 } // namespace
 
@@ -210,9 +168,8 @@ int64_t LightScene::spawn_glow(const Ref<GlowSpawn> &p_config) {
 	params.disable_terrain = p_config->get_disable_terrain();
 	params.disable_objects = p_config->get_disable_objects();
 	// Retail render flag 0x100 (the impact flash): the corona re-centers
-	// radius/2 below the light [orig: AmmoDef_ProcessImpactEffect @0x40a2b3
-	// sets it; EffectWorld_RenderLightCoronas @0x5ab037 reads it, see
-	// docs/render/render-lighting-re.md].
+	// radius/2 below the light (renderer::LightSpawnParams::corona_lower_half_radius
+	// carries the witness).
 	params.corona_lower_half_radius = p_config->get_corona_lower_half_radius();
 	return encode_handle(scene_.spawn(params));
 }
@@ -284,21 +241,14 @@ void LightScene::clear_render_output() {
 	static_row_count_ = 0;
 	last_static_draws_ = 0;
 	last_lit_static_draws_ = 0;
-	if (static_light_rows_image_.is_valid() &&
-			static_light_rows_texture_.is_valid()) {
-		static_light_rows_bytes_.fill(0);
-		static_light_rows_image_->set_data(
-				static_light_rows_image_->get_width(),
-				static_light_rows_image_->get_height(), false,
-				Image::FORMAT_RGBAF, static_light_rows_bytes_);
-		static_light_rows_texture_->update(static_light_rows_image_);
+	// The engine zeroes its payload and drops the claim that it mirrors the
+	// cached rows, so the next static frame rewrites every active row
+	// (renderer::StaticLightRows::clear_output); the zeros reach the device
+	// the texture already holds.
+	static_rows_.clear_output();
+	if (static_light_rows_image_.is_valid() && static_light_rows_texture_.is_valid()) {
+		upload_static_rows();
 	}
-	// The zeroed payload no longer mirrors the cached row set, so the next
-	// static frame rewrites every active row (its lights and its entity
-	// lighting lane) instead of maintaining the zeros in place. The cache key
-	// alone cannot catch this: a camera-loss frame keeps the rows, and a
-	// reload of the same mission rebuilds them at the same revision and count.
-	static_bytes_resident_ = false;
 }
 
 int LightScene::render_frame(const Vector3 &p_camera_world,
@@ -344,37 +294,23 @@ int LightScene::camera_global_select(const Vector3 &p_camera_world,
 	std::array<opennova::renderer::LightHandle, opennova::renderer::LightScene::kQueryLimit> handles{};
 	const size_t found = scene_.query_camera_global(qmin, qmax, handles);
 
-	opennova::renderer::LightFlickerInputs flicker;
-	flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	const Weather *weather = p_weather;
-	if (weather != nullptr) {
-		const opennova::env::WeatherOscillator &oscillator =
-				weather->runtime().core().oscillator;
-		flicker.amp_ring = oscillator.amp_ring;
-		flicker.amp_ring_size =
-				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
-		flicker.ring_index = oscillator.ring_index;
-	}
-	const std::array<float, 3> ambient = {
-		static_cast<float>(p_ambient_scale.x),
-		static_cast<float>(p_ambient_scale.y),
-		static_cast<float>(p_ambient_scale.z),
-	};
+	const opennova::renderer::LightFrameInputs inputs =
+			frame_inputs(p_time_ms, p_weather, p_ambient_scale);
 	opennova::renderer::LightSelectionOptions options;
 	options.target = opennova::renderer::LightSelectionTarget::Objects;
 	options.admit_owned_unscoped = true;
 	selected_count_ = scene_.select(handles.data(), found,
-			opennova::renderer::LightActiveGroups{}, options, ambient, flicker,
-			kObjectLightD3DFill, selected_);
+			opennova::renderer::LightActiveGroups{}, options, inputs.ambient, inputs.flicker,
+			opennova::renderer::kObjectLightD3DFill, selected_);
 	return static_cast<int>(selected_count_);
 }
 
 int64_t LightScene::owner_id_for_wire(int64_t p_wire_handle) {
-	return p_wire_handle >= 0 ? (WIRE_OWNER_TAG | (p_wire_handle & WIRE_HANDLE_MASK)) : 0;
+	return static_cast<int64_t>(opennova::renderer::LightOwnerIds::wire(p_wire_handle));
 }
 
 int64_t LightScene::owner_id_for_static_source(int64_t p_source_index) {
-	return p_source_index >= 0 ? (STATIC_OWNER_TAG | p_source_index) : 0;
+	return static_cast<int64_t>(opennova::renderer::LightOwnerIds::static_source(p_source_index));
 }
 
 int LightScene::corona_texture_size() {
@@ -421,9 +357,10 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 		qmin[axis] = opennova::io::saturate_i32(static_cast<int64_t>(center[axis]) - half);
 		qmax[axis] = opennova::io::saturate_i32(static_cast<int64_t>(center[axis]) + half);
 	}
-	// The shared objects-target select inputs (object_select_inputs) for the
-	// flicker and the ambient scale; the slot path takes no target gate.
-	const ObjectSelectInputs sel = object_select_inputs(p_time_ms, p_weather, p_ambient_scale);
+	// The objects-target frame inputs for the flicker and the ambient scale;
+	// the slot path takes no target gate.
+	const opennova::renderer::LightFrameInputs sel =
+			frame_inputs(p_time_ms, p_weather, p_ambient_scale);
 	opennova::renderer::LightActiveGroups groups;
 	groups.interior_group_entity = static_cast<uint64_t>(p_interior_owner);
 	groups.interior_group_section = p_interior_owner != 0 ? p_interior_section : 0;
@@ -487,51 +424,38 @@ int LightScene::select_model_frame(const TypedArray<Node3D> &p_models,
 		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 		const PackedVector3Array &p_entity_positions,
 		const PackedInt32Array &p_entity_bound_radii_q16, bool p_inset_view) {
-	// The shared objects-target select inputs (object_select_inputs).
-	const ObjectSelectInputs sel = object_select_inputs(p_time_ms, p_weather, p_ambient_scale);
-	const opennova::renderer::LightFlickerInputs &flicker = sel.flicker;
-	const std::array<float, 3> &ambient = sel.ambient;
-	const opennova::renderer::LightSelectionOptions &options = sel.options;
-
-	struct DrawTarget {
-		ObjectModel *model = nullptr;
-		int32_t robj_index = 0;
-		bool robj_scoped = false;
-	};
+	// The drawn models' facts (the entity query, the two groups, the skinned
+	// level and the ROBJs the view draws) into the engine's subjects; the
+	// draw-context policy and the select are the engine's
+	// (renderer::LightDrawFrame).
+	std::vector<ObjectModel *> subject_models;
+	std::vector<opennova::renderer::LightDrawSubject> subjects;
+	std::vector<std::pair<size_t, size_t>> robj_spans;
+	std::vector<int32_t> robjs;
+	std::vector<ObjectModel::PointLightDrawPart> parts;
 	const int64_t model_count = p_models.size();
-	std::vector<DrawTarget> targets;
-	std::vector<opennova::renderer::LightDrawContext> draws;
-	targets.reserve(static_cast<size_t>(model_count));
-	draws.reserve(static_cast<size_t>(model_count));
-	int filtered_models = 0;
-	bool any_robj_scoped = false;
 	for (int64_t i = 0; i < model_count; ++i) {
-		ObjectModel *model = Object::cast_to<ObjectModel>(
-				static_cast<Object *>(p_models[i]));
+		ObjectModel *model = Object::cast_to<ObjectModel>(static_cast<Object *>(p_models[i]));
 		if (model == nullptr) {
 			continue;
 		}
 		// Owners are parallel to the INPUT array, not the filtered draw list.
-		const uint64_t owner_entity = i < p_owner_entities.size()
-				? static_cast<uint64_t>(
-						static_cast<int64_t>(p_owner_entities[i]))
-				: 0;
-		const uint64_t interior_owner = i < p_interior_owners.size()
-				? static_cast<uint64_t>(
-						static_cast<int64_t>(p_interior_owners[i]))
-				: 0;
-		const int32_t interior_section = i < p_interior_sections.size()
-				? static_cast<int32_t>(p_interior_sections[i])
-				: 0;
+		opennova::renderer::LightDrawSubject subject;
+		subject.owner_entity = i < p_owner_entities.size()
+				? static_cast<uint64_t>(static_cast<int64_t>(p_owner_entities[i])) : 0;
+		subject.interior_entity = i < p_interior_owners.size()
+				? static_cast<uint64_t>(static_cast<int64_t>(p_interior_owners[i])) : 0;
+		subject.interior_section = i < p_interior_sections.size()
+				? static_cast<int32_t>(p_interior_sections[i]) : 0;
+		subject.building = i < p_robj_scoped.size() && p_robj_scoped[i] != 0;
 		ObjectModel *entity_model = model->get_entity_light_owner();
 		if (entity_model == nullptr) entity_model = model;
 		const bool explicit_query = i < p_entity_positions.size() &&
 				i < p_entity_bound_radii_q16.size();
-		const auto entity_draw = entity_draw_context(
-				explicit_query ? p_entity_positions[i] : entity_model->get_global_position(),
-				explicit_query ? p_entity_bound_radii_q16[i] : entity_model->get_entity_bound_radius_q16());
-		const bool robj_scoped = i < p_robj_scoped.size() &&
-				p_robj_scoped[i] != 0;
+		subject.query.position_fixed = godot_to_mission_q16(
+				explicit_query ? p_entity_positions[i] : entity_model->get_global_position());
+		subject.query.bound_radius_fixed = explicit_query ? p_entity_bound_radii_q16[i]
+				: entity_model->get_entity_bound_radius_q16();
 		std::vector<ObjectModel *> entity_models;
 		if (p_inset_view) {
 			collect_inset_entity_light_models(model, entity_models);
@@ -539,84 +463,33 @@ int LightScene::select_model_frame(const TypedArray<Node3D> &p_models,
 			collect_entity_light_models(model, entity_models);
 		}
 		for (ObjectModel *part_model : entity_models) {
-			++filtered_models;
-			if (robj_scoped) {
-				any_robj_scoped = true;
-				std::vector<ObjectModel::PointLightDrawPart> parts;
+			opennova::renderer::LightDrawSubject part = subject;
+			part.person_wave = part_model->is_slot_shadow_person();
+			part.skinned = p_inset_view ? part_model->is_inset_view_level_skinned()
+										: part_model->is_active_level_skinned();
+			const size_t first = robjs.size();
+			if (part.building || (!part.skinned && part.interior_entity != 0 &&
+										   part.interior_section == 0)) {
+				parts.clear();
 				collect_view_draw_parts(part_model, p_inset_view, parts);
-				// A rigid building has one row per visible ROBJ. Retain a section-0
-				// fallback for malformed/skinned building data so it never falls back
-				// to the broader entity-owner admission rule.
-				if (parts.empty()) {
-					parts.push_back(ObjectModel::PointLightDrawPart{
-							0, part_model->get_world_bounds()});
-				}
-				for (const ObjectModel::PointLightDrawPart &part : parts) {
-					auto draw = entity_draw;
-					// A building draw declares itself as interior section zero, then
-					// the model collector re-scopes the OWNER section per ROBJ. The
-					// group gate falls back from interior section zero to this value.
-					// (engine: runtime/renderer/light_scene.cpp)
-					const opennova::renderer::SubmitOwnerGroup owner =
-							opennova::renderer::submit_owner_group(owner_entity, false, false,
-									part.robj_index);
-					draw.groups.owner_group_entity = owner.entity;
-					draw.groups.owner_group_section = owner.section;
-					draw.groups.interior_group_entity = owner_entity;
-					draw.groups.interior_group_section = 0;
-					draws.push_back(draw);
-					targets.push_back(DrawTarget{
-							part_model, part.robj_index, true});
-				}
-				continue;
+				for (const ObjectModel::PointLightDrawPart &drawn : parts)
+					robjs.push_back(drawn.robj_index);
 			}
-
-			// Every other entity submit: the interior group is the building this
-			// model currently stands inside plus that blink volume's section
-			// (zero = outdoors); the owner group is what the submit declares
-			// (renderer::submit_owner_group) -- the drawn entity only for a
-			// person's skinned draws, else entity 0 with the rigid collector's
-			// per-ROBJ section.
-			auto draw = entity_draw;
-			draw.groups.interior_group_entity = interior_owner;
-			draw.groups.interior_group_section = interior_section;
-			const bool person_wave = part_model->is_slot_shadow_person();
-			const bool skinned = p_inset_view ? part_model->is_inset_view_level_skinned()
-											  : part_model->is_active_level_skinned();
-			// A rigid draw's owner section is read only when an owned light's
-			// owner is the interior entity AND the interior section is zero (the
-			// gate falls back to the owner section); only then do its ROBJs
-			// select apart.
-			if (!skinned && interior_owner != 0 && interior_section == 0) {
-				std::vector<ObjectModel::PointLightDrawPart> parts;
-				collect_view_draw_parts(part_model, p_inset_view, parts);
-				if (!parts.empty()) {
-					for (const ObjectModel::PointLightDrawPart &part : parts) {
-						auto part_draw = draw;
-						const opennova::renderer::SubmitOwnerGroup owner =
-								opennova::renderer::submit_owner_group(owner_entity,
-										person_wave, false, part.robj_index);
-						part_draw.groups.owner_group_entity = owner.entity;
-						part_draw.groups.owner_group_section = owner.section;
-						draws.push_back(part_draw);
-						targets.push_back(DrawTarget{
-								part_model, part.robj_index, true});
-					}
-					continue;
-				}
-			}
-			const opennova::renderer::SubmitOwnerGroup owner =
-					opennova::renderer::submit_owner_group(owner_entity, person_wave,
-							skinned, 0);
-			draw.groups.owner_group_entity = owner.entity;
-			draw.groups.owner_group_section = owner.section;
-			draws.push_back(draw);
-			targets.push_back(DrawTarget{part_model, 0, false});
+			robj_spans.emplace_back(first, robjs.size() - first);
+			subjects.push_back(part);
+			subject_models.push_back(part_model);
 		}
 	}
-	std::vector<opennova::renderer::LightDrawSelection> selections(draws.size());
-	scene_.select_for_draws(draws.data(), draws.size(), options, ambient,
-			flicker, kObjectLightD3DFill, selections.data());
+	draw_frame_.clear();
+	for (size_t i = 0; i < subjects.size(); ++i) {
+		subjects[i].robjs = robjs.data() + robj_spans[i].first;
+		subjects[i].robj_count = robj_spans[i].second;
+		draw_frame_.add(subjects[i]);
+	}
+	draw_frame_.select(scene_, frame_inputs(p_time_ms, p_weather, p_ambient_scale));
+	const std::vector<opennova::renderer::LightDrawTarget> &targets = draw_frame_.targets();
+	const std::vector<opennova::renderer::LightDrawSelection> &selections =
+			draw_frame_.selections();
 	std::unordered_set<ObjectModel *> lit_model_set;
 	for (size_t i = 0; i < targets.size(); ++i) {
 		const opennova::renderer::LightDrawSelection &selection = selections[i];
@@ -625,36 +498,34 @@ int LightScene::select_model_frame(const TypedArray<Node3D> &p_models,
 		for (size_t light = 0; light < selection.count; ++light) {
 			const opennova::renderer::SelectedLight &selected = selection.lights[light];
 			const Vector3 world = mission_to_godot(selected.position);
-			posr[light] = Vector4(world.x, world.y, world.z,
-					selected.attenuation[2]);
-			color[light] = Vector4(selected.color[0], selected.color[1],
-					selected.color[2], selected.range);
+			posr[light] = Vector4(world.x, world.y, world.z, selected.attenuation[2]);
+			color[light] = Vector4(selected.color[0], selected.color[1], selected.color[2],
+					selected.range);
 		}
 		const int count = static_cast<int>(selection.count);
-		if (p_inset_view && targets[i].robj_scoped) {
-			targets[i].model->apply_inset_point_light_selection_to_robj(
-					targets[i].robj_index, count, posr, color);
+		ObjectModel *model = subject_models[targets[i].subject];
+		if (p_inset_view && targets[i].per_robj) {
+			model->apply_inset_point_light_selection_to_robj(targets[i].robj_index, count, posr,
+					color);
 		} else if (p_inset_view) {
-			targets[i].model->apply_inset_point_light_selection(count, posr, color);
-		} else if (targets[i].robj_scoped) {
-			targets[i].model->apply_point_light_selection_to_robj(
-					targets[i].robj_index, count, posr, color);
+			model->apply_inset_point_light_selection(count, posr, color);
+		} else if (targets[i].per_robj) {
+			model->apply_point_light_selection_to_robj(targets[i].robj_index, count, posr, color);
 		} else {
-			targets[i].model->apply_point_light_selection(count, posr, color);
+			model->apply_point_light_selection(count, posr, color);
 		}
 		if (selection.count > 0) {
-			lit_model_set.insert(targets[i].model);
+			lit_model_set.insert(model);
 		}
 	}
 	if (p_inset_view) {
 		return static_cast<int>(lit_model_set.size());
 	}
 	selection_mode_ = "per_model_objects";
-	owner_isolation_ = any_robj_scoped ? "per_robj_buildings" : "per_model";
-	last_models_ = filtered_models;
-	const int lit_models = static_cast<int>(lit_model_set.size());
-	last_lit_models_ = lit_models;
-	return lit_models;
+	owner_isolation_ = draw_frame_.any_per_robj_building() ? "per_robj_buildings" : "per_model";
+	last_models_ = static_cast<int>(subjects.size());
+	last_lit_models_ = static_cast<int>(lit_model_set.size());
+	return last_lit_models_;
 }
 
 int LightScene::render_static_frame(
@@ -667,295 +538,79 @@ int LightScene::render_static_frame(
 		const PackedByteArray &p_active,
 		const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 		int64_t p_rows_revision, const PackedVector4Array &p_entity_lights) {
-	// Rows are immutable identities stamped into MultiMesh INSTANCE_CUSTOM.x.
-	// Their expensive AABB/light overlap and owner-group selection changes only
-	// when either the placer row revision or the pool's selection topology does.
-	// Cache those selected handles; live fade/RGB-gen/weather/ambient color is
-	// still reevaluated below every frame for the handful of lit rows. A carved
-	// entity remains a zero row rather than shifting later atlas identities.
+	// The bound form of set_static_rows + select_static_rows: the rows are
+	// handed over again only when their revision or count moved (a negative
+	// revision is uncached: every frame re-selects from scratch).
 	const int64_t row_count = p_entity_positions.size();
-	static_row_count_ = static_cast<int>(row_count);
-	// The row's entity lighting lane (the atlas' last texel).
-	const auto row_lane = [&p_entity_lights](int64_t p_row) {
-		return p_row < p_entity_lights.size() ? p_entity_lights[p_row]
-											  : Vector4(1.0f, 0.0f, 0.0f, 0.0f);
-	};
-	opennova::renderer::LightFlickerInputs flicker;
-	fill_flicker(flicker, p_time_ms, p_weather);
-	const std::array<float, 3> ambient = {
-		static_cast<float>(p_ambient_scale.x),
-		static_cast<float>(p_ambient_scale.y),
-		static_cast<float>(p_ambient_scale.z),
-	};
-	opennova::renderer::LightSelectionOptions options;
-	options.target = opennova::renderer::LightSelectionTarget::Objects;
-	options.admit_owned_unscoped = false;
-
-	std::vector<int> atlas_rows;
-	std::vector<opennova::renderer::LightDrawSelection> selections;
-	const uint64_t scene_revision = scene_.selection_revision();
-	const bool cacheable = p_rows_revision >= 0;
-	const bool rebuild_selection = !cacheable ||
-			static_cached_scene_revision_ != scene_revision ||
-			static_cached_rows_revision_ != p_rows_revision ||
-			static_cached_row_count_ != row_count;
-	if (rebuild_selection) {
-		std::vector<opennova::renderer::LightDrawContext> draws;
-		atlas_rows.reserve(static_cast<size_t>(row_count));
-		draws.reserve(static_cast<size_t>(row_count));
+	if (p_rows_revision < 0 || p_rows_revision != static_rows_revision_ ||
+			row_count != static_rows_.row_count()) {
+		std::vector<opennova::renderer::StaticLightRow> rows(static_cast<size_t>(row_count));
 		for (int64_t row = 0; row < row_count; ++row) {
-			if (row >= p_active.size() || p_active[row] == 0) {
-				continue;
+			opennova::renderer::StaticLightRow &out = rows[static_cast<size_t>(row)];
+			out.active = row < p_active.size() && p_active[row] != 0;
+			out.query.position_fixed = godot_to_mission_q16(p_entity_positions[row]);
+			out.query.bound_radius_fixed =
+					row < p_entity_bound_radii_q16.size() ? p_entity_bound_radii_q16[row] : 0;
+			out.groups.owner_group_entity = row < p_owner_entities.size()
+					? static_cast<uint64_t>(static_cast<int64_t>(p_owner_entities[row])) : 0;
+			out.groups.owner_group_section =
+					row < p_owner_sections.size() ? static_cast<int32_t>(p_owner_sections[row]) : 0;
+			out.groups.interior_group_entity = row < p_interior_owners.size()
+					? static_cast<uint64_t>(static_cast<int64_t>(p_interior_owners[row])) : 0;
+			out.groups.interior_group_section = row < p_interior_sections.size()
+					? static_cast<int32_t>(p_interior_sections[row]) : 0;
+			if (row < p_entity_lights.size()) {
+				const Vector4 lane = p_entity_lights[row];
+				out.lane = {lane.x, lane.y, lane.z, lane.w};
 			}
-			auto draw = entity_draw_context(p_entity_positions[row],
-					row < p_entity_bound_radii_q16.size()
-							? p_entity_bound_radii_q16[row] : 0);
-			draw.groups.owner_group_entity = row < p_owner_entities.size()
-					? static_cast<uint64_t>(
-							static_cast<int64_t>(p_owner_entities[row]))
-					: 0;
-			draw.groups.owner_group_section = row < p_owner_sections.size()
-					? static_cast<int32_t>(p_owner_sections[row])
-					: 0;
-			draw.groups.interior_group_entity = row < p_interior_owners.size()
-					? static_cast<uint64_t>(
-							static_cast<int64_t>(p_interior_owners[row]))
-					: 0;
-			draw.groups.interior_group_section =
-					row < p_interior_sections.size()
-					? static_cast<int32_t>(p_interior_sections[row])
-					: 0;
-			atlas_rows.push_back(static_cast<int>(row));
-			draws.push_back(draw);
 		}
-		selections.resize(draws.size());
-		scene_.select_for_draws(draws.data(), draws.size(), options, ambient,
-				flicker, kObjectLightD3DFill, selections.data());
-		last_static_draws_ = static_cast<int>(draws.size());
-		if (cacheable) {
-			static_cached_selections_.clear();
-			static_cached_selections_.reserve(selections.size());
-			for (size_t i = 0; i < selections.size(); ++i) {
-				const opennova::renderer::LightDrawSelection &selection = selections[i];
-				if (selection.count == 0) {
-					continue;
-				}
-				StaticCachedSelection cached;
-				cached.atlas_row = atlas_rows[i];
-				cached.groups = draws[i].groups;
-				cached.count = selection.count;
-				cached.last_count = selection.count;
-				for (size_t light = 0; light < selection.count; ++light) {
-					cached.handles[light] = selection.lights[light].handle;
-					cached.animated = cached.animated ||
-							scene_.slot_gen_active(selection.lights[light].handle);
-				}
-				static_cached_selections_.push_back(cached);
-			}
-			static_cached_scene_revision_ = scene_revision;
-			static_cached_color_revision_ = scene_.color_revision();
-			static_cached_ambient_ = ambient;
-			static_cached_rows_revision_ = p_rows_revision;
-			static_cached_row_count_ = static_cast<int>(row_count);
-			static_cached_active_draws_ = last_static_draws_;
-		}
-	} else {
-		// Broadphase and group gating are unchanged. Steady frames maintain
-		// the resident payload row by row: a cached row re-selects only when
-		// it is gen-animated or a global color input moved (any blend write
-		// or fade ramp bumps the pool's color revision; the ambient gain is
-		// compared directly). A skipped row's select() inputs are all
-		// provably unchanged, so its resident 144 bytes already equal what a
-		// recompute would produce; a recomputed row byte-compares before it
-		// marks the texture for upload.
-		last_static_draws_ = static_cached_active_draws_;
-		const uint64_t color_revision = scene_.color_revision();
-		const bool recompute_all =
-				static_cached_color_revision_ != color_revision ||
-				static_cached_ambient_ != ambient;
-		const int64_t resident_size =
-				static_cast<int64_t>(STATIC_LIGHT_ROW_TEXELS) *
-				MAX(static_cast<int>(row_count), 1) * 16;
-		if (static_bytes_resident_ &&
-				static_light_rows_bytes_.size() == resident_size &&
-				static_light_rows_image_.is_valid() &&
-				static_light_rows_texture_.is_valid()) {
-			float *texels = reinterpret_cast<float *>(
-					static_light_rows_bytes_.ptrw());
-			bool changed = false;
-			int lit_draws = 0;
-			opennova::renderer::LightDrawSelection selection;
-			std::array<float, static_cast<size_t>(STATIC_LIGHT_ROW_TEXELS) * 4>
-					row_texels;
-			for (StaticCachedSelection &cached : static_cached_selections_) {
-				if (!recompute_all && !cached.animated) {
-					if (cached.last_count > 0) {
-						++lit_draws;
-					}
-					continue;
-				}
-				selection.count = scene_.select(cached.handles.data(),
-						cached.count, cached.groups, options, ambient, flicker,
-						kObjectLightD3DFill, selection.lights);
-				cached.last_count = selection.count;
-				row_texels.fill(0.0f);
-				row_texels[0] = static_cast<float>(selection.count);
-				if (selection.count > 0) {
-					++lit_draws;
-				}
-				for (size_t light = 0; light < selection.count; ++light) {
-					const opennova::renderer::SelectedLight &selected =
-							selection.lights[light];
-					const Vector3 world =
-							mission_to_godot(selected.position);
-					const size_t base = (1 + light * 2) * 4;
-					row_texels[base + 0] = world.x;
-					row_texels[base + 1] = world.y;
-					row_texels[base + 2] = world.z;
-					row_texels[base + 3] = selected.attenuation[2];
-					row_texels[base + 4] = selected.color[0];
-					row_texels[base + 5] = selected.color[1];
-					row_texels[base + 6] = selected.color[2];
-					row_texels[base + 7] = selected.range;
-				}
-				const Vector4 lane = row_lane(cached.atlas_row);
-				const size_t lane_base = static_cast<size_t>(STATIC_LIGHT_ROW_LANE_TEXEL) * 4;
-				row_texels[lane_base + 0] = lane.x;
-				row_texels[lane_base + 1] = lane.y;
-				row_texels[lane_base + 2] = lane.z;
-				row_texels[lane_base + 3] = lane.w;
-				float *atlas = texels + static_cast<size_t>(cached.atlas_row) *
-						STATIC_LIGHT_ROW_TEXELS * 4;
-				if (std::memcmp(atlas, row_texels.data(),
-						sizeof(row_texels)) != 0) {
-					std::memcpy(atlas, row_texels.data(), sizeof(row_texels));
-					changed = true;
-				}
-			}
-			if (changed) {
-				static_light_rows_image_->set_data(STATIC_LIGHT_ROW_TEXELS,
-						MAX(static_cast<int>(row_count), 1), false,
-						Image::FORMAT_RGBAF, static_light_rows_bytes_);
-				static_light_rows_texture_->update(static_light_rows_image_);
-			}
-			if (recompute_all) {
-				static_cached_color_revision_ = color_revision;
-				static_cached_ambient_ = ambient;
-			}
-			last_lit_static_draws_ = lit_draws;
-			return lit_draws;
-		}
-		// No resident payload to maintain (first cacheable frame after a
-		// non-cacheable call, or a texture that was never created): fall
-		// through to the full re-select + whole-buffer path below.
-		atlas_rows.reserve(static_cached_selections_.size());
-		selections.resize(static_cached_selections_.size());
-		for (size_t i = 0; i < static_cached_selections_.size(); ++i) {
-			StaticCachedSelection &cached = static_cached_selections_[i];
-			atlas_rows.push_back(cached.atlas_row);
-			selections[i].count = scene_.select(cached.handles.data(), cached.count,
-					cached.groups, options, ambient, flicker,
-					kObjectLightD3DFill, selections[i].lights);
-			cached.last_count = selections[i].count;
-		}
+		set_static_rows(p_rows_revision, std::move(rows));
 	}
-
-	const int texture_rows = MAX(static_cast<int>(row_count), 1);
-	// Build the frame's rows in the scratch buffer and upload only when the
-	// payload differs from the resident texture: with no flickering or moving
-	// light in range, the selection resolves to the same bytes every frame.
-	PackedByteArray &previous = static_light_rows_bytes_;
-	static_light_rows_scratch_.resize(
-			static_cast<int64_t>(STATIC_LIGHT_ROW_TEXELS) * texture_rows * 16);
-	static_light_rows_scratch_.fill(0);
-	float *texels = reinterpret_cast<float *>(static_light_rows_scratch_.ptrw());
-	int lit_draws = 0;
-	for (size_t i = 0; i < selections.size(); ++i) {
-		const opennova::renderer::LightDrawSelection &selection = selections[i];
-		float *atlas = texels + static_cast<size_t>(atlas_rows[i]) *
-				STATIC_LIGHT_ROW_TEXELS * 4;
-		atlas[0] = static_cast<float>(selection.count);
-		if (selection.count > 0) {
-			++lit_draws;
-		}
-		for (size_t light = 0; light < selection.count; ++light) {
-			const opennova::renderer::SelectedLight &selected = selection.lights[light];
-			const Vector3 world = mission_to_godot(selected.position);
-			float *posr = atlas + (1 + light * 2) * 4;
-			float *color = posr + 4;
-			posr[0] = world.x;
-			posr[1] = world.y;
-			posr[2] = world.z;
-			posr[3] = selected.attenuation[2];
-			color[0] = selected.color[0];
-			color[1] = selected.color[1];
-			color[2] = selected.color[2];
-			color[3] = selected.range;
-		}
-	}
-	// Every active row carries its entity lighting lane, lit or not.
-	for (int64_t row = 0; row < row_count; ++row) {
-		if (row >= p_active.size() || p_active[row] == 0) {
-			continue;
-		}
-		const Vector4 lane = row_lane(row);
-		float *texel = texels + (static_cast<size_t>(row) * STATIC_LIGHT_ROW_TEXELS +
-										STATIC_LIGHT_ROW_LANE_TEXEL) *
-						4;
-		texel[0] = lane.x;
-		texel[1] = lane.y;
-		texel[2] = lane.z;
-		texel[3] = lane.w;
-	}
-
-	const bool recreate = static_light_rows_image_.is_null() ||
-			static_light_rows_image_->get_width() != STATIC_LIGHT_ROW_TEXELS ||
-			static_light_rows_image_->get_height() != texture_rows ||
-			static_light_rows_texture_.is_null();
-	const bool changed = recreate ||
-			previous.size() != static_light_rows_scratch_.size() ||
-			memcmp(previous.ptr(), static_light_rows_scratch_.ptr(),
-					static_cast<size_t>(previous.size())) != 0;
-	if (changed) {
-		previous = static_light_rows_scratch_;
-	}
-	if (recreate) {
-		static_light_rows_image_ = Image::create_from_data(
-				STATIC_LIGHT_ROW_TEXELS, texture_rows, false,
-				Image::FORMAT_RGBAF, static_light_rows_bytes_);
-		static_light_rows_texture_ =
-				ImageTexture::create_from_image(static_light_rows_image_);
-	} else if (changed) {
-		static_light_rows_image_->set_data(STATIC_LIGHT_ROW_TEXELS,
-				texture_rows, false, Image::FORMAT_RGBAF,
-				static_light_rows_bytes_);
-		static_light_rows_texture_->update(static_light_rows_image_);
-	}
-	if (recreate) {
-		if (RenderingServer *rs = RenderingServer::get_singleton()) {
-			rs->global_shader_parameter_set("opennova_static_point_light_rows",
-					static_light_rows_texture_);
-		}
-	}
-	// The payload now mirrors the cached row set (when one exists), so steady
-	// frames may maintain it in place.
-	static_bytes_resident_ = cacheable;
-	last_lit_static_draws_ = lit_draws;
-	return lit_draws;
+	return select_static_rows(p_ambient_scale, p_time_ms, p_weather);
 }
 
-Vector4 LightScene::static_row_entity_lane(bool p_is_building, int32_t p_robj_index,
-		float p_light_transfer, bool p_contained, int32_t p_model_floor_q16,
-		int32_t p_entity_bound_radius_q16) {
-	const opennova::renderer::EntityLightingState lane =
-			opennova::renderer::static_row_entity_lighting(p_is_building, p_robj_index,
-					p_light_transfer, p_contained);
-	const opennova::env::MirrorClipWave clip_wave = p_is_building ?
-			opennova::env::MirrorClipWave::kSectorModel :
-			opennova::env::MirrorClipWave::kEntity;
-	return Vector4(lane.effect_scale, lane.interior_lerp ? 1.0f : 0.0f, lane.interior_daylight,
-			opennova::env::water_mirror_clip_origin_offset(clip_wave,
-					p_is_building ? p_model_floor_q16 : p_entity_bound_radius_q16));
+void LightScene::set_static_rows(int64_t p_revision,
+		std::vector<opennova::renderer::StaticLightRow> p_rows) {
+	static_rows_revision_ = p_revision;
+	static_rows_.set_rows(p_revision, std::move(p_rows));
+}
+
+int LightScene::select_static_rows(const Vector3 &p_ambient_scale, int p_time_ms,
+		Weather *p_weather) {
+	const int lit = static_rows_.select(scene_, frame_inputs(p_time_ms, p_weather, p_ambient_scale));
+	upload_static_rows();
+	static_row_count_ = static_rows_.row_count();
+	last_static_draws_ = static_rows_.active_draws();
+	last_lit_static_draws_ = lit;
+	return lit;
+}
+
+// The engine's atlas onto the device: the RGBAF texture the MultiMesh rows
+// read through INSTANCE_CUSTOM.x, published as opennova_static_point_light_rows
+// when it is (re)made.
+void LightScene::upload_static_rows() {
+	if (!static_rows_.take_dirty()) {
+		return;
+	}
+	const std::vector<float> &texels = static_rows_.texels();
+	const int texture_rows = static_rows_.texture_rows();
+	static_light_rows_bytes_.resize(static_cast<int64_t>(texels.size() * sizeof(float)));
+	if (!texels.empty()) {
+		std::memcpy(static_light_rows_bytes_.ptrw(), texels.data(), texels.size() * sizeof(float));
+	}
+	const bool recreate = static_light_rows_image_.is_null() ||
+			static_light_rows_image_->get_height() != texture_rows ||
+			static_light_rows_texture_.is_null();
+	if (recreate) {
+		static_light_rows_image_ = Image::create_from_data(opennova::renderer::kStaticLightRowTexels,
+				texture_rows, false, Image::FORMAT_RGBAF, static_light_rows_bytes_);
+		static_light_rows_texture_ = ImageTexture::create_from_image(static_light_rows_image_);
+		publish_static_rows();
+		return;
+	}
+	static_light_rows_image_->set_data(opennova::renderer::kStaticLightRowTexels, texture_rows,
+			false, Image::FORMAT_RGBAF, static_light_rows_bytes_);
+	static_light_rows_texture_->update(static_light_rows_image_);
 }
 
 void LightScene::publish_static_rows() const {
@@ -974,26 +629,17 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 		CoronaView p_view,
 		std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
 		opennova::renderer::LightCoronaFrameInputs &r_inputs) const {
-	opennova::renderer::LightCoronaFrameInputs &inputs = r_inputs;
-	std::vector<opennova::renderer::LightCoronaOwnerMask> &owner_masks =
-			r_owner_masks;
-	owner_masks.clear();
-	// Owner visible-section masks from the same model/owner walk the
-	// per-model light pass runs: a model with an occlusion verdict (mask
-	// != -1) contributes its owner row; everything else passes the gate
-	// like retail's non-pool-2 owners [orig: Terrain_IsBuildingSectionBitSet
-	// @0x5c6960 returns TRUE outside the mask array, see
-	// docs/render/render-lighting-re.md].
+	// The owners' visible-section masks of this view's own collect: a model
+	// with an occlusion verdict (mask != -1) contributes its owner row; every
+	// other owner passes the walk's gate (renderer::LightCoronaFrameInputs).
+	r_owner_masks.clear();
 	const int64_t model_count = p_models.size();
-	owner_masks.reserve(static_cast<size_t>(model_count));
+	r_owner_masks.reserve(static_cast<size_t>(model_count));
 	for (int64_t i = 0; i < model_count && i < p_owner_entities.size(); ++i) {
-		const ObjectModel *model = Object::cast_to<ObjectModel>(
-				static_cast<Object *>(p_models[i]));
+		const ObjectModel *model = Object::cast_to<ObjectModel>(static_cast<Object *>(p_models[i]));
 		if (model == nullptr) {
 			continue;
 		}
-		// The Inset's walk and each mirror's gate on the masks that view's own
-		// collect wrote.
 		const int64_t mask = p_view == CoronaView::Inset ? model->get_inset_view_section_mask()
 				: p_view == CoronaView::Mirror           ? model->get_mirror_view_section_mask(0)
 				: p_view == CoronaView::InsetMirror      ? model->get_mirror_view_section_mask(1)
@@ -1002,53 +648,24 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 			continue;
 		}
 		opennova::renderer::LightCoronaOwnerMask row;
-		row.owner_entity = static_cast<uint64_t>(
-				static_cast<int64_t>(p_owner_entities[i]));
+		row.owner_entity = static_cast<uint64_t>(static_cast<int64_t>(p_owner_entities[i]));
 		row.section_mask = static_cast<uint32_t>(mask & 0xFFFFFFFF);
-		owner_masks.push_back(row);
+		r_owner_masks.push_back(row);
 	}
-	inputs.owner_masks = owner_masks.data();
-	inputs.owner_mask_count = owner_masks.size();
-	// The fog-to-black fold (engine: runtime/renderer/light_scene.h): primary fog params,
-	// color forced black engine-side.
-	inputs.fog_enabled = p_fog.is_valid() && p_fog->fog_enabled;
-	inputs.fog_type = p_fog.is_valid() ? static_cast<int32_t>(p_fog->fog_type) : 0;
-	inputs.fog_start = p_fog.is_valid() ? p_fog->fog_start : 0.0f;
-	inputs.fog_end = p_fog.is_valid() ? p_fog->fog_end : 0.0f;
-	inputs.camera_fixed = godot_to_mission_q16(p_camera_pos);
-	// The camera depth plane in mission space: depth grows in front of the
-	// camera, zero at the camera origin (the batch-sort plane retail feeds
-	// the fade [orig: EffectWorld_RenderLightCoronas @0x5aaf40 (the plane
-	// reads @0x5ab2f8..0x5ab33c)]; the engine also tests the light
-	// centre against the viewport near depth on this axis).
-	const Vector3 forward = p_camera_forward.normalized();
-	const std::array<float, 3> normal_mission = {
-		static_cast<float>(forward.x),
-		static_cast<float>(-forward.z),
-		static_cast<float>(forward.y),
+	opennova::renderer::LightCoronaFog fog;
+	fog.enabled = p_fog.is_valid() && p_fog->fog_enabled;
+	fog.type = p_fog.is_valid() ? static_cast<int32_t>(p_fog->fog_type) : 0;
+	fog.start = p_fog.is_valid() ? p_fog->fog_start : 0.0f;
+	fog.end = p_fog.is_valid() ? p_fog->fog_end : 0.0f;
+	// Godot (x, y-up, z) -> mission (x, -z, y).
+	const std::array<float, 3> forward_mission = {
+		static_cast<float>(p_camera_forward.x),
+		static_cast<float>(-p_camera_forward.z),
+		static_cast<float>(p_camera_forward.y),
 	};
-	const std::array<int32_t, 3> &cam = inputs.camera_fixed;
-	inputs.depth_plane_normal = normal_mission;
-	inputs.depth_plane_w =
-			-(normal_mission[0] * static_cast<float>(cam[0]) / opennova::io::kFp16One +
-					normal_mission[1] * static_cast<float>(cam[1]) / opennova::io::kFp16One +
-					normal_mission[2] * static_cast<float>(cam[2]) / opennova::io::kFp16One);
-	inputs.ambient_scale = {
-		static_cast<float>(p_ambient_scale.x),
-		static_cast<float>(p_ambient_scale.y),
-		static_cast<float>(p_ambient_scale.z),
-	};
-	inputs.frame_index = static_cast<uint32_t>(p_frame_index);
-	inputs.flicker.time_ms = static_cast<uint32_t>(p_time_ms);
-	const Weather *weather = p_weather;
-	if (weather != nullptr) {
-		const opennova::env::WeatherOscillator &oscillator =
-				weather->runtime().core().oscillator;
-		inputs.flicker.amp_ring = oscillator.amp_ring;
-		inputs.flicker.amp_ring_size =
-				sizeof(oscillator.amp_ring) / sizeof(oscillator.amp_ring[0]);
-		inputs.flicker.ring_index = oscillator.ring_index;
-	}
+	r_inputs = opennova::renderer::light_corona_frame_inputs(godot_to_mission_q16(p_camera_pos),
+			forward_mission, frame_inputs(p_time_ms, p_weather, p_ambient_scale),
+			static_cast<uint32_t>(p_frame_index), fog, r_owner_masks);
 }
 
 int LightScene::collect_corona_rows(const Vector3 &p_camera_pos,
@@ -1120,9 +737,8 @@ size_t LightScene::collect_terrain_light_rows(
 		Weather *p_weather, uint32_t p_recip_packed,
 		opennova::renderer::TerrainLightPatchRows *r_rows) const {
 	opennova::renderer::TerrainLightPassInputs inputs;
-	// EffectWorld_AmbientScale = the env light-state gain the object pass
-	// already feeds; flt_2732DA{C,8,4} = the loaded recip unpacked once
-	// [orig: EffectWorld_TickInstancesAndLightScale @0x5aa1ef..0x5aa23f].
+	// The env light-state gain the object pass already feeds, and the loaded
+	// recip unpacked (renderer::TerrainLightPassInputs carries the witness).
 	inputs.ambient_scale = {
 		static_cast<float>(p_ambient_scale.x),
 		static_cast<float>(p_ambient_scale.y),
@@ -1130,7 +746,9 @@ size_t LightScene::collect_terrain_light_rows(
 	};
 	inputs.terrain_factor =
 			opennova::renderer::terrain_per_channel_factor(p_recip_packed);
-	fill_flicker(inputs.flicker, p_time_ms, p_weather);
+	inputs.flicker = opennova::renderer::light_flicker_inputs(
+			p_weather != nullptr ? &p_weather->runtime().core().oscillator : nullptr,
+			static_cast<uint32_t>(p_time_ms));
 	// The reference adapter: the pixel-shader terrain path, the per-light loop
 	// never skipped, and caps bit 0x100 with four stages, so the ps.1.1 light
 	// pass (light_terrain_pass.h carries the witness).

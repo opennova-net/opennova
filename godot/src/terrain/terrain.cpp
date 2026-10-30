@@ -24,6 +24,7 @@
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 
+#include <runtime/renderer/triangle_strip.h>
 #include <runtime/terrain_query/terrain_atlas_rects.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 
@@ -1110,16 +1111,15 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 		light_patch_bounds[i] = opennova::renderer::terrain_patch_light_bounds(
 				aabb_min, aabb_max, draw.sector_ox, draw.sector_oz);
 	}
-	// EffectWorld_AmbientScale = the env light-state gain (the modulator
-	// unpack the object pass feeds too); the recip factor unpacks the loaded
-	// g_EnvTerrainColorRecip [orig: @0x5aa1ef..0x5aa23f].
+	// EffectWorld_AmbientScale = the engine's light block gain
+	// (EnvironmentState::light_gain, the modulator unpack the object pass
+	// feeds too); the recip factor unpacks the loaded g_EnvTerrainColorRecip
+	// [orig: @0x5aa1ef..0x5aa23f].
 	Vector3 gain(1.0f, 1.0f, 1.0f);
 	uint32_t recip_packed = opennova::renderer::kTerrainFactorDefaultPacked;
 	if (cached_env_node != nullptr) {
-		const Ref<EnvLightState> light_state = cached_env_node->get_light_state();
-		if (light_state.is_valid() && light_state->get_values().is_valid()) {
-			gain = light_state->get_values()->get_gain();
-		}
+		const opennova::env::Rgb light_gain = cached_env_node->state().light_gain();
+		gain = Vector3(light_gain.r, light_gain.g, light_gain.b);
 		if (cached_env_node->is_loaded()) {
 			recip_packed = cached_env_node->state().terrain_color_recip_packed();
 		}
@@ -1202,23 +1202,6 @@ void Terrain::_cache_env_weather_nodes() {
 	if (!water_path.is_empty())
 		cached_water_node =
 				Object::cast_to<Water>(get_node_or_null(water_path));
-}
-
-// ---------------------------------------------------------------------------
-// Strip-to-list conversion
-// ---------------------------------------------------------------------------
-
-void Terrain::_strip_to_list(const std::vector<uint16_t>& strip,
-                                  PackedInt32Array& out) {
-	if (strip.size() < 3) return;
-	for (size_t i = 2; i < strip.size(); i++) {
-		uint16_t a = strip[i - 2], b = strip[i - 1], c = strip[i];
-		if (a == b || b == c || a == c) continue;
-		// Reference uses CW winding (OpenGL default with glFrontFace unset renders both).
-		// Godot culls CW faces (back = CW), so swap to CCW.
-		if (i & 1) { out.push_back(a); out.push_back(b); out.push_back(c); }
-		else       { out.push_back(b); out.push_back(a); out.push_back(c); }
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1621,16 +1604,22 @@ bool Terrain::_build_tile_variant(size_t ti, int variant, int *r_vertices, int *
 	for (int lod = 0; lod < 8; lod++) {
 		const auto& src_lod = tile.lods[lod];
 
-		PackedInt32Array indices;
+		// The LOD's triangle list as the device draws it (a strip through the
+		// engine's renderer::triangle_strip_to_list), each triangle's first two
+		// indices swapped for the mesh's opposite facing convention.
+		std::vector<uint32_t> list;
 		if (src_lod.is_strip) {
-			_strip_to_list(src_lod.indices, indices);
+			opennova::renderer::triangle_strip_to_list(src_lod.indices, 0, list);
 		} else {
-			// Swap first two indices per triangle (CW -> CCW for Godot)
-			for (size_t i = 0; i + 2 < src_lod.indices.size(); i += 3) {
-				indices.push_back(src_lod.indices[i + 1]);
-				indices.push_back(src_lod.indices[i]);
-				indices.push_back(src_lod.indices[i + 2]);
-			}
+			list.assign(src_lod.indices.begin(),
+					src_lod.indices.begin() + (src_lod.indices.size() / 3) * 3);
+		}
+		PackedInt32Array indices;
+		indices.resize(static_cast<int64_t>(list.size()));
+		for (size_t i = 0; i + 2 < list.size(); i += 3) {
+			indices.set(static_cast<int64_t>(i), static_cast<int32_t>(list[i + 1]));
+			indices.set(static_cast<int64_t>(i + 1), static_cast<int32_t>(list[i]));
+			indices.set(static_cast<int64_t>(i + 2), static_cast<int32_t>(list[i + 2]));
 		}
 
 		// The <3 gate matches the snapshot's per-LOD index counts, so the

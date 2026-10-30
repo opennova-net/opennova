@@ -687,8 +687,9 @@ void test_the_pipeline_states_are_every_builder_state() {
 // The SRCBLEND / DESTBLEND words each combine draws with.
 void test_the_combines_blend_words() {
 	const auto words = [](SceneOverlayShading shading, int source, int dest) {
-		const SceneOverlayBlend blend = scene_overlay_blend(shading);
-		return static_cast<int>(blend.source) == source && static_cast<int>(blend.dest) == dest;
+		const BlendState blend = scene_overlay_blend(shading);
+		return blend.enabled && static_cast<int>(blend.src_color) == source &&
+				static_cast<int>(blend.dst_color) == dest;
 	};
 	// D3DBLEND: ZERO 1, ONE 2, SRCALPHA 5, INVSRCALPHA 6, DESTCOLOR 9.
 	CHECK(words(SceneOverlayShading::RibbonStock, 2, 2));    // slot 6, 0x222

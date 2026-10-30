@@ -1902,6 +1902,7 @@ void GameWorld::start_effect_world() {
 	EntityPresenter *presenter = wire_runtime != nullptr ? wire_runtime->get_entity_presenter() : nullptr;
 	if (presenter != nullptr && light_director_.is_valid()) {
 		presenter->connect("wire_node_spawned", callable_mp(this, &GameWorld::on_wire_node_spawned));
+		presenter->connect("wire_node_retired", callable_mp(this, &GameWorld::on_wire_node_retired));
 	}
 	// The present passes' typed collaborators (ADR 0043 d9): the mission audio
 	// (the stage before this one), this effect world, the light director, the

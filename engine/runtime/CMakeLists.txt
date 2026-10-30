@@ -182,6 +182,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/authored_occluder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_draw_frame.cpp # the per-draw light pass over a view
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_spawn.cpp # the pool spawners and their entity lifecycle
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp # the D3DX DXT texture codec
@@ -206,6 +208,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame_plan.cpp # which views compile which particle passes
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_quad_inputs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/frame_fx_effects.cpp

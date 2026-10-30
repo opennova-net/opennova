@@ -376,6 +376,64 @@ ParticleThermalMaterial particle_thermal_material(ParticlePipeline pipeline, boo
 	}
 }
 
+FixedFunctionState particle_pipeline_state(ParticlePipeline pipeline,
+		ParticleThermalMaterial thermal) {
+	FixedFunctionState state;
+	state.cull = CullMode::None;
+	state.depth_test = true;
+	state.depth_write = false;
+	state.depth_compare = DepthCompare::LessEqual;
+	BlendState &blend = state.blend;
+	blend.enabled = true;
+	blend.src_color = BlendFactor::SrcAlpha;
+	blend.dst_color = BlendFactor::InvSrcAlpha;
+	blend.src_alpha = BlendFactor::SrcAlpha;
+	blend.dst_alpha = BlendFactor::InvSrcAlpha;
+	switch (pipeline) {
+		case ParticlePipeline::Blend:
+		case ParticlePipeline::Bump:
+		case ParticlePipeline::Distort:
+			break;
+		case ParticlePipeline::Additive:
+		case ParticlePipeline::Premult:
+			// Additive and premult share one witnessed pair — ONE/INVSRCALPHA
+			// [orig: CParticleTexture_InitTextureAndChannels @ 0x5e8380 (case 1/2
+			// SRCBLEND=ONE) + @ 0x5e85a9 (LABEL_16 DESTBLEND=INVSRCALPHA), see docs/particles/ptl-format-re.md]. The
+			// type-1 atlas alpha clear zeroes the fragment alpha, which is what
+			// turns this pair into a pure add for additive layers.
+			blend.src_color = BlendFactor::One;
+			blend.src_alpha = BlendFactor::One;
+			break;
+		case ParticlePipeline::Bumpadd:
+			// [orig: @ 0x5e84dc/@ 0x5e84d8 — SRCALPHA/ONE, see docs/particles/ptl-format-re.md]
+			blend.dst_color = BlendFactor::One;
+			blend.dst_alpha = BlendFactor::One;
+			break;
+		case ParticlePipeline::Mod:
+			blend.src_color = BlendFactor::DestColor;
+			blend.dst_color = BlendFactor::Zero;
+			blend.src_alpha = BlendFactor::DestAlpha;
+			blend.dst_alpha = BlendFactor::Zero;
+			break;
+		case ParticlePipeline::Mod2x:
+			blend.src_color = BlendFactor::DestColor;
+			blend.dst_color = BlendFactor::SrcColor;
+			blend.src_alpha = BlendFactor::DestAlpha;
+			blend.dst_alpha = BlendFactor::SrcAlpha;
+			break;
+	}
+	if (thermal == ParticleThermalMaterial::DarkeningModulate) {
+		// Additive's and Premult's thermal secondary blends ZERO/INVSRCCOLOR
+		// (retail CParticleTexture_InitTextureAndChannels @ 0x5E8390..0x5E83A5):
+		// the source darkens what is already drawn.
+		blend.src_color = BlendFactor::Zero;
+		blend.dst_color = BlendFactor::InvSrcColor;
+		blend.src_alpha = BlendFactor::Zero;
+		blend.dst_alpha = BlendFactor::InvSrcAlpha;
+	}
+	return state;
+}
+
 class ParticleFrameCompiler::Impl {
 public:
 	static constexpr std::size_t kNoBoundsEntry =

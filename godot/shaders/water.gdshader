@@ -123,7 +123,7 @@ void vertex() {
 	// the SPECULAR ALPHA, which the rows fill with dist_alpha (255 near -> 0 far)
 	// [orig: RS28 on via pass bit 0x20000 @ 0x68324f; spec.a = dist_alpha
 	// @ 0x5c2eb5..0x5c2ef4]. NOT the terrain fog table — the old
-	// jointops_fog_factor curve here was a reimpl invention.
+	// terrain fog curve here was a reimpl invention.
 	v_fog = CUSTOM1.a;
 	// The witnessed depth model: the pre-transformed strip carries its own
 	// depth, an arithmetic replica of the scene projection with far = the fog
