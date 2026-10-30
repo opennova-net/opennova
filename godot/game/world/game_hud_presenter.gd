@@ -739,6 +739,10 @@ func tick() -> void:
 			if _player_presenter != null else _world.local_player_view()
 	if lv != null:
 		_sight_slide_multiplier = lv.sight_slide_multiplier
+	# The frame's main viewport off that view's composed camera: every world
+	# point the HUD draws at projects through it (HudOverlay.set_view_frame,
+	# engine hud/hud_viewport.h).
+	_game_hud.set_view_frame(lv)
 	# The frame's HUD info record, the shell's mirror of the original
 	# rebuilding its 576-byte info struct each frame: the engine fills it from
 	# that view, the equipped weapon's FSM view, the def slice and the health
@@ -879,10 +883,7 @@ func tick() -> void:
 	if _inset_scope != null:
 		_inset_scope.update_view(lv, combat_camera, _aspect_mode)
 	_sync_second_scene_camera()
-	_game_hud.set_combat_state(lv,
-			combat_camera.global_transform if combat_camera != null else Transform3D.IDENTITY,
-			hud_view_projection(combat_camera) if combat_camera != null else Projection.IDENTITY,
-			combat_camera != null, Strings.get_table(Strings.TABLE_GAMETEXT),
+	_game_hud.set_combat_state(lv, Strings.get_table(Strings.TABLE_GAMETEXT),
 			ControlsBindings.model().display_text_for_token("useitem"))
 	_game_hud.set_view_state(info.binoculars_view_active,
 			_player_presenter.aim_screen_point() \
@@ -989,37 +990,14 @@ func _resolve_waypoint_name(wp: WaypointHudView, sim: Simulation) -> String:
 			sim.get_session_game_type())
 
 
-# The projection the HUD projects world points through (the attach labels, the
-# friendly tags): the local player presenter's frame projection -- while an
-# aspect mode draws through its stretched target, the target camera's, whose
-# pixels the blit stretches over the surface the overlay draws on; the play
-# camera then carries only a CULLING SUPERSET of the frustum and would land a
-# label off on one axis (LocalPlayerPresenter.view_projection) -- else the
-# play camera's own. It is the frame's SCREEN projection, the D3D9 raster's
-# half pixel taken back out (LocalPlayerPresenter.screen_projection): the
-# overlay draws the original's window coordinates and carries them onto this
-# raster's pixel centres itself. Public as the ADR 0018 read seam.
-func hud_view_projection(camera: Camera3D) -> Projection:
-	if _player_presenter != null and _player_presenter.camera() != null:
-		return _player_presenter.screen_projection()
-	return camera.get_camera_projection()
-
-
-# The floating attach labels: the sim's selection (distance/LOS/occupancy/nearest,
-# armory-zone mode) projected through the frame's projection (hud_view_projection)
-# to overlay pixels with the resolved label text — the overlay's own fill
-# (HudOverlay.set_attach_labels carries the witness); no camera clears the labels.
+# The floating attach labels: the local player's seat scan projected through the
+# frame's viewport (HudOverlay.set_view_frame) with the resolved label text, the
+# overlay's engine fill (HudOverlay.set_attach_labels); no sim clears the labels.
 func _apply_attach_labels() -> void:
 	if _game_hud == null:
 		return
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
-			if sim != null else null
-	if camera == null:
-		_game_hud.set_attach_labels(Transform3D.IDENTITY, Projection.IDENTITY, null, null)
-		return
-	_game_hud.set_attach_labels(camera.global_transform, hud_view_projection(camera),
-			Strings.get_table(Strings.TABLE_GAMETEXT), sim)
+	_game_hud.set_attach_labels(Strings.get_table(Strings.TABLE_GAMETEXT), sim)
 
 
 
@@ -1030,10 +1008,10 @@ func get_game_hud() -> HudOverlay:
 	return _game_hud
 
 
-# The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
-# through the frame's projection (hud_view_projection) with the environment's
-# live fog distance — the overlay's own fill (HudOverlay.set_friendly_tags
-# carries the witness); no camera clears the tags.
+# The overhead friendly tags (D-HUD-20): the role's gather projected through the
+# frame's viewport (HudOverlay.set_view_frame) with the environment's live fog
+# distance, the overlay's engine fill (HudOverlay.set_friendly_tags); no sim
+# clears the tags.
 func _apply_friendly_tags() -> void:
 	if _game_hud == null:
 		return
@@ -1043,16 +1021,9 @@ func _apply_friendly_tags() -> void:
 	if env != null:
 		fog_distance = env.get_fog_distance()
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
-			if sim != null else null
-	if camera == null:
-		_game_hud.set_friendly_tags(false, Transform3D.IDENTITY, Projection.IDENTITY,
-				fog_distance, null)
-		_game_hud.set_radio_request_icon_viewer(false)
-		return
-	_game_hud.set_friendly_tags(true, camera.global_transform, hud_view_projection(camera),
-			fog_distance, sim)
-	_game_hud.set_radio_request_icon_viewer(sim.local_player_radio_request_icon_viewer())
+	_game_hud.set_friendly_tags(sim != null, fog_distance, sim)
+	_game_hud.set_radio_request_icon_viewer(
+			sim != null and sim.local_player_radio_request_icon_viewer())
 
 
 # Mission effects feed the HUD's text surfaces. Drained effects carry
@@ -1586,7 +1557,7 @@ func _apply_fp_gun_visible() -> void:
 
 
 # The objectives panel: the sim's shown win-condition rows resolved through
-# the mission text table by the overlay's own fill (Simulation.fill_objectives
+# the mission text table by the overlay's engine fill (world::fill_objective_rows
 # carries the witness); the toggle's off state clears the panel.
 func _apply_objectives() -> void:
 	if _game_hud == null:

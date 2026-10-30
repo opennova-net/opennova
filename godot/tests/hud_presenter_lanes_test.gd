@@ -4,7 +4,7 @@ extends GutTest
 # Messages + the chat drain, AAS zone status), exercised over a REAL HudOverlay
 # with the sim absent: the toggle edge machine, the hide-once bookkeeping, and
 # the null paths. The native row feeds (Simulation.fill_vehicle_panel /
-# fill_lfp_zones / drain_feed_posts) need a live mission and are pinned by the
+# inmatch::hud_lfp_panel_feed / drain_feed_posts) need a live mission and are pinned by the
 # engine ctests (vehicle_panel_feed, lfp_feed, client_replica_chat).
 
 const VehiclePanelPresenter := preload("res://game/world/vehicle_panel_presenter.gd")

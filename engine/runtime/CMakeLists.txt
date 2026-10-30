@@ -140,6 +140,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_bay_logos.cpp # the vehicle-bay logo walk
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_capture_labels.cpp # the capture-point label walk + element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_viewport.cpp # the main viewport words + the HUD projector
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_world_labels.cpp # the projected attach labels + friendly tags
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_texture_load_plan.cpp # the HUD set-up's texture loads + their stamp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/inset_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/sight_overlay.cpp # the SIGHTS card row modes + the dotsize cycle
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid
@@ -544,6 +547,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_info.cpp       # the NovaWorld listing's live-session columns
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_listing_binding.cpp # the NovaWorld host listing's match side (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/hud_frame_feeds.cpp # the HUD's per-frame feeds into its frame state
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/special_key_chain.cpp # the special-key chain over a role
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_input_frame.cpp # the local player's input frame (TickInputSource)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)

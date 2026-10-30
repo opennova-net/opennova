@@ -57,7 +57,7 @@ int main() {
 	check(static_cast<int>(kFriendlyTagModeDefault) == 2, "FULL is mode 2");
 	check(next_friendly_tag_mode(FriendlyTagMode::kBrief) == FriendlyTagMode::kOff,
 			"friendly tag cycle wraps 3 -> 0");
-	check(kFriendlyTagLiftUnits == 0x4000 / 65536.0f, "friendly tag lift 0x4000");
+	check(kFriendlyTagLiftQ16 == 0x4000, "friendly tag lift 0x4000");
 
 	if (g_failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);

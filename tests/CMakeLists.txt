@@ -5076,6 +5076,29 @@ target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
 target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
 add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
 
+# The HUD's projection (hud/hud_viewport.h): the main viewport's words, the projector's centre,
+# side-plane clips, edge forcing and near flag, and the attach labels and friendly tags it feeds.
+add_executable(hud_viewport_test hud/hud_viewport_test.cpp)
+target_link_libraries(hud_viewport_test PRIVATE opennova_runtime)
+target_include_directories(hud_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_viewport_test PRIVATE cxx_std_17)
+add_test(NAME hud_viewport COMMAND hud_viewport_test)
+
+# The HUD's texture load plan (hud/hud_texture_load_plan.h): each set-up load's file, loader,
+# word and arm, and what the draws read back of the loaded textures.
+add_executable(hud_texture_load_plan_test hud/hud_texture_load_plan_test.cpp)
+target_link_libraries(hud_texture_load_plan_test PRIVATE opennova_runtime)
+target_include_directories(hud_texture_load_plan_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_texture_load_plan_test PRIVATE cxx_std_17)
+add_test(NAME hud_texture_load_plan COMMAND hud_texture_load_plan_test)
+
+# The HUD's frame feeds (inmatch/hud_frame_feeds.h) over a session with no role.
+add_executable(hud_frame_feeds_test hud/hud_frame_feeds_test.cpp)
+target_link_libraries(hud_frame_feeds_test PRIVATE opennova_runtime)
+target_include_directories(hud_frame_feeds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_frame_feeds_test PRIVATE cxx_std_17)
+add_test(NAME hud_frame_feeds COMMAND hud_frame_feeds_test)
+
 # opennova-hostd, the machine agent (apps/hostd; Linux only, as the app). The runtime
 # test drives its platform legs on a stub command runner that checks every argv: the
 # docker runtime's exact `docker run` (the base and expansion trees' binds) and its
