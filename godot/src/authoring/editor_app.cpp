@@ -212,7 +212,7 @@ String EditorApp::update_editor() {
 	if (refused.empty() && !FileAccess::file_exists(dir.path_join("OPENNOVA.WIZ")))
 		refused = "OPENNOVA.WIZ is missing from the editor's folder: download the editor again.";
 	if (refused.empty()) {
-		// As the game's UPDATE starts it (godot/game/runtime_updates.gd), less its game's arguments: the
+		// As the game's UPDATE starts it (boot_policy.h updater_install_arguments), less its game's arguments: the
 		// editor's folder is the app's own, which update.exe updates alone.
 		PackedStringArray arguments;
 		arguments.push_back("/RUN");

@@ -63,6 +63,13 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_reload"), &LaunchFlags::no_reload);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("lan"), &LaunchFlags::lan);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("nopunt"), &LaunchFlags::nopunt);
+	ClassDB::bind_static_method("LaunchFlags",
+			D_METHOD("updater_check_arguments", "product", "runtime_dir", "resource_dir"),
+			&LaunchFlags::updater_check_arguments);
+	ClassDB::bind_static_method("LaunchFlags",
+			D_METHOD("updater_install_arguments", "product", "runtime_dir", "resource_dir",
+					"parent_pid", "run_args", "bootstrap", "join_rid"),
+			&LaunchFlags::updater_install_arguments);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_args_override", "args"),
 			&LaunchFlags::set_args_override);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("working_dir"), &LaunchFlags::working_dir);
@@ -111,6 +118,37 @@ void LaunchFlags::_bind_methods() {
 // without OpenNova's own options (without_own_options), which retail's never held.
 // Tests substitute the token list through set_args_override, which is walked as a
 // line spelling it.
+namespace {
+
+PackedStringArray to_packed(const std::vector<std::string> &p_values) {
+	PackedStringArray out;
+	for (const std::string &value : p_values) out.push_back(to_gd(value));
+	return out;
+}
+
+opennova::UpdaterProduct updater_product(
+		const String &p_product, const String &p_runtime_dir, const String &p_resource_dir) {
+	return {to_std(p_product), to_std(p_runtime_dir), to_std(p_resource_dir)};
+}
+
+} // namespace
+
+PackedStringArray LaunchFlags::updater_check_arguments(
+		const String &p_product, const String &p_runtime_dir, const String &p_resource_dir) {
+	return to_packed(opennova::updater_check_arguments(
+			updater_product(p_product, p_runtime_dir, p_resource_dir)));
+}
+
+PackedStringArray LaunchFlags::updater_install_arguments(const String &p_product,
+		const String &p_runtime_dir, const String &p_resource_dir, int64_t p_parent_pid,
+		const PackedStringArray &p_run_args, bool p_bootstrap, int64_t p_join_rid) {
+	std::vector<std::string> run_args;
+	for (int64_t i = 0; i < p_run_args.size(); ++i) run_args.push_back(to_std(p_run_args[i]));
+	return to_packed(opennova::updater_install_arguments(
+			updater_product(p_product, p_runtime_dir, p_resource_dir), p_parent_pid, run_args,
+			p_bootstrap, p_join_rid));
+}
+
 opennova::LaunchFlags LaunchFlags::parse() {
 	if (args_override_set_) return opennova::parse_launch_flags(args_override_);
 	std::vector<std::string> args;

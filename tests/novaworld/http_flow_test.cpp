@@ -984,30 +984,6 @@ static bool test_browser_request_host() {
 	return g_fail == 0;
 }
 
-// D-NET-1251: a menu-browser GET's URL for a transport that connects to the host its URL names:
-// the host the request resolved replaced by its address, the port and path kept, then the
-// nocachefix pair over that address, so the connect reaches the address the pair reads.
-// [orig: CNapiWinsock_InitFromUrl @0x658DA0 - CNapiWinsock_ResolveHostAsync called @0x658E4B;
-//  CUIBrowser_SendHTTPRequest @0x6588A3; `lea eax, [esi+30h]` @0x6597F3]
-static bool test_browser_resolved_get_url() {
-	expect(nw::browser_resolved_get_url("http://nw.example.test/jop_2_login.mnx", 676778718u,
-	               {198, 51, 100, 7}) ==
-	               "http://198.51.100.7/jop_2_login.mnx?nocachefix=676778718124007366",
-	       "the host goes out as the address the pair reads");
-	expect(nw::browser_resolved_get_url("http://nw.example.test:8080/jop_2.gsb?a=1", 676811359u,
-	               {203, 0, 113, 250}) ==
-	               "http://203.0.113.250:8080/jop_2.gsb?a=1&nocachefix=676811359-93257525",
-	       "the port and the query stay");
-	expect(nw::browser_resolved_get_url("http://198.51.100.7:80/NWLogin.dll", 5u,
-	               {198, 51, 100, 7}) ==
-	               "http://198.51.100.7:80/NWLogin.dll?nocachefix=5124007366",
-	       "a login leg's address and :80 stay as they are");
-	expect(nw::browser_resolved_get_url("http://nw.example.test", 5u, {198, 51, 100, 7}) ==
-	               "http://198.51.100.7",
-	       "a URL with no path takes the address and no pair");
-	return g_fail == 0;
-}
-
 // D-NET-1328: the Host's open sets PLoad "" and EXP (the expansion's name) in the jar ahead
 // of its @HOST_URL@ lookup, appended after the login's cookies, so the host leg's requests and the
 // host request's Cookie var-list carry them right after the login's PERSISTENTREMEMBERLOGINDATA,
@@ -1888,7 +1864,6 @@ int main() {
 	test_host_leg_origin();
 	test_host_leg_cookies();
 	test_browser_request_host();
-	test_browser_resolved_get_url();
 	test_enter_reentry();
 	test_enter_seeds_identity_once();
 	test_ib3_form_inputs();

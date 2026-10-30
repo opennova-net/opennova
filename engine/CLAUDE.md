@@ -16,7 +16,8 @@
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query,
     environment, hud, menu, assets, profile (the player profile: `player.sav` and
-    `weapon.sav` in memory), ragdoll (the opt-in ragdoll corpses, ADR 0060), and
+    `weapon.sav` in memory), frontend (the game's mode table above the session, retail's
+    `Game_MainLoop` modes, its save points and routing, ADR 0077 R3), ragdoll (the opt-in ragdoll corpses, ADR 0060), and
     devtools (the Dear ImGui pass, ADR
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
     allowlist; the frame-stats board builds in every flavour; Dear ImGui, the pass
@@ -32,7 +33,12 @@
     game server's remote-admin TCP protocol), protocol (the Protocol type a
     title speaks, its wire and NovaWorld identity, and its registry keyed by
     title code; the gate tag and gt.ssc; the NAPI transport's and the lobby
-    protocol's constants) and update (the updater's wire, ADR 0061). Nothing under
+    protocol's constants), update (the updater's wire, ADR 0061), socket (the platform
+    sockets every wire rides, Winsock2 or BSD, and the stream seam `IStreamSocket`, the TCP
+    twin of npwire's datagram seam; ADR 0077 d2) and http (one HTTP/1.0 exchange over that
+    seam, its reply read plainly or in the NovaWorld menu browser's framing; the menu
+    browser's transport over it, the game's and serve's, is
+    `novaworld/browser_transport.h`). Nothing under
     `net/` includes `runtime/`; `opennova_net` never links `opennova_runtime`.
   - the in-match control lives in `runtime/` (ADR 0043 d4): `runtime/inmatch`
     (`session.*` owns lifecycle, role policy, fixed-tick banking and input consumption
@@ -103,7 +109,8 @@
   Title type and its registry; `version` is `Version`'s one parse rule and ONE's build,
   `one_build()`, whose `one_build.cpp` is the one TU the CMake stamp compiles into: nothing else
   carries a version literal of ONE's), `opennova_net`
-  (novacrypto, napi, npwire, admin, protocol, update and the novaworld session/gate: the wire),
+  (novacrypto, napi, npwire, admin, protocol, update, socket, http and the novaworld
+  session/gate: the wire),
   `opennova_runtime` (the rest of runtime/, `inmatch` and
   `replication` included),
   `opennova_novaworld_service` (the service alone, only with the root option
@@ -119,7 +126,7 @@
   `opennova_net -> opennova_runtime` and keeps the libpq containment. ADR 0020's terrain
   seam is include-level (`include_graph_check.py`: for inmatch/replication/wac/mission/world
   the `runtime/terrain/` prefix is forbidden; the seam is `<runtime/terrain_query/...>`),
-  and every runtime lib but inmatch/replication is NET-AGNOSTIC (no `net/`,
+  and every runtime lib but inmatch/replication/frontend is NET-AGNOSTIC (no `net/`,
   `runtime/inmatch/` or `runtime/replication/` include, the same lint).
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/`BitWriter`,
@@ -186,7 +193,7 @@
   form the shipped corpus takes (minted, FNV-pinned) + a ledgered D-entry when output
   legitimately differs.
 - The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`,
-  `engine/net/admin`, `engine/net/update`) and the
+  `engine/net/admin`, `engine/net/update`, `engine/net/http`) and the
   replication seam (`engine/runtime/replication`) are
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires

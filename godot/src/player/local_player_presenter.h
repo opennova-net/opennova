@@ -297,11 +297,9 @@ public:
 	// The shell's keyboard pass, run at each update's input-frame head
 	// (PlayerInputRouter::set_keyboard_pass).
 	void set_keyboard_pass(const Callable &p_pass) { input_router_.set_keyboard_pass(p_pass); }
-	// The shell's menu-screen bit, read at each update's input-frame head
-	// (PlayerInputRouter::set_menu_screen_probe).
-	void set_menu_screen_probe(const Callable &p_probe) {
-		input_router_.set_menu_screen_probe(p_probe);
-	}
+	// The shell's frontend, whose screen stack answers the menu-screen bit at each update's
+	// input-frame head (PlayerInputRouter::set_frontend).
+	void set_frontend(const Ref<GameFrontend> &p_frontend) { input_router_.set_frontend(p_frontend); }
 	// A pass-through screen's close: the next input frame takes the menu
 	// cursor's offset (PlayerInputRouter::close_pass_through_screen).
 	void close_pass_through_screen();

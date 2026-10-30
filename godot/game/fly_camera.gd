@@ -5,10 +5,8 @@ extends GameplayCamera
 ## Right click + move: look. Right click + WASD: fly.
 ## Right click + scroll: adjust fly speed. Shift: 3x speed boost.
 ## The GameplayCamera hook below is what LocalPlayerPresenter drives through
-## the base class's set_gameplay_locked.
-
-# Esc was pressed. Shell-neutral: each shell decides what the key means.
-signal escape_pressed
+## the base class's set_gameplay_locked. Esc is never the camera's: the game's
+## shell routes it through the engine frontend (MainGame._on_escape).
 
 @export var mouse_sensitivity: float = 0.003
 @export var orbit_sensitivity: float = 0.005
@@ -24,7 +22,7 @@ var fly_speed: float = 4.6875
 ## The free camera is a development tool with no counterpart in the game: it takes the mouse
 ## and the keys only in a debug build or while the dev tools (Insert) are open (the
 ## maintainer's decision, 2026-10-26). Elsewhere a view with no local body stays where the
-## game left it, and Esc still reaches the shell. `debug_build` is the build's own flag (a
+## game left it. `debug_build` is the build's own flag (a
 ## test sets it to stand for a release build); the shell hands `dev_tools_open` its
 ## DevTools.is_open.
 var debug_build := OS.is_debug_build()
@@ -75,8 +73,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		_orbiting = false
 		_panning = false
 		_flying = false
-		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-			escape_pressed.emit()
 		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
@@ -127,9 +123,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			_pivot -= right * event.relative.x * pan_sensitivity
 			_pivot += up * event.relative.y * pan_sensitivity
 			_update_orbit()
-
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		escape_pressed.emit()
 
 func _update_orbit() -> void:
 	var rot := Transform3D()

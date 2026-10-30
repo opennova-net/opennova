@@ -9,32 +9,17 @@ extends HostSessionOptions
 ## (socketless) listen server. The runtime projects it to the sim's HostSessionOptions
 ## record via to_session_options() for Simulation.configure_host_session.
 
-## The g_GameType code words host producers name, re-exported from the
-## NetProtocol binding (every other mode is spelled NetProtocol.GAME_TYPE_*).
-## The canonical home (and every witness, including
-## [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0 -> Game_StartMission @ 0x524360]
-## for the Co-op derivation) lives at engine/base/gameprofile/game_type.h; the
-## GUT pin test holds the re-export chain to the witnessed hex. Code words are opaque beyond the objective bit — never
-## decompose them. GAME_TYPE_TRAINING_COOP is what a mission without a
-## multiplayer attrib (the retail training mission case) resolves to when
-## launched by LAN automation.
+## The g_GameType code words host producers name, re-exported from the NetProtocol binding;
+## their home and witnesses are engine/base/gameprofile/game_type.h.
 const GAME_TYPE_COOP := NetProtocol.GAME_TYPE_COOP                           # LTGT_COOP (objective)
 const GAME_TYPE_TRAINING_COOP := NetProtocol.GAME_TYPE_TRAINING_COOP         # LTGT_COOP (stock)
 const GAME_TYPE_FLAG_ME := NetProtocol.GAME_TYPE_FLAG_ME                     # LTGT_FM
-## First port of the retail LAN host range — the witness
-## [orig: game.cfg mplanserverportmin/max, JO_SERVER] lives at the engine home,
-## engine/net/npwire net_ports.h kRetailLanPortMin/Max (the maturity lint
-## hard-fails new bare literals of these values outside the canonical homes).
+## The retail LAN host range's first port (engine net/npwire/net_ports.h kRetailLanPortMin).
 const DEFAULT_LAN_PORT := NetProtocol.DEFAULT_LAN_PORT
 ## The NovaWorld gate's UDP port, shared by the OpenNova and original targets
 ## (engine home: kNovaWorldGatePort in engine/net/npwire net_ports.h, beside
 ## GATE_DEFAULT_PORT in engine/net/novaworld/gate_probe.h).
 const DEFAULT_GATE_PORT := NetProtocol.DEFAULT_GATE_PORT
-## Width of the retail host dialog's SPECTATOR_PW edit buffer (17 chars, read by
-## HostDialog_ReadSettings @ 0x555940 into the buffer at 0x555ecc). Both password
-## entry surfaces clamp to it so a typed password never exceeds what a retail
-## host could have configured.
-const SPECTATOR_PASSWORD_MAX_LENGTH := 17
 ## Which browser/lobby the session was requested from. The LAN channel never reads or
 ## manufactures NovaWorld service configuration; a NovaWorld host is hosted by the
 ## NovaWorld panel's logged-in session (NovaWorldClient.start_hosting).

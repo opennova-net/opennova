@@ -25,7 +25,7 @@
 #include <net/npwire/session_hello.h> // ClientHello (the stray JO-PN Hello)
 #include <net/npwire/session_keys.h>
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <chrono>
 #include <cstdint>

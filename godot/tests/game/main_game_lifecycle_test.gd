@@ -402,7 +402,8 @@ func test_mission_return_shows_the_screen_it_was_started_from() -> void:
 	var terrain = world.get_node("Terrain")
 	var menu_shell: MenuShell = _shell.get_menu_shell()
 	var driver: MenuDriver = menu_shell.get_driver()
-	driver.menu_requested.emit("mp.mnu", "LAN_MULTI_PLAYER")
+	# The main menu's LAN entry: its SCREEN row's jump through the engine shell.
+	driver.activate(driver.widget_id("LAN_MULTI_PLAYER"))
 	assert_eq(menu_shell.get_current_menu_file(), "mp.mnu")
 	assert_eq(menu_shell.get_menu_stack_depth(), 1)
 

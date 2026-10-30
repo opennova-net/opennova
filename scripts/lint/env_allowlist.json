@@ -15,14 +15,16 @@
     "apps/novaworld_*/*": ["*"],
     "deploy/*": ["*"],
     "web/src/*": ["*"],
-    "backend/*": ["*"],
+    "backend/migrations/*": ["*"],
+    "backend/seed/*": ["*"],
     "infra/*": ["*"]
   },
   "indirect_ok": [
     "apps/novaworld_*/*",
     "deploy/*",
     "web/src/*",
-    "backend/*",
+    "backend/migrations/*",
+    "backend/seed/*",
     "infra/*"
   ]
 }

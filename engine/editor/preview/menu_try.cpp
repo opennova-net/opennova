@@ -87,28 +87,26 @@ JsonValue outcome_json(const MenuTryOutcome &outcome) {
 } // namespace
 
 MenuTry::MenuTry() {
+	menu::MenuRuntime &runtime = shell_.runtime();
 	frame_.set_configure([this](const std::string &screen, menu::MenuFrameCompiler &compiler) {
 		return configure_(screen, compiler);
 	});
 	// The frame's click and scroll reach the runtime as the game's frame signals them (MenuDriver).
-	frame_.set_clicked([this](int index, int part) { runtime_.on_widget_clicked(index, part); });
-	frame_.set_scrolled([this](int index, int value) { runtime_.on_frame_scroll_value(index, value); });
-	runtime_.set_frame(&frame_);
-	runtime_.set_sink([this](const menu::MenuEvent &event) { on_event_(event); });
-	// The single-player screen's controls, the shell's (menu_commands.h).
-	flow_.set_mission_controls(menu::menu_name_set(menu::MenuNameSet::SinglePlayerLists),
-			menu::menu_name_set(menu::MenuNameSet::Briefings),
-			menu::menu_name_set(menu::MenuNameSet::SinglePlayerAccepts));
-	mods_.set_descriptions(menu::menu_name_set(menu::MenuNameSet::ModDescriptions));
+	frame_.set_clicked([&runtime](int index, int part) { runtime.on_widget_clicked(index, part); });
+	frame_.set_scrolled([&runtime](int index, int value) { runtime.on_frame_scroll_value(index, value); });
+	runtime.set_frame(&frame_);
+	shell_.set_host(this);
+	shell_.set_sink([this](const menu::MenuEvent &event) { on_event_(event); });
 }
 
 MenuTry::~MenuTry() {
-	runtime_.set_sink(nullptr);
+	shell_.set_sink(nullptr);
+	shell_.set_host(nullptr);
 	assets_.clear(frame_.compiler(), decoder_);
 }
 
 bool MenuTry::configure_(const std::string &screen, menu::MenuFrameCompiler &compiler) {
-	const mnu::Document *document = image_.get();
+	const mnu::Document *document = shell_.runtime().document();
 	const mnu::Screen *found = !document ? nullptr : screen.empty() ? document->first_screen()
 	                                                                : document->find_screen(screen);
 	screen_ = found;
@@ -120,13 +118,21 @@ bool MenuTry::configure_(const std::string &screen, menu::MenuFrameCompiler &com
 	return true;
 }
 
-std::shared_ptr<const mnu::Document> MenuTry::menu_(const std::string &file) {
-	Held &held = menus_[strutil::to_lower(file)];
-	if (!held.read) {
-		held.read = true;
-		held.image = source_ && source_->menu ? source_->menu(file) : nullptr;
-	}
-	return held.image;
+std::shared_ptr<const mnu::Document> MenuTry::read_menu(const std::string &file) {
+	menus_read_.insert(strutil::to_lower(file));
+	return source_ && source_->menu ? source_->menu(file) : nullptr;
+}
+
+std::vector<menu::MissionChoice> MenuTry::missions() {
+	return source_ && source_->missions ? source_->missions() : std::vector<menu::MissionChoice>();
+}
+
+std::vector<ExpansionRecord> MenuTry::expansions() {
+	return source_ && source_->expansions ? source_->expansions() : std::vector<ExpansionRecord>();
+}
+
+std::string MenuTry::expansion() {
+	return source_ ? source_->expansion : std::string();
 }
 
 bool MenuTry::start(const MenuTrySource &source, const std::string &file, const std::string &screen,
@@ -134,76 +140,55 @@ bool MenuTry::start(const MenuTrySource &source, const std::string &file, const 
 	source_ = &source;
 	start_file_ = file;
 	start_screen_ = screen;
-	in_mission_ = menu::is_mission_menu_file(file);
 	breadcrumb_.clear();
 	outcomes_.clear();
 	settings_.clear();
 	sounds_.clear();
 	profile_ = playersav::ProfileRecord{};
 	profile_.bindings = profile::default_binding_table();
-	runtime_.screen_history().clear();
-	runtime_.set_version_line(source.version_line);
-	started_ = open_(file, screen);
-	if (!started_) error = "The game would show nothing of " + file + (screen.empty() ? "" : " at " + screen) + ".";
+	// The menu the game would show there: a mission's own menu file runs over a mission.
+	shell_.set_menu_files(file, file);
+	shell_.set_in_game(menu::is_mission_menu_file(file));
+	(void)shell_.flow().take_expansion_reload();
+	shell_.runtime().screen_history().clear();
+	shell_.runtime().set_version_line(source.version_line);
+	started_ = shell_.open_menu(file, screen);
+	bindings_revision_ = shell_.options().bindings().revision();
+	if (!started_) {
+		error = "The game would show nothing of " + file + (screen.empty() ? "" : " at " + screen) + ".";
+		outcomes_.clear();
+	}
 	++serial_;
 	source_ = nullptr;
 	return started_;
 }
 
 bool MenuTry::reset(const MenuTrySource &source, std::string &error) {
-	menus_.clear();
+	shell_.forget_menus();
+	menus_read_.clear();
 	return start(source, start_file_, start_screen_, error);
 }
 
 void MenuTry::reload(const MenuTrySource &source) {
 	if (!started_) return;
 	source_ = &source;
-	menus_.clear();
-	const std::string file = file_;
-	const std::string screen = runtime_.current_screen();
+	shell_.forget_menus();
+	menus_read_.clear();
+	menu::MenuRuntime &runtime = shell_.runtime();
+	const std::string file = shell_.file();
+	const std::string screen = runtime.current_screen();
 	// The file's own back stack goes with the document it is opened anew over: its screens join the history
 	// across files, which holds one history for every file as the game's scene does.
-	for (const std::string &held : runtime_.own_history()) runtime_.screen_history().push(file, held);
-	if (!open_(file, screen)) open_(start_file_, start_screen_);
+	for (const std::string &held : runtime.own_history()) runtime.screen_history().push(file, held);
+	if (!shell_.open_menu(file, screen)) shell_.open_menu(start_file_, start_screen_);
 	++serial_;
 	source_ = nullptr;
-}
-
-bool MenuTry::open_(const std::string &file, const std::string &screen) {
-	std::shared_ptr<const mnu::Document> image = menu_(file);
-	if (!image || image->screens.empty()) return false;
-	// The shell's open (menu_shell.gd open_menu): the selected mission cleared, the document opened, its
-	// Options surface prepared, its commands bound and its lists filled.
-	flow_.clear_selected_mission();
-	image_ = std::move(image);
-	file_ = file;
-	if (!runtime_.open_document(image_.get(), file, screen)) return false;
-	prepare_();
-	return true;
-}
-
-void MenuTry::prepare_() {
-	options_.prepare(runtime_, &profile_);
-	options_.apply_policy(runtime_);
-	options_.seed_profile(runtime_, &profile_);
-	commands_.wire(runtime_, in_mission_);
-	flow_.clear_rows();
-	if (!commands_.mission_lists().empty() && source_ && source_->missions) {
-		const std::vector<menu::MissionChoice> rows = source_->missions();
-		for (const int id : commands_.mission_lists()) flow_.seed_missions(runtime_, id, rows);
-	}
-	// The Mods lists: the base game's row, then the game folder's expansions, the one running highlighted.
-	if (!commands_.mod_lists().empty() && source_) {
-		expansion_ = source_->expansion;
-		mods_.set_records(source_->expansions ? source_->expansions() : std::vector<ExpansionRecord>());
-		for (const int id : commands_.mod_lists()) mods_.populate(runtime_, id, expansion_);
-	}
 }
 
 void MenuTry::mouse(const MenuTrySource &source, float x, float y, bool down, bool double_click) {
 	if (!started_) return;
 	source_ = &source;
-	runtime_.process_mouse(x, y, down, double_click);
+	shell_.runtime().process_mouse(x, y, down, double_click);
 	source_ = nullptr;
 }
 
@@ -216,7 +201,7 @@ void MenuTry::click(const MenuTrySource &source, float x, float y) {
 bool MenuTry::wheel(const MenuTrySource &source, float x, float y, int steps) {
 	if (!started_) return false;
 	source_ = &source;
-	const bool taken = runtime_.process_wheel(x, y, steps);
+	const bool taken = shell_.runtime().process_wheel(x, y, steps);
 	source_ = nullptr;
 	return taken;
 }
@@ -224,20 +209,18 @@ bool MenuTry::wheel(const MenuTrySource &source, float x, float y, int steps) {
 bool MenuTry::key(const MenuTrySource &source, const menu::MenuKeyInput &key) {
 	if (!started_) return false;
 	source_ = &source;
-	// The Options remap capture takes the key while it is armed (options_menu_controller.gd's
-	// consume_input before the runtime's keys) [orig: the capture pump @0x55c67c].
+	// The Options remap capture takes the key while it is armed (the shell's input before the runtime's
+	// keys) [orig: the capture pump @0x55c67c].
 	menu::RemapInput remap;
 	remap.kind = menu::RemapInput::Kind::Key;
 	remap.pressed = true;
 	remap.escape = key.vk == 0x1B;
 	remap.shift = key.shift;
 	remap.vk = key.vk;
-	const uint32_t revision = options_.bindings().revision();
-	const int effects = options_.consume(runtime_, remap);
+	const int effects = shell_.consume_options_input(remap);
 	bool taken = (effects & menu::OptionsScreen::Consumed) != 0;
-	if (options_.bindings().revision() != revision)
-		setting_("CONTROL_MAPPING", "binding", "changed (the sandbox's bindings: nothing saved)");
-	if (!taken) taken = runtime_.handle_key(key);
+	note_bindings_();
+	if (!taken) taken = shell_.runtime().handle_key(key);
 	source_ = nullptr;
 	return taken;
 }
@@ -251,29 +234,15 @@ std::vector<MenuTrySound> MenuTry::take_sounds() {
 int MenuTry::hovered() const {
 	const menu::MenuFrameState &state = frame_.state();
 	for (const menu::MenuWidgetState &row : state.widgets)
-		if (row.hovered || row.pressed) return runtime_.id_at_index(row.index);
+		if (row.hovered || row.pressed) return shell_.runtime().id_at_index(row.index);
 	return -1;
 }
 
 FileStamps MenuTry::reads(const FileSource &files) const {
 	FileStamps out;
 	for (const menu::MenuDependency &dependency : assets_.dependencies()) out.note(dependency.name, dependency.stamp);
-	for (const auto &held : menus_)
-		if (held.second.read) out.note(held.first, files.stamp(held.first));
+	for (const std::string &held : menus_read_) out.note(held, files.stamp(held));
 	return out;
-}
-
-bool MenuTry::pop_history_() {
-	// In a mission the history's top is the mark on the screen the mission was started from, which pops
-	// nothing (D-MNU-28); a row whose file does not load changes nothing.
-	menu::ScreenHistoryRow row;
-	if (!runtime_.screen_history().pop(&row)) return false;
-	const std::string file = row.file.empty() ? start_file_ : row.file;
-	if (!open_(file, row.screen)) {
-		outcome_("missing_menu", std::string(), "the game would not find " + file + ", so the screen would stay");
-		return false;
-	}
-	return true;
 }
 
 void MenuTry::outcome_(const std::string &kind, const std::string &control, const std::string &words) {
@@ -281,8 +250,8 @@ void MenuTry::outcome_(const std::string &kind, const std::string &control, cons
 	outcome.seq = ++outcome_seq_;
 	outcome.kind = kind;
 	outcome.control = control;
-	outcome.file = file_;
-	outcome.screen = runtime_.current_screen();
+	outcome.file = shell_.file();
+	outcome.screen = shell_.runtime().current_screen();
 	outcome.words = words;
 	outcomes_.push_back(std::move(outcome));
 	if (outcomes_.size() > kOutcomesKept) outcomes_.erase(outcomes_.begin(), outcomes_.end() - kOutcomesKept);
@@ -290,113 +259,145 @@ void MenuTry::outcome_(const std::string &kind, const std::string &control, cons
 }
 
 void MenuTry::setting_(const std::string &control, const std::string &kind, const std::string &value) {
-	const std::string screen = runtime_.current_screen();
+	const std::string &file = shell_.file();
+	const std::string screen = shell_.runtime().current_screen();
 	for (MenuTrySetting &held : settings_)
-		if (held.file == file_ && held.screen == screen && strutil::iequals(held.control, control)) {
+		if (held.file == file && held.screen == screen && strutil::iequals(held.control, control)) {
 			held.kind = kind;
 			held.value = value;
 			++serial_;
 			return;
 		}
-	settings_.push_back({ file_, screen, control, kind, value });
+	settings_.push_back({ file, screen, control, kind, value });
 	++serial_;
 }
 
-void MenuTry::on_command_(menu::MenuCommand command, const std::string &control) {
-	const std::string words = menu::menu_command_words(command);
-	switch (command) {
-	case menu::MenuCommand::None: return;
-	case menu::MenuCommand::StartMission: {
-		// The launch reads the list's selection alone: with none, nothing starts (menu_shell.gd
-		// _on_start_control; the retail ACCEPT is disabled until a pick, MenuFlow).
-		const std::string &mission = flow_.selected_mission();
-		if (mission.empty()) {
-			outcome_("nothing", control, "no mission is selected, so the game would start nothing");
-			return;
-		}
-		outcome_(menu::menu_command_token(command), control, "the game would start " + mission);
+// The Options screen's bindings changed (a remap, DEFAULTS, CLEAR_KEY): the sandbox's, nothing saved.
+void MenuTry::note_bindings_() {
+	const uint32_t revision = shell_.options().bindings().revision();
+	if (revision == bindings_revision_) return;
+	bindings_revision_ = revision;
+	setting_("CONTROL_MAPPING", "binding", "changed (the sandbox's bindings: nothing saved)");
+}
+
+// --- what the game would do, said ----------------------------------------------------------------
+
+void MenuTry::leave(menu::ShellExit exit, menu::MenuCommand command, const std::string &control,
+		const std::string &text) {
+	std::string words;
+	switch (exit) {
+	case menu::ShellExit::StartMission:
+		words = "the game would start " + text;
+		break;
+	case menu::ShellExit::Resume:
+		words = "the game would resume the mission";
+		break;
+	case menu::ShellExit::Exit:
+		words = command == menu::MenuCommand::Back ? std::string("the game would quit to the desktop")
+		                                           : "the game would " + std::string(menu::menu_command_words(command));
+		break;
+	default:
+		words = "the game would " + std::string(menu::menu_command_words(command));
+		break;
+	}
+	outcome_(menu::menu_command_token(command), control, words);
+}
+
+bool MenuTry::launch_update(const std::string &control) {
+	outcome_(menu::menu_command_token(menu::MenuCommand::Update), control,
+			"the game would " + std::string(menu::menu_command_words(menu::MenuCommand::Update)));
+	return false;
+}
+
+void MenuTry::open_browser(const std::string &url) {
+	outcome_("url", std::string(), "the game would open " + url + " in the web browser");
+}
+
+void MenuTry::fetch_page(const std::string &url) {
+	outcome_("url", std::string(), "the game would fetch " + url + " in its own page view (the NovaWorld page path)");
+}
+
+void MenuTry::service(const menu::MenuEvent &event) {
+	const menu::MenuRuntime &runtime = shell_.runtime();
+	if (event.kind == Kind::FilterRequested) {
+		outcome_("service", runtime.widget_name_of(event.id), "the game would filter the NovaWorld game list by " + event.text);
 		return;
 	}
-	case menu::MenuCommand::ApplyExpansion: {
-		// ACCEPT's pick of the Mods list: the game running takes nothing; another switches the game for the
-		// run, the menu booted anew at its main menu (menu_flow.h request_expansion, D-MNU-31).
-		if (commands_.mod_lists().empty()) return;
-		const int list = commands_.mod_lists().front();
-		const std::string pick = mods_.pick(runtime_, list);
-		const int row = runtime_.selected_row(list);
-		const std::string title = row >= 0 ? runtime_.item_text(list, row) : pick;
-		if (strutil::iequals(pick, expansion_)) {
+	outcome_("service", event.id >= 0 ? runtime.widget_name_of(event.id) : std::string(),
+			"the game would " + service_words(event.text, event.text2, event.text3));
+}
+
+void MenuTry::delegate_command(menu::MenuCommand command, const std::string &control) {
+	outcome_(menu::menu_command_token(command), control,
+			"the game would " + std::string(menu::menu_command_words(command)));
+}
+
+void MenuTry::notice(menu::ShellNotice notice, const std::string &control, const std::string &text,
+		const std::string &text2) {
+	switch (notice) {
+	case menu::ShellNotice::MenuMissing:
+		outcome_("missing_menu", control, "the game would not find " + text + ", so the screen would stay");
+		return;
+	case menu::ShellNotice::ScreenMissing:
+		outcome_("missing_screen", control,
+				"the game would find no screen " + text2 + " in " + text + ", so the screen would stay");
+		return;
+	case menu::ShellNotice::NothingSelected:
+		outcome_("nothing", control, "no mission is selected, so the game would start nothing");
+		return;
+	case menu::ShellNotice::ExpansionUnchanged:
+	case menu::ShellNotice::ExpansionQueued: {
+		// The pick's row as the list shows it.
+		const menu::MenuRuntime &runtime = shell_.runtime();
+		std::string title = text;
+		if (!shell_.commands().mod_lists().empty()) {
+			const int list = shell_.commands().mod_lists().front();
+			const int row = runtime.selected_row(list);
+			if (row >= 0) title = runtime.item_text(list, row);
+		}
+		if (notice == menu::ShellNotice::ExpansionUnchanged) {
 			outcome_("nothing", control, "the game would take nothing: " + title + " is the game running");
 			return;
 		}
-		const std::string where = pick.empty() ? std::string("the base game") : "expansion\\" + pick;
-		outcome_(menu::menu_command_token(command), control, "the game would switch to " + title + " (" + where +
-				") for this run, reloading everything and showing its main menu");
+		const std::string where = text.empty() ? std::string("the base game") : "expansion\\" + text;
+		outcome_(menu::menu_command_token(menu::MenuCommand::ApplyExpansion), control,
+				"the game would switch to " + title + " (" + where +
+						") for this run, reloading everything and showing its main menu");
 		return;
 	}
-	case menu::MenuCommand::Back:
-		// The history across files first; then in a mission the resume, else the quit.
-		if (pop_history_()) return;
-		outcome_(menu::menu_command_token(command), control,
-				in_mission_ ? "the game would resume the mission" : "the game would quit to the desktop");
-		return;
-	default:
-		outcome_(menu::menu_command_token(command), control, "the game would " + words);
+	case menu::ShellNotice::ExpansionNeedsPackedInstall:
+	case menu::ShellNotice::UpdateNotStarted:
 		return;
 	}
 }
 
+// The in-game dialog's OK and Cancel keep or put back what it holds (the sandbox keeps what it holds
+// either way).
+void MenuTry::options_effects(int effects, const std::string &control) {
+	if (effects & menu::OptionsScreen::CommitPreview)
+		outcome_("save_settings", control, "the game would keep the settings the dialog holds");
+	if (effects & menu::OptionsScreen::RestorePreview)
+		outcome_("restore_settings", control, "the game would put back the settings the dialog opened with");
+}
+
+// The runtime's events after the shell ran them: the breadcrumb, the sandbox's settings and the sounds.
 void MenuTry::on_event_(const menu::MenuEvent &event) {
+	const menu::MenuRuntime &runtime = shell_.runtime();
+	note_bindings_();
 	switch (event.kind) {
 	case Kind::ScreenChanged: {
-		// A screen change drops an armed remap (options_menu_controller.gd _on_screen_changed).
-		options_.end_remap(runtime_, true);
-		if (breadcrumb_.empty() || breadcrumb_.back().file != file_ || breadcrumb_.back().screen != event.text)
-			breadcrumb_.push_back({ file_, event.text });
+		const std::string &file = shell_.file();
+		if (breadcrumb_.empty() || breadcrumb_.back().file != file || breadcrumb_.back().screen != event.text)
+			breadcrumb_.push_back({ file, event.text });
 		if (breadcrumb_.size() > kBreadcrumbKept)
 			breadcrumb_.erase(breadcrumb_.begin(), breadcrumb_.end() - kBreadcrumbKept);
 		++serial_;
 		return;
 	}
-	case Kind::MenuRequested: {
-		// A jump to another menu (menu_shell.gd _on_menu_requested): a menu the game cannot read, or a
-		// target screen it lacks, changes nothing; else it opens there and the screen it leaves is pushed.
-		std::shared_ptr<const mnu::Document> image = menu_(event.text);
-		if (!image) {
-			outcome_("missing_menu", std::string(),
-					"the game would not find " + event.text + ", so the screen would stay");
-			return;
-		}
-		if (!event.text2.empty() && !image->find_screen(event.text2)) {
-			outcome_("missing_screen", std::string(),
-					"the game would find no screen " + event.text2 + " in " + event.text + ", so the screen would stay");
-			return;
-		}
-		const std::string from_file = file_;
-		const std::string from_screen = runtime_.current_screen();
-		if (open_(event.text, event.text2)) runtime_.screen_history().push(from_file, from_screen);
-		return;
-	}
-	case Kind::PopRequested:
-		pop_history_();
-		return;
-	case Kind::UrlRequested:
-		outcome_("url", std::string(),
-				event.flag ? "the game would open " + event.text + " in the web browser"
-				           : "the game would fetch " + event.text + " in its own page view (the NovaWorld page path)");
-		return;
-	case Kind::ServiceRequested:
-		outcome_("service", event.id >= 0 ? runtime_.widget_name_of(event.id) : std::string(),
-				"the game would " + service_words(event.text, event.text2, event.text3));
-		return;
-	case Kind::FilterRequested:
-		outcome_("service", runtime_.widget_name_of(event.id),
-				"the game would filter the NovaWorld game list by " + event.text);
-		return;
 	case Kind::Sound: {
 		MenuTrySound sound;
-		sound.file = file_;
-		sound.screen = runtime_.current_screen();
+		sound.file = shell_.file();
+		sound.screen = runtime.current_screen();
 		sound.id = event.id;
 		sound.window = event.text3;
 		sound.state = event.value;
@@ -412,59 +413,18 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 		else if (event.text2 == "scroll")
 			value = std::to_string(event.value);
 		setting_(event.text, event.text2, value);
-		// A pick of a mission list selects its mission, of a Mods list describes its game (menu_shell.gd
-		// _on_widget_value_changed).
-		const int id = runtime_.widget_id(event.text);
-		if (event.text2 == "list" &&
-				std::find(commands_.mission_lists().begin(), commands_.mission_lists().end(), id) !=
-						commands_.mission_lists().end())
-			flow_.select_mission(runtime_, id, event.value, event.text3);
-		else if (event.text2 == "list" &&
-				std::find(commands_.mod_lists().begin(), commands_.mod_lists().end(), id) != commands_.mod_lists().end())
-			mods_.select(runtime_, id, event.value);
 		return;
 	}
 	case Kind::EditCommitted:
-		setting_(event.text, "edit", runtime_.get_widget_text(event.id));
+		setting_(event.text, "edit", runtime.get_widget_text(event.id));
 		return;
 	case Kind::WidgetActivated: {
-		const int kind = runtime_.widget_kind_of(event.id);
-		if (kind == kCheckBox) setting_(event.text, "checkbox", runtime_.is_widget_checked(event.id) ? "checked" : "unchecked");
+		const int kind = runtime.widget_kind_of(event.id);
+		if (kind == kCheckBox) setting_(event.text, "checkbox", runtime.is_widget_checked(event.id) ? "checked" : "unchecked");
 		else if (kind == kRadio || kind == kRadioEdit) setting_(event.text, "radio", "checked");
-		// The Options surface's own controls (the device radios, DEFAULTS, CLEAR_KEY, its ACCEPT), over the
-		// sandbox's profile record.
-		const std::string screen = runtime_.current_screen();
-		const uint32_t revision = options_.bindings().revision();
-		const int effects = options_.activate(runtime_, &profile_, event.id);
-		if (options_.bindings().revision() != revision)
-			setting_("CONTROL_MAPPING", "binding", "changed (the sandbox's bindings: nothing saved)");
-		// The in-game dialog's OK and Cancel keep or put back what it holds, then show the menu again
-		// (options_menu_controller.gd; the sandbox keeps what it holds either way).
-		if (effects & menu::OptionsScreen::CommitPreview)
-			outcome_("save_settings", event.text, "the game would keep the settings the dialog holds");
-		if (effects & menu::OptionsScreen::RestorePreview)
-			outcome_("restore_settings", event.text, "the game would put back the settings the dialog opened with");
-		if (effects & (menu::OptionsScreen::CommitPreview | menu::OptionsScreen::RestorePreview))
-			menu::OptionsScreen::show_ingame_main(runtime_);
-		on_command_(commands_.command_of(screen, event.text), event.text);
 		return;
 	}
-	case Kind::ListActivated: {
-		// A double click: a mission list's starts its mission, the controls table's arms the remap.
-		const std::string name = runtime_.widget_name_of(event.id);
-		if (std::find(commands_.mission_lists().begin(), commands_.mission_lists().end(), event.id) !=
-				commands_.mission_lists().end()) {
-			flow_.activate_mission(event.id, event.value);
-			on_command_(menu::MenuCommand::StartMission, name);
-			return;
-		}
-		options_.arm(runtime_, event.id, event.value);
-		return;
-	}
-	case Kind::MusicVar:
-	case Kind::HoverChanged:
-	case Kind::ShownChanged:
-	case Kind::TableCellClicked:
+	default:
 		return;
 	}
 }

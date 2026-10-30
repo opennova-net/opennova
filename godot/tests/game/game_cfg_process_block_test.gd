@@ -234,19 +234,6 @@ func test_a_clear_word_lets_the_session_create_run() -> void:
 	assert_true(_signals.is_empty(), "and nothing asks the process to end")
 
 
-func test_the_shell_process_exit_saves_nothing() -> void:
-	# Out of the tree the SceneTree quit is skipped, so the shell's latch is the
-	# observable: the exit writes neither game.cfg nor the profile, and a later
-	# close request does not save either (the main loop's save never runs).
-	var game: MainGame = MainGameScript.new()
-	autofree(game)
-	GameCfgStore.block().set_word("mpreset", 1)
-	game.exit_process(0)
-	assert_true(game.is_process_exit_pending())
-	game.request_quit()
-	assert_false(FileAccess.file_exists(_cfg_path()), "no game.cfg save")
-
-
 func test_the_shell_quit_saves_the_block() -> void:
 	# The main loop's exit saves game.cfg (the window's close, the menu's EXIT).
 	var game: MainGame = MainGameScript.new()

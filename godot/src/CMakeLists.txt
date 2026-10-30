@@ -58,6 +58,7 @@ add_library(opennova_bindings OBJECT
     network/novaworld_client.cpp
     network/host_session_options.cpp
     network/novaworld_server_row.cpp
+    network/novaworld_service_target.cpp
     network/novaworld_gate_info.cpp
     network/novaworld_server_browser.cpp
     network/ping_sweep_worker.cpp
@@ -71,6 +72,7 @@ add_library(opennova_bindings OBJECT
     network/net_session_policy.cpp
     network/connection_error.cpp
     network/join_screen_status.cpp
+    network/join_flow.cpp
     network/join_target.cpp
     terrain/terrain.cpp
     terrain/terrain_surface_inputs.cpp
@@ -200,6 +202,7 @@ add_library(opennova_bindings OBJECT
     hud/hud_map_pass_renderer.cpp
     hud/map_view_window.cpp
     hud/command_map_screen.cpp
+    hud/command_map_controller.cpp
     hud/hud_toggles.cpp
     hud/hud_chat_entry.cpp
     hud/end_round_transition.cpp
@@ -305,11 +308,17 @@ add_library(opennova_bindings OBJECT
     mnu/menu_frame.cpp
     mnu/menu_audio.cpp
     mnu/menu_driver.cpp
-    mnu/player_info_loadout.cpp
-    mnu/armory_loadout.cpp
+    mnu/death_screen.cpp
+    mnu/end_round_screen.cpp
+    mnu/player_info_screen.cpp
+    mnu/armory_screen.cpp
+    mnu/lan_multiplayer_menu.cpp
+    mnu/pre_game_controller.cpp
+    mnu/vehicle_menu_controller.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp
+    frontend/game_frontend.cpp
     player/game_config_block.cpp
     player/gameplay_camera.cpp
     player/local_player_presenter.cpp
@@ -320,8 +329,6 @@ add_library(opennova_bindings OBJECT
     player/player_input_router.cpp
     player/special_key_outcome.cpp
     player/player_move_intent.cpp
-    player/player_info_kit_restore.cpp
-    player/player_info_character_state.cpp
     player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp

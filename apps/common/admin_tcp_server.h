@@ -7,7 +7,7 @@
 // [orig: CAdminServer_Listen @0x406E00 (INADDR_ANY, non-blocking, backlog 5);
 //  CAdminServer_ProcessFrame @0x406F50]
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <net/admin/admin_server.h>
 

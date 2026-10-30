@@ -17,6 +17,12 @@ order" checklist is the whole bring-up).
   Docker). Its HTTP layer also needs **hiredis** and OpenSSL (`libhiredis-dev libssl-dev`)
   and a Redis server, Valkey 8 (`scripts/dev_redis.sh` runs one in Docker).
 - **Godot 4.6.1** (only for Godot work). Set `GODOT_BIN` to the binary, or drop it in `.godot-bin/`.
+- On Linux, the **X11 or Wayland development headers** for `opennova-game`'s SDL3 (the
+  packages [SDL's Linux README](https://wiki.libsdl.org/SDL3/README-linux#build-dependencies) lists;
+  CI's `test-linux` installs `libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev
+  libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev libegl-dev libasound2-dev
+  libpulse-dev libdrm-dev libgbm-dev libudev-dev libdbus-1-dev`). A build that needs no game
+  window configures with `-DOPENNOVA_GAME=OFF`.
 - **Docker** (Docker Desktop on Windows/macOS, Compose v2.20+) to run the NovaWorld servers
   locally (`scripts/dev_stack.sh`).
 - **Git LFS** (binary test fixtures are LFS objects).
@@ -37,7 +43,8 @@ The GUT test plugin is copied out of the `third_party/gut` submodule into
 downloads the pinned imgui-godot release into `godot/addons/imgui-godot/`
 (gitignored; the Dear ImGui bridge for the in-engine dev tools, ADR 0039); the
 build and test scripts run it for you. `godot-cpp` lives at `third_party/godot-cpp` and is
-pulled in by the submodule update above.
+pulled in by the submodule update above, as is SDL3 (`third_party/sdl3`, a shallow clone of
+one release tag), which the root build compiles static for `opennova-game`.
 
 ## Build the C++ core and run the tests
 
@@ -235,6 +242,23 @@ exported OpenNova content or an existing retail install; add `--loose-root /d`
 for an extracted loose tree. Select the product with `/game` and use `--no-update`
 for development runs. The repository and downloads contain no retail game data.
 See [README.md](README.md) for packaged launch examples.
+
+### The SDL3 game (opennova-game)
+
+`opennova-game` (`apps/game`, ADR 0077 d9) is the game over the SDL3 backend
+(`backend/sdl3`), which replaces the Godot build at R8. Until the engine frontend lands it
+boots the one mission its command line names, with no menus, no HUD and a cleared window
+(rendering is R5), and runs it as a single player, the keyboard and mouse driving the local
+player through the default bindings:
+
+```bash
+# build/apps/game/Release/opennova-game.exe with the Visual Studio generator
+build/apps/game/opennova-game --resource-dir <game dir> --mission <file.bms> [/game jo]
+build/apps/game/opennova-game ... --frames 120 --headless   # no screen, no sound device
+```
+
+`--headless` sets SDL's dummy video and audio drivers and creates no GPU device; ctest's
+`opennova_game_smoke` runs it so on the minted mission set.
 
 ## Run the NovaWorld servers locally
 

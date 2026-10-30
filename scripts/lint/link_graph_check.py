@@ -40,6 +40,12 @@ TARGET level are the two structural seams:
   3. Required edges: each program that installs the games at its start
      (games::install(), REQUIRED_GAMES) links opennova_games.
 
+  4. SDL3 containment (ADR 0077 d9): the SDL3 platform backend
+     opennova_backend_sdl3 (backend/sdl3) is the ONLY library that links
+     SDL3 (third_party/sdl3's static SDL3::SDL3-static); a target reaching it
+     links the backend directly (opennova-game, apps/game). No engine group,
+     no game's code, the editor's core and the service never link the backend.
+
 PUBLIC vs PRIVATE keywords are deliberately not consulted: a STATIC library's
 PRIVATE deps still propagate onto every downstream link line (as $<LINK_ONLY>
 interface entries), so every target_link_libraries edge is a real closure edge.
@@ -81,6 +87,7 @@ SCAN_ROOTS = (
     "CMakeLists.txt",
     "engine",
     "games",
+    "backend",
     "apps",
     "tests",
     "tools",
@@ -105,11 +112,19 @@ REDIS_RULE_REASON = (
     "hiredis containment: only opennova_novaworld_web_core links opennova_redis; "
     "consumers must link web's core directly"
 )
+SDL3_BACKEND_TARGET = "opennova_backend_sdl3"
+SDL3_RULE_REASON = (
+    "SDL3 containment (ADR 0077 d9): only opennova_backend_sdl3 links SDL3; "
+    "consumers must link the backend directly"
+)
 # (leaf, its one owner, reason): every target reaching the leaf is the owner or
-# links the owner directly.
+# links the owner directly. SDL3's static library is SDL3::SDL3-static to a
+# consumer and SDL3-static in a graphviz dump.
 CONTAINED = [
     (PQ_TARGET, SERVICE_TARGET, PQ_RULE_REASON),
     (REDIS_TARGET, WEB_CORE_TARGET, REDIS_RULE_REASON),
+    ("SDL3::SDL3-static", SDL3_BACKEND_TARGET, SDL3_RULE_REASON),
+    ("SDL3-static", SDL3_BACKEND_TARGET, SDL3_RULE_REASON),
 ]
 # The NovaWorld service's layered libraries and programs (apps/novaworld_common,
 # apps/novaworld_<program>).
@@ -218,6 +233,17 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         ["opennova_editor", SERVICE_TARGET],
         set(),
     ),
+    (
+        "a platform backend sits ABOVE the engine (ADR 0077 d9): no engine group target, no "
+        "game's code and not the service links opennova_backend_sdl3 or SDL3; the app shell "
+        "(opennova-game) does",
+        ["opennova_formats", "opennova_base", "opennova_net", "opennova_runtime",
+         "opennova_editor", GAMES_TARGET, SERVICE_TARGET],
+        [SDL3_BACKEND_TARGET, "SDL3::SDL3-static", "SDL3-static"],
+        # SDL3's own target is defined in third_party/sdl3's CMake, which the files walk
+        # does not read.
+        {"SDL3::SDL3-static", "SDL3-static"},
+    ),
 ]
 
 # Rule 3: the programs that call games::install() at their start (include_graph_check.py's
@@ -225,12 +251,16 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
 # the command-line programs and the NovaWorld service's programs.
 REQUIRED_GAMES: list[str] = [
     "opennova", "opennova_editor_gdext",
-    "opennova_serve", "opennova_project", "opennova_wire", "opennova_parity",
+    "opennova_game", "opennova_serve", "opennova_project", "opennova_wire", "opennova_parity",
     "opennova_lan_probe", "opennova_extract", "opennova_update",
     NW + "gate", NW + "lobby", NW + "web", NW + "data", NW + "worker", NW + "fleet",
 ]
 # Defined in the godot/src CMake root alone (never in the repo-root build's graphviz dump).
 REQUIRED_GODOT = {"opennova", "opennova_editor_gdext"}
+# Defined only when the build turns OPENNOVA_GAME on (the repo root's option, on by default;
+# the server images and the package tools turn it off): a graphviz dump of a tree configured
+# without it lacks them. The files walk always sees them.
+GAME_GATED = {"opennova_game", SDL3_BACKEND_TARGET}
 
 LINK_KEYWORDS = {
     "PUBLIC", "PRIVATE", "INTERFACE",
@@ -434,7 +464,7 @@ def main() -> int:
             # A renamed/deleted target silently vacates its rule — surface
             # that, except for targets that legitimately live in the other
             # CMake root / behind a build option.
-            gated = name in SERVICE_GATED and source != "files"
+            gated = (name in SERVICE_GATED or name in GAME_GATED) and source != "files"
             if name not in known and name not in optional and not gated and name not in warned:
                 warned.add(name)
                 print(f"[linkgraph] WARNING: rule target '{name}' not in the "
@@ -452,7 +482,8 @@ def main() -> int:
     violations.extend(check_containment(edges))
 
     for target in REQUIRED_GAMES:
-        gated = (target in SERVICE_GATED or target in REQUIRED_GODOT) and source != "files"
+        gated = (target in SERVICE_GATED or target in REQUIRED_GODOT or
+                 target in GAME_GATED) and source != "files"
         if target not in known:
             if not gated and target not in warned:
                 warned.add(target)

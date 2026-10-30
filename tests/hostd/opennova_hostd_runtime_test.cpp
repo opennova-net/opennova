@@ -32,7 +32,7 @@
 #include "nft_table.h"
 #include "process_runtime.h"
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include "common/http_reply_server.h"
 #include "common/temp_dir.h"

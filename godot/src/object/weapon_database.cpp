@@ -31,9 +31,6 @@ static_assert(WeaponDatabase::ENCUMBRANCE_LIGHT == DEF_ENCUMBRANCE_LIGHT &&
               WeaponDatabase::ENCUMBRANCE_NORMAL == DEF_ENCUMBRANCE_NORMAL &&
               WeaponDatabase::ENCUMBRANCE_HEAVY == DEF_ENCUMBRANCE_HEAVY,
               "ENCUMBRANCE_* drifted from def.h");
-static_assert(WeaponDatabase::CLASS_ALLOW_ALL ==
-                      static_cast<int>(opennova::world::kClassAllowMaskAll),
-              "CLASS_ALLOW_ALL drifted from world/player_loadout.h");
 static_assert(WeaponDatabase::CLASS_MASK_ALL ==
                       opennova::world::kClassFilterMaskAll,
               "CLASS_MASK_ALL drifted from world/player_loadout.h");
@@ -63,12 +60,6 @@ void WeaponDatabase::_bind_methods() {
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("loadout_weight_line", "total", "menutxt", "gameui"),
 			&WeaponDatabase::loadout_weight_line);
-	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("armory_resolve_selected_class", "player_class", "class_allow_mask"),
-			&WeaponDatabase::armory_resolve_selected_class);
-	ClassDB::bind_static_method("WeaponDatabase",
-			D_METHOD("armory_class_catalog"),
-			&WeaponDatabase::armory_class_catalog);
 
 	BIND_CONSTANT(SLOT_ACCESSORY);
 	BIND_CONSTANT(SLOT_PRIMARY);
@@ -80,7 +71,6 @@ void WeaponDatabase::_bind_methods() {
 	BIND_CONSTANT(ENCUMBRANCE_HEAVY);
 	BIND_CONSTANT(CLIP_COUNT_DEF_DEFAULT);
 	BIND_CONSTANT(DEFAULT_VOICE_VALUE);
-	BIND_CONSTANT(CLASS_ALLOW_ALL);
 	BIND_CONSTANT(CLASS_MASK_ALL);
 }
 
@@ -222,44 +212,6 @@ String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringF
 
 static_assert(godot::WeaponDatabase::DEFAULT_VOICE_VALUE == opennova::menu::kDefaultVoiceValue,
 		"DEFAULT_VOICE_VALUE mirrors the engine's PLAYERVOICE default");
-
-Array WeaponDatabase::kit_entry_rows(const opennova::menu::PlayerInfoKitSelection &sel) const {
-	const opennova::menu::WeaponNameLookup name = [this](int32_t p_row) -> std::string {
-		const opennova::def::DefWeaponDef *w = row(p_row);
-		return w != nullptr ? std::string(w->weapon_name) : std::string();
-	};
-	Array out;
-	for (const opennova::playersav::KitEntry &e : opennova::menu::player_info_kit_entries(sel, name)) {
-		Dictionary d;
-		d["name"] = opennova::to_gd(e.name);
-		d["ammo_primary"] = e.ammo_primary;
-		d["ammo_secondary"] = e.ammo_secondary;
-		d["flags"] = e.flags;
-		out.push_back(d);
-	}
-	return out;
-}
-
-int WeaponDatabase::armory_resolve_selected_class(int p_player_class,
-		int p_class_allow_mask) {
-	return opennova::world::armory_resolve_selected_class(p_player_class,
-			static_cast<uint32_t>(p_class_allow_mask) & 0xFFFFu);
-}
-
-TypedArray<ArmoryClassRow> WeaponDatabase::armory_class_catalog() {
-	// The engine table (world/player_loadout.h kArmoryClassCatalog) is the
-	// one authored spin order; this only marshals rows.
-	TypedArray<ArmoryClassRow> rows;
-	for (int i = 0; i < opennova::world::kArmoryClassCount; ++i) {
-		const opennova::world::ArmoryClassCatalogEntry &entry =
-				opennova::world::kArmoryClassCatalog[i];
-		Ref<ArmoryClassRow> row;
-		row.instantiate();
-		row->assign(entry.class_value, entry.text_key);
-		rows.push_back(row);
-	}
-	return rows;
-}
 
 int WeaponDatabase::encumbrance_class(double weight) const {
 	return static_cast<int>(def_encumbrance_class(weight));

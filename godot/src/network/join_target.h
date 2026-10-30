@@ -7,11 +7,9 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include "network/udp_pump.h"
+#include "util/string_convert.h"
 
-#include <net/novaworld/proxy_rendezvous.h> // ProxyRendezvousConfig (the proxy-assisted join)
-#include <net/npwire/net_ports.h>
-#include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType
-#include <runtime/inmatch/server_flags.h>
+#include <runtime/inmatch/join_flow.h> // JoinTargetRecord (the record this wraps)
 
 namespace godot {
 
@@ -57,50 +55,32 @@ public:
 		ENTRY_PROMPT = 2,
 	};
 
-#define JOIN_TARGET_TEXT(m_name)                                       \
-	String get_##m_name() const { return m_name##_; }                  \
-	void set_##m_name(const String &p_value) { m_name##_ = p_value; }
+#define JOIN_TARGET_TEXT(m_name)                                                   	String get_##m_name() const { return opennova::to_gd(record_.m_name); }        	void set_##m_name(const String &p_value) { record_.m_name = opennova::to_std(p_value); }
 	JOIN_TARGET_TEXT(host_ip)
-	// The joiner's callsign; the shell fills its profile default when empty.
+	// The joiner's callsign; the dial fills its profile default when empty.
 	JOIN_TARGET_TEXT(player_name)
 	// Non-authoritative display hint; wire 0x7B/0x0B always owns the load.
 	JOIN_TARGET_TEXT(mission)
 	// Resource-dir override (dev/tests); empty = the persisted directory.
 	JOIN_TARGET_TEXT(dir)
-	// The game-session APPID join token the client recovers from the NWJoin
-	// .joi CK; a NovaWorld host validates it in ClientAuth (reject code 9).
-	// "0" = the LAN default.
 	JOIN_TARGET_TEXT(app_id)
-	// Browse-time DISPLAY HINT for the loading screen only, never session
-	// state: the authoritative value arrives post-auth in the 0x7B record.
 	JOIN_TARGET_TEXT(server_name)
 	JOIN_TARGET_TEXT(spectator_password)
 	JOIN_TARGET_TEXT(server_password)
 	JOIN_TARGET_TEXT(join_password)
-	// The host's expansion as the browse row advertised it (the 0x81 SUS2 a
-	// LAN or preflight row carries, the GSB Exp of a NovaWorld row; "" = base
-	// game). Meaningful only when `expansion_known`: the shell switches the
-	// mount to it BEFORE the dial so the join vars come from that expansion's
-	// profile, as retail switches before it connects.
 	JOIN_TARGET_TEXT(expansion)
 #undef JOIN_TARGET_TEXT
-	bool get_expansion_known() const { return expansion_known_; }
-	void set_expansion_known(bool p_value) { expansion_known_ = p_value; }
-	// The browse row's session record (a LAN row's 0x81 HK and SF): a join
-	// from it skips the 0x41 and enters the connect state, its 0x42 at the
-	// first pump past the start (JoinerConnection::DiscoveredSession,
-	// D-NET-850).
-	// `discovered_session` false = a target the shell enumerates first (D-NET-703).
-	bool get_discovered_session() const { return discovered_session_; }
-	void set_discovered_session(bool p_value) { discovered_session_ = p_value; }
-	int64_t get_session_host_key() const { return session_host_key_; }
-	void set_session_host_key(int64_t p_value) { session_host_key_ = p_value; }
-	bool get_session_password_required() const { return session_password_required_; }
-	void set_session_password_required(bool p_value) { session_password_required_ = p_value; }
-	// The browse's connection index the join goes on with (its 0x42's CI); 0 = none,
-	// the join taking a fresh one (JoinerConnection::DiscoveredSession::client_index).
-	int64_t get_session_client_index() const { return session_client_index_; }
-	void set_session_client_index(int64_t p_value) { session_client_index_ = p_value; }
+#define JOIN_TARGET_VALUE(m_type, m_name)                                  	m_type get_##m_name() const { return static_cast<m_type>(record_.m_name); } 	void set_##m_name(m_type p_value) { record_.m_name = p_value; }
+	JOIN_TARGET_VALUE(bool, expansion_known)
+	JOIN_TARGET_VALUE(bool, discovered_session)
+	JOIN_TARGET_VALUE(int64_t, session_host_key)
+	JOIN_TARGET_VALUE(bool, session_password_required)
+	JOIN_TARGET_VALUE(int64_t, session_client_index)
+	JOIN_TARGET_VALUE(int, port)
+	JOIN_TARGET_VALUE(int, game_type)
+	JOIN_TARGET_VALUE(bool, role_explicit)
+	JOIN_TARGET_VALUE(int, lobby_number)
+#undef JOIN_TARGET_VALUE
 
 	// The client's transport socket the join goes on with (D-NET-1019): the
 	// browse's that found the row (LanSession.take_transport), which on NovaWorld is
@@ -109,73 +89,51 @@ public:
 	Ref<UdpPump> get_transport() const { return transport_; }
 	void set_transport(const Ref<UdpPump> &p_pump) { transport_ = p_pump; }
 
-	int get_port() const { return port_; }
-	void set_port(int p_port) { port_ = p_port; }
-	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the
-	// NovaWorld NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates (codes
-	// 23/24/25/28). Empty = LAN.
-	PackedByteArray get_cd_cookie() const { return cd_cookie_; }
-	void set_cd_cookie(const PackedByteArray &p_cookie) { cd_cookie_ = p_cookie; }
-	// The NovaWorld gate's GLSVSSREQUEST (its wire bytes), which the 0x00 JOIN of a
-	// NovaWorld join carries last (D-NET-723). Empty = none (every LAN join).
-	PackedByteArray get_glsvss_request() const { return glsvss_request_; }
-	void set_glsvss_request(const PackedByteArray &p_value) { glsvss_request_ = p_value; }
-	// Numeric g_GameType hint; -1 = unknown before authentication.
-	int get_game_type() const { return game_type_; }
-	void set_game_type(int p_value) { game_type_ = p_value; }
+	PackedByteArray get_cd_cookie() const { return bytes(record_.cd_cookie); }
+	void set_cd_cookie(const PackedByteArray &p_cookie) { record_.cd_cookie = bytes(p_cookie); }
+	PackedByteArray get_glsvss_request() const { return bytes(record_.glsvss_request); }
+	void set_glsvss_request(const PackedByteArray &p_value) { record_.glsvss_request = bytes(p_value); }
 	// ServerHello P2; -1 = not discovered yet.
-	int get_server_flags() const { return server_flags_; }
-	void set_server_flags(int p_value) { server_flags_ = p_value; }
-	int get_network_type() const { return network_type_; }
+	int get_server_flags() const { return static_cast<int>(record_.server_flags); }
+	void set_server_flags(int p_value) { record_.server_flags = static_cast<int32_t>(p_value); }
+	int get_network_type() const { return static_cast<int>(record_.network_type); }
 	void set_network_type(int p_value) {
-		network_type_ = p_value == NETWORK_NOVAWORLD ? NETWORK_NOVAWORLD : NETWORK_LAN;
+		record_.network_type = p_value == NETWORK_NOVAWORLD ? opennova::inmatch::NetworkType::NovaWorld
+															 : opennova::inmatch::NetworkType::Lan;
 	}
-	int get_join_role() const { return join_role_; }
-	void set_join_role(int p_value) { join_role_ = p_value; }
-	bool get_role_explicit() const { return role_explicit_; }
-	void set_role_explicit(bool p_value) { role_explicit_ = p_value; }
+	int get_join_role() const { return static_cast<int>(record_.join_role); }
+	void set_join_role(int p_value) {
+		record_.join_role = p_value == ROLE_SPECTATOR ? opennova::inmatch::JoinRole::Spectator
+													  : opennova::inmatch::JoinRole::Player;
+	}
 
-	// The proxy-assisted NovaWorld join (the .joi NI/NP/BK next to NK) as the
-	// engine built it (proxy_rendezvous_from_join, net/novaworld/http_flow.h): the
-	// node the 48-byte rendezvous targets, the relay cookie and the NK relay
-	// endpoint. Disabled = no proxy (LAN, or a .joi without them). C++ only;
-	// NovaWorldClient.copy_join_proxy_to fills it.
-	const opennova::ProxyRendezvousConfig &get_join_proxy() const { return join_proxy_; }
-	void set_join_proxy(const opennova::ProxyRendezvousConfig &p_proxy) { join_proxy_ = p_proxy; }
-	bool has_join_proxy() const { return join_proxy_.enabled(); }
-	// The .joi LN lobby number; nonzero means the dial targets the LAN-discovered
-	// endpoint rather than the NK relay. 0 = the ordinary NovaWorld/LAN dial.
-	int get_lobby_number() const { return lobby_number_; }
-	void set_lobby_number(int p_value) { lobby_number_ = p_value; }
+	// The proxy-assisted NovaWorld join as the engine built it (proxy_rendezvous_from_join,
+	// net/novaworld/http_flow.h). C++ only; NovaWorldClient.copy_join_proxy_to fills it.
+	const opennova::ProxyRendezvousConfig &get_join_proxy() const { return record_.join_proxy; }
+	void set_join_proxy(const opennova::ProxyRendezvousConfig &p_proxy) { record_.join_proxy = p_proxy; }
+	bool has_join_proxy() const { return record_.join_proxy.enabled(); }
 
 	bool has_team_password() const {
-		return opennova::inmatch::server_has_side_password(server_flags_);
+		return opennova::inmatch::server_has_side_password(record_.server_flags);
 	}
 	bool server_password_required() const {
-		return opennova::inmatch::server_password_required(server_flags_);
+		return opennova::inmatch::server_password_required(record_.server_flags);
 	}
 	bool allows_spectators() const {
-		return opennova::inmatch::server_allows_spectators(server_flags_);
+		return opennova::inmatch::server_allows_spectators(record_.server_flags);
 	}
 	bool spectator_password_required() const {
-		return opennova::inmatch::server_spectator_password_required(server_flags_);
+		return opennova::inmatch::server_spectator_password_required(record_.server_flags);
 	}
-	// The join screen's choice committed (inmatch::pre_game_commit): GAME_PASSWORD's text is
-	// the server password, SPECTATE the role (answered), and TEAM_PASSWORD's one shared text
-	// the spectator password when spectating, else the side password, the other kept.
+	// The join screen's choice committed (inmatch::apply_pre_game_choice).
 	void apply_pre_game_choice(const String &p_game_password, bool p_spectate,
-			const String &p_team_password);
-	// What the shell does with this target before dialing: enumerate the
-	// endpoint for its flag word first (every target without one), dial, or ask
-	// the player/spectator question.
+			const String &p_team_password) {
+		opennova::inmatch::apply_pre_game_choice(record_, opennova::to_std(p_game_password),
+				p_spectate, opennova::to_std(p_team_password));
+	}
+	// What the join does with this target before dialing (inmatch::join_entry_step).
 	int entry_step() const {
-		opennova::inmatch::JoinEntryFacts facts;
-		facts.server_flags = server_flags_;
-		facts.role_explicit = role_explicit_;
-		facts.spectator = join_role_ == ROLE_SPECTATOR;
-		facts.server_password_given = !server_password_.is_empty();
-		facts.side_password_given = !join_password_.is_empty();
-		switch (opennova::inmatch::join_entry_step(facts)) {
+		switch (opennova::inmatch::join_entry_step(record_)) {
 		case opennova::inmatch::JoinEntryStep::Preflight: return ENTRY_PREFLIGHT;
 		case opennova::inmatch::JoinEntryStep::Prompt: return ENTRY_PROMPT;
 		case opennova::inmatch::JoinEntryStep::Dial: break;
@@ -183,41 +141,24 @@ public:
 		return ENTRY_DIAL;
 	}
 
-	// Decode a LanSession discovery row. Map identity is deliberately absent
-	// here: retail LAN enumeration has not joined the session yet, so the
-	// mission arrives in the normal post-auth 0x7B stream.
+	// The engine record the join flow carries (inmatch/join_flow.h); C++ only.
+	const opennova::inmatch::JoinTargetRecord &record() const { return record_; }
+	void set_record(const opennova::inmatch::JoinTargetRecord &p_record) { record_ = p_record; }
+
+	// A LanSession discovery row's target (inmatch::join_target_from_row); its row facts
+	// (C++ only, the join flow's browse rows).
 	static Ref<JoinTarget> from_lan_row(const Ref<LanServerRow> &p_row);
+	static opennova::inmatch::DiscoveredSessionRow row_facts(const Ref<LanServerRow> &p_row);
 
 protected:
 	static void _bind_methods();
 
 private:
-	String host_ip_ = "127.0.0.1";
-	int port_ = opennova::kRetailLanPortMin;
-	String player_name_;
-	String mission_;
-	String dir_;
-	String app_id_ = "0";
-	PackedByteArray cd_cookie_;
-	PackedByteArray glsvss_request_;
-	String server_name_;
-	int game_type_ = -1;
-	int server_flags_ = -1;
-	int network_type_ = NETWORK_LAN;
-	int join_role_ = ROLE_PLAYER;
-	String spectator_password_;
-	String server_password_;
-	String join_password_;
-	String expansion_;
-	bool expansion_known_ = false;
-	bool discovered_session_ = false;
-	int64_t session_host_key_ = 0;
-	bool session_password_required_ = false;
-	int64_t session_client_index_ = 0;
-	bool role_explicit_ = false;
-	opennova::ProxyRendezvousConfig join_proxy_;
+	static PackedByteArray bytes(const std::vector<uint8_t> &p_bytes);
+	static std::vector<uint8_t> bytes(const PackedByteArray &p_bytes);
+
+	opennova::inmatch::JoinTargetRecord record_;
 	Ref<UdpPump> transport_;
-	int lobby_number_ = 0;
 };
 
 } // namespace godot

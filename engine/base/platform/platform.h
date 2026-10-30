@@ -13,8 +13,9 @@
 // game flow); a backend implements them and nothing else: SDL3 (backend/sdl3, apps/game), the
 // headless test backend (tests/null_backend), Godot's bindings while the Godot build ships.
 //
-// STAGED, NOT WIRED: the R4 SDL3 backend's apps/game and the R3 engine frontend
-// (runtime/frontend) take this record; until they land, tests/null_backend is its one holder.
+// The SDL3 backend (backend/sdl3) builds this record and opennova-game (apps/game) takes it, as
+// tests/null_backend's headless backend does; the R3 engine frontend (runtime/frontend) takes it
+// over from the app shell.
 //
 // The design follows sokol_app's and SDL3's: one platform per process, its window, input, time,
 // files, OS services and audio reached through it.

@@ -12,12 +12,6 @@ signal check_finished(exit_code: int)
 ## stops waiting a little after it.
 const CHECK_TIMEOUT_MS := 15000
 
-## The relaunch marker a first-run install passes to the game (boot_policy.h).
-const AFTER_UPDATE_FLAG := "--after-update"
-## The NovaWorld server a mod's install was for, which the relaunched game joins
-## once signed in (boot_policy.h, ADR 0074).
-const NOVAWORLD_JOIN_FLAG := "--novaworld-join"
-
 ## Whether the updater's check found an update waiting. Unknown (checking, a
 ## failed or timed-out check, updates off for the launch) reads false, so it
 ## gates nothing (ADR 0067 d3 as amended 2026-10-28).
@@ -57,45 +51,14 @@ func updater_path() -> String:
 
 
 func check_arguments() -> PackedStringArray:
-	var arguments := PackedStringArray(["--check"])
-	arguments.append_array(_product_arguments())
-	return arguments
+	return LaunchFlags.updater_check_arguments(_product, _runtime_dir, _resource_dir)
 
 
-## `bootstrap`: a first-run install, whose relaunch carries AFTER_UPDATE_FLAG so a
-## game that still finds no content stops instead of starting the updater again.
-## `join_rid`: the NovaWorld server the relaunch joins (NOVAWORLD_JOIN_FLAG). An
-## earlier launch's markers are never carried into a later relaunch.
+## The install's command line (engine boot_policy.h updater_install_arguments): `bootstrap` a
+## first-run install, `join_rid` the NovaWorld server the relaunch joins.
 func install_arguments(parent_pid: int, bootstrap := false, join_rid := 0) -> PackedStringArray:
-	var arguments := PackedStringArray(["/RUN", "--parent-pid", str(parent_pid)])
-	arguments.append_array(_product_arguments())
-	var relaunch := PackedStringArray()
-	var skip_value := false
-	for argument in _run_args:
-		if skip_value:
-			skip_value = false
-		elif argument == NOVAWORLD_JOIN_FLAG:
-			skip_value = true
-		elif argument != AFTER_UPDATE_FLAG:
-			relaunch.append(argument)
-	var marks := PackedStringArray()
-	if bootstrap:
-		marks.append(AFTER_UPDATE_FLAG)
-	if join_rid > 0:
-		marks.append_array([NOVAWORLD_JOIN_FLAG, str(join_rid)])
-	if not marks.is_empty():
-		if not relaunch.has("--"):
-			relaunch.append("--")
-		relaunch.append_array(marks)
-	for argument in relaunch:
-		arguments.append("--run-arg")
-		arguments.append(argument)
-	return arguments
-
-
-func _product_arguments() -> PackedStringArray:
-	return PackedStringArray(["/game", _product, "--runtime-dir", _runtime_dir,
-			"--resource-dir", _resource_dir])
+	return LaunchFlags.updater_install_arguments(_product, _runtime_dir, _resource_dir,
+			parent_pid, _run_args, bootstrap, join_rid)
 
 
 ## The updater's check, started in the background: its exit code arrives
