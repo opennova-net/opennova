@@ -605,7 +605,8 @@ struct GameConfig {
 	// mission start, at most 251 rows [orig: Server_InitPlayerSlotSystem @0x4243A0 (from
 	// Game_StartMission @0x5248C1) - the read @0x4243B2, PlayerSlotTable_Reallocate @0x434B90];
 	// ours sizes no client roster (replication::ClientState::roster's fixed rows) and rebuilds
-	// the host's client runtime at each bring-up, as the reallocation clears it.
+	// the host's client runtime at each bring-up, as the reallocation clears it (D-NET-1474,
+	// PERMANENT).
 	// (Server_BuildStatusString @0x4FDEC0 reads it too, and has no caller.)
 	uint32_t live_slot_limit() const { return mission_slot_limit.value_or(player_slot_limit()); }
 
