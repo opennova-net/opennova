@@ -60,6 +60,8 @@ public:
 	// The title a session over `p_root` runs as, whose serializer the ACCEPT and the class flip
 	// run (engine menu::ArmoryLoadout::title).
 	void set_title_root(const Ref<ResourceRoot> &p_root);
+	// That title's death_screen_loadout (DFX2-41): its DEATH screen picks the loadout.
+	bool death_screen_loadout() const;
 };
 
 } // namespace godot

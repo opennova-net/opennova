@@ -750,6 +750,8 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 		if (view.joiner) buttons.rules_word = cs.session_rules_flags;
 	}
 	v.team_buttons_shown = world::deploy_team_buttons_shown(buttons);
+	v.loadout_shown =
+			world::deploy_loadout_shown(buttons.team, buttons.permanent_death, buttons.dead);
 	return v;
 }
 

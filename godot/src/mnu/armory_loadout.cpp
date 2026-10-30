@@ -132,6 +132,10 @@ void ArmoryLoadout::set_title_root(const Ref<ResourceRoot> &p_root) {
 	value_.title = &ResourceRoot::session_title(p_root);
 }
 
+bool ArmoryLoadout::death_screen_loadout() const {
+	return value_.title != nullptr && value_.title->death_screen_loadout;
+}
+
 void ArmoryLoadout::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stage", "profiles", "entity_team", "spawn"),
 			&ArmoryLoadout::stage);
@@ -156,4 +160,5 @@ void ArmoryLoadout::_bind_methods() {
 			&ArmoryLoadout::accept);
 	ClassDB::bind_method(D_METHOD("get_page", "player_class"), &ArmoryLoadout::get_page);
 	ClassDB::bind_method(D_METHOD("set_title_root", "root"), &ArmoryLoadout::set_title_root);
+	ClassDB::bind_method(D_METHOD("death_screen_loadout"), &ArmoryLoadout::death_screen_loadout);
 }

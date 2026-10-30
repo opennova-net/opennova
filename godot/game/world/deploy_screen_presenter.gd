@@ -110,6 +110,36 @@ func setup(view: WorldView, ui_parent: Node) -> void:
 	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
+# The armory presenter whose class pages the DEATH screen's loadout picker fills and applies
+# (the title's death_screen_loadout, DFX2-41); null: no picker.
+var _armory: ArmoryPresenter = null
+
+
+func set_armory(armory: ArmoryPresenter) -> void:
+	_armory = armory
+
+
+# Whether the screen's title picks the loadout here: its activation fills PRIMARY / SECONDARY
+# / ACCESSORY and its close on the triggers' clear applies them (engine
+# Title::death_screen_loadout, world::deploy_loadout_shown).
+func _picks_loadout() -> bool:
+	return _armory != null and _view != null and _armory.death_screen_loadout(_view.resource_root())
+
+
+# The activation's picker: the captions and outlines shown or hidden by the engine's gate, and
+# the three lists filled when shown (engine world::deploy_loadout_shown carries the witness).
+func _activate_loadout(status: DeployStatus) -> void:
+	if not _picks_loadout() or _driver == null:
+		return
+	for control_name in ["STATIC_PRIMARY", "STATIC_SECONDARY", "STATIC_ACCESSORY",
+			"PRIMARY_OUTLINE", "SECONDARY_OUTLINE", "ACCESSORY_OUTLINE"]:
+		var id := _driver.widget_id(control_name)
+		if id >= 0:
+			_driver.set_widget_shown(id, status.show_loadout)
+	if status.show_loadout:
+		_armory.populate_death_screen(_driver)
+
+
 func is_open() -> bool:
 	return _frame != null and is_instance_valid(_frame) and _frame.visible
 
@@ -184,9 +214,10 @@ func open() -> bool:
 		return false
 	if not _ensure_menu():
 		return false
-	_apply_team_service_buttons(sim.get_deploy_status(
-			Strings.get_table(Strings.TABLE_GAMETEXT),
-			ControlsBindings.model().display_text_for_token("MedicReq")).show_team_buttons)
+	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model().display_text_for_token("MedicReq"))
+	_apply_team_service_buttons(status.show_team_buttons)
+	_activate_loadout(status)
 	# The show hides the shroud; the per-frame reveal shows it and runs the
 	# content refresh (_process).
 	_set_shroud_shown(false)

@@ -213,6 +213,22 @@ struct DeployTeamButtonsInput {
 };
 bool deploy_team_buttons_shown(const DeployTeamButtonsInput &in);
 
+// DFX2-41, the DEATH screen's loadout picker (Title::death_screen_loadout): on the screen's
+// activation its PRIMARY / SECONDARY / ACCESSORY captions and outlines (the lists inside them)
+// show for a player on a team who is not lying dead under permanent death, and only then does
+// the activation resolve the class and fill the three lists (the armory's populate over this
+// screen); else they hide and nothing fills.
+// [orig: sub_550690 @0x550690 - the gate @0x550a3d..0x550a53, the captions and outlines
+//  @0x550a55..0x550acd, Armory_ResolveSelectedClass @0x550ae0, UI_PopulateThreeCategoryLists
+//  @0x550ae5; run by UI_DispatchScreenEvent's DEATH activation @0x54c231 (dfx2.exe)]
+inline bool deploy_loadout_shown(uint8_t team, bool permanent_death, bool dead) {
+	return team != 0 && !(permanent_death && dead);
+}
+inline constexpr const char *kDeployLoadoutCaptions[3] = { "STATIC_PRIMARY", "STATIC_SECONDARY",
+	"STATIC_ACCESSORY" };
+inline constexpr const char *kDeployLoadoutOutlines[3] = { "PRIMARY_OUTLINE", "SECONDARY_OUTLINE",
+	"ACCESSORY_OUTLINE" };
+
 // Both instruction widgets and the permanent-death status pair. A secured
 // spawn leaves the first widget's prior text intact and hides the second;
 // the later RESPawn1 assignment overwrites the intermediate RESPawn2 text.
@@ -264,6 +280,7 @@ struct DeployScreenStatus {
     int medic_cooldown_ticks = 0;
     int medic_request_serial = 0;
     bool team_buttons_shown = false; // deploy_team_buttons_shown
+    bool loadout_shown = false;      // deploy_loadout_shown
 };
 
 } // namespace opennova::world

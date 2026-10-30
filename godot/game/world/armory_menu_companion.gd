@@ -252,6 +252,33 @@ func _populate_slots() -> void:
 	_populating = false
 
 
+## The DEATH screen's three category lists over its driver (the title's death_screen_loadout,
+## DFX2-41): the class resolve, then this screen's populate over that one, its class pages,
+## counts and grenade positions the shared ones (engine world::deploy_loadout_shown and
+## menu::ArmoryLoadout::populate carry the witness).
+func populate_screen(driver: MenuDriver) -> void:
+	if driver == null or _weapons == null:
+		return
+	_selected_class_value = _resolve_selected_class()
+	_loadout.populate(driver, _weapons, _entity_team, _selected_class_value,
+			_availability_lookup, Strings.menu_text("NONE", "None"),
+			Strings.get_table(Strings.TABLE_GAMETEXT))
+
+
+## That screen's picks serialized into the class's page: the kit its close applies (engine
+## menu::ArmoryLoadout::accept).
+func accept_screen(driver: MenuDriver) -> Array[WeaponKitEntry]:
+	var kit: Array[WeaponKitEntry] = []
+	if driver != null and _weapons != null:
+		kit = _loadout.accept(driver, _weapons, _entity_team, _selected_class_value)
+	return kit
+
+
+## The class the last populate resolved (the selected-class mirror).
+func get_selected_class() -> int:
+	return _selected_class_value
+
+
 # The slot's selected weapon.def row (null = NONE). Public read seam (ADR
 # 0018): tests and diagnostics read the selection here.
 func selected_weapon(control: String) -> WeaponDef:

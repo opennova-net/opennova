@@ -369,7 +369,18 @@ void test_rows_are_the_page_bytes_past_z() {
 	}
 }
 
+// DFX2-41: the DEATH screen's loadout picker shows and fills for a player on a team, not for a
+// team-0 player, nor for one lying dead under permanent death (alive under it, it shows).
+// [orig: sub_550690 @0x550690 - the gate @0x550a3d..0x550a53 (dfx2.exe)]
+void test_loadout_picker_gate() {
+	CHECK(deploy_loadout_shown(1, false, true));
+	CHECK(deploy_loadout_shown(2, true, false));
+	CHECK(!deploy_loadout_shown(0, false, false));
+	CHECK(!deploy_loadout_shown(2, true, true));
+}
+
 int main() {
+	test_loadout_picker_gate();
 	test_list_items_are_the_page_bytes();
 	test_rows_are_the_page_bytes_past_z();
 	test_shroud_reveal_and_refresh();
