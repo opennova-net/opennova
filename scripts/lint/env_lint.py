@@ -5,8 +5,7 @@ docs/dev-env-vars.md is the registry. The whole set is:
 
   GODOT_BIN               the scripts' Godot binary
   the deployed service    ONNET_*, DATABASE_URL, ADMIN_*, ... under
-                          apps/novaworld_*, deploy, web, infra and the
-                          database's backend/migrations, backend/seed
+                          apps/novaworld_*, deploy, web, backend, infra
   OS variables            TEMP/TMP/APPDATA/HOME/... at their known sites
 
 Everything else was a launch flag, an argv option, an MCP tool argument, or

@@ -33,9 +33,9 @@ easier to relay than to rediscover.
   `engine/net/http`, ADR 0077 d2; pcap I/O lives in `engine/base/pcapio`); `serve/`
   (ADR 0051) keeps its files in its working directory; `game/` (opennova-game, ADR 0077 d9)
   is the game over the SDL3 backend, which becomes `opennova.exe` at R8.
-- `backend/` — the game's platform backends: `sdl3/` (`opennova_backend_sdl3`, the engine's
+- `backends/` — the engine's platform backends (ADR 0077): `sdl3/` (`opennova_backend_sdl3`, the
   `engine/base/platform` API over SDL3 and the SDL_GPU device; the one library linking SDL3,
-  and no SDL header outside it), beside the NovaWorld service's database (`migrations/`,
+  and no SDL header outside it). Not the service's `backend/` (its database: `migrations/`,
   `seed/`; backend/README.md).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).

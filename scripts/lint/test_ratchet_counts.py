@@ -187,10 +187,6 @@ class GodotBoundary(unittest.TestCase):
     def test_high_level_includes_count_each_file_and_class_once(self):
         self.assertEqual(self.run_in_tree(ratchet_counts.count_godot_high_level_class_includes), 5)
 
-    def test_the_backend_allowlist_exempts_only_the_backend(self):
-        self.assertEqual(self.run_in_tree(
-            ratchet_counts.count_godot_high_level_class_includes,
-            BACKEND_ALLOWED_CLASSES=frozenset(("audio_stream_player", "node3d"))), 4)
 
 
 if __name__ == "__main__":

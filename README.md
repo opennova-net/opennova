@@ -20,7 +20,8 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
 | `apps/` | Native command-line and NovaWorld service applications, and `opennova-game`, the experimental game over SDL3 (pre-1.0). |
-| `backend/` | The game's platform backends (`backend/sdl3`: SDL3 and SDL_GPU) and the NovaWorld service's database. |
+| `backends/` | The game's platform backends (`backends/sdl3`: SDL3 and SDL_GPU, ADR 0077). |
+| `backend/` | The NovaWorld service's database (migrations, seed). |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
 | `tests/` | Native CTest suite. |

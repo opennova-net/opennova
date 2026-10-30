@@ -1,6 +1,6 @@
 // opennova-game: the game over the SDL3 backend (ADR 0077 d9), the app shell that becomes
 // opennova.exe once Godot retires (R8; until then the Godot build keeps that name). main() brings
-// the SDL3 platform up (backend/sdl3: the window, the keyboard and mouse, the audio sink, the
+// the SDL3 platform up (backends/sdl3: the window, the keyboard and mouse, the audio sink, the
 // clock and its pump) and the SDL_GPU device over its window, then runs the engine's frame:
 //
 //   1. the platform pump: the OS's events into the devices, the input device's raw events into
@@ -19,8 +19,8 @@
 #include "local_input.h"
 #include "local_mission.h"
 
-#include <backend/sdl3/backend.h>
-#include <backend/sdl3/gpu.h>
+#include <backends/sdl3/backend.h>
+#include <backends/sdl3/gpu.h>
 
 #include <base/io/log.h>
 #include <base/io/strutil.h>

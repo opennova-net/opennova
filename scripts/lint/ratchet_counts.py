@@ -53,10 +53,8 @@ in maturity_baseline.json:
                         scene nodes, cameras, skeletons, viewports, Godot
                         materials and meshes, Control UI, audio players,
                         Tween/Animation, HTTPRequest, ...), one count per
-                        (file, class). ADR 0077: the backend reaches Godot
-                        through its platform and GPU servers; a class the
-                        backend genuinely needs is named in
-                        BACKEND_ALLOWED_CLASSES for godot/src/backend only.
+                        (file, class). ADR 0077: godot/ only shrinks until
+                        R8 deletes it, so no such include is ever added.
                         Non-increasing.
   gd_foreign_private_accesses
                         lines in the shipping GDScript (godot/game, godot/editor) that access an _underscore member of
@@ -401,12 +399,6 @@ GODOT_HIGH_LEVEL_CLASSES = frozenset((
     "http_request",
 ))
 
-# High-level classes the backend implementation may include, under
-# godot/src/backend only: each row is a class the backend genuinely needs to
-# reach the platform or the GPU. Empty until the backend lands.
-BACKEND_DIR = Path("godot") / "src" / "backend"
-BACKEND_ALLOWED_CLASSES: frozenset[str] = frozenset()
-
 GODOT_CLASS_INCLUDE = re.compile(r'#\s*include\s*[<"]godot_cpp/classes/([a-z0-9_]+)\.hpp[>"]')
 
 
@@ -419,10 +411,7 @@ def count_godot_high_level_class_includes() -> int:
         if _in_build_dir(rel.parts):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        stems = set(GODOT_CLASS_INCLUDE.findall(text)) & GODOT_HIGH_LEVEL_CLASSES
-        if BACKEND_DIR in rel.parents:
-            stems -= BACKEND_ALLOWED_CLASSES
-        count += len(stems)
+        count += len(set(GODOT_CLASS_INCLUDE.findall(text)) & GODOT_HIGH_LEVEL_CLASSES)
     return count
 
 
@@ -560,7 +549,7 @@ def count_oversize_cpp_files() -> int:
     leave two residual offenders; no .cpp under engine/, apps/, or godot/src
     may grow past 2500 lines without splitting first."""
     count = 0
-    for root in ("engine", "games", "backend", "apps", "godot/src"):
+    for root in ("engine", "games", "backends", "apps", "godot/src"):
         for path in (REPO / root).rglob("*.cpp"):
             parts = path.relative_to(REPO).parts
             if _in_build_dir(parts):
@@ -579,7 +568,7 @@ def count_oversize_cpp_headers() -> int:
     applied to .h/.hpp under engine/, apps/, godot/src (a state model the size
     of a translation unit is a split waiting to happen)."""
     count = 0
-    for root in ("engine", "games", "backend", "apps", "godot/src"):
+    for root in ("engine", "games", "backends", "apps", "godot/src"):
         for pattern in ("*.h", "*.hpp"):
             for path in (REPO / root).rglob(pattern):
                 parts = path.relative_to(REPO).parts

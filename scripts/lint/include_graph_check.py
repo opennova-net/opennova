@@ -90,13 +90,13 @@ in the path is what makes the layering visible, so this check reads it:
      at the registration points: each program's start (REGISTRATION_POINTS)
      and the tests' opennova_test_games.
  11. BACKENDS (ADR 0077 d9) — a platform backend lives in the top-level
-     backend/<name> tree (backend/sdl3: the engine's platform API over SDL3),
-     included as `<backend/<name>/file.h>` against the repository root; it
+     backends/<name> tree (backends/sdl3: the engine's platform API over SDL3),
+     included as `<backends/<name>/file.h>` against the repository root; it
      includes base, formats, net, runtime and its own backend, never the editor
-     or games. Nothing under engine/ or games/ includes backend/ (the engine
+     or games. Nothing under engine/ or games/ includes backends/ (the engine
      owns the interfaces, a backend implements them), and its library's own
      headers stay inside it: an `<SDL3/...>` include is allowed only under
-     backend/sdl3/, so no SDL type reaches the engine or the app shell.
+     backends/sdl3/, so no SDL type reaches the engine or the app shell.
 
 Modes:
   (default)   report violations; exit 0
@@ -113,12 +113,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ENGINE = REPO / "engine"
 GROUPS = ("base", "formats", "runtime", "net", "editor")
-SCAN_ROOTS = ("engine", "games", "backend", "apps", "tests", "godot/src")
-GODOT_FREE_ROOTS = ("engine", "games", "backend", "apps", "tests")
+SCAN_ROOTS = ("engine", "games", "backends", "apps", "tests", "godot/src")
+GODOT_FREE_ROOTS = ("engine", "games", "backends", "apps", "tests")
 # ADR 0040: a quoted include names a same-directory sibling and nothing else; a
 # `../` reach is the unqualified include in disguise (tests keep their
 # "../common/..." support includes: the test tree is not an include root).
-PARENT_RELATIVE_FORBIDDEN_ROOTS = ("engine", "games", "backend", "apps", "godot")
+PARENT_RELATIVE_FORBIDDEN_ROOTS = ("engine", "games", "backends", "apps", "godot")
 SOURCE_SUFFIXES = (".h", ".hpp", ".hh", ".c", ".cc", ".cpp", ".cxx", ".inl")
 SKIP_PARTS = {"third_party"}
 
@@ -135,14 +135,14 @@ ALLOWED = {
     # Rule 10: every game's own code, above runtime (games/CMakeLists.txt).
     "games": {("base", None), ("formats", None), ("net", None), ("runtime", None),
               ("games", None)},
-    # Rule 11: a platform backend, above runtime (backend/sdl3/CMakeLists.txt).
+    # Rule 11: a platform backend, above runtime (backends/sdl3/CMakeLists.txt).
     "backend": {("base", None), ("formats", None), ("net", None), ("runtime", None)},
 }
 
 # Rule 11: the backends' tree (the repository root is its include root) and the one library
 # header family each backend keeps to itself: (include prefix, the backend tree allowed it).
-BACKEND_ROOT = "backend"
-BACKEND_LIBRARY_HEADERS = (("SDL3/", "backend/sdl3"),)
+BACKEND_ROOT = "backends"
+BACKEND_LIBRARY_HEADERS = (("SDL3/", "backends/sdl3"),)
 
 # Rule 10: the games tree (the repository root is its include root) and the one header that
 # installs it, included only where a program starts and by the tests' registration point.
@@ -496,7 +496,7 @@ def scan() -> tuple[list[str], int]:
             if first == BACKEND_ROOT and (REPO / inc).is_file():
                 if rel.parts[0] in ("engine", GAMES_ROOT):
                     violations.append(f"[backend] {where} (nothing under engine/ or games/ "
-                                      f"includes backend/: the engine owns the interfaces a "
+                                      f"includes backends/: the engine owns the interfaces a "
                                       f"backend implements; ADR 0077 d9)")
                 elif tree == "backend" and parts[1] != rel.parts[1]:
                     violations.append(f"[backend] {where} (a backend includes its own tree "
@@ -582,7 +582,7 @@ def main() -> int:
               "service's libraries and programs include only the layers SERVICE_ALLOWED "
               "gives them (apps/novaworld_common/README.md); nothing under engine/ includes "
               "games/, and games/games.h is included only at the registration points "
-              "(games/CLAUDE.md); nothing under engine/ or games/ includes backend/, a "
+              "(games/CLAUDE.md); nothing under engine/ or games/ includes backends/, a "
               "backend includes base, formats, net, runtime and itself, and a backend's "
               "library headers (<SDL3/...>) stay in its own tree (ADR 0077 d9).")
         return 1
