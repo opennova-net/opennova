@@ -32,6 +32,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/protocol/protocol.h>
 
 #include <base/gameprofile/game_type.h>
 #include <formats/lwf/lwf.h>
@@ -146,6 +147,7 @@ int main() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	std::vector<inmatch::NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 	roster.push_back(make_conn(1, 1, &victim_wire, ns::TransportMode::Client, victim, true));

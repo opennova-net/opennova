@@ -51,6 +51,10 @@ struct AdminCommandResult {
 	bool delivery_unknown = false;
 	bool configuration_saved = false;
 	int64_t settings_revision = 0;
+	// A settings edit's command the server refused (an ERROR or USAGE reply, in the server's
+	// code page): the edit stopped there, the fields its earlier commands set saved, its later
+	// commands never sent. Empty for every other command.
+	std::string refused_command;
 	// Each reply packet's text, in the server's code page (cp1252), in order.
 	std::vector<std::string> replies;
 };

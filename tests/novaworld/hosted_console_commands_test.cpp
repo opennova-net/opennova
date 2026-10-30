@@ -25,7 +25,7 @@ namespace {
 const std::vector<std::string> kAllowedPrefixes = {
 	"PLAYER LIST", "PLAYER PUNT ", "PLAYER BAN ", "PLAYER SWAPTEAM ", "PLAYER KILL ", "MISSION AVAILABLE",
 	"MISSION LIST", "MISSION ADD ", "MISSION REMOVE ", "MISSION SETNEXT ", "MISSION CYCLE", "CHAT GET",
-	"CHAT SEND ", "GET GAMESETTINGS", "GET GAMESTATE",
+	"CHAT SEND ", "GET GAMESTATE",
 };
 
 bool allowed(const std::string &line) {
@@ -36,17 +36,9 @@ bool allowed(const std::string &line) {
 }
 
 int test_owner_list() {
-	for (const ConsoleVerb verb :
-			{ ConsoleVerb::PlayerList, ConsoleVerb::PlayerPunt, ConsoleVerb::PlayerBan, ConsoleVerb::PlayerSwapTeam,
-					ConsoleVerb::PlayerKill, ConsoleVerb::MissionAvailable, ConsoleVerb::MissionList,
-					ConsoleVerb::MissionAdd, ConsoleVerb::MissionRemove, ConsoleVerb::MissionSetNext,
-					ConsoleVerb::MissionCycle, ConsoleVerb::ChatGet, ConsoleVerb::ChatSend }) {
-		TEST_EXPECT(hosted::owner_may_run(verb));
-	}
-	TEST_EXPECT(hosted::owner_may_run(ConsoleVerb::GameSettings));
 	// The reads are not recorded; every change is.
 	for (const ConsoleVerb verb : { ConsoleVerb::PlayerList, ConsoleVerb::MissionAvailable, ConsoleVerb::MissionList,
-				 ConsoleVerb::ChatGet, ConsoleVerb::GameSettings, ConsoleVerb::GameState })
+				 ConsoleVerb::ChatGet, ConsoleVerb::GameState })
 		TEST_EXPECT(!hosted::console_verb_writes(verb));
 	for (const ConsoleVerb verb : { ConsoleVerb::PlayerPunt, ConsoleVerb::PlayerBan, ConsoleVerb::PlayerSwapTeam,
 				 ConsoleVerb::PlayerKill, ConsoleVerb::MissionAdd, ConsoleVerb::MissionRemove,
@@ -62,7 +54,6 @@ int test_compose() {
 	TEST_EXPECT(hosted::console_command(ConsoleVerb::MissionList)->line == "MISSION LIST");
 	TEST_EXPECT(hosted::console_command(ConsoleVerb::MissionCycle)->line == "MISSION CYCLE");
 	TEST_EXPECT(hosted::console_command(ConsoleVerb::ChatGet)->line == "CHAT GET");
-	TEST_EXPECT(hosted::console_command(ConsoleVerb::GameSettings)->line == "GET GAMESETTINGS");
 	TEST_EXPECT(hosted::console_command(ConsoleVerb::GameState)->line == "GET GAMESTATE");
 	TEST_EXPECT(!hosted::console_command(ConsoleVerb::PlayerPunt) && !hosted::console_command(ConsoleVerb::ChatSend));
 
@@ -117,7 +108,7 @@ int test_compose() {
 	// Every line a route can compose is on the list, and one packet carries it.
 	std::vector<std::string> lines;
 	for (const ConsoleVerb verb : { ConsoleVerb::PlayerList, ConsoleVerb::MissionAvailable, ConsoleVerb::MissionList,
-				 ConsoleVerb::MissionCycle, ConsoleVerb::ChatGet, ConsoleVerb::GameSettings, ConsoleVerb::GameState })
+				 ConsoleVerb::MissionCycle, ConsoleVerb::ChatGet, ConsoleVerb::GameState })
 		lines.push_back(hosted::console_command(verb)->line);
 	lines.push_back(hosted::console_player_command(ConsoleVerb::PlayerBan, 7, why)->line);
 	lines.push_back(hosted::console_mission_add("a.bms", true, why)->line);

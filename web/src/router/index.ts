@@ -51,9 +51,6 @@ const ProgramPage = () => import('../pages/admin/system/ProgramPage.vue');
 const ResourcePage = () => import('../pages/admin/system/ResourcePage.vue');
 import { requireUser } from './guards';
 
-// A server page's tabs an old /admin/fleet/<id>/<tab> link keeps.
-const KEPT_SERVER_TABS = new Set(['stats', 'console', 'logs']);
-
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
 // (guards.ts). /admin does not: its AdminGate also takes the Bearer token.
 const router = createRouter({
@@ -161,25 +158,6 @@ const router = createRouter({
         { path: 'jobs/:id(\\d+)', component: JobPage, meta: { title: 'Admin: Job' } },
         { path: 'programs/:name', component: ProgramPage, meta: { title: 'Admin: Program' } },
         { path: 'resources/:id(rds|cache|nlb)', component: ResourcePage, meta: { title: 'Admin: AWS resource' } },
-        // The pages' paths before the admin became six sections: old links
-        // and bookmarks land on their new places.
-        { path: 'overview', redirect: '/admin' },
-        { path: 'users', redirect: '/admin/players/accounts' },
-        { path: 'users/:id(\\d+)', redirect: (to) => `/admin/players/${to.params.id}` },
-        { path: 'cd-keys', redirect: '/admin/players/cd-keys' },
-        { path: 'fleet', redirect: (to) => (to.query.tab === 'roll' ? '/admin/servers/roll' : { path: '/admin/servers', query: to.query }) },
-        { path: 'fleet/machines/:id(\\d+)', redirect: (to) => `/admin/machines/${to.params.id}` },
-        { path: 'fleet/:id(\\d+)', redirect: (to) => `/admin/servers/${to.params.id}` },
-        { path: 'fleet/:id(\\d+)/:tab', redirect: (to) => `/admin/servers/${to.params.id}${KEPT_SERVER_TABS.has(String(to.params.tab)) ? `/${to.params.tab}` : ''}` },
-        { path: 'usage', redirect: '/admin/servers' },
-        { path: 'settings', redirect: '/admin/servers/machines' },
-        { path: 'addresses', redirect: '/admin/billing/addresses' },
-        { path: 'costs', redirect: '/admin/billing/costs' },
-        { path: 'novaworld', redirect: '/admin/system' },
-        { path: 'jobs', redirect: (to) => ({ path: '/admin/system/jobs', query: to.query }) },
-        { path: 'infrastructure', redirect: '/admin/system/infrastructure' },
-        { path: 'infrastructure/programs/:name', redirect: (to) => `/admin/programs/${to.params.name}` },
-        { path: 'infrastructure/resources/:id(rds|cache|nlb)', redirect: (to) => `/admin/resources/${to.params.id}` },
       ],
     },
     // Anything else.

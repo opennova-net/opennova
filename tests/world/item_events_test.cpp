@@ -1058,14 +1058,15 @@ int test_vehicle_respawn_rearms_the_final_husk() {
     return 0;
 }
 
-// The pool-2 walk visits its tick & 7 cohort alone, plus every tick the fade list's rows:
-// a husked row (listed by its spawn) advances its phases every tick, an intact row off
-// its cohort takes no visit (its clock and a planted phase word, which a visit's
-// evaluation would clear, stand until its cohort tick), and a row back intact ends its
-// pending final husk once and leaves the list. The list is ours, not a retail claim;
-// the cohort is [orig: Entity_UpdateAllEntities @0x4C2100 - tick & 7 @0x4C225A, the
-// stride step @0x4C2282..0x4C2285].
-int test_fade_list_and_cohort_visits() {
+// The pool-2 walk visits its tick & 7 cohort alone and evaluates no swap fade: a husked
+// row's fade stands where its last draw left it whatever the ticks, an intact row off its
+// cohort takes no visit (its clock stands until its cohort tick), and the walk clears no
+// phase word. The draw's leg (update_item_destroy_fade, which the view collects run for
+// each admitted row) advances the fade and shows the pending final husk, and a row back
+// intact ends it once there. [orig: Entity_UpdateAllEntities @0x4C2100 - tick & 7
+// @0x4C225A, the stride step @0x4C2282..0x4C2285; Render_SectorEntity @0x5C4190 -
+// Entity_PublishSwapFadePhases @0x5C4200]
+int test_cohort_walk_runs_no_swap_fade() {
     auto heap = std::make_unique<World>();
     auto &w = *heap;
     w.registry.configure_pool(2, 16);
@@ -1093,45 +1094,38 @@ int test_fade_list_and_cohort_visits() {
     const EntityHandle b = w.registry.spawn(2, plain); // slot 1: cohort ticks 1, 9, ...
     CHECK(a.slot() == 0 && b.slot() == 1);
     w.registry.get(b)->destroy_phases_q16[0] = 7;
-    CHECK(w.registry.fade_row_listed(a) && !w.registry.fade_row_listed(b));
     auto &swaps = w.out.destruction.husk_swaps;
-    const Entity &husked = *w.registry.get(a);
+    Entity &husked = *w.registry.get(a);
     const Entity &intact = *w.registry.get(b);
-    // Ticks 2..7 are neither row's cohort: the husked row fades every tick, the
-    // intact row is never reached.
-    int32_t last_phase = -1;
+    // Ticks 2..7 are neither row's cohort: no row is reached, and no fade runs.
     for (uint32_t tick = 2; tick <= 7; ++tick) {
         w.logic_tick = tick;
         tick_item_event_pool(w, 2);
-        CHECK(husked.destroy_phases_q16[1] > last_phase);
-        last_phase = husked.destroy_phases_q16[1];
+        CHECK(husked.destroy_phases_q16 == (std::array<int32_t, 6>{}) && swaps.empty());
         CHECK(intact.class_think_ticks == 100 && intact.destroy_phases_q16[0] == 7);
     }
-    CHECK(husked.final_husk_overlay && swaps.size() == 1 &&
-            swaps.back().final_overlay == HuskSwapEvent::Overlay::kShow);
-    // Tick 9 is the intact row's cohort: its clock steps and its visit clears the word.
+    // Tick 9 is the intact row's cohort: its clock steps, and its word stands.
     w.logic_tick = 9;
     tick_item_event_pool(w, 2);
-    CHECK(husked.destroy_phases_q16[1] > last_phase);
-    CHECK(intact.class_think_ticks == 92 && intact.destroy_phases_q16[0] == 0);
-    CHECK(!w.registry.fade_row_listed(b));
-    // Back intact (a revive): the pending final husk ends once, on the next tick's
-    // visit, and the row leaves the list.
-    w.registry.get(a)->engine_flags &= ~kEntityFlagHusk;
+    CHECK(intact.class_think_ticks == 92 && intact.destroy_phases_q16[0] == 7);
+    CHECK(husked.destroy_phases_q16 == (std::array<int32_t, 6>{}) && swaps.empty());
+    // The draw's leg fades the husked row from its death and draws the pending final husk.
     w.logic_tick = 10;
-    tick_item_event_pool(w, 2);
+    update_item_destroy_fade(w, husked);
+    const int32_t first = husked.destroy_phases_q16[1];
+    CHECK(first > 0 && husked.final_husk_overlay && swaps.size() == 1 &&
+            swaps.back().final_overlay == HuskSwapEvent::Overlay::kShow);
+    w.logic_tick = 11;
+    update_item_destroy_fade(w, husked);
+    CHECK(husked.destroy_phases_q16[1] > first && swaps.size() == 1);
+    // Back intact (a revive): the next draw ends the pending final husk once.
+    husked.engine_flags &= ~kEntityFlagHusk;
+    update_item_destroy_fade(w, husked);
     CHECK(!husked.final_husk_overlay && swaps.size() == 2 &&
             swaps.back().final_overlay == HuskSwapEvent::Overlay::kHide);
-    CHECK(husked.destroy_phases_q16 == (std::array<int32_t,6>{}) && husked.destroy_progress == 0);
-    CHECK(!w.registry.fade_row_listed(a));
-    w.logic_tick = 11;
-    tick_item_event_pool(w, 2);
+    CHECK(husked.destroy_phases_q16 == (std::array<int32_t, 6>{}) && husked.destroy_progress == 0);
+    update_item_destroy_fade(w, husked);
     CHECK(swaps.size() == 2);
-    // A writer's husk lists the row again (the gnrl death's Flags |= 4).
-    w.registry.get(a)->engine_flags &= ~kEntityFlagDead;
-    w.registry.get(a)->health = 0;
-    destruction_notify_item_damage(w, *w.registry.get(a), 2);
-    CHECK((husked.engine_flags & kEntityFlagHusk) != 0 && w.registry.fade_row_listed(a));
     return 0;
 }
 
@@ -1147,6 +1141,9 @@ int test_destroy_phases_and_ambient() {
     e.destroy_timer = 10;
     e.death_tick = 100;
     e.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+    // The draw publishes (and spends the delay) only for a row holding its final husk
+    // [orig: Render_SectorEntity @0x5C4190 - +0x38 @0x5C41F9 ahead of @0x5C4200].
+    e.final_husk_loaded = true;
     w.logic_tick = 109;
     update_item_destroy_fade(w,e);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
@@ -1167,6 +1164,57 @@ int test_destroy_phases_and_ambient() {
     e.engine_flags = 0;
     update_item_destroy_fade(w,e);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
+    // A husked row holding no final husk: the draw spends no delay, restamps no death tick
+    // and writes no phase, so the row keeps what was last written for it, the per-model
+    // array holding only what was written for that model (D-3DI-2)
+    // [orig: Render_SectorEntity @0x5C4190 - +0x38 @0x5C41F9].
+    // Nothing ever written: zeros.
+    {
+        auto &r = *w.registry.get(spawn(w, 2, 73, ItemDeathClass::kGnrl)); // default timing
+        r.destroy_timer = 10;
+        r.death_tick = 100;
+        r.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+        for (const uint32_t tick : {109u, 160u, 400u}) {
+            w.logic_tick = tick;
+            CHECK(!update_item_destroy_fade(w,r));
+            CHECK(r.death_tick == 100 && r.destroy_timer == 10);
+            CHECK(r.destroy_phases_q16 == (std::array<int32_t,6>{}) && r.destroy_progress == 0);
+        }
+    }
+    // An upfx row's own tick publication: its draw keeps it, and stamps nothing over it
+    // [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - Flags & 4 @0x4A92F5 alone,
+    //  Entity_PublishSwapFadePhases @0x4A9304].
+    {
+        auto &u = *w.registry.get(spawn(w, 2, 74, ItemDeathClass::kGnrl)); // 50 + 4 x 25
+        u.death_tick = 100;
+        u.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+        u.death_motion = DeathMotionMode::BuildingEffects;
+        w.logic_tick = 160;
+        CHECK(tick_item_class_motion(w, u, nullptr));
+        const std::array<int32_t,6> published{26214,65536,45875,13107,0,0};
+        CHECK(u.destroy_phases_q16 == published && u.destroy_progress == 0.4);
+        const size_t stamps = w.out.destruction.draw_fades.size();
+        CHECK(!update_item_destroy_fade(w,u));
+        run_draw_husk_leg(w,u);
+        CHECK(u.destroy_phases_q16 == published && u.destroy_progress == 0.4);
+        CHECK(w.out.destruction.draw_fades.size() == stamps && u.death_tick == 100);
+    }
+    // A promoted row keeps its last publication, the share at 1.0.
+    {
+        auto &f = *w.registry.get(spawn(w, 2, 75, ItemDeathClass::kGnrl)); // 50 + 4 x 25
+        f.death_tick = 100;
+        f.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+        f.final_husk_loaded = true;
+        w.logic_tick = 250;
+        CHECK(update_item_destroy_fade(w,f));
+        const std::array<int32_t,6> last{65536,65536,65536,65536,65536,65536};
+        CHECK(f.husk_promoted && !f.holds_final_husk());
+        CHECK(f.destroy_phases_q16 == last && f.destroy_progress == 1.0);
+        w.logic_tick = 300;
+        CHECK(!update_item_destroy_fade(w,f));
+        CHECK(f.destroy_phases_q16 == last && f.destroy_progress == 1.0 && f.death_tick == 100);
+    }
+    traits = w.tables.item_death_traits.get_mutable(70); // the set() above may move the rows
     e.death_motion = DeathMotionMode::BuildingEffects;
     e.item_type = 5;
     e.position = {3,4,5};
@@ -1375,7 +1423,7 @@ int main() {
     if (test_husk_swap_stage() != 0) return 1;
     if (test_type_index_zero_rows_take_no_visit() != 0) return 1;
     if (test_vehicle_respawn_rearms_the_final_husk() != 0) return 1;
-    if (test_fade_list_and_cohort_visits() != 0) return 1;
+    if (test_cohort_walk_runs_no_swap_fade() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;

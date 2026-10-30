@@ -1,17 +1,14 @@
 #include "console_routes.h"
-#include "hosted/model/console_queue.h"
 #include "hosted/model/console_configuration.h"
+#include "hosted/model/console_queue.h"
 #include "http_json.h"
 #include <base/io/cp1252.h>
-#include <net/admin/admin_protocol.h>
-#include <algorithm>
+
+#include <cstdio>
+#include <stdexcept>
 
 namespace opennova::novaworld_server::hosted {
 namespace {
-crow::json::wvalue json(const io::JsonValue &v) {
-	return crow::json::wvalue(crow::json::load(io::json_write(v)));
-}
-
 // A running server keeps its pinned catalog even after a newer release is published.
 OfferedProduct pinned_product(db::Database &db, const HostedServer &server) {
 	OfferedProduct p;
@@ -44,19 +41,30 @@ OfferedProduct pinned_product(db::Database &db, const HostedServer &server) {
 	return p;
 }
 
-crow::response command_reply(int64_t id, const AdminCommandResult &result) {
+// `next_launch_only`: a settings edit no admin line applies, saved for the next launch.
+crow::response command_reply(
+		int64_t id, const AdminCommandResult &result, bool next_launch_only = false) {
 	crow::json::wvalue out;
 	out["server_id"] = id;
+	out["next_launch_only"] = next_launch_only;
 	out["outcome"] = admin_command_outcome_name(result.outcome);
 	out["sent"] = result.sent;
 	out["delivery_unknown"] = result.delivery_unknown;
 	out["configuration_saved"] = result.configuration_saved;
 	out["settings_revision"] = result.settings_revision;
+	// The settings edit's command the server refused: the fields before it saved, the rest
+	// never sent (null when none was).
+	if (result.refused_command.empty())
+		out["refused_command"] = nullptr;
+	else
+		out["refused_command"] = cp1252_to_utf8(result.refused_command);
 	std::vector<std::string> replies;
 	for (const auto &reply : result.replies)
 		replies.push_back(cp1252_to_utf8(reply));
 	out["replies"] = std::move(replies);
 	int status = 200;
+	if (next_launch_only && result.configuration_saved)
+		out["message"] = "Saved; the changes apply at the next launch.";
 	if (result.outcome != AdminCommandOutcome::Answered) {
 		status = result.outcome == AdminCommandOutcome::Refused	  ? 409
 				: result.outcome == AdminCommandOutcome::TimedOut ? 504
@@ -73,37 +81,19 @@ crow::response command_reply(int64_t id, const AdminCommandResult &result) {
 }
 } //namespace
 
-crow::response ConsoleRoutes::settings(const Caller &c) {
-	std::optional<HostedServer> server;
-	OfferedProduct product;
-	{
-		auto lease = pool_.acquire();
-		server = find_server(*lease, c.server_id);
-		if (!server)
-			return json_error(404, "not_found");
-		product = pinned_product(*lease, *server);
-	}
-	std::optional<crow::response> refusal;
-	const auto replies = run(c, *console_command(ConsoleVerb::GameSettings), refusal);
-	if (!replies)
-		return std::move(*refusal);
-	std::vector<crow::json::wvalue> rows;
-	for (const auto &row : admin_parse_game_settings(replies->front())) {
-		crow::json::wvalue e;
-		e["key"] = cp1252_to_utf8(row.first);
-		e["value"] = cp1252_to_utf8(row.second);
-		rows.push_back(std::move(e));
-	}
+// The saved configuration, read from the database alone: no admin line, so it reads while the
+// server boots, restarts or has no link (the panel shows the saved settings; the live
+// GAMESETTINGS reply it once fetched was never shown, and carried the passwords).
+crow::response ConsoleRoutes::settings(db::Database &db, const HostedServer &server) {
+	const OfferedProduct product = pinned_product(db, server);
 	crow::json::wvalue out;
-	out["server_id"] = c.server_id;
-	out["settings"] = std::move(rows);
-	out["saved"] = json(settings_document(server->settings));
-	out["settings_revision"] = server->settings_revision;
-	out["schema"] = json(hosted_settings_schema(title_config_table(product.title)));
-	const auto &weapons = !product.expansions.empty() && !product.expansions.front().weapons.empty()
-			? product.expansions.front().weapons
-			: product.weapons;
-	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(weapons)));
+	out["server_id"] = server.id;
+	out["saved"] = to_crow(settings_document(server.settings));
+	out["settings_revision"] = server.settings_revision;
+	out["schema"] = to_crow(hosted_settings_schema(product.title));
+	const auto &weapons = server_weapon_roster(product.weapons,
+			product.expansions.empty() ? nullptr : &product.expansions.front().weapons);
+	out["weapons"] = to_crow(encode_tree_weapons(weapons));
 	return no_store(json_reply(200, out));
 }
 
@@ -115,29 +105,34 @@ crow::response ConsoleRoutes::weapon_settings(const Caller &c) {
 			run_console_command(pool_, c.server_id, "WEAPON LIST", options, kCommandBudget));
 }
 
-crow::response ConsoleRoutes::configuration_command(
-		const Caller &c, const crow::request &req, bool edit) {
+crow::response ConsoleRoutes::settings_edit(const Caller &c, const crow::request &req) {
 	io::JsonValue body;
 	std::string error;
 	if (!io::json_parse(req.body, body, error) || !body.is_object())
 		return json_error(400, "invalid_json");
 	AdminCommandOptions options;
 	options.actor = c.actor;
-	std::string line;
-	if (edit) {
-		const auto *revision = body.get("settings_revision"), *patch = body.get("patch");
-		if (!revision || !io::json_exact_whole_in(*revision, 1, io::kJsonSafeWholeMax) || !patch ||
-				!patch->is_object())
-			return json_error(
-					400, "invalid_field", "settings_revision and a settings patch are required.");
-		for (const char *key : { "product_id", "expansion_id", "rotation" })
-			if (patch->get(key))
-				return field_error(400, "invalid_field", key,
-						"Use the launcher or rotation controls to change this field.");
+	const auto *revision = body.get("settings_revision"), *patch = body.get("patch");
+	if (!revision || !io::json_exact_whole_in(*revision, 1, io::kJsonSafeWholeMax) || !patch ||
+			!patch->is_object())
+		return json_error(
+				400, "invalid_field", "settings_revision and a settings patch are required.");
+	for (const char *key : { "product_id", "expansion_id", "rotation" })
+		if (patch->get(key))
+			return field_error(400, "invalid_field", key,
+					"Use the launcher or rotation controls to change this field.");
+	// What the request waits for the edit's commands (edit_budget).
+	std::chrono::milliseconds wait = kCommandBudget;
+	{
 		auto lease = pool_.acquire();
 		const auto server = find_server(*lease, c.server_id);
 		if (!server)
 			return json_error(404, "not_found");
+		// A stored configuration that does not read is never replaced from the defaults (the
+		// supervisor fails that server).
+		if (!server->settings_error.empty())
+			return json_error(409, "settings_unreadable",
+					"This server's saved settings do not read; it is being stopped.");
 		if (server->settings_revision != static_cast<int64_t>(revision->number))
 			return json_error(
 					409, "settings_changed", "Reload settings before applying this edit.");
@@ -151,103 +146,117 @@ crow::response ConsoleRoutes::configuration_command(
 			desired.missions.push_back(product.missions.front().file);
 		if (const auto why = check_settings(desired, { product }))
 			return field_error(400, "invalid_field", why->field.c_str(), why->reason);
-		options.expected_revision = static_cast<int64_t>(revision->number);
-		options.settings_patch = io::json_write(*patch);
-		line = "configuration edit";
-	} else {
-		const auto *command = body.get("command");
-		if (!command || !command->is_string() || !utf8_to_cp1252(command->string, line) ||
-				line.empty() ||
-				line.size() > ADMIN_SERVER_PACKET_MAX_BYTES - ADMIN_PACKET_HEADER_BYTES - 1 ||
-				std::any_of(line.begin(), line.end(), [](unsigned char c) {
-					return c < 32 ||
-							(c == 127 || c == 129 || c == 141 || c == 143 || c == 144 || c == 157);
-				}))
-			return json_error(400, "invalid_command",
-					"Enter one command, at most 1015 CP1252 bytes, without control characters.");
-		// Refuse text that could not be represented safely in the saved cfg.
-		// Unknown retail keys still reach the server and return its own usage.
-		const auto patch = console_settings_patch(line, {});
-		if (!patch.object.empty()) {
-			auto lease = pool_.acquire();
-			const auto server = find_server(*lease, c.server_id);
-			if (!server)
-				return json_error(404, "not_found");
-			const auto product = pinned_product(*lease, *server);
-			auto block = gamecfg::defaults({}, 0, 0, title_config_table(product.title));
-			auto flat = io::JsonValue::make_object();
-			for (const auto &m : patch.object) {
-				if (m.key == "options")
-					for (const auto &o : m.value.object)
-						flat.set(o.key, o.value);
-				else
-					flat.set(m.key, m.value);
-			}
-			std::string field;
-			if (!gamecfg::apply_server_settings(block, flat, true, {}, field, error))
-				return field_error(400, "invalid_field", field.c_str(), error);
-			// The drain saves an accepted SET into the configuration (console_settings_patch),
-			// so it takes a structured edit's rules too (check_settings: a name not blank and
-			// free of "Nova" while listed on NovaLogic's, a password of printable ASCII): the
-			// saved configuration stays one a later edit and a fresh start accept.
-			HostedSettings desired = server->settings;
-			if (!read_settings_document(patch, desired, field, error))
-				return field_error(400, "invalid_field", field.c_str(), error);
-			if (desired.missions.empty() && !product.missions.empty())
-				desired.missions.push_back(product.missions.front().file);
-			if (const auto why = check_settings(desired, { product }))
-				return field_error(400, "invalid_field", why->field.c_str(), why->reason);
+		// The drain's plan of the same edit (configuration_edit): the commands it will send.
+		const auto &weapons = server_weapon_roster(product.weapons,
+				product.expansions.empty() ? nullptr : &product.expansions.front().weapons);
+		std::optional<ConfigurationEdit> planned;
+		try {
+			planned = configuration_edit(*patch, server->settings, product.title, weapons);
+		} catch (const std::invalid_argument &) {
+			// A saved configuration its game's data no longer takes: the drain's edit fails the
+			// same way, within the one command's budget.
 		}
+		if (planned && planned->commands.empty()) {
+			// No admin line applies it: every field waits for the next launch, so it is saved
+			// here, whatever the link (a server restarting or between starts), under the same
+			// revision and process fence the drain saves with.
+			HostedSettings saved = server->settings;
+			std::string next_field;
+			(void)read_settings_document(planned->next_launch, saved, next_field, error);
+			AdminCommandResult result;
+			result.outcome = AdminCommandOutcome::Answered;
+			result.configuration_saved = save_server_settings(*lease, server->id,
+					server->settings_revision, server->generation, saved);
+			if (result.configuration_saved) {
+				result.settings_revision = server->settings_revision + 1;
+			} else {
+				result.outcome = AdminCommandOutcome::Refused;
+				result.replies = { "ERROR - Configuration changed; reload before applying this edit." };
+			}
+			return command_reply(c.server_id, result, /*next_launch_only=*/true);
+		}
+		// Commands go out on the link: the server running, its link up.
+		if (auto refusal = check_server(*lease, *server)) {
+			refund(c);
+			return std::move(*refusal);
+		}
+		if (planned)
+			wait = edit_budget(planned->commands.size());
 	}
-	return command_reply(
-			c.server_id, run_console_command(pool_, c.server_id, line, options, kCommandBudget));
+	options.expected_revision = static_cast<int64_t>(revision->number);
+	options.settings_patch = io::json_write(*patch);
+	return command_reply(c.server_id,
+			run_console_command(pool_, c.server_id, "configuration edit", options, wait));
 }
 
 void ConsoleRoutes::register_configuration(WebApp &app) {
+	// GET .../settings: the owner's server (404 for another account's) or any for an admin,
+	// in any state; an owner's read draws one token from the account's read bucket.
 	CROW_ROUTE(app, "/api/me/servers/<uint>/settings")
 			.methods("GET"_method)([this](const crow::request &req, uint64_t id) -> crow::response {
 				auto access = access_.require_user(req);
 				if (access.refusal)
 					return std::move(*access.refusal);
-				auto c = owner_caller(*access.user, id, false, false);
-				if (c.refusal)
-					return std::move(*c.refusal);
-				return settings(c);
+				if (const int64_t wait =
+								owner_reads_.take("console|" + std::to_string(access.user->id),
+										RateLimiter::Clock::now()))
+					return too_many_requests(wait);
+				try {
+					auto lease = pool_.acquire();
+					const auto server = owned_server(*lease, path_id(id), access.user->id);
+					if (!server)
+						return json_error(
+								404, "not_found", "this account has no hosted server with this id");
+					return settings(*lease, *server);
+				} catch (const db::Error &e) {
+					std::fprintf(stderr, "[http] hosted settings read failed: %s\n", e.what());
+					return json_error(500, "db_error");
+				}
 			});
-	const auto handle = [this](const crow::request &req, uint64_t id, bool admin, bool edit,
+	CROW_ROUTE(app, "/api/admin/hosted/<uint>/settings")
+			.methods("GET"_method)([this](const crow::request &req, uint64_t id) -> crow::response {
+				auto access = access_.require_admin(req);
+				if (access.refusal)
+					return std::move(*access.refusal);
+				try {
+					auto lease = pool_.acquire();
+					const auto server = find_server(*lease, path_id(id));
+					if (!server)
+						return json_error(404, "not_found", "no hosted server has this id");
+					return settings(*lease, *server);
+				} catch (const db::Error &e) {
+					std::fprintf(stderr, "[http] hosted settings read failed: %s\n", e.what());
+					return json_error(500, "db_error");
+				}
+			});
+	const auto handle = [this](const crow::request &req, uint64_t id, bool admin,
 								bool weapons) -> crow::response {
 		auto access = admin ? access_.require_admin(req) : access_.require_user(req);
 		if (access.refusal)
 			return std::move(*access.refusal);
-		auto c = admin ? admin_caller(access, id, !weapons)
-					   : owner_caller(*access.user, id, !weapons, !weapons);
+		// A settings edit may need no admin line (settings_edit checks the link when it has
+		// commands); the weapon list reads the server.
+		auto c = admin ? admin_caller(access, id, !weapons, /*needs_link=*/weapons)
+					   : owner_caller(*access.user, id, !weapons, !weapons, /*needs_link=*/weapons);
 		if (c.refusal)
 			return std::move(*c.refusal);
-		return weapons ? weapon_settings(c) : configuration_command(c, req, edit);
+		return weapons ? weapon_settings(c) : settings_edit(c, req);
 	};
 	CROW_ROUTE(app, "/api/me/servers/<uint>/settings")
 			.methods("PATCH"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, false, true, false);
+				return handle(req, id, false, false);
 			});
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>/settings")
 			.methods("PATCH"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, true, true, false);
-			});
-	CROW_ROUTE(app, "/api/me/servers/<uint>/command")
-			.methods("POST"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, false, false, false);
-			});
-	CROW_ROUTE(app, "/api/admin/hosted/<uint>/command")
-			.methods("POST"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, true, false, false);
+				return handle(req, id, true, false);
 			});
 	CROW_ROUTE(app, "/api/me/servers/<uint>/weapons")
 			.methods("GET"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, false, false, true);
+				return handle(req, id, false, true);
 			});
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>/weapons")
 			.methods("GET"_method)([handle](const crow::request &req, uint64_t id) {
-				return handle(req, id, true, false, true);
+				return handle(req, id, true, true);
 			});
 }
 } //namespace opennova::novaworld_server::hosted

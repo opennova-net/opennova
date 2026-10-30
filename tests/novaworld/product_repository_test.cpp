@@ -777,14 +777,14 @@ int test_lobby_selection() {
 					resolve_title_protocol("jo", why)->gate_tag_keys, decoded) &&
 			decoded == "on:" + std::to_string(lobby->id));
 	// A lobby is made for the protocol a title speaks: OP: Acid Gambit's title JO's, from Acid
-	// Gambit's template; a title whose protocol is unwitnessed (the JO demo's) gets none.
+	// Gambit's template; a title whose protocol is unwitnessed (DFX's) gets none.
 	{
 		const std::string made = catalog::create_lobby(db, "Gambit lobby", "acidgambit");
 		const catalog::GameCatalog now = catalog::GameCatalog::load(db);
 		const catalog::GameRow *row = now.by_slug(made);
 		TEST_EXPECT(row && row->protocol == "jo" && row->pfid == "100" &&
 				row->start_page == "acidgambit_0_start.htm");
-		TEST_EXPECT(catalog::create_lobby(db, "Demo lobby", "jodemo").empty() &&
+		TEST_EXPECT(catalog::create_lobby(db, "DFX lobby", "dfx").empty() &&
 				catalog::create_lobby(db, "No lobby", "nogame").empty());
 		db.exec("DELETE FROM games WHERE slug = $1;", { BindValue(made) });
 	}
@@ -821,7 +821,7 @@ int test_lobby_selection() {
 			catalog::lobby_available(db, "extra_0_consumer", "jo", admin) &&
 			catalog::lobby_available(db, "extra_0_consumer", "acidgambit", admin) &&
 			!catalog::lobby_available(db, "extra_0_consumer", "dfx2", admin) &&
-			!catalog::lobby_available(db, "extra_0_consumer", "jodemo", admin) &&
+			!catalog::lobby_available(db, "extra_0_consumer", "dfx", admin) &&
 			!catalog::lobby_available(db, "extra_0_consumer", "nogame", admin));
 	patch.lobby = "extra_0_consumer";
 	TEST_EXPECT(update_product(db, id, patch, { owner }) == ProductOutcome::InvalidLobby);
@@ -916,6 +916,17 @@ int test_lobby_selection() {
 	}
 	TEST_EXPECT(waited && concurrent.get() == ProductOutcome::LobbyLocked &&
 			find_product(db, race_id)->lobby == race_lobby);
+	// A deleted game's own lobby: a released one's (its selection locked) stays for the installs
+	// that carry it; a never-built one's, which no install names, goes with the game.
+	TEST_EXPECT(delete_product(db, race_id) == ProductOutcome::Ok &&
+			catalog::GameCatalog::load(db).by_slug(race_lobby));
+	game.key = "GONEGAME";
+	int64_t gone_id = 0;
+	TEST_EXPECT(create_product(db, game, gone_id) == ProductOutcome::Ok);
+	const std::string gone_lobby = find_product(db, gone_id)->lobby;
+	TEST_EXPECT(gone_lobby.find("on_") == 0 && !find_product(db, gone_id)->lobby_locked);
+	TEST_EXPECT(delete_product(db, gone_id) == ProductOutcome::Ok &&
+			!catalog::GameCatalog::load(db).by_slug(gone_lobby));
 	return 0;
 }
 

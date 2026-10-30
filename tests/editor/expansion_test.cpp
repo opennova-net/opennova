@@ -158,7 +158,13 @@ static int test_project_expansion() {
 	TEST_EXPECT(check_project_expansion("dfx", ProjectExpansion(), error)); // standalone: any game
 	TEST_EXPECT(check_project_expansion("jo", ProjectExpansion{ "jxm", "" }, error));
 	TEST_EXPECT(check_project_expansion("JO", ProjectExpansion{ "jxm", "jox01" }, error));
+	// The target game's Title row says whether its executable mounts one (Title::expansions): Acid
+	// Gambit's is Joint Operations', DFX2's makes no claim.
+	TEST_EXPECT(check_project_expansion("acidgambit", ProjectExpansion{ "jxm", "jox01" }, error));
 	TEST_EXPECT(!check_project_expansion("dfx2", ProjectExpansion{ "jxm", "" }, error) &&
+	            error.code() == "project.expansion.unsupported" &&
+	            error.message.find("Delta Force Xtreme 2") != std::string::npos);
+	TEST_EXPECT(!check_project_expansion("nosuchgame", ProjectExpansion{ "jxm", "" }, error) &&
 	            error.code() == "project.expansion.unsupported");
 	TEST_EXPECT(!check_project_expansion("jo", ProjectExpansion{ "", "jox01" }, error) &&
 	            error.code() == "project.field.invalid" && error.message.find("/exp") != std::string::npos);
@@ -374,7 +380,7 @@ static int test_install_view() {
 	// The base game under an expansion project (base_install_spec): no expansion's file; the root's loose ones,
 	// not its version text, which the game never reads.
 	InstallView base;
-	TEST_EXPECT(base.open(base_install_spec(root, document), error));
+	TEST_EXPECT(base.open(base_install_spec(root), error));
 	TEST_EXPECT(text_of(base, "shared.txt") == "base" && text_of(base, "x1only.txt") == "<none>" &&
 	            text_of(base, "header.bik") == "base header" && text_of(base, "MENUMUS.SBF") == "base music" &&
 	            text_of(base, "menumus.bin") == "base menu script" && !base.find("version.txt"));
@@ -384,7 +390,7 @@ static int test_install_view() {
 	InstallView standalone;
 	TEST_EXPECT(standalone.open(install_spec(root, document), error));
 	TEST_EXPECT(standalone.files().size() == base.files().size() && !standalone.find("VERSION.TXT"));
-	TEST_EXPECT(install_spec(root, document) == base_install_spec(root, document));
+	TEST_EXPECT(install_spec(root, document) == base_install_spec(root));
 	// /exp x1, the project building as jxm: the expansion's copy of a shared name, its folder's video and
 	// bank, the root's other video; the expansion's own names under the project's; the base's music pairs,
 	// either version text and the player's file not listed.

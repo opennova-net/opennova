@@ -53,6 +53,24 @@ bool decode_hello(const std::vector<uint8_t> &raw, ClientHello &out) {
 	return parse_client_hello(body.data(), body.size(), out);
 }
 
+// A ClientSession set to the in-match game session's identity: the ClientHello a client sends a
+// host after NWJoin, which flips the connection protocol from the lobby (NOVAWORLDUDP) to the
+// title's game protocol (JO's JOINTOPERATIONS); the complete CO/AP/BDAT/PN/PG/PV1/PV2 block of
+// the protocol's network init [orig: CNapiNetwork_Init @0x4ca4a0] (make_protocol_client_hello).
+ClientSession::Config game_protocol_config(const Protocol &protocol) {
+	ClientSession::Config c;
+	const ClientHello retail = make_protocol_client_hello(protocol, c.client_index);
+	c.co = retail.co;
+	c.ap = retail.ap;
+	c.bdat = retail.bdat;
+	c.pn = retail.pn;
+	c.pv1 = retail.pv1;
+	c.pv2 = retail.pv2;
+	c.pg = retail.pg;
+	c.use_default_pg = false;
+	return c;
+}
+
 } // namespace
 
 int main() {
@@ -63,7 +81,7 @@ int main() {
 	const Protocol &protocol = *title_protocol("jo");
 
 	// Exact retail JointOperations game-session hello.
-	ClientSession jo{ClientSession::Config::game_protocol(protocol)};
+	ClientSession jo{game_protocol_config(protocol)};
 	ClientHello jo_hello;
 	check(decode_hello(jo.start(), jo_hello), "JO hello decodes");
 	check(jo_hello.nvs ==

@@ -273,9 +273,6 @@ int test_settings_rules() {
 		c.expansion_id = 2;
 		c.missions = { "second.bms", "ESCAL.BMS" };
 	})));
-
-	TEST_EXPECT(hosted::split_missions(hosted::join_missions(s.missions)) == s.missions);
-	TEST_EXPECT(hosted::split_missions("").empty());
 	return 0;
 }
 
@@ -389,8 +386,8 @@ int test_renders() {
 					copy.entity_send_budget == 1000 && copy.send_holdoff_ticks == 0 &&
 					copy.options.get_string("server_message", "") == "Keep this setting");
 		}
-		for (const auto table : { opennova::gamecfg::ConfigTable::Jo, opennova::gamecfg::ConfigTable::Dfx2 }) {
-			const auto schema = hosted::hosted_settings_schema(table);
+		for (const char *title : { "jo", "dfx2" }) {
+			const auto schema = hosted::hosted_settings_schema(title);
 			const auto packet = std::find_if(schema.array.begin(), schema.array.end(),
 					[](const auto &row) { return row.get_string("key", "") == "max_packet_size"; });
 			TEST_EXPECT(packet != schema.array.end());
@@ -1204,6 +1201,30 @@ int test_two_servers_one_machine() {
 	TEST_EXPECT(cb && cb->desired.uid == 10002 && cb->desired.slot == 1);
 	const auto holders = hosted::slot_holders(rig.db, *ra->machine_ref);
 	TEST_EXPECT(holders.size() == 2 && holders[0].server_id == a && holders[1].server_id == b);
+	return 0;
+}
+
+// A stored configuration that does not read (a key no binary takes, here) fails that server
+// alone: the row reads with the defaults and the reason, the pass fails it (its agent stops its
+// container) and every other server's pass goes on.
+int test_unreadable_configuration() {
+	Rig rig("hosted_unreadable_config");
+	const int64_t bad = rig.request("unreadable_a");
+	const int64_t good = rig.request("unreadable_b");
+	TEST_EXPECT(bad > 0 && good > 0);
+	TEST_EXPECT(!rig.to_running(bad, 5111).empty());
+	rig.db.exec("UPDATE hosted_servers SET configuration = configuration || '{\"no_such_key\": 1}' "
+				"WHERE id = $1;",
+			{ BindValue(bad) });
+	const auto unread = rig.server(bad);
+	TEST_EXPECT(unread && unread->settings_error == "no_such_key: Unknown settings field.");
+	TEST_EXPECT(!rig.to_running(good, 5112).empty());
+	const auto row = rig.server(bad);
+	TEST_EXPECT(row && row->state == State::Failed &&
+			row->failure_reason ==
+					"its stored configuration does not read (no_such_key: Unknown settings field.)" &&
+			!row->machine_ref);
+	TEST_EXPECT(rig.state(good) == State::Running);
 	return 0;
 }
 
@@ -3048,6 +3069,7 @@ int main(int argc, char **argv) {
 		{ "timeouts_and_health", { test_timeouts_and_health } },
 		{ "listing_lost", { test_listing_lost } },
 		{ "machine_lost_replaces", { test_machine_lost_replaces } },
+		{ "unreadable_configuration", { test_unreadable_configuration } },
 		{ "listing_waits_while_lost", { test_listing_waits_while_lost } },
 		{ "waits_for_lobby", { test_waits_for_lobby } },
 		{ "owner_changes", { test_owner_changes } },

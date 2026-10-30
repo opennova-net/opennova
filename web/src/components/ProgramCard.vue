@@ -119,7 +119,8 @@ import RelativeTime from './RelativeTime.vue';
 import type { InfraRelease, InfraService, InfraTask } from '../types/infra';
 import type { ProgramUsage } from '../types/usage';
 import { buildOf, programBuilds, releaseImageCommit, revisionLabel, type Build } from '../utils/buildView';
-import { countLabel, healthLabel, primaryDeployment, rolloutLabel, serviceState, shortImage, taskSize, taskStatusLabel } from '../utils/infraView';
+import { countLabel } from '../utils/format';
+import { healthLabel, primaryDeployment, rolloutLabel, serviceState, shortImage, taskSize, taskStatusLabel } from '../utils/infraView';
 import { badgeClass } from '../utils/tone';
 import { usageLine } from '../utils/usageView';
 

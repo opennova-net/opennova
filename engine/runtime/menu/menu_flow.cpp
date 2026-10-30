@@ -232,6 +232,11 @@ void HostDialog::remove_selected(MenuRuntime &menu) {
 	sync_start(menu);
 }
 
+void HostDialog::set_class_words(MenuRuntime &menu, const int32_t *words, size_t count) {
+	any_class_ = std::any_of(words, words + count, [](int32_t word) { return word != 0; });
+	sync_start(menu);
+}
+
 // [orig: START_GAME interactive gate @0x557f09, init disable @0x5589f2]
 void HostDialog::sync_start(MenuRuntime &menu) const {
 	const int start = menu.widget_id("START_GAME");

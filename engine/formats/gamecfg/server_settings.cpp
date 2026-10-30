@@ -33,11 +33,12 @@ ServerSetting number(const char *key, const char *label, const char *group, floa
 	s.command = command;
 	return s;
 }
+// A text row: its byte cap the reader's (text_limit), the bytes a game.cfg line of it keeps.
 ServerSetting text(const char *key, const char *label, const char *group,
-		std::string GameCfg::*field, int cap, const char *command = "", bool secret = false) {
+		std::string GameCfg::*field, const char *command = "", bool secret = false) {
 	ServerSetting s{ key, label, group, secret ? Kind::Password : Kind::Text };
 	s.text = field;
-	s.maximum = cap;
+	s.maximum = static_cast<double>(text_limit(field));
 	s.command = command;
 	return s;
 }
@@ -68,6 +69,43 @@ bool offered(const ServerSetting &s, ConfigTable table, bool hosted) {
 constexpr const char *kClassNames[] = { "medic", "sniper", "gunner", "rifleman", "engineer" };
 } //namespace
 
+const char *weapon_availability_name(int32_t word, const ServerSettingsTitle &title) {
+	// The list's cell text: -1 and the mission word MISSION, 0 NEVER, the armory-only word
+	// ARMORY, any other word ALWAYS.
+	// [orig: HostDialog_WeaponRestrictionCycleHandler @0x5576c0 - the switch: -1 and 3 MISSION,
+	//  0 NEVER, 2 ARMORY, default ALWAYS]
+	// [orig: @0x5558a0 (dfx2.exe) - the switch: -1 and 2 MISSION, 0 NEVER, 3 ARMORY]
+	if (word == -1 || word == title.mission_word)
+		return "mission";
+	if (word == 0)
+		return "never";
+	return word == title.armory_word ? "armory" : "always";
+}
+
+bool set_weapon_availability(int32_t &word, std::string_view name, const ServerSettingsTitle &title) {
+	int32_t named = 0;
+	if (name == "never")
+		named = 0;
+	else if (name == "always")
+		named = 1;
+	else if (name == "armory")
+		named = title.armory_word;
+	else if (name == "mission")
+		named = title.mission_word;
+	else
+		return false;
+	if (name != weapon_availability_name(word, title))
+		word = named;
+	return true;
+}
+
+bool class_available(int32_t word) {
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - the class words @0x551882..0x551990:
+	//  1 enables its class, 2 while the mission entry's mask holds its bit (every entry's 0x3FF,
+	//  MissionList_ScanAndBuildFromFiles @0x56334A), any other word disables it]
+	return word == 1 || word == 2;
+}
+
 const std::vector<ServerSetting> &server_settings() {
 	// Field semantics and defaults: [orig: Config_SetDefaults @0x54D030] and
 	// [orig: Config_ParseSettingsLine @0x54F740] (game_cfg.cpp),
@@ -75,11 +113,11 @@ const std::vector<ServerSetting> &server_settings() {
 	// names [orig: CAdminServer_HandleSetCommand @0x405A60] (admin_console.cpp).
 	static const std::vector<ServerSetting> settings = [] {
 		std::vector<ServerSetting> v = {
-			text("game_name", "Server name", "Server", &GameCfg::game_name, 31, "ServerName"),
+			text("game_name", "Server name", "Server", &GameCfg::game_name, "ServerName"),
 			text("game_password", "Game password", "Players and access",
-					&GameCfg::mp_host_game_password, 16, "ServerPassword", true),
+					&GameCfg::mp_host_game_password, "ServerPassword", true),
 			integer("max_players", "Maximum players", "Players and access",
-					&GameCfg::mp_max_players, "", 1, 64),
+					&GameCfg::mp_max_players, "", 1),
 			// A setting with a SET verb takes its signed word whole (the range loop below), so
 			// those rows name no range of their own.
 			integer("time_limit", "Round time (minutes)", "Rules", &GameCfg::time_limit, "GameTime"),
@@ -89,14 +127,14 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("start_delay", "Start delay (seconds)", "Rules", &GameCfg::startdelay,
 					"StartDelay"),
 			flag("team_ff", "Friendly fire", "Rules", 0x200, true, "FriendlyFire"),
-			text("server_message", "Server message", "Server", &GameCfg::servermsg, 127),
-			text("country", "Country code", "Server", &GameCfg::country, 3),
+			text("server_message", "Server message", "Server", &GameCfg::servermsg),
+			text("country", "Country code", "Server", &GameCfg::country),
 			text("side_a_password", "Blue team password", "Teams",
-					&GameCfg::mp_host_side_password_a, 16, "SideAPassword", true),
+					&GameCfg::mp_host_side_password_a, "SideAPassword", true),
 			text("side_b_password", "Red team password", "Teams", &GameCfg::mp_host_side_password_b,
-					16, "SideBPassword", true),
+					"SideBPassword", true),
 			text("spectator_password", "Spectator password", "Players and access",
-					&GameCfg::mp_host_spectator_password, 63, "", true),
+					&GameCfg::mp_host_spectator_password, "", true),
 			integer("spectator_slots", "Spectators (0 off, -1 unlimited)", "Players and access",
 					&GameCfg::mp_num_spectators_max, "", -1, 255),
 			toggle("use_lineup_queue", "Use lineup queue", "Players and access",
@@ -110,6 +148,13 @@ const std::vector<ServerSetting> &server_settings() {
 					"KOTHLimit"),
 			integer("koth_delta", "King of the Hill scoring interval", "Rules",
 					&GameCfg::koth_delta),
+			// The session takes both, and both ride to every joiner: the team lives in the initial
+			// state block (g_MaxTeamLives), the difficulty word as the S2C 0x08 block's and the
+			// S2C 0x04's byte (g_SessionDifficulty) [orig: Game_ApplySessionSettingsToGlobals
+			// @0x551500 - g_MaxTeamLives @0x551B67, g_SessionDifficulty @0x551E80]
+			// (runtime/inmatch/host_config.cpp, server_initial_state.cpp, server_dispatch_join.cpp).
+			integer("max_team_lives", "Team lives", "Rules", &GameCfg::max_team_lives),
+			integer("difficulty", "Difficulty", "Rules", &GameCfg::mp_difficulty, "", 0, 255),
 			integer("max_friendly_kills", "Allowed friendly kills", "Rules",
 					&GameCfg::numallowablefriendlykills, "MaxFriendlyKills"),
 			integer("capture_duration", "Capture duration (seconds)", "Teams",
@@ -135,7 +180,7 @@ const std::vector<ServerSetting> &server_settings() {
 					&GameCfg::mpchangeteam_interval, "ChangeTeamInterval"),
 			integer("change_team_penalty", "Team change penalty (seconds)", "Teams",
 					&GameCfg::mpchangeteam_penalty, "ChangeTeamPenalty"),
-			integer("num_teams", "Number of teams", "Teams", &GameCfg::mp_numteams, "", 1, 4),
+			integer("num_teams", "Number of teams", "Teams", &GameCfg::mp_numteams),
 			toggle("punt_vote", "Allow kick votes", "Players and access", &GameCfg::mpvoting,
 					"PuntVote"),
 			number("vote_percent", "Vote threshold", "Players and access",
@@ -186,10 +231,13 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("dfx_category", "DFX category", "Server", &GameCfg::mp_dfx_category),
 			toggle("publish_players", "Publish player list", "Server", &GameCfg::sendplayerlist),
 			toggle("listing_ping", "Allow ping in listing", "Server", &GameCfg::ping),
+			// The fold the defaults apply [orig: Config_SetDefaults @0x54D030 - @0x54D060..0x54D090].
 			integer("max_packet_size", "Maximum packet size", "Network",
-					&GameCfg::mp_max_packet_size, "", 64, 65507),
+					&GameCfg::mp_max_packet_size, "", 100, 0x4000),
 			toggle("extended_metrics", "Extended network metrics", "Network",
 					&GameCfg::mp_extract_extended_metric_information),
+			// The reader's fold: a mode outside 1..4 is 2 [orig: Config_ParseSettingsLine @0x54F740 -
+			//  the lanmode fold @0x550425..0x55044C].
 			integer("lan_mode", "LAN network mode", "Network", &GameCfg::lanmode, "", 1, 4),
 			toggle("lan_only", "LAN-only admission", "Server",
 					&GameCfg::mp_novaworld_host_lan_only),
@@ -201,10 +249,12 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("lan_port_step", "LAN port step", "Network", &GameCfg::mp_lan_server_port_delta,
 					"", 1, 65535),
 		};
-		for (size_t i = 0; i < 9; ++i)
-			v[i].core = true;
+		// The hosted launch's established top-level fields.
+		constexpr std::string_view kCore[] = { "game_name", "game_password", "max_players",
+			"time_limit", "kill_limit", "max_score", "respawn", "start_delay", "team_ff" };
 		for (auto &s : v) {
 			const std::string_view key(s.key);
+			s.core = std::find(std::begin(kCore), std::end(kCore), key) != std::end(kCore);
 			// SET consumes signed 32-bit words, including retail sentinel values.
 			// Do not substitute the old website's guessed slider ranges.
 			if (*s.command && s.kind == Kind::Integer) {
@@ -267,7 +317,8 @@ io::JsonValue server_setting_value(const GameCfg &cfg, const ServerSetting &s) {
 	return io::json_number(cfg.*s.integer);
 }
 
-bool set_server_setting(GameCfg &cfg, const ServerSetting &s, const Json &v, std::string &error) {
+bool set_server_setting(GameCfg &cfg, const ServerSetting &s, const Json &v,
+		const ServerSettingsTitle &title, std::string &error) {
 	error.clear();
 	if (s.text) {
 		std::string bytes;
@@ -298,10 +349,7 @@ bool set_server_setting(GameCfg &cfg, const ServerSetting &s, const Json &v, std
 		} else
 			cfg.*s.integer = v.boolean ? 1 : 0;
 	} else {
-		const double maximum =
-				std::string_view(s.key) == "max_players" && cfg.table == ConfigTable::Dfx2
-				? 100
-				: s.maximum;
+		const double maximum = std::string_view(s.key) == "max_players" ? title.max_players : s.maximum;
 		if (!v.is_number() || !std::isfinite(v.number) || v.number < s.minimum ||
 				v.number > maximum || (s.kind == Kind::Integer && std::floor(v.number) != v.number))
 			error = "Value is outside the supported range.";
@@ -313,11 +361,11 @@ bool set_server_setting(GameCfg &cfg, const ServerSetting &s, const Json &v, std
 	return error.empty();
 }
 
-io::JsonValue server_settings_schema(ConfigTable table, bool hosted) {
+io::JsonValue server_settings_schema(const ServerSettingsTitle &title, bool hosted) {
 	Json list = Json::make_array();
-	const GameCfg cfg = defaults({}, 0, 0, table);
+	const GameCfg cfg = defaults({}, 0, 0, title.table);
 	for (const auto &s : server_settings()) {
-		if (!offered(s, table, hosted))
+		if (!offered(s, title.table, hosted))
 			continue;
 		Json row = Json::make_object();
 		row.set("key", io::json_string(s.key));
@@ -327,10 +375,7 @@ io::JsonValue server_settings_schema(ConfigTable table, bool hosted) {
 		row.set("default", server_setting_value(cfg, s));
 		row.set("min", io::json_number(s.minimum));
 		row.set("max",
-				io::json_number(
-						std::string_view(s.key) == "max_players" && table == ConfigTable::Dfx2
-								? 100
-								: s.maximum));
+				io::json_number(std::string_view(s.key) == "max_players" ? title.max_players : s.maximum));
 		row.set("command", io::json_string(s.command));
 		row.set("core", Json::make_bool(s.core));
 		row.set("note", io::json_string(s.note));
@@ -347,13 +392,14 @@ io::JsonValue server_settings_values(const GameCfg &cfg, bool hosted) {
 			out.set(s.key, server_setting_value(cfg, s));
 	Json classes = Json::make_object();
 	for (int i = 0; i < 5; ++i)
-		classes.set(kClassNames[i], Json::make_bool(cfg.class_availability[i + 5] != 0));
+		classes.set(kClassNames[i], Json::make_bool(class_available(cfg.class_availability[kClassMedic + i])));
 	out.set("classes", std::move(classes));
 	return out;
 }
 
 bool apply_server_settings(GameCfg &cfg, const Json &patch, bool hosted,
-		const WeaponRoster &weapons, std::string &field, std::string &error) {
+		const WeaponRoster &weapons, const ServerSettingsTitle &title, std::string &field,
+		std::string &error) {
 	if (!patch.is_object()) {
 		error = "Expected a settings object.";
 		return false;
@@ -372,21 +418,22 @@ bool apply_server_settings(GameCfg &cfg, const Json &patch, bool hosted,
 				if (m.key == "classes") {
 					for (int i = 0; i < 5; ++i)
 						if (entry.key == kClassNames[i] && entry.value.is_bool()) {
-							next.class_availability[i + 5] = entry.value.boolean ? 1 : 0;
+							// A class left as it reads keeps its raw word (MISSION's 2 among them).
+							int32_t &word = next.class_availability[kClassMedic + i];
+							if (entry.value.boolean != class_available(word))
+								word = entry.value.boolean ? 1 : 0;
 							found = true;
 						}
 				} else {
-					const int armory = cfg.table == ConfigTable::Dfx2 ? 3 : 2;
+					int32_t probe = 0;
 					if (entry.value.is_string() &&
-							(entry.value.string == "always" || entry.value.string == "never" ||
-									entry.value.string == "armory")) {
+							set_weapon_availability(probe, entry.value.string, title)) {
 						for (size_t i = 1; i < weapons.size() && i < kWeaponAvailabilityCount;
 								++i) {
 							if (weapons[i].loadout_selectable &&
 									strutil::iequals(entry.key, cp1252_to_utf8(weapons[i].name))) {
-								next.weapon_availability[i] = entry.value.string == "never" ? 0
-										: entry.value.string == "armory"					? armory
-																							: 1;
+								set_weapon_availability(
+										next.weapon_availability[i], entry.value.string, title);
 								found = true;
 							}
 						}
@@ -404,7 +451,7 @@ bool apply_server_settings(GameCfg &cfg, const Json &patch, bool hosted,
 			error = "This setting is unavailable for this server.";
 			return false;
 		}
-		if (!set_server_setting(next, *s, m.value, error))
+		if (!set_server_setting(next, *s, m.value, title, error))
 			return false;
 	}
 	cfg = std::move(next);

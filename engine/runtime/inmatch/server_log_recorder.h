@@ -67,7 +67,7 @@ public:
 	static constexpr int kRosterIds = 128;
 
 	ServerLogRecorder(ServerFileSink &files, std::string profile_path);
-	// The process-exit close [orig: sub_7947A0 -> CServerLog_CloseAndFree].
+	// The process-exit close [orig: ServerLog_AtExitClose -> CServerLog_CloseAndFree].
 	~ServerLogRecorder();
 	ServerLogRecorder(const ServerLogRecorder &) = delete;
 	ServerLogRecorder &operator=(const ServerLogRecorder &) = delete;

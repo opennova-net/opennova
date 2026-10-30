@@ -49,6 +49,12 @@ int main() {
 		TEST_EXPECT(roster.size() == 7 && roster[4].name == "WPN_SUB_A" && roster[4].loadout_selectable == 0);
 		TEST_EXPECT(roster.size() == 7 && roster[5].name == "WPN_SUB_B" && roster[5].loadout_selectable == 0);
 		TEST_EXPECT(roster.size() == 7 && roster[6].name == "WPN_RIFLE" && roster[6].loadout_selectable == 1);
+		// The remote admin's table keeps every row's own word, a subclass row's too (WEAPON SET
+		// ALL's rows), where the roster leaves a subclass row out.
+		TEST_EXPECT(roster.size() == 7 && roster[0].admin_loadout_selectable == 0 &&
+				roster[1].admin_loadout_selectable == 1 && roster[2].admin_loadout_selectable == 0 &&
+				roster[3].admin_loadout_selectable == 1 && roster[4].admin_loadout_selectable == 1 &&
+				roster[5].admin_loadout_selectable == 1 && roster[6].admin_loadout_selectable == 1);
 
 		// The avail_wpn keys address the table by row: WPN_RIFLE is row 6.
 		const std::string cfg_text = "version = 29\r\navail_wpn_rifle = 2\r\navail_wpn_sub_a = 0\r\n";

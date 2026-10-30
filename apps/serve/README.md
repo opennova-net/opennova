@@ -39,7 +39,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 | `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as retail's switch does (a host file with no `MaxPlayers` line leaves it unread). |
 | `/exp <name>`, `/mod <name>` | Mount that expansion (for example `revx02`); `/mod` is the same switch, as in the game (the last one given wins). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
-| `/game <code>` | The data's game code, as the game's `/game`: its SCR keying and the title the server runs as (below). Default: the game the folder's `UPDATE.WIZ` names, else `acidgambit`. |
+| `/game <code>` | The data's game code, as the game's `/game`: the title the server runs as (below). Default: the game the folder's `UPDATE.WIZ` names, else `acidgambit`. |
 | `/LAN` | Every `game.cfg` read sets `mpnovaworldhostlanonly` to 1, as retail's switch does: a NovaWorld listing advertises LAN only. |
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |

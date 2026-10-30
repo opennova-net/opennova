@@ -8,6 +8,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 #include <memory>
 #include <cstdio>
 #include "conn_fixture.h"
@@ -142,6 +143,7 @@ int main() {
     inmatch::NapiNPServerCtx ctx;
     ctx.world = &world;
     ctx.is_authority = ctx.is_in_session = 1;
+    ctx.np_protocol.identity = title_protocol("jo");
     auto &connections = ctx.np_protocol.connection_list;
     connections.push_back(conn_fixture::make_conn(1, 1, &alive_wire, ns::TransportMode::Client, alive, true));
     connections.push_back(conn_fixture::make_conn(2, 1, &dead_wire, ns::TransportMode::Client, dead, true));

@@ -352,7 +352,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 // while the SP round-over latch holds (the SP round end sets it before the
 // epilog cine starts, and a session never runs the epilog), so this chain
 // never sees it; dword_24C18D0 and dword_B76494 have no reachable setter;
-// the cine editor dword_24C18B8 opens only from its own dialog. The quit
+// g_CScreenActive (ex dword_24C18B8) rises only from the cine editor's dialog. The quit
 // dialog closes third, after the voice-macro menus; with none open the tail
 // runs the init keeping the dialog word, then opens the dialog on the
 // authority's server-status view in a session, else the in-game menu.

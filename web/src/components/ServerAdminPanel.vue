@@ -55,19 +55,29 @@ async function reload() {
   busy.value = true; error.value = '';
   try { await load(); } catch (e) { error.value = configurationError(e); } finally { busy.value = false; }
 }
+// A nested map (the weapons, the classes) sends only the rows the user changed: a row left
+// alone keeps the raw word the server holds for it.
+function edited(value: ServerOptions[string], before: ServerOptions[string] | undefined): ServerOptions[string] {
+  if (typeof value !== 'object' || typeof before !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([name, v]) => v !== before[name]));
+}
 function openSettings(event: Event) { if ((event.target as HTMLDetailsElement).open && !state.value && !busy.value) void reload(); }
 async function save() {
   if (!state.value || busy.value || validation.value) return;
   const patch: ServerOptions = {}, options: ServerOptions = {};
   for (const [key, value] of Object.entries(values.value)) {
     if (JSON.stringify(value) === JSON.stringify(original.value[key])) continue;
-    (state.value.schema.find((s) => s.key === key)?.core ? patch : options)[key] = value;
+    (state.value.schema.find((s) => s.key === key)?.core ? patch : options)[key] = edited(value, original.value[key]);
   }
   busy.value = true; error.value = ''; notice.value = '';
   try {
     const result = await queue.action(() => editConfiguration(props.target, state.value!.settings_revision, { ...patch, options }));
     output.value = result.replies.join('\n');
-    notice.value = result.configuration_saved ? 'Accepted changes saved. Settings marked for the next launch are pending.' : 'The changes were not saved. Reload before retrying.';
+    notice.value = result.next_launch_only && result.configuration_saved
+      ? 'Saved. The changes apply at the next launch.'
+      : result.refused_command
+      ? `The server refused "${result.refused_command}". The changes before it were saved; the rest were not sent.`
+      : result.configuration_saved ? 'Accepted changes saved. Settings marked for the next launch are pending.' : 'The changes were not saved. Reload before retrying.';
     await load();
   } catch (e) { error.value = configurationError(e); } finally { busy.value = false; }
 }

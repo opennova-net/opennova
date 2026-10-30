@@ -6,7 +6,7 @@
 // ran more than five steps. A rider in a control seat reads the rest left, else 0xFF once its
 // vehicle was full, else 0, as the 0x0A's rearm byte.
 // [orig: Server_UpdateEntityTargetLockAndWeaponOverlays @0x511820 (Server_TickUpdate
-//  @0x51DF78); Entity_IsInFriendlyFarp @0x44A2B0; sub_546150 @0x546150;
+//  @0x51DF78); Entity_IsInFriendlyFarp @0x44A2B0; Entity_IsWeaponSlotFull @0x546150;
 //  Entity_AddMountSlotAmmo @0x546230; Entity_AddEWeapSlotAmmo @0x5462A0;
 //  NetPacket_WritePlayerState @0x4FF8F0..0x4FF992]
 
@@ -89,7 +89,7 @@ struct Rig {
 // On a friendly FARP each pass is a step: the cannon gains its 20 rounds per step, capped at its
 // startrounds and split clip-first, and the vehicle reads full only at a step that finds the slot
 // full already (the test runs ahead of the step's rounds).
-// [orig: @0x5118BE (the step), sub_546150 @0x5118FB ahead of Entity_AddMountSlotAmmo
+// [orig: @0x5118BE (the step), Entity_IsWeaponSlotFull called @0x5118FB ahead of Entity_AddMountSlotAmmo
 //  @0x511934, @0x5119C3]
 void test_a_service_tops_up_and_reads_full() {
 	Rig r;

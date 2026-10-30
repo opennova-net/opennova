@@ -8,6 +8,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/world/collision.h> // static_prox_count_bound, kItemDefTypeBuilding
+#include <runtime/world/destruction.h> // the draw's husk leg (DrawFadeStamp)
 #include <runtime/world/entity.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>
@@ -722,8 +723,63 @@ void test_the_building_type_skip() {
 
 } // namespace
 
+// The collect runs the draw's husk leg for the rows it admits alone: of two husked rows
+// holding their final husk past their destroy delay, the admitted one spends the delay,
+// restamps its death tick and fades (its stamp recorded for the embedder's same-frame
+// draw), and the culled one keeps its delay, its death tick and its phases.
+// [orig: Render_SectorEntity @0x5C4190 - +0x38 @0x5C41F9, Entity_PublishSwapFadePhases
+//  @0x5C4200 (the restamp @0x5C3F9A..0x5C3FA6); its live caller Terrain_RenderSectorEntities
+//  @0x5C7B60 (@0x5C7D13), over the collect's admitted list]
+void test_the_draw_runs_the_husk_leg() {
+	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	opennova::mission::MissionKernel &kernel = *kernel_heap;
+	kernel.world.registry.configure_pool(0, 16);
+	const w::OcclusionFrameCamera cam = camera_down_x();
+	w::ItemDeathTraits traits; // the default fade: 50 + 4 x 25 ticks
+	kernel.world.tables.item_death_traits.set(900, traits);
+	const auto husk = [&](w::Entity &e) {
+		e.item_id = 900;
+		e.engine_flags |= w::kEntityFlagDead | w::kEntityFlagHusk;
+		e.final_husk_loaded = true;
+		e.destroy_timer = 10;
+		e.death_tick = 100;
+	};
+	w::Entity &seen = row(kernel, 0, 1, w::EntityKind::Organic, 201, 20.0f, 0.0f);
+	w::Entity &unseen = row(kernel, 0, 2, w::EntityKind::Organic, 202, -20.0f, 0.0f);
+	husk(seen);
+	husk(unseen);
+	im::WireOcclusionLatchMap latches;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	const auto collect = [&](uint32_t tick) {
+		kernel.world.logic_tick = tick;
+		kernel.world.out.destruction.clear();
+		kernel.occlusion.build_frame(kernel.world, kernel.collision, cam);
+		im::collect_view_verdicts(im::PresentRowsContext{kernel, nullptr, false}, latches, cam,
+				culled_bms, culled_wire, anchors);
+	};
+	collect(200);
+	expect(!contains(culled_bms, 201) && contains(culled_bms, 202),
+			"the row ahead is admitted, the one behind the eye culled");
+	expect(seen.destroy_timer == 0 && seen.death_tick == 200,
+			"the admitted row spends its delay and restamps its death tick");
+	expect(unseen.destroy_timer == 10 && unseen.death_tick == 100,
+			"the culled row keeps its delay and its death tick");
+	collect(250);
+	expect(seen.destroy_phases_q16[1] == 65536 && seen.destroy_phases_q16[0] != 0,
+			"50 ticks past its restamp the admitted row's fade runs");
+	expect(unseen.destroy_phases_q16 == (std::array<int32_t, 6>{}) && unseen.destroy_timer == 10,
+			"the culled row's phases stand at zero");
+	const std::vector<w::DrawFadeStamp> &stamps = kernel.world.out.destruction.draw_fades;
+	expect(stamps.size() == 1 && stamps[0].handle == seen.handle.packed && stamps[0].husked &&
+					stamps[0].phases_q16 == seen.destroy_phases_q16,
+			"the changed row's stamp is recorded for the same-frame draw");
+}
+
 int main() {
 	test_the_walk();
+	test_the_draw_runs_the_husk_leg();
 	test_the_mirror_walk();
 	test_the_walk_order();
 	test_the_statics_bound();

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <net/npwire/ingame_decode.h>               // decode_frame_update / FrameUpdate
+#include <net/protocol/protocol.h>                  // title_protocol (the host speaks JO's)
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/connection.h>
 #include <runtime/replication/connection_fan.h>     // drain_connection_c2s / emit_connection_s2c
@@ -28,12 +29,13 @@ inline void drain_all(world::World &world, std::vector<Connection> &conns, bool 
 
 // Build the world snapshot ONCE, then fan a per-connection-anchored 0x0A to every connection
 // [orig: NapiNPServer_SendFiltered @0x4C87E0 builds once, SendToConn @0x4c4f20 per node]. `conns` is
-// non-const: each emit advances that connection's 0x0A sub-block phase counter.
+// non-const: each emit advances that connection's 0x0A sub-block phase counter. The host speaks
+// JO's protocol.
 inline void emit_all(const world::World &w, std::vector<Connection> &conns,
                      uint32_t game_type = 0) {
 	const std::vector<GameEntitySnapshot> ents = snapshot_world(w);
 	for (Connection &c : conns)
-		emit_connection_s2c(w, c, ents, game_type);
+		emit_connection_s2c(w, c, ents, game_type, 0, 0, 0, title_protocol("jo"));
 }
 
 // Spawn a joiner's owned pool-0 player (a REMOTE peer — spawn_remote_player leaves it non-local) and

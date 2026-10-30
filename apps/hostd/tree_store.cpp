@@ -5,6 +5,7 @@
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <base/project/project_manifest.h> // is_expansion_code
 
 #include <algorithm>
 #include <chrono>
@@ -487,7 +488,7 @@ std::string TreeStore::expansion_mount_point(
 		error = "tree " + std::to_string(base_id) + " is not present";
 		return {};
 	}
-	if (!hosted::is_expansion_code(code)) {
+	if (!project::is_expansion_code(code)) {
 		error = "no expansion code";
 		return {};
 	}

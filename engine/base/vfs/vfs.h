@@ -133,12 +133,6 @@ public:
     // let a loose file beat a .dds sibling ask it with the caller's policy.
     bool loose_first_hit(const std::string &name, VfsLookupPolicy policy) const;
 
-    // Choose how read_file keys SCR payloads. Pass a VfsScrPolicy value (a title's
-    // scr_policy). Defaults to version-detect; persists across mounts. The game-aware
-    // caller sets this so demo-vs-retail keying is correct.
-    void set_scr_policy(int scr_policy);
-    int scr_policy() const; // how read_file keys SCR payloads (VfsScrPolicy)
-
     // --- Flat resolution (case-insensitive filename) ---
     bool has_file(const std::string &name) const;
     bool read_file(const std::string &name, std::vector<uint8_t> &out) const;      // + SCR/BFC1 decode

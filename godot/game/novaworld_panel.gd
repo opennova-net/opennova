@@ -48,9 +48,8 @@ const COLUMN_TITLES: PackedStringArray = [
 # The menu file holding the host dialog: the multiplayer menu, whose host
 # buttons open its MULTI_PLAYER_HOST with file="mp.mnu" and whose
 # NW_MULTI_PLAYER the NovaWorld arm returns to.
-const HOST_DIALOG_MENU := "mp.mnu"
 
-enum Screen { CONNECTING, LOGIN, LOBBY, HOST, MESSAGE, MODS }
+enum Screen { CONNECTING, LOGIN, LOBBY, MESSAGE, MODS }
 
 # Hosting from this menu is OpenNova's alone: a host is never advertised on
 # NovaLogic's live NovaWorld from here (the Host button's tooltip and the press's
@@ -114,18 +113,14 @@ var _joining_rid := 0
 # The mounted resource root, set by MainGame BEFORE _ready so the host Map picker can list the
 # install's .bms missions (the panel owns no mission list; the world's root is null until a load).
 var resource_root: ResourceRoot
-var _mission_option: OptionButton
 var _connecting_view: Control
 var _login_view: Control
 var _lobby_view: Control
-var _host_view: Control
 var _message_view: Control
 var _message_label: Label
 var _message_button: Button
 var _population_label: Label
 var _empty_label: Label
-var _host_start_button: Button
-var _host_cancel_button: Button
 var _screen := Screen.CONNECTING
 var _message_return_screen := Screen.LOGIN
 var _message_action: Callable
@@ -171,7 +166,6 @@ func _bind_scene_ui() -> void:
 	_connecting_view = get_node(pages + "ConnectingView")
 	_login_view = get_node(pages + "LoginView")
 	_lobby_view = get_node(pages + "LobbyView")
-	_host_view = get_node(pages + "HostView")
 	_message_view = get_node(pages + "MessageView")
 	_username_edit = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/UsernameEdit")
 	_password_edit = get_node(pages + "LoginView/LoginCard/LoginMargin/LoginForm/PasswordEdit")
@@ -191,9 +185,6 @@ func _bind_scene_ui() -> void:
 	_roster_list = get_node(pages + "LobbyView/BrowserStack/BrowserSplit/DetailsPanel/DetailsMargin/DetailsScroll/DetailsVBox/RosterList")
 	_host_button = get_node(pages + "LobbyView/Actions/HostButton")
 	_join_button = get_node(pages + "LobbyView/Actions/JoinButton")
-	_mission_option = get_node(pages + "HostView/HostCard/HostMargin/HostForm/MissionOption")
-	_host_start_button = get_node(pages + "HostView/HostCard/HostMargin/HostForm/HostActions/StartButton")
-	_host_cancel_button = get_node(pages + "HostView/HostCard/HostMargin/HostForm/HostActions/CancelButton")
 	_message_label = get_node(pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageLabel")
 	_message_button = get_node(pages + "MessageView/MessageCard/MessageMargin/MessageForm/MessageButton")
 	_message_back_button = get_node(
@@ -248,8 +239,6 @@ func _bind_scene_ui() -> void:
 	_refresh_button.pressed.connect(_on_refresh_pressed)
 	_host_button.pressed.connect(_on_host_screen_pressed)
 	_join_button.pressed.connect(_on_join_pressed)
-	_host_start_button.pressed.connect(_on_host_pressed)
-	_host_cancel_button.pressed.connect(_on_host_cancel_pressed)
 	_message_button.pressed.connect(_on_message_action_pressed)
 	_message_back_button.pressed.connect(_on_message_back_pressed)
 	# The Mods page opens from the header on every screen, and from the games list.
@@ -285,7 +274,6 @@ func _bind_scene_ui() -> void:
 	_server_tree.item_selected.connect(_on_server_selected)
 	_server_tree.item_activated.connect(_on_join_pressed)
 	_update_column_titles()
-	_populate_missions()
 
 
 func _set_screen(next: int) -> void:
@@ -305,7 +293,6 @@ func _show_screen(next: int) -> void:
 		_connecting_view.visible = next == Screen.CONNECTING
 		_login_view.visible = next == Screen.LOGIN
 		_lobby_view.visible = next == Screen.LOBBY
-		_host_view.visible = next == Screen.HOST
 		_message_view.visible = next == Screen.MESSAGE
 		_mods_view.visible = next == Screen.MODS
 
@@ -368,10 +355,6 @@ func _return_to_lobby() -> void:
 	_set_screen(Screen.LOBBY)
 
 
-func _return_to_host() -> void:
-	_set_screen(Screen.HOST)
-
-
 func _retry_server_list() -> void:
 	_set_screen(Screen.LOBBY)
 	_on_refresh_pressed()
@@ -381,10 +364,6 @@ func _on_host_screen_pressed() -> void:
 	if not _logged_in:
 		return
 	_on_host_pressed()
-
-
-func _on_host_cancel_pressed() -> void:
-	_set_screen(Screen.LOBBY)
 
 
 func _update_column_titles() -> void:
@@ -515,8 +494,6 @@ func _reset_connection_state() -> void:
 	_joining_rid = 0
 	# The host Start button is held only while a host request is in flight.
 	_pending_host_config = null
-	if _host_start_button != null:
-		_host_start_button.disabled = false
 	if _password_edit != null:
 		_password_edit.clear()
 	_rebuild_type_filter()
@@ -1067,8 +1044,6 @@ func begin_configured_host(config: HostSessionConfig) -> void:
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
 	_set_status("Starting host...")
 	_pending_host_config = config
-	if _host_start_button != null:
-		_host_start_button.disabled = true
 	# The NovaWorld page's launch saves the player profile, then game.cfg,
 	# before it hosts or dials, whatever the hosting answers
 	# (docs/playerinfo/player-sav-re.md and docs/gamecfg/game-cfg-re.md, the
@@ -1082,25 +1057,11 @@ func begin_configured_host(config: HostSessionConfig) -> void:
 	_client.start_hosting(config.to_session_options())
 
 
-# The mounted menu holding the host dialog (HOST_DIALOG_MENU); null when the mount has
-# none, which leaves only the populate's clamp.
-func _host_dialog_document() -> MnuDocument:
-	if resource_root == null:
-		return null
-	var bytes := resource_root.read_file(HOST_DIALOG_MENU)
-	if bytes.is_empty():
-		return null
-	var doc := MnuDocument.new()
-	return doc if doc.load_from_bytes(bytes) == OK else null
-
-
 # The service accepted the hosting (the session is in state 6): the mission
 # starts now, with the session riding in.
 func _on_hosting_started() -> void:
 	var config := _pending_host_config
 	_pending_host_config = null
-	if _host_start_button != null:
-		_host_start_button.disabled = false
 	if config == null:
 		return
 	host_requested.emit(config)
@@ -1109,24 +1070,10 @@ func _on_hosting_started() -> void:
 func _on_host_failed(reason: String) -> void:
 	var config := _pending_host_config
 	_pending_host_config = null
-	if _host_start_button != null:
-		_host_start_button.disabled = false
 	# A failure for a request the reset already dropped reports nothing.
 	if _suppress_client_messages or config == null:
 		return
 	host_failed(error_message(reason))
-
-
-# Populate the Map picker from the injected resource root. Empty (no root / no .bms) leaves the
-# dropdown empty; Host then reports "no missions" rather than emitting an unhostable request.
-func _populate_missions() -> void:
-	if _mission_option == null:
-		return
-	_mission_option.clear()
-	for m in MissionCatalog.mission_names(resource_root):
-		_mission_option.add_item(m)
-	if _mission_option.item_count > 0:
-		_mission_option.select(0)
 
 
 # --- Mods (ADR 0074) ------------------------------------------------------
@@ -1227,9 +1174,10 @@ static func mod_title(mod: ModListing) -> String:
 	return title if not title.is_empty() else mod.code
 
 
-# The page's rows: the listed mods, then each mod installed here the list does
-# not hold (a private one, a retired one, another service's), by its folder's
-# name, marked as not listed once a list has loaded, which only Remove takes.
+# The page's rows: the listed mods, then each mod the page installed here (its
+# folder's mark) that the list does not hold (a private one, a retired one, another
+# service's), by its folder's name, marked as not listed once a list has loaded,
+# which only Remove takes.
 func _show_mods() -> void:
 	if _mods_tree == null:
 		return
@@ -1295,7 +1243,7 @@ func _update_mod_buttons() -> void:
 	var installed := not code.is_empty() and RuntimeUpdates.has_mod(code)
 	_mod_install_button.disabled = mod == null or installed
 	_mod_update_button.disabled = mod == null or not installed
-	_mod_remove_button.disabled = not installed
+	_mod_remove_button.disabled = not RuntimeUpdates.can_remove_mod(code)
 
 
 func _on_mod_install_pressed() -> void:
@@ -1326,18 +1274,26 @@ func _on_mod_update_pressed() -> void:
 
 func _on_mod_remove_pressed() -> void:
 	var code := _selected_code()
-	if code.is_empty():
+	if code.is_empty() or not RuntimeUpdates.can_remove_mod(code):
 		return
 	var title := mod_title(_selected_mod()) if _selected_mod() != null else code
 	if resource_root != null and String(resource_root.get_expansion()).to_lower() == code.to_lower():
 		_show_message(("%s is the mod the game is playing now. Choose the base game under "
 				+ "Options, Mods, then remove it.") % title, "Back", Callable(), Screen.MODS)
 		return
+	_show_message(("Remove %s? Its folder is deleted with everything in it, and a server "
+			+ "playing it can be joined again only once it is installed again.") % title,
+			"Remove", _remove_mod.bind(code, title), Screen.MODS, "Back")
+
+
+# The confirmed removal: the folder the Mods page installed deleted, the page shown again.
+func _remove_mod(code: String, title: String) -> void:
 	if not RuntimeUpdates.remove_mod(code):
 		_show_message("%s could not be removed.\n\n%s" % [title, RuntimeUpdates.last_error],
 				"Back", Callable(), Screen.MODS)
 		return
 	_installed_listed = false
+	_show_screen(Screen.MODS)
 	_show_mods()
 	_rebuild_view()
 
@@ -1637,24 +1593,6 @@ func details_text() -> String:
 	return _details_label.text if _details_label != null else ""
 
 
-func mission_count() -> int:
-	return _mission_option.item_count if _mission_option != null else 0
-
-
-func mission_name_at(index: int) -> String:
-	return _mission_option.get_item_text(index) if _mission_option != null else ""
-
-
-func select_mission(index: int) -> void:
-	if _mission_option != null:
-		_mission_option.select(index)
-
-
-## The Map dropdown's current selection (the .bms basename), or "" when none.
-func selected_mission() -> String:
-	return _selected_mission()
-
-
 ## The Host button's press path.
 func press_host() -> void:
 	_on_host_pressed()
@@ -1686,6 +1624,11 @@ func server_item_count() -> int:
 
 func host_enabled() -> bool:
 	return _host_button != null and not _host_button.disabled
+
+
+## Whether a host request waits on the service (begin_configured_host's, until its answer).
+func host_pending() -> bool:
+	return _pending_host_config != null
 
 
 func mods_visible() -> bool:
@@ -1752,13 +1695,6 @@ func message_back_visible() -> bool:
 
 
 # The Map dropdown's current selection (the .bms basename), or "" when none.
-func _selected_mission() -> String:
-	if _mission_option == null or _mission_option.item_count == 0:
-		return ""
-	var idx := _mission_option.selected
-	return _mission_option.get_item_text(idx) if idx >= 0 else ""
-
-
 # Called by MainGame when a requested host could not start (no mission, load failed). Reports it on
 # the panel instead of leaving the stale "Starting..." status, and re-enables Host (REAL stays off).
 func host_failed(reason: String) -> void:

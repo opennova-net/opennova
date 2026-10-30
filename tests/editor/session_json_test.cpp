@@ -136,7 +136,7 @@ static int test_tokens() {
 		TEST_EXPECT(*edit_operation_token(operation) && edit_operation_from_token(edit_operation_token(operation), back) &&
 		            back == operation);
 	}
-	for (int i = 0; i <= static_cast<int>(PickPurpose::NovaWorldFolder); ++i) {
+	for (int i = 0; i <= static_cast<int>(PickPurpose::HeightsRaw); ++i) {
 		const auto purpose = static_cast<PickPurpose>(i);
 		PickPurpose back = PickPurpose::None;
 		TEST_EXPECT(*pick_purpose_token(purpose) && pick_purpose_from_token(pick_purpose_token(purpose), back) &&
@@ -1296,7 +1296,9 @@ static int test_over_a_session() {
 	            session.handle(request));
 	TEST_EXPECT(view.project.requirements->required_missing == 0);
 	// Every file the scan lists, each with its kind and whether the editor opens it: the files
-	// query's pages (S13 A5), the project section their count.
+	// query's pages (S13 A5), the project section their count. The NovaWorld cookie jar, which no
+	// editor opens, is the player's file a project may still hold (no requirement makes it).
+	editor_test::hold_cookie_jar(session);
 	TEST_EXPECT(section(ViewSection::Project).get_int("file_count", -1) == int(view.project.scan->entries.size()) &&
 	            section(ViewSection::Project).get("files") == nullptr);
 	JsonValue file_args = JsonValue::make_object();

@@ -29,11 +29,11 @@ namespace {
 
 void test_flags_parse_case_insensitively_with_values() {
     const LaunchFlags f = parse_launch_flags(
-        {"game.exe", "/D", "/EXP", " jox01 ", "--Resource-Dir", "C:/Games/JO", "/game", "JoDemo",
+        {"game.exe", "/D", "/EXP", " jox01 ", "--Resource-Dir", "C:/Games/JO", "/game", "DfX",
          "--", "--loose-mission", "00TRg.bms", "--LOOSE-ROOT"});
     CHECK(f.loose_override);
     CHECK(f.expansion == "jox01");
-    CHECK(f.game == "jodemo");
+    CHECK(f.game == "dfx");
     CHECK(f.resource_dir == "C:/Games/JO");
     CHECK(f.resource_dir_given);
     CHECK(f.loose_mission == "00TRg.bms");
@@ -396,9 +396,9 @@ void test_flags_win_over_fallbacks_and_acidgambit_is_the_default_game() {
           jo_there.name == "Joint Operations");
     CHECK(parse_launch_flags({"--NO-UPDATE"}).no_update && !none.no_update);
     CHECK(parse_launch_flags({"--", "--after-update"}).after_update && !none.after_update);
-    const LaunchFlags set = parse_launch_flags({"/exp", "jox01", "/game", "JODEMO", "--resource-dir", "E:/y"});
+    const LaunchFlags set = parse_launch_flags({"/exp", "jox01", "/game", "DFX", "--resource-dir", "E:/y"});
     CHECK(launch_expansion(set, "revx02") == "jox01");
-    CHECK(launch_game(set, "dfx") == "jodemo");
+    CHECK(launch_game(set, "jo") == "dfx");
     CHECK(set.resource_dir == "E:/y");
 }
 
@@ -407,9 +407,9 @@ void test_flags_win_over_fallbacks_and_acidgambit_is_the_default_game() {
 // @ 0x4a76a6 -> g_ExpansionName @ 0x4a76cf].
 void test_repeated_flags_take_the_last_value() {
     const LaunchFlags f = parse_launch_flags(
-        {"/exp", "jox01", "/game", "jo", "--lan-port", "2000", "/EXP", "revx02", "/game", "JoDemo", "--lan-port", "3000"});
+        {"/exp", "jox01", "/game", "jo", "--lan-port", "2000", "/EXP", "revx02", "/game", "DfX", "--lan-port", "3000"});
     CHECK(f.expansion == "revx02");
-    CHECK(f.game == "jodemo");
+    CHECK(f.game == "dfx");
     CHECK(f.lan_port == 3000);
 }
 
@@ -451,7 +451,7 @@ void test_wizard_product() {
     // (no command file) none.
     const WizardProduct ours = named("MYGAME.CMD", "MyGame", "AcidGambit");
     CHECK(ours.product == "mygame" && ours.game == "acidgambit" && ours.native);
-    CHECK(named("MYGAME.CMD", "MYGAME", "jodemo").product.empty());
+    CHECK(named("MYGAME.CMD", "MYGAME", "dfx").product.empty());
     CHECK(named("", "MYGAME", "jo").product.empty());
 }
 

@@ -272,8 +272,10 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			if (!value(text)) return 1;
 			const auto number = strutil::parse_int(text);
 			const bool holdoff = a == "--send-holdoff-ticks";
-			const int minimum = holdoff ? 0 : 100;
-			const int maximum = holdoff ? 255 : 1600;
+			// The engine's ranges: the override's ceiling (D-NET-1473) and BANDWIDTH's clamp.
+			const int minimum = holdoff ? 0 : inmatch::kEntitySendBudgetMin;
+			const int maximum = holdoff ? static_cast<int>(inmatch::kSendHoldoffTicksMax)
+										: inmatch::kEntitySendBudgetMax;
 			if (!number || !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }) ||
 					*number < minimum || *number > maximum) {
 				error = a + " must be " + std::to_string(minimum) + ".." + std::to_string(maximum);
@@ -569,10 +571,9 @@ bool Server::resolve_title(std::string &error) {
 // The mount opennova.exe makes (godot/game/boot_root_mount.gd over
 // ResourceRoot::mount_runtime / set_root_dir, the one install mount
 // ResourceIndex::scan_install): the witnessed fixed archive table (Packed,
-// PackedWithLooseOverride under /d) under the launch's game code's SCR keying,
-// set ahead of the scan, and, only when asked, a directory with no archives
-// mounted as a plain loose root with no expansion under the same keying
-// (ADR 0025). Then the gate tag: the title's, or the mount's gt.ssc's.
+// PackedWithLooseOverride under /d), and, only when asked, a directory with no
+// archives mounted as a plain loose root with no expansion (ADR 0025). Then the
+// gate tag: the title's, or the mount's gt.ssc's.
 bool Server::mount(std::string &error) {
 	const std::string &code = game_code_;
 	LaunchFlags flags;
@@ -584,7 +585,6 @@ bool Server::mount(std::string &error) {
 	bool mounted = index_.scan_install(options_.resource_dir, flags) ==
 			ResourceIndex::InstallScan::Mounted;
 	if (!mounted && options_.loose_root) {
-		index_.set_scr_policy(title_scr_policy_for_code(code.c_str()));
 		mounted = index_.scan(options_.resource_dir, std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll);
 	}
@@ -592,9 +592,11 @@ bool Server::mount(std::string &error) {
 		error = "could not mount '" + options_.resource_dir + "': " + index_.last_error();
 		return false;
 	}
-	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion)
-	// [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
-	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion()));
+	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion),
+	// each capped at what the title's protocol can name (resolve_title resolved it with its
+	// in-match branches) [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
+	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion(),
+			world::wire_pool_capacities(protocol_in_match(protocol_).pool0_wire_capacity)));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
 	gate_tag_ = protocol_gate_tag(*protocol_, &index_);
@@ -748,17 +750,14 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// over it and the live slot limit from the block, as the game's map change stages it
 	// (inmatch/host_config.h stage_next_mission).
 	inmatch::GameConfig config;
-	int32_t player_limit = 0;
 	if (next_mission) {
-		const inmatch::NextMissionStage stage = inmatch::stage_next_mission(
+		config = inmatch::stage_next_mission(
 				session_config_, &config_.cfg(), list, doc.get_mission_name());
-		config = stage.config;
-		player_limit = stage.player_limit;
 	} else {
 		config = inmatch::host_screen_from_block(config_.cfg(), *config_.title()).config;
 		inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
-		player_limit = static_cast<int32_t>(config.player_slot_limit());
 	}
+	const int32_t player_limit = static_cast<int32_t>(config.live_slot_limit());
 	config.expansion = index_.mounted_expansion();
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
@@ -1011,7 +1010,7 @@ HostRegistration Server::listing_columns() const {
 	r.server_name = config.server_name;
 	r.server_message = config.custom_text;
 	r.max_players = host_.player_limit;
-	r.published_cap = static_cast<int>(config.player_slot_limit());
+	r.published_cap = static_cast<int>(config.live_slot_limit());
 	r.password = !config.server_password.empty();
 	r.listen_host = false;
 	r.lan_only = config_.cfg().mp_novaworld_host_lan_only != 0 ? 1 : 0;
@@ -1600,9 +1599,9 @@ void Server::open_admin() {
 	(void)admincfg::load_file(admincfg::kFileName, config);
 	// The round clock with no session bound is the process's (RemoteAdminConsoles::use_process_state).
 	admin_consoles_.use_process_state(&client_process_);
-	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_consoles_, admin_rand_,
-			[this](std::string_view line) {
-				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(admin_log_redacted(line)),
+	admin_server_ = std::make_unique<AdminServer>(
+			std::move(config), admin_consoles_, admin_rand_, [this](std::string_view line) {
+				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(line),
 						/*append=*/true);
 			});
 	admin_tcp_ = std::make_unique<net::AdminTcpServer>(*admin_server_);

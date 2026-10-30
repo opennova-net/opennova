@@ -21,6 +21,7 @@
 #include <base/io/sha256.h>
 
 #include "common/test_expect.h"
+#include <base/project/project_manifest.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -178,10 +179,10 @@ int test_paths_and_names() {
 	TEST_EXPECT(!hosted::is_image_reference("") && !hosted::is_image_reference("--privileged") &&
 			!hosted::is_image_reference("a b") &&
 			!hosted::is_image_reference(std::string(256, 'a')));
-	TEST_EXPECT(hosted::is_expansion_code("jox01") && hosted::is_expansion_code("x") &&
-			hosted::is_expansion_code("abcd1234"));
+	TEST_EXPECT(opennova::project::is_expansion_code("jox01") && opennova::project::is_expansion_code("x") &&
+			opennova::project::is_expansion_code("abcd1234"));
 	for (const char *bad : { "", "JOX01", "jox-1", "jox_01", "abcd12345", "../x" })
-		TEST_EXPECT(!hosted::is_expansion_code(bad));
+		TEST_EXPECT(!opennova::project::is_expansion_code(bad));
 	TEST_EXPECT(hosted::is_tree_url("s3://opennova-backups/data/prod/trees/7/") &&
 			hosted::is_tree_url("file:///var/lib/opennova/store/trees/8/") &&
 			hosted::is_tree_url("file:///C:/store/trees/8/"));

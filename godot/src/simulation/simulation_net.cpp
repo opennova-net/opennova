@@ -78,27 +78,21 @@ using namespace sim_internal;
 // start_host_session's gating. The host ctx's mission points straight at the
 // kernel's adopted document, which outlives the match; a reload's bring-up
 // rebuilds the loopback and a fresh host owner drops stale owner peers.
-namespace {
+namespace sim_internal {
 
-// The title a session speaks, the listen host's (HostConfig::title) and the joiner's
-// (JoinerRole::set_protocol): the one the shell named (Simulation::set_protocol, the mounted
-// game's), else, for a session no shell named one for, the game the process was launched
-// as (ResourceRoot::session_protocol with no root). Null when that title's protocol is not
-// witnessed in full; a joiner then does not dial and a host admits no joiner.
-const opennova::Protocol *session_protocol(const opennova::Protocol *named) {
-	if (named != nullptr) return named;
+// See simulation_internal.h.
+const opennova::Title &session_title(const SimulationNetState &p_net, const Ref<ResourceRoot> &p_root) {
+	return p_net.game_title != nullptr ? *p_net.game_title : ResourceRoot::session_title(p_root);
+}
+
+const opennova::Protocol *session_protocol(
+		const SimulationNetState &p_net, const Ref<ResourceRoot> &p_root) {
+	if (p_net.protocol != nullptr) return p_net.protocol;
 	std::string error;
-	return ResourceRoot::session_protocol(Ref<ResourceRoot>(), error);
+	return ResourceRoot::session_protocol(p_root, error);
 }
 
-// The title a session runs as, whose caps and rules its host config and its joiner take: the one
-// the shell named (Simulation::set_game_title, the mounted game's), else the game the process
-// was launched as (ResourceRoot::session_title with no root).
-const opennova::Title &session_game_title(const opennova::Title *named) {
-	return named != nullptr ? *named : ResourceRoot::session_title(Ref<ResourceRoot>());
-}
-
-} // namespace
+} // namespace sim_internal
 
 opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 		const std::string &p_sp_mission_file) {
@@ -118,9 +112,9 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 	source.cfg_block = net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr;
 	// The session runs as the mounted game: a LAN host's, and the single player's, which once
 	// never named one and so ran Joint Operations' rules whatever the game.
-	source.title = &session_game_title(net_.game_title);
+	source.title = &session_title(net_, assets_.root);
 	inmatch::HostConfig cfg = inmatch::shell_host_config(source);
-	cfg.protocol = session_protocol(net_.protocol);
+	cfg.protocol = session_protocol(net_, assets_.root);
 	// The process's log devices: the switches retail's command line arms reach every host the
 	// process runs, a listen host's as a dedicated one's (base/resource_index boot_policy.h
 	// LogSwitches carries the witness).
@@ -620,8 +614,8 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	// tables come from score.ini at each boot (inmatch/host_boot.h).
 	opennova::inmatch::GameConfig config = p_options->config();
 	config.mission_header_blob = std::move(net_.host_session_config.mission_header_blob);
-	// The session runs as the mounted game (session_game_title): its caps and its rules.
-	config.set_title(session_game_title(net_.game_title));
+	// The session runs as the mounted game (session_title): its caps and its rules.
+	config.set_title(session_title(net_, assets_.root));
 	net_.host_bind_port = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
 	net_.host_network_type = p_options->network_type();
 	config.spectator_slots = std::max(config.spectator_slots, -1);
@@ -776,13 +770,13 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// session's role switch is the gate: re-dialing a live mission is rejected
 	// without partially replacing its transport. A session with no title identity
 	// (session_protocol) has nothing to join with.
-	const opennova::Protocol *protocol = session_protocol(net_.protocol);
+	const opennova::Protocol *protocol = session_protocol(net_, assets_.root);
 	if (protocol == nullptr) return false;
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
 	joiner_role_->set_protocol(protocol);
-	// The rules the joiner's World and its replica run, the mounted game's (session_game_title).
-	joiner_role_->set_rules(opennova::world::title_rules(session_game_title(net_.game_title).code));
+	// The rules the joiner's World and its replica run, the mounted game's (session_title).
+	joiner_role_->set_rules(opennova::world::title_rules(session_title(net_, assets_.root).code));
 	// The process's 0x4C report count runs on across joins (ClientProcessState).
 	joiner_role_->use_process_state(net_.client_process);
 	// The process's log devices: a session destroy's stop of a held server writes its

@@ -85,8 +85,8 @@ void VehicleTrailPresenter::sync_fixed_tick_effects() {
 }
 
 // The zone's surface-effect group, executed as the sim orders it. Release
-// stops the group (retail: Effect_ReleaseEmitterIfLive -> sub_5E5ED0 notifies each child dead)
-// and drops the record; Ensure creates the group at the hit with the zone-less
+// stops the group (retail: Effect_ReleaseEmitterIfLive -> CEffectGroup_StopChildEmitters stops
+// each child's emission) and drops the record; Ensure creates the group at the hit with the zone-less
 // spawn (its scheduled particles search their zone); Trigger re-spawns every
 // child at the hit with the zone as the spawn window. A group the scene has
 // already reaped answers the trigger with false and keeps its record: retail's

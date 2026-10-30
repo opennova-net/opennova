@@ -184,8 +184,8 @@ _Avoid_: role, service (for one program), tier, microservice, pod
 **Gate**:
 The program that is retail's first contact: UDP port 7597 (the protocol in
 `engine/net/novaworld/gate`, the listener in `apps/novaworld_gate`), which hands a client the HTTP
-service URL and the one lobby address every **lobby instance** announces, and takes the hosts'
-status blobs on the same port. It holds no session; its address is the one retail's hosts file names.
+service URL and the one lobby address every **lobby instance** announces. It holds no session; its
+address is the one retail's hosts file names.
 _Avoid_: lobby, edge
 
 **Lobby**:
@@ -751,12 +751,13 @@ surface takes the middle dot as 0xB7.
 _Avoid_: build label, version string, version text (retail's `V1.7.5.7`)
 
 **Title**:
-The retail game a **game** runs as, by its code (`jo`, `dfx2`, `acidgambit`; `jodemo`, `dfx` and
-`bhd` are unwitnessed and refused by name): its rules, the **protocol** it speaks and what its
-install carries (its name and title text, its SCR policy, executable, command file and game.cfg
-table). A `Title` row in `engine/base/title`'s registry (`title_by_code`), each game's in
+The retail game a **game** runs as, by its code (`jo`, `dfx2`, `acidgambit`; `dfx` and `bhd`
+are unwitnessed and refused by name): its rules, the **protocol** it speaks and what its install
+carries (its name and title text, executable, command file and game.cfg table). A `Title`
+row in `engine/base/title`'s registry (`title_by_code`), each game's in
 `games/<code>/<code>_title.cpp`, its rules in `<code>_rules.cpp`; `games::install()` fills the
-registries, and `engine/` holds the types and lookups and names no title (ADR 0076). OP: Acid
+title and protocol registries, `games::install_rules()` the rules registry (a program that runs a
+match), and `engine/` holds the types and lookups and names no title (ADR 0076). OP: Acid
 Gambit is its own title, whose protocol and rules are JO's, and the default one: a launch, a
 project or a session that names none runs as it. Titles are in scope as data (ADR 0055); an
 unwitnessed field is refused where it is needed, never filled with JO's value. The editor and the

@@ -21,6 +21,7 @@
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdio>
 #include <memory>
@@ -53,6 +54,7 @@ struct Fixture {
 	explicit Fixture(const std::vector<uint8_t> &teams) {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config.game_type = 0x10000u; // TDM
 		ctx.config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
 		ctx.config.respawn_timeout = 5;

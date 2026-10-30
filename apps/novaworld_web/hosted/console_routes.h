@@ -6,12 +6,13 @@
 // curated commands (console_commands.h) on the server's admin link
 // (apps/novaworld_fleet/hosted/admin_link.h), which the fleet leader holds:
 // each command goes through the database (console_queue.h), and the link's
-// state is its row (admin_link_status). The owner's routes act on one of the caller's own servers by
-// its id: GET /api/me/servers/<id>/players, POST .../players/<slot>/punt, /ban,
-// /swap and /kill, GET .../missions, GET and POST .../rotation (the entries; one
-// appended), POST .../rotation/<index>/remove and /next, POST
+// state is its row (admin_link_status). The owner's routes act on one of the caller's own servers
+// by its id: GET /api/me/servers/<id>/players, POST .../players/<slot>/punt, /ban, /swap and /kill,
+// GET .../missions, GET and POST .../rotation (the entries; one appended), POST
+// .../rotation/<index>/remove and /next, POST
 // .../rotation/cycle, GET and POST .../chat, and GET .../console. The admin's
-// are the same under /api/admin/hosted/<id>/..., plus GET .../settings. Every
+// are the same under /api/admin/hosted/<id>/.... GET .../settings reads the
+// database alone (configuration_routes.cpp), owner and admin alike. Every
 // reply is JSON; a refusal is an error code with our own message, never the
 // server's text.
 //
@@ -19,13 +20,14 @@
 // header on a POST) or require_admin; the arguments (400, before anything is
 // read); the server: the id (404 not_found, also for another account's server
 // on an owner's route, 409 not_live), running (409 server_stopping while it stops, 409
-// server_not_running before it runs), its link up (503 admin_unavailable); the
+// server_not_running before it runs), its link up (503 admin_unavailable; a settings
+// edit with no live command needs neither, configuration_routes.cpp settings_edit); the
 // admission (below: 429 console_busy, 503 console_full, 409 rotation_busy);
 // for an owner, one token from the account's read or write bucket (429
 // rate_limited); then the link (503 admin_busy with its queue full, 504
-// admin_timeout past the 3 s a request has for all its commands; a 503 hands
-// the token back), and the command's own outcome (console_outcome). Behind
-// ONNET_API_PROXY_ONLY like every /api route.
+// admin_timeout past the 3 s a request has for all its commands, a settings edit
+// more by its command count (edit_budget); a 503 hands the token back), and the command's own
+// outcome (console_outcome). Behind ONNET_API_PROXY_ONLY like every /api route.
 //
 // The admission. A console request that runs commands holds a Crow handler
 // thread while it waits on the link (up to 3 s; a hosted server pumps its admin
@@ -41,8 +43,8 @@
 // last-map check. The edit is held in Redis (a key per server, set only if
 // absent, kRotationEditTtl at most, let go by its holder's token), so it holds
 // across every web process; the account's one request and the service-wide
-// count stay each process's own, since what they guard is its handler threads. GET .../console reads the database alone and is not
-// admitted.
+// count stay each process's own, since what they guard is its handler threads. GET .../console
+// reads the database alone and is not admitted.
 
 #include "console_commands.h"
 #include "hosted/model/admin_link_status.h"
@@ -77,6 +79,20 @@ public:
 	static constexpr RateLimiter::Params kOwnerWritePerUser{ "console_writes", 8, 1.0 / 2 };
 	// What one request may wait for all its commands on the link.
 	static constexpr std::chrono::milliseconds kCommandBudget{ 3000 };
+	// A settings edit sends one command per changed setting, and a hosted server answers one
+	// admin packet per update (its main loop pumps the admin port), so an edit waits
+	// kCommandBudget plus kEditCommandBudget for each command past its first, at most
+	// kEditBudgetMax; past it the drain still completes the edit and the reply reads as
+	// uncertain. Service policy.
+	static constexpr std::chrono::milliseconds kEditCommandBudget{ 250 };
+	static constexpr std::chrono::milliseconds kEditBudgetMax{ 30000 };
+	static constexpr std::chrono::milliseconds edit_budget(size_t commands) {
+		const std::chrono::milliseconds total = kCommandBudget +
+				kEditCommandBudget *
+						static_cast<std::chrono::milliseconds::rep>(
+								commands > 1 ? commands - 1 : 0);
+		return total < kEditBudgetMax ? total : kEditBudgetMax;
+	}
 	// GET .../console's lines: the newest 200 by default, kConsoleKeep at most.
 	static constexpr size_t kConsoleLinesShown = 200;
 	// The handler threads the console always leaves to the rest of the service.
@@ -122,13 +138,19 @@ private:
 	};
 	// The owner's server `id`, live and running, admitted, a token drawn from
 	// the account's write bucket (a command that changes the server) or its read
-	// bucket.
-	Caller owner_caller(const WebSessionUser &user, uint64_t id, bool write, bool rotation_edit);
-	// Server `id`, live and running, admitted.
-	Caller admin_caller(const RouteAccess &access, uint64_t id, bool rotation_edit);
+	// bucket. With `needs_link` false (a settings edit, which may need no admin line)
+	// a live server that is not stopping is enough: settings_edit checks the link
+	// when its edit has commands.
+	Caller owner_caller(const WebSessionUser &user, uint64_t id, bool write, bool rotation_edit,
+			bool needs_link = true);
+	// Server `id`, live and running, admitted (`needs_link` as owner_caller's).
+	Caller admin_caller(
+			const RouteAccess &access, uint64_t id, bool rotation_edit, bool needs_link = true);
 	// The server's state and link (its row, on `db`), for `c.server_id`; the
-	// refusal when it is not running or its link is not up.
-	std::optional<crow::response> check_server(db::Database &db, const HostedServer &server);
+	// refusal when it is stopping, or with `needs_link` when it is not running or its
+	// link is not up.
+	std::optional<crow::response> check_server(
+			db::Database &db, const HostedServer &server, bool needs_link = true);
 	// The admission of `account`'s request on `c`'s server (the class comment).
 	void admit(Caller &c, const std::string &account, bool rotation_edit);
 	// Takes server `id`'s one rotation edit under `token`; false while another
@@ -162,8 +184,8 @@ private:
 	crow::response chat(const Caller &c);
 	crow::response chat_send(const Caller &c, const ConsoleCommand &command);
 	crow::response console(const Caller &c, const crow::request &req);
-	crow::response settings(const Caller &c);
-	crow::response configuration_command(const Caller &c, const crow::request &req, bool edit);
+	crow::response settings(db::Database &db, const HostedServer &server);
+	crow::response settings_edit(const Caller &c, const crow::request &req);
 	crow::response weapon_settings(const Caller &c);
 	void register_configuration(WebApp &app);
 

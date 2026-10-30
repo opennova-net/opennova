@@ -27,8 +27,7 @@ struct GateResponse;
 struct LobbyStatusBlob {
 	std::string lobby_name;
 	std::string host_key;
-	// The Host ClientVarList, in wire order, unsanitized on the build side
-	// and as-received (sanitized) on the parse side.
+	// The Host ClientVarList, in wire order, unsanitized (the build sanitizes).
 	std::vector<std::pair<std::string, std::string>> host_vars;
 	// PlayerName values of the PlayerList.
 	std::vector<std::string> player_names;
@@ -46,13 +45,5 @@ std::string lobby_update_build(const LobbyStatusBlob &blob);
 // framing. Empty when the gate has no usable POST endpoint.
 std::vector<uint8_t> lobby_update_build_datagram(const GateResponse &gate,
                                                  const LobbyStatusBlob &blob);
-
-// Parse a received blob. Returns false unless the text carries the
-// "HostKey =" preamble. Values come back as sent (still sanitized).
-bool lobby_update_parse(std::string_view text, LobbyStatusBlob &out);
-
-// Look up a Host var by key in the parsed blob (case-insensitive, first
-// match; empty when absent).
-std::string lobby_status_value(const LobbyStatusBlob &blob, std::string_view key);
 
 } // namespace opennova

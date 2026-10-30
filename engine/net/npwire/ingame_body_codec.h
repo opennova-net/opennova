@@ -39,7 +39,7 @@ struct IngameBodyCodecContext {
 	bool waypoint_gametype = false;
 
 	// The session a capture or a host runs: its game type and the protocol it speaks
-	// (null runs JO's, protocol_in_match).
+	// (protocol_in_match: never null).
 	static IngameBodyCodecContext for_session(uint32_t game_type, const Protocol *protocol);
 };
 

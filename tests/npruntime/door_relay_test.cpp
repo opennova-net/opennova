@@ -22,6 +22,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -68,6 +69,7 @@ void test_host_reports_door_commands_and_completions() {
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	auto &connections = ctx.np_protocol.connection_list;
 	connections.push_back(conn_fixture::make_conn(1, 1, &remote_wire,
 			ns::TransportMode::Client, remote, true));

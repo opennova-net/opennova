@@ -21,7 +21,7 @@ namespace opennova::editor {
 // either is the same file to the game).
 //
 // Every hash read is kept (the build cache's `base` section, the project's build_cache.json), by the
-// install, the game and the stamps (size and last write) of what it came from (the boot archives
+// install and the stamps (size and last write) of what it came from (the boot archives
 // together for a member, the file for a loose one), so the next build reads none of the base's bytes
 // while the install is unchanged. A hash is kept only when what it came from had settled before the
 // build read it (io::file_stamp_settled, git's racy rule: a rewrite of the same size in the same clock
@@ -37,9 +37,9 @@ struct BaseCopy {
 
 class BaseMatch {
 public:
-	// The install at `install` mounted for the game `game`: false, `error` saying why, when it does not
-	// mount (no folder, none of the game's archives).
-	bool open(const std::string &install, const std::string &game, std::string &error);
+	// The install at `install` mounted: false, `error` saying why, when it does not mount (no folder,
+	// none of the game's archives).
+	bool open(const std::string &install, std::string &error);
 
 	// The copy of `name` the base's archives serve: false when they hold none. `read_bytes` grows by what
 	// was read to hash it (0 when the cache held it).
@@ -51,7 +51,7 @@ public:
 	bool serves(const std::string &name) const { return view_.find(name) != nullptr; }
 
 	// The cache as the build cache's `base` section keeps it: read before the comparison (one of
-	// another install or game reads as empty), and what it holds after: every copy asked for this
+	// another install reads as empty), and what it holds after: every copy asked for this
 	// time (a copy no longer asked for leaves it).
 	void load(const io::JsonValue &section);
 	io::JsonValue save() const;
@@ -66,7 +66,6 @@ private:
 	bool cached(const std::string &key, const std::string &stamp, BaseCopy &out);
 
 	std::string install_;
-	std::string game_;
 	InstallView view_;
 	std::string archives_stamp_;               // the boot archives' stamps together
 	bool archives_settled_ = false;            // each boot archive's last write settled when opened

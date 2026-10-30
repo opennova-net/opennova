@@ -119,10 +119,10 @@ func test_the_product_version_and_the_version_line() -> void:
 	line = LaunchFlags.version_line()
 	assert_true(line.begins_with("Delta Force Xtreme 2 · ONE "), line)
 	assert_true(line.ends_with(" · DFX2 protocol 16"), line)
-	LaunchFlags.set_args_override(PackedStringArray(["/game", "jodemo", "--resource-dir", dir]))
+	LaunchFlags.set_args_override(PackedStringArray(["/game", "dfx", "--resource-dir", dir]))
 	line = LaunchFlags.version_line()
-	assert_true(line.begins_with("Joint Operations (Demo) · ONE "), line)
-	assert_false(line.contains("protocol"), "the demo's protocol is unwitnessed: no protocol part")
+	assert_true(line.begins_with("Delta Force: Xtreme · ONE "), line)
+	assert_false(line.contains("protocol"), "DFX's protocol is unwitnessed: no protocol part")
 	TestFs.remove_dir_recursive(dir)
 
 

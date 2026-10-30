@@ -132,6 +132,9 @@ void test_port_and_log_text() {
 	expect_eq(inmatch::admin_log_file_text("User command (boss): GET\n"),
 	          "User command (boss): GET\r\n", "a log line reaches the file as CR LF");
 	expect_eq(inmatch::admin_log_file_text("a\nb\n"), "a\r\nb\r\n", "every LF");
+	// A line naming a password is redacted before it reaches the file (D-NET-1472).
+	expect_eq(inmatch::admin_log_file_text("User command (boss) - SET ServerPassword s3cret\n"),
+	          "[password-bearing output redacted]\r\n", "a password line redacted");
 }
 
 // The console in the menus, then over a host's context, then session-less again.

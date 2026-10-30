@@ -55,6 +55,13 @@ namespace {
 
 using test_expect::expect;
 
+// A session start speaking JO's protocol.
+opennova::inmatch::SessionStartup jo_startup() {
+	opennova::inmatch::SessionStartup startup;
+	startup.protocol = &kJo;
+	return startup;
+}
+
 // A host that has been up for five CNetQuality sample periods: the healthy-LAN
 // steady state the captures witness (a measured frame rate at or above 16, so
 // frame-pressure floor 1 in all five send samples and S2C 0x79 carries 1).
@@ -548,7 +555,7 @@ bool check_retail_rate_defaults() {
 	config.session_channel = opennova::inmatch::GameSessionChannel::Automatic;
 	config.lan_mode = 1;
 	opennova::inmatch::create_session(
-			lan_ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			lan_ctx, config, jo_startup(), nullptr);
 	if (!expect(lan_ctx.config.send_holdoff_ticks.has_value() &&
 	                    *lan_ctx.config.send_holdoff_ticks == 12,
 	            "session creation resolves automatic socketed cadence once")) return false;
@@ -558,7 +565,7 @@ bool check_retail_rate_defaults() {
 	opennova::inmatch::set_transport_mode(sp_ctx, SocketMode::Socketless);
 	opennova::inmatch::create_session(
 			sp_ctx, opennova::inmatch::GameConfig{},
-			opennova::inmatch::SessionStartup{}, nullptr);
+			jo_startup(), nullptr);
 	if (!expect(sp_ctx.config.send_holdoff_ticks.has_value() &&
 	                    *sp_ctx.config.send_holdoff_ticks == 1,
 	            "session creation resolves automatic socketless cadence to one tick"))
@@ -925,7 +932,7 @@ bool check_dedicated_host_has_no_local_client() {
 	opennova::inmatch::GameConfig settings;
 	settings.max_players = 16;
 	ctx.server_text.host_name = "Host";
-	opennova::inmatch::create_session(ctx, settings, opennova::inmatch::SessionStartup{}, nullptr);
+	opennova::inmatch::create_session(ctx, settings, jo_startup(), nullptr);
 	if (!expect(ctx.np_protocol.host_running == 1, "dedicated host running")) return false;
 	if (!expect(ctx.np_protocol.connection_list.empty(), "no local client on a dedicated host"))
 		return false;
@@ -1163,7 +1170,7 @@ bool check_host_frame_failure_preserves_owner_queue() {
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
 	opennova::inmatch::create_session(
-			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			owner.ctx, config, jo_startup(), nullptr);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33102};
 	auto &peer_link = owner.peers[peer];
@@ -1217,7 +1224,7 @@ bool check_requeued_fragment_run_overflows_per_node() {
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
 	opennova::inmatch::create_session(
-			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			owner.ctx, config, jo_startup(), nullptr);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33115};
 	auto &peer_link = owner.peers[peer];
@@ -1336,7 +1343,7 @@ bool check_host_idle_send_interval_keepalive() {
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
 	opennova::inmatch::create_session(
-			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			owner.ctx, config, jo_startup(), nullptr);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33116};
 	auto &peer_link = owner.peers[peer];
@@ -1428,7 +1435,7 @@ bool check_host_send_interval_legs_run_every_tick() {
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
 	opennova::inmatch::create_session(
-			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			owner.ctx, config, jo_startup(), nullptr);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33117};
 	auto &peer_link = owner.peers[peer];
@@ -1502,7 +1509,7 @@ bool check_host_builds_at_most_field_14_packets() {
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
 	opennova::inmatch::create_session(
-			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			owner.ctx, config, jo_startup(), nullptr);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33118};
 	auto &peer_link = owner.peers[peer];
@@ -1553,7 +1560,7 @@ bool check_host_admits_exact_retail_message_prefix() {
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
 	opennova::inmatch::create_session(
-			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			owner.ctx, config, jo_startup(), nullptr);
 
 	const opennova::PeerAddr peer{0x0100007Fu, 33103};
 	auto &peer_link = owner.peers[peer];
@@ -1629,7 +1636,7 @@ bool check_host_admits_exact_retail_message_prefix() {
 			transient_owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(transient_owner.ctx, SocketMode::Lan);
 	opennova::inmatch::create_session(
-			transient_owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			transient_owner.ctx, config, jo_startup(), nullptr);
 	const opennova::PeerAddr transient_peer{0x0100007Fu, 33104};
 	auto &transient_link = transient_owner.peers[transient_peer];
 	transient_link.transport =
@@ -2021,7 +2028,7 @@ bool check_script_change_reaches_the_same_frame() {
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
 	opennova::inmatch::GameConfig config;
 	opennova::inmatch::create_session(
-			ctx, config, opennova::inmatch::SessionStartup{}, &loopback);
+			ctx, config, jo_startup(), &loopback);
 	if (!expect(ctx.np_protocol.connection_list.size() == 1,
 	            "same-frame fixture has one host client")) return false;
 	// An added, in-match host client: the tick's periodic spawn pump passes it over.
@@ -2068,7 +2075,7 @@ bool check_host_loopback_does_not_inherit_udp_envelope() {
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
 	opennova::inmatch::GameConfig config;
 	opennova::inmatch::create_session(
-			ctx, config, opennova::inmatch::SessionStartup{}, &loopback);
+			ctx, config, jo_startup(), &loopback);
 	if (!expect(ctx.np_protocol.connection_list.size() == 1,
 	            "loopback envelope fixture has one host client")) return false;
 	// An added, in-match host client: the tick's periodic spawn pump passes it over.
@@ -2533,7 +2540,7 @@ bool check_global_scoreboard_integrity_phase() {
 	config.max_players = 4;
 	config.player_name = "PhaseHost";
 	opennova::inmatch::create_session(
-			ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			ctx, config, jo_startup(), nullptr);
 
 	opennova::world::World world;
 	world.rules.mp_session = true;
@@ -2652,7 +2659,7 @@ bool check_global_scoreboard_integrity_phase() {
 		return false;
 	ctx.scoreboard_broadcast_timer = 77;
 	opennova::inmatch::create_session(
-			ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			ctx, config, jo_startup(), nullptr);
 	ctx.np_protocol.connection_list.push_back(conn);
 	if (!expect(ctx.scoreboard_broadcast_timer == 0 &&
 	                    ctx.integrity_entity_family_next,
@@ -2687,7 +2694,7 @@ bool check_scoreboard_active_slot_filter_is_distinct() {
 	opennova::inmatch::GameConfig config;
 	config.max_players = 4;
 	opennova::inmatch::create_session(
-			ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			ctx, config, jo_startup(), nullptr);
 
 	opennova::world::World world;
 	world.rules.mp_session = true;
@@ -2774,7 +2781,7 @@ bool check_requester_score_delta_refresh() {
 	opennova::inmatch::GameConfig config;
 	config.game_type = opennova::game_type::kDeathmatch;
 	opennova::inmatch::create_session(
-			ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+			ctx, config, jo_startup(), nullptr);
 
 	opennova::world::World world;
 	world.rules.mp_session = true;
@@ -2879,7 +2886,7 @@ bool check_listen_host_own_slot_takes_no_quartet_or_family() {
 	opennova::inmatch::GameConfig config;
 	config.max_players = 4;
 	opennova::inmatch::create_session(
-			ctx, config, opennova::inmatch::SessionStartup{}, &loopback);
+			ctx, config, jo_startup(), &loopback);
 	if (!expect(ctx.np_protocol.connection_list.size() == 1 &&
 	                    ctx.np_protocol.connection_list.front().type == 2,
 	            "listen maintenance fixture owns one type-2 loopback slot"))
@@ -2999,6 +3006,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	opennova::inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	ctx.connection_mode = opennova::inmatch::ConnectionMode::HostClient;
 	ctx.loaded_model_list_count = 100;
 	opennova::world::World world;
@@ -3520,6 +3528,7 @@ bool check_spawn_wave_queue_and_release_wire() {
 	opennova::inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	world.rules.mp_session = true; // the deploy's 0x5A rides the session
 	ctx.world = &world;
 	ctx.config.game_type = opennova::game_type::kTeamDeathmatch;
@@ -3707,9 +3716,14 @@ bool check_default_spawn_requires_no_team_zone() {
 		conn.link.respawn_delay_seconds = 0;
 		conn.link.spawn_target_hold_seconds = 0;
 	};
+	// The deploy reads the session's protocol from the server context.
+	opennova::inmatch::NapiNPServerCtx server;
+	server.np_protocol.identity = &kJo;
+	opennova::inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &server;
 	auto dispatch = [&](const std::vector<opennova::ProtocolMessage> &messages) {
 		return opennova::inmatch::dispatch_session_replies(
-				config, conn, messages, 100, roster, &world);
+				config, conn, messages, 100, roster, &world, inputs);
 	};
 
 	reset_player();
@@ -3840,9 +3854,14 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 			opennova::c2s::RESPAWN_REQUEST,
 			{static_cast<uint8_t>(vehicle.packed),
 			 static_cast<uint8_t>(vehicle.packed >> 8)})};
+	// The deploy reads the session's protocol from the server context.
+	opennova::inmatch::NapiNPServerCtx server;
+	server.np_protocol.identity = &kJo;
+	opennova::inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &server;
 	auto dispatch = [&]() {
 		return opennova::inmatch::dispatch_session_replies(
-				config, conn, pick, 100, roster, &world);
+				config, conn, pick, 100, roster, &world, inputs);
 	};
 	auto reset_player = [&]() {
 		opennova::world::Entity *entity = world.registry.get(player);
@@ -3998,7 +4017,7 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 	conn.link.respawn_pending = true;
 	// The wave release and the 0x51 convert reach the deploy without the 0x0E's gate.
 	const bool deploy_refused = expect(opennova::inmatch::Server_ReleasePlayerDeployment(
-						config, conn, world, root, root.packed).empty() &&
+						config, conn, world, root, root.packed, nullptr, &kJo).empty() &&
 				world.registry.get(player)->health == 0 &&
 				world.registry.get(player)->position.x == -10.0f &&
 				!world.registry.get(player)->mounted,
@@ -4096,7 +4115,7 @@ bool check_refused_mobile_spawn_deploy_clears_hold() {
 	world.match.set_player_respawn_pending(player, true);
 	world.registry.get(player)->flags |= 1u;
 	ok = expect(opennova::inmatch::Server_ReleasePlayerDeployment(
-	                    config, conn, world, vehicle, vehicle.packed).empty() &&
+	                    config, conn, world, vehicle, vehicle.packed, nullptr, &kJo).empty() &&
 	                    unmoved() && !held() && (world.registry.get(player)->flags & 1u) != 0,
 	            "a refused spectator deploy clears the hold and keeps the hide bit") && ok;
 	return ok;
@@ -4375,6 +4394,7 @@ bool check_timed_capture_host_wire_transaction() {
 	opennova::inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
 	opennova::world::CollisionWorld collision;
@@ -4617,6 +4637,7 @@ bool check_numbered_flip_pair_and_banner_wire() {
 	opennova::inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
 	opennova::world::CollisionWorld collision;
@@ -4789,6 +4810,7 @@ bool check_capture_pass_runs_in_every_mode_and_after_the_round() {
 		opennova::inmatch::NapiNPServerCtx ctx;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = &kJo;
 		ctx.config.game_type = game_type;
 		opennova::world::World world;
 		world.rules.mp_session = true;
@@ -4855,6 +4877,7 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	NapiNPServerCtx ctx;
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	ctx.config.max_players = 4;
 	opennova::world::World world;
 	world.rules.mp_session = true;
@@ -4915,7 +4938,8 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	// The join's scan ran (its first overlay visit clears bit 0x01).
 	deployer.reply.minimap_initial_scan_pending = false;
 	opennova::inmatch::Server_ReleasePlayerDeployment(
-			ctx.config, deployer, world, opennova::world::EntityHandle{}, 0xFFFF);
+			ctx.config, deployer, world, opennova::world::EntityHandle{}, 0xFFFF, nullptr,
+			ctx.np_protocol.identity);
 	ok = expect(!deployer.link.respawn_pending && !pending(a),
 	            "the deploy leg clears the roster row's undeployed bit") && ok;
 	ok = expect(!deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held,
@@ -4943,6 +4967,7 @@ struct FrontierHintFixture {
 	explicit FrontierHintFixture(bool with_chain) {
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = &kJo;
 		ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 		world.rules.mp_session = true;
 		ctx.world = &world;
@@ -5061,7 +5086,8 @@ bool check_frontier_hints_read_the_slot_team() {
 	f.conn().assigned_team = 2; // the entity stays on team 1
 	const std::vector<opennova::ProtocolMessage> deploy =
 			opennova::inmatch::Server_ReleasePlayerDeployment(
-					f.ctx.config, f.conn(), f.world, opennova::world::EntityHandle{}, 0xFFFF);
+					f.ctx.config, f.conn(), f.world, opennova::world::EntityHandle{}, 0xFFFF,
+					nullptr, f.ctx.np_protocol.identity);
 	const std::vector<uint8_t> deploy_hint = {0x3A, red, 0xFF, 0xFF, 0, 0, 0, 0};
 	bool ok = expect(!deploy.empty() && deploy.back().tag == opennova::s2c::GAME_EVENT &&
 	                         deploy.back().payload == deploy_hint,
@@ -5286,6 +5312,7 @@ bool check_minimap_overlay_zone_capture_bits() {
 	opennova::inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
 	world.rules.mp_session = true;
@@ -5379,6 +5406,7 @@ bool check_minimap_overlay_reads_the_slot_team() {
 	opennova::inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = &kJo;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
 	world.rules.mp_session = true;
@@ -5487,6 +5515,7 @@ bool build_flag_overlay_scene(FlagOverlayScene &s, uint32_t game_type, int build
 	using namespace opennova;
 	s.ctx.is_authority = 1;
 	s.ctx.is_in_session = 1;
+	s.ctx.np_protocol.identity = &kJo;
 	s.ctx.config.game_type = game_type;
 	s.ctx.world = &s.world;
 	s.world.rules.mp_session = true;
@@ -5853,6 +5882,7 @@ bool check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() {
 	const auto player = world::spawn_remote_player(world, spawn);
 	inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1; ctx.is_in_session = 1; ctx.world = &world;
+	ctx.np_protocol.identity = &kJo;
 	replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 	inmatch::NapiNPConnection conn;
 	conn.type = 1; conn.phase = inmatch::ConnectionPhase::InMatch;

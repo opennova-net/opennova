@@ -13,6 +13,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -64,6 +65,7 @@ std::vector<uint8_t> player_frame(uint16_t handle, uint16_t type_id) {
 // exactly one 0x0F rides out, drained once.
 bool run_unknown_handle_queues_repair_and_creates_nothing() {
 	ns::ClientReplicaPipeline view(classify);
+	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(kHandle, kPlayerType));
 	if (!expect(view.state().find(kHandle) == nullptr,
 	            "a compact record never creates a row")) return false;
@@ -77,6 +79,7 @@ bool run_unknown_handle_queues_repair_and_creates_nothing() {
 // is not rewritten, and the 0x0F self-heal is queued.
 bool run_type_mismatch_queues_repair_and_applies_nothing() {
 	ns::ClientReplicaPipeline view(classify);
+	view.set_protocol(nw::title_protocol("jo"));
 	view.state().upsert(kHandle).type_id = kOtherPlayerType;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(kHandle, kPlayerType));
 	const ns::ClientEntityState *row = view.state().find(kHandle);
@@ -93,6 +96,7 @@ bool run_type_mismatch_queues_repair_and_applies_nothing() {
 // the same self-heal, not an apply.
 bool run_typeless_row_queues_repair() {
 	ns::ClientReplicaPipeline view(classify);
+	view.set_protocol(nw::title_protocol("jo"));
 	view.apply_team_assign(kHandle, 2);
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(kHandle, kPlayerType));
 	const ns::ClientEntityState *row = view.state().find(kHandle);
@@ -106,6 +110,7 @@ bool run_typeless_row_queues_repair() {
 // The matching row folds as before, with no request.
 bool run_matching_row_applies() {
 	ns::ClientReplicaPipeline view(classify);
+	view.set_protocol(nw::title_protocol("jo"));
 	view.state().upsert(kHandle).type_id = kPlayerType;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(kHandle, kPlayerType));
 	const ns::ClientEntityState *row = view.state().find(kHandle);
@@ -121,6 +126,7 @@ bool run_matching_row_applies() {
 // silently, no row, no request [orig: `slot < g_PoolList[pool].capacity`].
 bool run_out_of_capacity_handle_is_consumed_silently() {
 	ns::ClientReplicaPipeline view(classify);
+	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame(0x0FFF, kPlayerType));
 	if (!expect(view.state().find(0x0FFF) == nullptr, "no row for a capacity miss"))
 		return false;
@@ -184,6 +190,7 @@ std::vector<uint8_t> player_frame_byte(uint16_t handle, uint16_t type_id,
 
 bool run_live_record_repicks_the_row_by_its_class() {
 	ns::ClientReplicaPipeline view(classify_with_six);
+	view.set_protocol(nw::title_protocol("jo"));
 	install_cammo_table(view);
 	view.state().upsert(kHandle).type_id = kPlayerType;
 	// Tier 2, class 6 on a class-5 row: the record applies, then rebinds.
@@ -208,6 +215,7 @@ bool run_live_record_repicks_the_row_by_its_class() {
 
 bool run_matching_class_keeps_the_row() {
 	ns::ClientReplicaPipeline view(classify_with_six);
+	view.set_protocol(nw::title_protocol("jo"));
 	install_cammo_table(view);
 	view.state().upsert(kHandle).type_id = kPlayerType;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame_byte(kHandle, kPlayerType, 0x25, 0));
@@ -220,6 +228,7 @@ bool run_matching_class_keeps_the_row() {
 
 bool run_dead_record_keeps_the_class_it_had() {
 	ns::ClientReplicaPipeline view(classify_with_six);
+	view.set_protocol(nw::title_protocol("jo"));
 	install_cammo_table(view);
 	view.state().upsert(kHandle).type_id = kPlayerType;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, player_frame_byte(kHandle, kPlayerType, 0x25, 0));
@@ -238,6 +247,7 @@ bool run_dead_record_keeps_the_class_it_had() {
 
 bool run_classless_row_repicks_the_first_row_and_self_is_left() {
 	ns::ClientReplicaPipeline view(classify_with_six);
+	view.set_protocol(nw::title_protocol("jo"));
 	install_cammo_table(view);
 	view.state().upsert(kHandle).type_id = kPlayerType;
 	view.state().upsert(kSelfHandle).type_id = kPlayerType;

@@ -155,10 +155,13 @@ const char *parity_datagram_class_name(CaptureDatagramClass datagram_class) {
 // ---------------------------------------------------------------------------
 // Builder
 
-ParityTraceBuilder::ParityTraceBuilder(ParityTraceSink &sink, const ItemClassMap *item_classes) :
-		sink_(sink), item_classes_(item_classes) {}
+ParityTraceBuilder::ParityTraceBuilder(ParityTraceSink &sink, const ItemClassMap *item_classes,
+		const Protocol *protocol) :
+		sink_(sink), item_classes_(item_classes), protocol_(protocol) {}
 
 void ParityTraceBuilder::push(const net::PcapDatagram &pk) {
+	if (!error_.empty())
+		return;
 	frame_ts_[pk.frame_index] = pk.ts_nanos;
 	emit_handshake(pk.frame_index, pk.ts_nanos, pk.srcport, pk.dstport, pk.payload);
 	CaptureDatagram cd;
@@ -171,6 +174,8 @@ void ParityTraceBuilder::push(const net::PcapDatagram &pk) {
 
 void ParityTraceBuilder::push_decoded(
 		const CaptureDecodeResult &decoded, const std::map<int, uint64_t> &frame_timestamps) {
+	if (!error_.empty())
+		return;
 	emit_decoded(decoded, frame_timestamps);
 }
 
@@ -210,8 +215,11 @@ void ParityTraceBuilder::emit_decoded(
 					record.skip_bytes });
 		sink_.on_packet(out);
 	}
-	for (const InGameMessage &message : decoded.messages)
+	for (const InGameMessage &message : decoded.messages) {
 		emit_message(message, ts_of(message.frame_index));
+		if (!error_.empty())
+			return;
+	}
 }
 
 const Protocol *handshake_protocol(const std::vector<uint8_t> &raw) {
@@ -241,7 +249,8 @@ const Protocol *handshake_protocol(const std::vector<uint8_t> &raw) {
 
 void ParityTraceBuilder::emit_handshake(
 		int frame, uint64_t ts_ns, int src_port, int dst_port, const std::vector<uint8_t> &raw) {
-	if (const Protocol *protocol = handshake_protocol(raw)) protocol_ = protocol;
+	// The first hello naming one sets it, unless the caller named it (as opennova-wire's --game).
+	if (protocol_ == nullptr) protocol_ = handshake_protocol(raw);
 	std::vector<uint8_t> stripped(raw.size());
 	size_t stripped_len = 0;
 	if (napi_envelope_decode(
@@ -370,6 +379,14 @@ void ParityTraceBuilder::emit_message(const InGameMessage &message, uint64_t ts_
 
 	if (message.dir != 'S' || tag != s2c::PER_FRAME_UPDATE)
 		return;
+	// The objective body's layout is the session protocol's (DFX2-1): with none known, the
+	// trace stops rather than read it under another title's.
+	const bool objective = game_type::is_objective(game_type_);
+	if (objective && protocol_ == nullptr) {
+		error_ = "the capture's protocol is unknown: an objective game's S2C 0x0A at frame " +
+				std::to_string(message.frame_index) + " precedes any session hello naming it";
+		return;
+	}
 	const ItemClassMap *classes = item_classes_;
 	auto class_of = [classes](uint16_t type) -> EntityClass {
 		if (classes) {
@@ -383,8 +400,8 @@ void ParityTraceBuilder::emit_message(const InGameMessage &message, uint64_t ts_
 	};
 	FrameUpdate frame;
 	const bool clean = decode_frame_update(message.payload.data(), message.payload.size(), class_of,
-			frame, frame_objective_body(game_type::is_objective(game_type_),
-					protocol_in_match(protocol_).objective_checkpoint));
+			frame, frame_objective_body(objective,
+					objective && protocol_in_match(protocol_).objective_checkpoint));
 	ParityFrameState out;
 	out.frame = message.frame_index;
 	out.ts_ns = ts_ns;
@@ -649,14 +666,23 @@ void ParityTraceCollector::on_round(const ParityRoundEvent &record) {
 	trace_.rounds.push_back(record);
 }
 
-bool read_parity_trace(
-		const std::string &path, const ItemClassMap *item_classes, ParityTrace &out) {
+bool read_parity_trace(const std::string &path, const ItemClassMap *item_classes, ParityTrace &out,
+		std::string &error) {
 	ParityTraceCollector collector(out);
-	ParityTraceBuilder builder(collector, item_classes);
-	return net::stream_pcap_udp_file(path, [&builder](const net::PcapDatagram &datagram) {
+	ParityTraceBuilder builder(collector, item_classes, nullptr);
+	const bool read = net::stream_pcap_udp_file(path, [&builder](const net::PcapDatagram &datagram) {
 		builder.push(datagram);
-		return true;
+		return builder.error().empty();
 	});
+	if (!builder.error().empty()) {
+		error = builder.error();
+		return false;
+	}
+	if (!read) {
+		error = "cannot read the capture " + path;
+		return false;
+	}
+	return true;
 }
 
 } // namespace opennova::wire

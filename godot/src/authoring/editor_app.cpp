@@ -749,7 +749,7 @@ void EditorApp::serve(const EditorRequest &p_request) {
 			show_picker(p_request.purpose, true);
 			break;
 		case EditorRequestKind::PickFile:
-			show_picker(p_request.purpose, false);
+			show_picker(p_request.purpose, false, p_request.path);
 			break;
 		case EditorRequestKind::RevealPath:
 			if (!p_request.path.empty()) {
@@ -856,7 +856,7 @@ void EditorApp::wait_for_sound() {
 	if (sound_) sound_->wait();
 }
 
-void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
+void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory, const std::string &p_name) {
 	if (picker_ == nullptr) {
 		picker_ = memnew(FileDialog);
 		picker_->set_use_native_dialog(true);
@@ -869,7 +869,8 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 	}
 	pending_pick_ = p_purpose;
 	picker_->set_file_mode(p_directory ? FileDialog::FILE_MODE_OPEN_DIR :
-			p_purpose == PickPurpose::ImportFiles ? FileDialog::FILE_MODE_OPEN_FILES : FileDialog::FILE_MODE_OPEN_FILE);
+			p_purpose == PickPurpose::ImportFiles ? FileDialog::FILE_MODE_OPEN_FILES :
+			p_purpose == PickPurpose::HeightsRaw ? FileDialog::FILE_MODE_SAVE_FILE : FileDialog::FILE_MODE_OPEN_FILE);
 	PackedStringArray filters;
 	switch (p_purpose) {
 		case PickPurpose::NewProjectLocation:
@@ -900,10 +901,16 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 		case PickPurpose::NovaWorldFolder:
 			picker_->set_title("Choose where the project goes (a folder of its own is made inside)");
 			break;
+		case PickPurpose::HeightsRaw:
+			picker_->set_title("Export the heights to a .raw");
+			filters.push_back("*.raw ; Heights");
+			break;
 		case PickPurpose::None:
 			break;
 	}
 	picker_->set_filters(filters);
+	// Each time: the dialog is one, and a name offered once must not stand in the next.
+	picker_->set_current_file(opennova::to_gd(p_name));
 	picker_->popup_centered_ratio(0.75f);
 }
 

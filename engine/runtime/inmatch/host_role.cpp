@@ -12,7 +12,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // DisconnectEvent
-#include <net/protocol/protocol.h> // protocol_in_match (the rules word's bits, DFX2-18)
+#include <net/protocol/protocol.h> // protocol_in_match (the rules word's bits, DFX2-18), title_protocol
 #include <runtime/inmatch/game_config_block.h> // kSinglePlayerMpAttrib
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h> // build_mission_status (the own C2S 0x0B)
@@ -336,6 +336,9 @@ void HostRole::bring_up_singleplayer(const Title &title, const playersav::Profil
 	stop_unstopped_server(client_process_->unstopped_server, ServerLogs{}, nullptr, nullptr);
 	reset_session(/*serve_and_play=*/true);
 	inmatch::HostConfig host_cfg;
+	// The title's protocol: the single player's session takes its in-match branches as a host's
+	// does (the rules word's bits, in a session or out, DFX2-18).
+	host_cfg.protocol = title_protocol(title.code);
 	host_cfg.config = config;
 	host_cfg.socket_mode = inmatch::SocketMode::Socketless;
 	host_cfg.serve_and_play = true;
@@ -346,7 +349,7 @@ void HostRole::bring_up_singleplayer(const Title &title, const playersav::Profil
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
 	// Then the mission's World under it.
-	bind_session_world(config, /*serve_and_play=*/true, /*in_session=*/false, /*title=*/nullptr);
+	bind_session_world(config, /*serve_and_play=*/true, /*in_session=*/false, host_cfg.protocol);
 	// The authority's start steps the process's file-transfer session words, which the context
 	// reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
 	client_process_->file_transfer_session.start_mission();
@@ -1027,14 +1030,18 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// The chat handler, the snapshot builder, the radio call (its
 		// designation table and zone test), the squad handlers, the team
 		// change, the Respawn key's 0x41 (the authority and the respawn
-		// timeout) and the 0x51 convert (its authority test) read the host
-		// context.
+		// timeout), the 0x51 convert (its authority test) and the deploy
+		// pick's 0x0E (the deploy's protocol, whose state byte a DFX2 deploy
+		// writes (DFX2-11), and its /PROFILE line) read the host context: the
+		// own slot's deploy runs the remote's Server_DeployPlayer
+		// [orig: Server_ProcessClientRequestRespawn @0x519AF0 -> Server_DeployPlayer
+		//  @0x517740].
 		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
 				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET ||
 				dg.tag == c2s::SPECTATOR_RESPAWN || dg.tag == c2s::ADMIN_NETLOG_COMMAND ||
 				dg.tag == c2s::BAN_PUNT_COMMAND || dg.tag == c2s::MISSION_FILE_STATUS ||
-				dg.tag == c2s::LOADOUT_SUBMIT;
+				dg.tag == c2s::LOADOUT_SUBMIT || dg.tag == c2s::RESPAWN_REQUEST;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;

@@ -372,7 +372,7 @@ struct EffectScene::Impl {
 				// A dying parent zeroes its child's budget, so the child drains
 				// its live particles and then dies itself
 				// [orig: CParticleEmitter_AdvanceFrame @ 0x5e695f -> vtable+60 =
-				//  CEffectEmitter_OnChildDied @ 0x5ef9c0 on emitter+0xC].
+				//  CEffectEmitter_StopEmission @ 0x5ef9c0 on emitter+0xC].
 				if (emitter_slot < emitter_pool.size()) {
 					if (Emitter *child = child_emitter_of(emitter_pool[emitter_slot])) {
 						child->emit_budget = 0;

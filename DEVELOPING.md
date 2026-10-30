@@ -252,7 +252,8 @@ scripts/dev_stack.sh down      # stop it; the database stays (reset wipes it and
 ```
 
 `up` finds this machine's LAN address and announces it everywhere (`ONNET_PUBLIC_HOST`: the
-gate's `POSTIPADDRESS`, the lobby's endpoint, web's host); `--address <ipv4>` names another.
+lobby's endpoint, web's host, the hosted servers' master address); `--address <ipv4>` names
+another.
 It is never loopback, since the stack's own containers (the smoke test, the hosted servers)
 reach the published ports there too. It prints what to point a client at when it is up.
 
@@ -371,9 +372,9 @@ ONNET_HEALTH_PORT=8085 ./build/apps/novaworld_data/opennova-novaworld-data
 
 There is no all-in-one binary: each program is its own process (`apps/novaworld_common/README.md`
 "Programs"). The lobby needs `ONNET_LOBBY_ENDPOINT` (the endpoint it announces, which the
-gate hands clients; in a deployment the load balancer's, shared by every lobby); the gate, the lobby and web need
-`ONNET_WEB_HOST` (the address the gate, the lobby and the pages announce for HTTP), and the
-gate `ONNET_PUBLIC_HOST`. On one machine each program but web answers `GET /livez` on its
+gate hands clients; in a deployment the load balancer's, shared by every lobby); the lobby and
+web need `ONNET_WEB_HOST` (the address the lobby and the pages announce for HTTP). On one
+machine each program but web answers `GET /livez` on its
 own `ONNET_HEALTH_PORT`. Hosted servers need machines of their own (containers, or
 cloud machines): run them in the Docker stack above (the in-process tests,
 `hosted_local_e2e`, drive the real agent on one machine).
@@ -460,7 +461,11 @@ PRs run the components selected by `scripts/ci/changes.py`: Godot, native tests,
 service/backend, web/stack, Blender, tools, or infrastructure. Shared engine/build inputs,
 unknown paths and an incomplete changed-file query select everything. Renames select
 both the old and new component. Repository gates always run, including docs-only PRs.
-Staging and master run every component. The existing required check names remain
+Staging and master run every component. A pull request whose head is this repository's
+staging branch selects none: every staging push already runs the whole graph on that same
+head commit, and that push run is its proof (strict branch protection makes the head and the
+merge one tree). Its own run keeps the repository gates and the two required checks, which
+verify the skips. The existing required check names remain
 `test (windows-latest)` and `godot-tests (windows-latest)`; they now verify all selected
 jobs, including Linux and the web/stack checks, and reject unexpected skips.
 
@@ -524,8 +529,7 @@ with its original source run, attempt, SHA and manifest artifact ID while artifa
 remain available and the commit is still staging's head. To rebuild, start a **new CI
 run on staging**. Do not mix successful artifacts from an earlier CI attempt with
 rerun components; admission rejects them, and overwriting admitted artifacts would
-break an active rollout. Before dispatcher registration, start a new CI run for a
-rollout retry as well. The separate Deploy and Publish manual workflows remain
+break an active rollout. The separate Deploy and Publish manual workflows remain
 production-only.
 
 ## Troubleshooting

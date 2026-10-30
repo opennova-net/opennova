@@ -69,7 +69,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/item_replication_catalog.h>
-#include <runtime/world/entity.h> // world::retail_pool_capacity
+#include <runtime/world/entity.h> // world::kRetailPoolCapacity
 #include <runtime/world/world.h>
 
 #include <base/io/crt_ftol.h> // retail_atol (the VERSIONCRCSTRING the host's check reads)
@@ -348,7 +348,7 @@ PoolCounts count_pools(const rep::ClientState &state) {
 bool in_pool_tables(uint16_t handle) {
 	const int pool = handle >> 12;
 	return handle != 0xFFFFu && pool < world::kEntityPoolCount &&
-			static_cast<std::size_t>(handle & 0x0FFFu) < world::retail_pool_capacity(pool);
+			static_cast<std::size_t>(handle & 0x0FFFu) < world::kRetailPoolCapacity[pool];
 }
 
 // What the capture's spawn pages decode to through packet `limit` (exclusive), in wire
@@ -375,7 +375,7 @@ PoolCounts expected_pools(const Stream &down, std::size_t limit, std::set<uint16
 				batch.records.pop_back();
 			for (const PoolSpawnRecord &rec : batch.records) {
 				if ((rec.slot_id >> 12) != 1 ||
-						static_cast<std::size_t>(rec.slot_id & 0x0FFFu) >= world::retail_pool_capacity(1))
+						static_cast<std::size_t>(rec.slot_id & 0x0FFFu) >= world::kRetailPoolCapacity[1])
 					continue;
 				present[rec.slot_id] = true;
 			}
@@ -386,7 +386,7 @@ PoolCounts expected_pools(const Stream &down, std::size_t limit, std::set<uint16
 				batch.records.pop_back();
 			for (std::size_t i = 0; i < batch.records.size(); ++i) {
 				const std::size_t slot = static_cast<std::size_t>(batch.start_index) + i;
-				if (slot >= world::retail_pool_capacity(2)) continue;
+				if (slot >= world::kRetailPoolCapacity[2]) continue;
 				present[static_cast<uint16_t>(0x2000u | slot)] = !batch.records[i].is_empty_slot;
 			}
 		} else if (m.full_tag == s2c::POOL3_SYNC) {
@@ -396,7 +396,7 @@ PoolCounts expected_pools(const Stream &down, std::size_t limit, std::set<uint16
 				batch.records.pop_back();
 			for (std::size_t i = 0; i < batch.records.size(); ++i) {
 				const std::size_t slot = static_cast<std::size_t>(batch.start_index) + i;
-				if (slot >= world::retail_pool_capacity(3)) continue;
+				if (slot >= world::kRetailPoolCapacity[3]) continue;
 				present[static_cast<uint16_t>(0x3000u | slot)] = !batch.records[i].is_empty_slot;
 			}
 		} else if (m.full_tag == s2c::EMPTY_SLOT_SWEEP) {

@@ -10,8 +10,9 @@
 //  ChatFilter_LoadDictionary @0x68AAF0 ("filter.txt") -> ChatFilter_LoadDictionaryFile @0x68A890;
 //  NapiNPServer_HandleChatMessage @0x51382E -> ChatFilter_IsTextFiltered @0x4FD650 ->
 //  ChatFilter_ScoreText @0x68A860 (FLIRT misname) -> ChatFilter_ScoreLineForward @0x68A830 ->
-//  ChatFilter_ScoreLine @0x68A5F0; dfx2.exe's the same code (NapiNPServer_HandleChatMessage @0x510970 ->
-//  sub_4FA730 (dfx2.exe), its token table byte_8430A8 (dfx2.exe) identical to Jointops' @0x84FDC8)]
+//  ChatFilter_ScoreLine @0x68A5F0; dfx2.exe's the same code (NapiNPServer_HandleChatMessage
+//  @0x510970 (dfx2.exe) -> sub_4FA730 (dfx2.exe), its token table byte_8430A8 (dfx2.exe)
+//  identical to Jointops' @0x84FDC8)]
 
 #include <cstddef>
 #include <cstdint>

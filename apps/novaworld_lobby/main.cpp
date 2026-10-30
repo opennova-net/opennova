@@ -134,6 +134,7 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
-	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
+	opennova::games::install_rules(); // and the rules each runs: the embedded JO host runs a match
 	return program::run_program({ "lobby", configure, run });
 }

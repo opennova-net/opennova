@@ -1436,6 +1436,52 @@ void test_slew_reads_the_frame_before_the_compose() {
     CHECK(i.gun().emplaced_gun_pitch_word == 0);
 }
 
+// A gunner on an attached child keeps the seat frame of its last update through the
+// projectiles and the proximity build, and its own body update in the pool-0 walk poses it
+// on the child's new frame: no rider pass runs between the walks (D-SIM-56).
+// [orig: Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9,
+//  Weapon_UpdateAllProjectiles @0x4C223A, the proximity build @0x4C240A, the pool-0
+//  +0x1C4 call @0x4C2472]
+void test_gunner_takes_the_child_frame_in_its_own_update() {
+    Rig r(/*local=*/true, /*player_bit=*/true);
+    Entity carrier;
+    carrier.kind = EntityKind::Item;
+    carrier.health = 100;
+    carrier.heading = kGunHeading;
+    const EntityHandle parent = r.w.registry.spawn(1, carrier);
+    r.gun().emplacement_parent = parent;
+    r.gun().emplacement_parent_spawn_id = r.w.registry.get(parent)->registry_spawn_id;
+    r.gun().emplacement_pose_metadata_resolved = true;
+    r.gun().emplacement_bone = 1;
+    make_composed_ewep(r.w, r.gun());
+    r.look(kGunHeading, 0);
+    r.w.run_logic_tick(true);
+    const EntityPosition before = r.gunner().position;
+    // The carrier moves; the child's compose in its own pool-1 visit follows it.
+    r.w.registry.get(parent)->position.x.q16 += 8 * 65536;
+    EntityPosition at_build;
+    bool seen = false;
+    r.w.before_proximity_build = [&] {
+        at_build = r.gunner().position;
+        seen = true;
+    };
+    r.w.run_logic_tick(true);
+    r.w.before_proximity_build = nullptr;
+    CHECK(seen);
+    // Between the walks the gunner still stands where its last update put it.
+    CHECK(at_build.x.q16 == before.x.q16 && at_build.y.q16 == before.y.q16 &&
+            at_build.z.q16 == before.z.q16);
+    // Past the pool-0 walk it stands on the child's final frame.
+    Seat seat;
+    CHECK(r.w.vehicles.rider_seat(r.gunner(), r.gun(), seat));
+    Entity probe = r.gunner();
+    r.w.vehicles.pose_mounted_occupant(probe, r.gun(), seat);
+    CHECK(r.gunner().position.x.q16 != before.x.q16);
+    CHECK(r.gunner().position.x.q16 == probe.position.x.q16 &&
+            r.gunner().position.y.q16 == probe.position.y.q16 &&
+            r.gunner().position.z.q16 == probe.position.z.q16);
+}
+
 // Only the ewep class update composes an attached child, past its gates: a
 // child whose move function is not ewep, one with no slot Def and one whose
 // carrier is a dead PlayerControl hull all hold their frames on a moved
@@ -1628,6 +1674,7 @@ int main() {
     test_barrel_spin_once_before_weapon_pump();
     test_trail_off_plays_at_the_composed_position();
     test_only_the_ewep_update_composes_a_child();
+    test_gunner_takes_the_child_frame_in_its_own_update();
     test_barrel_spin_tail_and_class_gate();
     test_attached_turret_slews_once_per_world_tick();
     test_immediate_path_words_and_recoil_term();

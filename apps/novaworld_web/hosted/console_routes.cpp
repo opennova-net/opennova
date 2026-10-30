@@ -109,9 +109,11 @@ void ConsoleRoutes::register_routes(WebApp &app) {
 }
 
 std::optional<crow::response> ConsoleRoutes::check_server(
-		db::Database &db, const HostedServer &server) {
+		db::Database &db, const HostedServer &server, bool needs_link) {
 	if (server.state == State::Stopping)
 		return json_error(409, "server_stopping", "this hosted server is being stopped");
+	if (!needs_link)
+		return std::nullopt;
 	if (server.state != State::Running)
 		return json_error(409, "server_not_running", "this hosted server is not running yet");
 	// No link up (as the fleet last published it): refused before any
@@ -208,7 +210,7 @@ bool ConsoleRoutes::log_limit(const std::string &account) {
 }
 
 ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, uint64_t id, bool write,
-		bool rotation_edit) {
+		bool rotation_edit, bool needs_link) {
 	Caller c;
 	c.actor = "owner";
 	c.who = "owner '" + loggable(user.username) + "' (id=" + std::to_string(user.id) + ")";
@@ -224,7 +226,7 @@ ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, ui
 			return c;
 		}
 		c.server_id = server->id;
-		if (auto refusal = check_server(*db_conn, *server)) {
+		if (auto refusal = check_server(*db_conn, *server, needs_link)) {
 			c.refusal = std::move(refusal);
 			return c;
 		}
@@ -253,7 +255,8 @@ ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, ui
 	return c;
 }
 
-ConsoleRoutes::Caller ConsoleRoutes::admin_caller(const RouteAccess &access, uint64_t id, bool rotation_edit) {
+ConsoleRoutes::Caller ConsoleRoutes::admin_caller(
+		const RouteAccess &access, uint64_t id, bool rotation_edit, bool needs_link) {
 	Caller c;
 	c.actor = "admin";
 	c.who = access.user ? "admin '" + loggable(access.user->username) + "'" : std::string("admin (token)");
@@ -269,7 +272,7 @@ ConsoleRoutes::Caller ConsoleRoutes::admin_caller(const RouteAccess &access, uin
 			return c;
 		}
 		c.server_id = server->id;
-		if (auto refusal = check_server(*db_conn, *server)) {
+		if (auto refusal = check_server(*db_conn, *server, needs_link)) {
 			c.refusal = std::move(refusal);
 			return c;
 		}
@@ -747,10 +750,6 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 	});
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>/chat").methods("GET"_method)([simple](const crow::request &req, uint64_t id) {
 		return simple(req, id, &ConsoleRoutes::chat);
-	});
-	// The admins' one wider read.
-	CROW_ROUTE(app, "/api/admin/hosted/<uint>/settings").methods("GET"_method)([simple](const crow::request &req, uint64_t id) {
-		return simple(req, id, &ConsoleRoutes::settings);
 	});
 
 	const auto player = [this](const crow::request &req, uint64_t id, uint64_t slot, ConsoleVerb verb) -> crow::response {

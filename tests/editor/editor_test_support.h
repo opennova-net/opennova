@@ -142,6 +142,13 @@ inline void create_missing_files(opennova::editor::ProjectSession &session) {
 	session.run_operations();
 }
 
+// The NovaWorld cookie jar (nw_cdata.coo), made as New file makes one: the game writes it, so it is the
+// player's file and Create all missing makes none (gameprofile/player_files.h), but a project may still hold
+// one, its build leaving it out with a build.player_file word. The one kind a rig can hold that no editor opens.
+inline void hold_cookie_jar(opennova::editor::ProjectSession &session) {
+	handle_to_end(session, opennova::editor::request::create_file("nw_cdata.coo"));
+}
+
 // The project settings dialog's Apply with only the settings `change` names, the others as
 // they are (what came of it is the view's settings_result, and its SettingsApplied event), the
 // validation it left due run to its end; and two of them alone: the game install folder, the

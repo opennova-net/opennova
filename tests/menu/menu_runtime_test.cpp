@@ -2047,7 +2047,7 @@ void test_options_profile() {
 
 	// A dialog holding XHAIR_APPEARANCE: its Accept also reloads the crosshair art in
 	// alpha mode [orig: UI_IngameOptionsDialogEventHandler @0x554e40 - the gate
-	// @0x5551ca, sub_59EEF0 @0x555201] (D-HUD-48); its Cancel does not.
+	// @0x5551ca, HUD_LoadCrosshairTextureAlpha @0x555201] (D-HUD-48); its Cancel does not.
 	root.children.push_back(widget("XHAIR_APPEARANCE", mnu::WindowType::SpinList));
 	menu.open_document(&doc, "game.mnu", "");
 	options.prepare(menu, &record);

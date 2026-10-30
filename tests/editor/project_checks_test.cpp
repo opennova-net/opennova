@@ -172,7 +172,7 @@ struct Project {
 				return false;
 		paths = ProjectPaths::for_root(root);
 		scan = scan_project_assets(paths, document);
-		files.set_scan(root, scan, document.target_game);
+		files.set_scan(root, scan);
 		return true;
 	}
 };

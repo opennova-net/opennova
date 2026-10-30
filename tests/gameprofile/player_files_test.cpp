@@ -27,6 +27,10 @@ static int test_table() {
 	TEST_EXPECT(player_file_words("player.sav") == "the player's saved profiles");
 	TEST_EXPECT(player_file_words("epass.bin") == "the player's stored NovaWorld credentials");
 	TEST_EXPECT(player_file_words("_errlog.txt") == "the game's error log");
+	// The NovaWorld cookie jar: the game rewrites it with the player's cookies as the menu closes, so a
+	// release never ships it [orig: CUIScene_SaveCookieJarFile @ 0x63BA60, "wb" @ 0x63BA9A].
+	TEST_EXPECT(is_player_file("nw_cdata.coo") && is_player_file("NW_CDATA.COO"));
+	TEST_EXPECT(player_file_words("nw_cdata.coo") == "the player's NovaWorld cookies");
 	return 0;
 }
 

@@ -60,6 +60,10 @@ struct HostedServer {
 	State state = State::Requested;
 	HostedSettings settings;
 	int64_t settings_revision = 1;
+	// Why its stored configuration does not read (read_settings_document's field and error),
+	// `settings` then the defaults; empty when it reads. The supervisor's next pass fails such
+	// a server, and no edit replaces the stored document from the defaults.
+	std::string settings_error;
 	// The machine driver that ran its last start, its container's name
 	// (srv-<id>-g<generation>) and the machine's private address (the admin
 	// link's target); empty until a start renders them, and cleared when it

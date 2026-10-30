@@ -21,7 +21,7 @@ gamecfg::WeaponRoster game_cfg_weapon_roster(const def::DefWeaponsFile &weapons)
 	gamecfg::WeaponRoster roster;
 	// [orig: WeaponDef_LoadAll @0x54DD1C..0x54DD45: the table zeroed, the count
 	//  1, row 0 named "None"]
-	roster.push_back(gamecfg::WeaponRosterEntry{"None", 0});
+	roster.push_back(gamecfg::WeaponRosterEntry{"None", 0, "", 0});
 	int32_t subclass_rows = 0;
 	for (size_t i = 0; i < weapons.count; ++i) {
 		const def::DefWeaponDef &w = weapons.entries[i];
@@ -31,10 +31,13 @@ gamecfg::WeaponRoster game_cfg_weapon_roster(const def::DefWeaponsFile &weapons)
 		//  ends the row as a subclass row; its loadout keys were skipped @0x54D8F1]
 		if (subclass_rows != 0) {
 			--subclass_rows;
-			roster.push_back(gamecfg::WeaponRosterEntry{w.weapon_name, 0});
+			// The admin table keeps the row's own word [orig: WeaponDefs_ParseLineCallback
+			//  @0x544E11].
+			roster.push_back(gamecfg::WeaponRosterEntry{w.weapon_name, 0, "", w.loadout_selectable});
 			continue;
 		}
-		roster.push_back(gamecfg::WeaponRosterEntry{w.weapon_name, w.loadout_selectable});
+		roster.push_back(gamecfg::WeaponRosterEntry{
+				w.weapon_name, w.loadout_selectable, w.loadout_menu_textid, w.loadout_selectable});
 		// [orig: @0x54D7B8..0x54D7BF: the row's loadout_subclasses starts the countdown]
 		if (w.loadout_subclasses != 0) subclass_rows = w.loadout_subclasses;
 	}
@@ -167,14 +170,13 @@ void apply_mission_start_session_config(GameConfig &config, const gamecfg::GameC
 	config.mission_name = mission_name;
 }
 
-NextMissionStage stage_next_mission(const GameConfig &session, const gamecfg::GameCfg *block,
+GameConfig stage_next_mission(const GameConfig &session, const gamecfg::GameCfg *block,
 		const MissionRotation &rotation, const std::string &mission_name) {
-	NextMissionStage out;
-	out.config = session;
-	apply_mission_start_session_config(out.config, block, rotation, mission_name);
-	out.player_limit = static_cast<int32_t>(block != nullptr
+	GameConfig out = session;
+	apply_mission_start_session_config(out, block, rotation, mission_name);
+	out.mission_slot_limit = block != nullptr
 			? host_player_slot_limit(block->mp_max_players, block->dedicated == 0, *session.title)
-			: session.player_slot_limit());
+			: session.live_slot_limit();
 	return out;
 }
 

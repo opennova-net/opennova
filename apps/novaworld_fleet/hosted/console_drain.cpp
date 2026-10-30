@@ -34,13 +34,14 @@ void write_answer(db::Database &db, int64_t id, const AdminCommandResult &result
 	}
 	db.exec("UPDATE hosted_console_commands SET state = 'done', outcome = $2, sent = $3, "
 			"finished_at = now(), configuration_saved = $4, settings_revision = $5, "
-			"delivery_unknown = $6 "
+			"delivery_unknown = $6, refused_command = $7 "
 			"WHERE id = $1;",
 			{ BindValue(id), BindValue(std::string(admin_command_outcome_name(result.outcome))),
 					BindValue(db::Bool{ result.sent }),
 					BindValue(db::Bool{ result.configuration_saved }),
 					BindValue(result.settings_revision),
-					BindValue(db::Bool{ result.delivery_unknown }) });
+					BindValue(db::Bool{ result.delivery_unknown }),
+					BindValue(result.refused_command) });
 	tx.commit();
 }
 
@@ -110,21 +111,31 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 	io::JsonValue patch = io::JsonValue::make_object();
 	try {
 		gamecfg::WeaponRoster weapons;
+		std::string title; // the server's game's title (a settings edit's table)
 		{
 			auto lease = pool_.acquire();
 			before = find_server(*lease, server_id);
+			if (before)
+				if (const auto product = find_product(*lease, before->settings.product_id))
+					title = product->title;
 			if (before && before->base_tree_id) {
+				gamecfg::WeaponRoster base_weapons, expansion_weapons;
 				if (const auto tree = find_tree(*lease, *before->base_tree_id))
-					weapons = tree->weapons;
+					base_weapons = tree->weapons;
 				if (before->expansion_tree_id)
-					if (const auto tree = find_tree(*lease, *before->expansion_tree_id);
-							tree && !tree->weapons.empty())
-						weapons = tree->weapons;
+					if (const auto tree = find_tree(*lease, *before->expansion_tree_id))
+						expansion_weapons = tree->weapons;
+				weapons = server_weapon_roster(
+						base_weapons, before->expansion_tree_id ? &expansion_weapons : nullptr);
 			}
 		}
 		if (link && before && before->generation == server_generation &&
 				link->target().generation == server_generation) {
-			if (options.expected_revision &&
+			if (!options.settings_patch.empty() && !before->settings_error.empty()) {
+				// A stored configuration that does not read is never edited from the defaults.
+				result.outcome = AdminCommandOutcome::Refused;
+				result.replies = { "ERROR - The saved configuration does not read." };
+			} else if (options.expected_revision &&
 					*options.expected_revision != before->settings_revision) {
 				result.outcome = AdminCommandOutcome::Refused;
 				result.replies = {
@@ -140,7 +151,8 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 					if (!io::json_parse(options.settings_patch, requested, error))
 						result.outcome = AdminCommandOutcome::Refused;
 					else {
-						const auto edit = configuration_edit(requested, weapons);
+						const auto edit =
+								configuration_edit(requested, before->settings, title, weapons);
 						HostedSettings accepted = before->settings;
 						(void)read_settings_document(edit.next_launch, accepted, field, error);
 						result.outcome = AdminCommandOutcome::Answered;
@@ -153,8 +165,12 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 								result.outcome = reply.outcome;
 								break;
 							}
-							if (!console_reply_succeeded(reply.replies))
+							if (!console_reply_succeeded(reply.replies)) {
+								// The server refused it: the edit stops here, its earlier
+								// commands' fields saved, and the answer names this one.
+								result.refused_command = command;
 								break;
+							}
 							(void)read_settings_document(console_settings_patch(command, weapons),
 									accepted, field, error);
 						}

@@ -19,6 +19,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <net/protocol/protocol.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/world/entity.h>
@@ -132,6 +133,7 @@ int main() {
 			"roll_left is a hold-class (locking) state");
 
 	ns::ClientReplicaPipeline view;
+	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
 	view.set_root_motion_source(&root_motion);

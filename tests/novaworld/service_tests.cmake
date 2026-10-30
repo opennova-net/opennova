@@ -787,7 +787,7 @@ if(BUILD_NOVAWORLD_HTTP)
         novalogic_listing lifecycle_and_stop two_servers_one_machine own_machine own_restart_at_cap static_address
         static_address_brake comp_address_lapse stop_paths exits_and_crash_restarts last_good_pass
         launch_failure launch_refused_mid_pass restart_window timeouts_and_health listing_lost
-        machine_lost_replaces
+        machine_lost_replaces unreadable_configuration
         listing_waits_while_lost waits_for_lobby owner_changes limit_at_provisioning owner_limits
         own_machines_cut own_machines_cut_no_room own_cut_at_provisioning pools_cut mass_stop_hold hold_releases
         reconciliation relist_grace console_ring admin_links_follow_running)
@@ -797,10 +797,10 @@ if(BUILD_NOVAWORLD_HTTP)
     # invariant a check and its write hold, two writers on two connections, the first's
     # transaction held open until the second waits on its lock (pg_locks): two starts against
     # one account's limit and the cap, a session and a hosting key minted around a password
-    # reset either way, the status blob folded into a row the lobby is writing, crossing
-    # usernames and a shared PCID, two first admins, the CD keys' assignment, revocation,
-    # auto-mint and activation; and the edge's writes beside an open web transaction, never
-    # waiting. Over the libraries hosted_supervisor_test links and web's core (cd_keys.h).
+    # reset either way, crossing usernames and a shared PCID, two first admins, the CD keys'
+    # assignment, revocation, auto-mint and activation; and the lobby's writes beside an open web
+    # transaction, never waiting. Over the libraries hosted_supervisor_test links and web's core
+    # (cd_keys.h).
     add_executable(db_locks_test novaworld/db_locks_test.cpp)
     target_link_libraries(db_locks_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_web_core opennova_novaworld_hosting_cloud

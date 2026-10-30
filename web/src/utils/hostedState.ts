@@ -28,17 +28,6 @@ export const STATE_LABELS: Record<HostedState, string> = {
   failed: 'Failed',
 };
 
-export const STATE_DESCRIPTIONS: Record<HostedState, string> = {
-  requested: 'Your server is in line to start.',
-  provisioning: 'Your server is being set up.',
-  booting: 'Your server is starting up.',
-  listing: 'Your server is almost ready.',
-  running: 'Players can find it in the server browser and join.',
-  stopping: 'Your server is shutting down.',
-  stopped: 'Your server has stopped.',
-  failed: 'Something went wrong, so your server was shut down.',
-};
-
 // The owner's names: the start's middle states are all "Starting".
 export const OWNER_STATE_LABELS: Record<HostedState, string> = {
   requested: 'Requested',
@@ -61,14 +50,6 @@ export function stateLabel(state: string): string {
 export function ownerStateLabel(state: string): string {
   return (OWNER_STATE_LABELS as Record<string, string>)[state] ?? state;
 }
-
-// What a state means to the owner; empty for a state this site does not know.
-export function stateDescription(state: string): string {
-  return (STATE_DESCRIPTIONS as Record<string, string>)[state] ?? '';
-}
-
-// The steps a start goes through, in order, up to running.
-export const START_STEPS: readonly HostedState[] = ['requested', 'provisioning', 'booting', 'listing', 'running'];
 
 // The same steps as the owner sees them, each with the states it covers.
 export const OWNER_START_STEPS: readonly { label: string; states: readonly HostedState[] }[] = [
@@ -192,10 +173,6 @@ export function phaseSlow(server: Pick<HostedServer, 'phase' | 'updated_at'>, no
   if (expected === null || Number.isNaN(since)) return false;
   return now - since > 2 * expected * 1000;
 }
-
-// The fleet's notice while launches are held (a refused launch's backoff).
-export const LAUNCHES_HELD_NOTICE =
-  'New machines are held for a moment after the cloud turned a launch down. A server waiting for a machine starts as soon as launches resume; running servers carry on.';
 
 // Why a stopped or failed server's last run ended, in its owner's words (on an
 // admin's page, `scope` admin, of its owner): who stopped it, and for a stop

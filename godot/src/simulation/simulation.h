@@ -177,6 +177,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include "mnu/controls_model.h" // SAVEKEYS' binding table (install_console_seams)
 #include "simulation/simulation_constants.h" // the bound constant surface Simulation inherits
 #include "simulation/simulation_player_state.h"  // the local-player profile state (player_)
+#include "simulation/simulation_profiling_state.h" // the runtime profiling state (profiling_)
 #include "simulation/simulation_present_state.h" // the present/occlusion caches (present_)
 #include "simulation/deploy_rows.h" // DeployZoneRow / DeployListRow (the DEATH screen feeds)
 #include "simulation/hud_view_records.h" // the per-frame HUD view records (typed-array returns)
@@ -266,14 +267,7 @@ private:
 	// The C++ TickSink (simulation/tick_sink.h) the presentation owner
 	// installs around its own frame call (MissionRoot); null outside one.
 	TickSink *session_tick_sink_ = nullptr;
-	int64_t frame_sim_us_ = 0;
-	int64_t frame_sink_us_ = 0;
-	// The dev tools' frame-stats board (ADR 0039): fold_frame_stats() lands the
-	// kernel's tick profile (every touched SIM_* slot, ADR 0043 d5) plus the
-	// shell-side step/sink spans on it natively at the end of a session frame.
-	// Ordinary play leaves runtime_profiling_enabled_ false, so the profile is
-	// inactive and no producer reads a clock.
-	Ref<FrameStats> frame_stats_;
+	SimulationProfilingState profiling_; // the runtime profiling state
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
 	// The session frame's phases (FramePerf) onto the SIM_FRAME_* slots, as SIM_ADVANCE.
 	void fold_frame_phases(const opennova::inmatch::FramePerf &p_perf, int64_t p_marshal_us);
@@ -331,13 +325,6 @@ private:
 	// HostClient runtime (the role's ListenHostState) and the present pass reads the client-decoded ClientState
 	// (ADR 0011 Decision 1) instead of the AI pool. Server_TickUpdate owns the per-frame tick.
 	bool listen_server_ = false;
-	uint64_t last_sim_tick_us_ = 0;
-	uint64_t last_net_tick_us_ = 0;
-	// One opt-in gate for every native runtime timer/counter. Retail play keeps
-	// this false; F3 Stats and the manual probe share the public ownership seam.
-	bool runtime_profiling_enabled_ = false;
-	// The last tick's projectile traces (take_projectile_trace_profile).
-	opennova::world::CollisionWorld::TraceProfile last_trace_profile_;
 	// The FollowOwner effect-pose index (inmatch/effect_pose_index.h, held in
 	// present_; simulation_present.cpp maps its poses to Godot space).
 	void invalidate_present_effect_pose_cache() const;
@@ -886,7 +873,7 @@ public:
 	// while the profiling clocks run and the board captures.
 	void set_frame_stats(const Ref<FrameStats> &p_stats);
 	Ref<FrameStats> get_frame_stats() const;
-	int64_t get_last_session_sim_us() const { return frame_sim_us_; }
+	int64_t get_last_session_sim_us() const { return profiling_.frame_sim_us; }
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
 	// The joiner's / the listen host's own two-side character selection
@@ -999,7 +986,7 @@ public:
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
 	// The S2C 0x60's session variables as the loading screen's session block, and each parse's
-	// edge, taken once (engine: inmatch/joiner_connection.h take_session_vars_parsed).
+	// edge, taken once, SessionDrive's alone (engine: joiner_connection.h take_session_vars_parsed).
 	Ref<LoadingScreenInfo> get_join_server_info() const;
 	bool take_join_server_info_parsed();
 	String get_join_mission_file() const;
@@ -1706,7 +1693,7 @@ public:
 	// performs no native profiling clock reads or timing-counter writes.
 	void set_runtime_profiling_enabled(bool p_enabled);
 	bool is_runtime_profiling_enabled() const {
-		return runtime_profiling_enabled_;
+		return profiling_.runtime_profiling_enabled;
 	}
 	// Allocation-free trace sampling for the F3 hot path: the last tick's traces, as
 	// the tick's sink took them (take_projectile_trace_profile: the profile since the
@@ -1847,6 +1834,10 @@ public:
 	// events; the tests author a DestructionDrain through its data leg.
 	void drain_vehicle_effects(std::vector<opennova::world::VehicleEffectEvent> &r_events);
 	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
+	// The view collects' draw-leg output (engine world::run_draw_husk_leg), taken at the frame's
+	// occlusion end so the models it changed draw with it this frame. NOT ClassDB-bound.
+	void take_draw_husk_output(std::vector<opennova::world::HuskSwapEvent> &r_swaps,
+			std::vector<opennova::world::DrawFadeStamp> &r_fades);
 	// Every queue the entity presenter's passes drain, dropped undrawn: a session that
 	// presents no entity (a dedicated host) empties them each ticked frame (engine
 	// world::discard_entity_presentation). NOT ClassDB-bound: MissionRoot's session step.

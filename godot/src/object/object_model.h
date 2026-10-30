@@ -896,7 +896,6 @@ public:
 	static void set_world_skipped(bool p_skipped) { world_skipped_ = p_skipped; }
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
 	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
-	bool is_present_planned() const { return present_planned_; }
 	// The husk swap on this entity model (DestructionPresenter sets and clears
 	// both): the grafted husk drawn in its place and the swap stage's pending
 	// final husk drawn beside it, each null when none stands or once freed. The
@@ -906,7 +905,6 @@ public:
 	ObjectID get_husk_visual_id() const { return husk_visual_; }
 	ObjectModel *get_husk_visual() const;
 	void set_final_husk_overlay(ObjectID p_overlay) { final_husk_overlay_ = p_overlay; }
-	ObjectID get_final_husk_overlay_id() const { return final_husk_overlay_; }
 	ObjectModel *get_final_husk_overlay() const;
 	// True while this model is in the shared awake set (the park/re-arm gate's
 	// observable — replaces the ex-per-node is_processing() the tests read).

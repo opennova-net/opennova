@@ -4,6 +4,7 @@
 
 import type { InfraCloudRead, InfraOverview, InfraService, InfraTargetGroup, InfraTask } from '../types/infra';
 import type { Tone } from './tone';
+import { countLabel } from './format';
 
 // The deployment ECS rolls the service to.
 export function primaryDeployment(s: InfraService) {
@@ -93,16 +94,6 @@ export function shortImage(image: string): string {
   const at = name.indexOf('@sha256:');
   if (at >= 0) return name.slice(0, at + 8 + 12);
   return name;
-}
-
-// "sha256:0123456789ab".
-export function shortDigest(digest: string): string {
-  return digest.startsWith('sha256:') ? digest.slice(0, 7 + 12) : digest;
-}
-
-// "web: 1 of 2 running": counts in words.
-export function countLabel(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 // The running tasks and the ones wanted, over every program.

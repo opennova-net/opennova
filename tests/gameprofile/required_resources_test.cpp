@@ -156,11 +156,12 @@ static int test_known_row_lookups(void) {
           "the mission-list wildcard scan is a pattern row");
     /* The player's and this machine's own files carry RES_F_PLAYER_FILE, and only they. */
     static const char *const player_names[] = {"game.cfg", "assets.cd", "filter.txt", "hiscore.txt", "admin.cfg",
-                                               "player.sav", "weapon.sav", "epass.bin", "passgen.bin"};
+                                               "player.sav", "weapon.sav", "epass.bin", "passgen.bin",
+                                               "nw_cdata.coo"};
     int players = 0;
     for (int i = 0; i < gameprofile_required_resource_count(); ++i)
         players += (gameprofile_required_resource_at(i)->flags & RES_F_PLAYER_FILE) != 0;
-    CHECK(players == 9, "exactly the nine player-file rows");
+    CHECK(players == 10, "exactly the ten player-file rows");
     for (const char *name : player_names)
         CHECK(gameprofile_required_resource_find(name)->flags & RES_F_PLAYER_FILE, "a player's own file is flagged");
     /* gt.ssc, the gate-tag override, is shipped data the game only reads [orig: Mission_LoadEncryptedConfig

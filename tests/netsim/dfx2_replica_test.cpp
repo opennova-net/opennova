@@ -92,7 +92,6 @@ void host_fan_writes_the_checkpoint() {
 	               jo_fu.complete && !jo_fu.objective.has_coop_checkpoint,
 	       "JO's host writes the four values alone");
 	expect(jo_body.size() + 4 == dfx2_body.size(), "the checkpoint is DFX2's four bytes");
-	expect(phase3_frame(nullptr) == jo_body, "a host with no title writes JO's");
 	const std::vector<uint8_t> marked_body = phase3_frame(dfx2(), 7);
 	FrameUpdate marked;
 	expect(decode_frame_update(marked_body.data(), marked_body.size(), ns::class_for_type_id, marked,

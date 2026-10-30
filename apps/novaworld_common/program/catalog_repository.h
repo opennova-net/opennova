@@ -99,17 +99,6 @@ std::string create_lobby(opennova::db::Database &db, std::string_view name, std:
 // gate tag under its protocol's key chain (Protocol::gate_tag_keys).
 bool gate_tag_file(const GameRow &game, std::string &bytes, std::string &why);
 
-// A gate tag with no row of its own that answers as another tag's game: the
-// Joint Operations demo's `jopd:cus4` (jodemo, docs/net/novaworld-net-re.md
-// section 1) plays in JO's lobby.
-struct GateTagAlias {
-	std::string_view tag;
-	std::string_view answers_as;
-};
-inline constexpr GateTagAlias kGateTagAliases[] = {
-	{ "jopd:cus4", "jop:cus2" },
-};
-
 // The game of a request that names none, and the pick among games a request's
 // hints cannot tell apart: JO's lobby, the service's first title (every
 // request was JO's before the table chose).
@@ -135,9 +124,8 @@ public:
 	const std::vector<GameRow> &games() const { return rows_; }
 	bool empty() const { return rows_.empty(); }
 
-	// The row a gate probe's tag selects: the row with that gate_tag, else the
-	// row its alias (kGateTagAliases) answers as; null for any other tag, which
-	// the gate refuses.
+	// The row a gate probe's tag selects: the row with that gate_tag; null for
+	// any other tag, which the gate refuses.
 	const GameRow *by_gate_tag(std::string_view tag) const;
 	const GameRow *by_slug(std::string_view slug) const;
 	const GameRow *by_lobby_name(std::string_view lobby_name) const;

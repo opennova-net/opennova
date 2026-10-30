@@ -128,6 +128,26 @@ void test_requests_round_trip() {
 	      "a pick for no stream adds one");
 	windows.deliver_pick(PickPurpose::MusicStreamWave, "C:/music/theme.wav");
 	CHECK(!windows.take_request(out), "a pick answered once raises nothing again");
+	// A .cpt's Export heights...: the Shell is offered its name as a .raw, and the file picked gets the heights of
+	// the .cpt the item was for, a .raw whatever the dialog left off.
+	EditorRequest heights = request::pick_file(PickPurpose::HeightsRaw);
+	heights.path = "terrain/Tmap.cpt";
+	windows.request(heights);
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::PickFile && out.path == "Tmap.raw",
+	      "the save dialog offers the .cpt's name as a .raw");
+	windows.deliver_pick(PickPurpose::HeightsRaw, "");
+	CHECK(!windows.take_request(out), "a cancelled export raises nothing");
+	windows.deliver_pick(PickPurpose::HeightsRaw, "C:/art/island");
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::ExportHeights && out.path == "terrain/Tmap.cpt" &&
+	              out.values == request::export_heights("terrain/Tmap.cpt", "C:/art/island.raw").values,
+	      "the file picked gets the .cpt's heights, as a .raw");
+	windows.deliver_pick(PickPurpose::HeightsRaw, "C:/art/island.RAW");
+	CHECK(!windows.take_request(out), "an export answered once raises nothing again");
+	windows.request(heights);
+	windows.take_request(out);
+	windows.deliver_pick(PickPurpose::HeightsRaw, "C:/art/island.RAW");
+	CHECK(windows.take_request(out) && out.values == request::export_heights("terrain/Tmap.cpt", "C:/art/island.RAW").values,
+	      "a name already a .raw stays as it is");
 }
 
 // The frame bracket reads the request table (S13 A4: acts_on_saved_files and
@@ -154,10 +174,11 @@ void test_frame_bracket_follows_the_table() {
 	// S23: a wave's whole-wave edit names the active one, as a texture's does.
 	// S25: a terrain stroke names the view it is in, the active one.
 	// A music bank stream's audio from a wave names the active bank, as a wave's edit does.
+	// A .cpt's heights written out name the active document, read as it stands.
 	const std::vector<K> active = {K::OpenDocument, K::ReloadDocument, K::CloseDocument, K::SelectRecord, K::EditRecord,
 	                               K::SetStringText, K::RevertToSaved, K::EndEdit, K::Copy, K::Cut, K::Paste, K::Duplicate, K::Save,
 	                               K::Undo, K::Redo, K::TextureOperation, K::SetViewport, K::EditInViewport,
-	                               K::WaveOperation, K::TerrainStroke, K::MusicStreamAudio};
+	                               K::WaveOperation, K::TerrainStroke, K::MusicStreamAudio, K::ExportHeights};
 	const auto listed = [](const std::vector<K> &kinds, K kind) {
 		return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
 	};

@@ -572,7 +572,7 @@ private:
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};
 	const Protocol *protocol_ = nullptr; // set_protocol
-	const world::TitleRules *rules_ = nullptr; // set_rules
+	const world::TitleRules *rules_ = world::unset_title_rules(); // set_rules
 	ClientProcessState *client_process_ = nullptr; // use_process_state
 	ServerLogs server_logs_{};                     // set_server_logs
 	PeerAddr local_address_{};                     // set_local_address

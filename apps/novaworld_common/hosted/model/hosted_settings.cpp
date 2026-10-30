@@ -6,6 +6,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <runtime/inmatch/host_settings.h> // server_settings_title
 
 #include <cstdio>
 #include <algorithm>
@@ -107,14 +108,19 @@ std::optional<SettingsRefusal> check_settings(
 		if (!expansion)
 			return SettingsRefusal{ "expansion_id", "is no expansion of this game with data" };
 	}
-    auto block = gamecfg::defaults({}, 0, 0, title_config_table(product->title));
-    std::string field, error;
-    const auto &weapons = expansion && !expansion->weapons.empty() ? expansion->weapons : product->weapons;
-    if (!gamecfg::apply_server_settings(block, s.options, true, weapons, field, error))
-        return SettingsRefusal{ "options." + field, error };
-    if (s.mission_options.size() > s.missions.size() ||
-            std::any_of(s.mission_options.begin(), s.mission_options.end(), [](int v) { return v != 0 && v != 1; }))
-        return SettingsRefusal{"rotation", "invalid side-switch option"};
+	const gamecfg::ServerSettingsTitle settings_title =
+			inmatch::server_settings_title(product->title);
+	auto block = gamecfg::defaults({}, 0, 0, settings_title.table);
+	std::string field, error;
+	const auto &weapons =
+			server_weapon_roster(product->weapons, expansion ? &expansion->weapons : nullptr);
+	if (!gamecfg::apply_server_settings(
+				block, s.options, true, weapons, settings_title, field, error))
+		return SettingsRefusal{ "options." + field, error };
+	if (s.mission_options.size() > s.missions.size() ||
+			std::any_of(s.mission_options.begin(), s.mission_options.end(),
+					[](int v) { return v != 0 && v != 1; }))
+		return SettingsRefusal{ "rotation", "invalid side-switch option" };
 	if (s.missions.empty()) return SettingsRefusal{ "missions", "names no mission" };
 	if (s.missions.size() > kMissionsMax)
 		return SettingsRefusal{ "missions",
@@ -136,28 +142,6 @@ std::optional<SettingsRefusal> check_settings(
 				return SettingsRefusal{"rotation", "Side switching is shared by repeated occurrences of the same map."};
 	}
 	return std::nullopt;
-}
-
-std::string join_missions(const std::vector<std::string> &missions) {
-	std::string out;
-	for (const std::string &m : missions) {
-		if (!out.empty()) out.push_back('\n');
-		out += m;
-	}
-	return out;
-}
-
-std::vector<std::string> split_missions(const std::string &column) {
-	std::vector<std::string> out;
-	size_t pos = 0;
-	while (pos <= column.size()) {
-		const size_t end = column.find('\n', pos);
-		const std::string line = column.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
-		if (!line.empty()) out.push_back(line);
-		if (end == std::string::npos) break;
-		pos = end + 1;
-	}
-	return out;
 }
 
 std::string render_host_file(const HostedSettings &s, int64_t server_id) {

@@ -5,10 +5,13 @@ import { parseSettingsSchema, parseWeapons, type SavedConfiguration, type Server
 
 export interface ConfigurationState {
   saved: SavedConfiguration; settings_revision: number; schema: ServerSetting[]; weapons: ServerWeapon[];
-  settings: { key: string; value: string }[];
 }
 export interface CommandResult {
   outcome: string; sent: boolean; delivery_unknown: boolean; configuration_saved: boolean; settings_revision: number; replies: string[];
+  // The settings edit's command the server refused (the changes before it saved, the rest not sent); null for none.
+  refused_command: string | null;
+  // A settings edit no admin line applies, saved for the next launch (with no admin link too).
+  next_launch_only: boolean;
 }
 const client = (target: ConsoleTarget) => target.kind === 'admin' ? adminClient : apiClient;
 export async function readConfiguration(target: ConsoleTarget): Promise<ConfigurationState> {

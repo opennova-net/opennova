@@ -1,9 +1,12 @@
 // A dotted version, one to four decimal numbers: ONE's ("0.0.22", a staging build's
 // "0.0.22.123"), a game's release ("0.1.4", "1.0", a command file's [HEADER] VERSION) and the
-// four numbers retail's engine-build slots carry (its engine build, 1.7.5.7). `parse` is the one rule every reader of a typed
-// or stamped version applies (the service's release routes, the editor's release request, the
-// build's stamp in CMake); `text` spells it back, `retail_text` the way retail's binaries print
-// their build, and `packed` the one-byte-per-part dword.
+// four numbers retail's engine-build slots carry (its engine build, 1.7.5.7). `parse` is the one
+// rule every C++ reader of a typed or stamped version applies (the service's release routes, the
+// editor's release request); the build's stamp in CMake (engine/base/CMakeLists.txt) mirrors it in
+// CMake's own regex and adds that the first three numbers are at most 255, so ONE's wire_version
+// packs (`packed`), and the scripts and the web keep regex copies of their own. `text` spells it
+// back, `retail_text` the way retail's binaries print their build, and `packed` the
+// one-byte-per-part dword.
 //
 // Infrastructure, not a port: the forms are retail's, the type is ours.
 #pragma once

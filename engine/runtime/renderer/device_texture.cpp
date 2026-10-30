@@ -63,7 +63,7 @@ uint32_t terrain_texdetail_flags(int level) {
 // [orig: GTexture_DownsampleToLimits @ 0x687170 — the cap's halvings while either side exceeds it
 // (@ 0x6871B7..0x6871BD); 0x20000 shifts both sides by 2 and counts two (@ 0x6871C8..0x6871D0), else 0x10000
 // enters the card's loop at its halving (@ 0x6871DB, a halving whatever the size); the card's halvings while
-// either side exceeds dword_32A623C (@ 0x6871EA)]
+// either side exceeds g_DeviceMaxTextureWidth (@ 0x6871EA)]
 uint32_t pixel_texture_halvings(uint32_t width, uint32_t height, uint32_t flags, uint32_t max_side) {
 	// The sides are signed ints there; a texture's are far below 2^31.
 	const uint32_t cap = flag_cap(flags, max_side);

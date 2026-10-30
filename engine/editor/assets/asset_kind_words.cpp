@@ -1,10 +1,10 @@
-// Each kind of project file in a modder's words (asset_kind_words.h), and the .def names the game opens.
+// Each kind of project file in a modder's words (asset_kind_words.h), and the .def files a game never reads.
 #include "asset_kind_words.h"
 
 #include <iterator>
 
 #include <base/io/strutil.h>
-#include <net/protocol/protocol.h>
+#include <base/title/title.h>
 
 namespace opennova::editor {
 namespace {
@@ -72,29 +72,6 @@ constexpr bool in_order() {
 }
 static_assert(in_order(), "one row per AssetKind, in the enum's order");
 
-// Every .def name Jointops.exe opens, each where it opens it (the name's every push into a loader; the binary
-// holds no other .def name, and none it builds): the rows of the titles that run its code, those that speak
-// Joint Operations' protocol. No other title's binary is witnessed for them.
-struct ReadDefName {
-	const char *name; // as the game opens it, compared without case
-	const char *cite;
-};
-constexpr ReadDefName kReadDefNames[] = {
-	{"Avatars.def", "[orig: CAvatarDefs_Init @ 0x57B1D0]"},
-	{"SndProf.def", "[orig: Game_InitSubsystems @ 0x4A713C; Game_ReloadExpansionAndMods @ 0x5527D9; Expansion_ReloadAllAssets @ 0x56841B; Expansion_SwitchTo @ 0x5689DD]"},
-	{"ammo.def", "[orig: Game_StartMission @ 0x52548A]"},
-	{"charattr.def", "[orig: CharAttr_LoadFromDef @ 0x412172]"},
-	{"hudfx.def", "[orig: HUD_InitOverlaySystem @ 0x5A462E]"},
-	{"hudpos.def", "[orig: HUD_InitOverlaySystem @ 0x5A492C]"},
-	{"items.def", "[orig: Game_InitSubsystems @ 0x4A719E; Game_ReloadExpansionAndMods @ 0x5527E8; Expansion_ReloadAllAssets @ 0x56842F; Expansion_SwitchTo @ 0x5689EC]"},
-	{"overcast.def", "[orig: Environment_LoadTimeOfDayConfig @ 0x57DBFD]"},
-	{"powerup.def", "[orig: Game_StartMission @ 0x5256CD]"},
-	{"reverb.def", "[orig: Audio_LoadReverbDefs @ 0x766D8E]"},
-	{"weapon.def", "[orig: WeaponDef_LoadAll @ 0x54DD36; Game_StartMission @ 0x5254B8; Game_ReloadExpansionAndMods @ 0x552845]"},
-	// hud.def's one push is in a loader nothing calls or points at, so JO never reads it [orig: @ 0x5BE21E, the
-	// function @ 0x5BE210], as the second hudpos.def push [orig: @ 0x5A246B, the function @ 0x5A2450].
-};
-
 } // namespace
 
 const AssetKindWords &asset_kind_words(AssetKind kind) {
@@ -104,10 +81,12 @@ const AssetKindWords &asset_kind_words(AssetKind kind) {
 
 bool game_never_reads(AssetKind kind, const std::string &name, const std::string &game_code) {
 	if (kind != AssetKind::OtherDefs) return false;
-	const Protocol *protocol = title_protocol(game_code);
-	if (protocol == nullptr || protocol != title_protocol("jo")) return false;
-	for (const ReadDefName &row : kReadDefNames)
-		if (strutil::iequals(row.name, name)) return false;
+	// The title's own row says which .def names its executable opens (Title::read_defs); a title
+	// whose binary is unread for them, or no title, makes no claim.
+	const Title *title = title_by_code(game_code);
+	if (title == nullptr || title->read_defs == nullptr) return false;
+	for (const char *const *read = title->read_defs; *read; ++read)
+		if (strutil::iequals(*read, name)) return false;
 	return true;
 }
 

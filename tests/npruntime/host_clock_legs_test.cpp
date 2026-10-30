@@ -31,6 +31,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/session_ping.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -86,7 +87,9 @@ struct ClockHost {
 		inmatch::set_connection_mode(owner.ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(owner.ctx, inmatch::SocketMode::Lan);
 		inmatch::GameConfig config;
-		inmatch::create_session(owner.ctx, config, inmatch::SessionStartup{}, nullptr);
+		inmatch::SessionStartup startup;
+		startup.protocol = opennova::title_protocol("jo");
+		inmatch::create_session(owner.ctx, config, startup, nullptr);
 		owner.clock_ms = [this] { return clock; };
 		auto &link = owner.peers[kPeer];
 		link.transport = std::make_unique<opennova::replication::UdpSessionTransport>(

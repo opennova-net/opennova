@@ -86,6 +86,7 @@
 
 #include <crow/json.h>
 
+#include "common/cdkey_oracle.h"
 #include "common/file_io.h"
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -2232,7 +2233,6 @@ int test_lobby_per_title(Harness &h) {
 	};
 	const Prepared prepared[] = {
 		{ "jop:cus2", "/jop_2.gsb" },
-		{ "jopd:cus4", "/jop_2.gsb" },
 		{ "dfx2:0:cus:buffy", "/dfx2_0.gsb" },
 		{ "acidgambit:0", "/acidgambit_0.gsb" },
 		{ "mygame:0", "/mygame_0.gsb" },
@@ -2263,7 +2263,6 @@ int test_lobby_per_title(Harness &h) {
 	const Later later[] = {
 		{ "GT=acidgambit:0", "urls.htm", "/acidgambit_0.gsb" },
 		{ "GT=acidgambit:0", "dfx2_0_urls.htm", "/acidgambit_0.gsb" },
-		{ "GT=jopd:cus4", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=38", "urls.htm", "/dfx2_0.gsb" },
 		{ "NWPF=28", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=100", "urls.htm", "/acidgambit_0.gsb" },
@@ -2681,7 +2680,7 @@ int test_cd_key_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 201 && activated && !activated["reactivated"].b());
 	const std::string nwact = str(activated["nwact"]);
 	std::string wire;
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact, kMachine, wire) &&
+	TEST_EXPECT(cdkey_oracle::read_activation(dfx2_chains(), nwact, kMachine, wire) &&
 			wire == str(made["keys"][0]["wire_key"]));
 	TEST_EXPECT(activated["key"]["activations"].i() == 1);
 	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
@@ -2925,11 +2924,11 @@ int test_dfx2_activation(Harness &h) {
 			!nwact_a.empty() && minted.size() > 5 && minted.substr(minted.size() - 5) == "|auto");
 	const std::string wire_key = minted.substr(0, minted.size() - 5);
 	std::string recovered;
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_a, kMachineA, recovered) && recovered == wire_key);
+	TEST_EXPECT(cdkey_oracle::read_activation(dfx2_chains(), nwact_a, kMachineA, recovered) && recovered == wire_key);
 	std::string serial;
 	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
 	// Only that machine reads it.
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), nwact_a, kMachineB, recovered));
+	TEST_EXPECT(!cdkey_oracle::read_activation(dfx2_chains(), nwact_a, kMachineB, recovered));
 
 	// The same machine again: the same NWACT, no second key; another machine its own.
 	login = retail_login(
@@ -2943,7 +2942,7 @@ int test_dfx2_activation(Harness &h) {
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
 	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_b, kMachineB, recovered) && recovered == wire_key);
+	TEST_EXPECT(cdkey_oracle::read_activation(dfx2_chains(), nwact_b, kMachineB, recovered) && recovered == wire_key);
 	TEST_EXPECT(h.pool.acquire()
 						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
 								"= a.key_id "
@@ -3020,7 +3019,7 @@ int test_dfx2_activation(Harness &h) {
 					.code == 200);
 	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
 			unactivated(kMachineB), true);
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), 
+	TEST_EXPECT(cdkey_oracle::read_activation(dfx2_chains(), 
 			set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
 	TEST_EXPECT(recovered == str(key["keys"][0]["wire_key"]));
 
@@ -6839,6 +6838,11 @@ public:
 		delay_prefix_ = prefix;
 		delay_ms_ = ms;
 	}
+	// A line starting with `prefix` is refused ("ERROR - Bad Value."; empty: none).
+	void refuse(const std::string &prefix) {
+		std::lock_guard<std::mutex> lock(mu_);
+		refuse_prefix_ = prefix;
+	}
 	void set_scene(const std::string &scene) {
 		std::lock_guard<std::mutex> lock(mu_);
 		scene_ = scene;
@@ -6881,6 +6885,8 @@ public:
 		} else if (is(0, "GET") && is(1, "GAMESETTINGS")) {
 			replies.emplace_back("AutoBalanceOnRecycle = 1\nServerName           = Console Test\n"
 								 "ServerPassword       = s3cret\n");
+		} else if (!refuse_prefix_.empty() && line.substr(0, refuse_prefix_.size()) == refuse_prefix_) {
+			replies.emplace_back("ERROR - Bad Value.");
 		} else if (is(0, "SET")) {
 			replies.emplace_back("OK - Setting Changed.");
 		} else if (is(0, "PLAYER") && is(1, "LIST")) {
@@ -6978,6 +6984,7 @@ private:
 	std::vector<std::string> lines_;
 	std::string delay_prefix_;
 	int delay_ms_ = 0;
+	std::string refuse_prefix_;
 	std::string scene_ = "Game";
 	bool hostile_ = false;
 	std::vector<std::string> rotation_{ "ALPHA.BMS" };
@@ -7025,7 +7032,7 @@ bool curated_line(const std::string &line) {
 		});
 	}
 	static const std::set<std::string> exact = { "PLAYER LIST", "MISSION AVAILABLE", "MISSION LIST", "MISSION CYCLE",
-		"CHAT GET", "GET GAMESETTINGS", "GET GAMESTATE" };
+		"CHAT GET", "GET GAMESTATE" };
 	return exact.count(line) != 0;
 }
 
@@ -7996,14 +8003,17 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200);
 	reply = get(base + "/players", { kBearer });
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["players"].size() == 2);
+	// The settings read the saved configuration from the database: no admin line goes out
+	// for them (no live GET GAMESETTINGS, which carries the passwords), owner or admin.
+	const size_t settings_before = fake.lines().size();
 	reply = get(base + "/settings", { kBearer });
 	json = crow::json::load(body_text(reply));
-	bool named = false;
-	if (reply.code == 200 && json) {
-		for (const auto &row : json["settings"])
-			named = named || (str(row["key"]) == "ServerName" && str(row["value"]) == "Console Test");
-	}
-	TEST_EXPECT(named);
+	TEST_EXPECT(reply.code == 200 && json && str(json["saved"]["game_name"]) == "Console Test" &&
+			!json.has("settings"));
+	reply = get(me + "/settings", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["saved"]["game_name"]) == "Console Test");
+	TEST_EXPECT(fake.lines().size() == settings_before);
 	TEST_EXPECT(get("/api/admin/hosted/999999/players", { kBearer }).code == 404);
 
 	// A full rotation takes no more (kConsoleRotationMax, policy).
@@ -8127,11 +8137,19 @@ int test_hosted_console_routes(Harness &h) {
 	}
 
 	// Stopping: refused before the link, the console still read.
-	// The expanded routes enforce ownership and CSRF, and persist accepted TCP
-	// edits in the fleet independently of the caller's HTTP lifetime.
+	// The settings routes enforce ownership and CSRF, and persist accepted TCP
+	// edits in the fleet independently of the caller's HTTP lifetime. No admin line
+	// passes through (ADR 0053 d9): the raw command routes are gone.
 	TEST_EXPECT(get(me + "/settings", {with_session(other_s)}).code == 404);
-	TEST_EXPECT(post(me + "/command", {with_session(owner_s)}, R"({"command":"SET KillLimit 500"})").code == 403);
-	reply = post(base + "/command", {kBearer}, R"({"command":"SET KillLimit 500"})");
+	const std::string kill_limit_edit = "{\"settings_revision\":" +
+			std::to_string(hosted::find_server(*h.pool.acquire(), id)->settings_revision) +
+			",\"patch\":{\"kill_limit\":500}}";
+	TEST_EXPECT(h.send("PATCH", me + "/settings", {with_session(owner_s), kJson}, kill_limit_edit).code == 403);
+	// No route serves them: the portal's GET catch-all (/<path>, http_listener.cpp) answers a
+	// POST to a path no route takes 405, and nothing reaches the server.
+	TEST_EXPECT(post(me + "/command", as_owner_post, R"({"command":"SET KillLimit 500"})").code == 405);
+	TEST_EXPECT(post(base + "/command", {kBearer}, R"({"command":"QUIT"})").code == 405);
+	reply = h.send("PATCH", base + "/settings", {kBearer, kJson}, kill_limit_edit);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json["configuration_saved"].b());
 	const auto revision = json["settings_revision"].i();
@@ -8151,6 +8169,51 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(persisted->settings.send_holdoff_ticks == 2 && persisted->settings.entity_send_budget == 900 &&
 			persisted->settings.max_packet_size == 1250 && persisted->settings.lock_framerate);
 	TEST_EXPECT(h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body).code == 409);
+	// A command the server refuses stops the edit there: the fields before it saved, the rest
+	// never sent, and the reply names it rather than reading as saved. The commands go in the
+	// settings schema's order whatever the patch's (GameTime, KillLimit, MaxScore).
+	fake.refuse("SET KillLimit");
+	const auto before_refusal = hosted::find_server(*h.pool.acquire(), id);
+	const size_t refusal_lines = fake.lines().size();
+	reply = h.send("PATCH", base + "/settings", {kBearer,kJson},
+			"{\"settings_revision\":" + std::to_string(before_refusal->settings_revision) +
+					",\"patch\":{\"kill_limit\":61,\"max_score\":12,\"time_limit\":25}}");
+	fake.refuse("");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["refused_command"]) == "SET KillLimit 61" &&
+			json["configuration_saved"].b());
+	const auto after_refusal = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(after_refusal->settings.time_limit == 25 &&
+			after_refusal->settings.kill_limit == before_refusal->settings.kill_limit &&
+			after_refusal->settings.max_score == before_refusal->settings.max_score);
+	const auto refusal_sent = fake.lines();
+	TEST_EXPECT(std::none_of(refusal_sent.begin() + static_cast<std::ptrdiff_t>(refusal_lines),
+			refusal_sent.end(), [](const std::string &l) { return l.rfind("SET MaxScore", 0) == 0; }));
+	// With no admin link (the fleet's row gone stale, as a restarting server's is), an edit no
+	// admin line applies still saves, for the next launch, and says so; one with a live command
+	// is refused until the link is back.
+	h.pool.acquire()->exec(
+			"UPDATE hosted_admin_links SET seen_at = now() - interval '1 hour' WHERE server_id = $1;",
+			{ opennova::db::BindValue(id) });
+	const auto unlinked = hosted::find_server(*h.pool.acquire(), id);
+	reply = h.send("PATCH", base + "/settings", { kBearer, kJson },
+			"{\"settings_revision\":" + std::to_string(unlinked->settings_revision) +
+					",\"patch\":{\"options\":{\"server_message\":\"Unlinked\"}}}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["next_launch_only"].b() &&
+			json["configuration_saved"].b());
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), id)->settings.options.get_string(
+						"server_message", "") == "Unlinked");
+	reply = h.send("PATCH", base + "/settings", { kBearer, kJson },
+			"{\"settings_revision\":" + std::to_string(unlinked->settings_revision + 1) +
+					",\"patch\":{\"kill_limit\":63}}");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "admin_unavailable");
+	const auto unlinked_sent = fake.lines();
+	TEST_EXPECT(std::none_of(unlinked_sent.begin(), unlinked_sent.end(), [](const std::string &l) {
+		return l == "SET KillLimit 63" || l.rfind("SET ServerMessage", 0) == 0;
+	}));
+	h.pool.acquire()->exec("UPDATE hosted_admin_links SET seen_at = now() WHERE server_id = $1;",
+			{ opennova::db::BindValue(id) });
 	// A short-lived caller stops waiting after send; the drain still saves the reply.
 	fake.delay("SET KillLimit", 950);
 	hosted::AdminCommandOptions durable_options;
@@ -8165,8 +8228,10 @@ int test_hosted_console_routes(Harness &h) {
 	fake.delay("", 0);
 	const auto sent_lines = fake.lines();
 	TEST_EXPECT(std::count(sent_lines.begin(),sent_lines.end(),"SET KillLimit 42") == 1);
-	reply = post(base + "/command", {kBearer}, R"({"command":"QUIT"})");
-	TEST_EXPECT(reply.code == 200);
+	// The service's own QUIT (the link's own command) ends the session; the link reconnects.
+	hosted::AdminCommandOptions quit_options;
+	quit_options.record = false;
+	(void)hosted::run_console_command(h.pool, id, "QUIT", quit_options, std::chrono::milliseconds(3000));
 	TEST_EXPECT(wait_until([&] { return h.links->find(id)->status().state == hosted::AdminLinkState::Up; }, 5000));
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(),id)->state == hosted::State::Running);
 	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test",

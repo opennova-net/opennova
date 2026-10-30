@@ -91,6 +91,18 @@ inline constexpr int kClassEngineer = 9;
 struct WeaponRosterEntry {
 	std::string name;
 	int32_t loadout_selectable = 0;
+	// The row's loadout_menu_textid, the WepDes key the host screen's WEAPON_LIST names it by
+	// ("" for none, a subclass row's) [orig: WeaponDef_ParseProperty @0x54D730 - the key
+	// @0x54DA25, GameText_GetString("WepDes", ..) into the row's +40].
+	std::string loadout_menu_textid;
+	// The row's loadout_selectable word as the remote admin's table keeps it: weapon.def's on
+	// every row, a subclass row's too, where `loadout_selectable` above is 0 for a subclass row
+	// (whose loadout keys the weapon table skips). WEAPON SET ALL sets the rows where it is
+	// nonzero. -1: not known (a roster read without it).
+	// [orig: WeaponDefs_ParseLineCallback @0x543680 - "loadout_selectable" atol stored at
+	//  [def+0x3A8] @0x544E11; CAdminServer_HandleWeaponCommand @0x4045A0 - the ALL loop over
+	//  AdmDef_GetEntryByIndex's [234] @0x404850..0x404868]
+	int32_t admin_loadout_selectable = -1;
 };
 using WeaponRoster = std::vector<WeaponRosterEntry>;
 
@@ -389,6 +401,10 @@ void apply_line(GameCfg &cfg, const io::ConfigTokens &line, const WeaponRoster &
 // block's words by their keys.
 int32_t *int_word(GameCfg &cfg, const char *key);
 const int32_t *int_word(const GameCfg &cfg, const char *key);
+// The bytes the reader keeps of a string field's value: a cfg-table row's size less its NUL
+// (Napi_CopyString), else the switch key's limit (its strncpy count, Napi_CopyString's room, or the
+// field less one where the copy is unbounded, D-GAMECFG-1); 0 for a field no key stores.
+size_t text_limit(std::string GameCfg::*field);
 
 // The read of one file's text: every line the walk hands its callback,
 // through apply_line, onto `cfg` as it stands (no defaults, no version check).

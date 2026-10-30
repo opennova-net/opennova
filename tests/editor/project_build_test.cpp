@@ -256,7 +256,10 @@ static int test_filled_project_builds_and_mounts() {
 	// renderer's own shader, _ffp.fx, packs with localres, as retail packs its effects).
 	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.size() == 1);
 	for (const auto &entry : plan.archives[2].entries) TEST_EXPECT(entry.logical_name == "newarow1.tga");
-	TEST_EXPECT(plan.loose.size() == 2); // menumus.sbf and nw_cdata.coo
+	// menumus.sbf alone: the NovaWorld cookie jar the blanks make is the player's (the game rewrites it
+	// with their cookies), so no build ships it.
+	TEST_EXPECT(plan.loose.size() == 1 && plan.loose[0].logical_name == "menumus.sbf");
+	for (const BuildEntry &entry : plan.loose) TEST_EXPECT(entry.logical_name != "nw_cdata.coo");
 
 	const BuildReport report = run_build(plan, p.output_root());
 	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
@@ -264,7 +267,7 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(!report.reused_existing);
 	TEST_EXPECT(report.build_id.size() == 16);
 	TEST_EXPECT(report.archives_written.size() == 3 && report.archives_reused.empty());
-	TEST_EXPECT(report.loose_written.size() == 2);
+	TEST_EXPECT(report.loose_written.size() == 1);
 	TEST_EXPECT(fs::is_directory(system_path(report.build_dir)));
 	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/language.pff")));
 	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/localres.pff")));
@@ -647,7 +650,6 @@ static int test_expansion_layout() {
 	BuildTarget target;
 	target.expansion = "jxm";
 	target.install = install.root;
-	target.game = "jo";
 	target.gate_tag_file = p.dir.file("generated/gt.ssc");
 	const std::string version = "Synthetic, V1.0; English\r\n";
 	target.version_file = p.dir.file("generated/version.txt");
@@ -788,22 +790,20 @@ static int test_lean_packing() {
 	TEST_EXPECT(test_io::write_text(p.root + "/missions/ASP_G7.npz", "a map project of ours"));
 	TEST_EXPECT(test_io::write_text(p.root + "/missions/ASP_G7.bin", "its own table"));
 	TEST_EXPECT(test_io::write_text(p.root + "/missions/m3.bms", "a mission with the base's text"));
-	const std::string gametext = find_file(p.root, "gametext.bin"), menu = find_file(p.root, "main.mnu"),
-	                  coo = find_file(p.root, "nw_cdata.coo");
-	TEST_EXPECT(!gametext.empty() && !menu.empty() && !coo.empty());
+	const std::string gametext = find_file(p.root, "gametext.bin"), menu = find_file(p.root, "main.mnu");
+	TEST_EXPECT(!gametext.empty() && !menu.empty());
 	const BaseInstall install = make_base(
 	        p.dir.file("install"), { { "gametext.bin", test_io::read_file(gametext) }, { "m2.bin", bytes_of("its table") },
 	                                 { "ASP_G7.bin", bytes_of("its own table") }, { "m3.bin", bytes_of("the base's") } },
 	        { { "main.mnu", test_io::read_file(menu) }, { "m2.bms", bytes_of("the base's mission") } }, {},
 	        { { "intro.bik", bytes_of("the base's intro") }, { "header.bik", bytes_of("the base's header") },
-	          { "cc.bin", bytes_of("us") }, { "score.ini", bytes_of("theirs") }, { "nw_cdata.coo", test_io::read_file(coo) } });
+	          { "cc.bin", bytes_of("us") }, { "score.ini", bytes_of("theirs") } });
 	TEST_EXPECT(install.written);
 	settle_files(install.root); // the base cache keeps what it reads of settled files alone
 	const BaseNames base = install.base();
 	BuildTarget target;
 	target.expansion = "jxm";
 	target.install = install.root;
-	target.game = "jo";
 	const auto plan_of = [&] {
 		const AssetScan scan = scan_project_assets(p.paths, p.doc);
 		return plan_build(p.paths, scan, evaluate_requirements(p.doc, scan), {}, target, &base);
@@ -1064,7 +1064,6 @@ static int test_plan_blockers_are_the_plans() {
 		if (expansion) {
 			p.doc.expansion.name = minted_install::kExpansion;
 			target.expansion = minted_install::kExpansion;
-			target.game = p.doc.target_game;
 		}
 		const AssetScan scan = scan_project_assets(p.paths, p.doc);
 		const RequirementReport requirements = evaluate_requirements(p.doc, scan);

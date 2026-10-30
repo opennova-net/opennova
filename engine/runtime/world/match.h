@@ -49,7 +49,7 @@ struct MatchRules {
     // Absent means the exact GameType_CreateDefaultSettings row. Present is a
     // fully materialized score.ini overlay and may intentionally contain zero
     // in every slot; absence is therefore not encoded as a magic all-zero row.
-    std::optional<std::array<int32_t, 39>> score_values;
+    std::optional<ScoreValues> score_values;
     // Empty selects retail's per-game-type defaults. A loaded score.ini section
     // replaces them in file order.
     std::vector<MatchScoreField> score_fields;
@@ -85,7 +85,7 @@ struct MatchLiveScoreboard {
 // docs/titles/dfx2-vs-jo-re.md DFX2-15). The EXP_FANFARE pair the table seeds is the rules'
 // score_exp_fanfare.
 // [orig: GameType_CreateDefaultSettings @0x52DD00] [orig: @0x52ae80 (dfx2.exe)]
-std::array<int32_t, 39> default_match_score_values(uint32_t game_type, const TitleRules &rules);
+ScoreValues default_match_score_values(uint32_t game_type, const TitleRules &rules);
 std::vector<MatchScoreField> default_match_score_fields(uint32_t game_type);
 
 // The direct CPlayerStats dword layout. Index 0 is the associated entity; the

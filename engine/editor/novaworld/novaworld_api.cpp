@@ -6,6 +6,7 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <base/title/title.h>
+#include <base/version/version_line.h> // protocol_words
 #include <net/protocol/protocol.h>
 
 namespace opennova::editor {
@@ -169,9 +170,7 @@ NovaWorldRequest transfer_request(
 } // namespace
 
 std::string protocol_words(const RemoteProtocol &protocol) {
-	if (protocol.name.empty())
-		return std::string();
-	return protocol.name + " protocol" + (protocol.version.empty() ? "" : " " + protocol.version);
+	return opennova::protocol_words(protocol.name, protocol.version);
 }
 
 std::string title_protocol_code(std::string_view title_code) {

@@ -270,8 +270,7 @@ import type { ServiceSettings } from '../../../types/settings';
 import { BILLING_TABS } from '../../../utils/adminNav';
 import { billingRevenue } from '../../../utils/billingRevenue';
 import { subscriptionItemLabel, subscriptionStatusLabel, subscriptionStatusTone } from '../../../utils/billingView';
-import { formatCount, formatMoney, formatUtc } from '../../../utils/format';
-import { countLabel } from '../../../utils/infraView';
+import { countLabel, formatCount, formatMoney, formatUtc } from '../../../utils/format';
 
 const billing = ref<AdminBillingResponse | null>(null);
 const tiers = ref<TiersResponse | null>(null);

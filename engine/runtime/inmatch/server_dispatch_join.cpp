@@ -91,7 +91,7 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool m
 	// +36: the slot limit less a non-peer (dedicated) host's own slot, at most 251: the
 	// session's cap on every host; +48: the cfg's raw unlimited-vehicles word dword_24D2258.
 	// [orig: Client_BuildMissionDataRequestBlock @0x51E897..0x51E8B9, @0x51E8C5..0x51E8CB]
-	const int32_t players = static_cast<int32_t>(config.player_slot_limit()) - !mp_session_peer;
+	const int32_t players = static_cast<int32_t>(config.live_slot_limit()) - !mp_session_peer;
 	write_u32(36, static_cast<uint32_t>(players > 251 ? 251 : players));
 	write_u32(40, config.game_type);
 	// A DFX2 authority ORs 0x10000 into the rules word [orig: @0x51b89e (dfx2.exe)].
@@ -278,13 +278,15 @@ std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg,
 	                            static_cast<uint32_t>(info_body.size()), offset);
 }
 
-// tag=0x64 chunked mission-metadata transfer. [orig: NapiNPClientMsg_HandleMissionDataChunk (0x64) @0x432410]
+// tag=0x64 chunked mission-metadata transfer: the session's block, else (the World-less unit
+// path) one built for it, under the protocol the session speaks.
+// [orig: NapiNPClientMsg_HandleMissionDataChunk (0x64) @0x432410]
 std::vector<uint8_t> build_tag64_mission_metadata(
-		const GameConfig &cfg, const MissionMetadataBlob *session_blob,
+		const GameConfig &cfg, const MissionMetadataBlob *session_blob, const Protocol *protocol,
 		uint32_t transfer_id, uint32_t offset) {
 	MissionMetadataBlob fallback{};
 	if (session_blob == nullptr) {
-		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server, nullptr,
+		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server, protocol,
 				context_session_title(nullptr, cfg)); // no ctx
 		session_blob = &fallback;
 	}
@@ -737,6 +739,8 @@ void dispatch_mission_chunk_request(const GameConfig &config, const ProtocolMess
 			s2c::MISSION_DATA_CHUNK,
 			build_tag64_mission_metadata(
 					config, inputs.mission_metadata_blob,
+					inputs.server_ctx != nullptr ? inputs.server_ctx->np_protocol.identity
+					                             : nullptr,
 					inputs.mission_metadata_transfer_id,
 					chunk_request_offset(msg.payload, inputs.mission_metadata_transfer_id))));
 }

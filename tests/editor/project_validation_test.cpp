@@ -382,7 +382,7 @@ static int test_every_finding_has_a_row() {
 		ValidationCache cache;
 		ProjectChecks checks;
 		ProjectAssetSource files;
-		files.set_scan(project.paths.root, project.scan, project.document.target_game);
+		files.set_scan(project.paths.root, project.scan);
 		const std::vector<std::string> boot_missing;
 		const std::vector<Diagnostic> none;
 		const ProjectFindings composed = compose_project_findings(
@@ -708,7 +708,7 @@ static int test_install_validation() {
 		const RequirementReport requirements = evaluate_requirements(project.document, project.scan);
 		ProjectChecks checks;
 		ProjectAssetSource source;
-		source.set_scan(project.paths.root, project.scan, project.document.target_game);
+		source.set_scan(project.paths.root, project.scan);
 		const std::vector<std::string> boot_missing;
 		const std::vector<Diagnostic> none;
 		const ProjectFindings composed = compose_project_findings(

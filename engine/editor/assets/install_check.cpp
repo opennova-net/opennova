@@ -93,7 +93,6 @@ InstallCheck check_install(const std::string &root, const std::string &game) {
 	// The base game's view, as an import of a standalone project lists it: what every import reads.
 	InstallSpec spec;
 	spec.root = out.root;
-	spec.game = out.game;
 	InstallView view;
 	if (!view.open(spec, out.why)) {
 		// Archives there that do not open (one held by another program, an update stopped half way).

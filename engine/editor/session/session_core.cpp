@@ -675,7 +675,7 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 		                            (source.outputs.size() == 1 ? "" : "s") + ")");
 	files_scanned_ = refresh.files_scanned();
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(refresh.scan()));
-	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	// The requirements over that scan, with the project's document as it is now: a features change
 	// made while the refresh ran (S13 A3: it waits for none) is the one they follow.
 	view_.project.requirements = std::make_shared<const RequirementReport>(
@@ -730,7 +730,7 @@ void SessionCore::absorb_changed(ImportRunResult &imports, const std::vector<std
 	files_scanned_ = scan.update(paths_, *view_.project.document, paths);
 	note_came_back(*view_.project.scan, scan, files, refreshed);
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
-	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
@@ -778,7 +778,7 @@ void SessionCore::update_files(const std::vector<std::string> &paths) {
 	AssetScan scan = *view_.project.scan;
 	files_scanned_ = scan.update(paths_, *view_.project.document, paths);
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
-	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
@@ -798,7 +798,7 @@ void SessionCore::update_folders(const std::vector<std::string> &made, const std
 		if (!folder.empty()) folders[folder] = io::file_modified_ticks(system_path(join_path(paths_.root, folder)));
 	scan.set_folders(std::move(folders));
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
-	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	touch(ViewConcern::Files);
 }
 
@@ -1004,7 +1004,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	}
 	now.update(paths_, doc, result.created);
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(now));
-	problems().set_scan(paths_.root, *view_.project.scan, doc.target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	view_.project.requirements = std::make_shared<const RequirementReport>(requirements_of(doc, *view_.project.scan));
 	touch(ViewConcern::Files);
 	problems().show_requirements(); // the rows they lead with, at once
@@ -1706,7 +1706,6 @@ BuildTarget SessionCore::build_target() const {
 	target.expansion = view_.project.document->expansion.name;
 	target.install = base_game();
 	target.base_project = view_.project.document->expansion.base_project;
-	target.game = view_.project.document->target_game;
 	// A project on NovaWorld's lobby file as the view holds it (found once as it is cached: NovaWorldView::
 	// gate_tag_file), never read here, which every findings pass asks.
 	// An expansion's version.txt likewise (NovaWorldView::version_file; "" while nothing is published).

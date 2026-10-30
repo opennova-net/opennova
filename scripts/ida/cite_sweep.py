@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Cite sweep: join every `[orig: Name @ 0xADDR]` / `(retail: Name @0xADDR` marker in the
-tree against the LIVE IDB and report the disagreements (the three-way-link drift check of
-.claude/skills/grill-ida/LIFECYCLE.md section 4, made mechanical).
+tree, and every named `Name @ 0xADDR` cite of a docs/ record wherever it stands (a table cell,
+a backticked prose cite), against the LIVE IDB and report the disagreements (the
+three-way-link drift check of .claude/skills/grill-ida/LIFECYCLE.md section 4, made
+mechanical).
 
 Needs IDA running with the ida-pro-mcp plugin on http://127.0.0.1:13337/mcp and the
 retail `Jointops.exe.kong.i64` loaded (docs/correspondence.md pins the image: imagebase
@@ -17,6 +19,9 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                 `call esi` IDA tracked to that entry) included
   site-only     the marker names no symbol (`@0xADDR` alone, or a prose word before the @)
                 and the address is a defined location -- accepted
+  history       a docs/ record cites an old name at its address and names the IDB's current
+                one beside it (the line, or the one before or after): a rename log
+                (`Old @0x...` -> `New`) or an `(ex Old)` form -- accepted
   other-image   the marker names another image (scripts/lint/cite_images.py: every image
                 docs/engine-primer.md section 2 lists, by its file name or an established
                 short form such as `(dfbhd)`), or the record makes one its default
@@ -40,7 +45,11 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                        (`gobj` for `gobj.dll`, `JOTACmed` for `JOTACmed.exe`): one spelling
                        per image (cite_images.RATIFIED)
   reimpl-stale         an IDB `reimpl:` entry comment names a repo path that no longer
-                       exists (the reverse link half of the check)
+                       exists: HEAD's history held it (the reverse link half of the check)
+  reimpl-unlanded      the named path is one HEAD's history never held: a file of a branch
+                       that never landed here, whose session wrote the link into the shared IDB
+                       (an engine path written from its include root, `base/...`, is first
+                       tried as `engine/base/...`)
   reimpl-moved         the named path exists but neither it nor its .h/.cpp sibling still
                        carries a marker inside the function -- another file does (a rename
                        kept the basename, or a push-down moved the port to its engine home)
@@ -63,10 +72,13 @@ Exit status 1 when any of the defect classes is non-empty. Prints disagreements 
 `--all` prints every accepted row too, `--tsv PATH` writes the full join.
 
 The reverse leg can also repair itself: `--fix-reimpl` prints one planned rewrite per
-stale/moved link whose new home is unambiguous (the single citing file, else the citing
-file whose basename matches the old one, else the single engine/ or godot/src home);
-`--apply` writes those comment edits into the live IDB and `--save` runs idb_save after.
-Orphans and ambiguous links are never rewritten, only listed.
+stale/unlanded/moved link whose new home is unambiguous (pick_home: a gone path's renamed
+twin, else the one file whose marker is about the function, its first address inside it,
+else the single such engine/ or godot/src home; a file that only names the function as a
+callee or a site in another function's marker is never a home, nor an engine/editor/ file
+for a link that was not the editor's); `--apply` writes those comment edits into the live
+IDB and `--save` runs idb_save after. Orphans and ambiguous links are never rewritten, only
+listed.
 
 Usage:
   python scripts/ida/cite_sweep.py                 # code + docs + reverse links
@@ -95,8 +107,8 @@ import cite_images  # noqa: E402  the image table and rule, shared with cite_cen
 DEFAULT_URL = "http://127.0.0.1:13337/mcp"
 URL = DEFAULT_URL  # the IDA MCP endpoint; --url overrides
 
-CODE_ROOTS = ("engine", "godot/src", "godot/game", "godot/probes", "godot/shaders", "godot/tests",
-              "apps", "tests", "fixtures")
+CODE_ROOTS = ("engine", "games", "godot/src", "godot/game", "godot/editor", "godot/probes", "godot/shaders",
+              "godot/tests", "apps", "tests", "fixtures")
 DOC_ROOTS = ("docs",)
 # every tracked text form a marker has been written in: sources, shaders, the engine-side
 # .md records, CMake lists
@@ -106,7 +118,10 @@ DOC_EXT = (".md",)
 COMMENT_LEAD = re.compile(r"^\s*(?://|##?|\*|--|;)+\s?")   # a wrapped marker's continuation line lead-in
 
 MARKER_LINE = re.compile(r"\[orig:|\(retail:")
-PAIR = re.compile(r"(?<![\w.}])(?:([A-Za-z_][A-Za-z0-9_]*(?:::~?[A-Za-z_][A-Za-z0-9_]*)*)\s*)?@\s*(0x[0-9A-Fa-f]{4,8})\b")
+# `Name @0xADDR`, `Name@0xADDR`, and the records' backticked `` `Name` @ 0xADDR `` (a name
+# whose backtick opened right before it: `jnz loc_6218B6` @0x6217bc quotes an instruction)
+PAIR = re.compile(r"(?<![\w.}])(?:(?P<tick>`)?(?P<name>[A-Za-z_][A-Za-z0-9_]*(?:::~?[A-Za-z_][A-Za-z0-9_]*)*)"
+                  r"(?(tick)`)\s*)?@\s*(?P<addr>0x[0-9A-Fa-f]{4,8})\b")
 CAMEL = re.compile(r"^[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+$")
 # Records whose preamble makes another image the default for an unlabeled address
 # (docs/README.md: "Jointops.exe retail unless a doc says otherwise"); a marker that names
@@ -126,6 +141,32 @@ DOC_DEFAULT_IMAGE = {
     ),
     # misldr.dll (every 0x100xxxxx), dfx2med.exe and JOTACmed.exe, never mixed in one marker
     "docs/mission/mis-format-re.md": "misldr.dll",
+    # "Addresses are Jointops.exe retail ... except §8, which is dfx2med.exe"
+    "docs/mission/bms-event-runtime-re.md": (
+        ("## 8. ", "dfx2med.exe"),
+        ("## 8b. ", None),
+    ),
+    # the verdict table and §1 cite the game's launch of the updater (Jointops.exe); from
+    # §2 on the record is the updater pair's, its REVUPDAT.EXE cites qualified
+    "docs/update/updater-re.md": (
+        ("## 2. ", "UPDATE.EXE"),
+    ),
+    # §12's IDB-change logs are each one IDB's, its heading says which
+    "docs/titles/dfx2-vs-jo-re.md": (
+        ("### 12.1 ", "dfx2.exe"),
+        ("### 12.7 ", None),
+        ("### 12.8 ", None),
+        ("### 12.9 ", "dfx2.exe"),
+    ),
+    # §16 logs the DFX IDB's names (Dfx_new_ver.exe.i64)
+    "docs/titles/dfx-vs-dfx2-re.md": (
+        ("## 16. ", "Dfx_new_ver.exe"),
+    ),
+    # "addresses are `MDEdit.exe`'s" in its writers' subsection
+    "docs/audio/mus-sbf-re.md": (
+        ("### MDEdit's own writers", "MDEdit.exe"),
+        ("### The method table", None),
+    ),
 }
 
 
@@ -154,9 +195,12 @@ LABELISH = re.compile(r"^(?:LABEL_\d+|var_[0-9A-Fa-f]+|arg_[0-9A-Fa-f]+|v\d+|a\d
 DEFECTS = (
     "name-mismatch", "name-elsewhere", "unknown-name", "code-autoname", "idb-autoname",
     "undefined", "malformed", "unqualified-image", "image-spelling", "reimpl-stale",
-    "reimpl-moved", "reimpl-orphan",
+    "reimpl-unlanded", "reimpl-moved", "reimpl-orphan",
 )
 TEST_ROOTS = ("godot/tests/", "tests/")
+# the engine groups, the first segment of an engine path written from its one public include
+# root (ADR 0040)
+ENGINE_GROUPS = ("base/", "formats/", "runtime/", "net/", "editor/")
 
 # ---------------------------------------------------------------- MCP over HTTP
 
@@ -307,13 +351,14 @@ def owed_autoname(tok):
 
 
 def marker_text(lines, i):
-    """Line i plus, when its last `[orig:` marker wraps, the continuation lines up to the one
-    that closes it (at most MAX_CONTINUATION), minus their comment lead-in (`Name @ //
-    0x4c8750` is one marker, not a dropped cite)."""
+    """(text, last): line i plus, when its last `[orig:` marker wraps, the continuation lines
+    up to the one that closes it (at most MAX_CONTINUATION), minus their comment lead-in
+    (`Name @ // 0x4c8750` is one marker, not a dropped cite); last is the index of the text's
+    last line."""
     line = lines[i]
     body = line.rfind("[orig:")
     if "(retail:" in line or body < 0 or cite_images.marker_close(line, body + 6) >= 0:
-        return line
+        return line, i
     parts = [line]
     for nxt in lines[i + 1:i + 1 + MAX_CONTINUATION]:
         parts.append(COMMENT_LEAD.sub("", nxt))
@@ -322,36 +367,65 @@ def marker_text(lines, i):
         # then on to the line whose bracket closes the marker
         if len(parts) > 2 and cite_images.marker_close(joined, joined.rfind("[orig:") + 6) >= 0:
             break
-    return " ".join(parts)
+    return " ".join(parts), i + len(parts) - 1
 
 
 def extract(paths):
-    """Yield (path, line_no, token, addr, ctx) per address in every marker. ctx is "" for a
-    Jointops address (the default), "(retail)" when the marker says so explicitly, else
-    "(other-image) <image>" or "(image-spelling) <image> <as spelled>"
-    (scripts/lint/cite_images.py binds the address to its image), or the record's
-    DOC_DEFAULT_IMAGE."""
+    """extract_lines over every file of `paths`."""
     for path in paths:
         try:
             lines = open(os.path.join(REPO, path), encoding="utf-8", errors="replace").read().split("\n")
         except OSError:
             continue
-        doc_image = doc_images(path, lines)
-        for i, line in enumerate(lines):
-            if not MARKER_LINE.search(line):
-                continue
-            text = marker_text(lines, i)
-            for m in PAIR.finditer(text):
-                tok, addr = m.group(1), m.group(2).lower()
-                bound = cite_images.image_at(text, m.start(), m.end())
-                image, spelled = bound if bound else (doc_image[i] or cite_images.DEFAULT_IMAGE, "")
-                if image == cite_images.DEFAULT_IMAGE:
-                    ctx = "(retail)" if bound else ""
-                elif cite_images.misspelled(image, spelled):
-                    ctx = "(image-spelling) %s %s" % (image, spelled)
-                else:
-                    ctx = "(other-image) " + image
-                yield path, i + 1, tok, addr, ctx
+        yield from extract_lines(path, lines)
+
+
+def extract_lines(path, lines):
+    """Yield (path, line_no, token, addr, ctx, subject) per address in every marker of the
+    file's `lines`. ctx is "" for a Jointops address (the default), "(retail)" when the marker
+    says so explicitly, else "(other-image) <image>" or "(image-spelling) <image> <as spelled>"
+    (scripts/lint/cite_images.py binds the address to its image), or the record's
+    DOC_DEFAULT_IMAGE. subject is True for a marker's first address, the function the marker
+    is about (`[orig: Mixer_Open @0x7668f0 - ...]`); the addresses after it are the sites and
+    callees its prose names. A docs/ record cites outside markers too (its tables, its
+    backticked prose): every pair of a record's line that names a symbol counts there, a bare
+    `@0xADDR` or a prose word's (`the call @0x52896a`) only inside a marker."""
+    doc_image = doc_images(path, lines)
+    record = path.startswith(DOC_ROOTS)
+    wrapped_to = -1   # the last continuation line of the marker a line above wraps onto
+    for i, line in enumerate(lines):
+        marked = bool(MARKER_LINE.search(line))
+        if not marked and not (record and "@" in line and i > wrapped_to):
+            continue
+        if marked:
+            text, last = marker_text(lines, i)
+            wrapped_to = max(wrapped_to, last)
+        else:
+            # an unmarked record line reads on into the next line's start, where a wrapped
+            # image qualifier lands (`sub_401C23 @0x401C23` / `(Nile.exe)`); its own pairs
+            # alone count
+            text = line + " " + (lines[i + 1].lstrip() if i + 1 < len(lines) else "")
+        # outside a marker an address below the image is a field's offset (`randomized_timeout_ms
+        # @0x1194`), never a cite
+        found = [m for m in PAIR.finditer(text)
+                 if marked or (m.start() < len(line) and m["name"] and int(m["addr"], 16) >= 0x401000
+                               and (symbol_like(m["name"]) or SNAKE.match(m["name"])))]
+        subjects = set()
+        for opened in MARKER_LINE.finditer(text):
+            first = next((m.start() for m in found if m.start() >= opened.end()), None)
+            if first is not None:
+                subjects.add(first)
+        for m in found:
+            tok, addr = m["name"], m["addr"].lower()
+            bound = cite_images.image_at(text, m.start(), m.end())
+            image, spelled = bound if bound else (doc_image[i] or cite_images.DEFAULT_IMAGE, "")
+            if image == cite_images.DEFAULT_IMAGE:
+                ctx = "(retail)" if bound else ""
+            elif cite_images.misspelled(image, spelled):
+                ctx = "(image-spelling) %s %s" % (image, spelled)
+            else:
+                ctx = "(other-image) " + image
+            yield path, i + 1, tok, addr, ctx, m.start() in subjects
 
 
 def is_other_image(ctx):
@@ -446,6 +520,34 @@ for ea, n in idautils.Names():
                 payload[f] = "0x%x" % ea
 '''
 DECORATED = {}
+
+
+# The defects a record's rename log or `(ex Old)` line shows by design: it cites the old name
+# at its address and names the IDB's current one beside it.
+RENAMED = ("name-mismatch", "code-autoname", "unknown-name", "name-elsewhere")
+
+
+def record_names_both(path, ln, nm, fn, read):
+    """The record's line (or the one before or after it) names the IDB's current name for the
+    cite, the address's own or its function's: `Old @0x...` -> `New`, `New`, ex `Old @0x...`.
+    `read(path)` is the record's lines."""
+    names = {n for n in (nm, fn) if n and not n.startswith(AUTO_PREFIXES)}
+    lines = read(path)
+    near = " ".join(lines[max(0, ln - 2):ln + 1])
+    return any(re.search(r"(?<![\w])%s(?![\w])" % re.escape(n), near) for n in names)
+
+
+_RECORD_CACHE = {}
+
+
+def record_lines(path):
+    """A record's lines, read once."""
+    if path not in _RECORD_CACHE:
+        try:
+            _RECORD_CACHE[path] = open(os.path.join(REPO, path), encoding="utf-8", errors="replace").read().split("\n")
+        except OSError:
+            _RECORD_CACHE[path] = []
+    return _RECORD_CACHE[path]
 
 
 def classify(tok, addr, ctx, info):
@@ -662,18 +764,26 @@ def renamed_twin(old_tok, by_base, homes):
     return None
 
 
-def pick_home(homes, old_tok, path_exists, by_base):
-    """The unambiguous new home for a link. A retired path follows its rename when the twin
-    still cites the function, else the single citing file (siblings collapsed), else the
-    single citing engine/ file, else (no engine/ file cites it) the single godot/src one.
-    A path that still EXISTS but lost its cite is rewritten only when exactly one file
-    cites the function and it lives under engine/ (the push-down direction); everything
-    else is listed for a hand adjudication."""
+def pick_home(subject_homes, homes, old_tok, path_exists, by_base):
+    """The unambiguous new home for a link. A gone path follows its rename when the twin
+    still cites the function (any of `homes`, the files citing an address inside it). Else
+    the home is a file whose marker is ABOUT the function (`subject_homes`: its first address
+    lies inside the function), never one that only names it as a callee or a site in
+    another function's marker (`world.h`'s `[orig: Input_HandleActionBinding ... -
+    AudioChannel_InitAll @0x7671B0]` is no port of AudioChannel_InitAll): the single one
+    (siblings collapsed), else the single engine/ one, else (no engine/ one) the single
+    godot/src one. A path that still EXISTS but lost its cite is rewritten only when exactly
+    one file's marker is about the function and it lives under engine/ (the push-down
+    direction); everything else is listed for a hand adjudication. The editor ports nothing
+    (engine/CLAUDE.md: tooling, not a port): its markers say why it relies on a retail rule, so
+    an engine/editor/ file is a home only for a link that was the editor's."""
     if not path_exists:
         twin = renamed_twin(old_tok, by_base, homes)
         if twin:
             return twin
-    homes = collapse_homes(homes)
+    if not old_tok.startswith(("engine/editor/", "editor/")):
+        subject_homes = {h for h in subject_homes if not h.startswith("engine/editor/")}
+    homes = collapse_homes(subject_homes)
     if len(homes) == 1:
         return homes[0] if (not path_exists or homes[0].startswith("engine/")) else None
     if path_exists:
@@ -687,19 +797,57 @@ def pick_home(homes, old_tok, path_exists, by_base):
     return None
 
 
-def classify_reimpl(rows, pairs, all_tracked):
+def link_spellings(tok):
+    """The repo paths a link's token may name: itself and, for an engine path written from the
+    one public include root (`base/platform/input_sample.h`, ADR 0040), its engine/ path."""
+    return [tok] + (["engine/" + tok] if tok.startswith(ENGINE_GROUPS) else [])
+
+
+def history_paths(paths):
+    """The paths HEAD's history ever held (a commit reachable from HEAD touched them), by one
+    `git log` walk per hundred: a link to a path it never held names a file of a branch that
+    never landed here. A bare file name is matched in every directory."""
+    out = set()
+    paths = sorted(paths)
+    for i in range(0, len(paths), 100):
+        chunk = paths[i:i + 100]
+        specs = [p if "/" in p else ":(glob)**/" + p for p in chunk]
+        log = subprocess.run(["git", "log", "--format=", "--name-only", "HEAD", "--", *specs], cwd=REPO,
+                             capture_output=True, text=True, check=True).stdout
+        touched = {t for t in log.split("\n") if t}
+        names = {os.path.basename(t) for t in touched}
+        out.update(p for p in chunk if p in touched or ("/" not in p and p in names))
+    return out
+
+
+def classify_reimpl(rows, pairs, all_tracked, history=history_paths):
     """Join each IDB reverse link against the tree. A link is ok when its path exists and
     that file (or a .h/.cpp sibling) cites an address inside the function; otherwise it is
-    stale (path gone), moved (path exists, the cite lives elsewhere) or orphan (nothing
-    cites the function). Returns (n_links, sweep_rows, planned_edits)."""
+    stale (the path HEAD's history held is gone), unlanded (HEAD's history never held it: a
+    file of an unmerged branch), moved (the path exists, the cite lives elsewhere) or orphan
+    (nothing cites the function). `history(paths)` is the subset HEAD's history held.
+    Returns (n_links, sweep_rows, planned_edits)."""
     tracked = set(all_tracked)
     by_base = defaultdict(list)
     for p in tracked:
         by_base[os.path.basename(p)].append(p)
-    cites = sorted({(int(addr, 16), path) for path, _, _, addr, ctx in pairs
-                    if not is_other_image(ctx) and not path.startswith(DOC_ROOTS + TEST_ROOTS)})
+    code = [(int(addr, 16), path, subject) for path, _, _, addr, ctx, subject in pairs
+            if not is_other_image(ctx) and not path.startswith(DOC_ROOTS + TEST_ROOTS)]
+    cites = sorted({(a, p) for a, p, _ in code})
     addrs = [a for a, _ in cites]
+    subjects = sorted({(a, p) for a, p, subject in code if subject})
+    subject_addrs = [a for a, _ in subjects]
     text_cache = {}
+
+    def resolve(tok):
+        """The tracked files a link's token names."""
+        if "/" not in tok:
+            return by_base.get(tok, [])
+        return [p for p in link_spellings(tok) if p in tracked][:1]
+
+    gone = {s for _, _, _, _, _, text in rows for line in REIMPL_LINE.findall(text)
+            for tok in REIMPL_TOKEN.findall(line) if not resolve(tok) for s in link_spellings(tok)}
+    held = history(gone) if gone else set()
 
     def read(path):
         """The file's text with its .h/.cpp sibling's."""
@@ -721,11 +869,13 @@ def classify_reimpl(rows, pairs, all_tracked):
     for ea, start, end, name, slot, text in rows:
         lo, hi = int(start, 16), int(end, 16)
         homes = {p for _, p in cites[bisect.bisect_left(addrs, lo):bisect.bisect_left(addrs, hi)]}
+        subject_homes = {p for _, p in subjects[bisect.bisect_left(subject_addrs, lo):
+                                                bisect.bisect_left(subject_addrs, hi)]}
         new_text = text
         for line in REIMPL_LINE.findall(text):
             n += 1
             for tok in REIMPL_TOKEN.findall(line):
-                cands = [tok] if tok in tracked else ([] if "/" in tok else by_base.get(tok, []))
+                cands = resolve(tok)
                 if any(c in homes or stem_siblings(c) & homes for c in cands):
                     continue
                 if cands and ORPHAN_OK.search(line):
@@ -735,12 +885,17 @@ def classify_reimpl(rows, pairs, all_tracked):
                     continue          # the file names the function without this address
                 if cands and godot_leg_named(line, tok, read):
                     continue          # a marker-free Godot-side leg whose file still names it
-                target = pick_home(homes, tok, bool(cands), by_base)
-                cls = "reimpl-stale" if not cands else ("reimpl-moved" if homes else "reimpl-orphan")
+                target = pick_home(subject_homes, homes, tok, bool(cands), by_base)
+                if cands:
+                    cls = "reimpl-moved" if homes else "reimpl-orphan"
+                else:
+                    cls = "reimpl-stale" if held & set(link_spellings(tok)) else "reimpl-unlanded"
                 out.append((cls, ea, name, tok, target or "", "slot%d" % slot, line.strip()[:160],
                             " ".join(sorted(homes))[:200]))
                 if target:
-                    new_text = new_text.replace(tok, target)
+                    # the token as a whole path, never the tail of a longer one
+                    new_text = re.sub(r"(?<![A-Za-z0-9_./-])%s(?![A-Za-z0-9])" % re.escape(tok),
+                                      lambda _: target, new_text)
         if new_text != text:
             edits.append((ea, slot, new_text))
     return n, out, edits
@@ -766,7 +921,7 @@ def check_primer_images(pairs):
     for cell in PRIMER_ROW.findall(section):
         listed.update(PRIMER_IMAGE.findall(cell))
     known = set(cite_images.IMAGES)
-    named = Counter(ctx.split(" ")[1] for _, _, _, _, ctx in pairs if is_other_image(ctx))
+    named = Counter(ctx.split(" ")[1] for _, _, _, _, ctx, _ in pairs if is_other_image(ctx))
     for image in sorted(known - listed):
         print("[cite-sweep][images] cite_images.IMAGES lists %s; engine-primer section 2 does not" % image)
     for image in sorted(listed - known):
@@ -799,7 +954,7 @@ def main():
     code_paths = tracked_files(CODE_ROOTS, CODE_EXT)
     doc_paths = [] if args.no_docs else tracked_files(DOC_ROOTS, DOC_EXT)
     pairs = list(extract(code_paths + doc_paths))
-    keys = sorted({(addr, tok or "") for _, _, tok, addr, ctx in pairs
+    keys = sorted({(addr, tok or "") for _, _, tok, addr, ctx, _ in pairs
                    if not is_other_image(ctx) and 0x401000 <= int(addr, 16) < 0x10000000})
     if not args.no_docs:
         check_primer_images(pairs)
@@ -814,7 +969,7 @@ def main():
         sys.stderr.write("  idb join %d/%d\n" % (min(i + args.batch, len(keys)), len(keys)))
 
     rows = []
-    for path, ln, tok, addr, ctx in pairs:
+    for path, ln, tok, addr, ctx, _ in pairs:
         key = addr + "|" + (tok or "")
         hint = ""
         if key in info:
@@ -831,6 +986,8 @@ def main():
             nm, fs, fn = (tok or ""), None, ""
         if is_other_image(ctx):
             hint = ctx.split(" ", 1)[1]   # the image (as spelled), also where the key was joined for a twin
+        if cls in RENAMED and path.startswith(DOC_ROOTS) and record_names_both(path, ln, nm, fn, record_lines):
+            cls = "history"
         rows.append((cls, addr, tok or "", nm, fs or "", fn, "%s:%d" % (path, ln), hint))
 
     n_reimpl, edits = 0, []

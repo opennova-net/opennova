@@ -341,7 +341,9 @@ int test_session_closed_gone_renamed() {
 int test_session_panes() {
 	Navigated n("opennova_editor_navigation_panes");
 	const SessionView &v = n.view();
-	// A file of no editor: the NovaWorld string table (the fonts are documents since round S23).
+	// A file of no editor: the NovaWorld cookie jar, a player's file a project may still hold (the fonts are
+	// documents since round S23).
+	editor_test::hold_cookie_jar(n.session);
 	std::string font, gametext;
 	for (const AssetEntry &entry : v.project.scan->entries) {
 		if (entry.kind == AssetKind::StringTableCoo && font.empty()) font = entry.relative_path;
@@ -454,9 +456,11 @@ int test_go_to_lands() {
 	TEST_EXPECT(n.back() && v.documents.active == n.extra);
 	TEST_EXPECT(n.forward() && v.documents.active == face);
 
-	// A file the editor has no editor for (the NovaWorld string table) lands on its page at the field a Go to names,
-	// the page's tab forward; another field of the same page a step of its own, Back and Forward each landing at its
-	// field again. (A .coo names nothing the graph reads, so no line of its page is marked.)
+	// A file the editor has no editor for (the NovaWorld cookie jar, a player's file a project may still hold) lands
+	// on its page at the field a Go to names, the page's tab forward; another field of the same page a step of its
+	// own, Back and Forward each landing at its field again. (A .coo names nothing the graph reads, so no line of its
+	// page is marked.)
+	editor_test::hold_cookie_jar(n.session);
 	std::string coo;
 	for (const AssetEntry &entry : v.project.scan->entries)
 		if (entry.kind == AssetKind::StringTableCoo) coo = entry.relative_path;

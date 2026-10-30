@@ -77,6 +77,7 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::TextureImage, "texture_image"},
 	{PickPurpose::MusicStreamWave, "music_stream_wave"},
 	{PickPurpose::NovaWorldFolder, "novaworld_folder"},
+	{PickPurpose::HeightsRaw, "heights_raw"},
 };
 
 constexpr Token<UnsavedChoice> kChoiceTokens[] = {

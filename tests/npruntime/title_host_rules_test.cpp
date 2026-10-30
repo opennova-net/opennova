@@ -8,6 +8,7 @@
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_settings.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_medic.h>
@@ -192,6 +193,7 @@ int no_revive_window_at_death() {
 		ctx.world = &w;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol(title->code);
 		ctx.config.game_type = game_type::kTeamDeathmatch;
 		std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
 		roster.push_back(conn_fixture::make_conn(1, 1, &victim_wire,

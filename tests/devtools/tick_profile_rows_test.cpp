@@ -223,7 +223,6 @@ void test_row_tree_shape() {
 	check_remainder_lists_its_siblings("ai_infantry_unattributed");
 	check_remainder_lists_its_siblings("update_walks_other");
 	check_remainder_lists_its_siblings("update_entities_unattributed");
-	check_remainder_lists_its_siblings("attachment_unattributed");
 	// The attached child's compose runs inside the ewep class update, under its row.
 	const int compose = find_row("walk_ewep_compose");
 	CHECK(compose >= 0 && std::strcmp(rows::kRows[parent_of(compose)].id, "walk_ewep") == 0,

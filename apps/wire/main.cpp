@@ -174,12 +174,19 @@ inline bool gt_is_waypoint() { return game_type::is_waypoint_family(g_game_type)
 inline bool gt_is_objective() { return game_type::is_objective(g_game_type); }
 
 // The session's protocol: `--game <code>`'s, else the one the PN the capture's first
-// session hello names (wire::handshake_protocol), else JO's. A DFX2 host's 0x0A objective
-// body carries the co-op checkpoint after the four values (DFX2-1).
+// session hello names (wire::handshake_protocol). A DFX2 host's 0x0A objective body
+// carries the co-op checkpoint after the four values (DFX2-1), so an objective game's
+// frame decodes only under a known protocol: with none, the decode is refused and the
+// tool exits (no other title's layout stands in).
 const Protocol *g_protocol = nullptr;
 bool g_protocol_fixed = false; // --game given: the handshake does not override it
 inline FrameObjectiveBody gt_objective_body() {
-	return frame_objective_body(gt_is_objective(), protocol_in_match(g_protocol).objective_checkpoint);
+	if (!gt_is_objective()) return FrameObjectiveBody::None;
+	if (g_protocol == nullptr) {
+		std::fprintf(stderr, "opennova-wire: the capture's protocol is unknown: pass --game <code>\n");
+		std::exit(1);
+	}
+	return frame_objective_body(true, protocol_in_match(g_protocol).objective_checkpoint);
 }
 void learn_protocol(const std::vector<uint8_t> &raw) {
 	if (g_protocol_fixed || g_protocol != nullptr) return;
@@ -1817,7 +1824,7 @@ int run_handshake(const char *path) {
 } // namespace
 
 int main(int argc, char *argv[]) {
-	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	const char *path = nullptr;
 	const char *items_path = nullptr;
 	std::set<int> tag_filter;
@@ -1908,7 +1915,8 @@ int main(int argc, char *argv[]) {
 		             "       --hexcap-max N widens the per-dump byte cap (default 48)\n"
 		             "       --game names the session's title (jo, dfx2), whose edits\n"
 		             "       to the in-match bodies the decode follows; default: the\n"
-		             "       PN of the capture's first session hello, else jo\n"
+		             "       PN of the capture's first session hello; an objective\n"
+		             "       game's 0x0A with neither is refused\n"
 		             "       --items gives a JO items.def "
 		             "(plaintext or SCR-encrypted with the JO/DFX2 key)\n"
 		             "       so type_ids in 0x0D/0x20 records show as names\n");
@@ -1939,7 +1947,7 @@ int main(int argc, char *argv[]) {
 		// --parity-events: the canonical trace (parity_trace.h) drives its own
 		// decoder over the same datagrams.
 		wire::ParityTracePrinter parity_printer(stdout);
-		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class);
+		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class, g_protocol);
 		auto decode_and_print = [&](const net::PcapDatagram &pk) {
 			frame_timestamps[pk.frame_index] = pk.ts_nanos;
 			learn_protocol(pk.payload);
@@ -1972,10 +1980,12 @@ int main(int argc, char *argv[]) {
 		auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
 			++seen;
 			if (skip_frames > 0 && seen <= skip_frames) return true;
-			if (parity_events_mode)
+			if (parity_events_mode) {
 				parity_trace.push(pk);
-			else
+				if (!parity_trace.error().empty()) return false; // the trace refused the capture
+			} else {
 				decode_and_print(pk);
+			}
 			printed_through = pk.frame_index;
 			if (max_frames > 0 && (seen - skip_frames) >= max_frames) {
 				stopped_early = true;
@@ -1984,6 +1994,11 @@ int main(int argc, char *argv[]) {
 			return true;
 		};
 		if (!net::stream_pcap_udp_file(path, on_dg)) {
+			if (!parity_trace.error().empty()) {
+				std::fprintf(stderr, "opennova-wire: %s: pass --game <code>\n",
+				             parity_trace.error().c_str());
+				return 1;
+			}
 			if (!stopped_early) {
 				std::fprintf(stderr, "FAILED to stream pcap %s\n", path);
 				return 1;
@@ -2051,8 +2066,13 @@ int main(int argc, char *argv[]) {
 	CaptureDecodeResult decoded = decode_capture(caps);
 	if (parity_events_mode) {
 		wire::ParityTracePrinter parity_printer(stdout);
-		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class);
+		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class, g_protocol);
 		parity_trace.push_decoded(decoded, frame_timestamps);
+		if (!parity_trace.error().empty()) {
+			std::fprintf(stderr, "opennova-wire: %s: pass --game <code>\n",
+			             parity_trace.error().c_str());
+			return 1;
+		}
 		decoded.messages.clear();
 	} else if (sequencing_mode) {
 		for (const CapturedSessionPacket &packet : decoded.session_packets)

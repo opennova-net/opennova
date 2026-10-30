@@ -21,8 +21,6 @@ var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
 var _mp_companion: MpMenuCompanion
-var _advanced_host_button: Button
-var _advanced_host_dialog: HostSettingsPanel
 var _host_return_file := ""
 var _host_return_screen := ""
 var _menu_visible_before_novaworld := false
@@ -51,10 +49,6 @@ const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
 func _exit_tree() -> void:
-	if is_instance_valid(_advanced_host_dialog):
-		_advanced_host_dialog.queue_free()
-	if is_instance_valid(_advanced_host_button):
-		_advanced_host_button.queue_free()
 	_cancel_launch_browse()
 	_cancel_spectator_probe()
 	_join_choice_target = null
@@ -66,14 +60,6 @@ func setup(shell: MainGame, world: GameWorld, menu_shell: MenuShell, panel_layer
 	_world = world
 	_menu_shell = menu_shell
 	_panel_layer = panel_layer
-	_advanced_host_button = Button.new()
-	_advanced_host_button.text = "All server options…"
-	_advanced_host_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	_advanced_host_button.position = Vector2(-230, -56)
-	_advanced_host_button.size = Vector2(210, 40)
-	_advanced_host_button.visible = false
-	_advanced_host_button.pressed.connect(_open_advanced_host_settings)
-	_panel_layer.add_child(_advanced_host_button)
 
 
 # The multiplayer menu companion's session requests route here.
@@ -88,30 +74,13 @@ func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
 
 # --- Launch-flag entries (dev/probe/automation launches) -----------------------
 
-func _process(_delta: float) -> void:
-	if _advanced_host_button == null or _menu_shell == null:
-		return
-	var driver := _menu_shell.get_driver()
-	_advanced_host_button.visible = driver != null and _menu_shell.visible \
-			and driver.get_current_screen().nocasecmp_to("MULTI_PLAYER_HOST") == 0 \
-			and (_novaworld_panel == null or not _novaworld_panel.visible)
-
-
-func _open_advanced_host_settings() -> void:
-	if is_instance_valid(_advanced_host_dialog):
-		return
-	GameCfgStore.block().read_host_screen(_menu_shell.get_driver())
-	_advanced_host_dialog = HostSettingsPanel.new()
-	_panel_layer.add_child(_advanced_host_dialog)
-	_advanced_host_dialog.popup_centered()
-
-
 func _open_novaworld_host_setup() -> void:
 	if _menu_shell == null or _mp_companion == null or _novaworld_panel == null:
 		return
 	_host_return_file = _menu_shell.get_current_menu_file()
 	_host_return_screen = _menu_shell.get_driver().get_current_screen()
-	if not _menu_shell.open_menu("mp.mnu", "MULTI_PLAYER_HOST"):
+	# The title's own host screen (engine Title::host_screen), the one the populate fills.
+	if not _menu_shell.open_menu("mp.mnu", GameCfgStore.block().host_screen()):
 		return
 	_mp_companion.host_channel = HostSessionConfig.CHANNEL_NOVAWORLD
 	_novaworld_panel.hide()

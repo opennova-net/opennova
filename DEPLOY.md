@@ -22,7 +22,7 @@ service on Fargate across two availability zones, whose tasks keep no state of t
 
 | Program | Runs | Tasks (default) | Reached at |
 |---|---|---|---|
-| gate | the gate (UDP 7597; the hosts' status blobs land there too) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
+| gate | the gate (UDP 7597) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
 | lobby | a lobby instance (UDP 64206) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP: one lobby address for every lobby task, which the gate hands out |
 | web | the retail HTTP routes and the website's API (8080), the update service (20044, 20556, 21068 and 21580) and the portal's nginx (443, and 8082 in front of the retail routes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone (to the portal's 8082), the four update ports from everyone (each to web's 20044) |
 | fleet | the fleet's reconcile pass, the admin links, the console drain, the machines' internal listener (8070); no job and no cloud call | 1 (elected; a standby may wait beside it), 0.25 vCPU / 0.5 GiB | `fleet.<deployment>.opennova.internal`, its Cloud Map name |
@@ -739,9 +739,9 @@ targets that keep each client's own address and port, and 443
 (the portal's nginx, from Cloudflare's ranges alone; with proxied records only, since
 without them there is no origin certificate and nginx listens on 80). Deletion
 protection is on: the balancer holds the gate's address.
-`ONNET_PUBLIC_HOST` (the gate's `POSTIPADDRESS`) and `ONNET_WEB_HOST` (the startup URL,
-the web domain, `HOST_URL`, `GSB_SERVER`) both name that address, so no retail client
-follows a DNS name; the site's records point at the balancer's DNS name. The gate's own
+`ONNET_PUBLIC_HOST` (the hosted servers' master address) and `ONNET_WEB_HOST` (the web
+domain the startup URL takes, `HOST_URL`, `GSB_SERVER`) both name that address, so no retail
+client follows a DNS name; the site's records point at the balancer's DNS name. The gate's own
 name, `nw.<domain>` (`nw.<deployment>.<domain>` off prod), is an unproxied A record at that
 address: OpenNova's own client dials it for its OpenNova NovaWorld, and a self-run
 `opennova-serve` lists on it with `--master-host`.
@@ -1075,13 +1075,14 @@ Deployment and publishing independently validate the current CI run's repository
 workflow, branch, event and commit; PRs into staging are not staging-branch builds.
 
 A failed deployment stops publishing. A failed publish is reported without automatically
-rolling services back. Re-run **all jobs** of the staging CI run, or start CI again on
-staging, to retry with a fresh source check; a partial retry with an older attempt's check
-is refused. The summary names the commit, run, deployed digests and published app releases.
-The local toolbox and its rollback commands remain the operator recovery path.
+rolling services back. To retry, rerun the **Staging rollout** run (DEVELOPING.md, "Cut a
+release": its source run, attempt, SHA and manifest stay its inputs), or start a new CI run
+on staging to rebuild; a rollout of an older attempt's artifacts is refused. The summary
+names the commit, run, deployed digests and published app releases. The local toolbox and
+its rollback commands remain the operator recovery path.
 
-These restrictions are workflow-only: this change does not apply Terraform or change
-environment policies. Older branches must adopt these workflows to stop their previous
+These restrictions are workflow-only: neither Terraform nor the environments' policies
+enforce them. Older branches must adopt these workflows to stop their previous
 PR-publishing behavior. Production's approval and staging-release read remain unchanged.
 
 A deployment's first release runs from the toolbox, never the workflow: it raises each
@@ -1200,8 +1201,8 @@ python scripts/publish_apps.py publish --url https://staging.<domain> \
    `ONNET_DOWNLOADS_URL`. The apply waits for ACM to validate (minutes) and not for
    CloudFront to deploy, which takes up to a quarter of an hour more before the host
    answers.
-3. `--deployment staging app deploy` with images of this change or later: the data
-   program writes the host, and the site's buttons read it.
+3. `--deployment staging app deploy` with images from #1273 (the one products catalog) or
+   later: the data program writes the host, and the site's buttons read it.
 4. `./deploy/run.sh github apply` (the environments' `NOVAWORLD_URL` and `ADMIN_API_TOKEN`,
    above), let a staging-branch CI rollout deploy and publish,
    and check: the four apps' releases published on the admin's Products page, and `curl -s
@@ -1716,7 +1717,7 @@ games' files stay in the bucket).
   if ICMP is blocked. After applying this rule, verify an external ping to the listed
   address and a numeric ping after refreshing the retail browser, then check joining.
   Security-group rules reach existing machines without restarting their servers;
-  this change needs `infra apply`, with staging verified before production.
+  the rule takes an `infra apply`, staging verified before production.
 - **A machine image.** The launch templates launch from the AMI the var-file's
   `fleet_ami` names (Amazon's ECS-optimized Amazon Linux 2023, x86_64, by its exact name,
   owner `amazon`), and the worker may launch that image alone. It carries docker and the

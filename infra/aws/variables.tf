@@ -49,7 +49,7 @@ variable "region" {
 # ---------------------------------------------------------------------------
 
 variable "gate" {
-  description = "The gate: UDP gate_udp_port behind the public network load balancer (the hosts' status blobs land there too). Stateless: two run side by side through a deployment."
+  description = "The gate: UDP gate_udp_port behind the public network load balancer. Stateless: two run side by side through a deployment."
   type = object({
     cpu     = optional(number, 256)
     memory  = optional(number, 512)

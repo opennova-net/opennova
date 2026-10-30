@@ -6,14 +6,10 @@
 
 namespace opennova {
 
-// How the SCR key is chosen when decoding: the one enum, which each title names
-// (base/title/title.h Title::scr_policy), so a caller holding a title passes its scr_policy
-// straight through. The version byte alone cannot tell the JO Demo (DEFAULT-keyed) from retail
-// JO/DFX2 (JO_DFX2-keyed) — both stamp version 1 — so a caller that knows the game forces the key
-// with one of the FORCE_* policies.
+// How the SCR key is chosen when decoding: by the SCR version byte, which every title's
+// payloads key by (the default), or one key forced whatever the byte says.
 enum VfsScrPolicy {
     VFS_SCR_VERSION_DETECT = 0, // pick the key from the SCR version byte (default)
-    VFS_SCR_FORCE_DEFAULT  = 1, // always SCR_KEY_DEFAULT (0xABEEFACE) — JO Demo
     VFS_SCR_FORCE_JO_DFX2  = 2, // always SCR_KEY_JO_DFX2 (0x2A5A8EAD)
     VFS_SCR_FORCE_SHADERS  = 3, // always SCR_KEY_SHADERS (0xA55B1EED)
 };

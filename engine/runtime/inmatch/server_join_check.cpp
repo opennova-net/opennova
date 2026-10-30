@@ -206,6 +206,8 @@ void read_join_cd_key_ids(NapiNPConnection &conn, const std::vector<uint8_t> &jo
 uint32_t Server_ValidatePlayerJoinRequest(const GameConfig &config, NapiNPServerCtx *ctx,
 		NapiNPConnection &conn, const std::vector<NapiNPConnection> &roster,
 		const std::vector<uint8_t> &join_payload) {
+	// The host's own build values, its protocol's: the context's identity, with no fallback
+	// (protocol_join_build aborts for none).
 	const Protocol *protocol = ctx != nullptr ? ctx->np_protocol.identity : nullptr;
 	uint32_t reject_dpc = validate_join_environment(conn.join_environment, protocol_join_build(protocol));
 	if (reject_dpc == 0 && ctx != nullptr)

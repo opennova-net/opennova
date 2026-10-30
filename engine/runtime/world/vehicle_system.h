@@ -298,7 +298,7 @@ public:
     // for the weapon's ammo class (the slot's reserve, the entity's +0x120 word for class 1,
     // the class cap under the infinite-ammo cheat) and the slot's loaded rounds. No item def
     // or no bound weapon reads not full.
-    // [orig: sub_546150 @0x546150 - the slot by def+0x54 bit 0x40 @0x546167..0x54616F;
+    // [orig: Entity_IsWeaponSlotFull @0x546150 - the slot by def+0x54 bit 0x40 @0x546167..0x54616F;
     //  Score_CalculateKillScore @0x5407E0 (Entity_GetScoreValueBySlotType @0x5406E0, the
     //  loaded rounds @0x540816..0x540831); the startrounds compare @0x546186]
     bool weapon_slot_full(const Entity &entity) const;

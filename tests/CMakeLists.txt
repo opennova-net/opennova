@@ -29,12 +29,12 @@ function(opennova_add_parts name)
 endfunction()
 
 # The tests' registration point (games/games.h): common/install_games.cpp, whose one
-# namespace-scope object calls games::install() ahead of the tests' own, so every title and
-# protocol a test reads is installed. An OBJECT library, so its object is always linked: every
+# namespace-scope object calls games::install() and games::install_rules() ahead of the tests'
+# own, so every title, protocol and rules row a test reads is installed. An OBJECT library, so its object is always linked: every
 # executable this directory makes (service_tests.cmake's included) links it, by the walk at
 # this file's end, and tests/editor's opennova_add_editor_executable does the same.
 add_library(opennova_test_games OBJECT common/install_games.cpp)
-target_link_libraries(opennova_test_games PUBLIC opennova_games)
+target_link_libraries(opennova_test_games PUBLIC opennova_games_rules)
 
 # The mission rig the world/mission ctests share (common/mission_rig.h): one
 # mission (the minted mission set's, common/mission_set.h) booted through the
@@ -3862,7 +3862,7 @@ add_test(NAME protocol COMMAND protocol_test)
 # complete, OP: Acid Gambit's JO's very object, the unwitnessed titles refused by name; the rules
 # each title runs and each game's joiner-side knobs.
 add_executable(games_test games/games_test.cpp)
-target_link_libraries(games_test PRIVATE opennova_games)
+target_link_libraries(games_test PRIVATE opennova_games_rules)
 target_include_directories(games_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME games COMMAND games_test)
 

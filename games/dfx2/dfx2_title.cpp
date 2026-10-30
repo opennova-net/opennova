@@ -1,6 +1,5 @@
 #include "dfx2.h"
 
-#include <base/vfs/vfs_decode.h>
 #include <formats/gamecfg/game_cfg.h>
 
 namespace opennova::games {
@@ -27,8 +26,6 @@ Title make() {
 	//  g_TitleText @0x4A7D60..0x4A7D6C, the twin of Game_ParseCommandLineAndInit @0x4A7310 (the
 	//  title sprintf @0x4A7D30..0x4A7D3C)]
 	t.title_text = "DeltaForce: Xtreme 2";
-	// Retail DFX2's version-1 SCR payloads use the JO_DFX2 key, which the SCR version byte selects.
-	t.scr_policy = VFS_SCR_VERSION_DETECT;
 	// The program the DFX2 install ships beside its archives (docs/titles/dfx2-vs-jo-re.md §6.1,
 	// DFX2-5).
 	t.executable = "dfx2.exe";
@@ -51,6 +48,10 @@ Title make() {
 	//  NWHL replace @0x5575ce in UI_ProcessLANSessionStateMachine @0x556ff0 (dfx2.exe)]
 	t.max_players = 250;
 	t.max_players_host_screen = 100;
+	// [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0 (@0x5547c1);
+	//  HostDialog_PopulateClassListCombo @0x5548b0 (@0x5548c2); @0x5562c0 (each restriction
+	//  control's registration, @0x556318..0x55640b) (dfx2.exe)]
+	t.host_screen = "NW_MULTI_PLAYER";
 	return t;
 }
 

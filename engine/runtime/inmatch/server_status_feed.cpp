@@ -10,13 +10,15 @@ namespace opennova::inmatch {
 void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServerCtx &ctx,
 		const world::World *world) {
 	page.mp_session_peer = ctx.is_mp_session_peer != 0;
-	// The slot table's capacity and the session's slot limit: the authority
-	// allocates the table with the very limit it stores
+	// The slot table's capacity and the session's live slot limit: the create allocates
+	// the table with the limit it stores, and a map change's mission start moves the
+	// limit alone, which the roster's rows run to
 	// [orig: Server_InitNewRoundState @0x51c976 (dword_24D211C) ->
-	//  Server_AllocatePlayerSlotTable @0x51c97b (g_PlayerSlotCapacity)].
+	//  Server_AllocatePlayerSlotTable @0x51c97b (g_PlayerSlotCapacity);
+	//  Server_DrawStatusScreen @0x50A2D0 - `cmp edi, dword_24D211C` @0x50A49A].
 	const int capacity = static_cast<int>(ctx.config.total_player_slot_capacity());
 	page.capacity = capacity;
-	page.slot_limit = capacity;
+	page.slot_limit = static_cast<int>(ctx.config.live_slot_limit());
 	page.slots.assign(static_cast<size_t>(capacity), hud::ServerStatusSlot{});
 	// A Serve Only host's own slot 0 (HostSlotRow) holds no connection, but its round init
 	// keeps it active and local, so the score list skips it and the current logins leave it

@@ -33,7 +33,7 @@ void read_session_listing_columns(
 	if (ctx.mission != nullptr)
 		r.region_index = static_cast<int>(ctx.mission->header.climate);
 	// [orig: dword_24D211C @0x4FEB03]
-	r.published_cap = static_cast<int>(config.player_slot_limit());
+	r.published_cap = static_cast<int>(config.live_slot_limit());
 	// MI1..MI3: the host CNetQuality's send-window averages (its +0x14 / +0x18 / +0x1C), the
 	// frame-pressure, ping and loss terms over the window's five samples as the main frame's last
 	// sample left them, 0 from a mission start's reset to its first sample (D-NET-1330).

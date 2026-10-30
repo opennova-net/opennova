@@ -149,6 +149,7 @@ enum class EditorRequestKind {
 	NovaWorldKeepFolder,
 	NovaWorldSubmit,
 	NovaWorldMakeBase,
+	ExportHeights,
 	kCount,
 };
 
@@ -165,7 +166,8 @@ enum class PickPurpose {
 	NewProjectInstall, // the New project form's game install
 	TextureImage, // a texture's Replace with image... (S18): the image it is made from
 	MusicStreamWave, // a music bank stream's audio from a wave...: the wave it is made from
-	NovaWorldFolder // a NovaWorld project's Sync... (ADR 0069): the folder it is got into a folder of its own inside
+	NovaWorldFolder, // a NovaWorld project's Sync... (ADR 0069): the folder it is got into a folder of its own inside
+	HeightsRaw // a .cpt's Export heights...: the .raw its heights go to, a file saved (the one save dialog)
 };
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited

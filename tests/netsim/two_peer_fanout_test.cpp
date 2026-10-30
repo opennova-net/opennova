@@ -29,6 +29,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
+#include <net/protocol/protocol.h>
 #include <runtime/world/ai.h>                // AiSystem / AiEntity (engine-frame mirror)
 #include <runtime/world/collision.h>         // CollisionWorld (the LOS ray log)
 #include <runtime/world/angle.h>
@@ -202,6 +203,8 @@ bool run_fanout_and_per_connection_anchor() {
 	carry(udp_host, udp_join);
 
 	ns::ClientReplicaPipeline self_view, join_view;
+	self_view.set_protocol(nw::title_protocol("jo"));
+	join_view.set_protocol(nw::title_protocol("jo"));
 	// The host's own client parses the header-only frame where retail's parser
 	// returns [orig: NapiNPClientMsg_0x00A @0x430174].
 	self_view.set_authority_recipient(true);
@@ -272,7 +275,8 @@ bool run_fanout_and_per_connection_anchor() {
 	const std::vector<nw::GameEntitySnapshot> replacement_snapshot =
 			ns::snapshot_world(world);
 	if (!expect(ns::emit_connection_s2c(
-	                    world, conns[conn_join], replacement_snapshot),
+	                    world, conns[conn_join], replacement_snapshot, 0, 0, 0, 0,
+	                    nw::title_protocol("jo")),
 	            "the stale slot's binding emits at the reused entry"))
 		return false;
 	std::vector<uint8_t> rebound_raw;
@@ -472,6 +476,7 @@ bool run_retail_player_slots_start_after_bms_organics() {
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);
 	ns::ClientReplicaPipeline join_view;
+	join_view.set_protocol(nw::title_protocol("jo"));
 	// The spawn stream's rows for both players (a compact never creates one).
 	join_view.state().upsert(0x0004).type_id = 0x14B9;
 	join_view.state().upsert(0x0005).type_id = 0x14B9;
@@ -544,6 +549,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(fu.timer.timer_seconds == -1,
 			            "phase 1 sends -1 while the pre-round countdown runs")) return false;
 			ns::ClientReplicaPipeline fold;
+			fold.set_protocol(nw::title_protocol("jo"));
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().round_time_remaining_ticks == -1,
 			            "client fold keeps the untimed -1")) return false;
@@ -561,6 +567,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(fu.weapon.uniform_team_mask == 0,
 			            "phase 0 owned-zone mask is 0 without a zone chain")) return false;
 			ns::ClientReplicaPipeline fold;
+			fold.set_protocol(nw::title_protocol("jo"));
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().preround_delay_seconds == 0x23,
 			            "client fold retains the authoritative pre-round timer"))
@@ -576,6 +583,7 @@ bool run_0a_subblock_phase_cycle() {
 			ns::LoopbackChannel fold_ch;
 			fold_ch.host_send(dg.tag, dg.body, false);
 			ns::ClientReplicaPipeline fold;
+			fold.set_protocol(nw::title_protocol("jo"));
 			fold.pump(fold_ch);
 			if (!expect(fold.state().environment.rain_pct == 0x56u &&
 			                    fold.state().environment.env_param == 0x9Au,
@@ -613,6 +621,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(timed_fu.timer.timer_seconds == 120,
 			            "phase 1 projects the round clock as whole seconds")) return false;
 			ns::ClientReplicaPipeline fold;
+			fold.set_protocol(nw::title_protocol("jo"));
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().round_time_remaining_ticks == 62 * 120,
 			            "client fold restores 62 Hz ticks from the wire seconds"))
@@ -638,7 +647,7 @@ bool run_0a_subblock_phase_cycle() {
 			bool saw_status = false;
 			for (int i = 0; i < 4 && !saw_status; ++i) {
 				ns::emit_connection_s2c(world, conns[0], ns::snapshot_world(world), 0, 0, 62,
-						cpu.share);
+						cpu.share, nw::title_protocol("jo"));
 				ns::Datagram dg;
 				if (!expect(ch.client_recv(dg), "cpu 0x0A frame dequeued")) return false;
 				if (!nw::decode_frame_update(dg.body.data(), dg.body.size(),
@@ -732,6 +741,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(zone_fu.weapon.uniform_team_mask == expected,
 			            "phase 0 carries the recipient slot team's owned-zone walk")) return false;
 			ns::ClientReplicaPipeline fold;
+			fold.set_protocol(nw::title_protocol("jo"));
 			fold.apply(zone_dg.tag, zone_dg.body);
 			if (!expect(fold.state().owned_zone_mask == static_cast<uint32_t>(expected),
 			            "client fold keeps the mask the FARP prompt reads")) return false;
@@ -998,6 +1008,7 @@ bool run_0a_vehicle_budget_round_robin() {
 	// ClientReplicaPipeline LEARNS the vehicle class from the 0x0D pool-1 spawn batch and then decodes
 	// the vehicle compact bodies with its DEFAULT resolver (which alone cannot know them).
 	ns::ClientReplicaPipeline view;
+	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
 	ns::test::emit_all(world, conns);
 	view.pump(ch);
@@ -1026,7 +1037,8 @@ bool run_0a_vehicle_budget_round_robin() {
     if (!expect(silent.records.size() < 15, "more than two seconds halves the budget")) return false;
     ns::LoopbackChannel other_channel;
     ns::Connection other_connection{&other_channel, ns::TransportMode::Loopback, host_h, 0};
-    ns::emit_connection_s2c(world, other_connection, ns::snapshot_world(world), 0);
+    ns::emit_connection_s2c(world, other_connection, ns::snapshot_world(world), 0, 0, 0, 0,
+        nw::title_protocol("jo"));
     ns::Datagram other_datagram;
     if (!expect(other_channel.client_recv(other_datagram) && other_datagram.body.size() >= 600,
         "a silent peer does not lower another peer's budget")) return false;
@@ -1289,7 +1301,7 @@ bool run_0a_owner_hidden_admission() {
 	const auto resolver = [](uint16_t) { return nw::EntityClass::Player; };
 	const auto pump_one = [&](ns::Connection &c, nw::FrameUpdate &fu) -> bool {
 		ns::LoopbackChannel &ch = *static_cast<ns::LoopbackChannel *>(c.transport);
-		ns::emit_connection_s2c(world, c, ents, 0);
+		ns::emit_connection_s2c(world, c, ents, 0, 0, 0, 0, nw::title_protocol("jo"));
 		ns::Datagram dg;
 		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
 		return expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), resolver, fu),
@@ -2540,6 +2552,7 @@ bool run_vehicle_drive_authority() {
 	// Decode through the real client fold as well: a child-first pool-0 row must
 	// reconstruct at the final same-frame pool-1 carrier, not at its pre-motor pose.
 	ns::ClientReplicaPipeline view(attach_test_class);
+	view.set_protocol(nw::title_protocol("jo"));
 	// The spawn stream's rows (a compact never creates one): the frame's own
 	// record identities, exactly as the world stream would have typed them.
 	for (const nw::FrameUpdateRecord &r : fb.records)

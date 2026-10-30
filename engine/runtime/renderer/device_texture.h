@@ -75,7 +75,7 @@ inline constexpr int kTerrainTexDetailFreshProfile = kTerrainTexDetailFull;
 uint32_t terrain_texdetail_flags(int level);
 
 // The largest side the reference card takes (D3DCAPS9 MaxTextureWidth, which CD3DDevice_InitializeDisplay
-// stores for the halvings [orig: @ 0x679AC2..0x679ACA, dword_32A623C]); a card that takes less halves a
+// stores for the halvings [orig: @ 0x679AC2..0x679ACA, g_DeviceMaxTextureWidth]); a card that takes less halves a
 // texture past its side. Not a witness: the reference machine, as kReferenceTextureDxtCaps is.
 inline constexpr uint32_t kReferenceMaxTextureSide = 8192;
 

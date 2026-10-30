@@ -37,7 +37,6 @@ constexpr RequirementWords kWords[] = {
 	{ "main_bik", "The menu shows no video there." },
 	{ "header_bik", "The menu shows no video there." },
 	{ "footer_bik", "The menu shows no video there." },
-	{ "nw_cdata", "The game goes on without it: the NovaWorld cookie jar starts empty." },
 	{ "main_menu", "The main menu never appears: the game stops on a blank screen, with no message." },
 	{ "menutxt", "The menus fall back on the game's built-in texts." },
 	{ "font_arial12b", "Text in this font draws nothing." },

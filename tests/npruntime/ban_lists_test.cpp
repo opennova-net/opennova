@@ -15,6 +15,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_session.h> // set_connection_mode
 #include <runtime/inmatch/server_ban_lists.h>
@@ -194,6 +195,7 @@ uint32_t join_punt_code(inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection
 	std::vector<inmatch::NapiNPConnection> roster{conn};
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &ctx;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.expansion.clear();
 	(void)inmatch::dispatch_session_replies(ctx.config, roster[0], {make_protocol_message(0x00, payload)}, 5, roster,
 			nullptr, inputs);
@@ -246,6 +248,7 @@ uint32_t session_join_punt_code(inmatch::NapiNPServerCtx &ctx, size_t index,
 	conn.join_environment = { 0, 2, 1, 0, 20042002, 180 };
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &ctx;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.expansion.clear();
 	(void)inmatch::dispatch_session_replies(ctx.config, conn,
 			{ make_protocol_message(0x00, payload) }, 5, ctx.np_protocol.connection_list, nullptr,

@@ -618,7 +618,11 @@ GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_d
 	cfg.alt_lock_type = 1;
 	cfg.play_exit_credits = -1;
 	cfg.mpattrib = 14850;
-	for (int32_t &word : cfg.weapon_availability) word = 3; // memset32(3, 0xFF) @0x54D410
+	// Every weapon the mission's word, the title's (DFX2-10): Jointops.exe's 3, dfx2.exe's 2
+	// [orig: Config_SetDefaults @0x54D030 - memset32(3, 0xFF) @0x54D410]
+	// [orig: Config_SetDefaults @0x54a2c0 - memset32(dword_254F25C, 2, 0xFF) (dfx2.exe)]
+	const int32_t mission_word = table == ConfigTable::Dfx2 ? 2 : 3;
+	for (int32_t &word : cfg.weapon_availability) word = mission_word;
 	for (int32_t &word : cfg.class_availability) word = 1;
 	cfg.enable_ai = 1;
 	cfg.remote_admin_port = 0;
@@ -694,6 +698,17 @@ int32_t *int_word(GameCfg &cfg, const char *key) {
 
 const int32_t *int_word(const GameCfg &cfg, const char *key) {
 	return find_int_word(cfg, key);
+}
+
+size_t text_limit(std::string GameCfg::*field) {
+	for (const ConfigVarRow &row : config_var_rows(ConfigTable::Jo))
+		if (row.type == ConfigVarType::String && row.string_field == field && row.size >= 1)
+			return static_cast<size_t>(row.size - 1);
+	for (const SwitchKey &k : kSwitchKeys)
+		if (k.text_field == field && (k.store == Store::Text || k.store == Store::TextIfAny ||
+				k.store == Store::VideoRes))
+			return k.extra;
+	return 0;
 }
 
 void parse(const char *text, size_t size, GameCfg &cfg, const WeaponRoster &weapons) {

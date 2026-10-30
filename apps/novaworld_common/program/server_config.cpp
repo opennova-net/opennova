@@ -52,10 +52,8 @@ bool getenv_bool(const char *name, bool fallback) {
 ServerConfig ServerConfig::from_env() {
 	ServerConfig c;
 
-	if (auto v = getenv_safe("ONNET_PUBLIC_HOST")) {
+	if (auto v = getenv_safe("ONNET_PUBLIC_HOST"))
 		c.public_host = v;
-		c.public_host_set = true;
-	}
 	if (auto v = getenv_safe("ONNET_WEB_HOST"))
 		c.web_host = strutil::trim(v);
 	if (auto v = getenv_safe("ONNET_LOBBY_ENDPOINT"))

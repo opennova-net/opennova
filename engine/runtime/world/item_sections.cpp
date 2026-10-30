@@ -21,7 +21,6 @@ void section_effect(World &world, const std::string &name, const Vec3 &position)
 void tower_husk(World &world, Entity &entity) {
     if ((entity.engine_flags & kEntityFlagHusk) != 0) return;
     entity.engine_flags |= kEntityFlagHusk;
-    world.registry.list_fade_row(entity.handle);
     world.out.destruction.husk_swaps.push_back(husk_swap_event(entity));
     ++world.out.destruction.items_destroyed;
 }
@@ -267,7 +266,6 @@ void palm_dead(World &world, Entity &entity) {
     entity.engine_flags |= kEntityFlagDead;
     if ((entity.engine_flags & kEntityFlagHusk) == 0) {
         entity.engine_flags |= kEntityFlagHusk;
-        world.registry.list_fade_row(entity.handle);
         world.out.destruction.husk_swaps.push_back({entity.net_id, entity.handle.packed,
                 entity.bms_id, entity.spawn_origin, entity.item_id,
                 entity.spawned_piece_mask, entity.position});
