@@ -216,8 +216,8 @@ struct TitleRules {
 	//  twin @0x4652a0 (dfx2.exe)]
 	int32_t ai_vehicle_near_reach = 0xC0000;
 	// The stuck count past which the write-off starts; the 3720 kill is the same in both.
-	// [orig: AI_CheckVehicleStuckState @0x465290 (@0x4653a6)] [orig: @0x4653a6, @0x4653ac (0x744)
-	//  in the twin @0x4652a0 (dfx2.exe)]
+	// [orig: AI_CheckVehicleStuckState @0x465290 (`cmp [esi+148h], 0D52h` @0x46539c)] [orig:
+	//  `cmp [esi+148h], 744h` @0x4653ac in the twin @0x4652a0 (dfx2.exe)]
 	int32_t ai_vehicle_write_off_count = 3410;
 
 	// --- DFX2-33: the profile-less spawn kit. ----------------------------------------------------

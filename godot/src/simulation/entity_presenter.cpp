@@ -1766,7 +1766,8 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed.
 			// [orig: Entity_RenderVehicleModel @ 0x4407d0 (the ewep world
-			// callback, g_BoneCallbackTable @ 0x82cfa4) - its UseGun predicate
+			// callback: the bone-callback table's "ewep" row @ 0x82cfa0, its
+			// callback word @ 0x82cfa4) - its UseGun predicate
 			// @ 0x4407f6..0x44084c; Render_SectorEntity @ 0x5C4190 (the Flags&4
 			// husk pick @ 0x5C41A0)].
 			// Two-bit visibility ownership: this walk owns the model's

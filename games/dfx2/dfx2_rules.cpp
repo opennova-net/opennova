@@ -180,8 +180,8 @@ world::TitleRules make() {
 	// DFX2-31: the narrowed radius [orig: Physics_RaycastAgainstBoneSections @0x4e1770
 	// (@0x4e17af..0x4e17e0) (dfx2.exe)].
 	r.narrow_still_player_radius = true;
-	// DFX2-32: 4 u and 1860 counts [orig: @0x46532c (0x40000), @0x4653a6, @0x4653ac (0x744) in the
-	// twin of AI_CheckVehicleStuckState @0x4652a0 (dfx2.exe)].
+	// DFX2-32: 4 u and 1860 counts [orig: @0x46532c (0x40000), @0x4653ac (0x744) in the twin of
+	// AI_CheckVehicleStuckState @0x4652a0 (dfx2.exe)].
 	r.ai_vehicle_near_reach = 0x40000;
 	r.ai_vehicle_write_off_count = 1860;
 	// DFX2-33: the page above.
