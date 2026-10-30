@@ -1196,6 +1196,11 @@ void tick_item_event_pool(World &world, int pool) {
             world.registry.unlist_fade_row(handle);
         // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
         if (!cohort) continue;
+        // Pool 2 calls it (and the emitter update after it) only for a row with a def;
+        // pool 3 has no such test [orig: Entity_UpdateAllEntities @0x4C2100 - pool 2's
+        //  `cmp dword ptr [esi+20h], 0; jz` @0x4C22CF..0x4C22D3 ahead of the call @0x4C22E7;
+        //  pool 3's call @0x4C2388..0x4C2393 tests only the callback].
+        if (pool == 2 && !entity->has_item_def) continue;
         // A pool-2 powerup row's update callback is its respawn countdown, so the
         // countdown steps one tick in 8 [orig: Powerup_TickRespawn @0x442850
         //  through @0x4C22E7].
