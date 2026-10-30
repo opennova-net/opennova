@@ -103,11 +103,11 @@ var _pending_expansion := ""  # the joined row's GSB Exp: the host's expansion
 # reads it for every row the table draws).
 var _installed_expansions := PackedStringArray()
 var _installed_listed := false
-# rid -> the reason a server refused this install earlier in the session (another
-# protocol version (PV2) or join build, an expansion mismatch, a banned address):
-# retrying cannot work.
-# The controller keeps the record across panel instances (mark_refused).
-var _refused_servers: Dictionary = {}
+# The servers that refused this install earlier in the process (another protocol
+# version (PV2) or join build, an expansion mismatch, a banned address: retrying
+# cannot work), each with its refusal's text: the controller's one record (engine
+# BrowserRefusals), set BEFORE _ready; a panel on its own keeps an empty one.
+var refusals := NovaWorldServerBrowser.new()
 # The rid of the row the last Join press went to (the controller reads it when
 # the join leaves the panel, to remember a refusal against it).
 var _joining_rid := 0
@@ -789,8 +789,9 @@ func _update_join_button(row: NovaWorldServerRow) -> void:
 func join_block_reason(row: NovaWorldServerRow) -> String:
 	if row == null:
 		return ""
-	if _refused_servers.has(row.rid):
-		return String(_refused_servers[row.rid])
+	var refusal := refusals.refusal_reason(row.rid)
+	if not refusal.is_empty():
+		return refusal
 	if not _lacks_expansion(row):
 		return ""
 	var host_exp := row.exp.strip_edges()
@@ -1576,13 +1577,6 @@ func visible_cell(row: int, column: NovaWorldServerBrowser.Column) -> String:
 	if row < 0 or row >= _view.size():
 		return ""
 	return NovaWorldServerBrowser.row_cells(_view[row], _ping_for(_view[row]))[column]
-
-
-## A server that refused this install this session, with the refusal's text
-## (the controller replays its record into each panel instance).
-func mark_refused(rid: int, reason: String) -> void:
-	_refused_servers[rid] = reason
-	_rebuild_view()
 
 
 ## The rid of the row the last Join press went to.

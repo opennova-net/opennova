@@ -4,10 +4,7 @@
 #include "hosted/protocol/agent_protocol.h"
 
 #include <base/io/strutil.h>
-
-#ifndef OPENNOVA_HOSTD_VERSION
-#define OPENNOVA_HOSTD_VERSION "dev"
-#endif
+#include <base/version/one_build.h>
 
 namespace opennova::hostd {
 
@@ -45,7 +42,8 @@ bool is_bind_path(const std::string &path) {
 } // namespace
 
 const char *hostd_version() {
-	return OPENNOVA_HOSTD_VERSION;
+	static const std::string label = one_build().label();
+	return label.c_str();
 }
 
 bool service_host_port(const std::string &url, std::string &host, uint16_t &port) {

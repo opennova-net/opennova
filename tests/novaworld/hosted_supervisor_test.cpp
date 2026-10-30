@@ -397,17 +397,38 @@ int test_renders() {
 			TEST_EXPECT(packet->get("core")->boolean && packet->get("min")->number == 100 &&
 					packet->get("max")->number == 16384 && packet->get("default")->number == 1300);
 		}
-		const hosted::LaunchSpec launch = hosted::render_launch(tuned, "jo", "jox01", in);
-		const auto cfg_file = std::find_if(launch.files.begin(), launch.files.end(),
-				[](const auto &f) { return f.name == "game.cfg"; });
-		TEST_EXPECT(cfg_file != launch.files.end());
-		const auto custom = opennova::gamecfg::load(cfg_file->content.data(), cfg_file->content.size(), {});
+		// On a dedicated machine the owner's unpaced loop runs as asked.
+		hosted::RenderInputs own_in = in;
+		own_in.machine_kind = hosted::MachineKind::Own;
+		const hosted::LaunchSpec launch = hosted::render_launch(tuned, "jo", "jox01", own_in);
+		const auto game_cfg_text = [](const hosted::LaunchSpec &spec) {
+			const auto file = std::find_if(spec.files.begin(), spec.files.end(),
+					[](const auto &f) { return f.name == "game.cfg"; });
+			return file == spec.files.end() ? std::string() : file->content;
+		};
+		const std::string custom_text = game_cfg_text(launch);
+		TEST_EXPECT(!custom_text.empty());
+		const auto custom = opennova::gamecfg::load(custom_text.data(), custom_text.size(), {});
 		TEST_EXPECT(custom.cfg.mp_max_packet_size == 1200 && custom.cfg.lock_framerate == 0 &&
 				custom.cfg.servermsg == "Keep this setting");
 		auto want_args = args;
 		*std::next(std::find(want_args.begin(), want_args.end(), "--send-holdoff-ticks")) = "0";
 		*std::next(std::find(want_args.begin(), want_args.end(), "--entity-send-budget")) = "1000";
 		TEST_EXPECT(launch.serve_args == want_args);
+		// On a shared machine (the inputs' default) every server runs paced, the rest of its
+		// tuning as asked; the saved setting stays the owner's.
+		TEST_EXPECT(in.machine_kind == hosted::MachineKind::Shared);
+		const hosted::LaunchSpec shared_launch = hosted::render_launch(tuned, "jo", "jox01", in);
+		const std::string paced_text = game_cfg_text(shared_launch);
+		TEST_EXPECT(!paced_text.empty());
+		const auto paced = opennova::gamecfg::load(paced_text.data(), paced_text.size(), {});
+		TEST_EXPECT(paced.cfg.mp_max_packet_size == 1200 && paced.cfg.lock_framerate == 1 &&
+				paced.cfg.servermsg == "Keep this setting");
+		TEST_EXPECT(shared_launch.serve_args == want_args);
+		TEST_EXPECT(!tuned.lock_framerate);
+		TEST_EXPECT(hosted::launched_settings(tuned, hosted::MachineKind::Shared).lock_framerate &&
+				!hosted::launched_settings(tuned, hosted::MachineKind::Own).lock_framerate &&
+				hosted::launched_settings(s, hosted::MachineKind::Own).lock_framerate);
 	}
 
 	// The NovaLogic listing: only for an owner who asked, on a service that offers it (the
@@ -1189,17 +1210,26 @@ int test_two_servers_one_machine() {
 // A dedicated machine: the server gets a machine of its own (one slot,
 // reserved for it, its own kind's template), never a shared one's slot, while a
 // shared server of the same owner goes to a shared machine; the dedicated machine
-// ends when its server stops.
+// ends when its server stops. Both saved unpaced: the dedicated machine's runs so,
+// the shared machine's paced.
 int test_own_machine() {
 	Rig rig("hosted_own");
 	Database *db = &rig.db;
 	const int64_t owner = make_player(*db, "own_owner", 0);
 	subscribe(*db, owner, 2, "active", "sub_own");
 	subscribe_machines(*db, owner, 1, "sub_own_machine");
-	const int64_t own = rig.request_as(owner, rig.settings(), true);
-	const int64_t shared = rig.request_as(owner);
+	auto unpaced = rig.settings();
+	unpaced.lock_framerate = false;
+	const int64_t own = rig.request_as(owner, unpaced, true);
+	const int64_t shared = rig.request_as(owner, unpaced);
 	TEST_EXPECT(own > 0 && shared > 0);
 	TEST_EXPECT(!rig.to_running(own, 5201).empty() && !rig.to_running(shared, 5202).empty());
+	const auto lock_of = [&rig](int64_t id) {
+		const std::string text = file_of(rig, id, "game.cfg");
+		return text.empty() ? -1 : opennova::gamecfg::load(text.data(), text.size(), {}).cfg.lock_framerate;
+	};
+	TEST_EXPECT(lock_of(own) == 0 && lock_of(shared) == 1);
+	TEST_EXPECT(!rig.server(own)->settings.lock_framerate && !rig.server(shared)->settings.lock_framerate);
 	TEST_EXPECT(rig.fake.launches == 2);
 	const auto own_machine = rig.machine(rig.machine_of(own));
 	const auto shared_machine = rig.machine(rig.machine_of(shared));
@@ -1647,6 +1677,8 @@ int test_exits_and_crash_restarts() {
 
 	// A crash (here the ServerStopHosting exit, 3, while the server should run)
 	// restarts, a new generation with a new password, until the limit (2) is used up.
+	// Its tuning goes with every start; on this shared machine it runs paced although its
+	// owner saved it unpaced (launched_settings), and the saved setting stays theirs.
 	auto tuned = rig.settings();
 	tuned.send_holdoff_ticks = 0;
 	tuned.entity_send_budget = 1000;
@@ -1670,8 +1702,9 @@ int test_exits_and_crash_restarts() {
 		return s.send_holdoff_ticks == 0 && s.entity_send_budget == 1000 &&
 				s.max_packet_size == 1200 && !s.lock_framerate &&
 				arg_is("--send-holdoff-ticks", "0") && arg_is("--entity-send-budget", "1000") &&
-				cfg.cfg.mp_max_packet_size == 1200 && cfg.cfg.lock_framerate == 0;
+				cfg.cfg.mp_max_packet_size == 1200 && cfg.cfg.lock_framerate == 1;
 	};
+	TEST_EXPECT(rig.machine(rig.machine_of(id))->kind == hosted::MachineKind::Shared);
 	TEST_EXPECT(tuning_kept());
 	const int64_t service = *rig.server(id)->service_user_id;
 	const std::string first_password = credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_PASS");
@@ -2409,7 +2442,10 @@ int test_own_machines_cut() {
 	TEST_EXPECT(hosted::record_allocation(*db, address, "eipalloc-cut", ip) &&
 			hosted::record_dns_upsert(*db, address, "cut-place", "c1"));
 	const int64_t older = rig.request_as(owner, rig.settings(), true);
-	const auto requested = hosted::request_server(*db, owner, rig.settings(), rig.offered(), rig.config.cap,
+	// The newer one saved unpaced: so on its dedicated machine, paced once moved to a shared one.
+	auto unpaced = rig.settings();
+	unpaced.lock_framerate = false;
+	const auto requested = hosted::request_server(*db, owner, unpaced, rig.offered(), rig.config.cap,
 			rig.wall, true, &rig.config.placement, address);
 	TEST_EXPECT(requested.outcome == hosted::RequestOutcome::Created);
 	const int64_t newer = requested.id;
@@ -2424,6 +2460,11 @@ int test_own_machines_cut() {
 	TEST_EXPECT(!rig.to_running(older, 6101).empty() && !rig.to_running(newer, 6102).empty() &&
 			!rig.to_running(shared, 6103).empty());
 	TEST_EXPECT(rig.fake.launches == 3);
+	const auto lock_of = [&rig](int64_t id) {
+		const std::string text = file_of(rig, id, "game.cfg");
+		return text.empty() ? -1 : opennova::gamecfg::load(text.data(), text.size(), {}).cfg.lock_framerate;
+	};
+	TEST_EXPECT(lock_of(newer) == 0);
 	const int64_t older_machine = rig.machine_of(older);
 	const int64_t shared_machine = rig.machine_of(shared);
 	TEST_EXPECT(rig.machine(newer_machine)->kind == hosted::MachineKind::Own &&
@@ -2463,6 +2504,7 @@ int test_own_machines_cut() {
 	hostdb::remove_host_by_rid(*db, 6102);
 	TEST_EXPECT(!rig.to_running(newer, 6104).empty());
 	TEST_EXPECT(rig.machine_of(newer) == shared_machine && rig.server(newer)->restarts == 0);
+	TEST_EXPECT(lock_of(newer) == 1 && !rig.server(newer)->settings.lock_framerate);
 	TEST_EXPECT(rig.fake.launches == 3); // no machine launched for the move
 	{
 		// A new start on the shared machine, the one before it on its dedicated machine

@@ -6,137 +6,48 @@
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
-#include <runtime/inmatch/server_info.h>
 #include <runtime/inmatch/server_tick.h>
 
 namespace opennova::serve {
 
 using io::LogLevel;
 
+// The match side of the listing is the engine's, the game's listen host's too
+// (inmatch::HostListingBinding): the context's hooks into the hosting session and the second
+// listing's (set_second), each role's columns off the live session at its server-info update. A
+// map change binds again: the kernel is fresh, the server context kept.
 void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel, Lister &lister) {
 	role_ = &role;
 	kernel_ = &kernel;
 	lister_ = &lister;
-	inmatch::NapiNPServerCtx &ctx = role.state.host_owner.ctx;
-	// A service that asked for join tickets arms the join-phase watchdog: each validating joiner
-	// is announced as a ClientPlayerEnterRequest on the hosting session and held until the
-	// ServerPlayerEnterResult answers (on_player_enter_result) or the ticket deadline reaps it.
-	// [orig: CNapiNetwork_CheckPlayerTimeouts @0x4C8AD0 — the arm @0x4C8B88,
-	//  CNapiGameSession_SendPlayEnterRequest @0x4C8BC1]
-	// A joiner the second listing's service sent (its APPID that listing's, D-NET-1385) goes to
-	// that listing's session, whose service issued its ticket.
-	ctx.on_player_enter_request = [this](const inmatch::NapiNPServerCtx::PlayerEnterRequest &request) {
-		Lister *lister = request.listing == 1 ? second_ : lister_;
-		if (lister == nullptr) return;
-		lister->host_role().request_player_enter(request.connection_id, request.peer.ip, request.peer.port,
-		                                         request.join_ticket);
-	};
-	// The match's server-info update (its 0x744 refresh, the join lock's toggle) runs the hosting
-	// session's (inmatch::run_server_info_refresh, Server_ToggleJoinLock), and the second
-	// listing's beside it (D-NET-1385, none of retail's).
-	// [orig: Server_TickUpdate @0x51D7E0 (the Lobby_UpdateServerInfo call @0x51D943)]
-	ctx.on_update_server_info = [this]() {
-		if (lister_ != nullptr) lister_->host_role().update_server_info();
-		if (second_ != nullptr) second_->host_role().update_server_info();
-	};
-	// A LAN-only host's admitted joiner's LANIP / LANPORT, on the listing that sent it
-	// (D-GAMECFG-8). [orig: NapiNPServerMsg_0x002 @0x513146..0x51318C]
-	ctx.on_lan_listing_address = [this](uint8_t listing, uint32_t ip, uint32_t port) {
-		Lister *target = listing == 1 ? second_ : lister_;
-		if (target != nullptr) target->host_role().set_lan_address(ip, port);
-	};
-	install_column_source(lister);
-	if (second_ != nullptr) install_column_source(*second_);
-	// The match's METPROTOCOL gate reports go out on the hosting session, its strings the
-	// registration's and the gate reply's (inmatch/gate_metrics_reports.h, D-NET-995).
-	ctx.gate_metrics.host = [this]() {
-		return lister_ != nullptr ? lister_->host_role().metrics_host() : GateMetricsHost{};
-	};
-	ctx.gate_metrics.game_text = seams_.gametext;
-	ctx.gate_metrics.send = [this](const std::string &text) {
-		if (lister_ != nullptr) lister_->host_role().send_gate_metrics(text);
-	};
+	inmatch::NapiNPServerCtx *ctx = &role.state.host_owner.ctx;
+	binding_.bind([ctx] { return ctx; }, lister.host_role(), seams_.gametext);
 	sync_session();
 }
 
-// The update reads the match's columns as it runs, as the game's does (SessionDrive::
-// bind_nw_host): the tick's refresh right after its cookie-key ring's advance, the round clock
-// and the net-quality window as that tick left them, where the lister's per-pass columns stand
-// a pass behind the tick (D-NET-1333).
-// [orig: Server_TickUpdate @0x51D7E0 - CSessionIdRing_AdvanceAndGenerate called @0x51D93D,
-//  Lobby_UpdateServerInfo called @0x51D943; Lobby_UpdateServerInfo @0x4FE8C0 - the ring's
-//  current key @0x4FF191..0x4FF196]
-void ServeListing::install_column_source(Lister &lister) {
-	lister.host_role().set_column_source([this](HostRegistration &r) {
-		if (role_ == nullptr) return false;
-		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx, seams_.gametext);
-		return true;
-	});
-}
-
 void ServeListing::set_second(Lister *second) {
-	if (second_ != nullptr && second_ != second) second_->host_role().set_column_source(nullptr);
-	second_ = second;
-	if (second_ != nullptr && role_ != nullptr) install_column_source(*second_);
-	sync_second();
-}
-
-// The second listing's facts on the server context while it hosts: its own registration's AppId,
-// the one its service's joiners carry (the code-9 leg's second AppId), and its ticket arm. None
-// once it goes, so a joiner still carrying its AppId is refused 9, as retail refuses one whose
-// .joi predates a fresh host request.
-void ServeListing::sync_second() {
-	if (role_ == nullptr) return;
-	inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
-	const bool hosting = second_ != nullptr && second_->hosting();
-	ctx.novaworld_second_app_id = hosting ? static_cast<uint32_t>(second_->host_role().app_id()) : 0u;
-	ctx.novaworld_second_join_tickets_armed = hosting && second_->host_role().requires_join_ticket();
+	binding_.set_second(second != nullptr ? &second->host_role() : nullptr);
+	// The second listing's AppId and ticket arm reach the server context at once, and go at once
+	// with it, so a joiner still carrying its AppId is refused 9.
+	if (role_ != nullptr) binding_.sync_registration(role_->state.host_owner.ctx, std::string());
 }
 
 void ServeListing::unbind() {
-	if (lister_ != nullptr) lister_->host_role().set_column_source(nullptr);
-	if (second_ != nullptr) second_->host_role().set_column_source(nullptr);
-	if (role_ != nullptr) {
-		inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
-		ctx.on_player_enter_request = nullptr;
-		ctx.on_update_server_info = nullptr;
-		ctx.on_lan_listing_address = nullptr;
-		ctx.gate_metrics = inmatch::GateMetricsSink{};
-		ctx.novaworld_join_tickets_armed = false;
-		ctx.novaworld_gsid.clear();
-		ctx.novaworld_app_id = 0;
-		ctx.novaworld_second_app_id = 0;
-		ctx.novaworld_second_join_tickets_armed = false;
-	}
+	binding_.unbind();
 	role_ = nullptr;
 	kernel_ = nullptr;
 	lister_ = nullptr;
 }
 
-// The hosting session meets its match: the GSID the 0x81 advertises (cleared while the
-// connection is down, re-supplied by a re-host), the AppId, the join-ticket arm, and the session's
-// word, flags and exit store for the authority's NovaWorld exit (the cookie-key ring the CD
-// cookies decrypt under is the match's own). A dedicated server has no loopback, so no login PCID
-// of its own.
-// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4D59D0 — the GSID @0x4D5BD6..0x4D5C0F;
-//  Game_ProcessMainFrame's NovaWorld exit @0x52654f..0x52657c (dword_B5FD2C, dword_B60108)]
+// Each update: the hosting session's registration onto the match (a dedicated server has no
+// loopback, so no login PCID of its own) and the NWU session's facts for the authority's NovaWorld
+// exit (inmatch::HostListingBinding::sync_registration, inmatch::set_nwu_match_facts carry the
+// witnesses); the cookie-key ring the CD cookies decrypt under is the match's own.
 void ServeListing::sync_session() {
 	if (role_ == nullptr || lister_ == nullptr) return;
 	inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
-	NwuHostRole &host = lister_->host_role();
-	ctx.novaworld_gsid = host.gsid();
-	ctx.novaworld_app_id = static_cast<uint32_t>(host.app_id());
-	inmatch::set_novaworld_account_facts(ctx, std::string());
-	ctx.novaworld_join_tickets_armed = host.requires_join_ticket();
-	sync_second();
-	const NwuLobbySession::MatchFacts facts = lister_->lobby().match_facts();
-	ctx.nwu_in_use = facts.in_use;
-	ctx.nwu_session_role = facts.role;
-	// The session's flags, whose bits the connection indicators' N icon steps on (a Serve Only
-	// host's status page, D-NET-971), as the game's NovaWorld feed hands them over
-	// (Simulation::set_nwu_session).
-	ctx.nwu_session_flags = static_cast<uint8_t>(facts.flags & 0xFFu);
-	if (facts.exit_reason != 0) ctx.mission_exit_reason = facts.exit_reason;
+	binding_.sync_registration(ctx, std::string());
+	inmatch::set_nwu_match_facts(ctx, lister_->lobby().match_facts());
 }
 
 bool ServeListing::start(int &exit_code) {
@@ -157,30 +68,24 @@ bool ServeListing::refresh(uint32_t now_ms, bool force) {
 // to 1..65 for a dedicated host; the refreshed list's is the published cap less the dedicated
 // slot, so neither counts the server's own slot. Dedicated is the STRNOVA11 text (listen_host
 // false). Once the match binds, the session's columns are the live session's, which a
-// ServerCommand or a map change edits (inmatch::read_session_listing_columns, the game's too).
+// ServerCommand or a map change edits (inmatch::HostListingBinding::read_columns, the game's too).
 // [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50; CNapiGameSession_ConnectOrHost
 //  @0x4d5046..0x4d507b; Lobby_UpdateServerInfo @0x4fe8c0 (@0x4feb03..0x4feb0a,
 //  @0x4febe2..0x4fec52)]
 HostRegistration ServeListing::registration() const {
 	HostRegistration r = base_;
 	r.listen_host = false;
-	if (role_ == nullptr) return r;
-	inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx, seams_.gametext);
+	(void)binding_.read_columns(r);
 	return r;
 }
 
-// The match's PlayerList roster (inmatch::host_player_list_rows, the game shell's too). A mode-1
+// The match's PlayerList roster (inmatch::host_listing_roster, the game shell's too). A mode-1
 // host builds no local connection, so its own slot 0 is never published.
 // [orig: CNapiGameSession_CreateSession @0x4c9b73]
 std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, HostPlayerSlot> &current) const {
 	(void)current;
-	std::vector<HostPlayerSlot> out;
-	if (role_ == nullptr) return out;
-	for (inmatch::HostPlayerListRow &row : inmatch::host_player_list_rows(role_->state.host_owner.ctx)) {
-		if (row.own) continue;
-		out.push_back(std::move(row.slot));
-	}
-	return out;
+	if (role_ == nullptr) return {};
+	return inmatch::host_listing_roster(role_->state.host_owner.ctx, /*own=*/nullptr);
 }
 
 // A ServerCommand runs on the match (inmatch::run_host_server_command, the game shell's path

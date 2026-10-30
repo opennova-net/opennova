@@ -98,12 +98,12 @@ public:
 	// the marker text and the ordering; see rtxt.h for the witnesses) ---
 	// "??section:key??" — the visible marker a failed lookup renders.
 	static String format_miss_marker(const String &p_section, const String &p_key);
-	// Override-table-first section lookup: a hit in p_override_table (the
-	// active expansion's text bin) wins outright; a miss in both returns the
-	// miss marker. Either table may be null.
-	static String lookup_with_override(const Ref<RtxtStringFile> &p_override_table,
-			const Ref<RtxtStringFile> &p_table, const String &p_section,
-			const String &p_key);
+	// Override-table-first section lookup (rtxt::lookup_with_override): a hit in
+	// the process's text-override table (rtxt::text_override, the active
+	// expansion's text bin) wins outright; a miss in both returns the miss
+	// marker. The table may be null (the override table alone answers).
+	static String lookup_with_override(const Ref<RtxtStringFile> &p_table,
+			const String &p_section, const String &p_key);
 
 	// --- The process-wide "Keys" table (engine controls::key_strings.h) ---
 	// install_key_strings copies THIS table in as the binding-label table

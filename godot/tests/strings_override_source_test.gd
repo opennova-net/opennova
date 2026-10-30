@@ -79,16 +79,17 @@ func test_strings_installs_the_table_and_follows_every_remount() -> void:
 		"the tracked root's table is consulted before the named tables")
 
 	assert_eq(root.mount_runtime(dir, ""), OK)
-	assert_null(Strings.get_override_table(), "a remount to the base game clears it")
-	assert_eq(Strings.lookup(Strings.TABLE_MENUTXT, "Menu", "TITLE"), "Base title")
+	assert_eq(Strings.lookup(Strings.TABLE_MENUTXT, "Menu", "TITLE"), "Base title",
+		"a remount to the base game clears it")
 
 	assert_eq(root.mount_runtime(dir, EXPANSION), OK)
-	assert_null(Strings.get_override_table(),
+	assert_eq(Strings.lookup(Strings.TABLE_MENUTXT, "Menu", "TITLE"), "Base title",
 		"the switch back, in place without /d, installs none")
 
 	Strings.clear()
 	assert_eq(root.mount_runtime(dir, EXPANSION, true), OK)
-	assert_null(Strings.get_override_table(), "clear() stops following the root")
+	assert_eq(Strings.lookup(Strings.TABLE_MENUTXT, "Menu", "TITLE"), "??Menu:TITLE??",
+		"clear() stops following the root: the loose table is not installed")
 	root.clear()
 
 

@@ -15,6 +15,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <runtime/controls/controls.h> // action_code (the HUD rows' dispatch codes)
+#include <runtime/hud/hud_toggles.h> // hud_key_press_keys
 #include <runtime/world/player_look.h> // pass_through_close_axis, kCursorCentreX / Y
 
 #include <cmath>
@@ -609,14 +610,14 @@ void PlayerInputRouter::poll_talk_rows(const Ref<Simulation> &p_sim, int p_rows_
 	// debounce and the flood are the engine's chat entry (ChatEntryFacts::frame,
 	// inmatch/chat_flood.h); the HUD presenter draws the line at its frame.
 	if (hud_chat_.is_null() || p_sim.is_null()) return;
-	hud_chat_->dispatch_rows(p_rows_fired, frame_gameplay_input_active_, p_sim, chat_gametext_,
+	hud_chat_->dispatch_rows(p_rows_fired, frame_gameplay_input_active_, p_sim, gametext_,
 			p_sim->get_main_frame_counter());
 }
 
 void PlayerInputRouter::set_hud_chat(const Ref<HudChatEntry> &p_chat,
 		const Ref<RtxtStringFile> &p_gametext) {
 	hud_chat_ = p_chat;
-	chat_gametext_ = p_gametext;
+	gametext_ = p_gametext;
 }
 
 void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input,
@@ -780,15 +781,16 @@ void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
 }
 
-Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(const Ref<Simulation> &p_session, int p_vk,
-		int p_yes_vk, int p_no_vk, int p_restart_vk) {
+Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(const Ref<Simulation> &p_session, int p_vk) {
 	const Ref<Simulation> chain_sim = p_session.is_valid() ? p_session : sim();
 	if (chain_sim.is_null()) return SpecialKeyOutcome::make({});
 	opennova::inmatch::SpecialKeyInput input;
 	input.vk = p_vk;
-	input.yes_vk = p_yes_vk;
-	input.no_vk = p_no_vk;
-	input.restart_vk = p_restart_vk;
+	const opennova::hud::HudKeyPressKeys keys =
+			opennova::hud::hud_key_press_keys(game_text_lookup(gametext_));
+	input.yes_vk = keys.yes;
+	input.no_vk = keys.no;
+	input.restart_vk = keys.restart;
 	// The chain's arms read the HUD's words as the key meets them, so a pick that closed a
 	// menu hands the frame's next digit to the next arm.
 	opennova::hud::HudToggleState no_hud;

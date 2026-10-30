@@ -198,7 +198,7 @@ func _menu_binds_return_and_escape() -> void:
 			MenuDriverFixture.screen_xml("KEYS", body))
 	var menu := _shell.get_menu_shell()
 	assert_true(menu.get_driver().open_document(doc, menu.get_resource_root(),
-			menu.get_stylesheet(), Strings.get_override_table(), "keys.mnu", "KEYS"))
+			menu.get_stylesheet(), "keys.mnu", "KEYS"))
 
 
 # While the join screen is up its Return and Escape are its own: the menu under

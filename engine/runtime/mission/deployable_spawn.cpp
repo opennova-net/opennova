@@ -202,7 +202,7 @@ world::EntityHandle MissionKernel::spawn_deployable(uint16_t item_id, uint8_t te
 			spawned->health = world::retail_signed_i16(child_def->hp);
 	}
 	// The spawn builds no proximity table and no slice: the row and its children join the
-	// tables at the next tick's build and the slices at the next 17-tick one (D-SIM-T4).
+	// tables at the next tick's build and the slices at the next 17-tick one (D-SIM-6).
 	// [orig: Entity_SpawnDeployable @0x51C2B0 - no Entity_BuildProximityListsFromPools
 	//  @0x4B8EB0 or Entity_BuildProximityLists_Pool01 @0x4B9340 among its callees]
 	return handle;

@@ -290,7 +290,9 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
             lap.mark(devtools::Slot::SIM_WALK_VISIT);
             throwables.update_device(*this, *device, ai.collision, tables.terrain);
             if (Entity *e = live()) {
-                update_item_destroy_fade(*this, *e);
+                // An intact row with no fade state takes no evaluation (it would only
+                // zero its zeroes; Entity::needs_destroy_fade).
+                if (e->needs_destroy_fade()) update_item_destroy_fade(*this, *e);
                 if (e->squib.motor) {
                     tick_squib(*this, *e);
                 } else {
@@ -392,7 +394,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     }
     // (A leg that removes the row leaves its last visit's item time to the walk's residual.)
     if ((e = live()) == nullptr) return;
-    update_item_destroy_fade(*this, *e);
+    if (e->needs_destroy_fade()) update_item_destroy_fade(*this, *e);
     if (e->squib.motor) {
         tick_squib(*this, *e);
     } else {

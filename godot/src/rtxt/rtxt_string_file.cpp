@@ -251,15 +251,13 @@ String RtxtStringFile::format_miss_marker(const String &p_section, const String 
 			gd_to_std(p_section), gd_to_std(p_key)));
 }
 
-String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_override_table,
-		const Ref<RtxtStringFile> &p_table, const String &p_section,
-		const String &p_key) {
-	const opennova::rtxt::File *override_file =
-			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr;
+String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_table,
+		const String &p_section, const String &p_key) {
+	const std::shared_ptr<const opennova::rtxt::File> override_table = opennova::rtxt::text_override();
 	const opennova::rtxt::File *file =
 			p_table.is_valid() ? &p_table->get_native() : nullptr;
 	return std_to_gd(opennova::rtxt::lookup_with_override(
-			override_file, file, gd_to_std(p_section), gd_to_std(p_key)));
+			override_table.get(), file, gd_to_std(p_section), gd_to_std(p_key)));
 }
 
 // --- The process's text-override table (the engine holds it: rtxt::set_text_override) ---
@@ -362,7 +360,7 @@ void RtxtStringFile::_bind_methods() {
 
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey", "text"), &RtxtStringFile::strip_hotkey);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("format_miss_marker", "section", "key"), &RtxtStringFile::format_miss_marker);
-	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "override_table", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
+	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
 	ClassDB::bind_static_method("RtxtStringFile",
 			D_METHOD("text_or", "table", "section", "key", "fallback"), &RtxtStringFile::text_or);
 	ClassDB::bind_static_method("RtxtStringFile",

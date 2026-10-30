@@ -35,6 +35,6 @@ static func screen_xml(screen_name: String, body: String) -> String:
 static func driver_over(test: GutTest, doc: MnuDocument, menu_file: String,
 		screen := "") -> MenuDriver:
 	var driver := MenuDriver.new()
-	test.assert_true(driver.open_document(doc, null, null, null, menu_file, screen),
+	test.assert_true(driver.open_document(doc, null, null, menu_file, screen),
 			"the document opens on the driver")
 	return driver

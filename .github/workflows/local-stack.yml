@@ -103,7 +103,6 @@ jobs:
           -DOPENNOVA_STAGING=${{ steps.one.outputs.staging }}
           -DOPENNOVA_COMMIT=${{ steps.one.outputs.commit }}
           -DOPENNOVA_BUILD_TIME=${{ steps.one.outputs.time }}
-          -DOPENNOVA_HOSTD_VERSION=${{ steps.one.outputs.commit }}
           -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
           -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 
