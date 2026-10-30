@@ -2,8 +2,8 @@
 // and the protocol it speaks): TitleRules, one named knob per difference the DFX2 catalog records
 // between dfx2.exe and Jointops.exe in the host's and the joiner's in-match code
 // (docs/titles/dfx2-vs-jo-re.md §7, the §8 row each knob names), and its registry keyed by title
-// code. Each title's row lives in games/<code>/<code>_rules.cpp, which games::install() hands to
-// install_title_rules; engine/ holds the type and the lookups alone, and several titles may run one
+// code. Each title's row lives in games/<code>/<code>_rules.cpp, which games::install_rules() hands
+// to install_title_rules; engine/ holds the type and the lookups alone, and several titles may run one
 // TitleRules object (OP: Acid Gambit runs Joint Operations').
 //
 // A default-constructed TitleRules is Jointops.exe's: JO is the baseline every port here was
@@ -238,7 +238,7 @@ struct TitleRulesRow {
 
 // Fills the registry with `rows` (each TitleRules outliving the program); a second call replaces
 // the first. The lookup below aborts on an EMPTY registry, naming the invariant: a program that
-// reaches it calls games::install() at its start (games/games.h).
+// reaches it calls games::install_rules() at its start (games/games.h, opennova_games_rules).
 void install_title_rules(const TitleRulesRow *rows, size_t count);
 
 // The rules title `title_code` runs, compared case-insensitively: the default title's

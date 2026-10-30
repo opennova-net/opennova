@@ -23,6 +23,7 @@ namespace {
 struct InstallGames {
 	InstallGames() {
 		opennova::games::install();
+		opennova::games::install_rules();
 		// The rules a World, a Match or a GameConfig no session titled runs: Joint Operations',
 		// which every fixture ran before titles had rules (world::install_unset_title_rules). The
 		// programs install none, so a session that forgets its title aborts there.

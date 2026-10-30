@@ -222,8 +222,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 
-	// Every game's titles and protocols, before any class reads one (games/games.h).
+	// Every game's titles and protocols, and the rules each runs, before any class reads one
+	// (games/games.h).
 	opennova::games::install();
+	opennova::games::install_rules();
 
 	// Engine diagnostics (io/log.h — the mission kernel's boot/tick warnings)
 	// surface on Godot's warning channel; the sink stays unset elsewhere so

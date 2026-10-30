@@ -1,6 +1,7 @@
 #include "dfx2.h"
 
 #include <base/gameprofile/game_type.h>
+#include <runtime/world/title_rules.h>
 
 #include <array>
 #include <cstdint>

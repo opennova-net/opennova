@@ -83,6 +83,6 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
-	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	return program::run_program({ "gate", configure, run });
 }

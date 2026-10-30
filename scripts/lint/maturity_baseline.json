@@ -30,8 +30,13 @@
     "formats/pcx/pcx_quantize.cpp",
     "formats/tga/tga_source.cpp",
     "games/acidgambit",
-    "games/bhd/bhd.cpp",
-    "games/games.cpp"
+    "games/bhd",
+    "games/dfx/dfx_rules.cpp",
+    "games/dfx/dfx_title.cpp",
+    "games/games.cpp",
+    "games/games_rules.cpp",
+    "games/jodemo/jodemo_rules.cpp",
+    "games/jodemo/jodemo_title.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,

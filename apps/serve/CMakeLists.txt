@@ -58,5 +58,6 @@ if(MSVC)
     target_sources(opennova_serve PRIVATE ${CMAKE_SOURCE_DIR}/apps/3di/utf8.manifest)
 endif()
 
-# Every game's titles and protocols, which main.cpp installs at its start (games/games.h).
-target_link_libraries(opennova_serve PRIVATE opennova_games)
+# Every game's titles and protocols and the rules each runs, which main.cpp installs at its
+# start (games/games.h): this program runs a match.
+target_link_libraries(opennova_serve PRIVATE opennova_games_rules)

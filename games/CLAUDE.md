@@ -2,9 +2,14 @@
 
 - One directory per title, named by its code (`jo/`, `dfx2/`, `acidgambit/`, the unwitnessed
   `jodemo/`, `dfx/`, `bhd/`), plus `novalogic_2009/`, the network-code generation Jointops.exe and
-  dfx2.exe share (NVS, CO, PV2 "16", the 0x42's BN/VN/MBN/SOPD). STATIC `opennova_games`,
-  PUBLIC-linking `opennova_runtime`; the repository root is its include root
-  (`#include <games/jo/jo.h>`), a same-directory sibling `"jo.h"`.
+  dfx2.exe share (NVS, CO, PV2 "16", the 0x42's BN/VN/MBN/SOPD). Two STATIC targets: `opennova_games`,
+  every title and protocol (the `_title.cpp` and `_protocol.cpp` files, `games.cpp`), linking
+  `opennova_net` alone; and `opennova_games_rules`, the rules (the `_rules.cpp` files,
+  `games_rules.cpp`), linking `opennova_games` and `opennova_runtime`. So a program that runs no
+  match (the updater, the gate, the data program) carries no in-match runtime. The repository root
+  is the include root (`#include <games/jo/jo.h>`), a same-directory sibling `"jo.h"`; a
+  `<code>.h` forward-declares `world::TitleRules`, and only the rules files include
+  `runtime/world/title_rules.h`.
 - `engine/` holds the types, the registries and the lookups (`base/title/title.h` Title,
   `net/protocol/protocol.h` Protocol, `runtime/world/title_rules.h` TitleRules); a game's files
   hold its rows: `<code>.h` declares its accessors, `<code>_title.cpp` its Title,
@@ -12,14 +17,17 @@
   in-match knobs where its executable parts from Jointops.exe, whose behaviour a default
   TitleRules is, and the tables it owns). A title that speaks another's protocol or runs another's
   rules returns that object (`acidgambit_protocol()` is `jo_protocol()`, `acidgambit_rules()`
-  `jo_rules()`), never a copy of its literals. An unwitnessed title is one TU holding its Title,
+  `jo_rules()`), never a copy of its literals. An unwitnessed title has the same files: its Title,
   its stub Protocol with exactly the values a binary witnessed, so its consumers refuse it by name,
   and Joint Operations' rules, said so.
-- `games.cpp`'s `games::install()` fills the registries; each program calls it at its start and
-  the tests through `opennova_test_games` (`tests/common/install_games.cpp`). Nothing under
-  `engine/` includes `games/`, `<games/games.h>` is included only at those registration points
-  (`include_graph_check.py`), and no engine target links `opennova_games`
-  (`link_graph_check.py`).
+- `games.cpp`'s `games::install()` fills the title and protocol registries, `games_rules.cpp`'s
+  `games::install_rules()` the rules registry. Each program calls `install()` at its start; one
+  that runs a match (a session, a World, the editor's previews) links `opennova_games_rules` and
+  calls `install_rules()` too. The tests install both through `opennova_test_games`
+  (`tests/common/install_games.cpp`). Nothing under `engine/` includes `games/`,
+  `<games/games.h>` is included only at those registration points (`include_graph_check.py`), and
+  no engine target links either target; `opennova_games` never reaches the runtime, and every
+  program that calls `install_rules()` links `opennova_games_rules` (`link_graph_check.py`).
 - Every retail value keeps its `[orig: Name @0xADDR]` cite where it is written (cite_census scopes
   `games/`). A protocol's version (PV2) bumps in its `<code>_protocol.cpp` with any change to its
   wire bytes or its joiner-side rules (the TitleRules knobs marked joiner-side); games_test's
