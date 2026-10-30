@@ -20,9 +20,9 @@ resource system (documents self-read/write via `load_from_path`/`save_to_path`).
 Names and includes (ADR 0040): there is no "Nova layer" — a file is named after the
 type it declares, no `nova_`/`Nova` prefix anywhere (`NovaWorld*` is the service's
 proper noun and stays); a binding may share its class name and directory with the
-engine concept it exposes (`AmbientMixer` in `audio/ambient_mixer.h` wraps
-`opennova::audio::AmbientMixer` from `<runtime/audio/ambient_mixer.h>`). Binding
-includes are quoted and root-relative (`#include "audio/ambient_mixer.h"`, this
+engine concept it exposes (`ScriptedInput` in `devtools/scripted_input.h` wraps
+`opennova::devtools::ScriptedInput` from `<runtime/devtools/scripted_input.h>`). Binding
+includes are quoted and root-relative (`#include "devtools/scripted_input.h"`, this
 directory is the include root); engine includes are `<group/lib/file.h>`; no
 subdirectory here may be named `base`, `formats`, `runtime` or `net`
 (`include_graph_check.py` enforces all three).

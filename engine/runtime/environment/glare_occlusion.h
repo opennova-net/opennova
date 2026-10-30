@@ -57,4 +57,30 @@ inline void advance_glare_occlusion(GlareOcclusionState &state, const Vec3 &cam_
 	glare_occlusion_tick(state, visible[0], visible[1], fog_distance_world);
 }
 
+// The settle a frozen frame runs before it publishes the glare (a fixture's
+// one zero-delta frame, the live load's forced frame): the witnessed leg
+// stepped at one pose until its brightness holds. Not a retail loop: retail
+// accumulates over its live frames, and a frozen frame has none. The dead-band
+// step never snaps onto its target, so a settled accumulator HOLDS: the settle
+// stops once the brightness stays unchanged across eight consecutive frames
+// (a full window turnover at any jitter phase) after the window itself is
+// full (4 frames of 2 samples), or at the caller's frame cap.
+class GlareSettle {
+public:
+	explicit GlareSettle(int brightness) : last_(brightness) {}
+	// One settle frame's brightness; true when the accumulator holds and the
+	// settle stops.
+	bool step(int brightness) {
+		held_ = brightness == last_ ? held_ + 1 : 0;
+		last_ = brightness;
+		return frame_++ >= 3 && held_ >= 8;
+	}
+	int brightness() const { return last_; }
+
+private:
+	int last_ = 0;
+	int held_ = 0;
+	int frame_ = 0;
+};
+
 } // namespace opennova::env

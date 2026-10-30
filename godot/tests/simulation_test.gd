@@ -2196,7 +2196,7 @@ end
 
 
 # The projected attach labels the overlay fills from the sim (HudOverlay's
-# read seams): a camera at the local player looking down +X keeps every
+# read seams): a view block at mission (-2, 0, 0) looking down +X keeps every
 # candidate in front of the near plane.
 func _attach_label_count(sim: Simulation) -> int:
 	return _attach_overlay(sim).get_attach_label_count()
@@ -2213,9 +2213,8 @@ func _attach_label_texts(sim: Simulation) -> Array[String]:
 func _attach_overlay(sim: Simulation) -> HudOverlay:
 	var hud := HudOverlay.new()
 	autofree(hud)
-	var camera := Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-2.0, 0.0, 0.0))
-	hud.set_attach_labels(camera, Projection.create_perspective(70.0, 1.0, 0.05, 4000.0),
-			null, sim)
+	hud.set_view_block(Vector3(-2.0, 0.0, 0.0), 0, 0, 0, 90.0)
+	hud.set_attach_labels(null, sim)
 	return hud
 
 

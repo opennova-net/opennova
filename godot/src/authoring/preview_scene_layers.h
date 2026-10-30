@@ -43,11 +43,10 @@ class EffectLightDirector;
 // WorldScene's table (game_world.tscn's rows, names and paths: the frame clear, FrameFx, the
 // terrain and its foliage, the environment, the sky dome, the weather, the drops, the water, the
 // environment cube, the sun, moon, glare and glint, and the entities' slot shadows where the
-// device's entities cast them; never the SunShadow, which no simulation drives here), every
-// process-wide global its rows write held but while the device publishes its scene state and
-// presents its frame (E13), the device's camera, the game's particle renderer for the overlay tail
-// and the device's own effects, and the game's frame effects (FrameFx as the terminal compositor
-// and display decode, the sun veil).
+// device's entities cast them), every process-wide global its rows write held but while the
+// device publishes its scene state and presents its frame (E13), the device's camera, the game's
+// particle renderer for the overlay tail and the device's own effects, and the game's frame
+// effects (FrameFx as the terminal compositor and display decode, the sun veil).
 //
 // Two of the device's layers are built here as the game's load builds them, each again only where
 // its key or a file it read moved: the environment (WorldScene::load_environment: the .trn,
@@ -91,8 +90,8 @@ public:
 		bool terrain = true, sky = true, water = true, foliage = true;
 	};
 
-	// The stack under a root named `name` in `viewport`: every row but the SunShadow, the
-	// SlotShadow only where `slot_shadows`.
+	// The stack under a root named `name` in `viewport`: every row, the SlotShadow only where
+	// `slot_shadows`.
 	PreviewSceneLayers(SubViewport &viewport, const char *name, bool slot_shadows);
 	~PreviewSceneLayers();
 	PreviewSceneLayers(const PreviewSceneLayers &) = delete;

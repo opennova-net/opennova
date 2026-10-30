@@ -1,138 +1,24 @@
 #pragma once
 
-#include <godot_cpp/classes/audio_stream_player3d.hpp>
-#include <godot_cpp/classes/audio_stream_wav.hpp>
-#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/core/object_id.hpp>
-#include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
-#include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
-#include <godot_cpp/variant/string_name.hpp>
-#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
 
-#include "audio/ambient_layer.h"
-
 #include <runtime/audio/ambient_channel_pool.h> // kAmbientMixChannels
 
-// The typed records of the mission audio orchestrator (audio/mission_audio,
-// the former mission_audio.gd inner classes, ADR 0017): the placed marker,
-// the physical channel, the candidate binding and ranked row, the dynamic
-// emitter lane, the setup statistics, the per-frame perf counters and the
-// fired one-shot the diagnostics ring keeps.
+// The typed records of the mission audio device (audio/mission_audio, ADR
+// 0017): the setup statistics, the per-frame perf counters and the fired
+// one-shot the diagnostics ring keeps. The ambient markers, lanes and their
+// candidates are the engine's (runtime/audio/ambient_emitters.h).
 
 namespace godot {
 
 // The ambient emitter mix budget (the engine's channel pool carries the witness).
 inline constexpr int kMissionAudioMixChannels = opennova::audio::kAmbientMixChannels;
-
-// One placed ambient marker ("snd:" item): data, not a scene node. The four
-// time-of-day slot set names ("" = silent in that region) and, per distinct
-// set, the LWF layer descriptors (SoundBank.describe_ambient's AmbientLayer
-// rows, the documented layer transport edge), each carrying a stable
-// `candidate_id` for the mission's lifetime so an incumbent keeps its channel
-// across ranking ticks. Sets keep their insertion order (the mixer's slot keys
-// index it).
-class MissionAudioMarker : public RefCounted {
-	GDCLASS(MissionAudioMarker, RefCounted)
-
-	Vector3 pos_;
-	int source_bms_id_ = 0;
-	PackedStringArray slot_sets_;
-	// The marker's pool-slot nibble: the native mixer derives the walk cohort
-	// AND the (slot << 11) Q16-hours clock stagger from it
-	// (engine: runtime/audio/ambient_mixer.h).
-	int stagger_slot_ = 0;
-	Vector<String> set_names_;
-	Vector<TypedArray<AmbientLayer>> set_layers_;
-
-protected:
-	static void _bind_methods();
-
-public:
-	Vector3 get_pos() const { return pos_; }
-	void set_pos(const Vector3 &p_value) { pos_ = p_value; }
-	int get_source_bms_id() const { return source_bms_id_; }
-	void set_source_bms_id(int p_value) { source_bms_id_ = p_value; }
-	PackedStringArray get_slot_sets() const { return slot_sets_; }
-	void set_slot_sets(const PackedStringArray &p_value) { slot_sets_ = p_value; }
-	int get_stagger_slot() const { return stagger_slot_; }
-	void set_stagger_slot(int p_value) { stagger_slot_ = p_value; }
-	// The layer descriptors of one set (replaces an earlier entry of the same
-	// name in place, else appends).
-	void set_layers(const String &p_set_name, const TypedArray<AmbientLayer> &p_layers);
-	PackedStringArray get_set_names() const;
-	TypedArray<AmbientLayer> get_layers(const String &p_set_name) const;
-
-	// The C++ walk in insertion order.
-	int set_count() const { return set_names_.size(); }
-	const String &set_name_at(int p_index) const { return set_names_[p_index]; }
-	const TypedArray<AmbientLayer> &layers_at(int p_index) const { return set_layers_[p_index]; }
-};
-
-// One of the MIX_CHANNELS physical channels: a reusable player and the
-// candidate bound to it (-1 = free).
-class MissionAudioChannel : public RefCounted {
-	GDCLASS(MissionAudioChannel, RefCounted)
-
-	ObjectID player_id_;
-	int candidate_id_ = -1;
-
-protected:
-	static void _bind_methods();
-
-public:
-	// The player, or null once it was freed from under the channel.
-	AudioStreamPlayer3D *get_player() const;
-	void set_player(AudioStreamPlayer3D *p_player);
-	int get_candidate_id() const { return candidate_id_; }
-	void set_candidate_id(int p_value) { candidate_id_ = p_value; }
-};
-
-// A live candidate's descriptor and bus, by candidate id: marker layers ride
-// the Ambient bus, dynamic emitter layers the SFX bus.
-class MissionAudioCandidateBinding : public RefCounted {
-	GDCLASS(MissionAudioCandidateBinding, RefCounted)
-
-	Ref<AmbientLayer> descriptor_;
-	StringName bus_;
-
-protected:
-	static void _bind_methods();
-
-public:
-	Ref<AmbientLayer> get_descriptor() const { return descriptor_; }
-	void set_descriptor(const Ref<AmbientLayer> &p_value) { descriptor_ = p_value; }
-	StringName get_bus() const { return bus_; }
-	void set_bus(const StringName &p_value) { bus_ = p_value; }
-};
-
-// One dynamic emitter lane's live registration ((source lifetime, lane) key):
-// the set it plays, its stable candidate ids, and the tick it expires.
-class MissionAudioDynamicEmitter : public RefCounted {
-	GDCLASS(MissionAudioDynamicEmitter, RefCounted)
-
-	String set_name_;
-	PackedInt32Array candidate_ids_;
-	int64_t expires_tick_ = 0;
-
-protected:
-	static void _bind_methods();
-
-public:
-	String get_set_name() const { return set_name_; }
-	void set_set_name(const String &p_value) { set_name_ = p_value; }
-	PackedInt32Array get_candidate_ids() const { return candidate_ids_; }
-	void set_candidate_ids(const PackedInt32Array &p_value) { candidate_ids_ = p_value; }
-	int64_t get_expires_tick() const { return expires_tick_; }
-	void set_expires_tick(int64_t p_value) { expires_tick_ = p_value; }
-};
 
 // The setup statistics: a typed record like the sibling present passes' Stats
 // (ADR 0017); to_json_value() is the probe/MCP JSON edge.

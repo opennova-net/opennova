@@ -373,6 +373,21 @@ bool test_publication_and_invalidation() {
 			"the retired record is claimed first, in record order");
 }
 
+// A time set's reset is answered once per change of the weather's count; the
+// TOD epoch alone never empties a record.
+bool test_time_set_reset_answers_each_change_once() {
+	opennova::TerrainTileCompositionCache cache;
+	opennova::TerrainTileTimeMarks marks;
+	if (!expect(!cache.take_time_set_reset(marks), "no time set yet: nothing to reset")) return false;
+	marks.tod_epoch = 3;
+	if (!expect(!cache.take_time_set_reset(marks), "a TOD step is no time set")) return false;
+	marks.time_set_resets = 1;
+	if (!expect(cache.take_time_set_reset(marks), "the first time set resets")) return false;
+	if (!expect(!cache.take_time_set_reset(marks), "the same count is answered once")) return false;
+	marks.time_set_resets = 3;
+	return expect(cache.take_time_set_reset(marks), "two more sets between sweeps reset once");
+}
+
 } // namespace
 
 int main() {
@@ -385,6 +400,7 @@ int main() {
 	if (!test_lookup_granularity_walk()) return 1;
 	if (!test_sector_patch_lookup_masks_ten_bits()) return 1;
 	if (!test_publication_and_invalidation()) return 1;
+	if (!test_time_set_reset_answers_each_change_once()) return 1;
 	std::printf("OK: terrain tile composition cache\n");
 	return 0;
 }

@@ -21,11 +21,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/body_channel.cpp # a clip-posed model's body channel: the clip, the blends, the remote arbitration, the composed pose
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_channel_pool.cpp # the eight physical voices the mix rows bind to
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_emitters.cpp # the mission's markers, lanes, clock and channel plan
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_mixer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/audio_out_meter.cpp # the mixer's output meter (the speaking kick, TALK, the tag pulse)
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/bank_chain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/dialog_queue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/envs_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/music_stream_pump.cpp # the music VM's pacing: one play per track
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/oneshot_play.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_selector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
@@ -42,6 +44,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/key_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/player_actions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/help_screen.cpp       # the F1 key-binding help pages
+    ${CMAKE_CURRENT_SOURCE_DIR}/controls/device_messages.cpp   # the window messages onto retail's input events
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
     # target-feed/writeback order) + the mission-start weather seed
@@ -107,6 +110,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_load.cpp # the load plan's executor over the embedder's legs (ADR 0077 R2)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_sidecars.cpp # the files the game finds by a mission's name, as one table
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_text.cpp # the <mission>.bin RTXT harvest (briefings, locations, people names)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/debug_oracles.cpp # the F3 hitbox view and entity pick over the kernel
@@ -138,6 +142,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_bay_logos.cpp # the vehicle-bay logo walk
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_capture_labels.cpp # the capture-point label walk + element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_viewport.cpp # the main viewport words + the HUD projector
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_world_labels.cpp # the projected attach labels + friendly tags
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_texture_load_plan.cpp # the HUD set-up's texture loads + their stamp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/inset_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/sight_overlay.cpp # the SIGHTS card row modes + the dotsize cycle
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid
@@ -222,6 +229,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/foliage_assets.cpp # a foliage definition's slot geometry and bounds
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/mission_fixed_files.cpp # the files a running mission opens by a fixed name
     # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
@@ -497,6 +505,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_boot.cpp             # the one joiner bring-up (the host boot's joiner half)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role_replica_world.cpp  # the replica-world mirror and the authoritative appliers of JoinerRole
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
@@ -546,7 +555,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_info.cpp       # the NovaWorld listing's live-session columns
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_listing_binding.cpp # the NovaWorld host listing's match side (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/hud_frame_feeds.cpp # the HUD's per-frame feeds into its frame state
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/special_key_chain.cpp # the special-key chain over a role
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_input_frame.cpp # the local player's input frame (TickInputSource)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
     # --- parity lane L1 sources ---

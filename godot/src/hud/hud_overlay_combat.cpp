@@ -1,17 +1,13 @@
 #include "hud/hud_overlay.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/player_local_view.h"
-#include "util/axes.h"
 #include "util/string_convert.h"
 #include <algorithm>
-#include <base/io/fixed.h>
-#include <cmath>
-#include <godot_cpp/variant/plane.hpp>
 #include <runtime/hud/hud_bay_logos.h>
 #include <runtime/hud/hud_capture_labels.h>
 #include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
-#include <runtime/hud/hud_texture_names.h>
+#include <runtime/hud/hud_viewport.h>
 
 namespace godot {
 void HudOverlay::combat_texture_(int slot, const String &name, ResourceRoot::TextureLoader loader,
@@ -37,30 +33,8 @@ void HudOverlay::set_weapon_icon(const String &p_weapon_name, const String &p_hu
 	queue_redraw();
 }
 
-void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets) {
-	using namespace opennova::hud;
-	auto &l = layout_.combat;
-	// HUD_LoadAllTextures loads the fixed art in colour mode and the hudpos
-	// parachute and armor icons in the modes HudLayoutAssets names
-	// (docs/interface/hud-re.md "The HUD texture loader"); the names are the
-	// engine's (hud_texture_names.h).
-	constexpr ResourceRoot::TextureLoader colour = ResourceRoot::TEXTURE_LOADER_HUD_COLOR;
-	combat_texture_(kHudTexVehicleFixed, hud_fixed_texture_name(kHudTexVehicleFixed), colour, l.vehicle_fixed);
-	combat_texture_(kHudTexVehicleLag, hud_fixed_texture_name(kHudTexVehicleLag), colour, l.vehicle_lag);
-	combat_texture_(kHudTexDriverCrosshair, hud_fixed_texture_name(kHudTexDriverCrosshair), colour, l.driver_crosshair);
-	combat_texture_(kHudTexTarget, hud_fixed_texture_name(kHudTexTarget), colour, l.target);
-	combat_texture_(kHudTexTargetFriendly, hud_fixed_texture_name(kHudTexTargetFriendly), colour, l.target_friendly);
-	combat_texture_(kHudTexParachute, opennova::to_gd(assets.parachute_icon),
-			ResourceRoot::loader_of(HudLayoutAssets::kParachuteIconRole), l.parachute);
-	combat_texture_(kHudTexArmor, opennova::to_gd(assets.armor_icon),
-			ResourceRoot::loader_of(HudLayoutAssets::kArmorIconRole), l.armor);
-	combat_texture_(kHudTexLogoHelo, hud_fixed_texture_name(kHudTexLogoHelo), colour, l.logo_helo);
-	combat_texture_(kHudTexLogoHumm, hud_fixed_texture_name(kHudTexLogoHumm), colour, l.logo_humm);
-	combat_texture_(kHudTexLogoBoat, hud_fixed_texture_name(kHudTexLogoBoat), colour, l.logo_boat);
-}
-void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
-		const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,
-		const String &use_key) {
+void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view,
+		const Ref<RtxtStringFile> &gametext, const String &use_key) {
 	using namespace opennova::hud;
 	state_.combat = {};
 	opennova::world::HudCombatView empty;
@@ -80,25 +54,9 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 	combat_texture_(kHudTexVehicleStatus, String(v.vehicle_texture.c_str()), alpha, l.vehicle);
 	combat_texture_(kHudTexCargo, String(v.cargo_texture.c_str()),
 			v.cargo_texture_alpha ? alpha : ResourceRoot::TEXTURE_LOADER_HUD_COLOR, l.cargo);
-	const Vector2 surface = draw_surface_();
-	const auto project = [&](const std::array<int32_t, 3> &point, bool valid) {
-		HudProjectedPoint out;
-		if (!has_camera || !valid)
-			return out;
-		const Vector3 position = godot_from_fixed3(point);
-		const Vector3 local = camera.xform_inv(position);
-		const Plane clip = projection.xform4(Plane(local, 1));
-		out.clip = -local.z < projection.get_z_near() ? 16 : 0;
-		const double depth = -double(local.z) * opennova::io::kFp16OneD;
-		out.depth_q16 = static_cast<int32_t>(std::clamp(depth, -2147483647.0, 2147483647.0));
-		if (clip.d == 0 || !std::isfinite(clip.d))
-			return out;
-		const float x = clip.normal.x / clip.d, y = clip.normal.y / clip.d;
-		out.clip |= frustum_clip_mask(x, y, false);
-		out.x = (std::clamp(x, -1.0f, 1.0f) * 0.5f + 0.5f) * surface.x;
-		out.y = (-std::clamp(y, -1.0f, 1.0f) * 0.5f + 0.5f) * surface.y;
-		out.valid = true;
-		return out;
+	// Each point through the frame's viewport (set_view_frame; engine hud/hud_viewport.h).
+	const auto project = [this](const std::array<int32_t, 3> &point, bool valid) {
+		return valid ? hud_project_world_point(viewport_, point) : HudProjectedPoint{};
 	};
 	s.vehicle_fixed_point = project(v.vehicle_fixed, v.vehicle_fixed_valid);
 	s.vehicle_lag_point = project(v.vehicle_lag, v.vehicle_lag_valid);

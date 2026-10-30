@@ -604,6 +604,13 @@ add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
 target_link_libraries(mission_load_plan_test PRIVATE opennova_runtime)
 add_test(NAME mission_load_plan COMMAND mission_load_plan_test)
 
+# The load plan's executor (mission/mission_load.h): each arm's order over recording legs (a
+# fresh session's, a headless dedicated host's as opennova-serve fills them, a wire joiner's S2C
+# 0x11 head and 0x1A load), the stage checkpoints, and the failures' stops.
+add_executable(mission_load_test mission/mission_load_test.cpp)
+target_link_libraries(mission_load_test PRIVATE opennova_runtime)
+add_test(NAME mission_load COMMAND mission_load_test)
+
 # fixtures/bms/synth_dense.bms: the synthetic dense mission (four populated
 # pools, zero-valued optional fields) authored through bms_edit and
 # written by bms::write; mission_bms and mission_mis_idempotency read it.
@@ -897,6 +904,15 @@ target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
 add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
 
+# The music stream pump (runtime/audio/music_stream_pump.h): the VM steps once
+# the track its last play selected stops sounding, a service frame's seven
+# updates, GFB's emptied stream, the context's begin and end.
+add_executable(music_stream_pump_test audio/music_stream_pump_test.cpp)
+target_link_libraries(music_stream_pump_test PRIVATE opennova_runtime)
+target_include_directories(music_stream_pump_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(music_stream_pump_test PRIVATE cxx_std_17)
+add_test(NAME music_stream_pump COMMAND music_stream_pump_test)
+
 # The ambient channel pool (runtime/audio/ambient_channel_pool.h): rank-order
 # binds up to the budget, incumbents keep their channel, dropouts release,
 # unresolvable entrants cached out, a pinned pool never grows.
@@ -904,6 +920,26 @@ add_executable(ambient_channel_pool_test audio/ambient_channel_pool_test.cpp)
 target_link_libraries(ambient_channel_pool_test PRIVATE opennova_runtime)
 target_compile_features(ambient_channel_pool_test PRIVATE cxx_std_17)
 add_test(NAME ambient_channel_pool COMMAND ambient_channel_pool_test)
+
+# The mission's ambient emitters (runtime/audio/ambient_emitters.h), moved out of the
+# Godot mission audio (ADR 0077 R2) with its GUT logic pins: envs markers described
+# through the bank chain, the loudest eight bound (incumbents kept, entrants restarted),
+# the time-of-day slot and crossfade, one occlusion query per raw-audible marker, the
+# entity-attached lanes replayed at their producer ticks with their ids retired and
+# recycled, the unresolvable entrant cached out, the world clock's latch.
+add_executable(ambient_emitters_test audio/ambient_emitters_test.cpp)
+target_link_libraries(ambient_emitters_test PRIVATE opennova_runtime)
+target_compile_features(ambient_emitters_test PRIVATE cxx_std_17)
+add_test(NAME ambient_emitters COMMAND ambient_emitters_test)
+
+# The sound-effects option's park (runtime/audio/effects_volume_park.h): saved only
+# when nothing is saved, restored once [orig: Sound_ParkEffectsVolume @ 0x5280b0;
+# Sound_RestoreEffectsVolume @ 0x5280d0].
+add_executable(effects_volume_park_test audio/effects_volume_park_test.cpp)
+target_link_libraries(effects_volume_park_test PRIVATE opennova_runtime)
+target_include_directories(effects_volume_park_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(effects_volume_park_test PRIVATE cxx_std_17)
+add_test(NAME effects_volume_park COMMAND effects_volume_park_test)
 
 # S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
 # entity pools, the authored soundloop slots passed through unfiltered, walk order,
@@ -1721,6 +1757,14 @@ target_link_libraries(environment_state_test PRIVATE opennova_runtime)
 target_include_directories(environment_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME environment_state COMMAND environment_state_test)
 
+# The water pass orchestration (runtime/environment/water_frame): which of a
+# scene's water passes run, the Inset's own, the per-side pass fog end and the
+# noise pair's frame counter.
+add_executable(water_frame_test environment/water_frame_test.cpp)
+target_link_libraries(water_frame_test PRIVATE opennova_runtime)
+target_include_directories(water_frame_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME water_frame COMMAND water_frame_test)
+
 # The mission-start weather seed (runtime/environment/weather_seed): the
 # mission-selected ENV/BMS derivation and retail's 255-tick weather settle must
 # reach clients through the same real phase-2 projection every host embeds.
@@ -2105,6 +2149,14 @@ add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
+
+# The game font's glyph advance (runtime/hud/game_font.h): the space and an empty
+# record advance by their own record and the spacing pad, decoded text by its
+# code-page byte's record.
+add_executable(hud_game_font_test hud/game_font_test.cpp)
+target_link_libraries(hud_game_font_test PRIVATE opennova_runtime)
+target_include_directories(hud_game_font_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_game_font COMMAND hud_game_font_test)
 
 # The flat HUD residual elements (GAMEINFO/ZONEINFO, CLOCK, TEAMID, HUDLS, the
 # objectives panel, /NOHUD, the squad colours, the clip-flash key).
@@ -4371,6 +4423,13 @@ add_test(NAME npruntime_player_list_vars COMMAND npruntime_player_list_vars_test
 add_executable(inmatch_joiner_role_test npruntime/joiner_role_test.cpp)
 target_link_libraries(inmatch_joiner_role_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME inmatch_joiner_role COMMAND inmatch_joiner_role_test)
+# The one joiner bring-up (inmatch/joiner_boot.h), headless: a JoinerRole booted over an in-memory
+# socket dials with every setting (its ClientAuth's APPID against a scripted ServerHello), a load's
+# rebuilt runtime takes the same, and a header-only join's streamed types settle in order.
+add_executable(inmatch_joiner_boot_test npruntime/joiner_boot_test.cpp)
+target_link_libraries(inmatch_joiner_boot_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(inmatch_joiner_boot_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME inmatch_joiner_boot COMMAND inmatch_joiner_boot_test)
 
 # The joiner session-drive policy (S10b): the preload's failure edge (no join wait has a deadline,
 # D-NET-1070), the S2C 0x7B promote validation, the admission/deploy/loss edge machine (frame
@@ -4997,6 +5056,13 @@ target_link_libraries(asset_store_test PRIVATE opennova_runtime)
 target_include_directories(asset_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME asset_store COMMAND asset_store_test)
 
+# A foliage definition's model asset (runtime/assets/foliage_assets.h): the slot bounds as the
+# terrain load takes them, the LOD0 geometry, the :fd material and the model key.
+add_executable(foliage_assets_test assets/foliage_assets_test.cpp)
+target_link_libraries(foliage_assets_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(foliage_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME foliage_assets COMMAND foliage_assets_test)
+
 # The files a running mission opens by a fixed name (runtime/assets/mission_fixed_files.h): each
 # set by the runtime's own constants, every name once.
 add_executable(mission_fixed_files_test assets/mission_fixed_files_test.cpp)
@@ -5063,6 +5129,29 @@ add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
 target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
 target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
 add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
+
+# The HUD's projection (hud/hud_viewport.h): the main viewport's words, the projector's centre,
+# side-plane clips, edge forcing and near flag, and the attach labels and friendly tags it feeds.
+add_executable(hud_viewport_test hud/hud_viewport_test.cpp)
+target_link_libraries(hud_viewport_test PRIVATE opennova_runtime)
+target_include_directories(hud_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_viewport_test PRIVATE cxx_std_17)
+add_test(NAME hud_viewport COMMAND hud_viewport_test)
+
+# The HUD's texture load plan (hud/hud_texture_load_plan.h): each set-up load's file, loader,
+# word and arm, and what the draws read back of the loaded textures.
+add_executable(hud_texture_load_plan_test hud/hud_texture_load_plan_test.cpp)
+target_link_libraries(hud_texture_load_plan_test PRIVATE opennova_runtime)
+target_include_directories(hud_texture_load_plan_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_texture_load_plan_test PRIVATE cxx_std_17)
+add_test(NAME hud_texture_load_plan COMMAND hud_texture_load_plan_test)
+
+# The HUD's frame feeds (inmatch/hud_frame_feeds.h) over a session with no role.
+add_executable(hud_frame_feeds_test hud/hud_frame_feeds_test.cpp)
+target_link_libraries(hud_frame_feeds_test PRIVATE opennova_runtime)
+target_include_directories(hud_frame_feeds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_frame_feeds_test PRIVATE cxx_std_17)
+add_test(NAME hud_frame_feeds COMMAND hud_frame_feeds_test)
 
 # opennova-hostd, the machine agent (apps/hostd; Linux only, as the app). The runtime
 # test drives its platform legs on a stub command runner that checks every argv: the
@@ -5909,6 +5998,12 @@ add_test(NAME cookie_jar COMMAND cookie_jar_test)
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)
 target_link_libraries(inmatch_tick_input_source_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_tick_input_source COMMAND inmatch_tick_input_source_test)
+# The local player's input frame over fake seams (inmatch::PlayerInputFrame, ADR 0077 R2): the
+# record order, the rows' edges, the drained records' arms, the mouse events and the wheel's
+# notches, and the device messages onto retail's events (controls/device_messages.h).
+add_executable(inmatch_player_input_frame_test frame/player_input_frame_test.cpp)
+target_link_libraries(inmatch_player_input_frame_test PRIVATE opennova_runtime)
+add_test(NAME inmatch_player_input_frame COMMAND inmatch_player_input_frame_test)
 add_executable(controls_key_event_queue_test controls/key_event_queue_test.cpp)
 target_link_libraries(controls_key_event_queue_test PRIVATE opennova_runtime)
 add_test(NAME controls_key_event_queue COMMAND controls_key_event_queue_test)

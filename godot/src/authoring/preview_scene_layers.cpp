@@ -110,7 +110,6 @@ PreviewSceneLayers::PreviewSceneLayers(SubViewport &viewport, const char *name, 
 	// rows enter the tree (E13): only this device's publication and its presented frames write
 	// them.
 	WorldSceneRows rows = WorldScene::all_rows();
-	rows.reset(size_t(WorldSceneRow::SunShadow));
 	if (!slot_shadows)
 		rows.reset(size_t(WorldSceneRow::SlotShadow));
 	scene_ = WorldScene::create(*root_, rows, true);

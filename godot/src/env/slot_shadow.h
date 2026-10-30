@@ -189,18 +189,10 @@ protected:
 	void _notification(int p_what);
 
 private:
-	struct CasterInfo {
-		ObjectModel *model = nullptr;
-		// The caster's slot-frame facts (engine: runtime/renderer/render_slot_frame.h
-		// SlotFrameCaster): the plan's state (bound_radius = entity+0: lod, light
-		// query), the model sphere sizing the capture, the origin, the march
-		// offset.
-		opennova::renderer::SlotFrameCaster caster;
-	};
-	// The registry row behind CasterInfo: identity plus the derived values a
-	// frame used to re-read from the node every frame. An unstamped model
-	// (radius_fallback) keeps reading its live render bounds per frame — the
-	// preview/test path — so only stamped facts cache.
+	// The registry row behind a caster's facts: identity plus the stamped
+	// values a frame used to re-read from the node every frame. An unstamped
+	// model (radius_fallback) keeps reading its live render bounds per frame —
+	// the preview/test path — so only stamped facts cache.
 	struct CasterRecord {
 		ObjectID id;
 		float capture_radius = 0.0f;
@@ -210,6 +202,8 @@ private:
 		bool seat_parented_ancestor = false;
 	};
 	void _rebuild_caster_records();
+	opennova::renderer::SlotCasterFacts _caster_facts(const ObjectModel &p_model,
+			const CasterRecord &p_record) const;
 
 	void _ensure_captures();
 	void _release_captures();
@@ -254,9 +248,11 @@ private:
 	std::vector<CasterRecord> caster_records_;
 	uint64_t caster_records_revision_ = 0;
 	bool caster_records_valid_ = false;
-	// Reused frame scratch (cleared, capacity retained).
-	std::vector<CasterInfo> casters_scratch_;
-	HashMap<uint64_t, size_t> caster_index_scratch_;
+	// Reused frame scratch (cleared, capacity retained): the casters' engine
+	// facts as the presenters stamped them, and the engine's frame casters
+	// built from them (runtime/renderer/render_slot_frame.h).
+	std::vector<opennova::renderer::SlotCasterFacts> caster_facts_scratch_;
+	opennova::renderer::SlotFrameCasters frame_casters_;
 	// Last-pushed uniform payloads: identical-value pushes are elided (the
 	// materials retain them), the T1 material-gating precedent. The drape
 	// material is process-shared, so a stamp is only trustworthy while this

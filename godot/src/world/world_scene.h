@@ -37,7 +37,6 @@ class Precipitation;
 class ResourceRoot;
 class SkyDome;
 class SlotShadow;
-class SunShadow;
 class Terrain;
 class TerrainData;
 class TerrainTileInfo;
@@ -58,7 +57,6 @@ enum class WorldSceneRow : uint8_t {
 	Water,
 	EnvironmentCube,
 	Celestial,
-	SunShadow,
 	SlotShadow,
 	Count,
 };
@@ -79,7 +77,6 @@ struct WorldSceneNodes {
 	Water *water = nullptr;
 	EnvironmentCubeCapture *environment_cube = nullptr;
 	Celestial *celestial = nullptr;
-	SunShadow *sun_shadow = nullptr;
 	SlotShadow *slot_shadow = nullptr;
 };
 

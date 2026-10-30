@@ -313,7 +313,11 @@ void TerrainTileCacheDevice::clear() {
 	frame_shadow_device_draws_ = 0;
 }
 
-void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id, uint32_t p_tod_epoch) {
+void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id,
+		const opennova::TerrainTileTimeMarks &p_marks) {
+	if (cache_.take_time_set_reset(p_marks)) {
+		_invalidate_all();
+	}
 	if (diagnostic_frame_active_ && diagnostic_frame_id_ == p_frame_id) {
 		return;
 	}
@@ -341,7 +345,7 @@ void TerrainTileCacheDevice::begin_frame(uint64_t p_frame_id, uint32_t p_tod_epo
 	frame_shadow_device_jobs_ = 0;
 	frame_shadow_device_draws_ = 0;
 	_refresh_shadow_snapshot();
-	cache_.begin_frame(p_tod_epoch);
+	cache_.begin_frame(p_marks.tod_epoch);
 }
 
 void TerrainTileCacheDevice::_invalidate_all() {

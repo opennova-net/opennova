@@ -8,8 +8,6 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
-#include <godot_cpp/templates/hash_set.hpp>
-#include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/string.hpp>
@@ -22,15 +20,14 @@
 #include <vector>
 
 #include <formats/lwf/lwf.h>
+#include <runtime/audio/ambient_emitters.h>
 #include <runtime/audio/dialog_queue.h>
-#include <runtime/audio/envs_markers.h>
+#include <runtime/audio/effects_volume_park.h>
 #include <runtime/world/script_voice.h>
 #include <runtime/world/script_sounds.h>
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent
 #include <runtime/world/weather_state.h> // WeatherSoundEvent
 
-#include "audio/ambient_layer.h"
-#include "audio/ambient_mixer.h"
 #include "audio/mission_audio_records.h"
 #include "audio/sound_bank.h"
 
@@ -42,18 +39,18 @@ class MissionData;
 class ResourceRoot;
 class Simulation;
 
-// Runtime mission audio orchestrator (the former mission_audio.gd, ADR 0043
-// d9) -- and the mission's audio root: setup() parents this node under the
-// container, and the physical ambient channels, the one-shot voices, the
-// dialog voice and the WAC voice are its children. Loads the global banks
-// into a SoundBank, resolves each placed
-// envs-class entity's time-of-day slot sets BY NAME (items.def soundloop_1..4
-// = morning/day/evening/night (engine: runtime/audio/envs_markers.h);
-// the engine is name-keyed -- see docs/audio/lwf-dbf-sound-re.md), and
-// retains each layer as lightweight candidate data. tick(camera_pos) runs the
-// witnessed ambient emitter mix: per-voice two-radius distance volumes, region
-// crossfades, and an eight-player physical channel pool (engine: runtime/audio/ambient_channel_pool.cpp). Also exposes the PlayWavList
-// action seam and the music/reverb bed. The dialog slots and their line
+// The mission audio device (the former mission_audio.gd, ADR 0043 d9; ADR
+// 0077's backend) -- and the mission's audio root: setup() parents this node
+// under the container, and the physical ambient channels, the one-shot voices,
+// the dialog voice and the WAC voice are its children. Loads the global banks
+// into a SoundBank and hands the mission's envs markers to the engine's ambient
+// emitters (runtime/audio/ambient_emitters.h), which describe each marker's
+// time-of-day slot sets BY NAME (items.def soundloop_1..4 =
+// morning/day/evening/night, runtime/audio/envs_markers.h), replay the
+// entity-attached lanes, run the witnessed emitter mix (two-radius distance
+// volumes, region crossfades) and plan the eight physical channels; tick()
+// plays that plan: the players, their streams, positions, volumes and pitches.
+// Also exposes the PlayWavList action seam and the music/reverb bed. The dialog slots and their line
 // timers and the dialog-id resolution are the engine's
 // runtime/audio/dialog_queue, the one table the world owns (this node is its
 // device: it runs the table's playback tick, plays the wave a line loads and
@@ -89,7 +86,7 @@ public:
 	static MissionAudio *create(const Ref<ResourceRoot> &p_resource_root,
 			const Ref<ItemDatabase> &p_item_db);
 
-	// Load banks, describe ambient marker candidates, parent this node under
+	// Load banks, hand the envs markers to the engine's ambient emitters, parent this node under
 	// `container`, and apply the reverb bed. `mission_name` is the .bms filename
 	// (its basename selects the dialog bank). Returns the setup Stats record.
 	Ref<MissionAudioStats> setup(const Ref<MissionData> &p_mission, const String &p_mission_name,
@@ -104,11 +101,6 @@ public:
 	// it), "" for a candidate it does not describe: the ambient_channels probe's
 	// read, which the editor's Listen (ADR 0046 DI-36) is compared against.
 	String ambient_candidate_wave(int p_candidate_id) const;
-	// Read/drive seams (ADR 0018): tests and diagnostics go through these, never
-	// the private fields. set_markers injects fully-described Marker records so
-	// the mix tick can be driven without a mission. `container` supplies a
-	// SceneTree home for the physical test channels.
-	void set_markers(const Array &p_markers, Node3D *p_container = nullptr);
 	// The "ambience disabled" arm: banks and the mission .DBF still load, no
 	// ambient marker resolves (the dialog-vs-ambient probe's silent control).
 	void set_ambient_markers_enabled(bool p_enabled);
@@ -121,8 +113,9 @@ public:
 	// Apply the portable entity-attached emitter drain. These are keep-alive
 	// registrations, not one-shots: the same (source registry lifetime, lane,
 	// layer) refreshes in place and competes with placed ambience in retail's one
-	// loudest-eight table. Pitch/volume zero is the common keyed clear.
-	// (engine: runtime/audio/ambient_mixer.cpp)
+	// loudest-eight table. Pitch/volume zero is the common keyed clear. The
+	// engine's ambient emitters queue them for the clock to replay
+	// (engine: runtime/audio/ambient_emitters.h).
 	void apply_sound_emitters(const Array &p_events);
 	// The native leg the fire pass feeds (the bound form above unwraps the
 	// test-authored SoundEmitterRow records into the same rows).
@@ -147,14 +140,15 @@ public:
 	// channel's last loaded line plays on falls silent (engine
 	// WorldOutbox::dialog_line_stop carries the witness).
 	void stop_dialog_line();
-	// The single-player round end's world-sound park, as a device: parking saves the
-	// volumes of the sound-effects option's buses (SFX and Ambient, the pair the
-	// options map the option to) and gives them a zero option's volume; releasing
-	// puts the saved volumes back, as the mission teardown does (engine
-	// EpilogCine::world_sound_parked carries the witness). The frame's audio leg
+	// The single-player round end's world-sound park, as a device: the engine's
+	// park (runtime/audio/effects_volume_park.h) saves the volumes of the
+	// sound-effects option's buses (SFX and Ambient, the pair the options map the
+	// option to) and this writes them the zeroed option's volume; the release
+	// writes the saved volumes back, as the mission teardown does (engine
+	// EpilogCine::world_sound_parked says when it stands). The frame's audio leg
 	// sets it from the world every frame; a repeat of the current state is a no-op.
 	void set_world_sound_parked(bool p_parked);
-	bool is_world_sound_parked() const { return world_sound_parked_; }
+	bool is_world_sound_parked() const { return effects_park_.parked(); }
 	// PlayWavList / event-action seam: fire a one-shot sound set by name at a world
 	// position. The .bms action param -> set-name decode is left to the caller (the
 	// engine resolves a pre-loaded sound_id handle; the action path plays it at full
@@ -221,29 +215,26 @@ public:
 	// Pump for the mission clock; HHMM like MissionEnvironment.time_of_day.
 	void set_time_of_day_hhmm(double p_hhmm);
 	// World-driven eval clock: the world tick pushes the sim's logic tick after each
-	// session tick batch, and the native mixer runs the witnessed staggered cohort
-	// walk for the elapsed ticks -- each placed marker re-evaluates every 8th 62.5 Hz
-	// tick (engine: runtime/audio/ambient_mixer.h). The first world-driven tick rebases the
-	// clock so an editor session that free-ran before Play keeps its slot lifetimes.
+	// session tick batch, and the engine's ambient emitters replay the queued lanes
+	// and run the table's staggered cohort walk to it
+	// (engine: runtime/audio/ambient_emitters.h AmbientEmitters::advance_to_logic_tick).
 	void advance_ticks(int64_t p_logic_tick);
 	// Occlusion provider (the Simulation) -- emitter/one-shot distances inflate
-	// through the witnessed two-ray LOS so occluded sources sound farther (engine: runtime/audio/ambient_mixer.h). Optional: tests and the menu run
+	// through the witnessed two-ray LOS so occluded sources sound farther
+	// (engine: runtime/audio/ambient_mixer.h). Optional: tests and the menu run
 	// without a sim and mix unoccluded.
 	void set_simulation(const Ref<Simulation> &p_sim);
 	// Test-injection seam: a Callable(listener, source, dist_q16, source_id) -> int
 	// occlusion override, consulted by the bank and the mixer only when no
 	// Simulation is set. Replaces the deleted duck-typed provider stubs.
 	void set_occlusion_override(const Callable &p_override);
-	// The per-frame ambient mix pass [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0,
-	// called once per render frame from the Game Loop render callback @ 0x521341]:
-	// the native mixer (engine/runtime/audio AmbientMixer) ranks the LIVE emitter slots --
-	// registered at the witnessed staggered tick cadence via advance_ticks -- through
-	// the two-radius member-0 curve with occlusion, and this node binds the loudest
-	// MIX_CHANNELS to reusable players (D-SND-6/D-SND-8 reimpl territory). Stable
-	// candidate IDs let selected incumbents continue while an entrant restarts,
-	// matching transient registration. `delta` free-runs the autonomous 62.5 Hz eval
-	// clock only for owners that never push logic ticks (editor idle) -- see
-	// docs/audio/lwf-dbf-sound-re.md §driver cadence (D-SND-16, ported).
+	// The per-frame ambient mix pass, as a device: the engine's ambient emitters
+	// rank the live slots and plan the channels (AmbientEmitters::frame), this node
+	// resolves each entrant's stream and plays the plan on its reusable players --
+	// a release stops one, a bind starts one from the wave's beginning, an update
+	// writes what changed (D-SND-6/D-SND-8 reimpl territory). `delta` free-runs the
+	// autonomous 62.5 Hz eval clock only for owners that never push logic ticks
+	// (editor idle) -- see docs/audio/lwf-dbf-sound-re.md §driver cadence.
 	void tick(const Vector3 &p_camera_pos, double p_delta = 0.0);
 	// Mission unload: undo the reverb, stop and free every voice child, forget
 	// the mission state. The owner frees the node itself.
@@ -283,20 +274,16 @@ private:
 	void _stop_script_voice(bool p_report_finished);
 	void _follow_script_voice(const opennova::world::ScriptVoiceChannel::Frame &p_frame);
 	Ref<AudioStreamWAV> _resolve_wav(const String &p_filename);
-	Ref<AudioStreamWAV> _resolve_candidate_stream(const Ref<AmbientLayer> &p_descriptor);
-	Ref<AudioStreamWAV> _validate_candidate_stream(int p_candidate_id,
-			const Ref<AmbientLayer> &p_descriptor);
-	Ref<MissionAudioChannel> _new_channel();
+	// An entrant's stream: its wave through the bank, the first failure warned.
+	Ref<AudioStreamWAV> _resolve_ambient_stream(
+			const opennova::audio::AmbientCandidateRef &p_candidate);
+	AudioStreamPlayer3D *_channel_player(int p_channel) const;
+	void _new_channel();
 	void _stop_all_ambient_channels();
 	void _reset_mission_playback_state();
-	void _feed_mixer();
-	void _flush_sound_emitters(int64_t p_final_tick);
-	void _forget_dynamic_emitter(const String &p_key);
-	int _allocate_dynamic_candidate_id();
-	void _prune_dynamic_emitter_states();
-	void _release_retired_candidate_ids();
+	// The engine's ambient counts into the setup Stats record.
+	void _publish_ambient_stats();
 	static double _pitch_scale(int p_pitch_q16);
-	static double _hhmm_to_hours(double p_hhmm);
 	void _load_bank(const String &p_lwf_name);
 	void _apply_reverb(int p_reverb_id);
 	void _apply_music(int p_music_id);
@@ -305,10 +292,9 @@ private:
 	Ref<ItemDatabase> item_db_;
 	// A header-only join defers its envs markers to the streamed world (tick).
 	bool world_envs_pending_ = false;
-	void _add_envs_markers(const std::vector<opennova::audio::EnvsMarker> &p_rows);
 	ObjectID simulation_id_; // occlusion LOS; optional
 	// Test-injection seam (Callable(listener, source, dist_q16, source_id) -> int),
-	// forwarded to the bank and every fresh mixer; production uses the sim.
+	// forwarded to the bank and asked by the ambient mix; production uses the sim.
 	Callable occlusion_override_;
 	Ref<SoundBank> bank_;
 	Ref<DbfData> dbf_; // the mission's dialog bank; null if absent
@@ -316,45 +302,19 @@ private:
 	// waves its lines name. Empty when the mission has no dialog bank.
 	opennova::lwf::File dialog_sounds_;
 	bool dialog_sounds_loaded_ = false;
-	// True while this node has a SceneTree home (setup / set_markers with a
-	// container) -- the audio root exists; teardown clears it.
+	// True while this node has a SceneTree home (setup) -- the audio root
+	// exists; teardown clears it.
 	bool root_attached_ = false;
-	Vector<Ref<MissionAudioMarker>> markers_;
-	// The native emitter system (engine/runtime/audio AmbientMixer): staggered tick&7 marker
-	// eval/registration on the logic-tick clock + the per-frame live-slot ranking
-	// (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16). This node keeps the
-	// per-candidate descriptors for stream resolution and the voice binding below.
-	Ref<AmbientMixer> mixer_;
-	HashMap<int, Ref<MissionAudioCandidateBinding>> candidate_lookup_; // candidate_id -> binding
-	// Portable systems emit short-lived registrations before the GameWorld audio
-	// pass advances the mixer clock. Queue them so catch-up ticks age the previous
-	// registrations first, then the newest per-tick refresh lands at the current
-	// clock [orig: SoundEmitter_Register @0x529270 before the render-frame
-	// SoundEmitter_UpdateAndMixTop8 @0x5284a0].
-	std::vector<opennova::world::SoundEmitterEvent> queued_sound_emitters_;
-	// "source_spawn_id:lane" -> DynamicEmitter. Candidate IDs remain stable across
-	// per-tick refreshes so an incumbent physical channel does not restart; a set
-	// change or explicit clear retires the old IDs.
-	HashMap<String, Ref<MissionAudioDynamicEmitter>> dynamic_emitter_states_;
-	// Latched once a world-driven logic tick arrives (advance_ticks): the world tick owns
-	// the eval clock; until then tick(delta) free-runs an autonomous 62.5 Hz clock
-	// (editor-idle owners -- the weather world-driven/autonomous split).
-	bool world_driven_ticks_ = false;
-	int64_t world_driven_tick_offset_ = 0;
-	Vector<Ref<MissionAudioChannel>> channels_; // at most MIX_CHANNELS, one per pool channel
-	// The engine's channel pool: which candidate rides which channel, the
-	// dropouts and entrants per frame, the unresolvable candidates cached out.
-	opennova::audio::AmbientChannelPool channel_pool_{ MIX_CHANNELS };
-	int next_candidate_id_ = 1;
-	Vector<int> free_candidate_ids_;
-	Vector<int> retired_candidate_ids_;
-	HashSet<int> validated_candidate_ids_;
+	// The engine's ambient emitters: the markers, the lanes, their candidates, the
+	// table's clock and the channel plan this node plays (runtime/audio/ambient_emitters.h).
+	opennova::audio::AmbientEmitters ambient_{ MIX_CHANNELS };
+	// The players of the plan's channels, by channel index (the plan grows them).
+	std::vector<ObjectID> channel_players_;
 	bool warned_ambient_decode_failure_ = false;
 	// The "ambience disabled" arm (the dialog-vs-ambient probe): banks and the
 	// .DBF still load, no marker resolves.
 	bool ambient_markers_enabled_ = true;
 	Ref<MissionAudioStats> stats_;
-	double time_of_day_hhmm_ = 1200.0; // HHMM like MissionEnvironment.time_of_day; noon default
 	Vector3 last_camera_pos_; // listener at the last tick; INF until first tick
 	// The voice the last loaded line plays on, and whether a frame has
 	// rendered since the last dialog tick (the dialog table is the
@@ -368,10 +328,8 @@ private:
 	// The device ran the voice's clip out (its `finished`): the physical channel's release,
 	// which the next scene frame's validation reads (update_script_voice).
 	bool script_voice_released_ = false;
-	// The world-sound park's device state: whether the buses are parked, and the
-	// SFX / Ambient volumes they held when they were.
-	bool world_sound_parked_ = false;
-	float parked_bus_volume_db_[2] = {};
+	// The world-sound park (the engine's rule; this node writes the buses).
+	opennova::audio::EffectsVolumePark effects_park_;
 	HashMap<String, Ref<AudioStreamWAV>> wac_wav_cache_; // filename(lower) -> stream (or null)
 	int64_t perf_tick_us_ = 0;
 	int perf_markers_ = 0;
@@ -391,9 +349,6 @@ private:
 	RecentFire recent_fires_[RECENT_FIRES];
 	int recent_fire_head_ = 0;
 	int recent_fire_count_ = 0;
-	// The ambient mix's per-frame lists, their storage kept from frame to frame.
-	std::vector<opennova::audio::AmbientCandidate> describable_rows_;
-	opennova::audio::AmbientChannelPlan channel_plan_;
 };
 
 } // namespace godot

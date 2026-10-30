@@ -787,19 +787,6 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 
 namespace {
 
-// Math_FixedPointTransformPoint22: the 3x3 Q22 rotation with the +0x200000
-// rounding bias before each >> 22, then the translation column.
-// [orig: Math_FixedPointTransformPoint22 @0x615810]
-void transform_point22(const world::CollisionMatrix &m, const int32_t in[3], int32_t out[3]) {
-	for (int row = 0; row < 3; ++row) {
-		const int64_t sum = static_cast<int64_t>(in[0]) * m.m[row * 4 + 0] +
-				static_cast<int64_t>(in[1]) * m.m[row * 4 + 1] +
-				static_cast<int64_t>(in[2]) * m.m[row * 4 + 2] + 0x200000;
-		out[row] = static_cast<int32_t>(static_cast<uint32_t>(sum >> 22) +
-				static_cast<uint32_t>(m.m[row * 4 + 3]));
-	}
-}
-
 // A spawn zone's Team byte (+0x162) as this client holds it, the byte the
 // DEATH screen's list and map read: the authority's own entity; on a joiner
 // the replica row once a 0x50 / 0x51 team store or a world-stream team byte
@@ -929,7 +916,7 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 				io::float_to_fp16_16_sat(e->bbox_center.y),
 				io::float_to_fp16_16_sat(e->bbox_center.z)};
 		int32_t anchor[3];
-		transform_point22(m, centre, anchor);
+		m.transform_point(centre, anchor); // [orig: Math_FixedPointTransformPoint22 @0x615810]
 		zone.anchor_x = anchor[0];
 		zone.anchor_y = anchor[1];
 		out.zones.push_back(zone);

@@ -493,21 +493,21 @@ void Celestial::advance_frame(double p_delta) {
 			? -cam->get_global_transform().basis.get_column(2).normalized()
 			: Vector3(0.0f, 0.0f, -1.0f);
 	// A view-aligned body's parts take the camera's inverse view rotation
-	// (celestial_frame.h). The build's +90 degree yaw is that rotation for
-	// the reference camera, level and looking east (Godot +X, columns right
-	// +Z, up +Y, back -X); the live camera's rotation relative to the
-	// reference composes ahead of it. The one turn serves every pass that
-	// shares the camera's rotation (the beauty, the bloom redraw).
+	// (engine celestial_frame.h celestial_view_aligned_basis).
 	if (cam != nullptr) {
-		const Basis identity_render(Vector3(0.0f, 1.0f, 0.0f),
-				static_cast<real_t>(Math_PI) * 0.5f);
-		const Basis east_camera(Vector3(0.0f, 0.0f, 1.0f), Vector3(0.0f, 1.0f, 0.0f),
-				Vector3(-1.0f, 0.0f, 0.0f));
-		const Basis view_turn = cam->get_global_transform().basis.orthonormalized() *
-				east_camera.transposed();
+		const Basis camera = cam->get_global_transform().basis;
+		const auto column = [&camera](int p_index) {
+			const Vector3 axis = camera.get_column(p_index);
+			return opennova::env::Vec3{static_cast<float>(axis.x), static_cast<float>(axis.y),
+					static_cast<float>(axis.z)};
+		};
+		const opennova::env::CelestialBasis turn =
+				opennova::env::celestial_view_aligned_basis(column(0), column(1), column(2));
+		const Basis body_basis(Vector3(turn.x.x, turn.x.y, turn.x.z),
+				Vector3(turn.y.x, turn.y.y, turn.y.z), Vector3(turn.z.x, turn.z.y, turn.z.z));
 		for (KeyValue<String, Body> &kv : bodies_) {
 			if (kv.value.view_aligned && kv.value.model != nullptr) {
-				kv.value.model->set_basis(view_turn * identity_render);
+				kv.value.model->set_basis(body_basis);
 			}
 		}
 	}
@@ -780,17 +780,13 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 	const Vector3 forward = cam != nullptr
 			? -cam->get_global_transform().basis.get_column(2).normalized()
 			: Vector3(0.0f, 0.0f, -1.0f);
-	// The dead-band step never snaps onto the target, so a settled
-	// accumulator HOLDS: stop once the brightness has been unchanged across
-	// eight consecutive frames (a full window turnover at any jitter phase)
-	// after the window itself is full (4 frames of 2 samples). The
-	// water-glint accumulator settles alongside on the same frames (its
+	// The settle's stop rule is the engine's (glare_occlusion.h GlareSettle).
+	// The water-glint accumulator settles alongside on the same frames (its
 	// snap-through +-16 chase converges within the same cap), each frame
 	// stepping every scene pass's call the live frame makes: the main
 	// scene's, then the weapon Inset pass's while one is set (set_inset_view).
 	Body *glint_body = bodies_.getptr("glint");
-	int held = 0;
-	int last = glare_occlusion_.brightness;
+	opennova::env::GlareSettle settle(glare_occlusion_.brightness);
 	for (int frame = 0; frame < p_max_frames; ++frame) {
 		_advance_glare_occlusion(state, cam_pos, sun_dir);
 		if (glint_body != nullptr) {
@@ -798,14 +794,11 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 					*glint_body);
 			_advance_inset_water_glint(state, cam_pos, sun_dir, *glint_body);
 		}
-		const int brightness = glare_occlusion_.brightness;
-		held = brightness == last ? held + 1 : 0;
-		last = brightness;
-		if (frame >= 3 && held >= 8) {
+		if (settle.step(glare_occlusion_.brightness)) {
 			break;
 		}
 	}
-	return last;
+	return settle.brightness();
 }
 
 Dictionary Celestial::get_diagnostics() const {
