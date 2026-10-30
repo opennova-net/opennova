@@ -153,12 +153,15 @@ func test_windowed_alpha_blend_ffp_caster_blends_a_partial_silhouette() -> void:
 	model.set_shadow_caster_enabled(true)
 	_keep_only_shader_surfaces(model, "/self_lit/")
 	model.advance_runtime_frame(1.0 / 62.0)
+	# The capture reads the material's published values, as ObjectModel's
+	# runtime writes publish them, so the AlphaGenValue is written and published.
 	var slab_materials := 0
 	for row in model.get_surface_materials():
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null \
 				and "/self_lit/" in material.shader.resource_path:
 			material.set_shader_parameter("u_alpha_mod", 0.5)
+			FrameFx.set_q3_object_alpha(material, 0.5)
 			slab_materials += 1
 	assert_gt(slab_materials, 0, "the fixture carries the FF_ST_AB_LUM heat slab")
 	shadow.advance_frame()
@@ -395,10 +398,15 @@ func test_windowed_capture_stops_at_the_stage_textures_last_retail_mip_level() -
 	var texture := _opaque_level0_texture()
 	for row in model.get_surface_materials():
 		var material := row as ShaderMaterial
-		if material != null and material.shader != null 				and "/self_lit/" in material.shader.resource_path:
+		if material != null and material.shader != null \
+				and "/self_lit/" in material.shader.resource_path:
+			# Written and published, as ObjectModel's stage and runtime writes
+			# are: the capture reads the published values.
 			material.set_shader_parameter("u_diffuse", texture)
 			material.set_shader_parameter("u_diffuse_max_lod", 1000.0)
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			FrameFx.set_q3_object_diffuse(material, texture, 1000.0)
+			FrameFx.set_q3_object_alpha(material, 1.0)
 			slab.append(material)
 	assert_gt(slab.size(), 0, "the fixture carries the FF_ST_AB_LUM heat slab")
 	shadow.advance_frame()
@@ -407,6 +415,7 @@ func test_windowed_capture_stops_at_the_stage_textures_last_retail_mip_level() -
 	var unbounded := await _capture_after_frames(shadow, order, 3)
 	for material in slab:
 		material.set_shader_parameter("u_diffuse_max_lod", 0.0)
+		FrameFx.set_q3_object_diffuse(material, texture, 0.0)
 	shadow.advance_frame()
 	var clamped := await _capture_after_frames(shadow, order, 3)
 	var report: Dictionary = shadow.get_report()

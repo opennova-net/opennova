@@ -126,10 +126,12 @@ public:
 			const opennova::renderer::MaterialRuntime &p_runtime);
 	static void update_q3_object_diffuse(const Ref<Material> &p_material,
 			const Ref<Texture2D> &p_diffuse, float p_max_lod);
-	// The two update legs for a script driving a material directly (the
-	// windowed device tests): the SelfLumColor alone, and the Diffuse1 stage.
+	// The update legs for a script driving a material directly (the windowed
+	// device tests): the SelfLumColor alone, the AlphaGenValue alone, and the
+	// Diffuse1 stage.
 	static void set_q3_object_self_lum(const Ref<Material> &p_material,
 			const Vector3 &p_self_lum);
+	static void set_q3_object_alpha(const Ref<Material> &p_material, float p_alpha);
 	static void set_q3_object_diffuse(const Ref<Material> &p_material,
 			const Ref<Texture2D> &p_diffuse, float p_max_lod);
 	// A water source's published block (the night-vision strip's).

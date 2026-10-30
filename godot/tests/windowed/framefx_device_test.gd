@@ -35,6 +35,16 @@ func _solid_texture(color: Color) -> ImageTexture:
 	return ImageTexture.create_from_image(image)
 
 
+## The Q3 compile reads an object material's published values, as ObjectModel's
+## stage and runtime writes publish them: a test that writes the material's
+## Diffuse1, SelfLumColor and AlphaGenValue publishes them too.
+func _publish_object_values(material: ShaderMaterial, diffuse: Texture2D,
+		self_lum: Vector3) -> void:
+	FrameFx.set_q3_object_diffuse(material, diffuse, 1000.0)
+	FrameFx.set_q3_object_self_lum(material, self_lum)
+	FrameFx.set_q3_object_alpha(material, 1.0)
+
+
 func _channel_peaks(image: Image) -> Dictionary:
 	var values := Vector3(-1.0, -1.0, -1.0)
 	var positions := [Vector2i.ZERO, Vector2i.ZERO, Vector2i.ZERO]
@@ -137,9 +147,11 @@ func _q3_lum_view(use_q3: bool) -> Dictionary:
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null \
 				and "/self_lit/" in material.shader.resource_path:
-			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			var published_diffuse := _solid_texture(Color.WHITE)
+			material.set_shader_parameter("u_diffuse", published_diffuse)
 			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			_publish_object_values(material, published_diffuse, Vector3.ONE)
 
 	var terminal: Node3D
 	if use_q3:
@@ -975,9 +987,11 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	for row in model.get_surface_materials():
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null 				and "/self_lit/" in material.shader.resource_path:
-			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			var published_diffuse := _solid_texture(Color.WHITE)
+			material.set_shader_parameter("u_diffuse", published_diffuse)
 			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			_publish_object_values(material, published_diffuse, Vector3.ONE)
 	var slab := _first_visible_mesh(model)
 	assert_not_null(slab, "the mount fixture carries an additive LUM surface")
 	if slab == null:
@@ -1072,9 +1086,11 @@ func _additive_lum_slab_view(background: Color,
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null \
 				and "/self_lit/" in material.shader.resource_path:
-			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			var published_diffuse := _solid_texture(Color.WHITE)
+			material.set_shader_parameter("u_diffuse", published_diffuse)
 			material.set_shader_parameter("u_rgb_mod", Vector3(0.25, 0.25, 0.25))
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			_publish_object_values(material, published_diffuse, Vector3(0.25, 0.25, 0.25))
 	var slab := _first_visible_mesh(model)
 	assert_not_null(slab, "the fixture carries a LUM surface on %s" % shader_fragment)
 	var pixel := Vector2i.ZERO
@@ -1340,9 +1356,11 @@ func _viewmodel_bulb_view(use_q3: bool) -> Dictionary:
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null \
 				and "/self_lit/" in material.shader.resource_path:
-			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			var published_diffuse := _solid_texture(Color.WHITE)
+			material.set_shader_parameter("u_diffuse", published_diffuse)
 			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			_publish_object_values(material, published_diffuse, Vector3.ONE)
 	_stamp_viewmodel_surfaces(model)
 
 	var skeleton := model.get_skeleton()
