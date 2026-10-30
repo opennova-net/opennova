@@ -1,11 +1,13 @@
 #pragma once
 
+#include <net/novacrypto/cdkey.h> // cdkey::WireKeys (activation_cd_keys)
 #include <net/novacrypto/epask.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -288,5 +290,23 @@ inline constexpr std::size_t kJoinCdCookieMax = 0x7FE;
 // the prefix matched without case), or none when the whole set is longer than kJoinCdCookieMax,
 // as retail's announce builder sends a set only of 1..0x7FE bytes (D-NET-1387).
 std::vector<uint8_t> join_cd_cookie(const CookieJar &jar);
+
+// The CD-key ids this machine's activation gives it (g_CDKeyInfo +16 and +0x810: the CDKIID a
+// LAN join sends and the one a LAN host refuses as its own, code 12): the jar's NWACT, read as
+// the NovaWorld screen's update reads it (its first 0x7FF characters), decoded on this machine
+// (cdkey::activation_wire_key under `fingerprint`, the machine's NWPSSK). None without `chains`
+// (a protocol with no CD key), with no NWACT, or where it does not decode. The CDKIIDEXP1 stays
+// empty: no code of dfx2.exe writes it.
+// OpenNova keeps no registry value: the activation is the jar's NWACT, which a NovaWorld page
+// hands this process (it is no PERSISTENT cookie, so nw_cdata.coo does not keep it), read where
+// the join and the host read g_CDKeyInfo and left in the jar, where retail's screen stores it in
+// the registry and clears it.
+// [orig: UI_ProcessLANSessionStateMachine @0x556ff0 (dfx2.exe) - the NWACT read (0x7FF pushed
+//  @0x55752c, the call @0x55753e), CDKey_WriteActivationFromNWACT called @0x557569, the jar's
+//  NWACT cleared @0x55757e;
+//  CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe) - CDKey_GenerateHardwareFingerprint called
+//  @0x411ebb; g_CDKeyInfoWireExp1 @0xa72448 (dfx2.exe), read and never written]
+cdkey::WireKeys activation_cd_keys(
+		const cdkey::KeyChains *chains, const CookieJar &jar, std::string_view fingerprint);
 
 } // namespace opennova

@@ -530,6 +530,8 @@ private:
 	void install_join_cd_cookie();
 	// Install the retained gate GLSVSSREQUEST (the NovaWorld JOIN's last TLV) on the runtime.
 	void install_join_glsvss_request();
+	// The join's CD-key ids (NetState::join_cd_key_ids) onto the joiner runtime.
+	void install_join_cd_key_ids();
 	// Install the retained mission-start seam (the load flag, the side password).
 	void install_join_mission_start();
 	// The host's session record for a mission of `p_game_type` (the UI host config or the SP

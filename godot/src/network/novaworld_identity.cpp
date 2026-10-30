@@ -1,7 +1,10 @@
 #include "network/novaworld_identity.h"
 
 #include <formats/gamecfg/game_cfg.h> // gamecfg::display_size
+#include <net/novaworld/cookie_jar_file.h> // process_menu_browser (the jar the activation rides)
+#include <net/novaworld/http_login.h> // activation_cd_keys
 #include <net/novaworld/lobby_identity.h>
+#include <net/protocol/protocol.h> // Protocol::cd_key
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/os.hpp>
@@ -101,6 +104,40 @@ void sample_device_identity(const opennova::gamecfg::GameCfg &cfg) {
 	if (!sample) sample = read_device_identity(cfg);
 }
 
+opennova::LobbyMachineTokens machine_tokens() {
+	// Retail derives these tokens from stable volume/MAC data. Off Windows, Godot's
+	// platform-stable opaque ID stands in: hashed into the words retail's inputs would supply,
+	// then retail's own encoders (engine fallback_machine_tokens), so no raw machine identifier
+	// reaches the wire.
+	opennova::RetailMachineInputs machine;
+	if (opennova::read_retail_machine_inputs(machine))
+		return opennova::make_retail_machine_tokens(machine);
+	OS *os = OS::get_singleton();
+	// The stand-in tokens' machine words take the renderer's adapter name (the model name, then
+	// "OpenNova", where it has none).
+	RenderingServer *rendering = RenderingServer::get_singleton();
+	std::string adapter_name =
+			rendering ? to_std(rendering->get_video_adapter_name()) : std::string();
+	if (adapter_name.empty() && os)
+		adapter_name = to_std(os->get_model_name());
+	if (adapter_name.empty())
+		adapter_name = "OpenNova";
+	std::replace(adapter_name.begin(), adapter_name.end(), '$', '_');
+	std::string stable_identity = os ? to_std(os->get_unique_id()) : std::string();
+	if (stable_identity.empty() && os) {
+		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());
+	}
+	stable_identity += "|" + adapter_name;
+	return opennova::fallback_machine_tokens(stable_identity);
+}
+
+opennova::cdkey::WireKeys machine_activation_cd_keys(const opennova::Protocol *protocol) {
+	if (protocol == nullptr || protocol->cd_key == nullptr)
+		return {};
+	return opennova::activation_cd_keys(
+			protocol->cd_key, opennova::process_menu_browser().jar, machine_tokens().nwpssk);
+}
+
 opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::gamecfg::GameCfg &cfg) {
 	opennova::LobbyIdentityParams out;
 
@@ -138,33 +175,9 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::game
 			hw.display_height);
 	out.nwhwi = opennova::make_nwhwi(hw);
 
-	// The stand-in tokens' machine words take the renderer's adapter name (the model name, then
-	// "OpenNova", where it has none).
-	RenderingServer *rendering = RenderingServer::get_singleton();
-	std::string adapter_name =
-			rendering ? to_std(rendering->get_video_adapter_name()) : std::string();
-	if (adapter_name.empty() && os) adapter_name = to_std(os->get_model_name());
-	if (adapter_name.empty()) adapter_name = "OpenNova";
-	std::replace(adapter_name.begin(), adapter_name.end(), '$', '_');
-
-	// Retail derives these telemetry-only tokens from stable volume/MAC data. Off
-	// Windows, Godot's platform-stable opaque ID stands in: hashed into the words
-	// retail's inputs would supply, then retail's own encoders (engine
-	// fallback_machine_tokens), so no raw machine identifier reaches the wire.
-	std::string stable_identity = os ? to_std(os->get_unique_id()) : std::string();
-	if (stable_identity.empty() && os) {
-		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());
-	}
-	stable_identity += "|" + adapter_name;
-	const opennova::LobbyMachineTokens fallback = opennova::fallback_machine_tokens(stable_identity);
-	out.nwpssk = fallback.nwpssk;
-	out.nwusid = fallback.nwusid;
-	opennova::RetailMachineInputs machine;
-	if (opennova::read_retail_machine_inputs(machine)) {
-		const opennova::LobbyMachineTokens tokens = opennova::make_retail_machine_tokens(machine);
-		out.nwpssk = tokens.nwpssk;
-		out.nwusid = tokens.nwusid;
-	}
+	const opennova::LobbyMachineTokens tokens = machine_tokens();
+	out.nwpssk = tokens.nwpssk;
+	out.nwusid = tokens.nwusid;
 
 	// The supported retail capture and OpenNova base install both advertise 0.
 	// Keep the field explicit so an expansion-aware binding can replace it.

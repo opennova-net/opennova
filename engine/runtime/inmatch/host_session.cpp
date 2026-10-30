@@ -775,6 +775,8 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5695B3 -> Server_InitNewRoundState
 	//  @0x51C92F (banlist.txt), @0x51CB3B (banned.txt)].
 	owner.ctx.bans.directory = cfg.ban_directory;
+	// The host's own CD-key ids, which its LAN join check compares (code 12).
+	owner.ctx.host_cd_keys = cfg.host_cd_keys;
 	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
 	owner.pending_session_messages.clear();
 	owner.pending_session_datagrams.clear();

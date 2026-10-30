@@ -83,6 +83,22 @@ bool decode_wire_key(const KeyChains &chains, std::string_view wire_key, std::st
 // The same inputs always give the same NWACT.
 std::string make_activation(
 		const KeyChains &chains, std::string_view wire_key, std::string_view fingerprint);
+// The wire key an NWACT holds on the machine `fingerprint` names, as the client reads it: the
+// value mixed down under the fingerprint, then decoded under chains.registry in its 0x800-byte
+// room, the result kept as Napi_CopyString keeps it (to its first NUL, at most 0x7FF
+// characters). False, `wire_key` empty, where the decode fails (the client's status -3). The
+// client's NovaWorld screen runs it over the NWACT a page hands it, its boot read over the
+// registry value that NWACT was stored as; what comes out is the CDKIID its LAN join sends and
+// its host compares against (g_CDKeyInfo +16).
+// [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe) - the fingerprint @0x411ebb, the
+//  copy @0x411eca, NapiNP_EncryptStringWithPRNG @0x411ee9, CDKey_Decode under off_812EE8
+//  @0x411f0a (its -3 @0x411f13), the wire key's copy to +16 @0x411f37; CDKey_ReadRegistry
+//  @0x411b90 (dfx2.exe) - the same legs @0x411c46..0x411c79, the copy @0x411cd3; CDKey_Decode
+//  @0x411af0 (dfx2.exe) - NapiNP_DecodeEncryptedString under the descriptor's +20 chain, room
+//  0x800, @0x411b38; Napi_CopyString @ 0x617e10 - at most dst_len - 1 characters, to the first
+//  NUL]
+bool activation_wire_key(const KeyChains &chains, std::string_view nwact,
+		std::string_view fingerprint, std::string &wire_key);
 
 // The two CD-key values a player carries: the CDKIID and CDKIIDEXP1 its join
 // sends (player +724 / +728), or the host's own (g_CDKeyInfo +16 / +0x810).

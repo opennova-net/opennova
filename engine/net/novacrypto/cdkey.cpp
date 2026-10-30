@@ -143,6 +143,25 @@ std::string make_activation(
 	return registry;
 }
 
+bool activation_wire_key(const KeyChains &chains, std::string_view nwact,
+		std::string_view fingerprint, std::string &wire_key) {
+	// The +16 copy's bound: Napi_CopyString(this + 16, decoded, 0x800) keeps 0x7FF characters.
+	// [orig: CDKey_WriteActivationFromNWACT @0x411f37 (dfx2.exe); Napi_CopyString @ 0x617e10]
+	constexpr size_t kWireKeyCopy = kDecodeRoom - 1;
+	wire_key.clear();
+	std::string registry(nwact);
+	mix_down(registry, fingerprint);
+	std::vector<uint8_t> plaintext;
+	if (!decode_key_chain(registry, chains.registry, plaintext, kDecodeRoom))
+		return false;
+	for (const uint8_t b : plaintext) {
+		if (b == 0 || wire_key.size() == kWireKeyCopy)
+			break;
+		wire_key.push_back(static_cast<char>(b));
+	}
+	return true;
+}
+
 LanJoinVerdict check_lan_join(const KeyChains &chains, const WireKeys &joiner, const WireKeys &host,
 		const std::vector<WireKeys> &others) {
 	std::vector<uint8_t> plaintext;

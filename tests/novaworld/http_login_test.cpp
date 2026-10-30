@@ -360,6 +360,42 @@ int main() {
 		      "a longer value keeps the 31 bytes the copy takes");
 	}
 
+	// activation_cd_keys: the CD-key ids this machine's activation gives a DFX2 join or host, the
+	// jar's NWACT decoded under the machine's NWPSSK, the vectors of docs/titles/dfx2-vs-jo-re.md
+	// section 9.7 (DFX2's chains spelled out: games/dfx2/dfx2_protocol.cpp's).
+	// [orig: UI_ProcessLANSessionStateMachine @0x556ff0 (dfx2.exe) - the NWACT read @0x55753e,
+	//  CDKey_WriteActivationFromNWACT called @0x557569; g_CDKeyInfoWireExp1 @0xa72448 (dfx2.exe)]
+	{
+		const opennova::cdkey::KeyChains chains = {
+			"5645236346346245:2345346541242546:4563451326353456",
+			"928975689:234957945234:24598293879654:2349857982794876",
+			"",
+		};
+		const char *machine = "ABCDEFGHIJKLMNOPQRSTUVW";
+		const std::string nwact =
+				"DQNWWKWDHZJHKFVXIHNJKEKYNSFFRIPKCOWFBPZIRXDVUSBLDCQDIQMRPDVQLBCDOPZRAYEREPP"
+				"LAQYUYTMKDPRRYKCYXQGRVNIDZDVWMBTYOWSPQWUNOGWSNYIWCUOQJILP";
+		const std::string wire = "BMCCDKDKDLFFNGFDJHMFMMALJCLEFPADLPHHDHEEDHOGCIDLKC";
+		CookieJar jar;
+		check(activation_cd_keys(&chains, jar, machine).cdkiid.empty(), "no NWACT, no CDKIID");
+		jar.set("NWACT", nwact);
+		const opennova::cdkey::WireKeys keys = activation_cd_keys(&chains, jar, machine);
+		check(keys.cdkiid == wire, "the jar's NWACT, read on its machine, is the wire key");
+		check(keys.exp1.empty(), "no CDKIIDEXP1: dfx2.exe never writes one");
+		check(activation_cd_keys(nullptr, jar, machine).cdkiid.empty(),
+				"a protocol with no CD key carries none");
+		check(activation_cd_keys(&chains, jar, "ABCDEFGHIJKLMNOPQRSTUVX").cdkiid.empty(),
+				"another machine's NWPSSK decodes no key");
+		CookieJar lower;
+		lower.set("nwact", nwact);
+		check(activation_cd_keys(&chains, lower, machine).cdkiid == wire,
+				"the NWACT is found case-insensitively");
+		CookieJar cleared;
+		cleared.set("NWACT", "");
+		check(activation_cd_keys(&chains, cleared, machine).cdkiid.empty(),
+				"an empty NWACT is no activation");
+	}
+
 	if (g_failures == 0) {
 		std::printf("http_login: all checks passed\n");
 		return 0;
