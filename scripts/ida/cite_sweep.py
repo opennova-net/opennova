@@ -19,6 +19,9 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                 `call esi` IDA tracked to that entry) included
   site-only     the marker names no symbol (`@0xADDR` alone, or a prose word before the @)
                 and the address is a defined location -- accepted
+  history       a docs/ record cites an old name at its address and names the IDB's current
+                one beside it (the line, or the one before or after): a rename log
+                (`Old @0x...` -> `New`) or an `(ex Old)` form -- accepted
   other-image   the marker names another image (scripts/lint/cite_images.py: every image
                 docs/engine-primer.md section 2 lists, by its file name or an established
                 short form such as `(dfbhd)`), or the record makes one its default
@@ -515,6 +518,34 @@ for ea, n in idautils.Names():
 DECORATED = {}
 
 
+# The defects a record's rename log or `(ex Old)` line shows by design: it cites the old name
+# at its address and names the IDB's current one beside it.
+RENAMED = ("name-mismatch", "code-autoname", "unknown-name", "name-elsewhere")
+
+
+def record_names_both(path, ln, nm, fn, read):
+    """The record's line (or the one before or after it) names the IDB's current name for the
+    cite, the address's own or its function's: `Old @0x...` -> `New`, `New`, ex `Old @0x...`.
+    `read(path)` is the record's lines."""
+    names = {n for n in (nm, fn) if n and not n.startswith(AUTO_PREFIXES)}
+    lines = read(path)
+    near = " ".join(lines[max(0, ln - 2):ln + 1])
+    return any(re.search(r"(?<![\w])%s(?![\w])" % re.escape(n), near) for n in names)
+
+
+_RECORD_CACHE = {}
+
+
+def record_lines(path):
+    """A record's lines, read once."""
+    if path not in _RECORD_CACHE:
+        try:
+            _RECORD_CACHE[path] = open(os.path.join(REPO, path), encoding="utf-8", errors="replace").read().split("\n")
+        except OSError:
+            _RECORD_CACHE[path] = []
+    return _RECORD_CACHE[path]
+
+
 def classify(tok, addr, ctx, info):
     a = int(addr, 16)
     if ctx.startswith("(image-spelling)"):
@@ -951,6 +982,8 @@ def main():
             nm, fs, fn = (tok or ""), None, ""
         if is_other_image(ctx):
             hint = ctx.split(" ", 1)[1]   # the image (as spelled), also where the key was joined for a twin
+        if cls in RENAMED and path.startswith(DOC_ROOTS) and record_names_both(path, ln, nm, fn, record_lines):
+            cls = "history"
         rows.append((cls, addr, tok or "", nm, fs or "", fn, "%s:%d" % (path, ln), hint))
 
     n_reimpl, edits = 0, []

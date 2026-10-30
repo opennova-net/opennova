@@ -270,6 +270,26 @@ class ReverseLinks(unittest.TestCase):
         self.assertEqual(rows, [("reimpl-moved", "")])
 
 
+class RecordHistory(unittest.TestCase):
+    """A record's rename log or (ex Old) line names the old name on purpose."""
+
+    LINES = ["- **D-NET-100** [naming, FIXED] `Player_MaybeGetLocalSessionId @0x4c6d40` -> **`NapiNP_GetLocalConnectionId`**:",
+             "  the class roster; the chat input line (`HUD_DrawChatInputLine`, ex",
+             "  `StdCtype_Destructor @0x5b8f30`, at (50, 480)); the quit dialog",
+             "  `Sound_Calculate3DAttenuation @ 0x527f60` doppler"]
+
+    def read(self, path):
+        return self.LINES
+
+    def test_a_rename_log_and_an_ex_form_are_history(self):
+        self.assertTrue(cite_sweep.record_names_both("docs/x.md", 1, "NapiNP_GetLocalConnectionId", "", self.read))
+        self.assertTrue(cite_sweep.record_names_both("docs/x.md", 3, "HUD_DrawChatInputLine", "", self.read))
+
+    def test_a_stale_name_alone_is_not(self):
+        self.assertFalse(cite_sweep.record_names_both("docs/x.md", 4, "Sound_ApplyDopplerShift", "", self.read))
+        self.assertFalse(cite_sweep.record_names_both("docs/x.md", 4, "sub_527F60", "", self.read))
+
+
 class Unchanged(unittest.TestCase):
     def test_the_accepted_forms(self):
         self.assertEqual(classify("Foo_Bar", "0x500000", cite_sweep.entry_info("Foo_Bar", "0x500000")), "ok")
