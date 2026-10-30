@@ -28,21 +28,17 @@ static func is_headless() -> bool:
 	return DisplayServer.get_name() == "headless"
 
 
-## The game's start, its first legs in the game's order and their one home: the command
-## line's init forces Num Lock on, saving its state for the exit (engine
-## controls::kVkNumLock carries the witness, D-NET-563), and only then does the start
-## read game.cfg (GameCfgStore, the first use of the block). False when that read sets
-## mpreset: the caller ends the process with exit code 0, before anything mounts, with
-## nothing saved and no shutdown, so Num Lock stays as the start forced it
-## (docs/gamecfg/game-cfg-re.md, the load; D-MNU-78). The launch checks and the
-## first-launch download ahead of it are OpenNova's own (ADR 0067) and touch no device.
+## The game's start (engine frontend::boot, its order and witness): Num Lock forced on,
+## then the start's read of game.cfg (GameCfgStore, the first use of the block). False
+## when that read sets mpreset: the caller ends the process with exit code 0, before
+## anything mounts, with nothing saved and no shutdown (D-MNU-78). The launch checks and
+## the first-launch download ahead of it are OpenNova's own (ADR 0067) and touch no device.
 static func begin_game() -> bool:
-	LocalPlayerPresenter.start_process_num_lock()
-	if GameCfgStore.block().is_reset_exit():
-		push_warning(
-				"GameRuntimeRoot: game.cfg's mpreset ends the process at the start (exit code 0)")
-		return false
-	return true
+	if GameFrontend.boot(func() -> void: LocalPlayerPresenter.start_process_num_lock(),
+			func() -> bool: return GameCfgStore.block().is_reset_exit()):
+		return true
+	push_warning("GameRuntimeRoot: game.cfg's mpreset ends the process at the start (exit code 0)")
+	return false
 
 
 func _ready() -> void:

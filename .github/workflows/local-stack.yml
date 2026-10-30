@@ -93,12 +93,12 @@ jobs:
         run: scripts/ci/one_stamp.sh "$HEAD_SHA" $RUN | tee -a "$GITHUB_OUTPUT"
 
       # net-linux.yml's configure (the same flags, the same directory), so the
-      # cached objects match.
+      # cached objects match; no game window (OPENNOVA_GAME, the SDL3 app).
       - name: Configure (OPENNOVA_NOVAWORLD_SERVICE=ON, BUILD_NOVAWORLD_HTTP=ON)
         if: inputs.service-artifact == ''
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON
+          -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON -DOPENNOVA_GAME=OFF
           -DOPENNOVA_VERSION=${{ steps.one.outputs.version }}
           -DOPENNOVA_STAGING=${{ steps.one.outputs.staging }}
           -DOPENNOVA_COMMIT=${{ steps.one.outputs.commit }}

@@ -80,6 +80,9 @@ make among them: the menu format sweeps' variant fixture), `mnu/render_cases.mnu
 `terrain/forms/line_forms16.trn` / `line_forms8.trn` (the line forms the shipped `.env`
 and `.trn` files take, the `env_shipped_forms` and `trn_mission_load` ctests'),
 `score/score_sample.ini`,
+`novaworld/browser_get.http` and `novaworld/browser_post.http` (the bytes the NovaWorld menu
+browser writes for a GET and for a form post, CR LF throughout, over our own host name, cookies
+and form: the `browser_transport` ctest's request goldens),
 `anim/idle.bad` and `anim/walk.bad` (the one-bone clips), `anim/soldier.adm`,
 `anim/US01.adm`, `anim/forms.adm` (every line form the shipped tables use, their trailing
 NUL included: `anim_rewrite`'s) and `anim/weapon_timing.txt` (the `opennova-3di weapon

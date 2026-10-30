@@ -51,6 +51,32 @@ add_subdirectory(engine)
 # engine's registries from (games::install()).
 add_subdirectory(games)
 
+# opennova-game (apps/game, ADR 0077 d9): the app shell over the SDL3 backend (backend/sdl3, the
+# engine's platform API over SDL3 and, from R5, its GPU API over SDL_GPU). SDL3 is the pinned
+# submodule third_party/sdl3, built static here with SDL's own CMake; nothing but backend/sdl3
+# links it. On Linux SDL needs the X11 or Wayland development headers (DEVELOPING.md
+# "Prerequisites"); a tree that builds no game window (the server images, the NovaWorld
+# service's jobs) configures with -DOPENNOVA_GAME=OFF.
+option(OPENNOVA_GAME "Build opennova-game (apps/game) and its SDL3 backend (backend/sdl3)" ON)
+if(OPENNOVA_GAME)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sdl3/CMakeLists.txt")
+        message(FATAL_ERROR "OPENNOVA_GAME needs the SDL3 submodule: run "
+            "`git submodule update --init third_party/sdl3`, or configure with -DOPENNOVA_GAME=OFF")
+    endif()
+    # One static SDL3 (SDL3::SDL3-static), no shared library, no SDL tests, examples or install
+    # rules. The game draws through SDL_GPU, so SDL's 2D renderer and the camera are left out.
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    set(SDL_RENDER OFF CACHE BOOL "" FORCE)
+    set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/sdl3 EXCLUDE_FROM_ALL)
+    add_subdirectory(backend/sdl3)
+endif()
+
 # The NovaWorld service's HTTP layer (novaworld_web, novaworld_fleet, and with
 # them novaworld_worker and novaworld_data).
 if(BUILD_NOVAWORLD_HTTP)
@@ -77,6 +103,9 @@ endif()
 add_subdirectory(apps/common)
 add_subdirectory(apps/3di)
 add_subdirectory(apps/extract)
+if(OPENNOVA_GAME)
+    add_subdirectory(apps/game)
+endif()
 # The service's libraries (apps/novaworld_common/README.md "Build layout and
 # tests"): with the service, or on Linux its core and the machine agents'
 # protocol alone, which hostd links.

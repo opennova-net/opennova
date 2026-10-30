@@ -560,7 +560,7 @@ def count_oversize_cpp_files() -> int:
     leave two residual offenders; no .cpp under engine/, apps/, or godot/src
     may grow past 2500 lines without splitting first."""
     count = 0
-    for root in ("engine", "games", "apps", "godot/src"):
+    for root in ("engine", "games", "backend", "apps", "godot/src"):
         for path in (REPO / root).rglob("*.cpp"):
             parts = path.relative_to(REPO).parts
             if _in_build_dir(parts):
@@ -579,7 +579,7 @@ def count_oversize_cpp_headers() -> int:
     applied to .h/.hpp under engine/, apps/, godot/src (a state model the size
     of a translation unit is a split waiting to happen)."""
     count = 0
-    for root in ("engine", "games", "apps", "godot/src"):
+    for root in ("engine", "games", "backend", "apps", "godot/src"):
         for pattern in ("*.h", "*.hpp"):
             for path in (REPO / root).rglob(pattern):
                 parts = path.relative_to(REPO).parts

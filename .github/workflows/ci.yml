@@ -237,6 +237,12 @@ jobs:
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
 
+      # opennova-game's SDL3 (third_party/sdl3, a pinned shallow submodule: the root
+      # CMakeLists.txt's OPENNOVA_GAME); the other submodules stay uninitialized.
+      - name: Check out SDL3
+        shell: bash
+        run: git submodule update --init --depth 1 third_party/sdl3
+
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
         run: |
@@ -391,20 +397,30 @@ jobs:
       # bucket (a no-op on GitHub's runners, a fork's).
       - uses: runs-on/action@v2
 
-      # The root CMake project builds without godot-cpp or GUT, so the
-      # submodules stay uninitialized.
+      # The root CMake project builds without godot-cpp or GUT; opennova-game's SDL3
+      # (third_party/sdl3, a pinned shallow submodule) is the one submodule it takes.
       - uses: actions/checkout@v4
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
 
+      - name: Check out SDL3
+        shell: bash
+        run: git submodule update --init --depth 1 third_party/sdl3
+
       # The service's client libraries: libpq (CMake's FindPostgreSQL) and, for
-      # the server's HTTP layer, hiredis with hiredis_ssl and OpenSSL; and Ninja,
-      # which RunsOn's ubuntu24-full image leaves out (ubuntu-latest has it).
-      - name: Install libpq, hiredis and Ninja
+      # the server's HTTP layer, hiredis with hiredis_ssl and OpenSSL; Ninja,
+      # which RunsOn's ubuntu24-full image leaves out (ubuntu-latest has it); and
+      # the headers SDL3 builds its X11, Wayland and audio drivers against (it
+      # loads their libraries at run time; its configure fails without X11 or
+      # Wayland), opennova-game's.
+      - name: Install libpq, hiredis, Ninja and SDL3's headers
         shell: bash
         run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
           libpq-dev libhiredis-dev libssl-dev ninja-build
+          libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev
+          libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev libegl-dev
+          libasound2-dev libpulse-dev libdrm-dev libgbm-dev libudev-dev libdbus-1-dev
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash

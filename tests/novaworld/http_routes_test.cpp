@@ -56,8 +56,8 @@
 #include "http_cookies.h"
 #include "http_listener.h"
 #include "jobs/worker_pool.h"
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 #include "novalogic_lobbies.h"
 #include "novaworld/billing_fake_stripe.h"
 #include "novaworld/fake_mailer.h"

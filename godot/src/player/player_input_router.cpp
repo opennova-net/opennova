@@ -448,7 +448,7 @@ void PlayerInputRouter::Shell::keyboard_pass() {
 }
 
 bool PlayerInputRouter::Shell::menu_screen_open() {
-	return menu_screen_probe_.is_valid() && bool(menu_screen_probe_.call());
+	return frontend_.is_valid() && frontend_->screen_holds_input();
 }
 
 void PlayerInputRouter::Shell::record_leg(int32_t p_code, int32_t p_param) {

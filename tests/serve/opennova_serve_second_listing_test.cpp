@@ -21,7 +21,7 @@
 #include "nw_udp_listener.h"
 #include "program/server_config.h"
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>

@@ -59,7 +59,7 @@
 #include "hosted/model/admin_link_status.h"
 #include "hosted/model/hosted_repository.h"
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <net/novaworld/db/database.h>
 

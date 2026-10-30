@@ -117,6 +117,15 @@ public:
 	// run-length TGA (engine formats/tga/tga.h tga_write_screenshot carries the witness).
 	static PackedByteArray screen_shot_tga_file(const PackedByteArray &rgba, int width, int height);
 
+	// The updater's command lines (boot_policy.h updater_check_arguments /
+	// updater_install_arguments): the check's, and the install's with the relaunch's
+	// arguments (`run_args`, less an earlier launch's markers) and this one's.
+	static PackedStringArray updater_check_arguments(const String &product,
+			const String &runtime_dir, const String &resource_dir);
+	static PackedStringArray updater_install_arguments(const String &product,
+			const String &runtime_dir, const String &resource_dir, int64_t parent_pid,
+			const PackedStringArray &run_args, bool bootstrap, int64_t join_rid);
+
 	// The whole parsed set, for a C++ consumer that reads several switches at once (the
 	// NovaWorld connect's command line, NovaWorldClient::start).
 	static opennova::LaunchFlags parsed() { return parse(); }

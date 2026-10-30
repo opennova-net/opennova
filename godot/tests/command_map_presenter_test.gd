@@ -2,11 +2,12 @@ extends GutTest
 
 # CommandMapPresenter over a staged cmap.mnu (hud-re D-HUD-19): the commander
 # map opens over live play with ONE command-kind map window over its MAP
-# control, the zoom buttons step the shared view, the GRID toggle stores its
-# control's state and re-checks its ORDERS_ twin, the tab radios take their
-# gates, the CREATE_WAYPOINTS press runs the name dialog through to a placed
-# waypoint, the chat send reads and clears its line, the ORDERS composer lists
-# and cancels an order, and OK closes the screen.
+# control, the screen's controller drives it through the real devices (the zoom
+# buttons step the shared view, the GRID toggle stores its control's state and
+# re-checks its ORDERS_ twin, the CREATE_WAYPOINTS press runs the name dialog
+# through to a placed waypoint, the ORDERS composer lists an order, and OK closes
+# the screen). The controller's dispatch, gates and chat send are ctest
+# command_map_controller's.
 # The shipped cmap.mnu stays covered by the retail menu-corpus compilation.
 
 const TMP_DIR := "res://.godot/command_map_presenter_test"
@@ -160,17 +161,6 @@ func test_the_command_window_compiles_through_the_hud() -> void:
 	assert_false(map_window.is_pass_visible())
 
 
-# The show gates the tab radios (the bare local role: in no session, leading
-# nobody) [orig: CMap_PopulateTeamList @0x547a50].
-func test_the_tab_radios_take_their_gates() -> void:
-	var presenter := _make_presenter()
-	assert_true(presenter.open())
-	var driver := presenter.get_menu_driver()
-	for tab in ["RADIO_TAB_ORDERS", "RADIO_TAB_PLAYERS", "RADIO_TAB_TEAM", "RADIO_TAB_RULES"]:
-		assert_true(driver.is_widget_disabled(driver.widget_id(tab)), tab + " is gated off")
-	assert_false(driver.is_widget_disabled(driver.widget_id("RADIO_TAB_MAP")))
-
-
 # The CREATE_WAYPOINTS press: the name dialog centred on the click and pushed
 # onto the MAP control's own rect, shown with WPNAME focused; WPNAME's Enter
 # presses WPNAME_OK, which places the waypoint, clears the field, unchecks
@@ -214,24 +204,6 @@ func test_the_waypoint_dialog_places_a_waypoint() -> void:
 	assert_eq(map_window.get_waypoint_count(), 0, "CLEAR_WAYPOINTS removes it")
 
 
-# The chat panel's send reads CHAT_TEXT and clears it; the go-code buttons
-# route to the session (the bare local role has no wire).
-func test_chat_send_and_go_codes() -> void:
-	var presenter := _make_presenter()
-	var hud := HudOverlay.new()
-	hud.size = Vector2(800, 600)
-	add_child_autofree(hud)
-	presenter.set_hud_source(func() -> HudOverlay: return hud)
-	assert_true(presenter.open())
-	var driver := presenter.get_menu_driver()
-	var chat := driver.widget_id("CHAT_TEXT")
-	driver.set_widget_text(chat, "on me")
-	driver.activate(driver.widget_id("CHAT_TEAM"))
-	assert_eq(driver.get_widget_text(chat), "", "the send clears the line")
-	driver.activate(driver.widget_id("GOCODE_UNIFORM"))
-	assert_true(presenter.is_open())
-
-
 # The CMAP view state is the presenter's: a menu rebuild keeps the zoom (the
 # CMAP show runs no fit).
 func test_the_view_state_outlives_the_menu() -> void:
@@ -250,11 +222,9 @@ func test_the_view_state_outlives_the_menu() -> void:
 
 # The ORDERS radio fills LOCATION (My Position first; the bare local role has
 # no squad, banks or locations); NEW_ORDER composes the group, command and
-# location rows into a CURRENT_ORDERS row (the delete box "0", the text); the
-# delete box's press cancels the order and removes its row; ADDTO_* with no
-# selected member sends nothing [orig: CMap_OnOpenPopulate @0x5492a0;
-# CMap_BuildAndSendOrderCommand @0x5472d0; CCommandMap_HandleOrderAction
-# @0x548990].
+# location rows into a CURRENT_ORDERS row (the delete box "0", the text);
+# ADDTO_* with no selected member sends nothing (ctest command_map_screen holds
+# the delete box's cancel).
 func test_the_orders_composer() -> void:
 	var presenter := _make_presenter()
 	assert_true(presenter.open())
@@ -268,8 +238,6 @@ func test_the_orders_composer() -> void:
 	assert_eq(driver.table_cell_text(orders, 0, 0), "0")
 	assert_eq(driver.table_cell_text(orders, 0, 1), "-Halt-My Position")
 	driver.activate(driver.widget_id("ADDTO_FIRETEAM_A"))
-	driver.emit_signal("table_cell_clicked", orders, "CURRENT_ORDERS", 0, 0, 3, 0, false)
-	assert_eq(driver.table_row_count(orders), 0, "the delete box cancels the order")
 	assert_true(presenter.is_open())
 
 

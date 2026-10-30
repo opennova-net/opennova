@@ -450,14 +450,9 @@ func _unwire_client(client: NovaWorldClient) -> void:
 			client.disconnect(signal_name, handler)
 
 
-# OpenNova dials our service's gate (NovaWorldSettings.opennova_host: prod's in
-# a release export, staging's in a debug one, loopback in a source run,
-# --novaworld-host over all three). "Original NovaWorld" points the same client at NovaLogic's live gate
-# (gs.novaworld.net), which no flag moves.
+# The gate the target dials (engine net/novaworld/service_target.h target_gate_host).
 func _resolved_host() -> String:
-	if _target == NovaWorldSettings.Target.REAL:
-		return NovaWorldSettings.REAL_NOVAWORLD_HOST
-	return NovaWorldSettings.opennova_host()
+	return NovaWorldServiceTarget.target_gate_host(_target)
 
 
 func _on_target_selected(index: int) -> void:
@@ -1135,7 +1130,7 @@ func _populate_missions() -> void:
 # by the game's command file: JOPTR.CMD, DFX2.CMD, ACIDGAMBIT.CMD or a player
 # game's), each installed into expansion/<code>/ by the updater: Install writes
 # that folder's UPDATE.WIZ and runs UPDATE, Update runs UPDATE, Remove deletes
-# the folder. The site is the OpenNova target's (NovaWorldSettings.web_base). The
+# the folder. The site is the OpenNova target's (NovaWorldServiceTarget.web_base). The
 # runtime holds no web session of the account, so its owner's private mods are
 # not listed here.
 
@@ -1162,7 +1157,7 @@ static func mods_url(web_base: String, command_file: String) -> String:
 func _request_mods() -> void:
 	if _mods_request != null:
 		return
-	var web_base := NovaWorldSettings.web_base()
+	var web_base := NovaWorldServiceTarget.web_base()
 	if web_base.is_empty():
 		_mods_failed("Mods come from OpenNova's NovaWorld, and this launch's gate is NovaLogic's.")
 		return

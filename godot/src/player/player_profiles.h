@@ -22,10 +22,8 @@ namespace godot {
 class AvatarDatabase;
 class CharacterProfile;
 class CharacterSelection;
-class PlayerInfoKitRestore;
 class ResourceRoot;
 class RtxtStringFile;
-class WeaponDatabase;
 class WeaponProfileSummary;
 
 class PlayerProfiles : public RefCounted {
@@ -131,11 +129,6 @@ public:
 
 	// The character side of the current weapon.sav record.
 	Ref<WeaponProfileSummary> character_summary() const;
-	// PLAYER_INFO's populate: the side's (0 blue, 1 red) class page of the
-	// current record, the one its class byte picks, restored over the weapon
-	// table (engine menu::player_info_restore_kit).
-	Ref<PlayerInfoKitRestore> restore_player_info_kit(int p_side,
-			const Ref<WeaponDatabase> &p_weapons) const;
 	// PLAYER_INFO's dialog save (its ACCEPT, a side radio, a class pick) into the
 	// current weapon.sav record (engine profile::PlayerProfiles::apply_character_selection
 	// holds the rules). ERR_INVALID_PARAMETER for a selection the record cannot take

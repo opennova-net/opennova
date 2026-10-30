@@ -12,10 +12,11 @@
 //   SINGLE_PLAYER screen (docs/required-resources.md "Reaching a mission from the menu") and the
 //   updater's buttons on its STARTUP and OPTIONS screens, whatever file holds them;
 // - the shell's name sets (docs/mnu/menu-wiring.md "Shell wiring"), which the OpenNova game shell
-//   binds on whatever document it opens (godot/game/menu_shell.gd's defaults read them through
-//   MenuDriver.command_names), and the shell's delegates that own a whole document by the
-//   controls it holds (the LAN multiplayer screens [orig: UI_RegisterLANMultiplayerCallbacks
-//   @ 0x558d20], PLAYER_INFO [orig: PlayerInfo_InitProfileSelector @ 0x5611b0]).
+//   binds on whatever document it opens (menu::MenuShell, menu_shell.h, wires them after each
+//   open), and the shell's delegates that own a whole document by the controls it holds, each a
+//   screen controller (menu_screen_controller.h): the LAN multiplayer screens [orig:
+//   UI_RegisterLANMultiplayerCallbacks @ 0x558d20], PLAYER_INFO [orig: PlayerInfo_InitProfileSelector
+//   @ 0x5611b0].
 // The editor's menu preview in Try mode (ADR 0046 DI-35) says from these what the game would do,
 // where the game would leave the menu.
 
@@ -53,7 +54,7 @@ const char *menu_command_token(MenuCommand command);
 // What the game does, in words, as "the game would ..." ends ("start the selected mission").
 const char *menu_command_words(MenuCommand command);
 
-// The shell's name sets (menu_shell.gd's exported defaults, a game's own to replace).
+// The shell's name sets (the OpenNova game's, a game's own to replace).
 enum class MenuNameSet : uint8_t {
 	Start, // the launch controls: start the mission on a document holding a mission list
 	Exit,
@@ -103,7 +104,7 @@ MenuCommand app_message_command(const std::string &message);
 // controls and nothing else, else the launch controls
 // start the mission on a document holding a mission list (switch to the Mods list's pick on one
 // holding a mod list instead, else they are the menu's own), then exit, return and restart (in a
-// mission), NovaWorld and back; a name keeps its first binding (menu_shell.gd _wire_named_controls).
+// mission), NovaWorld and back; a name keeps its first binding (menu::MenuShell runs it after each open).
 class MenuCommands {
 public:
 	void wire(const MenuRuntime &menu, bool in_mission);

@@ -30,22 +30,22 @@ static func load_callsign() -> String:
 ## the spawn loadout still speak: the shown side's fields beside the name and both sides.
 static func load_character_profile(root: ResourceRoot) -> Dictionary:
 	var profile := PlayerProfiles.process_character_profile(root)
-	var sides: Array[Dictionary] = [_side(profile.blue), _side(profile.red)]
+	var sides: Array[Dictionary] = [_side(profile, 0), _side(profile, 1)]
 	var shown: Dictionary = sides[profile.team].duplicate()
 	shown.merge({"name": profile.name, "side_profiles": sides}, true)
 	return shown
 
 
-static func _side(side: PlayerInfoSideSelection) -> Dictionary:
+static func _side(profile: CharacterProfile, side: int) -> Dictionary:
 	return {
-		"team": side.team,
-		"nationality": side.nationality,
-		"division": side.division,
-		"combo": side.combo,
-		"player_class": side.player_class,
-		"avatar_a": side.avatar_a,
-		"avatar_b": side.avatar_b,
-		"avatar_packed": side.avatar_packed,
+		"team": profile.side_team(side),
+		"nationality": profile.side_nationality(side),
+		"division": profile.side_division(side),
+		"combo": profile.side_combo(side),
+		"player_class": profile.side_player_class(side),
+		"avatar_a": profile.side_avatar_a(side),
+		"avatar_b": profile.side_avatar_b(side),
+		"avatar_packed": profile.side_avatar_packed(side),
 	}
 
 

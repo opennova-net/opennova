@@ -58,7 +58,7 @@ public:
 	String get_name() const;
 
 	// The PLAYER_INFO companion's ACCEPT snapshot, the profile Dictionary the menu screens still
-	// speak (PlayerCharacterSelectionState.snapshot plus the companion's `kit` / `kit_class` and
+	// speak (engine inmatch::PlayerInfoScreen::snapshot plus the screen's `kit` / `kit_class` and
 	// an optional `name`), read as the record: `player_class` and `team`, `side_profiles[team]`
 	// {avatar_a, avatar_b, avatar_packed} as the character when it is not empty, `kit` (rows of
 	// {name, ammo_primary, ammo_secondary, flags}) into the page of `kit_class` when present. A

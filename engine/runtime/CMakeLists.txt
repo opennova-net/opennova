@@ -88,17 +88,25 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_screen.cpp
     # the WEAPON screen's class pages, counts and type bytes (D-MNU-9)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/armory_loadout.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/armory_screen.cpp # the WEAPON screen's controller: its on-show, picks, ACCEPT and CANCEL
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_sound.cpp # the windows' SOUND rows and when the pump plays them
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_click.cpp # the click and the press's mouse capture (D-MNU-30)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_state_frame.cpp # the frame seam's state writes, and the seam headless
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_commands.cpp # what the game's code does with a control it binds by name
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_shell.cpp # the menu mode, each open's wiring and what a control's command asks
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_history.cpp # the screen history across menu files and a mission (D-MNU-28)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_stack.cpp # the in-mission screen up over a mission, its open, close and close request
+    # frontend — the game's mode table above the session (MainMenu, PreMenu, Game Loop, Post
+    # Menu): the transitions, the save points and the routing (ADR 0077 R3)
+    ${CMAKE_CURRENT_SOURCE_DIR}/frontend/frontend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/mod_list.cpp # the Mods list's rows, its pick's description and ACCEPT's pick (D-MNU-31)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/death_screen.cpp # the DEATH screen's controller (the reveal, the refresh, the picks)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_controller.cpp # the CMAP screen's controls by name, its show and the delete button
     # profile — the player profile's in-memory image (player.sav + weapon.sav),
     # its load and save (witness: docs/playerinfo/player-sav-re.md)
     ${CMAKE_CURRENT_SOURCE_DIR}/profile/player_profiles.cpp
@@ -473,6 +481,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console_player.cpp   # its slot walks: PLAYER, PETERRABBIT, QUERY
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/character_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_info_character.cpp  # the PLAYER_INFO screen's per-side character memory
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_info_screen.cpp  # the PLAYER_INFO screen's controller (its registrations, populate and save)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_emplaced.cpp
@@ -494,6 +503,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/map_change.cpp             # the host's round-end map change (D-NET-331)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_settings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/lan_multiplayer_menu.cpp   # the LAN multiplayer screens' controller (mp.mnu, the "lan" delegate)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_sources.cpp      # the anti-cheat CRC sources (D-NET-181)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_ammo_image.cpp   # retail's ammo.def table image
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_weapon_image.cpp # retail's weapon.def table image
@@ -507,11 +517,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/disconnect_reason.cpp  # retail's join/disconnect reason text over gameerr.bin
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/pre_game_menu.cpp  # the PreMenu join screen (pre.mnu PRE_GAME_MENU)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/pre_game_controller.cpp # the join screen's controls, panel and followed join
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_send.cpp  # the C2S framing and send-boundary pump of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_boot.cpp             # the one joiner bring-up (the host boot's joiner half)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_flow.cpp               # the front end's join flow (enumerate, choice, dial, state 9)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role_replica_world.cpp  # the replica-world mirror and the authoritative appliers of JoinerRole
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
@@ -557,6 +569,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/replica_track.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_screen.cpp # the STAT screen's controller (the show, the tabs, the exit)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_info.cpp       # the NovaWorld listing's live-session columns
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_listing_binding.cpp # the NovaWorld host listing's match side (game and serve)
@@ -565,6 +578,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/hud_session_feeds.cpp # the HUD session's role gates, effects and map feeds
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/special_key_chain.cpp # the special-key chain over a role
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_input_frame.cpp # the local player's input frame (TickInputSource)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/platform_input_device.cpp # its device over the platform's raw input and the binding table
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp
     # --- parity lane L1 sources ---
@@ -581,6 +595,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/body_trace.cpp # the body readout's recording calls (an instrument; the body_trace probe)
     # --- parity lane L5 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu.cpp # the vehicle screen (vehicle.mnu VEHICLE, D-NET-907)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/vehicle_menu_controller.cpp # the vehicle screen's controls over the session's VehicleMenu
     # --- parity lane L7 sources ---
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_mission_start.cpp # ClientRuntime's mission-start pump legs (split off client_runtime.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_weapon_usegun.cpp # the local player's UseGun transition leg (split off player_weapon.cpp)

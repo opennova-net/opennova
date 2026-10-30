@@ -30,8 +30,8 @@
 #include "jobs/maintenance_jobs.h"
 #include "jobs/scheduler.h"
 #include "jobs/worker_pool.h"
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 #include "program/server_config.h"
 
 #include <net/novaworld/db/database.h>

@@ -1,48 +1,40 @@
 #include "network/join_target.h"
 
 #include "network/lan_server_row.h"
-#include "util/string_convert.h"
-
-#include <runtime/inmatch/pre_game_menu.h> // pre_game_commit (the join screen's choice)
 
 namespace godot {
+
+opennova::inmatch::DiscoveredSessionRow JoinTarget::row_facts(const Ref<LanServerRow> &p_row) {
+	opennova::inmatch::DiscoveredSessionRow row;
+	if (p_row.is_null()) return row;
+	row.host_ip = opennova::to_std(p_row->get_host_ip());
+	row.port = p_row->get_port();
+	row.server_name = opennova::to_std(p_row->get_server_name());
+	row.game_type = p_row->get_gametype();
+	row.server_flags = p_row->get_server_flags();
+	row.expansion = opennova::to_std(p_row->get_expansion());
+	row.host_key = p_row->get_host_key();
+	row.password_required = p_row->get_password_required();
+	row.client_index = p_row->get_client_index();
+	return row;
+}
 
 Ref<JoinTarget> JoinTarget::from_lan_row(const Ref<LanServerRow> &p_row) {
 	Ref<JoinTarget> target;
 	target.instantiate();
-	if (p_row.is_null()) {
-		return target;
-	}
-	target->host_ip_ = p_row->get_host_ip();
-	target->port_ = p_row->get_port();
-	target->server_name_ = p_row->get_server_name();
-	target->game_type_ = static_cast<int>(p_row->get_gametype());
-	target->server_flags_ = static_cast<int>(p_row->get_server_flags());
-	// The row's 0x81 SUS2 is the host's expansion: the join switches to it
-	// before it connects.
-	target->expansion_ = p_row->get_expansion();
-	target->expansion_known_ = true;
-	// The row's record already holds the 0x81: the join sends no 0x41 of its own.
-	target->discovered_session_ = true;
-	target->session_host_key_ = p_row->get_host_key();
-	target->session_password_required_ = p_row->get_password_required();
-	// The join goes on with the browse's connection and its CI (D-NET-521).
-	target->session_client_index_ = p_row->get_client_index();
+	if (p_row.is_valid()) target->record_ = opennova::inmatch::join_target_from_row(row_facts(p_row));
 	return target;
 }
 
-void JoinTarget::apply_pre_game_choice(const String &p_game_password, bool p_spectate,
-		const String &p_team_password) {
-	opennova::inmatch::PreGameChoice choice;
-	choice.side_password = opennova::to_std(join_password_);
-	choice.spectator_password = opennova::to_std(spectator_password_);
-	opennova::inmatch::pre_game_commit(opennova::to_std(p_game_password), p_spectate,
-			opennova::to_std(p_team_password), choice);
-	server_password_ = opennova::to_gd(choice.server_password);
-	join_password_ = opennova::to_gd(choice.side_password);
-	spectator_password_ = opennova::to_gd(choice.spectator_password);
-	join_role_ = choice.spectate ? ROLE_SPECTATOR : ROLE_PLAYER;
-	role_explicit_ = true;
+PackedByteArray JoinTarget::bytes(const std::vector<uint8_t> &p_bytes) {
+	PackedByteArray out;
+	out.resize(static_cast<int64_t>(p_bytes.size()));
+	for (size_t i = 0; i < p_bytes.size(); ++i) out[static_cast<int64_t>(i)] = p_bytes[i];
+	return out;
+}
+
+std::vector<uint8_t> JoinTarget::bytes(const PackedByteArray &p_bytes) {
+	return std::vector<uint8_t>(p_bytes.ptr(), p_bytes.ptr() + p_bytes.size());
 }
 
 void JoinTarget::_bind_methods() {

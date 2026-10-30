@@ -1,5 +1,6 @@
 #include "simulation/hud_view_records.h"
 
+#include "rtxt/rtxt_string_file.h"
 #include "util/axes.h"
 #include "util/record_bind.h"
 #include "util/string_convert.h"
@@ -116,10 +117,16 @@ void EndRoundOverlay::_bind_methods() {
 
 // --- EndRoundStatistics -----------------------------------------------------
 
-PackedStringArray EndRoundStatistics::get_label_keys() const {
+String EndRoundStatistics::title(const Ref<RtxtStringFile> &p_gametext) const {
+	return opennova::cp1252_to_gd(
+			opennova::hud::end_round_statistics_text(value_, game_text_lookup(p_gametext)).title);
+}
+
+PackedStringArray EndRoundStatistics::labels(const Ref<RtxtStringFile> &p_gametext) const {
 	PackedStringArray out;
-	for (const opennova::hud::EndRoundStatisticsRow &row : value_.rows)
-		out.push_back(String::utf8(row.label_key));
+	for (const std::string &label :
+			opennova::hud::end_round_statistics_text(value_, game_text_lookup(p_gametext)).labels)
+		out.push_back(opennova::cp1252_to_gd(label));
 	return out;
 }
 
@@ -132,8 +139,9 @@ PackedStringArray EndRoundStatistics::get_values() const {
 
 void EndRoundStatistics::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::BOOL, raised)
-	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::PACKED_STRING_ARRAY, label_keys)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::PACKED_STRING_ARRAY, values)
+	ClassDB::bind_method(D_METHOD("title", "gametext"), &EndRoundStatistics::title);
+	ClassDB::bind_method(D_METHOD("labels", "gametext"), &EndRoundStatistics::labels);
 }
 
 // --- RoundOutcome -----------------------------------------------------------

@@ -2,7 +2,7 @@
 
 #include "hosted/protocol/agent_protocol.h"
 
-#include "net_http.h"
+#include <net/http/http_exchange.h>
 
 #include <base/io/strutil.h>
 

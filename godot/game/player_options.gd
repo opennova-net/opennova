@@ -35,8 +35,9 @@ func current() -> PlayerOptionsState:
 
 ## The record into the cfg block (normalized there), the device settings applied, then the new
 ## detached state published. Live application is retail's preview behavior; the pause dialog's
-## OPT_CANCEL and the front-end OPTIONS BACK roll the model back to its entry snapshot through
-## OptionsMenuController (docs/mnu/menu-re.md "The in-game options dialog").
+## OPT_CANCEL and the front-end OPTIONS BACK roll the model back to the words the dialog opened
+## with (the engine's menu::MenuShell preview baseline; docs/mnu/menu-re.md "The in-game options
+## dialog").
 func update(state: PlayerOptionsState) -> void:
 	if state == null:
 		return

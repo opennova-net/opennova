@@ -472,18 +472,14 @@ void HudSession::push_lanes_(const Ref<Simulation> &p_sim, const Ref<ControlsMod
 	legend_state.title = legend.title;
 	legend_state.labels = legend.labels;
 	hud->set_briefing(t.briefing_mode != 0 && !p_sim->is_mp_session(), p_sim);
-	// The SP Show Score (F5) panel: the gametext Score/SCORE_TITLE title and the Epilog labels
-	// over the engine-composed rows (hud/end_round_statistics.h), re-pushed every frame while
-	// open (the counters are live).
+	// The SP Show Score (F5) panel: the engine-composed rows, title and labels
+	// (hud/end_round_statistics.h end_round_statistics_text), re-pushed every frame while open
+	// (the counters are live).
 	if (t.end_round_stats_open) {
 		const Ref<EndRoundStatistics> stats = p_sim->get_end_round_statistics();
 		if (stats.is_valid()) {
-			PackedStringArray labels;
-			const PackedStringArray keys = stats->get_label_keys();
-			for (int64_t i = 0; i < keys.size(); ++i)
-				labels.push_back(text("Epilog", opennova::to_std(keys[i]).c_str()));
-			hud->set_end_round_statistics(true, stats->get_raised(), text("Score", "SCORE_TITLE"),
-					labels, stats->get_values());
+			hud->set_end_round_statistics(true, stats->get_raised(), stats->title(gametext),
+					stats->labels(gametext), stats->get_values());
 		}
 		end_round_stats_pushed_ = true;
 	} else if (end_round_stats_pushed_) {

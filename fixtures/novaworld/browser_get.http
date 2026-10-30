@@ -1,0 +1,9 @@
+GET /jop_2_main.mnx?nocachefix=67677871816777343 HTTP/1.0
+Host: nw.opennova.test
+Accept: image/jpeg, image/x-pcx, image/pcx, image/png, text/html
+Accept-Language: en
+User-Agent: NovaLogic IBrowse 2.0
+Pragma: no-cache
+Cookie: NWHANDLE=Walker;
+Cookie: PCID=4242;
+

@@ -3,6 +3,8 @@
 #include "rtxt/rtxt_string_file.h"
 #include "util/string_convert.h"
 
+#include <runtime/inmatch/join_flow.h> // refuses_this_install
+
 namespace godot {
 
 Ref<ConnectionError> ConnectionError::make(const opennova::inmatch::ConnectionErrorRecord &p_record) {
@@ -50,14 +52,7 @@ String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_gameerr) const 
 }
 
 bool ConnectionError::refuses_this_install() const {
-	// NCC007 (the protocol version (PV2) gate), GCC003 (a banned address), and the
-	// join build (GDC002..008) and expansion (GDC047, its version.txt GDC048) refusals.
-	if (absent_) return false;
-	if (record_.connect_error == 7) return true;
-	if (record_.connect_error == 14) return record_.connect_param == 3;
-	if (record_.connect_error != 0 || record_.disconnect_code != 2) return false;
-	const uint32_t dpc = record_.disconnect_param;
-	return (dpc >= 2 && dpc <= 8) || dpc == 47 || dpc == 48;
+	return opennova::inmatch::refuses_this_install(record_or_null());
 }
 
 void ConnectionError::_bind_methods() {

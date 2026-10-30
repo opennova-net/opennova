@@ -1,55 +1,24 @@
 class_name DeployScreenPresenter
 extends Node
 
-## The deploy-map screen (death.mnu's DEATH screen) handles the authority's
-## initial deployment hold and later death picks. The show hides DEATH_SHROUD
-## (the window holding the MAP, the list and the statics); it reveals at once
-## under the deploy overlay, else 240 ticks after the death, and the content
-## refreshes only while it is revealed, on each 16-tick boundary (the engine's
-## world/deploy_screen_feed.h death_shroud_revealed / deploy_refresh_due).
-## SPAWNPOINTS_LIST carries the Default Spawn row
-## plus one lettered row per team-owned SECURED zone. Selection always queues a
-## spawn request. Initial selection closes the dialog immediately; death re-picks
-## remain available until the server releases its pending hold because invalid
-## or contested picks can be silently dropped.
-## [orig: death.mnu <NAME>DEATH</NAME>; DeathScreen_UpdateShroudReveal @0x554730 (shroud reveal:
-##  immediate on g_DeployScreenActive, 240 ticks after death; content refresh
-##  every 16 ticks); UI_UpdateDeathScreenContent @0x5536a0 (list populate:
-##  row 0 "'<DEFAULT_SPAWN_KEY>' <HOME>" node 0, then per zone
-##  "'<A+idx>' <WPNames/STRWPNAME%03d>" node idx+1, team color tags <c4040FF>/
-##  <cFF2020>, the whole-list text sort, then the per-zone wave occupant rows
-##  + blank separator with node -1 — the engine builder world/deploy_screen_feed
-##  owns both loops; the STATIC_RESPAWN_MSG1 penalty/wave line, the
-##  STATIC_PSPRESPAWN_MSG1 hold, the STATIC_MEDIC_MSG1/STATIC_CALLMEDIC_MSG
-##  revive-window pair); UI_RegisterDeathScreenCallbacks @0x554610 (SPAWNPOINTS_LIST
-##  select -> Input_QueueEvent(12, node) @0x55364d, guarded on node != -1);
-##  DeathScreen_UpdateUI @0x553150 (map zoom fit from the zone AABB,
-##  SWAP_TEAMS/BUTTON_TEAMLIST by the engine's deploy_team_buttons_shown);
-##  DeathScreen_OnSwapTeams @0x5535B0 (the SWAP_TEAMS click)]
-##
-## The MAP window hosts the windowed map view (MapViewWindow over the engine's
-## DeathMapView and the HUD compiler's DEATH pass, hud/hud_map_view.h): the
-## terrain, the marker walk, the zone blips and letters and the player
-## crosshair, with left-drag pan, right-drag / wheel zoom, the show-time zoom
-## fit against the DEATH_SHROUD window and the per-tick pan ease. The view
-## state is this presenter's MapViewState, which outlives the per-mission menu
-## rebuild like retail's globals. Witnesses: hud-re D-HUD-19.
+## The deploy-map screen (death.mnu's DEATH) for the authority's initial
+## deployment hold and later death picks: the device half. The screen's logic
+## (the show, the shroud reveal and the 16-tick refresh, the spawn rows and
+## their params, the pick rule, the pass-through word, SWAP_TEAMS, the
+## statics) is the engine's DEATH controller (runtime/menu/death_screen.h,
+## the DeathScreen binding), claimed on this presenter's driver at each open.
+## This node owns the frame (its mount, fit and visibility), the per-frame
+## pump and clock, the input forwarding and the MAP window: the windowed map
+## view (MapViewWindow over the engine's DeathMapView and the HUD compiler's
+## DEATH pass, hud/hud_map_view.h), whose view state outlives the menu
+## rebuild like retail's globals (hud-re D-HUD-19).
 
 const MENU_FILE := "death.mnu"
 const MENU_SCREEN := "DEATH"
-const SPAWN_LIST := "SPAWNPOINTS_LIST"
 # The custom-draw MAP window and the shroud window whose authored size the
 # show-time zoom fit reads (hud/hud_map_view.h DeathMapView::fit).
 const MAP_WIDGET := "MAP"
 const SHROUD_WIDGET := "DEATH_SHROUD"
-# The team-service pair, shown together; only SWAP_TEAMS has a DEATH callback.
-const SWAP_TEAMS := "SWAP_TEAMS"
-const TEAM_LIST := "BUTTON_TEAMLIST"
-# The LEAVE MISSION button (its Esc hotkey shows CONFIRM_EXIT) and the
-# confirmation's NO and YES.
-const HIDDEN_BACK := "HIDDEN_BACK"
-const CONFIRM_NO := "CONFIRM_NO"
-const CONFIRM_YES := "CONFIRM_YES"
 
 signal opened
 signal closed
@@ -64,30 +33,12 @@ var _ui_parent: Node = null
 # drives the fit from its own size/resized; a CanvasLayer parent (the game HUD)
 # has no size, so the fit follows the viewport instead.
 var _layout_control: Control = null
-# The compiled menu surface: the frame draws + hit-tests, the audio node plays
-# widget SFX, and the RefCounted driver orchestrates both over the parsed
-# document (freed with the presenter; only the two nodes need queue_free).
+# The compiled menu surface (freed with the presenter; only the two nodes need
+# queue_free) and the screen's engine controller.
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
-# The logic tick the last frame sampled: the content refresh runs when the
-# ticks since reach a 16-tick boundary (Simulation.deploy_refresh_due).
-var _last_tick := 0
-# The spawn list's presenter-side row model, aligned with the compiled list's
-# visible rows: {label, param} per row, rebuilt by _populate_spawn_list. The
-# compiled list carries labels only, so the node parameter the pick serializes
-# lives here (the old ItemList's item metadata).
-## One visible list row: its stripped label and the node PARAM the pick sends
-## (0 default, index + 1 zone, -1 occupant/blank — never a pick).
-class SpawnRow extends RefCounted:
-	var label: String
-	var param: int
-
-	func _init(p_label: String, p_param: int) -> void:
-		label = p_label
-		param = p_param
-
-var _spawn_rows: Array[SpawnRow] = []
+var _screen := DeathScreen.new()
 # The MAP window host mounted over the MAP widget (null until the menu builds
 # on a screen that authors MAP), and the shell's HUD overlay getter: the map
 # pass compiles over the HUD's terrain / markers / fonts.
@@ -96,11 +47,11 @@ var _hud_source: Callable = Callable()
 # The DEATH map's pan/zoom state, held for the presenter's (the process's)
 # lifetime and handed to every MapViewWindow the menu rebuild mounts.
 var _map_view_state := MapViewState.new()
-# The menu input pass-through word while DEATH is up: its show raises it, the
-# exit confirmation (HIDDEN_BACK) lowers it and the confirmation's NO raises it
-# again; the close leaves it as it stands (engine world::pass_through_close_axis
-# carries the witness).
-var _input_pass_through := false
+
+
+func _init() -> void:
+	_screen.close_requested.connect(close)
+	_screen.exit_confirmed.connect(exit_confirmed.emit)
 
 
 func setup(view: WorldView, ui_parent: Node) -> void:
@@ -117,7 +68,7 @@ func is_open() -> bool:
 ## Whether the screen passes input through: its close then runs the input frame
 ## that takes the menu cursor's offset (the shell's _leave_screen).
 func is_input_pass_through() -> bool:
-	return _input_pass_through
+	return _screen.is_input_pass_through()
 
 
 ## The HUD overlay getter the MAP window draws through (the shell hands the HUD
@@ -151,61 +102,39 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
-## The presenter-side spawn row model (one SpawnRow per visible list row,
-## aligned with the compiled list's rows) — ADR 0018 read seam for tests.
-func get_spawn_rows() -> Array[SpawnRow]:
-	return _spawn_rows
-
-
-## ADR 0018 test seams over the row model: append one presenter row (the shape
-## the engine builder emits — an occupant row carries param -1) and fire the
-## list select the compiled list would raise for a row.
-func append_spawn_row(label: String, param: int) -> void:
-	_spawn_rows.append(SpawnRow.new(label, param))
-
-
-func select_spawn_row(row: int) -> void:
-	_on_widget_value_changed(SPAWN_LIST, "list", row, "")
+## The visible spawn rows, each {label, param} (the engine controller's row
+## model, aligned with the compiled list's rows) — ADR 0018 read seam.
+func get_spawn_rows() -> Array:
+	return _screen.get_spawn_rows()
 
 
 ## Open over the live world while the screen is held: the join owes a
-## deployment pick, the host drives the deploy-map OVERLAY (0x0F game_flags
-## bit0 / per-frame 0x0A flags1 bit1), or the local player lies dead in a
-## session. Retail's frame loop opens this same death.mnu DEATH screen off
-## those on every role (the listen host's own client included), and the
-## once-per-arming open latch belongs to the engine's ClientState. The
-## witnesses live on ClientState.death_menu_open_latch
-## (engine/runtime/replication/client_state.h) and hud-re D-HUD-19.
+## deployment pick, the host drives the deploy-map overlay, or the local player
+## lies dead in a session (the engine's DeathScreen::can_open over the
+## session's death-menu hold).
 func open() -> bool:
 	if is_open() or _view == null or _ui_parent == null:
 		return false
 	var sim: Simulation = _view.sim()
-	if sim == null or not bool(sim.is_death_menu_held()):
+	if sim == null:
+		return false
+	_screen.set_simulation(sim)
+	if not _screen.can_open():
 		return false
 	if not _ensure_menu():
 		return false
-	_apply_team_service_buttons(sim.get_deploy_status(
-			Strings.get_table(Strings.TABLE_GAMETEXT),
-			ControlsBindings.model().display_text_for_token("MedicReq")).show_team_buttons)
-	# The show hides the shroud; the per-frame reveal shows it and runs the
-	# content refresh (_process).
-	_set_shroud_shown(false)
-	_input_pass_through = true
+	_screen.set_text_tables(Strings.get_table(Strings.TABLE_GAMETEXT),
+			Strings.get_table(Strings.TABLE_MENUTXT), Strings.get_table(Strings.TABLE_GAMEUI))
+	_screen.set_medic_key_label(ControlsBindings.model().display_text_for_token("MedicReq"))
+	# The show (the engine controller's open): the team pair, the shroud hidden,
+	# the pass-through word raised.
+	_driver.claim_screen(_screen)
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
 	_show_map_window(sim)
-	_last_tick = sim.get_logic_tick()
 	set_process(true)
 	opened.emit()
 	return true
-
-
-# A selection under the initial overlay closes the screen at once; a death
-# re-pick (a joiner's owed pick, or a dead local player) keeps it until the
-# host releases the hold, because an invalid or contested pick is dropped
-# silently and the list's rows are the screen's.
-func _initial_overlay(sim: Simulation) -> bool:
-	return not bool(sim.is_join_deploy_pick_pending()) and not bool(sim.is_local_player_dead())
 
 
 func close() -> void:
@@ -213,6 +142,8 @@ func close() -> void:
 	var map_window := get_map_window()
 	if map_window != null:
 		map_window.screen_unload()
+	if _driver != null:
+		_driver.release_screen()
 	if MenuFrameSurface.hide_frame(_frame):
 		closed.emit()
 
@@ -224,13 +155,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 ## One key-down over the open screen, in the original's order (engine
 ## world::pass_through_close_axis carries the key witness): the menu's
-## keyboard hook runs the screen's hotkeys at once (death.mnu's LEAVE MISSION
-## and the confirmation's NO on Escape, its YES on Return), whose click lands
-## ahead of the pass-through test; the key itself waits in the shell's key ring
-## for the input frame the word lets run (KeyboardPass), the Escape key and a
-## key under the exit confirmation alike. True only when the hotkey closed the
-## screen (the confirmation's YES): the close resets the ring, so the key
-## reaches nothing else.
+## keyboard hook runs the screen's hotkeys at once, whose click lands ahead of
+## the pass-through test; the key itself waits in the shell's key ring for the
+## input frame the word lets run (KeyboardPass). True only when the hotkey
+## closed the screen (the confirmation's YES): the close resets the ring.
 func handle_key(key: InputEventKey) -> bool:
 	if not is_open() or key == null or not key.pressed or key.echo:
 		return false
@@ -249,16 +177,18 @@ func view_sim() -> Simulation:
 ## select, the initial overlay closes on the send and a death re-pick keeps the
 ## screen until the host releases the hold.
 func send_pick(param: int) -> void:
-	var sim: Simulation = _view.sim() if _view != null else null
+	var sim: Simulation = view_sim()
 	if sim == null:
 		return
-	var initial_overlay := _initial_overlay(sim)
-	if sim.send_deployment_pick(param) and initial_overlay:
+	_screen.set_simulation(sim)
+	if _screen.send_pick(param):
 		close()
 
 
 func teardown() -> void:
 	set_process(false)
+	if _driver != null:
+		_driver.release_screen()
 	if _frame != null and is_instance_valid(_frame):
 		_frame.queue_free()
 	if _audio != null and is_instance_valid(_audio):
@@ -267,7 +197,7 @@ func teardown() -> void:
 	_audio = null
 	_driver = null
 	_map_window = null
-	_spawn_rows = []
+	_screen.reset()
 
 
 func _process(_delta: float) -> void:
@@ -283,226 +213,19 @@ func _process(_delta: float) -> void:
 	if sim == null:
 		close()
 		return
-	# A DEAD session is not a deployment release. The host's punt closes the connection,
-	# whose terminal phase clears the pick-pending flag below — so closing there would hand
-	# the shell back to State.WORLD and re-capture the mouse over a world the player can no
-	# longer play. Tear the screen down instead and leave the exit to the session-loss leg:
-	# retail's disconnect exits the mission outright on this edge, it never resumes play.
-	# [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 -> Input_QueueEvent(3)
-	#  @0x4c67a4 -> g_MissionExitReason = 1 (Input_HandleActionBinding case 3 @0x49af2c),
-	#  the nav-push "MainMenu" teardown every abort leg takes @0x568654]
-	if bool(sim.is_session_lost()):
-		teardown()
-		return
-	# The screen's lifetime: a pending DEATH pick holds it, and so do the
-	# frame loop's two triggers, the host-driven overlay bit (which follows
-	# the per-frame 0x0A flags1 bit1, set AND cleared) and the in-session
-	# local death. Only all falling closes it: retail's frame loop closes the
-	# latched screen exactly when its open triggers are gone (the per-frame
-	# fold and close-on-clear witnesses live on ClientState.death_menu_open_latch
-	# and hud-re D-HUD-19). That close is the scene frame's: a frame a listen
-	# host's status page stood in for closes nothing (its ToggleServer row passes
-	# this screen's input frame; the same witness), and the screen's own frame
-	# runs on until the next drawn frame closes it.
-	if not bool(sim.is_death_menu_held()) and (_view == null or _view.scene_drawn()):
-		close()
-		return
-	# The shroud reveal and, inside it, the content refresh on each 16-tick
-	# boundary (engine: runtime/world/deploy_screen_feed.h).
-	var tick := sim.get_logic_tick()
-	if bool(sim.is_death_shroud_revealed()):
-		_set_shroud_shown(true)
-		if Simulation.deploy_refresh_due(_last_tick, tick):
-			_populate_spawn_list(sim)
-	_last_tick = tick
+	_screen.set_simulation(sim)
+	# The engine's frame (DeathScreen::frame): a dead session tears the screen
+	# down, its triggers falling on a drawn scene frame close it, else the
+	# shroud's reveal and the content refresh.
+	match _screen.frame(_driver, _view.scene_drawn()):
+		DeathScreen.FRAME_TEARDOWN:
+			teardown()
+			return
+		DeathScreen.FRAME_CLOSE:
+			close()
+			return
 	# The map window follows its widget, which the reveal just showed.
 	_place_map_window()
-
-
-# Selection commands arrive through the driver's aggregate relay. Every click on
-# a row queues a pick, including a click on the row that is already highlighted:
-# the original's select callback is a COMMAND, fired unconditionally from the
-# list event with no "did the selection change" test and no re-entry gate — and
-# the driver re-emits widget_value_changed on every list click, which carries the
-# old ItemList allow_reselect=true semantics (a re-opened DEATH screen, and any
-# re-pick after the host silently drops one, can still send another C2S 0x0E).
-# [orig: DeathScreen_OnSpawnListSelect @ 0x553630 -> Input_QueueEvent(12,
-#  node) @ 0x55364d, guarded only on node != -1]
-func _on_widget_value_changed(widget_name: String, kind: String, index: int,
-		_value: String) -> void:
-	if kind != "list" or widget_name.nocasecmp_to(SPAWN_LIST) != 0:
-		return
-	if index < 0 or index >= _spawn_rows.size():
-		return
-	var sim: Simulation = _view.sim() if _view != null else null
-	if sim == null:
-		return
-	# [orig: the SPAWNPOINTS_LIST select callback -> Input_QueueEvent(12, node)
-	#  @0x55364d; node 0 = the Default Spawn -> the parameter-0 pick; the
-	#  occupant/blank rows carry node -1 and the callback guards node != -1]
-	var param := _spawn_rows[index].param
-	if param == -1:
-		return
-	var initial_overlay := _initial_overlay(sim)
-	if sim.send_deployment_pick(param) and initial_overlay:
-		# Input case 12 resets the dialogs and queues the request even for an
-		# alive player. Runtime holds gameplay until the host releases the pick.
-		close()
-
-
-func _populate_spawn_list(sim: Simulation) -> void:
-	if _driver == null:
-		return
-	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT),
-			ControlsBindings.model().display_text_for_token("MedicReq"))
-	_apply_statics(status)
-	if status.permanent_death:
-		return
-	var list_id := _driver.widget_id(SPAWN_LIST)
-	if list_id < 0:
-		return
-	# Preserve the pick across the periodic refill by PARAMETER, not row index —
-	# zone security/ownership changes can reshuffle the rows.
-	var keep_param := -1
-	var selected := _driver.selected_row(list_id)
-	if selected >= 0 and selected < _spawn_rows.size():
-		keep_param = _spawn_rows[selected].param
-	# The compiled row set comes from the engine builder (world/deploy_screen_feed):
-	# the Default row, the secured team zones, the whole-list text sort, then
-	# each zone's wave occupants + blank separator at node -1. The row texts
-	# carry retail's team colour tag and the '<b><cFF4040>** name **' self
-	# marker; the compiled list renders the tags through its own markup.
-	# [orig: UI_UpdateDeathScreenContent @0x553aef..0x553de3]
-	_spawn_rows = []
-	var zone_names := {}
-	for zone: DeployZoneRow in sim.get_deploy_spawn_zones():
-		var key := zone.name_key
-		zone_names[key] = _game_text(Strings.SECTION_WPNAMES, key, "Spawn Point")
-	var list_rows: Array[DeployListRow] = sim.get_deploy_list_rows(
-			Strings.menu_text("DEFAULT_SPAWN_KEY", "D"), Strings.menu_text("HOME", "Home Base"),
-			zone_names)
-	for row: DeployListRow in list_rows:
-		# The compiled list has no inline markup channel yet (the row-style
-		# residue in D-HUD-19): the engine text keeps retail's <cRRGGBB>/<b>
-		# tags, the list shows them stripped. The sort already ran over the
-		# tagged text, so the row order is retail's. The stripper is retail's own
-		# (the engine's hud::strip_inline_tags (engine: runtime/hud/feed_format.cpp)).
-		var label := Simulation.strip_inline_tags(row.text)
-		_spawn_rows.append(SpawnRow.new(label, row.value))
-	# The list takes the engine's items (MenuDriver.set_deploy_list_items: the same
-	# stripped texts in the menu's code page, a member's roster name as its bytes);
-	# the spawn rows' labels are the script's own view of them. The fill resets the
-	# selection to row 0; restore the previous pick by parameter without emitting
-	# (picks ride user clicks only, never the refill).
-	_driver.set_deploy_list_items(list_id, list_rows)
-	if keep_param >= 0:
-		for row in _spawn_rows.size():
-			if _spawn_rows[row].param == keep_param:
-				_driver.select_row(list_id, row, false)
-				break
-
-
-
-
-func _set_shroud_shown(shown: bool) -> void:
-	var id := _driver.widget_id(SHROUD_WIDGET) if _driver != null else -1
-	if id >= 0:
-		_driver.set_widget_shown(id, shown)
-
-
-# The swap/team pair's show rule is the engine's (world/deploy_screen_feed.h
-# deploy_team_buttons_shown). [orig: DeathScreen_UpdateUI @0x553489 / @0x5534AA]
-func _apply_team_service_buttons(shown: bool) -> void:
-	for control_name in [SWAP_TEAMS, TEAM_LIST]:
-		# A -1 id means this screen simply does not author the control.
-		var id := _driver.widget_id(control_name)
-		if id >= 0:
-			_driver.set_widget_shown(id, shown)
-
-
-# SWAP_TEAMS asks the host for the other side (C2S 0x4D; the engine's
-# ClientRuntime::queue_team_change_request carries the witness). HIDDEN_BACK
-# and CONFIRM_NO lower and raise the pass-through word (_input_pass_through).
-# CONFIRM_YES closes the in-game screens, then asks the shell for the exit
-# (exit_confirmed).
-func _on_widget_activated(_id: int, widget_name: String) -> void:
-	if widget_name.nocasecmp_to(HIDDEN_BACK) == 0:
-		_input_pass_through = false
-		return
-	if widget_name.nocasecmp_to(CONFIRM_NO) == 0:
-		_input_pass_through = true
-		return
-	if widget_name.nocasecmp_to(CONFIRM_YES) == 0:
-		close()
-		exit_confirmed.emit()
-		return
-	if widget_name.nocasecmp_to(SWAP_TEAMS) != 0:
-		return
-	var sim: Simulation = _view.sim() if _view != null else null
-	if sim != null:
-		sim.send_team_change_request()
-
-
-# The witnessed STATIC show/text rules, refreshed with the list
-# [orig: UI_UpdateDeathScreenContent @0x5536a0]:
-#  * STATIC_RESPAWN_MSG1 (@0x5538e7..0x553a7b): hidden; the penalty timer
-#    "<STROVER_PENALTYTIMER>  <cFF4040><n>" wins; else the wave zone listing the
-#    local player — numbered "'<WPNames name>':  <cFF4040><n>", lettered
-#    "<letter>:  <cFF4040><n>";
-#  * STATIC_LIST_TITLE shown with the list (@0x553ab4);
-#  * STATIC_PSPRESPAWN_MSG1 (@0x553e10) while the spawn-target hold runs;
-#  * STATIC_MEDIC_MSG1 + STATIC_CALLMEDIC_MSG (@0x553e74..0x553f60) while the
-#    local revive window runs and the player is not in a seat.
-# The three texts are the engine's (world/deploy_screen_feed.h
-# deploy_statics_text), resolved through gametext by the sim with the MedicReq
-# binding's display string.
-func _apply_statics(status: DeployStatus) -> void:
-	_apply_team_service_buttons(status.show_team_buttons)
-	var instruction_id := _driver.widget_id("STATIC_INSTRUCTIONS_MSG")
-	var instruction2_id := _driver.widget_id("STATIC_INSTRUCTIONS2_MSG")
-	if instruction_id >= 0 and instruction2_id >= 0:
-		_driver.set_widget_shown(instruction_id, status.show_instruction)
-		_driver.set_widget_shown(instruction2_id, status.show_instruction2)
-		if status.replace_instruction:
-			_driver.set_widget_text(instruction_id, status.instruction_text)
-		_driver.set_widget_text(instruction2_id, status.instruction2_text)
-	if status.permanent_death:
-		var round_id := _driver.widget_id("STATIC_RESPAWN_MSG1")
-		var remaining_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
-		if round_id >= 0 and remaining_id >= 0:
-			_driver.set_widget_shown(round_id, status.show_round_status)
-			_driver.set_widget_shown(remaining_id, status.show_round_status)
-			if status.show_round_status:
-				_driver.set_widget_text(round_id, status.round_text)
-				_driver.set_widget_text(remaining_id, status.remaining_players_text)
-		return
-	var title_id := _driver.widget_id("STATIC_LIST_TITLE")
-	if title_id >= 0:
-		_driver.set_widget_shown(title_id, true)
-	var respawn_id := _driver.widget_id("STATIC_RESPAWN_MSG1")
-	if respawn_id >= 0:
-		var kind := status.queued_kind
-		_driver.set_widget_shown(respawn_id, kind != 0)
-		if kind != 0:
-			# The three sprintf arms are the engine's deploy_status_text
-			# (world/deploy_screen_feed.h), resolved through gametext by the sim.
-			_driver.set_widget_text(respawn_id,
-					status.respawn_text)
-	var psp_id := _driver.widget_id("STATIC_PSPRESPAWN_MSG1")
-	if psp_id >= 0:
-		var show_psp := status.show_psp_respawn
-		_driver.set_widget_shown(psp_id, show_psp)
-		if show_psp:
-			_driver.set_widget_text(psp_id, status.psp_respawn_text)
-	var medic_id := _driver.widget_id("STATIC_MEDIC_MSG1")
-	var call_id := _driver.widget_id("STATIC_CALLMEDIC_MSG")
-	if medic_id >= 0 and call_id >= 0:
-		var show_medic := status.show_medic
-		_driver.set_widget_shown(medic_id, show_medic)
-		_driver.set_widget_shown(call_id, show_medic)
-		if show_medic:
-			_driver.set_widget_text(medic_id, status.medic_timer_text)
-			_driver.set_widget_text(call_id, status.call_medic_text)
 
 
 # Build the compiled menu surface the same way the armory presenter does: the
@@ -516,10 +239,7 @@ func _ensure_menu() -> bool:
 	var surface := MenuFrameSurface.open_surface(root, _ui_parent, _layout_control,
 			MENU_FILE, MENU_SCREEN, "DeployScreenMenu", "DeployScreenPresenter",
 			_on_frame_gui_input,
-			func(driver: MenuDriver) -> void:
-				_register_text_tables(root)
-				driver.widget_value_changed.connect(_on_widget_value_changed)
-				driver.widget_activated.connect(_on_widget_activated))
+			func(_driver_built: MenuDriver) -> void: _register_text_tables(root))
 	if surface == null:
 		return false
 	_frame = surface.frame
@@ -599,13 +319,6 @@ func _register_text_tables(root: ResourceRoot) -> void:
 		var loaded := Strings.load_rtxt(root, spec[1])
 		if loaded != null:
 			Strings.register_table(spec[0], loaded)
-
-
-func _game_text(section: String, key: String, fallback: String) -> String:
-	# [orig: GameText_GetString(Strings.SECTION_WPNAMES, "STRWPNAME%03d") @0x5536a0]
-	if key.is_empty():
-		return fallback
-	return Strings.lookup_or(Strings.TABLE_GAMETEXT, section, key, fallback)
 
 
 func _recompute_fit() -> void:

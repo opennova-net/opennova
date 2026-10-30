@@ -68,8 +68,8 @@
 #include "products/product_repository.h"
 #include "serve/serve_test_support.h"
 
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 
 #include <base/io/file_io.h>
 #include <base/io/log.h>

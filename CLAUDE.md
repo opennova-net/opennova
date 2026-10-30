@@ -28,13 +28,19 @@ easier to relay than to rediscover.
 - `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
   `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"), except `update/` and
   `revupdat/`, which build retail's names, `update.exe` and `revupdat.exe`. `common/` is
-  the shared socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap
-  I/O lives in `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working
-  directory.
+  the remote-admin TCP pump, the update listener and the command runner, deliberately
+  app-layer over the engine's sockets (`engine/net/socket`; the HTTP exchange is
+  `engine/net/http`, ADR 0077 d2; pcap I/O lives in `engine/base/pcapio`); `serve/`
+  (ADR 0051) keeps its files in its working directory; `game/` (opennova-game, ADR 0077 d9)
+  is the game over the SDL3 backend, which becomes `opennova.exe` at R8.
+- `backend/` — the game's platform backends: `sdl3/` (`opennova_backend_sdl3`, the engine's
+  `engine/base/platform` API over SDL3 and the SDL_GPU device; the one library linking SDL3,
+  and no SDL header outside it), beside the NovaWorld service's database (`migrations/`,
+  `seed/`; backend/README.md).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
-- `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
-  data and deployment stack (DEPLOY.md).
+- `web/` — NovaWorld web portal (Vue 3 + TS); `backend/migrations` + `backend/seed` +
+  `deploy/` + `infra/` — service data and deployment stack (DEPLOY.md).
 - No repository holds game data (ADR 0067). Every game (our own and its expansion, the retail
   games' imports) has its OpenNova Editor project in NovaWorld (ADR 0069, ADR 0071): the
   editor's NovaWorld window gets, pulls and pushes it (its owner and admins push; a player may
@@ -48,6 +54,8 @@ easier to relay than to rediscover.
   `acidgambit`, `jo`, or `dfx2`; without it the folder's `UPDATE.WIZ` names the game
   (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `ACIDGAMBIT.CMD` or no wizard OP: Acid Gambit; ADR 0067 d2).
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
+  `tests/null_backend` is the headless platform backend (ADR 0077 d8, `opennova_null_backend`):
+  every `engine/base/platform` interface over simulated time and scripted input.
 - `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a
   `blender_<name>` row when Blender 5.x is on PATH, run against the source-tree add-on;
   the Blender packaging workflow runs them against the installed zip
@@ -69,7 +77,8 @@ easier to relay than to rediscover.
 - `third_party/` — never edit a submodule in place (bump it upstream). Dear ImGui
   (`third_party/imgui/`) is pinned to the commit the imgui-godot addon bundles: bump it
   and `scripts/bootstrap_imgui_godot.sh` together, never one alone; rgbcx bumps its
-  URL/commit and URL_HASH together.
+  URL/commit and URL_HASH together. SDL3 (`third_party/sdl3`) is a shallow submodule pinned
+  to a release tag, built static by the root CMakeLists.txt's `OPENNOVA_GAME`.
 
 ## Build & test
 

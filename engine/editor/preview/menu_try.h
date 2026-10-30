@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,7 @@
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_frame_assets.h>
 #include <runtime/menu/menu_runtime.h>
+#include <runtime/menu/menu_shell.h>
 #include <runtime/menu/menu_state_frame.h>
 #include <runtime/menu/menu_texture_header.h>
 #include <runtime/menu/mod_list.h>
@@ -24,13 +26,14 @@
 namespace opennova::editor {
 
 // A menu tried as the game runs it (ADR 0046 DI-35; CONTEXT.md "Try mode"): the menu viewport's
-// picture behaving as the game's menu, through the runtime's own driver (menu::MenuRuntime: the
-// windows' ACTION rows, the screen history across files, the toggles, the spin lists, the lists and
-// their combos, the edit fields, the focus and the keys, the windows' sounds) over the frame's own pump
-// (menu::MenuStateFrame, headless at design scale), and what the game's code does with the controls it
-// binds by name (menu::MenuCommands; the shell's per-open wiring: the mission lists filled with the
-// project's missions, the Mods lists with the base game and its expansions (menu::ModList), the Options
-// policy and its controls table at the game's defaults).
+// picture behaving as the game's menu, through the game's own shell (menu::MenuShell over the runtime's
+// driver menu::MenuRuntime: the windows' ACTION rows, the screen history across files, the toggles, the
+// spin lists, the lists and their combos, the edit fields, the focus and the keys, the windows' sounds;
+// each open's wiring: the commands the game binds by name, the mission lists filled with the project's
+// missions, the Mods lists with the base game and its expansions, the Options policy and its controls
+// table at the game's defaults, the update gate with no update waiting) over the frame's own pump
+// (menu::MenuStateFrame, headless at design scale). Try is the shell's host: where the game would leave
+// the menu, Try says so.
 //
 // A sandbox: every value it changes (a check, a pick, a slider, a typed text, a key binding) lives in
 // the runtime's own store and its sandbox bindings until a Reset, never in the user's configuration or
@@ -94,10 +97,10 @@ struct MenuTrySound {
 	std::string trigger;
 };
 
-class MenuTry {
+class MenuTry : private menu::MenuShellHost {
 public:
 	MenuTry();
-	~MenuTry();
+	~MenuTry() override;
 	MenuTry(const MenuTry &) = delete;
 	MenuTry &operator=(const MenuTry &) = delete;
 
@@ -124,19 +127,19 @@ public:
 	void set_time_ms(uint32_t ms) { frame_.set_time_ms(ms); }
 
 	bool started() const { return started_; }
-	bool in_mission() const { return in_mission_; }
+	bool in_mission() const { return shell_.in_game(); }
 	const std::string &start_file() const { return start_file_; }
 	const std::string &start_screen() const { return start_screen_; }
 	// The menu shown, its image (the game's reading of it) and its screen in it (null before a start).
-	const std::string &file() const { return file_; }
-	const std::string &screen_name() const { return runtime_.current_screen(); }
-	const std::shared_ptr<const mnu::Document> &image() const { return image_; }
+	const std::string &file() const { return shell_.file(); }
+	const std::string &screen_name() const { return shell_.runtime().current_screen(); }
+	const std::shared_ptr<const mnu::Document> &image() const { return shell_.document(); }
 	const mnu::Screen *screen() const { return screen_; }
 	// The frame: what the device draws (the runtime's state on the screen's compile).
 	const menu::MenuFrameCompiler &compiler() const { return frame_.compiler(); }
 	const menu::MenuFrameState &state() const { return frame_.state(); }
 	const menu::MenuFrameAssets &assets() const { return assets_; }
-	const menu::MenuRuntime &runtime() const { return runtime_; }
+	const menu::MenuRuntime &runtime() const { return shell_.runtime(); }
 	// Moves with each screen configured (the device configures again) and with each write to its state
 	// (the device takes the state again).
 	uint64_t configures() const { return frame_.configures(); }
@@ -156,45 +159,46 @@ public:
 	static constexpr size_t kBreadcrumbKept = 64;
 
 private:
-	// The menu `file` read as the game reads it (kept by name until a reload); null for none.
-	std::shared_ptr<const mnu::Document> menu_(const std::string &file);
-	// Opens `file` at `screen` (the runtime's open_document) and runs the shell's per-open wiring: the
-	// Options surface prepared, the commands bound, the mission lists filled.
-	bool open_(const std::string &file, const std::string &screen);
-	void prepare_();
+	// --- the shell's host: what the game reads, and what it would do, said ---
+	std::shared_ptr<const mnu::Document> read_menu(const std::string &file) override;
+	std::vector<menu::MissionChoice> missions() override;
+	std::vector<ExpansionRecord> expansions() override;
+	std::string expansion() override;
+	// Try describes a Mods switch as a packed install's.
+	bool packed_install() override { return true; }
+	playersav::ProfileRecord *profile_record() override { return &profile_; }
+	void leave(menu::ShellExit exit, menu::MenuCommand command, const std::string &control,
+			const std::string &text) override;
+	bool launch_update(const std::string &control) override;
+	void open_browser(const std::string &url) override;
+	void fetch_page(const std::string &url) override;
+	void service(const menu::MenuEvent &event) override;
+	void delegate_command(menu::MenuCommand command, const std::string &control) override;
+	void notice(menu::ShellNotice notice, const std::string &control, const std::string &text,
+			const std::string &text2) override;
+	void options_effects(int effects, const std::string &control) override;
+	bool mount_game(const std::string &, const std::string &) override { return false; }
+
 	void on_event_(const menu::MenuEvent &event);
-	void on_command_(menu::MenuCommand command, const std::string &control);
 	void outcome_(const std::string &kind, const std::string &control, const std::string &words);
 	void setting_(const std::string &control, const std::string &kind, const std::string &value);
+	void note_bindings_();
 	bool configure_(const std::string &screen, menu::MenuFrameCompiler &compiler);
-	// The cross-file history's pop (POP_SCREEN past the file's own, HIDDEN_BACK): true when it showed one.
-	bool pop_history_();
 
-	struct Held {
-		std::shared_ptr<const mnu::Document> image;
-		bool read = false;
-	};
 	const MenuTrySource *source_ = nullptr; // the call's, while one runs
-	menu::MenuRuntime runtime_;
+	menu::MenuShell shell_;
 	menu::MenuStateFrame frame_;
 	menu::MenuFrameAssets assets_;
 	menu::MenuTextureHeaderProbe decoder_;
-	menu::MenuCommands commands_;
-	menu::MenuFlow flow_;
-	menu::ModList mods_;
-	std::string expansion_; // the game running, as the last open's source said ("" the base game)
-	menu::OptionsScreen options_;
 	// The sandbox's player profile record (a fresh one's words and binding
 	// table), which the Options screens seed from and their Accepts write.
 	playersav::ProfileRecord profile_;
-	std::map<std::string, Held> menus_; // by file name, lower case
-	std::shared_ptr<const mnu::Document> image_;
+	std::set<std::string> menus_read_; // every menu file the game read by name, lower case
 	const mnu::Screen *screen_ = nullptr;
-	std::string file_;
 	std::string start_file_;
 	std::string start_screen_;
 	bool started_ = false;
-	bool in_mission_ = false;
+	uint32_t bindings_revision_ = 0; // the Options screen's bindings as the last event left them
 	std::vector<MenuTryVisit> breadcrumb_;
 	std::vector<MenuTryOutcome> outcomes_;
 	uint64_t outcome_seq_ = 0;

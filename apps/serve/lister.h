@@ -4,9 +4,10 @@
 #include "listing_source.h"
 
 #include "net_datagram_socket.h"
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 
+#include <net/novaworld/browser_transport.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
@@ -19,7 +20,6 @@
 #include <runtime/inmatch/punt_log.h> // inmatch::ConnectLog (the gate and connect lines)
 
 #include <cstdint>
-#include <future>
 #include <memory>
 #include <string>
 #include <vector>
@@ -124,9 +124,6 @@ public:
 	// (Server::second_listing_report). Never an account name, a password or a page's text.
 	const std::string &failure() const { return failure_; }
 	const std::string &failure_tag() const { return failure_tag_; }
-	// The web exchange still out (invalid when none), handed over so a finished lister can go
-	// without its destructor waiting on it; the exchange's worker reads nothing of the lister's.
-	std::future<net::HttpReply> release_http() { return std::move(http_); }
 	// The session and its host leg, for the source behind a live server (the GSID, the join
 	// tickets, the match facts) and the shared socket's claim.
 	NwuLobbySession &lobby() { return lobby_; }
@@ -140,6 +137,9 @@ private:
 	void on_listed();
 	void on_http_reply(const net::HttpReply &reply);
 	void ship(const HttpRequestSpec &spec);
+	// The web legs' transport: the menu browser's (browser_transport.h), its lookup the
+	// destination rule's and its waits the lister's own 15 s.
+	static BrowserTransportOptions web_options(bool allow_public);
 	void request_host();
 	void sync_flow_context();
 	std::vector<std::pair<std::string, std::string>> cookie_vars();
@@ -185,7 +185,8 @@ private:
 	LobbyHttpFlow flow_;
 	LobbyIdentityParams identity_;
 	std::vector<std::pair<std::string, std::string>> identity_vars_;
-	std::future<net::HttpReply> http_;
+	// The web exchange out, one at a time; a lister going away drops it unwaited.
+	BrowserChannel http_{web_options(options_.allow_public)};
 	// The HOSTKEY page's refresh GET, held until the host request is listed, and its answer due.
 	HttpRequestSpec host_page_;
 	bool host_page_in_flight_ = false;

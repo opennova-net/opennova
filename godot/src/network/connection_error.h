@@ -34,6 +34,10 @@ public:
 			const String &p_connect_text, int p_disconnect_code, int p_disconnect_param,
 			const String &p_disconnect_text);
 	const opennova::inmatch::ConnectionErrorRecord &record() const { return record_; }
+	// The record, null for no connection (the engine reads' form).
+	const opennova::inmatch::ConnectionErrorRecord *record_or_null() const {
+		return absent_ ? nullptr : &record_;
+	}
 
 	// True when the record holds a join failure or a disconnect, or there is no connection.
 	bool is_set() const;
@@ -46,9 +50,7 @@ public:
 	// Retail's reason text (inmatch::disconnect_reason_string), the process's
 	// text-override table (rtxt::text_override) searched before `p_gameerr`.
 	String reason_text(const Ref<RtxtStringFile> &p_gameerr) const;
-	// OpenNova browser policy, not a retail witness: the server refused this
-	// build or install outright (another protocol version (PV2) or join build, an
-	// expansion mismatch, or a banned address), so retrying the same server cannot work.
+	// The server refused this build or install outright (inmatch::refuses_this_install).
 	bool refuses_this_install() const;
 };
 

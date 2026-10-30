@@ -136,11 +136,12 @@ jobs:
 
       # The configure scripts/build.sh runs for ci.yml's test-linux (its
       # --cmake-args add the service, HTTP and test-database flags), so the
-      # cached objects match.
+      # cached objects match; no game window (OPENNOVA_GAME, the SDL3 app, which
+      # test-linux builds and smoke-runs).
       - name: Configure (OPENNOVA_NOVAWORLD_SERVICE=ON, BUILD_NOVAWORLD_HTTP=ON)
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON
+          -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON -DOPENNOVA_GAME=OFF
           -DOPENNOVA_VERSION=${{ steps.one.outputs.version }}
           -DOPENNOVA_STAGING=${{ steps.one.outputs.staging }}
           -DOPENNOVA_COMMIT=${{ steps.one.outputs.commit }}
