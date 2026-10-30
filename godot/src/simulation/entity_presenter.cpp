@@ -199,8 +199,6 @@ void EntityPresenter::_bind_methods() {
 			&EntityPresenter::get_throwable_present_stats);
 	ClassDB::bind_method(D_METHOD("get_scar_present_stats"),
 			&EntityPresenter::get_scar_present_stats);
-	ClassDB::bind_method(D_METHOD("has_active_wreck_fire", "owner_key"),
-			&EntityPresenter::has_active_wreck_fire);
 	ClassDB::bind_method(D_METHOD("fire_ribbon_mesh"), &EntityPresenter::fire_ribbon_mesh);
 	ClassDB::bind_method(D_METHOD("set_tracer_mirror_cameras", "mirror", "inset_mirror"),
 			&EntityPresenter::set_tracer_mirror_cameras);
@@ -434,10 +432,6 @@ Ref<ScarPresentStats> EntityPresenter::get_scar_present_stats() const {
 	Ref<ScarPresentStats> empty;
 	empty.instantiate();
 	return empty;
-}
-
-bool EntityPresenter::has_active_wreck_fire(const String &p_owner_key) const {
-	return destruction_->has_active_wreck_fire(p_owner_key);
 }
 
 void EntityPresenter::warm_fire_pipelines(const Vector3 &p_position) {
