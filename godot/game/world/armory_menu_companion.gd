@@ -135,6 +135,8 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	if frame != null and not frame.resized.is_connected(_reposition_icon_mounts):
 		frame.resized.connect(_reposition_icon_mounts)
 	_ensure_weapons("ArmoryMenuCompanion", "armory lists stay empty")
+	# The title the serializer runs as (engine menu::ArmoryLoadout::title).
+	_loadout.set_title_root(root)
 	# The on-show order: the class resolve and the spin, the stage under its team
 	# gate, then the populate (engine menu::ArmoryLoadoutBuffers::stage_on_show).
 	_populate_classes()

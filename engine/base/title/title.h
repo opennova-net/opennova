@@ -75,6 +75,14 @@ struct Title {
 	// [orig: HUD_ParseHudposToken @0x59F370 (@0x5A0463..0x5A04AF, no reader)] [orig: sub_5A6D20
 	//  @0x5A6EDE, sub_59B7E0 @0x59B7E0, sub_59B730 called @0x4223C5 (dfx2.exe)]
 	bool hud_exp_points = false;
+	// DFX2-41: the deploy screen picks the loadout. death.mnu's DEATH screen carries PRIMARY /
+	// SECONDARY / ACCESSORY lists its activation fills for the player's class, and the screen's
+	// close on its triggers' clear submits them (the loadout apply, a C2S 0x2F in session); its
+	// spawn points are a SPAWNPOINTS_TABLE, not a list. With it the loadout serializer writes every
+	// grenade position whose weapon resolves, shown or not, as the death screen authors no grenade
+	// control (DFX2-38). False (Jointops.exe): the DEATH screen's SPAWNPOINTS_LIST, a close that
+	// applies nothing, and only the shown grenade positions serialized.
+	bool death_screen_loadout = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

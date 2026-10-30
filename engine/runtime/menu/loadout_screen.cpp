@@ -356,9 +356,9 @@ void armory_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 	}
 }
 
-void armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
-		const LoadoutSlotRows (&rows)[3], const playersav::KitPage &page,
-		ArmoryScreenPairs &pairs, const hud::GameTextLookup &text) {
+std::vector<int> armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		const LoadoutSlotRows (&rows)[3], const playersav::KitPage &page, ArmoryScreenPairs &pairs,
+		const hud::GameTextLookup &text) {
 	for (const char *list : kParents) {
 		const int id = menu.widget_id(list);
 		if (id >= 0) menu.select_row(id, 0, false);
@@ -375,6 +375,10 @@ void armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const int parent = loadout_selected_weapon(menu, kParents[i], rows[i]);
 		armory_fill_ammo(menu, weapons, kParents[i], parent, pairs, text);
 	}
+	std::vector<int> positions;
+	for (const int32_t slot : walk.grenade_slots)
+		positions.push_back(slot - 1);
+	return positions;
 }
 
 std::vector<int> armory_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
@@ -399,7 +403,7 @@ std::vector<int> armory_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFi
 playersav::KitPage armory_serialize_page(const MenuRuntime &menu,
 		const def::DefWeaponsFile &weapons, const LoadoutSlotRows (&rows)[3],
 		const std::vector<int> &grenades, const ArmoryScreenPairs &pairs, int entity_team,
-		int selected_class) {
+		int selected_class, bool every_position) {
 	playersav::KitPage out;
 	const auto add = [&out](const std::string &name, int32_t primary, int32_t secondary,
 							 int32_t flags) {
@@ -425,7 +429,8 @@ playersav::KitPage armory_serialize_page(const MenuRuntime &menu,
 	}
 	for (size_t i = 0; i < std::size(kGrenades); ++i) {
 		const int combo = menu.widget_id(kGrenades[i]);
-		if (combo < 0 || !menu.is_widget_shown(combo)) continue;
+		if (!every_position && (combo < 0 || !menu.is_widget_shown(combo)))
+			continue;
 		const auto *w = i < grenades.size() ? weapon(weapons, grenades[i]) : nullptr;
 		if (w == nullptr) continue;
 		const int32_t count = pairs.clips_of(catalog_index_of_row(grenades[i]));

@@ -153,15 +153,20 @@ struct ArmoryScreenPairs {
 // reset and seeded by the page's walk, which is the PLAYER screen's (player_info_restore_kit),
 // each category list selected by the row its last entry names (one the list lacks leaves it
 // with none), the ammo-type bytes a PRIMARY / SECONDARY entry carried, then each category's
-// ammo fill (armory_fill_ammo) over its selection.
+// ammo fill (armory_fill_ammo) over its selection. Returns the three grenade positions the walk
+// left, as weapon.def rows (-1 for the "None" catalog row): zeroed, then the page's grenades in
+// page order, with no bound (a fourth lands in the "None" row's count, the walk's own); the
+// grenade fill then overwrites the positions it fills (ArmoryLoadout::populate).
+// [orig: UI_PopulateAmmoTypeComboBoxes @0x564930 - the zeroing @0x564951..0x56495d, the append
+//  @0x564b57; its twin sub_563890 @0x563890 - @0x5638b1..0x5638bd, @0x563af3 (dfx2.exe)]
 // [orig: UI_PopulateAmmoTypeComboBoxes @0x564930 - the NONE selects @0x56499e..0x5649e8, the
 //  pair reset @0x564963..0x56497d, the walk @0x5649ed..0x564b71 (the name lookup
 //  EntityDef_FindIndexByName @0x564a00..0x564a06, the category switch @0x564afe - the
 //  ACCESSORY case @0x564b47 -, the selects UIList_SelectByValue @0x564b33, the type bytes
 //  @0x564b0b / @0x564b40), the PRIMARY / SECONDARY / ACCESSORY legs @0x564b86..0x565454]
-void armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
-		const LoadoutSlotRows (&rows)[3], const playersav::KitPage &page,
-		ArmoryScreenPairs &pairs, const hud::GameTextLookup &text);
+std::vector<int> armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		const LoadoutSlotRows (&rows)[3], const playersav::KitPage &page, ArmoryScreenPairs &pairs,
+		const hud::GameTextLookup &text);
 
 // A category's ammo controls over its selected weapon `parent` (weapon.def row, -1 NONE):
 // with no weapon or none with a clip, AMMO1, the TYPE and AMMO2 hide, their rows kept; else
@@ -193,15 +198,19 @@ std::vector<int> armory_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFi
 // writes it into the class's buffer: the team's knife (WPN_KNIFE2 for an entity team of 2
 // or 4), the medic's medpack (class 5), each category's selected weapon with its two
 // counts and its ammo-type byte (-1 for ACCESSORY), then each shown grenade position's
-// weapon with its count, every other value -1.
+// weapon with its count, every other value -1. With `every_position` (Title::
+// death_screen_loadout, DFX2-38) a position writes whenever its weapon resolves, its control
+// shown, hidden or absent, as dfx2.exe's serializer reads no grenade control.
 // [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 - the knife @0x5658ca..0x56595b
 //  ("WPN_KNIFE" @0x7C3584, "-1" @0x7C3328), the medpack @0x5659fc..0x565a8d, the categories
 //  @0x565a97..0x565bab (AdmDef_GetEntryByIndex @0x565acb, the counts @0x565b10 /
 //  @0x565b3d, the bytes @0x565b64..0x565b8d), the grenades @0x565bbc..0x565cb5 (the shown
 //  gate @0x565bde, the three positions' bound @0x565cb2)]
+// [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x564850 (dfx2.exe) - the positions
+//  @0x564b5c..0x564c20, AdmDef_GetEntryByIndex @0x564b66 its one gate]
 playersav::KitPage armory_serialize_page(const MenuRuntime &menu,
 		const def::DefWeaponsFile &weapons, const LoadoutSlotRows (&rows)[3],
 		const std::vector<int> &grenades, const ArmoryScreenPairs &pairs, int entity_team,
-		int selected_class);
+		int selected_class, bool every_position = false);
 
 } // namespace opennova::menu

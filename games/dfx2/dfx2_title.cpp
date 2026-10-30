@@ -56,6 +56,15 @@ Title make() {
 	// [orig: sub_5A6D20 @0x5A6D20 (@0x5A6EDE..0x5A6EE7); sub_59B7E0 @0x59B7E0; sub_59B730 called
 	//  @0x4223C5 (dfx2.exe)]
 	t.hud_exp_points = true;
+	// DFX2-41 / DFX2-38: the DEATH screen's activation fills the three category lists, its close
+	// on the triggers' clear applies them, and the serializer writes every grenade position
+	// [orig: sub_550690 @0x550690 (Armory_ResolveSelectedClass @0x550ae0,
+	//  UI_PopulateThreeCategoryLists @0x550ae5), run by UI_DispatchScreenEvent @0x54c231;
+	//  sub_550BA0 @0x550ba0, called @0x5c9c09; WeaponLoadout_SerializeSelectionsToBuffer
+	//  @0x564850 (@0x564b5c..0x564c20) (dfx2.exe)]. Jointops.exe's close calls nothing there and
+	// its serializer tests each GRENADE_AMMO control [orig: nullsub_137 @0x5cac97;
+	//  WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 (@0x565bcf..0x565be5)].
+	t.death_screen_loadout = true;
 	return t;
 }
 

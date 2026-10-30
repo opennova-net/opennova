@@ -13,6 +13,7 @@ namespace godot {
 
 class MenuDriver;
 class PlayerProfiles;
+class ResourceRoot;
 class RtxtStringFile;
 class WeaponDatabase;
 class WeaponKitEntry;
@@ -56,6 +57,9 @@ public:
 	TypedArray<WeaponKitEntry> accept(const Ref<MenuDriver> &p_driver,
 			const Ref<WeaponDatabase> &p_weapons, int p_entity_team, int p_selected_class);
 	TypedArray<WeaponKitEntry> get_page(int p_player_class) const;
+	// The title a session over `p_root` runs as, whose serializer the ACCEPT and the class flip
+	// run (engine menu::ArmoryLoadout::title).
+	void set_title_root(const Ref<ResourceRoot> &p_root);
 };
 
 } // namespace godot

@@ -9,6 +9,7 @@
 //  @0x566db0; PlayerInfo_PopulateWeaponAccessoryAmmoUI @0x55e8b0; @0x55f730;
 //  @0x55f760; @0x55fb70; WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0]
 
+#include <base/title/title.h>
 #include <runtime/menu/armory_loadout.h>
 #include <runtime/menu/loadout_screen.h>
 #include <runtime/menu/menu_runtime.h>
@@ -271,7 +272,7 @@ void test_armory_loadout_state() {
 	CHECK(names_of(state.buffers.page(8)) ==
 			"WPN_KNIFE:-1,-1,-1 WPN_MIKE:1,-1,2 WPN_FRAG:-1,-1,-1 WPN_SMOKE:1,-1,-1 "
 			"WPN_FLASH:0,-1,-1 ");
-	CHECK(menu.item_count(primary) == 1 && state.grenade_rows.empty());
+	CHECK(menu.item_count(primary) == 1 && state.grenade_rows == (std::vector<int>{ -1, -1, -1 }));
 	CHECK(!menu.is_widget_shown(menu.widget_id("GRENADE_AMMO1")));
 	state.flip_class(menu, weapons.file, 1, 5, 8, {}, "NONE", text);
 	CHECK(names_of(state.buffers.page(5)) == "WPN_KNIFE:-1,-1,-1 WPN_MEDPACK:-1,-1,-1 ");
@@ -282,6 +283,48 @@ void test_armory_loadout_state() {
 			"WPN_KNIFE2:-1,-1,-1 WPN_MIKE:1,-1,2 WPN_FRAG:-1,-1,-1 WPN_SMOKE:1,-1,-1 "
 			"WPN_FLASH:0,-1,-1 ");
 	CHECK(names_of(state.buffers.page(8)).rfind("WPN_KNIFE2:", 0) == 0);
+}
+
+// The grenade positions and the two serializers (DFX2-38): the page walk's positions (zeroed,
+// then the page's grenades in page order), the fill's overwrite of the ones it fills, and a
+// screen with no grenade control: Jointops.exe's serializer writes none of them, dfx2.exe's
+// (Title::death_screen_loadout) every position whose weapon resolves.
+// [orig: UI_PopulateAmmoTypeComboBoxes @0x564930 (@0x564951..0x56495d, @0x564b57);
+//  UI_PopulateVehicleAmmoSlotList(3) @0x5643c0 (@0x5647f7);
+//  WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 (@0x565bcf..0x565be5)]
+// [orig: sub_563890 @0x563890 (@0x5638b1..0x5638bd, @0x563af3), the fill's store @0x563757,
+//  WeaponLoadout_SerializeSelectionsToBuffer @0x564850 (@0x564b5c..0x564c20) (dfx2.exe)]
+void test_grenade_positions_by_title() {
+	Weapons weapons;
+	// Class 8's filter lists FRAG alone; the page names SMOKE and FLASH.
+	weapons.rows[6].charfilter_mask = 16;
+	weapons.rows[7].charfilter_mask = 16;
+	const auto doc = document({ "PRIMARY", "SECONDARY", "ACCESSORY" }); // the DEATH screen's
+	MenuRuntime menu;
+	CHECK(menu.open_document(&doc, "death.mnu", "LOADOUT"));
+	playersav::Record record;
+	record.blue.pages[3].entries = { entry("WPN_KNIFE", -1, -1, -1), entry("WPN_MIKE", 2, -1, 1),
+		entry("WPN_SMOKE", 1, -1, -1), entry("WPN_FLASH", 2, -1, -1) };
+	ArmoryLoadout jo;
+	CHECK(jo.buffers.stage_on_show(record, 1, {}));
+	jo.populate(menu, weapons.file, 1, 8, {}, "NONE", text);
+	// The walk's SMOKE and FLASH, FRAG's fill over the first.
+	CHECK(jo.grenade_rows == (std::vector<int>{ 5, 7, -1 }));
+	CHECK(!jo.every_grenade_position());
+	CHECK(names_of(jo.accept(menu, weapons.file, 1, 8)) == "WPN_KNIFE:-1,-1,-1 WPN_MIKE:2,-1,1 ");
+	Title dfx2;
+	dfx2.death_screen_loadout = true;
+	ArmoryLoadout death;
+	death.title = &dfx2;
+	CHECK(death.buffers.stage_on_show(record, 1, {}));
+	death.populate(menu, weapons.file, 1, 8, {}, "NONE", text);
+	CHECK(death.every_grenade_position());
+	CHECK(names_of(death.accept(menu, weapons.file, 1, 8)) ==
+			"WPN_KNIFE:-1,-1,-1 WPN_MIKE:2,-1,1 WPN_FRAG:-1,-1,-1 WPN_FLASH:2,-1,-1 ");
+	// A position the walk zeroed (the "None" catalog row) writes nothing under either.
+	CHECK(armory_serialize_page(
+				  menu, weapons.file, death.slot_rows, { -1, -1, -1 }, death.pairs, 1, 8, true)
+					.entries.size() == 2);
 }
 
 void test_player_info_state() {
@@ -376,6 +419,7 @@ int main() {
 	test_armory_selected_clips();
 	test_armory_page_memory();
 	test_armory_loadout_state();
+	test_grenade_positions_by_title();
 	test_player_info_state();
 	std::cout << "loadout_dialog: " << failures << " failures\n";
 	return failures != 0;
