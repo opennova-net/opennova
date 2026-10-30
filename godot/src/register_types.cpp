@@ -193,6 +193,8 @@
 #include "mnu/menu_frame.h"
 #include "mnu/menu_audio.h"
 #include "mnu/menu_driver.h"
+#include "mnu/death_screen.h"
+#include "mnu/end_round_screen.h"
 #include "mnu/player_info_loadout.h"
 #include "mnu/armory_loadout.h"
 #include "mnu/menu_video_underlay.h"
@@ -466,6 +468,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(MenuScrollRange);
 	GDREGISTER_CLASS(MenuDriver);
+	GDREGISTER_CLASS(MenuScreenBinding);
+	GDREGISTER_CLASS(DeathScreen);
+	GDREGISTER_CLASS(EndRoundScreen);
 	GDREGISTER_CLASS(PlayerInfoLoadout);
 	GDREGISTER_CLASS(ArmoryLoadout);
 	GDREGISTER_CLASS(MenuVideoUnderlay);

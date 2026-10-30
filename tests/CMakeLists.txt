@@ -2289,6 +2289,23 @@ target_link_libraries(menu_state_frame_test PRIVATE opennova_runtime)
 target_compile_features(menu_state_frame_test PRIVATE cxx_std_17)
 add_test(NAME menu_state_frame COMMAND menu_state_frame_test)
 
+# The DEATH screen's controller (menu/death_screen.h) over the runtime and the state frame and a fake
+# session: the show, the reveal and the 16-tick refresh, the pick kept by its parameter, the pick
+# rule under the initial overlay, the occupant rows, the exit confirmation's word, SWAP_TEAMS, the
+# statics.
+add_executable(menu_death_screen_test menu/death_screen_test.cpp)
+target_link_libraries(menu_death_screen_test PRIVATE opennova_runtime)
+target_compile_features(menu_death_screen_test PRIVATE cxx_std_17)
+add_test(NAME menu_death_screen COMMAND menu_death_screen_test)
+
+# The end of round's STAT screen controller (inmatch/end_round_screen.h) over the runtime and the
+# state frame and a fake session: the table's fill at its design width, the tabs by the game type,
+# the tab filter, the exit.
+add_executable(menu_end_round_screen_test menu/end_round_screen_test.cpp)
+target_link_libraries(menu_end_round_screen_test PRIVATE opennova_runtime opennova_net)
+target_compile_features(menu_end_round_screen_test PRIVATE cxx_std_17)
+add_test(NAME menu_end_round_screen COMMAND menu_end_round_screen_test)
+
 # The Mods list (menu/mod_list.h, D-MNU-31): the base game's row and the expansion records, a pick's
 # description, ACCEPT's pick and its compare with the game running.
 add_executable(menu_mod_list_test menu/mod_list_test.cpp)

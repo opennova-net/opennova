@@ -163,4 +163,23 @@ struct EndRoundStatisticsPanel {
 	std::vector<EndRoundStatisticsRow> rows;
 };
 
+// The SP Show Score panel's texts the drawer reads per frame while it is open: the title gametext
+// ("Score", "SCORE_TITLE") and each row's label from section "Epilog", a missing string empty as
+// GameText_GetString answers it [orig: HUD_DrawEndRoundStatistics @0x5b7600 — the title @0x5b7656,
+// the labels @0x5b7699/@0x5b774f/@0x5b77d6/@0x5b7859; drawn from HUD_DrawOverlayPanels @0x5c0092
+// while the ShowScore toggle holds it (hud_toggles.h)]. Each text is the table's bytes.
+struct EndRoundStatisticsText {
+	std::string title;
+	std::vector<std::string> labels;
+};
+inline EndRoundStatisticsText end_round_statistics_text(const EndRoundStatisticsPanel &panel,
+		const GameTextLookup &gametext) {
+	EndRoundStatisticsText out;
+	out.title = game_text(gametext, "Score", "SCORE_TITLE", "");
+	out.labels.reserve(panel.rows.size());
+	for (const EndRoundStatisticsRow &row : panel.rows)
+		out.labels.push_back(game_text(gametext, kGameTextEpilog, row.label_key, ""));
+	return out;
+}
+
 } // namespace opennova::hud

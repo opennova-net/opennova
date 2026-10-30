@@ -46,9 +46,6 @@ class ResourceRoot;
 class RtxtStringFile;
 class AvatarDatabase;
 class AvatarComboRow;
-class DeployListRow;
-class EndRoundColumn;
-class EndRoundRow;
 
 // The standalone CScrollWnd range of one widget, as the driver's store holds
 // it (a value snapshot; MenuDriver.set_widget_scroll_range is the one write
@@ -387,19 +384,6 @@ public:
 	String table_cell_text(int p_id, int p_row, int p_col) const;
 	void table_select_row(int p_id, int p_row, bool p_additive);
 	int table_sort_column(int p_id) const;
-	// The end-of-round stat table (StatScreen_PopulateStatResultsList, witnessed in
-	// inmatch stat_screen_feed.h): the engine's column set installed (the RESULTLIST authors no
-	// HEADER), the rows with their team colours, the sort on the first stat column, descending, and
-	// after it the first row whose slot is `p_local_slot` (the local player entity's slot id,
-	// EndRoundState.get_local_slot) selected (inmatch stat_screen_feed.h).
-	void fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
-			const TypedArray<EndRoundRow> &p_rows, int p_local_slot);
-	// A stat tab's filter over the filled table: the rows shown or hidden by their team
-	// (inmatch stat_screen_feed.h stat_screen_filter_rows carries the witness).
-	void filter_stat_results(int p_id, int p_tab);
-	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
-	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
-	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);
 	// The CTableWnd reads (engine menu_table_row.h).
 	int table_cell_value(int p_id, int p_row, int p_col) const;
 	PackedInt32Array table_selected_rows(int p_id) const;

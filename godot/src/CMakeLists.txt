@@ -310,6 +310,8 @@ add_library(opennova_bindings OBJECT
     mnu/menu_frame.cpp
     mnu/menu_audio.cpp
     mnu/menu_driver.cpp
+    mnu/death_screen.cpp
+    mnu/end_round_screen.cpp
     mnu/player_info_loadout.cpp
     mnu/armory_loadout.cpp
     mnu/menu_video_underlay.cpp
