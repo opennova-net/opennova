@@ -460,6 +460,19 @@ void hud_toggles_session_init(HudToggleState &s, bool in_session, bool mp_sessio
 	s.server_status_view = in_session && !mp_session_peer;
 }
 
+HudKeyPressKeys hud_key_press_keys(const GameTextLookup &gametext) {
+	// The first byte as the init's `movsx` reads it; an empty string keeps the default.
+	const auto first = [&gametext](const char *key, int fallback) {
+		const std::string text = game_text(gametext, "KeyPress", key, "");
+		return text.empty() ? fallback : static_cast<int>(static_cast<signed char>(text[0]));
+	};
+	HudKeyPressKeys keys;
+	keys.yes = first("STRKEYPRESS_YES", keys.yes);
+	keys.no = first("STRKEYPRESS_NO", keys.no);
+	keys.restart = first("STRKEYPRESS_RESTART", keys.restart);
+	return keys;
+}
+
 uint32_t hud_toggles_quit_dialog_key(HudToggleState &s, const HudQuitDialogKeyInput &in) {
 	using namespace hud_special_key;
 	if (!s.quit_dialog_open) return 0; // [orig: @0x49c5df]

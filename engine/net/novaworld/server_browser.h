@@ -10,7 +10,10 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <net/novaworld/gsb.h>
@@ -73,5 +76,23 @@ std::vector<std::string> browser_details_lines(const GsbServerEntry &row);
 // The row's hover text: mission, region, country, expansion and the address
 // (an unreported 0.0.0.0 host is omitted), one per line.
 std::string browser_row_tooltip(const GsbServerEntry &row);
+
+// The servers that refused this install outright this process (another protocol version or
+// join build, an expansion mismatch, a banned address: a retry cannot work), by rid, each with
+// its refusal's text: the browser shows such a row unjoinable with that text for the rest of
+// the process. The game shell keeps the one record across the browser's openings.
+class BrowserRefusals {
+public:
+	// A refusal of `rid`; a later one replaces its text.
+	void note(uint32_t rid, std::string reason) { reasons_[rid] = std::move(reason); }
+	// The refusal's text, null for a server that has not refused.
+	const std::string *reason(uint32_t rid) const {
+		const auto it = reasons_.find(rid);
+		return it != reasons_.end() ? &it->second : nullptr;
+	}
+
+private:
+	std::map<uint32_t, std::string> reasons_;
+};
 
 } // namespace opennova

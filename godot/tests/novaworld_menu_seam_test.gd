@@ -1,8 +1,8 @@
 extends GutTest
 
-# The NovaWorld menu seam: a control named by one of novaworld_control_names,
-# when pressed, makes the menu host emit novaworld_requested. This is the same
-# Command-by-name convention the start/exit/return controls use. The live
+# The NovaWorld menu seam: a control the engine binds the NovaWorld command to
+# (menu::MenuCommands, the "novaworld" name set; ctest menu_state_frame pins the
+# set), when pressed, makes the menu host emit novaworld_requested. The live
 # server flow (browse, host, a second client seeing the row) is the manual
 # two-client smoke; this pins the wiring.
 
@@ -10,20 +10,13 @@ const MenuShell := preload("res://game/menu_shell.gd")
 const PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 
 
-func test_novaworld_control_names_default() -> void:
-	var host = MenuShell.new()
-	assert_true(host.novaworld_control_names.has("NW_MULTI_PLAYER"),
-		"the shipped JO main-menu NovaWorld button is covered")
-	host.free()
-
-
 func test_pressing_a_novaworld_control_emits_request() -> void:
 	var host = MenuShell.new()
 	add_child_autofree(host)
 	watch_signals(host)
 
-	# Simulate the host wiring a found control to its handler, the way
-	# _connect_named does, then the player pressing it.
+	# Simulate the host running a found control's NovaWorld command, then the
+	# player pressing it.
 	var button := Button.new()
 	button.name = "NW_MULTI_PLAYER"
 	add_child_autofree(button)
