@@ -108,6 +108,15 @@ inline uint16_t class_allow_mask_from_words(
 	return mask;
 }
 
+// The BANDWIDTH command's clamp of the per-frame 0x0A byte cap (GameConfig::entity_send_budget),
+// which opennova-serve's --entity-send-budget and a hosted server's settings take as their range.
+// [orig: g_EntitySendBudget @0xC8FC50 - atol / 5 clamped @0x50b884 / @0x50b890]
+inline constexpr int32_t kEntitySendBudgetMin = 100;
+inline constexpr int32_t kEntitySendBudgetMax = 1600;
+// The send-holdoff override's ceiling (GameConfig::send_holdoff_ticks; ours, D-NET-1473): a
+// connection holds a period of at most 255 ticks (clamp_send_holdoff_ticks), 0 per tick.
+inline constexpr uint32_t kSendHoldoffTicksMax = 255;
+
 struct GameConfig {
 	// The title the session runs as (CONTEXT.md "Title"): its player caps (title_player_caps) and
 	// the rules it runs (world::title_rules: its built-in score table, its timers and the knobs the
@@ -558,7 +567,8 @@ struct GameConfig {
 	// g_LanMode 1..4 -> 12/6/4/3; the loopback's per-tick cadence is the
 	// NapiNPServer_UpdateHoldoffTicks @0x4c5f40 else-branch @0x4c5f63/@0x4c5f69,
 	// not a GetSendHoldoffTicks case].
-	// `send_holdoff_ticks` is an explicit override; absent means select the
+	// `send_holdoff_ticks` is an explicit override (D-NET-1473: a hosted server's owner sets it,
+	// 0..kSendHoldoffTicksMax); absent means select the
 	// witnessed value from session_channel and lan_mode. Retail's invalid
 	// lanmode fallback is mode 2 (period 6). Loopback connections themselves
 	// remain per-tick and do not consume this remote-peer setting.

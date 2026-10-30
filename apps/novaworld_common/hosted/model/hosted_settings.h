@@ -17,6 +17,7 @@
 #include "machine_driver.h"
 #include "products/product_repository.h"
 #include <formats/gamecfg/server_settings.h>
+#include <runtime/inmatch/game_config.h> // the engine's send ranges
 
 #include <cstddef>
 #include <cstdint>
@@ -34,8 +35,11 @@ inline constexpr size_t kGamePasswordMaxBytes = 16;
 // expansion, more than 32 for Joint Operations with Escalation).
 inline constexpr size_t kMissionsMax = 128;
 inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
-inline constexpr SettingRange kSendHoldoffTicksRange{ 0, 255 };
-inline constexpr SettingRange kEntitySendBudgetRange{ 100, 1600 };
+// The engine's: the send-holdoff override's ceiling (D-NET-1473) and the BANDWIDTH clamp.
+inline constexpr SettingRange kSendHoldoffTicksRange{ 0,
+	static_cast<int>(inmatch::kSendHoldoffTicksMax) };
+inline constexpr SettingRange kEntitySendBudgetRange{ inmatch::kEntitySendBudgetMin,
+	inmatch::kEntitySendBudgetMax };
 inline constexpr SettingRange kMaxPacketSizeRange{ 100, 16384 };
 
 // The owner's settings, stored in hosted_servers.configuration; text in UTF-8.

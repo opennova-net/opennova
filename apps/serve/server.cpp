@@ -272,8 +272,10 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			if (!value(text)) return 1;
 			const auto number = strutil::parse_int(text);
 			const bool holdoff = a == "--send-holdoff-ticks";
-			const int minimum = holdoff ? 0 : 100;
-			const int maximum = holdoff ? 255 : 1600;
+			// The engine's ranges: the override's ceiling (D-NET-1473) and BANDWIDTH's clamp.
+			const int minimum = holdoff ? 0 : inmatch::kEntitySendBudgetMin;
+			const int maximum = holdoff ? static_cast<int>(inmatch::kSendHoldoffTicksMax)
+										: inmatch::kEntitySendBudgetMax;
 			if (!number || !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }) ||
 					*number < minimum || *number > maximum) {
 				error = a + " must be " + std::to_string(minimum) + ".." + std::to_string(maximum);

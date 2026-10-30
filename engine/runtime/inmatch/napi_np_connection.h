@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <runtime/inmatch/game_config.h> // kSendHoldoffTicksMax
 #include <runtime/replication/connection.h>             // replication::Connection, replication::TransportMode
 #include <net/npwire/cs_config.h> // opennova::CsConfig (the cs_dir template copy) and its helpers
 #include <net/npwire/ingame_decode_session.h> // opennova::LoadoutSubmit (the per-player loadout buffer)
@@ -898,7 +899,7 @@ inline bool latch_disconnect_event(NapiNPConnection &conn, const DisconnectEvent
 }
 
 inline uint32_t clamp_send_holdoff_ticks(uint32_t ticks) {
-	return ticks < 255u ? ticks : 255u;
+	return ticks < kSendHoldoffTicksMax ? ticks : kSendHoldoffTicksMax;
 }
 
 inline void arm_s2c_send_holdoff(NapiNPConnection &conn, uint32_t ticks) {
