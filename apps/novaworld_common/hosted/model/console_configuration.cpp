@@ -3,13 +3,77 @@
 #include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
+#include <formats/gamecfg/server_settings.h>
 #include <net/admin/admin_protocol.h>
+
+#include <algorithm>
 
 namespace opennova::novaworld_server::hosted {
 namespace {
 using Json = io::JsonValue;
 bool eq(std::string_view a, std::string_view b) {
 	return strutil::iequals(a, b);
+}
+
+// The keyword retail's WEAPON SET takes for an availability name: ARMORY its armory-only word,
+// NEVER 0, every other word ALWAYS (1). None reaches the mission word, so a weapon an edit sets
+// to "mission" waits for the next launch.
+// [orig: CAdminServer_HandleWeaponCommand @0x4045A0 - ARMORY @0x404822..0x40482E, NEVER
+//  @0x40484A, any other word 1]
+const char *weapon_set_keyword(std::string_view name) {
+	if (name == "never")
+		return "NEVER";
+	if (name == "armory")
+		return "ARMORY";
+	return name == "always" ? "ALWAYS" : nullptr;
+}
+
+// The weapons part of a settings edit: only the weapons whose availability the patch changes
+// from the saved configuration's (as a launch renders it), so a weapon left alone keeps its
+// word, the mission word or any other. A changed weapon's WEAPON SET, or one WEAPON SET ALL when
+// the edit leaves every selectable weapon at one keyword's availability (retail's ALL sets every
+// row with the loadout word, the rows the roster marks selectable [orig:
+// CAdminServer_HandleWeaponCommand @0x404850..0x404868, AdmDef_GetEntryByIndex +936]); a weapon
+// set to "mission" into `later`, the next launch's.
+void weapon_edit(const Json &patch_weapons, const gamecfg::GameCfg &launched,
+		const gamecfg::WeaponRoster &weapons, std::vector<std::string> &commands, Json &later) {
+	const size_t rows =
+			std::min(weapons.size(), static_cast<size_t>(gamecfg::kWeaponAvailabilityCount));
+	std::vector<std::string> target(rows);
+	for (size_t i = 1; i < rows; ++i)
+		if (weapons[i].loadout_selectable)
+			target[i] = gamecfg::weapon_availability_name(
+					launched.weapon_availability[i], launched.table);
+	std::vector<size_t> live;
+	for (const auto &weapon : patch_weapons.object) {
+		if (!weapon.value.is_string())
+			continue;
+		for (size_t i = 1; i < rows; ++i) {
+			if (!weapons[i].loadout_selectable || !eq(weapon.key, cp1252_to_utf8(weapons[i].name)) ||
+					weapon.value.string == target[i])
+				continue;
+			target[i] = weapon.value.string;
+			if (weapon_set_keyword(target[i]) != nullptr)
+				live.push_back(i);
+			else
+				later.set(weapon.key, io::json_string(target[i]));
+		}
+	}
+	if (live.empty())
+		return;
+	std::string uniform;
+	bool one = true;
+	for (size_t i = 1; i < rows && one; ++i)
+		if (weapons[i].loadout_selectable) {
+			one = uniform.empty() || target[i] == uniform;
+			uniform = target[i];
+		}
+	if (one && live.size() > 1) {
+		commands.push_back(std::string("WEAPON SET ALL ") + weapon_set_keyword(uniform));
+		return;
+	}
+	for (const size_t i : live)
+		commands.push_back("WEAPON SET " + std::to_string(i) + " " + weapon_set_keyword(target[i]));
 }
 } //namespace
 
@@ -43,6 +107,8 @@ Json console_settings_patch(std::string_view line, const gamecfg::WeaponRoster &
 	} else if (args.size() >= 3 && eq(args[0], "WEAPON") && eq(args[1], "SET")) {
 		const bool all = eq(args[2], "ALL");
 		const auto index = static_cast<uint8_t>(io::retail_atol(std::string(args[2]).c_str()));
+		// ARMORY the armory-only word, NEVER 0, any other word 1 (no keyword names the mission
+		// word). [orig: CAdminServer_HandleWeaponCommand @0x4045A0 - @0x404822..0x40484A]
 		const char *value = args.size() > 3 && eq(args[3], "NEVER") ? "never"
 				: args.size() > 3 && eq(args[3], "ARMORY")			? "armory"
 																	: "always";
@@ -64,16 +130,17 @@ bool console_changes_rotation(std::string_view line) {
 			(eq(args[1], "ADD") || eq(args[1], "REMOVE") || eq(args[1], "CLEAR"));
 }
 
-ConfigurationEdit configuration_edit(const Json &patch, const gamecfg::WeaponRoster &weapons) {
+ConfigurationEdit configuration_edit(const Json &patch, const HostedSettings &saved,
+		std::string_view title, const gamecfg::WeaponRoster &weapons) {
 	ConfigurationEdit edit;
 	Json later = Json::make_object();
 	const auto field = [&](const std::string &key, const Json &value, bool option) {
 		if (key == "weapons") {
-			for (const auto &weapon : value.object)
-				for (size_t i = 1; i < weapons.size(); ++i)
-					if (eq(weapon.key, cp1252_to_utf8(weapons[i].name)))
-						edit.commands.push_back(
-								"WEAPON SET " + std::to_string(i) + " " + weapon.value.string);
+			Json later_weapons = Json::make_object();
+			weapon_edit(value, settings_block(saved, title, weapons), weapons, edit.commands,
+					later_weapons);
+			if (!later_weapons.object.empty())
+				later.set("weapons", std::move(later_weapons));
 			return;
 		}
 		const auto *spec = gamecfg::server_setting(key);

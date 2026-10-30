@@ -1,7 +1,11 @@
 #include "console_routes.h"
+#include "hosted/model/console_configuration.h"
 #include "hosted/model/console_queue.h"
 #include "http_json.h"
 #include <base/io/cp1252.h>
+
+#include <cstdio>
+#include <stdexcept>
 
 namespace opennova::novaworld_server::hosted {
 namespace {
@@ -100,7 +104,7 @@ crow::response ConsoleRoutes::weapon_settings(const Caller &c) {
 			run_console_command(pool_, c.server_id, "WEAPON LIST", options, kCommandBudget));
 }
 
-crow::response ConsoleRoutes::configuration_edit(const Caller &c, const crow::request &req) {
+crow::response ConsoleRoutes::settings_edit(const Caller &c, const crow::request &req) {
 	io::JsonValue body;
 	std::string error;
 	if (!io::json_parse(req.body, body, error) || !body.is_object())
@@ -116,6 +120,8 @@ crow::response ConsoleRoutes::configuration_edit(const Caller &c, const crow::re
 		if (patch->get(key))
 			return field_error(400, "invalid_field", key,
 					"Use the launcher or rotation controls to change this field.");
+	// What the request waits for the edit's commands (edit_budget).
+	std::chrono::milliseconds wait = kCommandBudget;
 	{
 		auto lease = pool_.acquire();
 		const auto server = find_server(*lease, c.server_id);
@@ -134,11 +140,21 @@ crow::response ConsoleRoutes::configuration_edit(const Caller &c, const crow::re
 			desired.missions.push_back(product.missions.front().file);
 		if (const auto why = check_settings(desired, { product }))
 			return field_error(400, "invalid_field", why->field.c_str(), why->reason);
+		// The drain's plan of the same edit (configuration_edit): the commands it will send.
+		const auto &weapons = server_weapon_roster(product.weapons,
+				product.expansions.empty() ? nullptr : &product.expansions.front().weapons);
+		try {
+			wait = edit_budget(configuration_edit(*patch, server->settings, product.title, weapons)
+							.commands.size());
+		} catch (const std::invalid_argument &) {
+			// A saved configuration its game's data no longer takes: the drain's edit fails the
+			// same way, within the one command's budget.
+		}
 	}
 	options.expected_revision = static_cast<int64_t>(revision->number);
 	options.settings_patch = io::json_write(*patch);
 	return command_reply(c.server_id,
-			run_console_command(pool_, c.server_id, "configuration edit", options, kCommandBudget));
+			run_console_command(pool_, c.server_id, "configuration edit", options, wait));
 }
 
 void ConsoleRoutes::register_configuration(WebApp &app) {
@@ -189,7 +205,7 @@ void ConsoleRoutes::register_configuration(WebApp &app) {
 					   : owner_caller(*access.user, id, !weapons, !weapons);
 		if (c.refusal)
 			return std::move(*c.refusal);
-		return weapons ? weapon_settings(c) : configuration_edit(c, req);
+		return weapons ? weapon_settings(c) : settings_edit(c, req);
 	};
 	CROW_ROUTE(app, "/api/me/servers/<uint>/settings")
 			.methods("PATCH"_method)([handle](const crow::request &req, uint64_t id) {

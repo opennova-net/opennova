@@ -24,8 +24,8 @@
 // admission (below: 429 console_busy, 503 console_full, 409 rotation_busy);
 // for an owner, one token from the account's read or write bucket (429
 // rate_limited); then the link (503 admin_busy with its queue full, 504
-// admin_timeout past the 3 s a request has for all its commands; a 503 hands
-// the token back), and the command's own outcome (console_outcome). Behind
+// admin_timeout past the 3 s a request has for all its commands, a settings edit
+// more by its command count (edit_budget); a 503 hands the token back), and the command's own outcome (console_outcome). Behind
 // ONNET_API_PROXY_ONLY like every /api route.
 //
 // The admission. A console request that runs commands holds a Crow handler
@@ -78,6 +78,19 @@ public:
 	static constexpr RateLimiter::Params kOwnerWritePerUser{ "console_writes", 8, 1.0 / 2 };
 	// What one request may wait for all its commands on the link.
 	static constexpr std::chrono::milliseconds kCommandBudget{ 3000 };
+	// A settings edit sends one command per changed setting, and a hosted server answers one
+	// admin packet per update (its main loop pumps the admin port), so an edit waits
+	// kCommandBudget plus kEditCommandBudget for each command past its first, at most
+	// kEditBudgetMax; past it the drain still completes the edit and the reply reads as
+	// uncertain. Service policy.
+	static constexpr std::chrono::milliseconds kEditCommandBudget{ 250 };
+	static constexpr std::chrono::milliseconds kEditBudgetMax{ 30000 };
+	static constexpr std::chrono::milliseconds edit_budget(size_t commands) {
+		const std::chrono::milliseconds total = kCommandBudget +
+				kEditCommandBudget *
+						static_cast<std::chrono::milliseconds::rep>(commands > 1 ? commands - 1 : 0);
+		return total < kEditBudgetMax ? total : kEditBudgetMax;
+	}
 	// GET .../console's lines: the newest 200 by default, kConsoleKeep at most.
 	static constexpr size_t kConsoleLinesShown = 200;
 	// The handler threads the console always leaves to the rest of the service.
@@ -164,7 +177,7 @@ private:
 	crow::response chat_send(const Caller &c, const ConsoleCommand &command);
 	crow::response console(const Caller &c, const crow::request &req);
 	crow::response settings(db::Database &db, const HostedServer &server);
-	crow::response configuration_edit(const Caller &c, const crow::request &req);
+	crow::response settings_edit(const Caller &c, const crow::request &req);
 	crow::response weapon_settings(const Caller &c);
 	void register_configuration(WebApp &app);
 

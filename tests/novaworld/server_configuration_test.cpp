@@ -5,6 +5,8 @@
 #include <runtime/inmatch/host_config.h>
 #include "common/test_expect.h"
 #include <set>
+#include <string>
+#include <vector>
 
 using namespace opennova;
 namespace hosted = novaworld_server::hosted;
@@ -68,6 +70,32 @@ int main() {
 	TEST_EXPECT(
 			hosted::console_log_text("ServerPassword = Secret\nKillLimit = 10\n").find("Secret") ==
 			std::string::npos);
+	// A settings edit sends only what it changes from the saved configuration (a weapon left at
+	// its saved availability keeps its word, the mission word among them), retail's WEAPON SET
+	// keywords, one WEAPON SET ALL when every selectable weapon ends at one of them, and a weapon
+	// set to "mission", which no keyword reaches, at the next launch.
+	const auto edit_of = [&](const char *text,
+								 const hosted::HostedSettings &saved) -> hosted::ConfigurationEdit {
+		io::JsonValue edit_patch;
+		if (!io::json_parse(text, edit_patch, error))
+			return { io::JsonValue::make_object(), { "unparsed" } };
+		return hosted::configuration_edit(edit_patch, saved, "jo", weapons);
+	};
+	hosted::HostedSettings saved;
+	auto edit = edit_of(R"({"options":{"weapons":{"Rifle":"mission","Grenade":"never"}}})", saved);
+	TEST_EXPECT(edit.commands == std::vector<std::string>{ "WEAPON SET 2 NEVER" } &&
+			!edit.next_launch.get("options"));
+	edit = edit_of(R"({"options":{"weapons":{"Rifle":"always","Grenade":"always"}}})", saved);
+	TEST_EXPECT(edit.commands == std::vector<std::string>{ "WEAPON SET ALL ALWAYS" });
+	edit = edit_of(R"({"kill_limit":5,"options":{"weapons":{"Rifle":"armory"}}})", saved);
+	TEST_EXPECT(edit.commands == (std::vector<std::string>{ "SET KillLimit 5", "WEAPON SET 1 ARMORY" }));
+	TEST_EXPECT(io::json_parse(R"({"weapons":{"Rifle":"never"}})", saved.options, error));
+	edit = edit_of(R"({"options":{"weapons":{"Rifle":"mission","Grenade":"mission"}}})", saved);
+	TEST_EXPECT(edit.commands.empty() &&
+			edit.next_launch.get("options")->get("weapons")->get_string("Rifle", "") == "mission" &&
+			!edit.next_launch.get("options")->get("weapons")->get("Grenade"));
+	command = hosted::console_settings_patch("WEAPON SET 1 MISSION", weapons);
+	TEST_EXPECT(command.get("options")->get("weapons")->get_string("Rifle", "") == "always");
 	TEST_EXPECT(!hosted::console_reply_succeeded({ "OK - Setting Changed.", "ERROR - Failed" }));
 	TEST_EXPECT(hosted::console_changes_rotation("MISSION ADD a.bms 1 0 ONESHOT"));
 	TEST_EXPECT(!hosted::console_changes_rotation("MISSION CYCLE"));

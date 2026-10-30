@@ -111,9 +111,13 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 	io::JsonValue patch = io::JsonValue::make_object();
 	try {
 		gamecfg::WeaponRoster weapons;
+		std::string title; // the server's game's title (a settings edit's table)
 		{
 			auto lease = pool_.acquire();
 			before = find_server(*lease, server_id);
+			if (before)
+				if (const auto product = find_product(*lease, before->settings.product_id))
+					title = product->title;
 			if (before && before->base_tree_id) {
 				gamecfg::WeaponRoster base_weapons, expansion_weapons;
 				if (const auto tree = find_tree(*lease, *before->base_tree_id))
@@ -143,7 +147,8 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 					if (!io::json_parse(options.settings_patch, requested, error))
 						result.outcome = AdminCommandOutcome::Refused;
 					else {
-						const auto edit = configuration_edit(requested, weapons);
+						const auto edit =
+								configuration_edit(requested, before->settings, title, weapons);
 						HostedSettings accepted = before->settings;
 						(void)read_settings_document(edit.next_launch, accepted, field, error);
 						result.outcome = AdminCommandOutcome::Answered;
