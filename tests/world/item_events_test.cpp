@@ -1058,6 +1058,39 @@ int test_vehicle_respawn_rearms_the_final_husk() {
     return 0;
 }
 
+// The draw reads the same Flags & 4 the upfx row's tick reads: a person whose NVG bit (the bit
+// kEntityFlagNVGWorn keeps in `flags`) put its upfx row's publication on the tick takes the
+// draw's husked arm, and holding no final husk keeps those phases, as retail's draw writes
+// nothing for it. [orig: Render_SectorEntity @0x5C4190 - `test al, 4` @0x5C41F5, the +0x38
+//  test @0x5C41F9; Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - Flags & 4 @0x4A92FD,
+//  Entity_PublishSwapFadePhases @0x4A9304]
+int test_nvg_person_keeps_its_upfx_phases_through_the_draw() {
+    auto heap = std::make_unique<World>();
+    auto &w = *heap;
+    w.registry.configure_pool(0, 4);
+    Entity seed;
+    seed.kind = EntityKind::Organic;
+    seed.item_id = 72;
+    seed.alive = true;
+    const EntityHandle h = w.registry.spawn(0, seed);
+    ItemDeathTraits traits; // the default fade: 50 + 4 x 25 ticks
+    w.tables.item_death_traits.set(72, traits);
+    auto &p = *w.registry.get(h);
+    p.flags |= kEntityFlagNVGWorn;
+    p.death_tick = 100;
+    w.logic_tick = 160;
+    // The upfx row's tick publication (ai_system's Upfx move row under the NVG bit).
+    publish_swap_fade_phases(w, p);
+    const std::array<int32_t, 6> published = p.destroy_phases_q16;
+    const double progress = p.destroy_progress;
+    CHECK(published[1] == 65536 && published[0] != 0 && progress > 0.0);
+    // The draw's leg the same frame: no final husk, so nothing written, nothing zeroed.
+    CHECK(!update_item_destroy_fade(w, p));
+    CHECK(p.destroy_phases_q16 == published && p.destroy_progress == progress);
+    CHECK(w.out.destruction.husk_swaps.empty());
+    return 0;
+}
+
 // The pool-2 walk visits its tick & 7 cohort alone and evaluates no swap fade: a husked
 // row's fade stands where its last draw left it whatever the ticks, an intact row off its
 // cohort takes no visit (its clock stands until its cohort tick), and the walk clears no
@@ -1423,6 +1456,7 @@ int main() {
     if (test_husk_swap_stage() != 0) return 1;
     if (test_type_index_zero_rows_take_no_visit() != 0) return 1;
     if (test_vehicle_respawn_rearms_the_final_husk() != 0) return 1;
+    if (test_nvg_person_keeps_its_upfx_phases_through_the_draw() != 0) return 1;
     if (test_cohort_walk_runs_no_swap_fade() != 0) return 1;
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
