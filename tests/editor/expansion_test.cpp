@@ -158,7 +158,13 @@ static int test_project_expansion() {
 	TEST_EXPECT(check_project_expansion("dfx", ProjectExpansion(), error)); // standalone: any game
 	TEST_EXPECT(check_project_expansion("jo", ProjectExpansion{ "jxm", "" }, error));
 	TEST_EXPECT(check_project_expansion("JO", ProjectExpansion{ "jxm", "jox01" }, error));
+	// The target game's Title row says whether its executable mounts one (Title::expansions): Acid
+	// Gambit's is Joint Operations', DFX2's makes no claim.
+	TEST_EXPECT(check_project_expansion("acidgambit", ProjectExpansion{ "jxm", "jox01" }, error));
 	TEST_EXPECT(!check_project_expansion("dfx2", ProjectExpansion{ "jxm", "" }, error) &&
+	            error.code() == "project.expansion.unsupported" &&
+	            error.message.find("Delta Force Xtreme 2") != std::string::npos);
+	TEST_EXPECT(!check_project_expansion("nosuchgame", ProjectExpansion{ "jxm", "" }, error) &&
 	            error.code() == "project.expansion.unsupported");
 	TEST_EXPECT(!check_project_expansion("jo", ProjectExpansion{ "", "jox01" }, error) &&
 	            error.code() == "project.field.invalid" && error.message.find("/exp") != std::string::npos);

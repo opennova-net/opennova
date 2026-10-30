@@ -54,6 +54,14 @@ struct Title {
 	// title's stock data never ships and its program still reads unchecked: each is optional for
 	// the title. Null-terminated; null for none.
 	const char *const *absent_resource_roles = nullptr;
+	// Whether the title's executable mounts an expansion (`/exp` / `/mod`: an expansion folder's
+	// archives over the base game's), which a project may build as (the editor's
+	// check_project_expansion). False where no binary of the title was read for it.
+	bool expansions = false;
+	// Every .def name the title's executable opens, each at its open site: a definitions text under
+	// any other name the game never reads (the editor's game_never_reads). Null-terminated, as
+	// absent_resource_roles is; null: no claim, the title's binary unread for them.
+	const char *const *read_defs = nullptr;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

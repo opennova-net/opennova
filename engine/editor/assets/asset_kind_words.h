@@ -19,11 +19,12 @@ struct AssetKindWords {
 };
 const AssetKindWords &asset_kind_words(AssetKind kind);
 
-// Whether the game of `game_code` (a project's target game, gameprofile's code) never reads a file of `kind` named
-// `name` (its basename): a definitions text of no other kind (OtherDefs) under none of the .def names the profile's
-// binary opens, each witnessed at its open site (docs/required-resources.md, "The .def names the game opens"). The
-// build still packs it, as the game's own archives carry such files. False for every other kind, and for a profile
-// whose binary is unwitnessed, which marks nothing.
+// Whether the game of `game_code` (a project's target game, a title code) never reads a file of `kind` named
+// `name` (its basename): a definitions text of no other kind (OtherDefs) under none of the .def names the title's
+// row says its executable opens (Title::read_defs, each witnessed at its open site: docs/required-resources.md,
+// "The .def names the game opens"). The build still packs it, as the game's own archives carry such files. False
+// for every other kind, and for a title whose row makes no claim (its binary unread for them) or an unknown code,
+// which mark nothing.
 bool game_never_reads(AssetKind kind, const std::string &name, const std::string &game_code);
 
 } // namespace opennova::editor
