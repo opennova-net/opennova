@@ -42,4 +42,24 @@ uint32_t frame_tick_count_ms();
 // tick_count_ms64_from_us over the monotonic clock.
 uint64_t frame_tick_count_ms64();
 
+// The elapsed time a frame's presentation clocks advance by (the free-running body clips, the part
+// sweeps, a model's own PANM DWORD): the main loop's clock read once a frame, less the previous
+// frame's read, as the main loop banks GetTickCount's difference, so a frame moves them in the
+// timer's 15 and 16 ms steps and never by a backend's own frame delta [orig: Game_MainLoop @0x52B630
+// - the frame's elapsed @0x52B798, the add @0x52B7B2]. The DWORD difference keeps its step across a
+// wrap; the first read only stamps.
+class FrameTickElapsed {
+public:
+	uint32_t advance(uint32_t now_ms) {
+		const uint32_t elapsed = stamped_ ? now_ms - last_ms_ : 0u;
+		last_ms_ = now_ms;
+		stamped_ = true;
+		return elapsed;
+	}
+
+private:
+	uint32_t last_ms_ = 0;
+	bool stamped_ = false;
+};
+
 } // namespace opennova::world

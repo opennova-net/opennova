@@ -18,6 +18,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/clip_timeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/skeletal_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/remote_body_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/anim/body_channel.cpp # a clip-posed model's body channel: the clip, the blends, the remote arbitration, the composed pose
     # audio — mixers, bank chain, envs markers, selectors, profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_channel_pool.cpp # the eight physical voices the mix rows bind to
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/ambient_emitters.cpp # the mission's markers, lanes, clock and channel plan
@@ -273,6 +274,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/model_geometry.cpp
     world/entity_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/mounted_pose.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/body_present.cpp # a person body's present inputs: the clip request, the wire body walk, the overlay deltas
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp

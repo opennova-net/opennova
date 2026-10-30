@@ -44,6 +44,7 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view/viewport_kind.h>
+#include <runtime/world/tick_count_clock.h>
 
 #include "authoring/mission_viewport_applier.h"
 #include "authoring/viewport_device.h"
@@ -487,7 +488,8 @@ void EditorApp::_process(double p_delta) {
 		const uint64_t budget = uint64_t(budget_ms) * 1000;
 		devices_->step(session_->viewports(),
 				[start, budget] { return Time::get_singleton()->get_ticks_usec() - start < budget; });
-		ObjectModel::advance_awake_frame(p_delta);
+		// The models' clocks run on the engine's frame clock (GetTickCount's steps), as the game's.
+		ObjectModel::advance_awake_frame(static_cast<int64_t>(opennova::world::frame_tick_count_ms()));
 		session_->frame_times().add(opennova::editor::FramePhase::Devices,
 				opennova::editor::steady_clock_us() - devices_start);
 	}

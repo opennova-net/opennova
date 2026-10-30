@@ -397,6 +397,9 @@ private:
 	ObjectID camera_id_;
 	bool third_person_ = false;
 	ObjectID avatar_id_;
+	// The avatar's world transform as update_avatar composed it from the sim (its
+	// position, its body frame): the frame its attach legs place by.
+	Transform3D avatar_world_;
 	int avatar_type_id_ = 0; // the local body's type word the avatar was built for
 	ObjectID held_weapon_id_; // the 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals)
 	String held_weapon_graphic_; // the gfx3 the live node was built from

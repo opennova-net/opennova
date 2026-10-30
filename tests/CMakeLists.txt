@@ -1411,6 +1411,13 @@ target_link_libraries(anim_remote_body_state_test PRIVATE opennova_runtime)
 target_include_directories(anim_remote_body_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME anim_remote_body_state COMMAND anim_remote_body_state_test)
 
+# A clip-posed model's body channel (runtime/anim/body_channel, ADR 0077 R2): the clip selection,
+# the blends, the remote arbitration, the layers, the composed pose and the frame clock.
+add_executable(anim_body_channel_test anim/body_channel_test.cpp)
+target_link_libraries(anim_body_channel_test PRIVATE opennova_runtime)
+target_include_directories(anim_body_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_body_channel COMMAND anim_body_channel_test)
+
 add_executable(anim_adm_root_motion_test anim/adm_root_motion_test.cpp)
 target_link_libraries(anim_adm_root_motion_test PRIVATE opennova_runtime)
 target_include_directories(anim_adm_root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3310,6 +3317,20 @@ target_link_libraries(player_present_test PRIVATE opennova_runtime)
 target_include_directories(player_present_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(player_present_test PRIVATE cxx_std_17)
 add_test(NAME player_present COMMAND player_present_test)
+
+# A person body's present inputs (runtime/world/body_present, ADR 0077 R2): the placed and avatar
+# clip requests, the wire body walk, the weapon channel and the overlay deltas.
+add_executable(world_body_present_test world/body_present_test.cpp)
+target_link_libraries(world_body_present_test PRIVATE opennova_runtime)
+target_include_directories(world_body_present_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME world_body_present COMMAND world_body_present_test)
+
+# The attach frames from the engine's own bone matrices (runtime/world/entity_pose, ADR 0077 R2):
+# the posed bone frames, the held gun, the overlays and the part frame.
+add_executable(world_entity_pose_attach_test world/entity_pose_attach_test.cpp)
+target_link_libraries(world_entity_pose_attach_test PRIVATE opennova_runtime)
+target_include_directories(world_entity_pose_attach_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME world_entity_pose_attach COMMAND world_entity_pose_attach_test)
 
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <runtime/anim/remote_body_state.h>
+#include <runtime/anim/body_channel.h>
 #include <runtime/anim/skeletal_pose.h>
 #include <runtime/environment/water_mirror.h>
 #include <runtime/renderer/model_controls.h>
@@ -10,7 +10,8 @@
 // NATIVE (the 2026-08-09 de-scripting of the former GDScript implementation).
 // One Node3D owns the
 // retained scene (Robj part nodes / Skeleton3D + Skin / materials), the
-// main-body skeletal channels, the PLAYPARTANIM part channels, the CTRL
+// device half of the main-body channel (the engine anim::BodyChannel composes
+// the pose; this writes it), the PLAYPARTANIM part channels, the CTRL
 // register store, environment lighting application, and the event-driven
 // runtime frame. Presenters drive it through direct typed calls — there is
 // no script bridge, no virtual dispatch layer, and no capability probing.
@@ -50,6 +51,10 @@
 #include "object/object_data.h"
 #include "object/post_multiply_draw.h"
 #include "object/skeletal_anim.h"
+
+namespace opennova::world {
+struct PosedBoneFrames;
+}
 
 namespace godot {
 
@@ -151,7 +156,7 @@ public:
 		PRESENTATION_LAYER_VIEWMODEL = 3,
 	};
 
-	// Fixed layout returned by profile_awake_frame(delta). Keeping this a
+	// Fixed layout returned by profile_awake_frame(clock). Keeping this a
 	// packed numeric record lets the F3 feed cross the script boundary once per
 	// frame without allocating Dictionaries or Strings on the render hot path.
 	enum AwakeFrameProfileSlot {
@@ -197,7 +202,7 @@ private:
 		int64_t awake_models = 0;
 		int64_t renderable_models = 0;
 	};
-	static void advance_awake_frame_impl(double p_delta,
+	static void advance_awake_frame_impl(int64_t p_frame_clock_ms,
 			AwakeFrameProfile *p_profile);
 	struct AlphaStripDraw {
 		MeshInstance3D *instance = nullptr;
@@ -623,53 +628,13 @@ private:
 	// The def-AUTHORED launch userpoint name (items.def launchups_closeattack,
 	// pushed by the placer); empty = this model has no AI muzzle.
 	String muzzle_point_name_;
-	String anim_key_;
-	int anim_variant_ = 0;
-	double anim_time_ = 0.0;
-	bool anim_playing_ = false;
-	bool anim_external_phase_ = false;
-	// Native arbitration/playback numbers; Godot retains only clip resources.
-	opennova::anim::RemoteBodyState remote_body_;
-	String remote_pending_key_;
-	String remote_blend_source_key_;
-	bool body_pose_dirty_ = true;
+	// The body channel (engine anim::BodyChannel): the clip, its playhead, the blends, the remote
+	// arbitration, the weapon channel, the aim overlay and the override, and the pose they
+	// compose; this model writes that pose to its Skeleton3D and nothing more.
+	opennova::anim::BodyChannel body_;
 	bool bounds_dirty_ = true;
-	bool body_phase_stamp_valid_ = false;
-	int body_phase_ticks_applied_ = 0;
-	bool body_phase_parked_applied_ = false; // the applied tick was a parked one
-	String body_blend_source_key_;
-	double body_blend_source_time_ = 0.0;
-	float body_blend_weight_ = 1.0f;
-	// The outgoing primary channel's served ring entry (anim_variant_ is the
-	// target's), as the simulation's AnimVariantRings served it.
-	int body_blend_source_variant_ = 0;
-	int last_slot_resolved_ = -1;
-	String last_slot_key_;
-	// The ragdoll pose drawn over the clip (weight 0: none).
-	std::vector<opennova::anim::PoseBone> body_override_;
-	float body_override_weight_ = 0.0f;
-
-	// Third-person aim overlay + the upper-body weapon channel. The nine
-	// per-class deltas live in a fixed array (no Variant container on the
-	// present hot path); valid_ = an overlay is applied.
-	std::array<Basis, kAimOverlayClasses> aim_overlay_deltas_{};
-	bool aim_overlay_valid_ = false;
-	PackedInt32Array aim_overlay_classes_;
 	bool collapse_right_hand_ = false;
 	uint32_t cut_sections_ = 0;
-	String wpn_key_;
-	int wpn_phase_ticks_ = 0;
-	// The secondary channel's outgoing clip + cross-fade weight (the sim's
-	// wpn_prev / wpn_prev_clip_phase / wpn_blend_weight). Empty prev key = the
-	// channel is not blending (engine: runtime/world/infantry.h).
-	String wpn_prev_key_;
-	int wpn_prev_phase_ticks_ = 0;
-	float wpn_blend_weight_ = 1.0f;
-	// The served variant-ring entries for the target and outgoing weapon clips
-	// (the sim's wpn_variant / wpn_prev_variant — the +68 play latch).
-	int wpn_variant_ = 0;
-	int wpn_prev_variant_ = 0;
-	bool wpn_parked_ = false; // the weapon channel holds its last frame this tick
 
 	// Per-frame work skips.
 	bool has_live_panm_ = false;
@@ -783,24 +748,9 @@ private:
 
 	// --- body/part animation (object_model_anim.cpp) ---
 	void resolve_muzzle_userpoint();
-	bool select_body_clip_seeded(const String &p_key, int p_phase_ticks);
-	void accept_remote_body_clip(const String &p_key,
-			int p_flags, int p_phase_ticks, bool p_had_current);
-	void queue_remote_body_clip(const String &p_key);
-	void clear_remote_body_blend();
-	int body_phase_ticks(const String &p_key, double p_seconds) const;
-	void start_remote_body_blend(const String &p_target_key, int p_target_flags,
-			int p_target_phase_ticks);
-	bool promote_remote_body_pending_if_due();
-	void pose_body_blend_at_times(const String &p_source_key, double p_source_time,
-			const String &p_target_key, double p_target_time, float p_weight,
-			int p_source_variant = 0, int p_target_variant = 0);
-	void set_body_playhead(double p_seconds);
-	String resolve_body_clip_key(const String &p_key) const;
-	double clip_phase_seconds(const String &p_key, int p_phase_ticks, int p_variant = 0,
-			bool p_parked = false) const;
-	void clear_body_blend();
-	void reset_body_pose();
+	// Land what the channel's last verb asked of the device: the composed pose written now, or
+	// every bone back at its rest.
+	void land_body_request();
 	bool advance_part_anims(double p_delta);
 
 	// --- materials/environment (object_model_materials.cpp) ---
@@ -886,9 +836,12 @@ public:
 	// AWAKE set once per render frame — the game from GameWorld's
 	// render_material_frame leg, the menu shell from their one process
 	// loop. Models self-park out of the set the first frame they hold no live
-	// work; there is no per-node _process.
-	static void advance_awake_frame(double p_delta);
-	static PackedInt64Array profile_awake_frame(double p_delta);
+	// work; there is no per-node _process. The clock is the engine's: the frame's
+	// main-loop millisecond count (GameWorld.current_frame_clock_ms, GetTickCount's
+	// steps), the awake set advancing by its difference from the previous frame's
+	// (world::FrameTickElapsed), never a backend frame delta.
+	static void advance_awake_frame(int64_t p_frame_clock_ms);
+	static PackedInt64Array profile_awake_frame(int64_t p_frame_clock_ms);
 	// The game frame's world-skip word (engine inmatch::FrameOutcome::world_skipped): a frame
 	// that skips its world submits no model, so the awake set's next advance treats every
 	// model as not renderable (its clocks and anims advance; its PANM and material
@@ -1212,10 +1165,18 @@ public:
 	static int update_authored_lods_for_camera(Camera3D *p_camera, float p_viewport_width,
 			int p_object_detail = opennova::renderer::kObjectLodDetailLevelMax);
 	Dictionary get_render_part_nodes() const;
-	// A model-space attachment through the rendered subobject's live pose.
-	// Skeletal bones need their inverse rest pose; rigid PANM parts already
-	// map model space directly. Missing parts use the model root.
+	// A model-space attachment through the rendered subobject's pose: a
+	// clip-posed bone's model->world frame from the engine's pose
+	// (world::posed_part_to_world over the body channel); rigid PANM parts
+	// already map model space directly. Missing parts use the model root.
 	Transform3D subobject_model_to_world(int p_subobject) const;
+	// The engine frames of one of this model's posed bones (world::posed_bone_frames over the
+	// channel's composed pose, the rig at its rest without one), placed by p_model_world: false
+	// without a rig or the bone. Nothing is read back from the device skeleton.
+	bool get_posed_bone_frames(int p_bone, const Transform3D &p_model_world,
+			opennova::world::PosedBoneFrames &r_frames) const;
+	static opennova::anim::SkeletalClips::RestTransform to_pose_transform(const Transform3D &p_transform);
+	static Transform3D from_pose_transform(const opennova::anim::SkeletalClips::RestTransform &p_transform);
 	void set_focal_sway(bool active, const Basis &basis, const Vector3 &world_offset);
 	// The occlusion frame's verdict: the RAW section mask (-1 = no verdict,
 	// every section) and the def's forced-visible sections the part draw ORs
@@ -1399,33 +1360,81 @@ public:
 	// The def-authored launch userpoint name; rebuild resolves it against the
 	// model's userpoint table (case-insensitive, retail's by-name lookup).
 	void set_muzzle_point_name(const String &p_name);
+	// The body channel's verbs (engine anim::BodyChannel; each fans out over the linked parts).
+	// The script forms take String keys; the native forms are what the present walks drive,
+	// through BodyTarget.
 	void play_body_clip(const String &p_key);
+	void play_body_clip_native(const std::string &p_key);
 	void play_body_clip_variant(const String &p_key, int p_variant);
+	void play_body_clip_variant_native(const std::string &p_key, int p_variant);
 	void play_body_clip_variant_at_tick(const String &p_key, int p_variant, int p_ticks);
 	void play_body_clip_variant_at_time(const String &p_key, int p_variant,
+			double p_seconds);
+	void play_body_clip_variant_at_time_native(const std::string &p_key, int p_variant,
 			double p_seconds);
 	// p_variant / p_source_variant: each channel's served ring entry. p_parked:
 	// the armed end-notify holds the channel on its boundary this tick, so the
 	// clip samples its last frame (PF_ANIM_PHASE_PARKED).
 	void play_body_clip_at(const String &p_key, int p_phase_ticks, int p_variant = 0,
 			bool p_parked = false);
+	void play_body_clip_at_native(const std::string &p_key, int p_phase_ticks, int p_variant,
+			bool p_parked);
 	void play_body_blend_at(const String &p_source_key, int p_source_phase_ticks,
 			const String &p_target_key, int p_target_phase_ticks, double p_weight,
 			int p_source_variant = 0, int p_variant = 0);
+	void play_body_blend_at_native(const std::string &p_source_key, int p_source_phase_ticks,
+			const std::string &p_target_key, int p_target_phase_ticks, double p_weight,
+			int p_source_variant, int p_variant);
 	void play_body_clip_seeded(const String &p_key, int p_phase_ticks);
 	bool apply_remote_body_state(int p_state_id, const String &p_key, int p_flags,
 			int p_phase_ticks = -1);
+	bool apply_remote_body_state_native(int p_state_id, const std::string &p_key, uint32_t p_flags,
+			int p_phase_ticks);
 	void reset_remote_body_state();
 	bool advance_remote_body_blend_tick(int p_state_id);
 	bool remote_body_needs_fixed_tick() const;
 	void stop_body_clip();
-	String get_active_body_clip() const { return anim_key_; }
-	int get_active_body_variant() const { return anim_variant_; }
+	String get_active_body_clip() const { return String(body_.key().c_str()); }
+	int get_active_body_variant() const { return body_.variant(); }
 	void play_body_anim(int p_slot);
 	void play_body_anim_at(int p_slot, int p_phase_ticks, bool p_parked = false);
+	// The body channel's verbs as a present walk drives them (world/body_present.h): each one
+	// fanned out over this model's linked parts, as the script verbs are.
+	class BodyTarget final : public opennova::anim::BodyChannelTarget {
+	public:
+		explicit BodyTarget(ObjectModel &p_model) : model_(p_model) {}
+		void play_free(const std::string &p_key) override { model_.play_body_clip_native(p_key); }
+		void play_at(const std::string &p_key, int32_t p_phase_ticks, int32_t p_variant,
+				bool p_parked) override {
+			model_.play_body_clip_at_native(p_key, p_phase_ticks, p_variant, p_parked);
+		}
+		void play_blend_at(const std::string &p_source_key, int32_t p_source_phase_ticks,
+				const std::string &p_key, int32_t p_phase_ticks, float p_weight,
+				int32_t p_source_variant, int32_t p_variant) override {
+			model_.play_body_blend_at_native(p_source_key, p_source_phase_ticks, p_key, p_phase_ticks,
+					p_weight, p_source_variant, p_variant);
+		}
+		void play_slot(int32_t p_slot) override { model_.play_body_anim(p_slot); }
+		void play_slot_at(int32_t p_slot, int32_t p_phase_ticks, bool p_parked) override {
+			model_.play_body_anim_at(p_slot, p_phase_ticks, p_parked);
+		}
+		bool remote_request(int32_t p_state, const std::string &p_key, uint32_t p_flags,
+				int32_t p_phase_ticks) override {
+			return model_.apply_remote_body_state_native(p_state, p_key, p_flags, p_phase_ticks);
+		}
+		bool remote_tick(int32_t p_state) override {
+			return model_.advance_remote_body_blend_tick(p_state);
+		}
+
+	private:
+		ObjectModel &model_;
+	};
+	// The engine channel itself (read-only): the composed pose the device draws and the attach
+	// legs build their bone frames from (world/entity_pose.h posed_bone_frames).
+	const opennova::anim::BodyChannel &body_channel() const { return body_; }
 	int64_t get_animation_time_ms() const { return anim_time_ms_; }
 	void set_animation_time(double p_seconds);
-	double get_animation_time() const;
+	double get_animation_time() const { return body_.playhead(); }
 	void play_part_anim(int p_channel, int p_play_type, double p_time_s);
 	void restart_part_anim(int p_channel, int p_play_type, double p_time_s);
 	void set_part_phase(int p_channel, int64_t p_phase);
@@ -1438,16 +1447,17 @@ public:
 			const String &p_prev_key = String(), int p_prev_phase_ticks = 0,
 			float p_blend_weight = 1.0f, int p_variant = 0, int p_prev_variant = 0,
 			bool p_parked = false);
+	void set_weapon_channel_native(const opennova::anim::WeaponChannel &p_channel);
 	// The applied weapon-channel pose — presentation-state read-back: whether
 	// a channel is held, its clip key, its phase (-1 = not replicated) and
 	// whether it holds its last frame (the `parked` it was applied with).
-	bool has_weapon_channel() const;
-	String get_weapon_channel_key() const { return wpn_key_; }
-	int get_weapon_channel_phase_ticks() const { return wpn_phase_ticks_; }
-	bool is_weapon_channel_parked() const { return wpn_parked_; }
-	// The typed present path: p_deltas is kAimOverlayClasses body-relative
-	// per-class rotations; clear drops the overlay.
-	void set_aim_overlay_deltas(const Basis *p_deltas);
+	bool has_weapon_channel() const { return body_.has_weapon_channel(); }
+	String get_weapon_channel_key() const { return String(body_.weapon_channel().key.c_str()); }
+	int get_weapon_channel_phase_ticks() const { return body_.weapon_channel().phase_ticks; }
+	bool is_weapon_channel_parked() const { return body_.weapon_channel().parked; }
+	// The typed present path: the nine body-relative class rotations
+	// (world::aim_overlay_deltas); clear drops the overlay.
+	void set_aim_overlay_quats(const opennova::anim::Quat *p_deltas);
 	void clear_aim_overlay();
 	// The script-facing form (an Array of kAimOverlayClasses Basis, or empty
 	// to clear) converts into the typed path.
@@ -1468,25 +1478,30 @@ public:
 	// second channel is blending (a single channel poses the body otherwise),
 	// its source clip key, its playhead in seconds, the blend weight and its
 	// served ring entry.
-	bool has_body_blend() const;
-	String get_body_blend_source_key() const { return body_blend_source_key_; }
-	float get_body_blend_source_time() const { return static_cast<float>(body_blend_source_time_); }
-	float get_body_blend_weight() const { return body_blend_weight_; }
-	int get_body_blend_source_variant() const { return body_blend_source_variant_; }
+	bool has_body_blend() const { return body_.has_blend(); }
+	String get_body_blend_source_key() const { return String(body_.blend_source_key().c_str()); }
+	float get_body_blend_source_time() const { return static_cast<float>(body_.blend_source_time()); }
+	float get_body_blend_weight() const { return body_.blend_weight(); }
+	int get_body_blend_source_variant() const { return body_.blend_source_variant(); }
+	// One frame of the body channel on the engine frame clock's elapsed seconds, then the
+	// composed pose written to the skeleton (write_pose false: the clock alone, the hidden
+	// model's leg).
 	void advance_body_animation(double p_delta, bool p_write_pose = true);
 	// The ragdoll corpse's pose over the body clip (ADR 0060): at weight 1 it
 	// draws alone, below 1 it blends back toward the clip; clear hands the
 	// body back to the clip. Linked presentation copies take it too.
 	void set_body_pose_override(const std::vector<opennova::anim::PoseBone> &p_pose, float p_weight);
 	void clear_body_pose_override();
-	bool has_body_pose_override() const { return body_override_weight_ > 0.0f; }
+	bool has_body_pose_override() const { return body_.has_override(); }
 	// The body clip's own pose (no overlay) at its playhead plus p_offset
 	// seconds; false when no clip plays.
 	bool eval_body_clip_pose(double p_offset_seconds,
-			std::vector<opennova::anim::PoseBone> &r_pose) const;
+			std::vector<opennova::anim::PoseBone> &r_pose) const {
+		return body_.eval_clip_pose(p_offset_seconds, r_pose);
+	}
 	// Diagnostics: whether a body-pose input changed since the last pose write
 	// (the aim-overlay/weapon-channel dedup fast path pins against this).
-	bool is_body_pose_dirty() const { return body_pose_dirty_; }
+	bool is_body_pose_dirty() const { return body_.dirty(); }
 };
 
 } // namespace godot

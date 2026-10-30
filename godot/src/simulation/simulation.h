@@ -38,6 +38,7 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
 #include <runtime/world/present_drains.h> // the per-tick presentation drain rows (ADR 0043 d10)
+#include <runtime/world/player_present.h> // LocalAvatarPresent (the avatar's present row)
 #include <runtime/world/music_vars.h> // MusicVarWrite (the gamemus var pump)
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the attach-label scan), the attach-command ids + the seat mirror
@@ -1297,29 +1298,22 @@ public:
 	// (engine: runtime/world/player_loadout.cpp)
 	int get_local_player_class() const;
 	String get_local_player_weapon_name() const;
-	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The shell
-	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
-	int get_local_player_body_anim_slot() const;
-	// The local player's full anim-state clip key ("anim_<name>", "" when no player). Carries
-	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
-	// shell plays it on the avatar via ObjectModel.play_body_clip for full stance fidelity.
+	// The local player's full anim-state clip key ("anim_<name>", "" when no player).
 	String get_local_player_anim_key() const;
 	// The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
 	// dword_B76484 prone-latch equivalent the render-slot drape gate reads
 	// [orig: RenderSlot_DrawAllDrapes @0x5d6e81 reads
 	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md].
 	Stance get_local_player_stance_latch() const { return static_cast<Stance>(kernel_->local.stance_latch()); }
+	// The local avatar's present row: its MATCHTERRAIN gate and its body clip
+	// request (engine world::local_avatar_present).
+	opennova::world::LocalAvatarPresent local_avatar_present() const {
+		return opennova::world::local_avatar_present(kernel_->world, kernel_->local);
+	}
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
 	// authoritative stance state (engine: runtime/world/local_player_view.cpp). The witnessed
 	// source is the body state, never the anim clip name.
 	Stance get_local_player_stance() const;
-	int get_local_player_anim_phase_ticks() const;
-	String get_local_player_anim_source_key() const;
-	int get_local_player_anim_source_phase_ticks() const;
-	float get_local_player_anim_blend_weight() const;
-	// The primary channel's served ring entries (target, outgoing) and armed park.
-	int get_local_player_anim_variant() const;
-	int get_local_player_anim_source_variant() const;
 	bool get_local_player_anim_phase_parked() const; // InfantryState::body_phase_parked
 	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
 	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
