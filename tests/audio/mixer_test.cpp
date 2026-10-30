@@ -405,6 +405,52 @@ void script_voice() {
 	expect(voice.handle() == 0 && !voice.frame().state.clip, "the stop forgets the clip");
 }
 
+// A device that holds what it is pushed and plays nothing until told.
+class HeldDevice final : public platform::AudioDevice {
+public:
+	bool open(const platform::AudioSpec &spec, std::string &) override {
+		spec_ = spec;
+		open_ = true;
+		return true;
+	}
+	void close() override { open_ = false; }
+	bool is_open() const override { return open_; }
+	bool push(const void *, uint32_t frame_count) override {
+		queued_ += frame_count;
+		pushed_ += frame_count;
+		return open_;
+	}
+	uint32_t queued_frames() const override { return queued_; }
+	void set_gain(float) override {}
+	float take_peak() override { return 0.0f; }
+	void play(uint32_t frames) { queued_ -= frames < queued_ ? frames : queued_; }
+	platform::AudioSpec spec_;
+	uint32_t pushed_ = 0;
+
+private:
+	bool open_ = false;
+	uint32_t queued_ = 0;
+};
+
+// The mixer's stream on a platform device: opened at 44100 Hz stereo S16, kept a fifth of a
+// second ahead of the device's play.
+void device_feed() {
+	Mixer mixer;
+	HeldDevice device;
+	expect(feed_audio_device(mixer, device) == 0, "a closed device takes nothing");
+	std::string error;
+	device.open(mix_audio_spec(), error);
+	expect(device.spec_.rate == 44100 && device.spec_.channels == 2 &&
+					device.spec_.format == platform::SampleFormat::S16 &&
+					platform::audio_frame_bytes(device.spec_) == 4,
+			"the mixer's spec");
+	expect(feed_audio_device(mixer, device) == kMixFillFrames, "the first feed fills the fifth of a second");
+	expect(feed_audio_device(mixer, device) == 0, "a full queue takes nothing");
+	device.play(1000);
+	expect(feed_audio_device(mixer, device) == 1000, "the feed tops the queue back up");
+	expect(device.pushed_ == kMixFillFrames + 1000, "the frames pushed");
+}
+
 uint64_t fnv1a(const std::vector<int16_t> &samples) {
 	uint64_t h = 1469598103934665603ull;
 	for (const int16_t s : samples) {
@@ -454,6 +500,7 @@ int main() {
 	music_stream();
 	listener_pans();
 	script_voice();
+	device_feed();
 	golden();
 	if (test_expect::failures == 0) std::printf("audio_mixer: all passed\n");
 	return test_expect::failures == 0 ? 0 : 1;
