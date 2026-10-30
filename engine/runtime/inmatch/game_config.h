@@ -595,9 +595,14 @@ struct GameConfig {
 	uint32_t player_slot_limit() const;
 
 	// The limit a map change's mission start recomputed from the cfg block as it then stood
-	// (stage_next_mission), unset until a map change: a remote admin's SET of the cap or the
-	// server type between maps moves it, while the session's cap and its slot table stay the
-	// create's. [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals
+	// (stage_next_mission), unset until a map change: a cap or server type the host screen's
+	// read or the host file wrote into the block since the create moves it (no remote admin
+	// SET writes either), while the session's cap and its slot table stay the create's.
+	// [orig: the block's writers HostDialog_ReadSettings @0x555940 (from
+	//  UI_HandleHostSessionStart @0x556E36, HostDialog_StartSession @0x558764 and the host
+	//  screen's BACK callback sub_5571F0 @0x5571FA) and ServerConfig_ApplyHostSetting
+	//  @0x4A6000 (the host file); CAdminServer_HandleSetCommand @0x405A60 has no cap or
+	//  server-type key] [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals
 	//  @0x524662 under the first-load flag @0x52465E (the store @0x551B2B / @0x551B35, the
 	//  ceiling @0x551B3B..0x551B48); Server_InitNewRoundState has no map-change caller (its
 	//  callers: Game_InitSubsystems @0x4A6D76, CNapiGameSession_FullDestroy @0x4C9780,
