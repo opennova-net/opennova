@@ -145,8 +145,7 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 	cfg.game_root = host_game_root_;
 	if (net_.local_character_vars_set) cfg.local_character_vars = net_.local_character_vars;
 	// The host's own CD-key ids, this machine's activation: a DFX2 LAN host refuses a joiner
-	// sending them (code 12).
-	// [orig: Server_ValidatePlayerJoinRequest @0x50f449..0x50f464 (dfx2.exe), g_CDKeyInfo +16]
+	// sending them (code 12; engine NapiNPServerCtx::host_cd_keys carries the witness).
 	cfg.host_cd_keys = machine_activation_cd_keys(cfg.protocol);
 	return cfg;
 }
@@ -880,9 +879,8 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_join_glsvss_request();
 	// The JOIN's CD-key ids, this machine's activation as the join reads it: what a LAN JOIN
 	// leads with, where a DFX2 LAN host refuses one without a key it can decode (codes 10, 11).
-	// No activation, no CDKIID: such a join is refused 10, as a stock DFX2 without one is.
-	// [orig: NapiNP_WriteClientAuthPayload @0x42c210 (dfx2.exe) - g_CDKeyInfo +16 written as the
-	//  CDKIID in a LAN session @0x42c25b..0x42c2c5]
+	// No activation, no CDKIID: such a join is refused 10, as a stock DFX2 without one is
+	// (engine JoinerConnection::set_cd_key_ids carries the witness).
 	net_.join_cd_key_ids = machine_activation_cd_keys(protocol);
 	install_join_cd_key_ids();
 	install_join_mission_start();
