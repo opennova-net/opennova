@@ -18,11 +18,19 @@
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
+#include <runtime/renderer/render_slot_frame.h>
 #include <runtime/renderer/render_slot_shadow.h>
 
 namespace godot {
 
+class ObjectModel;
 class RenderingDevice;
+
+// A model draw's visibility as the slot pass reads it (engine
+// runtime/renderer/render_slot_frame.h SlotCasterVisibility, whose rule,
+// slot_draw_shown, decides): its present intent, its own state, and whether a
+// render-only claim (the occlusion collect, the sub-pixel floor) hides it.
+opennova::renderer::SlotCasterVisibility slot_draw_visibility(const ObjectModel &p_model);
 
 // The retail slot RT clear as a device colour: renderer::kSlotCaptureClearArgb
 // (0x00FFFFFF, white RGB and alpha 0) decoded once for the capture pass's

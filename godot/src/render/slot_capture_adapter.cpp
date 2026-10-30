@@ -64,16 +64,13 @@ namespace {
 
 // mat4 + vec4: the per-draw block below.
 constexpr std::uint32_t kPushConstantBytes = 96u;
-// Push flag bits (params.z) the shaders decode.
-constexpr std::uint32_t kFlagAlphaTest = 1u;
-constexpr std::uint32_t kFlagAlphaInvert = 2u;
-constexpr std::uint32_t kFlagAlphaMod = 4u;
-constexpr std::uint32_t kFlagDetailAlpha = 8u;
-constexpr std::uint32_t kFlagSkinned = 16u;
-// The _FFP material-blend PROJSHAD variant of an alpha-blend material: the
-// fragment carries its coverage as alpha for the SRCALPHA/INVSRCALPHA
-// pipeline instead of the opaque pass's alpha 1.
-constexpr std::uint32_t kFlagBlendCoverage = 32u;
+// The push flag bits (params.z) the shaders decode are the engine's
+// renderer::SlotCaptureCommandFlag (render_slot_shadow.h); the shaders below
+// spell the same values.
+static_assert(kSlotCaptureAlphaTest == 1u && kSlotCaptureAlphaInvert == 2u &&
+				kSlotCaptureAlphaMod == 4u && kSlotCaptureDetailAlpha == 8u &&
+				kSlotCaptureSkinned == 16u && kSlotCaptureBlendCoverage == 32u,
+		"the capture shaders decode the engine's command flag bits");
 constexpr std::uint32_t kBoneMatrixBytes = 64u;
 
 // The black PROJSHAD pass over the retail 0x00FFFFFF clear: the geometry
@@ -284,21 +281,16 @@ std::vector<Transform3D> skin_palette(MeshInstance3D *p_instance) {
 // (retail's seat children render inside the parent's slot). The auxiliary
 // duplicates (the BmTxMirrT P3 postmultiply instance) re-submit the same
 // strip and carry no classified material; retail's single PROJSHAD pass per
-// effect is the registered P0/P1 instance. An ObjectModel counts with the
-// render-occlusion claim lifted (its present intent — the sim's hide,
-// retail's Flags & 1 — still hides it): the slot pass never consults the
-// render-occlusion gate, so a caster the blink or
-// outdoors gate hides still casts (retail: RenderSlot_RenderEntityAndChildren
-// @0x5d7690 has no visibility test; RenderSlot_SortAndAssign gates only
-// Flags & 1 @0x5d657d). Every other node keeps its own visible flag (the
+// effect is the registered P0/P1 instance. An ObjectModel counts by the
+// engine's rule (renderer::slot_draw_shown: the render claims lifted, its
+// present intent kept). Every other node keeps its own visible flag (the
 // inactive RLOD levels, hidden parts).
 void collect_visible_geometry(Node *p_node,
 		std::vector<GeometryInstance3D *> &r_instances) {
 	if (p_node == nullptr)
 		return;
 	if (const ObjectModel *model = Object::cast_to<ObjectModel>(p_node)) {
-		if (!(model->is_occlusion_hidden() ? model->is_present_visible()
-										   : model->is_visible()))
+		if (!slot_draw_shown(slot_draw_visibility(*model)))
 			return;
 	} else if (const Node3D *spatial = Object::cast_to<Node3D>(p_node)) {
 		if (!spatial->is_visible())
@@ -336,8 +328,8 @@ struct AdmittedSurface {
 	ObjectMaterialClassification classification;
 	Ref<Texture2D> diffuse;
 	Ref<Texture2D> detail;
-	ObjectProjectedShadowPolicy policy = ObjectProjectedShadowPolicy::NoPass;
-	ObjectProjectedShadowCoverage coverage = ObjectProjectedShadowCoverage::NoPass;
+	// The engine's PROJSHAD draw for the surface (renderer::slot_capture_surface).
+	SlotCaptureSurface surface;
 	std::shared_ptr<const Q3PackedStream> stream;
 };
 
@@ -359,22 +351,12 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 	}
 	r_surface.diffuse = texture_parameter(r_surface.material, "u_diffuse");
 	r_surface.detail = texture_parameter(r_surface.material, "u_detail");
-	ObjectShaderKey key = build_object_shader_key(r_surface.classification);
-	if (r_surface.detail.is_null()) {
-		// The runtime's missing-detail downgrade: an unresolved
-		// secondary composes the no-detail technique
-		// (object_model_materials.cpp).
-		key &= ~OSCAP_DETAIL;
-	}
-	const ObjectShaderPipelineDescriptor pipeline = describe_object_shader_pipeline(key);
-	r_surface.policy = object_projected_shadow_policy(pipeline.technique);
-	r_surface.coverage = object_projected_shadow_coverage(pipeline.technique);
-	if (r_surface.policy == ObjectProjectedShadowPolicy::NoPass ||
-			r_surface.coverage == ObjectProjectedShadowCoverage::NoPass ||
-			(r_surface.policy == ObjectProjectedShadowPolicy::MaterialBlend &&
-					r_surface.classification.blend == ObjectBlendMode::Additive)) {
-		// No PROJSHAD declaration, or the _FFP material-blend pass
-		// of an additive material: black added to the RT is a no-op.
+	// The engine decides the surface's PROJSHAD draw and its command state
+	// (renderer::slot_capture_surface); an unresolved secondary composes the
+	// no-detail technique.
+	r_surface.surface = slot_capture_surface(r_surface.classification,
+			r_surface.detail.is_valid(), p_skinned);
+	if (!r_surface.surface.draws) {
 		return SurfaceAdmission::NoPass;
 	}
 	// Keyed on the mesh as well as the node: an ObjectModel surface
@@ -401,6 +383,18 @@ SurfaceAdmission admit_surface(Q3GeometryCache &r_cache, GeometryInstance3D *p_s
 }
 
 } // namespace
+
+namespace godot {
+
+SlotCasterVisibility slot_draw_visibility(const ObjectModel &p_model) {
+	SlotCasterVisibility visibility;
+	visibility.present_visible = p_model.is_present_visible();
+	visibility.draw_visible = p_model.is_visible();
+	visibility.render_claimed = p_model.is_occlusion_hidden() || p_model.is_subpixel_hidden();
+	return visibility;
+}
+
+} // namespace godot
 
 class SlotCaptureAdapter::Impl {
 public:
@@ -1103,11 +1097,9 @@ void SlotCaptureAdapter::compile_frame(
 						break;
 				}
 				const Ref<ShaderMaterial> &shader_material = admitted.material;
-				const ObjectMaterialClassification &classification = admitted.classification;
+				const SlotCaptureSurface &plan = admitted.surface;
 				const Ref<Texture2D> &diffuse = admitted.diffuse;
 				const Ref<Texture2D> &detail = admitted.detail;
-				const ObjectProjectedShadowPolicy policy = admitted.policy;
-				const ObjectProjectedShadowCoverage coverage = admitted.coverage;
 				const std::shared_ptr<const Q3PackedStream> &stream = admitted.stream;
 				DeviceCommand command;
 				command.stream = stream;
@@ -1125,7 +1117,6 @@ void SlotCaptureAdapter::compile_frame(
 					}
 					command.first_bone = first_bone;
 					command.bone_count = static_cast<std::uint32_t>(palette.size());
-					command.flags |= kFlagSkinned;
 					++counters.skinned_commands;
 				}
 				command.diffuse_resource = diffuse;
@@ -1137,27 +1128,12 @@ void SlotCaptureAdapter::compile_frame(
 						"u_diffuse_max_lod", kQ3NoMipCeiling);
 				command.detail_max_lod = float_parameter(shader_material,
 						"u_detail_max_lod", kQ3NoMipCeiling);
-				command.alpha_test_value = classification.alpha_test_value;
-				if (classification.alpha_test)
-					command.flags |= kFlagAlphaTest;
-				if (classification.alpha_test_invert)
-					command.flags |= kFlagAlphaInvert;
-				if (coverage == ObjectProjectedShadowCoverage::DiffuseAlphaFfp ||
-						coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp)
-					command.flags |= kFlagAlphaMod;
-				if (coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp)
-					command.flags |= kFlagDetailAlpha;
-				if (policy == ObjectProjectedShadowPolicy::MaterialBlend &&
-						classification.blend == ObjectBlendMode::AlphaBlend) {
-					// The _FFP BLEND_ALPHA variant: black blended by the
-					// coverage (Diffuse1.a x AlphaGenValue x Diffuse2.a)
-					// over the white clear, a partial silhouette for a
-					// translucent strip.
-					command.flags |= kFlagBlendCoverage;
-					command.blend_coverage = true;
+				command.alpha_test_value = plan.alpha_test_value;
+				command.flags = plan.flags;
+				command.blend_coverage = plan.blend_coverage;
+				if (plan.blend_coverage)
 					++counters.blended_commands;
-				}
-				command.two_sided = classification.is_two_sided;
+				command.two_sided = plan.two_sided;
 				capture.commands.push_back(std::move(command));
 			}
 		}

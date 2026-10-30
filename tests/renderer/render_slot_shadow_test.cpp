@@ -622,6 +622,54 @@ int main() {
 		CHECK(plan.register_entity(37));  // idempotent re-register
 	}
 
+	// One caster surface's PROJSHAD draw (slot_capture_surface).
+	{
+		ObjectMaterialClassification ffp;
+		ffp.known_shader = true;
+		ffp.family = ObjectShaderFamily::FixedFunction;
+		ffp.has_detail = true;
+		// The _MT block: Diffuse1.a x AlphaGenValue x Diffuse2.a.
+		const SlotCaptureSurface detailed = slot_capture_surface(ffp, true, false);
+		CHECK(detailed.draws);
+		CHECK(detailed.policy == ObjectProjectedShadowPolicy::MaterialBlend);
+		CHECK(detailed.coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp);
+		CHECK(detailed.flags == (kSlotCaptureAlphaMod | kSlotCaptureDetailAlpha));
+		CHECK(!detailed.blend_coverage && !detailed.two_sided);
+		// An unresolved secondary composes the no-detail technique.
+		const SlotCaptureSurface downgraded = slot_capture_surface(ffp, false, false);
+		CHECK(downgraded.draws &&
+				downgraded.coverage == ObjectProjectedShadowCoverage::DiffuseAlphaFfp);
+		CHECK(downgraded.flags == kSlotCaptureAlphaMod);
+		// The alpha test, its inversion, skinning and two-sidedness.
+		ObjectMaterialClassification tested = ffp;
+		tested.has_detail = false;
+		tested.alpha_test = true;
+		tested.alpha_test_invert = true;
+		tested.alpha_test_value = 0.5f;
+		tested.is_two_sided = true;
+		const SlotCaptureSurface cut = slot_capture_surface(tested, true, true);
+		CHECK(cut.draws && cut.two_sided && cut.alpha_test_value == 0.5f);
+		CHECK((cut.flags & kSlotCaptureAlphaTest) != 0 && (cut.flags & kSlotCaptureAlphaInvert) != 0);
+		CHECK((cut.flags & kSlotCaptureSkinned) != 0);
+		// The _FFP BLEND_ALPHA variant blends its coverage; BLEND_ADD draws nothing.
+		ObjectMaterialClassification blended = tested;
+		blended.alpha_test = false;
+		blended.alpha_test_invert = false;
+		blended.blend = ObjectBlendMode::AlphaBlend;
+		const SlotCaptureSurface translucent = slot_capture_surface(blended, true, false);
+		CHECK(translucent.draws && translucent.blend_coverage);
+		CHECK((translucent.flags & kSlotCaptureBlendCoverage) != 0);
+		blended.blend = ObjectBlendMode::Additive;
+		CHECK(!slot_capture_surface(blended, true, false).draws);
+		// Glass declares no PROJSHAD pass.
+		ObjectMaterialClassification glass;
+		glass.known_shader = true;
+		glass.family = ObjectShaderFamily::Glass;
+		const SlotCaptureSurface clear = slot_capture_surface(glass, true, false);
+		CHECK(!clear.draws && clear.policy == ObjectProjectedShadowPolicy::NoPass);
+		CHECK(clear.flags == 0);
+	}
+
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

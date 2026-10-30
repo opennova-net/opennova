@@ -51,6 +51,7 @@
 #include <array>
 
 #include <runtime/renderer/direction_look_at.h>
+#include <runtime/renderer/object_shader_template.h>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -553,6 +554,42 @@ private:
 	size_t live_count_ = 0;
 	std::array<bool, kSlotPatchCount> patch_used_{};
 };
+
+// One caster surface's black PROJSHAD draw in a slot capture: whether it
+// draws and the state the capture pass gives it, from the surface's object
+// material classification (object_shader_template.h carries the per-technique
+// policy and coverage tables and their witnesses). A surface draws when its
+// technique declares a PROJSHAD pass, unless that pass is the _FFP
+// material-blend variant of an additive material, whose ONE/ONE black adds
+// nothing to the RT [orig: _FFP.fx TBoringFFPProjShad BLEND_ADD]. A surface
+// whose secondary texture did not resolve composes the no-detail technique
+// (the runtime's missing-detail downgrade). The flag bits are the capture
+// shader's decode of the command: the alpha test and its inversion, the
+// AlphaGenValue factor of the _FFP families, the _MT Diffuse2 alpha, GPU
+// skinning, and the _FFP BLEND_ALPHA coverage blend (SRCALPHA/INVSRCALPHA of
+// the black over the white clear, a partial silhouette for a translucent
+// strip); a two-sided material culls nothing.
+enum SlotCaptureCommandFlag : uint32_t {
+	kSlotCaptureAlphaTest = 1u,
+	kSlotCaptureAlphaInvert = 2u,
+	kSlotCaptureAlphaMod = 4u,
+	kSlotCaptureDetailAlpha = 8u,
+	kSlotCaptureSkinned = 16u,
+	kSlotCaptureBlendCoverage = 32u,
+};
+
+struct SlotCaptureSurface {
+	bool draws = false;
+	ObjectProjectedShadowPolicy policy = ObjectProjectedShadowPolicy::NoPass;
+	ObjectProjectedShadowCoverage coverage = ObjectProjectedShadowCoverage::NoPass;
+	uint32_t flags = 0;
+	float alpha_test_value = 0.0f;
+	bool blend_coverage = false;
+	bool two_sided = false;
+};
+
+SlotCaptureSurface slot_capture_surface(const ObjectMaterialClassification &classification,
+		bool detail_resolved, bool skinned);
 
 // The retail priority score for one candidate: 2D camera distance / 4,
 // weighted by view alignment (1.5 - dot terms, Q16 fixed math), halved for
