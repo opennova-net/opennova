@@ -7,7 +7,10 @@
 #include <cstring>
 #include <memory>
 #include <variant>
+#include <vector>
+#include <string>
 
+#include <base/io/log.h>
 #include <runtime/mission/promote.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/friendly_tags.h>
@@ -1113,6 +1116,38 @@ static void test_pool_capacities_size_the_load() {
     CHECK(pool_capacity(1) == 1200);
 }
 
+// DFX2-24: a header counting more of a table than its pool holds warns at the load under
+// dfx2.exe's rules, "Too many <table> %i (max is %i)" in the load's order with the pool's capacity
+// as the max, where Jointops.exe's says nothing; the load carries on either way.
+// [orig: Mission_LoadBMSFile @0x40F4E0 - the jumps @0x40F5BA..; Mission_LoadBMSFile @0x40F330 -
+//  `jle` @0x40F40A, @0x40F443, @0x40F47C, @0x40F4B5, Game_ShowWarningDialog @0x40F431 (dfx2.exe)]
+static std::vector<std::string> g_warnings;
+static void test_dfx2_warns_of_a_table_past_its_pool() {
+    io::set_log_sink([](io::LogLevel level, const char *message) {
+        if (level == io::LogLevel::kWarn && std::strncmp(message, "Too many", 8) == 0)
+            g_warnings.push_back(message);
+    });
+    bms::File file;
+    file.header.num_items = 1201;
+    file.header.num_buildings = 1200; // at the limit: no warning
+    file.header.num_markers = 769;
+    file.header.num_people = 257;
+    for (const char *code : { "jo", "dfx2" }) {
+        g_warnings.clear();
+        auto w = std::make_unique<World>();
+        w->rules.title_rules = &title_rules(code);
+        mission::promote_mission(file, *w);
+        if (std::strcmp(code, "jo") == 0) {
+            CHECK(g_warnings.empty());
+        } else {
+            CHECK(g_warnings == (std::vector<std::string>{ "Too many items 1201 (max is 1200)",
+                                       "Too many markers 769 (max is 768)",
+                                       "Too many organics 257 (max is 256)" }));
+        }
+    }
+    io::set_log_sink(nullptr);
+}
+
 // Each pool's used count after the load: pools 1..3 take their record count, a
 // rejected last record included, and pool 0 the accepted count (D-NET-417).
 // [orig: Mission_LoadBMSFile @0x40F4E0 -- Pool_SetUsed @0x40F9DB (1), @0x40FA4A
@@ -1355,6 +1390,7 @@ static void test_item_brain_follows_class_and_attrib() {
 }
 
 int main() {
+    test_dfx2_warns_of_a_table_past_its_pool();
     test_item_brain_follows_class_and_attrib();
     test_bms_ai_attribute_fold();
     test_bms_range_slots_read_their_own_fields();

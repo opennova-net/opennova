@@ -176,6 +176,9 @@ world::TitleRules make() {
 	// decay 93206 @0x48FB77; Entity_SpawnFromBMSRecord @0x40ECD0; the aircraft bone init
 	// @0x4902FD (dfx2.exe)].
 	r.part_spin = world::PartSpinRates{ 372827, 326222, 279619, 372827, 93206 };
+	// DFX2-24: the load's table warnings [orig: Mission_LoadBMSFile @0x40F330 - `jle` @0x40F40A,
+	// @0x40F443, @0x40F47C, @0x40F4B5 (dfx2.exe)].
+	r.bms_table_warnings = true;
 	// DFX2-25: the counter-rotation [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) -
 	// IsTurret @0x440F87, Matrix_Multiply3x4_FixedPoint @0x440FC4, the words
 	// @0x440FDB..0x440FFE].

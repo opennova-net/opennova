@@ -3,6 +3,7 @@
 
 #include <base/io/crt_ftol.h>
 #include <base/io/le.h>
+#include <base/io/log.h>
 #include <formats/def/reserved_items.h>
 #include <formats/mission/mission_params.h>
 #include <runtime/world/ai.h>
@@ -793,6 +794,29 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                               const PromoteOptions &opts) {
     AiSystem &ai = world.ai;
     PromoteResult r;
+
+    // DFX2-24: the header's table counts against their pools, ahead of the loadout chunk, in the
+    // load's order, a signed compare; dfx2.exe's warning box, which our log takes (the box's OK
+    // carries on). The max is the pool's: retail's literal is its g_PoolList capacity.
+    // [orig: Mission_LoadBMSFile @0x40F330 - items 0x4B0 @0x40F405, decorations 0x4B0
+    //  @0x40F43E, markers 0x300 @0x40F477, organics 0x100 @0x40F4B0, each `jle` past its sprintf
+    //  and Game_ShowWarningDialog (dfx2.exe)] (TitleRules::bms_table_warnings)
+    if (world.rules.title().bms_table_warnings) {
+        struct Table {
+            const char *name;
+            uint32_t count;
+            int pool;
+        };
+        const Table tables[] = { { "items", m.header.num_items, 1 },
+            { "decorations", m.header.num_buildings, 2 }, { "markers", m.header.num_markers, 3 },
+            { "organics", m.header.num_people, 0 } };
+        for (const Table &t : tables) {
+            const int32_t max = static_cast<int32_t>(opts.pool_capacities[t.pool]);
+            if (static_cast<int32_t>(t.count) > max)
+                io::logf(io::LogLevel::kWarn, "Too many %s %i (max is %i)", t.name,
+                        static_cast<int32_t>(t.count), max);
+        }
+    }
 
     // Pools (pools 0..3 = actors searched by net id, pool 4 = static props),
     // at the witnessed per-pool retail capacities by default
