@@ -134,6 +134,24 @@ void HostListingBinding::sync_registration(
 	ctx.novaworld_second_join_tickets_armed = second_hosting && second->requires_join_ticket();
 }
 
+void read_mission_start_columns(HostRegistration &r, const NapiNPServerCtx &ctx,
+		const hud::GameTextLookup &gametext, const MissionStartListing &mission) {
+	read_session_listing_columns(r, ctx, gametext);
+	apply_mission_start_columns(r, mission.mission_text_title, mission.header_name, mission.climate,
+			mission.last_round_ticks);
+}
+
+void set_mission_start_columns(NwuHostRole &role, HostListingBinding::MatchContext match,
+		hud::GameTextLookup gametext, MissionStartListing mission) {
+	role.set_column_source([match = std::move(match), gametext = std::move(gametext),
+								   mission = std::move(mission)](HostRegistration &r) {
+		const NapiNPServerCtx *ctx = match ? match() : nullptr;
+		if (ctx == nullptr) return false;
+		read_mission_start_columns(r, *ctx, gametext, mission);
+		return true;
+	});
+}
+
 void set_nwu_match_facts(NapiNPServerCtx &ctx, const NwuLobbySession::MatchFacts &facts) {
 	ctx.nwu_in_use = facts.in_use;
 	ctx.nwu_session_role = facts.role;

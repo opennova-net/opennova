@@ -318,7 +318,7 @@ func test_launch_browse_joins_the_row_on_its_port() -> void:
 	controller.setup(null, null, null, layer)
 	var screen := JoinScreenFixture.open(self, screen_dir)
 	controller.standalone_join_screen = screen
-	assert_true(controller.maybe_launch_lan_from_flags(), "the browse form is a join launch")
+	assert_true(controller.launch_from_flags(), "the browse form is a join launch")
 	var browse := controller.get_node_or_null("LaunchBrowse") as LanSession
 	assert_not_null(browse, "the launch starts a LAN search")
 	if browse == null:

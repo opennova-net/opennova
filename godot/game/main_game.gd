@@ -465,7 +465,7 @@ func _ready() -> void:
 		return
 	# Co-op LAN launches (`--lan-host` / `--lan-join`) ride the controller.
 	# Mirrors `--mission` above; two instances on localhost = the co-op demo.
-	if _net.maybe_launch_lan_from_flags():
+	if _net.launch_from_flags():
 		return
 	# The relaunch after a mod's install for a join (`--novaworld-join`).
 	_net.maybe_open_novaworld_from_flags()
@@ -1185,7 +1185,7 @@ func _restore_quit_policy() -> void:
 ## Public delegate for "join this server" — kept on the shell so lifecycle tests
 ## and external drivers keep one ADR-0018 entry; the controller owns the path.
 func join_lan_server(target: JoinTarget) -> void:
-	_net.join_lan_server(target)
+	_net.join(target)
 
 
 ## The common mission-start seam; ShellPresentationSession owns its visibility

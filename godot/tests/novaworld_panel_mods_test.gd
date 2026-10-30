@@ -82,23 +82,9 @@ func _install_folder(code: String, marked := true) -> void:
 			mark.close()
 
 
-# The site whose /api/mods belongs to the OpenNova target's gate: a deployment's
-# nw.<domain> is https://<domain>, loopback the local stack's portal.
+# The mod list asks the gate's own site (ctest novaworld_service_target pins the site rule).
 func test_the_mod_list_asks_the_gates_own_site_by_the_games_command_file() -> void:
-	assert_eq(NovaWorldSettings.web_base_for("nw.opennova.net"), "https://opennova.net")
-	assert_eq(NovaWorldSettings.web_base_for("nw.staging.opennova.net"),
-			"https://staging.opennova.net")
-	assert_eq(NovaWorldSettings.web_base_for("127.0.0.1"), "http://127.0.0.1:8000")
-	assert_eq(NovaWorldSettings.web_base_for("play.example.org"), "https://play.example.org")
-	assert_eq(NovaWorldSettings.web_base_for("192.168.1.20"), "http://192.168.1.20:8000",
-			"a second machine's stack, by its LAN address")
-	assert_eq(NovaWorldSettings.web_base_for("localhost"), "http://localhost:8000")
-	assert_eq(NovaWorldSettings.web_base_for("::1"), "http://[::1]:8000")
-	assert_eq(NovaWorldSettings.web_base_for("gs.novaworld.net"), "",
-			"NovaLogic's gate serves no mods: nothing is asked of it")
-	assert_eq(NovaWorldSettings.web_base_for("GS.NovaWorld.net"), "")
-	assert_eq(NovaWorldSettings.web_base_for("gs.novaworld.net."), "",
-			"a root label's dot names NovaLogic's gate too (the engine's one rule)")
+	assert_eq(NovaWorldServiceTarget.web_base_for("nw.opennova.net"), "https://opennova.net")
 	assert_eq(NovaWorldPanel.mods_url("https://opennova.net", "JOPTR.CMD"),
 			"https://opennova.net/api/mods?game=JOPTR.CMD")
 	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _game_dir]))

@@ -2,7 +2,9 @@ extends GutTest
 
 # A discovered retail/OpenNova host whose ServerHello.P2 offers a choice (0x6038:
 # passwords, spectators) stops before world loading or ClientAuth on the join
-# screen's choice panels (pre.mnu PRE_GAME_MENU; engine inmatch/pre_game_menu.h).
+# screen's choice panels (pre.mnu PRE_GAME_MENU; engine inmatch/pre_game_menu.h). The
+# flow's decisions are ctest inmatch_join_flow's; these drive the device: the browse's
+# LanSession, the screen's panels, the sockets and the NovaWorld session.
 
 const TMP_DIR := "res://.godot/spectator_join_prompt_test"
 
@@ -57,7 +59,7 @@ func test_preflight_row_becomes_the_discovered_session() -> void:
 	assert_eq(target.entry_step(), JoinTarget.ENTRY_PREFLIGHT,
 			"a target with no flag word enumerates first")
 	assert_false(target.discovered_session)
-	controller.join_lan_server(target)
+	controller.join(target)
 	# The preflight browse runs as the controller's SpectatorPreflight LanSession;
 	# its row arrives through the browser's own signal.
 	var probe := controller.get_node_or_null("SpectatorPreflight") as LanSession
@@ -100,7 +102,7 @@ func test_silent_endpoint_keeps_enumerating_without_a_fallback_dial() -> void:
 	target.role_explicit = true
 	assert_eq(target.entry_step(), JoinTarget.ENTRY_PREFLIGHT,
 			"an answered role on an undiscovered word enumerates too")
-	controller.join_lan_server(target)
+	controller.join(target)
 	var probe := controller.get_node_or_null("SpectatorPreflight") as LanSession
 	assert_not_null(probe, "the bare target starts the enumerate")
 	if probe == null:
@@ -119,7 +121,7 @@ func test_discovered_spectator_host_prompts_before_joining() -> void:
 			JoinTarget.FLAG_ALLOW_SPECTATORS
 			| JoinTarget.FLAG_SPECTATOR_PASSWORD)
 
-	controller.join_lan_server(target)
+	controller.join(target)
 
 	assert_true(controller.is_join_choice_pending(),
 			"an enabled ServerHello.P2 opens the retail role decision")
@@ -141,7 +143,7 @@ func test_unprotected_spectator_host_omits_password_field_and_cancel_closes() ->
 	var controller := _controller(layer)
 	var target := _target(JoinTarget.FLAG_ALLOW_SPECTATORS)
 
-	controller.join_lan_server(target)
+	controller.join(target)
 
 	assert_true(controller.is_join_choice_pending())
 	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_SPECTATE)
@@ -168,7 +170,7 @@ func test_the_choice_back_tears_down_a_lan_joins_socket() -> void:
 		target.transport = pump
 		if novaworld:
 			target.network_type = JoinTarget.NETWORK_NOVAWORLD
-		controller.join_lan_server(target)
+		controller.join(target)
 		assert_true(controller.is_join_choice_pending())
 		JoinScreenFixture.press(_screen, "BACK")
 		assert_false(controller.is_join_choice_pending(), "BACK abandons the join")
@@ -187,7 +189,7 @@ func test_a_refused_rows_cancel_tears_down_the_lan_socket() -> void:
 	var pump := UdpPump.new()
 	assert_eq(pump.bind_client(), OK, "the LAN screen's search socket")
 	# With no shell the refusal's screen is skipped: its Cancel runs at once.
-	controller.refuse_lan_join("CVUNABLETOCREATE")
+	controller.refuse("CVUNABLETOCREATE")
 	assert_false(pump.is_open(), "the refusal's state 9 tears the LAN socket down")
 	pump.close()
 
@@ -197,7 +199,7 @@ func test_server_password_prompt_is_independent_of_spectator_access() -> void:
 	add_child_autofree(layer)
 	var controller := _controller(layer)
 	var target := _target(JoinTarget.FLAG_SERVER_PASSWORD)
-	controller.join_lan_server(target)
+	controller.join(target)
 	assert_true(controller.is_join_choice_pending())
 	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_GAME_PASSWORD,
 			"a server password opens GAME_PASSWORD")
@@ -214,7 +216,7 @@ func test_the_passwords_take_their_panels_in_turn() -> void:
 	var controller := _controller(layer)
 	var target := _target(JoinTarget.FLAG_SERVER_PASSWORD
 			| JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD)
-	controller.join_lan_server(target)
+	controller.join(target)
 	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_GAME_PASSWORD)
 	JoinScreenFixture.press(_screen, "ACCEPT")
 	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_SPECTATE)
@@ -235,7 +237,7 @@ func test_team_choose_host_prompts_for_the_side_password_with_no_team_control() 
 	var target := _target(JoinTarget.FLAG_TEAM_CHOICE | JoinTarget.FLAG_BLUE_PASSWORD
 			| JoinTarget.FLAG_RED_PASSWORD | JoinTarget.FLAG_SERVER_PASSWORD)
 	target.join_password = "prefilled"
-	controller.join_lan_server(target)
+	controller.join(target)
 	assert_true(controller.is_join_choice_pending(),
 			"protected sides open the choice even without spectator access")
 	assert_eq(_screen.panel(), JoinScreenStatus.PANEL_GAME_PASSWORD)
@@ -248,37 +250,6 @@ func test_team_choose_host_prompts_for_the_side_password_with_no_team_control() 
 	JoinScreenFixture.press(_screen, "BACK")
 	assert_eq(target.join_password, "prefilled", "BACK does not commit credentials")
 	assert_false(target.role_explicit)
-
-
-# The commit routes the screen's controls onto the target (engine pre_game_commit):
-# the shared TEAM_PASSWORD text is the spectator password when SPECTATE is
-# checked, else the side password, the other keeping what it held.
-func test_the_commit_routes_the_shared_password_by_the_role() -> void:
-	var target := _target(JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD)
-	target.join_password = "side"
-	target.apply_pre_game_choice("srv", true, "spec")
-	assert_eq(target.server_password, "srv")
-	assert_eq(target.join_role, JoinTarget.ROLE_SPECTATOR)
-	assert_true(target.role_explicit)
-	assert_eq(target.spectator_password, "spec")
-	assert_eq(target.join_password, "side", "the side password is kept")
-	target.apply_pre_game_choice("", false, "team")
-	assert_eq(target.join_role, JoinTarget.ROLE_PLAYER)
-	assert_eq(target.join_password, "team")
-	assert_eq(target.spectator_password, "spec", "the spectator password is kept")
-
-
-# TeamChoose alone (a plain team game; a stock host advertises 0x904) offers no
-# join choice: retail tests the discovered word against 0x6038 (passwords and
-# spectators) and joins at once, so the entry dials without a prompt and with
-# no credentials (the engine's join_entry_step, ctest join_entry).
-func test_team_choice_alone_dials_without_a_prompt() -> void:
-	var target := _target(JoinTarget.FLAG_TEAM_CHOICE)
-	assert_eq(target.entry_step(), JoinTarget.ENTRY_DIAL,
-			"a plain team game opens no join choice")
-	assert_eq(_target(0x904).entry_step(), JoinTarget.ENTRY_DIAL,
-			"a stock LAN team game (P2 0x904) dials")
-	assert_eq(target.join_password, "", "no credential is invented")
 
 
 # The NovaWorld lobby session survives the panel at the in-match handoff

@@ -25,6 +25,7 @@
 #include <net/protocol/gate_tag.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/host_listing_binding.h> // the mission start's read (both hosts')
 #include <runtime/inmatch/loaded_model_list.h> // the S2C 0x68 cursor's wrap
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/mission_exit.h>
@@ -537,29 +538,38 @@ bool Server::start_session(std::string &error) {
 //  @0x524A5D / @0x525251 follow].
 void Server::run_mission_start_update(const std::string &header_name, int32_t climate) {
 	if (listing_ == nullptr || lister_ == nullptr || lister_->finished()) return;
-	HostRegistration r = listing_columns();
+	// The mission start's own columns (inmatch::apply_mission_start_columns carries the witness):
+	// the mission text's title else the header's name, its climate, TimeOfDay 0, the last round's
+	// clock.
+	inmatch::MissionStartListing mission;
+	mission.mission_text_title = boot_.mission_text.get_string("info", "title");
+	mission.header_name = header_name;
+	mission.climate = climate;
+	mission.last_round_ticks = client_process_.round_time_remaining_ticks;
+	const hud::GameTextLookup gametext = [this](const char *section, const char *key,
+												 const char *fallback) {
+		return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
+	};
 	// The session the boot's head created ahead of this mission start (HostRole::create_session,
 	// D-NET-1254): its columns over the settings, as a bound listing reads them, the round-state
-	// init's GameServerBaffleKey and the cookie-key ring's first key among them.
+	// init's GameServerBaffleKey and the cookie-key ring's first key among them, then the mission
+	// start's over them, the read the game's listen host publishes too
+	// (inmatch::set_mission_start_columns).
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
 	//  @0x5695B3 (the g_GameServerBaffleKey store @0x51CB88, CSessionIdRing_Init called @0x51CB8E),
 	//  ahead of GameLoop_Init's Game_StartMission call @0x526377; Lobby_UpdateServerInfo @0x4FE8C0 -
 	//  the ring's current key @0x4FF191..0x4FF196, g_GameServerBaffleKey read @0x4FF1CC]
-	if (role_ != nullptr)
-		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx,
-				[this](const char *section, const char *key, const char *fallback) {
-					return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
-				});
-	// Then the mission start's own columns (inmatch::apply_mission_start_columns carries the
-	// witness): the mission text's title else the header's name, its climate, TimeOfDay 0, the last
-	// round's clock.
-	inmatch::apply_mission_start_columns(r, boot_.mission_text.get_string("info", "title"),
-			header_name, climate, client_process_.round_time_remaining_ticks);
+	inmatch::NapiNPServerCtx *ctx = role_ != nullptr ? &role_->state.host_owner.ctx : nullptr;
+	const inmatch::HostListingBinding::MatchContext match = [ctx] { return ctx; };
+	HostRegistration r = listing_columns();
+	if (ctx != nullptr) inmatch::read_mission_start_columns(r, *ctx, gametext, mission);
 	listing_->set_base(std::move(r));
+	inmatch::set_mission_start_columns(lister_->host_role(), match, gametext, mission);
 	lister_->publish_server_info(rotation_.round_count);
 	(void)lister_->tick(wall_ms());
 	// A hosting second listing publishes the same mission start on its own session.
 	if (second_lister_ != nullptr && second_published_ && second_lister_->hosting()) {
+		inmatch::set_mission_start_columns(second_lister_->host_role(), match, gametext, mission);
 		second_lister_->publish_server_info(rotation_.round_count);
 		(void)second_lister_->tick(wall_ms());
 	}

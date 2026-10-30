@@ -74,18 +74,18 @@
 //                               port (1..65535); absent = no endpoint.
 //   --novaworld-host <host>     the gate the NovaWorld screen's OpenNova target
 //                               dials (a name or an address); absent = the
-//                               product's own (godot/game/novaworld_settings.gd:
-//                               nw.opennova.net in a release export,
-//                               nw.staging.opennova.net in a debug one, loopback
-//                               in a source run). Never the Original target's;
-//                               a launch naming one opens the menu on the
-//                               OpenNova target whatever choice is stored
-//                               (novaworld_settings.gd launch_target).
+//                               product's own (net/novaworld/service_target.h
+//                               opennova_gate_host: nw.opennova.net in a release
+//                               export, nw.staging.opennova.net in a debug one,
+//                               loopback in a source run). Never the Original
+//                               target's; a launch naming one opens the menu on
+//                               the OpenNova target whatever choice is stored
+//                               (service_target.h launch_novaworld_target).
 //   --novaworld-join <rid>      the NovaWorld server to join (its list row's id,
 //                               1..2^31-1): the NovaWorld screen opens and joins
 //                               that row once signed in and listed. The relaunch
 //                               after a mod's install for a join carries it
-//                               (godot/game/runtime_updates.gd, ADR 0074).
+//                               (updater_install_arguments below, ADR 0074).
 //   --working-dir <path>        the directory the game was started in, where it
 //                               keeps the files it writes beside itself as retail
 //                               keeps its saves in its working directory
@@ -464,6 +464,24 @@ std::optional<Version> launch_product_version(const std::string &dir, const Laun
 // `dir/name`, with an empty dir yielding the bare name and a trailing
 // separator not doubled.
 std::string boot_path_join(const std::string &dir, const std::string &name);
+
+// The updater's command lines (apps/update/README.md), as the game starts update.exe: its
+// product (`/game`, the runtime and the resource directories), then for a check `--check`, and
+// for an install `/RUN --parent-pid <pid>` ahead of them and the relaunch's arguments after them,
+// each as `--run-arg <argument>`. The relaunch is the launch's own arguments (`run_args`) less an
+// earlier launch's markers (`--after-update`, `--novaworld-join <rid>`), then, behind a `--` the
+// arguments lack, this install's: `--after-update` for a first-run install (`bootstrap`), so a
+// game that still finds no content stops instead of installing again, and `--novaworld-join
+// <rid>` for the NovaWorld server a mod's install was for (`join_rid` > 0, ADR 0074).
+struct UpdaterProduct {
+    std::string product;      // the /game code
+    std::string runtime_dir;  // where update.exe and the runtime sit
+    std::string resource_dir; // the game folder
+};
+std::vector<std::string> updater_check_arguments(const UpdaterProduct &product);
+std::vector<std::string> updater_install_arguments(const UpdaterProduct &product,
+        long long parent_pid, const std::vector<std::string> &run_args, bool bootstrap,
+        long long join_rid);
 
 class Vfs;
 

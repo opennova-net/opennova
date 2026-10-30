@@ -49,17 +49,6 @@ String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_gameerr) const 
 			p_gameerr.is_valid() ? &p_gameerr->get_native() : nullptr));
 }
 
-bool ConnectionError::refuses_this_install() const {
-	// NCC007 (the protocol version (PV2) gate), GCC003 (a banned address), and the
-	// join build (GDC002..008) and expansion (GDC047, its version.txt GDC048) refusals.
-	if (absent_) return false;
-	if (record_.connect_error == 7) return true;
-	if (record_.connect_error == 14) return record_.connect_param == 3;
-	if (record_.connect_error != 0 || record_.disconnect_code != 2) return false;
-	const uint32_t dpc = record_.disconnect_param;
-	return (dpc >= 2 && dpc <= 8) || dpc == 47 || dpc == 48;
-}
-
 void ConnectionError::_bind_methods() {
 	ClassDB::bind_static_method("ConnectionError",
 			D_METHOD("from_fields", "connect_error", "connect_param", "connect_text",
@@ -73,7 +62,6 @@ void ConnectionError::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reason_key"), &ConnectionError::reason_key);
 	ClassDB::bind_method(D_METHOD("reason_text", "gameerr"),
 			&ConnectionError::reason_text);
-	ClassDB::bind_method(D_METHOD("refuses_this_install"), &ConnectionError::refuses_this_install);
 }
 
 } // namespace godot

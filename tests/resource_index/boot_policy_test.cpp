@@ -1,5 +1,6 @@
 // Explicit CLI resource roots, the retail launch vocabulary, and an install mounted as a
 // launch with those flags mounts it.
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -630,6 +631,42 @@ void test_mount_install() {
           !index.last_error().empty());
 }
 
+// The updater's command lines (updater_check_arguments / updater_install_arguments): the product
+// roots, the relaunch's arguments, a first-run install's --after-update and a mod install's
+// --novaworld-join behind one `--`, an earlier launch's markers never carried on.
+void test_updater_arguments() {
+    using V = std::vector<std::string>;
+    const UpdaterProduct product{"acidgambit", "C:/Runtime", "D:/Game Data"};
+    CHECK(updater_check_arguments(product) == V({"--check", "/game", "acidgambit", "--runtime-dir",
+            "C:/Runtime", "--resource-dir", "D:/Game Data"}));
+    const V run{"--", "/game", "acidgambit", "/exp", "onx"};
+    CHECK(updater_install_arguments(product, 1234, run, false, 0) ==
+          V({"/RUN", "--parent-pid", "1234", "/game", "acidgambit", "--runtime-dir", "C:/Runtime",
+                  "--resource-dir", "D:/Game Data", "--run-arg", "--", "--run-arg", "/game",
+                  "--run-arg", "acidgambit", "--run-arg", "/exp", "--run-arg", "onx"}));
+    const auto count = [](const V &v, const char *what) {
+        return std::count(v.begin(), v.end(), std::string(what));
+    };
+    const V marked = updater_install_arguments(product, 1234, run, true, 0);
+    CHECK(V(marked.end() - 2, marked.end()) == V({"--run-arg", "--after-update"}));
+    const V stale{"--verbose", "--", "/exp", "onx", "--after-update"};
+    CHECK(count(updater_install_arguments(product, 1234, stale, false, 0), "--after-update") == 0);
+    const V again = updater_install_arguments(product, 1234, stale, true, 0);
+    CHECK(count(again, "--after-update") == 1 && count(again, "--") == 1);
+    const V bare = updater_install_arguments(product, 1234, {}, true, 0);
+    CHECK(V(bare.begin() + 9, bare.end()) == V({"--run-arg", "--", "--run-arg", "--after-update"}));
+    const V joined = updater_install_arguments(product, 1234, run, false, 42);
+    CHECK(V(joined.end() - 4, joined.end()) == V({"--run-arg", "--novaworld-join", "--run-arg", "42"}));
+    CHECK(count(joined, "--") == 1);
+    const V old_join{"--", "/exp", "onx", "--novaworld-join", "7"};
+    const V later = updater_install_arguments(product, 1234, old_join, false, 0);
+    CHECK(count(later, "--novaworld-join") == 0 && count(later, "7") == 0);
+    const V both = updater_install_arguments(product, 1234, old_join, true, 9);
+    CHECK(V(both.end() - 6, both.end()) ==
+          V({"--run-arg", "--after-update", "--run-arg", "--novaworld-join", "--run-arg", "9"}));
+    CHECK(count(both, "--novaworld-join") == 1);
+}
+
 } // namespace
 
 int main() {
@@ -646,6 +683,7 @@ int main() {
     test_folder_product();
     test_launch_product_version();
     test_mount_install();
+    test_updater_arguments();
     if (failures == 0) std::printf("boot_policy_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
