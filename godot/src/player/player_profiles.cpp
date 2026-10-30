@@ -2,14 +2,20 @@
 
 #include "object/avatar_database.h"
 #include "object/weapon_database.h"
+#include "player/character_profile.h"
+#include "player/character_selection.h"
 #include "player/player_info_kit_restore.h"
+#include "resource_index/launch_flags.h"
+#include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/weapon_profile_summary.h"
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
 #include <formats/playersav/player_sav.h>
+#include <formats/rtxt/text_tables.h>
 #include <runtime/inmatch/character_registry.h>
+#include <runtime/inmatch/join_character_profile.h>
 #include <runtime/menu/player_info_kit.h>
 #include <runtime/profile/profile_controls.h>
 
@@ -20,6 +26,7 @@
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/os.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
@@ -114,13 +121,18 @@ PlayerProfiles::PlayerProfiles() {
 
 void PlayerProfiles::set_defaults(const Ref<AvatarDatabase> &p_avatars,
 		const Ref<RtxtStringFile> &p_menu_table, int p_joystick_caps) {
+	set_defaults_native(p_avatars.ptr(),
+			p_menu_table.is_valid() ? &p_menu_table->get_native() : nullptr, p_joystick_caps);
+}
+
+void PlayerProfiles::set_defaults_native(const AvatarDatabase *p_avatars,
+		const opennova::rtxt::File *p_menu_table, int p_joystick_caps) {
 	defaults_.bindings = opennova::profile::default_binding_table();
 	const std::shared_ptr<const opennova::rtxt::File> override_table = opennova::rtxt::text_override();
-	defaults_.macros = opennova::profile::default_macros(override_table.get(),
-			p_menu_table.is_valid() ? &p_menu_table->get_native() : nullptr);
+	defaults_.macros = opennova::profile::default_macros(override_table.get(), p_menu_table);
 	defaults_.joystick_caps = static_cast<uint32_t>(p_joystick_caps);
 	defaults_.avatars = {};
-	if (p_avatars.is_valid() && p_avatars->is_loaded()) {
+	if (p_avatars != nullptr && p_avatars->is_loaded()) {
 		const opennova::inmatch::CharacterRegistry &registry = p_avatars->character_registry();
 		for (int side = 0; side < 2; ++side) {
 			const uint16_t packed = registry.first_character_id(side);
@@ -138,10 +150,14 @@ Error PlayerProfiles::load(const String &p_dir, const String &p_expansion) {
 	std::vector<uint8_t> player_sav;
 	std::vector<uint8_t> weapon_sav;
 	Error error = OK;
-	const bool has_player =
-			!p_dir.is_empty() && read_save_file(p_dir.path_join("player.sav"), player_sav, error);
+	expansion_ = p_expansion;
+	// The two files' places are the engine's (profile::profile_file_paths).
+	const opennova::profile::ProfileFilePaths paths = opennova::profile::profile_file_paths(
+			opennova::to_std(p_dir), opennova::to_std(p_expansion));
+	const bool has_player = !p_dir.is_empty() &&
+			read_save_file(opennova::to_gd(paths.player_sav), player_sav, error);
 	const bool has_weapon = !p_dir.is_empty() &&
-			read_save_file(p_dir.path_join(weapon_sav_relpath(p_expansion)), weapon_sav, error);
+			read_save_file(opennova::to_gd(paths.weapon_sav), weapon_sav, error);
 	opennova::profile::PlayerProfiles::LoadInput input;
 	input.player_sav = has_player ? &player_sav : nullptr;
 	input.weapon_sav = has_weapon ? &weapon_sav : nullptr;
@@ -163,9 +179,12 @@ void PlayerProfiles::load_bytes(const PackedByteArray &p_player_sav, bool p_has_
 
 Error PlayerProfiles::save(const String &p_dir, const String &p_expansion) {
 	if (p_dir.is_empty()) return ERR_INVALID_PARAMETER;
-	const Error player_error = write_save_file(p_dir.path_join("player.sav"), store_.player_sav_bytes());
+	const opennova::profile::ProfileFilePaths paths = opennova::profile::profile_file_paths(
+			opennova::to_std(p_dir), opennova::to_std(p_expansion));
+	const Error player_error =
+			write_save_file(opennova::to_gd(paths.player_sav), store_.player_sav_bytes());
 	const Error weapon_error =
-			write_save_file(p_dir.path_join(weapon_sav_relpath(p_expansion)), store_.weapon_sav_bytes());
+			write_save_file(opennova::to_gd(paths.weapon_sav), store_.weapon_sav_bytes());
 	return player_error != OK ? player_error : weapon_error;
 }
 
@@ -292,46 +311,87 @@ Ref<PlayerInfoKitRestore> PlayerProfiles::restore_player_info_kit(int p_side,
 	return out;
 }
 
-Error PlayerProfiles::apply_character_selection(const Dictionary &p_profile) {
-	// The dialog's snapshot (PlayerCharacterSelectionState.snapshot) as the engine's
-	// CharacterSelection: the shared PLAYERCLASS value, the shown side (`team`), that
-	// side's side_profiles[team] {avatar_a, avatar_b, avatar_packed} when non-empty, and a
-	// `kit` array of {name, ammo_primary, ammo_secondary, flags} into the page of
-	// `kit_class`. A missing value reads as one the engine refuses; the rules are the
-	// engine's (profile::PlayerProfiles::apply_character_selection).
-	opennova::profile::CharacterSelection selection;
-	selection.player_class = int(p_profile.get("player_class", -1));
-	selection.team = int(p_profile.get("team", -1));
-	const Array side_profiles = p_profile.get("side_profiles", Array());
-	if (selection.team >= 0 && selection.team < side_profiles.size() &&
-			side_profiles[selection.team].get_type() == Variant::DICTIONARY) {
-		const Dictionary selected = side_profiles[selection.team];
-		if (!selected.is_empty()) {
-			opennova::profile::CharacterSelection::Character character;
-			character.avatar_a = int(selected.get("avatar_a", -1));
-			character.avatar_b = int(selected.get("avatar_b", -1));
-			character.avatar_packed = int(selected.get("avatar_packed", -1));
-			selection.character = character;
-		}
-	}
-	if (p_profile.has("kit")) {
-		opennova::profile::CharacterSelection::Kit kit;
-		kit.page_class = int(p_profile.get("kit_class", -1));
-		const Array entries = p_profile.get("kit", Array());
-		for (int i = 0; i < entries.size(); ++i) {
-			if (entries[i].get_type() != Variant::DICTIONARY) return ERR_INVALID_PARAMETER;
-			const Dictionary entry = entries[i];
-			playersav::KitEntry out;
-			out.name = opennova::to_std(String(entry.get("name", String())));
-			out.ammo_primary = int32_t(int(entry.get("ammo_primary", -1)));
-			out.ammo_secondary = int32_t(int(entry.get("ammo_secondary", -1)));
-			out.flags = int32_t(int(entry.get("flags", -1)));
-			kit.entries.push_back(std::move(out));
-		}
-		selection.kit = std::move(kit);
-	}
-	return store_.apply_character_selection(selection) ? OK : ERR_INVALID_PARAMETER;
+Error PlayerProfiles::apply_character_selection(const Ref<CharacterSelection> &p_selection) {
+	if (p_selection.is_null()) return ERR_INVALID_PARAMETER;
+	return store_.apply_character_selection(p_selection->native()) ? OK : ERR_INVALID_PARAMETER;
 }
+
+Error PlayerProfiles::accept_player_info(const Ref<CharacterSelection> &p_selection) {
+	if (p_selection.is_null()) return ERR_INVALID_PARAMETER;
+	return store_.accept_player_info(p_selection->native()) ? OK : ERR_INVALID_PARAMETER;
+}
+
+namespace {
+
+// The process's store (PlayerProfiles::process), dropped at the module's teardown.
+Ref<PlayerProfiles> &process_store() {
+	static Ref<PlayerProfiles> store;
+	return store;
+}
+
+// The mount's Avatars.def, or null when the root carries none that loads.
+Ref<AvatarDatabase> mounted_avatars(const Ref<ResourceRoot> &p_root) {
+	if (p_root.is_null()) return Ref<AvatarDatabase>();
+	Ref<AvatarDatabase> db;
+	db.instantiate();
+	if (db->load_from_resource_root(p_root, "Avatars.def") != OK || !db->is_loaded())
+		return Ref<AvatarDatabase>();
+	return db;
+}
+
+} // namespace
+
+Ref<PlayerProfiles> PlayerProfiles::process() {
+	Ref<PlayerProfiles> &store = process_store();
+	if (store.is_null()) {
+		store.instantiate();
+		store->load(LaunchFlags::working_dir(), String());
+	}
+	return store;
+}
+
+Error PlayerProfiles::load_process_for(const Ref<ResourceRoot> &p_root) {
+	Ref<PlayerProfiles> &store = process_store();
+	if (store.is_null()) store.instantiate();
+	const Ref<AvatarDatabase> avatars = mounted_avatars(p_root);
+	const std::shared_ptr<const opennova::rtxt::File> menu_table =
+			opennova::rtxt::registered_table(opennova::rtxt::kTableGameUi);
+	store->set_defaults_native(avatars.ptr(), menu_table.get(), 0);
+	return store->load(LaunchFlags::working_dir(),
+			p_root.is_valid() ? String(p_root->get_expansion()) : String());
+}
+
+Error PlayerProfiles::save_process() {
+	const String dir = LaunchFlags::working_dir();
+	if (dir.is_empty()) return ERR_UNCONFIGURED;
+	const Ref<PlayerProfiles> store = process();
+	const Error error = store->save(dir, store->expansion_);
+	if (error != OK) {
+		UtilityFunctions::push_warning(vformat(
+				"PlayerProfile: could not save the player profile in %s (error %d)", dir,
+				static_cast<int>(error)));
+	}
+	return error;
+}
+
+String PlayerProfiles::process_callsign() {
+	const Ref<PlayerProfiles> store = process();
+	return opennova::cp1252_to_gd(opennova::profile::profile_callsign(
+			profile_text(LaunchFlags::callsign()), store->store_.current().name));
+}
+
+Ref<CharacterProfile> PlayerProfiles::process_character_profile(const Ref<ResourceRoot> &p_root) {
+	const Ref<PlayerProfiles> store = process();
+	const Ref<AvatarDatabase> avatars = mounted_avatars(p_root);
+	Ref<CharacterProfile> out;
+	out.instantiate();
+	out->assign(opennova::inmatch::character_profile(store->store_.current_weapons(),
+			avatars.is_valid() ? &avatars->character_registry() : nullptr,
+			profile_text(process_callsign())));
+	return out;
+}
+
+void PlayerProfiles::cleanup_statics() { process_store().unref(); }
 
 void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_defaults", "avatars", "menu_table", "joystick_caps"),
@@ -375,8 +435,19 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("character_summary"), &PlayerProfiles::character_summary);
 	ClassDB::bind_method(D_METHOD("restore_player_info_kit", "side", "weapons"),
 			&PlayerProfiles::restore_player_info_kit);
-	ClassDB::bind_method(D_METHOD("apply_character_selection", "profile"),
+	ClassDB::bind_method(D_METHOD("apply_character_selection", "selection"),
 			&PlayerProfiles::apply_character_selection);
+	ClassDB::bind_method(D_METHOD("accept_player_info", "selection"),
+			&PlayerProfiles::accept_player_info);
+	ClassDB::bind_static_method("PlayerProfiles", D_METHOD("process"), &PlayerProfiles::process);
+	ClassDB::bind_static_method("PlayerProfiles", D_METHOD("load_process_for", "root"),
+			&PlayerProfiles::load_process_for);
+	ClassDB::bind_static_method("PlayerProfiles", D_METHOD("save_process"),
+			&PlayerProfiles::save_process);
+	ClassDB::bind_static_method("PlayerProfiles", D_METHOD("process_callsign"),
+			&PlayerProfiles::process_callsign);
+	ClassDB::bind_static_method("PlayerProfiles", D_METHOD("process_character_profile", "root"),
+			&PlayerProfiles::process_character_profile);
 	ClassDB::bind_method(D_METHOD("record_mission_start", "campaign"),
 			&PlayerProfiles::record_mission_start);
 	ClassDB::bind_method(D_METHOD("begin_session"), &PlayerProfiles::begin_session);

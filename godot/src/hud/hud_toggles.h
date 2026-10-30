@@ -11,6 +11,8 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <memory>
+
 #include <runtime/hud/hud_toggles.h>
 
 #include "rtxt/rtxt_string_file.h"
@@ -189,16 +191,21 @@ public:
 	int get_tip_countdown() const;
 	bool is_tip_showing() const;
 
-	const opennova::hud::HudToggleState &state() const { return state_; }
+	const opennova::hud::HudToggleState &state() const { return *state_; }
 	// The special-key chain's stores (the quit dialog's close, a menu pick's close): the
 	// input router's chain call (PlayerInputRouter::special_key).
-	opennova::hud::HudToggleState &mutable_state() { return state_; }
+	opennova::hud::HudToggleState &mutable_state() { return *state_; }
+	// A binding over state another owner keeps (a HUD session's toggles, hud/hud_session.h): the
+	// pointer shares that owner's lifetime.
+	static Ref<HudToggles> over(std::shared_ptr<opennova::hud::HudToggleState> p_state);
 
 protected:
 	static void _bind_methods();
 
 private:
-	opennova::hud::HudToggleState state_;
+	// Its own state, or the owner's it was made over (over()).
+	std::shared_ptr<opennova::hud::HudToggleState> state_ =
+			std::make_shared<opennova::hud::HudToggleState>();
 };
 
 } // namespace godot

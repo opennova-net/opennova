@@ -71,11 +71,6 @@ public:
 		MESSAGE_EXPIRY_STAGGER = 186,
 		MESSAGE_TEXT_MAX = 119,
 		MESSAGE_SLOT_COUNT = 40,
-		// The loading screen's present throttle (hud/loading_screen.h is the
-		// single source; the cpp static_assert pins this mirror to it). The
-		// session block rides composite_loading_session_text, the bar the
-		// loading_bar_* statics.
-		LOADING_PRESENT_INTERVAL_MS = 100,
 		// The first-person view effects (hud/view_effects.h; same pinning):
 		// the rangefinder digit advance and the 16px digit-strip cell.
 		BINOCULAR_DIGIT_STEP = 10,
@@ -109,11 +104,6 @@ public:
 	static int waypoint_distance_m(const Vector2 &p_ground_delta);
 	static Vector2i loading_bar_fill_span(int p_x, int p_w, int p_displayed);
 
-	// The mission loading screen's engine spec (hud/loading_screen.h carries
-	// the values and witnesses): the GAMETYPE -> LoadingText key policy ("" =
-	// unknown) plus the non-integer layout values the LoadingScreen shell
-	// draws with.
-	static String loading_gametype_text_key(int p_game_type);
 	// The HUD's game-text compositions (hud/hud_game_text.h carries the
 	// witnesses) over the mission / gametext tables: the waypoint label (the
 	// current marker's resolved name composed with "m to", the CTF runs and
@@ -138,9 +128,6 @@ public:
 			const String &p_weapon_id);
 	static String loading_font_small();
 	static String loading_font_large();
-	static String loading_msg_label_key();
-	static String loading_msg_label_fallback();
-	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed);
 	// The MP session block composited into a copy of `p_background` (RGBA8, its own size), as the
 	// game blends it into the image before the stretch (hud::composite_loading_session_text): the
 	// title, the mission and the game type in the large font, the server message's label
@@ -162,7 +149,6 @@ public:
 	static Vector2i splash_arrow_size(const Vector2i &p_art, const Vector2i &p_surface);
 	static String loading_splash_arrow_image();
 	static String loading_splash_sound_set();
-	static String loading_splash_continue_key();
 	static String loading_splash_continue_font();
 	// The continue line through its font page's material (D-LOADSCR-10): the engine's run
 	// (hud::splash_continue_run) over a `p_size` display, a triangle array per page run into `p_item`

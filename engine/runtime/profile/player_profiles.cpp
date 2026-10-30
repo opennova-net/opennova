@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstring>
 
+#include <base/gameprofile/game_type.h>
 #include <base/io/le.h>
 #include <base/io/strutil.h>
 #include <formats/rtxt/rtxt.h>
@@ -207,6 +208,30 @@ void set_voice_override(playersav::ProfileRecord &record, int side, int value) {
 	record.voice[static_cast<size_t>(side)] = static_cast<uint8_t>(value);
 }
 
+ProfileFilePaths profile_file_paths(const std::string &dir, const std::string &expansion) {
+	const auto under = [&dir](const std::string &relpath) {
+		if (dir.empty()) return relpath;
+		const char last = dir.back();
+		return last == '/' || last == '\\' ? dir + relpath : dir + "/" + relpath;
+	};
+	ProfileFilePaths paths;
+	// [orig: PlayerProfile_LoadAllFromDisk @0x54F586 (player.sav), @0x54F68C..0x54F6B7 (weapon.sav)]
+	paths.player_sav = under(kPlayerSavFileName);
+	paths.weapon_sav = under(playersav::weapon_sav_relpath(expansion));
+	return paths;
+}
+
+std::string profile_callsign(const std::string &launch_override, const std::string &record_name) {
+	const auto blank = [](char c) { return static_cast<unsigned char>(c) <= 0x20; };
+	size_t first = 0;
+	size_t last = launch_override.size();
+	while (first < last && blank(launch_override[first])) ++first;
+	while (last > first && blank(launch_override[last - 1])) --last;
+	const size_t cap = static_cast<size_t>(game_rules::kMaxCallsignLength);
+	if (last > first) return launch_override.substr(first, std::min(last - first, cap));
+	return record_name.substr(0, std::min(record_name.size(), cap));
+}
+
 PlayerProfiles::PlayerProfiles() = default;
 
 void PlayerProfiles::select_slot(int slot) {
@@ -364,6 +389,14 @@ bool PlayerProfiles::apply_character_selection(const CharacterSelection &selecti
 		page.entries = selection.kit->entries;
 	}
 	return true;
+}
+
+bool PlayerProfiles::accept_player_info(const CharacterSelection &selection) {
+	const bool applied = apply_character_selection(selection);
+	// The name after the character bytes, whatever the character leg took
+	// [orig: PlayerInfo_SaveFromDialog @0x55EFA8..0x55F039].
+	if (selection.name) commit_name(*selection.name);
+	return applied;
 }
 
 void PlayerProfiles::reset_current(const ProfileDefaults &defaults) {

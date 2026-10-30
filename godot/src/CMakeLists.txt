@@ -201,6 +201,7 @@ add_library(opennova_bindings OBJECT
     hud/map_view_window.cpp
     hud/command_map_screen.cpp
     hud/hud_toggles.cpp
+    hud/hud_session.cpp
     hud/hud_chat_entry.cpp
     hud/end_round_transition.cpp
     hud/hud_inset_scope.cpp
@@ -208,6 +209,7 @@ add_library(opennova_bindings OBJECT
     hud/hud_entity_info.cpp
     hud/loading_background.cpp
     hud/start_mission_splash.cpp
+    hud/loading_screen_model.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
     devtools/dev_tools_overlay.cpp
@@ -287,6 +289,7 @@ add_library(opennova_bindings OBJECT
     audio/mission_audio_voice.cpp
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
+    rtxt/text_tables.cpp
     util/data_format.cpp
     util/dxt_texture.cpp
     util/paths.cpp
@@ -302,7 +305,7 @@ add_library(opennova_bindings OBJECT
     audio/sbf_audio_stream.cpp
     audio/music_script.cpp
     audio/music_director.cpp
-    audio/music_pair_names.cpp
+    audio/music_pair.cpp
     mnu/mnu_document.cpp
     mnu/mnu_rows.cpp
     mnu/mns_stylesheet.cpp
@@ -316,6 +319,7 @@ add_library(opennova_bindings OBJECT
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp
     player/game_config_block.cpp
+    player/player_options_state.cpp
     player/gameplay_camera.cpp
     player/local_player_presenter.cpp
     player/local_player_visuals.cpp
@@ -327,6 +331,8 @@ add_library(opennova_bindings OBJECT
     player/player_move_intent.cpp
     player/player_info_kit_restore.cpp
     player/player_info_character_state.cpp
+    player/character_profile.cpp
+    player/character_selection.cpp
     player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp

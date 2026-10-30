@@ -335,7 +335,8 @@ func _m4_only_profile() -> PlayerProfiles:
 		"side_profiles": [{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200}, {}],
 		"kit": [{"name": "WPN_M4AUTO"}],
 	}
-	assert_eq(profiles.apply_character_selection(selection), OK)
+	assert_eq(profiles.apply_character_selection(
+			CharacterSelection.from_player_info_snapshot(selection)), OK)
 	return profiles
 
 

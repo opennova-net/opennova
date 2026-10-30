@@ -46,7 +46,7 @@ int HudChatEntry::poll_rows(int p_rows_down, bool p_active,
 	const uint32_t frame = static_cast<uint32_t>(p_frame);
 	const opennova::hud::ChatEntryFacts facts =
 			p_sim.is_valid() ? p_sim->chat_entry_facts(frame) : opennova::hud::ChatEntryFacts{};
-	last_events_ = static_cast<int>(entry_.poll_rows(static_cast<uint32_t>(p_rows_down),
+	last_events_ = static_cast<int>(entry_->poll_rows(static_cast<uint32_t>(p_rows_down),
 			p_active, facts, game_text_lookup(p_gametext)));
 	apply_device_events(p_sim.is_valid() ? p_sim.ptr() : nullptr);
 	return last_events_;
@@ -57,7 +57,7 @@ int HudChatEntry::dispatch_rows(int p_rows_fired, bool p_active,
 	const uint32_t frame = static_cast<uint32_t>(p_frame);
 	const opennova::hud::ChatEntryFacts facts =
 			p_sim.is_valid() ? p_sim->chat_entry_facts(frame) : opennova::hud::ChatEntryFacts{};
-	last_events_ = static_cast<int>(entry_.dispatch_rows(static_cast<uint32_t>(p_rows_fired),
+	last_events_ = static_cast<int>(entry_->dispatch_rows(static_cast<uint32_t>(p_rows_fired),
 			p_active, facts, game_text_lookup(p_gametext)));
 	apply_device_events(p_sim.is_valid() ? p_sim.ptr() : nullptr);
 	return last_events_;
@@ -75,7 +75,7 @@ void HudChatEntry::apply_device_events(Simulation *p_sim) const {
 bool HudChatEntry::key_event(const Ref<InputEventKey> &p_event, const Ref<Simulation> &p_sim,
 		const Ref<RtxtStringFile> &p_gametext, int64_t p_frame) {
 	last_events_ = 0;
-	if (!entry_.capturing() || p_event.is_null()) return false;
+	if (!entry_->capturing() || p_event.is_null()) return false;
 	// Releases are the editor's too: nothing else sees a key while the line
 	// is open.
 	if (!p_event->is_pressed()) return true;
@@ -91,7 +91,7 @@ bool HudChatEntry::key_event(const Ref<InputEventKey> &p_event, const Ref<Simula
 				: opennova::hud::ChatSendResult::Refused;
 	};
 	last_events_ = static_cast<int>(
-			entry_.key(key_char, vk, facts, game_text_lookup(p_gametext), send));
+			entry_->key(key_char, vk, facts, game_text_lookup(p_gametext), send));
 	apply_device_events(sim);
 	return true;
 }
@@ -100,17 +100,24 @@ String HudChatEntry::row_token(int p_row) {
 	return String(opennova::hud::chat_talk_row_token(p_row));
 }
 
-void HudChatEntry::reset() { entry_.reset(); }
-bool HudChatEntry::is_capturing() const { return entry_.capturing(); }
-String HudChatEntry::get_prompt() const { return opennova::cp1252_to_gd(entry_.prompt()); }
-String HudChatEntry::get_text() const { return opennova::cp1252_to_gd(entry_.text()); }
-int HudChatEntry::get_open_dispatch() const { return entry_.open_dispatch(); }
-String HudChatEntry::get_echo_text() const { return opennova::cp1252_to_gd(entry_.echo_text()); }
+void HudChatEntry::reset() { entry_->reset(); }
+bool HudChatEntry::is_capturing() const { return entry_->capturing(); }
+String HudChatEntry::get_prompt() const { return opennova::cp1252_to_gd(entry_->prompt()); }
+String HudChatEntry::get_text() const { return opennova::cp1252_to_gd(entry_->text()); }
+int HudChatEntry::get_open_dispatch() const { return entry_->open_dispatch(); }
+String HudChatEntry::get_echo_text() const { return opennova::cp1252_to_gd(entry_->echo_text()); }
 int64_t HudChatEntry::get_echo_argb() const {
-	return static_cast<int64_t>(opennova::hud::chat_dispatch_flood_color(entry_.echo_dispatch()));
+	return static_cast<int64_t>(opennova::hud::chat_dispatch_flood_color(entry_->echo_dispatch()));
 }
 void HudChatEntry::set_preset(int p_index, const String &p_text) {
-	entry_.set_preset(p_index, opennova::gd_to_retail_text(p_text));
+	entry_->set_preset(p_index, opennova::gd_to_retail_text(p_text));
+}
+
+Ref<HudChatEntry> HudChatEntry::over(std::shared_ptr<opennova::hud::ChatEntry> p_entry) {
+	Ref<HudChatEntry> binding;
+	binding.instantiate();
+	if (p_entry != nullptr) binding->entry_ = std::move(p_entry);
+	return binding;
 }
 
 void HudChatEntry::_bind_methods() {

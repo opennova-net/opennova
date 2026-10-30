@@ -468,6 +468,7 @@ func test_script_chat_lines_ride_the_chat_ring() -> void:
 	# WAC text/ptext/text# and the lose line post into the CHAT ring
 	# (Chat_AddMessageChannel1); the BMS triggered text and the console lines
 	# post into the SYSTEM ring (Chat_AddMessageChannel2).
+	_register_killed_green()
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
@@ -485,16 +486,16 @@ func test_script_chat_lines_ride_the_chat_ring() -> void:
 func test_lose_effect_sets_endround_banner_and_message() -> void:
 	# The WAC Lose banner trio is shell presentation [orig: WacAction_Lose @0x4ed3f0 ->
 	# GameMsg_AddChatLineAndRelay/SetBannerText/SetTeamBannerText]: the effect carries
-	# the gametext KEY; the presenter resolves it against 'Misc' (the miss-format marker
-	# stands in when no gametext table is registered) and keeps the banner line for
-	# the MISSION FAILED screen.
+	# the gametext KEY; the session resolves it against 'Misc' as GameText_GetString
+	# does (empty on a miss) and keeps the banner line for the MISSION FAILED screen.
+	_register_killed_green()
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
 		MissionEffect.make("lose", 0, 0, 0, "STRMISC_KILLEDGREEN"),
 	])
-	assert_string_contains(presenter.endround_banner_line(), "STRMISC_KILLEDGREEN",
-			"the lose banner resolves (or marks) the Misc gametext key")
+	assert_eq(presenter.endround_banner_line(), "Green team eliminated",
+			"the lose banner is the Misc gametext line")
 	assert_eq(presenter.pending_hud_message_count(), 1,
 			"the lose banner also lands one chat-feed line [orig: Chat_AddMessageChannel1]")
 	assert_eq(presenter.pending_chat_line_count(), 1,
@@ -502,6 +503,14 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 	presenter.teardown()
 	assert_eq(presenter.endround_banner_line(), "",
 			"teardown clears the banner [orig: the round-start HUD reset @0x5b71b0]")
+
+
+# The gametext Misc line the lose effect's key names.
+func _register_killed_green() -> void:
+	var gametext := RtxtStringFile.new()
+	gametext.add_section("Misc")
+	gametext.add_entry("STRMISC_KILLEDGREEN", "Green team eliminated", 0, Vector2i())
+	Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
 
 
 func test_crosshair_option_caches_before_hud_and_updates_an_existing_hud() -> void:
@@ -584,7 +593,7 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.setup(world, null, null)
-	preload("res://game/world/hud_text_tables.gd").register(root, world.get_loaded_mission_file())
+	presenter.ensure_game_hud()
 
 	assert_not_null(Strings.get_table("mission"),
 		"mnml.bin exists and must be selected from the successfully loaded BMS; medmssn.bin is absent")

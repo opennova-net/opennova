@@ -2,9 +2,11 @@ extends GutTest
 
 # The player profile (docs/playerinfo/player-sav-re.md): the shell's one in-memory
 # profile over player.sav and weapon.sav, saved beside the game, its name the
-# callsign, and single player's session words (D-NET-375). The format and the
-# load/save rules are the ctests' (playersav_player_sav, profile_player_profiles);
-# this pins the binding and the shell's seams over them.
+# callsign, and single player's session words (D-NET-375). The format, the
+# load/save rules, the name rule, the dialog save, the files' places and the
+# callsign rule are the ctests' (playersav_player_sav, profile_player_profiles),
+# the character half's character_registry; this pins the binding and the shell's
+# seams over them.
 
 const PLAYER_SAV_BYTES := 77464
 const WEAPON_SAV_BYTES := 337996
@@ -57,11 +59,6 @@ func test_the_accept_names_the_record_and_the_name_is_the_callsign() -> void:
 	PlayerProfile.load_for(null)
 	assert_eq(PlayerProfile.load_callsign(), "Sandman", "the name reads back from player.sav")
 	assert_false(PlayerProfile.store().is_first_run())
-	# A name that starts with white space empties the name and flags the record.
-	PlayerProfile.accept_player_info({"name": " Sandman", "team": 0, "player_class": 8,
-			"side_profiles": [{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200}, {}]})
-	assert_eq(PlayerProfile.store().get_player_name(), "")
-	assert_true(PlayerProfile.store().is_nameless())
 
 
 func test_the_record_reads_every_named_word() -> void:

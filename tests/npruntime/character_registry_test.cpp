@@ -362,6 +362,39 @@ int main() {
 			      join_player_class_or_default(10) == kJoinDefaultPlayerClass,
 	      "anything else the rifleman");
 
+	// The profile's character half off a weapon record: each side block's bytes as the record
+	// holds them, the class byte raw, with the tree indices its word resolves to on that side; a
+	// word the table does not resolve on its side, or no table, keeps its bytes with indices -1
+	// (D-PLAYERINFO-33).
+	{
+		opennova::playersav::Record record;
+		record.blue.player_class = 6;
+		record.blue.avatar_a = 0;
+		record.blue.avatar_b = 0;
+		record.blue.avatar_packed = 0x0400;
+		record.red.player_class = 200;
+		record.red.avatar_a = 30;
+		record.red.avatar_b = 15;
+		record.red.avatar_packed = 0x0400; // a good word in the red block
+		const CharacterProfile profile = character_profile(record, &registry, "Sandman");
+		check(profile.name == "Sandman" && profile.team == 0, "the callsign, the blue side shown");
+		check(profile.sides[0].team == 0 && profile.sides[0].nationality == 0 &&
+				      profile.sides[0].division == 0 && profile.sides[0].combo == 1,
+		      "blue's word resolves to its tree indices");
+		check(profile.sides[0].player_class == 6 && profile.sides[0].avatar_packed == 0x0400,
+		      "blue keeps its class byte and word");
+		check(profile.sides[1].team == 1 && profile.sides[1].nationality == -1 &&
+				      profile.sides[1].division == -1 && profile.sides[1].combo == -1,
+		      "a word of the other side resolves no indices");
+		check(profile.sides[1].player_class == 200 && profile.sides[1].avatar_a == 30 &&
+				      profile.sides[1].avatar_b == 15 && profile.sides[1].avatar_packed == 0x0400,
+		      "the unresolved side keeps the record's bytes, the class byte raw");
+		const CharacterProfile no_table = character_profile(record, nullptr, "");
+		check(no_table.sides[0].nationality == -1 && no_table.sides[0].avatar_packed == 0x0400 &&
+				      no_table.sides[0].player_class == 6,
+		      "no table: the record's bytes, no indices");
+	}
+
 	test_player_visual_spec();
 
 	if (g_failures != 0) {

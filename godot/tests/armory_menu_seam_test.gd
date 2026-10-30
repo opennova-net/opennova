@@ -84,8 +84,9 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> WeaponData
 # [orig: Armory_StageLoadoutBuffers @0x564290; UI_PopulateThreeCategoryLists @0x566f3c].
 func _page_profiles(entries: Array, player_class := 8, side := 0) -> PlayerProfiles:
 	var profiles := PlayerProfiles.new()
-	assert_eq(profiles.apply_character_selection({"player_class": player_class, "team": side,
-			"kit": entries, "kit_class": player_class}), OK, "the class page is written")
+	assert_eq(profiles.apply_character_selection(CharacterSelection.from_player_info_snapshot({
+			"player_class": player_class, "team": side, "kit": entries,
+			"kit_class": player_class})), OK, "the class page is written")
 	return profiles
 
 

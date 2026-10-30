@@ -1,15 +1,10 @@
 extends GutTest
 
-# The three HUD panel lanes of GameHudPresenter (vehicle panel, Recent
-# Messages + the chat drain, AAS zone status), exercised over a REAL HudOverlay
-# with the sim absent: the toggle edge machine, the hide-once bookkeeping, and
-# the null paths. The native row feeds (Simulation.fill_vehicle_panel /
-# inmatch::hud_lfp_panel_feed / drain_feed_posts) need a live mission and are pinned by the
-# engine ctests (vehicle_panel_feed, lfp_feed, client_replica_chat).
-
-const VehiclePanelPresenter := preload("res://game/world/vehicle_panel_presenter.gd")
-const MessageLogPresenter := preload("res://game/world/message_log_presenter.gd")
-const LfpPanelPresenter := preload("res://game/world/lfp_panel_presenter.gd")
+# The HUD panels the session's frame pushes (HudSession over engine hud/hud_session.h: the
+# Recent Messages window, the Tab board, the chat line), exercised over a REAL HudOverlay with the
+# sim absent: the toggle edge machine and the overlay's own window seams. The native row feeds
+# (Simulation.fill_vehicle_panel / inmatch::hud_lfp_panel_feed / drain_feed_posts) need a live
+# mission and are pinned by the engine ctests (vehicle_panel_feed, lfp_feed, client_replica_chat).
 const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"  # staged as Gunpl22b.fnt
 
 var _temp_dirs: Array[String] = []
@@ -74,61 +69,22 @@ func test_message_log_toggle_edge() -> void:
 	assert_false(toggles.is_message_log_open(), "reset_mission() clears the flag.")
 
 
-# The window the lane opens for the flag lists a chat line the feed has
-# already expired, and hides it again when the flag drops.
-func test_message_log_lane_shows_history() -> void:
+# The window the session opens for the flag lists a chat line the feed has already expired, and
+# hides it again when the flag drops.
+func test_message_log_window_shows_history() -> void:
 	var hud := _font_overlay()
-	var lane := MessageLogPresenter.new()
 	hud.push_chat_line("Taylor: moving to bravo", -1)
 	hud.set_frame_clocks(50 + 930, 50 + 930, 50 + 930, 50 + 930)
 	hud.set_player_state(1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"The feed has expired the line.")
-	lane.update(hud, true)
+	hud.set_message_log_shown(true)
 	assert_gt(hud.get_draw_list_stats().glyphs, 0,
-			"Opening the window through the lane lists the expired line.")
+			"Opening the window lists the expired line.")
 	await get_tree().process_frame
-	lane.update(hud, false)
+	hud.set_message_log_shown(false)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
-			"Closing through the lane hides the history.")
-
-
-# The vehicle panel lane hides on every missing input without touching the
-# overlay until it has pushed something, and the zone panel lane hides with
-# no sim.
-func test_vehicle_and_zone_lanes_null_paths() -> void:
-	var hud := _font_overlay()
-	var before := hud.get_draw_list_stats()
-	var vehicle := VehiclePanelPresenter.new()
-	vehicle.update(hud, null, null, null, 0)
-	vehicle.update(null, null, null, null, 0)
-	var zones := LfpPanelPresenter.new()
-	zones.update(hud, null)
-	zones.update(null, null)
-	var after := hud.get_draw_list_stats()
-	assert_eq(after.elements_drawn, before.elements_drawn,
-			"The null paths draw nothing and crash nothing.")
-	vehicle.reset()
-	zones.reset()
-	assert_true(is_instance_valid(hud))
-
-
-# The zone lane keeps no game-type rule of its own: it pushes the panel for
-# every session game type and the engine element picks the arm (retail calls
-# HUD_DrawZoneStatusPanel every HUD frame, its one game-type test the conquest
-# arm @0x5a248d..0x5a24a1). A sessionless sim's game type is 0, not AAS: the
-# lane still pushes, and the zone fill finds nothing to draw.
-func test_zone_lane_pushes_every_game_type() -> void:
-	var hud := _font_overlay()
-	var sim := Simulation.new()
-	assert_ne(int(sim.get_session_game_type()), NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE,
-			"A sessionless sim reads a non-AAS game type.")
-	var zones := LfpPanelPresenter.new()
-	zones.update(hud, sim)
-	assert_true(zones.is_pushed(), "A non-AAS game type still pushes the panel.")
-	zones.update(hud, null)
-	assert_false(zones.is_pushed(), "No sim hides the pushed panel once.")
-	assert_true(is_instance_valid(hud))
+			"Closing the window hides the history.")
 
 
 # The Tab board takes PgUp/PgDn only in a session with the board up (the

@@ -9,6 +9,7 @@
 #include <runtime/world/epilog_cine.h>
 
 #include <formats/fnt/fnt_stroke_font.h>
+#include <formats/rtxt/text_tables.h>
 
 #include "common/test_font.h"
 
@@ -16,6 +17,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -27,6 +31,20 @@ void check(bool ok, const char *what) {
 		std::fprintf(stderr, "FAIL: %s\n", what);
 		++g_failures;
 	}
+}
+
+// A gametext table of one LoadingText section holding `entries` (key, text).
+std::shared_ptr<const opennova::rtxt::File> loading_text_table(
+		const std::vector<std::pair<std::string, std::string>> &entries) {
+	auto file = std::make_shared<opennova::rtxt::File>();
+	file->sections.push_back({ "LoadingText", static_cast<uint32_t>(entries.size()) });
+	for (const auto &[key, text] : entries) {
+		opennova::rtxt::Entry entry;
+		entry.key = key;
+		entry.text = text;
+		file->entries.push_back(entry);
+	}
+	return file;
 }
 
 } // namespace
@@ -454,6 +472,136 @@ int main() {
 		const std::vector<uint8_t> told = composite("HI");
 		check(lit(told, 16, 522, 400, 600), "the server message under the band");
 		opennova::fnt::fnt_free(&font);
+	}
+
+	// --- the game type's LoadingText key [orig: HUD_GetLoadingScreenTextByGameType @ 0x51f300,
+	// the switch @ 0x51f30b..0x51f3a6] ---
+	check(std::strcmp(loading_gametype_text_key(0x00000u), "LTGT_DM") == 0, "DM");
+	check(std::strcmp(loading_gametype_text_key(0x10000u), "LTGT_TDM") == 0, "TDM");
+	check(std::strcmp(loading_gametype_text_key(0x10020u), "LTGT_COOP") == 0, "COOP");
+	check(std::strcmp(loading_gametype_text_key(0x30020u), "LTGT_COOP") == 0,
+			"the 0x20000 bit is masked out of the coop compare");
+	check(std::strcmp(loading_gametype_text_key(0x00001u), "LTGT_KOTH") == 0, "KOTH");
+	check(std::strcmp(loading_gametype_text_key(0x10001u), "LTGT_TKOTH") == 0, "TKOTH");
+	check(std::strcmp(loading_gametype_text_key(0x90002u), "LTGT_SD") == 0, "SD");
+	check(std::strcmp(loading_gametype_text_key(0x10002u), "LTGT_AD") == 0, "AD");
+	check(std::strcmp(loading_gametype_text_key(0x10004u), "LTGT_CTF") == 0, "CTF");
+	check(std::strcmp(loading_gametype_text_key(0x10008u), "LTGT_FB") == 0, "FB");
+	check(std::strcmp(loading_gametype_text_key(0x10010u), "LTGT_AAS") == 0, "AAS");
+	check(std::strcmp(loading_gametype_text_key(0x50010u), "LTGT_CAC") == 0, "CAC");
+	check(*loading_gametype_text_key(0xFFFFFFFFu) == '\0', "an unlisted type has no key");
+	check(*loading_gametype_text_key(0xDEADu) == '\0', "an unlisted type has no key (2)");
+	check(std::strcmp(kSplashContinueTextKey, "LT_Continue") == 0, "the continue line's key");
+
+	// --- the model's strings off the registered gametext ---
+	{
+		namespace rtxt = opennova::rtxt;
+		rtxt::register_table(rtxt::kTableGameText, nullptr);
+		check(loading_game_type_text(0x10010u).empty(), "no table: no game-type line");
+		check(loading_server_message_label() == kLoadingServerMessageLabelFallback,
+				"no table: the label's literal fallback");
+		check(loading_splash_continue_text().empty(), "no table: no continue line");
+		rtxt::register_table(rtxt::kTableGameText,
+				loading_text_table({ { "LTGT_AAS", "Advance and Secure" },
+						{ "LT_SERVERMSG", "Server says" }, { "LT_Continue", "Press a key" } }));
+		check(loading_game_type_text(0x10010u) == "Advance and Secure", "the type's line");
+		check(loading_game_type_text(0x10004u).empty(), "a key the table lacks: an empty line");
+		check(loading_game_type_text(0xDEADu).empty(), "an unlisted type: an empty line");
+		check(loading_server_message_label() == "Server says", "the label from the table");
+		check(loading_splash_continue_text() == "Press a key", "the continue line from the table");
+		rtxt::register_table(rtxt::kTableGameText, nullptr);
+	}
+
+	// --- the model: the session block [orig: Render_LoadingScreen @ 0x521d10; the
+	// session variables' parse Client_ParseServerSessionVariables @ 0x5202f0] ---
+	{
+		namespace rtxt = opennova::rtxt;
+		rtxt::register_table(rtxt::kTableGameText,
+				loading_text_table({ { "LTGT_DM", "Deathmatch" }, { "LTGT_AAS", "AAS" } }));
+		LoadingSessionInfo sp;
+		sp.mission_file = "00TRg.bms";
+		sp.server_name = "ignored";
+		LoadingScreenModel solo;
+		solo.setup(sp, true, true);
+		check(!solo.in_session(), "single player: no session block");
+		check(solo.title().empty() && solo.game_type_text().empty(),
+				"single player: the block stays empty");
+		check(solo.custom_background() && solo.band_right() == kLoadingBandRightCustom,
+				"a custom background's band edge");
+		solo.update_session_info(sp);
+		check(solo.title().empty(), "out of a session an update changes nothing");
+
+		LoadingSessionInfo mp;
+		mp.in_session = true;
+		mp.server_name = "DEMOHOST";
+		mp.mission_name = "Trainingsmission";
+		mp.game_type = 0x10010;
+		mp.custom_text = "Welcome aboard";
+		LoadingScreenModel host;
+		host.setup(mp, false, true);
+		check(host.in_session(), "a session's block");
+		check(host.band_right() == kLoadingBandRightStock, "the stock background's band edge");
+		check(host.title() == "DEMOHOST" && host.mission_name() == "Trainingsmission",
+				"the server and mission names");
+		check(host.game_type_text() == "AAS", "the game type's line");
+		check(host.custom_text() == "Welcome aboard", "the server message");
+
+		LoadingSessionInfo early;
+		early.in_session = true;
+		LoadingScreenModel joiner;
+		joiner.setup(early, false, true);
+		check(joiner.game_type_text() == "Deathmatch", "a type not carried reads as 0");
+		check(joiner.custom_text().empty(), "no message before the host is known");
+		LoadingSessionInfo told;
+		told.server_name = "DEMOHOST";
+		told.custom_text = "Welcome aboard";
+		joiner.update_session_info(told);
+		check(joiner.title() == "DEMOHOST", "the host's name arrives");
+		check(joiner.game_type_text() == "Deathmatch", "a type not carried keeps its line");
+		check(joiner.custom_text() == "Welcome aboard", "the host's message under the band");
+		LoadingSessionInfo cleared;
+		joiner.update_session_info(cleared);
+		check(joiner.title() == "DEMOHOST", "an empty name keeps the current one");
+		check(joiner.custom_text().empty(), "a host with no message draws none");
+		LoadingSessionInfo retyped;
+		retyped.game_type = 0x10004; // CTF: the table lacks its key
+		joiner.update_session_info(retyped);
+		check(joiner.game_type_text().empty(), "a carried type's miss is the empty line");
+		joiner.adopt_background(true);
+		check(joiner.custom_background() && joiner.band_right() == kLoadingBandRightCustom,
+				"an adopted background moves the band edge");
+		rtxt::register_table(rtxt::kTableGameText, nullptr);
+	}
+
+	// --- the model: the checkpoint and the present cadence [orig: LoadingScreen_UpdateAndPresent
+	// @ 0x586be0 - the effect gate @ 0x586bfd, the throttle @ 0x586c10..0x586c24] ---
+	{
+		LoadingSessionInfo sp;
+		LoadingScreenModel none;
+		none.setup(sp, false, false);
+		check(!none.present_due(1000, true), "no background: no present, forced or not");
+
+		LoadingScreenModel screen;
+		screen.setup(sp, false, true);
+		screen.set_progress(150);
+		check(screen.progress() == 100, "the checkpoint clamps to 100");
+		screen.set_progress(-3);
+		check(screen.progress() == 0, "the checkpoint clamps to 0");
+		check(screen.present_due(5000, false), "the first present is due");
+		check(!screen.present_due(5050, false), "an immediate re-present holds");
+		screen.set_progress(50);
+		check(screen.present_due(5060, false), "a changed checkpoint is due at once");
+		check(screen.progress() == 50, "the present shows the exact checkpoint");
+		check(!screen.present_due(5159, false), "under the interval with no change");
+		check(screen.present_due(5160, false), "the 100 ms window pump");
+		check(screen.present_due(5161, true), "a forced present");
+		check(screen.progress() == 50, "a forced present cannot invent progress");
+		// The DWORD difference read signed: GetTickCount wrapping past 2^32 still counts on.
+		LoadingScreenModel wrap;
+		wrap.setup(sp, false, true);
+		check(wrap.present_due(0xFFFFFFF0u, true), "a present just before the wrap");
+		check(!wrap.present_due(0x00000010u, false), "32 ms across the wrap is under the interval");
+		check(wrap.present_due(0x00000060u, false), "112 ms across the wrap is due");
 	}
 
 	if (g_failures != 0) {

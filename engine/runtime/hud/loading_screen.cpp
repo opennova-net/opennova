@@ -10,9 +10,75 @@
 #include <cstdint>
 #include <utility>
 
+#include <formats/rtxt/text_tables.h>
 #include <runtime/hud/hud_math.h>
+#include <runtime/hud/loading_background.h>
 
 namespace opennova::hud {
+
+std::string loading_game_type_text(uint32_t game_type) {
+	const char *key = loading_gametype_text_key(game_type);
+	if (*key == '\0') return std::string(); // the switch's default [orig: @0x51f3a4]
+	return rtxt::table_text_or(rtxt::kTableGameText, rtxt::kSectionLoadingText, key, "");
+}
+
+std::string loading_server_message_label() {
+	return rtxt::table_text_or(rtxt::kTableGameText, rtxt::kSectionLoadingText,
+			kLoadingServerMessageLabelKey, kLoadingServerMessageLabelFallback);
+}
+
+std::string loading_splash_continue_text() {
+	return rtxt::table_text_or(rtxt::kTableGameText, rtxt::kSectionLoadingText,
+			kSplashContinueTextKey, "");
+}
+
+void LoadingScreenModel::setup(const LoadingSessionInfo &info, bool custom_background,
+		bool background_loaded) {
+	custom_background_ = custom_background;
+	band_right_ = loading_band_right(custom_background);
+	background_loaded_ = background_loaded;
+	in_session_ = info.in_session;
+	title_.clear();
+	mission_name_.clear();
+	game_type_text_.clear();
+	custom_text_.clear();
+	// Out of a session the screen is the image alone [orig: Render_LoadingScreen @0x521ebe].
+	if (!in_session_) return;
+	title_ = info.server_name;
+	mission_name_ = info.mission_name;
+	custom_text_ = info.custom_text;
+	game_type_text_ = loading_game_type_text(
+			static_cast<uint32_t>(info.game_type < 0 ? 0 : info.game_type));
+}
+
+void LoadingScreenModel::adopt_background(bool custom_background) {
+	custom_background_ = custom_background;
+	band_right_ = loading_band_right(custom_background);
+	background_loaded_ = true;
+}
+
+void LoadingScreenModel::update_session_info(const LoadingSessionInfo &info) {
+	if (!in_session_) return;
+	if (!info.server_name.empty()) title_ = info.server_name;
+	if (!info.mission_name.empty()) mission_name_ = info.mission_name;
+	// The line is the game type's at every draw, a miss the empty line [orig: @0x51f3e3].
+	if (info.game_type >= 0) game_type_text_ = loading_game_type_text(static_cast<uint32_t>(info.game_type));
+	custom_text_ = info.custom_text;
+}
+
+void LoadingScreenModel::set_progress(int percent) {
+	progress_ = percent < 0 ? 0 : percent > 100 ? 100 : percent;
+}
+
+bool LoadingScreenModel::present_due(uint32_t now_ms, bool force) {
+	if (!background_loaded_) return false; // [orig: the effect gate @0x586bfd]
+	// GetTickCount() - last, compared signed [orig: @0x586c10..0x586c1a].
+	const int elapsed = static_cast<int32_t>(now_ms - last_present_ms_);
+	if (!force && !loading_present_due(elapsed, last_drawn_progress_ != progress_)) return false;
+	last_present_ms_ = now_ms;          // [orig: @0x586c2c]
+	last_drawn_progress_ = progress_;   // [orig: @0x586c32]
+	return true;
+}
 
 GameFontRun splash_continue_run(const GameFont &font, const char *text, int surface_w, int surface_h,
 		bool phase_on) {

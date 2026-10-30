@@ -28,6 +28,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/dialog_queue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/envs_markers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/music_stream_pump.cpp # the music VM's pacing: one play per track
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/music_context.cpp # the one music context: the pair, the open order, the seed
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/oneshot_play.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_selector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
@@ -154,6 +155,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/cine_text.cpp # the epilog cine's text and counters
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_background.cpp # the loading screen's background pick, band edge and splash gate
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_session.cpp    # the HUD session: toggles, chat, effects, caches
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/tip_system.cpp     # the MrClippy tip: events, gates, countdown, text
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_tip.cpp  # its compile element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_server_status.cpp       # the authority's status page: roster, score list, throttle
@@ -485,6 +487,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_file.cpp              # the retail /HOST host file (opennova-serve, ADR 0051)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_config.cpp            # game.cfg onto the host session (opennova-serve, ADR 0051 d2)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/game_config_block.cpp      # the process's game.cfg block, both embedders (D-NET-335)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_options.cpp         # the player's options over the cfg block
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_boot.cpp              # the one host boot, both phases (ADR 0051 d4)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/mission_rotation.cpp       # the map rotation and its session words (D-NET-331)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/rotation_admin.cpp         # the admin MISSION verbs over the rotation (ADR 0051 PR5b)
@@ -559,6 +562,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_listing_binding.cpp # the NovaWorld host listing's match side (game and serve)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/hud_frame_feeds.cpp # the HUD's per-frame feeds into its frame state
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/hud_session_feeds.cpp # the HUD session's role gates, effects and map feeds
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/special_key_chain.cpp # the special-key chain over a role
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_input_frame.cpp # the local player's input frame (TickInputSource)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)

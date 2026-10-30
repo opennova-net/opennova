@@ -115,6 +115,7 @@
 #include "hud/font_page_glyphs.h"
 #include "hud/loading_background.h"
 #include "hud/start_mission_splash.h"
+#include "hud/loading_screen_model.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_process_words_carry.h"
 #include "hud/hud_overlay.h"
@@ -122,6 +123,7 @@
 #include "hud/map_view_window.h"
 #include "hud/command_map_screen.h"
 #include "hud/hud_toggles.h"
+#include "hud/hud_session.h"
 #include "hud/hud_chat_entry.h"
 #include "hud/end_round_transition.h"
 #include "hud/hud_inset_scope.h"
@@ -164,6 +166,7 @@
 #include "dbf/dbf_data.h"
 #include "fnt/fnt_resource.h"
 #include "rtxt/rtxt_string_file.h"
+#include "rtxt/text_tables.h"
 #include "network/novaworld_client.h"
 #include "network/novaworld_server_browser.h"
 #include "network/host_session_options.h"
@@ -185,7 +188,7 @@
 #include "audio/sbf_audio_stream.h"
 #include "audio/music_script.h"
 #include "audio/music_director.h"
-#include "audio/music_pair_names.h"
+#include "audio/music_pair.h"
 #include "mnu/mnu_document.h"
 #include "mnu/mnu_rows.h"
 #include "mnu/mns_stylesheet.h"
@@ -199,6 +202,7 @@
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
 #include "player/game_config_block.h"
+#include "player/player_options_state.h"
 #include "player/gameplay_camera.h"
 #include "player/key_event_queue.h"
 #include "player/special_key_outcome.h"
@@ -207,6 +211,8 @@
 #include "player/player_move_intent.h"
 #include "player/player_info_kit_restore.h"
 #include "player/player_info_character_state.h"
+#include "player/character_profile.h"
+#include "player/character_selection.h"
 #include "player/player_profiles.h"
 #include "player/player_spawn_loadout.h"
 #include "player/player_viewmodel_def.h"
@@ -330,8 +336,11 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInfoKitRestore);
 	GDREGISTER_CLASS(PlayerInfoSideSelection);
 	GDREGISTER_CLASS(PlayerInfoCharacterState);
+	GDREGISTER_CLASS(CharacterProfile);
+	GDREGISTER_CLASS(CharacterSelection);
 	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(GameConfigBlock);
+	GDREGISTER_CLASS(PlayerOptionsState);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
@@ -354,6 +363,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MapViewWindow);
 	GDREGISTER_CLASS(CommandMapScreen);
 	GDREGISTER_CLASS(HudToggles);
+	GDREGISTER_CLASS(HudSession);
 	GDREGISTER_CLASS(HudChatEntry);
 	GDREGISTER_CLASS(EndRoundTransition);
 	GDREGISTER_CLASS(HudInsetScope);
@@ -361,6 +371,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudEntityInfo);
 	GDREGISTER_CLASS(LoadingBackground);
 	GDREGISTER_CLASS(StartMissionSplash);
+	GDREGISTER_CLASS(LoadingScreenModel);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
@@ -405,6 +416,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionAudio);
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
+	GDREGISTER_ABSTRACT_CLASS(TextTables);
 	GDREGISTER_CLASS(Paths);
 	GDREGISTER_CLASS(ParticleEffect);
 	GDREGISTER_CLASS(ParticleFile);
@@ -455,7 +467,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SbfAudioStream);
 	GDREGISTER_CLASS(SbfBank);
 	GDREGISTER_CLASS(MusicScript);
-	GDREGISTER_CLASS(MusicPairNames);
+	GDREGISTER_CLASS(MusicPair);
 	GDREGISTER_CLASS(MusicDirector);
 	GDREGISTER_CLASS(MnuDocument);
 	GDREGISTER_CLASS(MnuSoundRow);
@@ -538,6 +550,7 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	TargetProjectionXrInterface::cleanup_statics();
 	SlotShadow::cleanup_statics();
 	Q3SourceRegistry::cleanup_statics();
+	PlayerProfiles::cleanup_statics();
 	release_glyph_canvas_shader();
 	ObjectData::clear_static_caches();
 	opennova::clear_texture_resolver_caches();

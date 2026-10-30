@@ -43,8 +43,6 @@ static_assert(godot::HudPos::MESSAGE_TEXT_MAX ==
 		opennova::hud::kMessageTextMax);
 static_assert(godot::HudPos::MESSAGE_SLOT_COUNT ==
 		opennova::hud::kMessageSlotCount);
-static_assert(godot::HudPos::LOADING_PRESENT_INTERVAL_MS ==
-		opennova::hud::kLoadingPresentIntervalMs);
 static_assert(godot::HudPos::BINOCULAR_DIGIT_STEP ==
 		opennova::hud::kBinocularDigitStep);
 static_assert(godot::HudPos::VIEW_DIGIT_CELL ==
@@ -104,7 +102,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scene_sight_rect", "design", "surface", "aspect_mode"), &HudPos::nvg_scene_sight_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_distance_m", "ground_delta"), &HudPos::waypoint_distance_m);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &HudPos::loading_bar_fill_span);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_gametype_text_key", "game_type"), &HudPos::loading_gametype_text_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_label", "mission", "gametext", "view", "in_session", "game_type"), &HudPos::waypoint_label);
 	ClassDB::bind_static_method("HudPos", D_METHOD("subgoal_message", "mission", "lost", "header_id"), &HudPos::subgoal_message);
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_header", "gametext"), &HudPos::objective_header);
@@ -112,9 +109,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("triggered_text", "mission", "text_id"), &HudPos::triggered_text);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_small"), &HudPos::loading_font_small);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_large"), &HudPos::loading_font_large);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_key"), &HudPos::loading_msg_label_key);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_fallback"), &HudPos::loading_msg_label_fallback);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed"), &HudPos::loading_present_due);
 	ClassDB::bind_static_method("HudPos",
 			D_METHOD("composite_loading_session_text", "background", "large", "small", "title",
 					"mission", "game_type", "label", "custom_text", "band_right"),
@@ -129,7 +123,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_color"), &HudPos::loading_bar_fill_color);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_arrow_image"), &HudPos::loading_splash_arrow_image);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_sound_set"), &HudPos::loading_splash_sound_set);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_key"), &HudPos::loading_splash_continue_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_font"), &HudPos::loading_splash_continue_font);
 	ClassDB::bind_static_method("HudPos", D_METHOD("draw_splash_continue", "item", "font", "pages", "text", "size", "phase_on"), &HudPos::draw_splash_continue);
 	ClassDB::bind_static_method("HudPos",
@@ -159,7 +152,6 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(MESSAGE_EXPIRY_STAGGER);
 	BIND_CONSTANT(MESSAGE_TEXT_MAX);
 	BIND_CONSTANT(MESSAGE_SLOT_COUNT);
-	BIND_CONSTANT(LOADING_PRESENT_INTERVAL_MS);
 	BIND_CONSTANT(BINOCULAR_DIGIT_STEP);
 	BIND_CONSTANT(VIEW_DIGIT_CELL);
 	BIND_CONSTANT(VIEW_TEXTURE_BINOCULAR_MASK);
@@ -318,12 +310,6 @@ int HudPos::waypoint_distance_m(const Vector2 &p_ground_delta) {
 
 String HudPos::loading_font_small() { return opennova::hud::kLoadingFontSmall; }
 String HudPos::loading_font_large() { return opennova::hud::kLoadingFontLarge; }
-String HudPos::loading_msg_label_key() { return opennova::hud::kLoadingServerMessageLabelKey; }
-String HudPos::loading_msg_label_fallback() { return opennova::hud::kLoadingServerMessageLabelFallback; }
-
-bool HudPos::loading_present_due(int p_elapsed_ms, bool p_reported_changed) {
-	return opennova::hud::loading_present_due(p_elapsed_ms, p_reported_changed);
-}
 
 Vector2i HudPos::loading_bar_fill_span(int p_x, int p_w, int p_displayed) {
 	const opennova::hud::LoadingBarSpan span =
@@ -381,11 +367,6 @@ String HudPos::weapon_display_name(const Ref<RtxtStringFile> &p_gametext,
 
 // --- loading screen (hud/loading_screen.h carries the values/witnesses) -----
 
-String HudPos::loading_gametype_text_key(int p_game_type) {
-	return String(opennova::hud::loading_gametype_text_key(
-			static_cast<uint32_t>(p_game_type)));
-}
-
 Ref<Image> HudPos::composite_loading_session_text(const Ref<Image> &p_background,
 		const Ref<FntResource> &p_large, const Ref<FntResource> &p_small, const String &p_title,
 		const String &p_mission, const String &p_game_type, const String &p_label,
@@ -441,10 +422,6 @@ String HudPos::loading_splash_arrow_image() {
 
 String HudPos::loading_splash_sound_set() {
 	return String(opennova::hud::kSplashSoundSet);
-}
-
-String HudPos::loading_splash_continue_key() {
-	return String(opennova::hud::kSplashContinueTextKey);
 }
 
 String HudPos::loading_splash_continue_font() {

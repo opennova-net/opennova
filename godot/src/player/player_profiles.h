@@ -20,7 +20,10 @@
 namespace godot {
 
 class AvatarDatabase;
+class CharacterProfile;
+class CharacterSelection;
 class PlayerInfoKitRestore;
+class ResourceRoot;
 class RtxtStringFile;
 class WeaponDatabase;
 class WeaponProfileSummary;
@@ -30,12 +33,38 @@ class PlayerProfiles : public RefCounted {
 
 	opennova::profile::PlayerProfiles store_;
 	opennova::profile::ProfileDefaults defaults_;
+	// The expansion the last load read weapon.sav for, which the process's save writes it for.
+	String expansion_;
+
+	void set_defaults_native(const AvatarDatabase *p_avatars,
+			const opennova::rtxt::File *p_menu_table, int p_joystick_caps);
 
 protected:
 	static void _bind_methods();
 
 public:
 	PlayerProfiles();
+
+	// --- The process's profile (retail's one in-memory image, docs/playerinfo/player-sav-re.md) ---
+	// The store every screen and session leg reads: its first use loads both files from the
+	// directory the game runs in (LaunchFlags.working_dir) with a fresh record's defaults.
+	static Ref<PlayerProfiles> process();
+	// The menu's start on a mount: a fresh record's defaults from the mount's Avatars.def and the
+	// registered menu table (rtxt::kTableGameUi), then both files read again from the working
+	// directory, weapon.sav for the mount's expansion. OK, or the error a present file gave.
+	static Error load_process_for(const Ref<ResourceRoot> &p_root);
+	// A save point: both files written where the last load read them. ERR_UNCONFIGURED with no
+	// working directory; a failed write is warned and returned.
+	static Error save_process();
+	// The callsign every session leg rides (engine profile::profile_callsign): the `--callsign`
+	// launch override, else the current record's name, each cut to the wire's Name[16].
+	static String process_callsign();
+	// The profile's character half for the menu screens and the spawn (engine
+	// inmatch::character_profile over the current weapon record, the name the callsign, the
+	// sides resolved against the mount's Avatars.def).
+	static Ref<CharacterProfile> process_character_profile(const Ref<ResourceRoot> &p_root);
+	// The module's teardown drops the process's store.
+	static void cleanup_statics();
 
 	const opennova::profile::PlayerProfiles &native() const { return store_; }
 	opennova::profile::PlayerProfiles &native() { return store_; }
@@ -108,12 +137,13 @@ public:
 	Ref<PlayerInfoKitRestore> restore_player_info_kit(int p_side,
 			const Ref<WeaponDatabase> &p_weapons) const;
 	// PLAYER_INFO's dialog save (its ACCEPT, a side radio, a class pick) into the
-	// current weapon.sav record, the dialog's snapshot marshalled into the engine's
-	// CharacterSelection (engine profile::PlayerProfiles::apply_character_selection
-	// holds the rules): `player_class`, `team`, `side_profiles[team]` {avatar_a,
-	// avatar_b, avatar_packed} when non-empty, and a `kit` array to the page of
-	// `kit_class`. ERR_INVALID_PARAMETER for a snapshot the record cannot take.
-	Error apply_character_selection(const Dictionary &p_profile);
+	// current weapon.sav record (engine profile::PlayerProfiles::apply_character_selection
+	// holds the rules). ERR_INVALID_PARAMETER for a selection the record cannot take
+	// (or none).
+	Error apply_character_selection(const Ref<CharacterSelection> &p_selection);
+	// The dialog save whole: the character leg, then the PLAYERNAME text through the name
+	// rule when the selection carries one (engine PlayerProfiles::accept_player_info).
+	Error accept_player_info(const Ref<CharacterSelection> &p_selection);
 
 	void record_mission_start(int p_campaign) { store_.record_mission_start(p_campaign); }
 	void begin_session() { store_.begin_session(); }

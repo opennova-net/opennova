@@ -13,7 +13,9 @@
 namespace opennova::hud {
 
 // The image the screen loads and whether it is the mission's own sidecar (the
-// flag the band and the splash read).
+// flag the band and the splash read). The image reads through the PCX reader
+// alone, loose files first [orig: Render_LoadingScreen @0x521ea4 ->
+// Texture_LoadPCXFromPFF32 @0x56ea30].
 struct LoadingBackground {
 	std::string image;
 	bool custom = false;

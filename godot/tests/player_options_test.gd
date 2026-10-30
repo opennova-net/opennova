@@ -3,7 +3,8 @@ extends GutTest
 ## Shared player options: one normalized state over the process's cfg block
 ## (GameCfgStore, retail's game.cfg words) feeds both menu surfaces and the
 ## device/runtime application seams; the block reaches game.cfg at its save
-## points.
+## points. The record's clamps, defaults and words are the engine's (ctest
+## npruntime_player_options); these cases drive the binding and the device.
 
 const BUS_NAMES := [&"SFX", &"Ambient", &"Voice", &"Music"]
 
@@ -88,8 +89,8 @@ func test_tip_options_default_on_and_live_as_cfg_words() -> void:
 
 func test_update_clamps_into_the_block_and_saves_at_the_save_point() -> void:
 	var options := PlayerOptions.new()
-	var emitted: Array[PlayerOptions.State] = []
-	options.changed.connect(func(state: PlayerOptions.State) -> void: emitted.append(state))
+	var emitted: Array[PlayerOptionsState] = []
+	options.changed.connect(func(state: PlayerOptionsState) -> void: emitted.append(state))
 
 	var state := options.current()
 	state.sound_fx_volume = -2
@@ -122,36 +123,6 @@ func test_update_clamps_into_the_block_and_saves_at_the_save_point() -> void:
 	assert_string_contains(text, "xhair_appearance        = 24\r\n")
 	assert_string_contains(text, "xhair_color             = %d\r\n" % 0xFF8040)
 	assert_string_contains(text, "xhair_spread            = 0\r\n")
-
-
-func test_load_normalizes_corrupt_saved_words() -> void:
-	_write_cfg(
-		[
-			"SFXLevel = 260",
-			"DialogueLevel = -1",
-			"music_volume = 71",
-			"xhair_appearance = -7",
-			"xhair_color = %d" % 0x7F123456
-		]
-	)
-	var state := PlayerOptions.new().current()
-	assert_eq(state.sound_fx_volume, 255)
-	assert_eq(state.dialog_volume, 0)
-	assert_eq(state.music_volume, 71)
-	assert_eq(state.crosshair_style, 0)
-	assert_eq(state.crosshair_color, 0x123456, "an out-of-range colour masks down to its RGB")
-
-
-func test_native_aspect_mode_lives_as_the_cfg_word() -> void:
-	# Any value outside 0..3 is retail's "the surface's own ratio": a cfg-only
-	# choice with no authored spin row, kept verbatim rather than clamped.
-	var options := PlayerOptions.new()
-	var state := options.current()
-	state.aspect_mode = -1
-	options.update(state)
-	assert_eq(PlayerOptions.new().current().aspect_mode, -1)
-	assert_eq(GameCfgStore.save(), OK)
-	assert_string_contains(_saved_cfg(), "display_16x9         = -1\r\n")
 
 
 func test_fresh_profile_seeds_the_video_test_words_once() -> void:
@@ -213,114 +184,6 @@ func test_the_video_tests_desktop_is_the_dpi_unaware_sample() -> void:
 			DisplayServer.screen_get_size(DisplayServer.SCREEN_PRIMARY),
 			"off Windows the display server's primary screen stands in"
 		)
-
-
-func test_object_detail_lives_and_clamps_as_the_cfg_word() -> void:
-	# game.cfg's object_polydetail: the video test's capable-device rung 2 on a
-	# fresh profile; the load clamps a saved word into 0..3 (the engine's
-	# renderer/object_lod.h through GameWorld).
-	assert_eq(GameWorld.object_detail_fresh_profile(), 2)
-	assert_eq(GameWorld.clamp_object_detail(-4), 0)
-	assert_eq(GameWorld.clamp_object_detail(7), 3)
-	var options := PlayerOptions.new()
-	var state := options.current()
-	state.object_polydetail = 3
-	options.update(state)
-	assert_eq(PlayerOptions.new().current().object_polydetail, 3)
-	assert_eq(state.copy().object_polydetail, 3, "the snapshot copy carries the word")
-	_write_cfg(["object_polydetail = 12"])
-	assert_eq(
-		PlayerOptions.new().current().object_polydetail,
-		3,
-		"a saved word past the top rung loads as 3"
-	)
-	_write_cfg(["object_polydetail = 0"])
-	assert_eq(PlayerOptions.new().current().object_polydetail, 0)
-
-
-func test_texture_filter_lives_and_clamps_as_the_cfg_word() -> void:
-	# game.cfg's texfilter_level: the video test's 1 (trilinear) on a fresh
-	# profile; the load clamps a saved word into 0..3 (the engine's
-	# renderer/texture_filter.h through GameWorld).
-	assert_eq(GameWorld.texfilter_level_fresh_profile(), 1)
-	assert_eq(GameWorld.clamp_texfilter_level(-4), 0)
-	assert_eq(GameWorld.clamp_texfilter_level(7), 3)
-	var options := PlayerOptions.new()
-	var state := options.current()
-	state.texfilter_level = 3
-	options.update(state)
-	assert_eq(PlayerOptions.new().current().texfilter_level, 3)
-	assert_eq(state.copy().texfilter_level, 3, "the snapshot copy carries the word")
-	_write_cfg(["texfilter_level = 12"])
-	assert_eq(
-		PlayerOptions.new().current().texfilter_level,
-		3,
-		"a saved word past the top rung loads as 3"
-	)
-	_write_cfg(["texfilter_level = 0"])
-	assert_eq(PlayerOptions.new().current().texfilter_level, 0)
-
-
-func test_particle_density_lives_and_clamps_as_the_cfg_word() -> void:
-	# game.cfg's particle_density: the video test's 2 (a CPU past its 2980 MHz
-	# mark) on a fresh profile; the load clamps a saved word into 0..2 (the
-	# engine's renderer/particle_density.h).
-	assert_eq(GameWorld.particle_density_fresh_profile(), 2)
-	assert_eq(GameWorld.clamp_particle_density(-4), 0)
-	assert_eq(GameWorld.clamp_particle_density(7), 2)
-	var options := PlayerOptions.new()
-	var state := options.current()
-	state.particle_density = 0
-	options.update(state)
-	assert_eq(PlayerOptions.new().current().particle_density, 0)
-	assert_eq(state.copy().particle_density, 0, "the snapshot copy carries the word")
-	_write_cfg(["particle_density = 9"])
-	assert_eq(
-		PlayerOptions.new().current().particle_density,
-		2,
-		"a saved word past the top rung loads as 2"
-	)
-
-
-func test_texture_compression_lives_as_the_unclamped_cfg_word() -> void:
-	# game.cfg's texcompression_level: the video test's 1 (a shader-model-2
-	# card) on a fresh profile; the load never clamps it (the engine's
-	# renderer/texture_compression.h).
-	assert_eq(GameWorld.texcompression_level_fresh_profile(), 1)
-	var options := PlayerOptions.new()
-	var state := options.current()
-	state.texcompression_level = 2
-	options.update(state)
-	assert_eq(PlayerOptions.new().current().texcompression_level, 2)
-	assert_eq(state.copy().texcompression_level, 2, "the snapshot copy carries the word")
-	_write_cfg(["texcompression_level = 7"])
-	assert_eq(
-		PlayerOptions.new().current().texcompression_level,
-		7,
-		"the load keeps a word past the rows as written"
-	)
-
-
-func test_terrain_texture_detail_lives_and_clamps_as_the_cfg_word() -> void:
-	# game.cfg's terrain_texdetail: the video test's 3 (full detail) on a fresh
-	# profile; the block's read clamps a saved word into 0..3, so a -1 reads as
-	# 0, two halvings (the engine's gamecfg clamp_graphics_options,
-	# renderer/device_texture.h).
-	assert_eq(GameWorld.terrain_texdetail_fresh_profile(), 3)
-	var options := PlayerOptions.new()
-	var state := options.current()
-	state.terrain_texdetail = 1
-	options.update(state)
-	assert_eq(PlayerOptions.new().current().terrain_texdetail, 1)
-	assert_eq(state.copy().terrain_texdetail, 1, "the snapshot copy carries the word")
-	_write_cfg(["terrain_texdetail = -1"])
-	assert_eq(PlayerOptions.new().current().terrain_texdetail, 0, "a saved -1 loads as 0")
-	_write_cfg(["terrain_texdetail = 9"])
-	assert_eq(
-		PlayerOptions.new().current().terrain_texdetail,
-		3,
-		"a saved word past the top rung loads as 3"
-	)
 
 
 func test_update_maps_each_audio_option_to_its_runtime_buses() -> void:

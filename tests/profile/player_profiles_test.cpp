@@ -832,6 +832,61 @@ int test_default_weapon_sav() {
     return 0;
 }
 
+// --- 9. the dialog save whole, the files' places and the callsign ---------------
+
+// [orig: PlayerInfo_SaveFromDialog @0x55EE10 - the character stores @0x55EE3F..0x55EF38, then the
+//  name @0x55EFA8..0x55F039, read whatever the character leg took]
+int test_accept_player_info() {
+    PlayerProfiles p;
+    PlayerProfiles::LoadInput in;
+    in.user_name = "Account";
+    p.load(in, defaults());
+    // A screen with no PLAYERNAME leaves the name.
+    profile::CharacterSelection s = selection(9, 0);
+    s.character = character(0, 0, 0x0400);
+    TEST_EXPECT(p.accept_player_info(s));
+    TEST_EXPECT(p.current().name == "Account" && p.current_weapons().blue.avatar_packed == 0x0400);
+    // The name through the name rule beside the character.
+    s.name = std::string("Sandman");
+    TEST_EXPECT(p.accept_player_info(s));
+    TEST_EXPECT(p.current().name == "Sandman");
+    TEST_EXPECT((p.current().flags & playersav::kRecordFlagNoName) == 0);
+    // A refused character leg still takes the name, and changes no character byte.
+    const std::vector<uint8_t> before = p.weapon_sav_bytes();
+    profile::CharacterSelection refused = selection(4, 0);
+    refused.name = std::string(" Sandman");
+    TEST_EXPECT(!p.accept_player_info(refused));
+    TEST_EXPECT(p.weapon_sav_bytes() == before);
+    TEST_EXPECT(p.current().name.empty() && (p.current().flags & playersav::kRecordFlagNoName) != 0);
+    return 0;
+}
+
+// [orig: PlayerProfile_LoadAllFromDisk @0x54F4D0 - "player.sav" @0x54F586, the weapon.sav
+//  path @0x54F68C..0x54F6B7]
+int test_profile_file_paths() {
+    const profile::ProfileFilePaths base = profile::profile_file_paths("C:/Games/JO", "");
+    TEST_EXPECT(base.player_sav == "C:/Games/JO/player.sav");
+    TEST_EXPECT(base.weapon_sav == "C:/Games/JO/weapon.sav");
+    const profile::ProfileFilePaths expansion = profile::profile_file_paths("C:/Games/JO/", "revx02");
+    TEST_EXPECT(expansion.player_sav == "C:/Games/JO/player.sav");
+    TEST_EXPECT(expansion.weapon_sav == "C:/Games/JO/expansion/revx02/weapon.sav");
+    const profile::ProfileFilePaths here = profile::profile_file_paths("", "");
+    TEST_EXPECT(here.player_sav == "player.sav" && here.weapon_sav == "weapon.sav");
+    TEST_EXPECT(profile::profile_file_paths("D:\\JO\\", "").player_sav == "D:\\JO\\player.sav");
+    return 0;
+}
+
+// The record's name cut to the wire's Name[16]; the launch override trimmed and cut the same way.
+int test_profile_callsign() {
+    TEST_EXPECT(profile::profile_callsign("", "Sandman") == "Sandman");
+    TEST_EXPECT(profile::profile_callsign("", "ABCDEFGHIJKLMNOPQRS") == "ABCDEFGHIJKLMNO");
+    TEST_EXPECT(profile::profile_callsign("  Second\t", "Sandman") == "Second");
+    TEST_EXPECT(profile::profile_callsign(" \t ", "Sandman") == "Sandman");
+    TEST_EXPECT(profile::profile_callsign(" 0123456789ABCDEFGH ", "") == "0123456789ABCDE");
+    TEST_EXPECT(profile::profile_callsign("", "").empty());
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -856,6 +911,9 @@ int main() {
         {"default_weapon_sav", test_default_weapon_sav},
         {"character_selection", test_character_selection},
         {"character_selection_over_a_corrupt_file", test_character_selection_over_a_corrupt_file},
+        {"accept_player_info", test_accept_player_info},
+        {"profile_file_paths", test_profile_file_paths},
+        {"profile_callsign", test_profile_callsign},
     };
     int failures = 0;
     for (const Case &c : cases) {

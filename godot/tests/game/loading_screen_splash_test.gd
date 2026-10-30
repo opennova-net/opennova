@@ -32,7 +32,6 @@ func after_each() -> void:
 func test_splash_spec_carries_the_witnessed_names() -> void:
 	assert_eq(HudPos.loading_splash_arrow_image(), "newarow1.tga")
 	assert_eq(HudPos.loading_splash_sound_set(), "START_MISSION")
-	assert_eq(HudPos.loading_splash_continue_key(), "LT_Continue")
 	assert_eq(HudPos.loading_splash_continue_font(), "Impac22b.fnt")
 
 

@@ -15,11 +15,15 @@
 //  side blocks; a saved id the registry no longer resolves is reallocated to
 //  the same default by PlayerSession_InitFromProfile @0x50ca80]
 
+#include <formats/playersav/weapon_sav.h>
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/player_info_character.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <string>
+#include <utility>
 
 namespace opennova::inmatch {
 
@@ -214,6 +218,44 @@ inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile
 inline CharacterJoinVars fresh_profile_character_vars(const CharacterRegistry &registry) {
 	const JoinSideSelection none[2] = {};
 	return character_join_vars(join_character_profile(registry, none, /*in_session=*/true));
+}
+
+// THE PROFILE'S CHARACTER HALF as the menu's start reads it off the current weapon.sav record,
+// the record the PLAYER_INFO screen opens over and the spawn loadout and the join take their two
+// sides from: the callsign (profile::profile_callsign), the side the screen shows first (blue, its
+// SIDE_BLUE radio authored CHECKED), and each side block's bytes as the record holds them, the
+// class byte raw, with the Avatars.def tree indices its packed word resolves to on that side, -1
+// each when the table resolves none or none is mounted: the record's word and class byte stand
+// either way, and the join projection carries them as they are (join_character_profile above,
+// D-PLAYERINFO-33) [orig: the side blocks g_CharSelClass @0x2551130 +0/+1/+2/+4, read by
+// PlayerInfo_PopulateAllControls @0x5606F0 and Game_ApplySessionSettingsToGlobals @0x551500;
+// CAvatarDefs_FindComboByPackedId @0x57A270].
+struct CharacterProfile {
+	std::string name;
+	int team = 0;
+	PlayerInfoSideSelection sides[2];
+};
+
+inline CharacterProfile character_profile(const playersav::Record &record,
+		const CharacterRegistry *registry, std::string name) {
+	CharacterProfile profile;
+	profile.name = std::move(name);
+	for (int side = 0; side < 2; ++side) {
+		const playersav::Side &block =
+				record.side(side == 0 ? playersav::SideId::Blue : playersav::SideId::Red);
+		PlayerInfoSideSelection &out = profile.sides[side];
+		out.team = side;
+		out.player_class = block.player_class;
+		out.avatar_a = block.avatar_a;
+		out.avatar_b = block.avatar_b;
+		out.avatar_packed = block.avatar_packed;
+		const CharacterEntry *entry =
+				registry != nullptr ? registry->find_by_packed_id(block.avatar_packed, side) : nullptr;
+		out.nationality = entry != nullptr ? entry->nationality_index : -1;
+		out.division = entry != nullptr ? entry->division_index : -1;
+		out.combo = entry != nullptr ? entry->combo_index : -1;
+	}
+	return profile;
 }
 
 } // namespace opennova::inmatch

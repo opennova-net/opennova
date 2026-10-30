@@ -238,6 +238,14 @@ public:
 	static constexpr const char *kAdminGroup = "opennova_hud_overlay";
 	std::vector<std::string> chat_window_lines() const;
 	void echo_admin_chat(const std::string &p_text);
+	// The HUD session's seams (hud/hud_session.h): the frame state it fills, the rings it posts
+	// into at the frame's main-frame stamp (SYSTEM: push_message's sink; CHAT: push_chat_line's),
+	// each a retail text.
+	opennova::hud::HudFrameState &native_state() { return state_; }
+	opennova::hud::HudFrameCompiler &native_compiler() { return compiler_; }
+	uint32_t native_main_frame() const { return state_.main_frame; }
+	void push_message_text(const std::string &p_text);
+	void push_chat_text(const std::string &p_text, uint32_t p_argb);
 	// Drain the sim's S2C 0x1E feed lines, 0x14 chat lines and 0x32 join/leave
 	// lines (Simulation::drain_feed_posts, resolved against the gametext
 	// table) into their rings in wire order. Returns the frame's last involved

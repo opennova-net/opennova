@@ -25,7 +25,7 @@ opennova::hud::HudKeyPoll key_poll(int p_rows, bool p_active, bool p_in_session,
 int64_t HudToggles::poll(int p_rows_down, bool p_active,
 		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
 		bool p_mp_session_peer, bool p_mouse_scale_negative, int p_head_drops) {
-	return static_cast<int64_t>(opennova::hud::hud_toggles_poll(state_,
+	return static_cast<int64_t>(opennova::hud::hud_toggles_poll(*state_,
 			key_poll(p_rows_down, p_active, p_in_session, p_objective_game, p_local_alive,
 					p_authority, p_mp_session_peer, p_mouse_scale_negative, p_head_drops)));
 }
@@ -33,7 +33,7 @@ int64_t HudToggles::poll(int p_rows_down, bool p_active,
 int64_t HudToggles::dispatch(int p_rows_fired, bool p_active,
 		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
 		bool p_mp_session_peer, bool p_mouse_scale_negative, int p_head_drops) {
-	return static_cast<int64_t>(opennova::hud::hud_toggles_dispatch(state_,
+	return static_cast<int64_t>(opennova::hud::hud_toggles_dispatch(*state_,
 			key_poll(p_rows_fired, p_active, p_in_session, p_objective_game, p_local_alive,
 					p_authority, p_mp_session_peer, p_mouse_scale_negative, p_head_drops)));
 }
@@ -43,11 +43,11 @@ int HudToggles::escape(bool p_in_session, bool p_round_over, bool p_authority) {
 	input.in_session = p_in_session;
 	input.round_over = p_round_over;
 	input.authority = p_authority;
-	return static_cast<int>(opennova::hud::hud_toggles_escape(state_, input));
+	return static_cast<int>(opennova::hud::hud_toggles_escape(*state_, input));
 }
 
 void HudToggles::session_init(bool p_in_session, bool p_mp_session_peer) {
-	opennova::hud::hud_toggles_session_init(state_, p_in_session, p_mp_session_peer);
+	opennova::hud::hud_toggles_session_init(*state_, p_in_session, p_mp_session_peer);
 }
 
 int HudToggles::quit_dialog_key(int p_vk, bool p_in_session, int p_yes_vk, int p_no_vk,
@@ -58,90 +58,97 @@ int HudToggles::quit_dialog_key(int p_vk, bool p_in_session, int p_yes_vk, int p
 	input.yes_vk = p_yes_vk;
 	input.no_vk = p_no_vk;
 	input.restart_vk = p_restart_vk;
-	return static_cast<int>(opennova::hud::hud_toggles_quit_dialog_key(state_, input));
+	return static_cast<int>(opennova::hud::hud_toggles_quit_dialog_key(*state_, input));
 }
 
 bool HudToggles::server_status_page_key(int p_vk, bool p_in_session, bool p_authority,
 		bool p_mp_session_peer) const {
-	return opennova::hud::hud_toggles_server_status_page_key(state_, p_vk, p_in_session,
+	return opennova::hud::hud_toggles_server_status_page_key(*state_, p_vk, p_in_session,
 			p_authority, p_mp_session_peer);
 }
 
 String HudToggles::row_token(int p_row) { return String(opennova::hud::hud_toggle_row_token(p_row)); }
 
-void HudToggles::reset_mission() { opennova::hud::hud_toggles_reset_mission(state_); }
+void HudToggles::reset_mission() { opennova::hud::hud_toggles_reset_mission(*state_); }
 int HudToggles::cine_start(bool p_in_session) {
-	return static_cast<int>(opennova::hud::hud_toggles_cine_start(state_, p_in_session));
+	return static_cast<int>(opennova::hud::hud_toggles_cine_start(*state_, p_in_session));
 }
-void HudToggles::force_death_screen_hud_detail() { opennova::hud::hud_toggles_death_screen(state_); }
+void HudToggles::force_death_screen_hud_detail() { opennova::hud::hud_toggles_death_screen(*state_); }
 String HudToggles::cycle_friendly_tags() {
-	return String(opennova::hud::hud_toggles_cycle_friendly_tags(state_));
+	return String(opennova::hud::hud_toggles_cycle_friendly_tags(*state_));
 }
 String HudToggles::friendly_tag_toast_key() const {
-	return String(opennova::hud::friendly_tag_toast_key(state_.friendly_tag_mode));
+	return String(opennova::hud::friendly_tag_toast_key(state_->friendly_tag_mode));
 }
 String HudToggles::verbose_toast_key() const {
-	return String(opennova::hud::verbose_toast_key(state_.mp_verbose));
+	return String(opennova::hud::verbose_toast_key(state_->mp_verbose));
 }
 String HudToggles::mouse_scale_toast(const Ref<RtxtStringFile> &p_gametext, int p_scale) {
 	return opennova::cp1252_to_gd(
 			opennova::hud::mouse_scale_toast(game_text_lookup(p_gametext), p_scale));
 }
 void HudToggles::cycle_hud_color() {
-	state_.hud_color_index = opennova::hud::next_hud_color_index(state_.hud_color_index);
+	state_->hud_color_index = opennova::hud::next_hud_color_index(state_->hud_color_index);
 }
 void HudToggles::cycle_hud_detail() {
-	state_.hud_detail_level = opennova::hud::next_hud_detail_level(state_.hud_detail_level);
+	state_->hud_detail_level = opennova::hud::next_hud_detail_level(state_->hud_detail_level);
 }
 void HudToggles::cycle_showhud() {
-	state_.showhud_flags = opennova::hud::next_showhud_flags(state_.showhud_flags);
+	state_->showhud_flags = opennova::hud::next_showhud_flags(state_->showhud_flags);
 }
-void HudToggles::toggle_objectives() { state_.objectives_visible = !state_.objectives_visible; }
+void HudToggles::toggle_objectives() { state_->objectives_visible = !state_->objectives_visible; }
 
-int HudToggles::get_hud_color_index() const { return state_.hud_color_index; }
+int HudToggles::get_hud_color_index() const { return state_->hud_color_index; }
 void HudToggles::set_hud_color_index(int p_index) {
-	state_.hud_color_index = opennova::hud::clamp_hud_color_index(p_index);
+	state_->hud_color_index = opennova::hud::clamp_hud_color_index(p_index);
 }
-int HudToggles::get_hud_detail_level() const { return state_.hud_detail_level; }
+int HudToggles::get_hud_detail_level() const { return state_->hud_detail_level; }
 // Stored verbatim: retail applies the cfg token raw (hud_config_tokens.h).
-void HudToggles::set_hud_detail_level(int p_level) { state_.hud_detail_level = p_level; }
-int HudToggles::get_showhud_flags() const { return static_cast<int>(state_.showhud_flags); }
+void HudToggles::set_hud_detail_level(int p_level) { state_->hud_detail_level = p_level; }
+int HudToggles::get_showhud_flags() const { return static_cast<int>(state_->showhud_flags); }
 void HudToggles::set_showhud_flags(int p_flags) {
-	state_.showhud_flags = static_cast<uint32_t>(p_flags) & 3u;
+	state_->showhud_flags = static_cast<uint32_t>(p_flags) & 3u;
 }
-int HudToggles::get_friendly_tag_mode() const { return static_cast<int>(state_.friendly_tag_mode); }
-bool HudToggles::is_objectives_visible() const { return state_.objectives_visible; }
-bool HudToggles::is_scoreboard_open() const { return state_.scoreboard_open; }
-bool HudToggles::is_message_log_open() const { return state_.message_log_open; }
-bool HudToggles::is_end_round_stats_open() const { return state_.end_round_stats_open; }
-bool HudToggles::is_help_open() const { return state_.help_open; }
-bool HudToggles::is_map_legend_open() const { return state_.map_legend_open; }
-int HudToggles::get_briefing_mode() const { return state_.briefing_mode; }
-bool HudToggles::is_mp_verbose() const { return state_.mp_verbose; }
-bool HudToggles::is_emotes_menu_open() const { return state_.emotes_menu_open; }
-bool HudToggles::is_radio_menu_open() const { return state_.radio_menu_open; }
-bool HudToggles::is_paused() const { return state_.paused; }
-bool HudToggles::is_server_status_view() const { return state_.server_status_view; }
+int HudToggles::get_friendly_tag_mode() const { return static_cast<int>(state_->friendly_tag_mode); }
+bool HudToggles::is_objectives_visible() const { return state_->objectives_visible; }
+bool HudToggles::is_scoreboard_open() const { return state_->scoreboard_open; }
+bool HudToggles::is_message_log_open() const { return state_->message_log_open; }
+bool HudToggles::is_end_round_stats_open() const { return state_->end_round_stats_open; }
+bool HudToggles::is_help_open() const { return state_->help_open; }
+bool HudToggles::is_map_legend_open() const { return state_->map_legend_open; }
+int HudToggles::get_briefing_mode() const { return state_->briefing_mode; }
+bool HudToggles::is_mp_verbose() const { return state_->mp_verbose; }
+bool HudToggles::is_emotes_menu_open() const { return state_->emotes_menu_open; }
+bool HudToggles::is_radio_menu_open() const { return state_->radio_menu_open; }
+bool HudToggles::is_paused() const { return state_->paused; }
+bool HudToggles::is_server_status_view() const { return state_->server_status_view; }
 bool HudToggles::is_server_status_score_list_open() const {
-	return state_.server_status_score_list;
+	return state_->server_status_score_list;
 }
-bool HudToggles::is_quit_dialog_open() const { return state_.quit_dialog_open; }
-void HudToggles::set_paused(bool p_paused) { state_.paused = p_paused; }
+bool HudToggles::is_quit_dialog_open() const { return state_->quit_dialog_open; }
+void HudToggles::set_paused(bool p_paused) { state_->paused = p_paused; }
 void HudToggles::apply_tip_events(const PackedByteArray &p_events) {
-	opennova::hud::hud_toggles_tip_events(state_, p_events.ptr(),
+	opennova::hud::hud_toggles_tip_events(*state_, p_events.ptr(),
 			static_cast<size_t>(p_events.size()));
 }
 void HudToggles::advance_tip_frames(int p_frames) {
-	opennova::hud::hud_toggles_tip_frames(state_, p_frames);
+	opennova::hud::hud_toggles_tip_frames(*state_, p_frames);
 }
-void HudToggles::restart_round() { opennova::hud::hud_toggles_restart_round(state_); }
+void HudToggles::restart_round() { opennova::hud::hud_toggles_restart_round(*state_); }
 void HudToggles::set_tip_options(bool p_keyboard_tips, bool p_gameplay_tips) {
-	state_.tips.options.keyboard_tips = p_keyboard_tips;
-	state_.tips.options.gameplay_tips = p_gameplay_tips;
+	state_->tips.options.keyboard_tips = p_keyboard_tips;
+	state_->tips.options.gameplay_tips = p_gameplay_tips;
 }
-int HudToggles::get_tip() const { return state_.tips.tip; }
-int HudToggles::get_tip_countdown() const { return state_.tips.countdown; }
-bool HudToggles::is_tip_showing() const { return opennova::hud::tip_is_showing(state_.tips); }
+int HudToggles::get_tip() const { return state_->tips.tip; }
+int HudToggles::get_tip_countdown() const { return state_->tips.countdown; }
+bool HudToggles::is_tip_showing() const { return opennova::hud::tip_is_showing(state_->tips); }
+
+Ref<HudToggles> HudToggles::over(std::shared_ptr<opennova::hud::HudToggleState> p_state) {
+	Ref<HudToggles> binding;
+	binding.instantiate();
+	if (p_state != nullptr) binding->state_ = std::move(p_state);
+	return binding;
+}
 
 void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll", "rows_down", "active",

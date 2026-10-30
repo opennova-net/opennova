@@ -19,6 +19,7 @@ namespace godot {
 
 class JoinTarget;
 class MenuDriver;
+class PlayerOptionsState;
 class MnuDocument;
 class ResourceRoot;
 class RtxtStringFile;
@@ -73,6 +74,11 @@ public:
 	// unknown key reads 0 and writes nothing (a warning).
 	int get_word(const String &p_key) const;
 	void set_word(const String &p_key, int p_value);
+
+	// The player's options over the block's words (engine runtime/inmatch/player_options.h):
+	// the normalized read, and the write of a record (normalized) that returns what it wrote.
+	Ref<PlayerOptionsState> read_player_options() const;
+	Ref<PlayerOptionsState> write_player_options(const Ref<PlayerOptionsState> &p_state);
 
 	// The host screen over the block (the engine's host_settings.h): the
 	// populate's write (the block's cap clamped to the screen's), each

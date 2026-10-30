@@ -17,6 +17,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
+#include <runtime/audio/music_context.h>
 #include <runtime/audio/music_policy.h>
 #include <runtime/audio/music_stream_pump.h>
 
@@ -24,9 +25,9 @@
 
 namespace godot {
 
-class MusicPairNames;
-
+class MusicPair;
 class MusicScript;
+class ResourceRoot;
 class SbfBank;
 
 class MusicDirector : public Node {
@@ -50,12 +51,11 @@ public:
 		GAME_HEALTH_SEED = opennova::audio::kGameMusicHealthSeed,
 	};
 
-	// Pure name resolution for the witnessed music pairs (no filesystem), as
-	// a MusicPairNames record (audio/music_pair_names.h). The service keeps
-	// the on-disk case probing / VFS resolution; these only name the pair
-	// (engine music_policy.h owns the scheme + witnesses).
-	static Ref<MusicPairNames> resolve_menu_music_pair(const String &p_expansion_name);
-	static Ref<MusicPairNames> resolve_game_music_pair(const String &p_expansion_name);
+	// The pair a menu / game context opens over the mounted `p_root` (engine
+	// runtime/audio/music_context.h resolve_music_pair, which carries the rule and its
+	// witnesses); an empty pair with no root.
+	static Ref<MusicPair> resolve_menu_music_pair(const Ref<ResourceRoot> &p_root);
+	static Ref<MusicPair> resolve_game_music_pair(const Ref<ResourceRoot> &p_root);
 
 	MusicDirector();
 	~MusicDirector();
@@ -73,6 +73,18 @@ public:
 	StringName get_script_name() const;
 	void set_auto_start(bool p_auto);
 	bool get_auto_start() const;
+
+	// The one music context (engine runtime/audio/music_context.h MusicContext: the prior
+	// context's teardown, the bank's file before the script, the VM's open, the game context's
+	// seed): the menu context over `p_root` (a non-empty override names a loose script or bank
+	// the root resolves, the dev seams), the game context at a mission start, the teardown,
+	// and which context runs ("", "menu", "game") with the script it loaded.
+	bool open_menu_context(const Ref<ResourceRoot> &p_root, const String &p_script_override = String(),
+			const String &p_bank_override = String());
+	bool open_game_context(const Ref<ResourceRoot> &p_root);
+	void stop_context();
+	String get_context() const;
+	Ref<MusicScript> get_context_script() const;
 
 	// Methods
 	// The music context open over the pair the shell read (engine mus_vm_open_context
@@ -127,6 +139,28 @@ private:
 		MusicDirector &_owner;
 	};
 
+	// The context's player: the director's teardown, the two halves it loads for the open, the
+	// VM's open and the seed's writes.
+	class ContextPlayer final : public opennova::audio::MusicContextPlayer {
+	public:
+		explicit ContextPlayer(MusicDirector &p_owner) : _owner(p_owner) {}
+		void stop_context() override;
+		bool load_bank(const std::string &p_path) override;
+		bool load_script_file(const std::string &p_path) override;
+		int load_script_bytes(const std::vector<uint8_t> &p_bytes, const std::string &p_name) override;
+		void drop_script() override;
+		bool open_vm() override;
+		void set_var(int p_index, int32_t p_value) override;
+
+	private:
+		MusicDirector &_owner;
+		Ref<SbfBank> _bank;
+		Ref<MusicScript> _script;
+	};
+
+	bool _open(opennova::audio::MusicContextKind p_kind, const Ref<ResourceRoot> &p_root,
+			const String &p_script_override, const String &p_bank_override);
+
 	// The script start() and open_context() bind: the named one, else the file's default.
 	const opennova::mus::MusScript *_raw_script(const Ref<MusicScript> &p_script) const;
 
@@ -140,6 +174,8 @@ private:
 	opennova::mus::MusVM *_vm = nullptr;
 	StreamDevice _device{ *this };
 	opennova::audio::MusicStreamPump _pump;
+	ContextPlayer _context_player{ *this };
+	opennova::audio::MusicContext _context;
 	Vector<AudioStreamPlayer *> _players;
 	// IDs observe AudioServer ownership without keeping a stopped stream alive.
 	Vector<ObjectID> _playbacks;

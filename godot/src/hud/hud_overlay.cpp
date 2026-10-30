@@ -833,6 +833,16 @@ void HudOverlay::push_message(const String &p_text) {
 	queue_redraw();
 }
 
+void HudOverlay::push_message_text(const std::string &p_text) {
+	compiler_.push_message(p_text, static_cast<int>(state_.main_frame));
+	queue_redraw();
+}
+
+void HudOverlay::push_chat_text(const std::string &p_text, uint32_t p_argb) {
+	compiler_.push_chat_line(p_text, p_argb, static_cast<int>(state_.main_frame));
+	queue_redraw();
+}
+
 void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
 	// stored raw and drawn as stored (engine: runtime/hud/hud_frame.cpp).

@@ -9,47 +9,23 @@ extends Control
 ## continue line and the cursor arrow, dismissed by any fresh key or mouse
 ## button.
 ##
-## Structural translation of the witnessed originals:
-##  - background + text compositing  [orig: Render_LoadingScreen @ 0x521d10]
-##  - session text provider          [orig: HUD_GetLoadingScreenTextByGameType @ 0x51f300]
-##  - fullscreen stretch present     [orig: LoadingScreen_DrawEffectFullscreen @ 0x586ba0]
-##  - throttle + exact bar draw      [orig: LoadingScreen_UpdateAndPresent @ 0x586be0]
-##  - bar primitive                  [orig: HUD_DrawProgressBar_0 @ 0x5d4c40]
-##  - SP start-mission splash        [orig: Game_ShowStartMissionSplash @ 0x520820]
-##
-## The original composites text INTO the background surface with the CGameFont
-## bitmap fonts, each glyph blended on the CPU, then stretches the composite to
-## the backbuffer with no aspect preservation [orig: 0x586ba0 rect
-## (0,0,width,height)]. So do we: the engine blends the session block into a
-## copy of the background (HudPos.composite_loading_session_text), and the
-## composite draws stretched.
+## What the screen shows and when it presents is the engine's model
+## (LoadingScreenModel over engine runtime/hud/loading_screen.h, which carries
+## the witnesses): the session block's four strings, the band edge over the
+## background, the exact checkpoint and the present cadence. This control does
+## the device work: the texture loads, the composite (the engine blends the
+## session block into a copy of the background,
+## HudPos.composite_loading_session_text), the stretched draw with no aspect
+## preservation, the forced present and the splash's input and draw.
 ##
 ## Shell-neutral presentation mounted by the game shell around GameWorld loads.
 ## No world/menu knowledge lives here.
 
-## The layout values (image-space text band, server-message fractions/color,
-## progress-bar rect/colors, the redraw throttle) are the engine's
-## HudPos.LOADING_* constants and loading_* statics — the witnesses live at
-## the engine home, engine/runtime/hud hud/loading_screen.h.
-## The resource names (the stock background, the two fonts, the server-message
-## label key and its literal fallback) are the engine's HudPos.loading_*
-## statics too.
-
+var _model := LoadingScreenModel.new()
 var _texture: Texture2D = null
 var _base_image: Image = null # the background before the session block composites into it
-var _has_custom_bg := false
-var _band_right := 0      # the session text band's right edge over this background
-var _in_session := false
-var _title := ""          # server name [orig: g_SessionVarServerName -> title buf @ 0x51f533]
-var _mission_name := ""   # [orig: g_SessionVarMissionName -> mission buf @ 0x51f53a]
-var _game_type_text := "" # [orig: LoadingText LTGT_* lookup @ 0x51f3cf]
-var _custom_text := ""    # server message body [orig: g_SessionVarCustomText @ 0x522123]
 var _font_small: FntResource = null
 var _font_large: FntResource = null
-
-var _progress := 0        # exact real-stage checkpoint
-var _last_drawn_progress := -1
-var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
 # The slow-present readout under --verbose (debug/loading_present_instrument.gd); none otherwise.
 var _instrument: LoadingPresentInstrument = (
 		LoadingPresentInstrument.new() if OS.is_stdout_verbose() else null)
@@ -75,8 +51,8 @@ var _splash_blink_on := true
 
 
 ## Public texture-load seam for owners/tests; avoids private-state inspection (ADR 0018).
-## The background reads through the PCX reader alone (ResourceRoot.TEXTURE_LOADER_PCX).
-## [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
+## The background reads through the PCX reader alone (ResourceRoot.TEXTURE_LOADER_PCX; engine
+## hud/loading_background.h carries the witness).
 static func load_background_texture(root: ResourceRoot, image_name: String) -> Texture2D:
 	if root == null or image_name.is_empty():
 		return null
@@ -84,97 +60,54 @@ static func load_background_texture(root: ResourceRoot, image_name: String) -> T
 			ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 
 
-## Build the screen for a mission load (LoadingScreenInfo):
-##   mission_file — the .bms name driving the sidecar lookup
-##   in_session — MP session: draw the text overlay [orig: gate @ 0x521ebe]
-##   server_name / mission_name / custom_text — the session variables
-##     [orig: SERVERNAME/MISSIONNAME/CUSTOMTEXT @ Client_ParseServerSessionVariables
-##      0x5202f0 / Game_SerializeMissionInfoToDataStream 0x523620]
-##   game_type — the numeric session game type [orig: GAMETYPE]; not carried
-##     (negative) reads as 0
+## Build the screen for a mission load (LoadingScreenInfo): the background the
+## mission file picks (engine runtime/hud/loading_background.h), and in a session
+## the text block's fonts and its composite; the block's strings are the model's.
 func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
-	# The background pick: the mission's sidecar if the probe finds it, else
-	# the stock image (engine: runtime/hud/loading_background.h).
 	var bg := LoadingBackground.resolve(root, info.mission_file)
-	_has_custom_bg = bg.custom
-	_band_right = bg.band_right
 	_texture = load_background_texture(root, bg.name)
 	_base_image = _texture.get_image() if _texture != null else null
-	_in_session = info.in_session
-	if not _in_session:
+	_model.setup(info, bg.custom, _texture != null)
+	if not _model.is_in_session():
 		queue_redraw()
 		return
-	# MP only: the text overlay and its fonts [orig: fonts loaded only on the
-	# in-session path @ 0x521eec/0x521f5a].
-	_title = info.server_name
-	_mission_name = info.mission_name
-	_custom_text = info.custom_text
-	_game_type_text = _lookup_loading_text(HudPos.loading_gametype_text_key(maxi(info.game_type, 0)), "")
 	_font_small = _load_font(root, HudPos.loading_font_small())
 	_font_large = _load_font(root, HudPos.loading_font_large())
 	_composite_session_text()
 	queue_redraw()
 
 
-## Refresh mid-load: a JOINER learns the authoritative session record (server/
-## mission names, game type, and the mission file driving the sidecar
-## background) from the post-auth S2C 0x7B AFTER the screen is already up.
-## Retail fills the same buffers from the connect stream during its load
-## [orig: Client_ParseServerSessionVariables @ 0x5202f0 -> the title/mission bufs
-## @ 0x51f533/0x51f53a]. Empty values keep the current ones, except the server
-## message: it is the S2C 0x60's CUSTOMTEXT as the parse left it, which clears
-## the variable first, so an empty one is a host with no message (engine:
-## net/npwire/session_vars.h decode_session_vars).
+## Refresh mid-load: a JOINER learns the authoritative session record after the
+## screen is up. A mission file picks the background again (kept when its image
+## does not decode); the session variables' rules are the model's.
 func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	if not info.mission_file.is_empty():
 		var bg := LoadingBackground.resolve(root, info.mission_file)
 		var texture := load_background_texture(root, bg.name)
 		if texture != null:
-			_has_custom_bg = bg.custom
-			_band_right = bg.band_right
+			_model.adopt_background(bg.custom)
 			_texture = texture
 			_base_image = texture.get_image()
-	if _in_session:
-		if not info.server_name.is_empty():
-			_title = info.server_name
-		if not info.mission_name.is_empty():
-			_mission_name = info.mission_name
-		if info.game_type >= 0:
-			_game_type_text = _lookup_loading_text(
-					HudPos.loading_gametype_text_key(info.game_type), _game_type_text)
-		_custom_text = info.custom_text
+	if _model.is_in_session():
+		_model.update_session_info(info)
 		_composite_session_text()
 	queue_redraw()
 
 
-## Report load progress [orig: the per-stage/per-model calls into
-## LoadingScreen_UpdateAndPresent, e.g. Game_StartMission @ 0x52498f..0x525d29].
+## Report load progress: the model's exact checkpoint, 0..100.
 func set_progress(percent: int) -> void:
-	_progress = clampi(percent, 0, 100)
+	_model.set_progress(percent)
 	_sync_bar_fill()
 
 
-## Redraw + present if due: on a real checkpoint change or every 100 ms for
-## window-event pumping [orig: LoadingScreen_UpdateAndPresent @ 0x586be0].
-## `force` seeds the first frame but never changes the checkpoint.
+## Redraw + present if the model finds it due (the 100 ms window pump or a
+## changed checkpoint over the process's one clock, read now: the screen
+## presents inside a blocking load, past the frame's sample). `force` seeds the
+## first frame but never changes the checkpoint.
 func present(force := false) -> void:
-	if _texture == null:
-		return  # no background loaded -> no screen at all [orig: @ 0x586bfd]
-	# The process's one clock (GetTickCount), read now: the screen presents inside a
-	# blocking load, past the frame's sample. The elapsed time is the DWORD difference
-	# read signed, as retail compares it (engine runtime/hud/loading_screen.h
-	# loading_present_due carries the witness).
 	var now := GameWorld.tick_count_ms()
-	var elapsed := (now - _last_present_ms) & 0xFFFFFFFF
-	if elapsed >= 0x80000000:
-		elapsed -= 0x100000000
-	# The shared native due rule (interval elapsed or a real checkpoint changed)
-	# lives in engine/runtime/hud/loading_screen.h.
-	var due := HudPos.loading_present_due(elapsed, _last_drawn_progress != _progress)
-	if not (force or due):
+	if not _model.present_due(now, force):
 		return
-	_last_present_ms = now
-	_last_drawn_progress = _progress
 	var present_start := Time.get_ticks_usec()
 	_present_now(now)
 	if _instrument != null:
@@ -219,8 +152,8 @@ func _present_now(now: int) -> void:
 		var draw_start := Time.get_ticks_usec()
 		RenderingServer.force_draw(true, 0.0)
 		if _instrument != null:
-			_instrument.after_draw(Time.get_ticks_usec() - draw_start, now, _progress, viewport,
-					held)
+			_instrument.after_draw(Time.get_ticks_usec() - draw_start, now, _model.get_progress(),
+					viewport, held)
 		release_offscreen_targets(held)
 		viewport.disable_3d = world_was_off
 
@@ -277,7 +210,7 @@ func prepare_for_blocking_load(operation: WorldLoadOperation) -> bool:
 
 
 func displayed_progress() -> int:
-	return _progress
+	return _model.get_progress()
 
 
 ## Pixel extent covered by this screen after its transform is applied.
@@ -287,13 +220,13 @@ func presented_size() -> Vector2i:
 
 ## Public ADR-0018 read seam for whether the visible session overlay is enabled.
 func has_session_overlay() -> bool:
-	return _in_session
+	return _model.is_in_session()
 
 
 ## Public ADR-0018 read seam for the visible composed strings, ordered as server
 ## title, mission, game-type label, and custom message.
 func session_overlay_lines() -> PackedStringArray:
-	return PackedStringArray([_title, _mission_name, _game_type_text, _custom_text])
+	return _model.session_overlay_lines()
 
 
 ## Whether setup resolved and decoded loading art. Owners and tests should not
@@ -303,11 +236,10 @@ func has_background() -> bool:
 
 
 ## Whether setup resolved the per-mission sidecar art rather than the stock
-## fallback — the retail custom-background flag the SP splash gate reads
-## [orig: g_LoadScreenHasCustomBg @ 0x24d4dfd, set @ 0x521e94, splash gate
-## @ 0x525d38].
+## fallback: the custom-background flag the SP splash gate reads (the model's;
+## engine runtime/hud/loading_background.h start_mission_splash_due).
 func has_custom_background() -> bool:
-	return _has_custom_bg
+	return _model.has_custom_background()
 
 
 ## Public ADR-0018 read seam: the start-mission splash is raised (taking
@@ -414,7 +346,7 @@ func _sync_bar_fill() -> void:
 	var full_width := int(_bar_fill.size.x)
 	if full_width <= 0:
 		return
-	var fill: Rect2i = HudPos.loading_bar_rects(_layout_base_size, _progress)[3]
+	var fill: Rect2i = HudPos.loading_bar_rects(_layout_base_size, _model.get_progress())[3]
 	var fill_width := maxi(0, fill.size.x)
 	var should_draw := _texture != null \
 			and _splash.get_state() == StartMissionSplash.STATE_NONE and fill_width > 0
@@ -463,7 +395,7 @@ func begin_start_mission_splash(root: ResourceRoot) -> bool:
 		var glyph_material := ShaderMaterial.new()
 		glyph_material.shader = HudPos.glyph_shader()
 		material = glyph_material
-	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
+	_splash_text = LoadingScreenModel.splash_continue_text()
 	_splash.raise()
 	_sync_bar_fill()
 	_splash_blink_on = _splash_blink_phase()
@@ -580,16 +512,17 @@ func _draw_splash_overlay() -> void:
 
 
 # The MP text block composited into the background as the game blends it into
-# the image before the stretch: the engine's boxes, each block broken, placed
-# and blended glyph by glyph (HudPos.composite_loading_session_text;
-# hud/loading_screen.h carries the witness). The composite is what draws.
+# the image before the stretch: the model's strings in the engine's boxes, each
+# block broken, placed and blended glyph by glyph
+# (HudPos.composite_loading_session_text; hud/loading_screen.h carries the
+# witness). The composite is what draws.
 func _composite_session_text() -> void:
 	if _base_image == null:
 		return
-	var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
-			HudPos.loading_msg_label_fallback())
+	var lines := _model.session_overlay_lines()
 	var composite := HudPos.composite_loading_session_text(_base_image, _font_large, _font_small,
-			_title, _mission_name, _game_type_text, label, _custom_text, _band_right)
+			lines[0], lines[1], lines[2], LoadingScreenModel.server_message_label(), lines[3],
+			_model.get_band_right())
 	if composite != null:
 		_texture = ImageTexture.create_from_image(composite)
 
@@ -608,14 +541,6 @@ func _draw_progress_bar() -> void:
 	# The fill is the ProgressFill child. Its complete red rectangle is
 	# submitted before loading blocks, then scaled to the exact native span by
 	# _sync_bar_fill() at each real checkpoint.
-
-
-# LoadingText lookup against the registered gametext table; a miss returns the
-# fallback, never the "??..??" marker (the original returns the raw entry or
-# its literal fallback) [orig: GameText_GetStringWithFallback @ 0x51eb90;
-# TextResource_FindEntryBySectionAndKey(g_TextGameText, "LoadingText", key) @ 0x51f3cf].
-func _lookup_loading_text(key: String, fallback: String) -> String:
-	return Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_LOADING_TEXT, key, fallback)
 
 
 func _load_font(root: ResourceRoot, name: String) -> FntResource:

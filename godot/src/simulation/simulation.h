@@ -51,6 +51,7 @@
 #include <runtime/inmatch/admin_console.h> // AdminConsole::Seams (remote_admin_seams)
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminBinding (remote_admin_binding)
 #include <runtime/inmatch/hud_frame_feeds.h> // HudFeedSource: what the HUD feeds read
+#include <runtime/inmatch/hud_session_feeds.h> // HudSessionRole: the HUD session's role gates
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/inmatch/special_key_chain.h> // SpecialKeyInput / SpecialKeyOutcome
 #include <runtime/terrain_query/terrain_field_store.h>
@@ -1521,6 +1522,14 @@ public:
 	// seat occupancy) -- the AAS zone panel, the takeover dialog, the objectives, the
 	// attach labels, the friendly tags and the role facts.
 	opennova::inmatch::HudFeedSource hud_feed_source();
+	// The HUD session's role feeds (inmatch/hud_session_feeds.h) over this role: its gates, the
+	// map feeds' retried queries into the overlay's frame state, and the overlay init's forced
+	// grid-label origin query.
+	opennova::inmatch::HudSessionRole hud_session_role() const;
+	void hud_session_map_feeds(opennova::hud::HudSession &r_session, int64_t p_now_ticks,
+			opennova::hud::HudFrameState &r_state) const;
+	void hud_session_grid_origin(opennova::hud::HudSession &r_session,
+			opennova::hud::HudFrameState &r_state) const;
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
 	String get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const; // RULELIST (inmatch::command_map_rules_text); "" = keep

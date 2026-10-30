@@ -240,4 +240,12 @@ struct WaypointHudView {
 // (hudInfo+373 number, +400/404/408 position) + g_ShowWaypoints @ 0x27238BC]
 WaypointHudView waypoint_hud_view(const WaypointTrack &track, const EntityRegistry *registry);
 
+// Whether the waypoint label draws: ShowWaypoints on and a current present in the list; absent,
+// the label hides (no track, the flag off, no selection yet).
+// [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 gates @0x5a7daf (g_ShowWaypoints + a current
+//  present in the list)]
+inline bool waypoint_label_shown(const WaypointHudView &view) {
+    return view.show && view.current >= 0;
+}
+
 } // namespace opennova::world

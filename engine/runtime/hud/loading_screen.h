@@ -130,6 +130,104 @@ inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 	return elapsed_ms >= kLoadingPresentIntervalMs || reported_changed;
 }
 
+// What a mission load shows on the loading screen: the .bms name the sidecar background is
+// picked by, whether the load carries an MP session (the text block's gate), and the session
+// variables the block draws [orig: SERVERNAME / MISSIONNAME / CUSTOMTEXT and GAMETYPE, parsed
+// by Client_ParseServerSessionVariables @0x5202f0 on a joiner, serialized by
+// Game_SerializeMissionInfoToDataStream @0x523620 on a host]. Code-page text. A negative game
+// type is one the load does not carry.
+struct LoadingSessionInfo {
+	std::string mission_file;
+	bool in_session = false;
+	std::string server_name;
+	std::string mission_name;
+	int32_t game_type = -1;
+	std::string custom_text;
+};
+
+// The game-type line of the session block: the type's LoadingText key looked up in the
+// gametext table (rtxt/text_tables.h, the override table first), "" for a type with no key, no
+// table or no entry [orig: HUD_GetLoadingScreenTextByGameType @0x51f300 - the switch
+// @0x51f30b..0x51f3a6, the lookup TextResource_FindEntryBySectionAndKey(g_TextGameText,
+// "LoadingText", key) @0x51f3cf, a miss or no table the empty text @0x51f3e3].
+std::string loading_game_type_text(uint32_t game_type);
+// The server message's label: LoadingText/LT_SERVERMSG, else its literal fallback
+// [orig: GameText_GetStringWithFallback("LoadingText", "LT_SERVERMSG", "Message from Game
+// Server") @0x522074 (GameText_GetStringWithFallback @0x51eb90)].
+std::string loading_server_message_label();
+// The start-mission splash's continue line: LoadingText/LT_Continue, "" (no line) with no table
+// or no entry [orig: Game_ShowStartMissionSplash - g_TextGameText @0x52094e,
+// TextResource_FindEntryBySectionAndKey(g_TextGameText, "LoadingText", "LT_Continue")
+// @0x520975].
+std::string loading_splash_continue_text();
+
+// THE LOADING SCREEN'S MODEL: what the screen shows and when it presents, the device's draws
+// aside. Its session block is the four strings Render_LoadingScreen draws over the background
+// (the server name, the mission name, the game type's line, the server message), its band's
+// right edge the background pick's (loading_background.h), its bar the caller's exact
+// checkpoint, and its present the 100 ms window pump or a changed checkpoint over the
+// process's one clock.
+// [orig: Render_LoadingScreen @0x521d10 - the session gate @0x521ebe, the band @0x521fe1..
+//  0x522050, the server message @0x52205f..0x522123; HUD_GetLoadingScreenTextByGameType
+//  @0x51f300 - the title buffer @0x51f533 from g_SessionVarServerName @0x51f408, the mission
+//  buffer @0x51f53a from g_SessionVarMissionName @0x51f46b; LoadingScreen_UpdateAndPresent
+//  @0x586be0 - the effect gate @0x586bfd, the throttle @0x586c10..0x586c24, the stamp
+//  @0x586c2c and the stored checkpoint @0x586c32]
+class LoadingScreenModel {
+public:
+	// A load's screen over its background pick: `custom_background` the sidecar flag the band
+	// edge reads [orig: g_LoadScreenHasCustomBg @0x24d4dfd, set @0x521e94, cleared @0x521dcc],
+	// `background_loaded` whether the picked image decoded (no image, no screen [orig: the
+	// effect gate @0x586bfd]). Out of a session the block stays empty; in one it takes the
+	// info's variables, a game type the load does not carry reading as 0 (deathmatch, the
+	// game type's default).
+	void setup(const LoadingSessionInfo &info, bool custom_background, bool background_loaded);
+	// A joiner's mid-load refresh of the background: the image the refreshed mission file
+	// picks, once it decoded.
+	void adopt_background(bool custom_background);
+	// A joiner's mid-load refresh of the session variables, the host's record arriving after
+	// the screen went up [orig: Client_ParseServerSessionVariables @0x5202f0 -> the title and
+	// mission buffers @0x51f533 / @0x51f53a]: an empty name keeps the current one, a carried
+	// game type re-resolves its line, and the server message is the S2C 0x60's CUSTOMTEXT as
+	// the parse left it, which clears the variable first, so an empty one is a host with no
+	// message (net/npwire/session_vars.h decode_session_vars). Out of a session nothing
+	// changes.
+	void update_session_info(const LoadingSessionInfo &info);
+
+	// The load's checkpoint, 0..100: the bar shows exactly it (D-LOADSCR-1: no creep).
+	void set_progress(int percent);
+	int progress() const { return progress_; }
+
+	// Whether a present at `now_ms` (GetTickCount, read now) is due: never without a decoded
+	// background; `force` (the shell's seed) or loading_present_due over the DWORD difference
+	// read signed against the last present and whether the checkpoint changed since it. A due
+	// present stamps the clock and the checkpoint it shows.
+	bool present_due(uint32_t now_ms, bool force);
+
+	bool in_session() const { return in_session_; }
+	bool custom_background() const { return custom_background_; }
+	// The band's right edge over the background (loading_band_right).
+	int band_right() const { return band_right_; }
+	const std::string &title() const { return title_; }
+	const std::string &mission_name() const { return mission_name_; }
+	const std::string &game_type_text() const { return game_type_text_; }
+	const std::string &custom_text() const { return custom_text_; }
+
+private:
+	bool in_session_ = false;
+	bool custom_background_ = false;
+	bool background_loaded_ = false;
+	int band_right_ = kLoadingBandRightStock;
+	std::string title_;          // [orig: g_SessionVarServerName -> g_LoadScreenTitleBuf]
+	std::string mission_name_;   // [orig: g_SessionVarMissionName -> g_LoadScreenMissionBuf]
+	std::string game_type_text_; // [orig: g_LoadScreenGameTypeBuf]
+	std::string custom_text_;    // [orig: g_SessionVarCustomText]
+	int progress_ = 0;
+	int last_drawn_progress_ = -1;
+	// The last present's stamp, seeded one interval back so the first present is due.
+	uint32_t last_present_ms_ = static_cast<uint32_t>(-kLoadingPresentIntervalMs);
+};
+
 // What a present draws: the screen and its bar alone. It clears, draws the screen and the
 // bar, and presents; no world pass, no particle pass and no other render target runs in it
 // (the shell's present holds every offscreen target for its forced draw, D-NET-1270).

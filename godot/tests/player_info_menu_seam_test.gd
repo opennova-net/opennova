@@ -40,12 +40,12 @@ func _reset_profile(blue_kit: Array = [], red_kit: Array = []) -> void:
 	var store := PlayerProfile.store()
 	store.load_bytes(PackedByteArray(), false, PackedByteArray(), false, "")
 	for side in 2:
-		assert_eq(store.apply_character_selection({
+		assert_eq(store.apply_character_selection(CharacterSelection.from_player_info_snapshot({
 			"team": side,
 			"player_class": 5,
 			"side_profiles": [BLUE_CHARACTER, RED_CHARACTER],
 			"kit": blue_kit if side == 0 else red_kit,
-		}), OK, "the side's medic page is seeded")
+		})), OK, "the side's medic page is seeded")
 	store.set_voice(0, 0)
 	store.set_voice(1, 0)
 
@@ -233,8 +233,10 @@ func test_join_profile_carries_an_unresolved_sides_record_word() -> void:
 		return
 	var store := PlayerProfile.store()
 	var stale_packed := 0x8000 | (63 << 9) | (15 << 5) | 30
-	assert_eq(store.apply_character_selection({"team": 1, "player_class": 7,
-			"side_profiles": [{}, {"avatar_a": 30, "avatar_b": 15, "avatar_packed": stale_packed}]}), OK)
+	assert_eq(store.apply_character_selection(CharacterSelection.from_player_info_snapshot({
+			"team": 1, "player_class": 7,
+			"side_profiles": [{}, {"avatar_a": 30, "avatar_b": 15, "avatar_packed": stale_packed}]})),
+			OK)
 	var db := _load_db()
 	assert_null(db.resolve_character_id(stale_packed, 1), "the table has no such character")
 	var loaded := PlayerProfile.load_character_profile(root)
@@ -868,7 +870,8 @@ func test_missing_weapon_def_accepts_a_none_kit() -> void:
 	var profiles := PlayerProfiles.new()
 	profiles.load_bytes(PackedByteArray(), false, "NOTAPROFILE00000".to_ascii_buffer(), true, "")
 	profile["side_profiles"] = [{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200}, {}]
-	assert_eq(profiles.apply_character_selection(profile), OK, "the None kit is taken")
+	assert_eq(profiles.apply_character_selection(
+			CharacterSelection.from_player_info_snapshot(profile)), OK, "the None kit is taken")
 	TestFs.remove_dir_recursive(empty_dir)
 
 
@@ -1666,8 +1669,10 @@ func test_accept_leaves_the_side_not_shown() -> void:
 		return
 	var store := PlayerProfile.store()
 	var stale_packed := 0x8000 | (63 << 9) | (15 << 5) | 30
-	assert_eq(store.apply_character_selection({"team": 1, "player_class": 5,
-			"side_profiles": [{}, {"avatar_a": 30, "avatar_b": 15, "avatar_packed": stale_packed}]}), OK)
+	assert_eq(store.apply_character_selection(CharacterSelection.from_player_info_snapshot({
+			"team": 1, "player_class": 5,
+			"side_profiles": [{}, {"avatar_a": 30, "avatar_b": 15, "avatar_packed": stale_packed}]})),
+			OK)
 	assert_null(_load_db().resolve_character_id(stale_packed, 1), "the table has no such character")
 	# Blue's nationality and division bytes and red's class byte unlike what the
 	# ACCEPT writes, so each write below shows.

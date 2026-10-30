@@ -134,7 +134,30 @@ struct CharacterSelection {
 		std::vector<playersav::KitEntry> entries;  // each one named
 	};
 	std::optional<Kit> kit;
+	// The PLAYERNAME edit's text, the game's code-page bytes: absent when the screen authors no
+	// such control (the save then leaves the name) [orig: PlayerInfo_SaveFromDialog @0x55EFA8 -
+	// the control test @0x55EFAF].
+	std::optional<std::string> name;
 };
+
+// The two files' paths under the game's working directory, `dir` ('/'-separated; empty: the
+// working directory itself): player.sav by its bare name [orig: PlayerProfile_LoadAllFromDisk
+// @0x54F4D0 - File_CheckExists("player.sav") @0x54F586, the open @0x54F5A0; PlayerProfile_SaveToFiles
+// @0x54BE00] and weapon.sav at playersav::weapon_sav_relpath(expansion) [orig: @0x54F68C..0x54F6B7].
+inline constexpr const char *kPlayerSavFileName = "player.sav";
+struct ProfileFilePaths {
+	std::string player_sav;
+	std::string weapon_sav;
+};
+ProfileFilePaths profile_file_paths(const std::string &dir, const std::string &expansion);
+
+// The callsign every session leg rides: the record's name, the ClientAuth NA identity a join's
+// self-identification name-matches (net-re §5.23 D.0, so two players sharing a name cannot share a
+// session: D-NET-169), cut to the wire's Name[16] cstring (game_rules::kMaxCallsignLength), so the
+// echo carries the exact string. `launch_override` is OpenNova's `--callsign` switch (no retail
+// counterpart: it names a second instance on one machine), its leading and trailing white space and
+// control bytes trimmed: when it is not empty it wins, cut the same way.
+std::string profile_callsign(const std::string &launch_override, const std::string &record_name);
 
 class PlayerProfiles {
 public:
@@ -232,6 +255,14 @@ public:
 	// outside 5..9, a side other than 0 or 1, a character byte out of its range or whose
 	// packed id's bit 15 is not the shown side, or a kit entry with no name.
 	bool apply_character_selection(const CharacterSelection &selection);
+
+	// The PLAYER_INFO dialog save whole: the character leg (apply_character_selection), then,
+	// when the screen authors PLAYERNAME, its text through the name rule (commit_name), as the
+	// save reads the name after the character bytes [orig: PlayerInfo_SaveFromDialog @0x55EE10 -
+	// the class and character stores @0x55EE3F..0x55EF38, the name @0x55EFA8..0x55F039]. The name
+	// leg runs whether or not the character leg refused its snapshot (retail's save always
+	// writes it); false when the character leg refused.
+	bool accept_player_info(const CharacterSelection &selection);
 
 	// The QUERY_YES of the PLAYER_INFO delete query: the current record seeded
 	// again and flagged nameless [orig: PlayerInfo_OnDeleteQueryYes @0x561400 — @0x561435,

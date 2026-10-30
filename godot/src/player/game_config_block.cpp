@@ -1,4 +1,5 @@
 #include "player/game_config_block.h"
+#include "player/player_options_state.h"
 
 #include "mnu/menu_driver.h"
 #include "mnu/mnu_document.h"
@@ -11,6 +12,7 @@
 
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/player_options.h>
 #include <formats/gamecfg/server_settings.h>
 #include <base/io/cp1252.h>
 #include <net/protocol/protocol.h> // the armory-only value (DFX2-10)
@@ -58,7 +60,20 @@ void take_launch_switches(inmatch::GameConfigBlock &p_block) {
 
 } // namespace
 
+Ref<PlayerOptionsState> GameConfigBlock::read_player_options() const {
+	return PlayerOptionsState::make(inmatch::read_player_options(block_.cfg()));
+}
+
+Ref<PlayerOptionsState> GameConfigBlock::write_player_options(
+		const Ref<PlayerOptionsState> &p_state) {
+	if (p_state.is_null()) return read_player_options();
+	return PlayerOptionsState::make(inmatch::write_player_options(block_.cfg(), p_state->value()));
+}
+
 void GameConfigBlock::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("read_player_options"), &GameConfigBlock::read_player_options);
+	ClassDB::bind_method(D_METHOD("write_player_options", "state"),
+			&GameConfigBlock::write_player_options);
 	ClassDB::bind_method(D_METHOD("server_configuration_json"), &GameConfigBlock::server_configuration_json);
 	ClassDB::bind_method(D_METHOD("apply_server_configuration_json", "json"), &GameConfigBlock::apply_server_configuration_json);
 	ClassDB::bind_method(D_METHOD("set_path", "path"), &GameConfigBlock::set_path);

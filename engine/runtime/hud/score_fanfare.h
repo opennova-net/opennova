@@ -19,6 +19,8 @@
 // Client_ParseServerSessionVariables @0x520478; the authority sources it from
 // score.ini's EXP_FANFARE directive (word_24C1170).
 
+#include <formats/gamecfg/game_cfg.h>
+
 #include <cstdint>
 
 namespace opennova::hud {
@@ -55,5 +57,11 @@ struct ScoreFeedbackView {
 	int32_t delta = 0;
 	ScoreTone tone = ScoreTone::None;
 };
+
+// Whether the tone plays: the process's cfg word `enable_slotmachine`, read at each landing as the
+// handler reads the block at the play, so a block change after the HUD's construction applies
+// (the Options screens read and write the same word).
+// [orig: the enableSlotMachine_1F4 test @0x42257d; the Options screens @0x554b67 / @0x55ab3d]
+inline bool score_fanfare_enabled(const gamecfg::GameCfg &cfg) { return cfg.enable_slotmachine != 0; }
 
 } // namespace opennova::hud

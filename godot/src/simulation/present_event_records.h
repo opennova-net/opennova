@@ -328,6 +328,7 @@ public:
 		value_ = p_value;
 		wire_handle_ = p_wire_handle;
 	}
+	const opennova::world::Effect &value() const { return value_; }
 	// The test/fixture constructor: kind plus the positional words and text.
 	static Ref<MissionEffect> make(const String &p_kind, int p_a = 0, int p_b = 0, int p_c = 0,
 			const String &p_text = String(), int p_d = 0, int p_wire_handle = -1);

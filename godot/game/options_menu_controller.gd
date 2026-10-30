@@ -22,7 +22,7 @@ var _options: PlayerOptions
 # The native options controller requests commit/revert/discard; this is the
 # store's detached value passed back to its owner for persistence and device
 # preview.
-var _entry_state: PlayerOptions.State
+var _entry_state: PlayerOptionsState
 
 
 func setup(driver: MenuDriver, options: PlayerOptions) -> void:

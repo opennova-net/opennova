@@ -136,6 +136,22 @@ Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	return out;
 }
 
+opennova::inmatch::HudSessionRole Simulation::hud_session_role() const {
+	return opennova::inmatch::hud_session_role(session_.kind(), role_view());
+}
+
+void Simulation::hud_session_map_feeds(opennova::hud::HudSession &r_session, int64_t p_now_ticks,
+		opennova::hud::HudFrameState &r_state) const {
+	const opennova::inmatch::RoleView view = role_view();
+	opennova::inmatch::hud_session_grid_origin_feed(r_session, view, p_now_ticks, false, r_state);
+	opennova::inmatch::hud_session_footprints_feed(r_session, view, p_now_ticks, r_state);
+}
+
+void Simulation::hud_session_grid_origin(opennova::hud::HudSession &r_session,
+		opennova::hud::HudFrameState &r_state) const {
+	opennova::inmatch::hud_session_grid_origin_feed(r_session, role_view(), 0, true, r_state);
+}
+
 bool Simulation::is_round_over() const {
 	return kernel_ != nullptr && kernel_->world.match.outcome().ended;
 }

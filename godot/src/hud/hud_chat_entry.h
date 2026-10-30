@@ -13,6 +13,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <memory>
+
 #include <runtime/hud/hud_chat_entry.h>
 
 namespace godot {
@@ -64,13 +66,18 @@ public:
 	int64_t get_echo_argb() const;
 	void set_preset(int p_index, const String &p_text);
 
-	const opennova::hud::ChatEntry &entry() const { return entry_; }
+	const opennova::hud::ChatEntry &entry() const { return *entry_; }
+	opennova::hud::ChatEntry &mutable_entry() { return *entry_; }
+	// A binding over the line another owner keeps (a HUD session's, hud/hud_session.h): the
+	// pointer shares that owner's lifetime.
+	static Ref<HudChatEntry> over(std::shared_ptr<opennova::hud::ChatEntry> p_entry);
 
 protected:
 	static void _bind_methods();
 
 private:
-	opennova::hud::ChatEntry entry_;
+	// Its own line, or the owner's it was made over (over()).
+	std::shared_ptr<opennova::hud::ChatEntry> entry_ = std::make_shared<opennova::hud::ChatEntry>();
 	int last_events_ = 0;
 	// The device side effects the event bits name: the denied tone through the sim, the
 	// Caps Lock release through the keyboard-lock device.

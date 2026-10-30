@@ -1,11 +1,11 @@
 extends GutTest
 
-## The mission loading screen (LoadingScreen): the sidecar-image rule, the
-## game-type text mapping, exact stage progress and fill arithmetic, and
-## the SP-vs-MP text split — each against the witnessed original behavior
-## [orig: Render_LoadingScreen @ 0x521d10, HUD_GetLoadingScreenTextByGameType
-## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, HUD_DrawProgressBar_0
-## @ 0x5d4c40].
+## The mission loading screen (LoadingScreen) over a mounted root: the
+## background pick and its decode, the fill arithmetic, the SP-vs-MP text split
+## through the registered gametext, the composite, the forced present's target
+## holds and the blocking-load barrier. The model's rules (the game-type keys,
+## the session block's refreshes, the checkpoint and the present cadence) are
+## ctest hud_loading_screen's (engine runtime/hud/loading_screen.h).
 
 const LoadingScreen := preload("res://game/ui/loading_screen.gd")
 const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"
@@ -74,34 +74,6 @@ func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> v
 			"the loading-screen caller forwards the witnessed loose-first policy")
 
 
-# --- game-type -> LoadingText key [orig: switch @ 0x51f30b-0x51f3a6] -----------
-
-func test_gametype_keys_match_the_witnessed_switch() -> void:
-	assert_eq(HudPos.loading_gametype_text_key(0), "LTGT_DM")
-	assert_eq(HudPos.loading_gametype_text_key(0x10000), "LTGT_TDM")
-	assert_eq(HudPos.loading_gametype_text_key(0x10020), "LTGT_COOP")
-	assert_eq(HudPos.loading_gametype_text_key(0x30020), "LTGT_COOP",
-		"the 0x20000 bit is masked out of the coop compare")
-	assert_eq(HudPos.loading_gametype_text_key(0x00001), "LTGT_KOTH")
-	assert_eq(HudPos.loading_gametype_text_key(0x10001), "LTGT_TKOTH")
-	assert_eq(HudPos.loading_gametype_text_key(0x90002), "LTGT_SD")
-	assert_eq(HudPos.loading_gametype_text_key(0x10002), "LTGT_AD")
-	assert_eq(HudPos.loading_gametype_text_key(0x10004), "LTGT_CTF")
-	assert_eq(HudPos.loading_gametype_text_key(0x10008), "LTGT_FB")
-	assert_eq(HudPos.loading_gametype_text_key(0x10010), "LTGT_AAS")
-	assert_eq(HudPos.loading_gametype_text_key(0x50010), "LTGT_CAC")
-
-
-func test_unknown_gametype_yields_no_key() -> void:
-	# The original leaves the line empty for an unlisted type (LABEL_29 with a
-	# null lookup) — never a wrong label.
-	assert_eq(HudPos.loading_gametype_text_key(-1), "")
-	assert_eq(HudPos.loading_gametype_text_key(0xDEAD), "")
-
-
-# --- exact stage progress ------------------------------------------------------
-
-
 # --- bar fill arithmetic [orig: v8 @ 0x5d4c40] ----------------------------------
 
 func test_bar_fill_span_matches_the_original_arithmetic() -> void:
@@ -137,23 +109,6 @@ func test_mp_setup_carries_the_session_variables() -> void:
 	Strings.register_table("gametext", null)
 
 
-# A joiner's screen goes up before the host is known; the identification carries
-# the S2C 0x60's CUSTOMTEXT, whose parse clears it first, so the update replaces
-# the message even with an empty one (engine: npwire/session_vars.h).
-func test_a_join_identification_replaces_the_server_message() -> void:
-	var screen := _setup_screen(LoadingScreenInfo.make("00TRg.bms", true, "", "", 0, ""))
-	assert_eq(screen.session_overlay_lines()[3], "", "no message before the host is known")
-	screen.update_session_info(null, LoadingScreenInfo.make("", true, "DEMOHOST", "", -1,
-			"Welcome aboard"))
-	var lines := screen.session_overlay_lines()
-	assert_eq(lines[0], "DEMOHOST")
-	assert_eq(lines[3], "Welcome aboard", "the host's message under the band")
-	screen.update_session_info(null, LoadingScreenInfo.make("", true, "", "", -1, ""))
-	lines = screen.session_overlay_lines()
-	assert_eq(lines[0], "DEMOHOST", "an empty name keeps the current one")
-	assert_eq(lines[3], "", "a host with no message draws none")
-
-
 # --- the session block composites into the background as the game blends it
 # [orig: Render_LoadingScreen @ 0x521f1a / @ 0x521f86 -> CGameFont_RenderText
 # @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0] (D-LOADSCR-2) ------------
@@ -177,19 +132,6 @@ func test_session_block_composites_into_the_background() -> void:
 	assert_eq(background.get_pixel(30, 40), Color.BLACK, "the background itself is untouched")
 	assert_null(HudPos.composite_loading_session_text(null, font, font, "", "", "", "", "", 661),
 			"no background, no composite")
-
-
-func test_present_tracks_exact_stage_progress() -> void:
-	var screen := _setup_screen(LoadingScreenInfo.for_mission("00TRg.bms"))
-	screen.set_progress(50)
-	screen.present()
-	assert_eq(screen.displayed_progress(), 50,
-		"the bar displays the exact real stage checkpoint")
-	screen.present()
-	assert_eq(screen.displayed_progress(), 50, "an immediate re-present holds")
-	screen.present(true)
-	assert_eq(screen.displayed_progress(), 50,
-		"a forced window-pump redraw cannot invent progress")
 
 
 func test_canvas_layer_screen_tracks_viewport_resize() -> void:

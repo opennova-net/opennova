@@ -1443,6 +1443,8 @@ public:
 	// line, oldest first, NO expiry test [orig: HUD_DrawMessageLog
 	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
 	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
+	// The SYSTEM ring as it stands (push_message, push_feed_line): a read seam.
+	const std::vector<HudMessageLine> &feed_lines() const { return feed_lines_; }
 	// The rings' lives are retail's per-slot countdowns, which run once per frame; the port
 	// stamps an expiry against the main-frame counter instead. Only a mission start zeroes that
 	// counter, and the same start clears all six chat channels ahead of it, so a clock restart

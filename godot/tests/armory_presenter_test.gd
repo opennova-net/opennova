@@ -100,13 +100,12 @@ func _real_sim(entity_team: int = 2) -> Simulation:
 # red side [orig: Armory_StageLoadoutBuffers @0x564290; UI_PopulateThreeCategoryLists
 # @0x566f3c].
 func _red_rifleman_profiles(kit: Array[WeaponKitEntry]) -> PlayerProfiles:
-	var entries: Array = []
-	for row in kit:
-		entries.append({"name": row.name, "ammo_primary": row.ammo_primary,
-				"ammo_secondary": row.ammo_secondary, "flags": row.flags})
+	var selection := CharacterSelection.new()
+	selection.player_class = 8
+	selection.team = 1
+	selection.set_kit(8, kit)
 	var profiles := PlayerProfiles.new()
-	assert_eq(profiles.apply_character_selection({"player_class": 8, "team": 1,
-			"kit": entries, "kit_class": 8}), OK, "the red rifleman page is written")
+	assert_eq(profiles.apply_character_selection(selection), OK, "the red rifleman page is written")
 	return profiles
 
 

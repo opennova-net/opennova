@@ -28,23 +28,6 @@ const BMS_ATTRIB_COOP := 0x1000000
 const BMS_ATTRIB_TDM := 0x20000000
 
 
-class _MissingBankMusicRoot extends RefCounted:
-	var script_reads := 0
-
-	func get_expansion() -> String:
-		return ""
-
-	func resolve_file(_name: String) -> String:
-		return ""
-
-	func has_file(name: String) -> bool:
-		return name.to_lower() == "menumus.bin"
-
-	func read_file(_name: String) -> PackedByteArray:
-		script_reads += 1
-		return PackedByteArray([1])
-
-
 const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _state_config: TestFs.Snapshot
@@ -1910,11 +1893,11 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 	assert_true(MusicService.open_menu_context(root), "menu context reopens")
 	assert_eq(MusicService.get_var(14), 0,
 		"menu reload also clears globals under the headless audio driver")
-	# A failed replacement open tears down the old pair and obeys the witnessed
-	# bank-first gate: retail never attempts to read the script after no .sbf.
-	var missing_root := _MissingBankMusicRoot.new()
+	# A failed replacement open tears down the old pair (the bank-first gate's own
+	# order is the ctest music_context's).
+	var missing_root := ResourceRoot.new()
 	assert_false(MusicService.open_menu_context(missing_root), "missing bank leaves silence")
-	assert_eq(missing_root.script_reads, 0, "missing-bank gate precedes VFS script read")
+	assert_eq(MusicService.current_context(), "", "a failed open keeps no context")
 	assert_null(MusicService.director().get_bank(), "failed open retains no old bank")
 	assert_null(MusicService.director().get_mus_script(), "failed open retains no old script")
 	root.clear()

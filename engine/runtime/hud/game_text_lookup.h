@@ -8,9 +8,12 @@
 // presence-aware form (hud/end_round_overlay.h EndRoundTextLookup) because
 // its present-but-empty fold is witnessed.
 
+#include <formats/rtxt/text_tables.h>
+
 #include <cstddef>
 #include <cstdio>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace opennova::hud {
@@ -129,6 +132,19 @@ inline std::string game_text(const GameTextLookup &lookup, const GameTextKey &ke
 inline std::string game_text(const GameTextLookup &lookup, const TextKeyForm &form, int number,
 		const char *fallback) {
 	return game_text(lookup, form.section, text_key(form, number).c_str(), fallback);
+}
+
+// The seam over the table registered under `name` (formats/rtxt/text_tables.h), as it stands
+// when the lookup is made: the override table first, then the table (GameText_GetString's order,
+// rtxt::find_with_text_override); the fallback with no table or no entry.
+inline GameTextLookup registered_text_lookup(const char *name) {
+	return [table = rtxt::registered_table(name)](const char *section, const char *key,
+				   const char *fallback) {
+		if (table != nullptr)
+			if (const rtxt::Entry *entry = rtxt::find_with_text_override(*table, section, key))
+				return entry->text;
+		return std::string(fallback);
+	};
 }
 
 } // namespace opennova::hud
