@@ -49,7 +49,8 @@ void weapon_edit(const Json &patch_weapons, const gamecfg::GameCfg &launched,
 		if (!weapon.value.is_string())
 			continue;
 		for (size_t i = 1; i < rows; ++i) {
-			if (!weapons[i].loadout_selectable || !eq(weapon.key, cp1252_to_utf8(weapons[i].name)) ||
+			if (!weapons[i].loadout_selectable ||
+					!eq(weapon.key, cp1252_to_utf8(weapons[i].name)) ||
 					weapon.value.string == target[i])
 				continue;
 			target[i] = weapon.value.string;

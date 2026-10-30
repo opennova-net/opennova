@@ -6,10 +6,10 @@
 // curated commands (console_commands.h) on the server's admin link
 // (apps/novaworld_fleet/hosted/admin_link.h), which the fleet leader holds:
 // each command goes through the database (console_queue.h), and the link's
-// state is its row (admin_link_status). The owner's routes act on one of the caller's own servers by
-// its id: GET /api/me/servers/<id>/players, POST .../players/<slot>/punt, /ban,
-// /swap and /kill, GET .../missions, GET and POST .../rotation (the entries; one
-// appended), POST .../rotation/<index>/remove and /next, POST
+// state is its row (admin_link_status). The owner's routes act on one of the caller's own servers
+// by its id: GET /api/me/servers/<id>/players, POST .../players/<slot>/punt, /ban, /swap and /kill,
+// GET .../missions, GET and POST .../rotation (the entries; one appended), POST
+// .../rotation/<index>/remove and /next, POST
 // .../rotation/cycle, GET and POST .../chat, and GET .../console. The admin's
 // are the same under /api/admin/hosted/<id>/.... GET .../settings reads the
 // database alone (configuration_routes.cpp), owner and admin alike. Every
@@ -25,8 +25,8 @@
 // for an owner, one token from the account's read or write bucket (429
 // rate_limited); then the link (503 admin_busy with its queue full, 504
 // admin_timeout past the 3 s a request has for all its commands, a settings edit
-// more by its command count (edit_budget); a 503 hands the token back), and the command's own outcome (console_outcome). Behind
-// ONNET_API_PROXY_ONLY like every /api route.
+// more by its command count (edit_budget); a 503 hands the token back), and the command's own
+// outcome (console_outcome). Behind ONNET_API_PROXY_ONLY like every /api route.
 //
 // The admission. A console request that runs commands holds a Crow handler
 // thread while it waits on the link (up to 3 s; a hosted server pumps its admin
@@ -42,8 +42,8 @@
 // last-map check. The edit is held in Redis (a key per server, set only if
 // absent, kRotationEditTtl at most, let go by its holder's token), so it holds
 // across every web process; the account's one request and the service-wide
-// count stay each process's own, since what they guard is its handler threads. GET .../console reads the database alone and is not
-// admitted.
+// count stay each process's own, since what they guard is its handler threads. GET .../console
+// reads the database alone and is not admitted.
 
 #include "console_commands.h"
 #include "hosted/model/admin_link_status.h"
@@ -88,7 +88,8 @@ public:
 	static constexpr std::chrono::milliseconds edit_budget(size_t commands) {
 		const std::chrono::milliseconds total = kCommandBudget +
 				kEditCommandBudget *
-						static_cast<std::chrono::milliseconds::rep>(commands > 1 ? commands - 1 : 0);
+						static_cast<std::chrono::milliseconds::rep>(
+								commands > 1 ? commands - 1 : 0);
 		return total < kEditBudgetMax ? total : kEditBudgetMax;
 	}
 	// GET .../console's lines: the newest 200 by default, kConsoleKeep at most.

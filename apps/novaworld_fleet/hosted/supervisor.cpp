@@ -829,9 +829,11 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	// trees no longer take (a weapon a newer tree renamed) fails this server alone,
 	// before its account and admin login turn over.
 	gamecfg::WeaponRoster base_weapons, expansion_weapons;
-	if (const auto base = find_tree(db, base_tree)) base_weapons = base->weapons;
+	if (const auto base = find_tree(db, base_tree))
+		base_weapons = base->weapons;
 	if (expansion_tree)
-		if (const auto expansion = find_tree(db, *expansion_tree)) expansion_weapons = expansion->weapons;
+		if (const auto expansion = find_tree(db, *expansion_tree))
+			expansion_weapons = expansion->weapons;
 	const gamecfg::WeaponRoster &weapons =
 			server_weapon_roster(base_weapons, expansion_tree ? &expansion_weapons : nullptr);
 	try {

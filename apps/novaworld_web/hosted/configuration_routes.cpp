@@ -166,8 +166,9 @@ void ConsoleRoutes::register_configuration(WebApp &app) {
 				auto access = access_.require_user(req);
 				if (access.refusal)
 					return std::move(*access.refusal);
-				if (const int64_t wait = owner_reads_.take(
-							"console|" + std::to_string(access.user->id), RateLimiter::Clock::now()))
+				if (const int64_t wait =
+								owner_reads_.take("console|" + std::to_string(access.user->id),
+										RateLimiter::Clock::now()))
 					return too_many_requests(wait);
 				try {
 					auto lease = pool_.acquire();
