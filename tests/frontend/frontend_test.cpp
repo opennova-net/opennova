@@ -15,7 +15,9 @@
 //     the Esc routes, the use-item routes, the input frame's gates;
 //   - the mission's exits: the SP restart, the Mission box, the joiner's reload, the host's map
 //     change, the abort, the round end's profile step;
-//   - the main loop's ends: the quit's saves and its drain, the mpreset exit's latch;
+//   - the main loop's ends: the quit's saves and its drain, the mpreset exit's latch, a quit
+//     past it saving nothing (formerly GUT's game_cfg_process_block_test
+//     "the shell process exit saves nothing");
 //   - the menu mode's bank.
 #include <runtime/frontend/frontend.h>
 #include <runtime/inmatch/game_config_block.h>
@@ -429,6 +431,7 @@ void the_loop_ends() {
 	check(fo.process_exit_pending() && fo.quit_requested() &&
 					fo.request_quit() == QuitRequest::Ignored,
 			"a quit past the exit does nothing");
+	check(other.trace.empty(), "the exit and the quit past it save nothing");
 }
 
 void the_menu_bank() {
