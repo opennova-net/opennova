@@ -64,7 +64,7 @@ public:
 	static constexpr int kFetchTotalMs = 20000;
 	static constexpr size_t kMaxReplyBytes = 256u * 1024u;
 
-	// One fetch of the feed: the HTTP reply (apps/common/net_http.h).
+	// One fetch of the feed: the HTTP reply (net/http/http_exchange.h).
 	using Fetch = std::function<net::HttpReply()>;
 	// Milliseconds: the wall clock (fetched_at_ms) and a steady one (the cache).
 	using Clock = std::function<int64_t()>;
