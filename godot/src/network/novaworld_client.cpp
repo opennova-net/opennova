@@ -1578,6 +1578,13 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	cfg.lan_only = options->get_server_lan_only();
 	cfg.expansion = opennova::to_std(options->get_expansion());
 	cfg.region_index = options->get_region_index();
+	// DFXCATEGORY1, where the protocol's lists carry it (NwuHostRole sets category_var): the
+	// game.cfg word mpdfxcategory, as opennova-serve's registration takes it.
+	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0ce0 (dfx2.exe) - the word printed "%ld"
+	//  @0x4d0e8a..0x4d0eb1 (HostSetup) and @0x4d0faf..0x4d0fd5 (Host)]
+	cfg.category =
+			(game_config_.is_valid() ? game_config_->native().cfg() : opennova::gamecfg::defaults())
+					.mp_dfx_category;
 	const String mission = options->get_mission_name().is_empty()
 			? options->get_mission_file().get_file().get_basename()
 			: options->get_mission_name();
