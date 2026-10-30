@@ -263,4 +263,136 @@ const char *deploy_list_team_color_tag(int team) {
     return team == 2 ? "<cFF2020>" : "<c4040FF>";
 }
 
+int deploy_table_icon(uint8_t vehicle_category, int32_t class_id) {
+	int icon = 1;
+	switch (vehicle_category) {
+		case 1:
+		case 2:
+		case 0xC:
+			icon = 2;
+			break;
+		case 3:
+		case 4:
+			icon = 4;
+			break;
+		case 5:
+		case 6:
+		case 7:
+		case 8:
+			icon = 3;
+			break;
+		default:
+			break;
+	}
+	switch (class_id) {
+		case 0x210:
+			icon = 13;
+			break; // Ka-52
+		case 0x211:
+			icon = 6;
+			break; // Apache
+		case 0x212:
+			icon = 14;
+			break; // M1A1 Tank
+		case 0x213:
+			icon = 19;
+			break; // T80
+		case 0x214:
+		case 0x215:
+		case 0x216:
+			icon = 8;
+			break; // Little Bird
+		case 0x217:
+			icon = 10;
+			break; // Chinook
+		case 0x218:
+			icon = 20;
+			break; // Super Puma
+		case 0x219:
+			icon = 11;
+			break; // Blackhawk
+		case 0x21A:
+		case 0x21B:
+			icon = 18;
+			break;
+		case 0x21E:
+		case 0x21F:
+			icon = 7;
+			break;
+		case 0x220:
+			icon = 16;
+			break; // Mark V
+		case 0x222:
+			icon = 9;
+			break; // BTR-80
+		case 0x223:
+			icon = 17;
+			break; // Stryker
+		case 0x224:
+			icon = 15;
+			break; // Mil-26 Helo
+		case 0x225:
+		case 0x226:
+		case 0x227:
+			icon = 5;
+			break; // Nb0-105 Helo
+		case 0x228:
+		case 0x229:
+			icon = 12;
+			break; // Assault Boat
+		default:
+			break;
+	}
+	return icon;
+}
+
+std::string deploy_table_seat_line(const std::string &name, int slot, bool is_driver) {
+	std::string line = name;
+	if (slot == 8 || is_driver)
+		line += "  <i>(Driver)<-i>";
+	if (slot == 9)
+		line += "  <i>(Gunner)<-i>";
+	return line + "\r\n";
+}
+
+std::string deploy_table_gunner_line(const std::string &name, const std::string &seat_weapon) {
+	return name +
+			(seat_weapon.empty() ? std::string("  <i>(Gunner)<-i>")
+								 : "  <i>(" + seat_weapon + ")<-i>") +
+			"\r\n";
+}
+
+std::string deploy_table_waiting_line(const std::string &name, bool self) {
+	return (self ? "<b><cC0FFFF>** " + name + " **<-b> <i>waiting</i>"
+				 : "<cC0F0F0>" + name + " <i>waiting</i>") +
+			"\r\n";
+}
+
+std::vector<DeployTableRow> build_deploy_table_rows(
+		int local_team, const std::vector<DeployTableZone> &zones) {
+	std::vector<DeployTableRow> rows;
+	DeployTableRow def;
+	def.cells[0] = "' '";
+	def.cells[1] = "0";
+	def.cells[2] = "\r\nDefault";
+	// The team's colour, then 0xFFDDDDDD over it: the second write is the one that stands.
+	def.color = local_team == 0 ? 0xFF00FF00u : local_team == 2 ? 0xFFFF0000u : 0xFF00AFFFu;
+	def.color = 0xFFDDDDDDu;
+	rows.push_back(def);
+	for (const DeployTableZone &zone : zones) {
+		DeployTableRow row;
+		row.value = zone.index + 1;
+		row.cell1_value = zone.index + 1;
+		row.cells[0] = std::string("'") + static_cast<char>('A' + zone.index) + "'";
+		row.cells[1] = std::to_string(deploy_table_icon(zone.vehicle_category, zone.class_id));
+		row.cells[2] = "\r\n";
+		for (const std::string &line : zone.lines)
+			row.cells[2] += line;
+		row.color = zone.greyed ? 0xFF404040u : zone.health_color;
+		row.state1_color = zone.greyed;
+		rows.push_back(std::move(row));
+	}
+	return rows;
+}
+
 } // namespace opennova::world

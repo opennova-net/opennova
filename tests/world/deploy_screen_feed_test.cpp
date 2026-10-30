@@ -379,8 +379,48 @@ void test_loadout_picker_gate() {
 	CHECK(!deploy_loadout_shown(2, true, true));
 }
 
+// DFX2-41: the SPAWNPOINTS_TABLE rows: the Default row (its team colour overwritten by
+// 0xFFDDDDDD), a zone's letter, icon (the category's, the class id's over it) and its text
+// column, a blank head then its lines, its health colour or the greyed pair.
+// [orig: sub_551450 @0x551450 - @0x5514de..0x551568, @0x55170a, @0x551771, @0x5518a4,
+//  @0x551cbf..0x551cfc (dfx2.exe)]
+void test_spawn_table_rows() {
+	CHECK(deploy_table_icon(0, 0) == 1);
+	CHECK(deploy_table_icon(3, 0) == 4 && deploy_table_icon(7, 0) == 3 &&
+			deploy_table_icon(0xC, 0) == 2);
+	CHECK(deploy_table_icon(3, 0x210) == 13 && deploy_table_icon(1, 0x228) == 12);
+	CHECK(deploy_table_icon(2, 0x221) == 2); // a class no case names keeps the category's
+	CHECK(deploy_table_seat_line("Ace", 8, false) == "Ace  <i>(Driver)<-i>\r\n");
+	CHECK(deploy_table_seat_line("Bo", 9, true) == "Bo  <i>(Driver)<-i>  <i>(Gunner)<-i>\r\n");
+	CHECK(deploy_table_seat_line("Cy", 0, false) == "Cy\r\n");
+	CHECK(deploy_table_gunner_line("Di", "M2") == "Di  <i>(M2)<-i>\r\n");
+	CHECK(deploy_table_gunner_line("Di", "") == "Di  <i>(Gunner)<-i>\r\n");
+	CHECK(deploy_table_waiting_line("Me", true) == "<b><cC0FFFF>** Me **<-b> <i>waiting</i>\r\n");
+	CHECK(deploy_table_waiting_line("You", false) == "<cC0F0F0>You <i>waiting</i>\r\n");
+	DeployTableZone heli;
+	heli.index = 2;
+	heli.vehicle_category = 3;
+	heli.class_id = 0x219;
+	heli.health_color = 0xFF20FF20u;
+	heli.lines = { deploy_table_seat_line("Ace", 8, true) };
+	DeployTableZone empty;
+	empty.index = 0;
+	empty.greyed = true;
+	const std::vector<DeployTableRow> rows = build_deploy_table_rows(2, { heli, empty });
+	CHECK(rows.size() == 3);
+	CHECK(rows[0].cells[0] == "' '" && rows[0].cells[1] == "0" &&
+			rows[0].cells[2] == "\r\nDefault");
+	CHECK(rows[0].value == 0 && rows[0].cell1_value == 0 && rows[0].color == 0xFFDDDDDDu);
+	CHECK(rows[1].cells[0] == "'C'" && rows[1].cells[1] == "11" && rows[1].value == 3);
+	CHECK(rows[1].cell1_value == 3 && rows[1].color == 0xFF20FF20u && !rows[1].state1_color);
+	CHECK(rows[1].cells[2] == "\r\nAce  <i>(Driver)<-i>\r\n");
+	CHECK(rows[2].cells[0] == "'A'" && rows[2].cells[1] == "1" && rows[2].cells[2] == "\r\n");
+	CHECK(rows[2].color == 0xFF404040u && rows[2].state1_color);
+}
+
 int main() {
 	test_loadout_picker_gate();
+	test_spawn_table_rows();
 	test_list_items_are_the_page_bytes();
 	test_rows_are_the_page_bytes_past_z();
 	test_shroud_reveal_and_refresh();

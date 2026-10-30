@@ -229,6 +229,68 @@ inline constexpr const char *kDeployLoadoutCaptions[3] = { "STATIC_PRIMARY", "ST
 inline constexpr const char *kDeployLoadoutOutlines[3] = { "PRIMARY_OUTLINE", "SECONDARY_OUTLINE",
 	"ACCESSORY_OUTLINE" };
 
+// --- DFX2-41: the SPAWNPOINTS_TABLE fill ---------------------------------------------------------
+// dfx2.exe's DEATH screen lists its spawn points in a three-column table, refilled with the
+// content: its scroll top and selected row kept, every row removed, the table and
+// STATIC_LIST_TITLE shown; then the Default row, one row per spawn zone, column 0's sort flag
+// set and the rows sorted by it, the scroll top and the selected row (by index) restored.
+// [orig: sub_551450 @0x551450 - the keeps @0x55149d / @0x5514aa, CTableWnd_RemoveRow @0x5514ae,
+//  the shows @0x5514b7..0x5514d9, the zone walk @0x55156d..0x551d1c, sub_6CBF40(0, 1) @0x551d28,
+//  CTableWnd_SortByColumn @0x551d35, the restores @0x551d41..0x551d53; called from sub_551E10
+//  @0x5521ed, the twin of UI_UpdateDeathScreenContent (dfx2.exe)]
+//
+// A zone gets a row when its entity has a definition, stands on the local player's team, has
+// no zone-timer entry or a secured one ([9] >= [10]), its definition carries the spawn-zone
+// attribute 0x40000 and SpawnZoneList holds it [orig: @0x551591..0x551624 (dfx2.exe)]: the
+// embedder's walk over the handle table, in its order, hands those in as DeployTableZone.
+struct DeployTableZone {
+	int index = 0; // SpawnZoneList index: the row's value is index + 1
+	uint8_t vehicle_category = 0; // the definition's +406 byte
+	int32_t class_id = 0; // the definition's +80 class id
+	uint32_t health_color = 0xFFDDDDDDu; // sub_5A19D0's colour over the zone's health
+	bool greyed = false; // no driver (+368) and the definition's +92 word 1
+	// The text column's lines past its blank head, in the fill's order: the seat lines
+	// (deploy_table_seat_line), the mounted gunners' (deploy_table_gunner_line), the zone's
+	// waiting members' (deploy_table_waiting_line), each ending CR LF.
+	std::vector<std::string> lines;
+};
+// One row as the fill writes it: the column texts, the row value (the insert's column-0 cell
+// value), column 1's cell value, the row colour (CTableWnd_SetRowColor, the colour flag set)
+// and the state-1 colour bit (sub_6CD530's: set for a greyed row).
+struct DeployTableRow {
+	std::string cells[3];
+	int32_t value = 0;
+	int32_t cell1_value = 0;
+	uint32_t color = 0;
+	bool state1_color = false;
+};
+// The column-1 icon of a zone: 1 (a PSP) unless the definition's vehicle category names a
+// vehicle (1 ground vehicle, 2 tank, 0xC motorcycle: 2; 3 helicopter, 4 plane: 4; 5..8 boat:
+// 3), then the class id's own for 0x210..0x229. The names the same two switches pick feed a
+// type line the fill overwrites with "\r\n" before any use, so no row shows them.
+// [orig: the category switch @0x55170a, the class jump table @0x551771, "%d" @0x55185b, the
+//  type line's sprintf @0x551890 and its overwrite @0x551895..0x5518ac (dfx2.exe)]
+int deploy_table_icon(uint8_t vehicle_category, int32_t class_id);
+// A seat line: the occupant's display name, "  <i>(Driver)<-i>" for the driver seat (slot 8) or
+// the zone's driver, "  <i>(Gunner)<-i>" for the UseGun seat (slot 9); seats walk 8, 9, 0..7.
+// [orig: the seat walk @0x5518b3..0x5519c0, (i + 8) % 10 @0x5518c0 (dfx2.exe)]
+std::string deploy_table_seat_line(const std::string &name, int slot, bool is_driver);
+// A mounted gunner's line: the name and its seat weapon's name in "  <i>(%s)<-i>", or
+// "  <i>(Gunner)<-i>" with none [orig: @0x551a94..0x551b6b (dfx2.exe)].
+std::string deploy_table_gunner_line(const std::string &name, const std::string &seat_weapon);
+// A waiting member's line: "<b><cC0FFFF>** %s **<-b> <i>waiting</i>" for the local player,
+// "<cC0F0F0>%s <i>waiting</i>" for another [orig: @0x551bd3..0x551c67 (dfx2.exe)].
+std::string deploy_table_waiting_line(const std::string &name, bool self);
+// The rows in insert order: the Default row (value 0; "' '", "0", "\r\nDefault"; the local team's
+// colour, 0xFF00FF00 team 0 / 0xFFFF0000 team 2 / 0xFF00AFFF else, then 0xFFDDDDDD over it),
+// then a zone's ("'<A + index>'", its icon, "\r\n" and its lines; its health colour, or
+// 0xFF404040 and the state-1 colour bit when greyed).
+// [orig: the Default row @0x5514de..0x551568; the zone row @0x551639..0x55168c, the letter
+//  @0x5516ce, CTableWnd_AddRow @0x551ca0, its column-1 value @0x551cad, the cells
+//  @0x551cbf..0x551ce0, sub_6CD420 @0x551cef, sub_6CD530 @0x551cfc (dfx2.exe)]
+std::vector<DeployTableRow> build_deploy_table_rows(
+		int local_team, const std::vector<DeployTableZone> &zones);
+
 // Both instruction widgets and the permanent-death status pair. A secured
 // spawn leaves the first widget's prior text intact and hides the second;
 // the later RESPawn1 assignment overwrites the intermediate RESPawn2 text.
