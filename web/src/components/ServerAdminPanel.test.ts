@@ -16,7 +16,7 @@ const state: ConfigurationState = {
     time_limit: 30, kill_limit: 50, max_score: 5, respawn: 5, start_delay: 0, team_ff: false,
     send_holdoff_ticks: 12, entity_send_budget: 600, max_packet_size: 1100, lock_framerate: true,
     list_on_novalogic: false, rotation: [], options: { server_message: 'Welcome' } },
-  settings_revision: 7, settings: [{ key: 'ServerPassword', value: 'secret' }], weapons: [],
+  settings_revision: 7, weapons: [],
   schema: [{ key: 'server_message', label: 'Server message', group: 'Server', kind: 'text', default: '',
     min: 0, max: 127, command: '', core: false, note: '', depends_on: '' }],
 };

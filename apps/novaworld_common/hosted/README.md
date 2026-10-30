@@ -812,7 +812,7 @@ ahead of the waiting polls, so a page never meets its own `console_busy`.
 | `GET /api/me/servers/<id>/chat` | `CHAT GET` | the chat window, oldest first |
 | `POST /api/me/servers/<id>/chat` | `CHAT SEND <text>` | `{"text"}`: cp1252, no control character, not blank, at most 59 characters; 400 `invalid_text` |
 | `GET /api/me/servers/<id>/console` | none | the console ring in any state, with the link's state (`?limit=`, `?after=`); 404 |
-| `GET .../settings` | `GET GAMESETTINGS` | live values, saved configuration, revision, title schema and pinned weapon catalog |
+| `GET .../settings` | none (the database) | saved configuration, revision, title schema and pinned weapon catalog, in any state |
 | `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch |
 | `GET .../weapons` | `WEAPON LIST` | complete reply packets |
 

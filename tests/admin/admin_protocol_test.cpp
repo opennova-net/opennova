@@ -214,15 +214,6 @@ int main() {
 		expect(chat == std::vector<std::string>({"Server: hello ", "  continued", "Ann: hi"}),
 		       "CHAT GET: the lines, a continuation's two spaces kept");
 		expect(admin_parse_chat_window("").empty(), "an empty window");
-
-		const auto settings = admin_parse_game_settings("AutoBalanceOnRecycle = 1\n"
-		                                                "VotePercent          = 0.600000\n"
-		                                                "ServerName           = My = Server\n"
-		                                                "ServerPassword       = \n");
-		expect(settings.size() == 4 && settings[0] == std::make_pair(std::string("AutoBalanceOnRecycle"), std::string("1")) &&
-		               settings[2].second == "My = Server" && settings[3].first == "ServerPassword" &&
-		               settings[3].second.empty(),
-		       "GET GAMESETTINGS: each key and value");
 	}
 
 	// The reply plan: how many packets each command draws (§6.9's dispatcher), split as it

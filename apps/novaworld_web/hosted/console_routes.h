@@ -11,7 +11,8 @@
 // /swap and /kill, GET .../missions, GET and POST .../rotation (the entries; one
 // appended), POST .../rotation/<index>/remove and /next, POST
 // .../rotation/cycle, GET and POST .../chat, and GET .../console. The admin's
-// are the same under /api/admin/hosted/<id>/..., plus GET .../settings. Every
+// are the same under /api/admin/hosted/<id>/.... GET .../settings reads the
+// database alone (configuration_routes.cpp), owner and admin alike. Every
 // reply is JSON; a refusal is an error code with our own message, never the
 // server's text.
 //
@@ -162,7 +163,7 @@ private:
 	crow::response chat(const Caller &c);
 	crow::response chat_send(const Caller &c, const ConsoleCommand &command);
 	crow::response console(const Caller &c, const crow::request &req);
-	crow::response settings(const Caller &c);
+	crow::response settings(db::Database &db, const HostedServer &server);
 	crow::response configuration_edit(const Caller &c, const crow::request &req);
 	crow::response weapon_settings(const Caller &c);
 	void register_configuration(WebApp &app);

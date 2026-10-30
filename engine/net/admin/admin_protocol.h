@@ -170,8 +170,4 @@ std::vector<AdminRotationEntry> admin_parse_mission_list(std::string_view reply)
 // [orig: CAdminServer_HandleChatCommand @0x404B0F..0x404BB3]
 std::vector<std::string> admin_parse_chat_window(std::string_view reply);
 
-// GET GAMESETTINGS: its "<Key padded to 21> = <value>\n" rows as (key, value), in order.
-// [orig: CAdminServer_HandleGet @0x403434..0x403D42]
-std::vector<std::pair<std::string, std::string>> admin_parse_game_settings(std::string_view reply);
-
 } // namespace opennova

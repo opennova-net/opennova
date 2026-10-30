@@ -11,7 +11,7 @@
 // (ADMINUSER, BANLIST), or its session's end (GOTO, MISSION CLEAR, QUIT) outside
 // the supervisor's stop.
 //
-// The owners' commands (owner_may_run):
+// The commands, the owner's and the admin's alike:
 //   PLAYER LIST                 the players (read)
 //   PLAYER PUNT <slot>          a punt (slot 1..255; 0 is the host's own)
 //   PLAYER BAN <slot>           a ban: the PCID listed on a NovaWorld host, then the punt
@@ -31,9 +31,9 @@
 //   MISSION CYCLE               the round ends now and the next map loads
 //   CHAT GET                    the chat window (read)
 //   CHAT SEND <text>            a server chat line
-// The admins' add one read: GET GAMESETTINGS (the live settings, the game and
-// side passwords among them). The routes also read GET GAMESTATE themselves (a
-// rotation edit's scene check), never as a caller's command.
+// The routes also read GET GAMESTATE themselves (a rotation edit's scene check),
+// never as a caller's command. The settings page reads the saved configuration from
+// the database, never the live GET GAMESETTINGS (which carries the passwords).
 //
 // Every argument is checked before a line is composed: a slot is 1..255 (the
 // server compares `(u8)atol`, so 256 would be the host's 0), an index below
@@ -67,13 +67,10 @@ enum class ConsoleVerb : uint8_t {
 	MissionCycle,
 	ChatGet,
 	ChatSend,
-	GameSettings, // the admins' alone
 	GameState,    // the routes' own scene check (GET GAMESTATE), no caller's
 };
 // The verb's name in the log ("punt", "rotation", ...).
 const char *console_verb_name(ConsoleVerb verb);
-// Whether an owner may run it on their own server: every verb but GameSettings.
-bool owner_may_run(ConsoleVerb verb);
 // Whether it changes the server: the console records it and its replies (a read
 // the site polls is not recorded), and the owner's write bucket pays for it.
 bool console_verb_writes(ConsoleVerb verb);
@@ -111,7 +108,7 @@ struct ConsoleRefusal {
 };
 
 // The commands with no argument: PlayerList, MissionAvailable, MissionList,
-// MissionCycle, ChatGet, GameSettings, GameState. Nullopt for any other verb.
+// MissionCycle, ChatGet, GameState. Nullopt for any other verb.
 std::optional<ConsoleCommand> console_command(ConsoleVerb verb);
 // PLAYER PUNT / BAN / SWAPTEAM / KILL <slot>.
 std::optional<ConsoleCommand> console_player_command(ConsoleVerb verb, uint64_t slot, ConsoleRefusal &why);

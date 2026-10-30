@@ -2,7 +2,6 @@
 #include "hosted/model/console_queue.h"
 #include "http_json.h"
 #include <base/io/cp1252.h>
-#include <net/admin/admin_protocol.h>
 
 namespace opennova::novaworld_server::hosted {
 namespace {
@@ -71,32 +70,15 @@ crow::response command_reply(int64_t id, const AdminCommandResult &result) {
 }
 } //namespace
 
-crow::response ConsoleRoutes::settings(const Caller &c) {
-	std::optional<HostedServer> server;
-	OfferedProduct product;
-	{
-		auto lease = pool_.acquire();
-		server = find_server(*lease, c.server_id);
-		if (!server)
-			return json_error(404, "not_found");
-		product = pinned_product(*lease, *server);
-	}
-	std::optional<crow::response> refusal;
-	const auto replies = run(c, *console_command(ConsoleVerb::GameSettings), refusal);
-	if (!replies)
-		return std::move(*refusal);
-	std::vector<crow::json::wvalue> rows;
-	for (const auto &row : admin_parse_game_settings(replies->front())) {
-		crow::json::wvalue e;
-		e["key"] = cp1252_to_utf8(row.first);
-		e["value"] = cp1252_to_utf8(row.second);
-		rows.push_back(std::move(e));
-	}
+// The saved configuration, read from the database alone: no admin line, so it reads while the
+// server boots, restarts or has no link (the panel shows the saved settings; the live
+// GAMESETTINGS reply it once fetched was never shown, and carried the passwords).
+crow::response ConsoleRoutes::settings(db::Database &db, const HostedServer &server) {
+	const OfferedProduct product = pinned_product(db, server);
 	crow::json::wvalue out;
-	out["server_id"] = c.server_id;
-	out["settings"] = std::move(rows);
-	out["saved"] = json(settings_document(server->settings));
-	out["settings_revision"] = server->settings_revision;
+	out["server_id"] = server.id;
+	out["saved"] = json(settings_document(server.settings));
+	out["settings_revision"] = server.settings_revision;
 	out["schema"] = json(hosted_settings_schema(title_config_table(product.title)));
 	const auto &weapons = !product.expansions.empty() && !product.expansions.front().weapons.empty()
 			? product.expansions.front().weapons
@@ -155,15 +137,43 @@ crow::response ConsoleRoutes::configuration_edit(const Caller &c, const crow::re
 }
 
 void ConsoleRoutes::register_configuration(WebApp &app) {
+	// GET .../settings: the owner's server (404 for another account's) or any for an admin,
+	// in any state; an owner's read draws one token from the account's read bucket.
 	CROW_ROUTE(app, "/api/me/servers/<uint>/settings")
 			.methods("GET"_method)([this](const crow::request &req, uint64_t id) -> crow::response {
 				auto access = access_.require_user(req);
 				if (access.refusal)
 					return std::move(*access.refusal);
-				auto c = owner_caller(*access.user, id, false, false);
-				if (c.refusal)
-					return std::move(*c.refusal);
-				return settings(c);
+				if (const int64_t wait = owner_reads_.take(
+							"console|" + std::to_string(access.user->id), RateLimiter::Clock::now()))
+					return too_many_requests(wait);
+				try {
+					auto lease = pool_.acquire();
+					const auto server = owned_server(*lease, path_id(id), access.user->id);
+					if (!server)
+						return json_error(
+								404, "not_found", "this account has no hosted server with this id");
+					return settings(*lease, *server);
+				} catch (const db::Error &e) {
+					std::fprintf(stderr, "[http] hosted settings read failed: %s\n", e.what());
+					return json_error(500, "db_error");
+				}
+			});
+	CROW_ROUTE(app, "/api/admin/hosted/<uint>/settings")
+			.methods("GET"_method)([this](const crow::request &req, uint64_t id) -> crow::response {
+				auto access = access_.require_admin(req);
+				if (access.refusal)
+					return std::move(*access.refusal);
+				try {
+					auto lease = pool_.acquire();
+					const auto server = find_server(*lease, path_id(id));
+					if (!server)
+						return json_error(404, "not_found", "no hosted server has this id");
+					return settings(*lease, *server);
+				} catch (const db::Error &e) {
+					std::fprintf(stderr, "[http] hosted settings read failed: %s\n", e.what());
+					return json_error(500, "db_error");
+				}
 			});
 	const auto handle = [this](const crow::request &req, uint64_t id, bool admin,
 								bool weapons) -> crow::response {

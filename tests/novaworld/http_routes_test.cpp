@@ -7025,7 +7025,7 @@ bool curated_line(const std::string &line) {
 		});
 	}
 	static const std::set<std::string> exact = { "PLAYER LIST", "MISSION AVAILABLE", "MISSION LIST", "MISSION CYCLE",
-		"CHAT GET", "GET GAMESETTINGS", "GET GAMESTATE" };
+		"CHAT GET", "GET GAMESTATE" };
 	return exact.count(line) != 0;
 }
 
@@ -7996,14 +7996,17 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200);
 	reply = get(base + "/players", { kBearer });
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["players"].size() == 2);
+	// The settings read the saved configuration from the database: no admin line goes out
+	// for them (no live GET GAMESETTINGS, which carries the passwords), owner or admin.
+	const size_t settings_before = fake.lines().size();
 	reply = get(base + "/settings", { kBearer });
 	json = crow::json::load(body_text(reply));
-	bool named = false;
-	if (reply.code == 200 && json) {
-		for (const auto &row : json["settings"])
-			named = named || (str(row["key"]) == "ServerName" && str(row["value"]) == "Console Test");
-	}
-	TEST_EXPECT(named);
+	TEST_EXPECT(reply.code == 200 && json && str(json["saved"]["game_name"]) == "Console Test" &&
+			!json.has("settings"));
+	reply = get(me + "/settings", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["saved"]["game_name"]) == "Console Test");
+	TEST_EXPECT(fake.lines().size() == settings_before);
 	TEST_EXPECT(get("/api/admin/hosted/999999/players", { kBearer }).code == 404);
 
 	// A full rotation takes no more (kConsoleRotationMax, policy).

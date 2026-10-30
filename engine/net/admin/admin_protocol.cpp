@@ -382,19 +382,6 @@ std::vector<std::string> admin_parse_chat_window(std::string_view reply) {
 	return out;
 }
 
-// Each row is the key left-justified in 21 columns, "= ", the value.
-std::vector<std::pair<std::string, std::string>> admin_parse_game_settings(std::string_view reply) {
-	std::vector<std::pair<std::string, std::string>> out;
-	for (std::string_view line : split_lines(reply)) {
-		const size_t eq = line.find("= ");
-		if (eq == std::string_view::npos) continue;
-		const std::string_view key = strutil::trim_view(line.substr(0, eq));
-		if (key.empty()) continue;
-		out.emplace_back(std::string(key), std::string(line.substr(eq + 2)));
-	}
-	return out;
-}
-
 std::string admin_log_redacted(std::string_view text) {
     std::string out;
     size_t pos = 0;

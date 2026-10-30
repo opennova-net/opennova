@@ -5,7 +5,6 @@ import { parseSettingsSchema, parseWeapons, type SavedConfiguration, type Server
 
 export interface ConfigurationState {
   saved: SavedConfiguration; settings_revision: number; schema: ServerSetting[]; weapons: ServerWeapon[];
-  settings: { key: string; value: string }[];
 }
 export interface CommandResult {
   outcome: string; sent: boolean; delivery_unknown: boolean; configuration_saved: boolean; settings_revision: number; replies: string[];

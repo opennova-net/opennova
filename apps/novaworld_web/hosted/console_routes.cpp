@@ -748,10 +748,6 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>/chat").methods("GET"_method)([simple](const crow::request &req, uint64_t id) {
 		return simple(req, id, &ConsoleRoutes::chat);
 	});
-	// The admins' one wider read.
-	CROW_ROUTE(app, "/api/admin/hosted/<uint>/settings").methods("GET"_method)([simple](const crow::request &req, uint64_t id) {
-		return simple(req, id, &ConsoleRoutes::settings);
-	});
 
 	const auto player = [this](const crow::request &req, uint64_t id, uint64_t slot, ConsoleVerb verb) -> crow::response {
 		auto access = access_.require_admin(req);

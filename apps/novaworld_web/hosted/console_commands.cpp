@@ -66,15 +66,9 @@ const char *console_verb_name(ConsoleVerb verb) {
 		case ConsoleVerb::MissionCycle: return "rotation cycle";
 		case ConsoleVerb::ChatGet: return "chat";
 		case ConsoleVerb::ChatSend: return "chat send";
-		case ConsoleVerb::GameSettings: return "settings";
 		case ConsoleVerb::GameState: return "scene";
 	}
 	return "?";
-}
-
-bool owner_may_run(ConsoleVerb verb) {
-	(void)verb;
-	return true;
 }
 
 bool console_verb_writes(ConsoleVerb verb) {
@@ -83,7 +77,6 @@ bool console_verb_writes(ConsoleVerb verb) {
 		case ConsoleVerb::MissionAvailable:
 		case ConsoleVerb::MissionList:
 		case ConsoleVerb::ChatGet:
-		case ConsoleVerb::GameSettings:
 		case ConsoleVerb::GameState:
 			return false;
 		default:
@@ -98,7 +91,6 @@ std::optional<ConsoleCommand> console_command(ConsoleVerb verb) {
 		case ConsoleVerb::MissionList: return make(verb, "MISSION LIST");
 		case ConsoleVerb::MissionCycle: return make(verb, "MISSION CYCLE");
 		case ConsoleVerb::ChatGet: return make(verb, "CHAT GET");
-		case ConsoleVerb::GameSettings: return make(verb, "GET GAMESETTINGS");
 		case ConsoleVerb::GameState: return make(verb, "GET GAMESTATE");
 		default: return std::nullopt;
 	}
@@ -215,7 +207,6 @@ ConsoleOutcome console_outcome(ConsoleVerb verb, const std::vector<std::string> 
 		case ConsoleVerb::MissionAvailable:
 		case ConsoleVerb::MissionList:
 		case ConsoleVerb::ChatGet:
-		case ConsoleVerb::GameSettings:
 			return starts_with(first, "ERROR - ") ? unexpected() : ok();
 		case ConsoleVerb::GameState:
 			return console_scene(replies).empty() ? unexpected() : ok();
