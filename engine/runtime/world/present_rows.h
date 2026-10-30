@@ -325,6 +325,14 @@ enum PresentField : int {
 	// Unlike PF_CARRIER_HANDLE no seat link replaces the ground entity here.
 	PF_SLOT_RIDE_BITS,
 	PF_SLOT_GROUND_HANDLE,
+	// The render-slot seat facts (the renderer::SlotSeatBit word: the slot
+	// record's person bit, pool 0, the parentSlot, the parentEntity's refNum)
+	// and the wire handle of the entity whose capture's pool-0 child walk draws
+	// this row (world::slot_seat_facts; -1 for none). The slot sort excludes a
+	// seated person and its carrier's capture draws it [orig: RenderSlot_SortAndAssign
+	// @0x5d6593..0x5d65ff; RenderSlot_RenderEntityAndChildren @0x5d78ea..0x5d7968].
+	PF_SLOT_SEAT_BITS,
+	PF_SLOT_SEAT_WALK_HANDLE,
 	PF_STRIDE
 };
 

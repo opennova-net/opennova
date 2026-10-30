@@ -164,7 +164,7 @@ void ObjectModel::update_slot_shadow_group() {
 		SlotShadow::bump_caster_group_revision();
 	};
 	keep(SlotShadow::caster_group(), is_shadow_caster_enabled());
-	keep(SlotShadow::ride_group(), slot_ride_ground_.is_valid());
+	keep(SlotShadow::ride_group(), slot_ride_ground_.is_valid() || slot_seat_walk_.is_valid());
 }
 
 void ObjectModel::set_slot_ride(uint32_t p_bits, ObjectModel *p_ground) {
@@ -179,6 +179,20 @@ void ObjectModel::set_slot_ride(uint32_t p_bits, ObjectModel *p_ground) {
 
 ObjectModel *ObjectModel::get_slot_ride_ground() const {
 	return Object::cast_to<ObjectModel>(ObjectDB::get_instance(slot_ride_ground_));
+}
+
+void ObjectModel::set_slot_seat(uint32_t p_bits, ObjectModel *p_walk) {
+	const ObjectID walk = p_walk != nullptr ? ObjectID(p_walk->get_instance_id()) : ObjectID();
+	if (slot_seat_bits_ == p_bits && slot_seat_walk_ == walk) {
+		return;
+	}
+	slot_seat_bits_ = p_bits;
+	slot_seat_walk_ = walk;
+	update_slot_shadow_group();
+}
+
+ObjectModel *ObjectModel::get_slot_seat_walk() const {
+	return Object::cast_to<ObjectModel>(ObjectDB::get_instance(slot_seat_walk_));
 }
 
 void ObjectModel::set_slot_shadow_person(bool p_person) {

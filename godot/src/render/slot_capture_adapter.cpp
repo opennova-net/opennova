@@ -279,17 +279,17 @@ std::vector<Transform3D> skin_palette(MeshInstance3D *p_instance) {
 // duplicates (the BmTxMirrT P3 postmultiply instance) re-submit the same
 // strip and carry no classified material; retail's single PROJSHAD pass per
 // effect is the registered P0/P1 instance. An ObjectModel counts by the
-// engine's rule (renderer::slot_draw_shown: the render claims lifted, its
-// present intent kept), except under a carrier's refNum walk (`p_ride_walk`),
-// which draws its riders with no visibility test (renderer::SlotFrameCapture).
-// Every other node keeps its own visible flag (the inactive RLOD levels,
-// hidden parts).
+// engine's rule (renderer::slot_capture_draws: the render claims lifted, its
+// present intent kept, a local-view swap drawing its stand-in instead),
+// except under a carrier's child walk (`p_walk`), which draws its riders with
+// no visibility test (renderer::SlotFrameCapture). Every other node keeps its
+// own visible flag (the inactive RLOD levels, hidden parts).
 void collect_visible_geometry(Node *p_node,
-		std::vector<GeometryInstance3D *> &r_instances, bool p_ride_walk = false) {
+		std::vector<GeometryInstance3D *> &r_instances, bool p_walk = false) {
 	if (p_node == nullptr)
 		return;
 	if (const ObjectModel *model = Object::cast_to<ObjectModel>(p_node)) {
-		if (!p_ride_walk && !slot_draw_shown(slot_draw_visibility(*model)))
+		if (!p_walk && !slot_capture_draws(slot_draw_visibility(*model)))
 			return;
 	} else if (const Node3D *spatial = Object::cast_to<Node3D>(p_node)) {
 		if (!spatial->is_visible())
@@ -300,7 +300,7 @@ void collect_visible_geometry(Node *p_node,
 			r_instances.push_back(geometry);
 	}
 	for (int index = 0; index < p_node->get_child_count(); ++index)
-		collect_visible_geometry(p_node->get_child(index), r_instances, p_ride_walk);
+		collect_visible_geometry(p_node->get_child(index), r_instances, p_walk);
 }
 
 void write_matrix(PackedByteArray &r_bytes, int64_t p_offset,
@@ -392,6 +392,7 @@ SlotCasterVisibility slot_draw_visibility(const ObjectModel &p_model) {
 	visibility.present_visible = p_model.is_present_visible();
 	visibility.draw_visible = p_model.is_visible();
 	visibility.render_claimed = p_model.is_occlusion_hidden() || p_model.is_subpixel_hidden();
+	visibility.local_view_suppressed = p_model.is_slot_local_view_suppressed();
 	return visibility;
 }
 
@@ -1009,7 +1010,7 @@ void SlotCaptureAdapter::compile_frame(
 		for (std::size_t index = 0; index < request.casters.size(); ++index) {
 			collect_visible_geometry(Object::cast_to<Node>(
 					ObjectDB::get_instance(request.casters[index])), instances,
-					index >= request.ride_walk_begin);
+					index >= request.walk_begin);
 		}
 		for (GeometryInstance3D *source : instances) {
 			Ref<Mesh> mesh;

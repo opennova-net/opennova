@@ -180,6 +180,8 @@ struct SimulationConstants {
 		PF_CUT_SECTIONS_HI = opennova::world::PF_CUT_SECTIONS_HI,
 		PF_SLOT_RIDE_BITS = opennova::world::PF_SLOT_RIDE_BITS,
 		PF_SLOT_GROUND_HANDLE = opennova::world::PF_SLOT_GROUND_HANDLE,
+		PF_SLOT_SEAT_BITS = opennova::world::PF_SLOT_SEAT_BITS,
+		PF_SLOT_SEAT_WALK_HANDLE = opennova::world::PF_SLOT_SEAT_WALK_HANDLE,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 

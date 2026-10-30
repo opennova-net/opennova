@@ -891,7 +891,7 @@ bool SlotShadow::plan_frame() {
 
 	// The frame's casters: the engine's state for each from its facts (the
 	// local player and the vehicle it rides take the local priority); the
-	// draws holding a slot record register with the plan, a refNum-walk rider
+	// draws holding a slot record register with the plan, a child-walk rider
 	// with none only rides its carrier's capture.
 	opennova::renderer::slot_frame_casters(facts, local_id, uint64_t(local_player_parent_id_),
 			frame_casters_);
@@ -926,7 +926,7 @@ bool SlotShadow::plan_frame() {
 
 	// The per-slot frame (engine: runtime/renderer/render_slot_frame.h): each
 	// assigned slot's capture and drape terms from the casters, their
-	// capture-with links, the lights the pick weighs and the terrain the march
+	// draw links, the lights the pick weighs and the terrain the march
 	// probes. The device half below turns them into the RD capture requests,
 	// the patch meshes and the drape uniforms.
 	opennova::renderer::SlotFrameInput frame_input;
@@ -976,9 +976,8 @@ bool SlotShadow::plan_frame() {
 			return terrain->get_height_world(Vector3(p_x, 0.0f, p_z));
 		};
 	}
-	opennova::renderer::slot_frame(frame_input, assignments, caster_for,
-			frame_casters_.capture_links, frame_casters_.ride_links, lights_for, terrain_height,
-			slot_frame_);
+	opennova::renderer::slot_frame(frame_input, assignments, caster_for, frame_casters_.links,
+			lights_for, terrain_height, slot_frame_);
 	report_bound_ = slot_frame_.bound;
 	report_captures_ = slot_frame_.captures;
 
@@ -1022,7 +1021,7 @@ bool SlotShadow::plan_frame() {
 				request.target = capture_targets_[order];
 			}
 			request.casters = capture.casters;
-			request.ride_walk_begin = capture.ride_walk_begin;
+			request.walk_begin = capture.walk_begin;
 			requests_.push_back(std::move(request));
 			armed_capture_mask_ |= 1u << order;
 		}
@@ -1152,6 +1151,10 @@ opennova::renderer::SlotCasterFacts SlotShadow::_caster_facts(const ObjectModel 
 	if (const ObjectModel *ground = p_model.get_slot_ride_ground()) {
 		fact.ground_id = uint64_t(ground->get_instance_id());
 	}
+	fact.seat_bits = p_model.get_slot_seat_bits();
+	if (const ObjectModel *walk = p_model.get_slot_seat_walk()) {
+		fact.seat_walk_id = uint64_t(walk->get_instance_id());
+	}
 	fact.is_person = p_record.is_person;
 	fact.model_sphere_radius = p_record.radius_fallback ? 0.0f : p_record.capture_radius;
 	fact.entity_bound_radius = p_record.slot_radius;
@@ -1183,8 +1186,8 @@ void SlotShadow::_rebuild_caster_records() {
 		caster_records_valid_ = false;
 		return;
 	}
-	// The casters, then the refNum-walk riders that cast no slot of their own
-	// (ObjectModel::set_slot_ride).
+	// The casters, then the child-walk riders that cast no slot of their own
+	// (ObjectModel::set_slot_ride, set_slot_seat).
 	TypedArray<Node> nodes = get_tree()->get_nodes_in_group(caster_group());
 	const int64_t caster_count = nodes.size();
 	nodes.append_array(get_tree()->get_nodes_in_group(ride_group()));

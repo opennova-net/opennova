@@ -499,6 +499,77 @@ constexpr bool slot_ride_walk_child(uint32_t ride_bits) noexcept {
 	return (ride_bits & kSlotRideGroundVehicle) != 0 && (ride_bits & kSlotRideGroundRefChild) != 0;
 }
 
+// An entity's seat facts as the slot pass reads them (world::PF_SLOT_SEAT_BITS
+// carries the word). kSlotSeatPersonClass is the slot record's flag bit 1,
+// which the light update writes for a Player-class entity (Flags 0x100) or a
+// pool-0 one [orig: RenderSlot_UpdateEntityLight @ 0x5d6dbf..0x5d6ddf];
+// kSlotSeatPool0 the pool-0 membership the capture's child walk iterates
+// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d78ea, g_PoolList[0]]; the
+// entity's parentSlot (entity+0x168, the world::SeatType codes: 1 sitex, 2
+// ctrlx, 3 UseGun, 5 drvrx) rides bits 8..15, and kSlotSeatParentRefNum says
+// its parentEntity (+0x16C) is set and holds a refNum (+0x215).
+enum SlotSeatBit : uint32_t {
+	kSlotSeatPersonClass = 1u,
+	kSlotSeatPool0 = 2u,
+	kSlotSeatParentRefNum = 4u,
+};
+inline constexpr uint32_t kSlotSeatParentSlotShift = 8u;
+
+constexpr uint32_t slot_seat_bits(bool person_class, bool pool0, int parent_slot,
+		bool parent_ref_num) noexcept {
+	return (person_class ? kSlotSeatPersonClass : 0u) | (pool0 ? kSlotSeatPool0 : 0u) |
+			(parent_ref_num ? kSlotSeatParentRefNum : 0u) |
+			((static_cast<uint32_t>(parent_slot) & 0xFFu) << kSlotSeatParentSlotShift);
+}
+
+constexpr int slot_seat_parent_slot(uint32_t seat_bits) noexcept {
+	return static_cast<int>((seat_bits >> kSlotSeatParentSlotShift) & 0xFFu);
+}
+
+// The seat-parent exclusion, for a flag-bit-1 record only: parentSlot 2, 5 or
+// 1, or 3 with a parentEntity holding a refNum, takes no slot of its own
+// [orig: RenderSlot_SortAndAssign @ 0x5d6593..0x5d65ff, `cmp edx, ebp` on bit
+// 1 @ 0x5d6593, the parentSlot and parent refNum tests @ 0x5d65a0..0x5d65eb;
+// re-checked by the capture @ 0x5d774e..0x5d778d]. Its
+// carrier's capture draws it (slot_seat_walk).
+constexpr bool slot_seat_parented(uint32_t seat_bits) noexcept {
+	if ((seat_bits & kSlotSeatPersonClass) == 0) {
+		return false;
+	}
+	const int slot = slot_seat_parent_slot(seat_bits);
+	return slot == 1 || slot == 2 || slot == 5 ||
+			(slot == 3 && (seat_bits & kSlotSeatParentRefNum) != 0);
+}
+
+// Whose capture draws a pool-0 entity in its child walk: the walk runs in
+// every slot holder's capture, after the holder itself, over the whole of
+// pool 0, and draws through the member's own render callback, with no
+// visibility test and the camera mode left as it is, a member whose
+// parentEntity is the holder in parentSlot 1, 2 or 5, and a member in
+// parentSlot 3 whose parentEntity holds a refNum and stands on the holder
+// (groundEntity +0x28): a UseGun gunner rides its gun's carrier's slot, not
+// the gun's [orig: RenderSlot_RenderEntityAndChildren @ 0x5d78ea..0x5d7968:
+// parentEntity == holder @ 0x5d7917, parentSlot 2/5/1 @ 0x5d7921..0x5d792d,
+// the draw @ 0x5d7938; parentSlot 3 @ 0x5d793f, the refNum @ 0x5d794c, the
+// parent's groundEntity @ 0x5d7955, the draw @ 0x5d7963].
+enum class SlotSeatWalk : uint8_t {
+	kNone,
+	kParent,        // parentSlot 1, 2 or 5: the parentEntity's capture
+	kParentGround,  // parentSlot 3 under a refNum parent: its groundEntity's
+};
+
+constexpr SlotSeatWalk slot_seat_walk(uint32_t seat_bits) noexcept {
+	if ((seat_bits & kSlotSeatPool0) == 0) {
+		return SlotSeatWalk::kNone;
+	}
+	const int slot = slot_seat_parent_slot(seat_bits);
+	if (slot == 1 || slot == 2 || slot == 5) {
+		return SlotSeatWalk::kParent;
+	}
+	return slot == 3 && (seat_bits & kSlotSeatParentRefNum) != 0 ? SlotSeatWalk::kParentGround
+																  : SlotSeatWalk::kNone;
+}
+
 // The is_person class (itemdef +0x5C == 3) does NOT stretch the drape. The
 // 4.0 (flt_7C44B8) multiplies the VERTICAL component of a COPY of the slot
 // direction, and that copy builds only the drape's SECOND texture matrix —
@@ -529,8 +600,9 @@ struct SlotCandidateState {
 	// Render_ShadowPass @ 0x5d7b70 - RenderSlot_SortAndAssign @ 0x5d7c36, then the
 	// slot walk's RenderSlot_RenderEntityAndChildren @ 0x5d7c95].
 	bool hidden = false;
-	// Seat-parented (parentSlot 1/2/5, or 3 with a live parent)
-	// [orig: @ 0x5d65a0..0x5d65eb].
+	// Drawn in another caster's capture: a person seat-parented
+	// (slot_seat_parented) [orig: @ 0x5d6593..0x5d65ff], or a draw the
+	// embedder links capture-with another caster or parents under one.
 	bool seat_parented = false;
 	// A vehicle standing on a vehicle (slot_rides_vehicle): the carrier's
 	// capture draws it [orig: @ 0x5d6604..0x5d6627].

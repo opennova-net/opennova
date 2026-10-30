@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 static int failures = 0;
 
@@ -505,6 +506,33 @@ int main() {
 		CHECK(slot_ride_walk_child(slot_ride_bits(1, 1, true)));
 		CHECK(!slot_ride_walk_child(slot_ride_bits(1, 1, false))); // not in the group
 		CHECK(!slot_ride_walk_child(slot_ride_bits(1, 5, true)));  // the carrier no vehicle
+		// The seat word and its two rules: the exclusion only for the person
+		// bit, the pool-0 walk only for pool 0 [orig: RenderSlot_UpdateEntityLight
+		// @ 0x5d6dbf..0x5d6ddf (bit 1); RenderSlot_SortAndAssign @ 0x5d6593..0x5d65ff;
+		// RenderSlot_RenderEntityAndChildren @ 0x5d78ea..0x5d7968].
+		CHECK(slot_seat_bits(true, true, 5, true) ==
+				(kSlotSeatPersonClass | kSlotSeatPool0 | kSlotSeatParentRefNum | (5u << 8)));
+		CHECK(slot_seat_parent_slot(slot_seat_bits(false, false, 3, false)) == 3);
+		for (const int seat : {1, 2, 5}) {
+			CHECK(slot_seat_parented(slot_seat_bits(true, true, seat, false)));
+			CHECK(slot_seat_walk(slot_seat_bits(true, true, seat, false)) == SlotSeatWalk::kParent);
+			// Not the person bit: a slot of its own whatever its parentSlot.
+			CHECK(!slot_seat_parented(slot_seat_bits(false, false, seat, true)));
+			// The person bit without pool 0 (a Player-class entity elsewhere):
+			// excluded, and drawn by no pool-0 walk.
+			CHECK(slot_seat_parented(slot_seat_bits(true, false, seat, false)));
+			CHECK(slot_seat_walk(slot_seat_bits(true, false, seat, false)) == SlotSeatWalk::kNone);
+		}
+		// UseGun: excluded and walked into the gun's carrier only under a refNum gun.
+		CHECK(slot_seat_parented(slot_seat_bits(true, true, 3, true)));
+		CHECK(slot_seat_walk(slot_seat_bits(true, true, 3, true)) == SlotSeatWalk::kParentGround);
+		CHECK(!slot_seat_parented(slot_seat_bits(true, true, 3, false)));
+		CHECK(slot_seat_walk(slot_seat_bits(true, true, 3, false)) == SlotSeatWalk::kNone);
+		// On foot, or the armory label (no seat).
+		CHECK(!slot_seat_parented(slot_seat_bits(true, true, 0, true)));
+		CHECK(slot_seat_walk(slot_seat_bits(true, true, 0, true)) == SlotSeatWalk::kNone);
+		CHECK(!slot_seat_parented(slot_seat_bits(true, true, 4, true)));
+		CHECK(slot_seat_walk(slot_seat_bits(true, true, 4, true)) == SlotSeatWalk::kNone);
 		// The 320 u bind horizon [orig: @ 0x5d66b2].
 		SlotCandidateState distant = near_front;
 		distant.pos2d = {0.0f, 321.0f};
