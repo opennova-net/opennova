@@ -87,8 +87,14 @@ std::string make_wire_key(const KeyChains &chains, std::string_view serial);
 bool decode_wire_key(const KeyChains &chains, std::string_view wire_key, std::string &serial);
 
 // The NWACT that activates `wire_key` on the machine `fingerprint` names:
-// mix_up(encode_key_chain(wire_key, chains.registry), fingerprint), A..Z.
-// The same inputs always give the same NWACT.
+// mix_up(encode_key_chain(wire_key + NUL, chains.registry), fingerprint), A..Z,
+// 2 * (wire_key.size() + 1 + 4 * the chain's keys) letters. The NUL is part of
+// the plaintext because the client's decode writes none: it leaves the plaintext
+// in its room followed by the chain's CRC dwords and whatever the room held, and
+// its copy to +16 runs to the first NUL, so only the encoded one ends the wire key
+// there. The same inputs always give the same NWACT.
+// [orig: NapiNP_DecodeEncryptedString @0x701260 (dfx2.exe), in place, no terminator;
+//  CDKey_WriteActivationFromNWACT @0x411f37 (dfx2.exe), the Napi_CopyString to +16]
 std::string make_activation(
 		const KeyChains &chains, std::string_view wire_key, std::string_view fingerprint);
 // The wire key an NWACT holds on the machine `fingerprint` names, as the client reads it: the

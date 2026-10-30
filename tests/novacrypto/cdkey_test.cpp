@@ -28,10 +28,10 @@ constexpr const char *kSerial = "OPENNOVA-0001";
 constexpr const char *kWire = "BMCCDKDKDLFFNGFDJHMFMMALJCLEFPADLPHHDHEEDHOGCIDLKC";
 constexpr const char *kFingerprint = "ABCDEFGHIJKLMNOPQRSTUVW";
 constexpr const char *kNestedNwact =
-		"DQNWWKWDHZJHKFVXIHNJKEKYNSFFRIPKCOWFBPZIRXDVUSBLDCQDIQMRPDVQLBCDOPZRAYEREPP"
-		"LAQYUYTMKDPRRYKCYXQGRVNIDZDVWMBTYOWSPQWUNOGWSNYIWCUOQJILP";
+		"IQOZVFQWOFFZNCGBSFXHDBUINYCJHJYHFZTXETTKNWOQVKOAWPJDHDJBNJCEOBKATKFYPDGTZNO"
+		"HMKWZCWZKEMCKHQQAZRLPTHVMZRXYZAWUSEPVLZMNOXCSZFMTWVIMAVAYWV";
 constexpr const char *kBootOnlyNwact =
-		"CLCCYBAPFHAGHGAZHFWCHVGDJTDFFVUTBVBTPNEFMTIDNHEXTBVYYAOROHKMDZBVMMMVEX";
+		"HVKAWAMRQFJMDJZQLHWFMURZJDOJFJCTKSSEJXRJSTJCKTHFZRPBWZZVGKCICDIGVXAWDCOO";
 
 std::vector<uint8_t> bytes(const std::string &text) {
 	return std::vector<uint8_t>(text.begin(), text.end());
@@ -74,12 +74,13 @@ int exp1_vector() {
 	return 0;
 }
 
-// Section 9.7: the nested (LAN-joinable) NWACT for the sample fingerprint, 2 * (50 + 4 * 4)
-// = 132 letters, and the client's reading of it back to the wire key.
+// Section 9.7: the nested (LAN-joinable) NWACT for the sample fingerprint, the wire key and its
+// NUL under the registry chain, 2 * (50 + 1 + 4 * 4) = 134 letters, and the client's reading of
+// it back to the wire key.
 int nested_activation_vector() {
 	const std::string nwact = cdkey::make_activation(dfx2_chains(), kWire, kFingerprint);
 	TEST_EXPECT(nwact == kNestedNwact);
-	TEST_EXPECT(nwact.size() == 132);
+	TEST_EXPECT(nwact.size() == 134);
 	for (const char c : nwact)
 		TEST_EXPECT(c >= 'A' && c <= 'Z');
 	std::string wire;
@@ -90,17 +91,20 @@ int nested_activation_vector() {
 	TEST_EXPECT(serial == kSerial);
 	// The same inputs, the same NWACT: a machine activated again gets what it has.
 	TEST_EXPECT(cdkey::make_activation(dfx2_chains(), kWire, kFingerprint) == nwact);
-	// The registry chain's A-P intermediate is what the mix carries.
+	// The registry chain's A-P intermediate is what the mix carries, its plaintext the wire key
+	// and the NUL that ends it in the client's room (its decode writes none).
+	std::vector<uint8_t> plaintext = bytes(kWire);
+	plaintext.push_back(0);
 	TEST_EXPECT(mixed_down(nwact, kFingerprint) ==
-			opennova::encode_key_chain(bytes(kWire), dfx2_chains().registry));
+			opennova::encode_key_chain(plaintext, dfx2_chains().registry));
 	return 0;
 }
 
-// Section 9.7: the boot-only NWACT, a plaintext straight under the registry chain
-// (2 * (19 + 4 * 4) = 70 letters). The client reads it like any other.
+// Section 9.7: the boot-only NWACT, a plaintext and its NUL straight under the registry chain
+// (2 * (19 + 1 + 4 * 4) = 72 letters). The client reads it like any other.
 int boot_only_activation_vector() {
-	const std::string registry =
-			opennova::encode_key_chain(bytes("OPENNOVA-LOCAL-0001"), dfx2_chains().registry);
+	const std::string registry = opennova::encode_key_chain(
+			bytes(std::string("OPENNOVA-LOCAL-0001", 20)), dfx2_chains().registry);
 	TEST_EXPECT(mixed_up(registry, kFingerprint) == kBootOnlyNwact);
 	std::string value;
 	TEST_EXPECT(cdkey::activation_wire_key(dfx2_chains(), kBootOnlyNwact, kFingerprint, value));
@@ -177,6 +181,16 @@ int activation_negatives() {
 	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), cdkey::make_wire_key(dfx2_chains(), std::string(0x800 - 12, 'S')), serial));
 	TEST_EXPECT(!cdkey::activation_wire_key(dfx2_chains(),
 			cdkey::make_activation(dfx2_chains(), std::string(0x800, 'S'), kFingerprint),
+			kFingerprint, wire));
+	// The activation's NUL takes a byte of that room too: past the registry chain's four CRCs, a
+	// wire key of 0x800 - 17 bytes fits and one of 0x800 - 16 does not.
+	TEST_EXPECT(cdkey::activation_wire_key(dfx2_chains(),
+						cdkey::make_activation(
+								dfx2_chains(), std::string(0x800 - 17, 'S'), kFingerprint),
+						kFingerprint, wire) &&
+			wire.size() == 0x800 - 17);
+	TEST_EXPECT(!cdkey::activation_wire_key(dfx2_chains(),
+			cdkey::make_activation(dfx2_chains(), std::string(0x800 - 16, 'S'), kFingerprint),
 			kFingerprint, wire));
 	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), "", serial));
 	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), "QQQQ", serial));

@@ -140,7 +140,9 @@ bool decode_wire_key(const KeyChains &chains, std::string_view wire_key, std::st
 
 std::string make_activation(
 		const KeyChains &chains, std::string_view wire_key, std::string_view fingerprint) {
-	std::string registry = encode_key_chain(bytes_of(wire_key), chains.registry);
+	std::vector<uint8_t> plaintext = bytes_of(wire_key);
+	plaintext.push_back(0);
+	std::string registry = encode_key_chain(plaintext, chains.registry);
 	mix_up(registry, fingerprint);
 	return registry;
 }
