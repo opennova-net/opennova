@@ -7,6 +7,8 @@
 #include "render/rd_uniforms.h"
 #include "util/string_convert.h"
 
+#include <runtime/renderer/device_fog.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -125,24 +127,14 @@ uint particle_mode() {
 	return pc.mode & 0xFFu;
 }
 
+// The device fog (the engine's runtime/renderer/device_fog.h law) over the
+// submission's resolved Render_SetFogState pair.
+@DEVICE_FOG@
 float particle_fog_visibility() {
-	float fog_start = pc.camera_forward_fog_start.w;
-	float fog_end = pc.camera_position_fog_end.w;
-	if (fog_start == fog_end || fog_end <= 0.0) {
-		return 1.0;
-	}
-	vec3 camera_position = pc.camera_position_fog_end.xyz;
-	int fog_type = int(pc.fog_color_type.w);
-	float fog_distance;
-	if (fog_type == 0) {
-		fog_distance = max(dot(v_world_position - camera_position,
-				pc.camera_forward_fog_start.xyz), 0.0);
-		return clamp(exp(-fog_distance *
-				(4.1588830833596715 / fog_end)), 0.0, 1.0);
-	}
-	fog_distance = length(v_world_position - camera_position);
-	return clamp((fog_end - fog_distance) /
-			(fog_end - fog_start), 0.0, 1.0);
+	vec3 to_point = v_world_position - pc.camera_position_fog_end.xyz;
+	return device_fog_visibility(dot(to_point, pc.camera_forward_fog_start.xyz),
+			length(to_point), pc.camera_forward_fog_start.w, pc.camera_position_fog_end.w,
+			int(pc.fog_color_type.w), true);
 }
 
 // Only the materials whose intrinsic pass word carries FOGENABLE fog: every
@@ -232,6 +224,12 @@ void main() {
 	}
 }
 )GLSL";
+
+std::string particle_fragment_shader_source() {
+	std::string source(kFragmentShader);
+	splice_token(source, "@DEVICE_FOG@", opennova::renderer::kDeviceFogGlsl);
+	return source;
+}
 
 const char *kSceneSnapshotFragmentShader = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D source_color;
@@ -535,7 +533,7 @@ bool ParticleCompositorEffect::Impl::initialize_rd() {
 
 	Ref<RDShaderSPIRV> spirv;
 	const std::string compile_errors =
-			compile_rd_spirv(rd, kVertexShader, kFragmentShader, spirv);
+			compile_rd_spirv(rd, kVertexShader, particle_fragment_shader_source(), spirv);
 	if (!compile_errors.empty()) {
 		set_failure("Particle shader compilation failed: " + compile_errors,
 				"shader_compile_failed");

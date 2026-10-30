@@ -30,7 +30,14 @@ describe('ProgramPage', () => {
     const web = program('web', {
       running: 2,
       desired: 2,
-      tasks: [programTask('aaaa1111bbbb2222'), programTask('cccc3333dddd4444', { reporting: false, sampled_at: null, cpu_percent: null, last_status: 'PENDING' })],
+      tasks: [programTask('aaaa1111bbbb2222'), programTask('cccc3333dddd4444', {
+          reporting: false,
+          sampled_at: null,
+          cpu_percent: null,
+          last_status: 'PENDING',
+          one_version: null,
+          one_commit: null,
+        })],
     });
     programs.mockResolvedValue({ ok: true, value: programsResponse({ programs: [program('gate'), web] }) });
     usage.mockResolvedValue({ ok: true, value: programUsage() });
@@ -51,14 +58,21 @@ describe('ProgramPage', () => {
       ['Infrastructure', '/admin/system/infrastructure'],
     ]);
     expect(page.get('.page-meta').text()).toContain('2 of 2 tasks running');
+    // The build its tasks report, and no ECS task revision beside it.
+    expect(page.get('.program-build').text()).toBe('ONE 0.0.22.5922 b0c2b38 (1 task)');
+    expect(page.get('.program-build-unknown').text()).toBe('Build not known for 1 task');
+    expect(page.get('.page-meta').text()).not.toContain('opennova-prod-web:43');
+    expect(page.text()).not.toContain('revision');
     expect(page.find('.program-restarts').exists()).toBe(false);
     expect(page.get('.program-now').text()).toBe('web: 41 % CPU of 0.5 vCPU, 612 MiB of 1 GiB, 300 kB/s in, 1.2 MB/s out.');
     const tasks = page.findAll('tr.program-task');
     expect(tasks).toHaveLength(2);
     expect(tasks[0].text()).toContain('Reporting');
     expect(tasks[0].text()).toContain('Task aaaa1111bbbb: 41 % CPU of 0.5 vCPU');
+    expect(tasks[0].text()).toContain('ONE 0.0.22.5922 b0c2b38');
     expect(tasks[1].text()).toContain('Not reporting');
     expect(tasks[1].text()).toContain('Pending');
+    expect(tasks[1].text()).toContain('Not reported');
     expect(usage).toHaveBeenCalledWith('program', 'web', '48h', { task: undefined, signal: expect.anything() });
     expect(page.text()).toContain('Usage, all tasks');
     expect(page.get(`nav[aria-label="The program's views"] [aria-current="page"]`).text()).toBe('Usage');

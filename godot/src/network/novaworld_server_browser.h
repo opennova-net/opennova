@@ -17,9 +17,13 @@ namespace godot {
 
 // The server browser's table model (engine/net/novaworld/server_browser.h),
 // bound as statics over NovaWorldServerRow: the panel renders what these
-// return and owns nothing but the Tree/Label writes.
+// return and owns nothing but the Tree/Label writes. An instance holds the
+// process's record of the servers that refused this install (BrowserRefusals),
+// which the game shell keeps and hands each panel it opens.
 class NovaWorldServerBrowser : public RefCounted {
 	GDCLASS(NovaWorldServerBrowser, RefCounted)
+
+	opennova::BrowserRefusals refusals_;
 
 protected:
 	static void _bind_methods();
@@ -51,6 +55,11 @@ public:
 			Column p_column, bool p_ascending, const Dictionary &p_pings);
 	static PackedStringArray details_lines(const Ref<NovaWorldServerRow> &p_row);
 	static String row_tooltip(const Ref<NovaWorldServerRow> &p_row);
+
+	// A server that refused this install, with the refusal's text; and that text for
+	// `p_rid`, "" for a server that has not refused.
+	void note_refusal(int64_t p_rid, const String &p_reason);
+	String refusal_reason(int64_t p_rid) const;
 };
 
 } // namespace godot

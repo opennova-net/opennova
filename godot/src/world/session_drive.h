@@ -17,6 +17,7 @@
 #include "simulation/simulation.h"
 
 #include <net/novaworld/lobby_vars.h> // HostPlayerSlot (the hosting bind's own slot)
+#include <runtime/inmatch/host_listing_binding.h> // the hosting session's match side
 
 #include <map>
 #include <string>
@@ -231,10 +232,11 @@ private:
 	void update_joiner_admission_signals();
 	void fail_join_preload(const String &p_reason);
 	void cancel_join_preload();
-	// Bind a hosting session to the live hosted match: the GSID/AppId, the
-	// join-ticket arm, the host's own roster slot and the mission start's
-	// update (both lists whole). unbind_nw_host undoes the in-match half (the
-	// GSID, the join-ticket hook, the roster mirror).
+	// Bind a hosting session to the live hosted match (the engine's
+	// inmatch::HostListingBinding: the context's hooks into the session, the
+	// columns off the live match, the GSID / AppId / ticket arm), the host's own
+	// roster slot and the mission start's update (both lists whole).
+	// unbind_nw_host undoes the in-match half.
 	void bind_nw_host(const Ref<MissionSetupOptions> &p_opts);
 	void unbind_nw_host();
 	// The hosting session's own player slot, the match's own add's PlayerList entry (its name,
@@ -260,6 +262,9 @@ private:
 	ObjectID nw_client_id_;
 	// Set while a hosting session is bound to the live hosted match.
 	bool nw_host_bound_ = false;
+	// The hosting session's match side, bound while nw_host_bound_ is set (the engine's, which
+	// opennova-serve binds too).
+	opennova::inmatch::HostListingBinding nw_listing_;
 	// Set once the feed starts (sync_nwu_session); cleared by reset().
 	bool nwu_feed_live_ = false;
 	// A listen host's own PlayerList slot as the hosting bind published it;

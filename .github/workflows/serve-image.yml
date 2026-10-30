@@ -96,16 +96,17 @@ jobs:
           cache-from: type=gha,scope=opennova-serve
           cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,scope=opennova-serve,mode=min' || '' }}
 
-      # The machine agent's image: the agent reports this commit as its build,
+      # The machine agent's image: the agent reports the build's ONE stamp as
+      # its build (one_build().label(): "ONE 0.0.22.123 (a1b2c3d, staging)"),
       # and the CLIs it runs are there (the docker client, the AWS CLI, nft);
       # the health check answers 1 with no agent running.
       - name: Smoke-run hostd image
         run: |
           set -euo pipefail
           image=opennova-hostd:ci
-          expected_commit="$(jq -er '.one.commit' build/service-bundle/manifest.json)"
+          expected="$(jq -er '"opennova-hostd ONE \(.one.version) (\(.one.commit)\(if .one.staging == "ON" then ", staging" else "" end))"' build/service-bundle/manifest.json)"
           hostd_version="$(docker run --rm "$image" --version)"
-          if [ "$hostd_version" != "opennova-hostd $expected_commit" ]; then
+          if [ "$hostd_version" != "$expected" ]; then
             echo "::error::the hostd image's opennova-hostd reports '$hostd_version'"
             exit 1
           fi

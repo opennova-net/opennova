@@ -70,7 +70,11 @@ this directory's.
   a send each logic tick), `entity_send_budget` (100..1600 bytes, default 600),
   `max_packet_size` (100..16384 bytes, default 1300), and `lock_framerate` (boolean,
   default true). These are stored with the server and reused on crash restarts, moves and data
-  updates. Omitted fields and rows created before migration `0007_hosted_network_tuning.sql`
+  updates. Only a dedicated machine runs `lock_framerate` as saved: a start on a shared machine
+  always renders it on (`launched_settings`), since an unpaced loop keeps a CPU busy that the
+  machine's other servers need, so a saved unpaced server moved or restarted onto a shared
+  machine runs paced there and never fails its start over it (the start form disables the box
+  off a dedicated machine). Omitted fields and rows created before migration `0007_hosted_network_tuning.sql`
   keep the previous defaults. The canonical configuration document keeps these fields at its
   top level; the migration moves older `options.max_packet_size` values to that field with the
   same effective game.cfg clamp. Settings edits save them for the next launch.
@@ -339,7 +343,7 @@ this directory's.
 - **The working directory** is rendered from scratch at every start (`model/hosted_settings.*`),
   in retail's formats: the host file (`server.host`: the owner's settings and replay preference, maps in play order with `--rotation-first` selecting entry zero; cp1252, CR LF), `game.cfg` (through the format's own writer, the
   NovaWorld network type, the slot's ports, and the owner's `mpmaxpacketsize` and
-  `lock_framerate`), `admin.cfg` (user `svc`, a 31-character
+  `lock_framerate`, the latter always on for a shared machine's slot), `admin.cfg` (user `svc`, a 31-character
   random password, rights `8000007F`, `ip_restrict` the fleet's network) and the
   `--credentials` file. All four files are secret: sent to the agent only until it
   has reported the container, written owner-only, never logged; the admin login lives in

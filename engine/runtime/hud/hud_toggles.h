@@ -19,6 +19,7 @@
 //  @0x49939a / @0x49939f and, for a session peer, @0x4993ae]
 
 #include <runtime/hud/feed_format.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/tip_system.h>
@@ -412,6 +413,24 @@ inline constexpr uint32_t kQuitConfirmed = 0x4; // action 3 ran (Exit Mission)
 inline constexpr uint32_t kRestartQueued = 0x8; // event 12, out of a session only
 } // namespace hud_special_key
 uint32_t hud_toggles_quit_dialog_key(HudToggleState &state, const HudQuitDialogKeyInput &input);
+
+// The quit dialog's yes / no / restart keys as the binding system's init reads them: each the
+// first character of its gametext KeyPress string as written, a signed char, and the default
+// letter ('Y', 'N', 'R') when the string is empty or absent (GameText_GetString answers ""
+// for a missing table or key, the override table searched first). The init runs at each
+// mission start and at the in-game options dialog, so a lookup over the gametext loaded now
+// answers what it read.
+// [orig: Input_InitBindingSystem @0x499ab0 - the defaults @0x49a58e..0x49a5a2, the reads
+//  GameText_GetString("KeyPress", "STRKEYPRESS_YES") @0x49a5c0 / _NO @0x49a5e4 /
+//  _RESTART @0x49a604, each `test al, al` then `movsx` of the first byte @0x49a5c5..0x49a5d4 /
+//  @0x49a5e9..0x49a5f5 / @0x49a609..0x49a615; its callers Game_StartMission @0x525ba5 and
+//  UI_IngameOptionsDialogEventHandler @0x55536b; GameText_GetString @0x51ebd0]
+struct HudKeyPressKeys {
+	int yes = 'Y';
+	int no = 'N';
+	int restart = 'R';
+};
+HudKeyPressKeys hud_key_press_keys(const GameTextLookup &gametext);
 
 // The special-key handler's round-over leg, reached once the round-over gate
 // holds (the round end raised it) and no earlier leg took the chain (the quit

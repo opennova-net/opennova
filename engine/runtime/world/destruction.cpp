@@ -1273,6 +1273,7 @@ void process_destructible_death(World &world, Entity &target) {
     //  from the death chain ahead of Flags |= 6 @ 0x43fbf6].
     world.out.scars.clear_entity(target.handle);
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk); // [orig: Flags |= 6 @ 0x43fbf6]
+    world.registry.list_fade_row(target.handle);
     target.alive = false;
     target.health = 0;
     if (target.death_tick == 0) target.death_tick = world.logic_tick; // [orig: @ 0x43fbfd]
@@ -1510,6 +1511,7 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate) {
 	}
 	target.flags |= kEntityFlagDead | kEntityFlagHusk;
 	target.engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+	world.registry.list_fade_row(target.handle);
 	target.alive = false;
 	// Roll rate (+172) from 0.45..0.65 deg/tick, pitch rate (+168) the negated
 	// 0.15..0.35 roll, in that PRNG order. [orig: Entity_InitDeathState
@@ -1639,6 +1641,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     //  no-row arm @0x493F48]
     target.flags |= kEntityFlagDead | kEntityFlagHusk;
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk);
+    world.registry.list_fade_row(target.handle);
     target.alive = false;
     if (target.death_tick == 0) target.death_tick = world.logic_tick;
     if (!was_husked) {

@@ -26,6 +26,7 @@ function mountForm(
     baseId?: string;
     sharedFree?: number;
     ownMachinesFree?: number;
+    ownMachines?: number;
     previousOwnMachine?: boolean;
     addresses?: Address[];
     preferredAddressId?: number | null;
@@ -55,8 +56,10 @@ describe('HostedSettingsForm', () => {
   });
 
   it('submits custom network tuning and keeps it when starting a previous server again', async () => {
-    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
-    const wrapper = mountForm([JO], settings());
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested', own_machine: true }) });
+    // On a dedicated machine, where the frame pacing is the owner's to turn off.
+    const dedicated = { ownMachinesFree: 1, previousOwnMachine: true };
+    const wrapper = mountForm([JO], settings(), dedicated);
     expect(wrapper.get('#hosted-settings-send_holdoff_ticks-hint').text()).toContain('Nominal 192 ms (5.21 updates/s in each direction)');
     await wrapper.get('#hosted-settings-send_holdoff_ticks').setValue(2);
     await wrapper.get('#hosted-settings-entity_send_budget').setValue(1200);
@@ -67,7 +70,7 @@ describe('HostedSettingsForm', () => {
     await flushPromises();
     const saved = start.mock.calls[0][0] as HostedSettings;
     expect(saved).toMatchObject({ send_holdoff_ticks: 2, entity_send_budget: 1200, max_packet_size: 1100, lock_framerate: false });
-    const again = mountForm([JO], saved);
+    const again = mountForm([JO], saved, dedicated);
     expect((again.get('#hosted-settings-send_holdoff_ticks').element as HTMLInputElement).value).toBe('2');
     expect((again.get('#hosted-settings-lock_framerate').element as HTMLInputElement).checked).toBe(false);
     await again.get('form').trigger('submit');
@@ -75,6 +78,66 @@ describe('HostedSettingsForm', () => {
     expect(start.mock.calls[1][0]).toEqual(saved);
     wrapper.unmount();
     again.unmount();
+  });
+
+  it('paces a server on a shared machine, its box ticked and disabled with the reason beside it', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    const reason = 'Only a server on a dedicated machine can run unpaced.';
+    // Started again from an unpaced server, on a shared machine: paced, and no edit of the owner's.
+    const shared = mountForm([JO], settings({ lock_framerate: false }));
+    const box = shared.get('#hosted-settings-lock_framerate');
+    expect((box.element as HTMLInputElement).disabled).toBe(true);
+    expect((box.element as HTMLInputElement).checked).toBe(true);
+    expect(shared.get('#hosted-settings-lock_framerate-hint').text()).toBe(reason);
+    expect(box.attributes('aria-describedby')).toBe('hosted-settings-lock_framerate-hint');
+    expect(vi.mocked(useUnsavedChanges).mock.calls.at(-1)![0]()).toBe(false);
+    await shared.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ lock_framerate: true }), false, null);
+
+    // Every dedicated machine of the account's in use: a shared machine, paced too.
+    const allInUse = mountForm([JO], settings({ lock_framerate: false }), { ownMachines: 1, ownMachinesFree: 0 });
+    expect((allInUse.get('#hosted-settings-lock_framerate').element as HTMLInputElement).disabled).toBe(true);
+    expect(allInUse.get('#hosted-settings-lock_framerate-hint').text()).toBe(reason);
+    await allInUse.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ lock_framerate: true }), false, null);
+  });
+
+  it('lets a server on a dedicated machine run unpaced', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(4, { state: 'requested', own_machine: true }) });
+    // No server on shared machines free: it runs on the dedicated machine, the box the owner's.
+    const wrapper = mountForm([JO], settings(), { sharedFree: 0, ownMachinesFree: 1 });
+    const box = wrapper.get('#hosted-settings-lock_framerate');
+    expect((box.element as HTMLInputElement).disabled).toBe(false);
+    expect((box.element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.get('#hosted-settings-lock_framerate-hint').text()).toContain('On by default');
+    await box.setValue(false);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ lock_framerate: false }), true, null);
+  });
+
+  it('paces the server again when the owner unticks the box on a dedicated machine and then picks a shared one', async () => {
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
+    const wrapper = mountForm([JO], settings(), { ownMachinesFree: 1 });
+    const box = () => wrapper.get('#hosted-settings-lock_framerate').element as HTMLInputElement;
+    // A shared machine first: paced.
+    expect(box().disabled).toBe(true);
+    await wrapper.get('#hosted-settings-own_machine').setValue(true);
+    expect(box().disabled).toBe(false);
+    await wrapper.get('#hosted-settings-lock_framerate').setValue(false);
+    expect(box().checked).toBe(false);
+    await wrapper.get('#hosted-settings-shared_machine').setValue();
+    expect(box().disabled).toBe(true);
+    expect(box().checked).toBe(true);
+    await wrapper.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenLastCalledWith(expect.objectContaining({ lock_framerate: true }), false, null);
+    // Back on the dedicated machine: the box is the owner's again, ticked.
+    await wrapper.get('#hosted-settings-own_machine').setValue(true);
+    expect(box().disabled).toBe(false);
+    expect(box().checked).toBe(true);
   });
 
   it('opens network tuning for invalid values and marks a field refused by the service', async () => {

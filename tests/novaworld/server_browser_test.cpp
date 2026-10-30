@@ -155,6 +155,19 @@ void test_details_lines_and_tooltip() {
 	CHECK(browser_row_tooltip(t) == "Mission: ASH_G11A\nRegion: Jungle\nCountry: US\nExpansion: JOE");
 }
 
+void test_refusals_last_the_record() {
+	BrowserRefusals refusals;
+	CHECK(refusals.reason(42) == nullptr);
+	refusals.note(42, "Your game is incompatible with this server. (NCC007)");
+	refusals.note(7, "Banned (GCC003)");
+	CHECK(refusals.reason(42) != nullptr &&
+	      *refusals.reason(42) == "Your game is incompatible with this server. (NCC007)");
+	refusals.note(42, "An expansion pack/mod type mismatch has occurred. (GDC047)");
+	CHECK(*refusals.reason(42) == "An expansion pack/mod type mismatch has occurred. (GDC047)");
+	CHECK(*refusals.reason(7) == "Banned (GCC003)");
+	CHECK(refusals.reason(8) == nullptr);
+}
+
 } // namespace
 
 int main() {
@@ -163,6 +176,7 @@ int main() {
 	test_filter_rows_quick_filters_and_search();
 	test_sort_rows_text_numeric_and_ping();
 	test_details_lines_and_tooltip();
+	test_refusals_last_the_record();
 	if (failures == 0) std::printf("server_browser_test: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

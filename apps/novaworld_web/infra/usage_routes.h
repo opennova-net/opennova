@@ -17,7 +17,7 @@
 //     every program the service runs: its tasks running and desired and the
 //     revision it runs (ECS's, through infra_status.h's snapshot; none on the
 //     local stack), what its reporting tasks use now, its tasks gone in 24 h,
-//     and each task
+//     and each task with the ONE build its newest sample names
 //
 // The byte counters the samples keep are cumulative: a rate is the growth
 // between two minutes over the time between them, none across a gap past

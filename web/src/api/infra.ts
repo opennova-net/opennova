@@ -19,6 +19,7 @@ import type {
   InfraMachine,
   InfraOverview,
   InfraRelease,
+  InfraServeImage,
   InfraService,
   InfraTarget,
   InfraTargetGroup,
@@ -182,9 +183,22 @@ function pickCache(v: unknown): InfraCache | null {
   };
 }
 
+// {"<key>": "<text>"}: the text members of an object (none for anything else).
+function textMap(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (isObject(v)) for (const [key, value] of Object.entries(v)) if (typeof value === 'string' && value !== '') out[key] = value;
+  return out;
+}
+
 function pickRelease(v: unknown): InfraRelease | null {
   if (!isObject(v) || typeof v.id !== 'string') return null;
-  return { id: v.id, created: textOrNull(v.created), revision: textOrNull(v.revision) };
+  return {
+    id: v.id,
+    created: textOrNull(v.created),
+    revision: textOrNull(v.revision),
+    images: textMap(v.images),
+    image_commits: textMap(v.image_commits),
+  };
 }
 
 function pickInstance(v: unknown): InfraContainerInstance | null {
@@ -292,7 +306,14 @@ function pickMachine(v: unknown): InfraMachine | null {
     zone: textOrNull(v.zone),
     ec2_state: textOrNull(v.ec2_state),
     image_id: textOrNull(v.image_id),
+    agent_version: textOrNull(v.agent_version),
+    agent_image: textOrNull(v.agent_image),
   };
+}
+
+function pickServeImage(v: unknown): InfraServeImage | null {
+  if (!isObject(v) || typeof v.image !== 'string' || v.image === '') return null;
+  return { image: v.image, servers: count(v.servers) };
 }
 
 function pickFleet(v: unknown): InfraFleet | null {
@@ -306,12 +327,14 @@ export function pickOverview(v: unknown): InfraOverview | null {
   const lobbies = list(v.lobbies, pickLobby);
   const fleet = pickFleet(v.fleet);
   const machines = list(v.machines, pickMachine);
-  if (!cloud || !lobbies || !fleet || !machines || !isObject(v.hosting)) return null;
+  const serveImages = list(v.serve_images ?? [], pickServeImage);
+  if (!cloud || !lobbies || !fleet || !machines || !serveImages || !isObject(v.hosting)) return null;
   return {
     at: v.at,
     cloud,
     lobbies,
     fleet,
+    serve_images: serveImages,
     hosting: { enabled: v.hosting.enabled === true, provider: text(v.hosting.provider) || 'none' },
     machines,
   };

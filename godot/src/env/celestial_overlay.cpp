@@ -68,9 +68,9 @@ void append_celestial_overlays(SceneOverlayModelSurfaces &r_bodies, Celestial &p
 		if (!leg.body.drawn || leg.gated) {
 			continue;
 		}
-		const float view_depth = static_cast<float>(
-				(leg.body.model->get_global_position() - eye.origin).dot(forward));
-		const float visibility = opennova::renderer::device_fog_visibility(view_depth,
+		const Vector3 to_body = leg.body.model->get_global_position() - eye.origin;
+		const float visibility = opennova::renderer::device_fog_visibility(
+				static_cast<float>(to_body.dot(forward)), static_cast<float>(to_body.length()),
 				fog.start, fog.end, fog.type, light->fog_enabled);
 		r_bodies.append(leg.slot, leg.body.model, leg.light_scale, visibility, r_submission, {});
 	}
@@ -92,10 +92,10 @@ void append_mirror_sky_redraw(SceneOverlayModelSurfaces &r_bodies, Celestial &p_
 	options.offset = eye.origin - redraw.anchor;
 	options.depth = opennova::renderer::SceneOverlayDepth::FarBand;
 	const auto visibility_of = [&](ObjectModel *p_model) {
-		const float view_depth = static_cast<float>(
-				(p_model->get_global_position() + options.offset - eye.origin).dot(forward));
-		return opennova::renderer::device_fog_visibility(view_depth, p_fog.start, p_fog.end,
-				p_fog.type, p_light.fog_enabled);
+		const Vector3 to_body = p_model->get_global_position() + options.offset - eye.origin;
+		return opennova::renderer::device_fog_visibility(static_cast<float>(to_body.dot(forward)),
+				static_cast<float>(to_body.length()), p_fog.start, p_fog.end, p_fog.type,
+				p_light.fog_enabled);
 	};
 	for (ObjectModel *disc : { redraw.sun, redraw.moon }) {
 		if (disc != nullptr) {

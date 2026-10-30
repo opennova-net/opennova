@@ -196,7 +196,18 @@ struct RenderInputs {
 	std::string master_host;      // --master-host: where the server reaches NovaWorld
 	uint16_t master_gate_port = 0;
 	NovaLogicListing novalogic;   // the second listing, for a server whose owner asked
+	// The kind of machine the slot is on: only a dedicated one runs the owner's lock_framerate
+	// (launched_settings); a shared one, the default, runs every server paced.
+	MachineKind machine_kind = MachineKind::Shared;
 };
+
+// The settings a start on a machine of `kind` runs: the owner's, paced (lock_framerate on)
+// unless the machine is a dedicated one. An unpaced loop keeps one CPU busy, which the other
+// servers of a shared machine need; a dedicated machine runs its one server alone. Service
+// policy: the saved setting stays the owner's, so a server moved to a shared machine (or
+// restarted on one) runs paced there and unpaced again on a dedicated machine, and never fails
+// its start over it.
+HostedSettings launched_settings(const HostedSettings &settings, MachineKind kind);
 
 // The host file, in the host's cp1252 bytes and CR LF lines (the tokenizer
 // splits on the pair alone): the settings' keys, Replay from the options' replay
@@ -235,7 +246,8 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 // Whether a start of `settings` lists on NovaLogic's NovaWorld: its owner asked and the
 // service offers it.
 bool lists_on_novalogic(const HostedSettings &settings, const NovaLogicListing &novalogic);
-// The whole start of a server speaking `title` with `expansion_code`: the four
+// The whole start of a server speaking `title` with `expansion_code`, from its
+// launched_settings on `inputs.machine_kind`: the four
 // secret files (the host file and game.cfg also carry gameplay passwords),
 // the NovaLogic account's for a server that lists there
 // (lists_on_novalogic), and render_serve_args.

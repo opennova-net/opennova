@@ -3,6 +3,7 @@
 #include "render/retained_array_mesh.h"
 #include "render/q3_source_registry.h"
 #include "render/q3_vertex_format.h"
+#include "render/object_lod_frame.h"
 #include "render/rd_glsl.h"
 #include "render/rd_pipeline_state.h"
 #include "render/rd_uniforms.h"
@@ -47,6 +48,8 @@
 #include "util/string_convert.h"
 
 #include <formats/env/env_water_render.h>
+#include <runtime/renderer/device_fog.h>
+#include <runtime/renderer/view_frustum.h>
 
 using namespace godot;
 using namespace opennova::renderer;
@@ -225,24 +228,13 @@ layout(location = 7) in vec2 detail_uv;
 layout(location = 8) in float view_depth;
 layout(location = 0) out vec4 frag_color;
 
-// The primary device fog, mirrored from the engine's
-// runtime/renderer/device_fog.h (device_fog_visibility): type 0 is
-// exponential with density ln(64)/end, every other type is linear from the
-// caller's already-resolved Render_SetFogState start. The push block carries
-// start in camera_local.w and end in draw_color.w for the object techniques.
-// Every Q3 object copy is a fixed-function pass (the _FFP LUM GLOW block,
-// Glass's GLOW technique): the linear types are vertex RANGE fog over the
-// radial eye distance, type 0 is the table/non-range EXP over view depth
-// (retail CD3DDevice_SetFogParameters @ 0x6779e4..0x677a69).
-float q3_fog_visibility(float dist, float fog_start, float fog_end,
-		uint fog_type) {
-	float safe_end = max(fog_end, 1.0);
-	if (fog_type == 0u) {
-		return clamp(exp(-max(dist, 0.0) * (4.1588830833596715 / safe_end)),
-				0.0, 1.0);
-	}
-	return clamp((safe_end - dist) / max(safe_end - fog_start, 1.0), 0.0, 1.0);
-}
+// The primary device fog, the engine's runtime/renderer/device_fog.h law
+// (kDeviceFogGlsl) over the caller's already-resolved Render_SetFogState pair.
+// The push block carries start in camera_local.w and end in draw_color.w for
+// the object techniques. Every Q3 object copy is a fixed-function pass (the
+// _FFP LUM GLOW block, Glass's GLOW technique), so the law's fixed-function
+// form applies.
+@DEVICE_FOG@
 
 // The object stages' sampLinearWrap2D (rd_glsl.h kGlslSampleEffectStage).
 @SAMPLE_EFFECT_STAGE@
@@ -290,10 +282,9 @@ void main() {
 			if (!passes) discard;
 		}
 		float model_uniform_scale = max(abs(pc.light_local_gain.w), 1.0e-6);
-		float fog_distance = fog_type == 0u ? view_depth
-				: length(pc.camera_local.xyz - local_position) * model_uniform_scale;
-		float fog_visibility = fog_enabled ? q3_fog_visibility(fog_distance,
-				pc.camera_local.w, pc.draw_color.w, fog_type) : 1.0;
+		float fog_visibility = device_fog_visibility(view_depth,
+				length(pc.camera_local.xyz - local_position) * model_uniform_scale,
+				pc.camera_local.w, pc.draw_color.w, int(fog_type), fog_enabled);
 		if (selflum) {
 			// The LUM GLOW slot is a copy of the NORMAL block, re-shaded here as
 			// the SELFLUM specialization (technique/self_lit.gdshaderinc): base =
@@ -370,6 +361,7 @@ std::string q3_vertex_shader_source() {
 std::string q3_fragment_shader_source() {
 	std::string source(kQ3FragmentShaderTemplate);
 	splice_token(source, "@SAMPLE_EFFECT_STAGE@", kGlslSampleEffectStage);
+	splice_token(source, "@DEVICE_FOG@", kDeviceFogGlsl);
 	splice_token(source, "@GLASS_WHITE_GAIN@", glsl_float(kQ3GlassWhiteLobeGain));
 	splice_token(source, "@GLASS_WHITE_POWER@",
 			glsl_float(kQ3GlassWhiteLobePower));
@@ -418,54 +410,15 @@ bool belongs_to_scope(Node *p_node, Node *p_scope, Viewport *p_viewport) {
 	return false;
 }
 
-struct CameraFrustum {
-	std::vector<Plane> planes;
-	Vector3 interior_point;
-	bool valid = false;
-
-	bool outside(const AABB &p_bounds) const {
-		if (!valid || !p_bounds.position.is_finite() ||
-				!p_bounds.size.is_finite())
-			return false;
-		constexpr float kPlaneTolerance = 1.0e-3f;
-		for (const Plane &plane : planes) {
-			const float interior_distance = plane.distance_to(interior_point);
-			const float interior_sign = interior_distance >= 0.0f ? 1.0f : -1.0f;
-			bool has_inside_endpoint = false;
-			for (int endpoint = 0; endpoint < 8; ++endpoint) {
-				if (plane.distance_to(p_bounds.get_endpoint(endpoint)) *
-						interior_sign >= -kPlaneTolerance) {
-					has_inside_endpoint = true;
-					break;
-				}
-			}
-			if (!has_inside_endpoint)
-				return true;
-		}
+// Whether a world box lies outside the frustum: its bounding sphere (the box's
+// centre and half diagonal, as retail's BoundingBox_IsVisibleInFrustum takes
+// one) touches no inside. Non-finite bounds are never culled.
+bool outside_frustum(const ViewFrustum &p_frustum, const AABB &p_bounds) {
+	if (!p_bounds.position.is_finite() || !p_bounds.size.is_finite())
 		return false;
-	}
-};
-
-CameraFrustum camera_frustum(Camera3D *p_camera, Viewport *p_viewport) {
-	CameraFrustum result;
-	if (p_camera == nullptr || p_viewport == nullptr ||
-			p_camera->get_far() <= p_camera->get_near())
-		return result;
-	const TypedArray<Plane> godot_planes = p_camera->get_frustum();
-	if (godot_planes.size() < 4)
-		return result;
-	result.planes.reserve(godot_planes.size());
-	for (int index = 0; index < godot_planes.size(); ++index)
-		result.planes.push_back(godot_planes[index]);
-	const Rect2 visible_rect = p_viewport->get_visible_rect();
-	const Vector2 viewport_center = visible_rect.position +
-			visible_rect.size * 0.5f;
-	const float interior_depth = p_camera->get_near() +
-			(p_camera->get_far() - p_camera->get_near()) * 0.5f;
-	result.interior_point = p_camera->project_position(viewport_center,
-			interior_depth);
-	result.valid = result.interior_point.is_finite();
-	return result;
+	const Vector3 centre = p_bounds.get_center();
+	const float center[3] = { centre.x, centre.y, centre.z };
+	return !view_frustum_sphere_visible(p_frustum, center, p_bounds.size.length() * 0.5f);
 }
 
 void merge_bounds(AABB &r_bounds, bool &r_has_bounds,
@@ -890,7 +843,7 @@ bool Q3FrameAdapter::Impl::draw(RenderData *p_render_data, std::uint32_t p_view,
 	const Vector3 light_gain = frame->light_gain;
 	// The environment already resolved the Render_SetFogState start for the
 	// fog type (engine compute_fog_params); the device evaluation in the
-	// shader mirrors renderer/device_fog.h and never re-derives it.
+	// shader is renderer/device_fog.h's and never re-derives it.
 	const bool fog_enabled = frame->fog_enabled;
 	const float fog_start = frame->fog_start;
 	const float fog_end = frame->fog_end;
@@ -1111,7 +1064,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 	for (const std::uint64_t source_id : impl_->dead_sources)
 		cache.evict_source(source_id);
 	Q3SourceRegistry::FrameCounters counters;
-	const CameraFrustum frustum = camera_frustum(p_camera, p_viewport);
+	const ViewFrustum frustum = ObjectLodFrame::camera_frustum(p_camera);
 	const std::uint64_t scope_id = p_scope->get_instance_id();
 	const Vector3 camera_position = p_camera->get_global_position();
 	const Vector3 camera_forward = -p_camera->get_global_basis().get_column(2);
@@ -1169,7 +1122,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			record.world_bounds = global_transform.xform(record.node->get_aabb());
 			++counters.records_touched;
 		}
-		if (frustum.outside(record.world_bounds)) {
+		if (outside_frustum(frustum, record.world_bounds)) {
 			++frustum_culled_sources;
 			continue;
 		}
@@ -1187,7 +1140,7 @@ void Q3FrameAdapter::compile_frame(Node *p_scope, Viewport *p_viewport,
 			Q3SourceRegistry::refresh_rows(record, counters);
 			emitted_transforms.reserve(record.rows.size());
 			for (const Q3InstanceRow &row : record.rows) {
-				if (frustum.outside(row.world_bounds)) {
+				if (outside_frustum(frustum, row.world_bounds)) {
 					++frustum_culled_instances;
 					continue;
 				}

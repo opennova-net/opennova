@@ -58,6 +58,7 @@
 #include "particle/particle_material_cache.h"
 #include "render/display_decode.h"
 #include "render/frame_fx.h"
+#include "render/object_lod_frame.h"
 #include "render/rd_glsl.h" // call_device_create
 #include "render/scene_overlay_compositor.h"
 #include "render/world_environment_lookup.h"
@@ -137,10 +138,7 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 		}
 	}
 	result.projection_valid = true;
-	// A point just past the near plane reads inside every plane (EffectWorld's
-	// NOVISNOUPDATE state takes its probe the same way).
-	result.frustum = particle_view_frustum(camera->get_frustum(),
-			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
+	result.frustum = particle_view_frustum(ObjectLodFrame::camera_frustum(camera));
 	return result;
 }
 
@@ -151,18 +149,12 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 opennova::particle::ParticleViewFrustum mirror_cull_frustum(Camera3D *camera) {
 	const Projection projection = camera->get_camera_projection();
 	const double focal_x = static_cast<double>(projection.columns[0][0]);
-	if (!(focal_x > 0.0))
+	if (!(focal_x > 0.0) || camera->get_far() <= camera->get_near())
 		return {};
-	const double fov_h = 2.0 * std::atan(1.0 / focal_x) * 180.0 / 3.14159265358979323846;
-	const Projection square = Projection::create_perspective(static_cast<real_t>(fov_h), 1.0f,
-			camera->get_near(), camera->get_far(), true);
-	const Transform3D transform = camera->get_camera_transform();
-	const Vector<Plane> planes = square.get_projection_planes(transform);
-	TypedArray<Plane> plane_array;
-	for (int index = 0; index < planes.size(); ++index)
-		plane_array.push_back(planes[index]);
-	return particle_view_frustum(plane_array,
-			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
+	const float tan_half = static_cast<float>(1.0 / focal_x);
+	return particle_view_frustum(ObjectLodFrame::eye_frustum(camera->get_camera_transform(),
+			tan_half, tan_half, static_cast<float>(camera->get_near()),
+			static_cast<float>(camera->get_far())));
 }
 
 // One comparable value for "what this slot draws": FNV-1a over the compiled
@@ -1329,7 +1321,8 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	impl_->last_pass_lod_divisor = strides.last_pass;
 
 	const ParticleCameraFrame world_camera = particle_camera_frame(camera);
-	const bool camera_above_water = world_camera.position.y >= water_height_;
+	const bool camera_above_water = opennova::renderer::scene_camera_above_water(
+			world_camera.position.y, water_height_);
 	impl_->refresh_environment(get_environment_source());
 	// The main scene hands its particle passes the frame's thermal byte; every
 	// other scene call passes zero (renderer::particle_thermal_material).
@@ -1368,7 +1361,8 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 		// The original runs its one scene routine again for this camera, so the
 		// far/camera-side bracket belongs to this view's own eye.
 		const ParticleCameraFrame second_camera = particle_camera_frame(second_scene_camera);
-		views.inset_above_water = second_camera.position.y >= water_height_;
+		views.inset_above_water = opennova::renderer::scene_camera_above_water(
+				second_camera.position.y, water_height_);
 		view_cameras[static_cast<std::size_t>(opennova::renderer::ParticleFrameView::Inset)] =
 				second_camera;
 	}

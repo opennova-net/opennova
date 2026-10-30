@@ -41,10 +41,9 @@ public:
 	opennova::profile::PlayerProfiles &native() { return store_; }
 
 	// The defaults a fresh record takes: the character table (null: none), the
-	// menu table and the expansion's override table the macros read (either
-	// null), and the joystick's capability bits.
+	// menu table the macros read (null: none) after the process's text-override
+	// table (rtxt::text_override), and the joystick's capability bits.
 	void set_defaults(const Ref<AvatarDatabase> &p_avatars,
-			const Ref<RtxtStringFile> &p_override_table,
 			const Ref<RtxtStringFile> &p_menu_table, int p_joystick_caps);
 
 	// The load from `dir` (player.sav there, weapon.sav at weapon_sav_relpath

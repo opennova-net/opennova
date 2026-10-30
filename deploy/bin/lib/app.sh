@@ -310,6 +310,37 @@ image_digest() {
   esac
 }
 
+# The commit image $1 (<registry>/<repo>@sha256:...) was built from, its short
+# sha: the image's own org.opencontainers.image.revision label (CI's image
+# metadata stamps it), read anonymously from the registry. Nothing when the
+# image names none or does not read; never fails.
+image_commit() {
+  local revision
+  revision="$(docker buildx imagetools inspect "$1" --format '{{json .Image}}' 2>/dev/null \
+    | jq -r '(if has("config") then . else ([.[]] | first) end) | .config.Labels["org.opencontainers.image.revision"] // empty' 2>/dev/null)" \
+    || revision=""
+  if [[ "$revision" =~ ^[0-9a-f]{7,40}$ ]]; then printf '%s' "${revision:0:7}"; fi
+}
+
+# The commits images $1 ({key: image}) were built from, as {key: short sha}:
+# the release manifest's image_commits, which the admin's infrastructure page
+# shows as each image's build. An image whose label does not read is left out
+# (and said).
+image_commits_json() {
+  local images="$1" commits="{}" key ref commit
+  while IFS=$'\t' read -r key ref; do
+    [ -n "$key" ] || continue
+    commit="$(image_commit "$ref")"
+    if [ -n "$commit" ]; then
+      log "  $key $commit"
+      commits="$(jq -c --arg k "$key" --arg v "$commit" '. + {($k): $v}' <<<"$commits")"
+    else
+      log "  $key: its image names no commit (no org.opencontainers.image.revision label read)"
+    fi
+  done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<<"$images")
+  printf '%s' "$commits"
+}
+
 # The image a release takes for key $1: tag $2 resolved now (or, as
 # @sha256:<digest>, that digest as it is, checked to be in the registry), else
 # the current release's ($3, its manifest) while it is of the key's
@@ -818,6 +849,11 @@ app_deploy() {
   fi
   log "  serve  ${serve:-none}"
   log "  hostd  ${hostd:-none}"
+  # The commit each image was built from, recorded beside it.
+  log "image commits:"
+  local image_commits
+  image_commits="$(image_commits_json "$(jq -c --arg serve "$serve" --arg hostd "$hostd" \
+    '. + (if $serve == "" then {} else {serve: $serve} end) + (if $hostd == "" then {} else {hostd: $hostd} end)' <<<"$images")")"
   if [ "$hosting" -eq 0 ]; then log "  hosted game servers: off (--no-hosting)"; else log "  hosted game servers: $hosted_provider (infra.env)"; fi
   local what="these images"
   [ "$promoted_from" = null ] || what="$(jq -r '.deployment + "'"'"'s release " + .release' <<<"$promoted_from")"
@@ -864,13 +900,14 @@ app_deploy() {
            --argjson images "$images" --arg serve "$serve" --arg hostd "$hostd" \
            --argjson hosting "$([ "$hosting" -eq 1 ] && echo true || echo false)" \
            --arg programs "${RUN_PROGRAMS[*]}" --argjson revisions "$revisions" \
-           --argjson promoted_from "$promoted_from" \
+           --argjson promoted_from "$promoted_from" --argjson image_commits "$image_commits" \
     '{id: $id, deployment: $dep, created: $created, revision: $rev, dirty: $dirty,
       previous: (if $previous == "none" then null else $previous end),
       promoted_from: $promoted_from,
       programs: ($programs | split(" ")), hosting: $hosting,
       images: ($images + (if $serve == "" then {} else {serve: $serve} end)
                        + (if $hostd == "" then {} else {hostd: $hostd} end)),
+      image_commits: $image_commits,
       task_definitions: $revisions}')"
   release_record "$id" "$new"
   log "deploy complete: $id is the deployment's release (was $current_id)"

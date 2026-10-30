@@ -604,7 +604,8 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // "time_limit", "kill_limit", "max_score", "respawn", "start_delay" (integers),
 // "send_holdoff_ticks" (integer 0..255, default 12), "entity_send_budget" (integer
 // 100..1600, default 600), "max_packet_size" (integer 100..16384, default 1300),
-// "lock_framerate" (boolean, default true),
+// "lock_framerate" (boolean, default true; saved as sent, but a start on a shared machine
+// runs paced whatever it says: hosted_settings.h launched_settings),
 // "team_ff" (true/false), "rotation" (a list of {"file", "swap_sides"}: .bms names
 // among the product's and the expansion's, the first the starting map, a name
 // repeating with one side-switch flag; absent: every mission of the base, then the

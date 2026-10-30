@@ -276,6 +276,7 @@ add_library(opennova_bindings OBJECT
     world/resource_root_resolver.cpp
     world/scar_draw_list.cpp
     world/scar_presenter.cpp
+    world/tick_accumulator.cpp
     wac/wac_program.cpp
     lwf/lwf_data.cpp
     lwf/wav_loader.cpp

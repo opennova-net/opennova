@@ -82,7 +82,19 @@ String NovaWorldServerBrowser::row_tooltip(const Ref<NovaWorldServerRow> &p_row)
 	return opennova::cp1252_to_gd(opennova::browser_row_tooltip(p_row->value()));
 }
 
+void NovaWorldServerBrowser::note_refusal(int64_t p_rid, const String &p_reason) {
+	refusals_.note(static_cast<uint32_t>(p_rid), opennova::to_std(p_reason));
+}
+
+String NovaWorldServerBrowser::refusal_reason(int64_t p_rid) const {
+	const std::string *reason = refusals_.reason(static_cast<uint32_t>(p_rid));
+	return reason != nullptr ? opennova::to_gd(*reason) : String();
+}
+
 void NovaWorldServerBrowser::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("note_refusal", "rid", "reason"),
+			&NovaWorldServerBrowser::note_refusal);
+	ClassDB::bind_method(D_METHOD("refusal_reason", "rid"), &NovaWorldServerBrowser::refusal_reason);
 	BIND_ENUM_CONSTANT(COLUMN_NAME);
 	BIND_ENUM_CONSTANT(COLUMN_MISSION);
 	BIND_ENUM_CONSTANT(COLUMN_TYPE);

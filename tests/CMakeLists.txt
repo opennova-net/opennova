@@ -1190,6 +1190,14 @@ target_include_directories(vfs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(vfs_test PRIVATE cxx_std_17)
 add_test(NAME vfs COMMAND vfs_test)
 
+# A loose folder's files by name without case (base/vfs/dir_case_index.h): the one index the
+# game's resource root, texture and sidecar resolves find a loose file by.
+add_executable(dir_case_index_test vfs/dir_case_index_test.cpp)
+target_link_libraries(dir_case_index_test PRIVATE opennova_base)
+target_include_directories(dir_case_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(dir_case_index_test PRIVATE cxx_std_17)
+add_test(NAME dir_case_index COMMAND dir_case_index_test)
+
 # The files a build read from a FileSource, by stamp (base/vfs/file_stamps.h).
 add_executable(file_stamps_test vfs/file_stamps_test.cpp)
 target_link_libraries(file_stamps_test PRIVATE opennova_base)
@@ -1433,13 +1441,17 @@ foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_win
         frame_fx_effects nvg_scope_lens pipeline_state q3_frame render_slot_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
         texture_registry texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info
-        texture_roles fixed_texture_names)
+        texture_roles fixed_texture_names view_frustum triangle_strip)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
+
+# The device fog law's GLSL text checked against the .gdshader passes' copy of it.
+target_compile_definitions(renderer_device_fog_test PRIVATE
+    DEVICE_FOG_GDSHADERINC="${CMAKE_SOURCE_DIR}/godot/shaders/device_fog.gdshaderinc")
 
 # The NORMAL-pass coverage table checked against the object pipeline manifest's coverage_source.
 target_compile_definitions(renderer_material_classify_test PRIVATE
@@ -4562,6 +4574,15 @@ add_executable(npruntime_server_info_test npruntime/server_info_test.cpp)
 target_link_libraries(npruntime_server_info_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_server_info_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_server_info COMMAND npruntime_server_info_test)
+
+# The NovaWorld host listing's match side (inmatch/host_listing_binding.h), the one binding the
+# game's listen host and opennova-serve run: the hooks a bind installs and an unbind takes back,
+# the columns off the bound match, the registration, stale hooks doing nothing, the PlayerList
+# rows and the NWU session's facts (ADR 0051 d6, ADR 0077).
+add_executable(host_listing_binding_test npruntime/host_listing_binding_test.cpp)
+target_link_libraries(host_listing_binding_test PRIVATE opennova_runtime)
+target_include_directories(host_listing_binding_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME host_listing_binding COMMAND host_listing_binding_test)
 
 # The /PROFILE server log (inmatch/server_log_recorder.h, net/npwire/serverlog_encode.h,
 # formats/sph): the record writers against the decoder, a synthetic session recorded to

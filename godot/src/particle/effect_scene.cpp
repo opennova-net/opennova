@@ -363,9 +363,8 @@ void EffectScene::set_global_wind(const Vector3 &p_wind) {
 	scene_->set_global_wind(native_vector(p_wind));
 }
 
-void EffectScene::set_view_frustum(const TypedArray<Plane> &p_planes,
-		const Vector3 &p_inside_probe) {
-	frustum_ = particle_view_frustum(p_planes, p_inside_probe);
+void EffectScene::set_view_frustum(const opennova::renderer::ViewFrustum &p_frustum) {
+	frustum_ = particle_view_frustum(p_frustum);
 }
 
 void EffectScene::clear_view_frustum() {

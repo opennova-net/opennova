@@ -22,6 +22,7 @@
 #include <runtime/environment/water_mirror.h>
 
 #include "env/water_core.h"
+#include "render/q3_source_registry.h"
 #include "terrain/terrain_data.h"
 
 namespace godot {
@@ -324,6 +325,7 @@ private:
 	// The bloom strip's mirror image (environment/water_mirror.h
 	// bloom_water_mirror_image).
 	void _apply_night_vision_reflection();
+	void _publish_night_vision_q3();
 	void _retire_inset();
 	// The last march as ArrayMesh surface arrays.
 	Array _strip_arrays() const;
@@ -360,6 +362,10 @@ private:
 	MeshInstance3D *inset_mesh_instance_ = nullptr;
 	Ref<ShaderMaterial> water_material_;
 	Ref<ShaderMaterial> night_vision_material_;
+	// The night-vision strip's Q3 block, kept beside each write of its
+	// material and published to the focused Q3 compile
+	// (_publish_night_vision_q3): the compile never reads the material back.
+	Q3WaterMaterialValues night_vision_q3_;
 	Ref<ShaderMaterial> inset_material_;
 	// The main frame's mirror and the weapon Inset pass's own.
 	MirrorRig mirror_;
