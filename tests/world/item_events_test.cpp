@@ -1337,6 +1337,9 @@ int test_type_index_zero_rows_take_no_visit() {
         seed.drop_motion = DropMotion::Fall;
         seed.veh.vel_x = 65536; // one unit a tick along +x, well above the ground
         seed.class_think_ticks = 10; // the item callback's clock, stepped every visit
+        // Both rows carry a def, so the type index alone keeps the bare row unvisited
+        // (pool 2 calls a row's update only with one [orig: @0x4C22CF..0x4C22D3]).
+        seed.has_item_def = true;
         seed.item_type_index = 0;
         const EntityHandle bare = w.registry.spawn(pool, seed);
         seed.item_type_index = 1;
