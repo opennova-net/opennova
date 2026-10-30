@@ -337,13 +337,14 @@ def owed_autoname(tok):
 
 
 def marker_text(lines, i):
-    """Line i plus, when its last `[orig:` marker wraps, the continuation lines up to the one
-    that closes it (at most MAX_CONTINUATION), minus their comment lead-in (`Name @ //
-    0x4c8750` is one marker, not a dropped cite)."""
+    """(text, last): line i plus, when its last `[orig:` marker wraps, the continuation lines
+    up to the one that closes it (at most MAX_CONTINUATION), minus their comment lead-in
+    (`Name @ // 0x4c8750` is one marker, not a dropped cite); last is the index of the text's
+    last line."""
     line = lines[i]
     body = line.rfind("[orig:")
     if "(retail:" in line or body < 0 or cite_images.marker_close(line, body + 6) >= 0:
-        return line
+        return line, i
     parts = [line]
     for nxt in lines[i + 1:i + 1 + MAX_CONTINUATION]:
         parts.append(COMMENT_LEAD.sub("", nxt))
@@ -352,7 +353,7 @@ def marker_text(lines, i):
         # then on to the line whose bracket closes the marker
         if len(parts) > 2 and cite_images.marker_close(joined, joined.rfind("[orig:") + 6) >= 0:
             break
-    return " ".join(parts)
+    return " ".join(parts), i + len(parts) - 1
 
 
 def extract(paths):
@@ -377,13 +378,19 @@ def extract_lines(path, lines):
     `@0xADDR` or a prose word's (`the call @0x52896a`) only inside a marker."""
     doc_image = doc_images(path, lines)
     record = path.startswith(DOC_ROOTS)
+    wrapped_to = -1   # the last continuation line of the marker a line above wraps onto
     for i, line in enumerate(lines):
         marked = bool(MARKER_LINE.search(line))
-        if not marked and not (record and "@" in line):
+        if not marked and not (record and "@" in line and i > wrapped_to):
             continue
-        # an unmarked record line reads on into the next line's start, where a wrapped image
-        # qualifier lands (`sub_401C23 @0x401C23` / `(Nile.exe)`); its own pairs alone count
-        text = marker_text(lines, i) if marked else line + " " + (lines[i + 1].lstrip() if i + 1 < len(lines) else "")
+        if marked:
+            text, last = marker_text(lines, i)
+            wrapped_to = max(wrapped_to, last)
+        else:
+            # an unmarked record line reads on into the next line's start, where a wrapped
+            # image qualifier lands (`sub_401C23 @0x401C23` / `(Nile.exe)`); its own pairs
+            # alone count
+            text = line + " " + (lines[i + 1].lstrip() if i + 1 < len(lines) else "")
         found = [m for m in PAIR.finditer(text)
                  if marked or (m.start() < len(line) and m["name"]
                                and (symbol_like(m["name"]) or SNAKE.match(m["name"])))]

@@ -176,6 +176,14 @@ class MarkerSubjects(unittest.TestCase):
         # code joins markers only
         self.assertEqual(list(cite_sweep.extract_lines("engine/x.cpp", ["// Foo_Bar @0x500000"])), [])
 
+    def test_a_wrapped_markers_lines_are_read_once(self):
+        # the continuation lines of a wrapped marker are its own, never an unmarked record line
+        lines = ["the item's z (`[orig: JOTACmed.exe sub_44E640 @", "0x44e640, from MIS_SaveDocument @ 0x4546b5; sub_44E6A0 @",
+                 "0x44e6a0]`); then `Foo_Bar @0x401000`"]
+        got = [(tok, n, ctx) for _, n, tok, _, ctx, _ in cite_sweep.extract_lines("docs/x-re.md", lines)]
+        self.assertEqual([g[0] for g in got], ["sub_44E640", "MIS_SaveDocument", "sub_44E6A0", "Foo_Bar"])
+        self.assertTrue(all(ctx == "(other-image) JOTACmed.exe" for tok, n, ctx in got if tok != "Foo_Bar"))
+
     def test_a_wrapped_qualifier_binds_its_cite(self):
         lines = ["exchanged as 16.16 (`sub_401C23 @0x401C23", "(Nile.exe)`), each a 16.16 value.",
                  "The loader `Foo_Bar @0x401000` reads them."]
