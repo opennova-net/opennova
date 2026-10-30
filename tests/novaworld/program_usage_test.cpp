@@ -5,11 +5,12 @@
 //   - the sampler: its first minute without CPU, then the CPU over the minute in percent of
 //     the task's limit; the memory and its limit (the cgroup's, else the task's, else the
 //     machine's); /proc/net/dev's bytes; a file that does not read leaves its field null;
+//     each sample carries the program's own ONE build (one_build());
 //   - the task found off ECS: the hostname, the cgroup's quota as its CPU limit;
-//   - the rows: a second sample of a task's minute ignored; the hours rolled up from the
-//     minutes (the mean and peak CPU, the peak memory, the bytes in and out with a counter
-//     that started over), twice alike; an hour whose minutes are partly pruned left as it
-//     was; the prunes at 48 hours and 400 days.
+//   - the rows: a sample's build kept; a second sample of a task's minute ignored; the hours
+//     rolled up from the minutes (the mean and peak CPU, the peak memory, the bytes in and
+//     out with a counter that started over), twice alike; an hour whose minutes are partly
+//     pruned left as it was; the prunes at 48 hours and 400 days.
 
 #include "program/program_usage.h"
 
@@ -20,6 +21,7 @@
 #include "common/test_expect.h"
 
 #include <base/io/file_io.h>
+#include <base/version/one_build.h>
 
 #include <cmath>
 #include <cstdio>
@@ -86,6 +88,9 @@ int test_sampler() {
 	TEST_EXPECT(first.memory_used_bytes == 200000000 &&
 			first.memory_limit_bytes == int64_t(1024) * 1024 * 1024);
 	TEST_EXPECT(first.net_in_bytes == 12000 && first.net_out_bytes == 34000);
+	// The program's own build, whatever stamp this test was compiled with.
+	TEST_EXPECT(first.one_version == opennova::one_build().version.text() &&
+			first.one_commit == opennova::one_build().commit);
 
 	// A minute later: 15 s of CPU over 60 s is half a CPU, all of the task's half.
 	TEST_EXPECT(put(dir, "sys/fs/cgroup/cpu.stat", "usage_usec 16000000\n"));
@@ -170,8 +175,18 @@ int test_rows() {
 	}
 	// A second sample of a minute is ignored; task b has one minute.
 	program::insert_usage_sample(db, minute("aaaa", kNoon, 99.0, 1, 1));
-	program::insert_usage_sample(db, minute("bbbb", kNoon + 60, 10.0, 7000, 900));
+	program::UsageSample b = minute("bbbb", kNoon + 60, 10.0, 7000, 900);
+	b.one_version = "0.0.22.123";
+	b.one_commit = "a1b2c3d";
+	program::insert_usage_sample(db, b);
 	TEST_EXPECT(db.query("SELECT 1 FROM program_samples;").size() == 64);
+	// Each row's build as its task said it; '' where it named none.
+	const auto builds = db.query("SELECT task_id, one_version, one_commit FROM program_samples "
+								 "WHERE at = to_timestamp($1::double precision) ORDER BY task_id;",
+			{ BindValue(kNoon + 60) });
+	TEST_EXPECT(builds.size() == 2 && builds[0].as_text(1) == "" && builds[0].as_text(2) == "" &&
+			builds[1].as_text(0) == "bbbb" && builds[1].as_text(1) == "0.0.22.123" &&
+			builds[1].as_text(2) == "a1b2c3d");
 	const auto noon = db.query("SELECT cpu_percent, memory_used_bytes, cpu_limit FROM "
 							   "program_samples WHERE task_id = 'aaaa' AND at = "
 							   "to_timestamp($1::double precision);",

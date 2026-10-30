@@ -1682,8 +1682,8 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 		int material_index, bool p_needs_eval, MaterialRuntimeStamp &stamp,
 		const opennova::renderer::ControlRegisterValues &p_ctrl) {
 	// The focused Q3 compile caches this material's block; every write
-	// below names the material so its surfaces re-read it once.
-	bool q3_parameters_changed = false;
+	// below publishes the new values so its surfaces re-read them once.
+	bool q3_runtime_changed = false;
 	if (p_needs_eval) {
 		opennova::renderer::MaterialRuntime runtime;
 		if (object_data_->eval_material_runtime_native(material_index,
@@ -1694,25 +1694,25 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 					runtime.uv.m20 != previous.uv.m20) {
 				material->set_shader_parameter("u_uv_transform_u",
 						Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20));
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			if (!stamp.runtime_valid || runtime.uv.m01 != previous.uv.m01 ||
 					runtime.uv.m11 != previous.uv.m11 ||
 					runtime.uv.m21 != previous.uv.m21) {
 				material->set_shader_parameter("u_uv_transform_v",
 						Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21));
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			if (!stamp.runtime_valid || runtime.rgb_r != previous.rgb_r ||
 					runtime.rgb_g != previous.rgb_g ||
 					runtime.rgb_b != previous.rgb_b) {
 				material->set_shader_parameter("u_rgb_mod",
 						Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			if (!stamp.runtime_valid || runtime.alpha != previous.alpha) {
 				material->set_shader_parameter("u_alpha_mod", runtime.alpha);
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			if (!stamp.runtime_valid || runtime.reflect != previous.reflect) {
 				set_material_and_auxiliary_parameter(material,
@@ -1720,7 +1720,7 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 						"u_reflect_color",
 						Vector4(runtime.reflect[0], runtime.reflect[1],
 								runtime.reflect[2], runtime.reflect[3]));
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			stamp.runtime = runtime;
 			stamp.runtime_valid = true;
@@ -1736,16 +1736,17 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 			if (frame.is_valid()) {
 				const Ref<ShaderMaterial> postmultiply =
 						postmultiply_material_for_index(material_index);
+				const float frame_max_lod = opennova::texture_max_lod(frame);
 				set_material_and_auxiliary_parameter(material, postmultiply, "u_diffuse", frame);
 				set_material_and_auxiliary_parameter(material, postmultiply,
-						"u_diffuse_max_lod", opennova::texture_max_lod(frame));
+						"u_diffuse_max_lod", frame_max_lod);
 				stamp.anim_frame = frame_index;
-				q3_parameters_changed = true;
+				FrameFx::update_q3_object_diffuse(material, frame, frame_max_lod);
 			}
 		}
 	}
-	if (q3_parameters_changed) {
-		FrameFx::invalidate_q3_object_material(material);
+	if (q3_runtime_changed) {
+		FrameFx::update_q3_object_runtime(material, stamp.runtime);
 	}
 }
 

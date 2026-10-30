@@ -639,6 +639,7 @@ void EntityPresenter::present_wire_rows_view(PresentRowsView p_snap,
 		}
 	}
 	for (int32_t handle : retired) {
+		emit_signal("wire_node_retired", handle);
 		free_wire_node(handle);
 	}
 	retired.clear();

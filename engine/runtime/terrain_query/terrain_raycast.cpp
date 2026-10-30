@@ -1,5 +1,7 @@
 #include <runtime/terrain_query/terrain_raycast.h>
 
+#include <runtime/terrain_query/height_field.h>
+
 #include <base/io/bam.h>
 
 // Structural translation of the retail heightmap raycast chain; see the
@@ -376,6 +378,44 @@ bool terrain_raycast_los_clear(const TerrainRaycastSampler &sampler,
 		z += step_z;
 		if (remaining <= 0) return true; // budget CLEAR [orig: @ 0x60c9e7]
 	}
+}
+
+namespace {
+
+// The runtime field's two taps for terrain_field_ray_hit. Retail's coarse tap
+// reads the atlas at the march's remapped coordinate (x + 0x8000, 0x8000 - y),
+// the nearest texel of the world point; the field's point lookup takes the
+// mission words and negates y itself, so the tap passes (x + 0x8000,
+// y - 0x8000). An empty cell reads height 0, which the march meets as the
+// height-0 floor.
+TerrainRaycastSample field_point_tap(void *ctx, int32_t world_x_1616, int32_t world_y_1616) {
+	const TerrainHeightField &field = *static_cast<const TerrainHeightField *>(ctx);
+	TerrainRaycastSample sample;
+	sample.height_1616 = height_field_height_fixed(field,
+			static_cast<int32_t>(static_cast<int64_t>(world_x_1616) + 0x8000),
+			static_cast<int32_t>(static_cast<int64_t>(world_y_1616) - 0x8000));
+	return sample;
+}
+
+TerrainRaycastSample field_bilinear_tap(void *ctx, int32_t world_x_1616, int32_t world_y_1616) {
+	const TerrainHeightField &field = *static_cast<const TerrainHeightField *>(ctx);
+	TerrainRaycastSample sample;
+	sample.height_1616 = height_field_height_bilinear_fixed(field, world_x_1616, world_y_1616);
+	return sample;
+}
+
+} // namespace
+
+bool terrain_field_ray_hit(const TerrainHeightField *field, const int32_t start[3],
+                           const int32_t end[3]) {
+	if (field == nullptr || !field->valid()) {
+		return true;
+	}
+	TerrainRaycastSampler sampler;
+	sampler.point = &field_point_tap;
+	sampler.bilinear = &field_bilinear_tap;
+	sampler.ctx = const_cast<TerrainHeightField *>(field);
+	return terrain_raycast_march(sampler, start, end, nullptr, nullptr);
 }
 
 } // namespace opennova::terrain

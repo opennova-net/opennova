@@ -155,7 +155,6 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 
 #include <runtime/inmatch/host_boot.h>                // the one host boot, its two phases (ADR 0051 d4)
 #include <runtime/inmatch/host_role.h>                // HostRole: the listen/dedicated host's state + frame (ADR 0043 d3)
-#include <runtime/inmatch/server_info.h>              // HostPlayerListRow (the NovaWorld roster rows)
 #include <runtime/inmatch/joiner_role.h>              // JoinerRole: the joiner's runtime, bridge and frame
 #include <runtime/inmatch/local_role.h>               // LocalRole: the bare no-net tick
 #include <runtime/inmatch/loopback_channel.h>          // LoopbackChannel (the host role's own dcb-2 client)
@@ -754,17 +753,11 @@ public:
 	bool is_host_listening() const;
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
-	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key) and login PCID (the
-	// host's own player's); LAN: empty / 0. The joiners' cookie keys are the host context's own.
-	void set_novaworld_registration(const String &p_gsid, int p_app_id, const String &p_login_pcid);
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
-	// The added players as the NovaWorld host's PlayerList sees them (the engine's
-	// inmatch::host_player_list_rows over the host context; empty without one); the host's
-	// own (`own`) takes the gate binding's identity.
-	std::vector<opennova::inmatch::HostPlayerListRow> host_player_list_rows() const;
-	// The host role's server context (null without one): the NovaWorld listing's live columns.
+	// The host role's server context (null without one): the NovaWorld listing's match (the
+	// engine's inmatch::HostListingBinding).
 	opennova::inmatch::NapiNPServerCtx *host_ctx();
 	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
 	// A NovaWorld ServerCommand's verb, target and args at the host (run_host_server_command): on
@@ -775,13 +768,9 @@ public:
 	};
 	ServerCommandResult execute_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
-	// The NovaWorld join-ticket flow: `armed` arms the in-match watchdog's ClientPlayerEnterRequest
-	// leg (ServerHostResult HostRequiresJoinTicket); the hook gets each request (the ConnectionId,
-	// the inet_addr dword + port, the JOINTICKET), an empty hook unbinds, and the service's answer
-	// returns through apply_player_enter_result. All three no-op without a host role.
-	using PlayerEnterRequestHook = std::function<void(uint32_t p_connection_id,
-			uint32_t p_ip_packed, uint16_t p_port, const String &p_join_ticket)>;
-	void set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook);
+	// The NovaWorld service's answer to a ClientPlayerEnterRequest the in-match watchdog sent
+	// (the hosting session's binding, inmatch::HostListingBinding): false without a host role or
+	// a held joiner of that connection.
 	bool apply_player_enter_result(uint32_t p_connection_id, bool p_success, int32_t p_msg_code);
 	int toggle_join_lock(); // lockgame (inmatch::Server_ToggleJoinLock): 1 locked, 0 open, -1 none
 	// The hosted-session request (network/host_session_options.h): every

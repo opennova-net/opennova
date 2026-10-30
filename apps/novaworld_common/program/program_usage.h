@@ -1,14 +1,16 @@
 #pragma once
 
-// What each program's tasks use (backend/migrations/0001_baseline.sql):
+// What each program's tasks use (backend/migrations/0001_baseline.sql, 0013):
 // every program's task samples itself once a minute on its main loop
 // (program.h run_main_loop) and writes its own program_samples row: its CPU
 // over the minute in percent of its CPU limit, its memory and the most it may
-// use, and its network namespace's bytes in and out, through core/proc_stats.h's
+// use, its network namespace's bytes in and out, through core/proc_stats.h's
 // readers (its own cgroup, /proc/net/dev), alike on ECS and in the local stack's
-// containers. The worker's stats.prune (hosted/model/stats_jobs.h) rolls the minutes
-// up by the hour and prunes both (48 hours, 400 days). The admin's usage view
-// reads them (apps/novaworld_web/infra/usage_routes.h).
+// containers, and the ONE build it runs (base/version/one_build.h: its version
+// and commit), the build the admin's infrastructure page shows for it. The
+// worker's stats.prune (hosted/model/stats_jobs.h) rolls the minutes up by the
+// hour and prunes both (48 hours, 400 days). The admin's usage view reads them
+// (apps/novaworld_web/infra/usage_routes.h).
 //
 // A task is named by its ECS task id (the task metadata's TaskARN, its last
 // segment), else by its hostname (a local container's id), and measured
@@ -59,6 +61,10 @@ struct UsageSample {
 	std::optional<int64_t> memory_limit_bytes;
 	std::optional<int64_t> net_in_bytes; // since the namespace came up
 	std::optional<int64_t> net_out_bytes;
+	// The ONE build the task runs: one_build()'s version ("0.0.22.123") and commit
+	// ("a1b2c3d"); "" where the build names none.
+	std::string one_version;
+	std::string one_commit;
 };
 
 // A program's sampler of its own task. Not thread-safe: the main loop's alone.
@@ -68,7 +74,8 @@ public:
 
 	// A sample at `now_s` (Unix seconds, the wall clock; floored to its minute)
 	// with its CPU since the last take() (`steady_us` a steady clock in
-	// microseconds, the CPU time's measure): none for the first.
+	// microseconds, the CPU time's measure): none for the first. It carries this
+	// program's own build (one_build()).
 	UsageSample take(int64_t now_s, uint64_t steady_us);
 
 	const UsageTask &task() const { return task_; }

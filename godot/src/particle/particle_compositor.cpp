@@ -3,8 +3,11 @@
 #include "particle/particle_convert.h"
 #include "render/rd_fullscreen.h"
 #include "render/rd_glsl.h"
+#include "render/rd_pipeline_state.h"
 #include "render/rd_uniforms.h"
 #include "util/string_convert.h"
+
+#include <runtime/renderer/device_fog.h>
 
 #include <algorithm>
 #include <array>
@@ -124,24 +127,14 @@ uint particle_mode() {
 	return pc.mode & 0xFFu;
 }
 
+// The device fog (the engine's runtime/renderer/device_fog.h law) over the
+// submission's resolved Render_SetFogState pair.
+@DEVICE_FOG@
 float particle_fog_visibility() {
-	float fog_start = pc.camera_forward_fog_start.w;
-	float fog_end = pc.camera_position_fog_end.w;
-	if (fog_start == fog_end || fog_end <= 0.0) {
-		return 1.0;
-	}
-	vec3 camera_position = pc.camera_position_fog_end.xyz;
-	int fog_type = int(pc.fog_color_type.w);
-	float fog_distance;
-	if (fog_type == 0) {
-		fog_distance = max(dot(v_world_position - camera_position,
-				pc.camera_forward_fog_start.xyz), 0.0);
-		return clamp(exp(-fog_distance *
-				(4.1588830833596715 / fog_end)), 0.0, 1.0);
-	}
-	fog_distance = length(v_world_position - camera_position);
-	return clamp((fog_end - fog_distance) /
-			(fog_end - fog_start), 0.0, 1.0);
+	vec3 to_point = v_world_position - pc.camera_position_fog_end.xyz;
+	return device_fog_visibility(dot(to_point, pc.camera_forward_fog_start.xyz),
+			length(to_point), pc.camera_forward_fog_start.w, pc.camera_position_fog_end.w,
+			int(pc.fog_color_type.w), true);
 }
 
 // Only the materials whose intrinsic pass word carries FOGENABLE fog: every
@@ -231,6 +224,12 @@ void main() {
 	}
 }
 )GLSL";
+
+std::string particle_fragment_shader_source() {
+	std::string source(kFragmentShader);
+	splice_token(source, "@DEVICE_FOG@", opennova::renderer::kDeviceFogGlsl);
+	return source;
+}
 
 const char *kSceneSnapshotFragmentShader = R"GLSL(#version 450
 layout(set = 0, binding = 0) uniform sampler2D source_color;
@@ -534,7 +533,7 @@ bool ParticleCompositorEffect::Impl::initialize_rd() {
 
 	Ref<RDShaderSPIRV> spirv;
 	const std::string compile_errors =
-			compile_rd_spirv(rd, kVertexShader, kFragmentShader, spirv);
+			compile_rd_spirv(rd, kVertexShader, particle_fragment_shader_source(), spirv);
 	if (!compile_errors.empty()) {
 		set_failure("Particle shader compilation failed: " + compile_errors,
 				"shader_compile_failed");
@@ -1033,90 +1032,16 @@ RID ParticleCompositorEffect::Impl::pipeline_for(
 	if (found != pipelines.end())
 		return found->second;
 
-	Ref<RDPipelineRasterizationState> raster;
-	raster.instantiate();
-	raster->set_cull_mode(RenderingDevice::POLYGON_CULL_DISABLED);
+	// The draw's fixed-function state (renderer::particle_pipeline_state); the
+	// sample count is the pass's.
+	const RdPipelineState state = rd_pipeline_state(
+			opennova::renderer::particle_pipeline_state(command.pipeline, thermal));
 	Ref<RDPipelineMultisampleState> multisample;
 	multisample.instantiate();
 	multisample->set_sample_count(RenderingDevice::TEXTURE_SAMPLES_1);
-	Ref<RDPipelineDepthStencilState> depth;
-	depth.instantiate();
-	depth->set_enable_depth_test(true);
-	depth->set_enable_depth_write(false);
-	depth->set_depth_compare_operator(
-			RenderingDevice::COMPARE_OP_GREATER_OR_EQUAL);
-
-	RenderingDevice::BlendFactor source_color =
-			RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
-	RenderingDevice::BlendFactor destination_color =
-			RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-	RenderingDevice::BlendFactor source_alpha = source_color;
-	RenderingDevice::BlendFactor destination_alpha = destination_color;
-	switch (command.pipeline) {
-		case opennova::renderer::ParticlePipeline::Blend:
-		case opennova::renderer::ParticlePipeline::Bump:
-		case opennova::renderer::ParticlePipeline::Distort:
-			break;
-		case opennova::renderer::ParticlePipeline::Additive:
-		case opennova::renderer::ParticlePipeline::Premult:
-			// Additive and premult share one witnessed pair — ONE/INVSRCALPHA
-			// [orig: CParticleTexture_InitTextureAndChannels @ 0x5e8380 (case 1/2
-			// SRCBLEND=ONE) + @ 0x5e85a9 (LABEL_16 DESTBLEND=INVSRCALPHA), see docs/particles/ptl-format-re.md]. The
-			// type-1 atlas alpha clear zeroes the fragment alpha, which is what
-			// turns this pair into a pure add for additive layers.
-			source_color = RenderingDevice::BLEND_FACTOR_ONE;
-			source_alpha = RenderingDevice::BLEND_FACTOR_ONE;
-			break;
-		case opennova::renderer::ParticlePipeline::Bumpadd:
-			// [orig: @ 0x5e84dc/@ 0x5e84d8 — SRCALPHA/ONE, see docs/particles/ptl-format-re.md]
-			destination_color = RenderingDevice::BLEND_FACTOR_ONE;
-			destination_alpha = RenderingDevice::BLEND_FACTOR_ONE;
-			break;
-		case opennova::renderer::ParticlePipeline::Mod:
-			source_color = RenderingDevice::BLEND_FACTOR_DST_COLOR;
-			destination_color = RenderingDevice::BLEND_FACTOR_ZERO;
-			source_alpha = RenderingDevice::BLEND_FACTOR_DST_ALPHA;
-			destination_alpha = RenderingDevice::BLEND_FACTOR_ZERO;
-			break;
-		case opennova::renderer::ParticlePipeline::Mod2x:
-			source_color = RenderingDevice::BLEND_FACTOR_DST_COLOR;
-			destination_color = RenderingDevice::BLEND_FACTOR_SRC_COLOR;
-			source_alpha = RenderingDevice::BLEND_FACTOR_DST_ALPHA;
-			destination_alpha = RenderingDevice::BLEND_FACTOR_SRC_ALPHA;
-			break;
-	}
-	if (thermal == opennova::renderer::ParticleThermalMaterial::DarkeningModulate) {
-		// Additive's and Premult's thermal secondary blends ZERO/INVSRCCOLOR
-		// (retail CParticleTexture_InitTextureAndChannels @ 0x5E8390..0x5E83A5):
-		// the source darkens what is already drawn.
-		source_color = RenderingDevice::BLEND_FACTOR_ZERO;
-		destination_color = RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
-		source_alpha = RenderingDevice::BLEND_FACTOR_ZERO;
-		destination_alpha = RenderingDevice::BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-	}
-	Ref<RDPipelineColorBlendStateAttachment> attachment;
-	attachment.instantiate();
-	attachment->set_enable_blend(true);
-	attachment->set_src_color_blend_factor(source_color);
-	attachment->set_dst_color_blend_factor(destination_color);
-	attachment->set_color_blend_op(RenderingDevice::BLEND_OP_ADD);
-	// D3D9's DESTCOLOR/SRCCOLOR factors are component-wise: their alpha
-	// component is destination/source alpha. RenderingDevice exposes separate
-	// color and alpha slots, and D3D12 rejects color-only factors in the alpha
-	// slots, so use the explicit alpha equivalents without changing the
-	// witnessed blend equation.
-	attachment->set_src_alpha_blend_factor(source_alpha);
-	attachment->set_dst_alpha_blend_factor(destination_alpha);
-	attachment->set_alpha_blend_op(RenderingDevice::BLEND_OP_ADD);
-	TypedArray<Ref<RDPipelineColorBlendStateAttachment>> attachments;
-	attachments.push_back(attachment);
-	Ref<RDPipelineColorBlendState> blend;
-	blend.instantiate();
-	blend->set_attachments(attachments);
-
 	RID pipeline = create_rd_render_pipeline(rd, shader, framebuffer_format,
 			vertex_format, RenderingDevice::RENDER_PRIMITIVE_TRIANGLES,
-			raster, multisample, depth, blend);
+			state.rasterization, multisample, state.depth_stencil, state.color_blend);
 	if (!pipeline.is_valid() || !rd->render_pipeline_is_valid(pipeline)) {
 		if (pipeline.is_valid())
 			release_rid(pipeline);

@@ -891,7 +891,7 @@ void CollisionWorld::prune_stale_bindings(World &world) {
     // A binding or a slice goes stale only when a slot's occupant changes (a spawn steps the
     // registry's serial, a despawn its live count; a restore rebuilds through
     // build_all_tables) or a binding is assigned, so the walk runs at the first build after
-    // one and a build over an unchanged registry skips it (D-SIM-T5; host bookkeeping, not a
+    // one and a build over an unchanged registry skips it (D-SIM-7; host bookkeeping, not a
     // retail claim: retail's tables hold no binding to prune).
     const uint64_t serial = world.registry.spawn_serial();
     const size_t live = world.registry.live_count();

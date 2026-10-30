@@ -853,24 +853,6 @@ Vector3 MissionEnvironment::get_color_src_gain() const {
 	return to_vector3(state_.color_src_gain());
 }
 
-Vector3 MissionEnvironment::get_particle_ambient_tint() const {
-	// g_EnvTerrainLightCombined's bytes over 128.
-	const opennova::env::Rgb combined = opennova::env::combine_terrain_light(
-			state_.sun_light(), state_.sky_ambient());
-	constexpr float kByteOver128 = 255.0f / 128.0f;
-	return Vector3(combined.r * kByteOver128, combined.g * kByteOver128,
-			combined.b * kByteOver128);
-}
-
-Vector3 MissionEnvironment::get_particle_modulator_tint() const {
-	// `min(2 * modulator_byte, 255) / 128`; color_src_gain already carries the
-	// modulator byte over 64, so only the saturation remains.
-	const opennova::env::Rgb gain = state_.color_src_gain();
-	constexpr float kSaturated = 255.0f / 128.0f;
-	return Vector3(std::min(gain.r, kSaturated), std::min(gain.g, kSaturated),
-			std::min(gain.b, kSaturated));
-}
-
 Vector3 MissionEnvironment::get_fill_light_target() const {
 	return to_vector3(state_.fill_light_target());
 }

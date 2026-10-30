@@ -1105,6 +1105,18 @@ struct Entity {
     //  @0x4407D0 (the test @0x4408C8)]
     bool collapse_waits_on_final_husk = false;
     bool holds_final_husk() const { return final_husk_loaded && !husk_promoted; }
+    // The swap fade has work on the row (world::update_item_destroy_fade): it is husked,
+    // draws a pending final husk, or still carries a husked evaluation's phases. An intact
+    // row with none of them keeps its zeroes and emits nothing, so the walks skip it and
+    // the item walk's fade list (EntityRegistry::list_fade_row) holds only these rows.
+    // Ours, not a retail claim.
+    bool needs_destroy_fade() const {
+        if ((engine_flags & kEntityFlagHusk) != 0 || final_husk_overlay || destroy_progress != 0.0)
+            return true;
+        for (const int32_t phase : destroy_phases_q16)
+            if (phase != 0) return true;
+        return false;
+    }
     uint32_t last_state_sent_ms = 0; // entity+560; authority 0x26 send clock
     bool objective_death_scored = false;
     int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay

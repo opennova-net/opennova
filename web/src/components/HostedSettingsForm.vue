@@ -323,14 +323,15 @@
               :id="fieldId('lock_framerate')"
               v-model="form.lock_framerate"
               type="checkbox"
-              :disabled="busy"
+              :disabled="busy || !onDedicated"
               :aria-invalid="errors.lock_framerate ? 'true' : undefined"
               :aria-describedby="describedBy('lock_framerate')"
               class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
             />
             {{ FIELD_LABELS.lock_framerate }}
           </label>
-          <div :id="hintId('lock_framerate')" class="text-xs text-ink-muted">On by default to let the server sleep between updates. Turn off to experiment with an unpaced loop that may use more CPU; the logic tick stays 16 ms.</div>
+          <div v-if="onDedicated" :id="hintId('lock_framerate')" class="text-xs text-ink-muted">On by default to let the server sleep between updates. Turn off to experiment with an unpaced loop that may use more CPU; the logic tick stays 16 ms.</div>
+          <div v-else :id="hintId('lock_framerate')" class="text-xs text-ink-muted">Only a server on a dedicated machine can run unpaced.</div>
           <p v-if="errors.lock_framerate" :id="errorId('lock_framerate')" class="text-xs text-danger">{{ errors.lock_framerate }}</p>
         </div>
       </fieldset>
@@ -352,7 +353,8 @@
 // the start when the server started again ran on one), or with no server on
 // shared machines free runs it on the dedicated machine; there, a pick of the
 // account's free static addresses (the one `preferredAddressId` names first)
-// while any is. While the service offers it, a box lists the server on
+// while any is, and the frame pacing box (anywhere else the server goes paced,
+// the box ticked and disabled). While the service offers it, a box lists the server on
 // NovaLogic's NovaWorld too; else the start sends it off.
 // The game (a base game the service offers, by its product id) comes first and drives
 // the rest: the expansions it offers (expansion games with data), the
@@ -523,6 +525,19 @@ function rotationFor(productId: number, expansionId: number | null) {
 const firstForm = formFrom(props.previous, findProduct(props.products, firstProduct), []);
 firstForm.missions = rotationFor(firstProduct, firstForm.expansion_id).missions;
 const form = reactive(firstForm);
+// Frame pacing is the owner's choice on a dedicated machine alone: an unpaced
+// server keeps a CPU busy that the other servers of a shared machine need, so
+// anywhere else it goes paced (and the service launches it paced there), also
+// after the owner unticked it on a dedicated machine and then picked a shared
+// one. Before the snapshot below: a last server's unpaced setting forced on
+// here is no edit of the owner's.
+watch(
+  onDedicated,
+  (own) => {
+    if (!own) form.lock_framerate = true;
+  },
+  { immediate: true },
+);
 const submitted = ref(false);
 const settingsSnapshot = () => JSON.stringify({ settings: form, ownMachine: ownMachine.value, addressId: addressId.value });
 const initialSettings = settingsSnapshot();
