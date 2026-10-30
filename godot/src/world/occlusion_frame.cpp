@@ -335,7 +335,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 	// cold bodies/weapons (inmatch/role_feeds.h EntityLightingFeed carries the
 	// witnesses: the per-entity setup, its stack push, the 0x80 submit flag
 	// and the person wave's daylight aux).
-	if (env != nullptr) {
+	if (MissionEnvironment *env = environment()) {
 		const int64_t light_query_start = timing ? ticks_usec() : 0;
 		const std::vector<opennova::inmatch::EntityLightingChange> &changes =
 				s->draw_lighting_changes(env->get_light_direction());
