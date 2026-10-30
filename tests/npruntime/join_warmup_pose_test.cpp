@@ -276,7 +276,9 @@ bool run_the_warmup_resolve_takes_the_player_bit() {
 				e.flags &= ~w::kEntityFlagPlayer;
 				e.engine_flags &= ~w::kEntityFlagPlayer;
 			}
-			r.world->registry.configure_pool(2, 1);
+			// Two slots: the static prox table counts one short of pool 2's capacity, so a
+			// full pool's last row is never listed (static_prox_count_bound).
+			r.world->registry.configure_pool(2, 2);
 			w::Entity building;
 			building.kind = w::EntityKind::Building;
 			building.position = {8.0f, 8.0f, 0.0f};

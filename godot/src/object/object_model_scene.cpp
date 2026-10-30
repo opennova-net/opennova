@@ -42,9 +42,6 @@ void ObjectModel::rebuild_scene() {
 		child->queue_free();
 	}
 	retire_geometry_instances();
-	// The submission notifier died in the sweep above; set_model_bounds
-	// recreates it against the rebuilt bounds (even equal ones).
-	screen_notifier_ = nullptr;
 	robj_nodes_.clear();
 	robj_rest_transforms_.clear();
 	authored_occluders_.clear();
@@ -607,34 +604,6 @@ void ObjectModel::build_skeleton(const Ref<SkeletalAnim> &p_rig) {
 	// palette republishes there.
 	skeleton_->connect("skeleton_updated",
 			callable_mp(this, &ObjectModel::settle_skeleton_pose));
-}
-
-// Keep the submission notifier matching the model's current mesh bounds. An
-// empty-bounds model draws nothing: it carries no notifier and stays flagged
-// on-screen so a later real rebuild starts from the safe default.
-void ObjectModel::sync_screen_notifier(const AABB &p_bounds) {
-	if (p_bounds.size == Vector3()) {
-		if (screen_notifier_ != nullptr) {
-			screen_notifier_->queue_free();
-			screen_notifier_ = nullptr;
-		}
-		// Route through the public seam so the on-screen edge wakes the
-		// runtime frame like a real notifier would.
-		set_on_screen(true);
-		return;
-	}
-	if (screen_notifier_ == nullptr) {
-		screen_notifier_ = memnew(VisibleOnScreenNotifier3D);
-		screen_notifier_->set_name("ScreenNotifier");
-		screen_notifier_->connect("screen_entered",
-				callable_mp(this, &ObjectModel::set_on_screen).bind(true));
-		screen_notifier_->connect("screen_exited",
-				callable_mp(this, &ObjectModel::set_on_screen).bind(false));
-		add_child(screen_notifier_);
-	}
-	// Grow past the rest bounds: a playing pose can sweep limbs slightly
-	// outside the mesh-rest AABB; culling stays conservative.
-	screen_notifier_->set_aabb(p_bounds.grow(1.0f));
 }
 
 AABB ObjectModel::compute_transformed_mesh_bounds() const {

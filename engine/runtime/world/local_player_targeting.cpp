@@ -205,8 +205,10 @@ TargetRef guided_heat_target(World &world, const Entity &owner, const AiEntity &
             push({EntityHandle{}, -1, wire, score});
         }
     };
+    // Pools 0 and 1, each to its used count [orig: Entity_FindTargets @0x53A610 - the used
+    //  loads @0x53A6F1 (pool 0), @0x53A8F2 (pool 1)].
     for (int pool = 0; pool <= 1; ++pool) {
-        for (size_t index = 0; index < world.registry.pool_capacity(pool); ++index) {
+        for (size_t index = 0; index < world.registry.pool_used(pool); ++index) {
             const EntityHandle h = EntityHandle::make(pool, static_cast<int>(index));
             const Entity *target = world.registry.get(h);
             if (!target || !target->item_id || h == owner.handle || h == owner.primary_occupant) continue;

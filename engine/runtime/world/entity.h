@@ -62,8 +62,15 @@ constexpr std::size_t retail_pool_capacity(int pool) {
             ? kRetailPoolCapacity[pool]
             : 0;
 }
-// Retail's capacities, each times `scale` (1: retail's own). A slot past the 12-bit
-// handle field (4096) aliases another's handle, so a pool is useful up to 4096.
+// The widest each pool may be configured and still be named on the wire: a handle
+// carries a 12-bit slot (EntityHandle, 4096 slots), and the S2C records name a person
+// by its pool-0 slot's one byte, 0xFF for none (pool0_index_byte: the kill feed, the
+// radio call, the emote, the medic, the squad and capture records), so pool 0 stays at
+// retail's 256. The wire's widths are retail's and stay, so a scaled pool is capped
+// here rather than aliasing a row onto another's name.
+inline constexpr PoolCapacities kWirePoolCapacity = {256, 4096, 4096, 4096, 4096};
+// Retail's capacities, each times `scale` (1: retail's own), each capped at its
+// kWirePoolCapacity.
 PoolCapacities scaled_pool_capacities(std::size_t scale);
 // The capacities the game takes with `expansion` mounted (a name as /exp gives it,
 // ASCII case-blind; "" the base game): an expansion whose content outgrows retail's
@@ -140,8 +147,9 @@ struct TargetRef {
     bool operator!=(const TargetRef &o) const { return !(*this == o); }
 };
 
-// Pool_GetIndexFromPtr(0, entity) as the wire's byte: the pool-0 index (a
-// pool-0 slot is below the pool's 256 capacity), the -1 (0xFF) of an entity
+// Pool_GetIndexFromPtr(0, entity) as the wire's byte: the pool-0 index's low
+// byte (retail's pool 0 holds 256; a pool 0 configured past 256 aliases its
+// slots 256 on onto the byte, a wire width), the -1 (0xFF) of an entity
 // outside pool 0 or of none. [orig: Pool_GetIndexFromPtr @0x441f90 — the
 // base and capacity tests return -1; its callers store the low byte, e.g.
 // NapiNPServerMsg_HandleEmoteRequest @0x501e87, the radio call @0x5143c5, the
@@ -909,18 +917,16 @@ struct Entity {
     // — a hardcoded 0 tail force-stands a crouched retail client, the pre-v32 crouch/prone bug).
     uint8_t net_stance_bits = 0;
     // Wire body-anim state (entity+0x2BC animStateId) + the queued arbitration target
-    // (entity+0x2B8 pendingAnimStateId) + the anim-channel elapsed-ticks-in-loop, mirrored from
-    // the infantry motor each tick for the 0x0A player record bytes 14/15 (emit reads
-    // pending ?: current [orig: @0x4c0cc7]; ratio = trunc ticks clamp 255 [orig:
-    // AnimChannel_AdvancePlayback @0x40B140 via @0x4c0cf2]). Spawn default 44 (idle2)
-    // [orig: Entity_ResetToSpawnState @0x4b9714]; 43 = idle collapse.
+    // (entity+0x2B8 pendingAnimStateId), mirrored from the infantry motor each tick for the
+    // 0x0A player record byte 14 (emit reads pending ?: current [orig: @0x4c0cc7]); byte 15,
+    // the channel ratio, is read at the record's write (world::wire_anim_ratio). Spawn default
+    // 44 (idle2) [orig: Entity_ResetToSpawnState @0x4b9714]; 43 = idle collapse.
     uint8_t net_anim_state = 44;
     // The pending word is the whole +0x2B8 dword: the emit tests the dword and sends its low
     // byte, and a person body on the rokt row sets its high word (+0x2BA) alone.
     // [orig: `cmp dword ptr [edi+2B8h], 0` @0x4C0CC7, `mov cl, [edi+2B8h]` @0x4C0CD6;
     //  Entity_UpdateRocketFlag @0x443DD0 - the +0x2BA store @0x443DDE]
     int32_t net_anim_pending = 0;
-    uint8_t net_anim_phase = 0;
     // Analog control axes (entity+0x130..+0x132, the extended-uplink off-21..23 bytes):
     // joystick steering/throttle. The vehicle motor consumes the CONTROLLING occupant's
     // axes — analogX scales throttle, max(|analogY|,|analogZ|) steers [orig: the analog

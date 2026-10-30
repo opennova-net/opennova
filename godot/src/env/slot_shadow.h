@@ -131,8 +131,22 @@ public:
 	bool is_terrain_pass_drawn() const { return terrain_pass_drawn_; }
 
 	// One display frame: plan, publish the armed capture requests, publish
-	// the drape terms.
+	// the drape terms (plan_frame, then capture_frame).
 	void advance_frame();
+	// Its two halves, for a frame whose presenter re-presents the casters a
+	// slot newly captured between them: the plan (the caster registry, the
+	// sort and assignment, the captured marks, the drape patches and terms),
+	// false when nothing captures this frame; then the capture (each newly
+	// captured caster posed by the slot's own pass, then the adapter's frame
+	// compile). Retail's shadow pass sorts and assigns its slots and then
+	// draws each slot's caster through the caster's own render callback,
+	// which poses it (engine renderer/render_slot_shadow.h carries the
+	// witness), so a caster entering a slot is posed the frame it enters.
+	bool plan_frame();
+	void capture_frame();
+	// The casters the latest plan_frame captured that the frame before had not
+	// (instance ids).
+	const std::vector<uint64_t> &newly_captured() const { return newly_captured_; }
 	// An instrument: the timeline a post-load frame's slot_shadows span is open on (GameWorld
 	// sets it around this frame's advance_frame, null otherwise); the frame's parts nest under
 	// that span: "records" (the caster registry's rebuild), "plan" (the planner, the capture
@@ -225,9 +239,14 @@ private:
 	};
 	std::vector<DeferredFree> deferred_frees_;
 	// This frame's published requests and the caster -> order map behind
-	// get_capture_order_of.
+	// get_capture_order_of; its casters carry ObjectModel::is_slot_captured
+	// (_mark_captured_casters moves the marks to the map's casters, on their
+	// edges: captured_ids_ holds the marked ones).
 	std::vector<SlotCaptureRequest> requests_;
 	HashMap<uint64_t, int> capture_orders_;
+	std::vector<uint64_t> captured_ids_;
+	std::vector<uint64_t> newly_captured_;
+	void _mark_captured_casters();
 	// Slots armed for a capture by the latest advance_frame (bit = order).
 	uint32_t armed_capture_mask_ = 0;
 	// The casters registered with the plan (released on churn).

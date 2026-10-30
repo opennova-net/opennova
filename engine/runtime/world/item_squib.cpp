@@ -65,7 +65,9 @@ void squib_event(World &world, Entity &entity, int phase) {
     const auto *traits = world.tables.item_death_traits.get(entity.item_id);
     if (!traits || !entity.script_next_ssn) return;
     Entity *target = nullptr;
-    for (size_t i=0;i<world.registry.pool_capacity(3);++i) {
+    // Pool 3 to its used count [orig: Entity_InitArcMovement @0x449810 - the used load
+    // @0x44985E].
+    for (size_t i=0;i<world.registry.pool_used(3);++i) {
         Entity *row = world.registry.get(EntityHandle::make(3, uint16_t(i)));
         if (row && row->item_id && row->net_id == entity.script_next_ssn) { target=row; break; }
     }

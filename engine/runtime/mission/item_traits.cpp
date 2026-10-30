@@ -19,6 +19,7 @@
 #include <unordered_map>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/model_geometry.h> // model_bound_radius_q16_from_3di
 #include <runtime/world/physics_class_table.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/present_passes.h> // final_husk_graphics
@@ -181,6 +182,9 @@ void fill_spawn_row(world::PlayerTemplate &row, const DefItemDef *def,
     row.has_item_def = def != nullptr;
     if (def != nullptr) row.type_id = def->id - mission::kItemIdOffset;
     row.has_graphic_model = graphic_model_loads(def, models);
+    row.graphic_model_radius_q16 = row.has_graphic_model
+            ? world::model_bound_radius_q16_from_3di(*models->model(std::string(def->graphic)))
+            : 0;
     row.item_hp = world::retail_signed_i16(def != nullptr ? def->hp : 0);
     row.critical_hp = world::retail_signed_i16(def != nullptr ? def->critical_hp : 0);
     row.item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);

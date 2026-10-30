@@ -1700,8 +1700,7 @@ void JoinerRole::wire_replica_collision_seams() {
 						-> int32_t {
 					const auto start = std::chrono::steady_clock::now();
 					const int32_t ground = world_->ai.collision->raycast_ground_replica(*world_,
-							q.pos, q.source_bound_radius_q16, q.row_handle, q.entity_flags,
-							q.dx, q.dy, 0x4000, 0x20000);
+							q.pos, q.row_handle, q.entity_flags, q.dx, q.dy, 0x4000, 0x20000);
 					note_replica_collision_ns(std::chrono::duration_cast<std::chrono::nanoseconds>(
 							std::chrono::steady_clock::now() - start).count());
 					return ground;

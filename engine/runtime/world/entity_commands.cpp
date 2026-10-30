@@ -65,8 +65,9 @@ bool dcb_id_is(const World &world, const Entity &entity, int32_t ssn) {
 //  masked @0x4f0a84 and compared @0x4f0a8c, the pool mask 0xF @0x4f0a5f]
 EntityHandle EntityCommands::resolve_ssn(uint16_t ssn) const {
     for (int pool = 0; pool < 4; ++pool) {
-        const size_t capacity = world_.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        // Each pool to its used count [orig: @0x4F0A2D (pool 0), @0x4F0A68 (pools 1..3)].
+        const size_t used = world_.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
             if (entity != nullptr && static_cast<uint16_t>(entity_dcb_id(world_, *entity)) == ssn)
@@ -85,7 +86,8 @@ bool EntityCommands::set_ssn_target_selector(int32_t ssn, AiTargetSelector field
     //  e.g. Entity_SetAlertByBmsRef @0x43DA50 - @0x43DA79 / @0x43DAA9]
     if (ssn == 0) return false;
     for (int pool = 0; pool <= 1; ++pool) {
-        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+        // Each pool to its used count [orig: e.g. @0x43DA5E / @0x43DA92].
+        for (size_t slot = 0; slot < world_.registry.pool_used(pool); ++slot) {
             Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
             if (entity == nullptr || !dcb_id_is(world_, *entity, ssn)) continue;
             entity->target_selectors.set(field, value);
@@ -100,7 +102,8 @@ int EntityCommands::set_group_target_selector(int32_t group, AiTargetSelector fi
     if (mission::group_names_none(group)) return 0;
     int changed = 0;
     for (int pool = 0; pool <= 1; ++pool) {
-        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+        // Each pool to its used count [orig: e.g. Entity_SetActionByNetId @0x43D87F / @0x43D8B5].
+        for (size_t slot = 0; slot < world_.registry.pool_used(pool); ++slot) {
             Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
             if (entity == nullptr || entity->group_id != group) continue;
             entity->target_selectors.set(field, value);
@@ -396,7 +399,7 @@ bool EntityCommands::remove_ssn(EntityTarget ssn) {
     // [orig: Entity_Destroy @0x43E840..0x43E858 — DynArray_RemoveById on the
     //  refNum list]
     const uint8_t ref = entity->ref_num;
-    entity->ref_group_member = false;
+    world_.registry.set_ref_group_member(h, false);
     if (entity->item_type == 3) world_.match.drop_carried_object(world_, h);
     world_.facials.release(*entity);
     world_.out.scars.clear_entity(h);
@@ -462,7 +465,7 @@ void EntityCommands::destroy_eweap_group(EntityHandle h) {
     // [orig: @0x546FBC..0x547001 (the list removal), occupied[refNum] = 0
     //  @0x54700A, refNum = 0 @0x547017]
     if ((entity = world_.registry.get(h)) != nullptr) {
-        entity->ref_group_member = false;
+        world_.registry.set_ref_group_member(h, false);
         entity->ref_num = 0;
     }
 }
@@ -498,8 +501,9 @@ void EntityCommands::remove_placed_devices_by_owner(EntityHandle owner) {
     const Entity *owner_row = world_.registry.get(owner);
     if (owner_row == nullptr) return;
     const uint64_t owner_spawn_id = owner_row->registry_spawn_id;
-    const size_t capacity = world_.registry.pool_capacity(1);
-    for (size_t slot = 0; slot < capacity; ++slot) {
+    // Pool 1 to its used count [orig: @0x546E08].
+    const size_t used = world_.registry.pool_used(1);
+    for (size_t slot = 0; slot < used; ++slot) {
         const EntityHandle handle = EntityHandle::make(1, static_cast<int>(slot));
         const Entity *row = world_.registry.get(handle);
         if (row == nullptr || row->item_type_index == 0) continue;
@@ -1058,7 +1062,8 @@ bool EntityCommands::ssn_in_area(int32_t ssn, int area_id) const {
     const Area *area = world_.registry.area(area_id);
     if (ssn == 0 || area == nullptr) return false;
     for (int pool = 0; pool <= 1; ++pool) {
-        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+        // Each pool to its used count [orig: @0x43E582 / @0x43E5D6].
+        for (size_t slot = 0; slot < world_.registry.pool_used(pool); ++slot) {
             const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr) continue;
@@ -1078,7 +1083,8 @@ bool EntityCommands::group_in_area(int32_t group, int area_id) const {
     const Area *area = world_.registry.area(area_id);
     if (mission::group_names_none(group) || area == nullptr) return false;
     for (int pool = 0; pool <= 1; ++pool) {
-        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+        // Each pool to its used count [orig: @0x43C79D / @0x43C7FD].
+        for (size_t slot = 0; slot < world_.registry.pool_used(pool); ++slot) {
             const Entity *entity = world_.registry.get(EntityHandle::make(pool, static_cast<int>(slot)));
             if (entity == nullptr || static_cast<int16_t>(entity->group_id) != group) continue;
             if (pool == 0 && ((entity->flags | entity->engine_flags) & 1u) != 0) continue;
@@ -1180,7 +1186,8 @@ bool EntityCommands::bms_ref_alive(int32_t ssn) const {
     //  read @0x43e66e..0x43e676; no match @0x43e6dc; Entity_Destroy @0x43ea69]
     if (ssn == 0) return false;
     for (int pool = 0; pool <= 2; ++pool) {
-        for (size_t slot = 0; slot < world_.registry.pool_capacity(pool); ++slot) {
+        // Each pool to its used count [orig: @0x43E651 / @0x43E680 / @0x43E6B0].
+        for (size_t slot = 0; slot < world_.registry.pool_used(pool); ++slot) {
             const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
             if (entity == nullptr) continue;
@@ -1611,8 +1618,10 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
     // lookup EntityCommands::resolve_ssn ports has neither.
     if (ssn == 0) return EntityHandle{};
     for (int pool : {0, 1, 2}) {
-        const size_t capacity = world.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        // Each pool to its used count [orig: Entity_FindByDCBAndSetFlag @0x43DB42 / @0x43DB70 /
+        // @0x43DBA0; Entity_SetCommandGroupByDcbId @0x43D6CE / @0x43D702 / @0x43D732].
+        const size_t used = world.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world.registry.get(handle);
@@ -1633,8 +1642,9 @@ EntityHandle resolve_ssn_in_pools012(const World &world, uint16_t ssn) {
 EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
     if (ssn == 0) return EntityHandle{};
     for (int pool : {0, 1, 2}) {
-        const size_t capacity = world.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        // Each pool to its used count [orig: @0x43E00B / @0x43E0C1 / @0x43E167].
+        const size_t used = world.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world.registry.get(handle);
@@ -1648,8 +1658,9 @@ EntityHandle resolve_teleport_target(const World &world, uint16_t ssn) {
 // Marker lookup: pool 3, def type 6088, WP_NUMBER match
 // [orig: the pool-3 scans @0x43dfe0..0x43e003 / @0x43d3b0..0x43d3cf].
 const Entity *find_teleport_marker(const World &world, int32_t wp_number) {
-    const size_t capacity = world.registry.pool_capacity(3);
-    for (size_t slot = 0; slot < capacity; ++slot) {
+    // Pool 3 to its used count [orig: @0x43DFD3 / @0x43D3A4].
+    const size_t used = world.registry.pool_used(3);
+    for (size_t slot = 0; slot < used; ++slot) {
         const Entity *marker =
                 world.registry.get(EntityHandle::make(3, static_cast<int>(slot)));
         if (marker != nullptr && marker->item_id == kParticleEffectMarkerTypeId &&
@@ -1729,8 +1740,10 @@ int EntityCommands::remove_group(int group) {
     if (mission::group_names_none(group) || !world_.rules.logic_authority) return 0;
     int removed = 0;
     for (int pool : pools) {
-        const size_t capacity = world_.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        // Each pool to its used count [orig: @0x43D5EB (pool 2), @0x43D625 (0), @0x43D656 (1),
+        // @0x43D687 (3)].
+        const size_t used = world_.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             const Entity *entity = world_.registry.get(handle);
@@ -1746,8 +1759,9 @@ int EntityCommands::set_group_accuracy(int group, int32_t primary,
                                        int32_t secondary) {
     // [orig: WacCmd_GroupSetAccuracy @0x4F7BE0] Pool 0 only.
     int changed = 0;
-    const size_t capacity = world_.registry.pool_capacity(0);
-    for (size_t slot = 0; slot < capacity; ++slot) {
+    // Pool 0 to its used count [orig: @0x4F7C04].
+    const size_t used = world_.registry.pool_used(0);
+    for (size_t slot = 0; slot < used; ++slot) {
         const EntityHandle handle =
                 EntityHandle::make(0, static_cast<int>(slot));
         const Entity *entity = world_.registry.get(handle);
@@ -1788,8 +1802,9 @@ int EntityCommands::set_group_team(int group, int32_t team) {
     if (mission::group_names_none(group)) return 0;
     int changed = 0;
     for (int pool : pools) {
-        const size_t capacity = world_.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        // Each pool to its used count [orig: @0x43C698 (pool 2), @0x43C6C8 (0), @0x43C6F6 (1)].
+        const size_t used = world_.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             Entity *entity = world_.registry.get(handle);
@@ -1813,8 +1828,9 @@ int EntityCommands::change_group(int old_group, int new_group) {
     if (mission::group_names_none(old_group)) return 0;
     int changed = 0;
     for (int pool : pools) {
-        const size_t capacity = world_.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        // Each pool to its used count [orig: @0x43C5C3 (pool 2), @0x43C5F9 (0), @0x43C640 (1)].
+        const size_t used = world_.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             const EntityHandle handle =
                     EntityHandle::make(pool, static_cast<int>(slot));
             Entity *entity = world_.registry.get(handle);
@@ -1842,8 +1858,9 @@ int EntityCommands::teleport_group_to_marker(int group,
     std::vector<EntityHandle> members;
     static constexpr int pools[] = {0, 1, 2};
     for (int pool : pools) {
-        const size_t capacity = world_.registry.pool_capacity(pool);
-        for (size_t slot = 0; slot < capacity; ++slot) {
+        // Each pool to its used count [orig: @0x43D3D7 / @0x43D436 / @0x43D49A].
+        const size_t used = world_.registry.pool_used(pool);
+        for (size_t slot = 0; slot < used; ++slot) {
             Entity *entity = world_.registry.get(
                     EntityHandle::make(pool, static_cast<int>(slot)));
             if (entity == nullptr || entity->item_type_index == 0 ||

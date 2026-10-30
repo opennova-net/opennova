@@ -219,7 +219,7 @@ void initialized_before_premission_and_retry(Assets &assets) {
         CHECK(entity->npc_respawns == 2);
         CHECK(body->inf.magazine == 19);
         CHECK(body->inf.clip_phase > 0 && body->inf.wpn_clip_phase > 0);
-        CHECK(entity->net_anim_phase > 0);
+        CHECK(w::wire_anim_ratio(body->inf, world.ai.root_motion) > 0);
     };
     verify();
     const auto initial = *world.ai.for_handle(handle);

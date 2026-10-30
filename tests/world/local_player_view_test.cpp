@@ -1609,6 +1609,36 @@ void test_water_scope_legs() {
         CHECK(r.lw.w.out.water_scope_legs.count == 1);
         CHECK(r.lw.w.out.water_scope_legs.legs[0].kind == Kind::Swim);
     }
+    // On a listen host a remote player body's water block runs after the local body's in the
+    // same entity pass: it records no legs, so it leaves the local body's for the view tick
+    // [orig: `cmp g_LocalPlayerEntity, esi` @0x4b8304, @0x4b837b].
+    {
+        Rig r(elevation);
+        Entity seed;
+        seed.kind = EntityKind::Organic;
+        seed.item_id = 0x14B9;
+        seed.net_id = 2;
+        seed.position = {30.0f, 20.0f, 3.0f};
+        seed.alive = true;
+        seed.health = 100;
+        const EntityHandle remote = r.lw.w.registry.spawn(0, seed);
+        r.lw.ai.attach(remote);
+        r.body = r.lw.ai.for_handle(r.lw.local); // the attach may move the rows
+        AiEntity *peer = r.lw.ai.for_handle(remote);
+        CHECK(peer != nullptr);
+        if (peer != nullptr) {
+            r.body->self->position.z.q16 = deep;
+            r.lw.ai.player_water_block(*r.body, r.lw.w, &r.lw.entity(), 0, true,
+                                       r.lw.w.logic_tick);
+            CHECK(r.lw.w.out.water_scope_legs.count == 2);
+            peer->self->position.z.q16 = deep;
+            r.lw.ai.player_water_block(*peer, r.lw.w, r.lw.w.registry.get(remote), 0, true,
+                                       r.lw.w.logic_tick);
+            CHECK(r.lw.w.out.water_scope_legs.count == 2);
+            local_player_view_tick(&r.lw.w, r.v, r.t, r.s, &r.w);
+            CHECK(r.disengaged());
+        }
+    }
     // A Sighted sight answers Player_IsVehicleGunnerScoped, except in SWITCHFROM.
     for (const bool switching : {false, true}) {
         Rig r(DEF_WEAPON_FLAG_SIGHTED);

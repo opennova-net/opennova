@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -162,6 +163,18 @@ public:
 	PackedInt64Array profile_present_snapshot(PresentRowsView snap,
 			int stride, int64_t layout_revision,
 			const int32_t *door_phases, int64_t door_phase_count);
+	// The rows whose casters a render slot newly captured (`p_captured`, model
+	// instance ids) after this frame's walks skipped their legs (no view the
+	// frame draws collected them), presented again over the frame's own rows
+	// ahead of the slot's capture: retail's shadow pass draws its caster through
+	// the caster's own render callback (engine renderer/render_slot_shadow.h
+	// carries the witness). No time passes (a wire row's tick delta is spent).
+	void present_slot_captures(PresentRowsView snap, int stride, int64_t layout_revision,
+			const int32_t *door_phases, int64_t door_phase_count,
+			const std::vector<uint64_t> &p_captured);
+	// The script form over a packed snapshot (the present_snapshot precedent).
+	void present_slot_captures_snapshot(const PackedFloat32Array &p_snap, int p_stride,
+			int64_t p_layout_revision, const PackedInt64Array &p_captured);
 
 	Ref<MissionPresentStats> get_stats_record() const;
 
@@ -411,7 +424,7 @@ public:
 	void present_destruction_drained(const Ref<DestructionDrain> &p_events,
 			const TypedArray<DeathPieceRow> &p_pieces);
 	// The frame's death-piece draws (the occlusion frame's collect,
-	// Simulation::death_piece_draws); the typed form is the tests' data leg.
+	// Simulation::scene_draws); the typed form is the tests' data leg.
 	void present_death_piece_draws_native(
 			const std::vector<opennova::world::DeathPieceDraw> &p_draws);
 	void present_death_piece_draws(const TypedArray<DeathPieceDraw> &p_draws);
@@ -438,6 +451,11 @@ public:
 			int p_launch_userpoint, bool p_local_player, bool p_nvg_active, int p_camera_mode,
 			const Transform3D &p_eye, bool p_inset_view = false);
 	void present_throwable_visuals(const TypedArray<ThrowableVisualRow> &p_visuals);
+	// The flying-round models the main scene's and the weapon Inset's collects draw this
+	// frame, by presentation key (Simulation::scene_draws, InsetOcclusionView::draws):
+	// each round model takes the view's verdict (ThrowablePresenter::apply_round_draws).
+	void present_round_draws(const std::vector<int64_t> &p_keys);
+	void present_round_draws_inset(const std::vector<int64_t> &p_keys);
 	void present_vehicle_trail_visuals(const TypedArray<VehicleTrailVisualRow> &p_visuals);
 	void present_scar_draw_list(const Ref<ScarDrawList> &p_draw_list);
 
@@ -551,6 +569,8 @@ private:
 		int32_t rhc = -1;
 		int64_t cut_sections = -1;
 		int64_t destroyed_section_mask = -2;
+		// The swap fade's publication edge (stamp_destroy_phases).
+		int32_t destroy_published = -1;
 		bool transform_stamp_valid = false;
 		std::array<float, 6> transform_stamp = {};
 		bool aim_payload_valid = false;
@@ -571,6 +591,8 @@ private:
 		int32_t body_variant = 0;
 		int32_t body_source_variant = 0;
 		bool body_parked = false; // PF_ANIM_PHASE_PARKED on the clip/slot paths
+		// The placed walk that last submitted the row (placed_walk_serial_).
+		uint64_t submitted_walk = 0;
 	};
 
 	struct WireRow {
@@ -578,11 +600,18 @@ private:
 		int handle = 0;
 		ObjectID node_id;
 		bool spawned_now = false;
+		bool culled = false; // the last walk took the culled branch
 		// Last-applied edge state (-1 = unknown, first hot frame applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
 		int64_t cut_sections = -1;
 		int64_t destroyed_section_mask = -2;
+		int32_t destroy_published = -1; // stamp_destroy_phases' edge
+		// The PF_HUSK pick last handed to the husk swap (-1: none stands, the
+		// next husked frame hands it) and the husk the swap stamped on the
+		// model then (ObjectModel::get_husk_visual_id).
+		int32_t husk_applied = -1;
+		ObjectID husk_visual;
 		// The remote body-transition scalars (re-seeded from the per-handle
 		// cache on every plan build).
 		int32_t anim_state = -2;
@@ -640,7 +669,14 @@ private:
 	// Stance bits gate the MATCHTERRAIN tier (Terrain_RenderSectorEntitiesBySide
 	// @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 	static void stamp_match_terrain(ObjectModel *model, const float *p, int base);
-    void stamp_destroy_phases(ObjectModel *model, const float *p, int base);
+	// The swap fade's six CTRL slots (OBJECT_DESTROY, OBJECT_DESTROY01..05) of a
+	// SUBMITTED row: a husked row (PF_HUSK) re-asserts its six phases at each
+	// submission, a row that published releases them once at its first
+	// submission back intact, and an intact row that never published does no
+	// work. `published` is the row's edge: -1 unknown (a cold row releases),
+	// 0 nothing held, 1 published.
+	void stamp_destroy_phases(ObjectModel *model, const float *p, int base,
+			int32_t &published);
 	// The mounted right-hand collapse rides its own packed field, edge-gated
 	// to the value change; true when the model was written.
 	static bool stamp_right_hand_collapsed(ObjectModel *model, const float *p,
@@ -670,9 +706,11 @@ private:
 	// --- The placed walk (entity_presenter.cpp) ---
 	bool row_plan_is_current(int64_t size, int stride,
 			int64_t layout_revision);
+	// `p_captured` (present_slot_captures) limits the walk to those models' rows
+	// that it did not submit this frame.
 	void present_snapshot_impl(PresentRowsView snap, int stride,
 			int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
-			MissionFrameProfile *p_profile);
+			MissionFrameProfile *p_profile, const HashSet<uint64_t> *p_captured = nullptr);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
 			int64_t layout_revision);
 	void release_planned_rows();
@@ -689,10 +727,15 @@ private:
 	void append_wire_deferred(Object *node);
 	bool wire_plan_is_current(int64_t snapshot_size, int stride,
 			int64_t layout_revision, int64_t index_generation, int local_handle);
+	// `p_captured` (present_slot_captures) limits the walk to those models' rows
+	// that took the culled branch this frame.
 	void present_wire_rows(PresentRowsView snap, int stride,
-			int tick_delta);
+			int tick_delta, const HashSet<uint64_t> *p_captured = nullptr);
 	void present_one_wire_row(WireRow &row, ObjectModel *model,
 			PresentRowsView snap, int tick_delta);
+	// A wire row's root transform: its position under its aim-owned or entity
+	// basis, composed with the model's scale.
+	static Transform3D wire_row_transform(ObjectModel *model, PresentRowsView snap, int base);
 	// Each view's collector verdict on a row's body and its held gun (the
 	// models' owner bits; the Inset's through their Inset state).
 	void apply_wire_row_views(const WireRow &row, ObjectModel *model, bool p_present_visible,
@@ -708,8 +751,10 @@ private:
 	// The same third-person gun leg for a placed person row (the host's and
 	// SP's mission NPCs are placed models the wire walk defers), keyed by the
 	// row's wire handle; frees the guns of placed rows the walk no longer visits.
+	// `body_present` is the body's present intent; the gun takes the body's
+	// occlusion claim, so a render slot that captured the body draws it too.
 	void update_placed_held_weapon(const Row &row, ObjectModel *body,
-			PresentRowsView snap, bool body_visible);
+			PresentRowsView snap, bool body_present);
 	void retire_unvisited_placed_held_weapons();
 	void update_wire_person_overlays(const WireRow &row, ObjectModel *body,
 			PresentRowsView snap, bool body_visible);
@@ -738,6 +783,9 @@ private:
 	int64_t stat_hidden_ = 0;
 	int64_t stat_plan_rebuilds_ = 0;
 	int64_t stat_transform_builds_ = 0;
+	// The transform leg's work on rows no view collected (of the totals above).
+	int64_t stat_transform_builds_unsubmitted_ = 0;
+	int64_t stat_moved_unsubmitted_ = 0;
 	int64_t stat_aim_dispatches_ = 0;
 	int64_t stat_rhc_dispatches_ = 0;
 	int64_t stat_part_dispatches_ = 0;

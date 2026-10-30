@@ -408,10 +408,12 @@ void VehicleSystem::respawn(Entity &e) {
 		ai->brain.set_pend(ai->brain.f[AiBrain::kCurState] == 15 ? 14 : 22);
 	}
 	// Every source's candidate slice is rebuilt with the vehicle at its
-	// respawn point, the 17-tick phase restarted, ahead of the ground probe.
+	// respawn point, the 17-tick phase restarted, ahead of the ground probe: the
+	// spawns' slice build, so a world whose tables were never built (headless)
+	// keeps its registry fallbacks.
 	// [orig: Entity_RespawnVehicle - the Entity_BuildProximityListsFromPools
 	//  call @0x460133, ahead of Entity_RaycastGroundHeightAndObject @0x460145]
-	if (world_.ai.collision != nullptr) world_.ai.collision->rebuild_candidate_slices(world_);
+	if (world_.ai.collision != nullptr) world_.ai.collision->rebuild_slices_after_spawn(world_);
 	const int32_t ground = respawn_ground(world_, e);
 	if (ground != INT32_MIN)
 		e.position.z.q16 = std::max(world_.env.water_z, bam_add(ground, m.air_probe_z_off));

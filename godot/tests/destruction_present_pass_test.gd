@@ -1263,6 +1263,60 @@ func test_wire_wreck_keeps_the_broken_section_and_the_respawn_draws_every_part()
 	presenter.teardown()
 
 
+# The live (not queued for deletion) husk grafts under `root`.
+func _live_husk_models(root: Node) -> Array:
+	var out: Array = []
+	for husk in _husk_models(root):
+		if not (husk as Node).is_queued_for_deletion():
+			out.append(husk)
+	return out
+
+
+# The wire walk hands its row's retained PF_HUSK pick to the swap on the pick's
+# edges alone; between them the swap stands on the model's husk stamp. A husk
+# restored under a pick that still stands (the stamp moved) is grafted again on
+# the next walk.
+func test_wire_husk_pick_reaches_the_swap_on_its_edges() -> void:
+	var sim := Simulation.new()
+	var placer := _husk_placer()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var index := EntityIndex.new()
+	var presenter := _make_presenter(sim, container, index, placer, _item_db,
+			ItemEffectDirector.new(), null)
+	presenter.setup_wire(sim, placer, container, index)
+	var intact := _sectioned_intact(container)
+	var ref := EntityRef.make(2, 16777215, 0, BUGGY_ITEM_ID + 100000, 0x2001)
+	ref.origin_kind = 255
+	ref.runtime_type_id = BUGGY_ITEM_ID
+	intact.entity_ref = ref
+	presenter.register_wire_node(0x2001, intact)
+	var row := PackedFloat32Array()
+	row.resize(Simulation.PF_STRIDE)
+	row[Simulation.PF_TYPE_ID] = BUGGY_ITEM_ID
+	row[Simulation.PF_WIRE_HANDLE] = 0x2001
+	row[Simulation.PF_KIND] = 255
+	row[Simulation.PF_INDEX] = 16777215
+	row[Simulation.PF_ANIM_STATE] = -1
+	row[Simulation.PF_WPN_ANIM_STATE] = -1
+	row[Simulation.PF_HUSK] = 1
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	var husks := _live_husk_models(container)
+	assert_eq(husks.size(), 1, 'the pick grafts the husk')
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	assert_eq(_live_husk_models(container), husks, 'a standing pick keeps the same husk')
+	# A restore under the standing pick: the husk stamp leaves the model.
+	presenter.present_destruction_drained(DestructionDrain.make([
+			HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x2001, true)]), [])
+	assert_true(_live_husk_models(container).is_empty(), 'the restore drops the husk')
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	var regrafted := _live_husk_models(container)
+	assert_eq(regrafted.size(), 1, 'the standing pick grafts the husk again')
+	presenter.present_wire_snapshot(row, Simulation.PF_STRIDE, 1)
+	assert_eq(_live_husk_models(container), regrafted, 'and keeps it')
+	presenter.teardown()
+
+
 func test_static_husk_carries_entity_light_cube_and_static_owner() -> void:
 	var temp_root := WorldFixture.stage_minimal_root("static_husk_light", false, {
 		"items.def": """begin "Light query shell"

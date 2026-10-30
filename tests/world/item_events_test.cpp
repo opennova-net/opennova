@@ -1071,18 +1071,25 @@ int test_destroy_phases_and_ambient() {
     e.death_tick = 100;
     e.engine_flags = kEntityFlagDead | kEntityFlagHusk;
     w.logic_tick = 109;
-    tick_item_death_motion(w,e,nullptr,0,w.out.destruction);
+    update_item_destroy_fade(w,e);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
+    // The update callback of a row that is no upfx row evaluates no fade: the walk's
+    // visit does (retail's draw), and the upfx leg alone publishes again
+    // [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 (@0x4A9304)].
     w.logic_tick = 110;
     tick_item_death_motion(w,e,nullptr,0,w.out.destruction);
+    CHECK(e.death_tick == 100 && e.destroy_timer == 10);
+    update_item_destroy_fade(w,e);
     CHECK(e.death_tick == 110 && e.destroy_timer == 0);
     w.logic_tick = 160;
-    tick_item_death_motion(w,e,nullptr,0,w.out.destruction);
+    update_item_destroy_fade(w,e);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{21845,65536,32768,0,0,0}));
     w.logic_tick = 260;
-    tick_item_death_motion(w,e,nullptr,0,w.out.destruction);
+    update_item_destroy_fade(w,e);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{65536,65536,65536,65536,65536,65536}));
     e.engine_flags = 0;
+    update_item_destroy_fade(w,e);
+    CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
     e.death_motion = DeathMotionMode::BuildingEffects;
     e.item_type = 5;
     e.position = {3,4,5};
@@ -1090,7 +1097,6 @@ int test_destroy_phases_and_ambient() {
     w.weather.tod_fixed24 = uint32_t(12*65536) << 8;
     traits->regional_loops[1] = "Day";
     tick_item_death_motion(w,e,nullptr,0,w.out.destruction);
-    CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
     CHECK(w.out.sound_emitters.size() == 1);
     CHECK(w.out.sound_emitters[0].set_name == "Day");
     CHECK(w.out.sound_emitters[0].pos.z == 7);

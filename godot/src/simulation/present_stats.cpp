@@ -12,6 +12,8 @@ void MissionPresentStats::_bind_methods() {
 	STAT_BIND(MissionPresentStats, hidden)
 	STAT_BIND(MissionPresentStats, plan_rebuilds)
 	STAT_BIND(MissionPresentStats, transform_builds)
+	STAT_BIND(MissionPresentStats, moved_unsubmitted)
+	STAT_BIND(MissionPresentStats, transform_builds_unsubmitted)
 	STAT_BIND(MissionPresentStats, aim_dispatches)
 	STAT_BIND(MissionPresentStats, rhc_dispatches)
 	STAT_BIND(MissionPresentStats, part_dispatches)

@@ -250,6 +250,9 @@ func test_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	sim.resolve_item_traits(item_db)
+	# The armory, as every peer holds it: each ewep child's class init binds its slot
+	# Def and composes it on its carrier, which the spawn does not.
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	sim.step()
 	var actual := _present_miniguns(sim)
 	assert_gte(actual.size(), expected.size(),
@@ -347,6 +350,8 @@ func test_mark_v_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	sim.resolve_item_traits(item_db)
+	# The armory: the children's ewep class inits compose them (the spawn does not).
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	sim.step()
 	var rows := _synthetic_attachment_rows(sim, child_types)
 	assert_eq(rows.size(), attachments.size())

@@ -361,6 +361,9 @@ private:
 	Vector3 eye_position(const Vector3 &p_pos) const;
 	void update_held_weapon(const Ref<PlayerAimOverlay> &p_overlay);
 	void update_person_overlays();
+	// Whether the avatar draws this frame: a view collected it (its occlusion
+	// claims, ObjectModel::is_view_collected) or a render slot captured it.
+	static bool avatar_drawn(const ObjectModel *p_body);
 	void update_player_camera();
 	void stamp_camera_pose();
 	void update_model_lighting_context();

@@ -158,9 +158,10 @@ void run_ground_cache_class_init(World &world, Entity &e) {
 
 void run_ground_cache_class_inits(World &world) {
 	// [orig: Entity_InitAllFromModels @0x40E460 - the def+0x148 calls over pool 2 @0x40E55B,
-	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 after it]
+	//  pool 3 @0x40E59A, pool 1 @0x40E5D3 and pool 0 after it, each pool to its used count
+	//  (the loads @0x40E52F, @0x40E568, @0x40E5AC, @0x40E5E0)]
 	for (const int pool : { 2, 3, 1, 0 }) {
-		for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
+		for (size_t i = 0; i < world.registry.pool_used(pool); ++i) {
 			if (Entity *e = world.registry.get(EntityHandle::make(pool, uint16_t(i))))
 				run_ground_cache_class_init(world, *e);
 		}
@@ -1044,11 +1045,13 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
 	}
 }
 
+// The update callback runs no swap-fade evaluation of its own: the walk's visit
+// evaluated it before this callback (update_item_destroy_fade), and only the upfx
+// leg below publishes again, as retail's does.
 // [orig: Entity_ApplyGravityAndGroundCheck @0x43FB30;
 // Entity_UpdateWaterPhysicsAndEffects @0x4A92E0]
 bool tick_item_class_motion(World &world, Entity &entity,
         const terrain::TerrainHeightField *terrain) {
-    update_item_destroy_fade(world, entity);
     if (tick_item_section_motion(world, entity)) return true;
     if (entity.death_motion == DeathMotionMode::CraneFalling) {
         int32_t ground = terrain != nullptr && terrain->valid()
@@ -1080,6 +1083,10 @@ bool tick_item_class_motion(World &world, Entity &entity,
     if ((entity.engine_flags & 6u) == 0 && world.rules.last_tick_of_batch)
         update_item_ambient_sound(world, entity);
     if ((entity.engine_flags & kEntityFlagHusk) == 0) return true;
+    // The upfx row publishes the swap fade itself, then its husk leg reads the share
+    // [orig: Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - the def's physics word
+    //  @0x4A92E8, Flags & 4 @0x4A92F5, Entity_PublishSwapFadePhases @0x4A9304].
+    publish_swap_fade_phases(world, entity);
     upfx_husk_leg(world, entity, *traits, entity.destroy_progress);
     return true;
 }
@@ -1114,11 +1121,15 @@ void upfx_husk_leg(World &world, Entity &entity, const ItemDeathTraits &traits, 
 //  @0x4C230C..0x4C2398: the cohort @0x4C2322, the clock @0x4C2369, the
 //  callback @0x4C2378, the -64 @0x4C237F..0x4C2382, the update callback
 //  @0x4C2393]
+// Each walk ends at the pool's used count, never its capacity [orig: the used
+//  loads @0x4C2248 (pool 2) / @0x4C2310 (pool 3), their bound tests @0x4C2265 /
+//  @0x4C232D].
 void tick_item_event_pool(World &world, int pool) {
     if (pool < 2 || pool > 3) return;
     const uint32_t stride = pool == 2 ? 8u : 64u;
-    const size_t cap = world.registry.pool_capacity(pool);
-    for (size_t slot = 0; slot < cap; ++slot) {
+    const size_t used =
+            std::min(world.registry.pool_used(pool), world.registry.pool_capacity(pool));
+    for (size_t slot = 0; slot < used; ++slot) {
         const EntityHandle handle = EntityHandle::make(pool, static_cast<int>(slot));
         Entity *entity = world.registry.get(handle);
         // A row whose +0x1C type index is 0 takes no visit [orig: Entity_UpdateAllEntities
@@ -1149,10 +1160,19 @@ void tick_item_event_pool(World &world, int pool) {
         if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
         // The renderer recomputes the fade timers every frame it draws a
         // husked entity, independent of the update cohort; the presenter
-        // reads the sim's copy [orig: Render_SectorEntity @0x5C4200].
+        // publishes the sim's copy for each husked row it submits
+        // [orig: Render_SectorEntity @0x5C4200].
         update_item_destroy_fade(world, *entity);
         // The update callback: the pure slot cohort [orig: @0x4C22E7 / @0x4C2393].
         if (!cohort) continue;
+        // A pool-2 powerup row's update callback is its respawn countdown, so the
+        // countdown steps one tick in 8 [orig: Powerup_TickRespawn @0x442850
+        //  through @0x4C22E7].
+        if (entity->powerup_def_index >= 0) {
+            powerup_tick_respawn(world, *entity, world.rules.logic_authority);
+            entity = world.registry.get(handle);
+            if (entity == nullptr || entity->registry_spawn_id != lifetime) continue;
+        }
         if (entity->squib.motor) {
             tick_squib(world, *entity);
             continue;

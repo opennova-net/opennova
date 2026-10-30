@@ -148,6 +148,21 @@ public:
 
     void by_group(uint8_t group, std::vector<EntityHandle> &out) const;
 
+    // The refNum group lists, retail's g_EntityReferenceRegistry: refNum n's
+    // list holds the live rows that joined it, in join order, each until it
+    // leaves. Entity::ref_group_member is a row's membership, and the list
+    // follows it: a spawn whose seed is a member (a record carrying a nonzero
+    // refNum) joins, set_ref_group_member joins or leaves a live row (a
+    // joiner's fold, the destroy's removal), and a despawn leaves.
+    // [orig: g_EntityReferenceRegistry - the join Entity_SpawnFromBMSRecord
+    //  @0x40EC23..0x40EC45; the removal Entity_Destroy @0x43E840..0x43E858
+    //  (DynArray_RemoveById); the list read Entity_UpdateAllEntities
+    //  @0x4C2521..0x4C2545]
+    const std::vector<EntityHandle> &ref_group(uint8_t ref_num) const {
+        return ref_groups_[ref_num];
+    }
+    void set_ref_group_member(EntityHandle h, bool member);
+
     // Named, first-class non-entity addressables.
     // Returns the area INDEX (the id space zone-resolved refs use). zone_id is the
     // authored record id [orig: zone record dword @0].
@@ -213,25 +228,38 @@ public:
     }
     void set_pool_used(int pool, size_t count);
 
+    // Every live row, pool by pool in slot order, each pool below its used
+    // count (walk_bound), as for_each_in_pool.
     template <class F>
     void for_each(F &&fn) const {
         for (const Pool &p : pools_) {
-            for (size_t s = 0; s < p.slots.size(); ++s) {
+            const size_t bound = walk_bound(p);
+            for (size_t s = 0; s < bound; ++s) {
                 if (p.used[s]) fn(p.slots[s]);
             }
         }
     }
 
-    // One pool's used slots in slot order — the retail per-pool array walk
-    // (g_PoolList[pool].used entries) the per-tick systems take instead of
-    // the whole registry [orig: Entity_UpdateAllEntities @0x4c2100 walks pool
-    // 1 @0x4c2140.., pool 0 @0x4c244c..; Entity_BuildProximityLists_Pool01
-    // @0x4b9340 walks pools 1 then 0].
+    // One pool's live rows in slot order below its used count — the retail
+    // per-pool array walk (g_PoolList[pool].used entries) the per-tick systems
+    // take instead of the whole registry. Retail reads `used` in every walk,
+    // never the capacity, so a scaled pool (revx02's, up to kWirePoolCapacity) walks
+    // only the rows it allocated [orig: Entity_UpdateAllEntities @0x4c2100 -
+    // @0x4C2134 / @0x4C215E (pool 1, its walk @0x4c2140..), @0x4C242C (pool 0,
+    // its walk @0x4c244c..), @0x4C2248 (pool 2),
+    // @0x4C2310 (pool 3); Entity_BuildProximityLists_Pool01 @0x4b9340 walks
+    // pools 1 then 0; Entity_ClearAllReferences @0x465670 - @0x465673 /
+    // @0x4656F0; Entity_ResetToSpawnState @0x4B9610 - @0x4B982C / @0x4B985D;
+    // EntityPool_RecountByType @0x40E7E0 - @0x40E814 / @0x40E847 / @0x40E87A;
+    // EntityPool_RecountLiveByGroup @0x40E8D0 - @0x40E8FA / @0x40E94A /
+    // @0x40E990]. A live row at or past the count (only set_pool_used's
+    // narrowing store leaves one) is outside every walk, as retail's.
     template <class F>
     void for_each_in_pool(int pool, F &&fn) const {
         if (pool < 0 || pool >= kPoolCount) return;
         const Pool &p = pools_[pool];
-        for (size_t s = 0; s < p.slots.size(); ++s) {
+        const size_t bound = walk_bound(p);
+        for (size_t s = 0; s < bound; ++s) {
             if (p.used[s]) fn(p.slots[s]);
         }
     }
@@ -246,10 +274,25 @@ private:
         // The row holds Entity_Destroy's tail (destroyed_row): set by a despawn,
         // cleared by the next occupant's spawn.
         std::vector<char> freed_by_destroy;
+        // The refNum list the row is on (ref_groups_), 0 for none.
+        std::vector<uint8_t> ref_joined;
         size_t live = 0;
         size_t used_count = 0; // g_PoolList[pool].used, the high-water mark (pool_used)
     };
+    // A pool walk's end: the used count, held to the storage (the mission
+    // load's store is the record count, which no check bounds by the capacity).
+    static size_t walk_bound(const Pool &p) {
+        return p.used_count < p.slots.size() ? p.used_count : p.slots.size();
+    }
     std::array<Pool, kPoolCount> pools_{};
+    // The row's refNum list: join takes a member row onto its refNum's list,
+    // leave takes it off the list it joined.
+    void ref_group_join(Pool &p, size_t slot);
+    void ref_group_leave(Pool &p, size_t slot);
+    // One list per refNum byte, heap-held: 256 list heads inline would grow every World
+    // by 6 KB, past the 1 MB MSVC stack of a test holding several (not a retail claim).
+    std::vector<std::vector<EntityHandle>> ref_groups_ =
+            std::vector<std::vector<EntityHandle>>(256);
     uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"
     std::vector<Area> areas_;
     std::vector<LocationVolume> locations_;

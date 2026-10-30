@@ -22,52 +22,13 @@
 
 namespace opennova::world {
 
-// Attached emplacement children are allocated breadth-first after their carrier,
-// so pool/slot iteration is parent-before-child even for turret-on-vehicle chains.
-// Reuse the mounted-pose provider: a resolved USRP bone follows live PANM; bone
-// zero takes pose_mounted_occupant's parent-root/local fallback.
-static void pose_emplacement_attachments(World &world) {
+// A gunner riding an attached child still sits on the child's last frame: its
+// own body update (the gun channel, its look, its pose) comes later this tick,
+// in the pool-0 walk (finish_entity_update). Refresh only its seat frame on the
+// child the pool-1 walk posed. One pass over the live rows (a rider is found by
+// its own mount word, wherever its seat is held).
+static void refresh_attached_child_riders(World &world) {
     devtools::ProfileLap lap(world.profile);
-    // A carrier's death leaves its attachments in place: the ewep class update
-    // hides a dead PlayerControl hull's children and its vehicle block clears
-    // that hide when the hull respawns (tick_emplaced_weapon_class_update); a
-    // dead carrier of any other kind keeps them riding its wreck. Destroying
-    // the carrier's row destroys every child whose def carries EWeap, as the
-    // child shares the carrier's refNum (EntityCommands::remove_ssn). A child
-    // without EWeap keeps its pointer to the freed row: it takes that zeroed
-    // row's pose (the class update's root copy) and rides whatever entity is
-    // next allocated there. The pass below poses against the row's current
-    // occupant.
-    // [orig: Entity_UpdateTransformAndTurret @0x440CBF..0x440CE1 (the hide),
-    //  @0x440EB3 (the clear), the root copy @0x4410EA..0x4411BC; Entity_Destroy
-    //  @0x43E810 (the refNum walk @0x43E9CD -> EntityReference_DestroyEWeapGroup @0x546F30,
-    //  memset @0x43EA70)]
-    lap.mark(devtools::Slot::SIM_ATTACHMENT_ORPHANS);
-    world.registry.for_each([&](const Entity &snapshot) {
-        if (!snapshot.emplacement_parent.valid()) return;
-        // A stock streamed child carries an exact absolute spawn pose. Only a
-        // resolved attachment row (its subType's slot on the carrier's def) may
-        // replace that wire pose with a userpoint pose. The mounted-rider
-        // refresh below stays independent.
-        if (!snapshot.emplacement_pose_metadata_resolved) return;
-        Entity *child = world.registry.get(snapshot.handle);
-        const Entity *parent =
-                world.registry.get(snapshot.emplacement_parent);
-        if (child == nullptr || parent == nullptr) return;
-        Seat anchor;
-        anchor.type = SeatType::Gunner;
-        anchor.bone_index = child->emplacement_bone;
-        anchor.seat_local = child->emplacement_local;
-        anchor.yaw_offset = child->emplacement_yaw_offset;
-        anchor.attachment_frame = true;
-        world.vehicles.pose_mounted_occupant(*child, *parent, anchor);
-    });
-    lap.mark(devtools::Slot::SIM_ATTACHMENT_CHILDREN);
-
-    // A gunner riding an attached child still sits on the child's last frame: its
-    // own body update (the gun channel, its look, its pose) comes later this tick,
-    // in the pool-0 walk (finish_entity_update). Refresh only its seat frame on the
-    // posed child here.
     world.registry.for_each([&](const Entity &snapshot) {
         if (!snapshot.mounted) return;
         Entity *occupant = world.registry.get(snapshot.handle);
@@ -164,6 +125,7 @@ static void claim_standing_vehicle(World &world, const Entity &body) {
         node = world.registry.get(node->ground_target);
     }
     if (vehicle == nullptr) return;
+    const devtools::ProfileScope claim_scope(world.profile, devtools::Slot::SIM_WALK_CLAIMS);
     const uint32_t vehicle_flags = vehicle->flags | vehicle->engine_flags;
     if ((vehicle->item_attrib & kItemAttribPlayerControl) != 0 &&
             (vehicle->item_attrib & kItemAttribSpawnPoint) == 0 &&
@@ -177,17 +139,26 @@ static void claim_standing_vehicle(World &world, const Entity &body) {
             if (!skip_scan) {
                 for (const Seat &seat : vehicle->seats)
                     if (seat.occupant.valid()) held = true;
+                // The peers are the vehicle's refNum group list, not the pools:
+                // a live type row, not hidden, not the vehicle, standing on it,
+                // an EWeap def and an occupant (+0x170) holds it.
+                // [orig: the list read @0x4C2521..0x4C2545, the tests
+                //  @0x4C2549..0x4C2572, the hold @0x4C2586]
                 if (!held && vehicle->ref_num != 0) {
                     const EntityHandle vh = vehicle->handle;
-                    const uint8_t ref = vehicle->ref_num;
-                    world.registry.for_each([&](const Entity &peer) {
-                        if (held || peer.handle == vh || peer.ref_num != ref) return;
-                        if (((peer.flags | peer.engine_flags) & kEntityFlagCarried) != 0) return;
-                        if (peer.ground_target != vh || !peer.has_item_def ||
-                                (peer.item_attrib & kItemAttribEweap) == 0)
-                            return;
-                        if (peer.primary_occupant.valid()) held = true;
-                    });
+                    for (const EntityHandle member : world.registry.ref_group(vehicle->ref_num)) {
+                        const Entity *peer = world.registry.get(member);
+                        if (peer == nullptr || peer->item_type_index == 0) continue;
+                        const uint32_t peer_flags = peer->flags | peer->engine_flags;
+                        if ((peer_flags & kEntityFlagCarried) != 0 || peer->handle == vh ||
+                                peer->ground_target != vh || !peer->has_item_def ||
+                                (peer->item_attrib & kItemAttribEweap) == 0)
+                            continue;
+                        if (peer->primary_occupant.valid()) {
+                            held = true;
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -251,8 +222,9 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
         AiEntity *body = world.ai.for_handle(row->handle);
         if (body == nullptr || body->brain.f[AiBrain::kOwner] == 0 || !body->inf.active)
             continue;
-        if (body_move_row(world, *body, row) == PhysicsClass::Null) continue;
-        world.ai.update_organic(*body, world, ctx.logic_tick);
+        const PhysicsClass move_row = body_move_row(world, *body, row);
+        if (move_row == PhysicsClass::Null) continue;
+        world.ai.update_organic(*body, world, ctx.logic_tick, move_row);
         if (const Entity *live =
                     world.registry.get(EntityHandle::make(0, static_cast<int>(slot))))
             claim_standing_vehicle(world, *live);
@@ -268,15 +240,20 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // callback has no authority gate before the pickup [orig: the branch
     //  @0x4B2FB8..0x4B2FE5 -> PowerupAction_Pickup @0x4428A0].
     powerup_process_contacts(world, ctx);
+    lap.mark(devtools::Slot::SIM_UPDATE_CONTACTS);
     // Re-read after the walk: on the frame the cine's own dispatch built the
     // end screen the tail dispatches it a second time instead of counting.
     if (world.epilog_screen_active())
         world.epilog.update(world);
     else
         ++world.entity_update_counter;
+    lap.mark(devtools::Slot::SIM_UPDATE_EPILOG);
 }
 
 void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
+    // (The visit's legs report on one lap, an instrument: its head on SIM_WALK_VISIT, each leg
+    // on its SIM_WALK_* slot; a body's update and a decoded row's leg time themselves.)
+    devtools::ProfileLap lap(profile);
     row.pool1_visited = true; // [orig: Entity_UpdatePool1Slot @0x4B8DE1]
     // A row whose +0x1C type index is 0 (a type the items.def lacks, or its row 0, the
     // Null marker) returns with its visited byte set: no class think, no motor, no
@@ -310,7 +287,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     // motor (throwables.cpp); the item update callback still follows it.
     if (ctx.is_authority && body == nullptr) {
         if (PlacedDevice *device = throwables.device_for(row)) {
-            const devtools::ProfileScope device_scope(profile, devtools::Slot::SIM_WALK_DEVICES);
+            lap.mark(devtools::Slot::SIM_WALK_VISIT);
             throwables.update_device(*this, *device, ai.collision, tables.terrain);
             if (Entity *e = live()) {
                 update_item_destroy_fade(*this, *e);
@@ -320,6 +297,7 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
                     tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
                 }
             }
+            lap.mark(devtools::Slot::SIM_WALK_DEVICES);
             return;
         }
     }
@@ -346,11 +324,12 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     else if (class_known ? (body == nullptr || brain != nullptr)
                          : (body == nullptr && !row.is_ai_capable))
         kind = ThinkKind::Item;
+    lap.mark(devtools::Slot::SIM_WALK_VISIT);
     // A mounted non-organic brain takes the seat-follow shortcut: no think and
     // no clock step this visit (its row still runs the motor legs).
     if (brain != nullptr && !row.motor_suspended && row.health > 0) {
-        const devtools::ProfileScope mounted_scope(profile, devtools::Slot::SIM_WALK_MOUNTED);
         if (ai.pose_if_mounted(*brain, *this)) kind = ThinkKind::None;
+        lap.mark(devtools::Slot::SIM_WALK_MOUNTED);
     }
     auto clock_of = [kind](Entity &e) -> int32_t * {
         switch (kind) {
@@ -367,7 +346,6 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
     //  the Entity_BuildProximityList call @0x4B8E25 (CollisionWorld::refresh_blink),
     //  `call eax` @0x4B8E3C]
     if (clock != nullptr && *clock <= 0) {
-        const devtools::ProfileScope think_scope(profile, devtools::Slot::SIM_WALK_THINK);
         if (ai.collision != nullptr) ai.collision->refresh_blink(*this, row);
         switch (kind) {
         case ThinkKind::Brain:
@@ -384,53 +362,63 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         default:
             break;
         }
+        lap.mark(devtools::Slot::SIM_WALK_THINK);
     }
     // The +0x1C4 motor legs: the vehicle mover (a joiner's prediction leg),
-    // the ewep class update, an organic row's body, then the item update
-    // callback (the destroy fade, the squib or the death motion).
+    // the ewep class update and its compose, an organic row's body, a powerup's
+    // respawn countdown, then the item update callback (the destroy fade, the
+    // squib or the death motion).
     // [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
     Entity *e = live();
     if (e == nullptr) return;
-    {
-        const devtools::ProfileScope motor_scope(profile, devtools::Slot::SIM_WALK_MOTOR);
-        vehicles.update_motor(*e, ctx.is_authority);
+    vehicles.update_motor(*e, ctx.is_authority);
+    lap.mark(devtools::Slot::SIM_WALK_MOTOR);
+    if ((e = live()) == nullptr) return;
+    // The ewep update composes an attached child in its matrix leg, past
+    // its gates (compose_emplaced_child), after the publication and ahead
+    // of its spin tail; no other class update composes one.
+    tick_emplaced_weapon_class_update(*this, *e);
+    lap.mark(devtools::Slot::SIM_WALK_EWEP);
+    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0) {
+        ai.update_organic(*body, *this, ctx.logic_tick, body_move_row(*this, *body, e));
+        lap.restart(); // its own SIM_AI_INFANTRY span
+    }
+    // A powerup row's +0x1C4 is its respawn countdown, at its own visit every tick
+    // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef
+    //  @0x442D20, through @0x4B8E53].
+    if (Entity *powerup = live(); powerup != nullptr && powerup->powerup_def_index >= 0) {
+        powerup_tick_respawn(*this, *powerup, ctx.is_authority);
+        lap.mark(devtools::Slot::SIM_WALK_POWERUPS);
+    }
+    // (A leg that removes the row leaves its last visit's item time to the walk's residual.)
+    if ((e = live()) == nullptr) return;
+    update_item_destroy_fade(*this, *e);
+    if (e->squib.motor) {
+        tick_squib(*this, *e);
+    } else {
+        tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
     }
     if ((e = live()) == nullptr) return;
-    {
-        const devtools::ProfileScope ewep_scope(profile, devtools::Slot::SIM_WALK_EWEP);
-        tick_emplaced_weapon_class_update(*this, *e);
-    }
-    if (body != nullptr && body->inf.active && body->brain.f[AiBrain::kOwner] != 0)
-        ai.update_organic(*body, *this, ctx.logic_tick);
-    {
-        const devtools::ProfileScope items_scope(profile, devtools::Slot::SIM_WALK_ITEMS);
-        if ((e = live()) == nullptr) return;
-        update_item_destroy_fade(*this, *e);
-        if (e->squib.motor) {
-            tick_squib(*this, *e);
-        } else {
-            tick_item_death_motion(*this, *e, tables.terrain, env.water_z, out.destruction);
-        }
-        if ((e = live()) == nullptr) return;
-        // A dropped carried object's installed fall or ride (Match owns the
-        // carry objects), or a genx def's own ride.
-        if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
-        if ((e = live()) == nullptr) return;
-        // An ele0 def's own mover [orig: Entity_UpdateFallAndLandState @0x4A20E0 through
-        //  @0x4B8E53].
-        if (e->elevator_motion) update_item_elevator(*this, *e);
-    }
+    // A dropped carried object's installed fall or ride (Match owns the
+    // carry objects), or a genx def's own ride.
+    if (e->drop_motion != DropMotion::None) update_dropped_object(*this, *e);
+    if ((e = live()) == nullptr) return;
+    // An ele0 def's own mover [orig: Entity_UpdateFallAndLandState @0x4A20E0 through
+    //  @0x4B8E53].
+    if (e->elevator_motion) update_item_elevator(*this, *e);
+    lap.mark(devtools::Slot::SIM_WALK_ITEMS);
     // The +0x1C4 call ends here, whichever class leg it took: a joiner's decoded row
     // takes its visit at this slot (D-NET-196). [orig: Entity_UpdatePool1Slot
     //  @0x4B8E41..0x4B8E53, the return @0x4B8E55]
+    // (The joiner's leg times itself onto SIM_WALK_REPLICA_ROWS; no mark follows it on a joiner.)
     if (pool1_slot_leg) {
         pool1_slot_leg(handle);
         if ((e = live()) == nullptr) return;
     }
     // A mounted non-organic brain re-poses on its seat after the mover ran.
     if (brain != nullptr && ctx.is_authority && brain->brain.f[AiBrain::kOwner] != 0) {
-        const devtools::ProfileScope mounted_scope(profile, devtools::Slot::SIM_WALK_MOUNTED);
         ai.refresh_mounted_pose(*brain, *this);
+        lap.mark(devtools::Slot::SIM_WALK_MOUNTED);
     }
     // The trailing decrement, every visit whether or not the row thought.
     // [orig: `add [esi+2ACh],-1` @0x4B8EA0]
@@ -493,18 +481,15 @@ void World::update_all_entities(const TickContext &ctx) {
     for (size_t slot = 0; slot < clear_rows; ++slot)
         if (Entity *e = registry.get(EntityHandle::make(1, static_cast<int>(slot))))
             if (e->item_type_index != 0) e->pool1_visited = false;
-    // The powerup rows' +0x1C4 update callback is the respawn countdown
-    // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef @0x442D20].
-    powerup_tick(*this, ctx);
     auto unvisited_parent = [this](const Entity *e) -> Entity * {
         if (e == nullptr) return nullptr;
         Entity *p = registry.get(e->ground_target);
         return p != nullptr && !p->pool1_visited ? p : nullptr;
     };
     // Decoded joiner rows can exist beyond the registry high-water mark; their
-    // slot adapter retains the full walk, bounded by the 12-bit slot field: a
-    // scaled pool (revx02's 9600) past 4096 would alias each handle onto a lower
-    // slot and visit its decoded row again. Authority snapshots used after respawns.
+    // slot adapter retains the full walk, bounded by the 12-bit slot field (a
+    // scaled pool is capped there, kWirePoolCapacity, so no handle aliases a lower
+    // slot's row). Authority snapshots used after respawns.
     // [orig: Entity_UpdateAllEntities @ 0x4C2100, used read @ 0x4C215E]
     const size_t pool1 = pool1_slot_leg
             ? std::min<size_t>(registry.pool_capacity(1), size_t{0xFFF} + 1)
@@ -534,8 +519,9 @@ void World::update_all_entities(const TickContext &ctx) {
     }
     throwables.compact();
     lap.mark(devtools::Slot::SIM_UPDATE_WALKS);
-    pose_emplacement_attachments(*this);
-    // Static attachment poses can change after AI collision queries. The
+    refresh_attached_child_riders(*this);
+    // Attachment and mover poses change during the walk, after AI collision
+    // queries may have cached their views, and the rider refresh after it. The
     // projectile/out.destruction half of the tick starts a fresh matrix-view
     // epoch so it never inherits a pre-attachment target transform.
     if (collision != nullptr) collision->reset_query_view_cache();
@@ -586,6 +572,7 @@ void World::update_all_entities(const TickContext &ctx) {
     // The SP end-of-round cine's dispatch [orig: Entity_UpdateAllEntities
     //  @0x4C2230 -> Cinematic_EpilogUpdate @0x577950].
     epilog.update(*this);
+    lap.mark(devtools::Slot::SIM_UPDATE_EPILOG);
     // The weather particles and emitters [orig: @0x4C222B / @0x4C2235].
     rotor_wash.tick();
     // The projectiles, then the explosion queue once per frame [orig: the
@@ -609,6 +596,7 @@ void World::update_all_entities(const TickContext &ctx) {
     finish_entity_update(*this, ctx, lap);
     // The body readout's per-tick record (an instrument, no behaviour; body_trace.h).
     body_trace_tick(*this);
+    lap.mark(devtools::Slot::SIM_UPDATE_BODY_TRACE);
 }
 
 // The whole frame: the embedders without a server tick (the bare local
@@ -821,9 +809,9 @@ void World::pump_weapon_actions() {
     // through the installed LocalPlayer's pump, every other through the AI.
     // [orig: WeaponAction_ProcessAllEntities @0x5426A6..0x5426C9 -- the slot
     //  read @0x5426AD, the live test @0x5426B9, the WeaponAction_ProcessFrame
-    //  call @0x5426C1]
+    //  call @0x5426C1; the used read @0x542691]
     const EntityHandle local = cached.local_player;
-    const size_t pool0 = registry.pool_capacity(0);
+    const size_t pool0 = registry.pool_used(0);
     for (size_t slot = 0; slot < pool0; ++slot) {
         const EntityHandle handle = EntityHandle::make(0, static_cast<int>(slot));
         // A row whose ItemTypeIndex is 0 is skipped, the local player's too.
@@ -854,8 +842,8 @@ void World::pump_weapon_actions() {
     // [orig: WeaponAction_ProcessAllEntities @0x5426CB..0x54271E -- the
     //  occupant test @0x5426E9, the live test @0x5426F2, the EWEAP bit
     //  @0x5426FF, the slot @0x542704, the window @0x54270E, the call
-    //  @0x542716]
-    const size_t pool1 = registry.pool_capacity(1);
+    //  @0x542716; the used read @0x5426D1]
+    const size_t pool1 = registry.pool_used(1);
     for (size_t slot = 0; slot < pool1; ++slot) {
         Entity *row = registry.get(EntityHandle::make(1, static_cast<int>(slot)));
         if (row == nullptr) continue;
@@ -1182,33 +1170,37 @@ void World::restore(const Snapshot &s) {
 }
 
 
-void count_mission_units(World &world) {
+void classify_entity_for_counts(World &world, const Entity &e) {
     // Players (the +534 byte; our player_class != 0) count into the separate
     // player bucket the panels never draw; everything else with team >= 2 and
     // a non-zero items.def unit-class byte is one enemy unit, split per class
-    // (the by-player kill tally grows a class past its count). Pools 0 then 1
-    // only: the pool-2/3/4 rows are never counted.
+    // (the by-player kill tally grows a class past its count).
     // [orig: Score_ClassifyEntityForCounts @0x4fd070 — player @0x4fd074,
     //  team gate @0x4fd08d, def+0x196 gate @0x4fd09f, total @0x4fd0a8, the
-    //  class split @0x4fd0c7..0x4fd0dc; Score_CountMissionSubgoalsAndUnits
-    //  zeroes the four @0x509dfb..0x509e0d and walks pool 0 @0x509e13, then
-    //  pool 1 @0x509e40]
+    //  class split @0x4fd0c7..0x4fd0dc]
+    if (e.player_class != 0) return;
+    if (e.team < 2) return;
+    if (static_cast<uint8_t>(e.item_unit_type) == 0) return;
+    MissionKillStats &ks = world.kill_stats;
+    ++ks.enemy_unit_total;
+    switch (score_unit_class(e.item_unit_type)) {
+        case ScoreUnitClass::Vehicle: ++ks.enemy_vehicle_total; break;
+        case ScoreUnitClass::Aircraft: ++ks.enemy_aircraft_total; break;
+        case ScoreUnitClass::Infantry: ++ks.enemy_infantry_total; break;
+    }
+}
+
+void count_mission_units(World &world) {
+    // Pools 0 then 1 only: the pool-2/3/4 rows are never counted.
+    // [orig: Score_CountMissionSubgoalsAndUnits zeroes the four
+    //  @0x509dfb..0x509e0d and walks pool 0 @0x509e13, then pool 1 @0x509e40,
+    //  Score_ClassifyEntityForCounts called @0x509e1d / @0x509e4a]
     MissionKillStats &ks = world.kill_stats;
     ks.enemy_unit_total = 0;
     ks.enemy_vehicle_total = 0;
     ks.enemy_infantry_total = 0;
     ks.enemy_aircraft_total = 0;
-    const auto classify = [&](const Entity &e) {
-        if (e.player_class != 0) return;
-        if (e.team < 2) return;
-        if (static_cast<uint8_t>(e.item_unit_type) == 0) return;
-        ++ks.enemy_unit_total;
-        switch (score_unit_class(e.item_unit_type)) {
-            case ScoreUnitClass::Vehicle: ++ks.enemy_vehicle_total; break;
-            case ScoreUnitClass::Aircraft: ++ks.enemy_aircraft_total; break;
-            case ScoreUnitClass::Infantry: ++ks.enemy_infantry_total; break;
-        }
-    };
+    const auto classify = [&](const Entity &e) { classify_entity_for_counts(world, e); };
     world.registry.for_each_in_pool(0, classify);
     world.registry.for_each_in_pool(1, classify);
 }

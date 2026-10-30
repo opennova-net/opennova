@@ -20,7 +20,9 @@
 #include <runtime/world/death_piece_draw.h> // DeathPieceDraw
 #include <runtime/world/entity.h>         // EntityHandle
 
+#include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -50,6 +52,14 @@ struct InsetOcclusionRequest {
 	int object_detail = opennova::renderer::kObjectLodDetailLevelMax;
 };
 
+// What a scene collect draws beside its entity lists, the main view's and the
+// weapon Inset's alike: the death pieces (OcclusionWorld::collect_death_piece_draws)
+// and the flying rounds' models by presentation key (OcclusionWorld::collect_round_draws).
+struct SceneCollectDraws {
+	std::vector<opennova::world::DeathPieceDraw> death_pieces;
+	std::vector<int64_t> rounds;
+};
+
 // One Inset collect's verdicts: the same walk as the main view's (placed
 // non-building entities, decoded wire rows, the local player), then the
 // changes against what the shell last applied, in the main view's forms
@@ -59,9 +69,10 @@ struct InsetOcclusionView {
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	PackedVector3Array foliage_mask_anchors;
-	// The death pieces the Inset collect draws (DeathPiece_CollectVisible runs
-	// inside every collect) and the Inset pass's g_BlinkWaterVisible.
-	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
+	bool local_collected = false; // the local player's body admitted
+	// The death pieces and flying rounds the Inset collect draws (both walks run
+	// inside every scene collect) and the Inset pass's g_BlinkWaterVisible.
+	SceneCollectDraws draws;
 	bool water_visible = false;
 	PackedInt64Array building_changes;
 	PackedInt32Array culled_changes;
@@ -69,6 +80,10 @@ struct InsetOcclusionView {
 	std::unordered_map<uint32_t, int64_t> building_last;
 	std::vector<int32_t> culled_last;
 	std::vector<int32_t> culled_wire_last;
+	// The placed rows the main view's collect dropped and this one admitted, new
+	// since the shell last took them (view_admissions_since).
+	PackedInt32Array admitted_changes;
+	std::vector<int32_t> admitted_last;
 };
 
 // One water mirror's collect (Simulation::run_mirror_occlusion; the main scene's
@@ -80,6 +95,7 @@ struct MirrorOcclusionView {
 	std::vector<int32_t> culled_bms;
 	std::vector<int32_t> culled_wire;
 	PackedVector3Array foliage_mask_anchors;
+	bool local_collected = false; // the local player's body admitted
 	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
 	PackedInt64Array building_changes;
 	PackedInt32Array culled_changes;
@@ -87,7 +103,37 @@ struct MirrorOcclusionView {
 	std::unordered_map<uint32_t, int64_t> building_last;
 	std::vector<int32_t> culled_last;
 	std::vector<int32_t> culled_wire_last;
+	// As the Inset's: the main view's drops this mirror admitted, new since the
+	// shell last took them, taken only while the mirror collects (`active`: it
+	// ran since its last release).
+	PackedInt32Array admitted_changes;
+	std::vector<int32_t> admitted_last;
+	bool active = false;
 };
+
+// A view's admissions over the main view's drops: the placed rows (BMS ids) in the
+// main view's applied culled list `p_main_sorted` and absent from the view's own
+// `p_view_sorted` (both sorted), the ones not in `r_last` returned and `r_last`
+// replaced. A view's lists hold what its walk admits, but an embedder model with no
+// verdict of that view's own draws by the main view's there, so a row the main view
+// dropped and this view admitted takes the view's explicit admit (engine
+// inmatch/occlusion_collect.h carries the per-pass witness). A row leaving the set
+// needs nothing: either this view's own drop lands through its culled changes, or
+// the main view admits it again.
+inline PackedInt32Array view_admissions_since(const std::vector<int32_t> &p_main_sorted,
+		const std::vector<int32_t> &p_view_sorted, std::vector<int32_t> &r_last) {
+	std::vector<int32_t> now;
+	std::set_difference(p_main_sorted.begin(), p_main_sorted.end(), p_view_sorted.begin(),
+			p_view_sorted.end(), std::back_inserter(now));
+	PackedInt32Array added;
+	auto last = r_last.begin();
+	for (const int32_t id : now) {
+		while (last != r_last.end() && *last < id) ++last;
+		if (last == r_last.end() || *last != id) added.push_back(id);
+	}
+	r_last = std::move(now);
+	return added;
+}
 
 struct SimulationPresentState {
 	// --- the present snapshot ---------------------------------------------------
@@ -162,10 +208,8 @@ struct SimulationPresentState {
 	// The MODEL foliage tier's anchors this frame: the collected (visible)
 	// person entities with a stance bit and no groundEntity, Godot space.
 	PackedVector3Array foliage_mask_anchors;
-	// The death pieces this frame draws (OcclusionWorld::collect_death_piece_draws).
-	std::vector<opennova::world::DeathPieceDraw> death_piece_draws;
-	// Reused probe scratch (cleared per frame, capacity retained).
-	std::vector<opennova::world::EntityHandle> occlusion_probe_handles;
+	// The death pieces and flying rounds the main scene's collect draws this frame.
+	SceneCollectDraws scene_draws;
 	// Delta baselines for the render-occlusion apply path: what the shell last
 	// applied, so steady frames emit nothing. Cleared on world reset and via
 	// reset_occlusion_apply_baseline() (the occlusion A/B seam re-arms a full

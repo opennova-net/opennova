@@ -57,7 +57,9 @@ Result resolve(int16_t nx, int16_t ny, int16_t nz, int32_t velocity,
     auto world = std::make_unique<World>();
     CollisionWorld collision;
     world->registry.configure_pool(0, 1);
-    world->registry.configure_pool(2, 1);
+    // Two slots: the static prox table counts one short of pool 2's capacity, so a
+    // full pool's last row is never listed (static_prox_count_bound).
+    world->registry.configure_pool(2, 2);
     Entity building;
     building.kind = EntityKind::Building;
     building.position = {10, 10, 0};
@@ -76,6 +78,15 @@ Result resolve(int16_t nx, int16_t ny, int16_t nz, int32_t velocity,
         if (engine_flags_only) body.engine_flags = flags;
         else body.flags = flags;
         actor = world->registry.spawn(0, body);
+    } else {
+        // A decoded row walks the wire slice its last build left at its pose.
+        WireSliceRow row;
+        row.wire_handle = 0x0042;
+        row.lifetime = 1;
+        row.pool0_source = true;
+        row.position_q16 = FixedVec3{fp(10), fp(10), fp(5)};
+        row.bound_radius_q16 = fp(1);
+        collision.replace_wire_collision_proxies({}, {}, 0xFFFF, {row});
     }
     for (int i = 0; i < 17; ++i) collision.build_tick_tables(*world);
     CollisionWorld::ResolveState state;
@@ -86,7 +97,7 @@ Result resolve(int16_t nx, int16_t ny, int16_t nz, int32_t velocity,
     int32_t horizontal[2] = {};
     if (replica) {
         collision.resolve_replica(*world, state, pos, horizontal, velocity,
-            0, 117964, fp(1), player, 0, 43, 1, nullptr, 0, 0xffff, &flags, nullptr);
+            0, 117964, fp(1), player, 0, 43, 1, nullptr, 0, 0x0042, &flags, nullptr);
     } else {
         int16_t health = 100;
         collision.resolve_entity(*world, actor, state, pos, horizontal, velocity,

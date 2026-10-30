@@ -301,17 +301,37 @@ public:
     }
 
     // Per-entity render gate for non-building entities (the entity collectors'
-    // occlusion rules, then the render waves' render_TOC): the camera's Flags
-    // match (collect_flags_match; the mirror's collect alone sets one), the
-    // blink-hits gate, then the person leg for organics (person_render_visible) or the
-    // model leg's full-Euler bound sphere, and the outdoors-only three-ray
-    // terrain latch (mutates Entity::occlusion_latch); an entity in no blink
-    // box then takes render_TOC (render_wave_toc_occluded). TRUE = render.
+    // occlusion rules, then the render waves' render_TOC): the XY fog box
+    // (collect_fog_box), the hidden bit, the render-model gate (a usable
+    // collision instance or the assign_render_model stamp, a person's
+    // included), the camera's Flags match (collect_flags_match; the mirror's
+    // collect alone sets one), the blink-hits gate, then the person leg for organics
+    // (person_render_visible) or the model leg's full-Euler bound sphere, and the
+    // outdoors-only three-ray terrain latch (mutates Entity::occlusion_latch); an
+    // entity in no blink box then takes render_TOC (render_wave_toc_occluded).
+    // `static_row` is the static prox table row the statics' collector walks the
+    // entity from: its box reads the row's quantized words ahead of every other
+    // test; without one the entity is a pool 0 / 1 one, boxed on its own entity+0
+    // radius and position after the Flags match. TRUE = render.
     // [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 (statics) /
     // Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60 (pools 0/1) — the gates
-    // @ 0x5c7022-0x5c708a and the latch @ 0x5c7125-0x5c7162]
+    // @ 0x5c6f82-0x5c708a / @ 0x5c8cef-0x5c8dd1 and the latch @ 0x5c7125-0x5c7162]
     bool entity_render_visible(World &world, CollisionWorld &collision, Entity &ent,
-                               const OcclusionFrameCamera &cam);
+                               const OcclusionFrameCamera &cam,
+                               const CollisionWorld::StaticSlotView *static_row = nullptr);
+    // The collectors' XY fog box: an entity whose X or Y lies farther from the
+    // eye's than its radius word plus the fog distance is skipped ahead of the
+    // view cull and the latch (the depth test alone keeps a row just past the fog
+    // at an oblique heading, where it would tick its latch and draw the shared
+    // stream). A pool 0 / 1 entity passes its entity+0 radius and entity+4 / +8
+    // position; the statics' and the buildings' walks their static prox row's
+    // quantized words (static_slot_coord_q16, the radius word << 16). Wrapping
+    // 32-bit sums and differences, the x86 neg magnitude, a signed compare.
+    // TRUE = inside. [orig: Terrain_CollectVisibleEntitiesForTerrain
+    //  @ 0x5c8d12..0x5c8d3e; Terrain_CollectVisibleEntities_0 @ 0x5c6f82..0x5c6fcb;
+    //  Terrain_CollectVisibleSectorUserpoints @ 0x5c6bb0..0x5c6bff]
+    static bool collect_fog_box(const OcclusionFrameCamera &cam, int32_t x, int32_t y,
+                                int32_t radius_q16);
     // The collector's blink-hits gate: an entity inside blink boxes (first
     // hit nonzero) is collected only while one of its packed (building,
     // section) hits is set in the frame's raw section mask. TRUE = pass.
@@ -386,6 +406,18 @@ public:
     //  @ 0x57b830]
     void collect_death_piece_draws(const World &world, const OcclusionFrameCamera &cam,
                                    std::vector<DeathPieceDraw> &out) const;
+    // The frame's flying-round models (world/present_drains.cpp): the scene
+    // collect's RoundPool tail over this view, after the death pieces. An active
+    // round is collected when it lies within the fog distance of the eye on each
+    // axis (no radius word), passes round_model_collected, its item row has a
+    // model, its view depth lies within the fog, and the viewport clip at four
+    // times the model's radius keeps it. `out` takes each collected round's
+    // presentation key (round_presentation_key), pool order, cleared first. The
+    // main scene's collect and the weapon Inset's run it; no water mirror's does.
+    // [orig: Terrain_CollectVisibleEntities @ 0x5c9160 - RoundPool_GetBase called
+    //  @ 0x5c91c1 after DeathPiece_CollectVisible @ 0x5c91bc]
+    void collect_round_draws(const World &world, const OcclusionFrameCamera &cam,
+                             std::vector<int64_t> &out) const;
 
     // --- frame results ---
     // Whether the building entered the visible batch this frame (distance +
