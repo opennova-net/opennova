@@ -5,8 +5,7 @@
 // (apps/novaworld_common) and the databases, constructing only its own parts:
 //
 //   gate        the gate (UDP 7597): each client's lobby, picked from the lobby
-//               instances that take clients, and the hosts' status blobs
-//                                                     apps/novaworld_gate
+//               instances that take clients           apps/novaworld_gate
 //   lobby       one lobby instance (the NovaWorld UDP listener, 64206, with its
 //               ConnectionManager tick and its lobby command drain), registered
 //               at the endpoint it announces as it starts; as many as the

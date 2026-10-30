@@ -165,7 +165,6 @@ bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &er
 	Vfs vfs;
 	LaunchFlags flags;
 	flags.expansion = plan.target.expansion;
-	flags.game = plan.target.game;
 	if (!mount_install(vfs, dir, flags) || vfs.mounted_expansion() != plan.target.expansion) {
 		error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
 		                     plan.target.is_expansion()
@@ -675,7 +674,7 @@ void BuildRun::compare_base(uint64_t budget) {
 	if (!base_) {
 		base_ = std::make_unique<BaseMatch>();
 		std::string error;
-		if (!base_->open(plan_.target.install, plan_.target.game, error)) {
+		if (!base_->open(plan_.target.install, error)) {
 			base_.reset();
 			return fail(make_finding(CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error,
 			                         "The expansion " + plan_.target.expansion + " plays over the base game, and " + error +

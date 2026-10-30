@@ -4,8 +4,7 @@ The NovaWorld service's gate: retail's first contact on UDP 7597 (`ONNET_GATE_UD
 It answers each probe with the lobby address every lobby instance announces (the
 deployment's one, its load balancer's), while one takes clients, in the shape NovaLogic's live
 gate answered (no `POSTIPADDRESS` / `POSTIPPORT`, the `startupurl` on `[domainname]`, which the
-client fills from the lobby's web domain), and takes the hosts' status blobs on the same port.
-`ONNET_LOBBY_ENDPOINT`, optional, is the lobby it hands out while no instance takes clients;
+client fills from the lobby's web domain). `ONNET_LOBBY_ENDPOINT`, optional, is the lobby it hands out while no instance takes clients;
 with neither, a probe goes unanswered (logged, and counted in the heartbeat's
 `probes_unanswered`, beside `lobbies_live`: the deployment alarms on it, since such a gate is
 otherwise healthy).

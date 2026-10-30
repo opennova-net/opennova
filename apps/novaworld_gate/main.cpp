@@ -1,9 +1,9 @@
 // opennova-novaworld-gate: the gate (program/program.h). Retail's first contact on
 // UDP 7597 (ONNET_GATE_UDP_PORT): each probe answered with the lobby address
-// every lobby instance announces, while one takes clients (gate_listener.h);
-// the same port takes the hosts' status blobs. Stateless beyond its cached
-// read of the lobby instances: as many gates as the deployment runs behind one
-// address, and a redeploy of any other program leaves it serving.
+// every lobby instance announces, while one takes clients (gate_listener.h).
+// Stateless beyond its cached read of the lobby instances: as many gates as the
+// deployment runs behind one address, and a redeploy of any other program
+// leaves it serving.
 // ONNET_LOBBY_ENDPOINT, optional, is the lobby it hands out while no instance
 // takes clients; with none, such a probe goes unanswered (logged, and counted
 // in the heartbeat's probes_unanswered, which the deployment alarms on), and

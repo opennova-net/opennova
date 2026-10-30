@@ -14,7 +14,7 @@ The hosted servers (the fleet, its supervisor, the products, the console) are
 
 | Listener | Port | Protocol |
 | --- | --- | --- |
-| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: each game selects one" below); the same port is a sink for a retail host's plaintext status heartbeat (`Lobby_UpdateServerInfo`), folded into `active_hosts` by `HostKey`, which no reply names as `POSTIPPORT` |
+| `GateListener` | UDP 7597 | `novaworld_gate` probe → gate response (NWU `GATEAPI`) from the tag's lobby ("Lobbies: each game selects one" below) |
 | `NwUdpListener` | UDP 64206 | NWU framing -> session handshake (0x41/0x42/0x43/0x46) -> NOVAWORLDUDP containers; the opt-in JO game host (`ONNET_EMBEDDED_JO_HOST`) on a UDP port of its own |
 | `HttpListener` (Crow, `BUILD_NOVAWORLD_HTTP`) | TCP 8080 | `NW*.dll` routes + `/api/*` backend + web portal fallback |
 | `UpdateListener` (`apps/novaworld_web/updater/`) | TCP 20044, 20556, 21068, 21580 (`ONNET_UPDATE_PORTS`) | UPDATE.EXE's gateway and update server over the published releases, with `ONNET_UPDATE_HOST` set and an object store ([`hosted/README.md`](hosted/README.md) "The update listener") |
@@ -42,7 +42,7 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 
 | Program | Its parts | Scales by |
 | --- | --- | --- |
-| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: each game selects one" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
+| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients ("Lobbies: each game selects one" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
 | lobby (`apps/novaworld_lobby`) | one lobby instance: the NW UDP listener, its `ConnectionManager` tick, its lobby command drain, its session rows; its instance's registration, a row of its own, at the one lobby address ("Lobby instances" below) | more lobbies behind the one lobby address, each its own instance |
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the update listener (with `ONNET_UPDATE_HOST` and an object store), the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | fleet (`apps/novaworld_fleet`) | the election ("The fleet program" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links and the console drain; it runs and schedules no job | one leader (a standby waits) |
@@ -566,8 +566,7 @@ port) and keeps each flow on one task.
   connection); after a failed read, its fallback for six refreshes; with none live, its
   fallback `ONNET_LOBBY_ENDPOINT`; with no fallback, no reply (logged every 10 s at most).
   The reply is the gate's one send, to the probe's source, so behind a UDP load balancer it
-  rides the probe's flow back. A status blob posted to the gate's port lands on the gate,
-  whichever lobby holds its listing (`apply_status_blob` finds the listing by its key).
+  rides the probe's flow back.
 - **The lobby behind the balancer**: its target group (UDP 64206, client addresses and
   ports preserved, so a lobby lists a host at its own address) checks each task's `/livez`.
   A deployment starts the new task first, then the balancer drains the old one (10 s)
@@ -1271,8 +1270,6 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
     generation: the account's row (`FOR NO KEY UPDATE`), so a password reset or a ban
     runs wholly before the mint (which then mints nothing) or wholly after (and
     deletes what it minted);
-  - the status blob's read-modify-write: the host's row (`FOR NO KEY UPDATE`), which
-    the lobby's own write of the row and its roster locks first too;
   - a username or handle a registration, an admin's edit or a service account
     writes: an advisory lock per name (`hashtext(lower(name))`), taken for each name
     it checks or writes, since a username may equal no account's username or handle

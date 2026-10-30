@@ -22,7 +22,7 @@ service on Fargate across two availability zones, whose tasks keep no state of t
 
 | Program | Runs | Tasks (default) | Reached at |
 |---|---|---|---|
-| gate | the gate (UDP 7597; the hosts' status blobs land there too) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
+| gate | the gate (UDP 7597) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
 | lobby | a lobby instance (UDP 64206) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP: one lobby address for every lobby task, which the gate hands out |
 | web | the retail HTTP routes and the website's API (8080), the update service (20044, 20556, 21068 and 21580) and the portal's nginx (443, and 8082 in front of the retail routes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone (to the portal's 8082), the four update ports from everyone (each to web's 20044) |
 | fleet | the fleet's reconcile pass, the admin links, the console drain, the machines' internal listener (8070); no job and no cloud call | 1 (elected; a standby may wait beside it), 0.25 vCPU / 0.5 GiB | `fleet.<deployment>.opennova.internal`, its Cloud Map name |

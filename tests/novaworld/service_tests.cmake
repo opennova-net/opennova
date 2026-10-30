@@ -797,10 +797,10 @@ if(BUILD_NOVAWORLD_HTTP)
     # invariant a check and its write hold, two writers on two connections, the first's
     # transaction held open until the second waits on its lock (pg_locks): two starts against
     # one account's limit and the cap, a session and a hosting key minted around a password
-    # reset either way, the status blob folded into a row the lobby is writing, crossing
-    # usernames and a shared PCID, two first admins, the CD keys' assignment, revocation,
-    # auto-mint and activation; and the edge's writes beside an open web transaction, never
-    # waiting. Over the libraries hosted_supervisor_test links and web's core (cd_keys.h).
+    # reset either way, crossing usernames and a shared PCID, two first admins, the CD keys'
+    # assignment, revocation, auto-mint and activation; and the lobby's writes beside an open web
+    # transaction, never waiting. Over the libraries hosted_supervisor_test links and web's core
+    # (cd_keys.h).
     add_executable(db_locks_test novaworld/db_locks_test.cpp)
     target_link_libraries(db_locks_test PRIVATE
         opennova_novaworld_fleet_core opennova_novaworld_web_core opennova_novaworld_hosting_cloud

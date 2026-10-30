@@ -9,20 +9,16 @@
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_metrics.h>
-#include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_repository.h>
-#include <net/novaworld/lobby_update.h>
 #include <net/novaworld/unknown_tracker.h>
 
 #include <chrono>
 #include <cstdio>
 #include <ctime>
-#include <exception>
 #include <future>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace opennova::novaworld_server {
@@ -57,8 +53,8 @@ uint64_t steady_ms() {
 // POST IP" / "NO NW POST PORT") without them unless the NWU-in-use word is
 // set, which a UDPNOVAWORLD line (this reply always has one) or the junction
 // bypass sets [orig: CNapiGateManager_ProcessResponse @0x4ced20], so the reply
-// carries no pair: a host posts its status blob there only when it is off NWU
-// [orig: Lobby_UpdateServerInfo @0x4ff441..0x4ff62c].
+// carries no pair, and no host posts its status blob, which goes there only
+// when it is off NWU [orig: Lobby_UpdateServerInfo @0x4ff441..0x4ff62c].
 //
 // LobbyName, the startupurl's query and the GLSVSS leg are the probe's games
 // row's (lobby_name, startup_query, glsvss_*): JO's row answers
@@ -248,7 +244,7 @@ bool GateListener::start(const ServerConfig &config) {
 		            loggable(g.startup_query, 255).c_str());
 	}
 
-	std::printf("[gate] listening on UDP :%u (also the host-status sink)\n",
+	std::printf("[gate] listening on UDP :%u\n",
 	            static_cast<unsigned>(bound_port_));
 	return true;
 }
@@ -278,9 +274,8 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		if (n <= 0) continue;
 
 		// Strip the LSB-scatter CRC envelope first: retail wraps the gate
-		// probe, the METPROTOCOL block and the status blob in it
-		// [orig: NapiSocket_SendTo @0x62cfa0 encodes when its encrypt flag is set;
-		//  CNapiNPManager_SendTo @0x61ec20 passes 1 for the status blob].
+		// probe and the METPROTOCOL block in it
+		// [orig: NapiSocket_SendTo @0x62cfa0 encodes when its encrypt flag is set].
 		std::vector<uint8_t> plain(static_cast<size_t>(n));
 		size_t inner_len = 0;
 		if (opennova::napi_envelope_decode(rx, static_cast<size_t>(n),
@@ -297,32 +292,6 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 			std::printf("[gate] metrics block=%s fields=%zu entries=%zu\n",
 					loggable(metrics.block).c_str(), metrics.fields.size(), metrics.entries.size());
 			continue;
-		}
-
-		// The host-status heartbeat is plaintext (no NWU) and carries the
-		// "HostKey =" preamble; it lands here when a host posts it to this port,
-		// which no reply names (no POSTIPPORT).
-		{
-			LobbyStatusBlob blob;
-			const std::string_view text(reinterpret_cast<const char *>(plain.data()),
-			                            plain.size());
-			if (lobby_update_parse(text, blob)) {
-				bool applied = false;
-				if (db_conn) {
-					try {
-						applied = hostdb::apply_status_blob(**db_conn, blob);
-					} catch (const std::exception &e) {
-						std::fprintf(stderr, "[gate] WARN status blob apply: %s\n", e.what());
-					}
-				}
-				std::printf("[gate] %s:%u status blob lobby=%s host_key=%zuB vars=%zu players=%zu "
-							"-> %s\n",
-						opennova::net::endpoint_to_string(from).c_str(), from.port,
-						loggable(blob.lobby_name).c_str(), blob.host_key.size(),
-						blob.host_vars.size(), blob.player_names.size(),
-						applied ? "applied" : "no matching host");
-				continue;
-			}
 		}
 
 		// Decrypt with NWU + GATE_NWU_KEY ("GATEAPI") to recover the tag.
@@ -466,8 +435,8 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		}
 		reply.resize(reply_size);
 		// The gate's one send: this reply, to the probe's source, at once. It
-		// never sends a datagram of its own (the METPROTOCOL block and the
-		// status blob above are taken without an answer), so behind a UDP load
+		// never sends a datagram of its own (the METPROTOCOL block above is
+		// taken without an answer), so behind a UDP load
 		// balancer (ECS: the NLB on 7597) every datagram it sends rides the
 		// probe's own flow back through the balancer, never the task's own
 		// address, which a client's NAT would drop.

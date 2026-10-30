@@ -45,15 +45,14 @@ struct BuildArchive {
 
 // What the build makes (ADR 0046 S16): the game standalone, its three boot-table archives at the
 // build's root, which a launch on the build directory mounts in place of the install's; or the
-// expansion `expansion` of the game install `install` (its target game's `game`), the folder
-// `expansion/<expansion>/` with its two archives and its loose files, which a launch with
-// `/exp <expansion>` mounts over the install's base game. An expansion of a project's base game (ADR
+// expansion `expansion` of the game install `install`, the folder `expansion/<expansion>/` with its
+// two archives and its loose files, which a launch with `/exp <expansion>` mounts over the install's
+// base game. An expansion of a project's base game (ADR
 // 0046 T5) plays over that project's export instead: `install` is the export's folder and
 // `base_project` names the project, so a base that does not mount says to export it.
 struct BuildTarget {
 	std::string expansion;    // "" for the standalone game
 	std::string install;      // the base game the expansion plays over ("" when none is set)
-	std::string game;         // the project's target game (title code), the base's /game
 	std::string base_project; // the base game's project as the project file names it ("" the install's)
 	// The archive each imported game file came from (ProjectDocument::archives), which places it; null
 	// places every file by its kind.

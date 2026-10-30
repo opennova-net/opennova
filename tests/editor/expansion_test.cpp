@@ -374,7 +374,7 @@ static int test_install_view() {
 	// The base game under an expansion project (base_install_spec): no expansion's file; the root's loose ones,
 	// not its version text, which the game never reads.
 	InstallView base;
-	TEST_EXPECT(base.open(base_install_spec(root, document), error));
+	TEST_EXPECT(base.open(base_install_spec(root), error));
 	TEST_EXPECT(text_of(base, "shared.txt") == "base" && text_of(base, "x1only.txt") == "<none>" &&
 	            text_of(base, "header.bik") == "base header" && text_of(base, "MENUMUS.SBF") == "base music" &&
 	            text_of(base, "menumus.bin") == "base menu script" && !base.find("version.txt"));
@@ -384,7 +384,7 @@ static int test_install_view() {
 	InstallView standalone;
 	TEST_EXPECT(standalone.open(install_spec(root, document), error));
 	TEST_EXPECT(standalone.files().size() == base.files().size() && !standalone.find("VERSION.TXT"));
-	TEST_EXPECT(install_spec(root, document) == base_install_spec(root, document));
+	TEST_EXPECT(install_spec(root, document) == base_install_spec(root));
 	// /exp x1, the project building as jxm: the expansion's copy of a shared name, its folder's video and
 	// bank, the root's other video; the expansion's own names under the project's; the base's music pairs,
 	// either version text and the player's file not listed.

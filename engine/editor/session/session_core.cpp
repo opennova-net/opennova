@@ -1694,7 +1694,6 @@ BuildTarget SessionCore::build_target() const {
 	target.expansion = view_.project.document->expansion.name;
 	target.install = base_game();
 	target.base_project = view_.project.document->expansion.base_project;
-	target.game = view_.project.document->target_game;
 	// A project on NovaWorld's lobby file as the view holds it (found once as it is cached: NovaWorldView::
 	// gate_tag_file), never read here, which every findings pass asks.
 	// An expansion's version.txt likewise (NovaWorldView::version_file; "" while nothing is published).

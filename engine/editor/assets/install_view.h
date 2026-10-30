@@ -40,22 +40,21 @@ namespace opennova::editor {
 // (gameprofile/player_files.h) are never listed: no project holds them.
 struct InstallSpec {
 	std::string root;              // the install's folder
-	std::string game;              // the title code the stock launch names (/game)
 	std::string expansion;         // the installed expansion mounted (/exp), "" for the base game
 	std::string project_expansion; // the project's own expansion name, "" for a standalone project
 
 	bool operator==(const InstallSpec &other) const {
-		return root == other.root && game == other.game && expansion == other.expansion &&
+		return root == other.root && expansion == other.expansion &&
 		       project_expansion == other.project_expansion;
 	}
 	bool operator!=(const InstallSpec &other) const { return !(*this == other); }
 };
 
-// The view of an install a project imports from: its game, `/exp` the expansion it builds on, its own
-// expansion's name.
+// The view of an install a project imports from: `/exp` the expansion it builds on, its own expansion's
+// name.
 InstallSpec install_spec(const std::string &root, const ProjectDocument &document);
 // The base game's view of the same install: no expansion, no renames.
-InstallSpec base_install_spec(const std::string &root, const ProjectDocument &document);
+InstallSpec base_install_spec(const std::string &root);
 // The view an expansion project imports an installed expansion of the install from (2026-10-24): `/exp
 // <expansion>`, its files renamed to the project's expansion.
 InstallSpec installed_expansion_spec(const std::string &root, const ProjectDocument &document,

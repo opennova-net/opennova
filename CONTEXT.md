@@ -184,8 +184,8 @@ _Avoid_: role, service (for one program), tier, microservice, pod
 **Gate**:
 The program that is retail's first contact: UDP port 7597 (the protocol in
 `engine/net/novaworld/gate`, the listener in `apps/novaworld_gate`), which hands a client the HTTP
-service URL and the one lobby address every **lobby instance** announces, and takes the hosts'
-status blobs on the same port. It holds no session; its address is the one retail's hosts file names.
+service URL and the one lobby address every **lobby instance** announces. It holds no session; its
+address is the one retail's hosts file names.
 _Avoid_: lobby, edge
 
 **Lobby**:

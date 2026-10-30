@@ -2240,8 +2240,7 @@ static int test_edit_costs_what_it_touched() {
 		                                   cold.rows.begin() + std::ptrdiff_t(cold.gate_end));
 		ShippedFiles shipped;
 		shipped.unsaved = {"menus/a.mnu"};
-		BuildTarget target;
-		target.game = v.project.document->target_game;
+		const BuildTarget target{};
 		const BaseNames base{&v.project.base_files};
 		const std::vector<Diagnostic> blockers =
 		        plan_blockers(paths, *v.project.scan, *v.project.requirements, gate, target, &base, &shipped);

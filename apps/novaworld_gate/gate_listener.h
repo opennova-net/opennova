@@ -23,13 +23,7 @@ namespace opennova::novaworld_server {
 struct ServerConfig;
 
 // Port-7597 UDP listener implementing the simple GATEPROTOCOL bootstrap
-// (NWU-encrypted text-tag request -> VAR-encoded plain-text response) and,
-// on the same socket, a sink for the plaintext host-status heartbeat a
-// hosting retail client off NWU posts every ~30 s to its
-// POSTIPADDRESS:POSTIPPORT [orig: Lobby_UpdateServerInfo @0x4ff448..0x4ff62c],
-// which no reply names (the reply's udpnovaworld keeps a host on NWU); the
-// blob is told apart from a probe by its "HostKey =" preamble before the NWU
-// tag decrypt runs.
+// (NWU-encrypted text-tag request -> VAR-encoded plain-text response).
 //
 // The lobby it hands each client (udpnovaworld): the address every lobby
 // instance announces, the deployment's one lobby address (on ECS the load
@@ -87,10 +81,9 @@ public:
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
 	// Optional DB pool. When set, the receive thread leases one connection for
-	// its lifetime and reads the games catalogue on it (start() waits for
-	// both), and a received host-status blob refreshes the active_hosts row
-	// that owns its HostKey on it (hostdb::apply_status_blob). Without a pool
-	// the catalogue is empty and every probe goes unanswered.
+	// its lifetime and reads the games catalogue and the lobby instances on it
+	// (start() waits for the first). Without a pool the catalogue is empty and
+	// every probe goes unanswered.
 	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
 	// Bind the UDP socket and spawn the receive loop, which leases its DB

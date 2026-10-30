@@ -188,7 +188,7 @@ std::vector<std::string> list_retail_file_names(const std::string &retail_root, 
 
 std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document) {
 	if (document.expansion.standalone()) return std::vector<std::string>();
-	return list_install_file_names(base_install_spec(retail_root, document));
+	return list_install_file_names(base_install_spec(retail_root));
 }
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
