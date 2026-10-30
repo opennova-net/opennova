@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <editor/project/project_document.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_windows.h>
@@ -78,6 +79,50 @@ SessionView tracked_view() {
 ImGuiID novaworld_item(std::initializer_list<const char *> steps) { return item_id(Ui::window_id("NovaWorld"), steps); }
 ImGuiID put_item(std::initializer_list<const char *> steps) { return item_id(ImHashStr("Put on NovaWorld"), steps); }
 
+// Every standing, with what the window and the status bar say of it.
+void test_standing() {
+	using Kind = NovaWorldStandingKind;
+	SessionView v = tracked_view();
+	NovaWorldView &c = v.novaworld;
+	const auto is = [&c](Kind kind, const char *line, const char *status, const char *what) {
+		const NovaWorldStanding standing = novaworld_standing(c);
+		CHECK(standing.kind == kind && standing.line == line && standing.status == status, what);
+	};
+	is(Kind::Behind, "r3, r5 on NovaWorld, 2 changed", "novaworld.test: r3, 2 changed, 2 incoming", "behind and changed");
+	CHECK(novaworld_standing(c).tip.find("novaworld.test") != std::string::npos, "the service named");
+	c.changes.clear();
+	is(Kind::Behind, "r3, r5 on NovaWorld", "novaworld.test: r3, 2 incoming", "behind");
+	c.revision = 5;
+	is(Kind::UpToDate, "r5, up to date", "novaworld.test: r5", "up to date");
+	c.changes = {{"defs/a.def", NovaWorldChange::Modified}};
+	is(Kind::Changed, "r5, 1 changed", "novaworld.test: r5, 1 changed", "changed, never up to date");
+	c.checked = false;
+	is(Kind::Unchecked, "r5, not checked yet", "novaworld.test: r5", "not counted, never up to date");
+	c.conflicts = {NovaWorldConflictView{"defs/a.def", {}, {}}};
+	is(Kind::Conflicts, "r5, 1 conflict", "novaworld.test: r5, 1 conflict", "conflicts first");
+	c.conflicts.clear();
+	c.head_known = false;
+	c.head_error = "NovaWorld did not answer.";
+	is(Kind::Unreachable, "r5, NovaWorld not reached", "novaworld.test: r5, not reached", "the service not answering");
+	c.head_missing = true;
+	is(Kind::NotFound, "Not on novaworld.test, or private.", "novaworld.test: not found", "a 404 is no silence");
+	c.head_missing = false;
+	c.head_error.clear();
+	c.head_known = true;
+	c.revision = 0;
+	is(Kind::NoRevision, "No revision here yet: Pull r5 first.", "novaworld.test: no revision yet", "no revision held");
+	c.tracked = false;
+	is(Kind::NotSetUp, "Not set up here yet.", "novaworld.test: not set up", "no working copy, nothing making one");
+	c.setting_up = true;
+	is(Kind::SettingUp, "Setting up...", "novaworld.test: setting up", "the setup running");
+	c.setting_up = false;
+	c.head_error = "The setup failed.";
+	is(Kind::Unreachable, "NovaWorld not reached", "novaworld.test: not reached", "the setup not answered");
+	c.key.clear();
+	is(Kind::None, "", "", "on no project: nothing to say");
+	std::printf("content: every standing, what the window and the status bar say of it\n");
+}
+
 void test_working_copy() {
 	Ui ui;
 	SessionView v = tracked_view();
@@ -86,11 +131,11 @@ void test_working_copy() {
 	ui.away();
 	const std::string text = logged_frame(ui);
 	CHECK(text.find("taylor (admin) on novaworld.test") != std::string::npos, "who is signed in, and where");
-	CHECK(text.find("MOD r3, r5 on NovaWorld") != std::string::npos, "the revision and NovaWorld's newest");
+	CHECK(text.find("r3, r5 on NovaWorld, 2 changed") != std::string::npos, "the revision and NovaWorld's newest");
 	CHECK(text.find("Changes (2)") != std::string::npos && text.find("modified  defs/a.def") != std::string::npos &&
 	              text.find("added  models/b.3di") != std::string::npos,
 	      "the changes, each with what it did");
-	CHECK(text.find("MOD r3, 2 changed, 2 incoming") != std::string::npos, "the status bar's standing");
+	CHECK(text.find("novaworld.test: r3, 2 changed, 2 incoming") != std::string::npos, "the status bar's standing");
 	CHECK(text.find("Bind") == std::string::npos, "no Bind");
 	for (const std::string &offender : overflowing()) CHECK(false, ("tracked: " + offender).c_str());
 
@@ -268,7 +313,7 @@ void test_working_copy() {
 	v.novaworld.revision = 0;
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("No revision of MOD here yet: Pull r5 first.") != std::string::npos, "no revision: said");
+	CHECK(logged_frame(ui).find("No revision here yet: Pull r5 first.") != std::string::npos, "no revision: said");
 	ui.activate(novaworld_item({"Push"}));
 	CHECK(ui.drain().empty(), "no revision: Push waits for a pull");
 	v.novaworld.revision = 3;
@@ -405,16 +450,25 @@ void test_put_and_sign_in() {
 	// Set up for a key the service does not show: said so, and Check.
 	c.key = "NOPE";
 	c.head_error = "NOPE is not on novaworld.test, or is private: sign in with an account that may read it.";
+	c.head_missing = true;
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("NOPE is not on novaworld.test, or is private") != std::string::npos,
+	CHECK(logged_frame(ui).find("Not on novaworld.test, or private.") != std::string::npos,
 	      "a key the service does not show: said");
 	ui.activate(novaworld_item({"Check"}));
 	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Check: one novaworld_check");
 	c.head_error.clear();
+	c.head_missing = false;
 	ui.frames(2);
 	ui.away();
-	CHECK(logged_frame(ui).find("Setting up NOPE's working copy...") != std::string::npos, "being set up: said");
+	const std::string idle = logged_frame(ui);
+	CHECK(idle.find("Not set up here yet.") != std::string::npos && idle.find("Setting up") == std::string::npos,
+	      "nothing setting it up: never said to be");
+	c.setting_up = true;
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Setting up...") != std::string::npos, "being set up: said");
+	c.setting_up = false;
 	c.key.clear();
 
 	// Signed out: the form, its server the view's, and what was typed.
@@ -545,7 +599,7 @@ void test_settings_section() {
 	ui.windows.set_view(&v);
 	ui.frames(3);
 	ui.away();
-	CHECK(logged_frame(ui).find("MOD on novaworld.test, revision 3, Public") != std::string::npos,
+	CHECK(logged_frame(ui).find("novaworld.test: r3, r5 on NovaWorld, 2 changed, Public") != std::string::npos,
 	      "settings: its NovaWorld project, revision and who gets it");
 	ui.activate(item_id(ImHashStr("Project settings"), {"Open on the site"}));
 	{
@@ -797,6 +851,7 @@ void test_activity() {
 } // namespace
 
 void run_novaworld_tests() {
+	test_standing();
 	test_working_copy();
 	test_put_and_sign_in();
 	test_get_a_project();

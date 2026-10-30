@@ -11,6 +11,7 @@
 #include <base/version/version_line.h>
 #include <editor/model/field_text.h>
 #include <editor/novaworld/novaworld_account.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -32,12 +33,6 @@ std::string release_words(const std::string &version, const std::string &one_ver
 }
 
 bool admin(const NovaWorldView &novaworld) { return novaworld.signed_in && novaworld.role == "admin"; }
-
-// A working copy at no revision of a project that has revisions (session/novaworld_controller.h: a folder whose
-// files were not the head's as it was set up): a pull comes first, a push waits for it.
-bool holds_no_revision(const NovaWorldView &novaworld) {
-	return novaworld.tracked && novaworld.revision == 0 && novaworld.head_known && novaworld.head > 0;
-}
 
 // What a side of a conflict did to the file: "modified", "deleted", "added".
 const char *change_of(const std::optional<NovaWorldChange> &change) {
@@ -263,17 +258,6 @@ void draw_novaworld_activity(Workspace &workspace) {
 	ui_kit::tooltip(novaworld_cancel_words(running.kind));
 }
 
-std::string novaworld_status_text(const NovaWorldView &novaworld) {
-	if (!novaworld.tracked) return std::string();
-	std::string text = novaworld.key + " r" + std::to_string(novaworld.revision);
-	if (novaworld.checked && !novaworld.changes.empty())
-		text += ", " + std::to_string(novaworld.changes.size()) + " changed";
-	if (novaworld.head_known && novaworld.head > novaworld.revision)
-		text += ", " + std::to_string(novaworld.head - novaworld.revision) + " incoming";
-	if (!novaworld.conflicts.empty()) text += ", " + counted(novaworld.conflicts.size(), "conflict");
-	return text;
-}
-
 bool NovaWorldWindow::stands_aside() const { return aside_for_welcome(workspace_.view(), welcome_asked_); }
 
 void NovaWorldWindow::draw_account(const NovaWorldView &c) {
@@ -307,13 +291,21 @@ void NovaWorldWindow::draw_not_on_novaworld(const NovaWorldView &c) {
 		put_.open();
 }
 
-void NovaWorldWindow::draw_setting_up(const NovaWorldView &c) {
+// A project its file names, with no standing here: its setup running, none running, or the service showing it none
+// or not answering.
+void NovaWorldWindow::draw_no_standing(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
-	if (!c.head_error.empty()) ui_kit::refusal_text(c.head_error);
-	else
-		ui_kit::quiet_text("Setting up " + c.key + "'s working copy...",
-		                   "The folder becomes the working copy of " + c.key + " on " + novaworld_host(c.server) +
-		                           ": its files are then pushed and pulled.");
+	const NovaWorldStanding standing = novaworld_standing(c);
+	if (standing.kind == NovaWorldStandingKind::SettingUp) {
+		ui_kit::quiet_text(standing.line, standing.tip);
+		return;
+	}
+	if (standing.kind == NovaWorldStandingKind::NotSetUp) {
+		ui_kit::quiet_text(standing.line, standing.tip);
+	} else {
+		ui_kit::refusal_text(standing.line);
+		ui_kit::tooltip(standing.tip);
+	}
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Check", v.allows(EditorRequestKind::NovaWorldCheck),
 	                 "Sets the folder up as " + c.key + "'s working copy and looks for what changed."))
@@ -322,20 +314,11 @@ void NovaWorldWindow::draw_setting_up(const NovaWorldView &c) {
 
 void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
-	std::string line = c.key + " r" + std::to_string(c.revision);
-	std::string tip = "The revision this folder was last pulled or pushed at.";
-	if (c.head_known) line += c.head > c.revision ? ", r" + std::to_string(c.head) + " on NovaWorld" : ", up to date";
-	else if (!c.head_error.empty()) {
-		line += ", NovaWorld not reached";
-		tip = c.head_error;
-	}
-	ui_kit::clipped_text(line, tip);
+	const NovaWorldStanding standing = novaworld_standing(c);
 	// A folder holding no revision while the project has some (its files were not the head's as it was set up, or
 	// the empty project it was put on was pushed to since): a pull first.
-	if (holds_no_revision(c))
-		ui_kit::warning_line("No revision of " + c.key + " here yet: Pull r" + std::to_string(c.head) + " first.",
-		                     "The folder's files differ from r" + std::to_string(c.head) + ": a pull takes its files and "
-		                     "stops on each file both hold otherwise, for you to settle. Push waits until then.");
+	if (standing.kind == NovaWorldStandingKind::NoRevision) ui_kit::warning_line(standing.line, standing.tip);
+	else ui_kit::clipped_text(standing.line, standing.tip);
 	// A mod whose base game's project is missing (got with no install of its game): made from here once one is named.
 	if (!c.missing_base.empty()) {
 		ui_kit::warning_line("Its base game's project is missing: " + c.missing_base + ".",
@@ -428,11 +411,11 @@ void NovaWorldWindow::draw_push(const NovaWorldView &c) {
 	ImGui::SetNextItemWidth(-1.0f);
 	ImGui::InputTextWithHint("##message", "What changed", message_, sizeof(message_));
 	const bool pushes = v.allows(EditorRequestKind::NovaWorldPush) && message_[0] && (!c.checked || !c.changes.empty()) &&
-	                    c.conflicts.empty() && !holds_no_revision(c);
+	                    c.conflicts.empty() && !novaworld_holds_no_revision(c);
 	ImGui::BeginDisabled(!pushes);
 	const bool pushed = ImGui::Button("Push") && pushes;
 	ImGui::EndDisabled();
-	const char *why = holds_no_revision(c)            ? "Pull first: the folder holds no revision of the project yet."
+	const char *why = novaworld_holds_no_revision(c)  ? "Pull first: the folder holds no revision of the project yet."
 	                  : c.checked && c.changes.empty() ? "Nothing to push."
 	                  : !message_[0]         ? "Say what changed first."
 	                  : !c.conflicts.empty() ? "Settle every conflict first."
@@ -611,7 +594,7 @@ void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	draw_novaworld_activity(workspace_);
 	if (!v.project.open) draw_novaworld_projects(workspace_);
 	else if (c.key.empty()) draw_not_on_novaworld(c);
-	else if (!c.tracked) draw_setting_up(c);
+	else if (!c.tracked || novaworld_standing(c).kind == NovaWorldStandingKind::NotFound) draw_no_standing(c);
 	else {
 		draw_standing(c);
 		draw_conflicts(c);

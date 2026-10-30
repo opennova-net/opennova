@@ -1,5 +1,6 @@
 #include <editor/session/novaworld_json.h>
 
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
@@ -119,6 +120,7 @@ JsonValue novaworld_section(const SessionView &view) {
 	out.set("new_base", base);
 	out.set("missing_base", json_string(novaworld.missing_base));
 	JsonValue standing = JsonValue::make_object();
+	standing.set("state", json_string(novaworld_standing_name(novaworld_standing(novaworld).kind)));
 	standing.set("checked", JsonValue::make_bool(novaworld.checked));
 	standing.set("head_known", JsonValue::make_bool(novaworld.head_known));
 	standing.set("head", json_number(double(novaworld.head)));

@@ -49,16 +49,11 @@ std::string novaworld_cancel_words(OperationKind kind);
 // MYMOD on NovaWorld..."). The line and the bar change ten times a second at most. Nothing when nothing runs.
 void draw_novaworld_activity(Workspace &workspace);
 
-// The words the status bar gives the open project's standing in NovaWorld: "ACIDGAMBIT r41", then its
-// changes and the revisions it lacks once a check, a pull or a push has counted them ("ACIDGAMBIT r41, 3 changed,
-// 2 incoming"); "" for a folder that is no working copy of a project there.
-std::string novaworld_status_text(const NovaWorldView &novaworld);
-
 // The NovaWorld window (ADR 0069; its window id "novaworld"), a tab beside Files: the account (who is signed in, and
 // where; Sign in... and Sign out), then the open project's place on NovaWorld. A project its file names no NovaWorld
-// project of says so, with Put on NovaWorld... (NovaWorldPutDialog). One whose folder is being set up as its
-// working copy says so (or why the service shows it none). A working copy shows its revision and the store's
-// newest, Check and Pull, its changes since its revision (what each did to the file, and Discard, which puts the
+// project of says so, with Put on NovaWorld... (NovaWorldPutDialog). One with no standing here says which (being
+// set up as a working copy, not set up, the service showing it none or not answering; novaworld_standing.h, as the
+// status bar and Project settings read it). A working copy shows its revision and the store's newest, Check and Pull, its changes since its revision (what each did to the file, and Discard, which puts the
 // revision's file back), what kept a file out of them, and for an account that may push it (the service's word) a
 // message ("First revision" before the first) and Push, which sends every change; else a read-only line. For an
 // admin, a version and Release rN, which the service builds the release of the revision from (ADR 0069 d7). A pull
@@ -84,7 +79,7 @@ public:
 private:
 	void draw_account(const NovaWorldView &novaworld);
 	void draw_not_on_novaworld(const NovaWorldView &novaworld);
-	void draw_setting_up(const NovaWorldView &novaworld);
+	void draw_no_standing(const NovaWorldView &novaworld);
 	void draw_standing(const NovaWorldView &novaworld);
 	void draw_push(const NovaWorldView &novaworld);
 	void draw_release(const NovaWorldView &novaworld);

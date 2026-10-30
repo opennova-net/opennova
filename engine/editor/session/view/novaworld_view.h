@@ -101,11 +101,15 @@ struct NovaWorldView {
 	// Its standing as the last check, pull or push left it: the project's head (when the service
 	// answered; the project's ask and its setup set it too), the folder's changes since its base,
 	// and what kept a file out of them. `head_error` says why the head is unknown: for a project
-	// the service does not show the account, "<KEY> is not on <host>, or is private: ...".
+	// the service does not show the account, "<KEY> is not on <host>, or is private: ...", with
+	// `head_missing` set (a 404, where anything else is the service not answering). `setting_up`: the
+	// folder's setup is due or running. novaworld_standing.h reads all of this one way.
 	bool checked = false;
 	bool head_known = false;
 	int64_t head = 0;
 	std::string head_error;
+	bool head_missing = false;
+	bool setting_up = false;
 	std::vector<LocalChange> changes;
 	std::vector<std::string> problems;
 	// A pull stopped on conflicts: the revision it pulls, and each conflict still to settle.

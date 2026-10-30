@@ -285,6 +285,7 @@ void NovaWorldController::account_changed() {
 	view.remote = RemoteProject();
 	view.head_known = false;
 	view.head_error.clear();
+	view.head_missing = false;
 	// Another service's working copy (or none): what was counted against the last one's base goes.
 	const bool was_tracked = view.tracked;
 	const int64_t was_at = view.revision;
@@ -448,11 +449,13 @@ void NovaWorldController::take_remote(const NovaWorldJob &job) {
 		view.head = job.remote().head;
 		view.head_known = true;
 		view.head_error.clear();
+		view.head_missing = false;
 	} else if (job.not_found()) {
 		view.remote = RemoteProject();
 		view.remote_known = false;
 		view.head_known = false;
 		view.head_error = unreadable_text(view.key, account_.server);
+		view.head_missing = true;
 	}
 }
 
@@ -513,6 +516,7 @@ void NovaWorldController::track(bool then_check) {
 		return;
 	}
 	core_.view().novaworld.head_error.clear();
+	core_.view().novaworld.head_missing = false;
 	core_.start_operation(std::make_unique<NovaWorldOperation>(OperationKind::NovaWorldTrack, *this,
 			std::make_unique<NovaWorldTrack>(
 					*transport_, account_, core_.paths(), export_dir(), view.key)));
@@ -758,6 +762,7 @@ void NovaWorldController::finish_put() {
 	view.head = put_project_.head;
 	view.head_known = true;
 	view.head_error.clear();
+	view.head_missing = false;
 	show_copy();
 	view.last = "The project is on NovaWorld as " + key + ": push its files as the first revision.";
 	core_.note("NovaWorld: " + view.last);
@@ -1013,6 +1018,7 @@ void NovaWorldController::poll() {
 			view.head_error = read		  ? std::string()
 					: error.status == 404 ? unreadable_text(view.key, account_.server)
 										  : plain(error);
+			view.head_missing = !read && error.status == 404;
 			// A project the account may read, its folder no working copy of it here yet: set up.
 			if (read && !view.tracked)
 				track(false);
@@ -1156,6 +1162,14 @@ void NovaWorldController::poll() {
 			check_due_ = false;
 			start_check();
 		}
+	}
+	// The setup due or running, which the window and the status bar say.
+	const OperationStatus &running = core_.view().activity.operation;
+	const bool setting_up =
+			track_due_ || (running.running() && running.kind == OperationKind::NovaWorldTrack);
+	if (setting_up != view.setting_up) {
+		view.setting_up = setting_up;
+		core_.touch(ViewConcern::NovaWorld);
 	}
 	show_calls();
 }
@@ -1341,6 +1355,7 @@ void NovaWorldController::project_opened() {
 	view.head_known = false;
 	view.head = 0;
 	view.head_error.clear();
+	view.head_missing = false;
 	view.put = NovaWorldView::PutPlan(); // another project's, if any: a check finds this one's
 	put_due_ = false;
 	show_copy();
@@ -1381,6 +1396,7 @@ void NovaWorldController::forget_project() {
 	view.checked = false;
 	view.head_known = false;
 	view.head_error.clear();
+	view.head_missing = false;
 	view.changes.clear();
 	view.problems.clear();
 	project_ = NovaWorldCall(); // the closed project's ask
@@ -1620,8 +1636,10 @@ OperationOutcome NovaWorldController::finish_job(
 				const auto &checked = static_cast<NovaWorldCheck &>(*job);
 				view.checked = true;
 				view.head_known = checked.remote_known();
-				if (!checked.remote_known() && !checked.not_found())
+				if (!checked.remote_known() && !checked.not_found()) {
 					view.head_error = checked.remote_error();
+					view.head_missing = false;
+				}
 				view.changes = checked.changes();
 				view.problems = checked.problems();
 				view.last = count_text(view.changes.size(), "change", "changes") +

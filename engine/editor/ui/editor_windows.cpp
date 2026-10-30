@@ -16,6 +16,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
 #include <editor/session/navigation_controller.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/rename_controller.h>
 #include <editor/project_build/export_build.h>
 #include <editor/session/play_controller.h>
@@ -1158,8 +1159,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		                           : "See Problems.";
 	}
 
-	// The project's standing in NovaWorld (ADR 0069): "ACIDGAMBIT r41, 3 changed, 2 incoming".
-	const std::string novaworld_text = novaworld_status_text(v.novaworld);
+	// The project's standing in NovaWorld (ADR 0069): "opennova.net: r41, 3 changed, 2 incoming".
+	const std::string novaworld_text = novaworld_standing(v.novaworld).status;
 
 	// Each part's width, left to right: NovaWorld's standing, the unsaved files, the problem
 	// counts, the state and the buttons (the bar's layout puts an item spacing between items), from the
