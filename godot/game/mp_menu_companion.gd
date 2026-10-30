@@ -102,6 +102,9 @@ func _on_screen_changed(screen_name: String) -> void:
 		return
 	if screen_name.nocasecmp_to("LAN_MULTI_PLAYER") != 0 or not _driver.has_widget("LAN_GAME_LIST"):
 		return
+	# The LAN screen's activation writes the block's network connect type 2 (engine
+	# inmatch/game_config.h GameConfig::network_connect_type carries the witness).
+	GameCfgStore.block().set_word("networkconnecttype", 2)
 	_servers = []
 	_selected_server = -1
 	_browse_error = ""
