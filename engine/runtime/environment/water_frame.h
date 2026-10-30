@@ -84,7 +84,17 @@ ResolvedWaterHeight mission_water_rung(const BmsEnvOverrides &overrides, const C
 // stand-in values so owners without a loaded env still march strips.
 struct WaterFrameInputs {
 	float murk = 0.6f;
+	// The smoothed fog distance (g_EnvFogDistance): the scene far plane and
+	// the strip's depth curve read it.
 	float fog_end = 1000.0f;
+	// The strip march's fog end per side, the device fog range
+	// Environment_GetFogEndDistance serves the pass: above the plane the
+	// smoothed distance attenuated by the overcast blend [orig:
+	// Environment_GetFogEndDistance @ 0x57e426], under it the murk
+	// visibility curve [orig: Environment_GetFogEndDistance @ 0x57e40d].
+	// Without a loaded environment both sides march the dry one.
+	float pass_fog_end_above = 1000.0f;
+	float pass_fog_end_underwater = 1000.0f;
 	// Water renders lit: water_rgb x (light*0.707 + sky) x 2, saturating
 	// [orig: Environment_UpdateWeatherTick @ 0x57f16b].
 	Rgb lit{0.408f, 0.314f, 0.224f};
@@ -95,6 +105,11 @@ struct WaterFrameInputs {
 // supplies water_murk.
 WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 		float murk_default);
+
+// The fog end one side's strip march takes (WaterFrameInputs carries both).
+constexpr float water_pass_fog_end(const WaterFrameInputs &inputs, bool underwater) {
+	return underwater ? inputs.pass_fog_end_underwater : inputs.pass_fog_end_above;
+}
 
 // The full-viewport underwater murk scissor drawn after the scene/viewmodel
 // and before HUD: alpha = 0x80 - trunc(murk * -96) = 128 + trunc(96*murk).
@@ -131,6 +146,77 @@ struct WaterSurfaceSides {
 };
 
 WaterSurfaceSides water_surface_sides(float eye_y, float water_height);
+
+// One scene's water passes this display frame, from the eye's side of the
+// plane and the scene's pass gate (g_WaterActive, renderer quadtree.h
+// water_pass_active): the beauty pass's strip on the eye's side while the gate
+// holds [orig: Terrain_RenderWaterPass @ 0x610640 -> Render_WaterSurface
+// @ 0x5c32e0 (the sides @ 0x5c32ed..0x5c330a)], the bloom pass's
+// nightvision redraw above the plane whatever the gate [orig:
+// FrameFX_RenderGlowSource @ 0x582a59..0x582a5d, Render_WaterSurface(0, 1)],
+// and the mirror prerender ahead of every scene pass, on the gate alone: not
+// the eye's side and not the scene's water letter [orig: Render_TerrainScene
+// @ 0x610cd9..0x610ce0 -> Water_ReflectionPrerender @ 0x5c2780], so the
+// mirror the redraw samples renders under a skipping label too (env #30,
+// docs/env/env-tod-re.md).
+struct WaterFramePasses {
+	WaterSurfaceSides sides{};
+	bool beauty = false;
+	bool night_vision = false;
+	bool refresh_mirror = false;
+	// Every Render_WaterSurface call regenerates the noise pair at the frame's
+	// counter [orig: Render_WaterSurface @ 0x5c3326 -> Water_GenerateNoiseTextures
+	// @ 0x5C0360]; a frame with no call leaves it.
+	constexpr bool any() const { return beauty || night_vision; }
+};
+WaterFramePasses water_frame_passes(float eye_y, float water_height, bool water_pass_active);
+
+// The weapon Inset pass's water (the witnesses: water_mirror.h
+// inset_mirror_source, water_pass_latch above): its mirror renders while its
+// own g_WaterActive holds, and its strip past its own water letter on the
+// eye's side; the Inset pass runs no bloom redraw.
+WaterFramePasses inset_water_frame_passes(float eye_y, float water_height,
+		bool water_pass_active, bool view_water_letter);
+
+// The noise pair's frame counter: the world's entity-update count once a world
+// feeds it (the counter retail's generator reads [orig:
+// Water_GenerateNoiseTextures @ 0x5C0360, its counter @ 0x5C0366]), else the
+// water's own count of rendered water frames. The pair is a pure function of
+// the counter, so every call of a frame (the beauty strip, the redraw, the
+// Inset's strip) reads the one regeneration at that counter.
+class WaterNoiseClock {
+public:
+	// The world's entity-update count; from here the clock no longer counts
+	// rendered frames.
+	void feed(uint32_t counter) {
+		counter_ = counter;
+		fed_ = true;
+	}
+	// A display frame that renders water: an unfed clock counts it.
+	void advance_rendered_frame() {
+		if (!fed_) {
+			++counter_;
+		}
+	}
+	// True once per counter value: the pair regenerates at counter().
+	bool take_regeneration() {
+		if (generated_valid_ && generated_ == counter_) {
+			return false;
+		}
+		generated_ = counter_;
+		generated_valid_ = true;
+		return true;
+	}
+	// The pair's tables were made again: the next call regenerates.
+	void invalidate() { generated_valid_ = false; }
+	uint32_t counter() const { return counter_; }
+
+private:
+	uint32_t counter_ = 0;
+	uint32_t generated_ = 0;
+	bool fed_ = false;
+	bool generated_valid_ = false;
+};
 
 // The water pass's latch, the Blink water word g_WaterActive reads
 // [orig: g_WaterPassBlinkLatch @ 0x31BC910]. A

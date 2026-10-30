@@ -169,6 +169,24 @@ const char *object_projected_shadow_coverage_name(
 	return "no_pass";
 }
 
+FixedFunctionState object_projected_shadow_pipeline_state(ObjectProjectedShadowPolicy policy,
+		ObjectBlendMode blend, bool two_sided) noexcept {
+	FixedFunctionState state;
+	if (policy == ObjectProjectedShadowPolicy::MaterialBlend &&
+			blend == ObjectBlendMode::AlphaBlend) {
+		state.blend.enabled = true;
+		state.blend.src_color = BlendFactor::SrcAlpha;
+		state.blend.dst_color = BlendFactor::InvSrcAlpha;
+		state.blend.src_alpha = BlendFactor::SrcAlpha;
+		state.blend.dst_alpha = BlendFactor::InvSrcAlpha;
+	}
+	state.cull = two_sided ? CullMode::None : CullMode::CCW;
+	state.depth_test = true;
+	state.depth_write = true;
+	state.depth_compare = DepthCompare::LessEqual;
+	return state;
+}
+
 // The NORMAL pass's coverage per technique (object_shader_template.h carries the
 // witness; the pipeline manifest's coverage_source names the same table).
 ObjectCoverageSource object_coverage_source(ObjectShaderTechnique technique) noexcept {

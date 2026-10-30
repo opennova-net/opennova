@@ -16,6 +16,7 @@
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 
+#include <runtime/renderer/material_eval.h>
 #include <runtime/renderer/q3_frame.h>
 
 #include "render/q3_geometry_cache.h"
@@ -27,13 +28,37 @@ class Node;
 class Skeleton3D;
 class Viewport;
 
+// An object material's draw values as its producer last published them, the
+// block the focused Q3 compile and the slot capture read (never the
+// ShaderMaterial's parameters): the engine's evaluated effect parameters
+// (renderer::MaterialRuntime: the UV rows, SelfLumColor, AlphaGenValue,
+// ReflectColor, each at its effect default until the material writes it) and
+// the two stage textures with their last retail mip levels.
+struct Q3ObjectMaterialValues {
+	opennova::renderer::MaterialRuntime runtime{};
+	Ref<Texture2D> diffuse;
+	Ref<Texture2D> detail;
+	float diffuse_max_lod = opennova::renderer::kQ3NoMipCeiling;
+	float detail_max_lod = opennova::renderer::kQ3NoMipCeiling;
+};
+
+// A water source's block as its producer last published it: the engine
+// record's values (renderer::Q3WaterMaterialParameters, its leases filled by
+// the registry) and the three textures behind those leases.
+struct Q3WaterMaterialValues {
+	opennova::renderer::Q3WaterMaterialParameters values{};
+	Ref<Texture2D> reflection;
+	Ref<Texture2D> noise_color;
+	Ref<Texture2D> noise_normal;
+};
+
 // One surface of a registered Q3 source with the material block the focused
 // compile hands the compiler. An object surface caches the block and re-reads
-// it only when its material's parameter version moved
-// (Q3SourceRegistry::invalidate_object_material, called by ObjectModel's
-// runtime parameter writes) or the source's surfaces were refreshed; water
-// and celestial surfaces belong to per-frame producers and are re-read at
-// every in-frustum sight.
+// it only when its material's values moved (a publish through
+// Q3SourceRegistry::update_object_runtime / update_object_diffuse, called by
+// ObjectModel's runtime writes) or the source's surfaces were refreshed;
+// water and celestial surfaces belong to per-frame producers and are re-read
+// at every in-frustum sight.
 struct Q3SurfaceRecord {
 	int surface = 0;
 	Ref<ShaderMaterial> material;
@@ -81,6 +106,8 @@ struct Q3SourceRecord {
 	GeometryInstance3D *node = nullptr;
 	opennova::renderer::Q3Source source = opennova::renderer::Q3Source::Object;
 	std::uint64_t material_id = 0;
+	// Water sources: the producer's published block.
+	Q3WaterMaterialValues water;
 	// Celestial sources: the producer's bloom-pass SelfLumColor (the
 	// material's RgbGen at the bloom pass's UPL_INTENSITY value).
 	opennova::renderer::Q3Vec3 celestial_self_lum{1.0f, 1.0f, 1.0f};
@@ -156,21 +183,31 @@ public:
 		std::size_t records_touched = 0;
 		// MultiMesh sources whose rows were (re-)read this frame.
 		std::size_t instance_row_reads = 0;
-		// Surfaces whose material block was read through the material.
+		// Surfaces whose material block was re-read from its published values.
 		std::size_t material_reads = 0;
 	};
 
 	// Producer API.
 	static void register_object_material(const Ref<Material> &p_material,
-			const opennova::renderer::ObjectMaterialClassification &p_classification);
+			const opennova::renderer::ObjectMaterialClassification &p_classification,
+			const Q3ObjectMaterialValues &p_values);
 	static void clone_object_material(const Ref<Material> &p_source,
 			const Ref<Material> &p_clone);
 	static bool object_material_classification(const Ref<Material> &p_material,
 			opennova::renderer::ObjectMaterialClassification &r_classification);
-	// A producer rewrote one of the material's Q3 parameters (u_diffuse,
-	// u_detail, u_rgb_mod, u_alpha_mod, u_reflect_color, the UV rows): every
-	// object surface on it re-reads its block at its next sight.
-	static void invalidate_object_material(const Ref<Material> &p_material);
+	// The classification and the published values of a registered material.
+	static bool object_material(const Ref<Material> &p_material,
+			opennova::renderer::ObjectMaterialClassification &r_classification,
+			Q3ObjectMaterialValues &r_values);
+	// A producer wrote the material's evaluated effect parameters, or its
+	// Diffuse1 stage (an animated frame): every object surface on it re-reads
+	// its block at its next sight.
+	static void update_object_runtime(const Ref<Material> &p_material,
+			const opennova::renderer::MaterialRuntime &p_runtime);
+	static void update_object_diffuse(const Ref<Material> &p_material,
+			const Ref<Texture2D> &p_diffuse, float p_max_lod);
+	// A water source's block, published by its producer whenever it moves.
+	static void publish_water(GeometryInstance3D *p_source, const Q3WaterMaterialValues &p_water);
 	// Register (or re-register) an object surface instance with the material
 	// it currently draws: a glow-capable material makes it a compiled source
 	// (a node already registered keeps its record and bumps its geometry
@@ -220,8 +257,8 @@ public:
 	// Reads the live rows of a MultiMesh record once per instance
 	// generation and rebuilds their world form after a move.
 	static void refresh_rows(Q3SourceRecord &r_record, FrameCounters &r_counters);
-	// Reads the surface's material block when the material's parameter
-	// version moved (object) or unconditionally (water, celestial).
+	// Reads the surface's block from its material's published values when
+	// they moved (object), or unconditionally (water, celestial).
 	static void refresh_surface_parameters(const Q3SourceRecord &p_record,
 			Q3SurfaceRecord &r_surface, FrameCounters &r_counters);
 

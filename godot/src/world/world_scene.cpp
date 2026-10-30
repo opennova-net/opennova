@@ -24,7 +24,6 @@
 #include "env/precipitation.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
-#include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "render/frame_fx.h"
@@ -85,7 +84,6 @@ const RowSpec kRows[kWorldSceneRowCount] = {
 	{ WorldSceneRow::Celestial, "Celestial", "Celestial",
 			{ { "environment_path", WorldSceneRow::Environment } }, 1,
 			kEnvironmentCaptureLayerMask },
-	{ WorldSceneRow::SunShadow, "SunShadow", "SunShadow", {}, 0, 0 },
 	{ WorldSceneRow::SlotShadow, "SlotShadow", "SlotShadow", {}, 0, 0 },
 };
 
@@ -134,8 +132,6 @@ Node *make_row(WorldSceneRow p_row) {
 			return memnew(EnvironmentCubeCapture);
 		case WorldSceneRow::Celestial:
 			return memnew(Celestial);
-		case WorldSceneRow::SunShadow:
-			return memnew(SunShadow);
 		case WorldSceneRow::SlotShadow:
 			return memnew(SlotShadow);
 		case WorldSceneRow::Count:
@@ -178,9 +174,6 @@ void assign_row(WorldSceneNodes &r_nodes, WorldSceneRow p_row, Node *p_node) {
 			break;
 		case WorldSceneRow::Celestial:
 			r_nodes.celestial = Object::cast_to<Celestial>(p_node);
-			break;
-		case WorldSceneRow::SunShadow:
-			r_nodes.sun_shadow = Object::cast_to<SunShadow>(p_node);
 			break;
 		case WorldSceneRow::SlotShadow:
 			r_nodes.slot_shadow = Object::cast_to<SlotShadow>(p_node);
@@ -266,9 +259,6 @@ void WorldScene::wire_() const {
 	if (nodes_.foliage != nullptr) {
 		nodes_.foliage->set_terrain(nodes_.terrain);
 		nodes_.foliage->set_weather(nodes_.weather);
-	}
-	if (nodes_.sun_shadow != nullptr) {
-		nodes_.sun_shadow->set_environment_node(nodes_.environment);
 	}
 	// The render-slot entity ground shadows (the per-slot silhouette capture
 	// and the terrain drape; engine/runtime/renderer/render_slot_shadow.h

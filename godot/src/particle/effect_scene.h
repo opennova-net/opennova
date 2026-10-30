@@ -8,7 +8,6 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
-#include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -16,6 +15,7 @@
 #include <vector>
 
 #include <runtime/particle/effect_scene.h>
+#include <runtime/renderer/view_frustum.h>
 
 #include "particle/particle_file.h"
 
@@ -120,11 +120,10 @@ public:
 			double p_delta_seconds, const opennova::particle::ParticleForceField *forces);
 	// The two per-advance environment inputs retail reads off globals: the
 	// mission wind (GLOBALWIND drift, effect-frame units per second) and the
-	// camera's clip planes (the NOVISNOUPDATE gate). `p_inside_probe` is a
-	// point known to be inside the view (the planes are re-oriented so it is);
+	// camera's view frustum (the NOVISNOUPDATE gate; renderer/view_frustum.h);
 	// clearing the frustum advances every emitter.
 	void set_global_wind(const Vector3 &p_wind);
-	void set_view_frustum(const TypedArray<Plane> &p_planes, const Vector3 &p_inside_probe);
+	void set_view_frustum(const opennova::renderer::ViewFrustum &p_frustum);
 	// The building section masks the group gate reads on the next advances
 	// (particle::EffectSectionMasks, borrowed); null leaves every group visible.
 	void set_section_masks(const opennova::particle::EffectSectionMasks *p_masks) {

@@ -125,8 +125,9 @@ FrameFx::FrameFx() = default;
 FrameFx::~FrameFx() = default;
 
 void FrameFx::register_q3_object_material(const Ref<Material> &p_material,
-		const opennova::renderer::ObjectMaterialClassification &p_classification) {
-	Q3SourceRegistry::register_object_material(p_material, p_classification);
+		const opennova::renderer::ObjectMaterialClassification &p_classification,
+		const Q3ObjectMaterialValues &p_values) {
+	Q3SourceRegistry::register_object_material(p_material, p_classification, p_values);
 }
 
 void FrameFx::clone_q3_object_material(const Ref<Material> &p_source,
@@ -134,8 +135,36 @@ void FrameFx::clone_q3_object_material(const Ref<Material> &p_source,
 	Q3SourceRegistry::clone_object_material(p_source, p_clone);
 }
 
-void FrameFx::invalidate_q3_object_material(const Ref<Material> &p_material) {
-	Q3SourceRegistry::invalidate_object_material(p_material);
+void FrameFx::update_q3_object_runtime(const Ref<Material> &p_material,
+		const opennova::renderer::MaterialRuntime &p_runtime) {
+	Q3SourceRegistry::update_object_runtime(p_material, p_runtime);
+}
+
+void FrameFx::update_q3_object_diffuse(const Ref<Material> &p_material,
+		const Ref<Texture2D> &p_diffuse, float p_max_lod) {
+	Q3SourceRegistry::update_object_diffuse(p_material, p_diffuse, p_max_lod);
+}
+
+void FrameFx::set_q3_object_self_lum(const Ref<Material> &p_material,
+		const Vector3 &p_self_lum) {
+	opennova::renderer::ObjectMaterialClassification classification;
+	Q3ObjectMaterialValues values;
+	if (!Q3SourceRegistry::object_material(p_material, classification, values))
+		return;
+	values.runtime.rgb_r = static_cast<float>(p_self_lum.x);
+	values.runtime.rgb_g = static_cast<float>(p_self_lum.y);
+	values.runtime.rgb_b = static_cast<float>(p_self_lum.z);
+	Q3SourceRegistry::update_object_runtime(p_material, values.runtime);
+}
+
+void FrameFx::set_q3_object_diffuse(const Ref<Material> &p_material,
+		const Ref<Texture2D> &p_diffuse, float p_max_lod) {
+	Q3SourceRegistry::update_object_diffuse(p_material, p_diffuse, p_max_lod);
+}
+
+void FrameFx::publish_q3_water(GeometryInstance3D *p_source,
+		const Q3WaterMaterialValues &p_water) {
+	Q3SourceRegistry::publish_water(p_source, p_water);
 }
 
 void FrameFx::register_q3_object_source(GeometryInstance3D *p_source,
@@ -209,8 +238,11 @@ void FrameFx::_bind_methods() {
 			D_METHOD("invalidate_q3_source", "source"),
 			&FrameFx::invalidate_q3_source);
 	ClassDB::bind_static_method("FrameFx",
-			D_METHOD("invalidate_q3_object_material", "material"),
-			&FrameFx::invalidate_q3_object_material);
+			D_METHOD("set_q3_object_self_lum", "material", "self_lum"),
+			&FrameFx::set_q3_object_self_lum);
+	ClassDB::bind_static_method("FrameFx",
+			D_METHOD("set_q3_object_diffuse", "material", "diffuse", "max_lod"),
+			&FrameFx::set_q3_object_diffuse);
 	BIND_CONSTANT(kBeautyCameraMask);
 }
 

@@ -64,13 +64,9 @@ float foliage_model_wind_offset(double angle) {
 	return static_cast<float>(std::sin(angle) * 0.079999998);
 }
 
-bool foliage_camera_above_water(float camera_y, float water_height) {
-	return camera_y >= water_height;
-}
-
 bool foliage_entity_far_side(float entity_y, float camera_y, float water_height) {
 	const bool entity_below_water = entity_y - 1.0f < water_height;
-	return entity_below_water == foliage_camera_above_water(camera_y, water_height);
+	return entity_below_water == scene_camera_above_water(camera_y, water_height);
 }
 
 void FoliageFrameCompiler::configure_slots(
@@ -219,7 +215,7 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 	request.detail_cells = view.detail_cells;
 	request.thermal_view = view.thermal_view;
 	const bool camera_above_water =
-			foliage_camera_above_water(view.cam_y, view.water_height);
+			scene_camera_above_water(view.cam_y, view.water_height);
 	request.water_height = view.water_height;
 	request.camera_below_water = !camera_above_water;
 	draw_list_.debug.detail_cells =

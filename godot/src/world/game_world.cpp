@@ -131,7 +131,6 @@ void GameWorld::_ready() {
 	sky_dome_ = nodes.sky;
 	clear_color_ = nodes.clear_color;
 	dispatcher_ = nodes.foliage;
-	sun_shadow_ = nodes.sun_shadow;
 	slot_shadow_ = nodes.slot_shadow;
 	// The effect set's GLOW and PROJSHAD passes load with it as the renderer starts: FrameFX's Q3
 	// glow source and the slot captures create their device shaders here, ahead of any mission
@@ -164,10 +163,6 @@ void GameWorld::_ready() {
 	// Freeze the retained weather node until a load selects autonomous
 	// bare/net rendering or prepares a mission-owned fixed tick.
 	set_weather_world_tick_driven(true);
-	// The env presenters never self-clock: the leg table drives their
-	// advance_frame at a defined ladder slot (render_environment_nodes_frame
-	// and render_water_frame); the render diagnostics report that.
-	env_presenters_world_driven_ = true;
 }
 
 void GameWorld::_process(double p_delta) {
@@ -1331,9 +1326,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_water_node"), &GameWorld::get_water_node);
 	ClassDB::bind_method(D_METHOD("get_celestial_node"), &GameWorld::get_celestial_node);
 	ClassDB::bind_method(D_METHOD("get_sky_dome_node"), &GameWorld::get_sky_dome_node);
-	ClassDB::bind_method(D_METHOD("get_sun_shadow_node"), &GameWorld::get_sun_shadow_node);
-	ClassDB::bind_method(D_METHOD("drives_environment_presenters"),
-			&GameWorld::drives_environment_presenters);
 	ClassDB::bind_method(D_METHOD("get_clear_color_node"), &GameWorld::get_clear_color_node);
 	ClassDB::bind_method(D_METHOD("get_mission_audio"), &GameWorld::get_mission_audio);
 

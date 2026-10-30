@@ -156,7 +156,7 @@ func test_focal_wind_moves_the_authored_second_part_and_clears() -> void:
 	if not parts.has(1):
 		return
 	var part := parts[1] as Node3D
-	ObjectModel.advance_awake_frame(0.016)
+	ObjectModel.advance_awake_frame(GameWorld.current_frame_clock_ms())
 	var rest: Transform3D = data.evaluate_panm(0, 0, {})[1]
 	model.rotation.y = 0.6
 	var world_offset := Vector3(2, 0.5, -1)
@@ -179,7 +179,7 @@ func test_focal_wind_moves_the_authored_second_part_and_clears() -> void:
 	assert_almost_eq(part.basis.x, expected.basis.x, POSITION_EPS)
 	assert_almost_eq(part.basis.y, expected.basis.y, POSITION_EPS)
 	assert_almost_eq(part.basis.z, expected.basis.z, POSITION_EPS)
-	ObjectModel.advance_awake_frame(0.016)
+	ObjectModel.advance_awake_frame(GameWorld.current_frame_clock_ms())
 	assert_almost_eq(part.position, expected.origin, POSITION_EPS,
 			"ordinary frame updates preserve the focal-wind pose")
 	model.set_focal_sway(false, Basis(), Vector3.ZERO)

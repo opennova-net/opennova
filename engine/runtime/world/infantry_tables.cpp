@@ -8,6 +8,7 @@
 #include <runtime/world/infantry.h>
 
 #include <cmath>
+#include <vector>
 
 namespace opennova::world {
 
@@ -16,6 +17,16 @@ std::string infantry_anim_key(int state) {
     const char *name = anim::kAnimSlotNames[state];
     if (name == nullptr || name[0] == '\0') return std::string();
     return std::string("anim_") + name;
+}
+
+const std::string &infantry_anim_key_ref(int state) {
+    static const std::vector<std::string> kKeys = [] {
+        std::vector<std::string> keys(kInfantryAnimStateCount);
+        for (int i = 0; i < kInfantryAnimStateCount; ++i) keys[i] = infantry_anim_key(i);
+        return keys;
+    }();
+    static const std::string kNone;
+    return state < 0 || state >= kInfantryAnimStateCount ? kNone : kKeys[state];
 }
 
 // Body-state facial expressions. [orig: byte_813DE0; producer @0x4BE0C2]

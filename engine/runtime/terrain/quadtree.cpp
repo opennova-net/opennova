@@ -472,19 +472,4 @@ void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Strip to list
-// ---------------------------------------------------------------------------
-
-void strip_to_list(const std::vector<uint16_t>& strip,
-                   std::vector<uint32_t>& out, uint32_t base) {
-	if (strip.size() < 3) return;
-	for (size_t i = 2; i < strip.size(); i++) {
-		uint16_t a = strip[i - 2], b = strip[i - 1], c = strip[i];
-		if (a == b || b == c || a == c) continue;
-		if (i & 1) { out.push_back(base + b); out.push_back(base + a); out.push_back(base + c); }
-		else       { out.push_back(base + a); out.push_back(base + b); out.push_back(base + c); }
-	}
-}
-
 } // namespace opennova

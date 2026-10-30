@@ -381,8 +381,8 @@ void test_detail_pass_gate_keeps_the_model_masks() {
 // [orig: Terrain_RenderWorldScene @ 0x5c93a1..0x5c93b0;
 // Terrain_RenderSectorEntitiesBySide @ 0x5c7dd2, @ 0x5c7dfd..0x5c7e18]
 void test_entity_water_side() {
-	CHECK(r::foliage_camera_above_water(0.5f, 0.5f));
-	CHECK(!r::foliage_camera_above_water(0.49f, 0.5f));
+	CHECK(r::scene_camera_above_water(0.5f, 0.5f));
+	CHECK(!r::scene_camera_above_water(0.49f, 0.5f));
 	// Camera above: the feet at 1.49 are below (0.49 < 0.5), 1.5 are not.
 	CHECK(r::foliage_entity_far_side(1.49f, 10.0f, 0.5f));
 	CHECK(!r::foliage_entity_far_side(1.5f, 10.0f, 0.5f));

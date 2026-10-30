@@ -31,6 +31,7 @@
 #include <runtime/inmatch/punt_log.h> // the connect log's socket teardown line
 #include <runtime/inmatch/server_console.h> // the chat display wrap
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the start's update)
+#include <runtime/mission/mission_load.h> // the load plan's executor (the game's order)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
 #include <runtime/world/entity.h> // set_pool_capacities (the mount's pools)
@@ -510,6 +511,17 @@ void Server::run_mission_start_update(const std::string &header_name, int32_t cl
 	}
 }
 
+// A loading step of the mission load (mission/mission_load.h): the NovaWorld session's periodic
+// update, which retail's mission start runs past each loading present with no role test, a
+// dedicated host's too (inmatch::run_loading_step carries the witness, D-NET-1238), here the
+// listing's pass as the mission start's update runs it; nothing on a LAN host.
+void Server::run_loading_step_update() {
+	if (listing_ == nullptr || lister_ == nullptr || lister_->finished()) return;
+	(void)lister_->tick(wall_ms());
+	if (second_lister_ != nullptr && second_published_ && second_lister_->hosting())
+		(void)second_lister_->tick(wall_ms());
+}
+
 // The listing meets the mission that just started: the live source reads the new kernel and the
 // kept server context, its columns the map's from here; its update went out at the mission start
 // (run_mission_start_update).
@@ -878,7 +890,17 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		kernel_ = std::move(fresh);
 		return *kernel_;
 	};
-	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) {
+	// The load plan's order, the game's (mission/mission_load.h): a headless host fills the
+	// session's legs alone, so its boot leaves the mission start's head and the load end to the
+	// plan's points past the mission textures stage, as the game's Serve Only host does. Phase A
+	// runs the session's head, its window and its stage pumps itself (no device loads ahead of
+	// it), the freeze runs ahead of the render arm's last pumps and phase B, and the load end
+	// follows phase B.
+	request.render_arm_deferred = true;
+	mission::MissionLoadLegs legs;
+	legs.session.loading_step = [this] { run_loading_step_update(); };
+	legs.session.start_runtime = [this, &request, &error]() {
+		if (inmatch::boot_host_mission(std::move(request), boot_, error)) return 0;
 		// The session create's mpreset exit: retail's crt_exit(0) ends the
 		// process inside the create, so Game_Run's exit tail never runs (no
 		// game.cfg save, no banned.txt save, activesrvr.txt left behind); its
@@ -891,19 +913,30 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			reset_exit_ = true;
 			exit_save_owed_ = false;
 		}
-		return false;
-	}
-	// No device stages run between the phases on a headless host.
-	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
+		return 1;
+	};
+	legs.session.role = [] { return mission::MissionLoadRole::DedicatedHost; };
+	legs.session.mission_start_deferred = [this] { return boot_.mission_start_head_owed; };
 	// The mission start freezes its model-def list, whose count every S2C 0x68
 	// cursor wraps at: a dedicated host builds it from the mission's loads,
 	// with no renderer and no foliage leg [orig: Game_StartMission @0x524360
 	// (the dedicated jump @0x5259B4..0x5259BF, the call @0x525A6E) ->
 	// Render_InitMissionTextures @0x587120 (the reduced arm's call @0x58728C)
 	// -> CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80].
-	loaded_model_list_count_ = static_cast<uint32_t>(inmatch::mission_start_model_page(
-			*kernel_, mission::boot_files_from_index(index_), &boot_.charattr,
-			/*authority=*/true, /*dedicated=*/true).size());
+	legs.session.freeze_model_list = [this] {
+		loaded_model_list_count_ = static_cast<uint32_t>(inmatch::mission_start_model_page(
+				*kernel_, mission::boot_files_from_index(index_), &boot_.charattr,
+				/*authority=*/true, /*dedicated=*/true).size());
+	};
+	legs.session.pump_render_arm = [this] { role_->pump_render_arm_ahead_of_textures(); };
+	// No device stages ran: phase B over the boot's own weather owner.
+	legs.session.mission_start_boundary = [this, &error]() {
+		return inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error) ? 0 : 1;
+	};
+	legs.session.end_host_load = [this] { inmatch::end_host_mission_load(boot_); };
+	mission::MissionLoadArm arm;
+	arm.dedicated = true;
+	if (mission::run_mission_load(arm, legs) != 0) return false;
 	++missions_played_;
 	io::logf(io::LogLevel::kInfo,
 			"opennova-serve: '%s' (%s) up: %d entities, terrain %s, WAC %s, %u player slot(s)",

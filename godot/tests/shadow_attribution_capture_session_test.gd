@@ -44,9 +44,7 @@ func test_public_session_isolates_shadow_systems_and_only_suppresses_bms58() -> 
 	var viewport := SubViewport.new()
 	viewport.debug_draw = Viewport.DEBUG_DRAW_OVERDRAW
 	world.add_child(viewport)
-	var dynamic_shadow := world.get_node("SunShadow") as DirectionalLight3D
 	var terrain := world.get_terrain_node()
-	dynamic_shadow.shadow_enabled = false
 	terrain.set_static_terrain_shadow_enabled(true)
 
 	var sibling := _add_caster(world, 77, 101111, "Sibling.3di", 0x10,
@@ -63,9 +61,8 @@ func test_public_session_isolates_shadow_systems_and_only_suppresses_bms58() -> 
 	assert_eq(session.begin(world, viewport), OK)
 	var without_target = CaptureVariant.new(
 			"dynamic_without_bms58", Viewport.DEBUG_DRAW_DISABLED,
-			true, false, PackedInt32Array([58]))
+			false, PackedInt32Array([58]))
 	assert_eq(session.apply_variant(without_target), OK)
-	assert_true(dynamic_shadow.shadow_enabled)
 	assert_false(terrain.is_static_terrain_shadow_enabled())
 	assert_false(target.is_shadow_caster_enabled())
 	assert_true(target.is_static_shadow_caster_enabled(),
@@ -82,7 +79,6 @@ func test_public_session_isolates_shadow_systems_and_only_suppresses_bms58() -> 
 	assert_eq(realized.to_json_value(), {
 		"id": "dynamic_without_bms58",
 		"debug_draw": Viewport.DEBUG_DRAW_DISABLED,
-		"dynamic_shadow_enabled": true,
 		"static_terrain_shadow_enabled": false,
 		"suppressed_dynamic_caster_bms_ids": [58],
 		"suppressed_static_caster_bms_ids": [],
@@ -91,16 +87,14 @@ func test_public_session_isolates_shadow_systems_and_only_suppresses_bms58() -> 
 	assert_eq(Array(session.get_variant_diagnostics().suppressed_dynamic_caster_bms_ids),
 			[], "diagnostics must inspect the realized caster bit, not echo the request")
 	target.set_shadow_caster_enabled(false)
-	dynamic_shadow.shadow_enabled = false
-	assert_false(bool(session.get_variant_diagnostics().dynamic_shadow_enabled),
-			"diagnostics must inspect the realized light state, not echo the request")
-	dynamic_shadow.shadow_enabled = true
+	terrain.set_static_terrain_shadow_enabled(true)
+	assert_true(bool(session.get_variant_diagnostics().static_terrain_shadow_enabled),
+			"diagnostics must inspect the realized provider state, not echo the request")
+	terrain.set_static_terrain_shadow_enabled(false)
 
-	var static_only = CaptureVariant.new(
-			"static_terrain_shadow_only", Viewport.DEBUG_DRAW_DISABLED,
-			false, true)
-	assert_eq(session.apply_variant(static_only), OK)
-	assert_false(dynamic_shadow.shadow_enabled)
+	var both = CaptureVariant.new(
+			"both_shadow_systems", Viewport.DEBUG_DRAW_DISABLED, true)
+	assert_eq(session.apply_variant(both), OK)
 	assert_true(terrain.is_static_terrain_shadow_enabled())
 	assert_true(target.is_shadow_caster_enabled(),
 			"moving to the next variant restores BMS58 before capture")
@@ -108,8 +102,6 @@ func test_public_session_isolates_shadow_systems_and_only_suppresses_bms58() -> 
 	session.finish()
 	assert_null(session.get_variant_diagnostics(),
 			"finish clears the realized renderer snapshot")
-	assert_false(dynamic_shadow.shadow_enabled,
-			"finish restores the pre-session dynamic-light state")
 	assert_true(terrain.is_static_terrain_shadow_enabled())
 	assert_eq(viewport.debug_draw, Viewport.DEBUG_DRAW_OVERDRAW)
 	assert_true(target.is_shadow_caster_enabled())
@@ -161,7 +153,7 @@ func test_static_batch_inventory_and_suppression_leave_visible_geometry_intact()
 
 	var without_first = CaptureVariant.new(
 			"static_without_bms58", Viewport.DEBUG_DRAW_DISABLED,
-			false, true, PackedInt32Array(), PackedInt32Array([58]))
+			true, PackedInt32Array(), PackedInt32Array([58]))
 	assert_eq(session.apply_variant(without_first), OK)
 	assert_eq(batch.layers, original_layers,
 			"page-provider suppression never mutates visible/caster scene geometry")

@@ -331,13 +331,10 @@ Variant PlayerWeaponEffects::resolve_anchor(const String &p_userpoint) {
 	return EffectWorld::forward_pose(pos, forward);
 }
 
-// Map a model-space action userpoint through the live fake-skinned weapon
-// bone. Rigid first-person gun parts ride the .adm skeleton by subobject/bone
-// index, so applying only the model root leaves authored muzzle points in the
-// rest pose (and, for the AK, behind the gameplay camera). Convert model
-// space into the bone's rest frame, then back through its current global
-// pose -- the ported equivalent of the original action-bone transform.
-// [orig: Entity_ComputeActionTransform @0x401310 -> ActionSlot_SpawnEffect @0x401f20]
+// Map a model-space action userpoint through the posed weapon bone. Rigid
+// first-person gun parts ride the .adm rig by subobject/bone index, so the
+// part's frame is the bone's model->world matrix from the engine's own pose
+// (world::posed_part_to_world, through ObjectModel::subobject_model_to_world).
 Transform3D PlayerWeaponEffects::action_particle_model_to_world(ObjectModel *p_part,
 		const Ref<ModelUserPoint> &p_info) {
 	return p_part != nullptr ? p_part->subobject_model_to_world(p_info->get_subobject()) : Transform3D();

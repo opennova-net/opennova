@@ -1,14 +1,17 @@
 extends GutTest
 
-## The ambient emitter mix [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0]:
-## loudest-8 channel budget, time-of-day slot activation, and idempotent
-## writes. Asserts on volume_db — the headless dummy audio driver ignores
-## stream_paused (always reads back false), so volume is the observable.
+## The mission audio as a device: the players it gives the engine's channel plan
+## (runtime/audio/ambient_emitters.h; the plan's logic is the ctest
+## `ambient_emitters`), the voices it writes only on change, the entity-attached
+## lane's loop at its emitter word, setup over real banks, the dialog voices, the
+## reverb bed and the world-sound park's bus writes. Asserts on volume_db — the
+## headless dummy audio driver ignores stream_paused (always reads back false), so
+## volume is the observable.
 
 
 const SILENT_DB := -80.0
 
-# Staged WorldFixture roots, removed after each test.
+# Staged fixture roots, removed after each test.
 var _staged_dirs: Array[String] = []
 
 
@@ -16,39 +19,6 @@ func after_each() -> void:
 	for staged_dir in _staged_dirs:
 		TestFs.remove_dir_recursive(staged_dir)
 	_staged_dirs.clear()
-
-
-# One placed marker record: `layers_by_set` maps a set name to its
-# AmbientLayer rows (set order = the mixer's slot-key index order).
-func _marker(pos: Vector3, slot_sets: PackedStringArray,
-		layers_by_set: Dictionary, stagger_slot := 0, source_bms_id := 0) -> MissionAudioMarker:
-	var marker := MissionAudioMarker.new()
-	marker.pos = pos
-	marker.source_bms_id = source_bms_id
-	marker.slot_sets = slot_sets
-	marker.stagger_slot = stagger_slot
-	for set_name in layers_by_set:
-		var layers: Array[AmbientLayer] = []
-		layers.assign(layers_by_set[set_name])
-		marker.set_layers(String(set_name), layers)
-	return marker
-
-
-# One layer descriptor with an injected in-memory stream (no bank resolve).
-func _layer(falloff: int, min_dist := 0, volume := 255, clamp_vol := 255) -> AmbientLayer:
-	var stream := AudioStreamWAV.new()
-	stream.format = AudioStreamWAV.FORMAT_16_BITS
-	stream.mix_rate = 22050
-	var samples := PackedByteArray()
-	samples.resize(32)
-	stream.data = samples
-	var layer := AmbientLayer.new()
-	layer.stream = stream
-	layer.falloff_radius = falloff
-	layer.min_distance = min_dist
-	layer.volume = volume
-	layer.clamp_volume = clamp_vol
-	return layer
 
 
 func _players(container: Node) -> Array[AudioStreamPlayer3D]:
@@ -65,32 +35,56 @@ func _player_at_position(container: Node, pos: Vector3) -> AudioStreamPlayer3D:
 	return null
 
 
-func test_native_mixer_rows_carry_pitch() -> void:
-	var mixer := AmbientMixer.new()
-	var layer := PackedInt32Array([7, 2000, 0, 255, 255])
-	mixer.add_marker(Vector3(10, 2, 3), 0, 0, 30,
-		PackedInt32Array([0, 0, 0, 0]), [layer])
-	mixer.advance_to_tick(0)
-	var rows: PackedFloat32Array = mixer.mix(Vector3.ZERO)
-	assert_eq(rows.size(), 6,
-		"mix() rows are [candidate_id, vol, pitch_q16, x, y, z], stride 6")
-	if rows.size() == 6:
-		assert_eq(int(rows[0]), 7)
-		assert_eq(int(rows[2]), 0x10000)
-		assert_eq(Vector3(rows[3], rows[4], rows[5]), Vector3(10, 2, 3))
+# A mission whose envs buildings (items.def `move_function envs`, every slot the
+# set AMB: one layer of tone.wav at `falloff`) stand at the mission positions
+# `positions`, set up over its own root: the placed markers the device tests hear.
+func _envs_mission(tag: String, positions: Array, falloff: int) -> Dictionary:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_%s_%d" % [tag, Time.get_ticks_usec()])
+	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
+	_staged_dirs.append(fixture_dir)
+	TestFs.write_text(self, fixture_dir.path_join("items.def"), """begin "Env building"
+  id 100001
+  type decoration
+  move_function envs
+  soundloop_1 AMB
+  soundloop_2 AMB
+  soundloop_3 AMB
+  soundloop_4 AMB
+end
+""")
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path("res://../fixtures/lwf/tone.wav")))
+	var lwf := LwfData.new()
+	lwf.create_empty()
+	_add_lwf_set(lwf, "AMB", "tone.wav", falloff)
+	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
+	var mission := MissionData.new()
+	mission.create_default()
+	for pos: Vector3 in positions:
+		mission.add_entity(MissionData.KIND_BUILDING, 100001, pos, Vector3.ZERO)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = MissionAudio.create(root, item_db)
+	audio.setup(mission, "%s.bms" % tag, container)
+	return {"audio": audio, "container": container}
 
 
-func test_only_the_loudest_eight_candidates_mix() -> void:
-	var audio = MissionAudio.create(null, null)
-	var holder := Node3D.new()
-	add_child_autofree(holder)
-	var markers: Array = []
-	# 12 markers on a line, nearer = louder under the witnessed (1 - d/r)^2 curve.
+# The plan's channels get players only when the plan grows them, never more than
+# the eight: twelve markers on a line give the nearest eight a player each, at its
+# position, nearer louder [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0].
+func test_the_plan_s_channels_get_players() -> void:
+	var positions: Array = []
 	for i in range(12):
-		markers.append(_marker(
-			Vector3(float(10 + i * 50), 0, 0),
-			["amb", "amb", "amb", "amb"], {"amb": [_layer(2000)]}))
-	audio.set_markers(markers, holder)
+		positions.append(Vector3(float(10 + i * 50), 0, 0))
+	var fixture := _envs_mission("eight", positions, 2000)
+	var audio: MissionAudio = fixture["audio"]
+	var holder: Node3D = fixture["container"]
 	assert_eq(_players(holder).size(), 0,
 		"virtual ambient candidates do not create SceneTree audio nodes")
 	audio.tick(Vector3.ZERO, 0.2)
@@ -98,119 +92,25 @@ func test_only_the_loudest_eight_candidates_mix() -> void:
 	assert_eq(players.size(), 8, "the physical ambient pool never exceeds its eight channels")
 	players.sort_custom(func(a, b): return a.position.x < b.position.x)
 	for i in players.size():
-		assert_eq(players[i].position.x, float(10 + i * 50),
+		assert_almost_eq(players[i].position.x, float(10 + i * 50), 0.01,
 			"only the nearest eight virtual candidates occupy channels")
 		assert_gt(players[i].volume_db, SILENT_DB)
 		assert_eq(players[i].process_mode, Node.PROCESS_MODE_INHERIT)
-	# Nearer candidates are louder (quadratic falloff ordering).
 	assert_gt(players[0].volume_db, players[7].volume_db, "closest voice is loudest")
+	assert_eq(audio.active_ambient_candidate_ids(), [1, 2, 3, 4, 5, 6, 7, 8])
+	assert_eq(audio.ambient_candidate_wave(1).get_file().to_lower(), "tone.wav",
+		"a candidate's wave is its layer's member 0's")
+	audio.teardown()
 
 
-func test_beyond_falloff_radius_is_hard_silent() -> void:
-	var audio = MissionAudio.create(null, null)
-	var holder := Node3D.new()
-	add_child_autofree(holder)
-	audio.set_markers([_marker(
-		Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"],
-		{"amb": [_layer(100)]})], holder)
-	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(_players(holder).size(), 0,
-		"a candidate at d >= falloff_radius consumes no physical channel [orig: 0x75ca31]")
-
-
-func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
-	# Two active layers on one audible marker share one two-ray result. A second
-	# active marker is already silent by raw falloff and must not spend a query.
-	var audio = MissionAudio.create(null, null)
-	var provider := OcclusionRecorder.new()
-	audio.set_occlusion_override(provider.occlude)
-	var holder := Node3D.new()
-	add_child_autofree(holder)
-	audio.set_markers([
-		_marker(Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
-			{"amb": [_layer(100), _layer(100)]}, 0.0, 123),
-		_marker(Vector3(150, 0, 0), ["amb", "amb", "amb", "amb"],
-			{"amb": [_layer(100)]}, 0.0, 456),
-	], holder)
-
-	audio.tick(Vector3.ZERO, 0.2)
-
-	assert_eq(provider.calls, 1,
-		"only the raw-audible marker queries once despite carrying two layers")
-	assert_eq(provider.source_bms_ids, [123], "the audible marker keeps its source identity")
-	assert_eq(_players(holder).size(), 2)
-	for player in _players(holder):
-		assert_gt(player.volume_db, SILENT_DB)
-
-
-func test_time_of_day_slot_selects_the_active_set() -> void:
-	var audio = MissionAudio.create(null, null)
-	var holder := Node3D.new()
-	add_child_autofree(holder)
-	# Night-only marker (a flourescent light): soundloop_4 filled, 1..3 empty.
-	audio.set_markers([_marker(
-		Vector3(10, 0, 0), ["", "", "", "night_hum"],
-		{"night_hum": [_layer(500)]})], holder)
-
-	audio.set_time_of_day_hhmm(1200.0)  # noon -> region 1 (day) -> empty slot
-	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(_players(holder).size(), 0, "day region with an empty slot plays nothing")
-
-	audio.set_time_of_day_hhmm(2300.0)  # 23:00 -> region 3 (night)
-	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(_players(holder).size(), 1)
-	assert_gt(_players(holder)[0].volume_db, SILENT_DB, "night region plays the night slot")
-
-
-func test_region_crossfade_scales_volume() -> void:
-	var audio = MissionAudio.create(null, null)
-	var holder := Node3D.new()
-	add_child_autofree(holder)
-	var markers := [_marker(
-		Vector3(10, 0, 0), ["", "day_amb", "", ""],
-		{"day_amb": [_layer(500)]})]
-	audio.set_markers(markers, holder)
-
-	audio.set_time_of_day_hhmm(1200.0)  # mid-day: full blend
-	audio.tick(Vector3.ZERO, 0.2)
-	var day := _players(holder)[0]
-	var full_db := day.volume_db
-	assert_gt(full_db, SILENT_DB)
-
-	# 10:01 is inside the ~5-minute fade-in after the 10h cut [orig: @ 0x408203].
-	audio.set_time_of_day_hhmm(1001.0)
-	audio.tick(Vector3.ZERO, 0.2)
-	assert_gt(day.volume_db, SILENT_DB, "fading-in slot is audible")
-	assert_lt(day.volume_db, full_db, "crossfade blend attenuates the entering region")
-
-
-func test_same_set_neighbours_suppress_the_crossfade_dip() -> void:
-	var audio = MissionAudio.create(null, null)
-	var holder := Node3D.new()
-	add_child_autofree(holder)
-	# The same set in every slot (a marker whose soundloop_1..4 all name one set).
-	audio.set_markers([_marker(
-		Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
-		{"amb": [_layer(500)]})], holder)
-
-	audio.set_time_of_day_hhmm(1200.0)
-	audio.tick(Vector3.ZERO, 0.2)
-	var allday := _players(holder)[0]
-	var full_db := allday.volume_db
-
-	audio.set_time_of_day_hhmm(1001.0)  # in the 10h blend window
-	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(allday.volume_db, full_db,
-		"identical adjacent slot keeps full volume through the boundary [orig: 0x4a819d]")
-
-
+# The device writes a voice only when the plan changes it: a bind starts it on a
+# fresh looping stream, an unchanged update writes nothing, a release silences it,
+# drops its stream and takes it out of processing, and a re-entrant reuses the
+# free player with a fresh stream.
 func test_tick_writes_only_on_change() -> void:
-	var audio = MissionAudio.create(null, null)
-	var holder := Node3D.new()
-	add_child_autofree(holder)
-	audio.set_markers([_marker(
-		Vector3(10, 0, 0), ["amb", "amb", "amb", "amb"],
-		{"amb": [_layer(500)]})], holder)
+	var fixture := _envs_mission("writes", [Vector3(10, 0, 0)], 500)
+	var audio: MissionAudio = fixture["audio"]
+	var holder: Node3D = fixture["container"]
 
 	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(audio.get_perf_counters().voice_writes), 1, "first tick writes the voice on")
@@ -244,44 +144,10 @@ func test_tick_writes_only_on_change() -> void:
 	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(audio.get_perf_counters().voice_writes), 0,
 		"the resumed steady mix stays write-free")
+	audio.teardown()
 
 
-func test_top_eight_membership_reuses_pool_and_restarts_only_entrants() -> void:
-	var audio = MissionAudio.create(null, null)
-	var holder := Node3D.new()
-	add_child_autofree(holder)
-	var markers: Array = []
-	for i in range(12):
-		markers.append(_marker(
-			Vector3(float(i * 100), 0, 0), ["amb", "amb", "amb", "amb"],
-			{"amb": [_layer(2000)]}))
-	audio.set_markers(markers, holder)
-
-	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(audio.active_ambient_candidate_ids(), [1, 2, 3, 4, 5, 6, 7, 8])
-	var candidate_one_stream := audio.ambient_player_for_candidate(1).stream
-	var pool_ids: Array[int] = []
-	for player in _players(holder):
-		pool_ids.append(player.get_instance_id())
-	pool_ids.sort()
-
-	audio.tick(Vector3(1100, 0, 0), 0.2)
-	assert_eq(audio.active_ambient_candidate_ids(), [5, 6, 7, 8, 9, 10, 11, 12],
-		"the closest eight virtual candidates replace the four dropouts")
-	var moved_pool_ids: Array[int] = []
-	for player in _players(holder):
-		moved_pool_ids.append(player.get_instance_id())
-	moved_pool_ids.sort()
-	assert_eq(moved_pool_ids, pool_ids, "entrant replacement allocates no ninth channel")
-
-	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(audio.active_ambient_candidate_ids(), [1, 2, 3, 4, 5, 6, 7, 8])
-	assert_ne(audio.ambient_player_for_candidate(1).stream, candidate_one_stream,
-		"a dropped candidate restarts when it becomes an entrant again")
-	assert_eq(_players(holder).size(), 8)
-
-
-func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> void:
+func test_dynamic_vehicle_emitter_loops_refreshes_and_clears_by_key() -> void:
 	var fixture_dir := OS.get_cache_dir().path_join(
 		"mission_audio_vehicle_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
@@ -303,32 +169,21 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 	var audio = MissionAudio.create(root, null)
 	audio.setup(mission, "vehicle_probe.bms", container)
 
-	# Dynamic engine voices share retail's loudest-eight emitter budget with
-	# placed ambience [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0].
-	# Eight quieter placed voices plus this source must still own only eight
-	# physical players, with the truck displacing the weakest marker.
+	# The engine voice plays on a channel of the plan as a persistent loop at its
+	# emitter word and the witnessed emitter volume (its competition with placed
+	# ambience in the loudest eight is the ctest `ambient_emitters`).
 	var vehicle_pos := Vector3(900, 4, -300)
-	var markers: Array = []
-	for i in range(8):
-		var marker_offset := 1500.0 if i == 7 else float(20 + i * 20)
-		markers.append(_marker(
-			vehicle_pos + Vector3(marker_offset, 0, 0),
-			["amb", "amb", "amb", "amb"],
-			{"amb": [_layer(2000)]}))
-	audio.set_markers(markers)
 	audio.apply_sound_emitters([_emitter_row(77, vehicle_pos, 0x10000, 0xFFFF)])
 	audio.tick(vehicle_pos, 0.2)
-
-	assert_eq(_players(container).size(), MissionAudio.MIX_CHANNELS,
-		"the vehicle voice competes inside the same bounded emitter pool")
 	var voice := _player_at_position(container, vehicle_pos)
-	assert_not_null(voice, "the full-gain idle voice displaces a quieter ambient marker")
+	assert_not_null(voice, "the full-gain idle voice takes a channel")
 	if voice == null:
 		audio.teardown()
 		TestFs.remove_dir_recursive(fixture_dir)
 		return
 	var first_stream := voice.stream
 	assert_true(voice.playing)
+	assert_eq(voice.bus, &"SFX", "an entity-attached lane plays on the effects bus")
 	assert_eq((voice.stream as AudioStreamWAV).loop_mode,
 		AudioStreamWAV.LOOP_FORWARD, "the engine emitter is a persistent loop")
 	assert_almost_eq(voice.pitch_scale, 1.0, 0.0001)
@@ -348,57 +203,10 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 
 	audio.apply_sound_emitters([_emitter_row(77, refreshed_pos, 0, 0)])
 	audio.tick(refreshed_pos, 0.2)
-	assert_null(_player_at_position(container, refreshed_pos),
+	assert_true(audio.active_ambient_candidate_ids().is_empty(),
 		"the zeroed source/lane update removes the vehicle emitter immediately")
-	assert_eq(_players(container).size(), MissionAudio.MIX_CHANNELS,
-		"the released channel is reused by the displaced ambient marker")
-
-	audio.teardown()
-	TestFs.remove_dir_recursive(fixture_dir)
-
-
-func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> void:
-	var fixture_dir := OS.get_cache_dir().path_join(
-		"mission_audio_vehicle_catchup_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
-	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
-		FileAccess.get_file_as_bytes(
-			ProjectSettings.globalize_path(
-				"res://../fixtures/lwf/tone.wav")))
-	var lwf := LwfData.new()
-	lwf.create_empty()
-	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
-	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
-
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var mission := MissionData.new()
-	assert_eq(mission.create_default(), OK)
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var audio = MissionAudio.create(root, null)
-	audio.setup(mission, "vehicle_catchup.bms", container)
-
-	audio.apply_sound_emitters([_emitter_row(77, Vector3(40, 0, 0), 0x10000, 0xFFFF, 1)])
-	# One render frame catches up 32 world ticks. The registration must retain
-	# tick 1 as its refresh time rather than being reborn at the final tick.
-	audio.advance_ticks(32)
-	audio.tick(Vector3.ZERO)
-	var expiring_ids := audio.active_ambient_candidate_ids()
-	assert_eq(expiring_ids.size(), 1,
-		"the slot is serviced once on the tick its lifetime reaches zero")
-	var first_id := int(expiring_ids[0]) if expiring_ids.size() == 1 else -1
-
-	# The next same-clock mix releases the zero-lifetime slot and its physical
-	# channel. Only then can a later lane reuse the float-packed identity.
-	audio.tick(Vector3.ZERO)
-	assert_null(audio.ambient_player_for_candidate(first_id))
-
-	audio.apply_sound_emitters([_emitter_row(88, Vector3(80, 0, 0), 0x10000, 0xFFFF, 33)])
-	audio.advance_ticks(33)
-	audio.tick(Vector3.ZERO)
-	assert_not_null(audio.ambient_player_for_candidate(first_id),
-		"retired dynamic IDs stay float-exact by recycling after channel release")
+	assert_null(voice.stream, "its released channel drops its stream")
+	assert_eq(voice.volume_db, SILENT_DB, "and falls silent")
 
 	audio.teardown()
 	TestFs.remove_dir_recursive(fixture_dir)

@@ -591,7 +591,8 @@ func _tank_cannon(sim: Simulation, tank: EntityCard) -> EntityCard:
 # The labels over the frame the last _advance presented (its after_world_tick
 # is that tick's one camera compose).
 func _visible_attach_texts(hud: HudOverlay, gametext: RtxtStringFile) -> Array[String]:
-	hud.set_attach_labels(_camera.global_transform, _presenter.screen_projection(), gametext, _world.get_sim())
+	hud.set_view_frame(_presenter.presented_view())
+	hud.set_attach_labels(gametext, _world.get_sim())
 	var texts: Array[String] = []
 	for i in hud.get_attach_label_count():
 		if hud.get_viewport().get_visible_rect().has_point(hud.get_attach_label_position(i)):

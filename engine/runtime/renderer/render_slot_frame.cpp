@@ -1,5 +1,6 @@
 #include <runtime/renderer/render_slot_frame.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace opennova::renderer {
@@ -43,6 +44,80 @@ const SlotPointLight *find_light(const std::vector<SlotPointLight> &lights, uint
 }
 
 }  // namespace
+
+const SlotFrameCaster *SlotFrameCasters::find(uint64_t id) const {
+	const auto it = index_.find(id);
+	return it != index_.end() ? &casters[it->second] : nullptr;
+}
+
+const SlotCasterLightQuery *SlotFrameCasters::light_query(uint64_t id) const {
+	const auto it = index_.find(id);
+	return it != index_.end() ? &light_queries[it->second] : nullptr;
+}
+
+SlotCandidateState SlotFrameCasters::state_for(uint64_t id) const {
+	if (const SlotFrameCaster *caster = find(id)) {
+		return caster->state;
+	}
+	SlotCandidateState gone;
+	gone.hidden = true;
+	return gone;
+}
+
+void slot_frame_casters(const std::vector<SlotCasterFacts> &facts, uint64_t local_id,
+		uint64_t local_parent_id, SlotFrameCasters &out) {
+	out.ids.clear();
+	out.casters.clear();
+	out.light_queries.clear();
+	out.capture_links.clear();
+	out.index_.clear();
+	out.ids.reserve(facts.size());
+	out.casters.reserve(facts.size());
+	out.light_queries.reserve(facts.size());
+	for (const SlotCasterFacts &fact : facts) {
+		SlotFrameCaster caster;
+		// The two radii: the model sphere sizes the capture extent and the
+		// depth clip, the entity bound the lod, the patch and the light query
+		// (RenderSlot_RenderEntityAndChildren @ 0x5d7835 reads the model's
+		// +0x14, RenderSlot_AllocSlot @ 0x5d5773 entity+0).
+		const bool stamped = fact.model_sphere_radius > 0.0f;
+		const float fallback = std::max(0.5f, fact.fallback_radius);
+		caster.capture_radius = stamped ? fact.model_sphere_radius : fallback;
+		SlotCandidateState &state = caster.state;
+		state.bound_radius = stamped ? fact.entity_bound_radius : fallback;
+		state.pos2d = {fact.position[0], fact.position[2]};
+		state.hidden = !slot_draw_shown(fact.visibility) || fact.visibility.scene_hidden;
+		state.seat_parented = fact.parented_under_caster || fact.capture_with != 0;
+		// The vehicle-ride exclusion (a vehicle whose ground entity is a
+		// vehicle, slot bit 0 [orig: RenderSlot_SortAndAssign @ 0x5d6604..0x5d6627])
+		// stays off: its other half, the carrier's capture drawing that rider
+		// through its refNum group [orig: RenderSlot_RenderEntityAndChildren
+		// @ 0x5d796d..0x5d79d6], has no fact here yet, and the exclusion alone
+		// would leave the rider with no shadow.
+		state.on_vehicle = false;
+		state.is_local_player_or_parent =
+				fact.id == local_id || (local_parent_id != 0 && fact.id == local_parent_id);
+		const SlotCasterLighting &lighting =
+				fact.has_light_owner ? fact.owner_lighting : fact.lighting;
+		state.interior = lighting.interior;
+		state.dynamic = true;
+		state.is_person = fact.is_person;
+		caster.position = fact.position;
+		caster.march_offset = fact.march_offset;
+		if (fact.capture_with != 0) {
+			out.capture_links.push_back({fact.id, fact.capture_with});
+		}
+		SlotCasterLightQuery query;
+		query.position = fact.position;
+		query.bound_radius = state.bound_radius;
+		query.interior_bms = lighting.interior_bms;
+		query.interior_section = lighting.interior_bms != 0 ? lighting.interior_section : 0;
+		out.index_[fact.id] = out.casters.size();
+		out.ids.push_back(fact.id);
+		out.casters.push_back(caster);
+		out.light_queries.push_back(query);
+	}
+}
 
 void slot_frame(const SlotFrameInput &input, const std::vector<SlotAssignment> &assignments,
 		const SlotFrameCasterLookup &caster_for,

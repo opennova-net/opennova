@@ -102,7 +102,6 @@ add_library(opennova_bindings OBJECT
     env/environment_cube_capture.cpp
     env/sky_dome.cpp
     env/slot_shadow.cpp
-    env/sun_shadow.cpp
     env/water.cpp
     env/weather.cpp
     env/precipitation.cpp
@@ -136,6 +135,7 @@ add_library(opennova_bindings OBJECT
     render/q3_frame_adapter.cpp
     render/q3_geometry_cache.cpp
     render/q3_source_registry.cpp
+    render/rd_pipeline_state.cpp
     render/retained_array_mesh.cpp
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
@@ -279,7 +279,6 @@ add_library(opennova_bindings OBJECT
     lwf/lwf_data.cpp
     lwf/wav_loader.cpp
     lwf/wave_stream.cpp
-    audio/ambient_mixer.cpp
     audio/sound_selector.cpp
     audio/ambient_layer.cpp
     audio/sound_bank.cpp
@@ -320,6 +319,7 @@ add_library(opennova_bindings OBJECT
     player/gameplay_camera.cpp
     player/local_player_presenter.cpp
     player/local_player_visuals.cpp
+    player/input_device.cpp
     player/key_event_queue.cpp
     player/key_lock_device.cpp
     player/player_input_router.cpp

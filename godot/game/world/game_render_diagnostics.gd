@@ -46,7 +46,6 @@ func _init(world: GameWorld = null, camera: Camera3D = null, viewport: Viewport 
 	var water: Water = world.get_water_node()
 	var sky: SkyDome = world.get_sky_dome_node()
 	var celestial: Celestial = world.get_celestial_node()
-	var dynamic_shadow: SunShadow = world.get_sun_shadow_node()
 	var terrain: Terrain = world.get_terrain_node()
 	var clear: WorldEnvironment = world.get_clear_color_node()
 	_value = {
@@ -76,7 +75,6 @@ func _init(world: GameWorld = null, camera: Camera3D = null, viewport: Viewport 
 		"water": _water_state(water, camera),
 		"terrain": _terrain_state(world),
 		"shadows": {
-			"dynamic": _shadow_state(dynamic_shadow, world.drives_environment_presenters()),
 			"static_terrain": _terrain_page_shadow_state(terrain),
 		},
 		"lights": _lights_state(world),
@@ -379,31 +377,6 @@ static func _resource_value(value: Variant) -> Variant:
 			"instance_id": texture.get_instance_id(),
 		}
 	return value
-
-
-static func _shadow_state(shadow: SunShadow, world_driven: bool) -> Dictionary:
-	if shadow == null:
-		return {"available": false}
-	return {
-		"available": true,
-		"visible": shadow.visible,
-		"visible_in_tree": shadow.is_visible_in_tree(),
-		# Live = following the sun each frame through the world's
-		# render_environment_nodes_frame (the node never self-clocks).
-		"processing": world_driven,
-		"shadow_enabled": shadow.has_shadow(),
-		"global_transform": shadow.global_transform,
-		"emission_direction": -shadow.global_transform.basis.z,
-		"receiver_cull_mask": shadow.get_cull_mask(),
-		"caster_cull_mask": shadow.get_shadow_caster_mask(),
-		"shadow_mode": shadow.get_shadow_mode(),
-		"max_distance": shadow.get_param(Light3D.PARAM_SHADOW_MAX_DISTANCE),
-		"bias": shadow.get_param(Light3D.PARAM_SHADOW_BIAS),
-		"normal_bias": shadow.get_param(Light3D.PARAM_SHADOW_NORMAL_BIAS),
-		"fade_start": shadow.get_param(Light3D.PARAM_SHADOW_FADE_START),
-		"size": shadow.get_param(Light3D.PARAM_SIZE),
-		"energy": shadow.get_param(Light3D.PARAM_ENERGY),
-	}
 
 
 static func _terrain_page_shadow_state(terrain: Terrain) -> Dictionary:

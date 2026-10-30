@@ -6,6 +6,7 @@
 // tag anchor lift. HudFrameState (hud_frame.h) carries the live values; this
 // header is where their policy lives so no presenter restates a clamp.
 
+#include <array>
 #include <cstdint>
 
 namespace opennova::hud {
@@ -69,14 +70,15 @@ inline uint32_t next_showhud_flags(uint32_t flags) {
 // [orig: anchor z = z + entity[+116] + 0x4000 @0x5a3a84..0x5a3a98 — +116 is
 // the stance-driven eye offset the sim restamps per body tick and feeds per
 // tag; docs/interface/hud-re.md D-HUD-20].
-inline constexpr float kFriendlyTagLiftUnits = 0.25f;
+inline constexpr int32_t kFriendlyTagLiftQ16 = 0x4000;
 
-// The tag's anchor in mission space (z up): the entity position with its
-// per-tick eye offset (16.16) and the lift added to z.
-inline void friendly_tag_anchor(const float position[3], int32_t eye_offset_z, float out[3]) {
-	out[0] = position[0];
-	out[1] = position[1];
-	out[2] = position[2] + (static_cast<float>(eye_offset_z) / 65536.0f + kFriendlyTagLiftUnits);
+// The tag's anchor in 16.16 mission space (z up): the position words with the
+// eye offset and the lift added to z, the one `lea` of 32-bit words.
+inline std::array<int32_t, 3> friendly_tag_anchor(const std::array<int32_t, 3> &position_q16,
+		int32_t eye_offset_z) {
+	return { position_q16[0], position_q16[1],
+		static_cast<int32_t>(static_cast<uint32_t>(position_q16[2]) +
+				static_cast<uint32_t>(eye_offset_z) + static_cast<uint32_t>(kFriendlyTagLiftQ16)) };
 }
 
 } // namespace opennova::hud

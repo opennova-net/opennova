@@ -1692,8 +1692,8 @@ func test_the_device_draws_the_games_foliage_effects_and_lights() -> void:
 
 ## S26 (B1-B7, B12): the device draws the mission's world as the game's scene stack holds
 ## it (WorldScene's rows under game_world.tscn's names: the sun, moon, glare and glint, the
-## weather bound to the environment, the drops, the cube, FrameFx the one display decode; no
-## SunShadow), its weather started as a mission's start starts it and ticked on the preview
+## weather bound to the environment, the drops, the cube, FrameFx the one display decode), its
+## weather started as a mission's start starts it and ticked on the preview
 ## clock, the clock standing at the hour shown, and the body words the environment it draws.
 func test_the_device_draws_the_games_world() -> void:
 	if _app == null:
@@ -1704,7 +1704,6 @@ func test_the_device_draws_the_games_world() -> void:
 	var rows := ["Celestial", "Weather", "Precipitation", "EnvironmentCubeCapture", "FrameFx"]
 	for type in rows + ["SlotShadow"]:
 		assert_not_null(_device_node(state, type), "the device holds the game's %s" % type)
-	assert_null(_device_node(state, "SunShadow"), "no simulation drives a sun shadow here")
 	assert_null(_device_node(state, "DisplayDecode"), "FrameFx is the one decode")
 	var weather: Weather = _device_node(state, "Weather")
 	assert_not_null(weather)

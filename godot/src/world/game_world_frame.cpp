@@ -1268,15 +1268,16 @@ void GameWorld::append_celestial_overlays(SceneOverlaySubmission &r_submission) 
 		const opennova::env::SceneFogValues inset_fog = inset_scene_fog(*env_,
 				static_cast<float>(inset.eye.y), water_->get_water_height(),
 				is_water_render_active());
-		const float view_depth = static_cast<float>(
-				(inset.model->get_global_position() + inset.offset - inset.eye).dot(inset.forward));
+		const Vector3 to_body = inset.model->get_global_position() + inset.offset - inset.eye;
 		SceneOverlayModelSurfaces::AppendOptions options;
 		options.offset = inset.offset;
 		options.self_lum = &inset.self_lum;
 		scene_overlay_bodies_.append(opennova::renderer::SceneOverlaySlot::InsetWaterGlint,
 				inset.model, frame_scale,
-				opennova::renderer::device_fog_visibility(view_depth, inset_fog.start,
-						inset_fog.end, inset_fog.type, light->fog_enabled),
+				opennova::renderer::device_fog_visibility(
+						static_cast<float>(to_body.dot(inset.forward)),
+						static_cast<float>(to_body.length()), inset_fog.start, inset_fog.end,
+						inset_fog.type, light->fog_enabled),
 				r_submission, options);
 	}
 }
@@ -1386,16 +1387,13 @@ void GameWorld::sync_framefx_frame() {
 }
 
 // The environment presenters' per-frame advance (ex-self-clocked _process
-// bodies): weather smoothing toward the fixed-tick targets, the sun's
-// direction law, the sky dome and the celestial bodies following the render
-// eye. Ordered after the scene-environment classify so the lit consumers
-// below (terrain, foliage, objects) read this frame's pushed globals.
+// bodies): weather smoothing toward the fixed-tick targets, the sky dome and
+// the celestial bodies following the render eye. Ordered after the
+// scene-environment classify so the lit consumers below (terrain, foliage,
+// objects) read this frame's pushed globals.
 void GameWorld::render_environment_nodes_frame() {
 	if (weather_ != nullptr) {
 		weather_->advance_frame(frame_delta_);
-	}
-	if (sun_shadow_ != nullptr) {
-		sun_shadow_->advance_frame(frame_delta_);
 	}
 	if (sky_dome_ != nullptr) {
 		sky_dome_->advance_frame(frame_delta_);
@@ -1490,7 +1488,8 @@ void GameWorld::apply_scene_environment_frame() {
 	ObjectShaderCache *shader_cache = ObjectShaderCache::get_singleton();
 	if (water_active) {
 		const float water_height = water_->get_water_height();
-		shader_cache->set_water_plane(water_height, eye_y >= water_height);
+		shader_cache->set_water_plane(water_height,
+				opennova::renderer::scene_camera_above_water(eye_y, water_height));
 	} else {
 		shader_cache->clear_water_plane();
 	}
@@ -1836,13 +1835,13 @@ void GameWorld::render_material_frame() {
 		}
 	}
 	if (!frame_stats_on_) {
-		ObjectModel::advance_awake_frame(frame_delta_);
+		ObjectModel::advance_awake_frame(get_frame_clock_ms());
 		ObjectModel::set_world_skipped(false);
 		// The Inset twins follow the poses the advance just wrote.
 		ObjectModel::sync_view_twins();
 		return;
 	}
-	const PackedInt64Array profile = ObjectModel::profile_awake_frame(frame_delta_);
+	const PackedInt64Array profile = ObjectModel::profile_awake_frame(get_frame_clock_ms());
 	ObjectModel::set_world_skipped(false);
 	ObjectModel::sync_view_twins();
 	if (profile.size() < ObjectModel::AWAKE_PROFILE_SLOT_COUNT) {

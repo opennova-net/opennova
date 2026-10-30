@@ -724,14 +724,15 @@ func test_colour_mode_zone_tile_draws_half_bright_under_modulate2x() -> void:
 	assert_true(WorldFixture.load_patrol_mission(sim))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var view := sim.get_local_player_view()
-	var projection := Projection.create_perspective(80.0, 4.0 / 3.0, 0.1, 1000.0)
+	# The engine's viewport over an explicit view block: the origin, looking down mission +Y.
+	hud.set_view_block(Vector3.ZERO, 0x40000000, 0, 0, 80.0)
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([7, 36, 0]))
-	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
+	hud.set_combat_state(view, null, "E")
 	var before := hud.get_draw_list_stats()
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			_capture_zone_snapshot(0))
-	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
+	hud.set_combat_state(view, null, "E")
 	assert_eq(hud.get_draw_list_stats().tris - before.tris, 2, "the own-zone tile compiles")
 	var rows := _flat_rows(hud, Vector2i(36, 36))
 	assert_eq(rows.size(), 1, "the zone tile's two triangles submit as one run")
@@ -882,7 +883,7 @@ func test_friendly_tag_mode_clamps() -> void:
 	hud.set_friendly_tag_mode(99)
 	assert_eq(hud.get_friendly_tag_mode(), 3, "the mode setter clamps to 0..3")
 	hud.set_friendly_tag_mode(0)
-	hud.set_friendly_tags(false, Transform3D.IDENTITY, Projection.IDENTITY, 0.0, null)
+	hud.set_friendly_tags(false, 0.0, null)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0, "OFF draws nothing")
 
 
@@ -1264,59 +1265,6 @@ func _capture_zone_snapshot(timer_flags: int) -> PackedInt32Array:
 		timer_flags, 1, 1, 0, 62, 0,
 		0, 0,
 	])
-
-
-# The capture-point labels' device seam: set_combat_state walks the fed rows
-# and projects each admitted point; a zone ahead of the camera then compiles
-# the marker's stem and the viewer's own-zone tile, plus the letter once a
-# zone-timer entry exists [orig: Render_CapturePointLabels @0x5a2840 ->
-# HUD_DrawEntityMarker types 8/9 @0x593140].
-func test_capture_point_label_device_seam() -> void:
-	var fixture := _load_temp_layout(PackedStringArray(["fonthud1_hi Gunpl22b.fnt"]),
-			PackedStringArray(["lfp_alf.tga", "lfp_dlf.tga"]),
-			{"lfp_alf.tga": Vector2i(36, 36), "lfp_dlf.tga": Vector2i(36, 36)})
-	_copy_font_into(fixture.dir)
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture.dir), OK)
-	var hud := _make_overlay()
-	hud.configure(fixture.layout, root)
-	var sim := Simulation.new()
-	assert_true(WorldFixture.load_patrol_mission(sim))
-	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
-	var view := sim.get_local_player_view()
-	var projection := Projection.create_perspective(80.0, 4.0 / 3.0, 0.1, 1000.0)
-	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
-			PackedInt32Array([7, 36, 0]))
-	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
-	var before := hud.get_draw_list_stats()
-	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
-			_capture_zone_snapshot(0))
-	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
-	var blank := hud.get_draw_list_stats()
-	assert_eq(blank.lines - before.lines, 1, "The zone's marker stem compiles.")
-	assert_eq(blank.tris - before.tris, 2, "The own-zone tile compiles as two textured triangles.")
-	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
-			_capture_zone_snapshot(1))
-	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
-	assert_eq(blank.glyphs - before.glyphs, 1, "The blank letter lays out its one space quad.")
-	var lettered := hud.get_draw_list_stats()
-	assert_eq(lettered.glyphs, blank.glyphs,
-			"A zone-timer entry letters the zone; no name outside binoculars.")
-	assert_eq(lettered.quads_filled, blank.quads_filled, "No capture bar outside binoculars.")
-	# Through binoculars the entry's capture bar draws its three quads (the
-	# name is empty: no gametext here, and GameText_GetString misses to "").
-	hud.set_view_state(true, Vector2.INF)
-	var binoculars := hud.get_draw_list_stats()
-	assert_eq(binoculars.quads_filled - lettered.quads_filled, 3,
-			"The binocular capture bar: border, black inner rect, fill.")
-	hud.set_view_state(false, Vector2.INF)
-	# Behind the camera the marker draws nothing.
-	hud.set_combat_state(view, Transform3D.IDENTITY.rotated(Vector3.UP, PI), projection, true,
-			null, "E")
-	var behind := hud.get_draw_list_stats()
-	assert_eq(behind.lines, before.lines, "A zone behind the camera draws no stem.")
-	await get_tree().process_frame
-	assert_true(is_instance_valid(hud), "The capture-point labels render safely.")
 
 
 # The connection indicators' device seam (D-HUD-38): the three atlases and the

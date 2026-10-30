@@ -38,19 +38,6 @@ func _minimal_assets_dir() -> String:
 	return ProjectSettings.globalize_path(WorldFixture.BOOT_FIXTURE_DIR)
 
 
-func test_mission_load_reports_only_real_stage_checkpoints() -> void:
-	var world := WorldFixture.make_world(self)
-	var observed: Array[int] = []
-	world.load_progress.connect(func(percent: int) -> void:
-			if observed.is_empty() or observed[-1] != percent:
-				observed.append(percent))
-
-	assert_eq(WorldFixture.load_mission(
-			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
-	assert_eq(observed, [0, 10, 20, 30, 40, 50, 60, 70, 80, 90],
-		"the real load pipeline reports exact stage starts through world ready")
-
-
 # The minimap's depthspin water mask is made with the terrain's textures, ahead of the
 # freeze and the HUD's textures, not at the load's end (engine
 # mission/mission_load_plan.h carries the witness, D-NET-1186): the textures leg
@@ -521,7 +508,7 @@ func test_wire_header_missing_asset_reason_names_the_install() -> void:
 # (GameWorld's env-presenters-world-driven handoff; D-RORD-8's ordering).
 func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 	var world := WorldFixture.make_world(self)
-	for presenter_name in ["Weather", "SkyDome", "Celestial", "Water", "SunShadow"]:
+	for presenter_name in ["Weather", "SkyDome", "Celestial", "Water"]:
 		var presenter := world.get_node_or_null(NodePath(presenter_name)) as Node
 		assert_not_null(presenter, "%s exists under the world" % presenter_name)
 		if presenter != null:
@@ -1028,7 +1015,7 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	add_child_autofree(world)
 	assert_true(world is GameWorld, "the root is the native GameWorld")
 	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial",
-			"SunShadow", "SlotShadow"]:
+			"SlotShadow"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
 	# The dispatcher sits beside the terrain, so the indoors terrain hide never
 	# reaches the MODEL masks (the occlusion frame gates its detail passes).

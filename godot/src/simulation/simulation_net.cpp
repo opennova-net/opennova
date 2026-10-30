@@ -36,6 +36,7 @@
 #include <runtime/controls/binding_set.h> // keylist_text (SAVEKEYS)
 #include <runtime/inmatch/server_info.h> // Server_ToggleJoinLock (the lockgame action)
 #include <runtime/inmatch/host_listing_binding.h> // set_nwu_match_facts (the NWU session's facts)
+#include <runtime/inmatch/joiner_boot.h> // boot_joiner (the join's bring-up)
 #include <runtime/inmatch/server_spawn.h> // Server_SetPlayerSpectator
 #include <runtime/inmatch/session_status.h>
 #include <formats/threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
@@ -413,7 +414,7 @@ void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role
 		match.exit_reason = p_exit_reason;
 		opennova::inmatch::set_nwu_match_facts(*ctx, match);
 	} else {
-		facts.novaworld = net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld;
+		facts.novaworld = net_.joiner.network_type == opennova::inmatch::NetworkType::NovaWorld;
 		if (runtime_ != nullptr && p_exit_reason != 0) runtime_->set_mission_exit_reason(p_exit_reason);
 	}
 	if (runtime_ != nullptr) runtime_->set_novaworld_link(facts);
@@ -665,9 +666,8 @@ int Simulation::get_mission_header_size() const {
 
 void Simulation::set_join_character_profile(const Ref<CharacterJoinProfile> &p_profile) {
 	if (p_profile.is_null()) return;
-	net_.join_character_vars = opennova::inmatch::character_join_vars(p_profile->value());
-	net_.join_character_vars_set = true;
-	install_character_join_vars();
+	net_.joiner.character_vars = opennova::inmatch::character_join_vars(p_profile->value());
+	if (runtime_) runtime_->set_character_join_vars(*net_.joiner.character_vars);
 }
 
 void Simulation::set_local_character_profile(const Ref<CharacterJoinProfile> &p_profile) {
@@ -679,14 +679,14 @@ void Simulation::set_local_character_profile(const Ref<CharacterJoinProfile> &p_
 void Simulation::set_app_id(const String &p_token) {
 	// The .joi-recovered game-session BT join token a NovaWorld host validates
 	// (reject code 9). Empty/"0" is the LAN default. Applied to the live joiner
-	// runtime immediately and re-applied on each (re)load via install_app_id.
-	net_.app_id = opennova::to_std(p_token.strip_edges());
-	if (net_.app_id.empty()) net_.app_id = "0";
-	install_app_id();
+	// runtime immediately and taken by every runtime the join builds (JoinerSettings).
+	net_.joiner.app_id = opennova::to_std(p_token.strip_edges());
+	if (net_.joiner.app_id.empty()) net_.joiner.app_id = "0";
+	if (runtime_) runtime_->set_app_id(net_.joiner.app_id);
 }
 
 void Simulation::set_join_network_type(int p_type) {
-	net_.join_network_type =
+	net_.joiner.network_type =
 			p_type == static_cast<int>(opennova::inmatch::NetworkType::NovaWorld)
 			? opennova::inmatch::NetworkType::NovaWorld
 			: opennova::inmatch::NetworkType::Lan;
@@ -694,19 +694,19 @@ void Simulation::set_join_network_type(int p_type) {
 	// inmatch::ClientRuntime::tear_down_transport).
 	if (joiner_role_ != nullptr)
 		joiner_role_->set_join_novaworld(
-				net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
+				net_.joiner.network_type == opennova::inmatch::NetworkType::NovaWorld);
 }
 
 void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
 	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN. Retained
-	// and re-applied to the joiner runtime on each (re)load via install_join_cd_cookie.
-	net_.join_cd_cookie.assign(p_cookie.ptr(), p_cookie.ptr() + p_cookie.size());
-	install_join_cd_cookie();
+	// and taken by every runtime the join builds (JoinerSettings).
+	net_.joiner.cd_cookie.assign(p_cookie.ptr(), p_cookie.ptr() + p_cookie.size());
+	if (runtime_) runtime_->set_join_cd_cookie(net_.joiner.cd_cookie);
 }
 
 void Simulation::set_join_glsvss_request(const PackedByteArray &p_request) {
-	net_.join_glsvss_request.assign(p_request.ptr(), p_request.ptr() + p_request.size());
-	install_join_glsvss_request();
+	net_.joiner.glsvss_request.assign(p_request.ptr(), p_request.ptr() + p_request.size());
+	if (runtime_) runtime_->set_glsvss_request(net_.joiner.glsvss_request);
 }
 
 void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
@@ -719,19 +719,19 @@ void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
 		// The browse's CI, which the join goes on with (D-NET-521).
 		session.client_index = static_cast<uint32_t>(p_target->get_session_client_index());
 	}
-	net_.join_discovered_session = std::move(session);
+	net_.joiner.discovered_session = std::move(session);
 	// ... and the browse's socket (D-NET-1019).
 	net_.join_transport = p_target.is_valid() ? p_target->get_transport() : Ref<UdpPump>();
-	// Applied to a live joiner runtime now and on each (re)load in enable_join.
-	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);
+	// Applied to a live joiner runtime now and taken by every runtime the join builds.
+	if (runtime_) runtime_->set_discovered_session(net_.joiner.discovered_session);
 }
 
 void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 	// D-NET-166: the JOIN VERSIONCRCSTRING checksum source. The runtime CRCs
 	// the loose expansion/<SUS2>/version.txt under this root at JOIN-build
 	// time (see JoinerConnection::set_expansion_version_root).
-	net_.join_expansion_version_root = opennova::to_std(p_game_root);
-	install_expansion_version_root();
+	net_.joiner.expansion_version_root = opennova::to_std(p_game_root);
+	if (runtime_) runtime_->set_expansion_version_root(net_.joiner.expansion_version_root);
 }
 
 // ---- co-op LAN joiner (D.2) -------------------------------------------------
@@ -740,34 +740,23 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		const String &p_player_name, int p_join_role,
 		const String &p_spectator_password, const String &p_server_password,
 		const String &p_join_password) {
-	// P7: the joiner is a non-authority inmatch::ClientRuntime (Joiner role) built per-load by the boot's role hook;
-	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
-	// the socket + store the player name (the ClientAuth.NA display callsign). Leave
-	// listen_server_ false (the session kind is the flag); a sim is host XOR joiner.
-	// The joiner role, constructed with the loadout profile seams it keeps; the
-	// session's role switch is the gate: re-dialing a live mission is rejected
-	// without partially replacing its transport. A session with no title identity
-	// (session_protocol) has nothing to join with.
+	// The joiner is a non-authority inmatch::ClientRuntime (Joiner role); its bring-up is the
+	// engine's (inmatch/joiner_boot.h boot_joiner). Here the binding installs the role (the
+	// session's role switch is the gate: re-dialing a live mission is rejected without partially
+	// replacing its transport), opens the socket (the platform's), and hands the boot its words.
+	// Leave listen_server_ false (the session kind is the flag); a sim is host XOR joiner. A
+	// session with no title identity (session_protocol) has nothing to join with.
 	const opennova::Protocol *protocol = session_protocol(net_.protocol);
 	if (protocol == nullptr) return false;
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
-	joiner_role_->set_protocol(protocol);
-	// The rules the joiner's World and its replica run, the mounted game's (session_game_title).
-	joiner_role_->set_rules(opennova::world::title_rules(session_game_title(net_.game_title).code));
-	// The process's 0x4C report count runs on across joins (ClientProcessState).
-	joiner_role_->use_process_state(net_.client_process);
-	// The process's log devices: a session destroy's stop of a held server writes its
-	// _inout.txt lines (engine: inmatch::JoinerRole::destroy_session).
-	if (net_.log_devices != nullptr) joiner_role_->set_server_logs(net_.log_devices->logs());
+	opennova::inmatch::JoinerBootRequest request;
 	if (net_.join_transport.is_valid() && net_.join_transport->is_open()) {
-		// The join goes on with the browse's socket, the one the row was found on:
-		// retail's client has one transport socket per network type, and the join
-		// continues on the browse's connection (on NovaWorld the lobby session's
-		// socket, its demux keeping the two protocols apart). The connection reads
-		// its peer's datagrams alone (engine: net/npwire/lan_discovery.h, the
-		// browser's transport; net/npwire/datagram_demux.h, the per-source lookup).
-		// The row's address is the 0x81's source, a dotted quad.
+		// The join goes on with the browse's socket, the one the row was found on (engine
+		// inmatch::boot_joiner carries the witness). The connection reads its peer's datagrams
+		// alone (engine: net/npwire/lan_discovery.h, the browser's transport;
+		// net/npwire/datagram_demux.h, the per-source lookup). The row's address is the 0x81's
+		// source, a dotted quad.
 		const opennova::PeerAddr host{
 				opennova::resolve_address_without_dns(opennova::to_std(p_host_ip)),
 				static_cast<uint16_t>(p_port)};
@@ -782,7 +771,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		if (net_.client_process != nullptr)
 			join_socket->set_held_server(&net_.client_process->unstopped_server);
 		net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(std::move(join_socket));
-		joiner_role_->set_socket(net_.pump_socket.get(), host);
+		request.host = host;
 	} else {
 		if (net_.pump.is_null()) net_.pump.instantiate();
 		net_.pump->set_capture_path(net_.capture_pcap_path);
@@ -816,48 +805,34 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 		// from now on.
 		net_.pump_socket = std::make_unique<opennova::CountingDatagramSocket>(
 				std::make_unique<UdpPumpDatagramSocket>(net_.pump.ptr()));
-		joiner_role_->set_socket(net_.pump_socket.get(), net_.pump->dialed_host());
+		request.host = net_.pump->dialed_host();
 	}
-	// The join socket's bound address, which a held server's HOST STOPPED prints (engine:
-	// inmatch::JoinerRole::set_local_address).
-	joiner_role_->set_local_address(net_.pump->local_address());
-	// Build the Joiner runtime now so get_joiner_phase reads Idle before the first load (the contract
-	// the legacy joiner_session_ held); the role retains the request for a load that rebuilds it.
-	// The callsign goes out as the profile name's code-page bytes, the NA TLV and the host's
-	// roster carrying them (engine: inmatch/joiner_role.h create_runtime; D-NET-661), and so do
-	// the passwords, which the host compares against its own dialog's bytes (D-HUD-57).
-	runtime_ = &joiner_role_->create_runtime(
-			opennova::gd_to_retail_text(p_player_name),
-			p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
-					? opennova::inmatch::JoinRole::Spectator
-					: opennova::inmatch::JoinRole::Player,
-			opennova::gd_to_retail_text(p_spectator_password),
-			opennova::gd_to_retail_text(p_server_password),
-			opennova::gd_to_retail_text(p_join_password));
-	// The process's _connectlog.txt, which the session key's handler closes.
-	runtime_->set_connect_log(net_.log_devices != nullptr ? net_.log_devices->logs().connect
-	                                                     : nullptr);
-	// The join's network type: a NovaWorld join's session destroy keeps its transport.
-	joiner_role_->set_join_novaworld(
-			net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld);
+	request.socket = net_.pump_socket.get();
+	request.local_address = net_.pump->local_address();
+	request.protocol = protocol;
+	// The rules the joiner's World and its replica run, the mounted game's (session_game_title).
+	request.rules = &opennova::world::title_rules(session_game_title(net_.game_title).code);
+	// The process's 0x4C report count runs on across joins (ClientProcessState).
+	request.process = net_.client_process;
+	const opennova::inmatch::ServerLogs server_logs = net_.log_devices != nullptr
+			? net_.log_devices->logs()
+			: opennova::inmatch::ServerLogs{};
+	if (net_.log_devices != nullptr) request.server_logs = &server_logs;
+	// The callsign and the passwords as the profile name's code-page bytes (D-NET-661, D-HUD-57).
+	request.player_name = opennova::gd_to_retail_text(p_player_name);
+	request.join_role = p_join_role == static_cast<int>(opennova::inmatch::JoinRole::Spectator)
+			? opennova::inmatch::JoinRole::Spectator
+			: opennova::inmatch::JoinRole::Player;
+	request.spectator_password = opennova::gd_to_retail_text(p_spectator_password);
+	request.server_password = opennova::gd_to_retail_text(p_server_password);
+	request.join_password = opennova::gd_to_retail_text(p_join_password);
 	// The session reset's connection destroy drains the process enumerator's records, the
 	// browse the join went on from (engine: ClientRuntime::drain_enumerator, D-NET-956).
-	joiner_role_->set_enumerator_drain([] { LanSession::drain_process_enumerator(); });
+	request.enumerator_drain = [] { LanSession::drain_process_enumerator(); };
+	request.settings = net_.joiner;
+	request.tables = joiner_tables();
+	runtime_ = &opennova::inmatch::boot_joiner(*joiner_role_, request);
 	install_console_seams();
-	install_charattr_table();
-	install_character_join_vars();
-	install_auto_medic_preference();
-	install_expansion_version_root();
-	install_app_id();
-	install_join_cd_cookie();
-	install_join_glsvss_request();
-	install_join_mission_start();
-	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
-	install_item_catalog();
-	install_character_registry();
-	// The kind-derived world rules (no authority, an mp session) applied with
-	// the role install.
-	joiner_role_->reset_for_join();
 	net_.joiner_applied_loadout_revision = 0;
 	if (!session_.begin_connect().applied()) {
 		(void)install_offline_role();
@@ -993,13 +968,13 @@ PackedStringArray Simulation::get_mission_start_model_files() const {
 }
 
 void Simulation::set_join_sync_tail_loading(bool p_loading) {
-	net_.join_sync_tail_loading = p_loading;
-	install_join_mission_start();
+	net_.joiner.sync_tail_loading = p_loading;
+	if (runtime_) runtime_->set_sync_tail_loading(p_loading);
 }
 
 void Simulation::set_join_mission_data_loading(bool p_loading) {
-	net_.join_mission_data_loading = p_loading;
-	install_join_mission_start();
+	net_.joiner.mission_data_loading = p_loading;
+	if (runtime_) runtime_->set_mission_data_loading(p_loading);
 }
 
 bool Simulation::is_join_mission_data_load_running() const {
@@ -1029,6 +1004,25 @@ void Simulation::materialize_join_world_stream() {
 
 void Simulation::run_join_streamed_weapon_slot_class_inits() {
 	if (joiner_role_ != nullptr) joiner_role_->run_streamed_weapon_slot_class_inits();
+}
+
+void Simulation::settle_join_streamed_types(const Ref<ResourceRoot> &p_root,
+		const Ref<ItemDatabase> &p_item_db) {
+	if (joiner_role_ == nullptr || !kernel_ || p_item_db.is_null()) return;
+	// The native extractor reads model userpoints through the sim's own parse cache, so the
+	// asset root wires first.
+	if (p_root.is_valid()) set_asset_root(p_root);
+	opennova::inmatch::StreamedTypeLegs legs;
+	legs.seat_specs = [this, p_item_db](const std::vector<int32_t> &p_type_ids) {
+		PackedInt32Array type_ids;
+		for (const int32_t type_id : p_type_ids) type_ids.push_back(type_id);
+		(void)install_seat_specs_for_type_ids(p_item_db, type_ids);
+	};
+	legs.item_traits = [this, p_item_db]() { resolve_item_traits(p_item_db); };
+	legs.collision = [this, p_item_db]() { (void)resolve_collision_instances(p_item_db); };
+	const std::shared_ptr<const SimulationPresentSnapshot> frame = build_present_snapshot();
+	opennova::inmatch::settle_streamed_types(*joiner_role_, *kernel_,
+			opennova::inmatch::streamed_type_order(frame->rows), legs);
 }
 
 void Simulation::reload_join_pool0_row_channels() {

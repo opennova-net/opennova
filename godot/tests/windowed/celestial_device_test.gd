@@ -109,7 +109,7 @@ func _q3_glare_peak(glare_name: String, occluder_distance: float = -1.0) -> Dict
 	var white_texture := ImageTexture.create_from_image(white)
 	for material in _body_materials(glare):
 		material.set_shader_parameter("u_diffuse", white_texture)
-		FrameFx.invalidate_q3_object_material(material)
+		FrameFx.set_q3_object_diffuse(material, white_texture, 1000.0)
 	celestial.advance_frame(TICK)
 
 	var renderer := FrameFx.new()

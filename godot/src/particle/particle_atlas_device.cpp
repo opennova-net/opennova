@@ -164,8 +164,8 @@ void ParticleAtlasDevice::rebuild(const Definitions &p_definitions,
 		if (image.is_null()) {
 			mark_unresolved(name);
 			if (!p_procedural_fallback) {
-				entry_lookup.emplace(key, kMissingEntry);
-				return kMissingEntry;
+				entry_lookup.emplace(key, opennova::renderer::kParticleMissingEntry);
+				return opennova::renderer::kParticleMissingEntry;
 			}
 			const auto fallback = fallback_entries.find(static_cast<int>(type));
 			if (fallback != fallback_entries.end()) {
@@ -179,15 +179,15 @@ void ParticleAtlasDevice::rebuild(const Definitions &p_definitions,
 		}
 		if (image.is_null() || image->get_width() <= 0 ||
 				image->get_height() <= 0) {
-			entry_lookup.emplace(key, kMissingEntry);
-			return kMissingEntry;
+			entry_lookup.emplace(key, opennova::renderer::kParticleMissingEntry);
+			return opennova::renderer::kParticleMissingEntry;
 		}
 
 		opennova::renderer::ParticleRgbaImage rgba = particle_rgba_image(image,
 				used_fallback && type == 1);
 		if (!rgba.valid()) {
-			entry_lookup.emplace(key, kMissingEntry);
-			return kMissingEntry;
+			entry_lookup.emplace(key, opennova::renderer::kParticleMissingEntry);
+			return opennova::renderer::kParticleMissingEntry;
 		}
 		const std::size_t index = builder.register_frame(name, type,
 				std::move(rgba));
@@ -203,17 +203,17 @@ void ParticleAtlasDevice::rebuild(const Definitions &p_definitions,
 			definition_index < p_definitions->size(); ++definition_index) {
 		const opennova::particle::ParticleDef &definition =
 				(*p_definitions)[definition_index];
-		DefinitionVisual &visual = definition_visuals_[definition_index];
+		opennova::renderer::ParticleDefinitionVisual &visual = definition_visuals_[definition_index];
 		visual.ambient_lit = opennova::renderer::particle_def_ambient_tinted(definition);
 		bool any_present = false;
-		for (int layer_index = 0; layer_index < kGraphicLayerCount;
+		for (int layer_index = 0; layer_index < opennova::renderer::kParticleGraphicLayerCount;
 				++layer_index) {
 			const GraphicLayer &graphic =
 					definition.graphics[static_cast<std::size_t>(layer_index)];
 			if (!graphic.present)
 				continue;
 			any_present = true;
-			LayerVisual &layer = visual.layers[static_cast<std::size_t>(layer_index)];
+			opennova::renderer::ParticleLayerVisual &layer = visual.layers[static_cast<std::size_t>(layer_index)];
 			layer.present = true;
 			layer.type = static_cast<std::uint8_t>(graphic.blend_mode);
 			layer.flip_frames = std::clamp(graphic.flip_frames, 1,
@@ -226,7 +226,7 @@ void ParticleAtlasDevice::rebuild(const Definitions &p_definitions,
 			}
 		}
 		if (!any_present) {
-			LayerVisual &layer = visual.layers[0];
+			opennova::renderer::ParticleLayerVisual &layer = visual.layers[0];
 			layer.present = true;
 			layer.frame_entries.push_back(register_frame(std::string(), 0));
 		}

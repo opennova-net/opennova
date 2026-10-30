@@ -33,7 +33,6 @@
 #include "mission/static_population_instance.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
-#include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "env/precipitation.h"
@@ -157,7 +156,6 @@
 #include "lwf/lwf_data.h"
 #include "lwf/wav_loader.h"
 #include "lwf/wave_stream.h"
-#include "audio/ambient_mixer.h"
 #include "audio/sound_selector.h"
 #include "audio/ambient_layer.h"
 #include "audio/sound_bank.h"
@@ -262,7 +260,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionPlacementRun);
 	GDREGISTER_CLASS(StaticPopulationInstance);
 	GDREGISTER_CLASS(MissionObjectPlacer);
-	GDREGISTER_CLASS(SunShadow);
 	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
 	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
@@ -398,15 +395,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LwfData);
 	GDREGISTER_CLASS(WavLoader);
 	GDREGISTER_CLASS(WaveStream);
-	GDREGISTER_CLASS(AmbientMixer);
 	GDREGISTER_CLASS(SoundSelector);
 	GDREGISTER_CLASS(DbfData);
 	GDREGISTER_CLASS(AmbientLayer);
 	GDREGISTER_CLASS(SoundBank);
-	GDREGISTER_CLASS(MissionAudioMarker);
-	GDREGISTER_CLASS(MissionAudioChannel);
-	GDREGISTER_CLASS(MissionAudioCandidateBinding);
-	GDREGISTER_CLASS(MissionAudioDynamicEmitter);
 	GDREGISTER_CLASS(MissionAudioStats);
 	GDREGISTER_CLASS(MissionAudioPerf);
 	GDREGISTER_CLASS(FiredSoundset);

@@ -11,7 +11,7 @@ func after_each() -> void:
 		DirAccess.remove_absolute(abs)
 
 
-func test_fnt_loads_as_native_resource_and_font_file_view() -> void:
+func test_fnt_loads_as_native_resource() -> void:
 	var bytes := FileAccess.get_file_as_bytes(FNT_PATH)
 	assert_gt(bytes.size(), 0, "synth_1page.fnt fixture bytes should be readable.")
 	var res := FntResource.new()
@@ -29,11 +29,6 @@ func test_fnt_loads_as_native_resource_and_font_file_view() -> void:
 	if page != null:
 		assert_eq(page.get_width(), 256, "FNT page width is fixed.")
 		assert_eq(page.get_height(), 256, "FNT page height is fixed.")
-
-	var font := res.to_font_file()
-	assert_not_null(font, "Native FNT resource should generate a Godot FontFile view.")
-	if font != null:
-		assert_gt(font.get_fixed_size(), 0, "Generated FontFile should have a fixed size.")
 
 
 func test_blank_fnt_saves_and_reloads_alpha_and_glyph_rect() -> void:

@@ -38,6 +38,7 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout the snapshot carries
 #include <runtime/world/present_drains.h> // the per-tick presentation drain rows (ADR 0043 d10)
+#include <runtime/world/player_present.h> // LocalAvatarPresent (the avatar's present row)
 #include <runtime/world/music_vars.h> // MusicVarWrite (the gamemus var pump)
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the attach-label scan), the attach-command ids + the seat mirror
@@ -49,6 +50,7 @@
 #include <formats/playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <runtime/inmatch/admin_console.h> // AdminConsole::Seams (remote_admin_seams)
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminBinding (remote_admin_binding)
+#include <runtime/inmatch/hud_frame_feeds.h> // HudFeedSource: what the HUD feeds read
 #include <runtime/inmatch/role_feeds.h> // RoleView: what the role feeds read of this session
 #include <runtime/inmatch/special_key_chain.h> // SpecialKeyInput / SpecialKeyOutcome
 #include <runtime/terrain_query/terrain_field_store.h>
@@ -512,13 +514,15 @@ private:
 	// on the host role and runtime_'s view: their record classes and the def
 	// facts the view's destroy reads (no-op until resolve_item_traits built
 	// it). A host role is constructed with the same catalog. Called from
-	// resolve_item_traits, the boot's role hook, and enable_join.
+	// resolve_item_traits and the boot's role hook (a join's runtimes take it from
+	// joiner_tables, engine inmatch::install_joiner_runtime).
 	void install_item_catalog();
 	// Install the retained Avatars.def registry (assets_.character_registry) on
 	// runtime_'s view: a player row's NetId the table lacks takes its side's first
 	// combo (engine ClientReplicaPipeline::set_character_registry, D-NET-853);
 	// a mounted empty table installs too (it packs 0), none with no table mounted.
-	// Called from set_character_avatar_database, the boot's role hook, and enable_join.
+	// Called from set_character_avatar_database and the boot's role hook (a join's runtimes take
+	// it from joiner_tables).
 	void install_character_registry();
 	// Install the retained boot charattr table on the current Joiner runtime.
 	void install_charattr_table();
@@ -528,22 +532,14 @@ private:
 	// creation, at every table install, and after each net pump (engine:
 	// runtime/inmatch/charattr_table.h).
 	void sync_class_attribute_flags();
-	// Install the retained retail player-profile join block on the current runtime.
-	void install_character_join_vars();
-	// The current record's auto-medic word onto the joiner runtime (C2S 0x03).
+	// The current record's auto-medic word onto the runtime (C2S 0x03).
 	void install_auto_medic_preference();
 	// The session copy of the record's input words (profile::session_input).
 	void apply_session_input();
-	// Install the retained JOIN-checksum install root (D-NET-166).
-	void install_expansion_version_root();
-	// Install the retained APPID join token (decoded .joi CK) on the current runtime.
-	void install_app_id();
-	// Install the retained CD identity cookie (packed PUB* blob) on the runtime.
-	void install_join_cd_cookie();
-	// Install the retained gate GLSVSSREQUEST (the NovaWorld JOIN's last TLV) on the runtime.
-	void install_join_glsvss_request();
-	// Install the retained mission-start seam (the load flag, the side password).
-	void install_join_mission_start();
+	// The process tables the join's runtimes read (engine inmatch/joiner_boot.h JoinerTables):
+	// the retained charattr.def table, the items.def catalog, the Avatars.def registry, the
+	// record's auto-medic word and the connect log.
+	opennova::inmatch::JoinerTables joiner_tables() const;
 	// The host's session record for a mission of `p_game_type` (the UI host config or the SP
 	// listen server's, whose mission file is `p_sp_mission_file`: ShellHostSource::
 	// sp_mission_file); host_bringup() adds the retained .til, text and Server strings for the
@@ -959,6 +955,11 @@ public:
 	// The header-only load's slot leg, past its seat table and traits (engine:
 	// inmatch::JoinerRole::run_streamed_weapon_slot_class_inits, D-NET-1363).
 	void run_join_streamed_weapon_slot_class_inits();
+	// A header-only join's stream types' model-derived legs over `p_root` and `p_item_db` (engine
+	// inmatch::settle_streamed_types: the seat table, the traits, the slot legs, the collision,
+	// the portal init), ahead of the C2S 0x3D page's freeze.
+	void settle_join_streamed_types(const Ref<class ResourceRoot> &p_root,
+			const Ref<class ItemDatabase> &p_item_db);
 	// The mission start's model reload's pool-0 animation maps, at the reload's place in the
 	// load (engine: inmatch::JoinerRole::reload_pool0_row_channels, D-NET-1252).
 	void reload_join_pool0_row_channels();
@@ -1297,29 +1298,22 @@ public:
 	// (engine: runtime/world/player_loadout.cpp)
 	int get_local_player_class() const;
 	String get_local_player_weapon_name() const;
-	// The local player's canonical body-anim slot (BodyAnim; -1 when no player). The shell
-	// animates the 3rd-person avatar from this, mirroring how the present pass drives NPC models.
-	int get_local_player_body_anim_slot() const;
-	// The local player's full anim-state clip key ("anim_<name>", "" when no player). Carries
-	// stance + jump the 8-slot BodyAnim enum can't (anim_idle_crouch / anim_jump_loop / ...); the
-	// shell plays it on the avatar via ObjectModel.play_body_clip for full stance fidelity.
+	// The local player's full anim-state clip key ("anim_<name>", "" when no player).
 	String get_local_player_anim_key() const;
 	// The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
 	// dword_B76484 prone-latch equivalent the render-slot drape gate reads
 	// [orig: RenderSlot_DrawAllDrapes @0x5d6e81 reads
 	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md].
 	Stance get_local_player_stance_latch() const { return static_cast<Stance>(kernel_->local.stance_latch()); }
+	// The local avatar's present row: its MATCHTERRAIN gate and its body clip
+	// request (engine world::local_avatar_present).
+	opennova::world::LocalAvatarPresent local_avatar_present() const {
+		return opennova::world::local_avatar_present(kernel_->world, kernel_->local);
+	}
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
 	// authoritative stance state (engine: runtime/world/local_player_view.cpp). The witnessed
 	// source is the body state, never the anim clip name.
 	Stance get_local_player_stance() const;
-	int get_local_player_anim_phase_ticks() const;
-	String get_local_player_anim_source_key() const;
-	int get_local_player_anim_source_phase_ticks() const;
-	float get_local_player_anim_blend_weight() const;
-	// The primary channel's served ring entries (target, outgoing) and armed park.
-	int get_local_player_anim_variant() const;
-	int get_local_player_anim_source_variant() const;
 	bool get_local_player_anim_phase_parked() const; // InfantryState::body_phase_parked
 	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
 	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
@@ -1461,11 +1455,6 @@ public:
 
 	// The type-2043 grid-origin marker: present + Godot-space position.
 	Ref<HudMapGridOrigin> get_hud_map_grid_origin() const;
-	// The objectives-panel rows for header slots 1..8, terminated at the first 0/255 win-condition
-	// id — the panel's row walk (engine: runtime/mission/promote.cpp) — filled natively for
-	// HudOverlay::set_objectives: the SHOWN rows, lines resolved through the table. NOT bound.
-	void fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
-			std::vector<opennova::hud::HudObjectiveRow> &r_rows) const;
 	// The briefing panel's text: info/briefing2, else info/briefing (HudBriefingState). NOT bound.
 	std::string mission_briefing_text() const { return net_.mission_text.briefing2(); }
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
@@ -1527,12 +1516,11 @@ public:
 	// false (rows cleared) when the local player rides nothing.
 	bool fill_vehicle_panel(const opennova::def::DefVehicleHudBlock &p_block,
 			opennova::hud::HudVehiclePanelState &r_state) const;
-	// NOT ClassDB-bound: the AAS zone panel feed (world/lfp_feed.h), one HudLfpZone per
-	// spawn-zone entry joined with its zone-timer entry and its regular map slot's capture bits.
-	bool fill_lfp_zones(int p_local_team, std::vector<opennova::hud::HudLfpZone> &r_zones);
-	// NOT ClassDB-bound: the takeover dialog's nearest zone-timer entry
-	// (inmatch/takeover_status_feed.h); false when none qualifies.
-	bool fill_takeover_facts(opennova::hud::HudTakeoverFacts &r_facts);
+	// NOT ClassDB-bound: what HudOverlay's engine feeds read of this session
+	// (inmatch/hud_frame_feeds.h: the role view, the spawn-zone registry, a joiner's
+	// seat occupancy) -- the AAS zone panel, the takeover dialog, the objectives, the
+	// attach labels, the friendly tags and the role facts.
+	opennova::inmatch::HudFeedSource hud_feed_source();
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
 	String get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const; // RULELIST (inmatch::command_map_rules_text); "" = keep
@@ -1799,9 +1787,8 @@ public:
 	void finish_script_voice(uint64_t p_serial, const opennova::lwf::WavPcm *p_clip);
 	void set_script_voice_resolver(opennova::world::ScriptVoiceChannel::SetResolver p_resolver);
 	bool play_script_wave(const String &p_filename);
-	// The mixer meter's device feed (engine audio::AudioOutMeter): seconds mixed, the script-voice bus's peak; its first stage.
+	// The mixer meter's device feed (engine audio::AudioOutMeter): seconds mixed, the script-voice bus's peak.
 	void advance_audio_out_meter(double p_seconds, float p_peak);
-	int32_t audio_out_stage1() const;
 	// The world's one dialog table, which mission audio plays (runtime/audio/dialog_queue.h).
 	opennova::audio::DialogQueue *dialog_queue();
 	// One dialog tick over the world's table: the device loads and plays each line, then the
@@ -2440,22 +2427,6 @@ public:
 	bool local_player_toggle_mount();
 	bool local_player_select_seat(int p_index);
 
-	// The floating attach labels around the local player (world::AttachLabel:
-	// the mission-space position with the +0.1875 u lift applied, the seat
-	// type (world::SeatType, 4 = armory point), the armory-zone flag, the
-	// nearest full-bright highlight and the USEGUN weapon's attachtextid
-	// Overlays key, "" = absent -> the STROVER_USEGUN default). Armory mode
-	// rides the zone flag; the nearest-only gate consumes the same complete
-	// live fire verdict as body/HUD selection. NOT ClassDB-bound:
-	// HudOverlay::set_attach_labels projects and resolves the rows natively.
-	// False without a kernel. (engine: runtime/hud/hud_frame.cpp)
-	bool fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const;
-	// The friendly-tags gather (D-HUD-20; world::FriendlyTagSource): the raw
-	// positions + per-entity facts; HudOverlay::set_friendly_tags lifts,
-	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
-	// False without a kernel or a local player.
-	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
-	opennova::inmatch::HudRoleFacts hud_role_facts(uint32_t p_voice_menus = 0) const; // NOT bound
 	// The radio-request icon's viewer gate over the local player (world::
 	// friendly_tag_radio_request_viewer): a driver/controller seat or an own latch.
 	bool local_player_radio_request_icon_viewer() const;
