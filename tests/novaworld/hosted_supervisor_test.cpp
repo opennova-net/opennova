@@ -1207,6 +1207,30 @@ int test_two_servers_one_machine() {
 	return 0;
 }
 
+// A stored configuration that does not read (a key no binary takes, here) fails that server
+// alone: the row reads with the defaults and the reason, the pass fails it (its agent stops its
+// container) and every other server's pass goes on.
+int test_unreadable_configuration() {
+	Rig rig("hosted_unreadable_config");
+	const int64_t bad = rig.request("unreadable_a");
+	const int64_t good = rig.request("unreadable_b");
+	TEST_EXPECT(bad > 0 && good > 0);
+	TEST_EXPECT(!rig.to_running(bad, 5111).empty());
+	rig.db.exec("UPDATE hosted_servers SET configuration = configuration || '{\"no_such_key\": 1}' "
+				"WHERE id = $1;",
+			{ BindValue(bad) });
+	const auto unread = rig.server(bad);
+	TEST_EXPECT(unread && unread->settings_error == "no_such_key: Unknown settings field.");
+	TEST_EXPECT(!rig.to_running(good, 5112).empty());
+	const auto row = rig.server(bad);
+	TEST_EXPECT(row && row->state == State::Failed &&
+			row->failure_reason ==
+					"its stored configuration does not read (no_such_key: Unknown settings field.)" &&
+			!row->machine_ref);
+	TEST_EXPECT(rig.state(good) == State::Running);
+	return 0;
+}
+
 // A dedicated machine: the server gets a machine of its own (one slot,
 // reserved for it, its own kind's template), never a shared one's slot, while a
 // shared server of the same owner goes to a shared machine; the dedicated machine
@@ -3034,6 +3058,7 @@ int main(int argc, char **argv) {
 		{ "novalogic_listing", { test_novalogic_listing } },
 		{ "lifecycle_and_stop", { test_lifecycle_and_stop } },
 		{ "two_servers_one_machine", { test_two_servers_one_machine } },
+		{ "unreadable_configuration", { test_unreadable_configuration } },
 		{ "own_machine", { test_own_machine } },
 		{ "own_restart_at_cap", { test_own_restart_at_cap } },
 		{ "static_address", { test_static_address } },

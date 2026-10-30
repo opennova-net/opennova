@@ -290,6 +290,20 @@ void Supervisor::tick(uint64_t now_ms) {
 	for (const HostedServer &s : live) {
 		seen.insert(s.id);
 		if (limited.count(s.id) != 0) continue;
+		if (!s.settings_error.empty()) {
+			// Its stored configuration does not read: it fails alone (its agent stops its
+			// container), and every other server's pass goes on.
+			try {
+				finish(db, s, State::Failed,
+						"its stored configuration does not read (" + s.settings_error + ")",
+						StartCause::NoData);
+			} catch (const db::Error &e) {
+				good = false;
+				std::fprintf(stderr, "[hosted] WARN server %lld: %s\n",
+						static_cast<long long>(s.id), e.what());
+			}
+			continue;
+		}
 		Runtime &rt = runtimes_[s.id];
 		if (rt.since_ms == 0 || rt.state != s.state) {
 			// A state this pass did not set (a route's stop, a new request, or a

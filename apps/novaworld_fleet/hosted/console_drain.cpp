@@ -131,7 +131,11 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 		}
 		if (link && before && before->generation == server_generation &&
 				link->target().generation == server_generation) {
-			if (options.expected_revision &&
+			if (!options.settings_patch.empty() && !before->settings_error.empty()) {
+				// A stored configuration that does not read is never edited from the defaults.
+				result.outcome = AdminCommandOutcome::Refused;
+				result.replies = { "ERROR - The saved configuration does not read." };
+			} else if (options.expected_revision &&
 					*options.expected_revision != before->settings_revision) {
 				result.outcome = AdminCommandOutcome::Refused;
 				result.replies = {

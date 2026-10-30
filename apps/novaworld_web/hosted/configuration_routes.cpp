@@ -127,6 +127,11 @@ crow::response ConsoleRoutes::settings_edit(const Caller &c, const crow::request
 		const auto server = find_server(*lease, c.server_id);
 		if (!server)
 			return json_error(404, "not_found");
+		// A stored configuration that does not read is never replaced from the defaults (the
+		// supervisor fails that server).
+		if (!server->settings_error.empty())
+			return json_error(409, "settings_unreadable",
+					"This server's saved settings do not read; it is being stopped.");
 		if (server->settings_revision != static_cast<int64_t>(revision->number))
 			return json_error(
 					409, "settings_changed", "Reload settings before applying this edit.");
