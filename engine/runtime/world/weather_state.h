@@ -43,6 +43,16 @@ struct WeatherSeed {
     int32_t wind_scale = 256;                // g_EnvWindScale @ 0x26c68c0 (Environment_InitDefaults @ 0x57c1d1)
 };
 
+// The mission clock as a host's map change keeps it for the next mission: the 8.24 time and its
+// per-tick advance, read off the old mission at its teardown (the session's time-of-day
+// continuity, inmatch/map_change.h HostMapChange::kept_clock).
+// [orig: Game_TeardownMission @0x522350 - sub_57C4D0's g_EnvCurTimeFixed24 into dword_24D5A04
+//  @0x522539, sub_57C4E0's g_EnvTodAdvancePerTick into dword_24D5A08 @0x522543]
+struct TodClock {
+    uint32_t tod_fixed24 = 0;
+    uint32_t tod_advance_per_tick = 0;
+};
+
 // One decoded S2C 0x0A phase-2 ENV sub-block in WIRE units (the client
 // writes these into the TARGET globals; the local currents keep chasing)
 // [orig: NapiNPClientMsg_0x00A case 2 @ 0x430244..0x43034c].

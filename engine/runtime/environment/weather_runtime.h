@@ -92,8 +92,11 @@ public:
 	// Seed -> attach the embedder's render hook -> publish T0 -> complete the
 	// kernel boundary (eager WAC and the 255-tick settle). Without a mission
 	// state, retain the standalone prewarm path; neither callback runs.
-	void run_mission_start_boundary(EnvironmentState *env,
-			world::WeatherState *mission_state, const bms::Header &header,
+	// `kept_clock`: the clock a host's map change kept for this mission (the
+	// session's time-of-day continuity, inmatch::kept_mission_clock), set over the
+	// BMS header's; null for the header's.
+	void run_mission_start_boundary(EnvironmentState *env, world::WeatherState *mission_state,
+			const bms::Header &header, const world::TodClock *kept_clock,
 			const std::function<void()> &bind_render,
 			const std::function<void()> &complete_mission_start);
 

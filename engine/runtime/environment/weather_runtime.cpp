@@ -90,7 +90,7 @@ void WeatherRuntime::prewarm_mission_start(EnvironmentState *env) {
 
 void WeatherRuntime::run_mission_start_boundary(EnvironmentState *env,
 		world::WeatherState *mission_state, const bms::Header &header,
-		const std::function<void()> &bind_render,
+		const world::TodClock *kept_clock, const std::function<void()> &bind_render,
 		const std::function<void()> &complete_mission_start) {
 	if (env == nullptr || mission_state == nullptr) {
 		prewarm_mission_start(env);
@@ -104,6 +104,16 @@ void WeatherRuntime::run_mission_start_boundary(EnvironmentState *env,
 		world::WeatherSeed seed = weather_seed_from_config(*env->config(), header);
 		seed.wind_scale = static_cast<int32_t>(wind_strength_pct() / 100.0f * 256.0f);
 		mission_state->seed(seed);
+	}
+	// A map change's kept clock in place of the header's: the time as Environment_SetCurrentTime
+	// sets it (its tickdown 10), the advance as Environment_SetTodRate stores it.
+	// [orig: Game_StartMission @0x524360 - @0x5253A1..0x5253C3: Environment_SetCurrentTime
+	//  (dword_24D5A04) @0x5253B7, Environment_SetTodRate(dword_24D5A08) @0x5253C3, else the
+	//  header's @0x5253CA..0x5253E2] [orig: Game_StartMission @0x521530 - @0x522582..0x522594
+	//  (dfx2.exe)]
+	if (kept_clock != nullptr) {
+		mission_state->set_current_time(kept_clock->tod_fixed24);
+		mission_state->set_tod_advance_per_tick(kept_clock->tod_advance_per_tick);
 	}
 	bind_render();
 	resync_colors();

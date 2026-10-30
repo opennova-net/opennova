@@ -158,6 +158,12 @@ const std::vector<ServerSetting> &server_settings() {
 			// (runtime/inmatch/host_config.cpp, server_initial_state.cpp, server_dispatch_join.cpp).
 			integer("max_team_lives", "Team lives", "Rules", &GameCfg::max_team_lives),
 			integer("difficulty", "Difficulty", "Rules", &GameCfg::mp_difficulty),
+			// The authority's mission start after a map change runs on the clock the teardown kept
+			// instead of the map's own start time (runtime/inmatch/host_boot.h kept_mission_clock),
+			// which every joiner's clock follows [orig: Game_StartMission @0x524360 - @0x5253A1;
+			//  NetPacket_WritePlayerState @0x4FFB7E -> NapiNPClientMsg_0x00A @0x4302AE].
+			toggle("time_of_day_continuity", "Keep the time of day between maps", "Rules",
+					&GameCfg::mp_tod_continuity),
 			integer("max_friendly_kills", "Allowed friendly kills", "Rules",
 					&GameCfg::numallowablefriendlykills, "MaxFriendlyKills"),
 			integer("capture_duration", "Capture duration (seconds)", "Teams",

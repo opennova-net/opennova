@@ -116,6 +116,8 @@ void HostRole::reset_session(bool serve_and_play) {
 	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
 	ctx.punt_crc_counters = &client_process_->punt_crc_counters;
+	// A host start clears the map change's state, the kept clock's latch with it
+	// [orig: UI_HandleHostSessionStart @0x556D00 - dword_24D5A0C = 0 @0x556DD1].
 	map_change = HostMapChange{};
 }
 

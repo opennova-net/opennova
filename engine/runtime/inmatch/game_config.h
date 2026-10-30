@@ -180,6 +180,10 @@ struct GameConfig {
 	int32_t connection_speed = 5;
 	int32_t max_friendly_kills = 3;
 	bool allow_ai = true;
+	// Set on the authority: each mission start after a map change runs on the clock the
+	// teardown kept (host_boot.h kept_mission_clock) instead of the BMS header's.
+	// [orig: dword_24D5A00, Game_ApplySessionSettingsToGlobals @0x551E1F; read by
+	//  Game_StartMission @0x5253A1]
 	int32_t time_of_day_continuity = 0;
 	// The session's four charattr restriction words, game.cfg's mp_No* (no host
 	// screen control sets them): each set one makes the authority zero and

@@ -273,6 +273,14 @@ MapChangeStep begin_host_map_change(HostRole &role,
 	//  @0x52269B]
 	if (authority_in_session && rotation != nullptr && rotation->list.map_launch_option != 0)
 		swap_sides_or_latch(ctx, *rotation);
+	// Then the clock the next mission may run on: the latch set, the time and its advance read
+	// off the old mission (HostMapChange::kept_clock).
+	// [orig: Game_TeardownMission - dword_24D5A0C = 1 @0x52252A, dword_24D5A04 @0x522539,
+	//  dword_24D5A08 @0x522543, inside the in-session authority arm @0x522435]
+	// [orig: Game_TeardownMission @0x51F520 - @0x51F6FA, @0x51F709, @0x51F713 (dfx2.exe)]
+	if (authority_in_session && kernel != nullptr)
+		role.map_change.kept_clock = world::TodClock{ kernel->world.weather.tod_fixed24,
+			kernel->world.weather.tod_advance_per_tick };
 	// The teardown has emptied the server-info stream ahead of its pump; the next mission
 	// start rebuilds it [orig: Game_TeardownMission - CDataStream_Resize(&stru_C9480C, 0)
 	//  @0x5223D1, ahead of the pump @0x522588].

@@ -523,12 +523,15 @@ int server_settings_availability() {
 // [orig: Entity_GetMaxHealthWithDifficulty @0x43B8D1]).
 int server_settings_session_rows() {
 	const opennova::io::JsonValue schema = server_settings_schema(kJoSettings, true);
-	bool lives = false, difficulty = false;
+	bool lives = false, difficulty = false, continuity = false;
 	for (const auto &row : schema.array) {
 		lives = lives || (row.get_string("key", "") == "max_team_lives" && row.get_int("default", 0) == 100);
 		difficulty = difficulty || (row.get_string("key", "") == "difficulty" && row.get_int("max", 0) == INT32_MAX);
+		// The mission start reads it again (runtime/inmatch/host_boot.h kept_mission_clock).
+		continuity = continuity || (row.get_string("key", "") == "time_of_day_continuity" &&
+				row.get_string("kind", "") == "boolean" && !row.get_bool("default", true));
 	}
-	TEST_EXPECT(lives && difficulty);
+	TEST_EXPECT(lives && difficulty && continuity);
 	GameCfg cfg = defaults();
 	opennova::io::JsonValue patch;
 	std::string field, error;

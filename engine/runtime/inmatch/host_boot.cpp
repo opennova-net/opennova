@@ -554,6 +554,16 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	return true;
 }
 
+const world::TodClock *kept_mission_clock(const HostBoot &boot) {
+	if (boot.host == nullptr)
+		return nullptr;
+	const NapiNPServerCtx &ctx = boot.host->state.host_owner.ctx;
+	const std::optional<world::TodClock> &kept = boot.host->map_change.kept_clock;
+	if (ctx.is_in_session == 0 || ctx.config.time_of_day_continuity == 0 || !kept)
+		return nullptr;
+	return &*kept;
+}
+
 bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::string &error) {
 	if (boot.kernel == nullptr || boot.session == nullptr) {
 		error = "the host boot did not run";
@@ -600,7 +610,7 @@ bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::stri
 	}
 	const std::function<void()> no_render_bind = [] {};
 	weather->run_mission_start_boundary(environment, &kernel.world.weather, kernel.mission.header,
-			device.bind_render ? device.bind_render : no_render_bind,
+			kept_mission_clock(boot), device.bind_render ? device.bind_render : no_render_bind,
 			[&kernel] { (void)kernel.complete_mission_start(); });
 
 	// Past the load the authority's report clocks wait to begin while the pre-round delay runs,
