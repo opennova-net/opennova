@@ -1359,6 +1359,13 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	// The avatar node carries the BODY frame; the overlay's class deltas
 	// (world::aim_overlay_deltas) are relative to it.
 	MissionRoot *runtime = world_access::runtime(node);
+	// The row's render-slot seat: seated, the body takes no slot of its own and
+	// rides its carrier's capture (engine world::slot_seat_facts).
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	body->set_slot_seat(present.slot_seat.bits,
+			entities != nullptr && present.slot_seat.walk.valid()
+					? entities->resolve_present_handle(present.slot_seat.walk.packed)
+					: nullptr);
 	const Ref<PlayerAimOverlay> overlay = runtime != nullptr ? runtime->local_player_aim_overlay()
 															 : Ref<PlayerAimOverlay>();
 	const PackedVector3Array segments =

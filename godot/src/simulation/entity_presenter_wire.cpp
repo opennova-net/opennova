@@ -1001,13 +1001,15 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		if (model->is_visible()) {
 			model->set_visible(false);
 		}
-		// A caster keeps its place for the slot sort while no view draws it.
+		// A caster keeps its place and its facts for the slot sort while no
+		// view draws it.
 		if (model->is_shadow_caster_enabled()) {
 			const Transform3D caster_transform = wire_row_transform(model, snap, base);
 			if (model->get_transform() != caster_transform) {
 				model->set_transform(caster_transform);
 			}
 		}
+		stamp_slot_facts(model, p, base);
 		// A pending remote body blend is entity-update work, not draw work
 		// (retail advances it in AnimMap_UpdateEntity): keep consuming the
 		// tick delta so the blend finishes on schedule while occluded. Only a

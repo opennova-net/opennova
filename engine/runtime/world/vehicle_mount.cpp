@@ -19,6 +19,7 @@
 #include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom, the seat's pool reads
 
 #include <runtime/world/ai.h> // AiSystem / AiEntity / ai_apply_command — the AI-change command target
+#include <runtime/renderer/render_slot_shadow.h> // slot_seat_bits / slot_seat_walk: the slot seat facts
 #include <base/io/bam.h>
 
 #include "vehicle_motor_detail.h"
@@ -504,6 +505,35 @@ void vehicle_release_equipped_slot(Entity &occupant, bool is_local) {
         occupant.equipped_adm_index = 0;
         occupant.ammo_def_word = 0;
     }
+}
+
+SlotSeatFacts slot_seat_facts(bool player_class, bool pool0, SeatType seat,
+        bool parent_ref_num, EntityHandle parent, EntityHandle parent_ground) {
+    // The slot record's flag bit 1 (Flags 0x100 >> 7, or a pool-0 entity)
+    // [orig: RenderSlot_UpdateEntityLight @0x5d6dbf..0x5d6ddf].
+    SlotSeatFacts out;
+    out.bits = renderer::slot_seat_bits(player_class || pool0, pool0,
+            static_cast<int>(seat), parent_ref_num);
+    switch (renderer::slot_seat_walk(out.bits)) {
+        case renderer::SlotSeatWalk::kParent: out.walk = parent; break;
+        case renderer::SlotSeatWalk::kParentGround: out.walk = parent_ground; break;
+        case renderer::SlotSeatWalk::kNone: break;
+    }
+    return out;
+}
+
+SlotSeatFacts slot_seat_facts(const World &world, const Entity &entity) {
+    // parentEntity (+0x16C) and its refNum (+0x215) and groundEntity (+0x28)
+    // [orig: RenderSlot_SortAndAssign @0x5d65e1..0x5d65eb;
+    //  RenderSlot_RenderEntityAndChildren @0x5d794c..0x5d7955].
+    const Entity *parent = entity.mounted ? world.registry.get(entity.mount_target) : nullptr;
+    const Entity *parent_ground =
+            parent != nullptr ? world.registry.get(parent->ground_target) : nullptr;
+    return slot_seat_facts(((entity.flags | entity.engine_flags) & kEntityFlagPlayer) != 0,
+            entity.handle.pool() == 0, entity.mounted ? entity.mount_type : SeatType::None,
+            parent != nullptr && parent->ref_num != 0,
+            parent != nullptr ? parent->handle : EntityHandle{},
+            parent_ground != nullptr ? parent_ground->handle : EntityHandle{});
 }
 
 EntityPosition entity_local_point_world(const Entity &vehicle, const Vec3 &local) {

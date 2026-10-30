@@ -297,6 +297,7 @@ LocalAvatarPresent local_avatar_present(const World &world, const LocalPlayer &l
     if (body == nullptr || entity == nullptr) return out;
     out.valid = true;
     out.body = local_body_clip_request(infantry_body_pose(body->inf), entity->body_anim_slot);
+    out.slot_seat = slot_seat_facts(world, *entity);
     return out;
 }
 

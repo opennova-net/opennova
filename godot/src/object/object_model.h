@@ -356,6 +356,9 @@ private:
 	Vector3 slot_march_offset_;
 	uint32_t slot_ride_bits_ = 0;
 	ObjectID slot_ride_ground_;
+	uint32_t slot_seat_bits_ = 0;
+	ObjectID slot_seat_walk_;
+	bool slot_local_view_suppressed_ = false;
 	int32_t parachute_projection_radius_q16_ = 0;
 	void refresh_entity_projection_sphere();
 	// The frame's views a projection is kept for: the frame's image (view 0)
@@ -1242,13 +1245,26 @@ public:
 	Vector3 get_slot_march_offset() const { return slot_march_offset_; }
 	// The render-slot ride facts (the present rows' PF_SLOT_RIDE_BITS, the
 	// renderer::SlotRideBit word) and the model of the entity this one stands
-	// on, set for a carrier's refNum-walk rider. Such a rider joins
-	// SlotShadow::ride_group() whether or not it casts a slot of its own: the
-	// carrier's capture draws it either way (engine:
+	// on, set for a carrier's refNum-walk rider. A rider of either child walk
+	// joins SlotShadow::ride_group() whether or not it casts a slot of its own:
+	// the carrier's capture draws it either way (engine:
 	// runtime/renderer/render_slot_shadow.h slot_ride_walk_child).
 	void set_slot_ride(uint32_t p_bits, ObjectModel *p_ground);
 	uint32_t get_slot_ride_bits() const { return slot_ride_bits_; }
 	ObjectModel *get_slot_ride_ground() const;
+	// The render-slot seat facts (PF_SLOT_SEAT_BITS, the renderer::SlotSeatBit
+	// word) and the model whose capture's pool-0 child walk draws this one
+	// (PF_SLOT_SEAT_WALK_HANDLE). A walk rider joins the ride group too (engine:
+	// runtime/renderer/render_slot_shadow.h slot_seat_parented, slot_seat_walk).
+	void set_slot_seat(uint32_t p_bits, ObjectModel *p_walk);
+	uint32_t get_slot_seat_bits() const { return slot_seat_bits_; }
+	ObjectModel *get_slot_seat_walk() const;
+	// The row's Flags & 1 is clear and the local view keeps it off the camera
+	// (renderer::SlotCasterVisibility::local_view_suppressed).
+	void set_slot_local_view_suppressed(bool p_suppressed) {
+		slot_local_view_suppressed_ = p_suppressed;
+	}
+	bool is_slot_local_view_suppressed() const { return slot_local_view_suppressed_; }
 	// A carved static becomes a live husk visual while retaining the primary
 	// entity's already-derived local sphere and the scale of its pose matrix.
 	void set_entity_projection_override(

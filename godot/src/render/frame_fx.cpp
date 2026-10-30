@@ -157,6 +157,15 @@ void FrameFx::set_q3_object_self_lum(const Ref<Material> &p_material,
 	Q3SourceRegistry::update_object_runtime(p_material, values.runtime);
 }
 
+void FrameFx::set_q3_object_alpha(const Ref<Material> &p_material, float p_alpha) {
+	opennova::renderer::ObjectMaterialClassification classification;
+	Q3ObjectMaterialValues values;
+	if (!Q3SourceRegistry::object_material(p_material, classification, values))
+		return;
+	values.runtime.alpha = p_alpha;
+	Q3SourceRegistry::update_object_runtime(p_material, values.runtime);
+}
+
 void FrameFx::set_q3_object_diffuse(const Ref<Material> &p_material,
 		const Ref<Texture2D> &p_diffuse, float p_max_lod) {
 	Q3SourceRegistry::update_object_diffuse(p_material, p_diffuse, p_max_lod);
@@ -240,6 +249,9 @@ void FrameFx::_bind_methods() {
 	ClassDB::bind_static_method("FrameFx",
 			D_METHOD("set_q3_object_self_lum", "material", "self_lum"),
 			&FrameFx::set_q3_object_self_lum);
+	ClassDB::bind_static_method("FrameFx",
+			D_METHOD("set_q3_object_alpha", "material", "alpha"),
+			&FrameFx::set_q3_object_alpha);
 	ClassDB::bind_static_method("FrameFx",
 			D_METHOD("set_q3_object_diffuse", "material", "diffuse", "max_lod"),
 			&FrameFx::set_q3_object_diffuse);

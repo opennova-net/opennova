@@ -9,6 +9,8 @@
 #include <runtime/inmatch/napi_np_server_ctx.h> // the listen host's player slots (EquippedSlot)
 #include <runtime/world/pose_inputs.h> // seat/mount pose predicates + aim inputs (ADR 0028)
 #include <runtime/world/mount_controls.h> // heat-glow + emplaced turret CTRL sources (ADR 0028)
+#include <runtime/world/vehicle_mount.h> // slot_seat_facts: the render-slot seat facts
+#include <runtime/mission/seat_spec_extract.h> // item_seat_spec_for_type: a joiner row's seat by bone
 #include <runtime/world/present_rows.h>
 #include <runtime/world/vehicle_motor.h> // vehicle_ctrl_registers
 #include <runtime/world/infantry.h> // infantry_weapon_channel_visible
@@ -354,6 +356,22 @@ static void write_present_slot_ride(float *r, const World &w, const Entity &e) {
 			ground != nullptr && ground->has_item_def ? ground->item_type : -1, ground, &e);
 }
 
+// The render-slot seat facts one row publishes (world::PF_SLOT_SEAT_BITS,
+// PF_SLOT_SEAT_WALK_HANDLE): the slot record's person bit, the row's pool, its
+// parentSlot and its parentEntity's refNum, and the entity whose capture's
+// pool-0 child walk draws it [orig: RenderSlot_UpdateEntityLight @0x5d6dbf..0x5d6ddf;
+// RenderSlot_SortAndAssign @0x5d6593..0x5d65ff; RenderSlot_RenderEntityAndChildren
+// @0x5d78ea..0x5d7968].
+static void write_present_slot_seat(float *r, const SlotSeatFacts &seat) {
+	r[PF_SLOT_SEAT_BITS] = static_cast<float>(seat.bits);
+	r[PF_SLOT_SEAT_WALK_HANDLE] = seat.walk.valid() ? static_cast<float>(seat.walk.packed) : -1.0f;
+}
+
+// From the authoritative entity, its mount and that carrier's groundEntity.
+static void write_present_slot_seat(float *r, const World &w, const Entity &e) {
+	write_present_slot_seat(r, slot_seat_facts(w, e));
+}
+
 // From the authoritative entity: its split Flags words, live Euler triple and
 // stamped collision-bbox centre (entity+0x1FC).
 static void write_present_slot_march(float *r, const Entity &e) {
@@ -399,6 +417,42 @@ static void write_present_replica_slot_ride(float *r, const PresentRowsContext &
 					? kernel.wire_collision_shape_for_type(ground_row->type_id).item_type
 					: -1,
 			ground, owned);
+}
+
+// The seat facts from a joiner's decoded row, as its own retail client entity
+// holds them: the Player class bit of its Flags dword (replica_entity_flags_dword)
+// and its pool, the seat its carrier's model names at the row's raw seat bone
+// (the compact record's carrier and seat bone; a bone-0 carrier is the deck it
+// stands on, no seat), that carrier's refNum as its materialized row holds the
+// spawn record's, and the carrier's own groundEntity (resolved_ground).
+static void write_present_replica_slot_seat(float *r, const PresentRowsContext &context,
+		const replication::ClientState &cs, const replication::ClientEntityState &es) {
+	mission::MissionKernel &kernel = context.kernel;
+	const replication::ClientEntityState *carrier =
+			es.mount_bone != 0 && es.carrier_handle != EntityHandle::kInvalid
+			? cs.find(es.carrier_handle)
+			: nullptr;
+	SeatType seat = SeatType::None;
+	bool parent_ref_num = false;
+	if (carrier != nullptr) {
+		if (const mission::ItemSeatSpec *spec =
+						mission::item_seat_spec_for_type(kernel.seat_specs, carrier->type_id)) {
+			for (const Seat &candidate : spec->seats) {
+				if (candidate.bone_index == es.mount_bone) {
+					seat = candidate.type;
+					break;
+				}
+			}
+		}
+		const Entity *parent = replication::replica_row_entity(context.materializer, kernel.world,
+				EntityHandle{carrier->handle}, carrier->type_id);
+		parent_ref_num = parent != nullptr && parent->ref_num != 0;
+	}
+	write_present_slot_seat(r,
+			slot_seat_facts((replica_entity_flags_dword(es) & kEntityFlagPlayer) != 0,
+					EntityHandle{es.handle}.pool() == 0, seat, parent_ref_num,
+					carrier != nullptr ? EntityHandle{carrier->handle} : EntityHandle{},
+					carrier != nullptr ? EntityHandle{carrier->resolved_ground} : EntityHandle{}));
 }
 
 // The frame's row buffer at `rows` rows. Each row's writer initializes it whole
@@ -518,6 +572,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					((ent->flags | ent->engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 			write_present_slot_march(r, *ent);
 			write_present_slot_ride(r, kernel.world, *ent);
+			write_present_slot_seat(r, kernel.world, *ent);
 			write_present_section_mask(r, item_hidden_sections(*ent));
 			write_present_cut_sections(r, *ent);
 			write_present_doors(r, i, kernel.world, *ent, door_phases);
@@ -697,6 +752,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		if (joiner) {
 			write_present_replica_slot_march(r, kernel, es);
 			write_present_replica_slot_ride(r, context, cs, es, owned);
+			write_present_replica_slot_seat(r, context, cs, es);
 			// Every read below takes that row: the husk, the destroy phases, the
 			// doors, the motion controls, the gun words and the section draws.
 			if (owned) {
@@ -918,6 +974,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 			((e.flags | e.engine_flags) & kEntityFlagParachute) != 0 ? 1.0f : 0.0f;
 	write_present_slot_march(r, e);
 	write_present_slot_ride(r, w, e);
+	write_present_slot_seat(r, w, e);
 	write_present_section_mask(r, item_hidden_sections(e));
 	write_present_cut_sections(r, e);
 	write_present_doors(r, row_index, w, e, door_phases);

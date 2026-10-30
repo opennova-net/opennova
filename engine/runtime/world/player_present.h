@@ -15,6 +15,7 @@
 
 #include <runtime/world/body_present.h> // BodyClipRequest (the body channel's request)
 #include <runtime/world/present_drains.h> // FirePresentationRow (the fire drain's row)
+#include <runtime/world/vehicle_mount.h> // SlotSeatFacts (the avatar's render-slot seat)
 
 #include <cstddef>
 #include <cstdint>
@@ -43,12 +44,17 @@ class World;
 //     stay glued to the node and the split renders as the torso twist
 //     [orig: Entity_BuildBoneTransformMatrices @0x4b1290 -- every overlay
 //     blends toward bodyHeading/bodyPitch; world-wac-ai-re.md §14 (D-INF-11)].
+//   * the render-slot seat facts are any person's (world::slot_seat_facts):
+//     seated, the body takes no slot of its own and its carrier's capture
+//     draws it [orig: RenderSlot_SortAndAssign @0x5d6593..0x5d65ff;
+//     RenderSlot_RenderEntityAndChildren @0x5d78ea..0x5d7968].
 // The deltas themselves are world::aim_overlay_deltas over the overlay's
 // mission euler degrees. `valid` false: no live local body (no clip request).
 struct LocalAvatarPresent {
     bool valid = false;
     bool match_terrain = false;
     BodyClipRequest body;
+    SlotSeatFacts slot_seat;
 };
 LocalAvatarPresent local_avatar_present(const World &world, const LocalPlayer &local);
 

@@ -56,7 +56,8 @@ class Weather;
 // their parent's slot through the per-frame claim pass — the
 // RenderSlot_RenderEntityAndChildren child walk — while tree-parented riders
 // fold into the ancestor exclusion and ride the parent's subtree walk, and a
-// vehicle carrier's refNum-walk riders (ObjectModel::set_slot_ride, the ride
+// carrier's child-walk riders (its seated persons, ObjectModel::set_slot_seat;
+// a vehicle carrier's refNum riders, ObjectModel::set_slot_ride; the ride
 // group) render into its slot whatever their visibility; the
 // attached-light drape darkening folds the light's attenuation at the entity
 // into the per-slot term; the capture eye backs off the caster along the
@@ -73,8 +74,8 @@ public:
 	// Models flagged as dynamic shadow casters join this group
 	// (ObjectModel::set_shadow_caster_enabled).
 	static const StringName &caster_group();
-	// The refNum-walk riders (ObjectModel::set_slot_ride): drawn inside their
-	// carrier's capture whether or not they cast a slot of their own.
+	// The child-walk riders (ObjectModel::set_slot_ride, set_slot_seat): drawn
+	// inside their carrier's capture whether or not they cast a slot of their own.
 	static const StringName &ride_group();
 	// The shared drape material every patch instance draws with, on
 	// renderer::kRungSlotDrape and reading the terrain/sky stencil mark.
@@ -206,7 +207,7 @@ private:
 		bool is_person = false;
 		bool seat_parented_ancestor = false;
 		// A caster-group member (a slot record of its own); false for a rider
-		// only its carrier's refNum walk draws.
+		// only its carrier's child walk draws.
 		bool slot_record = true;
 	};
 	void _rebuild_caster_records();

@@ -642,10 +642,12 @@ private:
 	// Stance bits gate the MATCHTERRAIN tier (Terrain_RenderSectorEntitiesBySide
 	// @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 	static void stamp_match_terrain(ObjectModel *model, const float *p, int base);
-	// The render-slot facts of the row: the march start's offset and the ride
+	// The render-slot facts of the row: the march start's offset, the ride
 	// facts (PF_SLOT_RIDE_BITS) with the model of the entity it stands on, which
 	// is resolved only for a carrier's refNum-walk rider
-	// (renderer::slot_ride_walk_child).
+	// (renderer::slot_ride_walk_child), the seat facts (PF_SLOT_SEAT_BITS) with
+	// the model whose pool-0 walk draws it, and whether only the local view
+	// keeps it off the camera (renderer::SlotCasterVisibility).
 	void stamp_slot_facts(ObjectModel *model, const float *p, int base) const;
 	// The swap fade's six CTRL slots (OBJECT_DESTROY, OBJECT_DESTROY01..05) of a
 	// SUBMITTED row: a husked row (PF_HUSK) re-asserts its six phases at each

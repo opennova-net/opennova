@@ -19,7 +19,7 @@
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/entity.h>       // EntityKind: the organic-row gate of the DEATH leg
 #include <runtime/world/present_rows.h> // PF_DEATH_CTRL: the org0 skin DEATH register word
-#include <runtime/renderer/render_slot_shadow.h> // slot_ride_walk_child: the slot ride facts
+#include <runtime/renderer/render_slot_shadow.h> // slot_ride_walk_child, slot_seat_walk: the slot facts
 
 #include "audio/mission_audio.h"
 #include "env/mission_environment.h"
@@ -1027,6 +1027,16 @@ void EntityPresenter::stamp_slot_facts(ObjectModel *model, const float *p, int b
 			opennova::renderer::slot_ride_walk_child(ride_bits) && ground_handle >= 0
 					? resolve_present_handle(ground_handle)
 					: nullptr);
+	const uint32_t seat_bits = static_cast<uint32_t>(field_i(p, base, Simulation::PF_SLOT_SEAT_BITS));
+	const int32_t walk_handle = field_i(p, base, Simulation::PF_SLOT_SEAT_WALK_HANDLE);
+	model->set_slot_seat(seat_bits,
+			opennova::renderer::slot_seat_walk(seat_bits) !=
+							opennova::renderer::SlotSeatWalk::kNone &&
+					walk_handle >= 0
+					? resolve_present_handle(walk_handle)
+					: nullptr);
+	model->set_slot_local_view_suppressed(field_i(p, base, Simulation::PF_HIDDEN) == 0 &&
+			field_i(p, base, Simulation::PF_LOCAL_VIEW_SUPPRESSED) != 0);
 }
 
 bool EntityPresenter::stamp_right_hand_collapsed(ObjectModel *model,
@@ -2004,8 +2014,13 @@ void EntityPresenter::present_virtual_display(bool p_active, int p_carrier_handl
 		}
 		node->set_name("VirtualDisplay");
 		// One entity, one submission: the display draws in its carrier's
-		// place, so it shares the carrier's light query and groups.
+		// place, so it shares the carrier's light query and groups, and the
+		// carrier's render slot, whose capture calls the same render callback
+		// under the same camera mode and so draws the display too (engine:
+		// renderer::SlotCasterVisibility::local_view_suppressed).
 		node->set_entity_light_owner(carrier);
+		node->set_shadow_caster_enabled(true);
+		node->set_slot_shadow_capture_with(carrier);
 		virtual_display_id_ = node->get_instance_id();
 	}
 	// ...and the carrier's lighting context (both setters are change-gated:
@@ -2018,11 +2033,15 @@ void EntityPresenter::present_virtual_display(bool p_active, int p_carrier_handl
 		node->set_global_transform(pose);
 	}
 	// The carrier's collector gate still holds: a hull the occlusion frame
-	// does not collect draws nothing, its display included.
+	// does not collect draws nothing, its display included. It is the view's
+	// claim, which the hull's slot capture does not read.
 	const bool collected = !carrier->is_occlusion_hidden() &&
 			!wire_render_culled_.has(p_carrier_handle);
-	if (node->is_present_visible() != collected) {
-		node->set_present_visible(collected);
+	if (!node->is_present_visible()) {
+		node->set_present_visible(true);
+	}
+	if (node->is_occlusion_hidden() == collected) {
+		node->set_occlusion_hidden(!collected);
 	}
 }
 } // namespace godot
