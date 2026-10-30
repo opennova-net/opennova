@@ -303,7 +303,8 @@ void test_the_session_weapon_profile_clamps_and_routes_its_seed() {
 	Rig r(inmatch::ConnectionMode::HostOnly);
 	r.world.rules.mp_session = false;
 	w::LocalPlayerLoadout loadout;
-	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, 0, loadout));
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, nullptr,
+			opennova::bms::MissionType::NormalMission, 0, loadout));
 	const std::vector<w::WeaponKitEntry> page = w::weapon_kit_default(r.world.rules.title());
 	CHECK(loadout.spawn_kit().size() == page.size());
 	playersav::Record current;
@@ -314,15 +315,50 @@ void test_the_session_weapon_profile_clamps_and_routes_its_seed() {
 	CHECK(profile.loaded);
 	CHECK(profile.record.side(playersav::SideId::Blue).player_class == 9);
 	CHECK(profile.record.side(playersav::SideId::Red).player_class == 5);
-	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, 0, loadout));
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, nullptr,
+			opennova::bms::MissionType::NormalMission, 0, loadout));
 	CHECK(loadout.spawn_kit().size() == 1 && loadout.spawn_kit()[0].name == "WPN_AK47AUTO");
 	// A session peer copies its side's page: team 1 the blue block's, at its clamped class
 	// 9 (the fifth page), and the cursor names the side.
 	profile.record.blue.pages[4].entries = {playersav::KitEntry{"WPN_M4AUTO", 3, -1, -1}};
 	w::LocalPlayerLoadout session;
-	CHECK(profile.seed_kit(r.world, /*session_peer=*/true, 1, session));
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/true, opennova::title_protocol("jo"),
+			opennova::bms::MissionType::CombatVehicleMission, 1, session));
 	CHECK(session.spawn_kit().size() == 1 && session.spawn_kit()[0].name == "WPN_M4AUTO");
 	CHECK(profile.seeded_side == static_cast<int>(playersav::SideId::Blue));
+	CHECK(profile.record.blue.player_class == 9); // JO keeps the profile's class
+}
+
+// A protocol that fixes the loadout class (DFX2-12, ProtocolInMatch::c2s_2f): its mission start
+// writes 8, or 7 in a mission of type 2, into the side block the team names, then copies that
+// class's page; the other side's block keeps its own class.
+// [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe) - `movzx eax, byte_A6FB3A; sub eax, 2`,
+//  `mov byte [esi], 8` / `mov byte [esi], 7`, the page switch over the byte; the copy @0x522a04]
+void test_a_fixed_class_protocol_writes_its_class_before_the_page() {
+	Rig r(inmatch::ConnectionMode::HostOnly);
+	const opennova::Protocol *dfx2 = opennova::title_protocol("dfx2");
+	playersav::Record record;
+	record.blue.player_class = 9;
+	record.red.player_class = 5;
+	record.blue.pages[2].entries = {playersav::KitEntry{"WPN_M60", 5, -1, -1}};  // class 7's
+	record.blue.pages[3].entries = {playersav::KitEntry{"WPN_M4", 4, -1, -1}};   // class 8's
+	record.blue.pages[4].entries = {playersav::KitEntry{"WPN_M24", 2, -1, -1}};  // class 9's
+	int seeded_side = -1;
+	w::LocalPlayerLoadout gunner;
+	CHECK(inmatch::seed_session_kit_from_profile(r.world, record, dfx2,
+			opennova::bms::MissionType::CombatVehicleMission, 1, gunner, seeded_side));
+	CHECK(record.blue.player_class == 7);
+	CHECK(gunner.spawn_kit().size() == 1 && gunner.spawn_kit()[0].name == "WPN_M60");
+	CHECK(record.red.player_class == 5);
+	w::LocalPlayerLoadout rifleman;
+	CHECK(inmatch::seed_session_kit_from_profile(r.world, record, dfx2,
+			opennova::bms::MissionType::NormalMission, 1, rifleman, seeded_side));
+	CHECK(record.blue.player_class == 8);
+	CHECK(rifleman.spawn_kit().size() == 1 && rifleman.spawn_kit()[0].name == "WPN_M4");
+	// A self S2C 0x50 re-copies the block as it stands: the class the start wrote.
+	w::LocalPlayerLoadout reassigned;
+	CHECK(inmatch::reseed_session_kit_on_team_assign(record, 3, reassigned, seeded_side));
+	CHECK(reassigned.spawn_kit().size() == 1 && reassigned.spawn_kit()[0].name == "WPN_M4");
 }
 
 } // namespace
@@ -334,6 +370,7 @@ int main() {
 	test_the_single_players_page_fills_the_spawn_buffer();
 	test_an_out_of_session_accept_writes_the_list();
 	test_the_session_weapon_profile_clamps_and_routes_its_seed();
+	test_a_fixed_class_protocol_writes_its_class_before_the_page();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

@@ -59,10 +59,11 @@ constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 
 } // namespace
 
-LoadoutSubmit fresh_profile_loadout_submit(const world::WeaponTable *weapons, uint8_t team) {
+LoadoutSubmit fresh_profile_loadout_submit(
+		const world::WeaponTable *weapons, uint8_t team, uint8_t fixed_class) {
 	static const playersav::Record fresh = playersav::make_defaults().slots[0];
 	const playersav::Side &side = fresh.side(playersav::side_for_team(team));
-	uint8_t player_class = side.player_class;
+	uint8_t player_class = fixed_class != 0 ? fixed_class : side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
 	LoadoutSubmit submit;
 	submit.team = team;
@@ -454,7 +455,9 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 	// [orig: Game_StartMission @0x525767-0x525836 (join) and NapiNPClientMsg_TeamAssign
 	//  @0x431a35..0x431a9a (the S2C 0x50 reselect)]
 	if (!loadout_kit_set_) {
-		LoadoutSubmit submit = fresh_profile_loadout_submit(weapons_, team);
+		// A protocol that fixes the class picks that class's page, as its mission start wrote
+		// it into the side block (loadout_wire_class gives 0 for the profile's own).
+		LoadoutSubmit submit = fresh_profile_loadout_submit(weapons_, team, loadout_wire_class(0));
 		submit.player_class = loadout_wire_class(submit.player_class);
 		return submit;
 	}

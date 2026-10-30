@@ -89,8 +89,8 @@ void test_fresh_profile_kit_resolves_by_name() {
 	names.push_back(blue.entries[0].name);
 	const world::WeaponTable table = table_of(names);
 
-	const LoadoutSubmit first = inmatch::fresh_profile_loadout_submit(&table, 2);
-	const LoadoutSubmit second = inmatch::fresh_profile_loadout_submit(&table, 2);
+	const LoadoutSubmit first = inmatch::fresh_profile_loadout_submit(&table, 2, 0);
+	const LoadoutSubmit second = inmatch::fresh_profile_loadout_submit(&table, 2, 0);
 	CHECK(first.team == 2 && first.player_class == 8 && first.weapon_slot_index == 195u);
 	CHECK(second.weapon_slot_index == 195u);
 	CHECK(first.entries.size() == red.entries.size() - 1);
@@ -101,15 +101,26 @@ void test_fresh_profile_kit_resolves_by_name() {
 				first.entries[row].variant == 0xFF);
 	}
 	// Team 1 reads the blue block.
-	const LoadoutSubmit blue_submit = inmatch::fresh_profile_loadout_submit(&table, 1);
+	const LoadoutSubmit blue_submit = inmatch::fresh_profile_loadout_submit(&table, 1, 0);
 	CHECK(blue_submit.team == 1 && blue_submit.player_class == 8);
 	CHECK(!blue_submit.entries.empty() &&
 			blue_submit.entries[0].adm_index ==
 					static_cast<uint8_t>(table.index_of(blue.entries[0].name.c_str())));
 
 	// No table: every row drops.
-	const LoadoutSubmit none = inmatch::fresh_profile_loadout_submit(nullptr, 2);
+	const LoadoutSubmit none = inmatch::fresh_profile_loadout_submit(nullptr, 2, 0);
 	CHECK(none.entries.empty() && none.player_class == 8 && none.weapon_slot_index == 195u);
+
+	// A protocol that fixes the class (DFX2-12) picks that class's page, as its mission start
+	// writes the class into the side block ahead of the page pick: 7 here, a mission of type 2.
+	// [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe)]
+	const playersav::KitPage gunner = playersav::default_kit_page(playersav::SideId::Red, 7);
+	CHECK(!gunner.entries.empty());
+	std::vector<std::string> gunner_names = {"null"};
+	for (const playersav::KitEntry &entry : gunner.entries) gunner_names.push_back(entry.name);
+	const world::WeaponTable gunner_table = table_of(gunner_names);
+	const LoadoutSubmit fixed = inmatch::fresh_profile_loadout_submit(&gunner_table, 2, 7);
+	CHECK(fixed.player_class == 7 && fixed.entries.size() == gunner.entries.size());
 }
 
 } // namespace

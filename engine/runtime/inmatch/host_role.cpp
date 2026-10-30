@@ -842,7 +842,8 @@ void HostRole::send_own_mission_status() {
 		auto submit_for = [&](bool alternate) {
 			LoadoutSubmit submit = kit != nullptr
 					? profile_loadout_submit(*kit, team, false)
-					: fresh_profile_loadout_submit(&weapons, team);
+					: fresh_profile_loadout_submit(&weapons, team,
+							  loadout_fixed_class(protocol, kernel.mission.header.mission_type));
 			if (alternate && kernel.local.inventory_valid)
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
 						weapons, &kernel.local.inventory, team,

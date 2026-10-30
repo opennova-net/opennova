@@ -314,8 +314,12 @@ bool Simulation::seed_session_kit_from_profile() {
 	if (!kernel_) return false;
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
+	// The session's protocol and mission type: a protocol that fixes the loadout class writes
+	// it into the profile's side block ahead of the page pick (engine
+	// seed_session_kit_from_profile).
 	return player_.weapon.seed_kit(kernel_->world, is_host_listening() || is_joiner(),
-			assigned, kernel_->local.loadout);
+			session_protocol(net_, assets_.root), kernel_->mission.header.mission_type, assigned,
+			kernel_->local.loadout);
 }
 
 // The loadout profile seams the joiner role keeps shell-side (the weapon.sav
@@ -343,7 +347,8 @@ bool Simulation::reseed_session_kit_on_side_change() {
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
 	if (!opennova::inmatch::reseed_session_kit_on_side_change(kernel_->world,
-			player_.weapon.record, assigned, kernel_->local.loadout,
+			player_.weapon.record, session_protocol(net_, assets_.root),
+			kernel_->mission.header.mission_type, assigned, kernel_->local.loadout,
 			player_.weapon.seeded_side))
 		return false;
 	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);

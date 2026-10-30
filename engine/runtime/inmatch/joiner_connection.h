@@ -98,7 +98,11 @@ std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32
 //  NetPacket_SendLoadoutSubmit @0x42cdc0 - the name gate @0x42cf0b, the index @0x42cf21,
 //  atol @0x42cf7c / @0x42cfbc / @0x42cff7; Player_InitPlayer @0x4e15f0 - 195 @0x4e17ff,
 //  a failed select keeps it]
-LoadoutSubmit fresh_profile_loadout_submit(const world::WeaponTable *weapons, uint8_t team);
+// `fixed_class` is the class a protocol that fixes it writes into the side block ahead of the
+// page pick (ProtocolInMatch::c2s_2f, loadout_fixed_class), 0 for the profile's own: the page
+// is that class's. [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe)]
+LoadoutSubmit fresh_profile_loadout_submit(
+		const world::WeaponTable *weapons, uint8_t team, uint8_t fixed_class);
 
 // The OS time-zone bias in minutes, UTC = local + bias, of standard (not
 // daylight) time: the standard-library equivalent of TIME_ZONE_INFORMATION.Bias.

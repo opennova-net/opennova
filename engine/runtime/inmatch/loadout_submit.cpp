@@ -38,8 +38,13 @@ uint8_t loadout_side_team(const world::World &world, uint8_t assigned_team) {
 	return local != nullptr ? local->team : 0;
 }
 
-bool seed_session_kit_from_profile(world::World &world,
-		const playersav::Record &profile, uint8_t assigned_team,
+uint8_t loadout_fixed_class(const Protocol *protocol, bms::MissionType mission_type) {
+	if (!protocol_in_match(protocol).c2s_2f.loadout_class_fixed) return 0;
+	return mission_type == bms::MissionType::CombatVehicleMission ? uint8_t{7} : uint8_t{8};
+}
+
+bool seed_session_kit_from_profile(world::World &world, playersav::Record &profile,
+		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
 	if (world.tables.weapons.empty()) return false;
 	// A session PEER copies its side's page; a dedicated host is no peer and copies nothing,
@@ -56,8 +61,11 @@ bool seed_session_kit_from_profile(world::World &world,
 	// commit the wrong side's page and then have to flip it. Wait instead; the pump
 	// re-seeds the moment the latch (or a later 0x50 reassignment) changes the side.
 	if (team == 0) return false;
-	const playersav::Side &side =
-			profile.side(playersav::side_for_team(team));
+	playersav::Side &side = profile.side(playersav::side_for_team(team));
+	// A protocol that fixes the class writes it into the block first, and the page follows it
+	// [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe)].
+	if (const uint8_t fixed = loadout_fixed_class(protocol, mission_type); fixed != 0)
+		side.player_class = fixed;
 	uint8_t player_class = side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
 	const playersav::KitPage *page = side.page_for_class(player_class);
@@ -96,15 +104,15 @@ bool seed_single_player_kit_from_profile(world::World &world,
 	return true;
 }
 
-bool reseed_session_kit_on_side_change(world::World &world,
-		const playersav::Record &profile, uint8_t assigned_team,
+bool reseed_session_kit_on_side_change(world::World &world, playersav::Record &profile,
+		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
 	const uint8_t team = loadout_side_team(world, assigned_team);
 	if (team == 0) return false;
 	if (static_cast<int>(playersav::side_for_team(team)) == seeded_side)
 		return false;
 	return seed_session_kit_from_profile(
-			world, profile, assigned_team, loadout, seeded_side);
+			world, profile, protocol, mission_type, assigned_team, loadout, seeded_side);
 }
 
 void SessionWeaponProfile::use(const playersav::Record &current) {
@@ -116,10 +124,12 @@ void SessionWeaponProfile::use(const playersav::Record &current) {
 }
 
 bool SessionWeaponProfile::seed_kit(world::World &world, bool session_peer,
-		uint8_t assigned_team, world::LocalPlayerLoadout &loadout) {
+		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
+		world::LocalPlayerLoadout &loadout) {
 	if (!session_peer)
 		return seed_single_player_kit_from_profile(world, loaded ? &record : nullptr, loadout);
-	return seed_session_kit_from_profile(world, record, assigned_team, loadout, seeded_side);
+	return seed_session_kit_from_profile(
+			world, record, protocol, mission_type, assigned_team, loadout, seeded_side);
 }
 
 bool reseed_session_kit_on_team_assign(const playersav::Record &profile, uint8_t team,
