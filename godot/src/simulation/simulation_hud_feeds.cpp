@@ -155,7 +155,7 @@ opennova::hud::ChatEntryFacts Simulation::chat_entry_facts(uint32_t p_frame) con
 	// carried (JoinTarget::network_type).
 	const opennova::inmatch::NapiNPServerCtx *host = host_ctx();
 	const bool novaworld = is_joiner()
-			? net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld
+			? net_.joiner.network_type == opennova::inmatch::NetworkType::NovaWorld
 			: (host != nullptr &&
 					host->transport_mode == opennova::inmatch::NetworkType::NovaWorld);
 	return opennova::inmatch::chat_entry_facts(role_view(), novaworld, p_frame);

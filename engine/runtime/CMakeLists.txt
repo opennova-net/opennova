@@ -106,6 +106,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_load.cpp # the load plan's executor over the embedder's legs (ADR 0077 R2)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_sidecars.cpp # the files the game finds by a mission's name, as one table
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_text.cpp # the <mission>.bin RTXT harvest (briefings, locations, people names)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/debug_oracles.cpp # the F3 hitbox view and entity pick over the kernel
@@ -495,6 +496,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_boot.cpp             # the one joiner bring-up (the host boot's joiner half)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role_replica_world.cpp  # the replica-world mirror and the authoritative appliers of JoinerRole
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp

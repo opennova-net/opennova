@@ -173,7 +173,6 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 		const int stride = challenge_sim->get_present_stride();
 		const PackedFloat32Array snapshot = challenge_sim->get_present_snapshot();
 		HashSet<int> warmed_types;
-		PackedInt32Array warmed_order;
 		if (stride >= Simulation::PF_STRIDE) {
 			const int64_t rows = snapshot.size() / stride;
 			for (int64_t row = 0; row < rows; ++row) {
@@ -182,7 +181,6 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 					continue;
 				}
 				warmed_types.insert(runtime_type_id);
-				warmed_order.push_back(runtime_type_id);
 				const int visual_item_id = mission_placer->resolve_player_visual_item_id(runtime_type_id);
 				const String wire_graphic = mission_placer->graphic_for(visual_item_id);
 				if (!wire_graphic.is_empty()) {
@@ -191,30 +189,8 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 				}
 			}
 		}
-		// The header-only join learned its entity types from the stream after
-		// MissionRoot's ordinary mission-body setup. Resolve the model-derived
-		// seat/emplacement table and world collision/trait consumers now,
-		// before admission and before the loaded-model challenge page freezes.
-		const Ref<MissionData> mission = loaded_mission();
-		if (mission.is_valid() && mission->is_wire_header_only()) {
-			const Ref<ItemDatabase> item_db = mission_placer->get_item_db();
-			if (item_db.is_valid()) {
-				// S16: the native extractor reads model userpoints through the
-				// sim's own parse cache, so the asset root wires FIRST (the
-				// shell extractor that read models render-side is gone).
-				const Ref<ResourceRoot> root_dir = resource_root();
-				if (root_dir.is_valid()) {
-					challenge_sim->set_asset_root(root_dir);
-				}
-				challenge_sim->install_seat_specs_for_type_ids(item_db, warmed_order);
-				challenge_sim->resolve_item_traits(item_db);
-				// The rows' class init slot leg, now that their weapon names and models are in
-				// (engine: inmatch::JoinerRole::run_streamed_weapon_slot_class_inits).
-				challenge_sim->run_join_streamed_weapon_slot_class_inits();
-				challenge_sim->resolve_collision_instances(item_db);
-				challenge_sim->occlusion_init_mission();
-			}
-		}
+		// A header-only join's stream types take their model-derived legs past this warm, ahead
+		// of the freeze (engine inmatch/joiner_boot.h settle_streamed_types, run by the load).
 	}
 	const int player_visual_item_id = mission_placer->resolve_player_visual_item_id(
 			local_player_type_id());

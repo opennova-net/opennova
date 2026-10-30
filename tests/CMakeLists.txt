@@ -604,6 +604,13 @@ add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
 target_link_libraries(mission_load_plan_test PRIVATE opennova_runtime)
 add_test(NAME mission_load_plan COMMAND mission_load_plan_test)
 
+# The load plan's executor (mission/mission_load.h): each arm's order over recording legs (a
+# fresh session's, a headless dedicated host's as opennova-serve fills them, a wire joiner's S2C
+# 0x11 head and 0x1A load), the stage checkpoints, and the failures' stops.
+add_executable(mission_load_test mission/mission_load_test.cpp)
+target_link_libraries(mission_load_test PRIVATE opennova_runtime)
+add_test(NAME mission_load COMMAND mission_load_test)
+
 # fixtures/bms/synth_dense.bms: the synthetic dense mission (four populated
 # pools, zero-valued optional fields) authored through bms_edit and
 # written by bms::write; mission_bms and mission_mis_idempotency read it.
@@ -4350,6 +4357,13 @@ add_test(NAME npruntime_player_list_vars COMMAND npruntime_player_list_vars_test
 add_executable(inmatch_joiner_role_test npruntime/joiner_role_test.cpp)
 target_link_libraries(inmatch_joiner_role_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME inmatch_joiner_role COMMAND inmatch_joiner_role_test)
+# The one joiner bring-up (inmatch/joiner_boot.h), headless: a JoinerRole booted over an in-memory
+# socket dials with every setting (its ClientAuth's APPID against a scripted ServerHello), a load's
+# rebuilt runtime takes the same, and a header-only join's streamed types settle in order.
+add_executable(inmatch_joiner_boot_test npruntime/joiner_boot_test.cpp)
+target_link_libraries(inmatch_joiner_boot_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(inmatch_joiner_boot_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME inmatch_joiner_boot COMMAND inmatch_joiner_boot_test)
 
 # The joiner session-drive policy (S10b): the preload's failure edge (no join wait has a deadline,
 # D-NET-1070), the S2C 0x7B promote validation, the admission/deploy/loss edge machine (frame

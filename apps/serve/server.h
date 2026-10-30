@@ -358,6 +358,9 @@ private:
 	// the update reads them there (`header_name` and `climate`, the mission's BMS header's), the
 	// publish, then the NovaWorld session's periodic update, which sends it.
 	void run_mission_start_update(const std::string &header_name, int32_t climate);
+	// One loading step of the mission load: the NovaWorld session's periodic update, as the
+	// mission start's update runs it; nothing on a LAN host.
+	void run_loading_step_update();
 	// The listing over the mission that just started (the first, or a map change's next).
 	void bind_listing();
 	HostRegistration listing_columns() const;
