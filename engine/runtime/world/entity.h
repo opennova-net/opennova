@@ -57,11 +57,6 @@ using PoolCapacities = std::array<std::size_t, kEntityPoolCount>;
 //  @0x44219c/@0x4421a2 (pools 1/2, 1200), @0x442203 (pool 3, 768),
 //  @0x44221e (pool 4, 128)]
 inline constexpr PoolCapacities kRetailPoolCapacity = {256, 1200, 1200, 768, 128};
-constexpr std::size_t retail_pool_capacity(int pool) {
-    return pool >= 0 && pool < kEntityPoolCount
-            ? kRetailPoolCapacity[pool]
-            : 0;
-}
 // The widest each pool may be configured and still be named on the wire: a handle
 // carries a 12-bit slot (EntityHandle, 4096 slots), and the S2C records name a person
 // by its pool-0 slot's one byte, 0xFF for none (pool0_index_byte: the kill feed, the
