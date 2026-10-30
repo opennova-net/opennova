@@ -87,12 +87,10 @@ func test_game_world_exposes_an_exact_json_safe_render_snapshot() -> void:
 	assert_eq((value["camera"]["projection_columns"][0] as Array).size(), 4)
 	assert_true(value["environment"].has("loaded"))
 	assert_true(value["water"].has("render_active"))
-	assert_true(value["shadows"].has("dynamic"))
-	assert_true(value["shadows"].has("static_terrain"))
+	assert_eq((value["shadows"] as Dictionary).keys(), ["static_terrain"],
+		"the terrain page shadows are the one switchable shadow system the snapshot reports")
 	var static_terrain_shadow := value["shadows"]["static_terrain"] as Dictionary
 	assert_eq(static_terrain_shadow["implementation"], "terrain_page_alpha")
-	assert_false(world.has_node("StaticSunShadow"),
-		"Diagnostics must not preserve a stale static DirectionalLight witness.")
 	assert_true(static_terrain_shadow.has("enabled"))
 	assert_true(static_terrain_shadow.has("active"))
 	assert_true(static_terrain_shadow.has("raster_jobs"))

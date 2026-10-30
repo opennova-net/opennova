@@ -485,8 +485,6 @@ func test_terrain_detail_cells_use_foliage_map() -> void:
 		)
 		assert_false(bool(draw.casts_shadows),
 			"Fresh retail audit confirms both foliage tiers are absent from shadow passes.")
-		assert_eq(int(draw.layer_mask) & Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
-			"an alpha-blind catcher must not darken whole foliage cards")
 		assert_eq(int(draw.layer_mask), Water.VISUAL_LAYER_TERRAIN_FOLIAGE,
 			"foliage rides its own bit alone: the beauty camera admits it and " +
 			"the water mirror excludes it (the witnessed reflection context " +

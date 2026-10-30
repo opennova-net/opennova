@@ -33,7 +33,6 @@
 #include "mission/static_population_instance.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
-#include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "env/precipitation.h"
@@ -263,7 +262,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionPlacementRun);
 	GDREGISTER_CLASS(StaticPopulationInstance);
 	GDREGISTER_CLASS(MissionObjectPlacer);
-	GDREGISTER_CLASS(SunShadow);
 	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
 	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);

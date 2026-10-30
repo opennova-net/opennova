@@ -1387,16 +1387,13 @@ void GameWorld::sync_framefx_frame() {
 }
 
 // The environment presenters' per-frame advance (ex-self-clocked _process
-// bodies): weather smoothing toward the fixed-tick targets, the sun's
-// direction law, the sky dome and the celestial bodies following the render
-// eye. Ordered after the scene-environment classify so the lit consumers
-// below (terrain, foliage, objects) read this frame's pushed globals.
+// bodies): weather smoothing toward the fixed-tick targets, the sky dome and
+// the celestial bodies following the render eye. Ordered after the
+// scene-environment classify so the lit consumers below (terrain, foliage,
+// objects) read this frame's pushed globals.
 void GameWorld::render_environment_nodes_frame() {
 	if (weather_ != nullptr) {
 		weather_->advance_frame(frame_delta_);
-	}
-	if (sun_shadow_ != nullptr) {
-		sun_shadow_->advance_frame(frame_delta_);
 	}
 	if (sky_dome_ != nullptr) {
 		sky_dome_->advance_frame(frame_delta_);

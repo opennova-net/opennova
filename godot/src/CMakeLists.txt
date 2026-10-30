@@ -102,7 +102,6 @@ add_library(opennova_bindings OBJECT
     env/environment_cube_capture.cpp
     env/sky_dome.cpp
     env/slot_shadow.cpp
-    env/sun_shadow.cpp
     env/water.cpp
     env/weather.cpp
     env/precipitation.cpp

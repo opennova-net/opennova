@@ -68,11 +68,11 @@ static func fixture_by_id(catalog: Dictionary, id: String) -> Dictionary:
 
 static func capture_variants() -> Array:
 	return [
-		CaptureVariant.new("beauty", 0, true, true),
-		CaptureVariant.new("shadows_off", 0, false, false),
-		CaptureVariant.new("lighting_only", 2, true, true),
-		CaptureVariant.new("unshaded", 1, true, true),
-		CaptureVariant.new("directional_shadow_atlas", 10, true, true),
+		CaptureVariant.new("beauty", 0, true),
+		CaptureVariant.new("shadows_off", 0, false),
+		CaptureVariant.new("lighting_only", 2, true),
+		CaptureVariant.new("unshaded", 1, true),
+		CaptureVariant.new("directional_shadow_atlas", 10, true),
 	]
 
 
@@ -153,22 +153,15 @@ static func capture_variant_matches_diagnostics(
 	var terrain := terrain_value as Dictionary
 	var renderer := renderer_value as Dictionary
 	var shadows := shadows_value as Dictionary
-	var dynamic_value: Variant = shadows.get("dynamic")
 	var static_value: Variant = shadows.get("static_terrain")
-	if not (dynamic_value is Dictionary) or not (static_value is Dictionary):
+	if not (static_value is Dictionary):
 		return false
-	var dynamic := dynamic_value as Dictionary
 	var static_terrain := static_value as Dictionary
 	if not world.has("loaded") or not world.has("visible") \
 			or not terrain.has("available") \
 			or not terrain.has("visible") \
 			or not terrain.has("visible_in_tree") \
 			or not renderer.has("debug_draw") \
-			or not dynamic.has("available") \
-			or not dynamic.has("visible") \
-			or not dynamic.has("visible_in_tree") \
-			or not dynamic.has("processing") \
-			or not dynamic.has("shadow_enabled") \
 			or not static_terrain.has("available") \
 			or not static_terrain.has("enabled") \
 			or not static_terrain.has("suppressed_bms_ids"):
@@ -176,7 +169,6 @@ static func capture_variant_matches_diagnostics(
 	for key in [
 		"id",
 		"debug_draw",
-		"dynamic_shadow_enabled",
 		"static_terrain_shadow_enabled",
 		"suppressed_dynamic_caster_bms_ids",
 		"suppressed_static_caster_bms_ids",
@@ -201,23 +193,13 @@ static func capture_variant_matches_diagnostics(
 			or not bool(terrain.available) \
 			or not bool(terrain.visible) \
 			or not bool(terrain.visible_in_tree) \
-			or not bool(dynamic.available) \
-			or not bool(dynamic.visible) \
-			or not bool(dynamic.visible_in_tree) \
-			or not bool(dynamic.processing) \
 			or not bool(static_terrain.available):
 		return false
-	return bool(dynamic.available) \
-			and bool(static_terrain.available) \
-			and int(renderer.debug_draw) == int(variant.debug_draw) \
-			and bool(dynamic.shadow_enabled) \
-					== bool(variant.dynamic_shadow_enabled) \
+	return int(renderer.debug_draw) == int(variant.debug_draw) \
 			and bool(static_terrain.enabled) \
 					== bool(variant.static_terrain_shadow_enabled) \
 			and String(realized_variant.id) == String(variant.id) \
 			and int(realized_variant.debug_draw) == int(variant.debug_draw) \
-			and bool(realized_variant.dynamic_shadow_enabled) \
-					== bool(variant.dynamic_shadow_enabled) \
 			and bool(realized_variant.static_terrain_shadow_enabled) \
 					== bool(variant.static_terrain_shadow_enabled) \
 			and (realized_dynamic as Dictionary).ids \
@@ -244,18 +226,18 @@ static func _normalized_suppressed_bms_ids(value: Variant) -> Dictionary:
 
 static func shadow_attribution_variants(
 		suppressed_static_ids: PackedInt32Array = PackedInt32Array()) -> Array:
+	# The render-slot ground shadows always draw; the static terrain page
+	# shadows are the one system a variant switches.
 	var variants: Array = [
-		CaptureVariant.new("both_shadow_systems", 0, true, true),
-		CaptureVariant.new("dynamic_shadow_only", 0, true, false),
-		CaptureVariant.new("static_terrain_shadow_only", 0, false, true),
+		CaptureVariant.new("both_shadow_systems", 0, true),
+		CaptureVariant.new("dynamic_shadow_only", 0, false),
 	]
 	if not suppressed_static_ids.is_empty():
 		variants.append(CaptureVariant.new(
-				"static_without_selected", 0, false, true,
+				"static_without_selected", 0, true,
 				PackedInt32Array(), suppressed_static_ids))
-	variants.append(CaptureVariant.new("dynamic_without_bms58", 0, true, false,
+	variants.append(CaptureVariant.new("dynamic_without_bms58", 0, false,
 			PackedInt32Array([58])))
-	variants.append(CaptureVariant.new("shadows_off", 0, false, false))
 	return variants
 
 

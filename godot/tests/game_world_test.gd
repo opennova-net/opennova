@@ -586,7 +586,7 @@ func test_wire_header_missing_asset_reason_names_the_install() -> void:
 # (GameWorld's env-presenters-world-driven handoff; D-RORD-8's ordering).
 func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 	var world := WorldFixture.make_world(self)
-	for presenter_name in ["Weather", "SkyDome", "Celestial", "Water", "SunShadow"]:
+	for presenter_name in ["Weather", "SkyDome", "Celestial", "Water"]:
 		var presenter := world.get_node_or_null(NodePath(presenter_name)) as Node
 		assert_not_null(presenter, "%s exists under the world" % presenter_name)
 		if presenter != null:
@@ -1093,7 +1093,7 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	add_child_autofree(world)
 	assert_true(world is GameWorld, "the root is the native GameWorld")
 	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial",
-			"SunShadow", "SlotShadow"]:
+			"SlotShadow"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
 	# The dispatcher sits beside the terrain, so the indoors terrain hide never
 	# reaches the MODEL masks (the occlusion frame gates its detail passes).
