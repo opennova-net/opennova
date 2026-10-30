@@ -2289,6 +2289,16 @@ target_link_libraries(menu_state_frame_test PRIVATE opennova_runtime)
 target_compile_features(menu_state_frame_test PRIVATE cxx_std_17)
 add_test(NAME menu_state_frame COMMAND menu_state_frame_test)
 
+# The menu shell (menu/menu_shell.h) over its runtime and a fake host: the menu mode's enter and
+# leave across a mission, the cross-file jumps and their history, the back, the quit and the resume,
+# the single-player launch, the Mods pick and its reload in the original's order, the URL rows, the
+# update gate and the updater, the Options dialog's preview baseline, and the screen controllers'
+# claim, events and release.
+add_executable(menu_shell_test menu/menu_shell_test.cpp)
+target_link_libraries(menu_shell_test PRIVATE opennova_runtime)
+target_compile_features(menu_shell_test PRIVATE cxx_std_17)
+add_test(NAME menu_shell COMMAND menu_shell_test)
+
 # The Mods list (menu/mod_list.h, D-MNU-31): the base game's row and the expansion records, a pick's
 # description, ACCEPT's pick and its compare with the game running.
 add_executable(menu_mod_list_test menu/mod_list_test.cpp)

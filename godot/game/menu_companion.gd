@@ -33,6 +33,12 @@ var _weapons_mount := ""
 var _weapons_injected := false
 
 
+## The binding of the engine screen controller this companion is the device half
+## of (MenuShell.add_companion hands it to MenuDriver.add_screen); null for none.
+func screen() -> MenuScreenBinding:
+	return null
+
+
 ## The engine's name for the delegate this companion is (MenuDriver.command_owner:
 ## "lan", "player_info"), whose documents it drives; "" for none. Which document a
 ## delegate owns is the engine's (menu::MenuCommands::wire, by the controls it holds).

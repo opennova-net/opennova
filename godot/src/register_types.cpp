@@ -465,6 +465,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuFrame);
 	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(MenuScrollRange);
+	GDREGISTER_CLASS(MenuScreenBinding);
 	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(PlayerInfoLoadout);
 	GDREGISTER_CLASS(ArmoryLoadout);

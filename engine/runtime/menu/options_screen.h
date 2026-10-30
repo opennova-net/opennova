@@ -108,6 +108,9 @@ public:
 	bool capturing_joystick() const {
 		return action_ >= 0 && device_ == controls::Device::Joystick;
 	}
+	// A row armed: the remap capture runs (retail's options modal state 1, g_OptionsModalState
+	// @ 0x25c7708, which Options_UpdatePendingState @ 0x55c450 serves).
+	bool capturing() const { return action_ >= 0; }
 	void end_remap(MenuRuntime &menu, bool refill);
 	// The screen's own binding records (the remap flow's).
 	const controls::BindingSet &bindings() const { return bindings_; }

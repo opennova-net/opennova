@@ -4119,7 +4119,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	assert_gt(driver.selected_row(driver.widget_id("ACCESSORY")), 0,
 		"the current satchel is not NONE on first visit")
 
-	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	driver.activate(driver.widget_id("ACCEPT"))
 	# An untouched ACCEPT applies the page as the game serializes it: the blue entity's
 	# knife first, the page's primary and satchel, then every shown grenade position, its
 	# count untouched; class 1 filters no class, so the catalog's first three grenades

@@ -90,7 +90,9 @@ public:
 	virtual void set_player_words(const OptionsScreen::Words &words) { (void)words; }
 
 	// --- what leaves the menu ---
-	virtual void leave(ShellExit exit, const std::string &control, const std::string &text) = 0;
+	// `command` is what the control asked (StartMission, Exit, Back, Update, ...), `exit` what the game
+	// does of it, `control` the control whose activation it was ("" none).
+	virtual void leave(ShellExit exit, MenuCommand command, const std::string &control, const std::string &text) = 0;
 	// The updater started (the game then quits); false when it did not.
 	virtual bool launch_update(const std::string &control) = 0;
 	// The external browser opened on `url` (its scheme added where the authored link is bare).
@@ -176,6 +178,9 @@ public:
 	bool open_ingame();
 	bool in_game() const { return in_game_; }
 	bool in_menu_mode() const { return menu_mode_; }
+	// Whether a mission runs under the menu, set without an open (Try's start in a mission's own menu
+	// file): the next open's wiring binds the mission's commands.
+	void set_in_game(bool in_game) { in_game_ = in_game; }
 	// Opens `file` at `screen` (empty: its first) and wires it. False (the screen kept, with a
 	// notice) when the file does not load or holds no screens.
 	bool open_menu(const std::string &file, const std::string &screen);
@@ -184,8 +189,10 @@ public:
 	bool show_document(const mnu::Document *document, const std::string &file, const std::string &screen);
 	// Every menu read again at its next open (the root changed under the shell).
 	void forget_menus();
-	// The menu file shown (as opened), "" before any.
+	// The menu file shown (as opened), "" before any, and the document the shell opened (null for one
+	// its embedder opened itself).
 	const std::string &file() const { return file_; }
+	const std::shared_ptr<const mnu::Document> &document() const { return shown_; }
 	// Moves with every open (the shell's or the embedder's).
 	uint64_t open_serial() const { return open_serial_; }
 
@@ -270,6 +277,7 @@ private:
 	bool in_game_ = false;
 	bool menu_mode_ = false;
 	bool wired_by_shell_ = false; // the shell opened the document shown (its wiring answers)
+	bool opening_ = false; // inside an open's runtime open_document (its events are no controller's)
 	uint64_t open_serial_ = 0;
 	std::vector<int> update_gated_; // the multiplayer entries the update gate disabled
 	std::vector<MenuScreenController *> controllers_;

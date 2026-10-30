@@ -93,6 +93,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_click.cpp # the click and the press's mouse capture (D-MNU-30)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_state_frame.cpp # the frame seam's state writes, and the seam headless
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_commands.cpp # what the game's code does with a control it binds by name
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_shell.cpp # the menu mode, each open's wiring and what a control's command asks
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_history.cpp # the screen history across menu files and a mission (D-MNU-28)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/mod_list.cpp # the Mods list's rows, its pick's description and ACCEPT's pick (D-MNU-31)
