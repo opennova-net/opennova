@@ -706,9 +706,33 @@ DestroyFade destroy_fade_phases(int32_t elapsed, const int32_t destroy_timing_ti
     return fade;
 }
 
-// See destruction.h. [orig: Render_SectorEntity @0x5C4190 - Entity_PublishSwapFadePhases
-//  @0x5C4200 and the swap @0x5C420A..0x5C42D3]
-void update_item_destroy_fade(World &world, Entity &entity) {
+namespace {
+
+// A husked row holding no final husk: retail's draw publishes nothing for it, so nothing
+// spends its delay or restamps its death tick; its own slots read the fade off its clock
+// alone, none while the delay runs and the fade from the delay's end past it (the D-3DI-2
+// per-model reading). [orig: Render_SectorEntity @0x5C4190 - the +0x38 test @0x5C41F9 ahead
+//  of the publication @0x5C4200]
+void destroy_fade_resting_phases(const World &world, Entity &entity) {
+    const ItemDeathTraits *traits = world.tables.item_death_traits.get(entity.item_id);
+    if (traits == nullptr) return;
+    const int32_t since_death = int32_t(world.logic_tick - entity.death_tick);
+    const int32_t delay = entity.destroy_timer;
+    if (delay != 0 && since_death < delay) return;
+    const DestroyFade fade = destroy_fade_phases(
+            delay != 0 ? since_death - delay : since_death, traits->destroy_timing_ticks);
+    entity.destroy_progress = fade.progress;
+    entity.destroy_phases_q16 = fade.phases_q16;
+}
+
+} // namespace
+
+// See destruction.h. [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38
+//  @0x5C41F9, Entity_PublishSwapFadePhases @0x5C4200 and the swap @0x5C420A..0x5C42D3]
+bool update_item_destroy_fade(World &world, Entity &entity) {
+    const std::array<int32_t, 6> phases_before = entity.destroy_phases_q16;
+    const double progress_before = entity.destroy_progress;
+    const size_t swaps_before = world.out.destruction.husk_swaps.size();
     entity.destroy_phases_q16.fill(0);
     entity.destroy_progress = 0;
     if ((entity.engine_flags & kEntityFlagHusk) == 0) {
@@ -720,11 +744,24 @@ void update_item_destroy_fade(World &world, Entity &entity) {
             hide.final_overlay = HuskSwapEvent::Overlay::kHide;
             world.out.destruction.husk_swaps.push_back(hide);
         }
-        return;
+    } else if (entity.holds_final_husk()) {
+        publish_swap_fade_phases(world, entity);
+        if (const auto *traits = world.tables.item_death_traits.get(entity.item_id))
+            update_husk_swap_stage(world, entity, *traits);
+    } else {
+        destroy_fade_resting_phases(world, entity);
     }
-    publish_swap_fade_phases(world, entity);
-    if (const auto *traits = world.tables.item_death_traits.get(entity.item_id))
-        update_husk_swap_stage(world, entity, *traits);
+    return entity.destroy_phases_q16 != phases_before || entity.destroy_progress != progress_before ||
+            world.out.destruction.husk_swaps.size() != swaps_before;
+}
+
+void run_draw_husk_leg(World &world, Entity &entity) {
+    if (!update_item_destroy_fade(world, entity)) return;
+    DrawFadeStamp stamp;
+    stamp.handle = entity.handle.packed;
+    stamp.husked = (entity.engine_flags & kEntityFlagHusk) != 0;
+    stamp.phases_q16 = entity.destroy_phases_q16;
+    world.out.destruction.draw_fades.push_back(stamp);
 }
 
 HuskSwapEvent husk_swap_event(const Entity &entity) {

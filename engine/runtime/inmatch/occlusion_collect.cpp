@@ -6,7 +6,7 @@
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/world/collision.h> // ResolvedCollisionShape, BlinkAccum, collision_matrix_from_euler
-#include <runtime/world/destruction.h> // update_item_destroy_fade (the draw's husk leg)
+#include <runtime/world/destruction.h> // run_draw_husk_leg (the draw's husk leg)
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_feed.h> // pack_building_visibility
 #include <base/io/fixed.h> // kFp16OneD
@@ -71,7 +71,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 			r_culled_bms.push_back(e.bms_id);
 		} else {
 			anchor_entity(e);
-			world::update_item_destroy_fade(kernel.world, e);
+			world::run_draw_husk_leg(kernel.world, e);
 		}
 		if (r_local_collected != nullptr && e.handle == kernel.world.cached.local_player)
 			*r_local_collected = admitted;
@@ -125,7 +125,7 @@ void collect_view_verdicts(const PresentRowsContext &context, WireOcclusionLatch
 				r_culled_wire.push_back(static_cast<int32_t>(handle));
 			} else {
 				anchor_entity(*twin);
-				world::update_item_destroy_fade(kernel.world, *twin);
+				world::run_draw_husk_leg(kernel.world, *twin);
 			}
 			return;
 		}
@@ -393,8 +393,8 @@ void collect_building_verdicts(world::World &world, const world::CollisionWorld 
 		r_out.push_back(v);
 		// A visible building is drawn, and its draw runs the husk leg
 		// (world::update_item_destroy_fade) [orig: Terrain_RenderSectorModels @0x5C5D30 ->
-		//  Render_SectorEntity @0x5C5F23].
-		if (occlusion.building_visible(e.handle)) world::update_item_destroy_fade(world, e);
+		//  Render_SectorEntity @0x5C603F].
+		if (occlusion.building_visible(e.handle)) world::run_draw_husk_leg(world, e);
 	};
 	// The batch's walk is the static prox table's prefix, rows [0, static_building_count)
 	// as its last Pool2 build listed them (the Building-type defs, pool-2 slot order, at

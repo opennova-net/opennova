@@ -546,11 +546,22 @@ struct DeathLightEvent {
     float radius = 0.0f;
 };
 
+// A row the draw's husk leg changed in a view collect (run_draw_husk_leg): its handle, its
+// husk bit and the six phases it now carries, so the embedder stamps the drawn model in the
+// same frame, as retail's draw publishes and then draws in one call [orig: Render_SectorEntity
+// @0x5C4190 - Entity_PublishSwapFadePhases @0x5C4200 ahead of the model's draw @0x5C4335].
+struct DrawFadeStamp {
+    uint16_t handle = EntityHandle::kInvalid;
+    bool husked = false;
+    std::array<int32_t, 6> phases_q16{};
+};
+
 struct DestructionEvents {
     std::vector<DestructionEffectEvent> effects;
     std::vector<DestructionSoundEvent> sounds;
     std::vector<HuskSwapEvent> husk_swaps;
     std::vector<DeathLightEvent> death_lights;
+    std::vector<DrawFadeStamp> draw_fades; // the view collects' (run_draw_husk_leg)
     // Diagnostic counters (probes assert the legs actually ran).
     int32_t explosions_processed = 0;
     int32_t items_destroyed = 0;
@@ -562,6 +573,7 @@ struct DestructionEvents {
         sounds.clear();
         husk_swaps.clear();
         death_lights.clear();
+        draw_fades.clear();
         debris_triangles = 0;
     }
 };
@@ -817,19 +829,26 @@ inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
     return delay ? std::max(delay, husked_at) : 0;
 }
 // A drawn row's swap fade, the draw's own leg: each view's collect runs it for every row it
-// admits (inmatch::collect_view_verdicts, collect_building_verdicts), so a row no view draws
-// keeps its fade's clock, its delay and its husks where they stand, as retail's do; the
-// entity walks evaluate none. An intact row zeroes its phases (and ends a pending final
-// husk); a husked one publishes them (publish_swap_fade_phases: the delay's restamp past
-// the delay included) and runs the swap stage. Retail publishes the six CTRL slots under
-// Flags & 4 with a final husk held, before its sub-pixel reject, into one process-wide bus;
-// here every husked drawn row publishes its own, which the present row carries and the
-// presenter stamps (a retained model reads only the slots written for it, D-3DI-2).
+// admits (inmatch::collect_view_verdicts, collect_building_verdicts, through
+// run_draw_husk_leg), so a row no view draws keeps its fade's clock, its delay and its husks
+// where they stand, as retail's do; the entity walks evaluate none. An intact row zeroes its
+// phases (and ends a pending final husk). A husked row holding its final husk (+0x38) runs
+// retail's publication (publish_swap_fade_phases: past the delay it spends it and restamps
+// the death tick) and the swap stage; retail publishes for no other row, so a husked row
+// holding none spends nothing and restamps nothing (the death tick the targeting window reads
+// stands, Entity_ValidateWeaponTarget), and reads its own phases off its clock alone
+// (destroy_fade_resting_phases): retail's model there reads the process-wide bus's last
+// value, ours the slots written for it (D-3DI-2). Returns whether the row's phases, its
+// husks or its swap events changed.
 // [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38 @0x5C41F9,
-//  Entity_PublishSwapFadePhases @0x5C4200, the sub-pixel reject @0x5C42DE; its callers
-//  Terrain_RenderSectorEntities @0x5C7B60 (@0x5C7C99 / @0x5C7D13) and Terrain_RenderSectorModels
-//  @0x5C5D30 (@0x5C5F23)]
-void update_item_destroy_fade(World &world, Entity &entity);
+//  Entity_PublishSwapFadePhases @0x5C4200, the sub-pixel reject @0x5C42DE; its live callers
+//  Terrain_RenderSectorEntities @0x5C7B60 (@0x5C7D13) and Terrain_RenderSectorModels
+//  @0x5C5D30 (@0x5C603F), whose other calls sit behind RenderSlot_CollectReceiverSlots_Stub
+//  @0x5D7240, which returns 0]
+bool update_item_destroy_fade(World &world, Entity &entity);
+// The collects' call: update_item_destroy_fade, and a changed row's DrawFadeStamp onto
+// world.out.destruction.draw_fades for the embedder's same-frame stamp.
+void run_draw_husk_leg(World &world, Entity &entity);
 // The husk -> final-husk swap stage of a husked entity holding a final husk, after the
 // fade's publication: in the fade window it draws the final husk beside the husk, at
 // the window's end it promotes the final husk into the husk (the draw and the collision

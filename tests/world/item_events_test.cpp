@@ -1141,6 +1141,9 @@ int test_destroy_phases_and_ambient() {
     e.destroy_timer = 10;
     e.death_tick = 100;
     e.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+    // The draw publishes (and spends the delay) only for a row holding its final husk
+    // [orig: Render_SectorEntity @0x5C4190 - +0x38 @0x5C41F9 ahead of @0x5C4200].
+    e.final_husk_loaded = true;
     w.logic_tick = 109;
     update_item_destroy_fade(w,e);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
@@ -1161,6 +1164,22 @@ int test_destroy_phases_and_ambient() {
     e.engine_flags = 0;
     update_item_destroy_fade(w,e);
     CHECK(e.destroy_phases_q16 == (std::array<int32_t,6>{}));
+    // A husked row holding no final husk: nothing spends its delay or restamps its death
+    // tick, and its own phases read the fade from the delay's end (D-3DI-2).
+    {
+        auto &r = *w.registry.get(spawn(w, 2, 73, ItemDeathClass::kGnrl)); // default timing
+        r.destroy_timer = 10;
+        r.death_tick = 100;
+        r.engine_flags = kEntityFlagDead | kEntityFlagHusk;
+        w.logic_tick = 109;
+        CHECK(!update_item_destroy_fade(w,r));
+        CHECK(r.destroy_phases_q16 == (std::array<int32_t,6>{}));
+        w.logic_tick = 160; // 50 ticks past the delay's end, as the published row's at 160
+        CHECK(update_item_destroy_fade(w,r));
+        CHECK(r.death_tick == 100 && r.destroy_timer == 10);
+        CHECK(r.destroy_phases_q16 == (std::array<int32_t,6>{21845,65536,32768,0,0,0}));
+    }
+    traits = w.tables.item_death_traits.get_mutable(70); // the set() above may move the rows
     e.death_motion = DeathMotionMode::BuildingEffects;
     e.item_type = 5;
     e.position = {3,4,5};
