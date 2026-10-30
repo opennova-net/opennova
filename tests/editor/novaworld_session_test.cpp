@@ -423,6 +423,18 @@ static int test_set_up_and_reset() {
 	TEST_EXPECT(copy_at(dir.file("Mod"), copy) && copy.revision == 0);
 	s.send(request::novaworld_push("First revision"));
 	TEST_EXPECT(service.head == 1 && s.novaworld().revision == 1);
+
+	// Made anew at the same number: nothing but its files tells it from the folder's own revision. Its digest
+	// matching the base's until then is what the pushes and pulls of this suite prove.
+	s.send(request::novaworld_check());
+	TEST_EXPECT(s.novaworld().revision == 1);
+	const std::string other = "another project's";
+	service.blobs[opennova::io::sha256_hex(other.data(), other.size())] = other;
+	service.manifests[1] = opennova::project::encode_manifest({ ProjectFile{ "defs/other.def",
+			opennova::io::sha256_hex(other.data(), other.size()), other.size() } });
+	s.send(request::novaworld_check());
+	TEST_EXPECT(s.novaworld().tracked && s.novaworld().revision == 0 && copy_at(dir.file("Mod"), copy) &&
+			copy.revision == 0);
 	std::printf("set up: a project made for MOD set up as it opens, at no revision (its files not the "
 				"head's), its push waiting for a pull; the store reset, set up again by the check that "
 				"found it\n");
@@ -1240,13 +1252,78 @@ static int test_account_change_gives_up_put() {
 	editor::NovaWorldWorkingCopy copy;
 	TEST_EXPECT(service.made.count("GONE") && s.session.view().project.document->novaworld.empty() &&
 			!s.novaworld().tracked && !copy_at(dir.file("Gone"), copy) &&
-			s.novaworld().last.find("The put of GONE on NovaWorld was given up") != std::string::npos &&
-			s.novaworld().last.find("as the empty project GONE") != std::string::npos);
+			s.novaworld().last.find("The put of GONE on NovaWorld was given up") != std::string::npos);
 	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
-	s.send(request::novaworld_put_empty("GONE"));
+	s.send(request::novaworld_put_new("GONE", "Gone", ""));
 	TEST_EXPECT(s.session.view().project.document->novaworld == "GONE" && s.novaworld().tracked &&
 			copy_at(dir.file("Gone"), copy) && copy.key == "GONE" && copy.revision == 0);
-	std::printf("put given up: an account change gives a put up, the empty project taken after\n");
+
+	// A key a project with revisions holds is the key taken, in those words, however it was tried.
+	s.send(request::novaworld_push("First revision"));
+	TEST_EXPECT(service.made["GONE"].head == 1);
+	s.send(request::new_project(dir.file("Taken"), "Taken"));
+	s.send(request::novaworld_put_new("GONE", "Taken", ""));
+	TEST_EXPECT(s.session.view().project.document->novaworld.empty() &&
+			s.novaworld().put_refusal == "NovaWorld has a project GONE already: choose another key.");
+	push_to_mod(service, { { "defs/a.def", "a" } });
+	s.send(request::novaworld_put_new("MOD", "Taken", ""));
+	TEST_EXPECT(s.session.view().project.document->novaworld.empty() &&
+			s.novaworld().put_refusal == "NovaWorld has a project MOD already: choose another key.");
+	std::printf("put given up: an account change gives a put up, the same put asked again finishes it, a key "
+				"taken said so\n");
+	return 0;
+}
+
+// An account change gives a paused pull up, its base and its account being the last one's; a job's word on its
+// session stands only for that session: a sign-out made while it ran is not undone by the cookie it renewed, and an
+// ended session is an account change.
+static int test_account_changes_and_jobs() {
+	test_temp::TempDir dir("opennova_novaworld_session_account_jobs");
+	FakeService service;
+	push_to_mod(service, { { "project.opennova", project_file_naming("MOD") }, { "defs/a.def", "a" } });
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	s.send(request::novaworld_get("MOD", dir.file("Copy")));
+	push_to_mod(service, { { "project.opennova", project_file_naming("MOD") }, { "defs/a.def", "theirs" } });
+	TEST_EXPECT(put(dir.file("Copy/defs/a.def"), "mine"));
+	s.send(request::novaworld_pull());
+	TEST_EXPECT(s.novaworld().conflicts.size() == 1);
+	s.send(request::novaworld_sign_in(kServer, "alex", "player-pw"));
+	TEST_EXPECT(s.novaworld().conflicts.empty() && s.said("The pull was given up: the account changed"));
+	s.send(request::novaworld_resolve("defs/a.def", editor::Resolution::KeepMine));
+	TEST_EXPECT(s.refused("novaworld.refused"));
+
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	service.renew_next = true;
+	s.session.handle(request::novaworld_check()); // running, its first reply to renew the session
+	s.session.handle(request::novaworld_sign_out());
+	s.session.run_operations();
+	TEST_EXPECT(!s.novaworld().signed_in && s.accounts.load().cookie.empty());
+
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	service.sessions_ended = true;
+	s.send(request::novaworld_pull());
+	TEST_EXPECT(!s.novaworld().signed_in && !s.novaworld().remote.can_push);
+	service.sessions_ended = false;
+	std::printf("account: a paused pull given up as it changes, a job's word on its session only for that session\n");
+	return 0;
+}
+
+// A revision's project file never moves a folder to another project: pulled, the file keeps the working copy's key.
+static int test_pull_keeps_the_key() {
+	test_temp::TempDir dir("opennova_novaworld_session_pull_key");
+	FakeService service;
+	push_to_mod(service, { { "project.opennova", project_file_naming("MOD") }, { "defs/a.def", "a" } });
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	s.send(request::novaworld_get("MOD", dir.file("Copy")));
+	push_to_mod(service, { { "project.opennova", project_file_naming("OLD") }, { "defs/a.def", "a2" } });
+	s.send(request::novaworld_pull());
+	TEST_EXPECT(s.session.view().project.open && s.novaworld().key == "MOD" && s.novaworld().tracked &&
+			s.novaworld().revision == 2 && s.read("defs/a.def") == "a2");
+	s.send(request::novaworld_check());
+	TEST_EXPECT(s.novaworld().changes.size() == 1 && s.novaworld().changes[0].path == "project.opennova");
+	std::printf("pull: the working copy's key kept, whatever the revision's project file names\n");
 	return 0;
 }
 
@@ -1444,6 +1521,8 @@ int main() {
 	failures += test_get_mod_base_not_got();
 	failures += test_new_mod();
 	failures += test_account_change_gives_up_put();
+	failures += test_account_changes_and_jobs();
+	failures += test_pull_keeps_the_key();
 	failures += test_progress();
 	failures += test_get_without_revision();
 	failures += test_lobby_build_cache();

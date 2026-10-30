@@ -137,6 +137,9 @@ private:
 	// The account as the view shows it, and kept by the store.
 	void show_account();
 	void keep_account(const NovaWorldAccountUpdate &update);
+	// What a job settled about its session, kept where that is still the account's: a sign-in or a
+	// sign-out made while it ran stands, and an ended session is an account change.
+	void keep_job_account(const NovaWorldAccountUpdate &update);
 	// The account signed in, out, or to another service: the open project's working copy read again
 	// for it, and the project asked again (or its setup due).
 	void account_changed();
@@ -243,6 +246,7 @@ private:
 	std::string put_key_;
 	std::string put_code_;
 	bool put_create_ = false;
+	std::string put_taken_; // a new project's refusal for a key taken, while that key is asked after
 	RemoteProject put_project_;
 	bool put_waiting_ = false;
 	// A project New project makes to be put on NovaWorld (make_project): the put it waits for and

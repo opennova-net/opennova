@@ -107,6 +107,7 @@ private:
 struct NovaWorldAccountUpdate {
 	bool changed = false;
 	NovaWorldAccount account;
+	std::string from_cookie; // the session a job started on, which what it settled is about
 };
 
 class NovaWorldJob {
@@ -149,7 +150,7 @@ public:
 
 protected:
 	NovaWorldJob(NovaWorldTransport &transport, NovaWorldAccount account) :
-			transport_(transport), account_(std::move(account)) {}
+			transport_(transport), account_(std::move(account)), started_cookie_(account_.cookie) {}
 	// A reply's word on the session: a renewed cookie kept, a 401 signing out. False for a 401.
 	bool note_session(const NovaWorldResponse &reply);
 	NovaWorldJobState fail(std::string error);
@@ -162,6 +163,7 @@ protected:
 
 	NovaWorldTransport &transport_;
 	NovaWorldAccount account_;
+	std::string started_cookie_;
 	size_t batch_files_ = 0;
 	uint64_t batch_bytes_ = kSignedBatchBytes;
 	bool account_changed_ = false;

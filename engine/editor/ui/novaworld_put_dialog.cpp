@@ -268,7 +268,10 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 		asked_ = true;
 	}
 	ImGui::SameLine();
+	// Nothing can call back a put once asked: its answer is awaited, and says itself.
+	ImGui::BeginDisabled(asking);
 	if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+	ImGui::EndDisabled();
 	ImGui::EndPopup();
 }
 
