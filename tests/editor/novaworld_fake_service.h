@@ -68,6 +68,8 @@ inline editor::NovaWorldResponse refusal(int status, const char *code) {
 
 class FakeService : public editor::NovaWorldTransport {
 public:
+	// The address it answers at (a second one for a second service).
+	std::string server = kServer;
 	// MOD, the service's own game: its head and its manifests (by revision), whose account owns it
 	// ("" the service), whether it is public (private and of JO's title, it is NovaLogic's game), and
 	// the title it (and EXP, its mod) runs as.
@@ -335,7 +337,7 @@ private:
 	editor::NovaWorldResponse route(const editor::NovaWorldRequest &request, const Caller &caller) {
 		io::JsonValue body;
 		std::string error;
-		if (request.method == "POST" && request.url == std::string(kServer) + "/api/login") {
+		if (request.method == "POST" && request.url == server + "/api/login") {
 			if (!io::json_parse(request.body, body, error))
 				return refusal(400, "invalid_json");
 			const std::string password = body.get_string("password", "");
@@ -351,11 +353,11 @@ private:
 					std::string(admin ? kAdminCookie : kPlayerCookie) + "; Path=/; HttpOnly");
 			return r;
 		}
-		if (request.method == "POST" && request.url == std::string(kServer) + "/api/logout")
+		if (request.method == "POST" && request.url == server + "/api/logout")
 			return json(200, io::JsonValue::make_object());
 		// The caller's own projects, and the games it may make a mod of: the service's own and its
 		// own.
-		if (request.method == "GET" && request.url == std::string(kServer) + "/api/me/projects") {
+		if (request.method == "GET" && request.url == server + "/api/me/projects") {
 			if (caller.name.empty())
 				return refusal(401, "unauthorized");
 			io::JsonValue own = io::JsonValue::make_array();
@@ -392,7 +394,7 @@ private:
 			out.set("lobbies", std::move(lobbies));
 			return json(200, out);
 		}
-		if (request.url == std::string(kServer) + "/api/products") {
+		if (request.url == server + "/api/products") {
 			if (request.method == "POST")
 				return create(request, caller);
 			io::JsonValue list = io::JsonValue::make_array();
@@ -406,7 +408,7 @@ private:
 			return json(200, out);
 		}
 		// The project the route names, which the caller may read.
-		const std::string projects = std::string(kServer) + "/api/products/";
+		const std::string projects = server + "/api/products/";
 		if (request.url.rfind(projects, 0) != 0)
 			return refusal(404, "not_found");
 		const std::string named = request.url.substr(projects.size());

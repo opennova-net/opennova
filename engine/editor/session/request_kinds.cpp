@@ -317,6 +317,9 @@ void serve_novaworld_make_own(SessionCore &core, const EditorRequest &) {
 void serve_novaworld_rejoin(SessionCore &core, const EditorRequest &) {
 	core.novaworld().rejoin();
 }
+void serve_novaworld_keep_folder(SessionCore &core, const EditorRequest &) {
+	core.novaworld().keep_folder();
+}
 void serve_novaworld_submit(SessionCore &core, const EditorRequest &request) {
 	core.novaworld().submit(request);
 }
@@ -1646,6 +1649,13 @@ constexpr RequestKindRow kRows[] = {
 			"nothing downloaded, its base and revision as they were where they are this service's. Refused where "
 			"its state names none.")
 			.holds(kNone, kHoldsAll)
+			.row,
+	Request(K::NovaWorldKeepFolder, "novaworld_keep_folder", serve_novaworld_keep_folder,
+			"A working copy holding no revision of its project (a folder got from another service, or one that lost "
+			"its base): the project's head taken as its base with no file changed, an operation, then checked, so "
+			"every difference from the head, deletions too, is a change for the next push. A stopped pull is given "
+			"up. Refused for a folder that holds a revision.")
+			.holds(kFiles, kSlot)
 			.row,
 	// A call the poll takes the reply of, as a release's.
 	Request(K::NovaWorldSubmit, "novaworld_submit", serve_novaworld_submit,

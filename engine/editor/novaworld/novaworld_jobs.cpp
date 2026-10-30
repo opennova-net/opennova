@@ -495,10 +495,11 @@ NovaWorldJobState NovaWorldCheck::step(uint64_t budget) {
 // --- NovaWorldTrack ---
 
 NovaWorldTrack::NovaWorldTrack(NovaWorldTransport &transport, NovaWorldAccount account,
-		ProjectPaths paths, std::string export_dir, std::string key) :
+		ProjectPaths paths, std::string export_dir, std::string key, bool keep_folder) :
 		NovaWorldJob(transport, std::move(account)),
 		paths_(std::move(paths)),
-		export_dir_(std::move(export_dir)) {
+		export_dir_(std::move(export_dir)),
+		keep_folder_(keep_folder) {
 	copy_.key = std::move(key);
 }
 
@@ -569,6 +570,8 @@ NovaWorldJobState NovaWorldTrack::step(uint64_t budget) {
 					return fail("cannot read revision " + std::to_string(remote_.head) + ": " +
 							error.line());
 				call_ = NovaWorldCall();
+				if (keep_folder_)
+					return write(theirs_, remote_.head);
 				scan_ = std::make_unique<NovaWorldScan>(paths_, export_dir_);
 				phase_ = Phase::Scan;
 				break;

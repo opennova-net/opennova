@@ -28,6 +28,14 @@ bool EditorPreferences::write(const Preferences &next, Diagnostic &error) {
 	return true;
 }
 
+bool EditorPreferences::save(Diagnostic &error) {
+	Preferences kept;
+	Diagnostic finding;
+	if (store_.load(kept, finding))
+		for (const std::string &root : kept.working_copies) know_working_copy(root);
+	return store_.save(values_, error);
+}
+
 void EditorPreferences::remember_recent_project(const std::string &root) {
 	forget_recent_project(root);
 	values_.recent_projects.insert(values_.recent_projects.begin(), root);

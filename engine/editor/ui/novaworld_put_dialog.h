@@ -21,7 +21,16 @@ struct SessionView;
 class NovaWorldPutDialog {
 public:
 	// Shown at the next draw, its fields filled from the view as it is then.
-	void open() { opening_ = true; }
+	void open() {
+		opening_ = true;
+		new_here_.clear();
+	}
+	// The same for the open project's own `key` on a service that shows none of it: a new project under that
+	// key, the key itself nothing to ask.
+	void open_new_here(const std::string &key) {
+		opening_ = true;
+		new_here_ = key;
+	}
 	// Drawn every frame by its owner, in the ID scope it is opened from.
 	void draw(Workspace &workspace);
 
@@ -29,6 +38,7 @@ private:
 	void fill(const SessionView &view);
 
 	bool opening_ = false;
+	std::string new_here_; // the project's own key, put on this service as it is ("" a put of a project with none)
 	bool create_ = true;
 	char title_[128] = {};
 	char key_[17] = {};

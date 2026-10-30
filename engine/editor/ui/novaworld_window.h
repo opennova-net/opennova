@@ -88,6 +88,7 @@ private:
 	void draw_conflicts(const NovaWorldView &novaworld);
 	void draw_history(const NovaWorldView &novaworld);
 	void draw_make_own(const NovaWorldView &novaworld);
+	void draw_keep_folder(const NovaWorldView &novaworld);
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
@@ -95,6 +96,8 @@ private:
 	NovaWorldPutDialog put_;
 	ui_kit::HeldPopup make_own_popup_;
 	bool make_own_asked_ = false; // Make it your own...: its confirmation up
+	ui_kit::HeldPopup keep_folder_popup_;
+	bool keep_folder_asked_ = false; // Replace with this folder...: its confirmation up
 	char message_[2048] = {};  // the push's message
 	std::string prefilled_;    // the project the message was last prefilled for ("First revision")
 	char version_[33] = {};    // a release's version

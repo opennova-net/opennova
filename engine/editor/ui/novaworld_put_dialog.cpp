@@ -95,6 +95,13 @@ void NovaWorldPutDialog::fill(const SessionView &view) {
 	// The likeliest empty project, of those the project may be put on (novaworld_put_mismatch: a game or a mod as
 	// it is, of its game, a mod by its short name): its key or its name the project's, else the first. None of
 	// another kind, game or short name is chosen.
+	if (!new_here_.empty()) {
+		copy_text(key_, sizeof(key_), new_here_);
+		key_typed_ = true;
+		empty_.clear();
+		create_ = true;
+		return;
+	}
 	const std::string expansion = view.project.document ? view.project.document->expansion.name : std::string();
 	const std::vector<const RemoteProject *> matching = empty_projects(view);
 	const RemoteProject *likely = nullptr;
@@ -119,14 +126,15 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 	}
 	if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	// The project it was for closed, or put there now (its key written: this put's, or another client's).
-	if (!v.project.open || !c.key.empty()) {
+	if (!v.project.open || (new_here_.empty() ? !c.key.empty() : c.key != new_here_ || c.remote_known)) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
 	}
 	ImGui::Dummy(ImVec2(ImGui::GetFontSize() * 30.0f, 0.0f)); // as wide as its lines need, whatever is offered
 	const bool player = !(c.signed_in && c.role == "admin");
-	const std::vector<const RemoteProject *> empty = empty_projects(v);
+	const std::vector<const RemoteProject *> empty =
+			new_here_.empty() ? empty_projects(v) : std::vector<const RemoteProject *>();
 	// An empty project to take only where one the project may be put on is listed.
 	if (!empty.empty()) {
 		if (ImGui::RadioButton("A new project of yours", create_)) create_ = true;
@@ -145,11 +153,13 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 		if (ImGui::InputText("Name", title_, sizeof(title_)) && !key_typed_)
 			copy_text(key_, sizeof(key_), novaworld_key_for(title_, player));
 		ui_kit::tooltip("The project's name on NovaWorld.");
-		ImGui::SetNextItemWidth(width);
-		if (ImGui::InputText("Key", key_, sizeof(key_), ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
-			key_typed_ = true;
 		const char *key_rule = player ? "Up to 11 of A-Z, 0-9 and _, without \"QQ\"." : "Up to 16 of A-Z, 0-9 and _.";
-		ui_kit::tooltip(std::string("How NovaWorld and every copy of the project name it. ") + key_rule);
+		if (new_here_.empty()) {
+			ImGui::SetNextItemWidth(width);
+			if (ImGui::InputText("Key", key_, sizeof(key_), ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
+				key_typed_ = true;
+			ui_kit::tooltip(std::string("How NovaWorld and every copy of the project name it. ") + key_rule);
+		}
 		// Who gets it, as the website asks it: public first.
 		ui_kit::quiet_text("Who gets it");
 		if (ImGui::RadioButton("Public", public_)) public_ = true;

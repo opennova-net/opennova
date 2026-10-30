@@ -146,6 +146,22 @@ const char *const kRetiredPlayFile = "{\n"
                                      "  ]\n"
                                      "}\n";
 
+// Two editors, a debug and a release build, share the one store: a save keeps the working copies the other added.
+static int test_saves_keep_the_other_editors_copies() {
+	MemoryPreferencesStore store;
+	EditorPreferences first(store);
+	Diagnostic finding;
+	TEST_EXPECT(first.load(finding));
+	Preferences theirs;
+	theirs.working_copies = {"D:/Theirs"};
+	Diagnostic error;
+	TEST_EXPECT(store.save(theirs, error));
+	TEST_EXPECT(first.remember_working_copy("D:/Mine") && !first.remember_working_copy("D:/Mine"));
+	TEST_EXPECT(first.save(error));
+	TEST_EXPECT((store.preferences().working_copies == std::vector<std::string>{"D:/Mine", "D:/Theirs"}));
+	return 0;
+}
+
 // A store whose saves fail, as a settings file that cannot be written does.
 struct RefusingStore : PreferencesStore {
 	Preferences kept;
@@ -495,6 +511,7 @@ int main() {
 	failures += test_file_store_ignores_the_shared_play_settings();
 	failures += test_editor_preferences();
 	failures += test_session_over_a_store();
+	failures += test_saves_keep_the_other_editors_copies();
 	if (failures == 0) std::printf("editor_preferences: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

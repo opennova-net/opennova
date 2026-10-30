@@ -60,6 +60,13 @@ struct NovaWorldView {
 	std::string former_key;
 	int64_t former_revision = 0;
 	std::string former_host;
+	// The folder's working copies of this project on other services, as its own state has them: one folder,
+	// a debug build's staging and a release build's live service each keeping a base of their own.
+	struct OtherCopy {
+		std::string host;
+		int64_t revision = 0;
+	};
+	std::vector<OtherCopy> other_copies;
 	// The project as the service last answered (the open project's ask, its setup, a check, a pull
 	// or a push): whether the account may push it is its can_push.
 	bool remote_known = false;

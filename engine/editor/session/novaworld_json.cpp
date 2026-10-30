@@ -103,6 +103,14 @@ JsonValue novaworld_section(const SessionView &view) {
 	copy.set("former_key", json_string(novaworld.former_key));
 	copy.set("former_revision", json_number(double(novaworld.former_revision)));
 	copy.set("former_host", json_string(novaworld.former_host));
+	JsonValue others = JsonValue::make_array();
+	for (const NovaWorldView::OtherCopy &other : novaworld.other_copies) {
+		JsonValue row = JsonValue::make_object();
+		row.set("host", json_string(other.host));
+		row.set("revision", json_number(double(other.revision)));
+		others.push(std::move(row));
+	}
+	copy.set("other_copies", others);
 	out.set("working_copy", copy);
 	out.set("project",
 			novaworld.remote_known ? project_json(novaworld.remote) : JsonValue::make_null());

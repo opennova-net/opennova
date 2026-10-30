@@ -79,6 +79,9 @@ SessionView tracked_view() {
 ImGuiID novaworld_item(std::initializer_list<const char *> steps) { return item_id(Ui::window_id("NovaWorld"), steps); }
 ImGuiID put_item(std::initializer_list<const char *> steps) { return item_id(ImHashStr("Put on NovaWorld"), steps); }
 ImGuiID own_item(std::initializer_list<const char *> steps) { return item_id(ImHashStr("Make it your own"), steps); }
+ImGuiID replace_item(std::initializer_list<const char *> steps) {
+	return item_id(ImHashStr("Replace with this folder"), steps);
+}
 
 // Every standing, with what the window and the status bar say of it.
 void test_standing() {
@@ -195,6 +198,47 @@ void test_make_own() {
 	ui.away();
 	CHECK(logged_frame(ui).find("on every service") != std::string::npos, "not found: leaving it asks first too");
 	std::printf("content: Make it your own asks first, Rejoin the way back\n");
+}
+
+// Which service an editor is on, said where two editors side by side are told apart; a folder holding no revision
+// with Replace with this folder..., asked first; a project this service shows none of with Put on its host....
+void test_two_services() {
+	Ui ui;
+	SessionView v = tracked_view();
+	NovaWorldView &c = v.novaworld;
+	CHECK(editor_window_title(v) == "My Mod - OpenNova Editor (novaworld.test)", "the window's title names the service");
+	c.revision = 0;
+	c.other_copies = {{"staging.test", 12}};
+	ui.windows.set_view(&v);
+	ui.focus("NovaWorld");
+	ui.frames(2);
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("At r12 on staging.test") != std::string::npos, "where it stands on the other service");
+	ui.activate(novaworld_item({"Replace with this folder..."}));
+	CHECK(ui.drain().empty(), "Replace with this folder...: nothing raised yet");
+	ui.frames(2);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("anything newer") != std::string::npos && text.find("Nothing is sent until you push") != std::string::npos,
+	      "what it undoes, and that nothing is sent yet");
+	ui.activate(replace_item({"Replace with this folder"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldKeepFolder), "confirmed: one novaworld_keep_folder");
+	ui.frames(2);
+
+	c.revision = 3;
+	c.head_known = false;
+	c.remote_known = false;
+	c.head_missing = true;
+	c.head_error = "MOD is not on novaworld.test, or is private.";
+	ui.frames(2);
+	ui.activate(novaworld_item({"Put on novaworld.test..."}));
+	ui.frames(3);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldCheck), "Put on its host...: the lists asked again");
+	CHECK(text.find("Who gets it") != std::string::npos, "Put on its host...: the dialog, asking no key");
+	std::printf("content: the service named, Replace with this folder asked first, Put on its host\n");
 }
 
 void test_working_copy() {
@@ -939,6 +983,7 @@ void test_activity() {
 void run_novaworld_tests() {
 	test_standing();
 	test_make_own();
+	test_two_services();
 	test_working_copy();
 	test_put_and_sign_in();
 	test_get_a_project();

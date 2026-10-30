@@ -114,6 +114,11 @@ NovaWorldStanding novaworld_standing(const NovaWorldView &c) {
 			break;
 	}
 	out.status = host.empty() ? brief : host + ": " + brief;
+	if (!c.other_copies.empty()) {
+		const NovaWorldView::OtherCopy &other = c.other_copies.front();
+		out.elsewhere = "At r" + std::to_string(other.revision) + " on " + other.host;
+		out.tip += " " + out.elsewhere + ".";
+	}
 	return out;
 }
 

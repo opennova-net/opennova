@@ -36,6 +36,7 @@ struct NovaWorldStanding {
 	int64_t incoming = 0; // the revisions on NovaWorld past the folder's
 	std::string line;	  // the window's words ("r5, r7 on NovaWorld, 2 changed")
 	std::string tip;	  // the rest of it, the service named
+	std::string elsewhere; // where the folder stands on another service ("At r12 on staging.opennova.net")
 	std::string status;	  // the status bar's ("opennova.net: r5, 2 changed, 2 incoming"; "" none)
 };
 

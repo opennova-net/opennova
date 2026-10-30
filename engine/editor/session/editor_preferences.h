@@ -34,8 +34,9 @@ public:
 	// `next` kept by the store, then in effect; false with `error`, the values in effect as they
 	// were, when it could not be.
 	bool write(const Preferences &next, Diagnostic &error);
-	// The values in effect kept by the store (after a change of the recent list).
-	bool save(Diagnostic &error) { return store_.save(values_, error); }
+	// The values in effect kept by the store (after a change of the recent list), with any working
+	// copy another editor kept there since: a debug and a release editor share the one file.
+	bool save(Diagnostic &error);
 
 	// `root` moved (or added) to the front of the recent list, capped at kRecentProjectsMax; or
 	// dropped from it. In effect at once, kept by the next save.

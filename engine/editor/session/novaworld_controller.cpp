@@ -26,6 +26,7 @@
 #include <editor/session/disk_watch.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/novaworld_operation.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 
@@ -379,18 +380,25 @@ void NovaWorldController::show_copy() {
 	view.former_key.clear();
 	view.former_revision = 0;
 	view.former_host.clear();
-	if (open && !view.tracked) {
+	view.other_copies.clear();
+	if (open) {
 		const std::string here = novaworld_service_folder(account_.server);
 		for (const NovaWorldServiceCopy &each : read_novaworld_copies(core_.paths())) {
-			if (each.copy.key == view.key || (!view.former_key.empty() && each.host != here))
+			if (each.copy.key == view.key) {
+				if (each.host != here)
+					view.other_copies.push_back({ each.host, each.copy.revision });
+				continue;
+			}
+			if (view.tracked || (!view.former_key.empty() && each.host != here))
 				continue;
 			view.former_key = each.copy.key;
 			view.former_revision = each.copy.revision;
 			view.former_host = each.host == here ? std::string() : each.host;
 		}
 	}
-	// What a put would make of it is found as a check asks (put_due_), only while it has no key.
-	if (!open || !view.key.empty())
+	// What a put would make of it is found as a check asks (put_due_), only while it has no key or
+	// this service shows none of its key.
+	if (!open || (!view.key.empty() && !view.head_missing))
 		view.put = NovaWorldView::PutPlan();
 	show_lobby();
 	core_.touch(ViewConcern::NovaWorld);
@@ -610,12 +618,11 @@ void NovaWorldController::check() {
 	const NovaWorldView &view = core_.view().novaworld;
 	if (!core_.view().project.open)
 		return;
-	// A project not on NovaWorld: what a put would make of it, found once the lists are in (the Put
-	// dialog asks as it opens).
-	if (view.key.empty()) {
-		put_due_ = true;
+	// A project not on NovaWorld, or not on this service: what a put would make of it, found once the
+	// lists are in (the Put dialog asks as it opens).
+	put_due_ = view.key.empty() || view.head_missing;
+	if (view.key.empty())
 		return;
-	}
 	// A folder no working copy of its project on this service yet is made one, then checked.
 	if (!view.tracked) {
 		track(true);
@@ -677,7 +684,10 @@ void NovaWorldController::put(const EditorRequest &request) {
 		return;
 	}
 	const ProjectDocument &doc = *core_.view().project.document;
-	if (!doc.novaworld.empty()) {
+	// Its own key on a service that shows none of it, new here: every copy on every service is one project.
+	const bool new_here = !doc.novaworld.empty() && doc.novaworld == request.project_key &&
+			request.create && core_.view().novaworld.head_missing;
+	if (!doc.novaworld.empty() && !new_here) {
 		refuse("The project is on NovaWorld already, as " + doc.novaworld + ".");
 		return;
 	}
@@ -748,18 +758,21 @@ void NovaWorldController::finish_put() {
 		core_.touch(ViewConcern::NovaWorld);
 	};
 	if (!core_.view().project.open || core_.paths().root != put_root_ ||
-			!core_.view().project.document->novaworld.empty())
+			(!core_.view().project.document->novaworld.empty() &&
+					core_.view().project.document->novaworld != key))
 		return failed(key +
 				" is on NovaWorld, but its project closed or changed before its key was "
 				"written: open it and put it on NovaWorld again as the empty project " +
 				key + ".");
 	// The key written as Project settings' Apply writes the project file.
 	ProjectDocument project = *core_.view().project.document;
-	project.novaworld = key;
 	Diagnostic error;
-	if (!core_.write_project(project, error))
-		return failed(key + " is on NovaWorld, but the project file was not written (" +
-				error.message + "): put it on NovaWorld again as the empty project " + key + ".");
+	if (project.novaworld != key) {
+		project.novaworld = key;
+		if (!core_.write_project(project, error))
+			return failed(key + " is on NovaWorld, but the project file was not written (" +
+					error.message + "): put it on NovaWorld again as the empty project " + key + ".");
+	}
 	// The folder its working copy at revision 0 on the service the put was sent to: no base, every
 	// file a change to push.
 	const NovaWorldPaths paths = NovaWorldPaths::for_project(core_.paths(), put_server_);
@@ -999,7 +1012,7 @@ void NovaWorldController::poll() {
 	// (its base game among the games listed) are in.
 	if (put_due_ && !projects_.started() && !games_.started()) {
 		put_due_ = false;
-		if (core_.view().project.open && view.key.empty()) {
+		if (core_.view().project.open) {
 			view.put = put_plan();
 			core_.touch(ViewConcern::NovaWorld);
 		}
@@ -1225,6 +1238,23 @@ void NovaWorldController::make_own() {
 	show_conflicts();
 	project_opened(); // its place on NovaWorld read again: none
 	view_last("The project names " + key + " no longer: Rejoin takes the folder back to it.");
+}
+
+void NovaWorldController::keep_folder() {
+	if (!ready(true, true))
+		return;
+	const NovaWorldView &view = core_.view().novaworld;
+	if (!novaworld_holds_no_revision(view)) {
+		refuse("The folder holds a revision already: pull, then push.");
+		return;
+	}
+	paused_.reset(); // a pull stopped on this folder's conflicts: what this replaces
+	show_conflicts();
+	check_after_track_ = true;
+	core_.start_operation(std::make_unique<NovaWorldOperation>(OperationKind::NovaWorldTrack, *this,
+			std::make_unique<NovaWorldTrack>(*transport_, account_, core_.paths(), export_dir(), view.key,
+					true)));
+	core_.touch(ViewConcern::NovaWorld);
 }
 
 void NovaWorldController::rejoin() {
@@ -1696,7 +1726,10 @@ OperationOutcome NovaWorldController::finish_job(
 				view.problems.clear();
 				view.last = "The folder is " + copy.key + "'s working copy on " +
 						novaworld_host(account_.server) +
-						(tracked.differs()
+						(tracked.keeps_folder()
+								? ", over revision " + std::to_string(copy.revision) +
+										": each difference is a change for your next push."
+								: tracked.differs()
 										? ", but its files differ from revision " +
 												std::to_string(tracked.remote().head) +
 												", so it holds no revision of it yet: pull, settling "

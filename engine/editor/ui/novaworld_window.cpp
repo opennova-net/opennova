@@ -325,6 +325,11 @@ void NovaWorldWindow::draw_no_standing(const NovaWorldView &c) {
 	    ui_kit::tool(row, "Rejoin", v.allows(EditorRequestKind::NovaWorldRejoin),
 	                 "Takes this folder back to the project its own state names, with nothing downloaded."))
 		workspace_.request(request::novaworld_rejoin());
+	const std::string put_here = "Put on " + novaworld_host(c.server) + "...";
+	if (c.signed_in && ui_kit::tool(row, put_here.c_str(),
+	                                v.allows(EditorRequestKind::NovaWorldPut) && !c.calling,
+	                                "Makes it a project of yours on this service, for this folder to push to."))
+		put_.open_new_here(c.key);
 	if (c.signed_in && ui_kit::tool(row, "Make it your own...", v.allows(EditorRequestKind::NovaWorldMakeOwn),
 	                                "This folder leaves the project, its files yours. Asks first."))
 		make_own_asked_ = true;
@@ -335,8 +340,12 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	const NovaWorldStanding standing = novaworld_standing(c);
 	// A folder holding no revision while the project has some (its files were not the head's as it was set up, or
 	// the empty project it was put on was pushed to since): a pull first.
-	if (standing.kind == NovaWorldStandingKind::NoRevision) ui_kit::warning_line(standing.line, standing.tip);
-	else ui_kit::clipped_text(standing.line, standing.tip);
+	if (standing.kind == NovaWorldStandingKind::NoRevision) {
+		ui_kit::warning_line(standing.line, standing.tip);
+		if (!standing.elsewhere.empty()) ui_kit::quiet_text(standing.elsewhere);
+	} else {
+		ui_kit::clipped_text(standing.line, standing.tip);
+	}
 	// A mod whose base game's project is missing (got with no install of its game): made from here once one is named.
 	if (!c.missing_base.empty()) {
 		ui_kit::warning_line("Its base game's project is missing: " + c.missing_base + ".",
@@ -355,9 +364,17 @@ void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
 	                 "Looks for what changed here and on NovaWorld."))
 		workspace_.request(request::novaworld_check());
 	if (ui_kit::tool(row, "Pull", v.allows(EditorRequestKind::NovaWorldPull) && c.conflicts.empty(),
-	                 c.conflicts.empty() ? "Brings in the newest revision on NovaWorld; your own changes stay."
-	                                     : "Settle every conflict first."))
+	                 !c.conflicts.empty() ? "Settle every conflict first."
+	                 : novaworld_holds_no_revision(c)
+	                         ? "Stops on each file both hold otherwise. Files only NovaWorld has come in, even ones "
+	                           "deleted here."
+	                         : "Brings in the newest revision on NovaWorld; your own changes stay."))
 		workspace_.request(request::novaworld_pull());
+	// No base to merge over: this folder taken as the next revision instead, deletions and all.
+	if (novaworld_holds_no_revision(c) &&
+	    ui_kit::tool(row, "Replace with this folder...", v.allows(EditorRequestKind::NovaWorldKeepFolder),
+	                 "Makes this folder the next revision on " + novaworld_host(c.server) + ". Asks first."))
+		keep_folder_asked_ = true;
 
 	ImGui::SeparatorText(c.checked ? ("Changes (" + std::to_string(c.changes.size()) + ")").c_str() : "Changes");
 	if (!c.checked) {
@@ -437,13 +454,13 @@ void NovaWorldWindow::draw_push(const NovaWorldView &c) {
 	ImGui::BeginDisabled(!pushes);
 	const bool pushed = ImGui::Button("Push") && pushes;
 	ImGui::EndDisabled();
-	const char *why = novaworld_holds_no_revision(c)  ? "Pull first: the folder holds no revision of the project yet."
+	const std::string why = novaworld_holds_no_revision(c)  ? "Pull first: the folder holds no revision of the project yet."
 	                  : c.checked && c.changes.empty() ? "Nothing to push."
 	                  : !message_[0]         ? "Say what changed first."
 	                  : !c.conflicts.empty() ? "Settle every conflict first."
-	                                         : "Sends every change as the project's next revision; players get "
-	                                           "it once a release of it is published (an owner's once an admin "
-	                                           "approves it).";
+	                                         : "Sends every change to " + novaworld_host(c.server) + " as the "
+	                                           "project's next revision; players get it once a release of it is "
+	                                           "published (an owner's once an admin approves it).";
 	ui_kit::tooltip(why);
 	if (pushed) workspace_.request(request::novaworld_push(message_));
 }
@@ -542,14 +559,15 @@ void NovaWorldWindow::draw_conflicts(const NovaWorldView &c) {
 	if (c.conflicts.empty()) return;
 	const SessionView &v = workspace_.view();
 	ImGui::SeparatorText(("Conflicts (" + std::to_string(c.conflicts.size()) + ")").c_str());
-	ui_kit::quiet_text("Both sides changed these: keep yours or take theirs, then Pull.",
-	                   "The pull of revision " + std::to_string(c.pull_revision) + " waits for them.");
+	ui_kit::quiet_text("This folder and " + novaworld_host(c.server) + " both changed these.",
+	                   "The pull of revision " + std::to_string(c.pull_revision) + " waits for them: keep yours or take "
+	                   "theirs, and it goes on by itself.");
 	{
 		ui_kit::WrapRow row;
 		const bool resolves = v.allows(EditorRequestKind::NovaWorldResolve);
 		for (const auto &[label, resolution, tip] :
 		     {std::tuple<const char *, Resolution, const char *>{"Keep all mine", Resolution::KeepMine,
-		                                                         "Keeps every file of yours: your changes go in your next push."},
+		                                                         "Keeps this folder's file in each: your changes go in your next push."},
 		      {"Take all theirs", Resolution::TakeTheirs,
 		       "Puts NovaWorld's file in place of each of yours; yours go to the project's trash."}})
 			if (ui_kit::tool(row, label, resolves, tip))
@@ -638,6 +656,35 @@ void NovaWorldWindow::draw_make_own(const NovaWorldView &c) {
 	ImGui::EndPopup();
 }
 
+// Replace with this folder...'s ask: nothing is sent yet, but the next push takes the place of what the service holds.
+void NovaWorldWindow::draw_keep_folder(const NovaWorldView &c) {
+	const SessionView &v = workspace_.view();
+	const bool held = keep_folder_asked_ && v.project.open && novaworld_holds_no_revision(c);
+	if (!keep_folder_popup_.begin("Replace with this folder", held, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (keep_folder_popup_.dismissed() || !held) keep_folder_asked_ = false;
+		return;
+	}
+	const std::string revision = "r" + std::to_string(c.head);
+	ui_kit::dialog_text("This folder becomes the next revision on " + novaworld_host(c.server) + ": your next push puts its "
+	                    "files in place of " + revision + "'s. A file only " + revision + " has goes, and anything newer "
+	                    "there that this folder lacks is undone. Nothing is sent until you push, and Discard puts a file back.");
+	const bool allowed = v.allows(EditorRequestKind::NovaWorldKeepFolder);
+	ImGui::BeginDisabled(!allowed);
+	const bool keep = ImGui::Button("Replace with this folder");
+	ImGui::EndDisabled();
+	if (keep && allowed) {
+		workspace_.request(request::novaworld_keep_folder());
+		keep_folder_asked_ = false;
+		keep_folder_popup_.close();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel")) {
+		keep_folder_asked_ = false;
+		keep_folder_popup_.close();
+	}
+	ImGui::EndPopup();
+}
+
 void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &v = workspace_.view();
 	const NovaWorldView &c = v.novaworld;
@@ -664,6 +711,7 @@ void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	}
 	put_.draw(workspace_);
 	draw_make_own(c);
+	draw_keep_folder(c);
 }
 
 } // namespace opennova::editor

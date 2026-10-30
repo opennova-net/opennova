@@ -49,6 +49,7 @@
 #include <editor/requirements/requirements.h>
 #include <editor/run/null_process_platform.h>
 #include <editor/session/novaworld_json.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -841,6 +842,115 @@ static int test_make_own_and_rejoin() {
 	return 0;
 }
 
+// One folder, two services, as a project goes from a staging editor to a live one. With a base for each, staging's work
+// lists as changes and pushes with no conflict. With no live base (a folder got fresh from staging), the old way still
+// works but keeps what only live has; Replace with this folder takes the folder as it is, deletions and all. A project
+// new to the live service is put there under its own key.
+static int test_two_services() {
+	test_temp::TempDir dir("opennova_novaworld_session_two_services");
+	FakeService staging, live;
+	live.server = "https://live.test";
+	editor::ProjectDocument made;
+	editor::Diagnostic why;
+	TEST_EXPECT(editor::create_project(dir.file("source"), "A mod", "jo", made, why, editor::ProjectExpansion(), "MOD"));
+	std::string project, error;
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("source/project.opennova"), project, error));
+	const std::vector<std::pair<const char *, std::string>> first = { { "project.opennova", project },
+		{ "defs/a.def", "a" }, { "defs/gone.def", "gone" } };
+	push_to_mod(staging, first);
+	push_to_mod(live, first);
+	Session s(&staging), l(&live);
+	s.send(request::novaworld_sign_in(kServer, "taylor", "pw"));
+	l.send(request::novaworld_sign_in(live.server, "taylor", "pw"));
+	const auto standing = [](const Session &session) {
+		return editor::novaworld_standing(session.novaworld());
+	};
+	const auto has = [](const FakeService &service, const char *path) {
+		return service.manifests.at(service.head).find(path) != std::string::npos;
+	};
+
+	// A base for each: the live editor adopts the same files at its head, and staging's work is a plain push.
+	const std::string folder = dir.file("Mod");
+	s.send(request::novaworld_get("MOD", folder));
+	s.send(request::close_project());
+	l.send(request::open_project(folder));
+	TEST_EXPECT(l.novaworld().tracked && l.novaworld().revision == 1);
+	l.send(request::close_project());
+	s.send(request::open_project(folder));
+	TEST_EXPECT(put(folder + "/defs/a.def", "a2"));
+	std::error_code removed;
+	std::filesystem::remove(opennova::io::os_path(folder + "/defs/gone.def"), removed);
+	s.send(request::novaworld_push("Staging's work"));
+	TEST_EXPECT(staging.head == 2);
+	s.send(request::close_project());
+	l.send(request::open_project(folder));
+	l.send(request::novaworld_check());
+	TEST_EXPECT(l.novaworld().conflicts.empty() && l.novaworld().changes.size() == 2 &&
+			standing(l).kind == editor::NovaWorldStandingKind::Changed);
+	TEST_EXPECT(l.novaworld().other_copies.size() == 1 && l.novaworld().other_copies[0].host == "novaworld.test" &&
+			l.novaworld().other_copies[0].revision == 2 && standing(l).elsewhere == "At r2 on novaworld.test");
+	l.send(request::novaworld_push("Promoted"));
+	TEST_EXPECT(live.head == 2 && !has(live, "defs/gone.def"));
+	l.send(request::close_project());
+
+	// Live moved on, and folders got fresh from staging hold no base for it.
+	push_to_mod(live, { { "project.opennova", project }, { "defs/a.def", "a2" }, { "defs/live.def", "only live" } });
+	TEST_EXPECT(live.head == 3);
+
+	// The old way, a pull keeping this folder's files, goes on working, and keeps what only live has.
+	const std::string pulled = dir.file("Pulled");
+	s.send(request::novaworld_get("MOD", pulled));
+	s.send(request::close_project());
+	TEST_EXPECT(put(pulled + "/defs/a.def", "a3"));
+	l.send(request::open_project(pulled));
+	TEST_EXPECT(l.novaworld().tracked && l.novaworld().revision == 0 &&
+			standing(l).kind == editor::NovaWorldStandingKind::NoRevision);
+	l.send(request::novaworld_pull());
+	TEST_EXPECT(l.novaworld().conflicts.size() == 1 && l.novaworld().conflicts[0].path == "defs/a.def");
+	l.send(request::novaworld_resolve("defs/a.def", editor::Resolution::KeepMine));
+	TEST_EXPECT(l.novaworld().conflicts.empty() && l.novaworld().revision == 3 && l.read("defs/live.def") == "only live");
+	l.send(request::novaworld_push("Kept mine"));
+	TEST_EXPECT(live.head == 4 && has(live, "defs/live.def"));
+	l.send(request::close_project());
+
+	// Replace with this folder: every difference a change, deletions too; nothing sent until the push.
+	const std::string fresh = dir.file("Fresh");
+	s.send(request::novaworld_get("MOD", fresh));
+	s.send(request::close_project());
+	l.send(request::open_project(fresh));
+	TEST_EXPECT(standing(l).kind == editor::NovaWorldStandingKind::NoRevision);
+	const int64_t before = live.head;
+	l.send(request::novaworld_keep_folder());
+	TEST_EXPECT(l.novaworld().revision == before && live.head == before && l.novaworld().checked);
+	const auto deletes = [&l](const char *path) {
+		for (const editor::LocalChange &change : l.novaworld().changes)
+			if (change.path == path && change.change == editor::NovaWorldChange::Deleted)
+				return true;
+		return false;
+	};
+	TEST_EXPECT(deletes("defs/live.def"));
+	l.send(request::novaworld_keep_folder());
+	TEST_EXPECT(l.refused("novaworld.refused")); // it holds a revision now
+	l.send(request::novaworld_push("Replaced"));
+	TEST_EXPECT(live.head == before + 1 && !has(live, "defs/live.def") && l.read("defs/live.def") == "<missing>");
+	l.send(request::close_project());
+
+	// New to this service: said so, put under its own key with the project file untouched, then pushed.
+	const std::string own = dir.file("Own");
+	TEST_EXPECT(put(own + "/project.opennova", project_file_naming("NEWMOD")));
+	l.send(request::open_project(own));
+	TEST_EXPECT(l.novaworld().key == "NEWMOD" && standing(l).kind == editor::NovaWorldStandingKind::NotFound);
+	const std::string named = l.read("project.opennova");
+	l.send(request::novaworld_put_new("NEWMOD", "New", "public"));
+	TEST_EXPECT(live.made.count("NEWMOD") && l.novaworld().tracked && l.novaworld().revision == 0 &&
+			l.read("project.opennova") == named);
+	l.send(request::novaworld_push("First revision"));
+	TEST_EXPECT(live.made["NEWMOD"].head == 1);
+	std::printf("two services: a base each promotes as a push, the old pull still works, Replace with this folder "
+				"carries deletions, a project new to a service put under its own key\n");
+	return 0;
+}
+
 // A mod got whose base game's project the account may not read (a retail game's, its files the game
 // install's, private on NovaWorld): no get of the base is tried, its project is made from the game
 // install, and with no install of its game the mod's own working copy is got alone, Output saying
@@ -1330,6 +1440,7 @@ int main() {
 	failures += test_get_again();
 	failures += test_copies_outlive_recents();
 	failures += test_make_own_and_rejoin();
+	failures += test_two_services();
 	failures += test_get_mod_base_not_got();
 	failures += test_new_mod();
 	failures += test_account_change_gives_up_put();

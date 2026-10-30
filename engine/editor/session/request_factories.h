@@ -918,6 +918,9 @@ inline EditorRequest novaworld_submit(std::string version) {
 inline EditorRequest novaworld_rejoin() {
 	return of(EditorRequestKind::NovaWorldRejoin);
 }
+inline EditorRequest novaworld_keep_folder() {
+	return of(EditorRequestKind::NovaWorldKeepFolder);
+}
 inline EditorRequest novaworld_make_own() {
 	return of(EditorRequestKind::NovaWorldMakeOwn);
 }
