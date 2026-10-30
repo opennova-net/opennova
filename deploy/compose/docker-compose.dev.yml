@@ -14,9 +14,9 @@
 #   ONNET_PUBLIC_HOST=<this machine's LAN IPv4> \
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 #
-# ONNET_PUBLIC_HOST is the address everything announces: the gate's
-# POSTIPADDRESS, the lobby's endpoint, web's host. A retail client on this
-# machine (a hosts line naming it) and the
+# ONNET_PUBLIC_HOST is the address everything announces: the lobby's
+# endpoint, web's host, the hosted servers' master address. A retail client on
+# this machine (a hosts line naming it) and the
 # stack's own containers (the smoke test, the hosted servers' machines) all
 # reach the published ports there, so it is never loopback: a container's
 # 127.0.0.1 is its own.

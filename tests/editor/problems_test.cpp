@@ -2228,7 +2228,7 @@ static int test_edit_costs_what_it_touched() {
 		ValidationCache cache;
 		ProjectChecks checks;
 		ProjectAssetSource source;
-		source.set_scan(root, *v.project.scan, v.project.document->target_game);
+		source.set_scan(root, *v.project.scan);
 		source.set_open(v.documents.open);
 		const std::vector<Diagnostic> none;
 		const ProjectFindings cold = compose_project_findings(

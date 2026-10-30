@@ -52,8 +52,8 @@ crow::json::wvalue tree_json(db::Database &db, const ProductTree &tree);
 
 // The titles a game may run as (the title codes opennova-serve's /game takes): every installed
 // title (base/title/title.h) whose protocol's session part is witnessed in full
-// (net/protocol/protocol.h resolve_title_protocol), in install order: jo, dfx2, acidgambit. The
-// JO demo's, DFX's and BHD's protocols are unwitnessed, so no game runs as them.
+// (net/protocol/protocol.h resolve_title_protocol), in install order: jo, dfx2, acidgambit. DFX's
+// and BHD's protocols are unwitnessed, so no game runs as them.
 std::vector<const char *> game_titles();
 
 // The shapes a product's fields take, the admin's routes' and an owner's alike

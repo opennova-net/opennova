@@ -341,8 +341,8 @@ String mount_title_code(const String &game_code) {
 } // namespace
 
 Error ResourceRoot::set_root_dir(const String &path, const String &p_game_code) {
-	// Loose-source mount: never open PFF archives. The game it is mounted as names its title and
-	// its SCR policy, as a runtime mount's does.
+	// Loose-source mount: never open PFF archives. The game it is mounted as names its title, as a
+	// runtime mount's does.
 	const String game_code = mount_title_code(p_game_code);
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
@@ -359,7 +359,6 @@ Error ResourceRoot::set_root_dir(const String &path, const String &p_game_code) 
 			last_error_ = String(index_.last_error().c_str());
 			return ERR_CANT_OPEN;
 		}
-		index_.set_scr_policy(opennova::title_scr_policy_for_code(game_code.to_lower().utf8().get_data()));
 		game_code_ = game_code;
 		last_error_ = String();
 		mount_kind_ = MountKind::Loose;

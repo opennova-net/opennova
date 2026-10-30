@@ -20,7 +20,7 @@ namespace opennova::editor {
 //
 // The install is mounted as a stock launch of the project's game mounts it (mount_install: the
 // witnessed archive table, no /d, read alone while one of its archives is mounted), its payloads
-// decoded with that game's key, with `/exp <expansion>` when the spec names one: the expansion's two
+// decoded by their SCR version byte, with `/exp <expansion>` when the spec names one: the expansion's two
 // archives before the base's, the lowest slot first [orig: PFF_OpenAllArchives @ 0x4a4310 over the
 // table @ 0x829f90; Expansion_LoadAssets @ 0x4a48d6..0x4a48ed]. An expansion that does not mount is
 // refused, never quietly the base game (the game itself falls back [orig: @ 0x4a4767/@ 0x4a4775], which
@@ -40,7 +40,7 @@ namespace opennova::editor {
 // (gameprofile/player_files.h) are never listed: no project holds them.
 struct InstallSpec {
 	std::string root;              // the install's folder
-	std::string game;              // the title code its archives are keyed by
+	std::string game;              // the title code the stock launch names (/game)
 	std::string expansion;         // the installed expansion mounted (/exp), "" for the base game
 	std::string project_expansion; // the project's own expansion name, "" for a standalone project
 

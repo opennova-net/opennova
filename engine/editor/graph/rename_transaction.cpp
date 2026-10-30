@@ -13,7 +13,6 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
-#include <base/title/title.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/project_layout.h>
 #include <editor/documents/document_types.h>
@@ -1308,7 +1307,7 @@ void RenameTransaction::stage_native(const AssetEntry &asset, const std::vector<
 		return;
 	}
 	staged.read.assign(bytes.begin(), bytes.end());
-	if (!vfs_decode_payload(bytes, title_scr_policy_for_code(project_.target_game.c_str()))) {
+	if (!vfs_decode_payload(bytes)) {
 		staged.findings.push_back(refusal(CoreFinding::RenameSite, asset.relative_path + " could not be decoded.", asset.relative_path));
 		staged_ok_ = false;
 		return;

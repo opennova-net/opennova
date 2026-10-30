@@ -725,10 +725,10 @@ surface takes the middle dot as 0xB7.
 _Avoid_: build label, version string, version text (retail's `V1.7.5.7`)
 
 **Title**:
-The retail game a **game** runs as, by its code (`jo`, `dfx2`, `acidgambit`; `jodemo`, `dfx` and
-`bhd` are unwitnessed and refused by name): its rules, the **protocol** it speaks and what its
-install carries (its name and title text, its SCR policy, executable, command file and game.cfg
-table). A `Title` row in `engine/base/title`'s registry (`title_by_code`), each game's in
+The retail game a **game** runs as, by its code (`jo`, `dfx2`, `acidgambit`; `dfx` and `bhd`
+are unwitnessed and refused by name): its rules, the **protocol** it speaks and what its install
+carries (its name and title text, executable, command file and game.cfg table). A `Title`
+row in `engine/base/title`'s registry (`title_by_code`), each game's in
 `games/<code>/<code>_title.cpp`, its rules in `<code>_rules.cpp`; `games::install()` fills the
 registries, and `engine/` holds the types and lookups and names no title (ADR 0076). OP: Acid
 Gambit is its own title, whose protocol and rules are JO's, and the default one: a launch, a

@@ -1,7 +1,7 @@
 # games/ — every game's own code
 
 - One directory per title, named by its code (`jo/`, `dfx2/`, `acidgambit/`, the unwitnessed
-  `jodemo/`, `dfx/`, `bhd/`), plus `novalogic_2009/`, the network-code generation Jointops.exe and
+  `dfx/` and `bhd/`), plus `novalogic_2009/`, the network-code generation Jointops.exe and
   dfx2.exe share (NVS, CO, PV2 "16", the 0x42's BN/VN/MBN/SOPD). STATIC `opennova_games`,
   PUBLIC-linking `opennova_runtime`; the repository root is its include root
   (`#include <games/jo/jo.h>`), a same-directory sibling `"jo.h"`.

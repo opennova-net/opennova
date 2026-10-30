@@ -19,7 +19,6 @@ add_library(opennova_games STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/acidgambit/acidgambit_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/acidgambit/acidgambit_rules.cpp
     # the unwitnessed titles, one TU each, refused by name
-    ${CMAKE_CURRENT_SOURCE_DIR}/jodemo/jodemo.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dfx/dfx.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bhd/bhd.cpp
 )

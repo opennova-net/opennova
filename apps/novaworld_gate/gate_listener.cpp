@@ -13,7 +13,6 @@
 #include <net/novaworld/lobby_repository.h>
 #include <net/novaworld/lobby_update.h>
 #include <net/novaworld/unknown_tracker.h>
-#include <net/protocol/protocol.h>
 
 #include <chrono>
 #include <cstdio>
@@ -57,28 +56,29 @@ uint64_t steady_ms() {
 // POSTIPADDRESS + POSTIPPORT: the parser fails the gate to state -9 ("NO NW
 // POST IP" / "NO NW POST PORT") without them unless the NWU-in-use word is
 // set, which a UDPNOVAWORLD line (this reply always has one) or the junction
-// bypass sets [orig: CNapiGateManager_ProcessResponse @0x4ced20]. A host posts
-// its status blob there when it is off NWU [orig: Lobby_UpdateServerInfo
-// @0x4ff441..0x4ff62c], so the pair names this listener.
+// bypass sets [orig: CNapiGateManager_ProcessResponse @0x4ced20], so the reply
+// carries no pair: a host posts its status blob there only when it is off NWU
+// [orig: Lobby_UpdateServerInfo @0x4ff441..0x4ff62c].
 //
 // LobbyName, the startupurl's query and the GLSVSS leg are the probe's games
 // row's (lobby_name, startup_query, glsvss_*): JO's row answers
-// "jop_2_consumer" and "...&gt=[GT]&url=jop_2_start.htm" with no GLSVSS, the
-// bytes this reply always carried; DFX2's row answers as NovaLogic's live gate
-// answered the DFX2 tag (dfx2-vs-jo-re.md section 6.5, DFX2-6): LobbyName
-// "dfx2_0_consumer", pfid=38 in the startupurl, GLSVSS "[DFX2]KILLS" 3600000
-// 45000, the GLSVSS lines before the reflected pair as that reply has them.
-// A protocol whose live reply is witnessed (Protocol::gate_reply_witnessed,
-// DFX2's and JO's) gets that reply's shape too (D-NET-721): no POST pair (its
-// udpnovaworld line skips the client's POST tests, and a host on NWU posts no
-// status blob), the startupurl on http://[domainname]/ (the client fills the
-// domain from the lobby's 0x82 NovaworldWebDomainNameAndPortNumber, which
-// names the same web endpoint), and a TimeOnGateServer line, which no parse
-// reads, after the reflected pair: the gate's clock in asctime's shape (the
-// zone is this service's choice, UTC; the witness's is unrecorded). An alias
-// tag answers in its own protocol's shape: the JO demo's live reply is
-// unrecorded, so its tag keeps the POST pair, this service's address in the
-// startupurl and no TimeOnGateServer, though it plays in JO's lobby.
+// "jop_2_consumer" and "...&gt=[GT]&url=jop_2_start.htm" with no GLSVSS;
+// DFX2's row answers as NovaLogic's live gate answered the DFX2 tag
+// (dfx2-vs-jo-re.md section 6.5, DFX2-6): LobbyName "dfx2_0_consumer",
+// pfid=38 in the startupurl, GLSVSS "[DFX2]KILLS" 3600000 45000, the GLSVSS
+// lines before the reflected pair as that reply has them.
+// Every reply takes the shape NovaLogic's live gate answered JO's tag in (the
+// LN S1 retail host record, 2026-10-23) and DFX2's (dfx2-vs-jo-re.md section
+// 6.5; D-NET-721): no POST pair (above), the startupurl on
+// http://[domainname]/ (the client fills the domain from the lobby's 0x82
+// NovaworldWebDomainNameAndPortNumber, which names the one web endpoint), and
+// a TimeOnGateServer line, which no parse reads, after the reflected pair: the
+// gate's clock in asctime's shape (the zone is this service's choice, UTC; the
+// witness's is unrecorded) [orig: CNapiGateManager_ProcessResponse @0x4CED20 -
+// the in-use word set by a udpnovaworld line @0x4CF541 skips the POST tests
+// @0x4CF5A0, and no key reads TimeOnGateServer (dfx2.exe's twin @0x4CEEB0
+// identical); Mission_DeobfuscateDescription @0x4CDAA0 - [DOMAINNAME]
+// @0x4CDB88, called from CNapiGameSession_OnNovaWorldConnected @0x4D1665].
 //
 // Every reply's text goes out with one NUL after it, the live gate's C string
 // with its terminator: each of the live JO gate's replies in the LN S1b record
@@ -95,19 +95,14 @@ uint64_t steady_ms() {
 // on only while it is not negative @0x4CF4E7].
 //
 // Every address it names comes from the config or the lobby instances' rows,
-// never from a port another listener bound (the lobbies and web run in other
-// processes): the POST pair is this gate (ONNET_PUBLIC_HOST and its own port),
-// udpnovaworld the lobby address every live instance announces (with none,
-// the gate's fallback ONNET_LOBBY_ENDPOINT, and with no fallback no reply) and
-// the startupurl the one web endpoint (ONNET_WEB_HOST, ONNET_HTTP_PORT).
+// never from a port another listener bound (the lobbies run in other
+// processes): udpnovaworld is the lobby address every live instance announces
+// (with none, the gate's fallback ONNET_LOBBY_ENDPOINT, and with no fallback
+// no reply).
 struct GateResponseFields {
 	std::string lobby_name;
 	std::string startup_query;
-	std::string public_host;
-	uint16_t post_port = 0;      // this listener's port
 	std::string lobby_endpoint; // <host>:<port>
-	std::string web_host;
-	uint16_t http_port = 0;
 	std::string reflected_ip;
 	uint16_t reflected_port = 0;
 	std::string met_ip;
@@ -118,9 +113,7 @@ struct GateResponseFields {
 	std::string glsvss_request;
 	int64_t glsvss_rims = 0;
 	int64_t glsvss_agrms = 0;
-	// The witnessed live shape (Protocol::gate_reply_witnessed) and its
-	// TimeOnGateServer value.
-	bool witnessed_shape = false;
+	// The TimeOnGateServer value: the gate's clock (gate_clock_text).
 	std::string time_on_gate_server;
 };
 
@@ -146,10 +139,6 @@ std::string build_gate_response(const GateResponseFields &f) {
 	std::ostringstream os;
 	os << "GATEPROTOCOL \"1.0\"\r\n";
 	append_var(os, "LobbyName", f.lobby_name);
-	if (!f.witnessed_shape) {
-		append_var(os, "POSTIPADDRESS", f.public_host);
-		append_var(os, "POSTIPPORT", std::to_string(f.post_port));
-	}
 	if (!f.met_ip.empty()) {
 		append_var(os, "METIPADDRESS", f.met_ip);
 		append_var(os, "METIPPORT", std::to_string(f.met_port));
@@ -160,10 +149,7 @@ std::string build_gate_response(const GateResponseFields &f) {
 	append_var(os, "udpnovaworld", f.lobby_endpoint);
 	append_var(os, "udpcode1", "abc");
 	append_var(os, "udpcode2", "xyz");
-	const std::string web = f.witnessed_shape
-			? std::string("[domainname]")
-			: f.web_host + ":" + std::to_string(f.http_port);
-	append_var(os, "startupurl", "http://" + web + "/nwprepare.dll?" + f.startup_query);
+	append_var(os, "startupurl", "http://[domainname]/nwprepare.dll?" + f.startup_query);
 	append_var(os, "usejunction", "0");
 	append_var(os, "clearjunction", "0");
 	if (!f.glsvss_request.empty()) {
@@ -173,8 +159,7 @@ std::string build_gate_response(const GateResponseFields &f) {
 	}
 	append_var(os, "ReflectedIpAddress", f.reflected_ip);
 	append_var(os, "ReflectedPortNumber", std::to_string(f.reflected_port));
-	if (f.witnessed_shape)
-		append_var(os, "TimeOnGateServer", f.time_on_gate_server);
+	append_var(os, "TimeOnGateServer", f.time_on_gate_server);
 	return os.str();
 }
 
@@ -197,8 +182,8 @@ bool GateListener::start(const ServerConfig &config) {
 	}
 
 	// The socket stays bound from here into the receive thread, so the port
-	// reported (and advertised as POSTIPPORT) is the port served: a close and
-	// a re-bind would free it in between, and with port 0 take another one.
+	// reported is the port served: a close and a re-bind would free it in
+	// between, and with port 0 take another one.
 	uint16_t bound = 0;
 	opennova::net::ScopedSocket socket(opennova::net::udp_bind(config.gate_udp_port, &bound));
 	if (!socket.is_valid()) {
@@ -208,10 +193,7 @@ bool GateListener::start(const ServerConfig &config) {
 	}
 
 	bound_port_     = bound;
-	public_host_    = config.public_host;
 	lobby_endpoint_ = config.lobby_endpoint;
-	web_host_ = config.web_host;
-	http_port_      = config.http_port;
 
 	reflect_ip_   = config.client_reflect_ip;
 	reflect_port_ = config.client_reflect_gate_port;
@@ -265,15 +247,8 @@ bool GateListener::start(const ServerConfig &config) {
 		            loggable(g.lobby_name).c_str(), loggable(g.gate_tag).c_str(),
 		            loggable(g.startup_query, 255).c_str());
 	}
-	for (const catalog::GateTagAlias &alias : catalog::kGateTagAliases) {
-		if (const catalog::GameRow *g = loaded.by_gate_tag(alias.tag)) {
-			std::printf("[gate] lobby %s answers tag %s (alias of %s)\n",
-			            loggable(g->lobby_name).c_str(), std::string(alias.tag).c_str(),
-			            std::string(alias.answers_as).c_str());
-		}
-	}
 
-	std::printf("[gate] listening on UDP :%u (also the POSTIPPORT status sink)\n",
+	std::printf("[gate] listening on UDP :%u (also the host-status sink)\n",
 	            static_cast<unsigned>(bound_port_));
 	return true;
 }
@@ -325,7 +300,8 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		}
 
 		// The host-status heartbeat is plaintext (no NWU) and carries the
-		// "HostKey =" preamble; it lands on POSTIPPORT, which is this port.
+		// "HostKey =" preamble; it lands here when a host posts it to this port,
+		// which no reply names (no POSTIPPORT).
 		{
 			LobbyStatusBlob blob;
 			const std::string_view text(reinterpret_cast<const char *>(plain.data()),
@@ -456,11 +432,7 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		GateResponseFields fields;
 		fields.lobby_name     = game->lobby_name;
 		fields.startup_query  = game->startup_query;
-		fields.public_host    = public_host_;
-		fields.post_port      = bound_port_;
 		fields.lobby_endpoint = lobby_endpoint;
-		fields.web_host = web_host_;
-		fields.http_port      = http_port_;
 		fields.reflected_ip   = reflect_ip_.empty() ? client_ip : reflect_ip_;
 		fields.reflected_port = reflect_port_ != 0 ? reflect_port_ : from.port;
 		fields.met_ip         = met_ip_;
@@ -474,13 +446,7 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		fields.glsvss_request = row_glsvss ? game->glsvss_request : glsvss_request_;
 		fields.glsvss_rims    = row_glsvss ? game->glsvss_rims : glsvss_rims_;
 		fields.glsvss_agrms   = row_glsvss ? game->glsvss_agrms : glsvss_agrms_;
-		// The row's protocol answers in its witnessed live shape, if it has one; an alias tag (the
-		// JO demo's) in its own protocol's, which no live reply witnesses.
-		const Protocol *protocol = protocol_by_code(game->protocol);
-		fields.witnessed_shape =
-				tag == game->gate_tag && protocol != nullptr && protocol->gate_reply_witnessed;
-		if (fields.witnessed_shape)
-			fields.time_on_gate_server = gate_clock_text(std::time(nullptr));
+		fields.time_on_gate_server = gate_clock_text(std::time(nullptr));
 		const std::string body = build_gate_response(fields);
 
 		// The text and its terminating NUL (the live gate's reply, LN S1b).

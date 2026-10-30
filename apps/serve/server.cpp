@@ -569,10 +569,9 @@ bool Server::resolve_title(std::string &error) {
 // The mount opennova.exe makes (godot/game/boot_root_mount.gd over
 // ResourceRoot::mount_runtime / set_root_dir, the one install mount
 // ResourceIndex::scan_install): the witnessed fixed archive table (Packed,
-// PackedWithLooseOverride under /d) under the launch's game code's SCR keying,
-// set ahead of the scan, and, only when asked, a directory with no archives
-// mounted as a plain loose root with no expansion under the same keying
-// (ADR 0025). Then the gate tag: the title's, or the mount's gt.ssc's.
+// PackedWithLooseOverride under /d), and, only when asked, a directory with no
+// archives mounted as a plain loose root with no expansion (ADR 0025). Then the
+// gate tag: the title's, or the mount's gt.ssc's.
 bool Server::mount(std::string &error) {
 	const std::string &code = game_code_;
 	LaunchFlags flags;
@@ -584,7 +583,6 @@ bool Server::mount(std::string &error) {
 	bool mounted = index_.scan_install(options_.resource_dir, flags) ==
 			ResourceIndex::InstallScan::Mounted;
 	if (!mounted && options_.loose_root) {
-		index_.set_scr_policy(title_scr_policy_for_code(code.c_str()));
 		mounted = index_.scan(options_.resource_dir, std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll);
 	}

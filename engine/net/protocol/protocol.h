@@ -117,13 +117,6 @@ struct Protocol {
 	// witnessed difference rather than an unwitnessed value: absent from JO's lists, present in
 	// DFX2's (docs/titles/dfx2-vs-jo-re.md DFX2-7).
 	bool host_category_var = false;
-	// Whether NovaLogic's own gate's reply to the protocol's tag is witnessed, which the service's
-	// gate then answers in that shape: no POSTIPADDRESS / POSTIPPORT (the udpnovaworld line skips
-	// the client's POST tests), a startupurl on http://[domainname]/ (the client fills it from the
-	// lobby's 0x82), and a TimeOnGateServer line after the reflected pair: DFX2's (2026-10-14:
-	// docs/titles/dfx2-vs-jo-re.md §6.5, D-NET-721) and JO's (the LN S1 retail host record,
-	// 2026-10-23). The JO demo's is unrecorded, so its tag keeps the reply the service always sent.
-	bool gate_reply_witnessed = false;
 	// The sign-in page's submit control (its template's form-post button): the one the
 	// executable's LOGIN callbacks and its login validation name when it is "LOGIN"
 	// (LobbyHttpFlow::sign_in_submit_enabled, D-NET-1335).
@@ -163,7 +156,7 @@ const char *protocol_version(const Protocol &protocol);
 // title `title_code`: the title's display name where `versions` names no game yet, and the
 // protocol the title speaks with its protocol version (PV2), "JO" and "16", where that protocol's
 // session part is witnessed in full. An unknown title adds nothing; one whose protocol is
-// unwitnessed (the JO demo's, DFX's, BHD's) leaves the protocol part out.
+// unwitnessed (DFX's, BHD's) leaves the protocol part out.
 void title_versions(std::string_view title_code, Versions &versions);
 
 // The parts of a protocol, each complete or not on its own: what the in-match protocol and the

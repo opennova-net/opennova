@@ -310,12 +310,6 @@ bool ResourceIndex::archive_slot_has_file(int slot, const std::string &name) con
 	return impl_->vfs.archive_slot_has_file(slot, name);
 }
 
-void ResourceIndex::set_scr_policy(int scr_policy) {
-	++revision_;
-	// Vfs::clear() (called by scan) does not reset the policy, so this persists across re-scans.
-	impl_->vfs.set_scr_policy(scr_policy);
-}
-
 bool ResourceIndex::prefers_loose_file(const std::string &name) const {
 	// A file source has no archive a loose file could be preferred over.
 	if (impl_->source) return false;

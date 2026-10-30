@@ -176,9 +176,6 @@ void dfx2_row() {
 	CHECK(resolve_title_protocol("dfx2", error) == dfx2);
 	CHECK(protocol_complete(*dfx2, ProtocolPart::WebFlow));
 	CHECK(std::string(dfx2->sign_in_submit) == "LOGIN");
-	// The demo's web flow is not witnessed: refused by name.
-	CHECK(protocol_refusal(*title_protocol("jodemo"), ProtocolPart::WebFlow) ==
-			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 
 	// The hello: DFX2's block, which a JO identity does not match and a DFX2 one does.
 	const ClientHello hello = make_protocol_client_hello(*dfx2, 9);
@@ -196,14 +193,10 @@ void dfx2_row() {
 	CHECK(parse_client_hello(bytes.data(), bytes.size(), round) && round.pv3 == hello.pv3 &&
 			round.pg == guid && matches_protocol(*dfx2, round));
 
-	// The rows no binary has been read for: refused, the demo's gate tag its one value.
+	// The rows no binary has been read for: refused.
 	CHECK(resolve_title_protocol("bhd", error) == nullptr);
 	CHECK(error.find("the bhd title's session identity is not witnessed yet: NVS") == 0);
 	CHECK(resolve_title_protocol("dfx", error) == nullptr);
-	const Protocol *demo = title_protocol("jodemo");
-	CHECK(demo != nullptr && std::string(demo->gate_tag) == "jopd:cus4");
-	CHECK(resolve_title_protocol("jodemo", error) == nullptr);
-	CHECK(error.find("PG") != std::string::npos && error.find("gate tag") == std::string::npos);
 	CHECK(resolve_title_protocol("nosuchgame", error) == nullptr);
 	CHECK(error == "unknown game 'nosuchgame'");
 	CHECK(protocol_by_pn("NOSUCHGAME") == nullptr);
@@ -406,16 +399,6 @@ void consumers_refuse_without_identity() {
 	ctx.gate_tag = dfx2.gate_tag;
 	dfx2_flow.set_context(ctx);
 	CHECK(!dfx2_flow.gsb_request().valid && dfx2_flow.join(7).kind == JoinResult::Kind::Failed);
-	// The demo has no web flow to speak.
-	LobbyHttpFlow demo_flow;
-	ctx.protocol = title_protocol("jodemo");
-	ctx.gate_tag = ctx.protocol->gate_tag;
-	demo_flow.set_context(ctx);
-	CHECK(demo_flow.login("user", "pass").reason ==
-			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
-	CHECK(!demo_flow.gsb_request().valid && demo_flow.join(7).kind == JoinResult::Kind::Failed);
-	ctx.protocol = &dfx2;
-	ctx.gate_tag = dfx2.gate_tag;
 	// Its start page's tokens are its own (the live gate's template, dfx2-vs-jo-re §6.5).
 	ctx.startup_url = "http://[domainname]/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&pfid=38"
 	                  "&gt=[GT]&url=dfx2_0_start.htm&pc=[PRODUCTCODE]";

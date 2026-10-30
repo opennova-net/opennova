@@ -28,8 +28,6 @@ struct Title {
 	// The title text the executable copies into g_TitleText: the _connectlog.txt header's TITLE
 	// line and the VERSION command's title word.
 	const char *title_text = nullptr;
-	// VfsScrPolicy (base/vfs/vfs_decode.h): how the title's SCR payloads key.
-	int scr_policy = 0;
 	// The program the title's install ships beside its archives, which a player starts (and the
 	// editor's Play in the game install).
 	const char *executable = nullptr;
@@ -75,9 +73,5 @@ const Title *title_at(size_t index);
 // The title whose command_file is `command_file` (compared case-insensitively, as the updater
 // opens the file); null for none.
 const Title *title_by_command_file(std::string_view command_file);
-
-// The SCR policy (VfsScrPolicy) for a title `code`: VFS_SCR_VERSION_DETECT for a null or unknown
-// code, so a missing or bad `/game` value keys as JO's does. The engine's one game-to-policy seam.
-int title_scr_policy_for_code(const char *code);
 
 } // namespace opennova

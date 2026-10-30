@@ -11,7 +11,6 @@
 
 #include <base/io/strutil.h>
 #include <base/project/project_manifest.h>
-#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
@@ -329,9 +328,7 @@ class AssetImport::Run {
 public:
 	Run(std::vector<ImportChoice> sources, const ProjectPaths &paths, const ProjectDocument &document, bool replace_existing)
 	    : sources_(std::move(sources)), paths_(paths), document_(document), replace_existing_(replace_existing),
-	      walk_(paths_, document_) {
-		archive_.set_scr_policy(title_scr_policy_for_code(document_.target_game.c_str()));
-	}
+	      walk_(paths_, document_) {}
 
 	bool step(uint64_t bytes) {
 		cost_ = 0;

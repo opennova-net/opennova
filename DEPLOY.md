@@ -739,9 +739,9 @@ targets that keep each client's own address and port, and 443
 (the portal's nginx, from Cloudflare's ranges alone; with proxied records only, since
 without them there is no origin certificate and nginx listens on 80). Deletion
 protection is on: the balancer holds the gate's address.
-`ONNET_PUBLIC_HOST` (the gate's `POSTIPADDRESS`) and `ONNET_WEB_HOST` (the startup URL,
-the web domain, `HOST_URL`, `GSB_SERVER`) both name that address, so no retail client
-follows a DNS name; the site's records point at the balancer's DNS name. The gate's own
+`ONNET_PUBLIC_HOST` (the hosted servers' master address) and `ONNET_WEB_HOST` (the web
+domain the startup URL takes, `HOST_URL`, `GSB_SERVER`) both name that address, so no retail
+client follows a DNS name; the site's records point at the balancer's DNS name. The gate's own
 name, `nw.<domain>` (`nw.<deployment>.<domain>` off prod), is an unproxied A record at that
 address: OpenNova's own client dials it for its OpenNova NovaWorld, and a self-run
 `opennova-serve` lists on it with `--master-host`.

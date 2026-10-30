@@ -2232,7 +2232,6 @@ int test_lobby_per_title(Harness &h) {
 	};
 	const Prepared prepared[] = {
 		{ "jop:cus2", "/jop_2.gsb" },
-		{ "jopd:cus4", "/jop_2.gsb" },
 		{ "dfx2:0:cus:buffy", "/dfx2_0.gsb" },
 		{ "acidgambit:0", "/acidgambit_0.gsb" },
 		{ "mygame:0", "/mygame_0.gsb" },
@@ -2263,7 +2262,6 @@ int test_lobby_per_title(Harness &h) {
 	const Later later[] = {
 		{ "GT=acidgambit:0", "urls.htm", "/acidgambit_0.gsb" },
 		{ "GT=acidgambit:0", "dfx2_0_urls.htm", "/acidgambit_0.gsb" },
-		{ "GT=jopd:cus4", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=38", "urls.htm", "/dfx2_0.gsb" },
 		{ "NWPF=28", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=100", "urls.htm", "/acidgambit_0.gsb" },

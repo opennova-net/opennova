@@ -223,7 +223,6 @@ struct Vfs::Impl {
     // The expansion whose layers actually mounted (empty after the silent base fallback).
     std::string mounted_expansion;
     std::string last_error;
-    int scr_policy = VFS_SCR_VERSION_DETECT; // how read_file keys SCR payloads (game-driven)
     VfsMountMode session_mount_mode = VfsMountMode::PackedWithLooseOverride;
 
     mutable bool index_valid = false;
@@ -664,7 +663,7 @@ bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out,
 
 bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out) const {
     if (!read_file_raw(name, out)) return false;
-    if (!vfs_decode_payload(out, impl_->scr_policy)) {
+    if (!vfs_decode_payload(out)) {
         impl_->last_error = "Failed to decode payload (SCR/BFC1): " + name;
         return false;
     }
@@ -674,19 +673,11 @@ bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out) const {
 bool Vfs::read_file(const std::string &name, std::vector<uint8_t> &out,
                     VfsLookupPolicy policy) const {
     if (!read_file_raw(name, out, policy)) return false;
-    if (!vfs_decode_payload(out, impl_->scr_policy)) {
+    if (!vfs_decode_payload(out)) {
         impl_->last_error = "Failed to decode payload (SCR/BFC1): " + name;
         return false;
     }
     return true;
-}
-
-void Vfs::set_scr_policy(int scr_policy) {
-    impl_->scr_policy = scr_policy;
-}
-
-int Vfs::scr_policy() const {
-    return impl_->scr_policy;
 }
 
 std::vector<VfsFileLocation> Vfs::list_files() const {

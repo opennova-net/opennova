@@ -19,21 +19,16 @@ namespace opennova::novaworld_server {
 // Env-var names mirror onnet's `ONNET_*` convention (see memory
 // `project_local_dev_flow.md`) so existing dev flows keep working.
 struct ServerConfig {
-	// The gate's public address (ONNET_PUBLIC_HOST): its POSTIPADDRESS, where
-	// a hosting client's status blobs land, and the hosted servers' master host
-	// on a cloud machine. Set to the LAN IP for
+	// The gate's public address (ONNET_PUBLIC_HOST): the hosted servers' master
+	// host on a cloud machine. Set to the LAN IP for
 	// cross-machine testing; localhost is enough for single-host dev.
 	std::string public_host = "127.0.0.1";
-	// Whether ONNET_PUBLIC_HOST was set (non-empty) in the environment: the
-	// gate requires it, since a gate left on the default would announce
-	// loopback to every client; an explicit 127.0.0.1 is accepted.
-	bool public_host_set = false;
 
 	// The one load-balanced web endpoint every advertised URL names
-	// (ONNET_WEB_HOST, a name or an address), with http_port: the gate's
-	// startupurl, the 0x82 SessionInit's web domain (the lobby), and the menus'
-	// HOST_URL and GSB_SERVER (web), so all three agree. Required by the gate,
-	// the lobby and web.
+	// (ONNET_WEB_HOST, a name or an address), with http_port: the 0x82
+	// SessionInit's web domain (the lobby), which the gate's startupurl's
+	// [domainname] takes, and the menus' HOST_URL and GSB_SERVER (web), so all
+	// agree. Required by the lobby and web.
 	std::string web_host;
 
 	// The lobby address the gates hand clients (ONNET_LOBBY_ENDPOINT,
@@ -46,7 +41,7 @@ struct ServerConfig {
 	std::string lobby_endpoint;
 
 	// Gate UDP — bootstrap probes from clients land here (port 7597 in
-	// retail). Reply contains POSTIPADDRESS + UDPNOVAWORLD + STARTUPURL.
+	// retail). Reply contains UDPNOVAWORLD + STARTUPURL.
 	uint16_t gate_udp_port = opennova::GATE_DEFAULT_PORT;
 
 	// NW UDP — Layer 2-3 NAPI traffic (HELLO/JOIN/SESSION/GOODBYE) on

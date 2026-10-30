@@ -35,7 +35,7 @@ int g_failures = 0;
 
 // Every installed title resolves by its code and speaks an installed protocol.
 void every_title_resolves() {
-	CHECK(title_count() == 6);
+	CHECK(title_count() == 5);
 	for (size_t i = 0; i < title_count(); ++i) {
 		const Title *title = title_at(i);
 		CHECK(title != nullptr && title_by_code(title->code) == title);
@@ -90,7 +90,6 @@ void acidgambit_speaks_jo() {
 	CHECK(std::string(ag.display_name) == "OP: Acid Gambit" &&
 			std::string(ag.title_text) == "OP: Acid Gambit");
 	CHECK(std::string(ag.command_file) == "ACIDGAMBIT.CMD" && ag.executable == nullptr);
-	CHECK(ag.scr_policy == games::jo_title().scr_policy);
 	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == title_protocol("dfx2"));
 	// The updater login the service serves OpenNova's own content under is its title's; a retail
 	// title's folder names its own (Title::updater_login).
@@ -107,12 +106,6 @@ void unwitnessed_titles_refused() {
 	CHECK(error.find("the bhd title's session identity is not witnessed yet: NVS") == 0);
 	CHECK(resolve_title_protocol("dfx", error) == nullptr);
 	CHECK(error.find("the dfx title's session identity is not witnessed yet: NVS") == 0);
-	CHECK(resolve_title_protocol("jodemo", error) == nullptr);
-	CHECK(error.find("PG") != std::string::npos && error.find("gate tag") == std::string::npos);
-	const Protocol *demo = title_protocol("jodemo");
-	CHECK(demo != nullptr && std::string(demo->gate_tag) == "jopd:cus4");
-	CHECK(protocol_refusal(*demo, ProtocolPart::WebFlow) ==
-			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 	CHECK(resolve_title_protocol("nosuchgame", error) == nullptr);
 	CHECK(error == "unknown game 'nosuchgame'");
 }
@@ -124,7 +117,7 @@ void every_title_runs_rules() {
 	CHECK(&jo == &games::jo_rules());
 	CHECK(&world::title_rules("JO") == &jo);
 	CHECK(&world::title_rules("dfx2") == &games::dfx2_rules() && &games::dfx2_rules() != &jo);
-	for (const char *code : { "acidgambit", "jodemo", "dfx", "bhd" })
+	for (const char *code : { "acidgambit", "dfx", "bhd" })
 		CHECK(&world::title_rules(code) == &jo);
 	CHECK(&games::acidgambit_rules() == &jo);
 	CHECK(&world::title_rules("") == &jo && &world::title_rules("nosuchgame") == &jo);
@@ -224,7 +217,7 @@ void bump_rule_row_per_game() {
 	CHECK(std::string(protocol_version(*title_protocol("acidgambit"))) ==
 			protocol_version(*title_protocol("jo")));
 	// The unwitnessed titles have no in-match protocol: their session part is refused by name.
-	for (const char *code : { "jodemo", "dfx", "bhd" })
+	for (const char *code : { "dfx", "bhd" })
 		CHECK(bump_rule_row(code) == "no in-match protocol");
 }
 
@@ -243,10 +236,10 @@ void title_parts_of_the_version_line() {
 	named.game = "My Game";
 	title_versions("acidgambit", named);
 	CHECK(named.game == "My Game" && named.protocol == "JO" && named.protocol_version == "16");
-	Versions demo;
-	title_versions("jodemo", demo);
-	CHECK(demo.game == "Joint Operations (Demo)" && demo.protocol.empty() &&
-			demo.protocol_version.empty());
+	Versions dfx;
+	title_versions("dfx", dfx);
+	CHECK(dfx.game == "Delta Force: Xtreme" && dfx.protocol.empty() &&
+			dfx.protocol_version.empty());
 	Versions unknown;
 	title_versions("nosuchgame", unknown);
 	title_versions("", unknown);

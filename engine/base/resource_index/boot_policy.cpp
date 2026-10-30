@@ -407,7 +407,6 @@ std::string boot_path_join(const std::string &dir, const std::string &name) {
 }
 
 bool mount_install(Vfs &vfs, const std::string &root, const LaunchFlags &flags) {
-    vfs.set_scr_policy(title_scr_policy_for_code(launch_game(flags, std::string()).c_str()));
     const VfsMountMode mode =
             flags.loose_override ? VfsMountMode::PackedWithLooseOverride : VfsMountMode::Packed;
     return vfs.mount_game(root, flags.expansion, mode, VfsArchiveDiscovery::RetailTable) &&

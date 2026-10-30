@@ -102,7 +102,7 @@ int test_check() {
 	const auto run = [&](const ProjectDocument &as, std::unique_ptr<ProjectCheck> &check, bool &moved) {
 		const AssetScan scan = scan_project_assets(paths, as);
 		ProjectAssetSource files;
-		files.set_scan(root, scan, as.target_game);
+		files.set_scan(root, scan);
 		AssetGraph graph;
 		ValidationCache cache;
 		const std::vector<std::shared_ptr<const DocumentBase>> open;

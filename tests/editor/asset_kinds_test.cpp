@@ -98,7 +98,6 @@ static int test_unread_defs() {
 	TEST_EXPECT(!game_never_reads(AssetKind::ItemDefs, "items.def", "jo") &&
 	            !game_never_reads(AssetKind::Text, "notes.txt", "jo"));
 	TEST_EXPECT(!game_never_reads(AssetKind::OtherDefs, "MEDWEP.DEF", "dfx2") &&
-	            !game_never_reads(AssetKind::OtherDefs, "MEDWEP.DEF", "jodemo") &&
 	            !game_never_reads(AssetKind::OtherDefs, "MEDWEP.DEF", ""));
 	const std::string read_by = asset_kind_words(AssetKind::OtherDefs).read_by;
 	TEST_EXPECT(read_by.rfind("Unknown", 0) == std::string::npos && read_by.find("never reads") != std::string::npos);
