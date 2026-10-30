@@ -168,6 +168,14 @@ class MarkerSubjects(unittest.TestCase):
         got = [(tok, subject) for _, _, tok, _, _, subject in cite_sweep.extract_lines("engine/x.cpp", lines)]
         self.assertEqual(got, [("Foo_Bar", True), ("Baz_Qux", False), ("Qux_Quux", True)])
 
+    def test_a_record_cites_outside_markers(self):
+        # a docs table cell and a backticked prose cite are joined; a bare prose @0x is not
+        line = "| D-SND-8 | `Sound_ApplyDopplerShift` @ 0x527f60 doppler, the call @ 0x52896a |"
+        got = [(tok, addr) for _, _, tok, addr, _, _ in cite_sweep.extract_lines("docs/audio/x-re.md", [line])]
+        self.assertEqual(got, [("Sound_ApplyDopplerShift", "0x527f60")])
+        # code joins markers only
+        self.assertEqual(list(cite_sweep.extract_lines("engine/x.cpp", ["// Foo_Bar @0x500000"])), [])
+
     def test_a_bare_site_marker_is_its_own_subject(self):
         got = [subject for *_, subject in cite_sweep.extract_lines("engine/x.cpp", ["// [orig: @0x500010]"])]
         self.assertEqual(got, [True])

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Cite sweep: join every `[orig: Name @ 0xADDR]` / `(retail: Name @0xADDR` marker in the
-tree against the LIVE IDB and report the disagreements (the three-way-link drift check of
-.claude/skills/grill-ida/LIFECYCLE.md section 4, made mechanical).
+tree, and every named `Name @ 0xADDR` cite of a docs/ record wherever it stands (a table cell,
+a backticked prose cite), against the LIVE IDB and report the disagreements (the
+three-way-link drift check of .claude/skills/grill-ida/LIFECYCLE.md section 4, made
+mechanical).
 
 Needs IDA running with the ida-pro-mcp plugin on http://127.0.0.1:13337/mcp and the
 retail `Jointops.exe.kong.i64` loaded (docs/correspondence.md pins the image: imagebase
@@ -113,7 +115,10 @@ DOC_EXT = (".md",)
 COMMENT_LEAD = re.compile(r"^\s*(?://|##?|\*|--|;)+\s?")   # a wrapped marker's continuation line lead-in
 
 MARKER_LINE = re.compile(r"\[orig:|\(retail:")
-PAIR = re.compile(r"(?<![\w.}])(?:([A-Za-z_][A-Za-z0-9_]*(?:::~?[A-Za-z_][A-Za-z0-9_]*)*)\s*)?@\s*(0x[0-9A-Fa-f]{4,8})\b")
+# `Name @0xADDR`, `Name@0xADDR`, and the records' backticked `` `Name` @ 0xADDR `` (a name
+# whose backtick opened right before it: `jnz loc_6218B6` @0x6217bc quotes an instruction)
+PAIR = re.compile(r"(?<![\w.}])(?:(?P<tick>`)?(?P<name>[A-Za-z_][A-Za-z0-9_]*(?:::~?[A-Za-z_][A-Za-z0-9_]*)*)"
+                  r"(?(tick)`)\s*)?@\s*(?P<addr>0x[0-9A-Fa-f]{4,8})\b")
 CAMEL = re.compile(r"^[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+$")
 # Records whose preamble makes another image the default for an unlabeled address
 # (docs/README.md: "Jointops.exe retail unless a doc says otherwise"); a marker that names
@@ -352,20 +357,25 @@ def extract_lines(path, lines):
     (scripts/lint/cite_images.py binds the address to its image), or the record's
     DOC_DEFAULT_IMAGE. subject is True for a marker's first address, the function the marker
     is about (`[orig: Mixer_Open @0x7668f0 - ...]`); the addresses after it are the sites and
-    callees its prose names."""
+    callees its prose names. A docs/ record cites outside markers too (its tables, its
+    backticked prose): every pair of a record's line that names a symbol counts there, a bare
+    `@0xADDR` or a prose word's (`the call @0x52896a`) only inside a marker."""
     doc_image = doc_images(path, lines)
+    record = path.startswith(DOC_ROOTS)
     for i, line in enumerate(lines):
-        if not MARKER_LINE.search(line):
+        marked = bool(MARKER_LINE.search(line))
+        if not marked and not (record and "@" in line):
             continue
-        text = marker_text(lines, i)
-        found = list(PAIR.finditer(text))
+        text = marker_text(lines, i) if marked else line
+        found = [m for m in PAIR.finditer(text)
+                 if marked or (m["name"] and (symbol_like(m["name"]) or SNAKE.match(m["name"])))]
         subjects = set()
         for opened in MARKER_LINE.finditer(text):
             first = next((m.start() for m in found if m.start() >= opened.end()), None)
             if first is not None:
                 subjects.add(first)
         for m in found:
-            tok, addr = m.group(1), m.group(2).lower()
+            tok, addr = m["name"], m["addr"].lower()
             bound = cite_images.image_at(text, m.start(), m.end())
             image, spelled = bound if bound else (doc_image[i] or cite_images.DEFAULT_IMAGE, "")
             if image == cite_images.DEFAULT_IMAGE:
