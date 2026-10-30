@@ -1852,8 +1852,9 @@ static int test_plain_words() {
 	TEST_EXPECT(worded);
 	TEST_EXPECT(refusal(session, "file_card", "{}").find("no page shows") != std::string::npos);
 	TEST_EXPECT(!ask(session, "file_card", R"({"path": "fonts/nowhere.fnt"})").get_bool("found", true));
-	// A file of no editor (the NovaWorld string table) opened: the page shows (no document opens); the query names
-	// it with no path; closed, it goes.
+	// A file of no editor (the NovaWorld cookie jar, a player's file a project may still hold) opened: the page
+	// shows (no document opens); the query names it with no path; closed, it goes.
+	editor_test::hold_cookie_jar(session);
 	std::string coo;
 	for (const AssetEntry &entry : view.project.scan->entries)
 		if (entry.kind == AssetKind::StringTableCoo) coo = entry.relative_path;

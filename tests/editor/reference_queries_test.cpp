@@ -266,8 +266,9 @@ static int test_go_to_targets() {
 		TEST_EXPECT(used.file == "other.mnu" && used.editable && used.locator == jump->locator &&
 		            used.label == "other.mnu: OTHER/JUMP/Action 1");
 	}
-	// A file the editor does not edit (the NovaWorld string table) is shown in Files; a font (a document since round
-	// S23) and a menu opened.
+	// A file the editor does not edit (the NovaWorld cookie jar, a player's file a project may still hold) is shown
+	// in Files; a font (a document since round S23) and a menu opened.
+	editor_test::hold_cookie_jar(session);
 	std::string font_file, coo;
 	TEST_EXPECT(graph.resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(),
 						&font_file) == ReferenceStatus::Present);
