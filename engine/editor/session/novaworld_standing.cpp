@@ -11,7 +11,7 @@ namespace {
 NovaWorldStandingKind kind_of(const NovaWorldView &c) {
 	using Kind = NovaWorldStandingKind;
 	if (c.key.empty())
-		return Kind::None;
+		return c.former_key.empty() ? Kind::None : Kind::WasOnNovaWorld;
 	if (c.head_missing)
 		return Kind::NotFound;
 	if (!c.tracked)
@@ -43,6 +43,12 @@ NovaWorldStanding novaworld_standing(const NovaWorldView &c) {
 	out.kind = kind_of(c);
 	if (out.kind == Kind::None)
 		return out;
+	if (out.kind == Kind::WasOnNovaWorld) {
+		out.line = "Was on " + (c.former_host.empty() ? std::string("NovaWorld") : c.former_host) +
+				(c.former_revision ? " at r" + std::to_string(c.former_revision) : std::string()) + ".";
+		out.tip = "Rejoin takes this folder back to its project, with nothing downloaded.";
+		return out;
+	}
 	out.changed = c.checked ? c.changes.size() : 0;
 	out.incoming = c.tracked && c.head_known && c.head > c.revision ? c.head - c.revision : 0;
 
@@ -52,6 +58,7 @@ NovaWorldStanding novaworld_standing(const NovaWorldView &c) {
 	std::string brief; // the status bar's words after the service
 	switch (out.kind) {
 		case Kind::None:
+		case Kind::WasOnNovaWorld:
 			break;
 		case Kind::SettingUp:
 			out.line = "Setting up...";
@@ -114,6 +121,8 @@ const char *novaworld_standing_name(NovaWorldStandingKind kind) {
 	switch (kind) {
 		case NovaWorldStandingKind::None:
 			return "none";
+		case NovaWorldStandingKind::WasOnNovaWorld:
+			return "was_on_novaworld";
 		case NovaWorldStandingKind::SettingUp:
 			return "setting_up";
 		case NovaWorldStandingKind::NotSetUp:

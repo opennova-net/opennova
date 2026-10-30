@@ -314,6 +314,9 @@ void serve_novaworld_open_site(SessionCore &core, const EditorRequest &request) 
 void serve_novaworld_make_own(SessionCore &core, const EditorRequest &) {
 	core.novaworld().make_own();
 }
+void serve_novaworld_rejoin(SessionCore &core, const EditorRequest &) {
+	core.novaworld().rejoin();
+}
 void serve_novaworld_submit(SessionCore &core, const EditorRequest &request) {
 	core.novaworld().submit(request);
 }
@@ -1633,8 +1636,15 @@ constexpr RequestKindRow kRows[] = {
 	// The project file written as Project settings' Apply writes it, once nothing holds the project.
 	Request(K::NovaWorldMakeOwn, "novaworld_make_own", serve_novaworld_make_own,
 			"The open project's NovaWorld key taken out of its project file (another's project made the author's own "
-			"copy): the project is then on no NovaWorld project, and Put on NovaWorld (novaworld_put) makes it one of "
-			"the account's.")
+			"copy), for a signed-in account: the project is then on no NovaWorld project, and Put on NovaWorld "
+			"(novaworld_put) makes it one of the account's. Its working copy's state stays, for novaworld_rejoin.")
+			.holds(kNone, kHoldsAll)
+			.row,
+	Request(K::NovaWorldRejoin, "novaworld_rejoin", serve_novaworld_rejoin,
+			"The open project's folder taken back to the NovaWorld project its own state names and its project "
+			"file does not (the novaworld section's working_copy.former_key): that key written in its project file, "
+			"nothing downloaded, its base and revision as they were where they are this service's. Refused where "
+			"its state names none.")
 			.holds(kNone, kHoldsAll)
 			.row,
 	// A call the poll takes the reply of, as a release's.

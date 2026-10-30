@@ -81,6 +81,7 @@ public:
 	void open_site(const EditorRequest &request);
 	void submit(const EditorRequest &request);
 	void make_own();
+	void rejoin();
 	void make_missing_base(const EditorRequest &request);
 
 	// The poll's: the calls outside the slot (a sign-in, a project list, the project's ask, a put,

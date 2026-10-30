@@ -100,6 +100,9 @@ JsonValue novaworld_section(const SessionView &view) {
 	copy.set("key", json_string(novaworld.key));
 	copy.set("tracked", JsonValue::make_bool(novaworld.tracked));
 	copy.set("revision", json_number(double(novaworld.revision)));
+	copy.set("former_key", json_string(novaworld.former_key));
+	copy.set("former_revision", json_number(double(novaworld.former_revision)));
+	copy.set("former_host", json_string(novaworld.former_host));
 	out.set("working_copy", copy);
 	out.set("project",
 			novaworld.remote_known ? project_json(novaworld.remote) : JsonValue::make_null());

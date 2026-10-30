@@ -5,6 +5,7 @@
 
 #include <editor/session/session_operation.h>
 #include <editor/ui/novaworld_put_dialog.h>
+#include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -55,7 +56,8 @@ void draw_novaworld_activity(Workspace &workspace);
 // set up as a working copy, not set up, the service showing it none or not answering; novaworld_standing.h, as the
 // status bar and Project settings read it). A working copy shows its revision and the store's newest, Check and Pull, its changes since its revision (what each did to the file, and Discard, which puts the
 // revision's file back), what kept a file out of them, and for an account that may push it (the service's word) a
-// message ("First revision" before the first) and Push, which sends every change; else a read-only line. For an
+// message ("First revision" before the first) and Push, which sends every change; else a read-only line, with
+// Make it your own... for a signed-in account, which asks first and which Rejoin undoes. For an
 // admin, a version and Release rN, which the service builds the release of the revision from (ADR 0069 d7). A pull
 // stopped on conflicts lists them, each with Keep mine and Take theirs, and Pull goes on once none is left. Its
 // history lists the project's revisions, newest first. Then what the last NovaWorld job came to. With no project
@@ -85,11 +87,14 @@ private:
 	void draw_release(const NovaWorldView &novaworld);
 	void draw_conflicts(const NovaWorldView &novaworld);
 	void draw_history(const NovaWorldView &novaworld);
+	void draw_make_own(const NovaWorldView &novaworld);
 
 	Workspace &workspace_;
 	mutable bool welcome_asked_ = false; // shown with no project open at the author's ask
 	NovaWorldSignInForm sign_in_;
 	NovaWorldPutDialog put_;
+	ui_kit::HeldPopup make_own_popup_;
+	bool make_own_asked_ = false; // Make it your own...: its confirmation up
 	char message_[2048] = {};  // the push's message
 	std::string prefilled_;    // the project the message was last prefilled for ("First revision")
 	char version_[33] = {};    // a release's version

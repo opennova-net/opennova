@@ -915,6 +915,9 @@ inline EditorRequest novaworld_submit(std::string version) {
 	request.version = std::move(version);
 	return request;
 }
+inline EditorRequest novaworld_rejoin() {
+	return of(EditorRequestKind::NovaWorldRejoin);
+}
 inline EditorRequest novaworld_make_own() {
 	return of(EditorRequestKind::NovaWorldMakeOwn);
 }

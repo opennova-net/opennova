@@ -78,6 +78,7 @@ SessionView tracked_view() {
 
 ImGuiID novaworld_item(std::initializer_list<const char *> steps) { return item_id(Ui::window_id("NovaWorld"), steps); }
 ImGuiID put_item(std::initializer_list<const char *> steps) { return item_id(ImHashStr("Put on NovaWorld"), steps); }
+ImGuiID own_item(std::initializer_list<const char *> steps) { return item_id(ImHashStr("Make it your own"), steps); }
 
 // Every standing, with what the window and the status bar say of it.
 void test_standing() {
@@ -121,6 +122,79 @@ void test_standing() {
 	c.key.clear();
 	is(Kind::None, "", "", "on no project: nothing to say");
 	std::printf("content: every standing, what the window and the status bar say of it\n");
+}
+
+// A read-only project's Make it your own...: asked first, what goes and stays said, nothing raised until it is
+// confirmed; a mod warned its short name stays NovaWorld's. Signed out, an owner reads as anyone, so it is not offered.
+// Not on NovaWorld with the folder's state naming a project: Rejoin. The service showing the project none: Rejoin
+// where the state names one, and leaving it, signed in.
+void test_make_own() {
+	Ui ui;
+	SessionView v = tracked_view();
+	NovaWorldView &c = v.novaworld;
+	c.role = "player";
+	c.remote.can_push = false;
+	c.remote.can_release = false;
+	ui.windows.set_view(&v);
+	ui.focus("NovaWorld");
+	ui.frames(2);
+	ui.activate(novaworld_item({"Make it your own..."}));
+	CHECK(ui.drain().empty(), "Make it your own...: nothing raised yet");
+	ui.frames(2);
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("on every service") != std::string::npos && text.find("Rejoin brings") != std::string::npos,
+	      "what goes, what stays and the way back said");
+	ui.activate(own_item({"Cancel"}));
+	CHECK(ui.drain().empty(), "Cancel raises nothing");
+	ui.frames(2);
+
+	ProjectDocument mod = *v.project.document;
+	mod.expansion.name = "night";
+	mod.expansion.builds_on = "JO";
+	v.project.document = std::make_shared<const ProjectDocument>(mod);
+	ui.activate(novaworld_item({"Make it your own..."}));
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("NovaWorld keeps this mod's short name.") != std::string::npos, "a mod: warned");
+	ui.activate(own_item({"Make it your own"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldMakeOwn), "confirmed: one novaworld_make_own");
+	ui.frames(2);
+
+	c.signed_in = false;
+	c.role.clear();
+	ui.frames(2);
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Sign in to push.") != std::string::npos && text.find("Read-only") == std::string::npos &&
+	              text.find("Make it your own...") == std::string::npos,
+	      "signed out: an owner is not told the project is another's");
+	c.signed_in = true;
+	c.role = "player";
+
+	c.key.clear();
+	c.tracked = false;
+	c.former_key = "MOD";
+	c.former_revision = 3;
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("Was on NovaWorld at r3.") != std::string::npos, "the folder's state: said");
+	ui.activate(novaworld_item({"Rejoin"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldRejoin), "Rejoin: one novaworld_rejoin");
+
+	c.key = "OLD";
+	c.head_missing = true;
+	c.head_error = "OLD is not on novaworld.test, or is private.";
+	ui.frames(2);
+	ui.activate(novaworld_item({"Rejoin"}));
+	CHECK(one(ui.drain(), EditorRequestKind::NovaWorldRejoin), "not found: Rejoin");
+	c.former_key.clear();
+	ui.frames(2);
+	ui.activate(novaworld_item({"Make it your own..."}));
+	ui.frames(2);
+	ui.away();
+	CHECK(logged_frame(ui).find("on every service") != std::string::npos, "not found: leaving it asks first too");
+	std::printf("content: Make it your own asks first, Rejoin the way back\n");
 }
 
 void test_working_copy() {
@@ -864,6 +938,7 @@ void test_activity() {
 
 void run_novaworld_tests() {
 	test_standing();
+	test_make_own();
 	test_working_copy();
 	test_put_and_sign_in();
 	test_get_a_project();

@@ -11,6 +11,7 @@
 #include <base/version/version_line.h>
 #include <editor/model/field_text.h>
 #include <editor/novaworld/novaworld_account.h>
+#include <editor/project/project_document.h>
 #include <editor/session/novaworld_standing.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -286,8 +287,13 @@ void NovaWorldWindow::draw_account(const NovaWorldView &c) {
 
 void NovaWorldWindow::draw_not_on_novaworld(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
-	ui_kit::empty_state("Not on NovaWorld.", "Put it on NovaWorld to push its files there and get them anywhere.");
+	const NovaWorldStanding standing = novaworld_standing(c);
+	const bool rejoins = standing.kind == NovaWorldStandingKind::WasOnNovaWorld;
+	if (rejoins) ui_kit::clipped_text(standing.line, standing.tip);
+	else ui_kit::empty_state("Not on NovaWorld.", "Put it on NovaWorld to push its files there and get them anywhere.");
 	ui_kit::WrapRow row;
+	if (rejoins && ui_kit::tool(row, "Rejoin", v.allows(EditorRequestKind::NovaWorldRejoin), standing.tip))
+		workspace_.request(request::novaworld_rejoin());
 	if (ui_kit::tool(row, "Put on NovaWorld...", v.allows(EditorRequestKind::NovaWorldPut) && c.signed_in && !c.calling,
 	                 c.signed_in ? "Makes it a project on NovaWorld: a new one of yours, or an empty one you may push."
 	                             : "Sign in to put the project on NovaWorld."))
@@ -311,8 +317,17 @@ void NovaWorldWindow::draw_no_standing(const NovaWorldView &c) {
 	}
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Check", v.allows(EditorRequestKind::NovaWorldCheck),
-	                 "Sets the folder up as " + c.key + "'s working copy and looks for what changed."))
+	                 "Sets the folder up as a working copy and looks for what changed."))
 		workspace_.request(request::novaworld_check());
+	if (standing.kind != NovaWorldStandingKind::NotFound) return;
+	// The way back where the folder's own state names the project it left; else, signed in, leaving this one.
+	if (!c.former_key.empty() &&
+	    ui_kit::tool(row, "Rejoin", v.allows(EditorRequestKind::NovaWorldRejoin),
+	                 "Takes this folder back to the project its own state names, with nothing downloaded."))
+		workspace_.request(request::novaworld_rejoin());
+	if (c.signed_in && ui_kit::tool(row, "Make it your own...", v.allows(EditorRequestKind::NovaWorldMakeOwn),
+	                                "This folder leaves the project, its files yours. Asks first."))
+		make_own_asked_ = true;
 }
 
 void NovaWorldWindow::draw_standing(const NovaWorldView &c) {
@@ -397,12 +412,16 @@ void NovaWorldWindow::draw_push(const NovaWorldView &c) {
 	const SessionView &v = workspace_.view();
 	if (!c.remote_known) return;
 	if (!c.remote.can_push) {
-		ui_kit::quiet_text("Read-only: you may pull " + c.key + "; its owner and admins push it.");
+		// Signed out, its owner reads as anyone: nothing here says the project is not theirs.
+		if (!c.signed_in) {
+			ui_kit::quiet_text("Sign in to push.", "You may pull as you are; your own projects push once you sign in.");
+			return;
+		}
+		ui_kit::quiet_text("Read-only: you may pull; its owner and admins push it.");
 		ui_kit::WrapRow row;
 		if (ui_kit::tool(row, "Make it your own...", v.allows(EditorRequestKind::NovaWorldMakeOwn),
-		                 "Takes " + c.key + " out of the project file: this copy of its files is then yours, which Put on "
-		                 "NovaWorld... makes a project of yours."))
-			workspace_.request(request::novaworld_make_own());
+		                 "This folder leaves the project, its files yours. Asks first."))
+			make_own_asked_ = true;
 		return;
 	}
 	// The first push's message offered, once a project (its own words typed over it).
@@ -585,6 +604,40 @@ void NovaWorldWindow::draw_history(const NovaWorldView &c) {
 	}
 }
 
+// Make it your own...'s ask: the project file every service reads loses its key, so what goes, what stays and the way
+// back are said first.
+void NovaWorldWindow::draw_make_own(const NovaWorldView &c) {
+	const SessionView &v = workspace_.view();
+	const bool held = make_own_asked_ && v.project.open && !c.key.empty();
+	if (!make_own_popup_.begin("Make it your own", held, true, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (make_own_popup_.dismissed() || !held) make_own_asked_ = false;
+		return;
+	}
+	ui_kit::dialog_text("This folder leaves its NovaWorld project, on every service. Its files stay as they are, and the "
+	                    "project stays on NovaWorld. Rejoin brings the folder back, until you put it there as a new project.");
+	const ProjectDocument &doc = *v.project.document;
+	if (!doc.expansion.standalone())
+		ui_kit::warning_line("NovaWorld keeps this mod's short name.",
+		                     "A short name is one project's across NovaWorld, so this copy cannot be put there as it is.");
+	else if (!doc.archives.empty() && !admin(c))
+		ui_kit::warning_line("This copy holds the game's own files.", "Only an admin puts those on NovaWorld.");
+	const bool allowed = v.allows(EditorRequestKind::NovaWorldMakeOwn);
+	ImGui::BeginDisabled(!allowed);
+	const bool own = ImGui::Button("Make it your own");
+	ImGui::EndDisabled();
+	if (own && allowed) {
+		workspace_.request(request::novaworld_make_own());
+		make_own_asked_ = false;
+		make_own_popup_.close();
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel")) {
+		make_own_asked_ = false;
+		make_own_popup_.close();
+	}
+	ImGui::EndPopup();
+}
+
 void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &v = workspace_.view();
 	const NovaWorldView &c = v.novaworld;
@@ -610,6 +663,7 @@ void NovaWorldWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ui_kit::quiet_text(c.last);
 	}
 	put_.draw(workspace_);
+	draw_make_own(c);
 }
 
 } // namespace opennova::editor

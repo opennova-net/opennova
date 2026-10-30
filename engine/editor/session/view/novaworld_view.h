@@ -54,6 +54,12 @@ struct NovaWorldView {
 	std::string key;
 	bool tracked = false;
 	int64_t revision = 0;
+	// What the folder's own state names that its project file does not (a key taken out, or changed), the
+	// way back Rejoin takes: the key, the revision the folder held of it, and the service it held it on, ""
+	// this one. Read only for a folder that is no working copy here.
+	std::string former_key;
+	int64_t former_revision = 0;
+	std::string former_host;
 	// The project as the service last answered (the open project's ask, its setup, a check, a pull
 	// or a push): whether the account may push it is its can_push.
 	bool remote_known = false;

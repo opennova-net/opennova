@@ -17,6 +17,7 @@ struct NovaWorldView;
 
 enum class NovaWorldStandingKind : uint8_t {
 	None,		 // no project open, or one on no NovaWorld project
+	WasOnNovaWorld, // on none, its folder's state naming the one it left
 	SettingUp,	 // the folder being made a working copy on this service
 	NotSetUp,	 // no working copy on this service, and nothing making one
 	NotFound,	 // the service shows the account no such project

@@ -375,6 +375,20 @@ void NovaWorldController::show_copy() {
 		if (!fs::is_regular_file(system_path(base + "/" + kProjectFileName), ec))
 			view.missing_base = base;
 	}
+	// What the folder's state names that its project file does not: this service's first.
+	view.former_key.clear();
+	view.former_revision = 0;
+	view.former_host.clear();
+	if (open && !view.tracked) {
+		const std::string here = novaworld_service_folder(account_.server);
+		for (const NovaWorldServiceCopy &each : read_novaworld_copies(core_.paths())) {
+			if (each.copy.key == view.key || (!view.former_key.empty() && each.host != here))
+				continue;
+			view.former_key = each.copy.key;
+			view.former_revision = each.copy.revision;
+			view.former_host = each.host == here ? std::string() : each.host;
+		}
+	}
 	// What a put would make of it is found as a check asks (put_due_), only while it has no key.
 	if (!open || !view.key.empty())
 		view.put = NovaWorldView::PutPlan();
@@ -1195,6 +1209,10 @@ void NovaWorldController::make_own() {
 		refuse("The project is not on NovaWorld: Put on NovaWorld... puts it there.");
 		return;
 	}
+	if (!account_.signed_in()) {
+		refuse("Sign in to NovaWorld first: the project may be yours to push.");
+		return;
+	}
 	const std::string key = doc.novaworld;
 	ProjectDocument project = doc;
 	project.novaworld.clear();
@@ -1206,8 +1224,29 @@ void NovaWorldController::make_own() {
 	paused_.reset();
 	show_conflicts();
 	project_opened(); // its place on NovaWorld read again: none
-	view_last("The project names " + key + " no longer: Put on NovaWorld... makes it a project of yours, its files "
-			  "yours to push.");
+	view_last("The project names " + key + " no longer: Rejoin takes the folder back to it.");
+}
+
+void NovaWorldController::rejoin() {
+	if (!ready(true, false))
+		return;
+	const std::string key = core_.view().novaworld.former_key;
+	if (key.empty()) {
+		refuse("The folder's state names no other NovaWorld project to go back to.");
+		return;
+	}
+	ProjectDocument project = *core_.view().project.document;
+	project.novaworld = key;
+	Diagnostic error;
+	if (!core_.write_project(project, error)) {
+		refuse("The project file was not written (" + error.message + "): the folder did not go back to " + key + ".");
+		return;
+	}
+	paused_.reset();
+	show_conflicts();
+	project_opened(); // its place on NovaWorld read again: the working copy it left, or its setup
+	core_.remember_working_copy(core_.paths().root);
+	view_last("The folder is back on " + key + ".");
 }
 
 void NovaWorldController::make_missing_base(const EditorRequest &request) {

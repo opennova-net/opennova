@@ -598,6 +598,9 @@ static int test_player_projects() {
 	s.send(request::novaworld_make_own());
 	TEST_EXPECT(s.session.view().project.document->novaworld.empty() && s.novaworld().key.empty() &&
 			s.read("project.opennova").find("\"novaworld\"") == std::string::npos);
+	s.send(request::novaworld_rejoin());
+	TEST_EXPECT(s.session.view().project.document->novaworld == "MOD" && s.novaworld().tracked);
+	s.send(request::novaworld_make_own());
 
 	// A project naming a key the service shows the player none of: said so, no working copy.
 	s.send(new_project_for(dir.file("Nope"), "Nope", "NOPE"));
@@ -774,6 +777,67 @@ static int test_copies_outlive_recents() {
 	}
 	std::printf("copies: known whatever the recent list does, a folder not found kept, a moved one found as it "
 				"opens\n");
+	return 0;
+}
+
+// Make it your own needs an account, since a signed-out owner reads as anyone; and it has a way back. Rejoin
+// restores what the folder's own state names, nothing downloaded and the base kept, also where the project file names
+// a key the service does not show, and from another service's state, the folder then set up on this one.
+static int test_make_own_and_rejoin() {
+	test_temp::TempDir dir("opennova_novaworld_session_rejoin");
+	FakeService service;
+	// As the editor writes it, so a key taken out and put back leaves no change of its own.
+	editor::ProjectDocument made;
+	editor::Diagnostic why;
+	TEST_EXPECT(editor::create_project(dir.file("source"), "A mod", "jo", made, why, editor::ProjectExpansion(), "MOD"));
+	std::string project, unread;
+	TEST_EXPECT(opennova::io::read_file_text(dir.file("source/project.opennova"), project, unread));
+	push_to_mod(service, { { "project.opennova", project }, { "defs/a.def", "a" } });
+	Session s(&service);
+	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
+	const std::string copy = dir.file("Copy");
+	s.send(request::novaworld_get("MOD", copy));
+	s.send(request::novaworld_sign_out());
+	s.send(request::novaworld_make_own());
+	TEST_EXPECT(s.refused("novaworld.refused") && s.novaworld().key == "MOD");
+	s.send(request::novaworld_sign_in(kServer, kPlayer, "player-pw"));
+
+	s.send(request::novaworld_rejoin());
+	TEST_EXPECT(s.refused("novaworld.refused")); // nothing to go back to
+
+	TEST_EXPECT(put(copy + "/defs/b.def", "mine"));
+	s.send(request::novaworld_make_own());
+	TEST_EXPECT(s.novaworld().key.empty() && s.novaworld().former_key == "MOD" &&
+			s.novaworld().former_revision == 1 && s.novaworld().former_host.empty());
+	const size_t downloads = service.downloads;
+	s.send(request::novaworld_rejoin());
+	s.send(request::novaworld_check());
+	TEST_EXPECT(s.novaworld().key == "MOD" && s.novaworld().tracked && s.novaworld().revision == 1 &&
+			s.novaworld().former_key.empty() && service.downloads == downloads &&
+			s.read("project.opennova").find("\"novaworld\": \"MOD\"") != std::string::npos);
+	TEST_EXPECT(s.novaworld().changes.size() == 1 && s.novaworld().changes[0].path == "defs/b.def");
+
+	// The project file naming a key the service shows none of, the state another: said, and the way back there.
+	s.send(request::close_project());
+	TEST_EXPECT(put(copy + "/project.opennova", project_file_naming("OLD")));
+	s.send(request::open_project(copy));
+	TEST_EXPECT(s.novaworld().key == "OLD" && s.novaworld().head_missing && s.novaworld().former_key == "MOD");
+	s.send(request::novaworld_rejoin());
+	TEST_EXPECT(s.novaworld().key == "MOD" && s.novaworld().tracked && s.novaworld().revision == 1);
+
+	// Another service's state: the key back, the folder set up on this service.
+	s.send(request::close_project());
+	const editor::ProjectPaths paths = editor::ProjectPaths::for_root(dir.file("Elsewhere"));
+	TEST_EXPECT(put(dir.file("Elsewhere/project.opennova"), project_file_naming("")));
+	std::string error;
+	TEST_EXPECT(editor::write_novaworld_state(editor::NovaWorldPaths::for_project(paths, "https://other.test"),
+			editor::NovaWorldWorkingCopy{ "MOD", 7 }, error));
+	s.send(request::open_project(dir.file("Elsewhere")));
+	TEST_EXPECT(s.novaworld().key.empty() && s.novaworld().former_key == "MOD" &&
+			s.novaworld().former_revision == 7 && s.novaworld().former_host == "other.test");
+	s.send(request::novaworld_rejoin());
+	TEST_EXPECT(s.novaworld().key == "MOD" && s.novaworld().tracked);
+	std::printf("rejoin: make own asks an account, and the folder's own state brings it back, nothing downloaded\n");
 	return 0;
 }
 
@@ -1265,6 +1329,7 @@ int main() {
 	failures += test_get_then_open_again();
 	failures += test_get_again();
 	failures += test_copies_outlive_recents();
+	failures += test_make_own_and_rejoin();
 	failures += test_get_mod_base_not_got();
 	failures += test_new_mod();
 	failures += test_account_change_gives_up_put();
