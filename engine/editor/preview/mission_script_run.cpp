@@ -9,7 +9,6 @@
 #include <base/io/hash.h>
 #include <base/io/tick_rate.h>
 #include <base/resource_index/resource_index.h>
-#include <base/title/title.h>
 #include <base/vfs/file_source.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mission_document.h>
@@ -246,8 +245,9 @@ void MissionScriptRun::boot_(const std::shared_ptr<const ProjectAssetSource> &fi
 	// stands in for one's ears), no collision or terrain tables (nothing moves), the seat table (a start's script may
 	// seat a person, S27), the boundary held for the weather's seed.
 	mission::KernelBootOptions options;
-	// The rules its start runs: the default title's; the preview names no project's game.
-	options.title_rules = &world::title_rules(default_title().code);
+	// The rules its start runs: the project's target game's (the document's game), as the game's boot takes its
+	// title's.
+	options.title_rules = &world::title_rules(mission.game());
 	options.playable = false;
 	options.collision = false;
 	options.seat_specs = true;

@@ -13,6 +13,7 @@
 #include <editor/model/text_document.h>
 #include <editor/preview/hud_canvas.h>
 #include <editor/preview/option_reads.h>
+#include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
@@ -411,6 +412,7 @@ void HudViewport::follow_scope_(const SessionView &view) {
 	if (!range_) range_ = std::make_unique<WeaponRange>();
 	WeaponRangeSetup setup;
 	setup.files = view.findings.assets;
+	setup.game = view.project.document ? view.project.document->target_game : std::string();
 	setup.catalog = "weapon.def";
 	setup.weapon = weapon->name;
 	setup.target.range = float(options_.range);

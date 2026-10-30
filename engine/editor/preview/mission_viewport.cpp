@@ -475,7 +475,8 @@ void MissionViewport::follow_collect_(const SessionView &view, const Document &d
 		key = mix(key, mark.stamp);
 	}
 	const std::shared_ptr<MissionFiles> &read = collect_.files();
-	const bool files_moved = read && read->stamped->stamps().moved(*source);
+	const bool files_moved =
+			read && (read->stamped->stamps().moved(*source) || read->game != mission->game());
 	if (collect_.loaded() && key == collect_key_ && !files_moved) {
 		stand_collect_people_(false);
 		return;
@@ -502,7 +503,8 @@ void MissionViewport::follow_collect_(const SessionView &view, const Document &d
 		return;
 	}
 	// The files' reads kept while they stand (each model read once), for every world loaded over them.
-	const std::shared_ptr<MissionFiles> files = read && !files_moved ? read : std::make_shared<MissionFiles>(source);
+	const std::shared_ptr<MissionFiles> files =
+			read && !files_moved ? read : std::make_shared<MissionFiles>(source, mission->game());
 	collect_.load(files, composed, terrain_ground_, scene_.entities());
 	collect_key_ = key;
 	collect_stamps_.clear();

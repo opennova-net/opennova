@@ -212,7 +212,7 @@ bool MissionShots::files_moved() const {
 }
 
 void MissionShots::configure(MissionShotsSetup setup) {
-	const bool moved = setup.files != setup_.files || setup.key != built_key_ ||
+	const bool moved = setup.files != setup_.files || setup.game != setup_.game || setup.key != built_key_ ||
 	                   (setup.files && !reads_.empty() && reads_.moved(*setup.files));
 	setup_ = std::move(setup);
 	if (moved) {
@@ -269,7 +269,7 @@ bool MissionShots::build_(Run &run) {
 		why_ = "No mission is shown.";
 		return false;
 	}
-	run.files = std::make_shared<MissionFiles>(setup_.files);
+	run.files = std::make_shared<MissionFiles>(setup_.files, setup_.game);
 	world::World &world = run.world;
 	// ammo.def and items.def as the mission load reads them: ammo.def through the load's own read
 	// (mission::read_ammo_table) [orig: AmmoDef_LoadAll @ 0x40B0B0; the item list's load].

@@ -881,7 +881,7 @@ static int test_people_attend() {
 			viewport()->people().in_world() && viewport()->people().playing() == 4);
 	if (!viewport()->people().in_world()) return 1;
 	// The reference's files and ground: the project's files as the load reads them, Tmap read the same.
-	auto files = std::make_shared<MissionFiles>(s.session.view().findings.assets);
+	auto files = std::make_shared<MissionFiles>(s.session.view().findings.assets, opened->game());
 	MissionGround ground;
 	{
 		MissionSceneHeader header;

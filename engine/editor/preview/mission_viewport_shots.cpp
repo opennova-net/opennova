@@ -77,6 +77,7 @@ bool MissionViewport::follow_shots_(const ViewportInput &input, const Document &
 	if (!gesture_open_ && (key != shots_key_ || shots_.files_moved())) {
 		MissionShotsSetup setup;
 		setup.files = view.findings.assets;
+		setup.game = document.game();
 		setup.key = key;
 		if (const auto *mission = dynamic_cast<const MissionDocument *>(&document)) {
 			auto file = std::make_shared<bms::File>();

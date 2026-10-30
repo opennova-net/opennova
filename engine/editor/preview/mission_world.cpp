@@ -5,7 +5,6 @@
 #include <utility>
 
 #include <base/io/fixed.h>
-#include <base/title/title.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <runtime/mission/item_traits.h>
 #include <runtime/mission/promote.h>
@@ -27,7 +26,8 @@ bool pool_of(world::EntityKind kind, MissionPool &out) {
 
 } // namespace
 
-MissionFiles::MissionFiles(const std::shared_ptr<const FileSource> &files) {
+MissionFiles::MissionFiles(const std::shared_ptr<const FileSource> &files, std::string target_game)
+	: game(std::move(target_game)) {
 	stamped = std::make_shared<StampedFiles>(files);
 	index.mount_source(stamped);
 	store = std::make_unique<assets::AssetStore>(&index);
@@ -52,9 +52,8 @@ int mission_world_load_into(const MissionFiles &files, const bms::File &mission,
 			return def ? def->attrib : 0u;
 		};
 	}
-	// The rules what it runs reads (world::TitleRules): the default title's; the preview names no
-	// project's game.
-	world.rules.title_rules = &world::title_rules(default_title().code);
+	// The rules what it runs reads (world::TitleRules): the project's target game's.
+	world.rules.title_rules = &world::title_rules(files.game);
 	mission::promote_mission(mission, world, options);
 	world.ai.is_authority = true;
 	if (files.items_read)
