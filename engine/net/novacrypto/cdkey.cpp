@@ -174,7 +174,7 @@ KeyInfo &process_key_info() {
 KeyStore machine_key_store(const KeyChains &chains, const std::string &stand_in_dir) {
 	// The value's room: the read's 0x2000-byte buffer [orig: CDKey_ReadRegistry @0x411bd6
 	//  (dfx2.exe), the size pushed to the read].
-	constexpr size_t kValueRoom = 0x2000;
+	static constexpr size_t kValueRoom = 0x2000;
 	const std::string key = chains.registry_key != nullptr ? chains.registry_key : "";
 	const std::string value = chains.registry_value != nullptr ? chains.registry_value : "";
 	std::string stand_in;
