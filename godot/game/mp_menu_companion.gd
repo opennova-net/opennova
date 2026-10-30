@@ -100,21 +100,24 @@ func _on_screen_changed(screen_name: String) -> void:
 		novaworld_host_cancelled.emit()
 	if _driver == null or _driver.get_menu_file() != _wired_file:
 		return
-	if screen_name.nocasecmp_to("LAN_MULTI_PLAYER") != 0 or not _driver.has_widget("LAN_GAME_LIST"):
+	if screen_name.nocasecmp_to("LAN_MULTI_PLAYER") != 0:
 		return
-	# The LAN screen's activation writes the block's network connect type 2 (engine
-	# inmatch/game_config.h GameConfig::network_connect_type carries the witness).
-	GameCfgStore.block().set_word("networkconnecttype", 2)
-	_servers = []
-	_selected_server = -1
-	_browse_error = ""
-	_refresh_lan_list()
-	if _lan_session != null:
-		_lan_session.drain_records()
+	# Only the list's clear and the drain need the list; the refill and the write run on
+	# every activation of the screen.
+	if _driver.has_widget("LAN_GAME_LIST"):
+		_servers = []
+		_selected_server = -1
+		_browse_error = ""
+		_refresh_lan_list()
+		if _lan_session != null:
+			_lan_session.drain_records()
 	# The activation fills the host screen's WEAPON_LIST again from the block (engine
 	# inmatch/host_settings.h populate_host_weapon_list).
 	GameCfgStore.block().populate_host_weapon_list(_driver, Strings.get_table(Strings.TABLE_GAMETEXT),
 			Strings.get_table(Strings.TABLE_GAMEUI))
+	# The LAN screen's activation writes the block's network connect type 2 (engine
+	# inmatch/game_config.h GameConfig::network_connect_type carries the witness).
+	GameCfgStore.block().set_word("networkconnecttype", 2)
 
 
 # --- LAN browser screen (LAN_MULTI_PLAYER) ------------------------------------

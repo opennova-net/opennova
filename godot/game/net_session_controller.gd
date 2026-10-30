@@ -83,9 +83,6 @@ func _open_novaworld_host_setup() -> void:
 	if not _menu_shell.open_menu("mp.mnu", GameCfgStore.block().host_screen()):
 		return
 	_mp_companion.host_channel = HostSessionConfig.CHANNEL_NOVAWORLD
-	# The NovaWorld host screen's setup writes the block's network connect type 1 (engine
-	# inmatch/game_config.h GameConfig::network_connect_type carries the witness).
-	GameCfgStore.block().set_word("networkconnecttype", 1)
 	_novaworld_panel.hide()
 	_menu_shell.show_menu()
 	_menu_shell.set_process_unhandled_key_input(true)
@@ -543,6 +540,10 @@ func resolve_player_callsign() -> String:
 func open_novaworld_panel(start_client := true) -> void:
 	if _novaworld_panel != null:
 		return
+	# The NovaWorld screen's activation writes the block's network connect type 1, whether
+	# the player then hosts or joins (engine inmatch/game_config.h
+	# GameConfig::network_connect_type carries the witness).
+	GameCfgStore.block().set_word("networkconnecttype", 1)
 	_capture_menu_behind_novaworld()
 	_novaworld_panel = NOVAWORLD_PANEL_SCENE.instantiate() as NovaWorldPanel
 	# A return from a match hands the panel its session (or its error) instead
