@@ -18,7 +18,7 @@ resolve). Two headers that share a suffix both count as included (the check
 never reports a false orphan on an ambiguous include).
 
 Consumers scanned: engine/, games/, godot/src/, apps/, the platform backends
-(backend/, ADR 0077 d9; their own headers are scanned too), and the header's own
+(backends/, ADR 0077 d9; their own headers are scanned too), and the header's own
 directory. `tests/` is deliberately NOT a
 consumer: a header included only by its test is exactly the orphan shape.
 
@@ -43,8 +43,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "orphan_header_allowlist.json"
 
-HEADER_ROOTS = ("engine", "games", "backend", "godot/src")
-CONSUMER_ROOTS = ("engine", "games", "backend", "godot/src", "apps")
+HEADER_ROOTS = ("engine", "games", "backends", "godot/src")
+CONSUMER_ROOTS = ("engine", "games", "backends", "godot/src", "apps")
 SOURCE_SUFFIXES = (".h", ".hpp", ".c", ".cc", ".cpp", ".inl")
 HEADER_SUFFIXES = (".h", ".hpp")
 SKIP_PARTS = {"third_party", "build", "tools"}

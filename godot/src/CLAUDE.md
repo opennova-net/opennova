@@ -1,7 +1,7 @@
 # godot/src/ — the Godot GDExtension (retiring, ADR 0077)
 
 The engine owns everything above platform and GPU (ADR 0077), and SDL3 with SDL_GPU replaces
-Godot as the backend (`backend/sdl3`, `apps/game`); R8 deletes `godot/`. Until then this tree is
+Godot as the backend (`backends/sdl3`, `apps/game`); R8 deletes `godot/`. Until then this tree is
 the shipped game's binding and it only shrinks: no new behavior lands here, and nothing new is
 built here as a backend. Every behavior, render and audio policy included (what to draw, order,
 state, culling, skinning, transforms, mixing, panning, text layout, the game flow), belongs in

@@ -246,7 +246,7 @@ See [README.md](README.md) for packaged launch examples.
 ### The SDL3 game (opennova-game)
 
 `opennova-game` (`apps/game`, ADR 0077 d9) is the game over the SDL3 backend
-(`backend/sdl3`), which replaces the Godot build at R8. Until the engine frontend lands it
+(`backends/sdl3`), which replaces the Godot build at R8. Until the engine frontend lands it
 boots the one mission its command line names, with no menus, no HUD and a cleared window
 (rendering is R5), and runs it as a single player, the keyboard and mouse driving the local
 player through the default bindings:

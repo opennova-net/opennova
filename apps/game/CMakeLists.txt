@@ -1,6 +1,6 @@
 # opennova-game: the game over the SDL3 backend (ADR 0077 d9), the app shell that becomes
 # opennova.exe at R8 (the Godot build keeps that name until then). main() brings the SDL3
-# platform (backend/sdl3) and its SDL_GPU device up and runs the engine's frame over them; the
+# platform (backends/sdl3) and its SDL_GPU device up and runs the engine's frame over them; the
 # mission, its session and its input frame are the engine's (runtime/), the app owns their order.
 # Built only with OPENNOVA_GAME (the root CMakeLists.txt). godot-cpp is never on this graph.
 
