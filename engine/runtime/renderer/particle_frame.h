@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <runtime/particle/emitter.h>
+#include <runtime/renderer/pipeline_state.h>
 
 namespace opennova::renderer {
 
@@ -108,6 +109,13 @@ enum class ParticleThermalMaterial : std::uint8_t {
 	DarkeningModulate = 2,
 };
 ParticleThermalMaterial particle_thermal_material(ParticlePipeline pipeline, bool thermal);
+
+// The device state a colour-pass draw of `pipeline` binds under `thermal`'s
+// material: the material's SRCBLEND / DESTBLEND (its alpha pair the
+// component-wise alpha of each factor), both sides drawn, the depth tested
+// LESSEQUAL without a write.
+FixedFunctionState particle_pipeline_state(ParticlePipeline pipeline,
+		ParticleThermalMaterial thermal);
 
 enum class ParticleRenderPass : std::uint8_t {
 	Color = 0,

@@ -9,7 +9,6 @@
 #include "render/scene_overlay_compositor.h"
 #include "lights/light_spawn.h"
 #include "mission/mission_data.h"
-#include "object/entity_index.h"
 #include "object/entity_ref.h"
 #include "object/object_data.h"
 #include "simulation/present_event_records.h"
@@ -22,12 +21,13 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/core/object.hpp>
-#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 
 #include <algorithm>
 
+#include <runtime/renderer/light_draw_frame.h>
 #include <runtime/renderer/light_scene.h>
+#include <runtime/renderer/light_spawn.h>
 #include <runtime/renderer/scene_overlay.h>
 
 using namespace godot;
@@ -38,11 +38,26 @@ namespace {
 // ADR 0043 d9); a bare-scene test builds the same two-level shape.
 constexpr const char *kMissionObjectsPath = "MissionRoot/MissionObjects";
 
+// A node's world transform as the entity matrix an LGHT spawn reads
+// (renderer::LightPlacement: the basis rows, then the origin).
+opennova::renderer::LightPlacement light_placement(const Transform3D &p_transform) {
+	opennova::renderer::LightPlacement placement{};
+	for (int row = 0; row < 3; ++row) {
+		for (int column = 0; column < 3; ++column)
+			placement[row * 3 + column] = static_cast<float>(p_transform.basis.rows[row][column]);
+		placement[9 + row] = static_cast<float>(p_transform.origin[row]);
+	}
+	return placement;
+}
+
 } // namespace
 
 EffectLightDirector::EffectLightDirector() {
 	scene_.instantiate();
+	spawner_ = std::make_unique<opennova::renderer::LightSpawner>(scene_->engine());
 }
+
+EffectLightDirector::~EffectLightDirector() = default;
 
 void EffectLightDirector::setup(Node *p_world, const Ref<MissionObjectPlacer> &p_placer) {
 	setup_with_provider(p_world, p_placer.ptr());
@@ -136,18 +151,10 @@ Ref<LightScene> EffectLightDirector::scene() const {
 }
 
 void EffectLightDirector::reset() {
-	for (const KeyValue<uint64_t, SpawnedNode> &kv : spawned_nodes_) {
-		_disconnect_wire_node_exit(kv.value);
-	}
+	spawner_->reset();
 	scene()->clear();
-	spawned_static_.clear();
 	static_sources_snapshot_.clear();
 	static_rows_revision_ = -1;
-	static_owner_by_bms_.clear();
-	spawned_nodes_.clear();
-	entity_effect_handles_.clear();
-	round_handles_.clear();
-	blink_owner_cache_.clear();
 	reg_models_.clear();
 	reg_owners_.clear();
 	reg_robj_scoped_.clear();
@@ -158,52 +165,61 @@ void EffectLightDirector::reset() {
 void EffectLightDirector::reattach() {
 	reset();
 	Node *container = scene_set_ ? nullptr : _mission_objects();
-	if (scene_set_ || container != nullptr) {
-		const TypedArray<Node> children = scene_set_ ? scene_models_ : container->get_children();
-		for (int64_t i = 0; i < children.size(); ++i) {
-			ObjectModel *node = Object::cast_to<ObjectModel>(static_cast<Object *>(children[i]));
-			if (node == nullptr || node->get_entity_ref().is_null()) {
-				continue;
-			}
-			on_wire_node_spawned(node, -1, 0);
-		}
+	TypedArray<Node> children;
+	if (scene_set_) {
+		children = scene_models_;
+	} else if (container != nullptr) {
+		children = container->get_children();
 	}
 	static_sources_snapshot_ = _static_sources();
 	static_rows_revision_ = -1;
-	// Build every BMS identity before resolving any blink containment. A
-	// static item can spawn inside a batched building that appears later in
-	// the source walk, and retail still binds it to that building's owner
-	// group.
-	for (int64_t source_index = 0; source_index < static_sources_snapshot_.size(); ++source_index) {
-		const auto &mapped_source = static_sources_snapshot_[source_index];
-		const int bms_id = mapped_source.bms_id;
-		if (bms_id != 0) {
-			static_owner_by_bms_.insert(bms_id, LightScene::owner_id_for_static_source(source_index));
+	// Every building identity before any blink containment resolves
+	// (renderer::LightSpawner::register_building carries the witness); a
+	// batched static's tagged id wins its BMS id.
+	for (size_t source_index = 0; source_index < static_sources_snapshot_.size(); ++source_index) {
+		spawner_->register_building(static_sources_snapshot_[source_index].bms_id,
+				opennova::renderer::LightOwnerIds::static_source(static_cast<int64_t>(source_index)));
+	}
+	for (int64_t i = 0; i < children.size(); ++i) {
+		ObjectModel *node = Object::cast_to<ObjectModel>(static_cast<Object *>(children[i]));
+		if (node != nullptr && node->get_entity_ref().is_valid()) {
+			_register_entity(node, owner_id_for_node(node));
 		}
 	}
-	for (int64_t source_index = 0; source_index < static_sources_snapshot_.size(); ++source_index) {
-		const auto &source = static_sources_snapshot_[source_index];
-		if (spawned_static_.has(static_cast<int>(source_index))) {
+	for (int64_t i = 0; i < children.size(); ++i) {
+		ObjectModel *node = Object::cast_to<ObjectModel>(static_cast<Object *>(children[i]));
+		if (node == nullptr || node->get_entity_ref().is_null()) {
 			continue;
 		}
-		const Ref<ObjectData> data = provider_->static_source_object_data(source.asset_id);
-		if (data.is_null()) {
+		on_wire_node_spawned(node, -1, 0);
+	}
+	for (size_t source_index = 0; source_index < static_sources_snapshot_.size(); ++source_index) {
+		const auto &source = static_sources_snapshot_[source_index];
+		const Ref<ObjectData> data = provider_ != nullptr
+				? provider_->static_source_object_data(source.asset_id) : Ref<ObjectData>();
+		if (data.is_null() || data->get_light_count() <= 0) {
 			continue;
 		}
 		// Batched statics are entities too: a subobject record binds to this
-		// tagged owner and the atlas draw row declares the same identity.
-		// [orig: Entity_SpawnGlowEffects @ 0x56c8ae; SetOwnerGroup(entity,bone)]
-		const Transform3D xform = from_static_source_transform(source.world_transform);
-		const bool is_building = _record_is_building(source.kind, source.item_id);
+		// tagged owner and the atlas draw row declares the same identity
+		// (renderer::LightSpawner::spawn_entity).
+		opennova::renderer::EntityLightSpawn spawn;
+		spawn.owner_entity =
+				opennova::renderer::LightOwnerIds::static_source(static_cast<int64_t>(source_index));
+		spawn.records = data->native_model().lights;
+		spawn.record_count = data->native_model().light_count;
+		spawn.placement = source.world_transform;
+		spawn.building = _record_is_building(source.kind, source.item_id);
 		// Retail skips the blink query for a Building-type def's own records;
 		// every other static (the pool-2 decorations too) resolves containment
 		// once at its placement origin.
-		const BlinkOwner blink_owner = is_building ? BlinkOwner() : _blink_owner_at(xform.origin);
-		const Vector<int64_t> handles = _spawn_model_lights(data, xform,
-				LightScene::owner_id_for_static_source(source_index), blink_owner, is_building);
-		if (!handles.is_empty()) {
-			spawned_static_.insert(static_cast<int>(source_index), handles);
+		if (!spawn.building) {
+			const BlinkOwner blink =
+					_blink_owner_at(from_static_source_transform(source.world_transform).origin);
+			spawn.blink_owner = static_cast<uint64_t>(blink.owner);
+			spawn.blink_section = blink.section;
 		}
+		spawner_->spawn_entity(spawn);
 	}
 }
 
@@ -218,116 +234,48 @@ int64_t EffectLightDirector::owner_id_for_node(ObjectModel *p_node) {
 					 : static_cast<int64_t>(p_node->get_instance_id());
 }
 
+void EffectLightDirector::_register_entity(ObjectModel *p_node, int64_t p_owner_id) {
+	const Ref<EntityRef> ref = p_node->get_entity_ref();
+	if (ref.is_null() || ref->get_bms_id() == 0 || spawner_->owner_for_bms(ref->get_bms_id()) != 0) {
+		return;
+	}
+	spawner_->register_building(ref->get_bms_id(), static_cast<uint64_t>(p_owner_id));
+}
+
 void EffectLightDirector::on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id) {
 	(void)p_kind;
 	(void)p_item_id;
 	if (p_node == nullptr) {
 		return;
 	}
-	const uint64_t node_id = p_node->get_instance_id();
-	if (spawned_nodes_.has(node_id)) {
-		return;
-	}
-	const Ref<ObjectData> data = p_node->get_object_data();
-	if (data.is_null()) {
-		return;
-	}
-	// Retail runs the blink query once per spawning entity, and skips it
-	// outright for a BUILDING — a building's own unattached records stay
-	// world lights even though its blink volumes contain them (the query has
-	// no self-exclusion) [orig: the ItemType_Building gate @ 0x56c7ec]. The
-	// gate is the items.def type: a pool-2 decoration queries like any entity.
-	const Ref<EntityRef> ref = p_node->get_entity_ref();
-	const bool is_building =
-			ref.is_valid() && _record_is_building(ref->get_kind(), ref->get_item_id());
-	BlinkOwner blink_owner;
-	if (!is_building) {
-		blink_owner = _blink_owner_at(p_node->get_global_position());
-	}
-	if (data->get_light_count() <= 0) {
-		return;
-	}
 	const int64_t owner_id = owner_id_for_node(p_node);
-	entity_effect_handles_.insert(owner_id,
-			_spawn_node_lights(p_node, owner_id, blink_owner, is_building));
-	// Register even when pool exhaustion returned zero. Retail walks a given
-	// entity once; duplicate callback delivery must not turn a later free
-	// slot into an invented second spawn attempt.
-	SpawnedNode record;
-	record.node = ObjectID(node_id);
-	record.owner_id = owner_id;
-	record.tree_exiting = Callable(this, "_on_wire_node_exiting").bind(static_cast<int64_t>(node_id));
-	p_node->connect("tree_exiting", record.tree_exiting, Object::CONNECT_ONE_SHOT);
-	spawned_nodes_.insert(node_id, record);
-}
-
-void EffectLightDirector::_on_wire_node_exiting(int64_t p_node_id) {
-	const SpawnedNode *record = spawned_nodes_.getptr(static_cast<uint64_t>(p_node_id));
-	if (record == nullptr) {
+	_register_entity(p_node, owner_id);
+	const Ref<ObjectData> data = p_node->get_object_data();
+	if (data.is_null() || data->get_light_count() <= 0) {
 		return;
 	}
-	const int64_t owner_id = record->owner_id;
-	spawned_nodes_.erase(static_cast<uint64_t>(p_node_id));
-	// Entity_Destroy has one 16-bit EffectWorld word, not an owned-light
-	// list. Clear exactly the lease currently cached there; a husk swap does
-	// not exit the node and therefore does not touch any authored light.
-	if (const int64_t *cached_handle = entity_effect_handles_.getptr(owner_id)) {
-		if (*cached_handle != 0) {
-			scene()->despawn(*cached_handle);
-		}
+	// The entity's one walk (renderer::LightSpawner::spawn_entity): the
+	// records through the entity matrix once, the building gate on the
+	// items.def type (a pool-2 decoration queries like any entity), and the
+	// one blink query at the entity's position.
+	const Ref<EntityRef> ref = p_node->get_entity_ref();
+	opennova::renderer::EntityLightSpawn spawn;
+	spawn.owner_entity = static_cast<uint64_t>(owner_id);
+	spawn.records = data->native_model().lights;
+	spawn.record_count = data->native_model().light_count;
+	const Transform3D transform = p_node->get_global_transform();
+	spawn.placement = light_placement(transform);
+	spawn.building = ref.is_valid() && _record_is_building(ref->get_kind(), ref->get_item_id());
+	if (!spawn.building && !spawner_->walked(spawn.owner_entity)) {
+		const BlinkOwner blink = _blink_owner_at(transform.origin);
+		spawn.blink_owner = static_cast<uint64_t>(blink.owner);
+		spawn.blink_section = blink.section;
 	}
-	entity_effect_handles_.erase(owner_id);
+	spawner_->spawn_entity(spawn);
 }
 
-void EffectLightDirector::_disconnect_wire_node_exit(const SpawnedNode &p_record) {
-	Node *node = Object::cast_to<Node>(ObjectDB::get_instance(p_record.node));
-	const Callable &on_exit = p_record.tree_exiting;
-	if (node != nullptr && on_exit.is_valid() && node->is_connected("tree_exiting", on_exit)) {
-		node->disconnect("tree_exiting", on_exit);
-	}
-}
-
-Vector<int64_t> EffectLightDirector::_spawn_model_lights(const Ref<ObjectData> &p_data,
-		const Transform3D &p_world_transform, int64_t p_owner_id, const BlinkOwner &p_blink_owner,
-		bool p_spawner_is_building) {
-	Vector<int64_t> handles;
-	if (p_data.is_null()) {
-		return handles;
-	}
-	for (int i = 0; i < p_data->get_light_count(); ++i) {
-		const Ref<ModelLight> info = p_data->get_light_info(i);
-		const int64_t handle = _spawn_light_at(info,
-				p_world_transform.xform(info->get_position()), p_owner_id, p_blink_owner,
-				p_spawner_is_building);
-		if (handle != 0) {
-			handles.push_back(handle);
-		}
-	}
-	return handles;
-}
-
-// Live-node twin of the static source walk. Retail transforms every record's
-// model-space point by the ENTITY placement matrix once; `subobject` is read
-// only afterward as an owner-group section [orig: Entity_SpawnGlowEffects
-// @0x56c82d..0x56c84e, then @0x56c89a..0x56c8ae]. No node/ROBJ/bone position
-// follow exists. Return the final entity+0x1B4 value; retail retains no list.
-int64_t EffectLightDirector::_spawn_node_lights(ObjectModel *p_node, int64_t p_owner_id,
-		const BlinkOwner &p_blink_owner, bool p_spawner_is_building) {
-	if (p_node == nullptr) {
-		return 0;
-	}
-	const Ref<ObjectData> data = p_node->get_object_data();
-	if (data.is_null()) {
-		return 0;
-	}
-	int64_t cached_handle = 0;
-	const Transform3D world_transform = p_node->get_global_transform();
-	for (int index = 0; index < data->get_light_count(); ++index) {
-		const Ref<ModelLight> info = data->get_light_info(index);
-		cached_handle = _spawn_light_at(info, world_transform.xform(info->get_position()),
-				p_owner_id, p_blink_owner, p_spawner_is_building);
-	}
-	return cached_handle;
+void EffectLightDirector::on_wire_entity_destroyed(int p_wire_handle) {
+	spawner_->destroy_entity(opennova::renderer::LightOwnerIds::wire(p_wire_handle));
 }
 
 int64_t EffectLightDirector::spawn_light_record(const Ref<ModelLight> &p_info,
@@ -401,29 +349,11 @@ bool EffectLightDirector::_record_is_building(int p_kind, int p_item_id) const {
 			has_def ? items->get_item_type(p_item_id) : 0);
 }
 
-// The owner id a containing building's bms_id resolves to — the SAME id its
-// own draw context declares, or owner gating never matches.
+// The owner id a containing building's bms_id resolves to: the SAME id its
+// own draw context declares, or owner gating never matches
+// (renderer::LightSpawner::owner_for_bms).
 int64_t EffectLightDirector::_owner_id_for_bms(int p_bms_id) {
-	if (p_bms_id == 0) {
-		return 0;
-	}
-	if (const int64_t *static_owner = static_owner_by_bms_.getptr(p_bms_id)) {
-		return *static_owner;
-	}
-	if (const int64_t *cached = blink_owner_cache_.getptr(p_bms_id)) {
-		return *cached;
-	}
-	int64_t owner = 0;
-	if (MissionRoot *runtime = _runtime()) {
-		const Ref<EntityIndex> registry = runtime->get_entity_index();
-		if (registry.is_valid()) {
-			if (ObjectModel *node = registry->resolve_single(p_bms_id)) {
-				owner = owner_id_for_node(node);
-			}
-		}
-	}
-	blink_owner_cache_.insert(p_bms_id, owner);
-	return owner;
+	return static_cast<int64_t>(spawner_->owner_for_bms(p_bms_id));
 }
 
 Vector3 EffectLightDirector::light_gain() const {
@@ -445,91 +375,55 @@ void EffectLightDirector::_render_static_light_rows(const Vector3 &p_gain, Weath
 		int p_time_ms) {
 	const int64_t revision = _static_draw_source_revision();
 	if (revision != static_rows_revision_) {
-		_rebuild_static_light_rows();
+		_rebuild_static_light_rows(revision);
 		static_rows_revision_ = revision;
 	}
-	scene()->render_static_frame(static_rows_positions_, static_rows_bound_radii_q16_,
-			static_rows_owner_entities_,
-			static_rows_owner_sections_, static_rows_interior_owners_,
-			static_rows_interior_sections_, static_rows_active_, p_gain, p_time_ms, p_weather,
-			static_rows_revision_, static_rows_entity_lights_);
+	scene()->select_static_rows(p_gain, p_time_ms, p_weather);
 }
 
-void EffectLightDirector::_rebuild_static_light_rows() {
+// The immutable-index static atlas rows. The placer owns row identity and
+// entity bounds; each row declares the engine's static-row groups
+// (renderer::static_light_row_groups) and its lighting lane
+// (renderer::static_light_row_lane).
+void EffectLightDirector::_rebuild_static_light_rows(int64_t p_revision) {
 	const auto descriptors = _static_draw_sources();
 	int row_count = 0;
-	for (int64_t i = 0; i < descriptors.size(); ++i) {
-		const auto &descriptor = descriptors[i];
+	for (const auto &descriptor : descriptors) {
 		row_count = std::max(row_count, descriptor.atlas_row + 1);
 	}
-	PackedVector3Array entity_positions;
-	PackedInt32Array entity_bound_radii_q16;
-	PackedInt64Array owner_entities;
-	PackedInt32Array owner_sections;
-	PackedInt64Array interior_owners;
-	PackedInt32Array interior_sections;
-	PackedByteArray active;
-	PackedVector4Array entity_lights;
-	entity_positions.resize(row_count);
-	entity_bound_radii_q16.resize(row_count);
-	owner_entities.resize(row_count);
-	owner_sections.resize(row_count);
-	interior_owners.resize(row_count);
-	interior_sections.resize(row_count);
-	active.resize(row_count);
-	entity_lights.resize(row_count);
-	for (int64_t i = 0; i < descriptors.size(); ++i) {
-		const auto &descriptor = descriptors[i];
+	std::vector<opennova::renderer::StaticLightRow> rows(static_cast<size_t>(row_count));
+	for (const auto &descriptor : descriptors) {
 		const int atlas_row = descriptor.atlas_row;
 		const int source_index = descriptor.source_index;
 		if (atlas_row < 0 || atlas_row >= row_count || source_index < 0 ||
-				source_index >= static_sources_snapshot_.size()) {
+				source_index >= static_cast<int>(static_sources_snapshot_.size())) {
 			continue;
 		}
 		const auto &source = static_sources_snapshot_[source_index];
-		entity_positions[atlas_row] = from_static_source_transform(source.world_transform).origin;
-		entity_bound_radii_q16[atlas_row] = source.entity_bound_radius_q16;
-		active[atlas_row] = descriptor.active ? 1 : 0;
-		// The row's two groups are the engine's static-row policy
-		// (renderer::static_light_row_groups): a building is its own
-		// interior group at section zero with the owner section re-scoped
-		// to this exact ROBJ; every other row is owned by its static owner
-		// and carries the blink interior its placement origin resolves. A
-		// building is a Building-type DEF: the pool-2 decorations and foliage
+		opennova::renderer::StaticLightRow &row = rows[static_cast<size_t>(atlas_row)];
+		row.query.position_fixed = opennova::renderer::light_placement_origin_fixed(source.world_transform);
+		row.query.bound_radius_fixed = source.entity_bound_radius_q16;
+		row.active = descriptor.active;
+		// A building is a Building-type DEF: the pool-2 decorations and foliage
 		// draw in the entity wave (mission::placed_record_is_building).
 		opennova::renderer::StaticLightRowInputs inputs;
-		inputs.static_owner = static_cast<uint64_t>(LightScene::owner_id_for_static_source(source_index));
+		inputs.static_owner = opennova::renderer::LightOwnerIds::static_source(source_index);
 		inputs.robj_index = descriptor.robj_index;
 		inputs.is_building = _record_is_building(descriptor.kind >= 0 ? descriptor.kind : source.kind,
 				descriptor.item_id != 0 ? descriptor.item_id : source.item_id);
 		if (!inputs.is_building) {
-			const BlinkOwner interior = _blink_owner_at(from_static_source_transform(source.world_transform).origin);
+			const BlinkOwner interior =
+					_blink_owner_at(from_static_source_transform(source.world_transform).origin);
 			inputs.blink_hit = interior.valid();
 			inputs.blink_owner_entity = static_cast<uint64_t>(interior.owner);
 			inputs.blink_section = interior.section;
 		}
-		// The row's per-entry lighting state (the u_entity_light lane a
-		// MultiMesh instance cannot carry): a building's ROBJ 1+ lerps by its
-		// own daylight, a contained static lerps with t = 0; w the water
-		// mirror's CLIP arming.
-		entity_lights[atlas_row] = LightScene::static_row_entity_lane(inputs.is_building,
+		row.groups = opennova::renderer::static_light_row_groups(inputs);
+		row.lane = opennova::renderer::static_light_row_lane(inputs.is_building,
 				descriptor.robj_index, descriptor.light_transfer, inputs.blink_hit,
 				source.model_floor_q16, source.entity_bound_radius_q16);
-		const opennova::renderer::LightActiveGroups groups =
-				opennova::renderer::static_light_row_groups(inputs);
-		owner_entities[atlas_row] = static_cast<int64_t>(groups.owner_group_entity);
-		owner_sections[atlas_row] = groups.owner_group_section;
-		interior_owners[atlas_row] = static_cast<int64_t>(groups.interior_group_entity);
-		interior_sections[atlas_row] = groups.interior_group_section;
 	}
-	static_rows_positions_ = entity_positions;
-	static_rows_bound_radii_q16_ = entity_bound_radii_q16;
-	static_rows_owner_entities_ = owner_entities;
-	static_rows_owner_sections_ = owner_sections;
-	static_rows_interior_owners_ = interior_owners;
-	static_rows_interior_sections_ = interior_sections;
-	static_rows_active_ = active;
-	static_rows_entity_lights_ = entity_lights;
+	scene()->set_static_rows(p_revision, std::move(rows));
 }
 
 void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
@@ -549,10 +443,9 @@ void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 	if (_walk_models()) {
 		for (int64_t i = 0; i < reg_models_.size(); ++i) {
 			ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(reg_models_[i]));
+			// Every model the view draws selects (no camera distance gates the
+			// select, renderer/light_draw_frame.h).
 			if (model == nullptr || !model->is_visible_in_tree()) {
-				continue;
-			}
-			if (model->get_global_position().distance_to(cam_pos) > QUERY_RADIUS) {
 				continue;
 			}
 			_push_model_draw(model, i);
@@ -594,7 +487,7 @@ void EffectLightDirector::render_frame(Camera3D *p_camera, int64_t p_time_ms,
 	census_cam_pos_ = cam_pos;
 	census_time_ms_ = time_ms;
 	if (p_run_census) {
-		scene()->render_frame(cam_pos, QUERY_RADIUS, gain, time_ms, weather);
+		scene()->render_frame(cam_pos, kCensusRadius, gain, time_ms, weather);
 		census_stale_ = false;
 	} else {
 		census_stale_ = true;
@@ -659,9 +552,6 @@ void EffectLightDirector::render_inset_frame(Camera3D *p_camera, int64_t p_time_
 			if (model == nullptr || !model->is_inset_view_drawn()) {
 				continue;
 			}
-			if (model->get_global_position().distance_to(camera_transform.origin) > QUERY_RADIUS) {
-				continue;
-			}
 			_push_model_draw(model, i);
 		}
 	}
@@ -686,7 +576,7 @@ void EffectLightDirector::run_census_now() {
 	// census_frame refreshes the rows without restamping the report's mode:
 	// a report read with the F3 stats off keeps saying what the gameplay
 	// pass (render_model_frame) reported.
-	scene()->census_frame(census_cam_pos_, QUERY_RADIUS, light_gain(), census_time_ms_, _weather());
+	scene()->census_frame(census_cam_pos_, kCensusRadius, light_gain(), census_time_ms_, _weather());
 	census_stale_ = false;
 }
 
@@ -729,9 +619,6 @@ void EffectLightDirector::_ensure_model_registry(Node *p_container) {
 void EffectLightDirector::_on_container_membership_changed(Node *p_node) {
 	(void)p_node;
 	reg_dirty_ = true;
-	// A bms id's resolved owner can change with membership
-	// (despawn/respawn), so the blink-owner cache follows the registry.
-	blink_owner_cache_.clear();
 }
 
 void EffectLightDirector::_rebuild_model_registry(const TypedArray<Node> &p_models) {
@@ -747,9 +634,9 @@ void EffectLightDirector::_rebuild_model_registry(const TypedArray<Node> &p_mode
 		if (entity_model == nullptr) entity_model = model;
 		const Ref<EntityRef> ref = entity_model->get_entity_ref();
 		reg_models_.push_back(ObjectID(model->get_instance_id()));
-		const int64_t *static_owner = ref.is_valid()
-				? static_owner_by_bms_.getptr(ref->get_bms_id()) : nullptr;
-		reg_owners_.push_back(static_owner != nullptr ? *static_owner : owner_id_for_node(model));
+		// A batched static's tagged id wins its BMS id (the registry).
+		const int64_t registered = ref.is_valid() ? _owner_id_for_bms(ref->get_bms_id()) : 0;
+		reg_owners_.push_back(registered != 0 ? registered : owner_id_for_node(model));
 		// Only a building pass draw re-scopes its owner per ROBJ: a
 		// Building-type def, not every pool-2 record.
 		reg_robj_scoped_.push_back(
@@ -894,13 +781,9 @@ void EffectLightDirector::advance_fixed_tick() {
 }
 
 void EffectLightDirector::on_muzzle_fire(int64_t p_shooter_handle, const Vector3 &p_world_pos) {
-	// The shooter's handle word, the engine's re-arm rule (renderer::LightScene::fire_muzzle_glow).
-	const int64_t owner_id = LightScene::owner_id_for_wire(p_shooter_handle);
-	const int64_t *cached = entity_effect_handles_.getptr(owner_id);
-	const int64_t handle = scene()->fire_muzzle_glow(cached ? *cached : 0, p_world_pos, owner_id);
-	if (handle != 0) {
-		entity_effect_handles_.insert(owner_id, handle);
-	}
+	// The shooter's cached word and the re-arm rule (renderer::LightSpawner::muzzle_fire).
+	spawner_->muzzle_fire(opennova::renderer::LightOwnerIds::wire(p_shooter_handle),
+			godot_to_mission_q16(p_world_pos));
 }
 
 void EffectLightDirector::on_impact_light(const Vector3 &p_world_pos, float p_radius,
@@ -925,41 +808,7 @@ void EffectLightDirector::sync_round_glow_records(const Array &p_rows) {
 }
 
 void EffectLightDirector::sync_round_glows(const std::vector<opennova::world::RoundGlowRow> &p_rows) {
-	HashSet<int64_t> seen;
-	for (const opennova::world::RoundGlowRow &row : p_rows) {
-		const int64_t id = static_cast<int64_t>(row.id);
-		seen.insert(id);
-		const float radius = row.radius;
-		// Mission (x, y, z-up) -> Godot (x, z, -y), the presentation drains' rule.
-		const Vector3 pos = mission_to_godot(row.pos);
-		const int64_t *cached = round_handles_.getptr(id);
-		if (cached == nullptr || *cached == 0) {
-			// The spawn rides radius/2 above the round; the per-tick follow
-			// re-centers at the raw round position [orig: @ 0x4ec8d6 vs the
-			// @ 0x4eaa9f SetPositionAndBounds follow] — the engine's
-			// round-glow law.
-			const int64_t handle = scene()->spawn_glow(
-					GlowSpawn::make(pos + Vector3(0.0f, opennova::renderer::round_glow_spawn_lift(radius), 0.0f),
-							radius, opennova::color_from_rgb24(row.color_rgb24))
-							->masking(false, true, false));
-			if (handle != 0) {
-				round_handles_.insert(id, handle);
-			}
-		} else {
-			scene()->set_light_position(*cached,
-					pos + Vector3(0.0f, opennova::renderer::kRoundGlowFollowLift, 0.0f));
-		}
-	}
-	Vector<int64_t> dropped;
-	for (const KeyValue<int64_t, int64_t> &kv : round_handles_) {
-		if (!seen.has(kv.key)) {
-			dropped.push_back(kv.key);
-		}
-	}
-	for (const int64_t id : dropped) {
-		scene()->despawn(round_handles_[id]);
-		round_handles_.erase(id);
-	}
+	spawner_->sync_round_glows(p_rows);
 }
 
 Ref<EffectLightReport> EffectLightDirector::get_report() {
@@ -996,8 +845,8 @@ void EffectLightDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sync_round_glows", "rows"),
 			&EffectLightDirector::sync_round_glow_records);
 	ClassDB::bind_method(D_METHOD("get_report"), &EffectLightDirector::get_report);
-	ClassDB::bind_method(D_METHOD("_on_wire_node_exiting", "node_id"),
-			&EffectLightDirector::_on_wire_node_exiting);
+	ClassDB::bind_method(D_METHOD("on_wire_entity_destroyed", "wire_handle"),
+			&EffectLightDirector::on_wire_entity_destroyed);
 	ClassDB::bind_method(D_METHOD("_on_container_membership_changed", "node"),
 			&EffectLightDirector::_on_container_membership_changed);
 }

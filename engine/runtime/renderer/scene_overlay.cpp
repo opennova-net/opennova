@@ -83,21 +83,36 @@ void compile_scene_overlay(const SceneOverlayFrame &frame, const SceneOverlaySlo
 	}
 }
 
-SceneOverlayBlend scene_overlay_blend(SceneOverlayShading shading) {
-	using F = SceneOverlayBlendFactor;
+BlendState scene_overlay_blend(SceneOverlayShading shading) {
+	using F = BlendFactor;
+	// The colour pair; the alpha keeps the target's (ZERO / ONE) but under
+	// SRCALPHA / INVSRCALPHA, where it blends the same way.
+	const auto keep_alpha = [](F source, F dest) {
+		return BlendState{true, source, dest, F::Zero, F::One};
+	};
 	switch (shading) {
 		case SceneOverlayShading::AdditiveModulate:
 		case SceneOverlayShading::SelfLumAdditive:
 		case SceneOverlayShading::RibbonStock:
-			return {F::One, F::One};
+			return keep_alpha(F::One, F::One);
 		case SceneOverlayShading::DimMultiply:
-			return {F::DestColor, F::Zero};
+			return keep_alpha(F::DestColor, F::Zero);
 		case SceneOverlayShading::NvgLaser:
-			return {F::SrcAlpha, F::One};
+			return keep_alpha(F::SrcAlpha, F::One);
 		default:
 			// Modulate2xBlend, FlatBlend, RibbonSmoke.
-			return {F::SrcAlpha, F::InvSrcAlpha};
+			return {true, F::SrcAlpha, F::InvSrcAlpha, F::SrcAlpha, F::InvSrcAlpha};
 	}
+}
+
+FixedFunctionState scene_overlay_pipeline_state(const SceneOverlayPipelineState &state) {
+	FixedFunctionState out;
+	out.blend = scene_overlay_blend(state.shading);
+	out.cull = CullMode::None;
+	out.depth_test = state.depth_test;
+	out.depth_write = false;
+	out.depth_compare = DepthCompare::LessEqual;
+	return out;
 }
 
 bool scene_overlay_view_draws(const SceneOverlayBatch &batch, float eye_height) {

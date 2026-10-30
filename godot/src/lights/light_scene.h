@@ -20,7 +20,9 @@
 
 #include <godot_cpp/variant/color.hpp>
 
+#include <runtime/renderer/light_draw_frame.h>
 #include <runtime/renderer/light_scene.h>
+#include <runtime/renderer/light_spawn.h>
 #include <runtime/renderer/light_terrain_pass.h>
 #include <runtime/renderer/render_slot_shadow.h>
 
@@ -89,10 +91,8 @@ public:
 	int census_frame(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
 
-	// The per-draw gameplay pass [orig: Light_SelectAndEnableForDraw @0x5ab9d0
-	// and the collectors' group gate @0x5d91f8 per draw context, see
-	// docs/render/render-lighting-re.md]: one draw context
-	// per visible ObjectModel. The owner group is what that submit declares
+	// The per-draw gameplay pass (renderer::LightDrawFrame carries the policy
+	// and the witness): one draw context per visible ObjectModel. The owner group is what that submit declares
 	// (renderer::submit_owner_group): p_owner_entities names the drawn entity,
 	// which only a person's skinned draws keep; every other draw declares
 	// entity 0 with its rigid ROBJ section, splitting per visible ROBJ only
@@ -152,14 +152,15 @@ public:
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			int64_t p_rows_revision = -1,
 			const PackedVector4Array &p_entity_lights = PackedVector4Array());
-	// One static row's p_entity_lights lane: renderer::static_row_entity_lighting
-	// (effectScale, interior lerp, daylight) and, in w, the water mirror's CLIP
-	// arming as an offset from the instance origin (a building's floor in the
-	// sector-model pass, the bound radius in the first entity wave; a static
-	// row is never a person). `p_contained` is the row's placement blink hit.
-	static Vector4 static_row_entity_lane(bool p_is_building, int32_t p_robj_index,
-			float p_light_transfer, bool p_contained, int32_t p_model_floor_q16,
-			int32_t p_entity_bound_radius_q16);
+	// The C++ form of render_static_frame: the engine's rows (their revision
+	// keys the cached selection, renderer::StaticLightRows) and one frame's
+	// select, uploaded when the payload changed. Returns the active rows lit.
+	void set_static_rows(int64_t p_revision,
+			std::vector<opennova::renderer::StaticLightRow> p_rows);
+	int select_static_rows(const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
+	// The engine pool behind this binding (the spawners' and the co-consumers').
+	opennova::renderer::LightScene &engine() { return scene_; }
+	const opennova::renderer::LightScene &engine() const { return scene_; }
 	// The atlas render_static_frame built, published again as
 	// opennova_static_point_light_rows (a picture that shares the global with
 	// another: the editor's mission device, ViewportApplier::publish_scene_state).
@@ -176,9 +177,12 @@ public:
 	// ObjectIDs: a decoded wire handle (16-bit, zero valid) and a static
 	// source index, each tagged into a nonzero range disjoint from ObjectIDs
 	// so zero stays retail's unowned/world sentinel. 0 for a negative input.
-	static constexpr int64_t WIRE_OWNER_TAG = int64_t(1) << 48;
-	static constexpr int64_t STATIC_OWNER_TAG = int64_t(2) << 48;
-	static constexpr int64_t WIRE_HANDLE_MASK = 0xFFFF;
+	static constexpr int64_t WIRE_OWNER_TAG =
+			static_cast<int64_t>(opennova::renderer::LightOwnerIds::kWireTag);
+	static constexpr int64_t STATIC_OWNER_TAG =
+			static_cast<int64_t>(opennova::renderer::LightOwnerIds::kStaticTag);
+	static constexpr int64_t WIRE_HANDLE_MASK =
+			static_cast<int64_t>(opennova::renderer::LightOwnerIds::kWireHandleMask);
 	static int64_t owner_id_for_wire(int64_t p_wire_handle);
 	static int64_t owner_id_for_static_source(int64_t p_source_index);
 
@@ -292,22 +296,6 @@ private:
 	// The camera-global select behind render_frame and census_frame.
 	int camera_global_select(const Vector3 &p_camera_world, float p_query_radius,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather);
-	// count + three (posr, color) pairs + the entity lighting lane.
-	static constexpr int STATIC_LIGHT_ROW_TEXELS = 10;
-	static constexpr int STATIC_LIGHT_ROW_LANE_TEXEL = STATIC_LIGHT_ROW_TEXELS - 1;
-	struct StaticCachedSelection {
-		int atlas_row = 0;
-		opennova::renderer::LightActiveGroups groups{};
-		std::array<opennova::renderer::LightHandle,
-				opennova::renderer::LightScene::kSelectLimit> handles{};
-		size_t count = 0;
-		// Any cached handle carries an RgbGen style: the row's color varies
-		// per frame and must re-select even on quiet frames.
-		bool animated = false;
-		// The re-select count of the last frame that evaluated this row (a
-		// skipped row's inputs are unchanged, so its count carries over).
-		size_t last_count = 0;
-	};
 	// The view a corona walk gates its owned coronas for: the section masks of
 	// that view's own collect.
 	enum class CoronaView : uint8_t { Main, Inset, Mirror, InsetMirror };
@@ -322,6 +310,8 @@ private:
 			const Ref<EnvLightValues> &p_fog, CoronaView p_view,
 			std::vector<opennova::renderer::LightCoronaOwnerMask> &r_owner_masks,
 			opennova::renderer::LightCoronaFrameInputs &r_inputs) const;
+	// The engine's atlas onto the device texture, when it changed.
+	void upload_static_rows();
 	// render_model_frame and render_inset_model_frame: one pass over one view.
 	int select_model_frame(const TypedArray<Node3D> &p_models,
 			const PackedInt64Array &p_owner_entities,
@@ -333,6 +323,10 @@ private:
 			const PackedInt32Array &p_entity_bound_radii_q16, bool p_inset_view);
 
 	opennova::renderer::LightScene scene_;
+	// The per-draw pass's contexts (reused per frame) and the static rows.
+	opennova::renderer::LightDrawFrame draw_frame_;
+	opennova::renderer::StaticLightRows static_rows_;
+	int64_t static_rows_revision_ = -1;
 	// Reused per-frame corona scratch (the fill path runs every frame).
 	std::vector<opennova::renderer::LightCoronaOwnerMask> corona_masks_scratch_;
 	std::vector<opennova::renderer::LightCoronaQuad> corona_quads_scratch_;
@@ -349,20 +343,6 @@ private:
 	Ref<Image> static_light_rows_image_;
 	Ref<ImageTexture> static_light_rows_texture_;
 	PackedByteArray static_light_rows_bytes_;
-	PackedByteArray static_light_rows_scratch_;
-	std::vector<StaticCachedSelection> static_cached_selections_;
-	uint64_t static_cached_scene_revision_ = 0;
-	// Steady-frame dirty-row inputs: rows re-evaluate only when the pool's
-	// color revision or the ambient gain moved, or the row is gen-animated.
-	uint64_t static_cached_color_revision_ = 0;
-	std::array<float, 3> static_cached_ambient_{};
-	// static_light_rows_bytes_ holds the resident texture payload for the
-	// cached row set (the in-place steady path's precondition); the output
-	// clear zeroes that payload and drops the claim.
-	bool static_bytes_resident_ = false;
-	int64_t static_cached_rows_revision_ = -1;
-	int static_cached_row_count_ = -1;
-	int static_cached_active_draws_ = 0;
 	int static_row_count_ = 0;
 	int last_static_draws_ = 0;
 	int last_lit_static_draws_ = 0;
