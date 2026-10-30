@@ -1836,13 +1836,13 @@ void GameWorld::render_material_frame() {
 		}
 	}
 	if (!frame_stats_on_) {
-		ObjectModel::advance_awake_frame(frame_delta_);
+		ObjectModel::advance_awake_frame(get_frame_clock_ms());
 		ObjectModel::set_world_skipped(false);
 		// The Inset twins follow the poses the advance just wrote.
 		ObjectModel::sync_view_twins();
 		return;
 	}
-	const PackedInt64Array profile = ObjectModel::profile_awake_frame(frame_delta_);
+	const PackedInt64Array profile = ObjectModel::profile_awake_frame(get_frame_clock_ms());
 	ObjectModel::set_world_skipped(false);
 	ObjectModel::sync_view_twins();
 	if (profile.size() < ObjectModel::AWAKE_PROFILE_SLOT_COUNT) {

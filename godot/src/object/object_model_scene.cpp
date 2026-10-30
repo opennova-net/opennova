@@ -72,7 +72,7 @@ void ObjectModel::rebuild_scene() {
 	material_cache_.clear();
 	material_skin_programs_.clear();
 	postmultiply_cache_.clear();
-	body_pose_dirty_ = true;
+	body_.mark_dirty();
 	bounds_dirty_ = true;
 	has_live_panm_ = false;
 	material_needs_eval_.clear();

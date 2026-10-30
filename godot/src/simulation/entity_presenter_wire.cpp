@@ -828,11 +828,8 @@ void EntityPresenter::append_wire_row(Object *node, int base, int handle,
 	// the body-transition scalars re-seed from the stable per-handle cache so a
 	// revisionless source's cold plan every call cannot strand an active
 	// receive-side blend at weight zero.
-	const RemoteBodyCache *cached = wire_remote_body_.getptr(handle);
-	if (cached != nullptr) {
-		row.anim_state = cached->state;
-		row.anim_request = cached->request;
-		row.remote_body_tick = cached->latch;
+	if (const opennova::world::WireBodyLatch *cached = wire_remote_body_.getptr(handle)) {
+		row.body_latch = *cached;
 	}
 	if (const Vector2i *foot = wire_foot_cursor_.getptr(handle)) {
 		row.foot_state = foot->x;
@@ -1015,7 +1012,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		// tick delta so the blend finishes on schedule while occluded. Only a
 		// row with a blend in flight pays this; clip dispatch itself is draw
 		// work and re-asserts on the first drawn frame.
-		if (row.remote_body_tick != 0) {
+		if (row.body_latch.remote_tick != 0) {
 			apply_wire_body_anim(row, model, snap, tick_delta);
 		}
 		present_wire_row_body_sounds(row, snap);
@@ -1103,8 +1100,8 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	lap.mark(WIRE_PROFILE_CTRL);
 	if (respawned_since_present) {
 		model->reset_remote_body_state();
-		row.anim_state = -2; // force the next body-anim dispatch through
-		row.remote_body_tick = 0;
+		row.body_latch.anim_state = -2; // force the next body-anim dispatch through
+		row.body_latch.remote_tick = 0;
 		// The reset wipes model-side state the gated legs may have applied;
 		// their caches must not claim it is still applied.
 		row.ctrl_cache_valid = false;
@@ -1120,13 +1117,11 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 	}
 	apply_wire_body_anim(row, model, snap, tick_delta);
 	lap.mark(WIRE_PROFILE_BODY);
-	// The upper-body weapon channel: the hold pose this player's held weapon and
-	// scope state select. -1 means no channel this frame, which clears any pose
-	// left over from the weapon it was holding before. Dispatch is gated on the
-	// (state, phase) pair — a playing channel advances its phase every tick and
-	// still dispatches per tick; idle -1 rows and render-only frames skip.
-	// [orig: the selection Entity_UpdateInfantryPlayerBody @ 0x4b5dad, which
-	//  retail runs for every player body it draws, not just the local one]
+	// The upper-body weapon channel (engine world::row_weapon_channel): -1 means
+	// no channel this frame, which clears any pose left over from the weapon it
+	// was holding before. Dispatch is gated on the row's fields — a playing
+	// channel advances its phase every tick and still dispatches per tick; idle
+	// -1 rows and render-only frames skip.
 	{
 		const int32_t wpn_state =
 				wfield_i(p, base, Simulation::PF_WPN_ANIM_STATE);
@@ -1147,11 +1142,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 				wpn_src_state != row.wpn_src_state || wpn_src_phase != row.wpn_src_phase ||
 				wpn_weight != row.wpn_weight || wpn_variant != row.wpn_variant ||
 				wpn_src_variant != row.wpn_src_variant || wpn_parked != row.wpn_parked) {
-			model->set_weapon_channel(
-					wpn_state >= 0 ? infantry_key(wpn_state) : String(),
-					wpn_phase,
-					wpn_src_state >= 0 ? infantry_key(wpn_src_state) : String(),
-					wpn_src_phase, wpn_weight, wpn_variant, wpn_src_variant, wpn_parked);
+			model->set_weapon_channel_native(opennova::world::row_weapon_channel(p + base));
 			row.wpn_parked = wpn_parked;
 			row.wpn_state = wpn_state;
 			row.wpn_phase = wpn_phase;
@@ -1329,137 +1320,15 @@ void EntityPresenter::apply_wire_procedural_part(const WireRow &row,
 	}
 }
 
-// The wire-driven skeletal primary pose, on the same projection path as the
-// placed walk. REMOTE-request rows skip re-dispatch entirely while the wire
-// state is unchanged; host-loopback rows (remote_request 0) keep per-tick
-// dispatch — their playhead rides play_body_clip_at's phase.
+// The wire-driven skeletal primary pose: the engine's walk over the row
+// (world::present_wire_body), its verbs fanned out over the model's parts.
 void EntityPresenter::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 		PresentRowsView snap, int tick_delta) {
-	const float *p = snap.ptr();
-	const int base = row.base;
-	const int32_t anim_state = wfield_i(p, base, Simulation::PF_ANIM_STATE);
-	const int32_t remote_request_i =
-			wfield_i(p, base, Simulation::PF_ANIM_REMOTE_REQUEST);
-	const int32_t anim_pulse =
-			wfield_i(p, base, Simulation::PF_ANIM_STATE_PULSE);
-	// Accepted/queued remote transitions advance exactly once per simulation
-	// tick. The row latch is set only when the model reports live transition
-	// work, so steady-state rows never dispatch.
-	if (row.remote_body_tick != 0 && remote_request_i != 0 && anim_pulse < 0 &&
-			anim_state == row.anim_state && remote_request_i == row.anim_request) {
-		int ticks_left = tick_delta;
-		while (ticks_left > 0 && row.remote_body_tick != 0) {
-			row.remote_body_tick =
-					model->advance_remote_body_blend_tick(anim_state) ? 1 : 0;
-			--ticks_left;
-		}
-		row.anim_state = anim_state;
-		row.anim_request = remote_request_i;
-		store_wire_remote_body_cache(row);
-		return;
+	ObjectModel::BodyTarget target(*model);
+	if (opennova::world::present_wire_body(target, snap.ptr() + row.base, tick_delta,
+				row.body_latch)) {
+		wire_remote_body_.insert(row.handle, row.body_latch);
 	}
-	if (remote_request_i != 0 && anim_pulse < 0 && anim_state == row.anim_state &&
-			remote_request_i == row.anim_request) {
-		return;
-	}
-	row.anim_state = anim_state;
-	row.anim_request = remote_request_i;
-	store_wire_remote_body_cache(row);
-	const int32_t anim_phase =
-			wfield_i(p, base, Simulation::PF_ANIM_PHASE_TICKS);
-	const bool remote_request = remote_request_i != 0;
-	bool remote_needs_tick = false;
-	// A transition state that arrived and was overwritten within one decode fold
-	// dispatches FIRST so the model's arbitration sees retail's per-record
-	// order. [orig: per-record remote anim apply @ 0x4c1153]
-	if (remote_request && anim_pulse >= 0) {
-		const String &pulse_key = infantry_key(anim_pulse);
-		if (!pulse_key.is_empty()) {
-			remote_needs_tick = model->apply_remote_body_state(
-					anim_pulse, pulse_key,
-					Simulation::infantry_anim_flags(anim_pulse),
-					wfield_i(p, base, Simulation::PF_ANIM_PULSE_TICKS));
-		}
-	}
-	if (anim_state >= 0) {
-		const String &key = infantry_key(anim_state);
-		if (!key.is_empty()) {
-			// ObjectModel owns current/pending acceptance because it also
-			// owns clip time and completion. Forward every raw wire request.
-			// [orig: @ 0x4c0859 / @ 0x4c11a6]
-			if (remote_request) {
-				remote_needs_tick = model->apply_remote_body_state(
-						anim_state, key,
-						Simulation::infantry_anim_flags(anim_state),
-						anim_phase);
-				row.remote_body_tick = remote_needs_tick ? 1 : 0;
-				store_wire_remote_body_cache(row);
-				return;
-			}
-			// Host-loopback rows expose the authority's already-accepted
-			// CURRENT state and playhead: pose it directly.
-			if (anim_phase >= 0) {
-				const int32_t source_state =
-						wfield_i(p, base, Simulation::PF_ANIM_SOURCE_STATE);
-				const String source_key = source_state >= 0
-						? infantry_key(source_state)
-						: String();
-				const float blend_weight =
-						p[base + Simulation::PF_ANIM_BLEND_WEIGHT];
-				// Each channel poses its served ring entry (PF_ANIM_VARIANT /
-				// PF_ANIM_SOURCE_VARIANT).
-				const int32_t variant =
-						wfield_i(p, base, Simulation::PF_ANIM_VARIANT);
-				if (!source_key.is_empty() && blend_weight < 1.0f) {
-					model->play_body_blend_at(source_key,
-							wfield_i(p, base,
-									Simulation::PF_ANIM_SOURCE_PHASE_TICKS),
-							key, anim_phase, blend_weight,
-							wfield_i(p, base, Simulation::PF_ANIM_SOURCE_VARIANT),
-							variant);
-				} else {
-					model->play_body_clip_at(key, anim_phase, variant,
-							wfield_i(p, base, Simulation::PF_ANIM_PHASE_PARKED) != 0);
-				}
-				return;
-			}
-			model->play_body_clip(key);
-			return;
-		}
-	}
-	if (!remote_request) {
-		const int32_t source_state =
-				wfield_i(p, base, Simulation::PF_ANIM_SOURCE_STATE);
-		if (source_state >= 0) {
-			const String &source_key = infantry_key(source_state);
-			if (!source_key.is_empty()) {
-				model->play_body_clip_at(source_key,
-						wfield_i(p, base,
-								Simulation::PF_ANIM_SOURCE_PHASE_TICKS),
-						wfield_i(p, base, Simulation::PF_ANIM_SOURCE_VARIANT));
-				return;
-			}
-		}
-	}
-	const int32_t body_anim_slot =
-			wfield_i(p, base, Simulation::PF_BODY_ANIM_SLOT);
-	if (body_anim_slot < 0) {
-		return;
-	}
-	if (anim_phase >= 0) {
-		model->play_body_anim_at(body_anim_slot, anim_phase,
-				wfield_i(p, base, Simulation::PF_ANIM_PHASE_PARKED) != 0);
-		return;
-	}
-	model->play_body_anim(body_anim_slot);
-}
-
-void EntityPresenter::store_wire_remote_body_cache(const WireRow &row) {
-	RemoteBodyCache cache;
-	cache.state = row.anim_state;
-	cache.request = row.anim_request;
-	cache.latch = row.remote_body_tick;
-	wire_remote_body_.insert(row.handle, cache);
 }
 
 // This body's third-person gun — retail's draw 5, for a remote player or, on

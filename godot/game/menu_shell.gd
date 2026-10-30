@@ -200,7 +200,7 @@ func _process(delta: float) -> void:
 ## expansion remount. Public so a caller (and the GUT suite) can step the menu
 ## tick the way the mode loop does.
 ## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
-func update_menu_frame(delta: float = 0.0) -> void:
+func update_menu_frame(_delta: float = 0.0) -> void:
 	# The pump, once a frame after the input events (each taken as its message
 	# in _gui_input): hover, the click and the window sounds of the mouse as the
 	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse). Over a
@@ -214,7 +214,7 @@ func update_menu_frame(delta: float = 0.0) -> void:
 	# The one model runtime-frame driver outside a live mission: menu portraits
 	# (avatar previews) are ObjectModels, which no longer self-clock. The static
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
-	ObjectModel.advance_awake_frame(delta)
+	ObjectModel.advance_awake_frame(GameWorld.current_frame_clock_ms())
 	_consume_expansion_reload_request()
 
 

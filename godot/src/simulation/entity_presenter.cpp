@@ -795,23 +795,18 @@ void EntityPresenter::aim_apply_valid(Object *node,
 	if (model == nullptr) {
 		return;
 	}
-	const Basis current_basis = model->get_basis();
-	const Basis body_basis = aim_root_basis_native(snap, base, current_basis);
-	if (drive_root_basis && current_basis != body_basis) {
-		model->set_basis(body_basis);
+	if (drive_root_basis) {
+		const Basis current_basis = model->get_basis();
+		const Basis body_basis = aim_root_basis_native(snap, base, current_basis);
+		if (current_basis != body_basis) {
+			model->set_basis(body_basis);
+		}
 	}
-	const Basis inverse_body = body_basis.inverse();
-	const float *p = snap.ptr();
-	Basis deltas[ObjectModel::kAimOverlayClasses];
-	for (int overlay_class = 0; overlay_class < ObjectModel::kAimOverlayClasses;
-			++overlay_class) {
-		const int offset = base + Simulation::PF_AIM_ANGLES +
-				overlay_class * Simulation::PF_AIM_CLASS_STRIDE;
-		deltas[overlay_class] = inverse_body *
-				bms_to_godot_basis(
-						Vector3(p[offset], p[offset + 1], p[offset + 2]));
+	// The nine class deltas are the engine's (world::row_aim_overlay_deltas).
+	opennova::anim::Quat deltas[ObjectModel::kAimOverlayClasses];
+	if (opennova::world::row_aim_overlay_deltas(snap.ptr() + base, deltas)) {
+		model->set_aim_overlay_quats(deltas);
 	}
-	model->set_aim_overlay_deltas(deltas);
 }
 
 namespace {
@@ -1251,15 +1246,6 @@ void EntityPresenter::release_part_anim_outputs() {
 		if (model == nullptr) continue;
 		release_row_ctrl_writers(model);
 	}
-}
-
-const String &EntityPresenter::infantry_key(int state) {
-	auto it = infantry_keys_.find(state);
-	if (it == infantry_keys_.end()) {
-		it = infantry_keys_.emplace(state, Simulation::infantry_anim_key(state))
-					 .first;
-	}
-	return it->second;
 }
 
 void EntityPresenter::present_snapshot(const PackedFloat32Array &snap,
@@ -1797,123 +1783,23 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			if (p_profile != nullptr) {
 				++p_profile->body_rows;
 			}
-			// Main-body skeletal clip: infantry poses to the exact anim-state
-			// phase that produced root motion; PF_BODY_ANIM_SLOT is the coarse
-			// fallback for compatible non-infantry nodes.
-			const int32_t anim_state =
-					field_i(p, base, Simulation::PF_ANIM_STATE);
-			int32_t body_mode = BODY_NONE;
-			int32_t body_selector = -1;
-			int32_t body_phase = 0;
-			int32_t body_source_selector = -1;
-			int32_t body_source_phase = 0;
-			float body_blend_weight = 1.0f;
-			// Each channel poses its served ring entry (PF_ANIM_VARIANT /
-			// PF_ANIM_SOURCE_VARIANT).
-			int32_t body_variant = 0;
-			int32_t body_source_variant = 0;
-			// The armed end-notify's park (PF_ANIM_PHASE_PARKED): only an
-			// unblended target channel parks, so only the clip/slot paths read it.
-			bool body_parked = false;
-			String body_clip_key;
-			String body_source_clip_key;
-			{
-				const String key =
-						anim_state >= 0 ? infantry_key(anim_state) : String();
-				const int32_t source_state = field_i(
-						p, base, Simulation::PF_ANIM_SOURCE_STATE);
-				const String source_key =
-						source_state >= 0 ? infantry_key(source_state) : String();
-				if (!key.is_empty()) {
-					body_selector = anim_state;
-					body_phase = field_i(
-							p, base, Simulation::PF_ANIM_PHASE_TICKS);
-					body_variant = field_i(p, base, Simulation::PF_ANIM_VARIANT);
-					body_clip_key = key;
-					const float target_weight =
-							p[base + Simulation::PF_ANIM_BLEND_WEIGHT];
-					if (source_state >= 0 && !source_key.is_empty() &&
-							target_weight < 1.0f) {
-						body_mode = BODY_BLEND_AT;
-						body_source_selector = source_state;
-						body_source_phase = field_i(
-								p, base,
-								Simulation::PF_ANIM_SOURCE_PHASE_TICKS);
-						body_source_clip_key = source_key;
-						body_blend_weight = target_weight;
-						body_source_variant = field_i(
-								p, base, Simulation::PF_ANIM_SOURCE_VARIANT);
-					} else {
-						body_mode = BODY_CLIP_AT;
-						body_parked = field_i(p, base, Simulation::PF_ANIM_PHASE_PARKED) != 0;
-					}
-				} else if (source_state >= 0 && !source_key.is_empty()) {
-					body_mode = BODY_CLIP_AT;
-					body_selector = source_state;
-					body_phase = field_i(
-							p, base,
-							Simulation::PF_ANIM_SOURCE_PHASE_TICKS);
-					body_variant = field_i(
-							p, base, Simulation::PF_ANIM_SOURCE_VARIANT);
-					body_clip_key = source_key;
-				}
-			}
-			if (body_mode == BODY_NONE) {
-				const int32_t body_anim_slot =
-						field_i(p, base, Simulation::PF_BODY_ANIM_SLOT);
-				if (body_anim_slot >= 0) {
-					body_mode = BODY_SLOT_AT;
-					body_selector = body_anim_slot;
-					body_phase = field_i(
-							p, base, Simulation::PF_ANIM_PHASE_TICKS);
-					body_parked = field_i(p, base, Simulation::PF_ANIM_PHASE_PARKED) != 0;
-				}
-			}
+			// Main-body skeletal clip: the engine's request over the row
+			// (world::placed_body_clip_request — the state at its tick, blended
+			// from its source, else the coarse slot), re-dispatched on a change
+			// or when a dependency re-posed the body.
+			const opennova::world::BodyClipRequest body_request =
+					opennova::world::placed_body_clip_request(p + base);
 			const bool body_stamp_changed =
-					!row.body_stamp_valid || row.body_mode != body_mode ||
-					row.body_selector != body_selector ||
-					row.body_phase != body_phase ||
-					row.body_source_selector != body_source_selector ||
-					row.body_source_phase != body_source_phase ||
-					row.body_blend_weight != body_blend_weight ||
-					row.body_variant != body_variant ||
-					row.body_source_variant != body_source_variant ||
-					row.body_parked != body_parked;
-			const bool force_external_pose =
-					body_dependency_changed &&
-					(body_mode == BODY_CLIP_AT ||
-							body_mode == BODY_BLEND_AT ||
-							body_mode == BODY_SLOT_AT);
+					!row.body_stamp_valid || row.body_request != body_request;
+			const bool force_external_pose = body_dependency_changed &&
+					body_request.kind != opennova::world::BodyClipRequest::Kind::kNone;
 			if (body_stamp_changed || force_external_pose) {
-				switch (body_mode) {
-					case BODY_CLIP_AT:
-						model->play_body_clip_at(body_clip_key, body_phase, body_variant,
-								body_parked);
-						++stat_body_dispatches_;
-						break;
-					case BODY_BLEND_AT:
-						model->play_body_blend_at(body_source_clip_key,
-								body_source_phase, body_clip_key, body_phase,
-								body_blend_weight, body_source_variant, body_variant);
-						++stat_body_dispatches_;
-						break;
-					case BODY_SLOT_AT:
-						model->play_body_anim_at(body_selector, body_phase, body_parked);
-						++stat_body_dispatches_;
-						break;
-					case BODY_SLOT_PLAY:
-					case BODY_NONE:
-						break;
+				if (body_request.kind != opennova::world::BodyClipRequest::Kind::kNone) {
+					ObjectModel::BodyTarget target(*model);
+					opennova::world::play_body_clip_request(target, body_request);
+					++stat_body_dispatches_;
 				}
-				row.body_mode = body_mode;
-				row.body_selector = body_selector;
-				row.body_phase = body_phase;
-				row.body_source_selector = body_source_selector;
-				row.body_source_phase = body_source_phase;
-				row.body_blend_weight = body_blend_weight;
-				row.body_variant = body_variant;
-				row.body_parked = body_parked;
-				row.body_source_variant = body_source_variant;
+				row.body_request = body_request;
 				row.body_stamp_valid = true;
 			}
 		} else if ((output_channels_ & OUTPUT_BODY_ANIM) != 0) {

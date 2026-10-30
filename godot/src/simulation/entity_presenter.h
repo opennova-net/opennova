@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <runtime/world/body_present.h>
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/present_rows.h>
 #include <runtime/world/minefield.h>
@@ -525,14 +526,6 @@ private:
 		int64_t submitted_rows = 0;
 		int64_t body_rows = 0;
 	};
-	enum BodyDispatchMode {
-		BODY_NONE = 0,
-		BODY_CLIP_AT,
-		BODY_BLEND_AT,
-		BODY_SLOT_AT,
-		BODY_SLOT_PLAY,
-	};
-
 	enum CtrlPublishField {
 		CTRL_PUBLISH_PART1 = 0,
 		CTRL_PUBLISH_PART2,
@@ -581,16 +574,9 @@ private:
 		// the cold/falling edge.
 		bool ctrl_publish_state_valid = false;
 		std::array<int32_t, CTRL_PUBLISH_COUNT> ctrl_publish_state = {};
+		// The body clip request last dispatched (world::placed_body_clip_request).
 		bool body_stamp_valid = false;
-		int32_t body_mode = BODY_NONE;
-		int32_t body_selector = -1;
-		int32_t body_phase = 0;
-		int32_t body_source_selector = -1;
-		int32_t body_source_phase = 0;
-		float body_blend_weight = 1.0f;
-		int32_t body_variant = 0;
-		int32_t body_source_variant = 0;
-		bool body_parked = false; // PF_ANIM_PHASE_PARKED on the clip/slot paths
+		opennova::world::BodyClipRequest body_request;
 		// The placed walk that last submitted the row (placed_walk_serial_).
 		uint64_t submitted_walk = 0;
 	};
@@ -612,11 +598,9 @@ private:
 		// model then (ObjectModel::get_husk_visual_id).
 		int32_t husk_applied = -1;
 		ObjectID husk_visual;
-		// The remote body-transition scalars (re-seeded from the per-handle
-		// cache on every plan build).
-		int32_t anim_state = -2;
-		int32_t anim_request = -1;
-		int32_t remote_body_tick = 0;
+		// The remote body-transition latch (world::present_wire_body; re-seeded
+		// from the per-handle cache on every plan build).
+		opennova::world::WireBodyLatch body_latch;
 		// Per-leg input caches for the measured every-frame legs (the 2026-08-04
 		// joiner profile: ~21us/row ungated over a full streamed world). Each
 		// holds the exact PF fields its leg consumes; an invalid cache forces
@@ -646,12 +630,6 @@ private:
 		// nothing back-fires.
 		int32_t foot_state = -2;
 		int32_t foot_phase = -1;
-	};
-
-	struct RemoteBodyCache {
-		int32_t state = -2;
-		int32_t request = -1;
-		int32_t latch = 0;
 	};
 
 	// Mirrors the retail per-entity lighting fields (Terrain_SetupEffectForEntity
@@ -716,7 +694,6 @@ private:
 	void release_planned_rows();
 	void release_part_anim_outputs();
 	int64_t current_index_generation();
-	const String &infantry_key(int state);
 	Simulation *sim() const;
 
 	// --- The wire walk (entity_presenter_wire.cpp) ---
@@ -745,7 +722,6 @@ private:
 			PresentRowsView snap);
 	void apply_wire_body_anim(WireRow &row, ObjectModel *model,
 			PresentRowsView snap, int tick_delta);
-	void store_wire_remote_body_cache(const WireRow &row);
 	void update_wire_held_weapon(WireRow &row, Node3D *node,
 			PresentRowsView snap, bool body_visible);
 	// The same third-person gun leg for a placed person row (the host's and
@@ -804,12 +780,11 @@ private:
 	// infantry_anim_key(state) allocates its String per call natively; the
 	// state->key map is tiny and global-stable, so cache per presenter (both
 	// walks read it).
-	std::unordered_map<int, String> infantry_keys_;
 
 	// --- Wire walk state: the plan + per-row caches ---
 	std::vector<WireRow> wire_rows_;
 	std::vector<ObjectID> wire_deferred_ids_;
-	HashMap<int32_t, RemoteBodyCache> wire_remote_body_;
+	HashMap<int32_t, opennova::world::WireBodyLatch> wire_remote_body_;
 	// The footstep cursor (WireRow::foot_state, foot_phase) per wire handle:
 	// a cold re-plan rebuilds every WireRow, and a fresh cursor re-seeds at
 	// the playhead, dropping the steps the re-plan frame crossed.

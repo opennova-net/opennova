@@ -38,6 +38,7 @@
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/world/occlusion_feed.h>
+#include <runtime/world/tick_count_clock.h>
 #include <runtime/renderer/render_order.h>
 
 using namespace opennova::threedi;
@@ -1000,13 +1001,13 @@ void ObjectModel::retire_geometry_instances() {
 	geometry_instance_count_ = 0;
 }
 
-void ObjectModel::advance_awake_frame(double p_delta) {
-	advance_awake_frame_impl(p_delta, nullptr);
+void ObjectModel::advance_awake_frame(int64_t p_frame_clock_ms) {
+	advance_awake_frame_impl(p_frame_clock_ms, nullptr);
 }
 
-PackedInt64Array ObjectModel::profile_awake_frame(double p_delta) {
+PackedInt64Array ObjectModel::profile_awake_frame(int64_t p_frame_clock_ms) {
 	AwakeFrameProfile profile;
-	advance_awake_frame_impl(p_delta, &profile);
+	advance_awake_frame_impl(p_frame_clock_ms, &profile);
 	PackedInt64Array result;
 	result.resize(AWAKE_PROFILE_SLOT_COUNT);
 	result.set(AWAKE_PROFILE_CLOCK_ANIMATION_US, profile.clock_animation_us);
@@ -1018,7 +1019,7 @@ PackedInt64Array ObjectModel::profile_awake_frame(double p_delta) {
 	return result;
 }
 
-void ObjectModel::advance_awake_frame_impl(double p_delta,
+void ObjectModel::advance_awake_frame_impl(int64_t p_frame_clock_ms,
 		AwakeFrameProfile *p_profile) {
 	// The set is process-global while the drivers are per-context; a per-frame
 	// guard keeps exactly one advance per Godot frame no matter how many
@@ -1030,6 +1031,11 @@ void ObjectModel::advance_awake_frame_impl(double p_delta,
 		return;
 	}
 	last_frame = frame;
+	// The frame's elapsed on the engine clock: the main loop's millisecond count less the
+	// previous frame's read (world::FrameTickElapsed), the step every awake model's clocks take.
+	static opennova::world::FrameTickElapsed clock;
+	const double elapsed =
+			static_cast<double>(clock.advance(static_cast<uint32_t>(p_frame_clock_ms))) / 1000.0;
 	if (awake_models_.is_empty()) {
 		return;
 	}
@@ -1045,7 +1051,7 @@ void ObjectModel::advance_awake_frame_impl(double p_delta,
 			if (p_profile != nullptr) {
 				++p_profile->awake_models;
 			}
-			model->advance_runtime_frame_profiled(p_delta, p_profile);
+			model->advance_runtime_frame_profiled(elapsed, p_profile);
 		}
 	}
 }
@@ -1488,12 +1494,7 @@ bool ObjectModel::needs_runtime_frame_work() const {
 			(render_order_dirty_ && !alpha_strip_draws_.is_empty()) || controls_.has_active_parts()) {
 		return true;
 	}
-	if (skeleton_ == nullptr || skeletal_.is_null() || anim_key_.is_empty()) {
-		return false;
-	}
-	return body_pose_dirty_ ||
-			(is_playing_ && anim_playing_ && !anim_external_phase_) ||
-			remote_body_.has_pending();
+	return skeleton_ != nullptr && body_.needs_frame(is_playing_);
 }
 
 void ObjectModel::refresh_live_panm_classification() {
@@ -2050,7 +2051,7 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_focal_sway", "active", "basis", "world_offset"),
 			&ObjectModel::set_focal_sway);
 	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("advance_awake_frame", "delta"),
+			D_METHOD("advance_awake_frame", "frame_clock_ms"),
 			&ObjectModel::advance_awake_frame);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("update_authored_lods",
