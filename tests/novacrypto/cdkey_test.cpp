@@ -8,6 +8,7 @@
 #include <net/protocol/protocol.h>
 #include <net/novacrypto/pubcrypto.h>
 
+#include "common/cdkey_oracle.h"
 #include "common/test_expect.h"
 
 #include <cstdint>
@@ -47,28 +48,7 @@ std::string mixed_up(std::string text, const std::string &fingerprint) {
 	return text;
 }
 
-// The client's reading of an NWACT on its own machine, the oracle the activation's make is
-// checked against: the mix under its fingerprint, then the registry chain decoded (a room of
-// 0x800), giving the wire key it keeps as a C string. False where the client's decode fails
-// (its status -3).
-// [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe): the fingerprint @0x411ebb,
-//  the copy @0x411eca, NapiNP_EncryptStringWithPRNG @0x411ee9, CDKey_Decode under
-//  off_812EE8 @0x411f0a, the decoded value stored at +16 @0x411f37; CDKey_Decode @0x411af0
-//  (dfx2.exe): NapiNP_DecodeEncryptedString under the descriptor's +20 chain @0x411b38]
-bool read_activation(const cdkey::KeyChains &chains, std::string_view nwact,
-		const std::string &fingerprint, std::string &wire_key) {
-	wire_key.clear();
-	const std::string registry = mixed_down(std::string(nwact), fingerprint);
-	std::vector<uint8_t> plaintext;
-	if (!opennova::decode_key_chain(registry, chains.registry, plaintext, 0x800))
-		return false;
-	for (const uint8_t b : plaintext) {
-		if (b == 0)
-			break;
-		wire_key.push_back(static_cast<char>(b));
-	}
-	return true;
-}
+using cdkey_oracle::read_activation;
 
 // Section 9.7: the serial's wire key, 2 * (13 + 4 * 3) = 50 A-P characters, and back.
 int wire_key_vector() {
