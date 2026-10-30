@@ -30,6 +30,9 @@ signal lan_host_start_requested(config: HostSessionConfig)
 signal novaworld_host_start_requested(config: HostSessionConfig)
 signal novaworld_host_cancelled
 var host_channel := HostSessionConfig.CHANNEL_LAN
+## The host screen's radios that set every weapon or class word, by name.
+const HOST_RESTRICTION_RADIOS := ["WPN_ALWAYS", "WPN_NEVER", "WPN_ARMORY", "WPN_MISSION",
+	"CLASS_ALWAYS", "CLASS_NEVER", "CLASS_MISSION"]
 
 var _lan_session: LanSession = null  # injected by MainGame
 var _servers: Array = []       # last LAN browse result; rows for LAN_GAME_LIST
@@ -104,6 +107,10 @@ func _on_screen_changed(screen_name: String) -> void:
 	_refresh_lan_list()
 	if _lan_session != null:
 		_lan_session.drain_records()
+	# The activation fills the host screen's WEAPON_LIST again from the block (engine
+	# inmatch/host_settings.h populate_host_weapon_list).
+	GameCfgStore.block().populate_host_weapon_list(_driver, Strings.get_table(Strings.TABLE_GAMETEXT),
+			Strings.get_table(Strings.TABLE_GAMEUI))
 
 
 # --- LAN browser screen (LAN_MULTI_PLAYER) ------------------------------------
@@ -241,6 +248,8 @@ func _wire_host_settings() -> void:
 	_connect_pressed("ADD_MISSIONS", _on_add_missions)
 	_connect_pressed("REMOVE_MISSIONS", _on_remove_missions)
 	_connect_pressed("START_GAME", _on_host_start)
+	for control in HOST_RESTRICTION_RADIOS:
+		_connect_pressed(control, _on_host_restriction_radio.bind(control))
 	if not _driver.table_cell_clicked.is_connected(_on_host_table_cell_clicked):
 		_driver.table_cell_clicked.connect(_on_host_table_cell_clicked)
 	_sync_start_gate()
@@ -248,10 +257,23 @@ func _wire_host_settings() -> void:
 
 ## The SELECTED_MISSIONS Switch cell (column 2): a click toggles the row's launch
 ## option, the Attack-and-Defend halves (engine menu::HostDialog::toggle_switch).
+## The restriction lists' cell (column 1): a press steps the row's weapon or class
+## word (engine inmatch/host_settings.h host_restriction_list_pressed).
 func _on_host_table_cell_clicked(_id: int, widget_name: String, row: int, column: int,
 		_state: int, _cell_value: int, _double_click: bool) -> void:
 	if widget_name == "SELECTED_MISSIONS" and column == 2:
 		_driver.toggle_host_mission_switch(row)
+	elif GameCfgStore.block().host_restriction_list_pressed(_driver, widget_name, row, column,
+			Strings.get_table(Strings.TABLE_GAMEUI)):
+		_sync_start_gate()
+
+
+## A radio that sets every weapon or class word (engine inmatch/host_settings.h
+## host_restriction_radio_pressed).
+func _on_host_restriction_radio(control: String) -> void:
+	if GameCfgStore.block().host_restriction_radio_pressed(_driver, control,
+			Strings.get_table(Strings.TABLE_GAMEUI)):
+		_sync_start_gate()
 
 
 # The host screen opens showing the process's cfg block, the populate step the
@@ -259,8 +281,12 @@ func _on_host_table_cell_clicked(_id: int, widget_name: String, row: int, column
 # engine's populate_host_screen, which carries the witness: the cap clamped to
 # the screen's, each control from the block, PunkBuster 0 and disabled with no
 # pb\pbcl.dll). A user-cleared edit is still read verbatim at START.
+# Then the restriction lists, which the init fills after its populate (engine
+# inmatch/host_settings.h populate_host_weapon_list / populate_host_class_list).
 func _seed_host_controls() -> void:
 	GameCfgStore.block().populate_host_screen(_driver)
+	GameCfgStore.block().populate_host_restrictions(_driver, Strings.get_table(Strings.TABLE_GAMETEXT),
+			Strings.get_table(Strings.TABLE_GAMEUI))
 
 
 ## The catalog comes from the mounted resource root; tests may supply catalog rows.

@@ -34,7 +34,7 @@ gamecfg::WeaponRoster game_cfg_weapon_roster(const def::DefWeaponsFile &weapons)
 			roster.push_back(gamecfg::WeaponRosterEntry{w.weapon_name, 0});
 			continue;
 		}
-		roster.push_back(gamecfg::WeaponRosterEntry{w.weapon_name, w.loadout_selectable});
+		roster.push_back(gamecfg::WeaponRosterEntry{w.weapon_name, w.loadout_selectable, w.loadout_menu_textid});
 		// [orig: @0x54D7B8..0x54D7BF: the row's loadout_subclasses starts the countdown]
 		if (w.loadout_subclasses != 0) subclass_rows = w.loadout_subclasses;
 	}

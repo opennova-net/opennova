@@ -62,7 +62,14 @@ public:
 	void filter(MenuRuntime &menu);
 	void add_selected(MenuRuntime &menu, const hud::GameTextLookup &text);
 	void remove_selected(MenuRuntime &menu);
-	bool can_start() const { return !selected_.empty(); }
+	// START is live while some class word is set and a mission is selected: each gate tests
+	// the ten class words first (all 0 disables it), then the SELECTED_MISSIONS rows.
+	// [orig: HostDialog_AddRemoveSelectedMissions @0x557c10 - the class words @0x557F24..
+	//  0x557F43, the row count @0x557F4E..0x557F5F; HostDialog_OnClassAvailabilityListClick
+	//  @0x5577d0; HostDialog_SetAllWeaponRestrictions @0x557a10]
+	bool can_start() const { return any_class_ && !selected_.empty(); }
+	// The block's ten class words as the gate reads them, the gate run again.
+	void set_class_words(MenuRuntime &menu, const int32_t *words, size_t count);
 	std::vector<std::string> selected_missions() const;
 	// The Switch cell (column 2) of a SELECTED_MISSIONS row: a click toggles
 	// the row's launch option, only on a team, non-objective row, and the
@@ -80,6 +87,7 @@ private:
 	std::vector<MissionChoice> pool_;
 	std::vector<int> visible_, selected_;
 	std::vector<int32_t> launch_options_; // one per selected row
+	bool any_class_ = true; // some class word set (the block's ten, set_class_words)
 
 };
 

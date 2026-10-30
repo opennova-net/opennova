@@ -1,6 +1,7 @@
 #include "host_settings.h"
 
 #include <base/io/crt_ftol.h>
+#include <formats/gamecfg/server_settings.h>
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
@@ -278,6 +279,160 @@ void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, co
         }
         apply_host_dialog_control(cfg, title, control, value);
     }
+}
+
+namespace {
+
+// A Game.bin "Menu" token, "??KEY??" when the table lacks it.
+// [orig: TextResource_GetStringWithFallback @0x562EE0 (the "??%s??" miss)]
+std::string menu_token(const hud::GameTextLookup& menu_ui, const std::string& key) {
+    const std::string miss = "??" + key + "??";
+    return hud::game_text(menu_ui, "Menu", key.c_str(), miss.c_str());
+}
+
+// A weapon word's cell: -1 and the mission word MISSION, 0 NEVER, the armory-only word ARMORY,
+// any other ALWAYS (gamecfg::weapon_availability_name's names, as the tokens spell them).
+// [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 - the switch @0x556655]
+std::string weapon_word_token(const hud::GameTextLookup& menu_ui, int32_t word, gamecfg::ConfigTable table) {
+    std::string key = gamecfg::weapon_availability_name(word, table);
+    for (char& c : key) c = static_cast<char>(c - 'a' + 'A');
+    return menu_token(menu_ui, key);
+}
+
+// A class word's cell: 0 NEVER, 2 MISSION, any other ALWAYS.
+// [orig: HostDialog_PopulateClassListCombo @0x556700 - @0x5567C1..0x5567FE]
+std::string class_word_token(const hud::GameTextLookup& menu_ui, int32_t word) {
+    return menu_token(menu_ui, word == 0 ? "NEVER" : word == 2 ? "MISSION" : "ALWAYS");
+}
+
+constexpr int kRestrictionCell = 1; // the token's column [orig: CTableWnd_SetCellText(.., 1) @0x5566BF]
+constexpr size_t kClassWordCount = std::size(gamecfg::GameCfg{}.class_availability);
+
+int host_screen_list(const menu::MenuRuntime& screen, std::string_view list) {
+    return screen.find_screen_control(std::string(kHostDialogScreen), std::string(list));
+}
+
+} // namespace
+
+void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
+                               const gamecfg::WeaponRoster& weapons, const hud::GameTextLookup& gametext,
+                               const hud::GameTextLookup& menu_ui) {
+    // [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 - UI_FindScreenControl
+    //  ("MULTI_PLAYER_HOST", "WEAPON_LIST") @0x556611, CTableWnd_RemoveRow(-1) @0x556625, the
+    //  table walk @0x55663A..0x5566D3 (a row's loadout_selectable @0x556640, its WepDes name, the
+    //  text WeaponDef_ParseProperty's loadout_menu_textid resolves, none without one),
+    //  CTableWnd_AddRow(name, index, 0, -1) @0x5566B2, CTableWnd_SetCellText(row, token, 1)
+    //  @0x5566BF]
+    const int list = host_screen_list(screen, "WEAPON_LIST");
+    if (list < 0) return;
+    screen.table_clear_rows(list);
+    for (size_t i = 0; i < weapons.size() && i < gamecfg::kWeaponAvailabilityCount; ++i) {
+        if (weapons[i].loadout_selectable == 0) continue;
+        const std::string& textid = weapons[i].loadout_menu_textid;
+        const std::string name = textid.empty()
+                ? std::string()
+                : hud::game_text(gametext, hud::kGameTextWepDes, textid.c_str(), "");
+        const int row = screen.table_insert_row(list, name, static_cast<int32_t>(i), 0, -1);
+        screen.table_set_cell_text(list, row, kRestrictionCell,
+                weapon_word_token(menu_ui, cfg.weapon_availability[i], cfg.table));
+    }
+}
+
+void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
+                              const hud::GameTextLookup& menu_ui) {
+    // [orig: HostDialog_PopulateClassListCombo @0x556700 - UI_FindScreenControl("MULTI_PLAYER_HOST",
+    //  "CLASS_LIST") @0x556712, CTableWnd_RemoveRow(-1) @0x556728, classes 5..9 @0x556731, the
+    //  CHARCLASS_* names @0x556741..0x556798, CTableWnd_AddRow(name, class, 0, -1) @0x5567B5, the
+    //  token @0x5567C1..0x5567FE, CTableWnd_SetCellText(row, token, 1) @0x556814]
+    static constexpr const char* kClassKeys[] = {"CHARCLASS_MEDIC", "CHARCLASS_SNIPER",
+        "CHARCLASS_GUNNER", "CHARCLASS_RIFLEMAN", "CHARCLASS_ENGINEER"};
+    const int list = host_screen_list(screen, "CLASS_LIST");
+    if (list < 0) return;
+    screen.table_clear_rows(list);
+    for (int cls = gamecfg::kClassMedic; cls <= gamecfg::kClassEngineer; ++cls) {
+        const int row = screen.table_insert_row(list,
+                menu_token(menu_ui, kClassKeys[cls - gamecfg::kClassMedic]), cls, 0, -1);
+        screen.table_set_cell_text(list, row, kRestrictionCell,
+                class_word_token(menu_ui, cfg.class_availability[cls]));
+    }
+}
+
+bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
+                                   gamecfg::GameCfg& cfg, std::string_view widget, int row, int column,
+                                   const hud::GameTextLookup& menu_ui) {
+    if (column != kRestrictionCell) return false;
+    const bool weapons = widget == "WEAPON_LIST";
+    if (!weapons && widget != "CLASS_LIST") return false;
+    const int list = host_screen_list(screen, widget);
+    if (list < 0 || row < 0 || row >= screen.table_row_count(list)) return false;
+    const int32_t index = screen.table_row_value(list, row);
+    if (weapons) {
+        // [orig: HostDialog_WeaponRestrictionCycleHandler @0x5576c0 - the cell event's press forms
+        //  and column 1 @0x5576D3..0x5576EE, CTableWnd_GetRowValue @0x55771A, the step past 3 to 0
+        //  @0x55772F..0x557731, the token's switch @0x55774B, CTableWnd_SetCellText @0x5577A6]
+        if (index < 0 || index >= static_cast<int32_t>(gamecfg::kWeaponAvailabilityCount)) return false;
+        int32_t& word = cfg.weapon_availability[index];
+        if (++word > 3) word = 0;
+        screen.table_set_cell_text(list, row, kRestrictionCell, weapon_word_token(menu_ui, word, cfg.table));
+        return true;
+    }
+    // [orig: HostDialog_OnClassAvailabilityListClick @0x5577d0 - the press forms and column 1
+    //  @0x5577E3, the event's own list @0x557805, CTableWnd_GetRowValue @0x557815, the step past 2
+    //  to 0 @0x55782C..0x55782E, the token @0x557839..0x557880, CTableWnd_SetCellText @0x557897,
+    //  the START gate @0x5578B1..0x557907]
+    if (index < 0 || index >= static_cast<int32_t>(kClassWordCount)) return false;
+    int32_t& word = cfg.class_availability[index];
+    if (++word > 2) word = 0;
+    screen.table_set_cell_text(list, row, kRestrictionCell, class_word_token(menu_ui, word));
+    dialog.set_class_words(screen, cfg.class_availability, kClassWordCount);
+    return true;
+}
+
+bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
+                                    gamecfg::GameCfg& cfg, const gamecfg::WeaponRoster& weapons,
+                                    std::string_view control, const hud::GameTextLookup& menu_ui) {
+    // [orig: UI_RegisterHostSettingsCallbacks @0x5580f0 - CLASS_ALWAYS 1, CLASS_NEVER 0,
+    //  CLASS_MISSION 2 to HostDialog_SetAllWeaponRestrictions; WPN_ALWAYS 1, WPN_NEVER 0,
+    //  WPN_ARMORY 2, WPN_MISSION 3 to HostDialog_SetAllWeaponAvailability @0x557910]
+    struct Radio {
+        std::string_view control;
+        bool weapons;
+        int32_t word;
+    };
+    static constexpr Radio kRadios[] = {
+        {"CLASS_ALWAYS", false, 1}, {"CLASS_NEVER", false, 0}, {"CLASS_MISSION", false, 2},
+        {"WPN_ALWAYS", true, 1}, {"WPN_NEVER", true, 0}, {"WPN_ARMORY", true, 2}, {"WPN_MISSION", true, 3},
+    };
+    const Radio* radio = nullptr;
+    for (const Radio& r : kRadios)
+        if (r.control == control) radio = &r;
+    if (radio == nullptr) return false;
+    if (radio->weapons) {
+        // [orig: HostDialog_SetAllWeaponAvailability @0x557910 - every loadout_selectable row's word
+        //  @0x55792F..0x55794B, the value's token @0x557956, every WEAPON_LIST row's cell
+        //  @0x5579B9..0x5579DD]
+        for (size_t i = 0; i < weapons.size() && i < gamecfg::kWeaponAvailabilityCount; ++i)
+            if (weapons[i].loadout_selectable != 0) cfg.weapon_availability[i] = radio->word;
+        const int list = host_screen_list(screen, "WEAPON_LIST");
+        if (list >= 0) {
+            const std::string token = weapon_word_token(menu_ui, radio->word, cfg.table);
+            for (int row = 0; row < screen.table_row_count(list); ++row)
+                screen.table_set_cell_text(list, row, kRestrictionCell, token);
+        }
+        return true;
+    }
+    // [orig: HostDialog_SetAllWeaponRestrictions @0x557a10 - the ten class words @0x557A23..
+    //  0x557A50, the token @0x557A70 / @0x557A96, every CLASS_LIST row's cell @0x557AB5..0x557AD9,
+    //  the START gate @0x557AFC..0x557B4C]
+    std::fill(std::begin(cfg.class_availability), std::end(cfg.class_availability), radio->word);
+    const int list = host_screen_list(screen, "CLASS_LIST");
+    if (list >= 0) {
+        const std::string token = class_word_token(menu_ui, radio->word);
+        for (int row = 0; row < screen.table_row_count(list); ++row)
+            screen.table_set_cell_text(list, row, kRestrictionCell, token);
+    }
+    dialog.set_class_words(screen, cfg.class_availability, kClassWordCount);
+    return true;
 }
 
 void read_untouched_host_dialog(gamecfg::GameCfg& cfg, const Title& title,

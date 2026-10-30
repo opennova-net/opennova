@@ -3,10 +3,12 @@
 #include "game_config.h"
 #include <formats/gamecfg/game_cfg.h>
 #include <formats/rtxt/rtxt.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <string>
 #include <string_view>
 
 namespace opennova::menu {
+class HostDialog;
 class MenuRuntime;
 }
 namespace opennova::mnu {
@@ -86,6 +88,40 @@ int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_scree
 // 1 or 0.
 // [orig: HostDialog_ReadSettings @0x555940]
 void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title);
+// The screen's restriction lists from the block, as the dialog's init fills them after its
+// populate, and the LAN screen's activation fills WEAPON_LIST again. WEAPON_LIST: cleared, then a
+// row per loadout_selectable weapon in the table's order, its text the weapon's WepDes name
+// (`gametext`, its loadout_menu_textid; "" with none), its value its table row, its column 1 the
+// word's Game.bin "Menu" token (`menu_ui`): -1 and the mission word MISSION, 0 NEVER, the
+// armory-only word ARMORY, any other ALWAYS. CLASS_LIST: cleared, a row per class 5..9 (Game.bin's
+// CHARCLASS_* name, its value the class word's index), column 1 NEVER for 0, MISSION for 2,
+// ALWAYS for any other. A token the table lacks reads "??KEY??".
+// [orig: UI_InitHostSettingsDialog @0x558960 - @0x5589CC, @0x5589D1; UI_InitLANMultiplayerScreen
+//  @0x556930 - @0x5569CC; HostDialog_PopulateWeaponRestrictionList @0x556600;
+//  HostDialog_PopulateClassListCombo @0x556700; TextResource_GetStringWithFallback @0x562EE0]
+void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
+                               const gamecfg::WeaponRoster& weapons, const hud::GameTextLookup& gametext,
+                               const hud::GameTextLookup& menu_ui);
+void populate_host_class_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg,
+                              const hud::GameTextLookup& menu_ui);
+// A press on a restriction list's row in its column 1 (the 0x8000001 cell event, its press or
+// double-click form): WEAPON_LIST steps the row's weapon word 0 -> 1 -> 2 -> 3 -> 0, CLASS_LIST
+// the row's class word 0 -> 1 -> 2 -> 0 and then the START gate (`dialog`, set_class_words); the
+// cell shows the new token. False for another widget or column, or a row past the list.
+// [orig: HostDialog_WeaponRestrictionCycleHandler @0x5576c0; HostDialog_OnClassAvailabilityListClick
+//  @0x5577d0]
+bool host_restriction_list_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
+                                   gamecfg::GameCfg& cfg, std::string_view widget, int row, int column,
+                                   const hud::GameTextLookup& menu_ui);
+// A press on a radio that sets every word: WPN_ALWAYS 1, WPN_NEVER 0, WPN_ARMORY 2 and WPN_MISSION 3
+// over each loadout_selectable weapon, every WEAPON_LIST row's cell relabelled; CLASS_ALWAYS 1,
+// CLASS_NEVER 0 and CLASS_MISSION 2 over the ten class words, every CLASS_LIST row's cell
+// relabelled, then the START gate. False for another control.
+// [orig: UI_RegisterHostSettingsCallbacks @0x5580f0 (the controls and their values);
+//  HostDialog_SetAllWeaponAvailability @0x557910; HostDialog_SetAllWeaponRestrictions @0x557a10]
+bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog& dialog,
+                                    gamecfg::GameCfg& cfg, const gamecfg::WeaponRoster& weapons,
+                                    std::string_view control, const hud::GameTextLookup& menu_ui);
 // The dialog left untouched: the mounted menu's MULTI_PLAYER_HOST opened
 // fresh (null `doc`, or a menu without the screen: no control), populated and
 // read back, so the block takes each word as the screen gives it back.

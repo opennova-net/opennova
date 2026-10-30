@@ -89,10 +89,21 @@ public:
 	void populate_host_screen(const Ref<MenuDriver> &p_driver);
 	void read_host_screen(const Ref<MenuDriver> &p_driver);
 	void read_untouched_host_dialog(const Ref<MnuDocument> &p_doc);
-	// Shared typed server-settings schema, current values and mounted weapons.
-	String server_configuration_json() const;
-	// Empty on success; a field-specific validation message otherwise.
-	String apply_server_configuration_json(const String &p_json);
+	// The screen's restriction lists over the block (the engine's populate_host_weapon_list /
+	// populate_host_class_list): the dialog's init fills both and gives its START gate the class
+	// words; the LAN screen's activation fills WEAPON_LIST again. `gametext` names the weapons
+	// (WepDes), `menu_ui` (Game.bin) the classes and the words.
+	void populate_host_restrictions(const Ref<MenuDriver> &p_driver, const Ref<RtxtStringFile> &p_gametext,
+			const Ref<RtxtStringFile> &p_menu_ui);
+	void populate_host_weapon_list(const Ref<MenuDriver> &p_driver, const Ref<RtxtStringFile> &p_gametext,
+			const Ref<RtxtStringFile> &p_menu_ui);
+	// A restriction list's cell press and a set-every-word radio's press (the engine's
+	// host_restriction_list_pressed / host_restriction_radio_pressed): false when the press was
+	// not one of theirs.
+	bool host_restriction_list_pressed(const Ref<MenuDriver> &p_driver, const String &p_widget, int p_row,
+			int p_column, const Ref<RtxtStringFile> &p_menu_ui);
+	bool host_restriction_radio_pressed(const Ref<MenuDriver> &p_driver, const String &p_control,
+			const Ref<RtxtStringFile> &p_menu_ui);
 	// Single player's mission start's block write after its save (the engine's
 	// GameConfigBlock::single_player_mission_start).
 	void single_player_mission_start() { block_.single_player_mission_start(); }

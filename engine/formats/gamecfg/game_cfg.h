@@ -91,6 +91,10 @@ inline constexpr int kClassEngineer = 9;
 struct WeaponRosterEntry {
 	std::string name;
 	int32_t loadout_selectable = 0;
+	// The row's loadout_menu_textid, the WepDes key the host screen's WEAPON_LIST names it by
+	// ("" for none, a subclass row's) [orig: WeaponDef_ParseProperty @0x54D730 - the key
+	// @0x54DA25, GameText_GetString("WepDes", ..) into the row's +40].
+	std::string loadout_menu_textid;
 };
 using WeaponRoster = std::vector<WeaponRosterEntry>;
 

@@ -8,6 +8,7 @@
 #include <runtime/inmatch/host_settings.h>
 #include "common/test_expect.h"
 #include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_state_frame.h>
 #include <runtime/menu/menu_text_tables.h>
@@ -213,12 +214,106 @@ int max_players_recommendation() {
     TEST_EXPECT(bare_label >= 0 && bare->get_widget_text(bare_label) == "MAX_PLAYERS");
     return 0;
 }
+// The restriction lists over the block: WEAPON_LIST a row per loadout_selectable weapon (its WepDes
+// name, "" with no textid; its value the table row), CLASS_LIST the five classes; column 1 each
+// word's Game.bin token, "??KEY??" on a miss. A column-1 press steps the word (weapons past 3 to 0,
+// classes past 2 to 0), a radio sets every word; START stays off while every class word is 0.
+// [orig: HostDialog_PopulateWeaponRestrictionList @0x556600; HostDialog_PopulateClassListCombo
+//  @0x556700; HostDialog_WeaponRestrictionCycleHandler @0x5576c0;
+//  HostDialog_OnClassAvailabilityListClick @0x5577d0; HostDialog_SetAllWeaponAvailability
+//  @0x557910; HostDialog_SetAllWeaponRestrictions @0x557a10; UI_RegisterHostSettingsCallbacks
+//  @0x5580f0; HostDialog_AddRemoveSelectedMissions @0x557c10 - the class words @0x557F24..0x557F43]
+int restriction_lists() {
+    const auto table = [](const char* name, int columns) {
+        mnu::Window w = control(name, mnu::WindowType::Table);
+        w.table_data.column.has_count = true;
+        w.table_data.column.count = columns;
+        return w;
+    };
+    mnu::Document doc = host_dialog_document();
+    auto& children = doc.screens[0].roots[0].children;
+    children.push_back(table("WEAPON_LIST", 2));
+    children.push_back(table("CLASS_LIST", 2));
+    children.push_back(table("SELECTED_MISSIONS", 3));
+    children.push_back(control("START_GAME", mnu::WindowType::Button));
+    for (const char* radio : {"WPN_NEVER", "WPN_MISSION", "CLASS_NEVER", "CLASS_ALWAYS"})
+        children.push_back(control(radio, mnu::WindowType::Radio));
+    opennova::menu::MenuRuntime screen;
+    TEST_EXPECT(screen.open_document(&doc, std::string(), std::string(kHostDialogScreen)));
+    const auto find = [&](const char* name) {
+        return screen.find_screen_control(std::string(kHostDialogScreen), name);
+    };
+    const opennova::hud::GameTextLookup gametext = [](const char* section, const char* key,
+                                                       const char* fallback) {
+        return std::string(section) == "WepDes" && std::string(key) == "WD_M16" ? std::string("M16A2")
+                                                                               : std::string(fallback);
+    };
+    const opennova::hud::GameTextLookup menu_ui = [](const char* section, const char* key,
+                                                      const char* fallback) {
+        const std::string k = key;
+        if (std::string(section) != "Menu") return std::string(fallback);
+        if (k == "NEVER") return std::string("Never");
+        if (k == "ALWAYS") return std::string("Always");
+        if (k == "MISSION") return std::string("Mission");
+        if (k == "CHARCLASS_MEDIC") return std::string("Medic");
+        return std::string(fallback);
+    };
+    const gamecfg::WeaponRoster weapons = {
+        {"None", 0, ""}, {"WPN_M16", 1, "WD_M16"}, {"WPN_KNIFE", 0, "WD_KNIFE"}, {"WPN_X", 1, ""}};
+    gamecfg::GameCfg cfg = gamecfg::defaults();
+    cfg.weapon_availability[3] = 2;
+    cfg.class_availability[gamecfg::kClassSniper] = 2;
+    cfg.class_availability[gamecfg::kClassGunner] = 0;
+    populate_host_weapon_list(screen, cfg, weapons, gametext, menu_ui);
+    populate_host_class_list(screen, cfg, menu_ui);
+    const int list = find("WEAPON_LIST");
+    TEST_EXPECT(screen.table_row_count(list) == 2);
+    TEST_EXPECT(screen.table_cell_text(list, 0, 0) == "M16A2" && screen.table_row_value(list, 0) == 1);
+    TEST_EXPECT(screen.table_cell_text(list, 0, 1) == "Mission"); // the default 3
+    TEST_EXPECT(screen.table_cell_text(list, 1, 0).empty() && screen.table_row_value(list, 1) == 3);
+    TEST_EXPECT(screen.table_cell_text(list, 1, 1) == "??ARMORY??"); // the token missing
+    const int classes = find("CLASS_LIST");
+    TEST_EXPECT(screen.table_row_count(classes) == 5 && screen.table_row_value(classes, 0) == 5);
+    TEST_EXPECT(screen.table_cell_text(classes, 0, 0) == "Medic" &&
+                screen.table_cell_text(classes, 1, 0) == "??CHARCLASS_SNIPER??");
+    TEST_EXPECT(screen.table_cell_text(classes, 0, 1) == "Always" &&
+                screen.table_cell_text(classes, 1, 1) == "Mission" &&
+                screen.table_cell_text(classes, 2, 1) == "Never");
+
+    opennova::menu::HostDialog dialog;
+    // A press steps the word: column 1 only, past 3 to 0.
+    TEST_EXPECT(!host_restriction_list_pressed(screen, dialog, cfg, "WEAPON_LIST", 0, 0, menu_ui));
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, "WEAPON_LIST", 0, 1, menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 0 && screen.table_cell_text(list, 0, 1) == "Never");
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, "WEAPON_LIST", 0, 1, menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 1 && screen.table_cell_text(list, 0, 1) == "Always");
+    // A class steps past 2 to 0.
+    TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, "CLASS_LIST", 1, 1, menu_ui));
+    TEST_EXPECT(cfg.class_availability[gamecfg::kClassSniper] == 0);
+    TEST_EXPECT(!host_restriction_list_pressed(screen, dialog, cfg, "SELECTED_MISSIONS", 0, 1, menu_ui));
+    // The radios: every loadout_selectable weapon, every class word.
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, weapons, "WPN_MISSION", menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 3 && cfg.weapon_availability[3] == 3 &&
+                cfg.weapon_availability[2] == 3 && screen.table_cell_text(list, 1, 1) == "Mission");
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, weapons, "WPN_NEVER", menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 0 && cfg.weapon_availability[2] == 3);
+    // Every class word 0: START off whatever the missions; one set: START follows them.
+    const int start = find("START_GAME");
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, weapons, "CLASS_NEVER", menu_ui));
+    TEST_EXPECT(cfg.class_availability[0] == 0 && cfg.class_availability[9] == 0 && !dialog.can_start());
+    TEST_EXPECT(screen.is_widget_disabled(start) && screen.table_cell_text(classes, 4, 1) == "Never");
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, weapons, "CLASS_ALWAYS", menu_ui));
+    TEST_EXPECT(cfg.class_availability[0] == 1 && screen.is_widget_disabled(start)); // no mission yet
+    TEST_EXPECT(!host_restriction_radio_pressed(screen, dialog, cfg, weapons, "START_GAME", menu_ui));
+    return 0;
+}
 } // namespace
 
 int main() {
     if (title_caps() != 0) return 1;
     if (untouched_dialog() != 0) return 1;
     if (max_players_recommendation() != 0) return 1;
+    if (restriction_lists() != 0) return 1;
     gamecfg::GameCfg cfg;
     const auto read = [&](const char* name, const char* value) {
         return apply_host_dialog_control(cfg, kJo, name, value);
