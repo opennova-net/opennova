@@ -154,12 +154,9 @@
 #include "simulation/inmatch_session_values.h"
 #include "simulation/simulation.h"
 #include "lwf/lwf_data.h"
-#include "lwf/wav_loader.h"
-#include "lwf/wave_stream.h"
-#include "audio/sound_selector.h"
-#include "audio/ambient_layer.h"
 #include "audio/sound_bank.h"
 #include "audio/mission_audio_records.h"
+#include "audio/audio_out.h"
 #include "audio/mission_audio.h"
 #include "dbf/dbf_data.h"
 #include "fnt/fnt_resource.h"
@@ -182,7 +179,6 @@
 #include "resource_index/mod_listing.h"
 #include "resource_index/resource_root.h"
 #include "audio/sbf_bank.h"
-#include "audio/sbf_audio_stream.h"
 #include "audio/music_script.h"
 #include "audio/music_director.h"
 #include "audio/music_pair_names.h"
@@ -395,15 +391,12 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ScarPresentStats);
 	GDREGISTER_CLASS(Simulation);
 	GDREGISTER_CLASS(LwfData);
-	GDREGISTER_CLASS(WavLoader);
-	GDREGISTER_CLASS(WaveStream);
-	GDREGISTER_CLASS(SoundSelector);
 	GDREGISTER_CLASS(DbfData);
-	GDREGISTER_CLASS(AmbientLayer);
 	GDREGISTER_CLASS(SoundBank);
 	GDREGISTER_CLASS(MissionAudioStats);
 	GDREGISTER_CLASS(MissionAudioPerf);
 	GDREGISTER_CLASS(FiredSoundset);
+	GDREGISTER_CLASS(AudioOut);
 	GDREGISTER_CLASS(MissionAudio);
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
@@ -454,7 +447,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ResourceRoot);
 	GDREGISTER_CLASS(LaunchFlags);
 	GDREGISTER_CLASS(ModListing);
-	GDREGISTER_CLASS(SbfAudioStream);
 	GDREGISTER_CLASS(SbfBank);
 	GDREGISTER_CLASS(MusicScript);
 	GDREGISTER_CLASS(MusicPairNames);

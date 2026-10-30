@@ -430,9 +430,12 @@ typedef struct MusVMHooks {
        method), fires this hook with the int32 value.
        Witnessed: [orig: AudioVM_Intrinsic_GEcho @ 0x6720C0]. */
     void (*on_echo)           (void *user, int32_t arg);
-    /* GSV / GSDV set master / right-channel volumes in 16.16 fixed point.
-       Witnessed: [orig: AudioVM_Intrinsic_GSV @ 0x6720E0], [orig: AudioVM_Intrinsic_GSDV @ 0x672120]. */
-    void (*on_volume_changed) (void *user, int32_t left_16_16, int32_t right_16_16);
+    /* GSV sets the music stream's current and target volumes, GSDV the target
+       alone (current -1: unchanged), in 16.16 fixed point; the stream ramps the
+       current toward the target over each track (audio::MusicStream).
+       Witnessed: [orig: AudioVM_Intrinsic_GSV @ 0x6720E0 (unk_31C3800 and dword_31C3804)],
+       [orig: AudioVM_Intrinsic_GSDV @ 0x672120 (dword_31C3804)]. */
+    void (*on_volume_changed) (void *user, int32_t current_16_16, int32_t target_16_16);
     /* GFB empties the music stream: the bytes left of the track the last play
        selected go to 0, so the stream pump's next update steps the script
        (runtime/audio music_stream_pump.h).

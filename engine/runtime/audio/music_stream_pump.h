@@ -1,13 +1,13 @@
 #pragma once
 
 // The music stream pump: the per-frame service that steps the music context's AudioVM only once
-// the track its last `play` selected has streamed out, and otherwise keeps that track streaming.
-// The script is never stepped per frame; one `play` runs per track, and section changes land on
-// track boundaries [orig: AudioStream_Update @ 0x671c60; AudioStream_ServiceFrame @ 0x671dd0].
-// The VM is formats/mus; the pump owns the context's run state, whether the selected track still
-// has data to stream (retail's bytes left, g_AudioStreamBytesLeft @ 0x31C37EC) and the service
-// loop. The embedder's device (MusicStreamDevice) plays the one music stream: it starts the
-// track each `play` selects and reports whether that track is still sounding.
+// the track its last `play` selected has streamed out, and otherwise streams that track a block at
+// a time while its device's queue has room. The script is never stepped per frame; one `play` runs
+// per track, and section changes land on track boundaries [orig: AudioStream_Update @ 0x671c60;
+// AudioStream_ServiceFrame @ 0x671dd0]. The VM is formats/mus; the pump owns the context's run
+// state and the service loop. The device (MusicStreamDevice; the engine's is audio::MusicStream,
+// over the mixer's music channels) holds the selected track's bytes left (retail's
+// g_AudioStreamBytesLeft @ 0x31C37EC), its queue and its volumes.
 // Witness record: docs/audio/mus-sbf-re.md, "AudioVM playback pacing".
 
 #include <formats/mus/mus.h>
@@ -16,20 +16,33 @@
 
 namespace opennova::audio {
 
-// The device the pump drives: the embedder's one music stream.
+// The device the pump drives: the one music stream.
 class MusicStreamDevice {
 public:
 	virtual ~MusicStreamDevice() = default;
-	// `play` / `playw` selected SBF entry `entry`: the one stream switches to it from its start,
-	// so a track still sounding stops streaming [orig: AudioVM_Op_Play @ 0x672CB0 ->
-	// AudioVM_StartSound @ 0x671ff0 -> AudioVM_SelectStream @ 0x671bc0 - the entry's bytes
-	// @ 0x671bf0, the seek to its data @ 0x671c4a].
+	// `play` / `playw` selected SBF entry `entry`: the stream switches to it from its start, its
+	// bytes the entry's [orig: AudioVM_Op_Play @ 0x672CB0 -> AudioVM_StartSound @ 0x671ff0 ->
+	// AudioVM_SelectStream @ 0x671bc0 - the entry's bytes @ 0x671bf0, the seek to its data
+	// @ 0x671c4a].
 	virtual void start_track(uint32_t entry) = 0;
-	// Whether the track the last start_track began is still sounding.
-	virtual bool track_sounding() const = 0;
-	// The VM's section and GEcho notices (mus.h's on_section_entered / on_echo), passed on.
+	// GFB: the selected track's bytes left go to 0 [orig: AudioVM_Intrinsic_GFB @ 0x672150].
+	virtual void flush() = 0;
+	// Whether the selected track still has bytes to stream: its bytes left above 0 [orig:
+	// AudioStream_Update @ 0x671c76].
+	virtual bool streaming() const = 0;
+	// Whether the stream's queue is full [orig: Audio_GetPendingBufferCount >= 7 @ 0x671c95].
+	virtual bool queue_full() const = 0;
+	// One block of the track read and queued, its bytes left counted down [orig: AudioStream_Update
+	// @ 0x671ca4..0x671db3].
+	virtual void stream_block() = 0;
+	// The VM's section, GEcho and volume notices (mus.h's on_section_entered / on_echo /
+	// on_volume_changed), passed on.
 	virtual void section_entered(const char *name) { (void)name; }
 	virtual void echo(int32_t value) { (void)value; }
+	virtual void volume_changed(int32_t current_16_16, int32_t target_16_16) {
+		(void)current_16_16;
+		(void)target_16_16;
+	}
 };
 
 // What one service frame did.
@@ -48,8 +61,8 @@ public:
 	MusicStreamPump &operator=(const MusicStreamPump &) = delete;
 
 	// Bind the VM and the device (neither owned): the VM's hooks become the pump's, `play` /
-	// `playw` selecting the stream, GFB emptying it, the section and echo notices going to the
-	// device.
+	// `playw` selecting the stream, GFB emptying it, the section, echo and volume notices going to
+	// the device.
 	void install(mus::MusVM *vm, MusicStreamDevice *device);
 
 	// A context opened or started: it runs while the VM runs, no track selected yet, so the
@@ -66,16 +79,16 @@ public:
 
 	bool running() const { return running_; }
 	// Whether the selected track still has data to stream: retail's bytes left above 0.
-	bool streaming() const { return streaming_; }
+	bool streaming() const { return device_ != nullptr && device_->streaming(); }
 
 	// One service frame [orig: AudioStream_ServiceFrame @ 0x671dd0 - the update up to seven
 	// times, stopping at the first that finds the stream's queue full @ 0x671ddc..0x671de7]:
 	// each update with the context running steps the script when the selected track has
 	// streamed out, or with none selected [orig: AudioStream_Update @ 0x671c60 -
 	// g_AudioVMContextActive @ 0x671c66, g_AudioStreamBytesLeft <= 0 @ 0x671c76 ->
-	// AudioVM_RunInstance @ 0x671c7f], and otherwise streams it, the queue full while the
-	// device sounds it [orig: Audio_GetPendingBufferCount >= 7 @ 0x671c95]. A step that selects
-	// a track ends the frame, the track streaming through it. `dt_ms` goes to mus_vm_tick.
+	// AudioVM_RunInstance @ 0x671c7f], ends the frame on a full queue [orig:
+	// Audio_GetPendingBufferCount >= 7 @ 0x671c95], and otherwise streams one block of it.
+	// `dt_ms` goes to mus_vm_tick.
 	MusicPumpOutcome service_frame(uint32_t dt_ms);
 
 private:
@@ -83,11 +96,11 @@ private:
 	static void on_flush_buffer(void *user);
 	static void on_section_entered(void *user, const char *name);
 	static void on_echo(void *user, int32_t value);
+	static void on_volume_changed(void *user, int32_t current_16_16, int32_t target_16_16);
 
 	mus::MusVM *vm_ = nullptr;
 	MusicStreamDevice *device_ = nullptr;
 	bool running_ = false;    // g_AudioVMContextActive
-	bool streaming_ = false;  // g_AudioStreamBytesLeft > 0
 };
 
 } // namespace opennova::audio

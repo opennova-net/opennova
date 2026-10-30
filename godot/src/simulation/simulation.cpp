@@ -409,6 +409,7 @@ void Simulation::apply_terrain_to_ai() {
 void Simulation::apply_sound_state_to_world() {
 	if (!kernel_) return;
 	kernel_->world.script.voice.set_set_resolver(voice_set_resolver_);
+	kernel_->world.script.voice.set_dialogue_volume(voice_dialogue_volume_);
 	if (assets_.sound_profiles_override) {
 		kernel_->world.tables.sound_profiles.clear();
 		if (!assets_.sndprof_text.empty())

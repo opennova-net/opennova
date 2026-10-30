@@ -2,6 +2,9 @@
 
 #include <runtime/audio/ambient_emitters.h>
 
+#include <runtime/audio/sound_options.h>
+#include <base/io/fixed.h>
+
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/placement_traits.h>
 
@@ -190,6 +193,57 @@ const AmbientChannelPlan &AmbientEmitters::frame(const float listener[3], float 
 	return plan_;
 }
 
+void AmbientEmitters::play(Mixer &mixer, const SoundListener &listener, int32_t sound_fx_option,
+		const WaveOf &wave, const Centered &centered) {
+	// A row's channel bytes: its place back in the mission frame's 16.16 units (presentation
+	// (x, y, z) is mission (x, -z, y)), its pan, its volume through the option and its play
+	// word through the doppler.
+	const auto channel_of = [&](const AmbientCandidate &row, uint8_t &pan, uint8_t &volume,
+			uint32_t &play) {
+		const int32_t at[3] = { int32_t(row.pos[0] * io::kFp16One), int32_t(-row.pos[2] * io::kFp16One),
+			int32_t(row.pos[1] * io::kFp16One) };
+		const int32_t dx = int32_t(uint32_t(at[0]) - uint32_t(listener.position()[0]));
+		const int32_t dy = int32_t(uint32_t(at[1]) - uint32_t(listener.position()[1]));
+		const bool rides = row.source_spawn_id != 0 && centered && centered(row.source_spawn_id);
+		pan = positional_pan(dx, dy, listener.yaw(), rides);
+		volume = static_cast<uint8_t>(scaled_volume(row.vol, sound_fx_option));
+		play = doppler_play_word(emitter_play_word(row.pitch_q16), listener.position(),
+				listener.velocity(), at, row.velocity, 0);
+	};
+	for (const int channel : plan_.released) {
+		if (channel < 0 || channel >= kAmbientMixChannels) continue;
+		// [orig: AudioChannel_ResetByHandle @0x528A70]
+		mixer.reset(handles_[size_t(channel)]);
+		handles_[size_t(channel)] = 0;
+	}
+	for (const AmbientChannelPlan::Bind &update : plan_.updates) {
+		if (update.channel < 0 || update.channel >= kAmbientMixChannels) continue;
+		uint8_t pan = 0, volume = 0;
+		uint32_t play = 0;
+		channel_of(update.row, pan, volume, play);
+		uint32_t &handle = handles_[size_t(update.channel)];
+		// [orig: AudioChannel_SetAndPlay @0x528A5C; a handle it no longer plays reset @0x528A6C]
+		if (mixer.set_and_play(handle, pan, volume, play) == 0) {
+			mixer.reset(handle);
+			handle = 0;
+		}
+	}
+	for (const AmbientChannelPlan::Bind &bind : plan_.binds) {
+		if (bind.channel < 0 || bind.channel >= kAmbientMixChannels) continue;
+		const AmbientCandidateRef *ref = candidate(bind.row.candidate_id);
+		const MixWaveRef buffer = ref != nullptr && wave ? wave(bind.row.candidate_id, *ref) : nullptr;
+		uint32_t &handle = handles_[size_t(bind.channel)];
+		handle = 0;
+		if (!buffer) continue;
+		uint8_t pan = 0, volume = 0;
+		uint32_t play = 0;
+		channel_of(bind.row, pan, volume, play);
+		// [orig: AudioChannel_OpenSlotChecked(desc_ptr + 4, ...) @0x528ADB]
+		handle = mixer.open_looping(kFirstAmbientChannel + bind.channel,
+				voice_params(buffer, pan, volume, play, 0));
+	}
+}
+
 const AmbientCandidateRef *AmbientEmitters::candidate(int32_t candidate_id) const {
 	const auto found = candidates_.find(candidate_id);
 	return found != candidates_.end() ? &found->second : nullptr;
@@ -264,7 +318,7 @@ void AmbientEmitters::flush_emitters(int64_t final_tick) {
 			layers.push_back(layer_desc(candidate_id, described[i]));
 		}
 		mixer_.register_emitter(source, lane_id, pos, source_bms_id, lifetime, pitch_q16,
-				volume_q8_8, std::move(layers));
+				volume_q8_8, std::move(layers), event.velocity);
 	}
 	pending.clear();
 }

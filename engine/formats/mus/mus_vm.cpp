@@ -1165,20 +1165,17 @@ static int32_t intrinsic_gsv(MusVM *vm, int top) {
 }
 
 /* Witnessed: [orig: AudioVM_Intrinsic_GSDV @ 0x672120].
-   Sets right-channel only. Reuse on_volume_changed but pass current(left)
-   unchanged; we don't track the previous left value, so pass `fixed` for
-   both channels and let the embedder disambiguate. */
+   Sets the target volume alone (dword_31C3804), which the stream ramps the
+   current one toward over the next track (audio::MusicStream). Hooks
+   on_volume_changed with -1 for the current volume: unchanged. */
 static int32_t intrinsic_gsdv(MusVM *vm, int top) {
     int32_t v = stack_word(vm, top);
     int32_t clipped = v;
     if (clipped < 0)   clipped = 0;
     if (clipped > 255) clipped = 255;
     int32_t fixed = clipped << 16;
-    /* GSDV only changes the right channel. We pass left=0 to indicate
-       "left unchanged" -- not perfectly faithful but the only practical
-       choice without a per-channel state mirror. */
     if (vm->hooks.on_volume_changed) {
-        vm->hooks.on_volume_changed(vm->hooks.user, 0, fixed);
+        vm->hooks.on_volume_changed(vm->hooks.user, -1, fixed);
     }
     return fixed;
 }

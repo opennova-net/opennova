@@ -22,6 +22,7 @@
 
 #include <formats/lwf/lwf.h>
 #include <runtime/audio/ambient_mixer.h>
+#include <runtime/audio/mixer.h>
 #include <runtime/audio/sound_selector.h>
 
 namespace opennova::audio {
@@ -172,22 +173,9 @@ struct OneshotVoice {
 	uint32_t sndparm = 0;
 	int32_t vol255 = 255;
 	uint32_t pitch_q16 = 0x10000u;
-};
-
-// Retail has 26 physical channels. The generic one-shot allocator scans
-// channels 12..25; the first twelve belong to voice/music/ambient owners.
-// [orig: Audio_FindAndOpenChannel @0x766E80; AudioChannel_Open @0x7668F0]
-inline constexpr size_t kAudioChannelCount = 26;
-inline constexpr size_t kFirstOneshotChannel = 12;
-class OneshotChannelPool {
-public:
-	// First strictly lower score wins; ties retain slot order. Incoming gain
-	// must exceed half the selected channel's six-byte gain sum.
-	int acquire(uint64_t wave, uint8_t volume, uint32_t sound_id = 0);
-	void release(size_t channel);
-private:
-	struct Channel { uint64_t wave = 0; uint32_t sound_id = 0; uint8_t volume = 0; };
-	std::array<Channel, kAudioChannelCount> channels_{};
+	// The layer pans by the fire's bearing (its flag bit 0); else it plays at pan 0
+	// [orig: SoundBank_PlayTriggerEntries @0x75CE52..0x75CE5F].
+	bool positional = false;
 };
 
 // The one-shot's own-channel reuse key. Retail hands the SOURCE ENTITY pointer
@@ -195,7 +183,7 @@ private:
 // playing the same wave for the same id at ZERO, so an entity re-firing a wave
 // restarts its own voice instead of stealing the quietest other one
 // [orig: Audio_FindAndOpenChannel @0x766F46 / @0x766F8E (score 0 on the
-// (wave, sound_id) match; the 12*vol floor @0x766F0A never beats it);
+// (wave, sound_id) match; the 12*vol floor @0x766F0A never beats it; audio::Mixer::find_and_open);
 // Sound_Play3DPositional @0x527E4A stores the entity, SoundBank_PlayTriggerEntries
 // @0x75CE4F carries it into the open call (push @0x75CFD4, call @0x75CFE3),
 // Entity_PlaySound3D_FullVolume @0x528E31 forwards it]. Our entities have no pointer identity: the packed
@@ -222,13 +210,24 @@ struct OneshotPlan {
 	std::vector<OneshotVoice> voices;
 };
 
+// The plan's voices opened on the mixer's one-shot channels, each where the allocator puts it
+// (Mixer::find_and_open): its wave at its volume and play word, the fire's pan byte for a layer
+// that pans by its bearing (OneshotVoice::positional) and 0 for one that does not, the plan's
+// sound_id the reuse key [orig: SoundBank_PlayTriggerEntries @0x75CE52..0x75CE5F, @0x75CFA8..
+// 0x75CFE3 -> Audio_FindAndOpenChannel]. `wave_of` names a voice's wave (null: the voice is
+// skipped). Nothing opens for a plan the range cull dropped. True when a voice opened.
+using OneshotWaveFn = std::function<MixWaveRef(const OneshotVoice &voice)>;
+bool open_oneshot_plan(Mixer &mixer, const OneshotPlan &plan, uint8_t pan, const OneshotWaveFn &wave_of);
+
 // Plan a direct trigger-set fire at an explicit listener distance. This path
 // has no set-range cull or occlusion query; layer attenuation still applies.
 // [orig: Sound_PlayTriggerSetScaled @0x527B90 -> SoundBank_PlayTriggerEntries
 // @0x75CCD0]. The optional flat arm preserves menu playback without a listener.
+// `emitter_vol` is the fire's emitter volume, the sound-effects option's scale of the
+// caller's (oneshot_layer_volume; SoundOptions), 255 a fire at full volume.
 OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &loc,
         int64_t dist_q16, SoundSelector &selector, uint8_t listener_view_flags,
-        bool attenuate = true);
+        bool attenuate = true, int32_t emitter_vol = 255);
 
 // Plan a one-shot fire of the set at `loc` at a world position (PlayWavList /
 // event actions). Volume is computed ONCE at fire time from the witnessed
@@ -248,7 +247,7 @@ OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &l
 OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const float world_pos[3], const float listener_pos[3], bool has_listener,
 		int64_t source_bms_id, uint32_t sound_id, OcclusionFn occl, void *occl_ctx,
-		SoundSelector &selector, uint8_t listener_view_flags);
+		SoundSelector &selector, uint8_t listener_view_flags, int32_t emitter_vol = 255);
 
 // Where a set fire is heard (plan_set_fire): at a world point from the
 // listener's, a 3D one-shot culled past the set's range and each layer

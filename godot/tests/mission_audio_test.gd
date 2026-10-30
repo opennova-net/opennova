@@ -1,15 +1,10 @@
 extends GutTest
 
-## The mission audio as a device: the players it gives the engine's channel plan
-## (runtime/audio/ambient_emitters.h; the plan's logic is the ctest
-## `ambient_emitters`), the voices it writes only on change, the entity-attached
-## lane's loop at its emitter word, setup over real banks, the dialog voices, the
-## reverb bed and the world-sound park's bus writes. Asserts on volume_db — the
-## headless dummy audio driver ignores stream_paused (always reads back false), so
-## volume is the observable.
-
-
-const SILENT_DB := -80.0
+## The mission audio as a device: the engine mixer's emitter channels it plays the engine's
+## channel plan on (runtime/audio/ambient_emitters.h; the plan's logic is the ctest
+## `ambient_emitters`, the mixer's the ctest `audio_mixer`), the channels it opens only on
+## change, the entity-attached lane's loop at its emitter word, setup over real banks, the
+## dialog channel and the world-sound park of the sound-effects option word.
 
 # Staged fixture roots, removed after each test.
 var _staged_dirs: Array[String] = []
@@ -21,18 +16,12 @@ func after_each() -> void:
 	_staged_dirs.clear()
 
 
-func _players(container: Node) -> Array[AudioStreamPlayer3D]:
-	var out: Array[AudioStreamPlayer3D] = []
-	for value in container.find_children("*", "AudioStreamPlayer3D", true, false):
-		out.append(value as AudioStreamPlayer3D)
+# The mixer channels the plan's candidates ride, by candidate id.
+func _channels(audio: MissionAudio) -> Array:
+	var out: Array = []
+	for id in audio.active_ambient_candidate_ids():
+		out.append(audio.ambient_channel_for_candidate(int(id)))
 	return out
-
-
-func _player_at_position(container: Node, pos: Vector3) -> AudioStreamPlayer3D:
-	for player in _players(container):
-		if player.position.is_equal_approx(pos):
-			return player
-	return null
 
 
 # A mission whose envs buildings (items.def `move_function envs`, every slot the
@@ -75,71 +64,60 @@ end
 	return {"audio": audio, "container": container}
 
 
-# The plan's channels get players only when the plan grows them, never more than
-# the eight: twelve markers on a line give the nearest eight a player each, at its
-# position, nearer louder [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0].
-func test_the_plan_s_channels_get_players() -> void:
+# The plan's channels ride the mixer's eight emitter channels, 4..11: twelve markers on a
+# line give the nearest eight a channel each, nearer louder [orig: SoundEmitter_UpdateAndMixTop8
+# @ 0x5284a0, the channels desc_ptr + 4 @ 0x528adb].
+func test_the_plan_s_channels_ride_the_mixer_s_emitter_channels() -> void:
 	var positions: Array = []
 	for i in range(12):
 		positions.append(Vector3(float(10 + i * 50), 0, 0))
 	var fixture := _envs_mission("eight", positions, 2000)
 	var audio: MissionAudio = fixture["audio"]
 	var holder: Node3D = fixture["container"]
-	assert_eq(_players(holder).size(), 0,
-		"virtual ambient candidates do not create SceneTree audio nodes")
+	assert_eq(holder.get_child_count(), 1, "the mission audio node alone: no voice nodes")
 	audio.tick(Vector3.ZERO, 0.2)
-	var players := _players(holder)
-	assert_eq(players.size(), 8, "the physical ambient pool never exceeds its eight channels")
-	players.sort_custom(func(a, b): return a.position.x < b.position.x)
-	for i in players.size():
-		assert_almost_eq(players[i].position.x, float(10 + i * 50), 0.01,
-			"only the nearest eight virtual candidates occupy channels")
-		assert_gt(players[i].volume_db, SILENT_DB)
-		assert_eq(players[i].process_mode, Node.PROCESS_MODE_INHERIT)
-	assert_gt(players[0].volume_db, players[7].volume_db, "closest voice is loudest")
-	assert_eq(audio.active_ambient_candidate_ids(), [1, 2, 3, 4, 5, 6, 7, 8])
+	assert_eq(audio.active_ambient_candidate_ids(), [1, 2, 3, 4, 5, 6, 7, 8],
+		"only the nearest eight virtual candidates occupy channels")
+	var channels := _channels(audio)
+	channels.sort()
+	assert_eq(channels, [4, 5, 6, 7, 8, 9, 10, 11], "each on an emitter channel of its own")
+	var nearest := audio.ambient_channel_for_candidate(1)
+	var farthest := audio.ambient_channel_for_candidate(8)
+	assert_true(audio.channel_sounding(nearest), "the channel plays its wave")
+	assert_gt(audio.channel_volume(nearest), audio.channel_volume(farthest), "closest voice is loudest")
 	assert_eq(audio.ambient_candidate_wave(1).get_file().to_lower(), "tone.wav",
 		"a candidate's wave is its layer's member 0's")
 	audio.teardown()
 
 
-# The device writes a voice only when the plan changes it: a bind starts it on a
-# fresh looping stream, an unchanged update writes nothing, a release silences it,
-# drops its stream and takes it out of processing, and a re-entrant reuses the
-# free player with a fresh stream.
+# The device opens or resets a channel only when the plan changes it: a bind opens it
+# looping, an unchanged update opens nothing, a release resets it to the silent buffer,
+# and a re-entrant opens the free channel anew.
 func test_tick_writes_only_on_change() -> void:
 	var fixture := _envs_mission("writes", [Vector3(10, 0, 0)], 500)
 	var audio: MissionAudio = fixture["audio"]
-	var holder: Node3D = fixture["container"]
 
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(int(audio.get_perf_counters().voice_writes), 1, "first tick writes the voice on")
-	var p := _players(holder)[0]
-	var first_stream := p.stream
+	assert_eq(int(audio.get_perf_counters().voice_writes), 1, "first tick opens the channel")
+	var channel := audio.ambient_channel_for_candidate(1)
+	assert_eq(channel, 4, "the first emitter channel")
 
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_eq(int(audio.get_perf_counters().voice_writes), 0, "unchanged mix writes nothing")
-	assert_eq(_players(holder)[0], p, "the incumbent keeps its physical channel")
-	assert_eq(_players(holder)[0].stream, first_stream, "the incumbent playback is not restarted")
+	assert_eq(int(audio.get_perf_counters().voice_writes), 0, "unchanged mix opens nothing")
+	assert_eq(audio.ambient_channel_for_candidate(1), channel, "the incumbent keeps its channel")
 
 	audio.tick(Vector3(2000, 0, 0), 0.2)  # walk out of range
-	assert_eq(int(audio.get_perf_counters().voice_writes), 1, "leaving range writes the silence once")
-	assert_eq(p.volume_db, SILENT_DB)
-	assert_null(p.stream, "a dropout releases its bound stream")
-	assert_eq(p.process_mode, Node.PROCESS_MODE_DISABLED,
-		"an unused physical channel leaves SceneTree processing")
+	assert_eq(int(audio.get_perf_counters().voice_writes), 1, "leaving range resets the channel once")
+	assert_false(audio.channel_sounding(channel), "a dropout's channel plays the silent buffer")
 
 	audio.tick(Vector3(2000, 0, 0), 0.2)
 	assert_eq(int(audio.get_perf_counters().voice_writes), 0, "steady silence writes nothing")
 
 	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(audio.get_perf_counters().voice_writes), 1,
-		"re-entering the mix binds and restarts the voice once")
-	assert_eq(_players(holder)[0], p, "the bounded pool reuses its free channel")
-	assert_ne(_players(holder)[0].stream, first_stream,
-		"a candidate that dropped out restarts with a fresh looping stream binding")
-	assert_eq(p.process_mode, Node.PROCESS_MODE_INHERIT,
-		"an audible entrant returns the physical channel to processing")
+		"re-entering the mix opens the channel once")
+	assert_eq(audio.ambient_channel_for_candidate(1), channel, "the bounded pool reuses its free channel")
+	assert_true(audio.channel_sounding(channel), "the re-entrant plays")
 
 	audio.tick(Vector3.ZERO, 0.2)
 	assert_eq(int(audio.get_perf_counters().voice_writes), 0,
@@ -169,44 +147,42 @@ func test_dynamic_vehicle_emitter_loops_refreshes_and_clears_by_key() -> void:
 	var audio = MissionAudio.create(root, null)
 	audio.setup(mission, "vehicle_probe.bms", container)
 
-	# The engine voice plays on a channel of the plan as a persistent loop at its
-	# emitter word and the witnessed emitter volume (its competition with placed
-	# ambience in the loudest eight is the ctest `ambient_emitters`).
+	# The engine voice plays on a channel of the plan as a persistent loop at its emitter word
+	# and the witnessed emitter volume through the sound-effects option, (option * 252) >> 8
+	# (its competition with placed ambience in the loudest eight is the ctest `ambient_emitters`).
+	var options := AudioOut.option_volumes()
+	AudioOut.set_option_volumes(255, int(options[1]), int(options[2]))
 	var vehicle_pos := Vector3(900, 4, -300)
 	audio.apply_sound_emitters([_emitter_row(77, vehicle_pos, 0x10000, 0xFFFF)])
 	audio.tick(vehicle_pos, 0.2)
-	var voice := _player_at_position(container, vehicle_pos)
-	assert_not_null(voice, "the full-gain idle voice takes a channel")
-	if voice == null:
+	var ids := audio.active_ambient_candidate_ids()
+	assert_eq(ids.size(), 1, "the full-gain idle voice takes a channel")
+	if ids.size() != 1:
+		AudioOut.set_option_volumes(int(options[0]), int(options[1]), int(options[2]))
 		audio.teardown()
 		TestFs.remove_dir_recursive(fixture_dir)
 		return
-	var first_stream := voice.stream
-	assert_true(voice.playing)
-	assert_eq(voice.bus, &"SFX", "an entity-attached lane plays on the effects bus")
-	assert_eq((voice.stream as AudioStreamWAV).loop_mode,
-		AudioStreamWAV.LOOP_FORWARD, "the engine emitter is a persistent loop")
-	assert_almost_eq(voice.pitch_scale, 1.0, 0.0001)
-	assert_almost_eq(voice.volume_db, linear_to_db(252.0 / 255.0), 0.001,
-		"Q8.8 full gain enters the witnessed emitter volume curve")
+	var channel := audio.ambient_channel_for_candidate(int(ids[0]))
+	assert_true(audio.channel_sounding(channel))
+	assert_eq(audio.channel_play(channel), 0x10000, "the emitter word is the play factor")
+	assert_eq(audio.channel_volume(channel), (255 * 252) >> 8,
+		"Q8.8 full gain enters the witnessed emitter volume curve, through the option")
 
 	# A per-tick refresh of the same (source lifetime, lane) updates its live
-	# controls and pose without rebinding/restarting its stream.
+	# controls and pose on the same channel.
 	var refreshed_pos := vehicle_pos + Vector3(1, 0, 0)
 	audio.apply_sound_emitters([_emitter_row(77, refreshed_pos, 0xC000, 0x8000)])
 	audio.tick(refreshed_pos, 0.2)
-	assert_eq(_player_at_position(container, refreshed_pos), voice)
-	assert_eq(voice.stream, first_stream,
-		"a keyed refresh preserves the incumbent playback")
-	assert_almost_eq(voice.pitch_scale, 0.75, 0.0001)
-	assert_almost_eq(voice.volume_db, linear_to_db(125.0 / 255.0), 0.001)
+	assert_eq(audio.ambient_channel_for_candidate(int(ids[0])), channel, "the incumbent keeps its channel")
+	assert_eq(audio.channel_play(channel), 0xC000)
+	assert_eq(audio.channel_volume(channel), (255 * 125) >> 8)
 
 	audio.apply_sound_emitters([_emitter_row(77, refreshed_pos, 0, 0)])
 	audio.tick(refreshed_pos, 0.2)
 	assert_true(audio.active_ambient_candidate_ids().is_empty(),
 		"the zeroed source/lane update removes the vehicle emitter immediately")
-	assert_null(voice.stream, "its released channel drops its stream")
-	assert_eq(voice.volume_db, SILENT_DB, "and falls silent")
+	assert_false(audio.channel_sounding(channel), "its released channel falls silent")
+	AudioOut.set_option_volumes(int(options[0]), int(options[1]), int(options[2]))
 
 	audio.teardown()
 	TestFs.remove_dir_recursive(fixture_dir)
@@ -271,11 +247,8 @@ end
 		"an envs decoration/building resolves its ambient soundloop")
 	assert_gt(int(stats.ambient_candidates), 0)
 	assert_eq(int(stats.physical_channels), 0)
-	assert_eq(_players(container).size(), 0,
-		"mission setup stores marker/layer data without creating candidate nodes")
 	audio.tick(Vector3.ZERO, 0.2)
-	assert_lte(_players(container).size(), MissionAudio.MIX_CHANNELS)
-	assert_eq(int(audio.get_stats().physical_channels), _players(container).size())
+	assert_lte(audio.active_ambient_candidate_ids().size(), MissionAudio.MIX_CHANNELS)
 	assert_eq(provider.source_bms_ids, [env_building.bms_id],
 		"setup retains the authored emitter identity through the ambient LOS call")
 	audio.teardown()
@@ -340,7 +313,7 @@ end
 	assert_eq(int(stats.ambient_candidates_validated), 2)
 	assert_eq(int(stats.ambient_decode_failures), 1,
 		"the corrupt virtual candidate is visible in runtime stats")
-	assert_eq(_players(container).size(), 1,
+	assert_eq(audio.active_ambient_candidate_ids().size(), 1,
 		"the next-ranked playable candidate receives the physical channel")
 	audio.teardown()
 	TestFs.remove_dir_recursive(fixture_dir)
@@ -376,17 +349,12 @@ func test_repeated_setup_clears_the_dialog_bank_and_wac_voice() -> void:
 	audio.setup(mission, "first.bms", container)
 	assert_eq(audio.resolve_dialog_wave(1), "tone.wav")
 	assert_true(audio.play_wac_wave("tone.wav"))
-	var old_wac: AudioStreamPlayer = null
-	for value in container.find_children("*", "AudioStreamPlayer", true, false):
-		old_wac = value as AudioStreamPlayer
-		break
-	assert_not_null(old_wac)
+	assert_true(audio.channel_sounding(0), "the WAC wave plays on channel zero")
 
 	audio.setup(mission, "second.bms", container)
 	assert_eq(audio.resolve_dialog_wave(1), "",
 		"a mission without a DBF cannot retain the previous mission's dialog mapping")
-	if old_wac != null:
-		assert_false(old_wac.playing, "the previous mission's WAC channel is stopped")
+	assert_false(audio.channel_sounding(0), "the previous mission's WAC channel is stopped")
 	audio.teardown()
 	TestFs.remove_dir_recursive(fixture_dir)
 
@@ -412,14 +380,14 @@ func _dialog_fixture(waves: PackedStringArray) -> Dictionary:
 	return {"dir": root_dir, "world": world, "audio": world.get_mission_audio()}
 
 
-# Dialog ticks until a voice other than `before` plays the channel's last line;
+# Dialog ticks until a handle other than `before` plays the channel's last line;
 # returns the tick it loaded on, counting from `first_tick`, or -1.
-func _tick_until_next_line(audio: MissionAudio, before: AudioStreamPlayer,
+func _tick_until_next_line(audio: MissionAudio, before: int,
 		first_tick: int, last_tick: int) -> int:
 	for tick in range(first_tick, last_tick + 1):
 		audio.advance_dialog_tick()
-		var voice: AudioStreamPlayer = audio.dialog_voice()
-		if voice != null and voice != before:
+		var voice := audio.dialog_voice_handle()
+		if voice != 0 and voice != before:
 			return tick
 	return -1
 
@@ -436,13 +404,13 @@ func test_dialog_lines_load_on_the_queue_s_timers() -> void:
 	if audio == null:
 		return
 	assert_true(audio.play_dialog(2))
-	assert_null(audio.dialog_voice(), "the line waits for the dialog tick")
+	assert_eq(audio.dialog_voice_handle(), 0, "the line waits for the dialog tick")
 	audio.advance_dialog_tick()
-	var first: AudioStreamPlayer = audio.dialog_voice()
-	assert_not_null(first, "the first line loads on the first dialog tick")
-	if first == null:
+	var first := audio.dialog_voice_handle()
+	assert_ne(first, 0, "the first line loads on the first dialog tick")
+	if first == 0:
 		return
-	first.stop()  # its wave ends long before the hold runs out
+	audio.stop_dialog_line()  # its wave ends long before the hold runs out
 	audio.tick(Vector3.ZERO, 0.0)  # a rendered frame: the hold counts from the next tick
 	assert_eq(_tick_until_next_line(audio, first, 2, 200), 126,
 		"the second line loads after the hold, the free channel and its delay")
@@ -458,9 +426,9 @@ func test_a_dialog_line_without_its_wave_holds_twelve_ticks() -> void:
 		return
 	assert_true(audio.play_dialog(2))
 	audio.advance_dialog_tick()
-	assert_null(audio.dialog_voice(), "SynR101 has no wave: no voice")
+	assert_eq(audio.dialog_voice_handle(), 0, "SynR101 has no wave: no voice")
 	audio.tick(Vector3.ZERO, 0.0)
-	assert_eq(_tick_until_next_line(audio, null, 2, 200), 90,
+	assert_eq(_tick_until_next_line(audio, 0, 2, 200), 90,
 		"the missing line holds 12 ticks, then the next line's delay runs")
 
 
@@ -481,60 +449,29 @@ func test_a_new_mission_load_carries_no_dialog() -> void:
 		return
 	assert_true(audio.play_dialog(2))
 	audio.advance_dialog_tick()
-	var old_dialog: AudioStreamPlayer = audio.dialog_voice()
-	assert_not_null(old_dialog)
+	assert_true(audio.is_dialog_voice_playing())
 	assert_true(audio.play_dialog(2), "a second dialog takes a slot behind the playing line")
 	world.unload()
-	# The stop is the teardown's, not the wave's end: it holds the same frame
-	# (the voice node is only queued for deletion).
-	if old_dialog != null and is_instance_valid(old_dialog):
-		assert_false(old_dialog.playing, "the mission teardown stops its dialog voice")
+	# The stop is the teardown's, not the wave's end: the dialog channel plays the silent buffer.
+	assert_false(audio.channel_sounding(3), "the mission teardown stops its dialog channel")
 	assert_eq(WorldFixture.load_mission(world, fixture["dir"]), OK)
 	var next_audio: MissionAudio = world.get_mission_audio()
 	assert_not_null(next_audio)
 	if next_audio == null:
 		return
 	next_audio.advance_dialog_tick()
-	assert_null(next_audio.dialog_voice(),
+	assert_eq(next_audio.dialog_voice_handle(), 0,
 		"the new mission's dialog table holds neither of the old mission's dialogs")
 
 
-func test_mission_reverb_does_not_install_an_unwitnessed_bus_effect() -> void:
-	var fixture_dir := OS.get_cache_dir().path_join("mission_audio_reverb_%d" % Time.get_ticks_usec())
-	DirAccess.make_dir_recursive_absolute(fixture_dir)
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var mission := MissionData.new()
-	mission.create_default()
-	mission.set_header_int("reverb", 1)
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var audio = MissionAudio.create(root, null)
-	var ambient_bus := AudioServer.get_bus_index(&"Ambient")
-	assert_gte(ambient_bus, 0)
-	audio.setup(mission, "reverb_probe.bms", container)
-	assert_eq(_reverb_count(ambient_bus), 0,
-		"the retail preset selector does not introduce a Godot reverb effect")
-
-	audio.teardown()
-	assert_eq(_reverb_count(ambient_bus), 0,
-		"unloading the mission cannot leave its global bus effect in the menu/next world")
-	TestFs.remove_dir_recursive(fixture_dir)
-
-
-# The single-player round end's world-sound park, as a device: parking gives the SFX
-# and Ambient buses a zero option's volume, releasing puts back the volumes they held,
-# and the mission teardown releases a park (engine EpilogCine::world_sound_parked
-# carries the witness).
-func test_world_sound_park_saves_and_restores_the_effects_buses() -> void:
-	var sfx := AudioServer.get_bus_index(&"SFX")
-	var ambient := AudioServer.get_bus_index(&"Ambient")
-	assert_gte(sfx, 0)
-	assert_gte(ambient, 0)
-	var sfx_before := AudioServer.get_bus_volume_db(sfx)
-	var ambient_before := AudioServer.get_bus_volume_db(ambient)
-	AudioServer.set_bus_volume_db(sfx, -6.0)
-	AudioServer.set_bus_volume_db(ambient, -3.0)
+# The single-player round end's world-sound park: the sound-effects option word saved and
+# zeroed, so what opens after falls silent while what sounds plays out; the release puts it
+# back, and the mission teardown releases a park [orig: Sound_ParkEffectsVolume @ 0x5280b0;
+# Sound_RestoreEffectsVolume @ 0x5280d0] (engine EpilogCine::world_sound_parked carries the
+# witness).
+func test_world_sound_park_saves_and_restores_the_effects_option() -> void:
+	var before := AudioOut.option_volumes()
+	AudioOut.set_option_volumes(200, int(before[1]), int(before[2]))
 	var fixture_dir := OS.get_cache_dir().path_join("mission_audio_park_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(fixture_dir)
 	var root := ResourceRoot.new()
@@ -544,25 +481,20 @@ func test_world_sound_park_saves_and_restores_the_effects_buses() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio = MissionAudio.create(root, null)
-	var silent := float(SoundBank.volume_db_from_255(0))
 	audio.set_world_sound_parked(true)
 	assert_true(audio.is_world_sound_parked())
-	assert_almost_eq(AudioServer.get_bus_volume_db(sfx), silent, 0.001)
-	assert_almost_eq(AudioServer.get_bus_volume_db(ambient), silent, 0.001)
-	# A repeat of the park saves nothing over the volumes it holds.
+	assert_eq(int(AudioOut.option_volumes()[0]), 0, "the parked option is zero")
+	# A repeat of the park saves nothing over the word it holds.
 	audio.set_world_sound_parked(true)
 	audio.set_world_sound_parked(false)
 	assert_false(audio.is_world_sound_parked())
-	assert_almost_eq(AudioServer.get_bus_volume_db(sfx), -6.0, 0.001)
-	assert_almost_eq(AudioServer.get_bus_volume_db(ambient), -3.0, 0.001)
+	assert_eq(int(AudioOut.option_volumes()[0]), 200, "the release puts the word back")
 	audio.setup(mission, "park_probe.bms", container)
 	audio.set_world_sound_parked(true)
 	audio.teardown()
 	assert_false(audio.is_world_sound_parked(), "the teardown releases the park")
-	assert_almost_eq(AudioServer.get_bus_volume_db(sfx), -6.0, 0.001)
-	assert_almost_eq(AudioServer.get_bus_volume_db(ambient), -3.0, 0.001)
-	AudioServer.set_bus_volume_db(sfx, sfx_before)
-	AudioServer.set_bus_volume_db(ambient, ambient_before)
+	assert_eq(int(AudioOut.option_volumes()[0]), 200)
+	AudioOut.set_option_volumes(int(before[0]), int(before[1]), int(before[2]))
 	TestFs.remove_dir_recursive(fixture_dir)
 
 
@@ -615,104 +547,9 @@ func _add_lwf_set(
 	lwf.set_member_field(set_i, layer_i, member_i, "base_pitch", member_pitch)
 
 
-func _reverb_count(bus_idx: int) -> int:
-	var count := 0
-	for i in AudioServer.get_bus_effect_count(bus_idx):
-		if AudioServer.get_bus_effect(bus_idx, i) is AudioEffectReverb:
-			count += 1
-	return count
-
-
 # One persistent emitter registration shaped like Simulation.drain_sound_emitters
 # emits: the fixture truck's idle lane at `pos` with the given pitch/volume words.
 func _emitter_row(source_spawn_id: int, pos: Vector3, pitch_q16: int, volume_q8_8: int,
 		emitted_tick: int = 0) -> SoundEmitterRow:
 	return SoundEmitterRow.make(source_spawn_id, 0x10001, 42, pos, 0, 0, 30, emitted_tick,
 			pitch_q16, volume_q8_8, false, "V_TRUCK_ILP")
-
-
-# An emitter word is the channel's play factor [orig: SoundEmitter_UpdateAndMixTop8
-# @ 0x528943..0x528949, into the channel's +4 through the AudioChannel_OpenSlotChecked
-# call @ 0x528ae3 and the AudioChannel_SetAndPlay call @ 0x528a5c], which the mixer's step
-# composes with the wave's pitch: a word whose step is 0 plays at the least
-# step, 1/512 of a sample a device frame (44100 / 512 = 86.13 Hz), not floored
-# at 0.0001 of the wave's rate (D-SND-53; opennova::lwf::wave_pitch_scale).
-func test_emitter_word_of_step_zero_plays_at_the_least_step() -> void:
-	var fixture_dir := OS.get_cache_dir().path_join(
-		"mission_audio_least_step_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
-	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
-		FileAccess.get_file_as_bytes(
-			ProjectSettings.globalize_path(
-				"res://../fixtures/lwf/tone.wav")))
-	var lwf := LwfData.new()
-	lwf.create_empty()
-	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
-	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var mission := MissionData.new()
-	assert_eq(mission.create_default(), OK)
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var audio = MissionAudio.create(root, null)
-	audio.setup(mission, "least_step_probe.bms", container)
-
-	# tone.wav is 22050 Hz, its ratio 0x8000: a word of 1 steps at
-	# (1 * 0x8000 + 0x400000) >> 23 = 0.
-	var pos := Vector3(900, 4, -300)
-	audio.apply_sound_emitters([_emitter_row(77, pos, 1, 0xFFFF)])
-	audio.tick(pos, 0.2)
-	var voice := _player_at_position(container, pos)
-	assert_not_null(voice, "the emitter takes a channel")
-	if voice != null:
-		assert_almost_eq(voice.pitch_scale, 44100.0 / 512.0 / 22050.0, 0.000001,
-			"a word whose step is 0 plays at the least step")
-	audio.teardown()
-	TestFs.remove_dir_recursive(fixture_dir)
-
-
-# An emitter's channel plays its emitter word alone: the mix reads the layer's
-# member 0 for its wave, volume and clamp, never its pitch, and opens or updates
-# the channel with the slot's word as its play factor [orig:
-# SoundEmitter_UpdateAndMixTop8 @ 0x528943..0x528949, member 0 @ 0x528649; the
-# AudioChannel_OpenSlotChecked call @ 0x528ae3, the AudioChannel_SetAndPlay call
-# @ 0x528a5c] (D-SND-56). game.lwf's V_AH62_ILP carries a member 0 pitch of
-# 0x11709 (1.09), which ours had composed onto the word.
-func test_emitter_channel_plays_its_word_alone() -> void:
-	var fixture_dir := OS.get_cache_dir().path_join(
-		"mission_audio_word_alone_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
-	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
-		FileAccess.get_file_as_bytes(
-			ProjectSettings.globalize_path(
-				"res://../fixtures/lwf/tone.wav")))
-	var lwf := LwfData.new()
-	lwf.create_empty()
-	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000, float(0x11709) / 65536.0)
-	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var mission := MissionData.new()
-	assert_eq(mission.create_default(), OK)
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var audio = MissionAudio.create(root, null)
-	audio.setup(mission, "word_alone_probe.bms", container)
-
-	# tone.wav is 22050 Hz, its ratio 0x8000: the word 0x10000 steps at 256,
-	# the wave's own rate, and 0xC000 at 192, three quarters of it.
-	var pos := Vector3(900, 4, -300)
-	audio.apply_sound_emitters([_emitter_row(77, pos, 0x10000, 0xFFFF)])
-	audio.tick(pos, 0.2)
-	var voice := _player_at_position(container, pos)
-	assert_not_null(voice, "the emitter takes a channel")
-	if voice != null:
-		assert_almost_eq(voice.pitch_scale, 1.0, 0.000001,
-			"the channel opens at the word alone, not member 0's pitch")
-		audio.apply_sound_emitters([_emitter_row(77, pos, 0xC000, 0xFFFF)])
-		audio.tick(pos, 0.2)
-		assert_almost_eq(voice.pitch_scale, 0.75, 0.000001,
-			"and a live channel's update takes the word alone")
-	audio.teardown()
-	TestFs.remove_dir_recursive(fixture_dir)
