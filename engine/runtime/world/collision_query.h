@@ -757,12 +757,17 @@ inline bool building_def_row(const Entity &e) {
 
 // The static prox list's membership and bound: a pool-2 row with an item type
 // (+0x1C) and a def (+0x20) is written, and the count advances only while it is
-// under 1199, so the 1200th row's write lands but is never counted and no
-// later row is. [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 - pass 1's
-// tests @ 0x4b945d / @ 0x4b9466, `cmp eax, 4AFh` @ 0x4b94b7 and its `jge`
-// @ 0x4b94cb; pass 2's @ 0x4b94f1 / @ 0x4b94fa, `cmp eax, 4AFh` @ 0x4b954b and
-// its `jge` @ 0x4b955f]
-inline constexpr int32_t kStaticProxCountBound = 1199;
+// under one less than the table's size, so the last row's write lands but is never
+// counted and no later row is. The table's arrays hold pool 2's capacity (1200 at
+// retail's size, the 0x4AF compare its 1199), and pool sizes are the engine's
+// configured capacities, so the bound follows pool 2's.
+// [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430 - pass 1's tests @ 0x4b945d /
+// @ 0x4b9466, `cmp eax, 4AFh` @ 0x4b94b7 and its `jge` @ 0x4b94cb; pass 2's
+// @ 0x4b94f1 / @ 0x4b94fa, `cmp eax, 4AFh` @ 0x4b954b and its `jge` @ 0x4b955f;
+// pool 2's 1200 @ 0x4421a2]
+inline int32_t static_prox_count_bound(std::size_t pool2_capacity) {
+    return pool2_capacity > 0 ? static_cast<int32_t>(pool2_capacity) - 1 : 0;
+}
 inline bool static_prox_listed(const Entity &e) {
     return e.item_type_index != 0 && e.has_item_def;
 }

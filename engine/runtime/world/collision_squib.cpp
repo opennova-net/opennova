@@ -65,9 +65,10 @@ bool CollisionWorld::sun_ray_clear_of_entities(const World &world, const FixedVe
     if (distance < 16) return true;
     const EntityHandle local=world.cached.local_player;
     const Entity *local_row=world.registry.get(local);
-    // Pool 2, then 1, then 0; the first hit ends the test.
+    // Pool 2, then 1, then 0, each to its used count; the first hit ends the test
+    // [orig: Physics_RaycastAgainstPoolByIndex @0x539530 - the used load @0x539540].
     for (const int pool : {2,1,0})
-        for (size_t i=0;i<world.registry.pool_capacity(pool);++i) {
+        for (size_t i=0;i<world.registry.pool_used(pool);++i) {
             const auto handle=EntityHandle::make(pool,uint16_t(i));
             const Entity *e=world.registry.get(handle);
             if (e && pool_row_hits_ray(world,handle,*e,ray,local,local_row)) return false;
@@ -140,7 +141,8 @@ EntityHandle CollisionWorld::raycast_nearest_entity(const World &world, EntityHa
         bool any=false;
         CollisionTargetView view;
         std::vector<CollisionMatrix> matrices;
-        for (size_t i=0;i<world.registry.pool_capacity(pool);++i) {
+        // The pool to its used count [orig: @0x414419].
+        for (size_t i=0;i<world.registry.pool_used(pool);++i) {
             const auto handle=EntityHandle::make(pool,uint16_t(i));
             const Entity *e=world.registry.get(handle);
             // [orig: the +0x1C and bound gates @0x41445C..0x41446E]
@@ -214,7 +216,8 @@ ProjectileHit CollisionWorld::trace_squib(World &world, EntityHandle source,
     // Physics_RaycastAgainstEntityPool, the skip @0x5387A4..0x5387B4].
     for (const int pool : {0,2,1}) {
         ProjectileHit candidate;
-        for (size_t i=0;i<world.registry.pool_capacity(pool);++i) {
+        // The pool to its used count [orig: Physics_RaycastAgainstPoolByIndex @0x539540].
+        for (size_t i=0;i<world.registry.pool_used(pool);++i) {
             const auto handle=EntityHandle::make(pool,uint16_t(i));
             const Entity *e=world.registry.get(handle);
             if (!e || !pool_row_hits_ray(world,handle,*e,ray,source,owner)) continue;

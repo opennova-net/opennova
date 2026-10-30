@@ -46,8 +46,7 @@ static func load_for(root: ResourceRoot) -> int:
 		var db := AvatarDatabase.new()
 		if db.load_from_resource_root(root, "Avatars.def") == OK and db.is_loaded():
 			avatars = db
-	_store.set_defaults(avatars, Strings.get_override_table(),
-			Strings.get_table(Strings.TABLE_GAMEUI), 0)
+	_store.set_defaults(avatars, Strings.get_table(Strings.TABLE_GAMEUI), 0)
 	_expansion = String(root.get_expansion()) if root != null else ""
 	return int(_store.load(LaunchFlags.working_dir(), _expansion))
 

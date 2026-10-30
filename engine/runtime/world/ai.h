@@ -891,11 +891,13 @@ public:
     //  resolved by EntityDef_InitAllCallbacks @0x4a5aae]
     void think_brain(AiEntity &e, World &world);
     // One pool-0 row's +0x1C4 body update, its bound row's move function
-    // (body_move_row): org1 the AI motor, org2 the player body (or the joiner's
-    // presentation leg for a wire-owned peer); any other row runs nothing here.
+    // (`move_row`, body_move_row's pick over the body's registry row, which the
+    // caller's walk already read for its null-row skip): org1 the AI motor, org2
+    // the player body (or the joiner's presentation leg for a wire-owned peer);
+    // any other row runs nothing here.
     // [orig: Entity_UpdateAllEntities @0x4C2460..0x4C2474 (`call eax`);
     //  g_EntityClassPhysicsTable row "org1" -> Entity_UpdateInfantryAI @0x4b9910]
-    void update_organic(AiEntity &e, World &world, uint32_t logic_tick);
+    void update_organic(AiEntity &e, World &world, uint32_t logic_tick, PhysicsClass move_row);
 
     // Capture the current AI state as the restore baseline. The embedder calls this once at
     // play start (after promote + the pre-mission pass), when it snapshots the World.

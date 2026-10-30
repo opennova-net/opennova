@@ -135,6 +135,7 @@ bool run_fanout_and_per_connection_anchor() {
 	// --- sub-case a1: conn_join has no player. The live host emits, while the
 	// joiner produces neither bytes nor any hidden phase/cache/watermark progress. ---
 	conns[conn_join].s2c_phase = 7;
+	ns::size_priority_caches(conns[conn_join], world.registry);
 	conns[conn_join].s2c_entity_age[3] = 9;
 	conns[conn_join].s2c_entity_heading[3] = 11;
 	conns[conn_join].s2c_entity_speed[3] = 13;
@@ -1134,7 +1135,7 @@ bool run_0a_priority_view_terms() {
 	ok = ok && expect(ib1 < ia1,
 	                  "watched/occupied/enemy/moving B outranks the nearer behind-the-viewer A");
 	// The selection stamped B's last-sent caches [orig: @0x50f17c + the speed tail].
-	ok = ok && expect(conns[0].s2c_entity_speed[256 + (b_h.packed & 0xFF)] == 255,
+	ok = ok && expect(conns[0].s2c_entity_speed[world.registry.pool_capacity(0) + b_h.slot()] == 255,
 	                  "B's speed cache stamped at selection");
 	// Frame 2: the one-shot speed delta is gone, but the sustained view terms
 	// (angle/enemy/occupied/LOS/+200) still order B first.
@@ -1370,9 +1371,12 @@ bool run_0a_player_record_field_sources() {
 	// default 44, never 0 (the null clip; the v15 flicker) [orig: @0x4b9714] (D-NET-159).
 	if (!expect(rec->player.anim_state_id == 44, "anim-state id is the spawn default 44"))
 		return false;
-	// Pending-wins selection [orig: reads +0x2B8 ?: +0x2BC @0x4c0cc7] + the channel ratio byte.
+	// Pending-wins selection [orig: reads +0x2B8 ?: +0x2BC @0x4c0cc7] + the channel ratio byte,
+	// read off the body's live channel as the record is written: a body 37 ticks into its pass
+	// (no clip source here: the elapsed ticks themselves) [orig: NetPacket_SerializePlayerState
+	// @0x4C0CF2..0x4C0D35].
 	e->net_anim_pending = 11; // a queued crouch-walk commit
-	e->net_anim_phase = 37;
+	ae->inf.clip_phase = 37;
 	ns::test::emit_all(world, conns);
 	if (!expect(ch.client_recv(dg), "second 0x0A frame dequeued")) return false;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
@@ -2559,11 +2563,13 @@ bool run_vehicle_drive_authority() {
 	return true;
 }
 
-// B-9: the priority caches keep one entry per slot for pool 0's 256 and pool 1's 1200
-// (handle & 0xFFF, +256 for pool 1, no 0xFF mask), so pool-1 slots 10 and 266 keep their
-// own last-sent heading where a 512-entry cache aliased them.
+// B-9: the priority caches keep one entry per slot of pool 0's capacity then pool 1's
+// (handle & 0xFFF, + pool 0's capacity for pool 1, no 0xFF mask), so pool-1 slots 10 and
+// 266 keep their own last-sent heading where a 512-entry cache aliased them. The block
+// follows the configured pools (8 + 300 here), as retail's 0x5B0 bytes are its 256 + 1200.
 // [orig: NetPacket_SerializeEntityStatesToPacket @0x50F150..0x50F17C;
-//  Server_BuildEntityPriorityList @0x50E601 (the 0x5B0-byte sweep)]
+//  Server_BuildEntityPriorityList @0x50E601 (the 0x5B0-byte sweep); EntityPool_Allocate
+//  @0x4421CD / @0x44219C]
 bool run_0a_priority_caches_hold_every_pool1_slot() {
 	w::World world;
 	world.registry.configure_pool(0, 8);
@@ -2591,18 +2597,33 @@ bool run_0a_priority_caches_hold_every_pool1_slot() {
 	ns::Datagram dg;
 	(void)ch.client_recv(dg);
 	const ns::Connection &c = conns[0];
-	if (!expect(c.s2c_entity_age.size() == 256 + 1200, "cache: 256 + 1200 entries")) return false;
-	if (!expect(c.s2c_entity_heading[256 + 10] == 0x00 && c.s2c_entity_heading[256 + 266] == 0x40,
+	if (!expect(c.s2c_entity_age.size() == 8 + 300 && c.s2c_priority_pool1_base == 8,
+	            "cache: pool 0's 8 entries then pool 1's 300"))
+		return false;
+	if (!expect(c.s2c_entity_heading[8 + 10] == 0x00 && c.s2c_entity_heading[8 + 266] == 0x40,
 	            "cache: slot 266 keeps its own heading, not slot 10's"))
 		return false;
-	// Retail's sweep covers 0x5A0 of the block's 0x5B0 bytes: pool 1's last sixteen slots
-	// never age [orig: Server_BuildEntityPriorityList @0x50E601..0x50E634].
-	conns[0].s2c_entity_age[256 + 1199] = 7;
-	conns[0].s2c_entity_age[256 + 1183] = 7;
+	// The sweep covers the block's bytes rounded down to its 32-byte stride, 288 of 308:
+	// pool 1's last twenty slots never age, as retail's 0x5A0 of 0x5B0 leaves sixteen
+	// [orig: Server_BuildEntityPriorityList @0x50E601..0x50E634].
+	conns[0].s2c_entity_age[8 + 299] = 7;
+	conns[0].s2c_entity_age[8 + 279] = 7;
 	ns::test::emit_all(world, conns);
 	(void)ch.client_recv(dg);
-	return expect(conns[0].s2c_entity_age[256 + 1199] == 7 && conns[0].s2c_entity_age[256 + 1183] == 8,
-	              "cache: the sweep stops 16 entries short of the block's end");
+	if (!expect(conns[0].s2c_entity_age[8 + 299] == 7 && conns[0].s2c_entity_age[8 + 279] == 8,
+	            "cache: the sweep stops 20 entries short of the block's end"))
+		return false;
+	// Pools configured again at other sizes: the next emit lays the block out anew, zeroed.
+	world.registry.configure_pool(0, 16);
+	const w::EntityHandle again =
+			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+	if (!expect(again.valid(), "cache: recipient spawned again")) return false;
+	conns[0].owned_entity = again;
+	ns::test::emit_all(world, conns);
+	(void)ch.client_recv(dg);
+	return expect(conns[0].s2c_entity_age.size() == 16 + 300 && conns[0].s2c_priority_pool1_base == 16 &&
+	                      conns[0].s2c_entity_age[16 + 299] == 0,
+	              "cache: a reconfigured pool 0 moves pool 1's entries to its new capacity");
 }
 
 // B-10: phase 1's round-clock gate tests the whole pre-round countdown dword; only

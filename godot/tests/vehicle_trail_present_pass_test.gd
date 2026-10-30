@@ -152,7 +152,6 @@ func test_focal_wind_moves_the_authored_second_part_and_clears() -> void:
 	if not parts.has(1):
 		return
 	var part := parts[1] as Node3D
-	model.set_on_screen(true)
 	ObjectModel.advance_awake_frame(0.016)
 	var rest: Transform3D = data.evaluate_panm(0, 0, {})[1]
 	model.rotation.y = 0.6

@@ -187,15 +187,16 @@ void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
 	//  @0x43C390 - Entity_InitFromModel (the call @0x43C492) -> FaceAnim_AllocEntitySlot
 	//  (the call @0x40E22E)].
 	if (w::Entity *body = world.registry.get(handle)) world.facials.initialize_entity(world, *body);
-	// The host's spawn builds the slices after its model init, so the body's
-	// first slice reads the bound radius the model stamped.
+	// The authority's spawn builds the slices once, after its model init, so the body's
+	// first slice reads the bound radius the model stamped; no table is published.
 	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - EntityDef_LoadModelsAndCallbacks
 	//  called @0x43C45F, Entity_InitFromModel @0x43C492, the
 	//  Entity_BuildProximityListsFromPools call @0x43C4EB]
-	// A joiner's own body: retail's client creates it in NapiNPClientMsg_0x00C
-	// @0x42E730, which never calls the builder; world::spawn_player already
-	// rebuilt there, so this rebuild adds no edge, it rereads the radius.
-	if (world.collision != nullptr) world.collision->refresh_after_registry_change(world);
+	// A joiner's own body builds none: retail's client creates it in NapiNPClientMsg_0x00C
+	// @0x42E730 and rebuilds it in NapiNPClientMsg_FullEntitySpawn @0x433780, neither of
+	// which calls the builder (D-SIM-4).
+	if (world.rules.logic_authority && world.collision != nullptr)
+		world.collision->rebuild_slices_after_spawn(world);
 	// The body's animation map registers at its spawn, so a player the server tick's spawn
 	// pump adds is grounded before its first update [orig: Entity_SpawnFromAnimSlotProperty
 	// @0x43C390 - the AnimMap_RegisterEntity @0x40BB60 call @0x43C4DF].
@@ -493,14 +494,14 @@ bool MissionKernel::spawn_local_player(const w::PlayerSpawn &spawn) {
 	const w::EntityHandle h = w::spawn_player(world, spawn);
 	if (!h.valid()) return false;
 	// Once the collision world is up (a spawn after the boot's), the model
-	// init stamps the bound radius ahead of the spawn's slice build; the
-	// boot's own spawn precedes the wiring, and the mission start's build
-	// follows its collision step. [orig: Entity_SpawnFromAnimSlotProperty
-	//  @0x43C390 - Entity_InitFromModel called @0x43C492, the
-	//  Entity_BuildProximityListsFromPools call @0x43C4EB]
+	// init stamps the bound radius ahead of the spawn's one slice build, which
+	// publishes no table (D-SIM-4); the boot's own spawn precedes the wiring,
+	// and the mission start's build follows its collision step.
+	// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 - Entity_InitFromModel
+	//  called @0x43C492, the Entity_BuildProximityListsFromPools call @0x43C4EB]
 	if (world.collision != nullptr) {
 		ensure_collision_instance(world, h);
-		world.collision->refresh_after_registry_change(world);
+		world.collision->rebuild_slices_after_spawn(world);
 	}
 	resolve_new_infantry_adm_ids();
 	// The row's class init after the registration, as bind_spawned_body's [orig:

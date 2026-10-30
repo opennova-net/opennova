@@ -567,6 +567,12 @@ int test_snapshot() {
 					"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-data:2" &&
 			snap->release->task_definitions.at("web") ==
 					"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:42");
+	// The images it pins and the commits their labels name.
+	TEST_EXPECT(snap->release->images.size() == 1 &&
+			snap->release->images.at("gate") ==
+					"ghcr.io/opennova-net/opennova-novaworld-gate@sha256:0123" &&
+			snap->release->image_commits.size() == 1 &&
+			snap->release->image_commits.at("gate") == "f42f7fe");
 	TEST_EXPECT(snap->machines.size() == 1 && snap->machines_error.empty());
 	const infra::MachineInstance &m = snap->machines.at("i-0aaaaaaaaaaaaaaa1");
 	TEST_EXPECT(m.state == "running" && m.zone == "us-east-1b" && m.type == "t3a.large" &&

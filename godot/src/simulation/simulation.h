@@ -1840,9 +1840,9 @@ public:
 	// presents no entity (a dedicated host) empties them each ticked frame (engine
 	// world::discard_entity_presentation). NOT ClassDB-bound: MissionRoot's session step.
 	void discard_entity_presentation();
-	// NOT ClassDB-bound: the piece pool + frame draws; the NVG laser persons + ray clip.
+	// NOT ClassDB-bound: the piece pool + the main collect's draws; the NVG laser persons + ray clip.
 	void fill_death_pieces(std::vector<opennova::world::DeathPieceRow> &r_pieces) const;
-	const std::vector<opennova::world::DeathPieceDraw> &death_piece_draws() const;
+	const SceneCollectDraws &scene_draws() const;
 	void nvg_laser_sources(std::vector<NvgLaserSource> &r_sources) const;
 	int32_t nvg_laser_clip_distance(int p_handle, const int32_t p_origin[3], const int32_t p_dir[3]) const;
 	// Whether the collision world holds an instance for the placed entity
@@ -2134,8 +2134,8 @@ public:
 	// degrees; fog/water in mission units; force_indoors mirrors the mission
 	// attribute override (engine: formats/mission/bms.h). No near distance:
 	// the occlusion planes pass through the eye (engine: world/occlusion_camera.h).
-	// (engine: runtime/world/occlusion.cpp)
-	void run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
+	// True when its collect admitted the local player's body (engine: world/occlusion.cpp).
+	bool run_occlusion_frame(const Transform3D &p_camera, double p_fov_h_deg,
 	                         double p_viewport_width, double p_viewport_height,
 	                         double p_fog_dist_units, double p_water_z_units,
 	                         bool p_force_indoors,

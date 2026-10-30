@@ -130,11 +130,10 @@ PlayerProfiles::PlayerProfiles() {
 }
 
 void PlayerProfiles::set_defaults(const Ref<AvatarDatabase> &p_avatars,
-		const Ref<RtxtStringFile> &p_override_table, const Ref<RtxtStringFile> &p_menu_table,
-		int p_joystick_caps) {
+		const Ref<RtxtStringFile> &p_menu_table, int p_joystick_caps) {
 	defaults_.bindings = opennova::profile::default_binding_table();
-	defaults_.macros = opennova::profile::default_macros(
-			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr,
+	const std::shared_ptr<const opennova::rtxt::File> override_table = opennova::rtxt::text_override();
+	defaults_.macros = opennova::profile::default_macros(override_table.get(),
 			p_menu_table.is_valid() ? &p_menu_table->get_native() : nullptr);
 	defaults_.joystick_caps = static_cast<uint32_t>(p_joystick_caps);
 	defaults_.avatars = {};
@@ -377,8 +376,7 @@ Error PlayerProfiles::apply_character_selection(const Dictionary &p_profile) {
 }
 
 void PlayerProfiles::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_defaults", "avatars", "override_table", "menu_table",
-								 "joystick_caps"),
+	ClassDB::bind_method(D_METHOD("set_defaults", "avatars", "menu_table", "joystick_caps"),
 			&PlayerProfiles::set_defaults);
 	ClassDB::bind_method(D_METHOD("load", "dir", "expansion"), &PlayerProfiles::load);
 	ClassDB::bind_method(D_METHOD("load_bytes", "player_sav", "has_player_sav", "weapon_sav",

@@ -122,9 +122,10 @@ struct GameEntitySnapshot {
 	uint8_t equipped_adm_index = 0xFF;
 	// Body-anim wire state for the player record bytes 14/15: the anim-state id the emit
 	// selects as pending ?: current [orig: @0x4c0cc7 reads +0x2B8 ?: +0x2BC] and the anim
-	// channel's elapsed-ticks-in-loop clamped to 255 [orig: @0x4c0cf2]. Mirrored from the
-	// infantry motor (AiSystem::mirror_wire_anim). Defaults keep snapshot-only tests on the
-	// retail spawn/idle bytes (44/0). (D-NET-159)
+	// channel's elapsed-ticks-in-loop clamped to 255 [orig: @0x4c0cf2]. The state is mirrored
+	// from the infantry motor (AiSystem::mirror_wire_anim), the ratio read off the body's live
+	// channel as the snapshot is taken (world::wire_anim_ratio). Defaults keep snapshot-only
+	// tests on the retail spawn/idle bytes (44/0). (D-NET-159)
 	uint8_t anim_state_id = 44;
 	// The whole +0x2B8 dword (snapshot_anim_byte tests it whole).
 	int32_t anim_pending_id = 0;

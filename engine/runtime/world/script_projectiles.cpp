@@ -14,11 +14,12 @@ FixedVec3 script_position(const World &world, const Entity &entity) {
 }
 } // namespace
 
-// The target commands walk pool 3 in slot order, test ItemDef and its numeric
-// id, then compare WP_NUMBER. Health, alive state and team do not participate.
-// [orig: WacCmd_SoundToTarget @0x4F7F60 / ammo2tgt @0x4F8100]
+// The target commands walk pool 3 in slot order to its used count, test ItemDef
+// and its numeric id, then compare WP_NUMBER. Health, alive state and team do not
+// participate. [orig: WacCmd_SoundToTarget @0x4F7F60 (the used load @0x4F7F73) /
+// ammo2tgt @0x4F8100 (@0x4F8116)]
 const Entity *EntityCommands::script_target(int32_t number) const {
-    for (size_t slot = 0; slot < world_.registry.pool_capacity(3); ++slot) {
+    for (size_t slot = 0; slot < world_.registry.pool_used(3); ++slot) {
         const Entity *marker = world_.registry.get(EntityHandle::make(3, int(slot)));
         if (marker && marker->has_item_def && marker->item_id == kParticleEffectMarkerTypeId &&
                 marker->wp_number == number)

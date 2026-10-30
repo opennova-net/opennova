@@ -41,12 +41,12 @@ MissionFiles::~MissionFiles() {
 	if (items_read) def::def_free_items(&items);
 }
 
-void MissionWorld::load(const std::shared_ptr<MissionFiles> &read, const bms::File &mission, const MissionGround &ground,
-		const std::function<void(world::World &)> &placed) {
-	files = read;
+int mission_world_load_into(const MissionFiles &files, const bms::File &mission, const MissionGround &ground,
+		const std::function<void(world::World &)> &placed, world::World &world, world::CollisionWorld &collision,
+		world::OcclusionWorld &occlusion, world::EntityPoseProvider &pose, mission::CollisionResolveState &state) {
 	mission::PromoteOptions options;
-	if (files->items_read) {
-		const def::DefItemsFile *items = &files->items;
+	if (files.items_read) {
+		const def::DefItemsFile *items = &files.items;
 		options.item_attributes = [items](int32_t type_id) -> uint32_t {
 			const def::DefItemDef *def = mission::find_item_def(*items, int(type_id) + int(mission::kItemIdOffset));
 			return def ? def->attrib : 0u;
@@ -57,29 +57,37 @@ void MissionWorld::load(const std::shared_ptr<MissionFiles> &read, const bms::Fi
 	world.rules.title_rules = &world::title_rules(default_title().code);
 	mission::promote_mission(mission, world, options);
 	world.ai.is_authority = true;
-	if (files->items_read)
-		mission::resolve_item_traits(world, files->items, [](int32_t) -> uint8_t { return 0; }, files->store.get());
-	terrain = ground.height_field();
-	water_height = ground.water() ? float(ground.water_height()) : 0.0f;
+	if (files.items_read)
+		mission::resolve_item_traits(world, files.items, [](int32_t) -> uint8_t { return 0; }, files.store.get());
 	world.tables.surface_map = ground.surface_sampler();
 	world.tables.foliage_map = ground.foliage_sampler(false);
 	world.env.water_z = ground.water() ? int32_t(std::lround(ground.water_height() * io::kFp16OneD)) : 0;
-	pose.set_assets(files->store.get());
-	collision.terrain = terrain;
+	pose.set_assets(files.store.get());
+	collision.terrain = ground.height_field();
 	collision.set_pose_provider(&pose);
 	world.collision = &collision;
 	world.pose_provider = &pose;
 	world.ai.collision = &collision;
-	if (files->items_read) {
-		const mission::CollisionResolveDeps deps{ collision, occlusion, pose, *files->store };
-		collidable = mission::resolve_collision_instances(world, files->items, state, deps);
+	int collidable = 0;
+	if (files.items_read) {
+		const mission::CollisionResolveDeps deps{ collision, occlusion, pose, *files.store };
+		collidable = mission::resolve_collision_instances(world, files.items, state, deps);
 	}
 	if (placed) placed(world);
 	collision.build_initial_tables(world);
+	return collidable;
+}
+
+void MissionWorld::load(const std::shared_ptr<MissionFiles> &read, const bms::File &mission, const MissionGround &ground,
+		const std::function<void(world::World &)> &placed) {
+	files = read;
+	terrain = ground.height_field();
+	water_height = ground.water() ? float(ground.water_height()) : 0.0f;
+	collidable = mission_world_load_into(*files, mission, ground, placed, world, collision, occlusion, pose, state);
 }
 
 const MissionEntityMark *MissionWorld::mark_of(const world::Entity &entity,
-		const std::vector<MissionEntityMark> &marks) const {
+		const std::vector<MissionEntityMark> &marks) {
 	MissionPool pool = MissionPool::Item;
 	if (entity.item_id < 0 || !pool_of(entity.kind, pool)) return nullptr;
 	const int index = int(world::spawn_origin_index(entity.spawn_origin));

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include <runtime/world/entity.h> // EntityHandle
 
@@ -75,27 +76,33 @@ struct Connection {
     uint32_t receive_silence_ms = 0;
 
 	// Per-connection entity AGE bytes for the 0x0A priority loop — the reimpl of the original's
-	// per-player-slot age arrays: pool 0's 256 slots at slot+89978 then pool 1's 1200 at
-	// slot+90234, one 0x5B0-byte block, whose first 0x5A0 bytes the saturating `paddusb +1`
-	// sweep ages [orig: Server_BuildEntityPriorityList @ 0x50e590 - `mov ecx, 5B0h` @0x50E601,
-	// `shr ecx, 5` @0x50E60F, the passes @0x50E62B..0x50E634].
-	// Index = (pool==1 ? 256 : 0) + (slot & 0xFFF) (priority_cache_index). Aged +1 (saturating) every emit, reset to 0
+	// per-player-slot age arrays: one byte per slot of pool 0's capacity, then pool 1's, one block
+	// (at retail's sizes pool 0's 256 at slot+89978 then pool 1's 1200 at slot+90234, 0x5B0
+	// bytes), whose bytes rounded down to the sweep's 32-byte stride (0x5A0 of 0x5B0) the
+	// saturating `paddusb +1` sweep ages [orig: Server_BuildEntityPriorityList @ 0x50e590 -
+	// `mov ecx, 5B0h` @0x50E601, `shr ecx, 5` @0x50E60F, the passes @0x50E62B..0x50E634;
+	// EntityPool_Allocate - pool 0's 0x100 @0x4421CD, pool 1's 1200 @0x44219C].
+	// The block holds the world's configured pool capacities (size_priority_caches, at every
+	// emit). Index = (pool==1 ? pool 0's capacity : 0) + (slot & 0xFFF) (priority_cache_index).
+	// Aged +1 (saturating) every emit, reset to 0
 	// when the entity's record is serialized [orig: @0x50f168]; age raises the priority key and
 	// age >= 50 force-admits past the 1124-tile distance gate, so budget-starved entities climb
 	// until they win a slot — the original's round-robin is EMERGENT from aging (no resume cursor).
-	static constexpr std::size_t kPriorityCacheSlots = 256 + 1200;
-	std::array<uint8_t, kPriorityCacheSlots> s2c_entity_age{};
+	std::vector<uint8_t> s2c_entity_age;
+	// Pool 0's capacity when the caches were sized: pool 1's entries start here (retail's
+	// +0x100 @0x50F15E / @0x50EDB3).
+	std::size_t s2c_priority_pool1_base = 0;
 
-	// Per-slot last-SENT caches feeding the priority delta terms (same 256 + 1200-slot
-	// indexing as the ages): heading = the entity's rounded yaw high byte
+	// Per-slot last-SENT caches feeding the priority delta terms (same indexing and size
+	// as the ages): heading = the entity's rounded yaw high byte
 	// `(Yaw + 0x800000) >> 24`, speed = the tick-displacement metric `|v| >> 6`
 	// clamp 255. Both written when the entity's record is serialized, beside the
 	// age reset; the build side scores `2*|headingDelta| + 3*|speedDelta|` so
 	// entities whose motion CHANGED since their last record jump the queue.
 	// [orig: slot+91434 / slot+92890; writes @0x50f17c / @0x50F241;
 	// reads @0x50e905 / @0x50ea77]
-	std::array<uint8_t, kPriorityCacheSlots> s2c_entity_heading{};
-	std::array<uint8_t, kPriorityCacheSlots> s2c_entity_speed{};
+	std::vector<uint8_t> s2c_entity_heading;
+	std::vector<uint8_t> s2c_entity_speed;
 
 	// The client's 4 requested-interest pairs from its C2S 0x0C extended uplink
 	// (handle u16, score u16 zero-extended). The 0x0A priority build walks them:

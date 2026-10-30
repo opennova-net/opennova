@@ -5,12 +5,15 @@
 #include <runtime/world/present_drains.h>
 
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/fire_sound.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/occlusion.h>
+#include <runtime/world/player_spawn.h> // item_index_by_type_id
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/vehicle_motor.h>
@@ -23,6 +26,71 @@
 #include <utility>
 
 namespace opennova::world {
+
+// See present_drains.h.
+bool round_model_collected(const LiveRound &round, const AmmoTableEntry *ammo) {
+	const int32_t remaining = io::bam_sub(round.max_age_ticks, round.age_ticks);
+	if (remaining <= 0) return false;
+	const int32_t lifetime = ammo != nullptr ? ammo->max_age_ticks : round.max_age_ticks;
+	const int32_t elapsed = io::bam_sub(lifetime, remaining);
+	if (elapsed > 0) {
+		const FixedVec3 v = round.vel.q16();
+		double speed = std::sqrt(double(v.x) * v.x + double(v.y) * v.y + double(v.z) * v.z);
+		if (speed > 2147418112.0) speed = 2147418112.0;
+		const int32_t travelled = static_cast<int32_t>(static_cast<uint32_t>(
+				io::retail_ftol_sse2(speed)) * static_cast<uint32_t>(elapsed));
+		if (travelled < 0x18000) return false;
+	}
+	return round_visible_item_id(round) != 0;
+}
+
+// 512 pool slots need nine bits. Keep a tenth low bit spare and put the
+// monotonic lifetime above it so a same-slot replacement cannot inherit the
+// outgoing round's model/effect group.
+int64_t round_presentation_key(const LiveRound &round, int slot) {
+	const uint64_t generation =
+			round.presentation_generation != 0 ? round.presentation_generation : 1;
+	return static_cast<int64_t>((generation << 10) | static_cast<uint64_t>(slot));
+}
+
+// [orig: Terrain_CollectVisibleEntities @0x5C9160 - the RoundPool walk from
+//  RoundPool_GetBase @0x5C91C1 over 512 rows (@0x5C91D6): the active byte
+//  @0x5C91EC; the x / y / z box, each axis `cdq; xor; sub; cmp eax, ebp; jg` against
+//  g_EnvFogDistCurrent with no radius word @0x5C91F5..0x5C9234; the life and travel
+//  gates @0x5C923A..0x5C92AA, +0x138 @0x5C92B4 and +0x1C @0x5C92C1
+//  (round_model_collected); the model +0x30 @0x5C92CB (its item row's graphic) and its
+//  radius word `mov edi, [eax+14h]; add edi, edi; add edi, edi` @0x5C92D6..0x5C92E6; the
+//  view point (Math_FixedPointTransformPoint22 @0x5C92E8) its first word against the fog,
+//  `jge` skips @0x5C92ED..0x5C9301, no radius; the viewport clip at that radius
+//  (Viewport_TransformAndClipPoint @0x5C930E, 1 culled @0x5C931C..0x5C931F); the append
+//  @0x5C9321..0x5C9369]
+void OcclusionWorld::collect_round_draws(const World &world, const OcclusionFrameCamera &cam,
+		std::vector<int64_t> &out) const {
+	out.clear();
+	for (int i = 0; i < RoundSim::kCapacity; ++i) {
+		const LiveRound &r = world.round_sim.rounds[static_cast<size_t>(i)];
+		if (!r.active) continue;
+		const int32_t pos[3] = {r.pos.x.q16, r.pos.y.q16, r.pos.z.q16};
+		// The x / y box is the collectors' with a zero radius word; z takes the same test.
+		if (!collect_fog_box(cam, pos[0], pos[1], 0) ||
+				io::bam_abs(io::bam_sub(pos[2], cam.pos_fixed[2])) > cam.fog_dist)
+			continue;
+		if (!round_model_collected(r, world.tables.ammo.by_index(r.ammo_index))) continue;
+		// The model is the TrcrID row's graphic (Entity_InitFromItemDef's +0x30 store).
+		const int32_t index = item_index_by_type_id(world, r.item_type_id);
+		const PlayerTemplate *row =
+				index != 0 ? &world.tables.item_rows[static_cast<size_t>(index)] : nullptr;
+		if (row == nullptr || !row->has_graphic_model) continue;
+		const int32_t clip_radius =
+				static_cast<int32_t>(static_cast<uint32_t>(row->graphic_model_radius_q16) << 2);
+		// The clip (the projector stand-in, D-OCC-12) at four times the model's radius;
+		// the depth word against the fog alone.
+		int32_t depth = 0;
+		if (!sphere_in_view(cam, pos, clip_radius, &depth) || io::bam_abs(depth) >= cam.fog_dist)
+			continue;
+		out.push_back(round_presentation_key(r, i));
+	}
+}
 
 void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualRow> &r_rows) {
 	r_rows.clear();
@@ -62,21 +130,15 @@ void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualR
 		// TrcrID still binds the round's item callbacks on non-tracer shots,
 		// but @0x4ec900 clears their visible model pointer. The tag-1 move
 		// effect is independent of that presentation gate and can remain live
-		// even when no item model is drawn.
-		const int32_t visible_item = round_visible_item_id(r);
+		// even when no item model is drawn; the scene collect's other model gates
+		// (round_model_collected) drop the model alone too.
+		const int32_t visible_item = round_model_collected(r, ammo) ? round_visible_item_id(r) : 0;
 		if (visible_item == 0 && (move_effect == nullptr || move_effect[0] == '\0'))
 			continue;
-		// 512 pool slots need nine bits. Keep a tenth low bit spare and put
-		// the monotonic lifetime above it so a same-slot replacement cannot
-		// inherit the outgoing round's model/effect group.
-		const uint64_t generation =
-				r.presentation_generation != 0 ? r.presentation_generation : 1;
-		const int64_t presentation_key =
-				static_cast<int64_t>((generation << 10) | static_cast<uint64_t>(i));
 		// The RoundPool: no water mirror's collect walks it [orig:
 		// Terrain_CollectVisibleEntitiesForReflection @0x5C90A0].
-		push_entry(presentation_key, visible_item, r.pos, r.yaw_bam, r.pitch_bam, r.roll_bam,
-				move_effect, r.move_effect_live, false);
+		push_entry(round_presentation_key(r, i), visible_item, r.pos, r.yaw_bam, r.pitch_bam,
+				r.roll_bam, move_effect, r.move_effect_live, false);
 	}
 	uint8_t viewer_team = 0xFF;
 	if (const Entity *lp = world.registry.get(world.cached.local_player))
@@ -87,7 +149,7 @@ void fill_throwable_visual_rows(const World &world, std::vector<ThrowableVisualR
 		// no foe TrcrID is authored [orig: @ 0x5469db..0x546a15].
 		const int item = throwable_item_for_viewer(d.item_friendly, d.item_enemy, d.team, viewer_team);
 		if (item == 0) continue;
-		const int64_t device_key = 0x4000000000000000LL | static_cast<int64_t>(d.entity.packed);
+		const int64_t device_key = kThrowableDeviceKeyBit | static_cast<int64_t>(d.entity.packed);
 		// A pool-1 entity: the reflected collect's pool-1 walk takes it [orig:
 		// Terrain_CollectVisibleEntitiesForReflection @0x5C90A0, the call @0x5C914E].
 		push_entry(device_key, item, d.pos, d.yaw_bam, d.pitch_bam, d.roll_bam, "", false, true);

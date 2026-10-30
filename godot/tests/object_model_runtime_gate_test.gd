@@ -652,19 +652,10 @@ func test_visibility_edge_rearms_for_one_runtime_frame() -> void:
 	assert_false(model.is_runtime_frame_awake(), "and park once that frame is done")
 
 
-# --- Camera-submission gate: retail computes per SUBMITTED model ------------
-# [orig: Terrain_RenderSectorModels @0x5c5d30]. set_on_screen is the public
-# seam the bounds notifier's screen_entered/exited signals drive; headless
-# contexts never fire the notifier, so the flag defaults on and these tests
-# exercise the gate through the same seam.
-
-func test_model_carries_a_submission_notifier_sized_to_its_bounds() -> void:
-	var model := _clocked_spy_model()
-	var notifier := model.get_node_or_null("ScreenNotifier")
-	assert_not_null(notifier, "a built model carries its submission notifier")
-	assert_gt((notifier as VisibleOnScreenNotifier3D).aabb.size.length(), 0.0,
-			"the notifier AABB covers the mesh bounds")
-
+# --- Draw gate: retail poses and evaluates only a DRAWN model ---------------
+# [orig: Terrain_RenderSectorModels @0x5c5d30]. A pass draws the model: the
+# main view's collect (its occlusion claim, folded into the node's flag), the
+# weapon Inset's and the water mirrors' twins, or a render slot's capture.
 
 func test_mirror_eligibility_selects_the_base_visual_layer() -> void:
 	# env #30: only vehicles enter the water mirror; every other model rides
@@ -695,41 +686,51 @@ func test_mirror_eligibility_selects_the_base_visual_layer() -> void:
 				"a vehicle model never rides the no-mirror layer")
 
 
-func test_on_screen_edges_are_readable_by_the_present_walk() -> void:
-	var model := _clocked_spy_model()
-	assert_true(model.is_on_screen(),
-			"the on-screen default reports submitted")
-	model.set_on_screen(false)
-	assert_false(model.is_on_screen(),
-			"leaving the camera reports the off-screen edge the walk gates on")
-	model.set_on_screen(true)
-	assert_true(model.is_on_screen(),
-			"re-entering the camera reports submitted again")
-
-
-func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
+func test_undrawn_model_advances_clocks_but_skips_render_derives() -> void:
 	var model := _spy_model(PMP_3DI)  # live PANM: always has runtime work
 	var clock := PanmClock.new()
 	clock.set_time_ms_for_test(0)
 	model.set_panm_clock(clock)
 	var part := _animated_part_node(model)
-	model.set_on_screen(false)
+	model.set_occlusion_hidden(true)
 	var poison := Transform3D(Basis(), Vector3(123.0, 456.0, 789.0))
 	part.transform = poison
 	model.play_part_anim(1, 1, 1.0)
 
 	model.advance_runtime_frame(0.5)
-	assert_eq(part.transform, poison, "no PANM evaluation while off camera")
+	assert_eq(part.transform, poison, "no PANM evaluation while no pass draws it")
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 31 * 1048,
-			"the commanded part anim still advanced while off camera")
+			"the commanded part anim still advanced while undrawn")
 
-	model.set_on_screen(true)
+	model.set_occlusion_hidden(false)
 	assert_true(model.is_runtime_frame_awake(),
-			"re-entering the screen wakes the model for the catch-up frame")
+			"the collect's release wakes the model for the catch-up frame")
 	clock.set_time_ms_for_test(1200)
 	model.advance_runtime_frame(0.5)
 	assert_ne(part.transform, poison,
-			"the submitted frame re-derives transforms from the absolute clock")
+			"the drawn frame re-derives transforms from the absolute clock")
+
+
+func test_a_slot_captured_model_is_posed_while_the_views_hide_it() -> void:
+	var model := _spy_model(PMP_3DI)
+	var clock := PanmClock.new()
+	clock.set_time_ms_for_test(0)
+	model.set_panm_clock(clock)
+	var part := _animated_part_node(model)
+	model.set_occlusion_hidden(true)
+	var poison := Transform3D(Basis(), Vector3(123.0, 456.0, 789.0))
+	part.transform = poison
+	model.play_part_anim(1, 1, 1.0)
+	model.advance_runtime_frame(0.5)
+	assert_eq(part.transform, poison, "no pass draws it")
+
+	model.set_slot_captured(true)
+	assert_true(model.is_runtime_frame_awake(), "a slot's capture wakes the model")
+	clock.set_time_ms_for_test(1200)
+	model.advance_runtime_frame(0.5)
+	assert_ne(part.transform, poison,
+			"the render slot's capture poses it while the views hide it")
+	model.set_slot_captured(false)
 
 
 func test_missing_material_texture_uses_the_retail_checkerboard() -> void:

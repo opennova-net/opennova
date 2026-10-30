@@ -857,6 +857,7 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	inputs.master_host = config_.master_host;
 	inputs.master_gate_port = config_.master_gate_port;
 	inputs.novalogic = config_.novalogic;
+	inputs.machine_kind = machine.kind; // a shared machine's server runs paced
 	const LaunchSpec spec = render_launch(s.settings, data->title, data->expansion_code, inputs);
 
 	Start start;

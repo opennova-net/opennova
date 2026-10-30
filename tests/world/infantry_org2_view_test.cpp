@@ -11,6 +11,7 @@
 //   LeaveCorpse keep, section bit 0's destroy).
 // - D-NET-1227 / -58: the local body's rain ambient ahead of the phase, dead or alive; the
 //   stance sound after the on-foot site.
+// - The local body's reverb preset on the 16-tick slow pass.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the canopy chase @0x4B4945..0x4B496C, the
 //  skip test @0x4B4972..0x4B4978, the mount config test @0x4B4AC6..0x4B4ADE, the ground test
 //  @0x4B4AE0..0x4B4AF9, the clamp @0x4B4AFB..0x4B4B59, the legs @0x4B4B5F..0x4B4B6B, the leg model
@@ -587,6 +588,49 @@ void test_rain_ambient_dead_or_alive() {
 	}
 }
 
+// The local live body sets its reverb preset on the slow pass alone: the raw tick's low nibble 0,
+// whatever region it stood in between; a player body not the local one sets none.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the gate @0x4B5D6D..0x4B5D71 on the key
+//  stored @0x4B4E79, the local test @0x4B6234..0x4B623A, Audio_SetReverbPreset @0x4B633F]
+void test_reverb_rides_the_slow_pass() {
+	for (const bool local : {false, true}) {
+		auto wp = std::make_unique<w::World>();
+		w::World &world = *wp;
+		world.registry.configure_pool(0, 16);
+		world.reverb.mission = world.reverb.selected = 3;
+		w::ReverbRegion region;
+		region.min[0] = 5 << 16;
+		region.min[1] = 15 << 16;
+		region.min[2] = -30000 * 65536;
+		region.max[0] = 15 << 16;
+		region.max[1] = 25 << 16;
+		region.max[2] = 30000 * 65536;
+		region.value = 7;
+		world.reverb.regions.push_back(region);
+		w::Entity body;
+		body.kind = w::EntityKind::Organic;
+		body.health = 100;
+		body.alive = true;
+		body.position = {10.f, 20.f, 0.f};
+		body.flags = body.engine_flags = local ? 0u : w::kEntityFlagPlayer;
+		const w::EntityHandle bh = world.registry.spawn(0, body);
+		w::AiEntity *ae = world.ai.at(world.ai.attach(bh));
+		CHECK(ae != nullptr);
+		if (ae == nullptr) continue;
+		ae->inf.active = true;
+		ae->inf.is_local_player = local;
+		world.ai.tick_infantry(*ae, world, 1);
+		CHECK(world.reverb.selected == 3); // inside the region, off the pass
+		world.ai.tick_infantry(*ae, world, 16);
+		CHECK(world.reverb.selected == (local ? 7 : 3));
+		ae->self->position.x.q16 = 100 << 16; // out of the region
+		world.ai.tick_infantry(*ae, world, 17);
+		CHECK(world.reverb.selected == (local ? 7 : 3)); // held to the next pass
+		world.ai.tick_infantry(*ae, world, 32);
+		CHECK(world.reverb.selected == 3);
+	}
+}
+
 // D-NET-1228: the stance sound plays after the on-foot site. A seated body's mounted site
 // returns first, so it plays none and its latch holds; the same body on foot plays its change.
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the mounted returns @0x4B6907 / @0x4B6977,
@@ -696,6 +740,7 @@ int main() {
 	test_dead_tail_through_the_tick();
 	test_corpse_leg_through_the_tick();
 	test_rain_ambient_dead_or_alive();
+	test_reverb_rides_the_slow_pass();
 	test_stance_sound_after_the_on_foot_site();
 	if (failures == 0) std::printf("infantry_org2_view: all passed\n");
 	return failures == 0 ? 0 : 1;

@@ -185,7 +185,7 @@ export function infraWarnings(o: InfraOverview): string[] {
       out.push(`A deploy is rolling out (${names(rolling)} now); ${names(off)} ${off.length === 1 ? 'runs its new revision' : 'run their new revisions'}.`);
     } else {
       for (const s of off) {
-        out.push(`${s.name} runs ${s.task_definition}, not the release's revision.`);
+        out.push(`${s.name} is not on the release.`);
       }
     }
   }

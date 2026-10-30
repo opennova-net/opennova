@@ -120,9 +120,13 @@ func _attachment_items_db(anchor_name: String, ambiguous: bool) -> ItemDatabase:
 	# whose addeweap child anchors at the DISCOVERED articulated userpoint.
 	# The ambiguous variant repeats the child type on a second missing-anchor
 	# row (stored slot 2), the exact shape the old hand dictionary pinned.
-	# Deliberately NO 101419 row: the child rides the parent's attachment
-	# metadata only, so it lands no spec/seat of its own and the mount scan
-	# can only take the carrier's Usegun — the old table's exact shape.
+	# The 101419 child row names only the weapon its traits row names, no
+	# graphic: the child's ewep class init binds its slot Def from its own
+	# def's weapon, which its class update composes behind, while it lands no
+	# seat of its own, so the mount scan can only take the carrier's Usegun.
+	# [orig: WeaponSlot_InitFromEntityDef @0x5466C0 - the def's name @0x5466E1;
+	#  Entity_UpdateTransformAndTurret @0x440CA0 - the slot Def exit
+	#  @0x440E8E..0x440EA0 ahead of the matrix @0x440F04..0x4411BC]
 	var path := ProjectSettings.globalize_path(
 			"res://.godot/coop_attachment_items_ambiguous.def" if ambiguous
 			else "res://.godot/coop_attachment_items.def")
@@ -130,11 +134,20 @@ func _attachment_items_db(anchor_name: String, ambiguous: bool) -> ItemDatabase:
 	assert_not_null(file)
 	if file == null:
 		return null
-	file.store_string(TestFs.crlf(_attachment_row(anchor_name, ambiguous)))
+	file.store_string(TestFs.crlf(_attachment_row(anchor_name, ambiguous)
+			+ ATTACHMENT_CHILD_WEAPON_ROW))
 	file.close()
 	var db := ItemDatabase.new()
 	assert_eq(db.load(path), OK)
 	return db
+
+
+const ATTACHMENT_CHILD_WEAPON_ROW := """begin "Attachment Fixture Child"
+  id 101419
+  type object
+  primary_weapon WPN_EMPLCD50NA
+end
+"""
 
 
 func _attachment_row(anchor_name: String, ambiguous: bool) -> String:
@@ -1136,6 +1149,9 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_true(WireJoinFixture.load_wire_header(host, joiner),
 			"the joiner loads the host's header-only mission")
 	joiner.resolve_item_traits(traits_db)
+	# The joiner's armory, as every peer loads it: the streamed child's class
+	# init binds its slot Def from it.
+	assert_eq(joiner.load_weapon_table(def_root, "weapon.def"), OK)
 	var reached := false
 	for _tick in range(800):
 		host.step()

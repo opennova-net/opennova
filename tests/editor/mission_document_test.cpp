@@ -52,6 +52,7 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
+#include <runtime/world/entity.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -817,6 +818,34 @@ int test_player_route_past_slots() {
 		}
 	TEST_EXPECT(gated == 1);
 	std::printf("player route: past its 32 slots into the next record, and past the marker pool from the header gated\n");
+	return 0;
+}
+
+// The pools' limits are the capacities the game runs with (world::pool_capacity: retail's, or an expansion's
+// scaled ones), as its mission load sizes the pools from them [orig: EntityPool_Allocate @0x442168;
+// Pool_AllocEntry @0x442230]. The fixture's 2 organics, 3 items, 2 buildings and 5 markers fit retail's pools;
+// under pools of 2, 2, 2 and 4 the items and the markers each warn, with the capacity they pass.
+int test_pool_limit_follows_the_running_pools() {
+	const DocumentType &type = *document_type_for(AssetKind::Mission);
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document);
+	if (!document) return 1;
+	const auto limits = [&] {
+		std::vector<std::string> messages;
+		for (const Diagnostic &d : type.validate_file(*document))
+			if (d.code() == "mission.pool_limit") messages.push_back(d.message);
+		return messages;
+	};
+	TEST_EXPECT(limits().empty());
+	opennova::world::set_pool_capacities({2, 2, 2, 4, 1});
+	const std::vector<std::string> warnings = limits();
+	opennova::world::set_pool_capacities(opennova::world::kRetailPoolCapacity);
+	const auto warned = [&](const char *text) {
+		return std::any_of(warnings.begin(), warnings.end(),
+		                   [&](const std::string &message) { return message.find(text) != std::string::npos; });
+	};
+	TEST_EXPECT(warnings.size() == 2 && warned("3 items, past the 2 ") && warned("5 markers, past the 4 "));
+	std::printf("pool limits: the running pools' capacities, not retail's alone\n");
 	return 0;
 }
 
@@ -2083,6 +2112,7 @@ int main() {
 	if (test_save_clamp() != 0) return 1;
 	if (test_player_route() != 0) return 1;
 	if (test_player_route_past_slots() != 0) return 1;
+	if (test_pool_limit_follows_the_running_pools() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
 	if (test_item_type_on_symbol() != 0) return 1;

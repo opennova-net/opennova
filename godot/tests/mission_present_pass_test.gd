@@ -51,6 +51,7 @@ class Snapshot:
 					int(e.get("active2", 0)) != 0)
 			var doors: Array = e.get("doors", [])
 			out[b + Simulation.PF_DOOR_COUNT] = float(doors.size())
+			out[b + Simulation.PF_HUSK] = float(e.get("husk", 0))
 			var destroy: Array = e.get("destroy", [0, 0, 0, 0, 0, 0])
 			for channel in range(6):
 				out[b + Simulation.PF_OBJECT_DESTROY + channel] = float(destroy[channel])
@@ -443,10 +444,10 @@ func test_part_channel_releases_while_inactive_and_catches_up_when_reactivated()
 
 
 # Retail evaluates the presentation writers per SUBMITTED model
-# [orig: Terrain_RenderSectorModels @ 0x5c5d30]: a row whose bounds notifier
-# reports off-screen skips the part/CTRL/aim dispatches and catches up with
-# the live state at its next submission. set_on_screen is the production seam
-# the bounds notifier drives.
+# [orig: Terrain_RenderSectorModels @ 0x5c5d30]: a row every view's collect
+# dropped skips the part/CTRL/aim dispatches and catches up with the live
+# state at its next submission. set_occlusion_hidden is the seam the main
+# scene's collect drives.
 func test_offscreen_row_skips_presentation_writers_until_reentry() -> void:
 	var model := _model()
 	var p := _make_pass(_index_of({ 7: model }))
@@ -458,7 +459,7 @@ func test_offscreen_row_skips_presentation_writers_until_reentry() -> void:
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 100, "the submitted row poses")
 	assert_eq(_ctrl(model, "EWEAP_GUNYAW"), 40)
 
-	model.set_on_screen(false)
+	model.set_occlusion_hidden(true)
 	snap.entities[0]["phase1"] = 250
 	snap.entities[0]["emplaced_gun_yaw"] = 90
 	_present(p, snap)
@@ -468,7 +469,7 @@ func test_offscreen_row_skips_presentation_writers_until_reentry() -> void:
 	assert_eq(_ctrl(model, "EWEAP_GUNYAW"), 40,
 			"an off-screen row's emplaced controls hold the last submitted state")
 
-	model.set_on_screen(true)
+	model.set_occlusion_hidden(false)
 	snap.entities[0]["phase1"] = 400
 	_present(p, snap)
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 400,
@@ -485,15 +486,45 @@ func test_offscreen_falling_edge_releases_at_the_next_submission() -> void:
 	_present(p, snap)
 	assert_true(model.get_ctrl_values().has("VEHICLE_SPECIAL1"))
 
-	model.set_on_screen(false)
+	model.set_occlusion_hidden(true)
 	snap.entities[0]["active1"] = 0
 	_present(p, snap)
 	assert_true(model.get_ctrl_values().has("VEHICLE_SPECIAL1"),
 			"no release dispatch while the row is not submitted")
-	model.set_on_screen(true)
+	model.set_occlusion_hidden(false)
 	_present(p, snap)
 	assert_false(model.get_ctrl_values().has("VEHICLE_SPECIAL1"),
 			"the falling edge latched while off-screen releases on re-entry")
+
+
+# Each pass runs the writers over its own collect's rows (engine
+# inmatch/occlusion_collect.h carries the witness): a row the main scene's
+# collect dropped but an open water mirror's admits draws in that mirror and
+# is submitted; once every open view dropped it, it is not.
+func test_a_row_any_drawn_view_collects_is_submitted() -> void:
+	var model := _model()
+	var p := _make_pass(_index_of({ 5: model }))
+	var snap := Snapshot.new()
+	snap.entities = [{ "bms_id": 5, "active1": 1, "phase1": 100 }]
+	_present(p, snap)
+	model.set_occlusion_hidden(true)
+	ObjectModel.set_mirror_view_state(0, true, false)
+	model.set_mirror_occlusion_hidden(0, false)
+	assert_true(model.is_view_collected(), "the mirror's own verdict admits the row")
+	snap.entities[0]["phase1"] = 300
+	_present(p, snap)
+	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 300,
+			"a row only the mirror collects is still submitted")
+	model.set_mirror_occlusion_hidden(0, true)
+	assert_false(model.is_view_collected())
+	snap.entities[0]["phase1"] = 500
+	_present(p, snap)
+	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 300,
+			"a row every open view dropped is not submitted")
+	ObjectModel.set_mirror_view_state(0, false, false)
+	model.clear_mirror_occlusion(0)
+	assert_false(model.is_view_collected(),
+			"a closed mirror's verdict admits nothing")
 
 
 func test_both_channels_posed() -> void:
@@ -1185,6 +1216,33 @@ func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
 	assert_true(c.is_present_visible(), "the replacement row's model is shown")
 
 
+func test_layout_rebuild_carries_a_kept_rows_applied_stamps() -> void:
+	# A spawn elsewhere rebuilds the plan; the kept row's model carries what was
+	# applied to it, so only the new row composes, poses and clears cold.
+	var a := _model()
+	var b := _model()
+	var p := _make_pass(_index_of({ 11: a, 22: b }))
+	var snap := Snapshot.new()
+	snap.entities = [
+		{ "bms_id": 11, "handle": 2, "type_id": 101, "pos_x": 1.0,
+				"active1": 1, "phase1": 100 },
+	]
+	_present(p, snap, 1)
+	var builds := _stat(p, "transform_builds")
+	var moved := _stat(p, "moved")
+	var parts := _stat(p, "part_dispatches")
+	snap.entities.append({ "bms_id": 22, "handle": 3, "type_id": 102, "pos_x": 2.0 })
+	_present(p, snap, 2)
+	assert_eq(_stat(p, "plan_rebuilds"), 2, "the spawn rebuilds the plan")
+	assert_eq(_stat(p, "transform_builds"), builds + 1, "only the new row composes")
+	assert_eq(_stat(p, "moved"), moved + 1, "only the new row moves")
+	assert_eq(_stat(p, "part_dispatches"), parts + 3,
+			"the kept row re-asserts its channel; only the new row clears both cold")
+	assert_eq(_ctrl(a, "VEHICLE_SPECIAL1"), 100, "the kept row's publication stands")
+	assert_almost_eq(b.position.x, 2.0, 0.001)
+	assert_true(a.is_present_visible() and b.is_present_visible())
+
+
 func test_freeing_an_unplanned_model_keeps_the_typed_plan() -> void:
 	var planned := ObjectModel.new()
 	add_child(planned)
@@ -1516,13 +1574,22 @@ func test_disabling_part_anim_output_releases_all_retained_ctrl_writers() -> voi
 			"freezing the output seam cannot retain its last CTRL frame")
 
 
+# The draw publishes the swap fade only for a model it submits, under the husk
+# bit (engine: world::update_item_destroy_fade carries the witness): a hidden
+# row publishes nothing, a submitted husked row re-asserts its six slots, and a
+# row back intact releases them at its next submission.
 func test_destruction_publication_reclaims_owner_and_releases_only_its_slots() -> void:
 	var model := _model()
 	var pass_ := _make_pass(_index_of({1: model}))
 	var snap := Snapshot.new()
-	snap.entities = [{"bms_id": 1, "hidden": 1, "destroy": [65536, 32768, 1, 0, 0, 0]}]
+	snap.entities = [{"bms_id": 1, "hidden": 1, "husk": 1,
+			"destroy": [65536, 32768, 1, 0, 0, 0]}]
 	_present(pass_, snap)
-	assert_eq(_ctrl(model, "OBJECT_DESTROY"), 65536, "hidden rows retain destruction publication")
+	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY"),
+			"an unsubmitted row publishes no destruction phase")
+	snap.entities[0]["hidden"] = 0
+	_present(pass_, snap)
+	assert_eq(_ctrl(model, "OBJECT_DESTROY"), 65536, "a submitted husked row publishes its phases")
 	model.set_ctrl_override("other", "OBJECT_DESTROY", 65536)
 	_present(pass_, snap)
 	model.clear_ctrl_override("other", "OBJECT_DESTROY")
@@ -1533,3 +1600,16 @@ func test_destruction_publication_reclaims_owner_and_releases_only_its_slots() -
 	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY"), "falling phase releases our slot")
 	assert_eq(_ctrl(model, "OBJECT_DESTROY01"), 99, "stale release preserves a later writer")
 	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY02"))
+	snap.entities[0]["destroy"] = [32768, 0, 0, 0, 0, 0]
+	_present(pass_, snap)
+	snap.entities[0]["husk"] = 0
+	snap.entities[0]["destroy"] = [0, 0, 0, 0, 0, 0]
+	snap.entities[0]["hidden"] = 1
+	_present(pass_, snap)
+	assert_eq(_ctrl(model, "OBJECT_DESTROY"), 32768,
+			"an unsubmitted row keeps its last publication")
+	snap.entities[0]["hidden"] = 0
+	_present(pass_, snap)
+	assert_false(model.get_ctrl_values().has("OBJECT_DESTROY"),
+			"the row's first submission back intact releases its slots")
+	assert_eq(_ctrl(model, "OBJECT_DESTROY01"), 99, "the release stays owner-scoped")

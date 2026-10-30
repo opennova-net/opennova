@@ -105,6 +105,16 @@ const world::Entity *owned_entity_for_emit(const world::World &w, const Connecti
 // the zeroed entry (owned_entity_for_emit) (D-NET-449).
 const world::Entity &destroyed_entry_body();
 
+// Sizes `conn`'s priority caches (age, heading, speed) to one entry per slot of the
+// registry's pool 0 then pool 1, as retail's block holds pool 0's capacity then pool 1's
+// [orig: Server_BuildEntityPriorityList @0x50E590 - the 0x5B0-byte block @0x50E601 (256
+// + 1200, EntityPool_Allocate @0x4421CD / @0x44219C), pool 1's +0x100 @0x50EDB3]. Caches
+// already of that layout stand; any other layout (a connection that never emitted, a
+// pool reconfigured since) is zeroed at the new size, as a fresh slot's are [orig:
+// Server_PlayerAdd - memset(slot, 0, 0x188E8) @0x51CD06]. Every emit runs it ahead of
+// the priority build.
+void size_priority_caches(Connection &conn, const world::EntityRegistry &registry);
+
 // The fan's phases lap onto the SIM_REPLICATION_* rows of the world's profile
 // (ADR 0043 d5); an inactive profile keeps selection and encoding free of
 // clock reads.

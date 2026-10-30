@@ -380,13 +380,14 @@ void ClientWorldMaterializer::apply_objective_state(const ClientState &state,
 // [orig: the def type != 3 and refNum != 0 tests and the DynArray_AddOrFind
 //  join in NapiNPClientMsg_0x00D @0x433381..0x4333AD, NapiNPClientMsg_0x010
 //  @0x433684..0x4336B0 and NapiNPClientMsg_FullEntitySpawn @0x433E27..0x433E52]
-void ClientWorldMaterializer::join_reference_group(uint16_t packed, world::Entity &child) {
+void ClientWorldMaterializer::join_reference_group(world::World &world, uint16_t packed,
+		world::Entity &child) {
 	const auto tracked = materialized_rows_.find(packed);
 	if (tracked == materialized_rows_.end() || !child.has_item_def ||
 			tracked->second.ref_join_lifetime == child.registry_spawn_id)
 		return;
 	tracked->second.ref_join_lifetime = child.registry_spawn_id;
-	child.ref_group_member = child.ref_num != 0 && child.item_type != 3;
+	world.registry.set_ref_group_member(child.handle, child.ref_num != 0 && child.item_type != 3);
 }
 
 ClientWorldSyncResult ClientWorldMaterializer::sync(
@@ -513,7 +514,7 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 	for (const auto &[packed, row] : current) {
 		world::Entity *child = owned(world, world::EntityHandle{packed});
 		if (child == nullptr) continue;
-		join_reference_group(packed, *child);
+		join_reference_group(world, packed, *child);
 		if (is_carry_objective(row->type_id)) {
 			apply_objective_state(state, world, packed, *row, *child);
 			continue;

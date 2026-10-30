@@ -25,6 +25,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <base/io/rotating_prng.h>
@@ -345,25 +346,38 @@ struct ItemDeathTraits {
 };
 
 struct ItemDeathTraitsTable {
-    // Keyed by Entity::item_id (items.def type id). Small missions: linear is fine.
+    // Keyed by Entity::item_id (items.def type id), in fill order. The pool walks
+    // read a row per visit: retail reads the row's own def and class callbacks
+    // off the entity [orig: Entity_UpdatePool1Slot @0x4B8DD0 - +0x1C8 @0x4B8E2A,
+    // +0x1C4 @0x4B8E41], so the lookup is O(1) through an id -> row index (not a
+    // retail claim: an index beside the rows). A set() append may move the rows
+    // as before; the index holds positions, never pointers.
     std::vector<std::pair<int32_t, ItemDeathTraits>> rows;
 
     const ItemDeathTraits *get(int32_t item_id) const {
-        for (const auto &r : rows)
-            if (r.first == item_id) return &r.second;
-        return nullptr;
+        const auto it = index_.find(item_id);
+        return it == index_.end() ? nullptr : &rows[it->second].second;
     }
     void set(int32_t item_id, ItemDeathTraits t) {
-        for (auto &r : rows)
-            if (r.first == item_id) { r.second = std::move(t); return; }
+        const auto it = index_.find(item_id);
+        if (it != index_.end()) {
+            rows[it->second].second = std::move(t);
+            return;
+        }
+        index_.emplace(item_id, rows.size());
         rows.emplace_back(item_id, std::move(t));
     }
     ItemDeathTraits *get_mutable(int32_t item_id) {
-        for (auto &r : rows)
-            if (r.first == item_id) return &r.second;
-        return nullptr;
+        const auto it = index_.find(item_id);
+        return it == index_.end() ? nullptr : &rows[it->second].second;
     }
-    void clear() { rows.clear(); }
+    void clear() {
+        rows.clear();
+        index_.clear();
+    }
+
+private:
+    std::unordered_map<int32_t, size_t> index_;
 };
 
 // ----------------------------------------------------------------------------
@@ -802,6 +816,16 @@ inline DestroyFadeClock destroy_fade_clock(int32_t since_death, int32_t delay) {
 inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
     return delay ? std::max(delay, husked_at) : 0;
 }
+// A row's swap fade on the entity walk's visit, every tick (a pool-1 row's own visit, the
+// pool-2/3 walks' fade list; a row Entity::needs_destroy_fade fails takes none): the draw's
+// own evaluation at the sim's cadence. An intact row zeroes its phases (and ends a pending
+// final husk); a husked one publishes them (publish_swap_fade_phases) and runs the swap
+// stage. The draw publishes the six CTRL slots only for a model its collect admits, under
+// Flags & 4 with a final husk held, before its sub-pixel reject; the present row carries the
+// phases and the presenter publishes them for each husked row it submits, every husked row
+// its own (a retained model reads only the slots written for it, D-3DI-2).
+// [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38 @0x5C41F9,
+//  Entity_PublishSwapFadePhases @0x5C4200, the sub-pixel reject @0x5C42DE]
 void update_item_destroy_fade(World &world, Entity &entity);
 // The husk -> final-husk swap stage of a husked entity holding a final husk, after the
 // fade's publication: in the fade window it draws the final husk beside the husk, at
@@ -882,9 +906,11 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
         const ItemDeathTraits *traits, int phase, ItemHitContext hit = {});
 
 // The pool-2/3 cohort walks: cb(entity, 0, 0) at slot&7 with positive-clock
-// -8 (pool 2), at slot&63 with -64 (pool 3), then the update callback. Both
-// peers run class callbacks; each callback owns its authority gates. Pool 1 is
-// World::update_pool1_slot. [orig: Entity_UpdateAllEntities @0x4C2100]
+// -8 (pool 2), at slot&63 with -64 (pool 3), then the update callback; only the
+// cohort's slots are visited, plus every tick the registry's fade list's rows for
+// their swap fade (EntityRegistry::list_fade_row). Both peers run class callbacks;
+// each callback owns its authority gates. Pool 1 is World::update_pool1_slot.
+// [orig: Entity_UpdateAllEntities @0x4C2100]
 void tick_item_event_pool(World &world, int pool);
 
 // The tree-class destruction [orig: Entity_ProcessDestructibleDeath @ 0x43fbc0 +

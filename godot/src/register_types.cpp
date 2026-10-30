@@ -66,6 +66,7 @@
 #include "world/runtime_perf_counters.h"
 #include "world/world_view.h"
 #include "world/scar_draw_list.h"
+#include "world/tick_accumulator.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
 #include "object/entity_ref.h"
@@ -448,6 +449,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LoadingScreenInfo);
 	GDREGISTER_CLASS(PostMissionRoute);
 	GDREGISTER_CLASS(RuntimePerfCounters);
+	// The engine's frame-time bank for the menu mode's own updates.
+	GDREGISTER_CLASS(TickAccumulator);
 	GDREGISTER_CLASS(WorldView);
 	GDREGISTER_CLASS(ArmoryWorldView);
 	GDREGISTER_INTERNAL_CLASS(LiveWorldView);

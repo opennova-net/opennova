@@ -205,12 +205,11 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	// The equipped-weapon adm index (entity+0x2B0) — the 0x0A off-16 echo source: uplink
 	// ingest for peers, the WPN_M4AUTO spawn default for host-spawned players (D-NET-143).
 	s.equipped_adm_index = e.equipped_adm_index;
-	// Body-anim wire state (entity+0x2BC/+0x2B8 + the channel ratio), mirrored from the
-	// infantry motor each tick (AiSystem::mirror_wire_anim; remote peers get the authority
-	// selection pass) — the player record bytes 14/15 sources. (D-NET-159)
+	// Body-anim wire state (entity+0x2BC/+0x2B8), mirrored from the infantry motor each tick
+	// (AiSystem::mirror_wire_anim; remote peers get the authority selection pass) — the player
+	// record byte 14 source; byte 15, the channel ratio, is snapshot_world's. (D-NET-159)
 	s.anim_state_id = e.net_anim_state;
 	s.anim_pending_id = e.net_anim_pending;
-	s.anim_channel_ratio = e.net_anim_phase;
 	s.veh_bone = e.mounted ? e.mount_bone : 0; // entity+0x157 [orig: mounted-only @0x4c0a1a]
 	s.state_flags = static_cast<uint8_t>(e.flags & 0xFF); // entity+0x24 low byte, unmasked
 	// The live vehicle compact's prediction tail is sourced from the authority
@@ -262,9 +261,14 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 		// carrier pitch on Entity while preserving the gunner's live look on
 		// AiEntity. Rejoin only that split here; snapshot_of's witnessed integer
 		// yaw conversion deliberately retains its distinct truncation behavior.
+		// Its anim ratio byte divides the body's live channel words as the record is written,
+		// not a copy a tick took (D-NET-159).
+		// [orig: NetPacket_SerializePlayerState @0x4C0CF2..0x4C0D35]
 		if (s.entity_class == EntityClass::Player) {
 			if (const world::AiEntity *ai = w.ai.for_handle(e.handle)) {
 				s.pitch_bam = ai->pitch;
+				if (ai->inf.active)
+					s.anim_channel_ratio = world::wire_anim_ratio(ai->inf, w.ai.root_motion);
 			}
 		}
 		// Priority-feed fills (D-NET-139 full terms; the World-aware seam).

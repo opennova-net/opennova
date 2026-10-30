@@ -87,8 +87,9 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 	// spawn's entity+0x2C bit 0x80); the spawn points' pass does not test it
 	// [orig: Server_BuildOverlayStateForPlayer @0x51809B, @0x51849C].
 	if (reply.minimap_initial_scan_pending) {
-		const size_t capacity = world.registry.pool_capacity(2);
-		for (size_t slot = 0; slot < capacity; ++slot) {
+		// To pool 2's used count [orig: @0x51802E].
+		const size_t used = world.registry.pool_used(2);
+		for (size_t slot = 0; slot < used; ++slot) {
 			const world::Entity *e = world.registry.get(
 					world::EntityHandle::make(2, static_cast<int>(slot)));
 			if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
@@ -113,8 +114,9 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 	// Server_BuildOverlayStateForPlayer @0x5181ff..0x518248 (pool 2),
 	// @0x51834f..0x518398 (pool 1); ZoneSlotChain_IsZoneCapturableByTeam @0x4A2450].
 	for (const int pool : {2, 1}) {
-		const size_t capacity = world.registry.pool_capacity(pool);
-		for (size_t slot = 0; slot < capacity; ++slot) {
+		// To each pool's used count [orig: @0x51818E (pool 2), @0x5182E3 (pool 1)].
+		const size_t used = world.registry.pool_used(pool);
+		for (size_t slot = 0; slot < used; ++slot) {
 			const world::Entity *e = world.registry.get(
 					world::EntityHandle::make(pool, static_cast<int>(slot)));
 			if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
@@ -133,9 +135,10 @@ void build_overlay_state_for_player(NapiNPServerCtx &ctx, world::World &world,
 		}
 	}
 	const uint32_t gt = world.match.rules().game_type;
-	const size_t pool1_capacity = world.registry.pool_capacity(1);
+	// To pool 1's used count [orig: @0x518427, the phase compare @0x518431].
+	const size_t pool1_used = world.registry.pool_used(1);
 	for (size_t slot = reply.minimap_pool1_phase;
-			slot < pool1_capacity; slot += 128) {
+			slot < pool1_used; slot += 128) {
 		const world::Entity *e = world.registry.get(
 				world::EntityHandle::make(1, static_cast<int>(slot)));
 		if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||

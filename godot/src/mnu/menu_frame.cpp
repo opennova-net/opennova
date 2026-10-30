@@ -313,9 +313,9 @@ bool MenuFrame::load_texture_ahead(const std::string &p_name, const opennova::Fi
 
 bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 		const String &p_screen_name, const Ref<ResourceRoot> &p_root,
-		const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text) {
+		const Ref<MnsStyleSheet> &p_style) {
 	document_ = p_document;
-	override_text_ = p_override_text;
+	override_text_ = opennova::rtxt::text_override();
 	root_files_.set_root(p_root);
 	if (document_.is_null()) {
 		clear_screen();
@@ -333,7 +333,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 		}
 	}
 	return configure_screen(&doc, screen, root_files_, vars,
-			override_text_.is_valid() ? &override_text_->get_native() : nullptr);
+			override_text_.get());
 }
 
 // What the screen reads, through the engine's loader (the witnesses live at the engine
@@ -1344,8 +1344,7 @@ void MenuFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_piece_material_count"),
 			&MenuFrame::get_piece_material_count);
 	ClassDB::bind_method(
-			D_METHOD("configure", "document", "screen_name", "root", "style",
-					"override_text"),
+			D_METHOD("configure", "document", "screen_name", "root", "style"),
 			&MenuFrame::configure);
 	ClassDB::bind_method(D_METHOD("is_configured"), &MenuFrame::is_configured);
 	ClassDB::bind_method(D_METHOD("set_widget_disabled", "index", "disabled"),

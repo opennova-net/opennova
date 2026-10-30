@@ -490,6 +490,10 @@ struct PlayerTemplate {
     // @0x439FDC; Entity_InitFromItemDef @0x49E550 - the +0x30 store @0x49E598;
     // the gate @0x43CC19].
     bool has_graphic_model = true;
+    // That graphic's radius word (model+0x14, the GHDR radius in 16.16), 0 when none
+    // loaded: a flying round bound to the row clips its model at four times it in the
+    // scene collect's RoundPool walk (OcclusionWorld::collect_round_draws).
+    int32_t graphic_model_radius_q16 = 0;
     // The Player row's hp word (itemDef+0x17C healthMax), 0 a real word: unset
     // until the traits sweep stores it (or a harness seeds one), and while unset
     // the spawn and the deploy take their fallbacks. A word of 0 makes the
@@ -1787,6 +1791,15 @@ private:
 // [orig: Score_CountMissionSubgoalsAndUnits (ex sub_509DC0) @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070,
 //  the pool walks @0x509e13..0x509e4a, called at Game_StartMission @0x525d5d]
 void count_mission_units(World &world);
+
+// One row's census leg: a non-player row with team >= 2 and a non-zero unit-class byte adds
+// one enemy unit to MissionKillStats's total and its class. The mission start's walk runs it
+// over pools 0 and 1, and an org1 respawn on the authority runs it on the respawned row, so
+// every respawn of an enemy grows the census.
+// [orig: Score_ClassifyEntityForCounts @0x4fd070, called by
+//  Score_CountMissionSubgoalsAndUnits @0x509e1d / @0x509e4a and Entity_UpdateInfantryAI
+//  @0x4ba055]
+void classify_entity_for_counts(World &world, const Entity &e);
 
 // The mission's defined-subgoal count: the leading run of authored win
 // conditions (slots 1..8) before the first 0 or 0xFF entry.
