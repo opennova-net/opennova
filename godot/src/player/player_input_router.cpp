@@ -1,14 +1,11 @@
 #include "player/player_input_router.h"
 
-#include "player/input_device.h"
 #include "player/key_lock_device.h"
 #include "player/local_player_presenter.h"
 #include "simulation/simulation.h"
 #include "world/game_world.h"
 #include "world/game_world_access.h"
 
-#include <godot_cpp/classes/display_server.hpp>
-#include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 
 #include <runtime/hud/hud_toggles.h> // hud_key_press_keys
@@ -102,10 +99,8 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 		return frame_input;
 	}
 	owner->set_fly_camera_locked(true);
-	Input *input = Input::get_singleton();
-	if (p_capture_mouse && input->get_mouse_mode() != Input::MOUSE_MODE_CAPTURED) {
-		input->set_mouse_mode(Input::MOUSE_MODE_CAPTURED);
-	}
+	if (p_capture_mouse)
+		input_.set_cursor_mode(opennova::platform::CursorMode::Captured);
 	if (!head.spectating) owner->ensure_models();
 	frame_input->set_cursor_delta(Vector2i(head.cursor_dx, head.cursor_dy));
 	frame_input->set_menu_open(head.menu_open);
@@ -115,12 +110,16 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
 	LocalPlayerPresenter *owner = presenter();
 	if (!p_active || owner == nullptr || !owner->has_player()) return false;
-	opennova::platform::InputEvent event;
-	if (!input_device::to_platform(p_event, event)) return false;
-	// With no binding table the device's buttons and wheel reach no row.
-	if (controls_.is_null() && event.type != opennova::platform::InputEvent::Type::MouseMotion)
+	if (!input_.push(p_event))
 		return false;
-	return frame_.device_event(event);
+	// Godot pumps one event at a time, which the input frame takes at once. With no binding
+	// table the device's buttons and wheel reach no row.
+	bool used = false;
+	opennova::platform::InputEvent event;
+	while (input_.poll_event(event))
+		if (controls_.is_valid() || event.type == opennova::platform::InputEvent::Type::MouseMotion)
+			used = frame_.device_event(event) || used;
+	return used;
 }
 
 Ref<SpecialKeyOutcome> PlayerInputRouter::special_key(const Ref<Simulation> &p_session, int p_vk) {
@@ -181,18 +180,15 @@ void PlayerInputRouter::set_hud_chat(const Ref<HudChatEntry> &p_chat,
 }
 
 void PlayerInputRouter::release_mouse_capture() {
-	Input *input = Input::get_singleton();
-	if (input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED) {
-		input->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
-	}
+	if (input_.state().cursor_captured)
+		input_.set_cursor_mode(opennova::platform::CursorMode::Visible);
 }
 
 void PlayerInputRouter::release_capture_for_screen() {
-	Input *input = Input::get_singleton();
-	if (input->get_mouse_mode() != Input::MOUSE_MODE_CAPTURED) return;
-	input->set_mouse_mode(Input::MOUSE_MODE_VISIBLE);
-	DisplayServer::get_singleton()->warp_mouse(
-			Vector2i(opennova::world::kCursorCentreX, opennova::world::kCursorCentreY));
+	if (!input_.state().cursor_captured)
+		return;
+	input_.set_cursor_mode(opennova::platform::CursorMode::Visible);
+	input_.warp_cursor(opennova::world::kCursorCentreX, opennova::world::kCursorCentreY);
 }
 
 // --- the device ---------------------------------------------------------------------------
@@ -242,7 +238,7 @@ bool PlayerInputRouter::Device::fire_signed(const char *p_token) const {
 }
 
 opennova::platform::InputState PlayerInputRouter::Device::state() const {
-	return input_device::state();
+	return router_.input_.state();
 }
 
 void PlayerInputRouter::Device::set_scan_gates(bool p_death_screen, bool p_scan_word) {

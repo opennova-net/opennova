@@ -11,7 +11,7 @@
 
 #include <runtime/controls/player_actions.h> // kVkCapital, kVkNumLock, kVkScroll
 
-namespace godot::input_device {
+namespace godot {
 
 namespace {
 
@@ -73,7 +73,7 @@ platform::Scancode scancode_of(Key p_key, KeyLocation p_location) {
 
 } // namespace
 
-platform::KeyEvent key_event(const InputEventKey &p_key) {
+platform::KeyEvent InputDevice::key_event(const InputEventKey &p_key) {
 	platform::KeyEvent out;
 	// The layout's key, else the physical one (a synthesized event may carry either).
 	const Key keycode = p_key.get_keycode() != KEY_NONE ? p_key.get_keycode()
@@ -94,6 +94,9 @@ platform::KeyEvent key_event(const InputEventKey &p_key) {
 	return out;
 }
 
+namespace {
+
+// One Godot event as the engine's raw device event (InputDevice::push).
 bool to_platform(const Ref<InputEvent> &p_event, platform::InputEvent &r_event) {
 	r_event = platform::InputEvent{};
 	if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr())) {
@@ -138,7 +141,39 @@ bool to_platform(const Ref<InputEvent> &p_event, platform::InputEvent &r_event) 
 	return false;
 }
 
-platform::InputState state() {
+} // namespace
+
+bool InputDevice::push(const Ref<InputEvent> &p_event) {
+	platform::InputEvent event;
+	if (!to_platform(p_event, event))
+		return false;
+	events_.push_back(event);
+	return true;
+}
+
+bool InputDevice::poll_event(platform::InputEvent &r_event) {
+	if (events_.empty())
+		return false;
+	r_event = events_.front();
+	events_.pop_front();
+	return true;
+}
+
+void InputDevice::set_cursor_mode(platform::CursorMode p_mode) {
+	Input *input = Input::get_singleton();
+	const Input::MouseMode mode = p_mode == platform::CursorMode::Captured
+			? Input::MOUSE_MODE_CAPTURED
+			: (p_mode == platform::CursorMode::Hidden ? Input::MOUSE_MODE_HIDDEN
+													  : Input::MOUSE_MODE_VISIBLE);
+	if (input->get_mouse_mode() != mode)
+		input->set_mouse_mode(mode);
+}
+
+void InputDevice::warp_cursor(int32_t p_x, int32_t p_y) {
+	DisplayServer::get_singleton()->warp_mouse(Vector2i(p_x, p_y));
+}
+
+platform::InputState InputDevice::state() const {
 	platform::InputState out;
 	DisplayServer *display = DisplayServer::get_singleton();
 	if (display != nullptr) {
@@ -169,4 +204,4 @@ platform::InputState state() {
 	return out;
 }
 
-} // namespace godot::input_device
+} // namespace godot

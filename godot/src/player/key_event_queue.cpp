@@ -12,7 +12,7 @@ void KeyEventQueue::push_key(const Ref<InputEventKey> &p_event, bool p_ctrl_down
 	// The key's entry is the engine's (controls::queued_key carries the witness): its VK and
 	// flag word from the device's key event.
 	const opennova::controls::QueuedKey key = opennova::controls::queued_key(
-			input_device::key_event(**p_event), p_ctrl_down, p_shift_down);
+			InputDevice::key_event(**p_event), p_ctrl_down, p_shift_down);
 	if (key.vk == 0) return;
 	events_[static_cast<size_t>(queue_.write_index())] = p_event;
 	queue_.push(key.vk, key.flags);

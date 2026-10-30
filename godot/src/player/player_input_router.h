@@ -13,6 +13,7 @@
 #include "hud/hud_chat_entry.h"
 #include "hud/hud_toggles.h"
 #include "mnu/controls_model.h"
+#include "player/input_device.h"
 #include "player/key_event_queue.h"
 #include "player/player_move_intent.h"
 #include "player/special_key_outcome.h"
@@ -204,6 +205,7 @@ private:
 	Ref<HudChatEntry> hud_chat_;
 	Ref<RtxtStringFile> gametext_;
 	Ref<KeyEventQueue> key_events_;
+	InputDevice input_; // the backend's input device (engine base/platform/input_device.h)
 	Device device_;
 	Session session_;
 	Shell shell_;
