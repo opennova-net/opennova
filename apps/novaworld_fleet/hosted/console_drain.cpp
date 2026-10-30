@@ -34,13 +34,14 @@ void write_answer(db::Database &db, int64_t id, const AdminCommandResult &result
 	}
 	db.exec("UPDATE hosted_console_commands SET state = 'done', outcome = $2, sent = $3, "
 			"finished_at = now(), configuration_saved = $4, settings_revision = $5, "
-			"delivery_unknown = $6 "
+			"delivery_unknown = $6, refused_command = $7 "
 			"WHERE id = $1;",
 			{ BindValue(id), BindValue(std::string(admin_command_outcome_name(result.outcome))),
 					BindValue(db::Bool{ result.sent }),
 					BindValue(db::Bool{ result.configuration_saved }),
 					BindValue(result.settings_revision),
-					BindValue(db::Bool{ result.delivery_unknown }) });
+					BindValue(db::Bool{ result.delivery_unknown }),
+					BindValue(result.refused_command) });
 	tx.commit();
 }
 
@@ -153,8 +154,12 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 								result.outcome = reply.outcome;
 								break;
 							}
-							if (!console_reply_succeeded(reply.replies))
+							if (!console_reply_succeeded(reply.replies)) {
+								// The server refused it: the edit stops here, its earlier
+								// commands' fields saved, and the answer names this one.
+								result.refused_command = command;
 								break;
+							}
 							(void)read_settings_document(console_settings_patch(command, weapons),
 									accepted, field, error);
 						}

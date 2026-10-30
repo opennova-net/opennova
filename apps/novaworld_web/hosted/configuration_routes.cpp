@@ -49,6 +49,12 @@ crow::response command_reply(int64_t id, const AdminCommandResult &result) {
 	out["delivery_unknown"] = result.delivery_unknown;
 	out["configuration_saved"] = result.configuration_saved;
 	out["settings_revision"] = result.settings_revision;
+	// The settings edit's command the server refused: the fields before it saved, the rest
+	// never sent (null when none was).
+	if (result.refused_command.empty())
+		out["refused_command"] = nullptr;
+	else
+		out["refused_command"] = cp1252_to_utf8(result.refused_command);
 	std::vector<std::string> replies;
 	for (const auto &reply : result.replies)
 		replies.push_back(cp1252_to_utf8(reply));

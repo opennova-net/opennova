@@ -6839,6 +6839,11 @@ public:
 		delay_prefix_ = prefix;
 		delay_ms_ = ms;
 	}
+	// A line starting with `prefix` is refused ("ERROR - Bad Value."; empty: none).
+	void refuse(const std::string &prefix) {
+		std::lock_guard<std::mutex> lock(mu_);
+		refuse_prefix_ = prefix;
+	}
 	void set_scene(const std::string &scene) {
 		std::lock_guard<std::mutex> lock(mu_);
 		scene_ = scene;
@@ -6881,6 +6886,8 @@ public:
 		} else if (is(0, "GET") && is(1, "GAMESETTINGS")) {
 			replies.emplace_back("AutoBalanceOnRecycle = 1\nServerName           = Console Test\n"
 								 "ServerPassword       = s3cret\n");
+		} else if (!refuse_prefix_.empty() && line.substr(0, refuse_prefix_.size()) == refuse_prefix_) {
+			replies.emplace_back("ERROR - Bad Value.");
 		} else if (is(0, "SET")) {
 			replies.emplace_back("OK - Setting Changed.");
 		} else if (is(0, "PLAYER") && is(1, "LIST")) {
@@ -6978,6 +6985,7 @@ private:
 	std::vector<std::string> lines_;
 	std::string delay_prefix_;
 	int delay_ms_ = 0;
+	std::string refuse_prefix_;
 	std::string scene_ = "Game";
 	bool hostile_ = false;
 	std::vector<std::string> rotation_{ "ALPHA.BMS" };
@@ -8160,6 +8168,25 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(persisted->settings.send_holdoff_ticks == 2 && persisted->settings.entity_send_budget == 900 &&
 			persisted->settings.max_packet_size == 1250 && persisted->settings.lock_framerate);
 	TEST_EXPECT(h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body).code == 409);
+	// A command the server refuses stops the edit there: the fields before it saved, the rest
+	// never sent, and the reply names it rather than reading as saved.
+	fake.refuse("SET MaxScore");
+	const auto before_refusal = hosted::find_server(*h.pool.acquire(), id);
+	const size_t refusal_lines = fake.lines().size();
+	reply = h.send("PATCH", base + "/settings", {kBearer,kJson},
+			"{\"settings_revision\":" + std::to_string(before_refusal->settings_revision) +
+					",\"patch\":{\"kill_limit\":61,\"max_score\":12,\"time_limit\":25}}");
+	fake.refuse("");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["refused_command"]) == "SET MaxScore 12" &&
+			json["configuration_saved"].b());
+	const auto after_refusal = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(after_refusal->settings.kill_limit == 61 &&
+			after_refusal->settings.max_score == before_refusal->settings.max_score &&
+			after_refusal->settings.time_limit == before_refusal->settings.time_limit);
+	const auto refusal_sent = fake.lines();
+	TEST_EXPECT(std::none_of(refusal_sent.begin() + static_cast<std::ptrdiff_t>(refusal_lines),
+			refusal_sent.end(), [](const std::string &l) { return l.rfind("SET GameTime", 0) == 0; }));
 	// A short-lived caller stops waiting after send; the drain still saves the reply.
 	fake.delay("SET KillLimit", 950);
 	hosted::AdminCommandOptions durable_options;

@@ -8,6 +8,8 @@ export interface ConfigurationState {
 }
 export interface CommandResult {
   outcome: string; sent: boolean; delivery_unknown: boolean; configuration_saved: boolean; settings_revision: number; replies: string[];
+  // The settings edit's command the server refused (the changes before it saved, the rest not sent); null for none.
+  refused_command: string | null;
 }
 const client = (target: ConsoleTarget) => target.kind === 'admin' ? adminClient : apiClient;
 export async function readConfiguration(target: ConsoleTarget): Promise<ConfigurationState> {

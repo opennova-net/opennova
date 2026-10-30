@@ -73,7 +73,9 @@ async function save() {
   try {
     const result = await queue.action(() => editConfiguration(props.target, state.value!.settings_revision, { ...patch, options }));
     output.value = result.replies.join('\n');
-    notice.value = result.configuration_saved ? 'Accepted changes saved. Settings marked for the next launch are pending.' : 'The changes were not saved. Reload before retrying.';
+    notice.value = result.refused_command
+      ? `The server refused "${result.refused_command}". The changes before it were saved; the rest were not sent.`
+      : result.configuration_saved ? 'Accepted changes saved. Settings marked for the next launch are pending.' : 'The changes were not saved. Reload before retrying.';
     await load();
   } catch (e) { error.value = configurationError(e); } finally { busy.value = false; }
 }
