@@ -131,8 +131,8 @@ void Simulation::reset_world() {
 	kernel_->set_placed_tiles(net_.terrain_til_data);
 	kernel_->set_assets(
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
-	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
-	kernel_->profile.set_active(runtime_profiling_enabled_);
+	kernel_->collision.set_trace_profile_enabled(profiling_.runtime_profiling_enabled);
+	kernel_->profile.set_active(profiling_.runtime_profiling_enabled);
 	// player_.weapon is player-scoped and outlives every load [orig:
 	// PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup path, not
 	// Game_StartMission], as the spawn buffer is process-scoped (the role binds the
@@ -150,8 +150,8 @@ void Simulation::reset_world() {
 	sync_class_attribute_flags();
 	apply_session_rules();
 	world_installed_ = false;
-	last_sim_tick_us_ = 0;
-	last_net_tick_us_ = 0;
+	profiling_.last_sim_tick_us = 0;
+	profiling_.last_net_tick_us = 0;
 	present_.last_occlusion_build_us = 0;
 	present_.last_occlusion_probe_us = 0;
 	present_.last_snapshot_us = 0;
@@ -786,16 +786,16 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 }
 
 void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
-	if (runtime_profiling_enabled_ == p_enabled) return;
-	runtime_profiling_enabled_ = p_enabled;
-	last_trace_profile_ = opennova::world::CollisionWorld::TraceProfile{};
-	last_sim_tick_us_ = 0;
-	last_net_tick_us_ = 0;
+	if (profiling_.runtime_profiling_enabled == p_enabled) return;
+	profiling_.runtime_profiling_enabled = p_enabled;
+	profiling_.last_trace_profile = opennova::world::CollisionWorld::TraceProfile{};
+	profiling_.last_sim_tick_us = 0;
+	profiling_.last_net_tick_us = 0;
 	present_.last_snapshot_us = 0;
 	present_.last_occlusion_build_us = 0;
 	present_.last_occlusion_probe_us = 0;
-	frame_sim_us_ = 0;
-	frame_sink_us_ = 0;
+	profiling_.frame_sim_us = 0;
+	profiling_.frame_sink_us = 0;
 	if (kernel_ != nullptr) {
 		kernel_->profile.reset();
 		kernel_->profile.set_active(p_enabled);
@@ -804,7 +804,7 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 }
 
 Vector4i Simulation::get_last_projectile_trace_times_us() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector4i(trace_profile_lane(tp.terrain_us),
 			trace_profile_lane(tp.static_us),
 			trace_profile_lane(tp.dynamic_us),
@@ -812,7 +812,7 @@ Vector4i Simulation::get_last_projectile_trace_times_us() const {
 }
 
 Vector4i Simulation::get_last_projectile_trace_counts() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector4i(trace_profile_lane(tp.calls),
 			trace_profile_lane(tp.static_survivors),
 			trace_profile_lane(tp.dynamic_survivors),
@@ -821,12 +821,12 @@ Vector4i Simulation::get_last_projectile_trace_counts() const {
 
 void Simulation::take_projectile_trace_profile() {
 	if (kernel_ == nullptr) return;
-	last_trace_profile_ = kernel_->collision.trace_profile();
+	profiling_.last_trace_profile = kernel_->collision.trace_profile();
 	kernel_->collision.clear_trace_profile();
 }
 
 Vector2i Simulation::get_last_projectile_trace_faces() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector2i(trace_profile_lane(tp.static_faces),
 			trace_profile_lane(tp.dynamic_faces));
 }
@@ -837,15 +837,15 @@ Dictionary Simulation::get_runtime_perf_counters() const {
 	out["listen_server"] = listen_server_;
 	out["ai_count"] = kernel_ ? kernel_->world.ai.count() : 0;
 	out["present_entity_count"] = present_.last_entity_count;
-	out["sim_tick_us"] = static_cast<int64_t>(last_sim_tick_us_);
-	out["net_tick_us"] = static_cast<int64_t>(last_net_tick_us_);
+	out["sim_tick_us"] = static_cast<int64_t>(profiling_.last_sim_tick_us);
+	out["net_tick_us"] = static_cast<int64_t>(profiling_.last_net_tick_us);
 	out["present_snapshot_us"] = static_cast<int64_t>(present_.last_snapshot_us);
 	out["occlusion_build_us"] = static_cast<int64_t>(present_.last_occlusion_build_us);
 	out["occlusion_probe_us"] = static_cast<int64_t>(present_.last_occlusion_probe_us);
-	out["runtime_profiling_enabled"] = runtime_profiling_enabled_;
+	out["runtime_profiling_enabled"] = profiling_.runtime_profiling_enabled;
 	// The last tick's projectile-trace attribution (collision.h TraceProfile), as the
 	// tick's sink took it (take_projectile_trace_profile).
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	out["trace_profiling_enabled"] = kernel_->collision.trace_profile_enabled();
 	out["trace_calls"] = tp.calls;
 	out["trace_terrain_us"] = tp.terrain_us;

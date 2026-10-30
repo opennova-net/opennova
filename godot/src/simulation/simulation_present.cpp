@@ -736,7 +736,7 @@ int Simulation::get_entity_part_anim_phase(int p_index, int channel) const {
 
 std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snapshot() const {
 	const uint64_t start_us =
-			runtime_profiling_enabled_ ? opennova::io::perf_now_us() : 0;
+			profiling_.runtime_profiling_enabled ? opennova::io::perf_now_us() : 0;
 	// ADR 0011 Decision 1 (as amended, D-NET-140 closed): every authoritative live mission is an
 	// in-process listen server in standalone MainGame/GameWorld, and the listen host presents
 	// from its OWN pools — retail's local client reads process memory and its loopback 0x0A is
@@ -754,7 +754,7 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	if (runtime_ && kernel_) {
 		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner(),
 				host_ctx(), joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr,
-				runtime_profiling_enabled_ ? &present_.last_snapshot_body_us : nullptr};
+				profiling_.runtime_profiling_enabled ? &present_.last_snapshot_body_us : nullptr};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
 					context, present_.pool_lifecycle, frame.rows, frame.door_phases);
@@ -787,7 +787,7 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	}
 	if (changed) ++present_.layout_revision;
 	frame.layout_revision = present_.layout_revision;
-	if (runtime_profiling_enabled_)
+	if (profiling_.runtime_profiling_enabled)
 		present_.last_snapshot_us = opennova::io::perf_now_us() - start_us;
 	return present_.snapshot;
 }

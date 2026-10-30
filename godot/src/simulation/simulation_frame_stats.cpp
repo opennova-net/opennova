@@ -9,23 +9,24 @@ namespace godot {
 // samples its row, exactly as the former per-role field lists did.
 
 void Simulation::set_frame_stats(const Ref<FrameStats> &p_stats) {
-	frame_stats_ = p_stats;
+	profiling_.frame_stats = p_stats;
 }
 
 Ref<FrameStats> Simulation::get_frame_stats() const {
-	return frame_stats_;
+	return profiling_.frame_stats;
 }
 
 void Simulation::fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome) {
-	if (!runtime_profiling_enabled_ || !frame_stats_.is_valid() || p_outcome.ticks_run() <= 0) {
+	if (!profiling_.runtime_profiling_enabled || !profiling_.frame_stats.is_valid() ||
+			p_outcome.ticks_run() <= 0) {
 		return;
 	}
-	FrameStats &stats = **frame_stats_;
+	FrameStats &stats = **profiling_.frame_stats;
 	if (!stats.is_capture_active()) {
 		return;
 	}
-	stats.add(FrameStats::SIM_STEP, frame_sim_us_);
-	stats.add(FrameStats::SIM_SINK, frame_sink_us_);
+	stats.add(FrameStats::SIM_STEP, profiling_.frame_sim_us);
+	stats.add(FrameStats::SIM_SINK, profiling_.frame_sink_us);
 	if (kernel_ == nullptr) return;
 	kernel_->profile.for_each_touched(
 			[&stats](opennova::devtools::Slot p_slot, int64_t p_sum) {
@@ -37,8 +38,8 @@ void Simulation::fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outco
 // the same frames (a frame of no tick banks and runs its legs too).
 void Simulation::fold_frame_phases(
 		const opennova::inmatch::FramePerf &p_perf, int64_t p_marshal_us) {
-	if (!runtime_profiling_enabled_ || !frame_stats_.is_valid()) return;
-	FrameStats &stats = **frame_stats_;
+	if (!profiling_.runtime_profiling_enabled || !profiling_.frame_stats.is_valid()) return;
+	FrameStats &stats = **profiling_.frame_stats;
 	if (!stats.is_capture_active()) return;
 	stats.add(FrameStats::SIM_FRAME_BANK, p_perf.bank_us);
 	stats.add(FrameStats::SIM_FRAME_UPDATES, p_perf.tick_us);
