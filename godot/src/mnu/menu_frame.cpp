@@ -333,7 +333,8 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 		}
 	}
 	return configure_screen(&doc, screen, root_files_, vars,
-			override_text_.is_valid() ? &override_text_->get_native() : nullptr);
+			override_text_.is_valid() ? &override_text_->get_native() : nullptr,
+			ResourceRoot::session_title(p_root).menu_font_scale);
 }
 
 // What the screen reads, through the engine's loader (the witnesses live at the engine
@@ -344,7 +345,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 bool MenuFrame::configure_screen(const opennova::mnu::Document *p_document,
 		const opennova::mnu::Screen *p_screen, const opennova::FileSource &p_files,
 		const std::map<std::string, std::string> &p_vars,
-		const opennova::rtxt::File *p_override_text) {
+		const opennova::rtxt::File *p_override_text, float p_font_scale) {
 	files_ = &p_files;
 	configured_ = false;
 	state_ = opennova::menu::MenuFrameState{};
@@ -355,6 +356,7 @@ bool MenuFrame::configure_screen(const opennova::mnu::Document *p_document,
 		clear_screen();
 		return false;
 	}
+	compiler_.set_font_scale(p_font_scale);
 	assets_.configure(compiler_, p_document, p_screen, p_files, texture_store_, p_vars,
 			p_override_text);
 	adopt_slots_();

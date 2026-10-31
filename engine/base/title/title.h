@@ -410,6 +410,12 @@ struct Title {
 	// registered and the pass's call there is an empty stub [orig: nullsub_130 @0x562130, from
 	// UI_ProcessMenuScreenFrame @0x54e681; HUD_CacheStatPanelValues @0x5627a0].
 	bool stat_screen_done = false;
+	// The scale the menu font cache writes into every menu font it loads (the font's +0x12EC),
+	// which the menus' text draws and measures at (menu::MenuFrameCompiler::set_font_scale,
+	// D-FNT-7): Jointops.exe's 1.0, its flt_84C10C, which no code writes, so a menu glyph is its
+	// texels [orig: CFontCache_LoadOrGetFont @0x652f70 (@0x6530e7); CFontCache_EnsureFontLoaded
+	// @0x653de0 (@0x653ea0)].
+	float menu_font_scale = 1.0f;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

@@ -519,6 +519,12 @@ public:
 	// Borrowed; set before configure().
 	void set_text_tables(const MenuTextTables *tables);
 
+	// The scale the menu font cache writes into every menu font it loads, which each draws and
+	// measures its glyphs at: the title's (Title::menu_font_scale; Jointops.exe's 1.0, the
+	// texels) (D-FNT-7). Set before configure() (MenuFrameAssets::configure sets it).
+	void set_font_scale(float scale) { font_scale_ = scale > 0.0f ? scale : 1.0f; }
+	float font_scale() const { return font_scale_; }
+
 	// Per-name font registration (case-insensitive, the FONT NAME as authored
 	// after %VAR%): only a font that loaded is registered; an unregistered name
 	// is one that did not load. Set before configure() (a marquee's node fonts
@@ -1288,6 +1294,7 @@ private:
 	const mnu::Screen *screen_ = nullptr;
 	std::map<std::string, std::string> style_vars_;
 	const MenuTextTables *text_tables_ = nullptr;
+	float font_scale_ = 1.0f;
 	std::map<std::string, const opennova::fnt::fnt_font_t *> registered_fonts_;
 	// The first-load HEIGHT per texture key (name + FLAGS, lowercased); -1 is a
 	// load with no HEIGHT (the texture's own height).

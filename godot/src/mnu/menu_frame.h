@@ -144,11 +144,12 @@ public:
 	// (the game's root, the editor's project files), the engine's loader
 	// (runtime/menu/menu_frame_assets.h) keeping what it loaded by (file, stamp)
 	// across configures. The document, the screen, the file source and the
-	// override table are borrowed until the next configure.
+	// override table are borrowed until the next configure. `p_font_scale` is the
+	// title's menu font scale its fonts draw at (engine MenuFrameCompiler::set_font_scale).
 	bool configure_screen(const opennova::mnu::Document *p_document,
 			const opennova::mnu::Screen *p_screen, const opennova::FileSource &p_files,
 			const std::map<std::string, std::string> &p_vars,
-			const opennova::rtxt::File *p_override_text);
+			const opennova::rtxt::File *p_override_text, float p_font_scale);
 	// Let everything go (configure over nothing).
 	void clear_screen();
 	bool is_configured() const;

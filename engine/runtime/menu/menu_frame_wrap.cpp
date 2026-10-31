@@ -72,7 +72,7 @@ void MenuFrameCompiler::emit_wrapped_text(const WidgetNode &node,
 		return;
 	}
 	hud::GameFont gf;
-	gf.set_font(font, true); // a menu font: its texels (D-FNT-7)
+	gf.set_font(font, font_scale_); // a menu font: the cache's scale (D-FNT-7)
 	int wrap_w = rect.right - rect.left;
 	if (wrap_w <= 0) {
 		wrap_w = 0x10000; // [orig: 0 -> unbounded]
@@ -204,7 +204,7 @@ bool MenuFrameCompiler::multiline_line_counts(int index,
 		return true;
 	}
 	hud::GameFont gf;
-	gf.set_font(font, true); // a menu font: its texels (D-FNT-7)
+	gf.set_font(font, font_scale_); // a menu font: the cache's scale (D-FNT-7)
 	const mnu::RectEdges rect = node_rect_(node, ws);
 	int wrap_w = rect.right - rect.left;
 	if (wrap_w <= 0) {

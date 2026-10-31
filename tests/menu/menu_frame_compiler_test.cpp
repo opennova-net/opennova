@@ -933,10 +933,32 @@ void test_menu_font_draws_at_its_texels() {
 	int h = 0;
 	hud.measure("OK", 1.0f, 1.0f, &w, &h);
 	CHECK(w < 17 && hud.design_scale() == 0.5f, "the HUD keeps the design scale");
+	const int hud_w = w;
+	const int hud_h = h;
 	opennova::hud::GameFont menu;
-	menu.set_font(&wide, true);
+	menu.set_font(&wide, 1.0f);
 	menu.measure("OK", 1.0f, 1.0f, &w, &h);
 	CHECK(w == 17 && h == 16 && menu.design_scale() == 1.0f, "a menu font's scale is 1.0");
+	CHECK(c.font_scale() == 1.0f, "a compiler's menu fonts default to Jointops.exe's 1.0");
+	// dfx2.exe's cache writes 0.5 into every menu font (Title::menu_font_scale): its glyphs
+	// measure as the HUD's do over a 1600-designed font, and OK's narrower "OK" centres further
+	// right at half the height [orig: Menu_InitShellResources @0x54f750 (@0x54f759);
+	// CFontCache_LoadOrGetFont @0x6d8490 (@0x6d8607..0x6d8611) (dfx2.exe)].
+	opennova::hud::GameFont halved;
+	halved.set_font(&wide, 0.5f);
+	halved.measure("OK", 1.0f, 1.0f, &w, &h);
+	CHECK(w == hud_w && h == hud_h && halved.design_scale() == 0.5f,
+			"a 0.5 menu font measures at half its texels");
+	MenuFrameCompiler half;
+	half.set_font_scale(0.5f);
+	configure_with(half, doc.first_screen(), &wide);
+	const MenuDrawList &dl_half = half.compile(state, 1.0f, 1.0f);
+	CHECK(!dl_half.glyphs.empty() && dl_half.glyphs[0].x_top_left > 51.5f,
+			"a 0.5 menu font centres its narrower run further right");
+	CHECK(!dl_half.glyphs.empty() &&
+					dl_half.glyphs[0].y_bottom - dl_half.glyphs[0].y_top ==
+							(dl.glyphs[0].y_bottom - dl.glyphs[0].y_top) * 0.5f,
+			"a 0.5 menu font's glyph is half as tall");
 	fnt_free(&wide);
 }
 

@@ -102,7 +102,7 @@ private:
 		bool seen = false;
 	};
 	void render_menu_(Menu &menu, const MnuDocument &document, const FileSource &files,
-	                  const std::map<std::string, std::string> &vars);
+	                  const std::map<std::string, std::string> &vars, float font_scale);
 
 	std::map<std::string, Menu> menus_; // by project-relative path
 	menu::MenuStyleSource style_;

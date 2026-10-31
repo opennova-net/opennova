@@ -642,7 +642,8 @@ ViewportAction MenuViewport::follow_(const ViewportInput &input, PreviewClock &)
 	style_vars_ = style_.vars(files);
 	++configures_;
 	screen_variables_made_ = false;
-	const MenuScreenStatus compiled = render_.configure(*document, row->id, files, style_vars_);
+	const MenuScreenStatus compiled = render_.configure(*document, row->id, files, style_vars_,
+			menu_font_scale_of(view.project.document ? view.project.document->target_game : std::string()));
 	if (compiled != MenuScreenStatus::Ready) return stop_(compiled, render_.detail());
 	forced_index_ = -1;
 	if (options_.force_window) {

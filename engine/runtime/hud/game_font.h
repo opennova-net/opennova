@@ -106,18 +106,20 @@ struct GameFontRun {
 
 class GameFont {
 public:
-	// Borrow a parsed font (not owned; the caller keeps it alive). `unit_scale`: a
-	// menu font, which the menu font cache makes draw and measure at its texels,
-	// writing 1.0 over the 800 / design_width scale the loader stored [orig:
+	// Borrow a parsed font (not owned; the caller keeps it alive). `menu_scale`: a
+	// menu font's, the value the menu font cache writes over the 800 / design_width
+	// scale the loader stored, which the font then draws and measures at: the
+	// title's (Title::menu_font_scale; Jointops.exe's 1.0, its texels) [orig:
 	// CFontCache_LoadOrGetFont @ 0x6530e7, CFontCache_EnsureFontLoaded @ 0x653ea0
-	// - fld flt_84C10C (1.0f), fstp [font+0x12EC]] (D-FNT-7); the HUD's fonts keep it.
-	void set_font(const opennova::fnt::fnt_font_t *font, bool unit_scale = false) {
+	// - fld flt_84C10C (1.0f), fstp [font+0x12EC]] (D-FNT-7); 0, a HUD font, keeps
+	// the loader's.
+	void set_font(const opennova::fnt::fnt_font_t *font, float menu_scale = 0.0f) {
 		font_ = font;
-		unit_scale_ = unit_scale;
+		menu_scale_ = menu_scale;
 	}
 	const opennova::fnt::fnt_font_t *font() const { return font_; }
 	// The scale every glyph extent, line height and spacing pad multiplies in (the
-	// font's +0x12EC): 1.0 for a menu font, else fnt_design_scale. 0 with no font.
+	// font's +0x12EC): a menu font's set_font scale, else fnt_design_scale. 0 with no font.
 	float design_scale() const;
 
 	// Emitted glyph quads carry page indices offset by this base, giving each
@@ -186,7 +188,7 @@ private:
 	const opennova::fnt::fnt_glyph_t *glyph_for_byte(uint8_t byte) const;
 
 	const opennova::fnt::fnt_font_t *font_ = nullptr;
-	bool unit_scale_ = false;
+	float menu_scale_ = 0.0f;
 	uint32_t page_base_ = 0;
 };
 

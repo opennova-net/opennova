@@ -104,7 +104,8 @@ void MenuViewportApplier::configure_(const opennova::editor::ViewportModel &mode
 	// height here. The frame borrows the image's screen and the file source until its next
 	// configure: both held here as long.
 	frame_->reset_loads();
-	frame_->configure_screen(menu.image().get(), menu.screen(), *assets, menu.style_vars(), nullptr);
+	frame_->configure_screen(menu.image().get(), menu.screen(), *assets, menu.style_vars(), nullptr,
+			menu.picture_compiler().font_scale());
 	image_ = menu.image();
 	assets_ = assets;
 	apply_options_(model);

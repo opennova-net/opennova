@@ -66,7 +66,7 @@ float GameFont::char_height(uint8_t byte, float scale_y) const {
 
 float GameFont::design_scale() const {
 	if (font_ == nullptr) return 0.0f;
-	return unit_scale_ ? 1.0f : fnt_design_scale(font_->design_width);
+	return menu_scale_ > 0.0f ? menu_scale_ : fnt_design_scale(font_->design_width);
 }
 
 int GameFont::char_width(uint8_t byte, float scale_x, int tab_width) const {

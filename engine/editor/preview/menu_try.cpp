@@ -117,6 +117,8 @@ bool MenuTry::configure_(const std::string &screen, menu::MenuFrameCompiler &com
 	static const std::map<std::string, std::string> kNoVars;
 	// Every configure a first load of its textures, as the device's own (the editor's menu device).
 	compiler.reset_texture_loads();
+	// The project's game's menu font scale (Title::menu_font_scale, D-FNT-7).
+	compiler.set_font_scale(source_->title != nullptr ? source_->title->menu_font_scale : 1.0f);
 	assets_.configure(compiler, document, found, *source_->files, decoder_, source_->vars ? *source_->vars : kNoVars);
 	return true;
 }

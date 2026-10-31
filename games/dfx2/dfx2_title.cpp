@@ -436,6 +436,12 @@ Title make() {
 	//  @0x561000, from the menu-screen pass @0x54b901 (dfx2.exe)], the twins of
 	// HUD_CacheStatPanelValues @0x5627a0, StatScreen_ShowCallback @0x562840 and nullsub_130 @0x562130.
 	t.stat_screen_done = true;
+	// The menu font scale 0.5: the shell's resource init stores flt_7C2A2C (0.5f) in flt_84DD50
+	// ahead of the menu, and the font cache writes that into every menu font's +0x12EC [orig:
+	// Menu_InitShellResources @0x54f750 (@0x54f750..0x54f759); CFontCache_LoadOrGetFont @0x6d8490
+	// (@0x6d8607..0x6d8611); CFontCache_EnsureFontLoaded @0x6d9300 (@0x6d93c0..0x6d93cb)
+	// (dfx2.exe)]. Jointops.exe's twin of the init stores nothing there (@0x552500).
+	t.menu_font_scale = 0.5f;
 	return t;
 }
 
