@@ -954,6 +954,37 @@ void MenuDriver::select_mission(int p_id, int p_row, const String &p_fallback) {
 
 String MenuDriver::get_selected_mission() const { return to_gd(flow_.selected_mission()); }
 
+Vector2i MenuDriver::get_selected_campaign() const {
+	const opennova::mission_catalog::CampaignWords &words = flow_.selected_campaign();
+	return Vector2i(words.campaign, words.campaign_mission);
+}
+
+bool MenuDriver::activate_single_player_tab(const String &p_name) {
+	return flow_.activate_tab(runtime_, to_std(p_name));
+}
+
+void MenuDriver::set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
+		const Ref<RtxtStringFile> &p_menu_text) {
+	const opennova::Title &title = ResourceRoot::session_title(root_);
+	flow_.set_title(&title);
+	if (!title.sp_campaign_tabs) return;
+	sp_menu_text_ = p_menu_text;
+	std::string def;
+	if (root_.is_valid()) {
+		const PackedByteArray bytes = root_->read_file(to_gd(opennova::campaign::kCampaignFile));
+		def.assign(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+	}
+	opennova::campaign::CompletionTable progress{};
+	if (p_profiles.is_valid()) {
+		const auto &table = p_profiles->native().current().campaign_complete;
+		for (size_t c = 0; c < progress.size() && c < table.size(); ++c)
+			for (size_t m = 0; m < progress[c].size() && m < table[c].size(); ++m)
+				progress[c][m] = table[c][m];
+	}
+	flow_.set_campaign_source(std::move(def),
+			sp_menu_text_.is_valid() ? &sp_menu_text_->get_native() : nullptr, progress);
+}
+
 void MenuDriver::seed_mod_list(int p_id) {
 	const String dir = root_.is_valid() ? root_->get_root_dir() : String();
 	if (dir != mods_root_) {
@@ -1012,10 +1043,6 @@ PackedInt32Array MenuDriver::command_mod_lists() const {
 	PackedInt32Array out;
 	for (const int id : commands_.mod_lists()) out.push_back(id);
 	return out;
-}
-
-bool MenuDriver::is_player_info_document() const {
-	return opennova::menu::is_player_info_document(runtime_);
 }
 
 PackedStringArray MenuDriver::command_names(const String &p_set) {

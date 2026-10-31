@@ -85,7 +85,7 @@ func _built_dfx2_spin_screen(companion: PlayerInfoMenuCompanion, voice := false)
 	if root == null:
 		return null
 	var driver := MenuDriver.new()
-	assert_true(driver.open_document(_spin_screen_doc(voice), root, null, null, "player.mnu"),
+	assert_true(driver.open_document(_spin_screen_doc(voice), root, null, "player.mnu"),
 			"the document opens over the dfx2 root")
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
 	return driver
@@ -428,7 +428,7 @@ func test_the_portrait_hovers_as_its_title_does() -> void:
 		var driver := MenuDriver.new()
 		driver.attach(frame, null)
 		assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
-				root if game_code != "" else null, null, null, "player.mnu"), "the document opens")
+				root if game_code != "" else null, null, "player.mnu"), "the document opens")
 		var companion := PlayerInfoMenuCompanion.new()
 		companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
 		var preview := frame.find_child("PlayerInfoAvatarPreview", true, false) as AvatarPreview

@@ -12,8 +12,8 @@
 //   SINGLE_PLAYER screen (docs/required-resources.md "Reaching a mission from the menu") and the
 //   updater's buttons on its STARTUP and OPTIONS screens, whatever file holds them;
 // - the shell's name sets (docs/mnu/menu-wiring.md "Shell wiring"), which the OpenNova game shell
-//   binds on whatever document it opens (godot/game/menu_shell.gd's defaults read them through
-//   MenuDriver.command_names), and the shell's delegates that own a whole document by the
+//   binds on whatever document it opens (MenuCommands::wire, which godot/game/menu_shell.gd runs
+//   through MenuDriver.wire_commands), and the shell's delegates that own a whole document by the
 //   controls it holds (the LAN multiplayer screens [orig: UI_RegisterLANMultiplayerCallbacks
 //   @ 0x558d20]) or by its screen's name (PLAYER_INFO, is_player_info_document).
 // The editor's menu preview in Try mode (ADR 0046 DI-35) says from these what the game would do,
@@ -53,7 +53,7 @@ const char *menu_command_token(MenuCommand command);
 // What the game does, in words, as "the game would ..." ends ("start the selected mission").
 const char *menu_command_words(MenuCommand command);
 
-// The shell's name sets (menu_shell.gd's exported defaults, a game's own to replace).
+// The shell's name sets (MenuCommands::wire binds them; MenuDriver.command_names reads them).
 enum class MenuNameSet : uint8_t {
 	Start, // the launch controls: start the mission on a document holding a mission list
 	Exit,

@@ -70,8 +70,9 @@ func set_persisted_profile(profile: Dictionary) -> void:
 	_character_state.set_persisted_profile(profile)
 
 
-# The PLAYER_INFO screen's delegate: the engine gives it a document holding
-# NATIONALITY and COMBO_LIST (menu::MenuCommands::wire).
+# The PLAYER_INFO screen's delegate: the engine gives it a document holding a
+# screen named PLAYER_INFO, whatever controls it holds (menu::MenuCommands::wire,
+# is_player_info_document).
 func owner_name() -> String:
 	return "player_info"
 

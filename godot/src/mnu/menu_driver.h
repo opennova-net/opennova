@@ -102,6 +102,7 @@ class MenuDriver : public RefCounted {
 	Ref<MnuDocument> doc_;
 	Ref<ResourceRoot> root_;
 	Ref<MnsStyleSheet> style_;
+	Ref<RtxtStringFile> sp_menu_text_; // the campaign reader's menu table (set_single_player_source)
 	// The pointer the driver last made the OS cursor (the claim's CURSOR, or the
 	// transparent no-pointer image), by id: the frame's texture stays the frame's
 	// to release; and that image (D-MNU-26).
@@ -170,10 +171,21 @@ public:
 	// (engine MenuFlow::selected_campaign).
 	Vector2i get_selected_campaign() const;
 	void clear_selected_mission() { flow_.clear_selected_mission(); }
+	// The single-player screen's inputs ahead of its populate: the bound root's title, and under
+	// one with the campaign tabs the mount's campaign.def, `p_menu_text` (the shell's gameui
+	// table, Game.bin, not menutxt.bin; kept while the flow reads it) and the current profile's
+	// completion bytes (engine MenuFlow::set_title, set_campaign_source).
+	void set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
+			const Ref<RtxtStringFile> &p_menu_text);
+	// A CA_LIST pick, true when the campaign tabs took it (engine MenuFlow::select_campaign).
+	bool select_campaign(int p_id, int p_row) { return flow_.select_campaign(runtime_, p_id, p_row); }
+	// A control's activation, true when it was a campaign-tab radio (engine MenuFlow::activate_tab).
+	bool activate_single_player_tab(const String &p_name);
 	// The Mods list (engine menu::ModList): the descriptions a pick fills are the engine's
-	// ModDescriptions name set (set at construction); the list filled with the base game's row and the expansion records of
-	// the bound root's folder (scanned once per folder, as the game scans once at boot), the one
-	// running highlighted; a row picked; and ACCEPT's pick ("" the base game).
+	// ModDescriptions name set (set at construction); the list filled with the base game's row
+	// and the expansion records of the bound root's folder (scanned once per folder, as the game
+	// scans once at boot), the one running highlighted; a row picked; and ACCEPT's pick ("" the
+	// base game).
 	void seed_mod_list(int p_id);
 	void select_mod(int p_id, int p_row) { mods_.select(runtime_, p_id, p_row); }
 	String mod_list_pick(int p_id) const;

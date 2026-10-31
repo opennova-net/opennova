@@ -35,7 +35,8 @@ var _weapons_injected := false
 
 ## The engine's name for the delegate this companion is (MenuDriver.command_owner:
 ## "lan", "player_info"), whose documents it drives; "" for none. Which document a
-## delegate owns is the engine's (menu::MenuCommands::wire, by the controls it holds).
+## delegate owns is the engine's (menu::MenuCommands::wire: the LAN screens by the
+## controls they hold, PLAYER_INFO by its screen's name).
 func owner_name() -> String:
 	return ""
 

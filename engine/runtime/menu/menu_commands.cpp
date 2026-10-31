@@ -39,8 +39,8 @@ const CommandRow &command_row(MenuCommand command) {
 	return kCommands[0];
 }
 
-// The OpenNova game shell's name sets (godot/game/menu_shell.gd's exported defaults; a game whose
-// menus name its controls otherwise points the shell at its own).
+// The OpenNova game shell's name sets, which MenuCommands::wire binds on the document the shell
+// opens (godot/game/menu_shell.gd runs it through MenuDriver.wire_commands).
 const char *const kSetTokens[] = { "start", "exit", "return", "restart", "back", "novaworld", "mission_lists",
 	"sp_lists", "briefings", "sp_accepts", "mod_lists", "mod_descriptions" };
 static_assert(sizeof(kSetTokens) / sizeof(kSetTokens[0]) == size_t(MenuNameSet::kCount), "a token per set");
