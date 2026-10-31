@@ -61,6 +61,7 @@ Title make() {
 	t.frame_fx_work_side = jo_title().frame_fx_work_side;
 	// Its loading screen is Joint Operations', as its code is.
 	t.loading_screen = jo_title().loading_screen;
+	t.death_map_no_names = jo_title().death_map_no_names;
 	return t;
 }
 

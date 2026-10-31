@@ -310,6 +310,8 @@ struct HudMinimapOverlays {
 	bool capture_rings_under_layers = false;
 	// ... and its DEATH map pass walks the zone markers (Title::death_map_zone_markers, DFX2-50).
 	bool death_map_zone_markers = false;
+	// ... and its DEATH map pass names no one (Title::death_map_no_names, DFX2-115).
+	bool death_map_no_names = false;
 };
 
 // The HUD_BuildMapOverlayView parameter block's mask bytes (the M cycle

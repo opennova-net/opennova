@@ -768,6 +768,69 @@ void test_death_zone_markers() {
     CHECK(label);
 }
 
+// DFX2-115: the DEATH map's labels pass names a player slot (Jointops.exe's flag 1), and draws
+// its marker alone where the title's map view passes 0 (dfx2.exe's).
+// [orig: MapOverlay_DrawView @0x5a58e0 - @0x5a5a1b..0x5a5a29; HUD_DrawEntityLabelsAndMarkers
+//  @0x5a49e0 - the names gate @0x5a4dbb] [orig: the twin @0x5a48a0 - `push 0` @0x5a4a30;
+//  sub_5A3850 @0x5a3850 - @0x5a3c31 (dfx2.exe)]
+void test_death_map_names() {
+    DeathMapView v;
+    v.on_load();
+    const int32_t cx = 100 * kWu;
+    const int32_t cy = 200 * kWu;
+    const DeathMapFrame frame = v.render(death_rect(), 800, cx, cy);
+    DeathMapFacts facts;
+    facts.player_present = true;
+    facts.player_x = cx;
+    facts.player_y = cy;
+    HudMinimapOverlays ov;
+    ov.hud_present = true;
+    ov.hud_team = 1;
+    HudMinimapPlayerSlot slot;
+    slot.active = true;
+    slot.name_slot = true;
+    slot.name = "Kilo";
+    slot.blip.bank = static_cast<uint8_t>(HudMinimapBank::kTransient);
+    slot.blip.handle = 0x0002;
+    slot.blip.team = 1;
+    slot.blip.def_type = 3;
+    slot.blip.icon = 3;
+    slot.blip.color = 0xFF304080u;
+    slot.blip.entity_known = 1;
+    slot.blip.entity_bits = kMarkerEntityHasModel;
+    slot.blip.x = slot.blip.anchor_x = slot.blip.entity_x = cx;
+    slot.blip.y = slot.blip.anchor_y = slot.blip.entity_y = cy;
+    ov.player_slots = {slot};
+    HudMinimapInput in;
+    in.surface_w = 1024.0f;
+    in.surface_h = 768.0f;
+    in.overlays = &ov;
+    DeathMapCompiler compiler;
+    HudMapWindowPass out;
+    const auto named = [&]() {
+        for (const HudMapLabel &l : out.map.labels)
+            if (std::strcmp(l.text, "Kilo") == 0) return true;
+        return false;
+    };
+    const auto markers = [&]() {
+        int n = 0;
+        for (const HudMapSprite &s : out.map.sprites)
+            if (s.texture != kHudMapTextureNone) ++n;
+        return n;
+    };
+    compiler.compile(in, frame, facts, out);
+    CHECK(out.map.visible);
+    CHECK(named());
+    const int jo_markers = markers();
+    CHECK(jo_markers > 0);
+    CHECK(opennova::title_by_code("dfx2")->death_map_no_names &&
+            !opennova::title_by_code("jo")->death_map_no_names);
+    ov.death_map_no_names = true;
+    compiler.compile(in, frame, facts, out);
+    CHECK(!named());
+    CHECK(markers() == jo_markers);
+}
+
 // DFX2-58: the CMAP window's ceiling is the title's too: dfx2.exe's 6.0 for the right drag and
 // the ZOOMIN / ZOOMOUT step, Jointops.exe's 10.0; the titles' rows carry 10.0 and 6.0.
 // [orig: CMapWindow_HandleEvent @0x5497f0 - @0x548276, @0x549d5c] [orig: CMapWindow_HandleEvent
@@ -798,6 +861,7 @@ int main() {
     test_death_title_pane();
     test_death_zoom_ease();
     test_death_zone_markers();
+    test_death_map_names();
     test_integer_pow();
     test_design_to_device();
     test_death_load();

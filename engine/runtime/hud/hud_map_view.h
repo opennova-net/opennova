@@ -498,6 +498,11 @@ void map_view_crosshair(const HudMinimapInput &view, const MapViewRect &rect,
 //  0x40000000, 1, 1, 0xFF) @0x5a5a29, Render_LaserSightEffect(rect, 0, 0.0,
 //  0) @0x5a5a40]
 inline constexpr uint32_t kDeathMapMask = 0x2022u;
+// The names bit of that mask, the labels call's 4th argument: dfx2.exe's DEATH view passes 0
+// (HudMinimapOverlays::death_map_no_names, DFX2-115).
+// [orig: the twin of MapOverlay_DrawView @0x5a48a0 - `push 0` @0x5a4a30 into sub_5A3850
+//  @0x5a4a3e (dfx2.exe)]
+inline constexpr uint32_t kDeathMapNamesBit = 0x2000u;
 
 // Compiles the DEATH MAP window: the terrain + marker walk through the
 // spinmap compiler's windowed mode (the device rect, north-up, the caller's

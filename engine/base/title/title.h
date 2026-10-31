@@ -432,6 +432,15 @@ struct Title {
 	// (menu::ArmoryLoadout::populate). Jointops.exe's do [orig: UI_PopulateThreeCategoryLists
 	// @0x566db0 (@0x566f05..0x566f34)]; false: none, dfx2.exe's.
 	bool armory_lists_none_row = true;
+	// DFX2-115: the DEATH screen's map pass draws no names: its entity labels and markers call
+	// passes 0 as the names flag Jointops.exe's passes 1, so no player slot's name with its clan
+	// tag and no transient-bank person's name (runtime/hud HudMinimapOverlays::
+	// death_map_no_names, the DEATH mask without bit 13); the slots' markers stay.
+	// [orig: MapOverlay_DrawView @0x5A58E0 - HUD_DrawEntityLabelsAndMarkers(rect, 0x40000000, 1,
+	//  1, 0xFF) @0x5A5A29, its flag gating the slot names @0x5A4DBB and the second walk @0x5A4ED6]
+	//  [orig: the twin @0x5A48A0 - sub_5A3850(rect, 0x40000000, 1, 0, 0xFF) @0x5A4A3E (the 0 pushed
+	//  @0x5A4A30); sub_5A3850 @0x5A3850 - the same gates @0x5A3C31 / @0x5A3D4B (dfx2.exe)]
+	bool death_map_no_names = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

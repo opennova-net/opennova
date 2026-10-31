@@ -455,6 +455,9 @@ Title make() {
 	//  populate @0x565e55; no TextResource_GetStringWithFallback("Menu", "NONE") (dfx2.exe)], the
 	// twin of Jointops.exe's @0x566db0, which inserts it at row 0 of each @0x566f05..0x566f34.
 	t.armory_lists_none_row = false;
+	// DFX2-115: the DEATH map names no one [orig: the twin of MapOverlay_DrawView @0x5A48A0 -
+	//  `push 0` @0x5A4A30, sub_5A3850 @0x5A4A3E (dfx2.exe)].
+	t.death_map_no_names = true;
 	return t;
 }
 

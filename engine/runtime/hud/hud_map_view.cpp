@@ -690,7 +690,9 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 	input.rect_y2 = device_to_virtual(frame.rect.bottom, input.surface_h, kDesignHeight);
 	input.player_x = frame.center_x;
 	input.player_y = frame.center_y;
-	input.flags = kDeathMapMask;
+	input.flags = input.overlays != nullptr && input.overlays->death_map_no_names
+			? kDeathMapMask & ~kDeathMapNamesBit
+			: kDeathMapMask;
 	input.death_map_pass = true;
 	input.flip_180 = false;
 	input.window_scale = frame.scale;
