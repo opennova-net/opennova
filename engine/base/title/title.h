@@ -441,6 +441,20 @@ struct Title {
 	//  [orig: the twin @0x5A48A0 - sub_5A3850(rect, 0x40000000, 1, 0, 0xFF) @0x5A4A3E (the 0 pushed
 	//  @0x5A4A30); sub_5A3850 @0x5A3850 - the same gates @0x5A3C31 / @0x5A3D4B (dfx2.exe)]
 	bool death_map_no_names = false;
+	// DFX2-53: the sector render picks a player person's character again every frame it draws it,
+	// relative to the viewer: the first combo of the good side while the person is on the local
+	// player's team (or there is no local player), else of the evil side, which its avatar blip
+	// (entity+0x3C) then names, the body drawn and the profile sounds' sex alike
+	// (inmatch::drawn_player_character, the present rows' PF_CHARACTER_ID). False
+	// (Jointops.exe's): the blip keeps the spawn's pick, the NetId, or the first combo of the side
+	// its Team names.
+	// [orig: Terrain_RenderSectorEntitiesBySide @0x5C7D50 - the blip read @0x5C7FD6;
+	//  NapiNPClientMsg_0x00C @0x42E730 - the pick @0x42EAC5..0x42EB1D; Entity_GetProfileSlotSound
+	//  @0x528300 - the blip's sex byte @0x52830F..0x52831C] [orig: Terrain_RenderSectorEntitiesBySide
+	//  @0x5C6C20 - Flags & 0x100 @0x5C6EA6, EntitySlot_LookupAndPackEntry(team != the local
+	//  player's) @0x5C6EE1..0x5C6F25, MinimapSlot_FindOrAllocByEntityId into +0x3C @0x5C6F3D, read
+	//  @0x5C6F45; Entity_GetProfileSlotSound @0x525490 (dfx2.exe)]
+	bool player_avatar_by_viewer_side = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

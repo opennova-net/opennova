@@ -458,6 +458,9 @@ Title make() {
 	// DFX2-115: the DEATH map names no one [orig: the twin of MapOverlay_DrawView @0x5A48A0 -
 	//  `push 0` @0x5A4A30, sub_5A3850 @0x5A4A3E (dfx2.exe)].
 	t.death_map_no_names = true;
+	// DFX2-53: each player drawn as the first combo of its viewer-relative side [orig:
+	//  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EA6..0x5C6F42 (dfx2.exe)].
+	t.player_avatar_by_viewer_side = true;
 	return t;
 }
 

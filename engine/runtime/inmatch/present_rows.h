@@ -26,12 +26,17 @@
 #include <unordered_map>
 #include <vector>
 
+namespace opennova {
+struct Title;
+} // namespace opennova
+
 namespace opennova::replication {
 class ClientWorldMaterializer;
 } // namespace opennova::replication
 
 namespace opennova::inmatch {
 
+class CharacterRegistry;
 struct NapiNPServerCtx;
 
 // What both collectors read. The kernel is the world + the local player's
@@ -55,6 +60,11 @@ struct PresentRowsContext {
 	// columns (the pose, the weapon channel, the aim overlays, the held weapon, the person
 	// overlays) to it, in microseconds.
 	uint64_t *body_us = nullptr;
+	// The session's title and its Avatars.def registry (g_AvatarDefs): a player row's
+	// PF_CHARACTER_ID is the character its avatar blip names as the title's sector render draws
+	// it (drawn_player_character, DFX2-53). No title or no registry: the spawn's pick.
+	const Title *title = nullptr;
+	const CharacterRegistry *characters = nullptr;
 };
 
 // The decoded fold's dead->alive respawn revision, mirrored per pool row on the

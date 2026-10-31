@@ -3,6 +3,7 @@
 // the joiner's profile-to-wire projection (join_character_profile.h): the
 // fresh-profile defaults, a persisted side selection, the class-byte rule.
 
+#include <base/title/title.h>
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/join_character_profile.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -118,6 +119,32 @@ int main() {
 	check(registry.first_character_id(AVATAR_ALIGN_GOOD) == 0x0200, "first good = entry 0");
 	check(registry.first_character_id(AVATAR_ALIGN_EVIL) == 0x8207, "first evil = entry 2");
 	check(CharacterRegistry().first_character_id(AVATAR_ALIGN_GOOD) == 0, "empty registry packs 0");
+
+	// DFX2-53: dfx2.exe's sector render draws each player as the first combo of its side relative
+	// to the viewer, the good one with no viewer; Jointops.exe's keeps the spawn's id.
+	// [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EE1..0x5C6F42 (dfx2.exe)]
+	{
+		const opennova::Title *jo = opennova::title_by_code("jo");
+		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+		const opennova::Title *ag = opennova::title_by_code("acidgambit");
+		check(jo != nullptr && dfx2 != nullptr && ag != nullptr && dfx2->player_avatar_by_viewer_side &&
+						!jo->player_avatar_by_viewer_side && !ag->player_avatar_by_viewer_side,
+				"the per-frame pick is dfx2.exe's");
+		check(drawn_player_character(jo, &registry, 0x0400, true, 2, 1) == 0x0400,
+				"Jointops.exe draws the spawn's id");
+		check(drawn_player_character(nullptr, &registry, 0x0400, true, 2, 1) == 0x0400,
+				"no title draws the spawn's id");
+		check(drawn_player_character(dfx2, &registry, 0x0400, true, 1, 1) == 0x0200,
+				"a teammate draws as the first good combo");
+		check(drawn_player_character(dfx2, &registry, 0x0400, true, 2, 1) == 0x8207,
+				"another team's player draws as the first evil combo");
+		check(drawn_player_character(dfx2, &registry, 0x8207, true, 2, 2) == 0x0200,
+				"the side is the viewer's, not the team's");
+		check(drawn_player_character(dfx2, &registry, 0x8207, false, 2, 1) == 0x0200,
+				"no viewer draws everyone good");
+		check(drawn_player_character(dfx2, nullptr, 0x8207, true, 2, 1) == 0x8207,
+				"no registry passes the id through");
+	}
 
 	// The fresh profile: first good / first evil, rifleman both sides, the
 	// selected combos' head voices.

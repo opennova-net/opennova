@@ -8,6 +8,7 @@
 // from a parsed AvatarsFile, or entry by entry by an embedder that holds the
 // tree in its own model; every lookup here is a witnessed registry walk.
 
+#include <base/title/title.h>
 #include <formats/avatars/avatars.h>
 
 #include <array>
@@ -99,5 +100,18 @@ struct PlayerVisualSpec {
 // The visual `character_id` resolves to over `file` and the registry built from it.
 PlayerVisualSpec resolve_player_visual_spec(const opennova::avatars::AvatarsFile &file,
 		const CharacterRegistry &registry, int character_id);
+
+// DFX2-53: the character a player person's avatar blip (entity+0x3C) names while `title`'s sector
+// render draws it: `net_id`, the spawn's pick (entity+0x15C), unless the title picks again every
+// frame (Title::player_avatar_by_viewer_side), when it is `registry`'s first combo of the good side
+// while there is no `viewer` or the person's `team` is the viewer's, else of the evil side. No
+// registry installed passes the id through.
+// [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - `test [esi+24h], 100h` @0x5C6EA6, the
+//  g_LocalPlayerEntity test @0x5C6EE6 and the Team compare `cmp dl, [eax+162h]; setnz`
+//  @0x5C6EEE..0x5C6F00, EntitySlot_LookupAndPackEntry @0x5C6F0A (0 without a local player
+//  @0x5C6F25), MinimapSlot_FindOrAllocByEntityId into +0x3C @0x5C6F3D; EntitySlot_LookupAndPackEntry
+//  @0x5791C0, CAvatarDefs_PackFirstComboOfAlignment's twin (dfx2.exe)]
+uint16_t drawn_player_character(const Title *title, const CharacterRegistry *registry,
+		uint16_t net_id, bool viewer, uint8_t team, uint8_t viewer_team);
 
 } // namespace opennova::inmatch

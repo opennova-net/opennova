@@ -117,6 +117,14 @@ const CharacterEntry *CharacterRegistry::find_by_indices(int nationality_index,
 	return nullptr;
 }
 
+uint16_t drawn_player_character(const Title *title, const CharacterRegistry *registry,
+		uint16_t net_id, bool viewer, uint8_t team, uint8_t viewer_team) {
+	if (title == nullptr || !title->player_avatar_by_viewer_side || registry == nullptr)
+		return net_id;
+	return registry->first_character_id(
+			viewer && team != viewer_team ? AVATAR_ALIGN_EVIL : AVATAR_ALIGN_GOOD);
+}
+
 // [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40 — the loop
 // @0x57ad6b..0x57ad80 returns the first side match, the entry-0 fallback
 // @0x57ad84..0x57adda]
