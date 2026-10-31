@@ -376,6 +376,18 @@ struct TitleRules {
 	//  0x4DFB44)] [orig: WeaponSlot_InitFromDef @0x53C0C0 (@0x53C1E8..0x53C1F9);
 	//  Player_MountWeaponSlot @0x4DCAE0 (@0x4DCBDB) (dfx2.exe)]
 	ScopeZeroSeed scope_zero_seed = ScopeZeroSeed::DefaultStep;
+
+	// --- DFX2-30: the spawn reset's health. ------------------------------------------------------
+	// joiner-side: every reset (the deploy's, the teleports', an NPC respawn's and the joiner's own
+	// respawn arm, world::entity_reset_to_spawn_state) raises the health to the difficulty ceiling
+	// under Jointops.exe and stores the def's word (+0x17C) under dfx2.exe, after its deploy's own
+	// raise to the ceiling. The two differ out of a session for the local player at a difficulty
+	// of -1 or 1, and for a body above its maximum.
+	// [orig: Entity_ResetToSpawnState @0x4B9610 - Entity_RaiseHealthToMax @0x4B97BC;
+	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0 (@0x43B8C6..0x43B8E9)] [orig:
+	//  Entity_ResetToSpawnState @0x4B96F0 - @0x4B989B..0x4B98A2; Server_DeployPlayer @0x514990 -
+	//  Entity_RaiseHealthToMax @0x514A70 (dfx2.exe)]
+	bool spawn_reset_stores_def_health = false;
 };
 
 // One registry row: a title's code and the rules it runs.

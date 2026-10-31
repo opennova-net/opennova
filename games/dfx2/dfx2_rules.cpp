@@ -220,6 +220,9 @@ world::TitleRules make() {
 	// and a ForceScoped mount's rangefinder word -1 [orig: WeaponSlot_InitFromDef @0x53C0C0 -
 	//  @0x53C1E8..0x53C1F9; Player_MountWeaponSlot @0x4DCAE0 - @0x4DCBDB (dfx2.exe)].
 	r.scope_zero_seed = world::ScopeZeroSeed::Rangefinder;
+	// DFX2-30: the spawn reset stores the def's health word [orig: Entity_ResetToSpawnState
+	//  @0x4B96F0 - `mov dx, [eax+17Ch]` @0x4B989B, `mov [esi+11Eh], dx` @0x4B98A2 (dfx2.exe)].
+	r.spawn_reset_stores_def_health = true;
 	return r;
 }
 

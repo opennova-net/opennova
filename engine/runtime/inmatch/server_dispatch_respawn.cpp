@@ -135,11 +135,18 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// The row is the body's own (its camouflage item's, D-NET-348) [orig:
 	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0 - the def `[edx+20h]` @0x43B8A4, its
 	//  healthMax `[eax+17Ch]` @0x43B8B4].
+	// dfx2.exe's reset then stores the row's word itself (TitleRules::
+	// spawn_reset_stores_def_health, DFX2-30) [orig: Server_DeployPlayer @0x514990 -
+	//  Entity_RaiseHealthToMax @0x514A70, Entity_ResetToSpawnState @0x514ADA; Entity_ResetToSpawnState
+	//  @0x4B96F0 - @0x4B989B..0x4B98A2 (dfx2.exe)].
 	const world::PlayerTemplate &row = world::player_item_row(world, *player);
 	const bool def_hp = row.has_item_def && row.item_hp.has_value();
-	const int32_t ceiling = def_hp || player->health_max > 0 ? world::max_health_with_difficulty(
-			world, *player, def_hp ? *row.item_hp : player->health_max) : 100;
-	if (world::retail_signed_i16(player->health) < ceiling) player->health = ceiling;
+	world::SpawnHealth health;
+	health.def_max = def_hp ? *row.item_hp : player->health_max > 0 ? player->health_max : 100;
+	health.ceiling = def_hp || player->health_max > 0
+			? world::max_health_with_difficulty(world, *player, health.def_max)
+			: 100;
+	if (world::retail_signed_i16(player->health) < health.ceiling) player->health = health.ceiling;
 	// The leg clears the dead bit itself, ahead of the reset, so the reset takes its spawn-pose
 	// leg on the placed body: the respawn state, the twelve dual updates, the resolve over the
 	// body's slice with its lift, the spawn effect. Then its stores, the corpse's +0x1CC
@@ -163,7 +170,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	if (world::AiEntity *mirror = world.ai.for_handle(player->handle);
 			mirror != nullptr && mirror->inf.active)
 		mirror->inf.stance = world::InfantryState::Stance::kStand;
-	world::entity_reset_to_spawn_state(world, *player, ceiling);
+	world::entity_reset_to_spawn_state(world, *player, health);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)
 	// is clear stores the title's ticks into entity+292 (deploy_spawn_protection_ticks;
 	// the reset above never touches it); the per-tick arm in Server_TickUpdate counts it

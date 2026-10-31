@@ -519,9 +519,10 @@ void player_body_class_init(World &world, Entity &entity) {
 
 namespace {
 
-// The reset's entity words: the spawn backup, the gate and dead bits, the raise and the
-// anim fallback; the World form runs it between the body leg and its own backup.
-void reset_spawn_words(Entity &e, int32_t health_ceiling) {
+// The reset's entity words: the spawn backup, the gate and dead bits, the raise (or
+// dfx2.exe's store) and the anim fallback; the World form runs it between the body leg and its
+// own backup.
+void reset_spawn_words(Entity &e, const SpawnHealth &health, bool store_def_health) {
     // [orig: Entity_ResetToSpawnState @0x4B9610] Save the current pose and
     // flags before clearing death state.
     e.spawn_position = e.position;
@@ -541,8 +542,15 @@ void reset_spawn_words(Entity &e, int32_t health_ceiling) {
     // [orig: no [esi+124h] store anywhere in @0x4B9610; the seed is
     //  Server_DeployPlayer @0x517937/@0x517952/@0x517960].
     // The reset's one raise [orig: Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax
-    // @0x43C290: `if (Health < max) Health = max`, a signed word compare].
-    if (retail_signed_i16(e.health) < health_ceiling) e.health = health_ceiling;
+    // @0x43C290: `if (Health < max) Health = max`, a signed word compare]; dfx2.exe's reset
+    // stores the def's word instead, whatever the difficulty or the health, after its deploy's
+    // raise to the ceiling (TitleRules::spawn_reset_stores_def_health, DFX2-30) [orig:
+    // Entity_ResetToSpawnState @0x4B96F0 - `mov dx, [eax+17Ch]` @0x4B989B, `mov [esi+11Eh], dx`
+    // @0x4B98A2 (dfx2.exe)].
+    if (store_def_health)
+        e.health = retail_signed_i16(health.def_max);
+    else if (retail_signed_i16(e.health) < health.ceiling)
+        e.health = health.ceiling;
     e.alive = e.health > 0;
     e.mana = e.mana_max;
     e.section_mask = 0;
@@ -573,13 +581,17 @@ void reset_spawn_words(Entity &e, int32_t health_ceiling) {
 // player's out of a session), no def-word raise ahead of it [orig:
 // Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 ->
 // Entity_GetMaxHealthWithDifficulty]; a row with no definition keeps the def word.
-int32_t spawn_health_ceiling(const World &world, const Entity &entity) {
-    return entity.has_item_def ? max_health_with_difficulty(world, entity) : entity.health_max;
+SpawnHealth spawn_health(const World &world, const Entity &entity) {
+    SpawnHealth out;
+    out.def_max = entity.health_max;
+    out.ceiling =
+            entity.has_item_def ? max_health_with_difficulty(world, entity) : entity.health_max;
+    return out;
 }
 
 // The reset over the AI system that ticks the body: world.ai for every public caller, the
 // corpse step's own for the NPC respawn.
-void reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity, int32_t health_ceiling) {
+void reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity, const SpawnHealth &health) {
     // Port-side invariants, not retail words: Entity_ResetToSpawnState
     // @0x4B9610 writes no fade/destroy state. destroy_phases_q16 /
     // destroy_progress are derived values update_item_destroy_fade zeroes and
@@ -698,8 +710,9 @@ void reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity, int32_t he
         clear_slot_target(*body);
     }
 
-    // The reset's one raise, to the caller's ceiling [orig: Entity_ResetToSpawnState @0x4B97BC].
-    reset_spawn_words(entity, health_ceiling);
+    // The reset's one raise, to the caller's ceiling [orig: Entity_ResetToSpawnState @0x4B97BC],
+    // or dfx2.exe's store of the def's word [orig: @0x4B989B..0x4B98A2 (dfx2.exe)].
+    reset_spawn_words(entity, health, world.rules.title().spawn_reset_stores_def_health);
     // The backup precedes collision correction in the original reset.
     entity.spawn_position = origin;
     entity.spawn_heading = heading;
@@ -759,11 +772,11 @@ void reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity, int32_t he
 } // namespace
 
 void entity_reset_to_spawn_state(World &world, Entity &entity) {
-    reset_to_spawn_state(world, world.ai, entity, spawn_health_ceiling(world, entity));
+    reset_to_spawn_state(world, world.ai, entity, spawn_health(world, entity));
 }
 
-void entity_reset_to_spawn_state(World &world, Entity &entity, int32_t health_ceiling) {
-    reset_to_spawn_state(world, world.ai, entity, health_ceiling);
+void entity_reset_to_spawn_state(World &world, Entity &entity, const SpawnHealth &health) {
+    reset_to_spawn_state(world, world.ai, entity, health);
 }
 
 bool npc_respawn_unhide(World &world, const AiSystem &ai, Entity &entity) {
@@ -848,7 +861,7 @@ NpcCorpseStep step_npc_corpse(World &world, AiSystem &ai, Entity &entity) {
         entity.position = entity.spawn_position;
         entity.heading = entity.spawn_heading;
         entity.flags = entity.engine_flags = entity.spawn_flags;
-        reset_to_spawn_state(world, ai, entity, spawn_health_ceiling(world, entity));
+        reset_to_spawn_state(world, ai, entity, spawn_health(world, entity));
         // The authority counts the respawned row into the census again (an enemy grows the
         // enemy-unit total and its class). The group live counts wait for the server tick's
         // periodic rescan (D-SIM-8).
