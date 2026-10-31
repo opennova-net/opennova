@@ -17,7 +17,9 @@ bool ScriptVoiceChannel::start(World &world, const std::string &filename,
     state_.portrait = portrait;
     state_.max_distance = max_distance;
     state_.pitch_q16 = 0x10000u;
-    state_.volume = kScriptVoiceVolume;
+    // The title's gain (DFX2-42) [orig: Wac_PlayScriptedVoiceWave @0x4ED688; SSNwave @0x4F7989;
+    // SSNradio @0x4F7A63]; a set's start replaces it with its member's.
+    state_.volume = world.rules.title().script_voice_volume;
     world.out.effects.push({"dialog_wav", 0, 0, 0, 0, filename});
     std::vector<uint8_t> bytes;
     auto decoded = std::make_shared<lwf::WavPcm>();

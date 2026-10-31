@@ -333,6 +333,16 @@ struct TitleRules {
 	//  @0x49bcbf (dfx2.exe)]
 	std::array<const char *, 4> friendly_tag_toast_literals{};
 	bool friendly_tags_skip_mode_1_on_death_screen = false;
+
+	// --- DFX2-42: the scripted voice's gain. -----------------------------------------------------
+	// joiner-side: the gain byte a script's voice wave (wave, SSNwave, SSNradio) starts at, which the
+	// channel plays as (gain * the dialogue volume + 128) >> 8 through the distance curve
+	// (world::ScriptVoiceChannel); a joiner's world plays its host's SSNwave remote command with it.
+	// [orig: Wac_PlayScriptedVoiceWave @0x4ED688, WacCmd_SsnWave @0x4F7989, WacCmd_SsnRadio @0x4F7A63 -
+	//  `imul 0D2h`]
+	// [orig: WacCmd_SsnWave @0x4F4A40; the twins of WacCmd_SsnRadio @0x4F4B20 and of
+	//  Wac_PlayScriptedVoiceWave @0x4EA745, undefined in the IDB - `imul 0F0h` (dfx2.exe)]
+	int32_t script_voice_volume = 210;
 };
 
 // One registry row: a title's code and the rules it runs.

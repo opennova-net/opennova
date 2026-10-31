@@ -209,6 +209,10 @@ world::TitleRules make() {
 	// the step @0x49b59c..0x49b5b6 (dfx2.exe)].
 	r.friendly_tag_toast_literals = {nullptr, "Friendly Tags: On", "Friendly Tags: Smart", nullptr};
 	r.friendly_tags_skip_mode_1_on_death_screen = true;
+	// DFX2-42: the voice waves' gain 240 [orig: WacCmd_SsnWave @0x4F49B0 (`imul 0F0h` @0x4F4A40);
+	//  @0x4F4B20 and @0x4EA745 in the twins of WacCmd_SsnRadio and Wac_PlayScriptedVoiceWave
+	//  (dfx2.exe)].
+	r.script_voice_volume = 240;
 	return r;
 }
 

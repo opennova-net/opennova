@@ -103,6 +103,10 @@ uint32_t MissionScriptRun::script_runs() const {
 	return kernel_ ? kernel_->wac.runs() : 0;
 }
 
+int32_t MissionScriptRun::script_voice_volume() const {
+	return kernel_ ? kernel_->world.rules.title().script_voice_volume : 0;
+}
+
 std::vector<MissionScriptEmitter> MissionScriptRun::take_emitters() {
 	std::vector<MissionScriptEmitter> out;
 	out.swap(emitters_);
