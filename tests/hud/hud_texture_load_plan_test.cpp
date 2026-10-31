@@ -1,7 +1,7 @@
 // The HUD's texture load plan (hud/hud_texture_load_plan.h): which file each set-up load opens,
 // through which loader, under which material word, on which arm and in what order; and what the
 // draws read back of the loaded textures (the box gate, the radar-slice gate, the icon strip's
-// sides, the combat sprites, the stance records).
+// sides, the combat sprites with the scope crosshair, the stance records).
 // [orig: HUD_LoadAllTextures @0x59DDA0; BoxTexture_LoadAndSetupUVRegions @0x56ACD0 (the null
 //  gate @0x56B71F); CNetworkIcons_LoadTextures @0x4C2CF0; CTipSystem_Init @0x5B6970]
 #include <cstdint>
@@ -53,6 +53,9 @@ void full_arm() {
 	const HudTextureLoad *rock = find(plan, kHudTexVehicleFixed);
 	CHECK(rock && rock->name == "rockpip.tga" && rock->loader == TextureLoader::HudColor &&
 			rock->material_word == 0);
+	// The scope crosshair, a combat sprite in its alpha-mode role (DFX2-45's Inset reticle quad).
+	const HudTextureLoad *scope = find(plan, kHudTexScopeCrosshair);
+	CHECK(scope && scope->name == "scopexh.tga" && scope->loader == TextureLoader::HudAlpha);
 	const HudTextureLoad *chute = find(plan, kHudTexParachute);
 	CHECK(chute && chute->name == "chute.tga" && chute->loader == TextureLoader::HudAlpha);
 	const HudTextureLoad *frame = find(plan, kHudTexFrame);
@@ -110,6 +113,7 @@ void stamps() {
 	HudTextureSizes sizes{};
 	sizes[kHudTexBoxBorder] = { 128, 128, true };
 	sizes[kHudTexTarget] = { 32, 16, true };
+	sizes[kHudTexScopeCrosshair] = { 256, 256, true };
 	sizes[kHudTexStance0 + 2] = { 20, 30, true };
 	sizes[kHudTexMapRadar] = { 64, 64, true };
 	sizes[kHudTexFrame] = { 800, 100, true };
@@ -120,6 +124,7 @@ void stamps() {
 	CHECK(layout.combat.target.valid && layout.combat.target.width == 32 &&
 			layout.combat.target.height == 16);
 	CHECK(!layout.combat.vehicle_fixed.valid);
+	CHECK(layout.combat.scope_crosshair.valid && layout.combat.scope_crosshair.width == 256);
 	CHECK(layout.stance_texture_valid[2] && layout.stance_frame_w[2] == 20 &&
 			layout.stance_frame_h[2] == 30);
 	CHECK(layout.frame_texture_valid && layout.frame_tex_w == 800);

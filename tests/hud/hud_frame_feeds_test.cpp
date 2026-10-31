@@ -1,8 +1,8 @@
 // The HUD's frame feeds (inmatch/hud_frame_feeds.h) over a session with no role (the bare
 // feed source: no kernel, no replica, no zones): the zone panel's strings, game type and team
 // with no rows, the takeover dialog composed from no entry; the friendly tags' fog and
-// speaking words with no tags; the role facts' Overlays strings and the slot bar's loads by
-// the HUDLS system word.
+// speaking words with no tags; the role facts' Overlays strings (the EXPPOINTS element's among
+// them) and the slot bar's loads by the HUDLS system word.
 // [orig: HUD_DrawZoneStatusPanel @0x5A2480; HUD_DrawFriendlyTagsPass @0x5A4480;
 //  HUD_DrawWeaponSlotBar @0x599E5A]
 #include <cstdint>
@@ -78,6 +78,12 @@ void role_facts() {
 	CHECK(state.breath_label == "[STROVER91]");
 	CHECK(state.connect_status.label == "[STROVER54]");
 	CHECK(state.start_timer.label == "[STROVER59]" && state.start_timer.footer == "[STROVER63]");
+	// The EXPPOINTS strings resolve every frame; no role leaves the title null, no lone gunner,
+	// no rider lines and the JO Inset's arms.
+	CHECK(state.exp_points.text.label == "[STROVER_HUDEXPPOINTS]");
+	CHECK(state.exp_points.text.total_format == "[STROVER_HUDTOTALPTS]");
+	CHECK(state.title == nullptr && !state.lone_gunner && state.vehicle_riders.empty());
+	CHECK(!feed.inset_reticle_quad && feed.inset_target_name.empty());
 	CHECK(!feed.slot_bar_loads);
 	hud_role_facts_feed(HudFeedSource{}, 0, GameTextLookup(overlays), 1, keys, state, feed);
 	CHECK(feed.slot_bar_loads);

@@ -44,6 +44,7 @@ HudSprite *combat_sprite(HudCombatLayout &l, int32_t slot) {
 		case kHudTexLogoHelo: return &l.logo_helo;
 		case kHudTexLogoHumm: return &l.logo_humm;
 		case kHudTexLogoBoat: return &l.logo_boat;
+		case kHudTexScopeCrosshair: return &l.scope_crosshair;
 		default: return nullptr;
 	}
 }
@@ -76,6 +77,10 @@ std::vector<HudTextureLoad> hud_texture_load_plan(const HudLayoutAssets &assets,
 		plan.push_back(fixed(kHudTexLogoHelo, colour));
 		plan.push_back(fixed(kHudTexLogoHumm, colour));
 		plan.push_back(fixed(kHudTexLogoBoat, colour));
+		// The scope crosshair in its alpha-mode role (renderer fixed_texture_names), the quad a
+		// title's Inset reticle draws (HudCombatState::inset_reticle_quad).
+		plan.push_back(named(kHudTexScopeCrosshair, kHudScopeCrosshairTexture,
+				renderer::TextureRoleId::HudAlphaOnly));
 		// The static HUD frame the layout picked (the last authored StaticFrame line,
 		// hud_static_frame_index); absent, nothing loads.
 		if (frame_present)

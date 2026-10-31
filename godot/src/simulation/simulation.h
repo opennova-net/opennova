@@ -1513,8 +1513,8 @@ public:
 	bool fill_vehicle_panel(const opennova::def::DefVehicleHudBlock &p_block,
 			opennova::hud::HudVehiclePanelState &r_state) const;
 	// NOT ClassDB-bound: what HudOverlay's engine feeds read of this session
-	// (inmatch/hud_frame_feeds.h: the role view, the spawn-zone registry, a joiner's
-	// seat occupancy) -- the AAS zone panel, the takeover dialog, the objectives, the
+	// (inmatch/hud_frame_feeds.h: the role view, a joiner's seat occupancy with it, and
+	// the spawn-zone registry) -- the AAS zone panel, the takeover dialog, the objectives, the
 	// attach labels, the friendly tags and the role facts.
 	opennova::inmatch::HudFeedSource hud_feed_source();
 	// The in-match game type for every role (joiner header / HostClient view).
