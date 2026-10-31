@@ -33,7 +33,6 @@
 #include "mission/static_population_instance.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
-#include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "env/precipitation.h"
@@ -56,7 +55,6 @@
 #include "render/retained_array_mesh.h"
 #include "render/scene_overlay_compositor.h"
 #include "render/target_projection_xr_interface.h"
-#include "world/item_effect_director.h"
 #include "world/occlusion_frame.h"
 #include "world/game_world.h"
 #include "world/load_timeline.h"
@@ -122,6 +120,7 @@
 #include "hud/map_view_state.h"
 #include "hud/map_view_window.h"
 #include "hud/command_map_screen.h"
+#include "hud/command_map_controller.h"
 #include "hud/hud_toggles.h"
 #include "hud/hud_chat_entry.h"
 #include "hud/end_round_transition.h"
@@ -146,6 +145,8 @@
 #include "mission/mission_perf_counters.h"
 #include "mission/mission_root.h"
 #include "mission/mission_setup_options.h"
+#include "network/join_flow.h"
+#include "network/novaworld_service_target.h"
 #include "network/join_target.h"
 #include "simulation/entity_card.h"
 #include "simulation/end_round_state.h"
@@ -155,17 +156,14 @@
 #include "simulation/inmatch_session_values.h"
 #include "simulation/simulation.h"
 #include "lwf/lwf_data.h"
-#include "lwf/wav_loader.h"
-#include "lwf/wave_stream.h"
-#include "audio/ambient_mixer.h"
-#include "audio/sound_selector.h"
-#include "audio/ambient_layer.h"
 #include "audio/sound_bank.h"
 #include "audio/mission_audio_records.h"
+#include "audio/audio_out.h"
 #include "audio/mission_audio.h"
 #include "dbf/dbf_data.h"
 #include "fnt/fnt_resource.h"
 #include "rtxt/rtxt_string_file.h"
+#include "rtxt/text_tables.h"
 #include "network/novaworld_client.h"
 #include "network/novaworld_server_browser.h"
 #include "network/host_session_options.h"
@@ -184,10 +182,9 @@
 #include "resource_index/mod_listing.h"
 #include "resource_index/resource_root.h"
 #include "audio/sbf_bank.h"
-#include "audio/sbf_audio_stream.h"
 #include "audio/music_script.h"
 #include "audio/music_director.h"
-#include "audio/music_pair_names.h"
+#include "audio/music_pair.h"
 #include "mnu/mnu_document.h"
 #include "mnu/mnu_rows.h"
 #include "mnu/mns_stylesheet.h"
@@ -196,19 +193,25 @@
 #include "mnu/menu_audio.h"
 #include "mnu/menu_driver.h"
 #include "mnu/player_info_loadout.h"
-#include "mnu/armory_loadout.h"
+#include "mnu/armory_screen.h"
+#include "mnu/lan_multiplayer_menu.h"
+#include "mnu/pre_game_controller.h"
+#include "mnu/vehicle_menu_controller.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
 #include "player/game_config_block.h"
+#include "player/player_options_state.h"
 #include "player/gameplay_camera.h"
 #include "player/key_event_queue.h"
 #include "player/special_key_outcome.h"
+#include "frontend/game_frontend.h"
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
 #include "player/player_info_kit_restore.h"
 #include "player/player_info_character_state.h"
+#include "player/player_info_preview.h"
 #include "player/player_profiles.h"
 #include "player/player_spawn_loadout.h"
 #include "player/player_viewmodel_def.h"
@@ -264,7 +267,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionPlacementRun);
 	GDREGISTER_CLASS(StaticPopulationInstance);
 	GDREGISTER_CLASS(MissionObjectPlacer);
-	GDREGISTER_CLASS(SunShadow);
 	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
 	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
@@ -286,7 +288,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponSightRow);
 	GDREGISTER_CLASS(WeaponActionRow);
 	GDREGISTER_CLASS(WeaponDef);
-	GDREGISTER_CLASS(ArmoryClassRow);
 	GDREGISTER_CLASS(WeaponDatabase);
 	GDREGISTER_CLASS(AmmoDatabase);
 	GDREGISTER_CLASS(AvatarPartRow);
@@ -320,7 +321,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(DeployStatus);
 	GDREGISTER_CLASS(DeployZoneRow);
 	GDREGISTER_CLASS(DeployListRow);
-	GDREGISTER_CLASS(DestructionEffectEvent);
 	GDREGISTER_CLASS(HuskSwapEvent);
 	GDREGISTER_CLASS(DestructionDrain);
 	GDREGISTER_CLASS(HitboxDebugEntity);
@@ -336,8 +336,11 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInfoKitRestore);
 	GDREGISTER_CLASS(PlayerInfoSideSelection);
 	GDREGISTER_CLASS(PlayerInfoCharacterState);
+	GDREGISTER_CLASS(PlayerInfoPreview);
 	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(GameConfigBlock);
+	GDREGISTER_CLASS(PlayerOptionsState);
+	GDREGISTER_CLASS(GameFrontend);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
@@ -359,6 +362,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MapViewState);
 	GDREGISTER_CLASS(MapViewWindow);
 	GDREGISTER_CLASS(CommandMapScreen);
+	GDREGISTER_CLASS(CommandMapController);
 	GDREGISTER_CLASS(HudToggles);
 	GDREGISTER_CLASS(HudChatEntry);
 	GDREGISTER_CLASS(EndRoundTransition);
@@ -399,23 +403,16 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ScarPresentStats);
 	GDREGISTER_CLASS(Simulation);
 	GDREGISTER_CLASS(LwfData);
-	GDREGISTER_CLASS(WavLoader);
-	GDREGISTER_CLASS(WaveStream);
-	GDREGISTER_CLASS(AmbientMixer);
-	GDREGISTER_CLASS(SoundSelector);
 	GDREGISTER_CLASS(DbfData);
-	GDREGISTER_CLASS(AmbientLayer);
 	GDREGISTER_CLASS(SoundBank);
-	GDREGISTER_CLASS(MissionAudioMarker);
-	GDREGISTER_CLASS(MissionAudioChannel);
-	GDREGISTER_CLASS(MissionAudioCandidateBinding);
-	GDREGISTER_CLASS(MissionAudioDynamicEmitter);
 	GDREGISTER_CLASS(MissionAudioStats);
 	GDREGISTER_CLASS(MissionAudioPerf);
 	GDREGISTER_CLASS(FiredSoundset);
+	GDREGISTER_CLASS(AudioOut);
 	GDREGISTER_CLASS(MissionAudio);
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
+	GDREGISTER_ABSTRACT_CLASS(TextTables);
 	GDREGISTER_CLASS(Paths);
 	GDREGISTER_CLASS(ParticleEffect);
 	GDREGISTER_CLASS(ParticleFile);
@@ -437,8 +434,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TargetProjectionXrInterface);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(EffectWorld);
-	GDREGISTER_CLASS(ItemEffectDirectorStats);
-	GDREGISTER_CLASS(ItemEffectDirector);
 	GDREGISTER_CLASS(OcclusionFrame);
 	// The world (ADR 0043 slice G10): the world node, its two view interfaces
 	// (the live implementations are internal), the resource-root resolver
@@ -463,10 +458,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ResourceRoot);
 	GDREGISTER_CLASS(LaunchFlags);
 	GDREGISTER_CLASS(ModListing);
-	GDREGISTER_CLASS(SbfAudioStream);
 	GDREGISTER_CLASS(SbfBank);
 	GDREGISTER_CLASS(MusicScript);
-	GDREGISTER_CLASS(MusicPairNames);
+	GDREGISTER_CLASS(MusicPair);
 	GDREGISTER_CLASS(MusicDirector);
 	GDREGISTER_CLASS(MnuDocument);
 	GDREGISTER_CLASS(MnuSoundRow);
@@ -476,9 +470,13 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuFrame);
 	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(MenuScrollRange);
+	GDREGISTER_CLASS(MenuScreenBinding);
 	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(PlayerInfoLoadout);
-	GDREGISTER_CLASS(ArmoryLoadout);
+	GDREGISTER_CLASS(ArmoryScreen);
+	GDREGISTER_CLASS(LanMultiplayerMenu);
+	GDREGISTER_CLASS(PreGameController);
+	GDREGISTER_CLASS(VehicleMenuController);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	// The scenario driver's scripted input device (inert until a probe arms
 	// it), ahead of the binding model it attaches to.
@@ -514,6 +512,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NetProtocol);
 	GDREGISTER_CLASS(NetSessionPolicy);
 	GDREGISTER_CLASS(ConnectionError);
+	GDREGISTER_CLASS(JoinFlow);
+	GDREGISTER_CLASS(NovaWorldServiceTarget);
 	GDREGISTER_CLASS(JoinScreenStatus);
 	// The ImGui pass seams (ADR 0039): registered in every flavour so scripts
 	// parse; the release DLL's DevTools is inert.

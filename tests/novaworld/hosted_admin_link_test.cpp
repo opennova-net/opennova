@@ -30,7 +30,7 @@
 #include "hosted/model/hosted_settings.h"
 #include "serve/serve_test_support.h"
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <base/proc/child_process.h>
 #include <formats/gamecfg/game_cfg.h>

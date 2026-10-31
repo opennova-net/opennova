@@ -48,10 +48,6 @@ ObjectLodFrame ObjectLodFrame::from_tangents(const Transform3D &p_camera_transfo
 	}
 	frame.tan_half_vertical = p_tan_half_vertical;
 	frame.tan_half_horizontal = p_tan_half_horizontal;
-	frame.vertical_plane_scale =
-			std::sqrt(1.0f + frame.tan_half_vertical * frame.tan_half_vertical);
-	frame.horizontal_plane_scale = std::sqrt(
-			1.0f + frame.tan_half_horizontal * frame.tan_half_horizontal);
 	// Retail's viewport focal: half the viewport width over the horizontal
 	// half-angle tangent, an integer pixel count (engine:
 	// renderer::object_lod_focal_pixels).
@@ -63,6 +59,8 @@ ObjectLodFrame ObjectLodFrame::from_tangents(const Transform3D &p_camera_transfo
 	frame.forward = -p_camera_transform.basis.get_column(2).normalized();
 	frame.right = p_camera_transform.basis.get_column(0).normalized();
 	frame.up = p_camera_transform.basis.get_column(1).normalized();
+	frame.frustum = eye_frustum(p_camera_transform, frame.tan_half_horizontal,
+			frame.tan_half_vertical, 0.0f, 0.0f);
 	frame.valid = frame.focal_pixels > 0 && frame.projection_scale > 0.0f;
 	return frame;
 }
@@ -106,6 +104,30 @@ bool ObjectLodFrame::camera_tangents(const Camera3D *p_camera,
 	return true;
 }
 
+opennova::renderer::ViewFrustum ObjectLodFrame::eye_frustum(const Transform3D &p_eye,
+		float p_tan_half_horizontal, float p_tan_half_vertical, float p_near, float p_far) {
+	const Vector3 forward_axis = -p_eye.basis.get_column(2).normalized();
+	const Vector3 right_axis = p_eye.basis.get_column(0).normalized();
+	const Vector3 up_axis = p_eye.basis.get_column(1).normalized();
+	const float eye[3] = { p_eye.origin.x, p_eye.origin.y, p_eye.origin.z };
+	const float forward[3] = { forward_axis.x, forward_axis.y, forward_axis.z };
+	const float right[3] = { right_axis.x, right_axis.y, right_axis.z };
+	const float up[3] = { up_axis.x, up_axis.y, up_axis.z };
+	return opennova::renderer::view_frustum(eye, forward, right, up, p_tan_half_horizontal,
+			p_tan_half_vertical, p_near, p_far);
+}
+
+opennova::renderer::ViewFrustum ObjectLodFrame::camera_frustum(const Camera3D *p_camera) {
+	float tan_half_horizontal = 0.0f;
+	float tan_half_vertical = 0.0f;
+	if (p_camera == nullptr || p_camera->get_far() <= p_camera->get_near() ||
+			!camera_tangents(p_camera, tan_half_horizontal, tan_half_vertical)) {
+		return opennova::renderer::ViewFrustum();
+	}
+	return eye_frustum(p_camera->get_camera_transform(), tan_half_horizontal, tan_half_vertical,
+			static_cast<float>(p_camera->get_near()), static_cast<float>(p_camera->get_far()));
+}
+
 float ObjectLodFrame::uniform_scale(const Basis &p_basis) {
 	return std::max({ p_basis.get_column(0).length(),
 			p_basis.get_column(1).length(), p_basis.get_column(2).length() });
@@ -134,20 +156,8 @@ bool ObjectLodFrame::sphere_in_frustum(const Vector3 &p_center,
 	if (!valid) {
 		return false;
 	}
-	const Vector3 relative = p_center - origin;
-	const float depth = relative.dot(forward);
-	if (depth + p_radius <= 0.0f) {
-		return false;
-	}
-	// The frustum side planes, with the sphere's true plane distance.
-	const float lateral = std::fabs(relative.dot(right));
-	if (lateral - depth * tan_half_horizontal >
-			p_radius * horizontal_plane_scale) {
-		return false;
-	}
-	const float vertical = std::fabs(relative.dot(up));
-	return vertical - depth * tan_half_vertical <=
-			p_radius * vertical_plane_scale;
+	const float center[3] = { p_center.x, p_center.y, p_center.z };
+	return opennova::renderer::view_frustum_sphere_visible(frustum, center, p_radius);
 }
 
 bool ObjectLodFrame::project(const Vector3 &p_center, float p_radius,

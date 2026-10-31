@@ -1049,6 +1049,34 @@ bool EffectScene::trigger_group_children(EffectGroupId group_id, const Vec3 &pos
 	return true;
 }
 
+bool EffectScene::move_group(EffectGroupId group_id, const Vec3 &position, const Vec3 *forward) {
+	if (!spawn_enabled_) {
+		return false;
+	}
+	Impl::GroupRecord *group = impl_->find_group(group_id);
+	if (group == nullptr || group->detached) {
+		return false;
+	}
+	EffectPose pose = forward != nullptr ? forward_pose(position, *forward) : group->pose;
+	pose.position = position;
+	impl_->move_group_to_pose(*group, pose);
+	return true;
+}
+
+bool EffectScene::move_slot(EffectSlotToken slot, const Vec3 &position, const Vec3 *forward) {
+	const EffectGroupId group = slot_group(slot);
+	return group && move_group(group, position, forward);
+}
+
+bool EffectScene::group_pose(EffectGroupId group_id, EffectPose &out) const {
+	const Impl::GroupRecord *group = impl_->find_group(group_id);
+	if (group == nullptr) {
+		return false;
+	}
+	out = group->pose;
+	return true;
+}
+
 bool EffectScene::contains_group(EffectGroupId group) const {
 	return impl_->find_group(group) != nullptr;
 }

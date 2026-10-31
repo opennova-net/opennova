@@ -1,14 +1,16 @@
 #include "mnu/menu_audio.h"
 
-#include "lwf/wav_loader.h"
+#include "audio/audio_out.h"
 #include "resource_index/resource_root.h"
 #include "util/string_convert.h"
 
-#include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <formats/lwf/lwf.h>
+#include <formats/lwf/wav_pcm.h>
 #include <runtime/menu/menu_sound.h>
+
+#include <cmath>
 
 using namespace godot;
 
@@ -25,21 +27,6 @@ void MenuAudio::set_resource_root(const Ref<ResourceRoot> &p_root) {
 	// state (the same reset the Control-tree owner performed on root swaps).
 	banks_.clear();
 	sound_selector_.reset();
-}
-
-void MenuAudio::ensure_sound_pool_() {
-	if (!sound_players_.is_empty()) {
-		return;
-	}
-	// One pooled player per original mixer channel (menu/menu_sound.h carries
-	// the witness).
-	for (int i = 0; i < opennova::menu::kMenuSoundChannels; ++i) {
-		AudioStreamPlayer *player = memnew(AudioStreamPlayer);
-		player->set_name(String("_MenuSound") + String::num_int64(i));
-		player->set_bus(StringName("SFX"));
-		add_child(player);
-		sound_players_.push_back(player);
-	}
 }
 
 bool MenuAudio::play_widget_sound(const String &p_trigger,
@@ -102,29 +89,22 @@ bool MenuAudio::play_member_sound_(const String &p_wav_path, int p_vol255,
 		return false;
 	}
 	const PackedByteArray bytes = resource_root_->read_file(name);
-	if (bytes.is_empty()) {
+	opennova::lwf::WavPcm pcm;
+	std::string error;
+	if (bytes.is_empty() ||
+			!opennova::lwf::wav_decode_pcm16(bytes.ptr(), static_cast<size_t>(bytes.size()), pcm, error)) {
 		return false;
 	}
-	Ref<AudioStreamWAV> stream = WavLoader::from_bytes(bytes);
-	if (stream.is_null()) {
+	const opennova::audio::MixWaveRef wave = opennova::audio::mix_wave_from_pcm(pcm);
+	if (!wave) {
 		return false;
 	}
-
-	ensure_sound_pool_();
-	if (sound_players_.is_empty()) {
-		return false;
-	}
-	AudioStreamPlayer *player = sound_players_[next_sound_player_];
-	next_sound_player_ = (next_sound_player_ + 1) % sound_players_.size();
-	player->set_stream(stream);
-	player->set_pitch_scale((float)WavLoader::pitch_scale_for(stream, p_pitch_scale));
-	double lin = (double)p_vol255 / 255.0;
-	lin = lin < 0.0 ? 0.0 : (lin > 1.0 ? 1.0 : lin);
-	player->set_volume_db(p_vol255 > 0
-					? (float)UtilityFunctions::linear_to_db(lin)
-					: -80.0f);
-	player->play();
-	return true;
+	AudioOut::attach(this);
+	// A layer's voice on the channel the allocator picks (audio::Mixer::find_and_open), at the
+	// menu emitter's pan 0 and its play word, the truncated Q16 word menu_effective_pitch scales
+	// (menu/menu_sound.h carries the witness), which the scale holds exactly.
+	const uint32_t play = static_cast<uint32_t>(std::llround(p_pitch_scale * 65536.0));
+	return AudioOut::mixer().find_and_open(wave, 0, static_cast<uint8_t>(p_vol255), play, 0) != 0;
 }
 
 void MenuAudio::_bind_methods() {

@@ -370,22 +370,4 @@ void WeaponDef::_bind_methods() {
 #undef WEAPON_DEF_PROP
 }
 
-// --- ArmoryClassRow -------------------------------------------------------------
-
-void ArmoryClassRow::assign(int p_value, const char *p_text_key) {
-	value_ = p_value;
-	text_key_ = String(p_text_key);
-}
-
-void ArmoryClassRow::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_value"), &ArmoryClassRow::get_value);
-	ClassDB::bind_method(D_METHOD("get_text_key"), &ArmoryClassRow::get_text_key);
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "value", PROPERTY_HINT_NONE, "",
-						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),
-			"", "get_value");
-	ADD_PROPERTY(PropertyInfo(Variant::STRING, "text_key", PROPERTY_HINT_NONE, "",
-						 PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_READ_ONLY),
-			"", "get_text_key");
-}
-
 } // namespace godot

@@ -52,88 +52,6 @@ func before_each() -> void:
 
 # --- placement --------------------------------------------------------------------------
 
-# A skeleton with bones 0..16 whose rests are deliberately non-identity.
-func _make_skeleton() -> Skeleton3D:
-	var skel := Skeleton3D.new()
-	for i in range(17):
-		skel.add_bone("BN%d" % (i + 1))
-	skel.set_bone_rest(0, Transform3D(Basis(Vector3.UP, deg_to_rad(21.0)), Vector3(0.0, 0.9, 0.0)))
-	skel.set_bone_rest(HEAD, Transform3D(Basis(Vector3.RIGHT, deg_to_rad(33.0)),
-			Vector3(0.0, 1.6, 0.05)))
-	skel.set_bone_rest(LEFT_HAND, Transform3D(Basis(Vector3.FORWARD, deg_to_rad(-48.0)),
-			Vector3(0.35, 1.1, 0.2)))
-	_root.add_child(skel)
-	skel.reset_bone_poses()
-	return skel
-
-
-func test_canopy_rides_bone_zero_translation_with_a_heading_only_turn() -> void:
-	var skel := _make_skeleton()
-	var xf: Transform3D = PersonOverlayModels.canopy_transform(skel, 37.0)
-	# At rest the hips bone moves nothing: the model origin stays at the skeleton origin,
-	# NOT at the hip joint (retail copies the matrix's translation row).
-	assert_true(xf.origin.is_equal_approx(Vector3.ZERO),
-			"at rest the canopy sits at the model origin, got %s" % xf.origin)
-	assert_true(xf.basis.is_equal_approx(
-			MissionObjectPlacer.bms_to_godot_basis(Vector3(0.0, 37.0, 0.0))),
-			"the canopy turns about the up axis alone")
-	# Lift the hips: the canopy follows the bone's model->world translation.
-	skel.set_bone_pose_position(0, Vector3(0.0, 2.9, 0.0))
-	xf = PersonOverlayModels.canopy_transform(skel, 37.0)
-	assert_true(xf.origin.is_equal_approx(Vector3(0.0, 2.0, 0.0)),
-			"a posed hips bone carries the canopy, got %s" % xf.origin)
-
-
-func test_goggles_ride_the_head_bone_with_the_nudge() -> void:
-	var skel := _make_skeleton()
-	var xf: Transform3D = PersonOverlayModels.nvg_transform(skel)
-	var rest_origin := Vector3(0.0, 1.6, 0.05)
-	assert_true(xf.origin.is_equal_approx(rest_origin + PersonOverlayModels.nvg_nudge()),
-			"at rest the nudge lands unrotated on the head joint, got %s" % xf.origin)
-	assert_true(xf.basis.is_equal_approx(Basis.IDENTITY),
-			"at rest the goggles take the head bone's model->world rotation (identity)")
-	var turn := Basis(Vector3.UP, deg_to_rad(90.0))
-	var rest := skel.get_bone_rest(HEAD).basis
-	skel.set_bone_pose_rotation(HEAD, (turn * rest).get_rotation_quaternion())
-	xf = PersonOverlayModels.nvg_transform(skel)
-	assert_true(xf.basis.is_equal_approx(turn), "posing the head carries the goggles")
-	assert_true(xf.origin.is_equal_approx(rest_origin + turn * PersonOverlayModels.nvg_nudge()),
-			"the nudge rides the head's model->world rotation")
-
-
-func test_binoculars_ride_the_left_hand_with_the_calibration() -> void:
-	var skel := _make_skeleton()
-	var xf: Transform3D = PersonOverlayModels.binoculars_transform(skel)
-	assert_true(xf.origin.is_equal_approx(
-			Vector3(0.35, 1.1, 0.2) + PersonOverlayModels.binoculars_nudge()),
-			"at rest the nudge lands unrotated on the left-hand joint")
-	assert_true(xf.basis.is_equal_approx(PersonOverlayModels.binoculars_frame_basis(Basis.IDENTITY)),
-			"at rest the binoculars take the calibration alone")
-
-
-func test_carried_object_takes_the_carrier_triple_at_the_left_hand() -> void:
-	var skel := _make_skeleton()
-	var euler := Vector3(12.0, -63.0, 4.0)
-	var xf: Transform3D = PersonOverlayModels.carried_transform(skel, euler)
-	var hand: Transform3D = PersonOverlayModels.binoculars_transform(skel)
-	assert_true(xf.origin.is_equal_approx(hand.origin),
-			"the carried object sits at the binocular frame's point")
-	assert_true(xf.basis.is_equal_approx(PersonOverlayModels.carried_frame_basis(euler)),
-			"the carried object takes the carrier's own orientation, not a bone's")
-
-
-func test_placement_needs_the_bones() -> void:
-	assert_null(PersonOverlayModels.canopy_transform(null, 0.0))
-	var short_skel := Skeleton3D.new()
-	short_skel.add_bone("BN1")
-	_root.add_child(short_skel)
-	assert_not_null(PersonOverlayModels.canopy_transform(short_skel, 0.0),
-			"bone 0 alone places the canopy")
-	assert_null(PersonOverlayModels.nvg_transform(short_skel), "no head bone, no goggles")
-	assert_null(PersonOverlayModels.binoculars_transform(short_skel), "no hand, no binoculars")
-	assert_null(PersonOverlayModels.carried_transform(short_skel, Vector3.ZERO),
-			"no hand, no carried object")
-
 
 # --- the calibration, re-derived from the original's element placement -----------------
 
@@ -235,16 +153,16 @@ func test_canopy_turn_matches_the_inverted_heading_feed() -> void:
 	# Axis 2 fed sinFixed = sin(h) * +2^22, cosFixed = cos(h) * -2^22 of the body heading
 	# [retail BoneCallback_org0_World @0x4e39d6..0x4e3a0a]; the engine publishes the
 	# mission yaw of h + pi, which the canopy turns by.
-	var skel := _make_skeleton()
+	# The canopy's turn is the placement builder's heading turn (world::canopy_attach).
 	for heading_deg in [0.0, 37.0, -120.0, 200.0]:
 		var h := deg_to_rad(heading_deg)
 		var fed := Vector2(float(int(cos(h) * -4194304.0)) / 4194304.0,
 				float(int(sin(h) * 4194304.0)) / 4194304.0)
 		var expected := _world_basis(_block(2, fed))
 		var yaw := fposmod(90.0 - (heading_deg + 180.0), 360.0)
-		var got: Transform3D = PersonOverlayModels.canopy_transform(skel, yaw)
-		assert_true(got.basis.is_equal_approx(expected),
-				"heading %s: derived %s, implementation %s" % [heading_deg, expected, got.basis])
+		var got := MissionObjectPlacer.bms_to_godot_basis(Vector3(0.0, yaw, 0.0))
+		assert_true(got.is_equal_approx(expected),
+				"heading %s: derived %s, implementation %s" % [heading_deg, expected, got])
 
 
 # --- the wire walk ----------------------------------------------------------------------
@@ -307,12 +225,16 @@ func test_wire_body_draws_its_overlays_in_its_own_context() -> void:
 			"a body that never published an overlay allocates nothing")
 	var body: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_not_null(body, "the wire body is built")
-	# The pump has no rig; scaffold the bones the overlays ride (as the held weapon's
-	# wire test does).
-	var skel := Skeleton3D.new()
-	for i in range(17):
-		skel.add_bone("BN%d" % (i + 1))
-	body.add_child(skel)
+	# The pump has no rig; give it the fixture person rig, whose posed bones (the
+	# engine's frames, world::posed_bone_frames) the overlays ride.
+	var rig := SkeletalAnim.new()
+	var rig_root := ResourceRoot.new()
+	rig_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	assert_true(rig.load_from_resource_root(rig_root, "rig19.adm"),
+			"rig19.adm fixture loads: %s" % rig.get_last_error())
+	assert_gt(rig.get_bone_count(), EntityPresenter.HELD_WEAPON_BONE_INDEX,
+			"the 19-bone person rig carries every attach bone")
+	body.set_skeletal_anim(rig)
 
 	var fields := {
 		Simulation.PF_CANOPY_PARA: 1536, Simulation.PF_CANOPY_PARA_O: 1024,
@@ -346,9 +268,11 @@ func test_wire_body_draws_its_overlays_in_its_own_context() -> void:
 	assert_eq(int(ctrl.get("PARA_O", -1)), 1024, "the canopy carries PARA_O")
 	assert_eq(int(nvg.get_ctrl_values().get("NVG_FLIP", -1)), 65535, "the goggles carry NVG_FLIP")
 	assert_true(canopy.global_transform.is_equal_approx(
-			PersonOverlayModels.canopy_transform(body, 30.0)), "the canopy sits at its frame")
+			PersonOverlayModels.canopy_transform(body, body.global_transform, 30.0)),
+			"the canopy sits at its frame")
 	assert_true(carried.global_transform.is_equal_approx(
-			PersonOverlayModels.carried_transform(body, Vector3(0.0, -40.0, 0.0))),
+			PersonOverlayModels.carried_transform(body, body.global_transform,
+					Vector3(0.0, -40.0, 0.0))),
 			"the carried object sits at its frame")
 	assert_null(overlays.get_node(PersonOverlayModels.KIND_CANOPY, PersonOverlayModels.PASS_SECOND),
 			"a single-part body draws each overlay once")

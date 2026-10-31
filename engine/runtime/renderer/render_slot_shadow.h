@@ -51,6 +51,7 @@
 #include <array>
 
 #include <runtime/renderer/direction_look_at.h>
+#include <runtime/renderer/object_shader_template.h>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -69,6 +70,14 @@ namespace opennova::renderer {
 // (retail stores the clamped-negated tuple raw).
 std::array<float, 3> slot_projection_direction(
 		const std::array<float, 3> &sun_surface_to_light);
+// The same from the environment getter's raw render tuple g: the
+// surface->light vector in presentation axes is (g2, g1, g0)
+// [orig: Environment_GetLightDirectionFloat @0x57d870 into
+// Render_ShadowPass @0x5d7b70].
+inline std::array<float, 3> slot_projection_direction_from_environment_tuple(
+		float g0, float g1, float g2) {
+	return slot_projection_direction({g2, g1, g0});
+}
 
 // Slot LOD at registration: dynamic silhouette slots take
 // bound_radius(16.16) >> 15 + 1 = 2*radius + 1 world units, clamped [6, 20]
@@ -393,6 +402,31 @@ void slot_patch_vertices(const SlotPatch &patch, int lod,
 		const std::function<float(float, float)> &terrain_height,
 		std::vector<std::array<float, 3>> &out);
 
+// The patch a slot's drape mesh was last built over, and the rebuild gate
+// over it [orig: RenderSlot_DrawSilhouetteDrape @0x5d5ca0 ->
+// RenderSlot_RebuildPatchVertexBuffer @0x5d5130, the rebuild gate
+// @0x5d51a3..0x5d51bc]: origin, lod and resolution unchanged keep the
+// vertices. `heights_serial` is the embedder's mark of the heights the
+// vertices sampled (an editor's sculpt patches them in place; a match's never
+// change), so patched heights drape again too.
+struct SlotPatchBuild {
+	bool built = false;
+	float origin_x = 0.0f;
+	float origin_north = 0.0f;
+	int lod = 0;
+	uint64_t heights_serial = 0;
+};
+inline bool slot_patch_needs_rebuild(const SlotPatchBuild &build, const SlotPatch &patch,
+		int lod, uint64_t heights_serial) {
+	return !build.built || build.origin_x != patch.min_x ||
+			build.origin_north != patch.max_north || build.lod != lod ||
+			build.heights_serial != heights_serial;
+}
+inline SlotPatchBuild slot_patch_built(const SlotPatch &patch, int lod,
+		uint64_t heights_serial) {
+	return SlotPatchBuild{true, patch.min_x, patch.max_north, lod, heights_serial};
+}
+
 // The patch's triangle list for one lod, the level's run of the shared
 // index buffer [orig: RenderSlot_InitPatchIndexBuffers @ 0x5d53d0 — per cell
 // (i, j) with a = (i, j), b = (i, j + 1), c = (i + 1, j), d = (i + 1, j + 1):
@@ -409,7 +443,8 @@ void slot_patch_indices(int lod, std::vector<uint16_t> &out);
 // "shadowztex": the 32x4 ARGB texture the drape's second stage ADDs to the
 // silhouette term — rows 0..2 are white below column 16, one gray texel
 // at column 16 and black beyond; row 3 is all white. Sampled CLAMP +
-// bilinear [orig: @ 0x5d6260..0x5d62a7 the fill; flags 1 -> clamp
+// bilinear [orig: Shadow_SystemInitResources @ 0x5d6260..0x5d62d7 — the fill
+//  @ 0x5d6260..0x5d62a7; flags 1 -> clamp
 //  (CGfxShader_ApplyTextureStages @ 0x680870), linear min/mag]. Because the stage
 // ADDs and saturates, WHITE suppresses the shadow and BLACK keeps it:
 // u2 > 0.5 (ground beyond the plane through the caster, away from the
@@ -439,6 +474,25 @@ struct SlotDepthClip {
 SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
 		float half_size, bool person, const std::array<float, 3> &entity_pos);
 
+// The drape's stage-0 texgen: world -> the capture's (u, v), the drape
+// sampling the capture along the same slot direction it was rendered from
+// [orig: the shared unscaled direction of the capture and drape matrices,
+// RenderSlot_SetupShadowCascadeMatrices @0x58d300 /
+// RenderSlot_BuildShadowCascadeUVMatrices @0x58cf10 lookat_dir1; the person
+// 4x belongs to the separate depth-clip stage above]: over the capture view's
+// axes (slot_capture_view_axes) about its center, u = 0.5 + x·(p − c) / 2h,
+// v = 0.5 − y·(p − c) / 2h (image y down). No depth bound: the capture's own
+// near/far band never clips the drape (the clamped sampler covers the rest of
+// the patch). u = u_axis·p + u_offset, v = v_axis·p + v_offset.
+struct SlotDrapeTexgen {
+	std::array<float, 3> u_axis{};
+	float u_offset = 0.5f;
+	std::array<float, 3> v_axis{};
+	float v_offset = 0.5f;
+};
+SlotDrapeTexgen slot_drape_texgen(const SlotCaptureViewAxes &axes,
+		const std::array<float, 3> &center, float half_extent);
+
 // ---------------------------------------------------------------------------
 // Slot assignment [orig: RenderSlot_SortAndAssign @ 0x5d6530]
 // ---------------------------------------------------------------------------
@@ -450,6 +504,124 @@ inline constexpr int kSlotCaptureCount = 12;   // silhouette RT budget
 // the record — 320 u [orig: @ 0x5d66b2..0x5d66b4]. (The 80 u cull is the
 // separate DRAPE gate — drape_culled above.)
 inline constexpr float kSlotBindMaxDistance = 320.0f;
+
+// An entity's ride facts as the slot pass reads them (world::PF_SLOT_RIDE_BITS
+// carries the word). kSlotRideVehicle is the slot record's flag bit 0, its
+// own ItemDef type 1, which the light update writes beside bit 1 (the Player
+// class bit 0x100, or a pool-0 entity) and bit 2 (the local player)
+// [orig: RenderSlot_UpdateEntityLight @ 0x5d6dbf..0x5d6e0e]. The ground bits
+// read the entity it stands on (entity+0x28 groundEntity): that entity's
+// ItemDef type 1 [orig: RenderSlot_SortAndAssign @ 0x5d6608..0x5d661a], and
+// whether this entity is in that ground entity's refNum group list
+// (g_EntityReferenceRegistry, the list the carrier's capture walks
+// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d797e..0x5d79a9]).
+enum SlotRideBit : uint32_t {
+	kSlotRideVehicle = 1u,
+	kSlotRideGroundVehicle = 2u,
+	kSlotRideGroundRefChild = 4u,
+};
+
+// The word from an entity's facts: its ItemDef type and its groundEntity's
+// (-1 for no def, or no ground entity), and whether it is in that ground
+// entity's refNum group list. The type 1 tests are `cmp [def+5Ch], 1`
+// [orig: RenderSlot_UpdateEntityLight @ 0x5d6dfa; RenderSlot_SortAndAssign
+// @ 0x5d6616].
+constexpr uint32_t slot_ride_bits(int item_type, int ground_item_type,
+		bool ground_ref_child) noexcept {
+	return (item_type == 1 ? kSlotRideVehicle : 0u) |
+			(ground_item_type == 1 ? kSlotRideGroundVehicle : 0u) |
+			(ground_ref_child ? kSlotRideGroundRefChild : 0u);
+}
+
+// The ride exclusion: a vehicle (flag bit 0) whose groundEntity is ItemDef
+// type 1 takes no slot of its own [orig: RenderSlot_SortAndAssign
+// @ 0x5d6604..0x5d6627, `cmp eax, ebp` on bit 0, the ground's def +0x5C;
+// re-checked by the capture @ 0x5d778c..0x5d77aa]. Its carrier's capture
+// draws it when it is in the carrier's refNum group (slot_ride_walk_child).
+constexpr bool slot_rides_vehicle(uint32_t ride_bits) noexcept {
+	return (ride_bits & kSlotRideVehicle) != 0 && (ride_bits & kSlotRideGroundVehicle) != 0;
+}
+
+// The carrier's refNum walk: a carrier whose slot holds flag bit 0 (its own
+// ItemDef type 1, which is this rider's ground bit) draws, after itself and
+// its pool-0 riders, every member of its refNum group list standing on it,
+// whatever slot that member holds [orig: RenderSlot_RenderEntityAndChildren
+// @ 0x5d796a..0x5d79dc: `test [esi+30h], dl`, the refNum @ 0x5d797e, the list
+// @ 0x5d798e, groundEntity == carrier @ 0x5d79a6, the draw @ 0x5d79c8].
+constexpr bool slot_ride_walk_child(uint32_t ride_bits) noexcept {
+	return (ride_bits & kSlotRideGroundVehicle) != 0 && (ride_bits & kSlotRideGroundRefChild) != 0;
+}
+
+// An entity's seat facts as the slot pass reads them (world::PF_SLOT_SEAT_BITS
+// carries the word). kSlotSeatPersonClass is the slot record's flag bit 1,
+// which the light update writes for a Player-class entity (Flags 0x100) or a
+// pool-0 one [orig: RenderSlot_UpdateEntityLight @ 0x5d6dbf..0x5d6ddf];
+// kSlotSeatPool0 the pool-0 membership the capture's child walk iterates
+// [orig: RenderSlot_RenderEntityAndChildren @ 0x5d78ea, g_PoolList[0]]; the
+// entity's parentSlot (entity+0x168, the world::SeatType codes: 1 sitex, 2
+// ctrlx, 3 UseGun, 5 drvrx) rides bits 8..15, and kSlotSeatParentRefNum says
+// its parentEntity (+0x16C) is set and holds a refNum (+0x215).
+enum SlotSeatBit : uint32_t {
+	kSlotSeatPersonClass = 1u,
+	kSlotSeatPool0 = 2u,
+	kSlotSeatParentRefNum = 4u,
+};
+inline constexpr uint32_t kSlotSeatParentSlotShift = 8u;
+
+constexpr uint32_t slot_seat_bits(bool person_class, bool pool0, int parent_slot,
+		bool parent_ref_num) noexcept {
+	return (person_class ? kSlotSeatPersonClass : 0u) | (pool0 ? kSlotSeatPool0 : 0u) |
+			(parent_ref_num ? kSlotSeatParentRefNum : 0u) |
+			((static_cast<uint32_t>(parent_slot) & 0xFFu) << kSlotSeatParentSlotShift);
+}
+
+constexpr int slot_seat_parent_slot(uint32_t seat_bits) noexcept {
+	return static_cast<int>((seat_bits >> kSlotSeatParentSlotShift) & 0xFFu);
+}
+
+// The seat-parent exclusion, for a flag-bit-1 record only: parentSlot 2, 5 or
+// 1, or 3 with a parentEntity holding a refNum, takes no slot of its own
+// [orig: RenderSlot_SortAndAssign @ 0x5d6593..0x5d65ff, `cmp edx, ebp` on bit
+// 1 @ 0x5d6593, the parentSlot and parent refNum tests @ 0x5d65a0..0x5d65eb;
+// re-checked by the capture @ 0x5d774e..0x5d778d]. Its
+// carrier's capture draws it (slot_seat_walk).
+constexpr bool slot_seat_parented(uint32_t seat_bits) noexcept {
+	if ((seat_bits & kSlotSeatPersonClass) == 0) {
+		return false;
+	}
+	const int slot = slot_seat_parent_slot(seat_bits);
+	return slot == 1 || slot == 2 || slot == 5 ||
+			(slot == 3 && (seat_bits & kSlotSeatParentRefNum) != 0);
+}
+
+// Whose capture draws a pool-0 entity in its child walk: the walk runs in
+// every slot holder's capture, after the holder itself, over the whole of
+// pool 0, and draws through the member's own render callback, with no
+// visibility test and the camera mode left as it is, a member whose
+// parentEntity is the holder in parentSlot 1, 2 or 5, and a member in
+// parentSlot 3 whose parentEntity holds a refNum and stands on the holder
+// (groundEntity +0x28): a UseGun gunner rides its gun's carrier's slot, not
+// the gun's [orig: RenderSlot_RenderEntityAndChildren @ 0x5d78ea..0x5d7968:
+// parentEntity == holder @ 0x5d7917, parentSlot 2/5/1 @ 0x5d7921..0x5d792d,
+// the draw @ 0x5d7938; parentSlot 3 @ 0x5d793f, the refNum @ 0x5d794c, the
+// parent's groundEntity @ 0x5d7955, the draw @ 0x5d7963].
+enum class SlotSeatWalk : uint8_t {
+	kNone,
+	kParent,        // parentSlot 1, 2 or 5: the parentEntity's capture
+	kParentGround,  // parentSlot 3 under a refNum parent: its groundEntity's
+};
+
+constexpr SlotSeatWalk slot_seat_walk(uint32_t seat_bits) noexcept {
+	if ((seat_bits & kSlotSeatPool0) == 0) {
+		return SlotSeatWalk::kNone;
+	}
+	const int slot = slot_seat_parent_slot(seat_bits);
+	if (slot == 1 || slot == 2 || slot == 5) {
+		return SlotSeatWalk::kParent;
+	}
+	return slot == 3 && (seat_bits & kSlotSeatParentRefNum) != 0 ? SlotSeatWalk::kParentGround
+																  : SlotSeatWalk::kNone;
+}
 
 // The is_person class (itemdef +0x5C == 3) does NOT stretch the drape. The
 // 4.0 (flt_7C44B8) multiplies the VERTICAL component of a COPY of the slot
@@ -481,10 +653,12 @@ struct SlotCandidateState {
 	// Render_ShadowPass @ 0x5d7b70 - RenderSlot_SortAndAssign @ 0x5d7c36, then the
 	// slot walk's RenderSlot_RenderEntityAndChildren @ 0x5d7c95].
 	bool hidden = false;
-	// Seat-parented (parentSlot 1/2/5, or 3 with a live parent)
-	// [orig: @ 0x5d65a0..0x5d65eb].
+	// Drawn in another caster's capture: a person seat-parented
+	// (slot_seat_parented) [orig: @ 0x5d6593..0x5d65ff], or a draw the
+	// embedder links capture-with another caster or parents under one.
 	bool seat_parented = false;
-	// Standing on a vehicle-type ground entity [orig: @ 0x5d661a..0x5d6627].
+	// A vehicle standing on a vehicle (slot_rides_vehicle): the carrier's
+	// capture draws it [orig: @ 0x5d6604..0x5d6627].
 	bool on_vehicle = false;
 	bool is_local_player_or_parent = false;  // halves the score [orig: @ 0x5d6864]
 	bool interior = false;
@@ -553,6 +727,42 @@ private:
 	size_t live_count_ = 0;
 	std::array<bool, kSlotPatchCount> patch_used_{};
 };
+
+// One caster surface's black PROJSHAD draw in a slot capture: whether it
+// draws and the state the capture pass gives it, from the surface's object
+// material classification (object_shader_template.h carries the per-technique
+// policy and coverage tables and their witnesses). A surface draws when its
+// technique declares a PROJSHAD pass, unless that pass is the _FFP
+// material-blend variant of an additive material, whose ONE/ONE black adds
+// nothing to the RT [orig: _FFP.fx TBoringFFPProjShad BLEND_ADD]. A surface
+// whose secondary texture did not resolve composes the no-detail technique
+// (the runtime's missing-detail downgrade). The flag bits are the capture
+// shader's decode of the command: the alpha test and its inversion, the
+// AlphaGenValue factor of the _FFP families, the _MT Diffuse2 alpha, GPU
+// skinning, and the _FFP BLEND_ALPHA coverage blend (SRCALPHA/INVSRCALPHA of
+// the black over the white clear, a partial silhouette for a translucent
+// strip); the pass's device state, its blend and its cull, is
+// object_projected_shadow_pipeline_state's.
+enum SlotCaptureCommandFlag : uint32_t {
+	kSlotCaptureAlphaTest = 1u,
+	kSlotCaptureAlphaInvert = 2u,
+	kSlotCaptureAlphaMod = 4u,
+	kSlotCaptureDetailAlpha = 8u,
+	kSlotCaptureSkinned = 16u,
+	kSlotCaptureBlendCoverage = 32u,
+};
+
+struct SlotCaptureSurface {
+	bool draws = false;
+	ObjectProjectedShadowPolicy policy = ObjectProjectedShadowPolicy::NoPass;
+	ObjectProjectedShadowCoverage coverage = ObjectProjectedShadowCoverage::NoPass;
+	uint32_t flags = 0;
+	float alpha_test_value = 0.0f;
+	FixedFunctionState state{};
+};
+
+SlotCaptureSurface slot_capture_surface(const ObjectMaterialClassification &classification,
+		bool detail_resolved, bool skinned);
 
 // The retail priority score for one candidate: 2D camera distance / 4,
 // weighted by view alignment (1.5 - dot terms, Q16 fixed math), halved for

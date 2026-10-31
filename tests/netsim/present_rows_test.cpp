@@ -10,6 +10,7 @@
 #include <runtime/inmatch/present_rows.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/renderer/render_slot_shadow.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/client_world_materializer.h>
@@ -1536,6 +1537,153 @@ bool test_rows_carry_the_slot_march_start() {
 // naming a NoClipsNoDraw def hides whatever +0x2B0 draws once that def's pool
 // plus its one-round clip reads zero. The local player keeps its own branch.
 // [orig: Entity_CanFireWeapon @0x4dcb5f..0x4dcbc6]
+// The render-slot ride facts the rows carry (world::PF_SLOT_RIDE_BITS, PF_SLOT_GROUND_HANDLE):
+// the row's own and its groundEntity's ItemDef type 1 and its membership in that ground
+// entity's refNum group list [orig: RenderSlot_UpdateEntityLight @0x5d6dfa..0x5d6e0e;
+// RenderSlot_SortAndAssign @0x5d6604..0x5d661a; RenderSlot_RenderEntityAndChildren
+// @0x5d797e..0x5d79a9].
+bool test_rows_carry_the_slot_ride_facts() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(1, 64);
+	const auto spawn = [&](int slot, int item_type, uint8_t ref_num, bool member) {
+		w::Entity *e = spawn_pool_row(kernel, 1, slot, 1291);
+		if (e == nullptr) return e;
+		e->has_item_def = true;
+		e->item_type = static_cast<uint8_t>(item_type);
+		e->ref_num = ref_num;
+		kernel.world.registry.set_ref_group_member(e->handle, member);
+		return e;
+	};
+	// The carrier holds refNum 7 without joining its own list (as the addeweap spawner leaves it).
+	w::Entity *carrier = spawn(3, 1, 7, false);
+	w::Entity *jeep = spawn(4, 1, 7, true);   // a vehicle in its group, riding it
+	w::Entity *gun = spawn(5, 2, 7, true);    // a non-vehicle member, riding it
+	w::Entity *boat = spawn(6, 1, 0, false);  // a vehicle riding it, in no group
+	if (!expect(carrier != nullptr && jeep != nullptr && gun != nullptr && boat != nullptr,
+				"the bare registry spawns four pool-1 rows"))
+		return false;
+	jeep->ground_target = carrier->handle;
+	gun->ground_target = carrier->handle;
+	boat->ground_target = carrier->handle;
+	const im::PresentRowsContext context{kernel, nullptr, false};
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	if (!expect(rows.size() == 4 * w::PF_STRIDE, "one row per live registry slot")) return false;
+	const auto bits = [&](size_t row) {
+		return static_cast<uint32_t>(row_at(rows, row)[w::PF_SLOT_RIDE_BITS]);
+	};
+	const float carrier_handle = static_cast<float>(carrier->handle.packed);
+	namespace rr = opennova::renderer;
+	bool ok = expect(bits(0) == rr::kSlotRideVehicle &&
+					row_at(rows, 0)[w::PF_SLOT_GROUND_HANDLE] == -1.0f,
+			"a free-standing vehicle carries its own type bit and no ground");
+	ok = expect(bits(1) == (rr::kSlotRideVehicle | rr::kSlotRideGroundVehicle |
+								   rr::kSlotRideGroundRefChild) &&
+					row_at(rows, 1)[w::PF_SLOT_GROUND_HANDLE] == carrier_handle,
+			"a vehicle in its carrier's group rides it: excluded and walked") && ok;
+	ok = expect(rr::slot_rides_vehicle(bits(1)) && rr::slot_ride_walk_child(bits(1)),
+			"the jeep's word reads both rules") && ok;
+	ok = expect(bits(2) == (rr::kSlotRideGroundVehicle | rr::kSlotRideGroundRefChild) &&
+					!rr::slot_rides_vehicle(bits(2)) && rr::slot_ride_walk_child(bits(2)),
+			"a non-vehicle member keeps its slot and rides the walk") && ok;
+	ok = expect(bits(3) == (rr::kSlotRideVehicle | rr::kSlotRideGroundVehicle) &&
+					rr::slot_rides_vehicle(bits(3)) && !rr::slot_ride_walk_child(bits(3)),
+			"a vehicle outside the group is excluded and walked by no carrier") && ok;
+	// A ground that is no vehicle: the walk tests the carrier slot's own bit 0.
+	carrier->item_type = 5;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	ok = expect(bits(1) == (rr::kSlotRideVehicle | rr::kSlotRideGroundRefChild) &&
+					!rr::slot_rides_vehicle(bits(1)) && !rr::slot_ride_walk_child(bits(1)),
+			"a vehicle on a building deck keeps its slot") && ok;
+	return ok;
+}
+
+// The render-slot seat facts the rows carry (world::PF_SLOT_SEAT_BITS,
+// PF_SLOT_SEAT_WALK_HANDLE): the person bit, pool 0, the parentSlot and the
+// parentEntity's refNum, and the carrier whose pool-0 walk draws the row: its
+// parentEntity for seats 1, 2 and 5, a refNum gun's groundEntity for a UseGun
+// gunner [orig: RenderSlot_UpdateEntityLight @0x5d6dbf..0x5d6ddf;
+// RenderSlot_SortAndAssign @0x5d6593..0x5d65ff; RenderSlot_RenderEntityAndChildren
+// @0x5d78ea..0x5d7968].
+bool test_rows_carry_the_slot_seat_facts() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(0, 32);
+	kernel.world.registry.configure_pool(1, 64);
+	const auto item = [&](int slot, int item_type, uint8_t ref_num) {
+		w::Entity *e = spawn_pool_row(kernel, 1, slot, 1291);
+		if (e == nullptr) return e;
+		e->has_item_def = true;
+		e->item_type = static_cast<uint8_t>(item_type);
+		e->ref_num = ref_num;
+		return e;
+	};
+	const auto person = [&](int slot, const w::Entity *mount, w::SeatType seat) {
+		w::Entity *e = spawn_pool_row(kernel, 0, slot, 1);
+		if (e == nullptr) return e;
+		e->has_item_def = true;
+		e->item_type = 3;
+		if (mount != nullptr) {
+			e->mounted = true;
+			e->mount_target = mount->handle;
+			e->mount_type = seat;
+		}
+		return e;
+	};
+	w::Entity *carrier = item(3, 1, 7);
+	w::Entity *gun = item(4, 2, 7);      // an addeweap gun on the carrier, refNum 7
+	w::Entity *post = item(5, 2, 0);     // a free-standing gun, no refNum
+	if (!expect(carrier != nullptr && gun != nullptr && post != nullptr,
+				"the bare registry spawns three pool-1 rows"))
+		return false;
+	gun->ground_target = carrier->handle;
+	w::Entity *driver = person(1, carrier, w::SeatType::Driver);
+	w::Entity *gunner = person(2, gun, w::SeatType::Gunner);
+	w::Entity *sentry = person(3, post, w::SeatType::Gunner);
+	w::Entity *walker = person(4, nullptr, w::SeatType::None);
+	if (!expect(driver != nullptr && gunner != nullptr && sentry != nullptr && walker != nullptr,
+				"the bare registry spawns four pool-0 rows"))
+		return false;
+	const im::PresentRowsContext context{kernel, nullptr, false};
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows(context, lifecycle, rows, doors);
+	const auto row_of = [&](const w::Entity *e) -> const float * {
+		for (size_t i = 0; i * w::PF_STRIDE < rows.size(); ++i) {
+			const float *r = row_at(rows, i);
+			if (r[w::PF_WIRE_HANDLE] == static_cast<float>(e->handle.packed)) return r;
+		}
+		return nullptr;
+	};
+	namespace rr = opennova::renderer;
+	const auto bits = [&](const w::Entity *e) {
+		const float *r = row_of(e);
+		return r != nullptr ? static_cast<uint32_t>(r[w::PF_SLOT_SEAT_BITS]) : 0xFFFFFFFFu;
+	};
+	const auto walk = [&](const w::Entity *e) {
+		const float *r = row_of(e);
+		return r != nullptr ? r[w::PF_SLOT_SEAT_WALK_HANDLE] : -2.0f;
+	};
+	bool ok = expect(bits(driver) == rr::slot_seat_bits(true, true, 5, true) &&
+					walk(driver) == static_cast<float>(carrier->handle.packed),
+			"a driver is excluded and its carrier's walk draws it");
+	ok = expect(rr::slot_seat_parented(bits(driver)), "the driver's word reads the exclusion") &&
+			ok;
+	ok = expect(bits(gunner) == rr::slot_seat_bits(true, true, 3, true) &&
+					walk(gunner) == static_cast<float>(carrier->handle.packed),
+			"a refNum gun's gunner rides the gun's carrier, not the gun") && ok;
+	ok = expect(bits(sentry) == rr::slot_seat_bits(true, true, 3, false) &&
+					walk(sentry) == -1.0f && !rr::slot_seat_parented(bits(sentry)),
+			"a free-standing gun's gunner keeps its slot") && ok;
+	ok = expect(bits(walker) == rr::slot_seat_bits(true, true, 0, false) && walk(walker) == -1.0f,
+			"a person on foot carries its person bit and no seat") && ok;
+	ok = expect(bits(carrier) == 0u && walk(carrier) == -1.0f,
+			"a vehicle carries no seat facts") && ok;
+	return ok;
+}
+
 bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	opennova::mission::MissionKernel kernel;
 	kernel.world.registry.configure_pool(0, 32);
@@ -1839,6 +1987,8 @@ int main() {
 	ok = test_host_rows_apply_the_remote_held_weapon_ammo_leg() && ok;
 	ok = test_host_rows_draw_the_mounted_rider_weapon() && ok;
 	ok = test_rows_carry_the_slot_march_start() && ok;
+	ok = test_rows_carry_the_slot_ride_facts() && ok;
+	ok = test_rows_carry_the_slot_seat_facts() && ok;
 	ok = test_replica_statics_present_their_pitch_and_roll() && ok;
 	ok = test_replica_rows_present_the_served_ring_entries() && ok;
 	ok = test_seated_replica_row_presents_its_channel() && ok;

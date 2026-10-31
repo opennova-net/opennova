@@ -42,7 +42,6 @@ const ScoreboardPresenterScript := preload("res://game/world/scoreboard_presente
 const VehiclePanelPresenterScript := preload("res://game/world/vehicle_panel_presenter.gd")
 const MessageLogPresenterScript := preload("res://game/world/message_log_presenter.gd")
 const EndRoundStatisticsPresenterScript := preload("res://game/world/end_round_statistics_presenter.gd")
-const HudTextTables := preload("res://game/world/hud_text_tables.gd")
 const LfpPanelPresenterScript := preload("res://game/world/lfp_panel_presenter.gd")
 
 var _world: GameWorld = null
@@ -538,7 +537,7 @@ func _init_overlay_system(mission_file: String) -> void:
 	else:
 		_map_grid_origin_present = false
 		_game_hud.set_minimap_grid_origin(Vector2.ZERO, false)
-	HudTextTables.register(root, mission_file)
+	TextTables.register_mission_tables(root, mission_file)
 	# The objectives-panel header, resolved once against the freshly registered
 	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
 	if Strings.has_text(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):
@@ -674,7 +673,7 @@ func _tick_dedicated_host(sim: Simulation) -> void:
 ## original rebuilding its HUD info struct each frame. Call once per frame while the
 ## player is in-world (the shells gate on their own state).
 ## [orig: HUD_BuildEntityInfo @0x4b8440]
-func tick(gameplay_input_active: bool = false) -> void:
+func tick() -> void:
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	if _world == null or not _world.is_loaded():
 		return
@@ -739,6 +738,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 			if _player_presenter != null else _world.local_player_view()
 	if lv != null:
 		_sight_slide_multiplier = lv.sight_slide_multiplier
+	# The frame's main viewport off that view's composed camera: every world
+	# point the HUD draws at projects through it (HudOverlay.set_view_frame,
+	# engine hud/hud_viewport.h).
+	_game_hud.set_view_frame(lv)
 	# The frame's HUD info record, the shell's mirror of the original
 	# rebuilding its 576-byte info struct each frame: the engine fills it from
 	# that view, the equipped weapon's FSM view, the def slice and the health
@@ -836,7 +839,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 				_game_hud.set_minimap_footprints(footprints)
 	# The talk rows are the player input router's: it polls them in every
 	# input frame, the frame's own sample and each later tick's, with the
-	# current gametext for the prompts (PlayerInputRouter::poll_talk_rows
+	# current gametext for the prompts (engine inmatch::PlayerInputFrame::dispatch_record
 	# carries the witness); the dispatch gates, the capture and the line
 	# editor are the engine's chat entry. This frame draws the line.
 	if _player_presenter != null:
@@ -845,12 +848,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The HUD binding rows' events in input-frame order: the player input
 	# router polls the rows in every input frame, the frame's own sample and
 	# each later tick's (PlayerInputRouter::poll_hud_toggles carries the
-	# witness); with no router this presenter polls the frame's sample.
-	var toggle_frames: PackedInt64Array
+	# witness); with no router no rows are polled.
+	var toggle_frames := PackedInt64Array()
 	if _player_presenter != null:
 		toggle_frames = _player_presenter.take_hud_toggle_events()
-	else:
-		toggle_frames = PackedInt64Array([_poll_toggle_rows(sim, gameplay_input_active)])
 	for toggle_events in toggle_frames:
 		# The window actions' respawn init also closes the sim's map overlay (the
 		# witness rides hud_toggles.h kOverlayWindowsCleared).
@@ -881,10 +882,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	if _inset_scope != null:
 		_inset_scope.update_view(lv, combat_camera, _aspect_mode)
 	_sync_second_scene_camera()
-	_game_hud.set_combat_state(lv,
-			combat_camera.global_transform if combat_camera != null else Transform3D.IDENTITY,
-			hud_view_projection(combat_camera) if combat_camera != null else Projection.IDENTITY,
-			combat_camera != null, Strings.get_table(Strings.TABLE_GAMETEXT),
+	_game_hud.set_combat_state(lv, Strings.get_table(Strings.TABLE_GAMETEXT),
 			ControlsBindings.model().display_text_for_token("useitem"))
 	_game_hud.set_view_state(info.binoculars_view_active,
 			_player_presenter.aim_screen_point() \
@@ -991,37 +989,14 @@ func _resolve_waypoint_name(wp: WaypointHudView, sim: Simulation) -> String:
 			sim.get_session_game_type())
 
 
-# The projection the HUD projects world points through (the attach labels, the
-# friendly tags): the local player presenter's frame projection -- while an
-# aspect mode draws through its stretched target, the target camera's, whose
-# pixels the blit stretches over the surface the overlay draws on; the play
-# camera then carries only a CULLING SUPERSET of the frustum and would land a
-# label off on one axis (LocalPlayerPresenter.view_projection) -- else the
-# play camera's own. It is the frame's SCREEN projection, the D3D9 raster's
-# half pixel taken back out (LocalPlayerPresenter.screen_projection): the
-# overlay draws the original's window coordinates and carries them onto this
-# raster's pixel centres itself. Public as the ADR 0018 read seam.
-func hud_view_projection(camera: Camera3D) -> Projection:
-	if _player_presenter != null and _player_presenter.camera() != null:
-		return _player_presenter.screen_projection()
-	return camera.get_camera_projection()
-
-
-# The floating attach labels: the sim's selection (distance/LOS/occupancy/nearest,
-# armory-zone mode) projected through the frame's projection (hud_view_projection)
-# to overlay pixels with the resolved label text — the overlay's own fill
-# (HudOverlay.set_attach_labels carries the witness); no camera clears the labels.
+# The floating attach labels: the local player's seat scan projected through the
+# frame's viewport (HudOverlay.set_view_frame) with the resolved label text, the
+# overlay's engine fill (HudOverlay.set_attach_labels); no sim clears the labels.
 func _apply_attach_labels() -> void:
 	if _game_hud == null:
 		return
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
-			if sim != null else null
-	if camera == null:
-		_game_hud.set_attach_labels(Transform3D.IDENTITY, Projection.IDENTITY, null, null)
-		return
-	_game_hud.set_attach_labels(camera.global_transform, hud_view_projection(camera),
-			Strings.get_table(Strings.TABLE_GAMETEXT), sim)
+	_game_hud.set_attach_labels(Strings.get_table(Strings.TABLE_GAMETEXT), sim)
 
 
 
@@ -1032,10 +1007,10 @@ func get_game_hud() -> HudOverlay:
 	return _game_hud
 
 
-# The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
-# through the frame's projection (hud_view_projection) with the environment's
-# live fog distance — the overlay's own fill (HudOverlay.set_friendly_tags
-# carries the witness); no camera clears the tags.
+# The overhead friendly tags (D-HUD-20): the role's gather projected through the
+# frame's viewport (HudOverlay.set_view_frame) with the environment's live fog
+# distance, the overlay's engine fill (HudOverlay.set_friendly_tags); no sim
+# clears the tags.
 func _apply_friendly_tags() -> void:
 	if _game_hud == null:
 		return
@@ -1045,16 +1020,9 @@ func _apply_friendly_tags() -> void:
 	if env != null:
 		fog_distance = env.get_fog_distance()
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
-			if sim != null else null
-	if camera == null:
-		_game_hud.set_friendly_tags(false, Transform3D.IDENTITY, Projection.IDENTITY,
-				fog_distance, null)
-		_game_hud.set_radio_request_icon_viewer(false)
-		return
-	_game_hud.set_friendly_tags(true, camera.global_transform, hud_view_projection(camera),
-			fog_distance, sim)
-	_game_hud.set_radio_request_icon_viewer(sim.local_player_radio_request_icon_viewer())
+	_game_hud.set_friendly_tags(sim != null, fog_distance, sim)
+	_game_hud.set_radio_request_icon_viewer(
+			sim != null and sim.local_player_radio_request_icon_viewer())
 
 
 # Mission effects feed the HUD's text surfaces. Drained effects carry
@@ -1227,14 +1195,14 @@ func handle_chat_key(key: InputEventKey) -> bool:
 ## runs the rest (the restart's splash re-run, the event-12 pick). Null with no
 ## player presenter. The chain reads the key's one VK, the layout's (Godot's keycode,
 ## else the physical key), as the key queue and the binding scan do, over `session`
-## (the shell's world view's; null = the player presenter's world's).
+## (the shell's world view's; null = the player presenter's world's), and the quit
+## dialog's keys off the gametext this presenter hands the player presenter
+## (engine hud::hud_key_press_keys).
 func handle_special_key(key: InputEventKey, session: Simulation = null) -> SpecialKeyOutcome:
 	if _player_presenter == null:
 		return null
 	var vk := ControlsModel.vk_from_godot_key(ArmoryPresenter.bound_key_of(key))
-	var outcome: SpecialKeyOutcome = _player_presenter.special_key(session, vk,
-			_key_press_vk("STRKEYPRESS_YES", "Y"), _key_press_vk("STRKEYPRESS_NO", "N"),
-			_key_press_vk("STRKEYPRESS_RESTART", "R"))
+	var outcome: SpecialKeyOutcome = _player_presenter.special_key(session, vk)
 	if outcome.is_quit_confirmed():
 		quit_confirmed.emit()
 	var forward := outcome.is_page_forward()
@@ -1252,41 +1220,9 @@ func handle_special_key(key: InputEventKey, session: Simulation = null) -> Speci
 	return outcome
 
 
-## The KeyPress gametext key's code: its first character as written, the
-## default letter when the table lacks it or the string is empty (engine
-## hud_toggles.h HudQuitDialogKeyInput carries the witness).
-func _key_press_vk(key: String, fallback: String) -> int:
-	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	var text := fallback
-	if t != null and t.has_string_in_section("KeyPress", key):
-		var s := t.get_string_in_section("KeyPress", key)
-		if not s.is_empty():
-			text = s
-	return text.unicode_at(0)
-
-
 ## The connection mode's two bits by role (engine HudKeyPoll): single player
 ## and a listen host carry both, a joiner only the peer bit, a dedicated host
 ## only the authority bit.
-## One poll of the HUD binding rows over the frame's own sample, for a
-## presenter with no player input router (PlayerInputRouter::poll_hud_toggles
-## is the per-input-frame poll and carries the witness); the event bits.
-func _poll_toggle_rows(sim: Simulation, gameplay_input_active: bool) -> int:
-	var rows_down := 0
-	for row in HudToggles.ROW_COUNT:
-		if ControlsBindings.pressed(HudToggles.row_token(row)):
-			rows_down |= 1 << row
-	# The mousescale row's step direction is its fire's sign bit (Shift on a
-	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
-	return _toggles.poll(rows_down,
-			gameplay_input_active, sim.is_mp_session(),
-			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
-			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
-			ControlsBindings.model().is_token_fire_signed(
-					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)),
-			0, HudToggles.sim_death_screen(sim), HudToggles.sim_friendly_tags_skip_mode_1(sim))
-
-
 static func _authority(sim: Simulation) -> bool:
 	return sim.session_role() != Simulation.ROLE_JOINER
 
@@ -1627,7 +1563,7 @@ func _apply_fp_gun_visible() -> void:
 
 
 # The objectives panel: the sim's shown win-condition rows resolved through
-# the mission text table by the overlay's own fill (Simulation.fill_objectives
+# the mission text table by the overlay's engine fill (world::fill_objective_rows
 # carries the witness); the toggle's off state clears the panel.
 func _apply_objectives() -> void:
 	if _game_hud == null:

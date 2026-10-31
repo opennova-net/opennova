@@ -12,6 +12,8 @@
 
 namespace opennova::mission {
 
+// The +100000 item-id bias of the BMS entity records: an items.def id is the
+// record's type id plus this offset.
 constexpr int kItemIdOffset = 100000;
 constexpr size_t kMaxWaypointPathMarkers = 32;
 

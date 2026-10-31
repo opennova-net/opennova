@@ -311,6 +311,48 @@ bool slot_entity_flags_zero(uint32_t flags, uint32_t engine_flags, int item_type
 	return (flags | engine_flags | vehicle_reflectable) == 0;
 }
 
+SlotCaptureSurface slot_capture_surface(const ObjectMaterialClassification &classification,
+		bool detail_resolved, bool skinned) {
+	SlotCaptureSurface surface;
+	ObjectShaderKey key = build_object_shader_key(classification);
+	if (!detail_resolved) {
+		key &= ~OSCAP_DETAIL;
+	}
+	const ObjectShaderPipelineDescriptor pipeline = describe_object_shader_pipeline(key);
+	surface.policy = object_projected_shadow_policy(pipeline.technique);
+	surface.coverage = object_projected_shadow_coverage(pipeline.technique);
+	if (surface.policy == ObjectProjectedShadowPolicy::NoPass ||
+			surface.coverage == ObjectProjectedShadowCoverage::NoPass ||
+			(surface.policy == ObjectProjectedShadowPolicy::MaterialBlend &&
+					classification.blend == ObjectBlendMode::Additive)) {
+		return surface;
+	}
+	surface.draws = true;
+	surface.alpha_test_value = classification.alpha_test_value;
+	if (classification.alpha_test) {
+		surface.flags |= kSlotCaptureAlphaTest;
+	}
+	if (classification.alpha_test_invert) {
+		surface.flags |= kSlotCaptureAlphaInvert;
+	}
+	if (surface.coverage == ObjectProjectedShadowCoverage::DiffuseAlphaFfp ||
+			surface.coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp) {
+		surface.flags |= kSlotCaptureAlphaMod;
+	}
+	if (surface.coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp) {
+		surface.flags |= kSlotCaptureDetailAlpha;
+	}
+	if (skinned) {
+		surface.flags |= kSlotCaptureSkinned;
+	}
+	surface.state = object_projected_shadow_pipeline_state(surface.policy, classification.blend,
+			classification.is_two_sided);
+	if (surface.state.blend.enabled) {
+		surface.flags |= kSlotCaptureBlendCoverage;
+	}
+	return surface;
+}
+
 std::array<float, 2> march_shadow_anchor(const std::array<float, 3> &start,
 		const std::array<float, 3> &direction,
 		const std::function<float(float, float)> &terrain_height,
@@ -443,6 +485,23 @@ std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> shadowztex_pixels() {
 	return px;
 }
 
+SlotDrapeTexgen slot_drape_texgen(const SlotCaptureViewAxes &axes,
+		const std::array<float, 3> &center, float half_extent) {
+	const float inv = 1.0f / (2.0f * std::max(half_extent, 0.001f));
+	SlotDrapeTexgen texgen;
+	float x_dot_c = 0.0f;
+	float y_dot_c = 0.0f;
+	for (int i = 0; i < 3; ++i) {
+		texgen.u_axis[i] = axes.x[i] * inv;
+		texgen.v_axis[i] = -axes.y[i] * inv;
+		x_dot_c += axes.x[i] * center[i];
+		y_dot_c += axes.y[i] * center[i];
+	}
+	texgen.u_offset = 0.5f - x_dot_c * inv;
+	texgen.v_offset = 0.5f + y_dot_c * inv;
+	return texgen;
+}
+
 SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
 		float half_size, bool person, const std::array<float, 3> &entity_pos) {
 	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d66..0x5d5de1 — two copies
@@ -485,9 +544,9 @@ SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
 
 static bool slot_excluded(const SlotCandidateState &state) {
 	// [orig: RenderSlot_SortAndAssign @ 0x5d6581..0x5d6627 —
-	// hidden (Flags & 1), seat-parented, or standing on a vehicle; the
-	// silhouette-render leg re-checks the same predicates
-	// @ 0x5d774e..0x5d77b3].
+	// hidden (Flags & 1), seat-parented, or a vehicle standing on a vehicle
+	// (slot_rides_vehicle); the silhouette-render leg re-checks the same
+	// predicates @ 0x5d774e..0x5d77b3].
 	return state.hidden || state.seat_parented || state.on_vehicle;
 }
 

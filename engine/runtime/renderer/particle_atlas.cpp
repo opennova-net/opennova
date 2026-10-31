@@ -422,7 +422,9 @@ ParticleAtlasBuild ParticleAtlasBuilder::build() const {
 				page.rgba[destination + 1] = frame.image.rgba[source + 1];
 				page.rgba[destination + 2] = frame.image.rgba[source + 2];
 				// Type 1 alpha is cleared per source before the stable-order
-				// blit. A type 2 source on the same compatible page retains it.
+				// blit, so an additive layer adds at full strength whatever its
+				// alpha curve [orig: CParticleManager_BuildTextureAtlases
+				// @ 0x5e9116]. A type 2 source on the same compatible page retains it.
 				page.rgba[destination + 3] = frame.type == 1
 						? 0 : frame.image.rgba[source + 3];
 			}

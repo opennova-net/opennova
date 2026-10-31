@@ -5,9 +5,9 @@
 namespace godot {
 
 // The renderer's visual-layer allocation: one contract shared by the beauty
-// camera mask (render/frame_fx), the sun-shadow light masks (env/sun_shadow),
-// the environment-cube capture (env/environment_cube_capture), the placed
-// object layers (mission/mission_object_placer), the terrain foliage blanket
+// camera mask (render/frame_fx), the environment-cube capture
+// (env/environment_cube_capture), the placed object layers
+// (mission/mission_object_placer), the terrain foliage blanket
 // (terrain/foliage_dispatcher), the terrain flat fallback (terrain/terrain),
 // the water mirror (env/water), the weapon Inset scene camera
 // (hud/hud_inset_scope) and the FirstPerson particle batch, which rides the
@@ -27,7 +27,6 @@ enum : uint32_t {
 	FP_BODY_SHADOW_ONLY = 1u << 12,
 	STATIC_SHADOW_CASTER = 1u << 13,
 	DYNAMIC_SHADOW_CASTER = 1u << 14,
-	TERRAIN_SHADOW_RECEIVER = 1u << 15,
 	WORLD_NO_MIRROR = 1u << 16,
 	// The foliage detail blanket rides its own bit (alone, inside the 20-bit
 	// default mask): retail's reflection prerender hands PolyTrn a context

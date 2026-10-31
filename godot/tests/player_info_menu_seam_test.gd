@@ -85,7 +85,7 @@ func _built_dfx2_spin_screen(companion: PlayerInfoMenuCompanion, voice := false)
 	if root == null:
 		return null
 	var driver := MenuDriver.new()
-	assert_true(driver.open_document(_spin_screen_doc(voice), root, null, null, "player.mnu"),
+	assert_true(driver.open_document(_spin_screen_doc(voice), root, null, "player.mnu"),
 			"the document opens over the dfx2 root")
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
 	return driver
@@ -131,7 +131,7 @@ func _make_framed_avatar_driver() -> MenuDriver:
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
 	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml()),
-			null, null, null, "player.mnu"), "the document opens on the frame")
+			null, null, "player.mnu"), "the document opens on the frame")
 	return driver
 
 
@@ -267,22 +267,6 @@ func test_join_profile_carries_an_unresolved_sides_record_word() -> void:
 	assert_eq(no_table.get_player_class(1), 7, "no table: CTB is still the class byte")
 
 
-func test_owns_menu_detects_player_info() -> void:
-	var companion := PlayerInfoMenuCompanion.new()
-	assert_true(companion.owns_menu(_make_avatar_driver()),
-			"a menu holding the PLAYER_INFO screen is the character screen")
-	# dfx2.exe's player.mnu: no NATIONALITY or DIVISION, COMBO_LIST a spin list; the screen's
-	# name claims it all the same.
-	var spin := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self,
-			MenuDriverFixture.screen_xml("PLAYER_INFO", MenuDriverFixture.wnd("spinlist", "COMBO_LIST", 10)
-			+ MenuDriverFixture.wnd("button", "ACCEPT", 40))), "player.mnu")
-	assert_true(companion.owns_menu(spin), "the PLAYER_INFO screen without its nationality lists")
-	var elsewhere := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self,
-			MenuDriverFixture.screen_xml("PLAIN", _avatar_body())), "plain.mnu")
-	assert_false(companion.owns_menu(elsewhere),
-			"the character controls on a screen of another name are left to the shell")
-
-
 func test_populates_avatar_lists_and_combo_label() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	var db := _load_db()
@@ -408,7 +392,7 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
 	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
-			null, null, null, "player.mnu"), "the preview document opens on the driver")
+			null, null, "player.mnu"), "the preview document opens on the driver")
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
 	# No resource root, so the preview mounts but loads no .3di (graceful); we only
@@ -444,7 +428,7 @@ func test_the_portrait_hovers_as_its_title_does() -> void:
 		var driver := MenuDriver.new()
 		driver.attach(frame, null)
 		assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
-				root if game_code != "" else null, null, null, "player.mnu"), "the document opens")
+				root if game_code != "" else null, null, "player.mnu"), "the document opens")
 		var companion := PlayerInfoMenuCompanion.new()
 		companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
 		var preview := frame.find_child("PlayerInfoAvatarPreview", true, false) as AvatarPreview
@@ -465,7 +449,7 @@ func test_preview_render_activity_follows_visibility() -> void:
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
 	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
-			null, null, null, "player.mnu"), "the preview document opens on the driver")
+			null, null, "player.mnu"), "the preview document opens on the driver")
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
@@ -499,7 +483,7 @@ func test_release_frees_the_preview_mount() -> void:
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
 	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
-			null, null, null, "player.mnu"), "the preview document opens on the driver")
+			null, null, "player.mnu"), "the preview document opens on the driver")
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
@@ -970,7 +954,7 @@ func _make_loadout_driver(with_frame := false) -> MenuDriver:
 		add_child_autofree(frame)
 		driver.attach(frame, null)
 	assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _loadout_screen_xml()),
-			null, null, null, "player.mnu"), "the loadout document opens on the driver")
+			null, null, "player.mnu"), "the loadout document opens on the driver")
 	return driver
 
 
@@ -1905,7 +1889,7 @@ func test_voice_preview_requests_selected_avatar_voice() -> void:
 
 	var doc := _assets_player_doc()
 	var driver := MenuDriver.new()
-	assert_true(driver.open_document(doc, root, null, null, "player.mnu", "PLAYER_INFO"),
+	assert_true(driver.open_document(doc, root, null, "player.mnu", "PLAYER_INFO"),
 		"the authored player menu opens on the driver")
 
 	var companion := PlayerInfoMenuCompanion.new()

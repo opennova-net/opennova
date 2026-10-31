@@ -20,46 +20,13 @@
 // drain aggregate (ADR 0043 d10), Godot-space positions on read. The C++
 // DestructionPresenter reads the engine DestructionEvents directly; these
 // records exist for the pass's public data leg, which the present-pass tests
-// and the retail parity probe author through the static make() factories.
+// author through the static make() factories. The effect rows are the engine's
+// own (world::DestructionEmitters spawns them in the world's scene): no drain
+// carries them.
 // Identity defaults follow the engine (EntityHandle::kInvalid,
 // kSpawnOriginNone) so an unattached row reads as one.
 
 namespace godot {
-
-// One .ptl effect roll: transient (family 0) or one of the attached wreck
-// families (1 death, 2 fire, 3 other) keyed to its owner entity.
-class DestructionEffectEvent : public RefCounted {
-	GDCLASS(DestructionEffectEvent, RefCounted)
-
-	opennova::world::DestructionEffectEvent value_;
-
-protected:
-	static void _bind_methods();
-
-public:
-	void assign(const opennova::world::DestructionEffectEvent &p_value) { value_ = p_value; }
-	const opennova::world::DestructionEffectEvent &value() const { return value_; }
-	static Ref<DestructionEffectEvent> make(const String &p_effect, const Vector3 &p_pos,
-			int p_family, const Vector3 &p_dir, int p_attach_net_id, int p_attach_bms_id,
-			int p_attach_wire_handle, int64_t p_attach_spawn_origin, bool p_release,
-			int p_bank_slot = 0, const Vector3 &p_local_pos = Vector3(),
-			bool p_section_tagged = false, bool p_positioned = false);
-
-	String get_effect() const;
-	Vector3 get_pos() const;
-	Vector3 get_dir() const;
-	bool get_release() const { return value_.release; }
-	bool get_section_tagged() const { return value_.section_tagged; }
-	bool get_positioned() const { return value_.positioned; }
-	int get_bank_slot() const { return value_.bank_slot; }
-	int get_family() const { return static_cast<int>(value_.family); }
-	int get_attach_net_id() const { return static_cast<int>(value_.attach_net_id); }
-	int get_attach_bms_id() const { return value_.attach_bms_id; }
-	int get_attach_wire_handle() const { return static_cast<int>(value_.attach_wire_handle); }
-	int64_t get_attach_spawn_origin() const {
-		return static_cast<int64_t>(value_.attach_spawn_origin);
-	}
-};
 
 // One husked entity: the present pass swaps its render model to the husk.
 class HuskSwapEvent : public RefCounted {
@@ -106,8 +73,8 @@ public:
 	void assign(const opennova::world::DestructionEvents &p_value);
 	const opennova::world::DestructionEvents &value() const { return value_; }
 	static Ref<DestructionDrain> make(const TypedArray<HuskSwapEvent> &p_husk_swaps,
-			const TypedArray<DestructionEffectEvent> &p_effects, int p_debris_triangles,
-			int p_crackles, const PackedVector3Array &p_death_light_positions,
+			int p_debris_triangles, int p_crackles,
+			const PackedVector3Array &p_death_light_positions,
 			const PackedFloat32Array &p_death_light_radii);
 
 	int get_explosions_processed() const { return value_.explosions_processed; }
@@ -118,7 +85,6 @@ public:
 	PackedVector3Array get_sound_positions() const;
 	PackedVector3Array get_death_light_positions() const;
 	PackedFloat32Array get_death_light_radii() const;
-	TypedArray<DestructionEffectEvent> get_effects() const;
 	TypedArray<HuskSwapEvent> get_husk_swaps() const;
 };
 

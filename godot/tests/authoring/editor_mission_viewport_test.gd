@@ -1692,8 +1692,8 @@ func test_the_device_draws_the_games_foliage_effects_and_lights() -> void:
 
 ## S26 (B1-B7, B12): the device draws the mission's world as the game's scene stack holds
 ## it (WorldScene's rows under game_world.tscn's names: the sun, moon, glare and glint, the
-## weather bound to the environment, the drops, the cube, FrameFx the one display decode; no
-## SunShadow), its weather started as a mission's start starts it and ticked on the preview
+## weather bound to the environment, the drops, the cube, FrameFx the one display decode), its
+## weather started as a mission's start starts it and ticked on the preview
 ## clock, the clock standing at the hour shown, and the body words the environment it draws.
 func test_the_device_draws_the_games_world() -> void:
 	if _app == null:
@@ -1704,7 +1704,6 @@ func test_the_device_draws_the_games_world() -> void:
 	var rows := ["Celestial", "Weather", "Precipitation", "EnvironmentCubeCapture", "FrameFx"]
 	for type in rows + ["SlotShadow"]:
 		assert_not_null(_device_node(state, type), "the device holds the game's %s" % type)
-	assert_null(_device_node(state, "SunShadow"), "no simulation drives a sun shadow here")
 	assert_null(_device_node(state, "DisplayDecode"), "FrameFx is the one decode")
 	var weather: Weather = _device_node(state, "Weather")
 	assert_not_null(weather)
@@ -1988,9 +1987,9 @@ func test_a_shot_swaps_in_the_husk() -> void:
 
 ## DI-36: the Listen. The fixture's four waypoint markers made the game's env-sound emitters of a set the
 ## project's bank holds: listening near one, the viewport's mix binds each marker's layer to one of the game's
-## channels, and the device plays each looping at its marker (an AudioStreamPlayer3D under its world, no
-## attenuation: the mix's volume; the device's camera the listener), held paused while its picture is not drawn
-## (a headless run draws none); off, the device lets its voices go.
+## channels, and the device plays each looping on the engine mixer's emitter channel of its number (the mix's
+## volume, panned by its bearing from the device's camera), held silent while its picture is not drawn (a
+## headless run draws none); off, the device lets its voices go.
 func test_the_listen_plays_the_mixs_channels() -> void:
 	if _app == null:
 		return
@@ -2002,7 +2001,6 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 	assert_not_null(device)
 	if device == null:
 		return
-	assert_true(device.is_audio_listener_3d(), "the device's camera is its world's listener")
 	assert_true(_change({"kind": "mission", "camera": {"target": [-190, -200, 0], "pitch": 60, "distance": 10},
 			"options": {"time": 12, "listen": {"on": true}}}))
 	var listen := {}
@@ -2020,40 +2018,24 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 		assert_eq(String((channel as Dictionary).get("source", "")), "marker")
 		assert_eq(String((channel as Dictionary).get("path", "")), "sounds/tone.wav")
 	assert_eq(int(listen.get("sources", {}).get("playing", 0)), 4, str(listen.get("sources", {})))
-	# The device plays them: a looping, unattenuated voice a channel, at the channel's place.
-	var voices: Array[Node] = []
+	# The device plays them: a looping voice a channel on the mixer, which the viewport reports.
+	var drawn: Dictionary = {}
 	for _frame in 120:
 		_app.pump()
 		await get_tree().process_frame
-		voices = device.find_children("ListenChannel*", "AudioStreamPlayer3D", true, false)
-		if voices.size() >= 4:
+		drawn = _state().get("body", {}).get("drawn", {}).get("listen", {})
+		if int(drawn.get("voices", 0)) >= 4:
 			break
-	assert_eq(voices.size(), 4, "a voice a channel")
-	# What the device reports reaches the viewport at the next pump.
-	_app.pump()
-	var drawn: Dictionary = _state().get("body", {}).get("drawn", {}).get("listen", {})
-	assert_eq(int(drawn.get("voices", 0)), 4, str(drawn))
+	assert_eq(int(drawn.get("voices", 0)), 4, "a voice a channel: %s" % str(drawn))
 	# Sounding while its picture is drawn, held while not (a headless run draws none).
 	var audible := bool(drawn.get("audible", false))
 	assert_eq(int(drawn.get("playing", -1)), 4 if audible else 0, str(drawn))
-	var at := MissionObjectPlacer.bms_to_godot_position(Vector3(-200, -200, 0))
-	for voice: Node in voices:
-		var player := voice as AudioStreamPlayer3D
-		assert_eq(player.attenuation_model, AudioStreamPlayer3D.ATTENUATION_DISABLED)
-		assert_eq(player.bus, &"Ambient", "the game's ambient bus")
-		assert_eq((player.stream as AudioStreamWAV).loop_mode, AudioStreamWAV.LOOP_FORWARD)
-		assert_true(player.volume_db <= 0.0, "the mix's volume, the game's")
-	var near := 0
-	for voice: Node in voices:
-		near += 1 if (voice as AudioStreamPlayer3D).position.distance_to(at) < 0.01 else 0
-	assert_eq(near, 1, "one voice at the marker the camera looks at")
 	# Off: the voices go.
 	assert_true(_change({"kind": "mission", "options": {"listen": {"on": false}}}))
 	for _frame in 4:
 		_app.pump()
 		await get_tree().process_frame
 	assert_eq(_state().get("body", {}).get("listen"), null, "off: no listen")
-	assert_eq(device.find_children("ListenChannel", "AudioStreamPlayer3D", true, false).size(), 0, "off: no voice")
 
 
 ## S23 C: the mission's 2D map (kind "map"), the Preview window's beside the 3D view, the state of it.

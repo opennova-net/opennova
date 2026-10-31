@@ -12,6 +12,7 @@
 #include <base/io/fixed.h>
 
 #include <runtime/renderer/aspect_ratio.h>
+#include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/renderer/nvg_scope_lens.h>
 #include <runtime/terrain_query/height_field.h>
@@ -768,6 +769,15 @@ float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg) {
     const float fp = std::tan(renderfov_h_deg * kHalfDegToRad);
     if (fp <= 0.0f) return 1.0f;
     return std::tan(world_fov_h_deg * kHalfDegToRad) / fp;
+}
+
+ViewmodelProjectionFeed viewmodel_projection_feed(float world_fov_h_deg, float renderfov_h_deg,
+                                                  float far_z) {
+    ViewmodelProjectionFeed out;
+    out.focal_ratio = viewmodel_focal_ratio(world_fov_h_deg, renderfov_h_deg);
+    out.near_z = renderer::kViewmodelPassNearZ;
+    out.far_z = far_z;
+    return out;
 }
 
 void player_view_bias_units(const PlayerViewState &v, const float pos[3], float out[3]) {

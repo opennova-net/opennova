@@ -8,7 +8,6 @@
 #include "object/weapon_database.h"
 #include "player/local_player_presenter.h"
 #include "resource_index/resource_root.h"
-#include "simulation/fp_viewmodel_spec.h"
 #include "simulation/player_inventory.h"
 #include "simulation/simulation.h"
 #include "simulation/weapon_kit_entry.h"
@@ -26,6 +25,20 @@
 
 using namespace godot;
 using opennova::to_std;
+
+namespace {
+
+// The engine's submit spec over the presented def and the resolved character.
+opennova::renderer::FpViewmodelSpec viewmodel_spec(const Ref<PlayerViewmodelDef> &p_def,
+		const Ref<PlayerVisualSpec> &p_character) {
+	return opennova::renderer::fp_viewmodel_spec(p_def.is_valid(),
+			p_def.is_valid() ? to_std(p_def->get_gfx1()) : std::string(),
+			p_character.is_valid() ? to_std(p_character->get_arms()) : std::string(),
+			p_def.is_valid() ? to_std(p_def->get_animadm()) : std::string(),
+			static_cast<uint32_t>(p_def.is_valid() ? p_def->get_flags() : 0));
+}
+
+} // namespace
 
 void LocalPlayerVisuals::setup(Node *p_world) {
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
@@ -128,10 +141,11 @@ ObjectModel *LocalPlayerVisuals::build_local_player_held_weapon(const String &p_
 
 void LocalPlayerVisuals::present_local_player_person_overlays(PersonOverlayModels &p_overlays,
 		const opennova::world::PersonOverlays &p_state, ObjectModel *p_avatar,
-		bool p_body_drawn, PersonOverlayModels::Presentation p_presentation) {
+		const Transform3D &p_avatar_world, bool p_body_drawn,
+		PersonOverlayModels::Presentation p_presentation) {
 	const Ref<MissionObjectPlacer> mission_placer = placer();
-	p_overlays.present(p_state, p_avatar, p_body_drawn, mission_placer.ptr(), world_node3d(),
-			p_presentation);
+	p_overlays.present(p_state, p_avatar, p_avatar_world, p_body_drawn, mission_placer.ptr(),
+			world_node3d(), p_presentation);
 }
 
 ObjectModel *LocalPlayerVisuals::build_local_player_avatar(int p_type_id) {
@@ -173,7 +187,6 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 		const int stride = challenge_sim->get_present_stride();
 		const PackedFloat32Array snapshot = challenge_sim->get_present_snapshot();
 		HashSet<int> warmed_types;
-		PackedInt32Array warmed_order;
 		if (stride >= Simulation::PF_STRIDE) {
 			const int64_t rows = snapshot.size() / stride;
 			for (int64_t row = 0; row < rows; ++row) {
@@ -182,7 +195,6 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 					continue;
 				}
 				warmed_types.insert(runtime_type_id);
-				warmed_order.push_back(runtime_type_id);
 				const int visual_item_id = mission_placer->resolve_player_visual_item_id(runtime_type_id);
 				const String wire_graphic = mission_placer->graphic_for(visual_item_id);
 				if (!wire_graphic.is_empty()) {
@@ -191,30 +203,8 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 				}
 			}
 		}
-		// The header-only join learned its entity types from the stream after
-		// MissionRoot's ordinary mission-body setup. Resolve the model-derived
-		// seat/emplacement table and world collision/trait consumers now,
-		// before admission and before the loaded-model challenge page freezes.
-		const Ref<MissionData> mission = loaded_mission();
-		if (mission.is_valid() && mission->is_wire_header_only()) {
-			const Ref<ItemDatabase> item_db = mission_placer->get_item_db();
-			if (item_db.is_valid()) {
-				// S16: the native extractor reads model userpoints through the
-				// sim's own parse cache, so the asset root wires FIRST (the
-				// shell extractor that read models render-side is gone).
-				const Ref<ResourceRoot> root_dir = resource_root();
-				if (root_dir.is_valid()) {
-					challenge_sim->set_asset_root(root_dir);
-				}
-				challenge_sim->install_seat_specs_for_type_ids(item_db, warmed_order);
-				challenge_sim->resolve_item_traits(item_db);
-				// The rows' class init slot leg, now that their weapon names and models are in
-				// (engine: inmatch::JoinerRole::run_streamed_weapon_slot_class_inits).
-				challenge_sim->run_join_streamed_weapon_slot_class_inits();
-				challenge_sim->resolve_collision_instances(item_db);
-				challenge_sim->occlusion_init_mission();
-			}
-		}
+		// A header-only join's stream types take their model-derived legs past this warm, ahead
+		// of the freeze (engine inmatch/joiner_boot.h settle_streamed_types, run by the load).
 	}
 	const int player_visual_item_id = mission_placer->resolve_player_visual_item_id(
 			local_player_type_id());
@@ -229,17 +219,14 @@ PackedStringArray LocalPlayerVisuals::prewarm_loaded_model_challenge_definitions
 	}
 	const Ref<PlayerViewmodelDef> def = local_player_viewmodel_def();
 	const Ref<PlayerVisualSpec> character_spec = local_player_visual_spec();
-	const Ref<FpViewmodelSpec> spec = Simulation::fp_viewmodel_spec(def.is_valid(),
-			def.is_valid() ? def->get_gfx1() : String(),
-			character_spec.is_valid() ? character_spec->get_arms() : String(),
-			def.is_valid() ? def->get_animadm() : String(), def.is_valid() ? def->get_flags() : 0);
-	if (!spec->get_gun().is_empty()) {
-		mission_placer->object_data_for(spec->get_gun());
-		resolved.push_back(spec->get_gun());
+	const opennova::renderer::FpViewmodelSpec spec = viewmodel_spec(def, character_spec);
+	if (!spec.gun.empty()) {
+		mission_placer->object_data_for(String(spec.gun.c_str()));
+		resolved.push_back(String(spec.gun.c_str()));
 	}
-	if (spec->get_show_arms() && !spec->get_arms().is_empty()) {
-		mission_placer->object_data_for(spec->get_arms());
-		resolved.push_back(spec->get_arms());
+	if (spec.show_arms && !spec.arms.empty()) {
+		mission_placer->object_data_for(String(spec.arms.c_str()));
+		resolved.push_back(String(spec.arms.c_str()));
 	}
 	return resolved;
 }
@@ -273,10 +260,10 @@ bool LocalPlayerVisuals::set_local_player_weapon_by_name(const String &p_weapon_
 	if (mount_sim.is_valid()) {
 		// One-step native mount (S6b, ADR 0028): the sim bakes the FSM from
 		// its RETAINED weapon.def row and seeds the clip rings from the rig's
-		// own .adm -- the mount is not hostage to the FP model load, matching
-		// the retail ACCEPT chain exactly [orig: WeaponSlotTable_LoadAllFromDefs
-		// @0x5414e0 + Player_MountWeaponSlot @0x4dfa40; the FP model resolve is
-		// a separate per-frame render consumer @0x4ded60].
+		// own .adm -- the mount is not hostage to the FP model load, as
+		// retail's ACCEPT chain mounts before any model resolves (the engine's
+		// mount carries the witness; the FP model resolve is a per-frame render
+		// consumer, renderer::fp_viewmodel_spec).
 		if (!mount_sim->install_local_player_weapon_by_name(p_weapon_name, local_weapon_preserve_slot_state_)) {
 			UtilityFunctions::push_warning(
 					vformat("GameWorld: sim has no retained weapon.def row for '%s'", p_weapon_name));
@@ -400,30 +387,23 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	container->set_name("PlayerViewmodel");
 	parent->add_child(container);
 	// anim_wpn_idle = the FP holding pose; without it the arms sit in their
-	// bind/T-pose. The environment: the viewmodel lights/fogs with the live
-	// TOD like every entity (retail draws the FP model through the same
-	// lighting constants (engine: runtime/renderer/fp_viewmodel_spec.h)).
-	// The submit spec (gun/arms/clip-adm + the emplaced arms omission)
-	// resolves natively (renderer::fp_viewmodel_spec): a def with no fpModel
-	// submits nothing. (engine: runtime/renderer/fp_viewmodel_spec.h)
+	// bind/T-pose. The viewmodel lights/fogs with the live TOD like every
+	// entity. The submit spec (gun/arms/clip-adm/rig + the emplaced arms
+	// omission) is the engine's (renderer::fp_viewmodel_spec): a def with no
+	// fpModel submits nothing, and both submits pose by the gun's part table
+	// while the clip set supplies the clips.
 	const Ref<PlayerVisualSpec> character_spec = local_player_visual_spec();
-	const Ref<FpViewmodelSpec> spec = Simulation::fp_viewmodel_spec(def.is_valid(),
-			def.is_valid() ? def->get_gfx1() : String(),
-			character_spec.is_valid() ? character_spec->get_arms() : String(),
-			def.is_valid() ? def->get_animadm() : String(), def.is_valid() ? def->get_flags() : 0);
-	const String gun_name = spec->get_gun();
-	const String arms_name = spec->get_arms();
-	const String adm_name = spec->get_adm();
-	const bool show_arms = spec->get_show_arms();
-	// Both submits reuse the equipped GUN's model table, while `adm_name`
-	// supplies the clips. Some valid retail sets differ (M21B_1st: 42 parts,
-	// M21_1st: 40); sizing from the ADM basename truncates late animated parts
-	// such as the M14 magazine. [orig: @0x4ded60]
+	const opennova::renderer::FpViewmodelSpec spec = viewmodel_spec(def, character_spec);
+	const String gun_name(spec.gun.c_str());
+	const String arms_name(spec.arms.c_str());
+	const String adm_name(spec.adm.c_str());
+	const String rig_name(spec.rig.c_str());
+	const bool show_arms = spec.show_arms;
 	ObjectModel *arms = show_arms
-			? mission_placer->build_model_from_graphic(arms_name, adm_name, container, "anim_wpn_idle", gun_name)
+			? mission_placer->build_model_from_graphic(arms_name, adm_name, container, "anim_wpn_idle", rig_name)
 			: nullptr;
 	ObjectModel *gun = !gun_name.is_empty()
-			? mission_placer->build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", gun_name)
+			? mission_placer->build_model_from_graphic(gun_name, adm_name, container, "anim_wpn_idle", rig_name)
 			: nullptr;
 	// Each missing model is reported once a mission, never per build or
 	// frame: retail reports a weapon.def model that fails to load once, at
@@ -449,8 +429,8 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	local_viewmodel_parts_.clear();
 	if (arms != nullptr) {
 		// The arms' own raw camo triplet, stored by the rig's per-submit FP
-		// writer alongside TEX_TEAM/HEAT_GLOW [orig: Avatar_SetArmsCamoCtrl
-		// @0x57a3b0 immediately before each FP arms submit @0x4df008/@0x4df070].
+		// writer alongside TEX_TEAM/HEAT_GLOW (world::fp_ctrl_register_writes
+		// carries the witness).
 		arms->set_avatar_part(ObjectModel::AVATAR_PART_ARMS);
 		arms->set_graphic_name(arms_name);
 		arms->set_avatar_camo(character_spec.is_valid() ? character_spec->get_arms_camo() : Vector3i());
@@ -485,8 +465,7 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	// presentation epoch: returning its container keeps the caller from
 	// rebuilding every frame or substituting a different weapon. The FSM and
 	// its clip rings installed natively at ACCEPT time (S6b) -- the model
-	// resolve is purely presentational, as in retail [orig: the FP model
-	// resolve @0x4ded60 is a render consumer, not a mount].
+	// resolve is purely presentational, a render consumer, not a mount.
 	return container;
 }
 
@@ -518,20 +497,19 @@ int LocalPlayerVisuals::build_viewmodel_pipeline_warm(Node3D *p_parent, int p_ty
 	// The spec and the two builds are build_local_player_viewmodel's, the character the warm's.
 	const Ref<PlayerVisualSpec> character_spec =
 			mission_placer->resolve_player_visual_spec(p_type_id, p_character_id);
-	const Ref<FpViewmodelSpec> spec = Simulation::fp_viewmodel_spec(true, def->get_gfx1(),
-			character_spec.is_valid() ? character_spec->get_arms() : String(), def->get_animadm(),
-			def->get_flags());
-	const String gun_name = spec->get_gun();
+	const opennova::renderer::FpViewmodelSpec spec = viewmodel_spec(def, character_spec);
+	const String gun_name(spec.gun.c_str());
 	if (gun_name.is_empty()) {
 		return 0;
 	}
-	const String arms_name = spec->get_arms();
-	const String adm_name = spec->get_adm();
+	const String arms_name(spec.arms.c_str());
+	const String adm_name(spec.adm.c_str());
+	const String rig_name(spec.rig.c_str());
 	ObjectModel *const parts[] = {
-		spec->get_show_arms() && !arms_name.is_empty()
-				? mission_placer->build_model_from_graphic(arms_name, adm_name, p_parent, "anim_wpn_idle", gun_name)
+		spec.show_arms && !arms_name.is_empty()
+				? mission_placer->build_model_from_graphic(arms_name, adm_name, p_parent, "anim_wpn_idle", rig_name)
 				: nullptr,
-		mission_placer->build_model_from_graphic(gun_name, adm_name, p_parent, "anim_wpn_idle", gun_name),
+		mission_placer->build_model_from_graphic(gun_name, adm_name, p_parent, "anim_wpn_idle", rig_name),
 	};
 	int built = 0;
 	for (ObjectModel *part : parts) {

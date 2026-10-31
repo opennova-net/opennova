@@ -1,33 +1,27 @@
 #pragma once
 
-#include <godot_cpp/classes/audio_stream_player.hpp>
-#include <godot_cpp/classes/audio_stream_player3d.hpp>
-#include <godot_cpp/classes/audio_stream_wav.hpp>
-#include <godot_cpp/classes/node.hpp>
-#include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object_id.hpp>
-#include <godot_cpp/templates/hash_map.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
-#include <godot_cpp/variant/string_name.hpp>
-#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <cmath>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <formats/lwf/lwf.h>
+#include <runtime/audio/mixer.h>
 #include <runtime/audio/oneshot_play.h>
-#include <runtime/world/script_voice.h>
+#include <runtime/audio/sound_listener.h>
+#include <runtime/audio/sound_options.h>
 #include <runtime/audio/sound_selector.h>
-#include <runtime/audio/volume_law.h>
-
-#include "audio/ambient_layer.h"
+#include <runtime/world/script_voice.h>
 
 namespace godot {
 
@@ -35,23 +29,16 @@ class LwfData;
 class ResourceRoot;
 class Simulation;
 
-// Runtime playback over one or more loaded .lwf banks (the former
-// sound_bank.gd, ADR 0043 d9). Indexes sound sets by name (case-insensitive
-// across all banks -- the engine's SoundSetIndex), decodes member .wav bytes
-// via WavLoader (cached), and spawns AudioStreamPlayer3D voices. The
-// member-selection state machine (engine-faithful: sequential / random-anchor
-// cycle / random default, one shared ROL-LCG stream) lives in portable C++
-// (engine/runtime/audio, via SoundSelector (engine: runtime/audio/oneshot_play.h)); the one-shot fire decision (the set-range cull, the occlusion
-// inflate and recheck, the per-layer member pick and the fire-time volume) is
-// the engine's oneshot_play plan over the banks read as the engine's
-// formats/lwf structs (LwfData::engine_file). This is the device half: the
-// wave cache, the bus guards, the looping stream copies and the spawned
-// players. See docs/audio/lwf-dbf-sound-re.md.
+// The loaded .lwf banks' device leg (ADR 0043 d9; ADR 0077): the name index over the banks
+// (the engine's SoundSetIndex), the member selection state (SoundSelector), the waves decoded
+// once into the mixer's buffers (runtime/audio/mixer.h MixWave) and the one-shot fires, which
+// the engine plans (oneshot_play: the set-range cull, the occlusion inflate and recheck, the
+// per-layer pick and the fire-time volume) and this opens on the mixer's one-shot channels at the
+// pan and play factor the sound calls give them. See docs/audio/lwf-dbf-sound-re.md.
 class SoundBank : public RefCounted {
 	GDCLASS(SoundBank, RefCounted)
 
 public:
-	// The engine volume byte ceiling and its dB law (engine/runtime/audio/volume_law.h).
 	enum { VOLUME_BYTE_MAX = opennova::audio::kVolumeByteMax };
 
 	// `resource_root` null = menu/isolated-bank use (no VFS reads).
@@ -71,124 +58,47 @@ public:
 	void add_bank(const Ref<LwfData> &p_lwf);
 	bool has_set(const String &p_name) const;
 	PackedStringArray get_set_names() const;
-	// C++-side seam (not bound): the loaded-chain set index the dialog
-	// resolution filters against (runtime/audio/dialog_queue.h).
+	// The loaded-chain set index the dialog resolution filters against (runtime/audio/dialog_queue.h).
 	const opennova::audio::SoundSetIndex &set_index() const { return index_; }
 
-	// Return lightweight layer descriptors for the mission ambient mixer. No WAV
-	// is read or decoded here: placed emitters remain data until one of the eight
-	// physical channels actually needs the layer. The emitter path always uses
-	// member 0 of each layer (engine: runtime/audio/oneshot_play.cpp).
-	TypedArray<AmbientLayer> describe_ambient(const String &p_name);
-	// Resolve a descriptor returned by describe_ambient(). Description and decode
-	// are separate so hundreds of candidates can be ranked while only selected
-	// channel entrants cause VFS reads and WAV decoding.
-	Ref<AudioStreamWAV> resolve_ambient_stream(const Ref<AmbientLayer> &p_layer);
-	// Bind a resolved stream to a reusable physical ambient channel. Playback is
-	// owned by MissionAudio: incumbents continue while new bindings restart, and
-	// the channel's pitch is its emitter word's, which MissionAudio sets (the
-	// layer's member 0 pitch is never played, D-SND-56).
-	static void configure_ambient_player(AudioStreamPlayer3D *p_player,
-			const Ref<AudioStreamWAV> &p_stream, const StringName &p_bus);
+	// A set's layers as the emitter mix takes them as candidates (the engine's
+	// ambient_layer_rows: member 0 of each layer whose wave the root holds); empty for a
+	// set the chain lacks. No wave is read here: a layer decodes only once a channel
+	// takes it.
+	std::vector<opennova::audio::AmbientLayerRow> ambient_layer_rows(const std::string &p_name) const;
+	// A wave as the mixer plays it (its basename through the VFS, decoded once as the game's
+	// loader decodes it, a miss cached): null for none.
+	opennova::audio::MixWaveRef resolve_wave(const String &p_wav_path);
 
-	// Spawn the looping ambient voices for the named sound set at `world_pos`,
-	// parented under `parent`. One AudioStreamPlayer3D per layer, playing the
-	// layer's FIRST member -- the emitter path does not run the selection machine
-	// (it reads layer+16, member 0, as describe_ambient cites) -- at a placed set's
-	// emitter word, 0x10000 (the engine's marker registration,
-	// AmbientMixer::register_set), never the member's pitch (D-SND-56).
-	// Voices spawn SILENT and paused; the caller's mix tick (MissionAudio)
-	// owns audibility via the witnessed distance model over its own candidate
-	// records. Returns the holder Node3D, or null if the set is unknown or no
-	// member resolves to audio.
-	Node3D *spawn_ambient(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
-			const StringName &p_bus);
-	// Fire a one-shot voice for the named set at a world position: the engine's
-	// oneshot_play plan (cull, occlusion, per-layer pick and fire-time volume)
-	// over `listener_pos`, then one auto-freeing player per planned voice whose
-	// wave resolves. Pass Vector3.INF to play distance-flat (menu / tests).
-	// Returns true if anything played. `p_sound_id` is the engine's own-channel
-	// reuse key (audio::oneshot_sound_id): a channel already playing the same
-	// wave for the same key is retaken; 0 plays with no identity.
-	bool play_oneshot_3d(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
-			const StringName &p_bus, const Vector3 &p_listener_pos = Vector3(INFINITY, INFINITY, INFINITY),
-			int p_source_bms_id = 0, int p_sound_id = 0);
-    // Direct WAC/weather trigger: explicit distance controls layer gain; the
-    // position only supplies Godot's panner (D-SND-8). No 3D cull or occlusion.
-    bool play_oneshot_at_distance(Node3D *p_parent, const Vector3 &p_pan_position,
-            const String &p_name, const StringName &p_bus, int64_t p_dist_q16);
-    // Stop this bank's one-shot children on mission retry (the retail restart
-    // reset re-inits the audio channels and IO [orig: Audio_ResetChannelsForRestart @0x527910]
-    // and never frees or reloads a bank; sample buffers are freed only at
-    // teardown [orig: Game_TeardownMission @0x522600 -> sub_527930]). Ambient
-    // and dialog channels retain their own owners; the per-layer selection
-    // state is untouched because the banks stay loaded across a round restart.
-    void reset_oneshots(Node3D *p_parent);
-	// Spawn a one-shot, NON-positional voice for the named set (mission dialog/voice
-	// is centered and full-volume, not 3D-attenuated) and RETURN its
-	// AudioStreamPlayer (the first resolvable layer's voice) without auto-freeing it
-	// -- the caller owns its lifetime and listens for `finished`. Used by the
-	// serialized dialog queue (the engine plays one dialog audio channel at a time:
-	// Dialog_UpdatePlayback @ 0x44e470 only advances when the active channel frees).
-	// Returns null if the set is unknown or no member resolves to audio.
-	// Typed native bank service used by the mission's shared voice channel:
-	// the radio line's member file, or (bank_member) the entity voice's bank
-	// member with its pitch jitter (engine audio select_entity_voice).
+	// Where a 3D fire is heard: the sound layer's listener and whether it rides the source.
+	struct Hearing {
+		const opennova::audio::SoundListener *listener = nullptr;
+		bool ridden = false;
+	};
+	// A one-shot of the named set at `world_pos` (the presentation frame) heard from
+	// `listener_pos`, the engine's oneshot_play plan at the sound-effects option's emitter
+	// volume, (255 * option) >> 8 (runtime/audio/sound_options.h), its voices opened at the
+	// listener's bearing pan (audio::open_oneshot_plan, SoundListener::pan_of). A listener at
+	// INF plays distance-flat (the menu, tests). `p_sound_id` is the own-channel reuse key
+	// (audio::oneshot_sound_id).
+	bool play_oneshot_3d(const Vector3 &p_world_pos, const String &p_name, const Vector3 &p_listener_pos,
+			const Hearing &p_hearing, int p_source_bms_id = 0, int p_sound_id = 0);
+	// A direct trigger-set play at a distance and bearing from the listener, at the option's
+	// emitter volume, no cull or occlusion (audio::plan_oneshot_at_distance).
+	bool play_oneshot_at_distance(const String &p_name, int64_t p_dist_q16, uint8_t p_bearing);
+	// The interface play: distance 0, pan 0, the option's emitter volume (runtime/audio/sound_options.h).
+	bool play_interface_oneshot(const String &p_name);
+	// The radio line's member file, or (bank_member) the entity voice's bank member with its
+	// pitch jitter (engine audio select_entity_voice).
 	std::optional<opennova::world::ScriptVoiceChannel::SetSelection>
 			select_radio_set(const std::string &name, uint8_t listener_view_flags,
 					bool p_bank_member = false);
-
-	bool play_interface_oneshot(Node *p_parent, const String &p_name, const StringName &p_bus);
-	AudioStreamPlayer *spawn_oneshot_2d(Node *p_parent, const String &p_name, const StringName &p_bus);
-
-	// A looping copy of a decoded one-shot stream, the whole buffer forward
-	// (the cached stream stays a one-shot's): loop_end is an absolute frame
-	// index that playback wraps at, so 0 would pin the voice at sample 0.
-	static Ref<AudioStreamWAV> loop_copy(const Ref<AudioStreamWAV> &p_stream);
-	// A positional voice the engine's own volume law drives: no attenuation on
-	// top, no distance cap and no doppler, Godot keeping only the panner (the
-	// script voice's channel; the editor's Listen channels).
-	static void configure_unattenuated_3d(AudioStreamPlayer3D *p_player);
-	// dB for a 0..255 engine channel volume; 0 -> hard silent (the engine's law).
-	static double volume_db_from_255(int p_vol255);
-	// The witnessed distance volume curve (engine: formats/lwf/lwf.h): at or beyond `radius` the voice is HARD SILENT; inside it the
-	// volume runs vol * (1 - d/r)^2, ceilinged by `clamp_vol`. The master-fade
-	// global (g_SoundMasterFadeQ24, steady state 0xFF0000) folds in as
-	// (vol * 255) >> 8; the underwater halving flag and the pan half of the packed
-	// return are reimpl territory (bus volume / Godot's panner). Distances are Q16.16
-	// like the original's; both arms of the engine pass a consistent scale so only
-	// the ratio matters. The integer form lives in engine/runtime/audio
-	// (ambient_mixer.cpp) -- one implementation for the native mix, the one-shot
-	// path, and the GUT pins.
-	static int calc_distance_volume(int64_t p_dist_q16, int64_t p_radius_q16, int p_vol255,
-			int p_clamp_vol);
-	// Layer volume for the looping ambient-emitter path. `dist_q16` is the
-	// listener distance in Q16.16 units -- the arms subtract in Q16 FIRST and
-	// truncate to whole units at the curve call, exactly like the original
-	// (HIWORD(dist - min) is floor(d - m), NOT min - floor(d): the proximity arm
-	// differs by a unit for fractional d). `vol_byte` is the emitter volume 0..255
-	// (the time-of-day crossfade blend for placed markers); member volume and
-	// clamp scale by it before the curve (engine: runtime/audio/ambient_mixer.h). With a min_distance the
-	// falloff REBASES to run min..falloff; inside min_distance the volume RISES
-	// as (d/min)^2 (the proximity fade); a bare falloff runs 0..falloff. The arm
-	// forms live in engine/runtime/audio (ambient_mixer.cpp) beside the mix that
-	// consumes them natively; this seam stays for the pins.
-	static int emitter_layer_volume(int64_t p_dist_q16, int p_falloff_u, int p_min_u,
-			int p_vol_byte, int p_member_vol, int p_clamp_vol);
-	// One-shot volume at fire time -- the native two-stage composition
-	// (engine/runtime/audio oneshot_layer_volume (engine: runtime/audio/ambient_mixer.h): proximity feeds falloff un-rebased; a layer with no
-	// falloff radius plays at the raw emitter volume). Reimpl emitter volume is
-	// full (255): the engine's fire-time (vol * g_SoundVolumeOption) >> 8 folds the
-	// options slider we map to bus volume (docs/audio/lwf-dbf-sound-re.md D-SND-8).
-	int oneshot_distance_volume(int64_t p_dist_q16, const Ref<AmbientLayer> &p_layer) const;
 
 protected:
 	static void _bind_methods();
 
 private:
 	uint8_t listener_view_flags() const;
-	// The per-fire occlusion seam the engine plan calls: the Simulation when one
-	// is set, else the test override, resolved fresh per fire.
 	struct FireContext {
 		Simulation *sim = nullptr;
 		const Callable *override = nullptr;
@@ -204,30 +114,20 @@ private:
 	const opennova::lwf::File &_bank_at(const opennova::audio::SetLocation &p_loc) const;
 	static String _member_wav_path(const opennova::lwf::File &p_bank,
 			const opennova::lwf::Sndparm &p_member);
-	AudioStreamPlayer3D *_make_player(const Ref<AudioStreamWAV> &p_stream, double p_play_scale,
-			const StringName &p_bus, bool p_loop, int p_vol255);
-    bool _play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,
-            const opennova::lwf::File &p_bank, const opennova::audio::OneshotPlan &p_plan,
-            const StringName &p_bus, bool p_interface = false);
-	Ref<AudioStreamWAV> _resolve_stream(const String &p_wav_path);
-	static int64_t _stream_frames(const Ref<AudioStreamWAV> &p_stream);
+	// The plan's voices opened on the one-shot channels at `p_pan` (a positional layer's) or 0.
+	bool _play_plan(const opennova::lwf::File &p_bank, const opennova::audio::OneshotPlan &p_plan,
+			uint8_t p_pan);
 
 	Ref<ResourceRoot> resource_root_; // null = menu/isolated-bank use (no VFS reads)
 	ObjectID occlusion_provider_id_;
 	Callable occlusion_override_;
-	// The loaded banks as the engine's structs, in load order (the index's bank
-	// numbers).
+	// The loaded banks as the engine's structs, in load order (the index's bank numbers).
 	std::vector<opennova::lwf::File> banks_;
 	opennova::audio::SoundSetIndex index_;
-	// The portable member-selection state machine (engine/runtime/audio); holds
-	// the per-(bank,set,layer) state.
+	// The portable member-selection state machine; holds the per-(bank,set,layer) state.
 	opennova::audio::SoundSelector selector_;
-	// wav basename(lower) -> AudioStreamWAV (or null if it failed to resolve/decode)
-	HashMap<String, Ref<AudioStreamWAV>> wav_cache_;
-	// The engine selects slots; the adapter releases completed voices and
-	// stops the previous player when a slot is stolen.
-	opennova::audio::OneshotChannelPool oneshot_pool_;
-	std::array<ObjectID, opennova::audio::kAudioChannelCount> oneshots_{};
+	// wav basename (lower) -> buffer (null if it failed to resolve or decode)
+	std::unordered_map<std::string, opennova::audio::MixWaveRef> waves_;
 };
 
 } // namespace godot

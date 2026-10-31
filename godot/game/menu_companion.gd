@@ -3,10 +3,11 @@ extends RefCounted
 
 # Base for the game-specific menu drivers ("companions") MenuShell delegates
 # whole menus to (add_companion): the JO multiplayer menu (MpMenuCompanion) and the
-# PLAYER_INFO character screen (PlayerInfoMenuCompanion). When a companion's
-# owns_menu() claims a freshly opened document, the shell hands it the whole
-# named-control wiring through on_menu_built() instead of running its generic
-# launch/mission wiring. Subclasses override owns_menu + _wire and share the
+# PLAYER_INFO character screen (PlayerInfoMenuCompanion). When the engine names a
+# freshly opened document's owner (menu::MenuCommands::owner, MenuDriver.command_owner)
+# as a companion's owner_name(), the shell hands it the whole named-control wiring
+# through on_menu_built() instead of running its generic launch/mission wiring.
+# Subclasses override owner_name + _wire and share the
 # by-NAME helpers below, all riding the shell's MenuDriver (widgets are
 # addressed by document id via widget_id — the find_child successor).
 
@@ -32,11 +33,12 @@ var _weapons_mount := ""
 var _weapons_injected := false
 
 
-## True when this companion drives the loaded document. Keyed on control names
-## unique to the owned screens rather than a screen name, since a document's
-## screens are all addressable at once.
-func owns_menu(_driver_candidate: MenuDriver) -> bool:
-	return false
+## The engine's name for the delegate this companion is (MenuDriver.command_owner:
+## "lan", "player_info"), whose documents it drives; "" for none. Which document a
+## delegate owns is the engine's (menu::MenuCommands::wire: the LAN screens by the
+## controls they hold, PLAYER_INFO by its screen's name).
+func owner_name() -> String:
+	return ""
 
 
 ## Called by MenuShell after each open_menu of a document this companion owns.

@@ -50,8 +50,11 @@ divergences in its §8 catalog):
 - Unknown packets and mismatches are tracked, not silently ignored.
 - Do not commit raw decompiled code, raw retail captures, secrets, account data,
   local install paths, or machine-specific IP addresses.
-- Keep protocol logic in Godot-free libraries. Apps and Godot bindings own
-  process, sockets, UI, and presentation.
+- Keep protocol logic in Godot-free libraries. The sockets and the HTTP exchange
+  are engine code too (`engine/net/socket`, `engine/net/http`, ADR 0077 d2), and the
+  NovaWorld web flow's HTTP is the engine's menu-browser transport
+  (`engine/net/novaworld/browser_transport.h`) for the game and serve alike. Apps and
+  Godot bindings own process, UI, and presentation.
 - Do not use raw passthrough blobs to make a writer or encoder pass parity.
   Model the fields structurally unless a tracked ADR explicitly says otherwise.
 - Treat the source and `docs/net/novaworld-net-re.md` as live truth.

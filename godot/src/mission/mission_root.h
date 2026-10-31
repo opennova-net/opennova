@@ -38,7 +38,6 @@ namespace godot {
 
 class EffectLightDirector;
 class EffectWorld;
-class ItemEffectDirector;
 class MissionAudio;
 class MissionEnvironment;
 
@@ -54,17 +53,15 @@ class MissionEnvironment;
 // Per-tick order (single-sourced here, faithful to the original main loop's
 // server-tick-then-render):
 //   advance logic (sim) -> present entity state onto nodes -> drain + emit side effects.
-// [orig: WacScript_AdvanceTick runs the logic systems; the client then renders the entities. Terrain/foliage/audio
-//  are Godot render passes the caller composes around this.]
+// (The logic systems run in the engine's tick, WacScript_AdvanceTick's; the client then renders the
+// entities. Terrain/foliage/audio are Godot render passes the caller composes around this.)
 //
 // Cadence: inmatch::Session banks wall clock and dispatches 0..N 62.5 Hz ticks;
 // tick() asks that same session for one deterministic local/test step. The
 // engine's WAC/BMS dividers remain inside their systems.
 //
-// Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
-// loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
-// independently of the variable render rate — multiple ticks on a long frame, zero on a short one.
-// [orig: Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0 (one current_tick++ @ 0x24c1968)]
+// Fixed-timestep accumulator: the engine's (world/tick_accumulator.h carries the witness) — the
+// logic update once per 16 ms (62.5 Hz), independent of the variable render rate.
 // The 0.016 s tick quantum is single-sourced natively as
 // world::TickAccumulator::kTickDt (Simulation.tick_dt()); the accumulator
 // arithmetic itself is native.
@@ -112,21 +109,6 @@ public:
 	bool is_process_exit() const { return process_exit_; }
 	int32_t process_exit_code() const { return process_exit_code_; }
 
-	// Full attached-effect transform for fx2ssn. Simulation owns the LIVE
-	// registry lookup and frame data; presentation applies the single
-	// canonical basis conversion shared with the mission present pass.
-	Variant entity_effect_transform_for_ssn(int p_ssn) const;
-	// True after at least one authoritative logic tick has produced a
-	// client-view snapshot. Hosts can use this to distinguish "not presented
-	// yet" (fall back to an authored Node seed) from "not present in the
-	// current tick" (detach).
-	bool has_current_present_effect_snapshot() const;
-	// Resolve one presented entity by its stable value identity. Placed nodes
-	// use bms_id first and (kind,index) as the zero-id fallback; wire-spawned
-	// nodes use their wire handle. Returns null when the entity is absent
-	// this tick.
-	Variant presented_entity_effect_transform(const Ref<EntityRef> &p_entity_ref) const;
-
 	String get_mission_file() const { return mission_file_; }
 	String get_mission_name() const { return mission_name_; }
 
@@ -154,14 +136,12 @@ public:
 	// audio plays no sound while the effect legs still run); `fx` (nullable)
 	// the effect legs; `lights` (nullable) the MF_Light
 	// muzzle glow + the death flash; `environment` (nullable) the scar pass's
-	// fog distance + combined terrain light; `anchors` (nullable) the
-	// owner-anchor registry the wreck/piece/move effect groups anchor
-	// through. The load calls this once the audio and effect stages have run;
+	// fog distance + combined terrain light. The load calls this once the
+	// audio and effect stages have run;
 	// isolated tests pass what they have. A session that presents no entity (a
 	// dedicated host) binds nothing.
 	void setup_passes(MissionAudio *p_audio, EffectWorld *p_fx,
-			EffectLightDirector *p_lights, MissionEnvironment *p_environment,
-			ItemEffectDirector *p_anchors);
+			EffectLightDirector *p_lights, MissionEnvironment *p_environment);
 	// Fire-presentation counters (FirePresentStats, typed per ADR 0017; an
 	// empty record before setup).
 	Ref<FirePresentStats> get_fire_present_stats() const;
@@ -292,9 +272,6 @@ private:
 
 	EntityPresenter *entities() const;
 	Node3D *container() const;
-	Variant effect_transform_from_state(const PackedVector3Array &p_state) const;
-	void clear_present_effect_poses();
-	void begin_present_effect_tick(int p_logic_tick);
 	void _on_frame_stats_capture_changed(bool p_active);
 	void sync_runtime_profiling();
 	// A joiner's stamped slot vanished or was re-typed: its placed
@@ -367,7 +344,6 @@ private:
 	// The current authoritative present tick (-1 = none yet). Attachment-pose
 	// lookups are Simulation's generation-bound native index — the one path;
 	// test sims implement the same compact API.
-	int effect_pose_snapshot_tick_ = -1;
 };
 
 } // namespace godot

@@ -18,6 +18,7 @@
 #include <formats/env/tod_clock.h>
 #include <formats/env/env_weather.h>
 #include <runtime/environment/sky_frame.h> // loads_mission_sky_maps
+#include <runtime/renderer/texture_roles.h>
 
 #include <algorithm>
 #include <sstream>
@@ -311,20 +312,20 @@ void EnvFile::_load_sky_textures() {
 	sky_map2_tex = _load_sky_map_texture_from_dir(dir, sky_map2);
 }
 
-// The sky maps load through the dedicated render-texture loader, which
-// synthesizes the PCX alpha channel from the image's own palette luminance —
-// the cloud combine's alpha (a1 = t0.a*t1.a*2) rides it, so a plain opaque
-// decode makes the cloud pass cover the whole dome
-// [orig: Terrain_InitRenderingResources @ 0x578a97/0x578aa5 ->
-// Texture_LoadFromArchive @ 0x58b980, PCX alpha loop @ 0x58bc35..0x58bcee, see docs/env/env-tod-re.md].
-// The name rides as its own alpha name, so the loader's .dds sibling still
-// wins first (renderer::TextureLoader::ArchiveSelfAlpha).
+// The sky maps open in their keywords' role, the engine's
+// (renderer::env_key_texture_role: the cloud layers' archive loader, which
+// synthesizes the PCX alpha channel from the image's own palette luminance;
+// the role table carries the witnesses). The cloud combine's alpha
+// (a1 = t0.a*t1.a*2) rides it, so a plain opaque decode would make the cloud
+// pass cover the whole dome. The loader's .dds sibling still wins first.
 Ref<Texture2D> EnvFile::_load_sky_map_texture(const String &name) {
-	return resource_root->load_texture(name, ResourceRoot::TEXTURE_LOADER_ARCHIVE_SELF_ALPHA);
+	return resource_root->load_texture(name,
+			ResourceRoot::loader_of(opennova::renderer::TextureRoleId::SkyCloud));
 }
 
 Ref<Texture2D> EnvFile::_load_sky_map_texture_from_dir(const String &dir, const String &name) {
-	return opennova::load_texture_from_dir(dir, name, opennova::renderer::TextureLoader::ArchiveSelfAlpha);
+	return opennova::load_texture_from_dir(dir, name,
+			opennova::renderer::texture_role(opennova::renderer::TextureRoleId::SkyCloud).loader);
 }
 
 Error EnvFile::load() {

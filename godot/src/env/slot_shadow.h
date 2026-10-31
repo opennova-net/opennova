@@ -55,7 +55,10 @@ class Weather;
 // capture-with linked children (held weapons, mounted riders) render into
 // their parent's slot through the per-frame claim pass — the
 // RenderSlot_RenderEntityAndChildren child walk — while tree-parented riders
-// fold into the ancestor exclusion and ride the parent's subtree walk; the
+// fold into the ancestor exclusion and ride the parent's subtree walk, and a
+// carrier's child-walk riders (its seated persons, ObjectModel::set_slot_seat;
+// a vehicle carrier's refNum riders, ObjectModel::set_slot_ride; the ride
+// group) render into its slot whatever their visibility; the
 // attached-light drape darkening folds the light's attenuation at the entity
 // into the per-slot term; the capture eye backs off the caster along the
 // slot direction (the RenderingDevice depth band of advance_frame, D-RLIT-10)
@@ -71,6 +74,9 @@ public:
 	// Models flagged as dynamic shadow casters join this group
 	// (ObjectModel::set_shadow_caster_enabled).
 	static const StringName &caster_group();
+	// The child-walk riders (ObjectModel::set_slot_ride, set_slot_seat): drawn
+	// inside their carrier's capture whether or not they cast a slot of their own.
+	static const StringName &ride_group();
 	// The shared drape material every patch instance draws with, on
 	// renderer::kRungSlotDrape and reading the terrain/sky stencil mark.
 	static Ref<ShaderMaterial> get_drape_material();
@@ -189,18 +195,10 @@ protected:
 	void _notification(int p_what);
 
 private:
-	struct CasterInfo {
-		ObjectModel *model = nullptr;
-		// The caster's slot-frame facts (engine: runtime/renderer/render_slot_frame.h
-		// SlotFrameCaster): the plan's state (bound_radius = entity+0: lod, light
-		// query), the model sphere sizing the capture, the origin, the march
-		// offset.
-		opennova::renderer::SlotFrameCaster caster;
-	};
-	// The registry row behind CasterInfo: identity plus the derived values a
-	// frame used to re-read from the node every frame. An unstamped model
-	// (radius_fallback) keeps reading its live render bounds per frame — the
-	// preview/test path — so only stamped facts cache.
+	// The registry row behind a caster's facts: identity plus the stamped
+	// values a frame used to re-read from the node every frame. An unstamped
+	// model (radius_fallback) keeps reading its live render bounds per frame —
+	// the preview/test path — so only stamped facts cache.
 	struct CasterRecord {
 		ObjectID id;
 		float capture_radius = 0.0f;
@@ -208,8 +206,13 @@ private:
 		bool radius_fallback = false;
 		bool is_person = false;
 		bool seat_parented_ancestor = false;
+		// A caster-group member (a slot record of its own); false for a rider
+		// only its carrier's child walk draws.
+		bool slot_record = true;
 	};
 	void _rebuild_caster_records();
+	opennova::renderer::SlotCasterFacts _caster_facts(const ObjectModel &p_model,
+			const CasterRecord &p_record) const;
 
 	void _ensure_captures();
 	void _release_captures();
@@ -219,8 +222,6 @@ private:
 	void _flush_deferred_frees(bool p_all);
 	void _clear_all_terms();
 	void _invalidate_uniform_stamps();
-	Projection _drape_projection(const Transform3D &p_pose, float p_half_u,
-			float p_half_v) const;
 
 	opennova::renderer::RenderSlotPlan plan_;
 	Ref<SlotCaptureCompositorEffect> effect_;
@@ -254,9 +255,11 @@ private:
 	std::vector<CasterRecord> caster_records_;
 	uint64_t caster_records_revision_ = 0;
 	bool caster_records_valid_ = false;
-	// Reused frame scratch (cleared, capacity retained).
-	std::vector<CasterInfo> casters_scratch_;
-	HashMap<uint64_t, size_t> caster_index_scratch_;
+	// Reused frame scratch (cleared, capacity retained): the casters' engine
+	// facts as the presenters stamped them, and the engine's frame casters
+	// built from them (runtime/renderer/render_slot_frame.h).
+	std::vector<opennova::renderer::SlotCasterFacts> caster_facts_scratch_;
+	opennova::renderer::SlotFrameCasters frame_casters_;
 	// Last-pushed uniform payloads: identical-value pushes are elided (the
 	// materials retain them), the T1 material-gating precedent. The drape
 	// material is process-shared, so a stamp is only trustworthy while this
@@ -290,13 +293,9 @@ private:
 	struct PatchMesh {
 		RID mesh;
 		RID instance;
-		bool built = false;
-		float origin_x = 0.0f;
-		float origin_north = 0.0f;
-		int lod = 0;
-		// The terrain's heights its vertices were draped over (TerrainData::get_heights_serial: an editor's
-		// sculpt patches them in place).
-		uint64_t heights_serial = 0;
+		// The patch its vertices were draped over (the engine's rebuild gate; the heights serial is
+		// TerrainData::get_heights_serial: an editor's sculpt patches them in place).
+		opennova::renderer::SlotPatchBuild build;
 		bool visible = false;
 		std::vector<std::array<float, 3>> vertices;
 	};

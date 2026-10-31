@@ -16,7 +16,6 @@
 #include "resource_index/launch_flags.h"
 #include "simulation/present_event_records.h"
 #include "util/string_convert.h"
-#include "world/item_effect_director.h"
 
 namespace godot {
 
@@ -44,10 +43,6 @@ MissionRoot::~MissionRoot() = default;
 void MissionRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "mission", "container", "options"),
 			&MissionRoot::setup, DEFVAL(Ref<MissionSetupOptions>()));
-	ClassDB::bind_method(D_METHOD("has_current_present_effect_snapshot"),
-			&MissionRoot::has_current_present_effect_snapshot);
-	ClassDB::bind_method(D_METHOD("presented_entity_effect_transform", "entity_ref"),
-			&MissionRoot::presented_entity_effect_transform);
 	ClassDB::bind_method(D_METHOD("get_mission_file"), &MissionRoot::get_mission_file);
 	ClassDB::bind_method(D_METHOD("get_mission_name"), &MissionRoot::get_mission_name);
 	ClassDB::bind_method(D_METHOD("has_player"), &MissionRoot::has_player);
@@ -58,8 +53,8 @@ void MissionRoot::_bind_methods() {
 			&MissionRoot::_on_frame_stats_capture_changed);
 	ClassDB::bind_method(D_METHOD("get_mission_present_stats"),
 			&MissionRoot::get_mission_present_stats);
-	ClassDB::bind_method(D_METHOD("setup_passes", "audio", "fx", "lights", "environment",
-			"anchors"), &MissionRoot::setup_passes);
+	ClassDB::bind_method(D_METHOD("setup_passes", "audio", "fx", "lights", "environment"),
+			&MissionRoot::setup_passes);
 	ClassDB::bind_method(D_METHOD("get_fire_present_stats"),
 			&MissionRoot::get_fire_present_stats);
 	ClassDB::bind_method(D_METHOD("get_destruction_present_stats"),
@@ -122,10 +117,10 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		r_sim->set_capture_pcap_path(LaunchFlags::capture_pcap());
 	}
 	// The listen host stamps its own type-2 connection during role bring-up, so
-	// its two per-side character selections must already be present here. The
-	// same profile is what a joiner uploads through ClientAuth.
-	// [orig: Game_ApplySessionSettingsToGlobals @0x551500;
-	//  Server_PlayerAdd @0x51CBC0 -> packed id @0x51D0B1]
+	// its two per-side character selections must already be present here (the
+	// engine's session apply, inmatch/join_character_profile.h, and the host's
+	// own add, inmatch/server_spawn, carry the witnesses). The same profile is
+	// what a joiner uploads through ClientAuth.
 	if (p_options->get_local_character_profile().is_valid()) {
 		r_sim->set_local_character_profile(p_options->get_local_character_profile());
 	}
@@ -297,7 +292,6 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	// The setup's split (an instrument, the verbose line at its end): the session's stage, the
 	// mission boot, the index and the presenter.
 	const int64_t setup_start = now_usec();
-	clear_present_effect_poses();
 	setup_error_ = OK;
 	process_exit_ = false;
 	process_exit_code_ = 0;
@@ -446,65 +440,6 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	return sim_->get_entity_count();
 }
 
-Variant MissionRoot::entity_effect_transform_for_ssn(int p_ssn) const {
-	if (sim_.is_null() || p_ssn <= 0) {
-		return Variant();
-	}
-	// Once a logic tick has completed, follow the exact client-view pose that the
-	// render pass will present for that tick. Before the first tick there is no
-	// such snapshot, so retain the authoritative registry lookup as the seed.
-	if (has_current_present_effect_snapshot()) {
-		return effect_transform_from_state(sim_->get_present_effect_state_for_ssn(p_ssn));
-	}
-	return effect_transform_from_state(sim_->get_entity_effect_state_for_ssn(p_ssn));
-}
-
-bool MissionRoot::has_current_present_effect_snapshot() const {
-	return sim_.is_valid() && effect_pose_snapshot_tick_ >= 0;
-}
-
-Variant MissionRoot::presented_entity_effect_transform(const Ref<EntityRef> &p_entity_ref) const {
-	if (p_entity_ref.is_null() || !has_current_present_effect_snapshot()) {
-		return Variant();
-	}
-	const int wire_handle = p_entity_ref->get_wire_handle();
-	PackedVector3Array state;
-	if (wire_handle >= 0 && wire_handle <= 0xffff) {
-		state = sim_->get_present_effect_state_for_wire_handle(wire_handle);
-	} else {
-		const int native_bms_id = p_entity_ref->get_bms_id();
-		if (native_bms_id > 0) {
-			state = sim_->get_present_effect_state_for_bms_id(native_bms_id);
-		} else {
-			const int native_kind = p_entity_ref->get_kind() >= 0
-					? p_entity_ref->get_kind()
-					: p_entity_ref->get_origin_kind();
-			const int native_index = p_entity_ref->get_index();
-			if (native_kind >= 0 && native_index >= 0) {
-				state = sim_->get_present_effect_state_for_origin(native_kind, native_index);
-			}
-		}
-	}
-	return effect_transform_from_state(state);
-}
-
-Variant MissionRoot::effect_transform_from_state(const PackedVector3Array &p_state) const {
-	if (p_state.size() != Simulation::EFFECT_STATE_COUNT) {
-		return Variant();
-	}
-	return Transform3D(
-			MissionObjectPlacer::bms_to_godot_basis(p_state[Simulation::EFFECT_STATE_ROTATION_DEG]),
-			p_state[Simulation::EFFECT_STATE_POSITION]);
-}
-
-void MissionRoot::clear_present_effect_poses() {
-	effect_pose_snapshot_tick_ = -1;
-}
-
-void MissionRoot::begin_present_effect_tick(int p_logic_tick) {
-	effect_pose_snapshot_tick_ = p_logic_tick;
-}
-
 bool MissionRoot::has_player() const {
 	return sim_.is_valid() && sim_->has_local_player();
 }
@@ -564,8 +499,7 @@ Ref<MissionPresentStats> MissionRoot::get_mission_present_stats() const {
 }
 
 void MissionRoot::setup_passes(MissionAudio *p_audio, EffectWorld *p_fx,
-		EffectLightDirector *p_lights, MissionEnvironment *p_environment,
-		ItemEffectDirector *p_anchors) {
+		EffectLightDirector *p_lights, MissionEnvironment *p_environment) {
 	EntityPresenter *presenter = entities();
 	if (presenter == nullptr) {
 		return;
@@ -577,7 +511,7 @@ void MissionRoot::setup_passes(MissionAudio *p_audio, EffectWorld *p_fx,
 		return;
 	}
 	presenter->setup_passes(container(), item_db_, resource_root_, p_audio, p_fx, p_lights,
-			p_environment, p_anchors);
+			p_environment);
 }
 
 Ref<FirePresentStats> MissionRoot::get_fire_present_stats() const {
@@ -882,10 +816,9 @@ bool MissionRoot::on_session_tick(const opennova::inmatch::TickOutcome &p_tick) 
 	if (sim_.is_null() || p_tick.terminal()) {
 		return false;
 	}
-	begin_present_effect_tick(p_tick.logic_tick);
-	// The throwable pass's fixed-tick half: the round-bound move groups
-	// reconcile BEFORE the effect world advances on this tick. A session that
-	// presents no entity runs none (its frame drops the vehicle effects).
+	// The vehicle-trail pass's fixed-tick half: its groups reconcile BEFORE the effect world
+	// advances on this tick. A session that presents no entity runs none (its frame drops the
+	// vehicle effects).
 	EntityPresenter *presenter = entities();
 	if (presenter != nullptr && sim_->session_presents_entities()) {
 		presenter->sync_fixed_tick_effects();
@@ -1107,7 +1040,6 @@ void MissionRoot::_exit_tree() {
 		sim_->set_runtime_profiling_enabled(false);
 		sim_->close_session();
 	}
-	clear_present_effect_poses();
 	if (EntityPresenter *presenter = entities()) {
 		// Frees the wire bodies + held weapons and the tracer mesh under the
 		// container, the husk models + effect anchors, the throwable models and

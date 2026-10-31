@@ -4,8 +4,8 @@ extends GameProbe
 ## more missions on the launch's mounted root. Per mission: how many "snd:"
 ## markers resolved to candidates, which banks loaded, how many dialogs the
 ## .DBF carries; then the current top-eight candidates are materialized and
-## the physical pool's loop regions checked (a loop_end <= loop_begin wraps
-## at sample 0 forever: a silent voice). With `missions` empty, every .bms
+## each bound emitter channel checked for a sounding wave (the mixer's
+## channels 4..11; one playing nothing is a silent emitter). With `missions` empty, every .bms
 ## the mount's index lists (cap 12). Used to compare stock vs mod missions
 ## when in-game ambience is reported silent.
 
@@ -58,29 +58,25 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 				m, int(stats.markers_resolved), int(stats.markers_total),
 				int(stats.banks_loaded), int(stats.ambient_candidates),
 				int(stats.dialogs)])
-		# Materialize only the current top-eight candidates, then verify the
-		# physical pool's loop regions.
+		# Materialize only the current top-eight candidates, then verify each bound
+		# emitter channel plays its wave (the mixer's channels, 4..11).
 		audio.tick(Vector3.ZERO, 0.2)
-		var loop_voices := 0
-		var loop_empty := 0
-		for p in container.find_children("*", "AudioStreamPlayer3D", true, false):
-			var sw := (p as AudioStreamPlayer3D).stream as AudioStreamWAV
-			if sw == null or sw.loop_mode == AudioStreamWAV.LOOP_DISABLED:
-				continue
-			loop_voices += 1
-			if sw.loop_end <= sw.loop_begin:
-				loop_empty += 1
-		if loop_empty > 0:
-			failures.append("%s: %d/%d looping voices have an empty loop region" % [m, loop_empty, loop_voices])
-			ctx.log("%-28s WARNING: %d/%d looping voices have an EMPTY loop region -> silent" % [
-					m, loop_empty, loop_voices])
+		var bound := 0
+		var silent := 0
+		for id: Variant in audio.active_ambient_candidate_ids():
+			bound += 1
+			if not audio.channel_sounding(audio.ambient_channel_for_candidate(int(id))):
+				silent += 1
+		if silent > 0:
+			failures.append("%s: %d/%d bound emitter channels play no wave" % [m, silent, bound])
+			ctx.log("%-28s WARNING: %d/%d bound emitter channels play no wave -> silent" % [m, silent, bound])
 		audio.teardown()
 		container.queue_free()
 		reports.append({
 			"mission": m,
 			"stats": stats.to_json_value(),
-			"loop_voices": loop_voices,
-			"loop_empty": loop_empty,
+			"bound_channels": bound,
+			"silent_channels": silent,
 		})
 		await ctx.tree.process_frame
 	var data := {"missions": reports, "failures": Array(failures)}
@@ -88,4 +84,4 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return ProbeVerdict.failed("cancelled", data)
 	if not failures.is_empty():
 		return ProbeVerdict.failed("%d problem(s): %s" % [failures.size(), "; ".join(failures)], data)
-	return ProbeVerdict.passed("%d mission(s) set up, every loop region non-empty" % reports.size(), data)
+	return ProbeVerdict.passed("%d mission(s) set up, every bound emitter channel sounding" % reports.size(), data)

@@ -16,13 +16,13 @@
 
 #include <net/novacrypto/epask.h> // EpaskParams / epask_to_string / epask_from_string
 
-// P7 Part 2 — the NovaWorld lobby HTTP orchestration, moved out of the Godot binding so the binding
-// becomes a pure HTTPRequest pump (ADR 0010 / .agents/README.md: protocol/framing/sequencing in libs,
-// sockets + HTTP transport + signals in Godot). This owns the EPASK login chain, the GSB server-browser
-// fetch, and the NWJoin handshake — the URL builders, the cookie jar, and the LoginStep / JoinStep state
-// machines — reusing the existing byte helpers (epask, build_login_post_body, the GSB/joi parsers).
-// Godot-free: no HTTPRequest, no Variant. The owner ships each HttpRequestSpec over its transport and
-// feeds the (code, headers, body) back in.
+// P7 Part 2 — the NovaWorld lobby HTTP orchestration, moved out of the Godot binding (ADR 0010 /
+// .agents/README.md: protocol/framing/sequencing in libs). This owns the EPASK login chain, the GSB
+// server-browser fetch, and the NWJoin handshake — the URL builders, the cookie jar, and the
+// LoginStep / JoinStep state machines — reusing the existing byte helpers (epask,
+// build_login_post_body, the GSB/joi parsers). The owner ships each HttpRequestSpec over the menu
+// browser's transport (net/novaworld/browser_transport.h, ADR 0077 d2) and feeds the (code,
+// headers, body) back in.
 //
 // The login, the list and the join moved here from godot/src/network/novaworld_client.cpp, which
 // now ships each request and feeds its reply back. The URL/.dll shapes are byte-preserved, the
@@ -45,7 +45,8 @@ struct HttpRequestSpec {
 	std::string body;                 // form body (POST); empty otherwise
 	bool valid = false;               // false when there is no request to issue
 	// The menu browser's GET: once the transport resolved the server, the URL takes its
-	// nocachefix pair (browser_cache_bust_url) before it goes out. A form post takes none.
+	// nocachefix pair (browser_cache_bust_url) before it goes out (browser_transport.h's
+	// browser_request_url). A form post takes none.
 	bool cache_bust = false;
 };
 

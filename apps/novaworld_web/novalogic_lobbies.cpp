@@ -3,7 +3,7 @@
 #include "core/clock.h"
 #include "core/loggable.h"
 #include "hosted/model/stats_repository.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <base/io/cp1252.h>
 #include <net/novaworld/server_browser.h>

@@ -277,6 +277,12 @@ inline constexpr uint32_t texture_stage_flags(TextureStage stage) {
 inline constexpr uint32_t kTextureFlagOneLevel = 0x40000;
 inline constexpr uint32_t kTextureFlagThreeLevels = 0x80000;
 
+// Whether a texture built from pixels under `creation_flags` holds levels past
+// its base: every creation word but the one-level word asks for a chain.
+inline constexpr bool pixel_texture_mipped(uint32_t creation_flags) {
+	return (creation_flags & kTextureFlagOneLevel) == 0;
+}
+
 // The last level a stage samples on a texture the game builds from pixels,
 // `width` x `height` (after its halvings) under its creation flags: D3DX's
 // levels at its own sides in the format the flags pick on the reference card

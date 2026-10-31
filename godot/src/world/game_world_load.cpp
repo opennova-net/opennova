@@ -18,6 +18,7 @@
 #include <runtime/ragdoll/ragdoll_option.h>
 #include <runtime/environment/celestial_frame.h> // builds_celestial_draws (the bodies' arm)
 #include <runtime/environment/environment_state.h>
+#include <runtime/mission/mission_catalog.h> // bms_lookup (the runtime .bms read)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h> // builds_placement_draws (the dedicated host's placement)
 #include <runtime/terrain/terrain_load_legs.h> // the dedicated arm's terrain legs
@@ -151,9 +152,11 @@ int GameWorld::load_mission_on_root(const String &p_bms_name, const Ref<Resource
 		timeline->set_gpu_marks(true);
 		last_load_timeline_ = timeline;
 	}
-	// The runtime BMS path bypasses loose overrides even under /d.
-	// [orig: Mission_LoadBMSFromPFF @ 0x40d43c]
-	if (!p_root->has_file(p_bms_name, ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY)) {
+	// An archive row's .bms reads past the loose overrides even under /d (engine
+	// mission_catalog::bms_lookup carries the witness).
+	const ResourceRoot::LookupPolicy bms_lookup =
+			ResourceRoot::from_vfs_lookup_policy(opennova::mission_catalog::bms_lookup(false));
+	if (!p_root->has_file(p_bms_name, bms_lookup)) {
 		emit_signal(kSignalLoadFailed,
 				vformat("%s not found in %s", p_bms_name, p_root->get_root_dir()));
 		timeline->finish();
@@ -162,8 +165,7 @@ int GameWorld::load_mission_on_root(const String &p_bms_name, const Ref<Resource
 	timeline->span("document");
 	Ref<MissionData> mission;
 	mission.instantiate();
-	if (mission->open_from_resource_root(p_root, p_bms_name,
-				ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY) != OK) {
+	if (mission->open_from_resource_root(p_root, p_bms_name, bms_lookup) != OK) {
 		emit_signal(kSignalLoadFailed,
 				vformat("failed to parse %s: %s", p_bms_name, mission->get_last_error()));
 		timeline->finish();
@@ -229,338 +231,276 @@ int GameWorld::load_mission_data(const Ref<MissionData> &p_mission, const String
 
 // --- the ONE mission path ------------------------------------------------------------
 
-// The file entry (load_mission) and the in-memory entry (load_mission_data)
-// converge here: resolve the header's terrain + environment from
-// `resource_root`, apply the mission's env overrides, build the world, place
-// objects, start the runtime + audio.
+// The file entry (load_mission), the in-memory entry (load_mission_data) and a join's S2C 0x1A
+// load (SessionDrive) converge here: the engine's executor runs the load plan's order
+// (mission/mission_load.h run_mission_load) over this world's legs (mission_load_legs).
 int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root) {
-	const bool wire_header_join = p_mission->is_wire_header_only();
-	// A join ran the head at its S2C 0x11 (load_join_terrain): this load, at its S2C 0x1A, goes
-	// on from the objects (engine inmatch/joiner_connection.h set_sync_tail_loading carries the
-	// witness).
-	const bool head_loaded = wire_header_join && join_terrain_preloaded_;
+	opennova::mission::MissionLoadArm arm;
+	arm.wire_header_join = p_mission->is_wire_header_only();
+	arm.head_loaded = join_terrain_preloaded_;
 	join_terrain_preloaded_ = false;
-	// The simulation whose host session this load runs: a fresh one's, staged with its create,
-	// else a map change's kept one (null on any other load).
-	Ref<Simulation> host_sim;
+	arm.fresh_authority = drive_.fresh_authority_load();
+	arm.dedicated = drive_.pending_dedicated();
+	arm.effects_preloaded = ObjectDB::get_instance(join_effect_world_id_) != nullptr;
 	// load_mission's entry timeline, when it ran (its mount and document spans).
 	Ref<LoadTimeline> timeline = entry_timeline_;
 	entry_timeline_.unref();
-	if (head_loaded) {
-		if (timeline.is_null()) {
-			timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
-			last_load_timeline_ = timeline;
-		}
-	} else {
-		// A fresh host's or single player's session stands before the mission start's every load:
-		// its simulation staged (the host's bound socket) and its session created here, ahead of
-		// the head's terrain and the objects (create_fresh_session, D-NET-1254).
-		if (drive_.fresh_authority_load()) {
-			const int create_error = create_fresh_session(p_mission, p_bms_name, p_resource_root);
-			if (create_error != OK) {
-				if (timeline.is_valid()) timeline->finish();
-				return create_error;
-			}
-		}
-		host_sim = staged_runtime_options_.is_valid() ? staged_runtime_options_->get_simulation()
-													  : drive_.kept_simulation();
-		// A host's mission start runs its head ahead of its terrain, a fresh session's past its
-		// create and a map change's on the kept session, and pumps the session through the
-		// load's window and stages, as retail's load does (engine inmatch/host_role.h
-		// begin_mission_load / begin_next_mission_load / pump_load_stage, D-NET-116).
-		if (host_sim.is_valid())
-			host_sim->begin_host_mission_load(p_mission, p_resource_root, p_bms_name);
-		// A NovaWorld listen host's mission-start server-info update, past its session's create or
-		// the map change's head and ahead of the effect system and every load (engine
-		// inmatch/server_info.h apply_mission_start_columns carries the witness, D-NET-1254).
-		drive_.publish_host_mission_start(host_sim, p_mission, p_resource_root, p_bms_name);
-		if (timeline.is_null()) {
-			timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
-			last_load_timeline_ = timeline;
-		}
-		copy_mission_start_options();
-		// Then the mission start's effect system at the copies' words, past the head's per-slot
-		// reset and ahead of the window's first pumps and the terrain, on every load but a
-		// dedicated host's: retail's skips it in session on the authority with no client of its
-		// own (engine inmatch/host_role.h open_mission_load_window carries the witness,
-		// D-NET-1055). A join's mission-data load built one already
-		// (load_join_effect_system); a single player's restart, whose effect system retail keeps
-		// from its first load, builds one here too, its unload having freed the last.
-		// start_effect_world binds it to the mission once the runtime stands.
-		if (!drive_.pending_dedicated() && ObjectDB::get_instance(join_effect_world_id_) == nullptr) {
-			timeline->span("effect_system");
-			free_head_effect_world();
-			head_effect_world_id_ = ObjectID(create_effect_world(p_resource_root, timeline)->get_instance_id());
-			timeline->end_span();
-		}
-		if (host_sim.is_valid()) host_sim->open_host_load_window();
-		const int head_error = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
-		if (head_error != OK) {
-			staged_runtime_options_.unref(); // the created session goes with its simulation
-			return head_error;
-		}
-		if (host_sim.is_valid()) host_sim->pump_host_load_stage(); // after the terrain
-	}
-	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
-	// A join's loading steps run its session's periodic update after each present.
-	pump_join_load_step();
-
-	loaded_mission_ = p_mission;
-	timeline->span("objects");
-	start_mission_root();
-	// A join whose S2C 0x11 ran the head keeps that load's placer, the avatar models in it.
-	if (!head_loaded) placer_.unref();
-	// A host's load: the stages after the mission's document and after the avatars and the
-	// clock, ahead of the objects.
-	if (host_sim.is_valid()) {
-		host_sim->pump_host_load_stage();
-		host_sim->pump_host_load_stage();
-	}
-	place_mission_objects(p_mission);
-	timeline->end_span();
-	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_RUNTIME));
-	pump_join_load_step();
-	timeline->span("runtime");
-	// Open and seed GAME music for sessions with a local client, including SP;
-	// dedicated hosts close the context. The shell owns the actual music VM.
-	// The connection-mode is_client gate and the original open/seed sequence
-	// are witnessed in docs/audio/mus-sbf-re.md (Context lifecycle, D-MUS-SPGATE).
-	// M# resolves this context while WAC compiles, so opening must precede
-	// boot: the original mission start opens music before its WAC init call,
-	// see docs/world/world-wac-ai-re.md section 33.15a.
-	if (drive_.pending_dedicated()) emit_signal(kSignalMusicContextClosed);
-	else emit_signal(kSignalMusicContextOpened, resource_root_);
-	const int runtime_error = start_runtime(p_mission, p_bms_name);
-	timeline->end_span();
-	if (runtime_error != OK) {
-		timeline->finish();
-		// A load abort leaves the mission the way the player's own quit does: the
-		// shell's post-mission route decides the NovaWorld session, so it outlives
-		// this unload.
-		NovaWorldClient *session = drive_.release_nw_client();
-		unload();
-		drive_.adopt_nw_client(session);
-		return runtime_error;
-	}
-	// The C2S 0x3D page freezes once here (the load plan's freeze witness): the
-	// mission start's model-def list computed from the mount and the loaded tables
-	// (engine: inmatch/loaded_model_list.h, D-NET-527); late network spawns must not
-	// change this page.
-	Ref<Simulation> challenge_sim = get_runtime()->get_sim();
-	if (challenge_sim.is_valid() && !wire_header_join) {
-		if (challenge_sim->is_joiner()) {
-			player_visuals_->prewarm_loaded_model_challenge_definitions();
-		}
-		challenge_sim->finalize_loaded_model_challenge_snapshot();
-	}
-	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_AUDIO));
-	pump_join_load_step();
-	timeline->span("audio");
-	start_mission_audio(p_mission, p_bms_name);
-	timeline->end_span();
-	const bool joiner_start = challenge_sim.is_valid() && challenge_sim->is_joiner();
-	// A joiner's mission start initializes every streamed row from its model, then queues
-	// its first 0x2F: its sound banks, the entity models' reload and the rows' init all
-	// run ahead of the first submission, and the model freeze after it (engine:
-	// inmatch::JoinerRole::MissionStartLegs carries the witness, D-NET-1053).
-	// The reload's pool-0 leg loads and registers each person row's animation map here, in
-	// the load, not on the first frame past it (engine: inmatch::JoinerRole::
-	// reload_pool0_row_channels, D-NET-1252).
-	if (joiner_start) {
-		timeline->span("pool0_channels");
-		challenge_sim->reload_join_pool0_row_channels();
-		timeline->end_span();
-	}
-	bool wire_world_placed = false;
-	if (joiner_start && wire_header_join) {
-		timeline->span("streamed_world");
-		wire_world_placed = place_join_wire_world(challenge_sim, timeline);
-		timeline->end_span();
-	}
-	const bool dedicated_host = challenge_sim.is_valid() &&
-			challenge_sim->session_role() == Simulation::ROLE_DEDICATED_HOST;
-	// The celestial bodies' models past the rows' init, ahead of the HUD's overlay init, on every
-	// arm (a joiner's inside its S2C 0x1A load, not its 0x11 head); their draw objects on the full
-	// arm alone (engine environment/celestial_frame.h builds_celestial_draws carries the witness,
-	// D-NET-1187).
-	timeline->span("celestial");
-	scene_.load_celestial_models(resource_root_,
-			opennova::env::builds_celestial_draws(dedicated_host));
-	// The overlay tail reads each built body's surfaces once, a device readback that stalls the
-	// frame it lands in: here, where the bodies build, not in the first frame that appends them
-	// (the glare, the glint and the water mirror's redraw of the discs; D-NET-1341).
-	if (celestial_ != nullptr) {
-		for (ObjectModel *body : celestial_->get_body_models()) {
-			scene_overlay_bodies_.prime(body);
-		}
-	}
-	timeline->end_span();
-	// The HUD's overlay init, on every mission start and every role: past the rows' init
-	// and ahead of a joiner's first 0x2F. The shell's HUD builds here, its layout and its
-	// map-grid origin scan, not on the first frame past the load (engine
-	// mission/mission_load_plan.h carries the witness, D-NET-1167).
-	timeline->span("hud_init");
-	emit_signal(kSignalHudOverlayInit, p_bms_name);
-	timeline->end_span();
-	if (joiner_start) {
-		// The definitions and the world are in: the mission start's first leg queues the first
-		// 0x2F and runs the pumps ahead of the effect builds and the freeze (engine:
-		// ClientRuntime::push_mission_start_first_loadout, D-NET-861).
-		timeline->span("first_leg");
-		challenge_sim->push_join_mission_start_first_loadout();
-		timeline->end_span();
-		// A wire-header joiner's C2S 0x3D page freezes here, its streamed world in, after the
-		// first leg as the freeze follows the first 0x2F; the mission textures stage's freeze
-		// below resolves its models' materials, as a host's does (D-NET-527, D-NET-1053,
-		// D-NET-1157).
-		if (wire_world_placed) {
-			timeline->span("model_list");
-			player_visuals_->prewarm_loaded_model_challenge_definitions();
-			challenge_sim->finalize_loaded_model_challenge_snapshot();
-			timeline->end_span();
-		}
-	}
-	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS));
-	pump_join_load_step();
-	timeline->span("effects");
-	// A join's mission-data load built and warmed the effect world ahead of its 0x09; the
-	// rest binds it to this mission (load_join_effect_system).
-	const bool effects_preloaded = ObjectDB::get_instance(join_effect_world_id_) != nullptr;
-	start_effect_world();
-	timeline->end_span();
-	// A host's render arm: its load window's pumps ahead of the mission's textures, which the
-	// warm below stands for (engine HostRole::render_arm_pumps carries the witness).
-	if (challenge_sim.is_valid()) challenge_sim->pump_host_render_arm_ahead_of_textures();
-	// Warm the effect catalog while the loading screen still covers the frame:
-	// the first live spawn otherwise pays the deferred texture resolves + the
-	// renderer's first-draw pipeline compiles as a ~90 ms hitch on the player's
-	// first shot (measured: first-fire tap 92.9 ms -> repeat 12.5 ms). Retail
-	// pays this at load (the load plan's effect-system witness).
-	emit_signal(kSignalLoadProgress,
-			MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM));
-	pump_join_load_step();
-	// The mission textures stage opens with the terrain's, on every arm, a dedicated host's reduced
-	// one too: the texture slots and the tile set's atlas the head's connect leg held, then the
-	// terrain's build (engine terrain/terrain_load_legs.h carries the witness, D-NET-1098).
-	// The terrain's LOD cache, its tile cache's page targets and the foliage's definitions build
-	// with the render subsystems, which a dedicated host's start jumps over (the same header's
-	// builds_lod_cache, builds_tile_cache_targets and loads_foliage_definitions, D-NET-1158,
-	// D-NET-1161, D-NET-1133).
-	load_terrain_textures(timeline, dedicated_host);
-	load_sky_maps(timeline, dedicated_host);
-	// Then the freeze, on every arm: the listed models' materials resolve and no model builds, a
-	// wire-header joiner's list too (it froze above, its world stream landed). The full arm's
-	// freeze is the reduced arm's, with the render arm's device inits after it (engine
-	// inmatch/loaded_model_list.h LoadedModelList::model_files carries the witness,
-	// D-NET-1078, D-NET-1157).
-	// Each listed file's resolve presents the loading screen at its stored checkpoint, the
-	// stage's start (MissionObjectPlacer::resolve_model_materials carries the witness).
-	timeline->span("model_materials");
-	if (placer_.is_valid() && challenge_sim.is_valid()) {
-		placer_->resolve_model_materials(challenge_sim->get_mission_start_model_files(),
-				callable_mp(this, &GameWorld::pulse_load_progress)
-						.bind(MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM)));
-	}
-	timeline->end_span();
-	// The HUD's textures and fonts at the mission textures stage, past the freeze: the full
-	// arm loads the HUD's textures and their materials there, and every arm, a dedicated
-	// host's reduced one too, then loads the HUD's fonts and the stdbox frame the status page
-	// draws, with the connection icons both arms load ahead of the split. The shell's HUD
-	// loads them here, inside the load, by the arm (engine mission/mission_load_plan.h carries
-	// the witness, D-NET-1167).
-	timeline->span("hud_textures");
-	emit_signal(kSignalHudTexturesLoad, !dedicated_host);
-	timeline->end_span();
-	// The view effects', the tracer pool's and FrameFX's device objects past the HUD's textures,
-	// FrameFX's "ffscan" scanlines with its pixel shaders: the full arm's, none on a dedicated
-	// host's reduced arm (load_frame_fx_textures carries the witnesses, D-NET-1172,
-	// D-NET-1231).
-	load_frame_fx_textures(timeline, dedicated_host);
-	if (!dedicated_host) {
-		// The render arm's device inits past the freeze: the effect catalog and the presenters'
-		// fire pipelines warm in the forced frames; a dedicated host's reduced arm runs none (no
-		// effect spawn, no pipeline warm, no forced frame).
-		timeline->span("effects_warm");
-		warm_effect_world_catalog(!effects_preloaded, timeline);
-		timeline->end_span();
-	}
-	// A host's mission start past its device stages: phase B opens with the render arm's
-	// last pump, then the PreMission pass, the round init and Player_InitPlayer, as retail's
-	// start runs them past its mission textures (engine inmatch/host_boot.h start_host_mission
-	// carries the witness).
-	if (challenge_sim.is_valid() && challenge_sim->host_mission_start_deferred()) {
-		timeline->span("mission_start");
-		run_mission_start();
-		timeline->end_span();
-	}
-	timeline->span("script_effects");
-	open_script_effects(); // the start's WAC/BMS descriptors, past the warm-scene reset
-	timeline->end_span();
-	// The load end past the mission start: a host's S2C 0x7B and the spawn gate's clear
-	// (engine inmatch::end_host_mission_load).
-	timeline->span("load_end");
-	if (challenge_sim.is_valid()) challenge_sim->end_host_mission_load();
-	timeline->end_span();
-	// The tail's legs are spans too (an instrument): the world-ready edges and their
-	// listeners run inside the load's call.
-	timeline->span("finish");
-	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_FINISH));
-	pump_join_load_step();
-	timeline->end_span();
-	loaded_mission_file_ = p_bms_name;
-	world_ready_ = true;
-	// The water's world rendering opens at the load's end; its minimap mask was made with the
-	// terrain's textures (load_terrain_textures).
-	timeline->span("water");
-	set_water_world_rendering_enabled(true);
-	timeline->end_span();
-	timeline->span("world_loaded");
-	emit_signal(kSignalLoadProgress, MissionData::LOAD_PROGRESS_WORLD_READY);
-	emit_signal(kSignalWorldLoaded);
-	timeline->end_span();
-	timeline->finish();
-	// The first frames past the load, timed on a timeline of their own (an instrument): a host's
-	// S2C 0x7B leaves at the first open send boundary of their updates (engine
-	// HostRole::finish_mission_load), and the mission start's first frames bank no render time
-	// (engine inmatch::Session::complete_load), so their draws are the load's tail on the wire.
-	begin_post_load_frames(p_bms_name);
-	return OK;
+	// The simulation whose host session this load runs: a fresh one's, staged with its create,
+	// else a map change's kept one (null on any other load).
+	Ref<Simulation> host_sim;
+	Ref<MissionSetupOptions> runtime_options;
+	const opennova::mission::MissionLoadLegs legs = mission_load_legs(
+			p_mission, p_bms_name, p_resource_root, timeline, host_sim, runtime_options);
+	return opennova::mission::run_mission_load(arm, legs);
 }
 
 // A join's S2C 0x11 load (SessionDrive::step_preload): the mission start's head and its terrain
-// from the host's 0x0B header, ahead of the game-start wait's 0x0A; its S2C 0x1A load
-// (load_mission_internal) goes on from the objects. Every mission start of a join runs it, a
-// reload's too, whose previous world the shell unloaded first (engine
-// inmatch/joiner_connection.h set_sync_tail_loading carries the witness). Emits load_failed and
-// returns the error on a failure.
+// from the host's 0x0B header, ahead of the game-start wait's 0x0A (the engine's
+// mission/mission_load.h run_join_head_load); its S2C 0x1A load (load_mission_internal) goes on
+// from the objects. Every mission start of a join runs it, a reload's too, whose previous world
+// the shell unloaded first. Emits load_failed and returns the error on a failure.
 int GameWorld::load_join_terrain(const Ref<MissionData> &p_mission, const String &p_bms_name,
 		const Ref<ResourceRoot> &p_resource_root) {
 	join_terrain_preloaded_ = false;
-	copy_mission_start_options();
-	// The load's steps run the session's periodic update ahead of the terrain and past it.
-	pump_join_load_step();
 	Ref<LoadTimeline> timeline;
-	const int err = load_mission_head(p_mission, p_bms_name, p_resource_root, timeline);
+	Ref<Simulation> host_sim;
+	Ref<MissionSetupOptions> runtime_options;
+	const opennova::mission::MissionLoadLegs legs = mission_load_legs(
+			p_mission, p_bms_name, p_resource_root, timeline, host_sim, runtime_options);
+	const int err = opennova::mission::run_join_head_load(legs);
 	if (err != OK) return err;
-	pump_join_load_step();
-	// Then the avatar combos' models, at the header's climate: their data loads into the
-	// placer the S2C 0x1A's load keeps, and that load's freeze resolves their materials with the
-	// rest of the list (engine: inmatch/loaded_model_list.h avatar_combo_models, D-NET-845,
-	// D-NET-1157).
-	timeline->span("avatars");
-	placer_ = MissionObjectPlacer::create(resource_root_, Ref<ItemDatabase>());
-	const opennova::mission::BootFileSource files =
-			opennova::mission::boot_files_from_index(p_resource_root->native_index());
-	const auto climate = static_cast<opennova::bms::ClimateType>(p_mission->get_info()->get_climate());
-	for (const std::string &name : opennova::inmatch::avatar_combo_models(&files, climate)) {
-		const String file = opennova::to_gd(opennova::inmatch::LoadedModelList::node_name(name));
-		if (p_resource_root->has_file(file)) placer_->object_data_for(file);
-	}
-	timeline->end_span();
-	timeline->finish();
 	join_terrain_preloaded_ = true;
 	return OK;
+}
+
+// The load plan's legs over this world (engine mission/mission_load.h): the device's (the
+// loading screen's presents, the scene's stage loads, the timeline's spans) and the session's,
+// through the load's simulation. The legs hold `r_timeline`, `r_host_sim` and `r_runtime_options`
+// by reference: the caller keeps them for the load's call.
+opennova::mission::MissionLoadLegs GameWorld::mission_load_legs(const Ref<MissionData> &p_mission,
+		const String &p_bms_name, const Ref<ResourceRoot> &p_resource_root,
+		Ref<LoadTimeline> &r_timeline, Ref<Simulation> &r_host_sim,
+		Ref<MissionSetupOptions> &r_runtime_options) {
+	using opennova::mission::MissionLoadRole;
+	opennova::mission::MissionLoadLegs legs;
+	opennova::mission::MissionLoadSessionLegs &session = legs.session;
+	opennova::mission::MissionLoadDeviceLegs &device = legs.device;
+
+	// --- the session's legs, over the load's simulation ---
+	session.create_session = [this, p_mission, p_bms_name, p_resource_root]() {
+		return create_fresh_session(p_mission, p_bms_name, p_resource_root);
+	};
+	// The host session the load's head runs on resolves here, past the create: the staged
+	// simulation, else a map change's kept one.
+	session.begin_host_load = [this, p_mission, p_bms_name, p_resource_root, &r_host_sim]() {
+		r_host_sim = staged_runtime_options_.is_valid() ? staged_runtime_options_->get_simulation()
+														: drive_.kept_simulation();
+		if (r_host_sim.is_valid()) r_host_sim->begin_host_mission_load(p_mission, p_resource_root, p_bms_name);
+	};
+	session.mission_start_update = [this, p_mission, p_bms_name, p_resource_root, &r_host_sim]() {
+		drive_.publish_host_mission_start(r_host_sim, p_mission, p_resource_root, p_bms_name);
+	};
+	session.open_host_load_window = [&r_host_sim]() {
+		if (r_host_sim.is_valid()) r_host_sim->open_host_load_window();
+	};
+	session.pump_host_load_stage = [&r_host_sim]() {
+		if (r_host_sim.is_valid()) r_host_sim->pump_host_load_stage();
+	};
+	session.loading_step = [this]() { pump_join_load_step(); };
+	session.start_runtime = [this, p_mission, p_bms_name, &r_runtime_options]() {
+		return start_runtime(p_mission, p_bms_name, r_runtime_options);
+	};
+	session.role = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		if (sim.is_null()) return MissionLoadRole::None;
+		if (sim->is_joiner()) return MissionLoadRole::Joiner;
+		return sim->session_role() == Simulation::ROLE_DEDICATED_HOST ? MissionLoadRole::DedicatedHost
+																	   : MissionLoadRole::Authority;
+	};
+	session.mission_start_deferred = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		return sim.is_valid() && sim->host_mission_start_deferred();
+	};
+	session.freeze_model_list = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		if (sim.is_valid()) sim->finalize_loaded_model_challenge_snapshot();
+	};
+	session.reload_pool0_rows = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		if (sim.is_valid()) sim->reload_join_pool0_row_channels();
+	};
+	session.first_loadout = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		if (sim.is_valid()) sim->push_join_mission_start_first_loadout();
+	};
+	session.settle_streamed_types = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		if (sim.is_valid() && placer_.is_valid())
+			sim->settle_join_streamed_types(resource_root_, placer_->get_item_db());
+	};
+	session.pump_render_arm = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		if (sim.is_valid()) sim->pump_host_render_arm_ahead_of_textures();
+	};
+	session.mission_start_boundary = [this]() {
+		run_mission_start_environment_boundary();
+		return static_cast<int>(OK);
+	};
+	session.weapon_profile = [this]() { load_player_weapon_profile(); };
+	session.play = [this]() {
+		if (MissionRoot *runtime = get_runtime()) runtime->play();
+	};
+	session.end_host_load = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		if (sim.is_valid()) sim->end_host_mission_load();
+	};
+
+	// --- the device's legs, over this world ---
+	device.present = [this](int p_percent) { emit_signal(kSignalLoadProgress, p_percent); };
+	device.begin_timeline = [this, p_bms_name, &r_timeline]() {
+		if (r_timeline.is_valid()) return;
+		r_timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
+		last_load_timeline_ = r_timeline;
+	};
+	device.span = [&r_timeline](const char *p_name) {
+		if (r_timeline.is_valid()) r_timeline->span(p_name);
+	};
+	device.end_span = [&r_timeline]() {
+		if (r_timeline.is_valid()) r_timeline->end_span();
+	};
+	device.finish_timeline = [&r_timeline]() {
+		if (r_timeline.is_valid()) r_timeline->finish();
+	};
+	device.copy_start_options = [this]() { copy_mission_start_options(); };
+	device.head_effect_system = [this, p_resource_root, &r_timeline]() {
+		free_head_effect_world();
+		head_effect_world_id_ = ObjectID(create_effect_world(p_resource_root, r_timeline)->get_instance_id());
+	};
+	// The local-asset gate: the document's references are basenames from either header source
+	// (the wire 0x0B header's extension is dropped by mission_info()). Only the REPORT is
+	// join-aware: a wire join names the host's stream and the mounted expansion so a live punt
+	// reads as "your install lacks X", not as a bad local file.
+	device.terrain_gate = [this, p_mission, p_bms_name, p_resource_root]() {
+		const bool wire_header_join = p_mission->is_wire_header_only();
+		join_wire_assets_pending_ = wire_header_join;
+		join_wire_til_applied_ = false;
+		join_wire_assets_failed_ = false;
+		join_wire_asset_failure_emitted_ = false;
+		const String trn = p_mission->get_terrain_ref() + ".trn";
+		if (p_resource_root->has_file(trn)) return static_cast<int>(OK);
+		emit_signal(kSignalLoadFailed,
+				missing_mission_asset_reason(trn, p_bms_name, p_resource_root, wire_header_join));
+		return static_cast<int>(ERR_FILE_NOT_FOUND);
+	};
+	device.head_begin = [this, p_mission, p_bms_name, p_resource_root]() {
+		set_weather_world_tick_driven(true);
+		set_water_world_rendering_enabled(false);
+		resource_root_ = p_resource_root;
+		// The model textures this mission loads take the mission start's object texture detail
+		// (publish_session_render_settings, past copy_mission_start_options).
+		if (resource_root_.is_valid()) resource_root_->set_object_texdetail(session_object_texdetail_);
+		load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
+				p_mission->is_wire_header_only());
+	};
+	// The environment, the mission's overrides, then the exact mission clock and the reset
+	// weather owner, ahead of the runtime.
+	device.environment = [this, p_mission]() {
+		load_environment(p_mission->get_terrain_ref() + ".trn", p_mission->get_environment_ref() + ".env");
+		apply_mission_environment_overrides(p_mission);
+		Ref<MissionInfo> mission_info = p_mission->get_info();
+		mission_clock_start_q8_8_ = mission_info->get_start_time();
+		mission_clock_minutes_per_day_ = mission_info->get_minutes_per_day();
+		scene_.configure_mission_clock(mission_clock_start_q8_8_, mission_clock_minutes_per_day_);
+		prepare_world_driven_weather();
+	};
+	device.terrain = [this, p_mission]() {
+		const String trn = p_mission->get_terrain_ref() + ".trn";
+		if (load_terrain(trn, p_mission->get_tile_set_ref(), p_mission->get_environment_ref()))
+			return static_cast<int>(OK);
+		emit_signal(kSignalLoadFailed, vformat("failed to load %s", trn));
+		return static_cast<int>(ERR_CANT_OPEN);
+	};
+	// The avatar combos' models at the header's climate, into the placer the S2C 0x1A's load
+	// keeps.
+	device.avatar_models = [this, p_mission, p_resource_root]() {
+		placer_ = MissionObjectPlacer::create(resource_root_, Ref<ItemDatabase>());
+		const opennova::mission::BootFileSource files =
+				opennova::mission::boot_files_from_index(p_resource_root->native_index());
+		const auto climate = static_cast<opennova::bms::ClimateType>(p_mission->get_info()->get_climate());
+		for (const std::string &name : opennova::inmatch::avatar_combo_models(&files, climate)) {
+			const String file = opennova::to_gd(opennova::inmatch::LoadedModelList::node_name(name));
+			if (p_resource_root->has_file(file)) placer_->object_data_for(file);
+		}
+	};
+	device.mission_root = [this, p_mission](bool p_keep_head_models) {
+		loaded_mission_ = p_mission;
+		start_mission_root();
+		if (!p_keep_head_models) placer_.unref();
+	};
+	device.place_objects = [this, p_mission]() { place_mission_objects(p_mission); };
+	// The shell owns the actual music VM.
+	device.music_context = [this](bool p_open) {
+		if (p_open) emit_signal(kSignalMusicContextOpened, resource_root_);
+		else emit_signal(kSignalMusicContextClosed);
+	};
+	device.runtime_started = [this, p_bms_name, &r_runtime_options]() {
+		finish_runtime_start(r_runtime_options, p_bms_name);
+	};
+	device.drop_created_session = [this]() { staged_runtime_options_.unref(); };
+	// The shell's post-mission route decides the NovaWorld session, so it outlives this unload.
+	device.unload_failed_runtime = [this]() {
+		NovaWorldClient *nw_session = drive_.release_nw_client();
+		unload();
+		drive_.adopt_nw_client(nw_session);
+	};
+	device.warm_model_definitions = [this]() { player_visuals_->prewarm_loaded_model_challenge_definitions(); };
+	device.mission_audio = [this, p_mission, p_bms_name]() { start_mission_audio(p_mission, p_bms_name); };
+	device.place_streamed_world = [this, &r_timeline]() { return place_join_wire_world(get_sim(), r_timeline); };
+	device.celestial_models = [this](bool p_dedicated) {
+		scene_.load_celestial_models(resource_root_, opennova::env::builds_celestial_draws(p_dedicated));
+		// The overlay tail reads each built body's surfaces once, a device readback that stalls the
+		// frame it lands in: here, where the bodies build, not in the first frame that appends them
+		// (the glare, the glint and the water mirror's redraw of the discs; D-NET-1341).
+		if (celestial_ != nullptr) {
+			for (ObjectModel *body : celestial_->get_body_models()) {
+				scene_overlay_bodies_.prime(body);
+			}
+		}
+	};
+	// The shell's HUD builds here, its layout and its map-grid origin scan, not on the first frame
+	// past the load.
+	device.hud_overlay_init = [this, p_bms_name]() { emit_signal(kSignalHudOverlayInit, p_bms_name); };
+	device.start_effect_world = [this]() { start_effect_world(); };
+	device.terrain_textures = [this, &r_timeline](bool p_dedicated) {
+		load_terrain_textures(r_timeline, p_dedicated);
+	};
+	device.sky_maps = [this](bool p_dedicated) { scene_.load_sky_maps(p_dedicated); };
+	// Each listed file's resolve presents the loading screen at its stored checkpoint, the
+	// stage's start (MissionObjectPlacer::resolve_model_materials carries the witness).
+	device.resolve_model_materials = [this]() {
+		const Ref<Simulation> sim = get_sim();
+		if (placer_.is_null() || sim.is_null()) return;
+		placer_->resolve_model_materials(sim->get_mission_start_model_files(),
+				callable_mp(this, &GameWorld::pulse_load_progress)
+						.bind(MissionData::load_progress_percent(MissionData::LOAD_STAGE_EFFECTS_WARM)));
+	};
+	// The shell's HUD loads its textures, fonts and stdbox frame here, inside the load, by the arm.
+	device.hud_textures = [this](bool p_full_arm) { emit_signal(kSignalHudTexturesLoad, p_full_arm); };
+	device.frame_fx_textures = [this](bool p_dedicated) { load_frame_fx_textures(p_dedicated); };
+	device.effects_warm = [this, &r_timeline](bool p_spawn_effects) {
+		warm_effect_world_catalog(p_spawn_effects, r_timeline);
+	};
+	device.spawn_loadout = [this]() { player_visuals_->apply_local_player_spawn_loadout(); };
+	device.script_effects = [this]() { open_script_effects(); };
+	device.world_ready = [this, p_bms_name]() {
+		loaded_mission_file_ = p_bms_name;
+		world_ready_ = true;
+	};
+	device.water_enabled = [this]() { set_water_world_rendering_enabled(true); };
+	device.world_loaded = [this]() { emit_signal(kSignalWorldLoaded); };
+	device.post_load_frames = [this, p_bms_name]() { begin_post_load_frames(p_bms_name); };
+	return legs;
 }
 
 // The mission start's copies of the options, which its effect system and its head build at.
@@ -597,76 +537,6 @@ void GameWorld::copy_mission_start_options() {
 			presenter->prepare_view_projection(aspect_mode_);
 		}
 	}
-}
-
-// The mission start's head through its terrain, past the start's copies of the options
-// (copy_mission_start_options): the terrain's gate, the tile info, the environment (the
-// mission's overrides, its clock, the weather owner) and the terrain. Emits load_failed and
-// returns the error on a failure; `r_timeline` is the load's timeline, begun here from the tile
-// info on when the caller began none.
-int GameWorld::load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
-		const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline) {
-	const bool wire_header_join = p_mission->is_wire_header_only();
-	join_wire_assets_pending_ = wire_header_join;
-	join_wire_til_applied_ = false;
-	join_wire_assets_failed_ = false;
-	join_wire_asset_failure_emitted_ = false;
-	// The local-asset gate holds for wire-header joins too — there is no world
-	// without terrain, and retail joiners also resolve it from the local
-	// install by the name the wire supplies (net-re section 5.28: custom
-	// missions reference stock assets). Only the REPORT is join-aware: a wire
-	// join names the host's stream and the mounted expansion so a live punt
-	// reads as "your install lacks X", not as a bad local file.
-	// The document's references are basenames from either header source (the
-	// wire 0x0B header's extension is dropped by mission_info()).
-	const String trn = p_mission->get_terrain_ref() + ".trn";
-	if (!p_resource_root->has_file(trn)) {
-		emit_signal(kSignalLoadFailed,
-				missing_mission_asset_reason(trn, p_bms_name, p_resource_root, wire_header_join));
-		if (r_timeline.is_valid()) r_timeline->finish();
-		return ERR_FILE_NOT_FOUND;
-	}
-	// The environment gates nothing: a .env that is not there is skipped and the
-	// mission starts on the engine's defaults (load_environment).
-	const String env_name = p_mission->get_environment_ref() + ".env";
-
-	set_weather_world_tick_driven(true);
-	set_water_world_rendering_enabled(false);
-	// Keep stage attribution stable so load timelines remain comparable.
-	if (r_timeline.is_null()) {
-		r_timeline = LoadTimeline::begin(vformat("Mission load %s", p_bms_name));
-		last_load_timeline_ = r_timeline;
-	}
-	resource_root_ = p_resource_root;
-	// The model textures this mission loads take the mission start's object texture detail
-	// (publish_session_render_settings, past copy_mission_start_options).
-	if (resource_root_.is_valid()) resource_root_->set_object_texdetail(session_object_texdetail_);
-	load_mission_tile_info(p_bms_name, p_mission, p_resource_root, PackedByteArray(),
-			p_mission->is_wire_header_only());
-	// Each stage below presents the plan's anchor when it starts.
-	emit_signal(kSignalLoadProgress,
-			MissionData::load_progress_percent(MissionData::LOAD_STAGE_ENVIRONMENT));
-	r_timeline->span("environment");
-	load_environment(trn, env_name);
-	apply_mission_environment_overrides(p_mission);
-	// Initialize the exact mission clock and the reset weather owner before the
-	// runtime is constructed. The authority publishes this T0 sample after setup
-	// but before play, so its first network tick cannot observe stale/default data.
-	Ref<MissionInfo> mission_info = p_mission->get_info();
-	mission_clock_start_q8_8_ = mission_info->get_start_time();
-	mission_clock_minutes_per_day_ = mission_info->get_minutes_per_day();
-	scene_.configure_mission_clock(mission_clock_start_q8_8_, mission_clock_minutes_per_day_);
-	prepare_world_driven_weather();
-	r_timeline->end_span();
-	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_TERRAIN));
-	r_timeline->span("terrain");
-	if (!load_terrain(trn, p_mission->get_tile_set_ref(), p_mission->get_environment_ref())) {
-		emit_signal(kSignalLoadFailed, vformat("failed to load %s", trn));
-		r_timeline->finish();
-		return ERR_CANT_OPEN;
-	}
-	r_timeline->end_span();
-	return OK;
 }
 
 // The per-mission subtree (ADR 0043 d9): MissionRoot owns the placed
@@ -863,21 +733,19 @@ void GameWorld::unload() {
 	if (container != nullptr) {
 		container->queue_free();
 	}
-	// Per-item attached-effect owner keys reference nodes in that container —
-	// never let a reload's provider resolve against freed instances.
-	item_fx_->reset();
 	MissionAudio *mission_audio = get_mission_audio();
 	if (mission_audio != nullptr) {
 		mission_audio->teardown();
 		mission_audio->queue_free(); // the node is the audio root; the world owned it
 	}
-	// Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
-	// The game shell re-opens menu music on its return to the front end
-	// (MainGame connects this to MusicService.stop_context).
+	// Tear down the game music context (engine audio MusicStreamPump::end carries
+	// the stop's witness). The game shell re-opens menu music on its return to the
+	// front end (MainGame connects this to MusicService.stop_context).
 	emit_signal(kSignalMusicContextClosed);
-	// Blink frame gates and every occlusion override reset with the mission
-	// [orig: the letter-bit clear @ 0x525c45 at mission start] — an unload while
-	// indoors must not leave the next mission's terrain/sky/water hidden. The
+	// Blink frame gates and every occlusion override reset with the mission, as
+	// the letter bits clear at the mission start (engine mission/mission_load_plan.h
+	// carries the witness): an unload while indoors must not leave the next
+	// mission's terrain/sky/water hidden. The
 	// release clears the occlusion-hidden bit, so every node lands on its own
 	// present intent — see OcclusionFrame.reset.
 	occlusion_->reset();
@@ -1016,10 +884,8 @@ void GameWorld::run_mission_start_environment_boundary() {
 // Retail loads <mission>.til (else the terrain's polytrn_tileinfo) into one
 // shared g_TerrainTileArray used by terrain overlays/surface overrides, network
 // initial state, and both foliage generators' radius-2 blocker. The file rule
-// is the engine's (mission::read_placed_tiles carries its witness).
-// [orig: Terrain_LoadTileInfoFile @ 0x60a740, policy force @ 0x60a74e;
-// Terrain_GetSurfaceTypeAtPosition @ 0x606510;
-// Foliage_PathBlockedByPlacedTile @ 0x606490]
+// is the engine's (mission::read_placed_tiles carries its witness; the readers,
+// terrain_query/surface_type_map.h and formats/til's foliage blocker, theirs).
 void GameWorld::load_mission_tile_info(const String &p_bms_name, const Ref<MissionData> &p_mission,
 		const Ref<ResourceRoot> &p_resource_root, const PackedByteArray &p_wire_til_bytes,
 		bool p_wire_is_authoritative) {
@@ -1226,11 +1092,9 @@ void GameWorld::place_streamed_mission_objects(const Ref<Simulation> &p_sim,
 	leg("occlusion");
 	occlusion_->rebind_placed_nodes();
 	leg_end();
-	// The authored .def item effects and effect lights attached at load against
-	// an empty placer; re-attach against the placed sources (the same pair the
-	// effect-catalog warm-up re-runs).
+	// The effect lights attached at load against an empty placer; re-attach
+	// against the placed sources (the effect-catalog warm-up re-runs it).
 	leg("reattach");
-	item_fx_->reattach();
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
@@ -1341,15 +1205,6 @@ void GameWorld::load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool 
 	p_timeline->end_span();
 }
 
-// The mission textures stage's sky maps, past the terrain's textures and ahead of the freeze: the
-// full arm's, none on a dedicated host's reduced arm (engine environment/sky_frame.h
-// loads_mission_sky_maps carries the witness, D-NET-1170).
-void GameWorld::load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
-	p_timeline->span("sky_maps");
-	scene_.load_sky_maps(p_dedicated_host);
-	p_timeline->end_span();
-}
-
 // The mission textures stage's view effects, tracer pool and FrameFX, past the HUD's textures and
 // in that order, on the full arm alone: the NVG view's device objects, the tracer pool's
 // materials' (the distortion ribbons' and the overlay stages', whose NVG laser draws the pool's
@@ -1357,8 +1212,7 @@ void GameWorld::load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedica
 // renderer/frame_fx_effects.h creates_view_effect_shaders, creates_frame_fx_pixel_shaders and
 // builds_frame_fx_scanline_texture, renderer/tracer_frame.h creates_tracer_pool_shaders;
 // D-NET-1172, D-NET-1231).
-void GameWorld::load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host) {
-	p_timeline->span("frame_fx_textures");
+void GameWorld::load_frame_fx_textures(bool p_dedicated_host) {
 	if (framefx_ != nullptr && opennova::renderer::creates_view_effect_shaders(p_dedicated_host)) {
 		framefx_->init_view_effects();
 	}
@@ -1367,7 +1221,6 @@ void GameWorld::load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool
 		effect_world->create_tracer_pool_devices();
 	}
 	scene_.init_frame_fx_mission_textures(p_dedicated_host);
-	p_timeline->end_span();
 }
 
 // Runtime foliage: Terrain supplies the retail 16-unit detail-cell set; the
@@ -1513,7 +1366,8 @@ int GameWorld::create_fresh_session(const Ref<MissionData> &p_mission, const Str
 	return OK;
 }
 
-int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name) {
+int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name,
+		Ref<MissionSetupOptions> &r_options) {
 	MissionRoot *runtime = get_runtime();
 	Node *container = runtime->get_node_or_null(NodePath("MissionObjects"));
 	// A null board is a no-op on the root (its own board is null too).
@@ -1534,9 +1388,8 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// host streams to joiners so their g_LoadingProgress climbs 5 -> 6 and
 	// terrain finishes loading (net-re §5.37). The tile-overlay .til is named
 	// after the MISSION (localres.pff: ASH_I5A.til), not the terrain tileinfo
-	// [orig: Terrain_LoadTileInfoFile @ 0x60a740;
-	// Terrain_SerializeTiles @ 0x6080f0]. Reuse the payload parsed before
-	// terrain build.
+	// (engine inmatch/host_boot.cpp carries the load's and the serializer's
+	// witnesses). Reuse the payload parsed before terrain build.
 	if (!mission_til_bytes_.is_empty()) {
 		opts->set_terrain_til(mission_til_bytes_);
 	}
@@ -1580,9 +1433,15 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// contexts. Re-handed per load; unload's reset() forgets them.
 	occlusion_->bind_mission(runtime->get_sim(), runtime->get_entity_index(), runtime->get_entity_presenter(),
 			placer_);
-	// Phase B of the one host boot, here unless the boot left the host's mission-start head
-	// to it: then it runs past the device stages (load_mission_internal).
-	if (!runtime->get_sim()->host_mission_start_deferred()) run_mission_start();
+	// The mission start runs next where its arm runs it (engine mission/mission_load.h
+	// run_mission_start), then finish_runtime_start.
+	r_options = opts;
+	return OK;
+}
+
+void GameWorld::finish_runtime_start(const Ref<MissionSetupOptions> &p_options, const String &p_bms_name) {
+	MissionRoot *runtime = get_runtime();
+	if (runtime == nullptr) return;
 	sync_runtime_profiling();
 	runtime->set_presentation_time_ms(panm_clock_->get_time_ms());
 	runtime->connect("effects_drained", callable_mp(this, &GameWorld::on_runtime_effects));
@@ -1592,28 +1451,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	install_admin_update_tail(runtime->get_sim());
 	// A browsable listen host: register it with the NovaWorld gate (F1), if
 	// one was configured. No-op for single-player, joiners, and pure-LAN play.
-	drive_.on_runtime_started(opts, p_bms_name);
-	return OK;
-}
-
-// Phase B of the one host boot (inmatch/host_boot.h): on a host whose boot left it the
-// mission-start head (the render arm's last pump, the PreMission pass, the round init,
-// Player_InitPlayer), then the water plane the vehicle init grounds hulls against (07TR's
-// offshore LCACs otherwise settle on the seabed before crews board), the environment
-// boundary and the session's load end; then the local player's spawn kit, and the game
-// starts running.
-void GameWorld::run_mission_start() {
-	run_mission_start_environment_boundary();
-	// The player profile's saved weapon kits, loaded before ANY kit is applied
-	// or submitted: in a net session the original's spawn kit is a page of
-	// this file, selected by the very class byte it also puts on the wire
-	// [orig: Game_StartMission @ 0x525767-0x525836].
-	load_player_weapon_profile();
-	player_visuals_->apply_local_player_spawn_loadout();
-	// The game starts running past the session's load end, which leaves a single-player
-	// session paused (Simulation::start_mission): tick() gates on is_playing, so the
-	// overlay's transport can pause/step a live mission.
-	if (MissionRoot *runtime = get_runtime()) runtime->play();
+	drive_.on_runtime_started(p_options, p_bms_name);
 }
 
 // The player profile's current weapon.sav record onto the sim, again after the
@@ -1639,7 +1477,7 @@ void GameWorld::start_mission_audio(const Ref<MissionData> &p_mission, const Str
 	MissionAudio *mission_audio = MissionAudio::create(resource_root_, item_db);
 	mission_audio_id_ = ObjectID(mission_audio->get_instance_id());
 	// Sound occlusion runs LOS through the sim's collision world + terrain
-	// [orig: Sound_ApplyOcclusionDistance @ 0x529970]; hosts without a sim mix
+	// (engine world/collision.h carries the witness); hosts without a sim mix
 	// unoccluded.
 	mission_audio->set_simulation(get_sim());
 	Ref<MissionAudioStats> stats = mission_audio->setup(p_mission, p_bms_name, this);
@@ -1823,7 +1661,6 @@ int GameWorld::warm_effect_world_catalog(bool p_spawn_effects, const Ref<LoadTim
 			effect_world->set_particles_hidden(true);
 		}
 	}
-	item_fx_->reattach();
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
@@ -1923,16 +1760,16 @@ Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position,
 	return warm;
 }
 
-// Mission-start load of EVERY mounted .ptl into the runtime effect world
-// [orig: CEffectSystem_Init @ 0x5f6070 <- Game_StartMission @ 0x524980 — no fixed
-// file list: the loose ptl\*.ptl set and every PFF .ptl entry both parse].
+// Mission-start load of EVERY mounted .ptl into the runtime effect world: no fixed
+// file list, the loose ptl\*.ptl set and every PFF .ptl entry both parse (engine
+// ResourceIndex::effect_files and mission/mission_load_plan.h carry the witness).
 EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_root,
 		const Ref<LoadTimeline> &p_timeline) {
 	EffectWorld *effect_world = memnew(EffectWorld);
 	effect_world->set_name("EffectWorld");
 	add_child(effect_world);
 	effect_world->set_environment_source(env_);
-	if (item_fx_->particles_hidden()) {
+	if (particles_hidden_) {
 		effect_world->set_particles_hidden(true);
 	}
 	// The session's words, before the pages are built (CParticleTexture_InitTextureAndChannels
@@ -2036,17 +1873,16 @@ void GameWorld::start_effect_world() {
 		}
 		// The sim-side water plane (env.water_z): the footstep water pick, the
 		// landing legs, AND the destruction paths (submerged wrecks skip pieces,
-		// the wreck fire steams out) all gate on it [orig: g_EnvWaterHeightFixed
-		// @ 0x26C6454; world-wac-ai-re §24]. Idempotent; re-pushed after runtime
-		// start too (either side may come up first).
+		// the wreck fire steams out) all gate on it (engine world/world.h carries
+		// the witness). Idempotent; re-pushed after runtime start too (either side
+		// may come up first).
 		Ref<Simulation> water_sim = get_sim();
 		if (water_sim.is_valid()) {
 			water_sim->set_water_z(water_->get_water_height());
 		}
 	}
-	// Item-effect wiring — the owner-pose provider, the persistent per-item
-	// attaches, and the wire-spawn callback — lives in the director.
-	item_fx_->on_effect_world_started();
+	// The persistent per-item effects are the engine's: its producers open onto this scene past
+	// the warm reset (open_script_effects, world::ItemEmitterSystem::open_producers).
 	if (light_director_.is_valid()) {
 		light_director_->reattach();
 	}
@@ -2060,16 +1896,16 @@ void GameWorld::start_effect_world() {
 	EntityPresenter *presenter = wire_runtime != nullptr ? wire_runtime->get_entity_presenter() : nullptr;
 	if (presenter != nullptr && light_director_.is_valid()) {
 		presenter->connect("wire_node_spawned", callable_mp(this, &GameWorld::on_wire_node_spawned));
+		presenter->connect("wire_node_retired", callable_mp(this, &GameWorld::on_wire_node_retired));
 	}
 	// The present passes' typed collaborators (ADR 0043 d9): the mission audio
-	// (the stage before this one), this effect world, the light director, the
-	// environment node and the owner-anchor registry (GameWorld's
-	// ItemEffectDirector). Bound
+	// (the stage before this one), this effect world, the light director and
+	// the environment node. Bound
 	// once here, inside the load and before the first session frame presents;
 	// the fire/destruction sound legs and the effect legs gate on the objects
 	// themselves (a dedicated serve binds no camera listener).
 	if (wire_runtime != nullptr) {
-		wire_runtime->setup_passes(get_mission_audio(), effect_world, light_director_.ptr(), env_, item_fx_.ptr());
+		wire_runtime->setup_passes(get_mission_audio(), effect_world, light_director_.ptr(), env_);
 	}
 	// The fire pass's tracer ribbons, built again per rendering water mirror
 	// against that mirror's camera (FirePresenter::set_mirror_cameras).

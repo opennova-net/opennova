@@ -193,18 +193,18 @@ func test_runtime_portrait_idle_spins_and_holds_the_camera() -> void:
 	# At rest the model rotates continuously (idle spin) while the camera holds its front pose.
 	_preview.frame_menu_pose(_soldier_bounds())
 	var cam := _preview.portrait_camera()
+	# A frame whose bank drained no menu update (the engine frontend's bank) steps nothing.
+	var held: float = _preview.model_yaw()
+	_preview.advance(0)
+	assert_eq(_preview.model_yaw(), held, "a frame that drains no update steps nothing")
 	var before_angle: float = _preview.model_yaw()
 	var rest_dist: float = (cam.global_position - _preview.menu_center()).length()
 	for i in range(5):
-		_preview.advance(Simulation.tick_dt())
+		_preview.advance(1)
 	# Five menu updates of 0x800000 BAM each (the yaw is a 32-bit word, so the
 	# difference is taken round the turn).
 	assert_almost_eq(wrapf(_preview.model_yaw() - before_angle, -PI, PI),
 			5 * 0x800000 * AvatarPreview.BAM_TO_RADIANS, 1e-4, "the model idle-spins per update")
-	# Time short of an update runs none.
-	var held: float = _preview.model_yaw()
-	_preview.advance(Simulation.tick_dt() * 0.5)
-	assert_eq(_preview.model_yaw(), held, "half an update steps nothing")
 	var dist_after: float = (cam.global_position - _preview.menu_center()).length()
 	assert_almost_eq(dist_after, rest_dist, 0.05, "the camera holds its distance at rest (no zoom)")
 	assert_gt(cam.global_position.z, _preview.menu_center().z, "camera stays in front (+Z)")
@@ -234,13 +234,13 @@ func test_runtime_portrait_hover_zooms_in_and_out() -> void:
 	var rest_dist: float = (cam.global_position - _preview.menu_center()).length()
 	_preview.set_hovered(true)
 	for i in range(30):
-		_preview.advance(0.1)
+		_preview.advance(6)
 	assert_gt(_preview.zoom_blend(), 0.5, "hover ramps the zoom blend toward 1")
 	var hover_dist: float = (cam.global_position - _preview.menu_center()).length()
 	assert_lt(hover_dist, rest_dist, "the camera zooms in (closer) on hover")
 	_preview.set_hovered(false)
 	for i in range(30):
-		_preview.advance(0.1)
+		_preview.advance(6)
 	assert_lt(_preview.zoom_blend(), 0.5, "un-hover relaxes the zoom blend toward 0")
 
 
@@ -252,7 +252,7 @@ func test_a_portrait_that_never_hovers_spins_under_the_pointer() -> void:
 	_preview.set_hovered(true)
 	var before_angle: float = _preview.model_yaw()
 	for i in range(5):
-		_preview.advance(Simulation.tick_dt())
+		_preview.advance(1)
 	assert_almost_eq(wrapf(_preview.model_yaw() - before_angle, -PI, PI),
 			5 * 0x800000 * AvatarPreview.BAM_TO_RADIANS, 1e-4, "it spins as at rest")
 	assert_eq(_preview.zoom_blend(), 0.0, "and never zooms")

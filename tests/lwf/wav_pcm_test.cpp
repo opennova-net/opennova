@@ -699,7 +699,9 @@ int main() {
 	// The byte at +13 shifts the channel's mix coefficients right, arithmetically (psraw
 	// [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5e6..0x7bd5f3]): each unit halves the
 	// volume, floored, and 15 or more leaves every coefficient of 0 or more (each at most 0x7FFF)
-	// at 0, a silent channel of the buffer's length; the lenient decode alike.
+	// at 0, a silent channel of the buffer's length. The game's decode keeps the byte for the
+	// mixer (audio::Mixer, ctest audio_mixer) and the samples as they are; the tooling's lenient
+	// decode folds it onto them.
 	{
 		const auto shifted = [&](uint8_t shift, uint8_t width, std::vector<int16_t> &r) {
 			std::vector<uint8_t> aud;
@@ -711,12 +713,16 @@ int main() {
 			} else {
 				aud.insert(aud.end(), {0x7F, 0x80, 0x10, 0xF0, 0xFF});
 			}
-			WavPcm out, lenient;
+			WavPcm out, lenient, plain;
+			std::vector<uint8_t> unshifted = aud;
+			unshifted[13] = 0;
 			if (!wav_decode_pcm16(aud.data(), aud.size(), out, error) ||
 					!opennova::lwf::wav_decode_pcm16_lenient(aud.data(), aud.size(), lenient, error) ||
-					lenient.pcm16 != out.pcm16 || out.loader_samples != 5 || out.sample_rate != 22050)
+					!wav_decode_pcm16(unshifted.data(), unshifted.size(), plain, error) ||
+					out.pcm16 != plain.pcm16 || out.loader_shift != shift || out.loader_width != width ||
+					out.loader_samples != 5 || out.sample_rate != 22050)
 				return false;
-			r = samples_of(out);
+			r = samples_of(lenient);
 			return true;
 		};
 		std::vector<int16_t> got;

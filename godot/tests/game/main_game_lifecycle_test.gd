@@ -56,17 +56,17 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 	assert_eq(int(controls.invoke(&"set_audio_bus_volume",
 			["Master", DebugControlTable.AUDIO_BUS_VOLUME_MAX_DB + 0.5]).error),
 			ERR_INVALID_PARAMETER)
-	var bus := AudioServer.get_bus_index("SFX")
+	var bus := AudioServer.get_bus_index("Master")
 	var previous := {
 		"volume": AudioServer.get_bus_volume_db(bus),
 		"mute": AudioServer.is_bus_mute(bus),
 		"solo": AudioServer.is_bus_solo(bus),
 		"bypass": AudioServer.is_bus_bypassing_effects(bus),
 	}
-	assert_eq(int(controls.invoke(&"set_audio_bus_volume", ["SFX", -14.5]).error), OK)
-	assert_eq(int(controls.invoke(&"set_audio_bus_mute", ["SFX", true]).error), OK)
-	assert_eq(int(controls.invoke(&"set_audio_bus_solo", ["SFX", true]).error), OK)
-	assert_eq(int(controls.invoke(&"set_audio_bus_bypass", ["SFX", true]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_volume", ["Master", -14.5]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_mute", ["Master", true]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_solo", ["Master", true]).error), OK)
+	assert_eq(int(controls.invoke(&"set_audio_bus_bypass", ["Master", true]).error), OK)
 	assert_almost_eq(AudioServer.get_bus_volume_db(bus), -14.5, 0.001)
 	assert_true(AudioServer.is_bus_mute(bus))
 	assert_true(AudioServer.is_bus_solo(bus))
@@ -198,9 +198,12 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 	# explicitly, observed here through the idempotent leg EXIT_TREE runs.
 	var world := _shell.get_node("World") as GameWorld
 	var dispatcher: FoliageDispatcher = world.get_foliage_dispatcher()
-	# A graphic lookup lists the root's *veg*.3di graphics into the caches
-	# (the listing is cached even when the name resolves to nothing).
-	dispatcher.load_mesh(resource_root, "veg_lifecycle")
+	# The load's foliage stage looks a definition's graphic up: it lists the
+	# root's *veg*.3di graphics into the caches and caches the answer (both
+	# even when the name resolves to nothing).
+	var definition := TerrainFoliageDef.new()
+	definition.graphic = "veg_lifecycle"
+	dispatcher.configure_slots_from_defs(resource_root, [definition])
 	var weak_texture: WeakRef = weakref(texture)
 	texture = null
 	assert_not_null(weak_texture.get_ref(),

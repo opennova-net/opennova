@@ -57,8 +57,7 @@
 #include "credentials.h"
 #include "run_reports.h" // SecondListingReport
 #include "net_datagram_socket.h"
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <atomic>
 #include <cstdint>
@@ -373,6 +372,9 @@ private:
 	// the update reads them there (`header_name` and `climate`, the mission's BMS header's), the
 	// publish, then the NovaWorld session's periodic update, which sends it.
 	void run_mission_start_update(const std::string &header_name, int32_t climate);
+	// One loading step of the mission load: the NovaWorld session's periodic update, as the
+	// mission start's update runs it; nothing on a LAN host.
+	void run_loading_step_update();
 	// The listing over the mission that just started (the first, or a map change's next).
 	void bind_listing();
 	HostRegistration listing_columns() const;
@@ -452,9 +454,6 @@ private:
 	// A try's gate lookup (the gate's dotted address, or none when it did not resolve), which
 	// runs off the frame thread: the name's DNS lookup could hold the match up for seconds.
 	std::future<std::optional<std::string>> second_resolve_;
-	// The web exchanges of torn-down tries still out, kept until each lands so no teardown on the
-	// frame thread waited on one (Lister::release_http).
-	std::vector<std::future<net::HttpReply>> second_http_left_;
 	uint16_t bound_port_ = 0;
 	// The socket's bind address (the block's mpipaddressstring, 0 for every interface), which
 	// the /INOUT HOST STARTED and STOPPED lines print beside the port, as the game's host prints

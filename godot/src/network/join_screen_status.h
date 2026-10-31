@@ -48,14 +48,13 @@ public:
 			const opennova::inmatch::JoinQueueRecord &p_queue, uint64_t p_now_ms);
 
 	int get_stage() const { return static_cast<int>(stage_); }
-	// The MESSAGES line for this read (inmatch::join_screen_text).
-	String message_text(const Ref<RtxtStringFile> &p_override_table,
-			const Ref<RtxtStringFile> &p_gameerr) const;
+	// The MESSAGES line for this read (inmatch::join_screen_text), the process's
+	// text-override table (rtxt::text_override) searched before `p_gameerr`.
+	String message_text(const Ref<RtxtStringFile> &p_gameerr) const;
 
 	// The MESSAGES line of a stage that has no queue record, read before any
 	// connection exists (the enumerate-and-join's PRE_ENUMSESSION).
-	static String stage_text(int p_stage, const Ref<RtxtStringFile> &p_override_table,
-			const Ref<RtxtStringFile> &p_gameerr);
+	static String stage_text(int p_stage, const Ref<RtxtStringFile> &p_gameerr);
 
 	// pre.mnu's panel windows: how many, each one's name, and whether a panel
 	// state shows it (inmatch::pre_game_windows).

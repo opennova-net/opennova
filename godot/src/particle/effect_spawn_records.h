@@ -93,29 +93,20 @@ private:
 };
 
 // The game-level half of one effect spawn (the former effect_spawn_options.gd):
-// the admission / binding / render-domain policy (EffectScene's enums), the
-// slot and owner KEYS EffectWorld interns to native tokens (any Variant; null
-// = no slot / no owner), the owner pose it seeds around the spawn (before
-// the spawn, after it for ReplaceOwned so the predecessor detaches at its
-// own last pose) when `has_owner_transform`, and the tick provenance.
-// EffectWorld composes the native EffectSpawnRequest from this plus the
-// interned effect handle; the request's remaining fields (tint, spring, LOD
-// divisor, kill plane) keep their native defaults. `entity_slot` is an entity's
-// +0x1CC slot token as the engine names it (world::entity_effect_slot), used as it
-// is and ahead of any slot key.
-#define EFFECT_SPAWN_OPTIONS_FIELDS(X)                                                             \
+// the admission / render-domain policy (EffectScene's enums), the slot KEY
+// EffectWorld interns to a native token (any Variant; null = no slot), and the
+// tick provenance. EffectWorld composes the native EffectSpawnRequest from this
+// plus the interned effect handle; every group it spawns is world-bound, and
+// the request's remaining fields (spring, kill plane) keep their native
+// defaults.
+#define EFFECT_SPAWN_OPTIONS_FIELDS(X)                                                           \
 	X(int, admission, 0)                                                                           \
-	X(int, binding, 0)                                                                             \
 	X(int, render_domain, 0)                                                                       \
-	X(Transform3D, owner_transform, Transform3D())                                                 \
-	X(bool, has_owner_transform, false)                                                            \
-	X(Transform3D, owner_relative_transform, Transform3D())                                        \
 	X(int, force_zone, 0)                                                                          \
 	X(int, initial_age_ticks, 0)                                                                   \
 	X(int64_t, source_tick, 0)                                                                     \
 	X(int64_t, source_order, 0)                                                                    \
-	X(bool, section_tagged, false)                                                                 \
-	X(int64_t, entity_slot, 0)
+	X(bool, section_tagged, false)
 
 class EffectSpawnOptions : public RefCounted {
 	GDCLASS(EffectSpawnOptions, RefCounted)
@@ -124,8 +115,6 @@ public:
 	EFFECT_SPAWN_OPTIONS_FIELDS(EFFECT_SPAWN_ACCESSORS)
 	Variant get_slot_key() const { return slot_key_; }
 	void set_slot_key(const Variant &p_value) { slot_key_ = p_value; }
-	Variant get_owner_key() const { return owner_key_; }
-	void set_owner_key(const Variant &p_value) { owner_key_ = p_value; }
 
 protected:
 	static void _bind_methods();
@@ -133,7 +122,6 @@ protected:
 private:
 	EFFECT_SPAWN_OPTIONS_FIELDS(EFFECT_SPAWN_MEMBER)
 	Variant slot_key_;
-	Variant owner_key_;
 };
 
 } // namespace godot

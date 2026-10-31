@@ -16,7 +16,6 @@
 
 namespace godot {
 
-class SbfAudioStream;
 
 class SbfBank : public Resource {
 	GDCLASS(SbfBank, Resource)
@@ -42,9 +41,12 @@ public:
 	Array get_entries() const;
 	bool has_entry(const StringName &p_name) const;
 	String get_entry_name(int p_index) const;
-	Ref<SbfAudioStream> get_stream_at(int p_index);
 
 	const opennova::sbf::SbfRawEntry *raw_entry_at(int p_index) const;
+	// The streaming reader's index and the bytes it points into (the music stream's,
+	// audio::MusicStream), null when load_from_path opened none.
+	const opennova::sbf::SbfArchive *archive() const { return _opened ? &_arc : nullptr; }
+	const PackedByteArray &file_bytes() const { return _file_bytes; }
 	// The opened bank's header, null when load_from_path opened none (the music
 	// context open's bank).
 	const opennova::sbf::SbfHeader *opened_header() const {

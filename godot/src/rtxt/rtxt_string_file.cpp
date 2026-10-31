@@ -65,71 +65,75 @@ std::string gd_to_std(const String &s) {
 
 } // namespace
 
+String RtxtStringFile::text_to_gd(const std::string &p_text) { return std_to_gd(p_text); }
+
+std::string RtxtStringFile::text_from_gd(const String &p_text) { return gd_to_std(p_text); }
+
 RtxtStringFile::RtxtStringFile() {
-	file_.build_lookup();
+	file_->build_lookup();
 }
 
 void RtxtStringFile::_refresh() {
 	// Keep each section's string_count consistent with the entries that point at
 	// it, then rebuild the case-insensitive lookup. Called after every mutation;
 	// never on plain load, so an untouched file saves back byte-for-byte.
-	for (size_t s = 0; s < file_.sections.size(); ++s) {
+	for (size_t s = 0; s < file_->sections.size(); ++s) {
 		uint32_t count = 0;
-		for (const auto &entry : file_.entries) {
+		for (const auto &entry : file_->entries) {
 			if (entry.section_index == s) {
 				++count;
 			}
 		}
-		file_.sections[s].string_count = count;
+		file_->sections[s].string_count = count;
 	}
-	file_.build_lookup();
+	file_->build_lookup();
 }
 
 // --- Read ---
 
 String RtxtStringFile::get_string(const StringName &p_key) const {
-	return std_to_gd(file_.get(gd_to_std(String(p_key))));
+	return std_to_gd(file_->get(gd_to_std(String(p_key))));
 }
 
 bool RtxtStringFile::has_string(const StringName &p_key) const {
-	return file_.has(gd_to_std(String(p_key)));
+	return file_->has(gd_to_std(String(p_key)));
 }
 
 String RtxtStringFile::get_string_in_section(const String &p_section, const StringName &p_key) const {
-	return std_to_gd(file_.get_in_section(gd_to_std(p_section), gd_to_std(String(p_key))));
+	return std_to_gd(file_->get_in_section(gd_to_std(p_section), gd_to_std(String(p_key))));
 }
 
 bool RtxtStringFile::has_string_in_section(const String &p_section, const StringName &p_key) const {
-	return file_.find_in_section(gd_to_std(p_section), gd_to_std(String(p_key))) != nullptr;
+	return file_->find_in_section(gd_to_std(p_section), gd_to_std(String(p_key))) != nullptr;
 }
 
 int RtxtStringFile::get_entry_count() const {
-	return static_cast<int>(file_.entries.size());
+	return static_cast<int>(file_->entries.size());
 }
 
 // --- Section read ---
 
 int RtxtStringFile::get_section_count() const {
-	return static_cast<int>(file_.sections.size());
+	return static_cast<int>(file_->sections.size());
 }
 
 PackedStringArray RtxtStringFile::get_section_names() const {
 	PackedStringArray names;
-	names.resize(static_cast<int64_t>(file_.sections.size()));
-	for (size_t i = 0; i < file_.sections.size(); ++i) {
-		names.set(static_cast<int64_t>(i), std_to_gd(file_.sections[i].name));
+	names.resize(static_cast<int64_t>(file_->sections.size()));
+	for (size_t i = 0; i < file_->sections.size(); ++i) {
+		names.set(static_cast<int64_t>(i), std_to_gd(file_->sections[i].name));
 	}
 	return names;
 }
 
 String RtxtStringFile::get_section_name(int p_section_index) const {
-	ERR_FAIL_INDEX_V(p_section_index, static_cast<int>(file_.sections.size()), String());
-	return std_to_gd(file_.sections[p_section_index].name);
+	ERR_FAIL_INDEX_V(p_section_index, static_cast<int>(file_->sections.size()), String());
+	return std_to_gd(file_->sections[p_section_index].name);
 }
 
 PackedStringArray RtxtStringFile::get_section_keys(int p_section_index) const {
 	PackedStringArray keys;
-	for (const auto &entry : file_.entries) {
+	for (const auto &entry : file_->entries) {
 		if (static_cast<int>(entry.section_index) == p_section_index) {
 			keys.push_back(std_to_gd(entry.key));
 		}
@@ -140,8 +144,8 @@ PackedStringArray RtxtStringFile::get_section_keys(int p_section_index) const {
 // --- Indexed entry access ---
 
 String RtxtStringFile::get_entry_text(int p_index) const {
-	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_.entries.size()), String());
-	return std_to_gd(file_.entries[p_index].text);
+	ERR_FAIL_INDEX_V(p_index, static_cast<int>(file_->entries.size()), String());
+	return std_to_gd(file_->entries[p_index].text);
 }
 
 // --- Entry mutations ---
@@ -154,26 +158,26 @@ int RtxtStringFile::add_entry(const String &p_key, const String &p_text, int p_s
 	entry.position.x = static_cast<int16_t>(p_position.x);
 	entry.position.y = static_cast<int16_t>(p_position.y);
 	// At the end of the section's run (engine rtxt::File::insert_entry).
-	const int index = static_cast<int>(file_.insert_entry(std::move(entry)));
+	const int index = static_cast<int>(file_->insert_entry(std::move(entry)));
 	_refresh();
 	emit_signal("entries_structure_changed");
 	return index;
 }
 
 void RtxtStringFile::remove_entry(int p_index) {
-	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
-	file_.entries.erase(file_.entries.begin() + p_index);
+	ERR_FAIL_INDEX(p_index, static_cast<int>(file_->entries.size()));
+	file_->entries.erase(file_->entries.begin() + p_index);
 	_refresh();
 	emit_signal("entries_structure_changed");
 }
 
 void RtxtStringFile::set_entry_text(int p_index, const String &p_text) {
-	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
-	file_.entries[p_index].text = gd_to_std(p_text);
+	ERR_FAIL_INDEX(p_index, static_cast<int>(file_->entries.size()));
+	file_->entries[p_index].text = gd_to_std(p_text);
 }
 
 bool RtxtStringFile::is_grouped() const {
-	return file_.is_grouped();
+	return file_->is_grouped();
 }
 
 // --- Section CRUD ---
@@ -182,9 +186,9 @@ int RtxtStringFile::add_section(const String &p_name) {
 	opennova::rtxt::Section section;
 	section.name = gd_to_std(p_name);
 	section.string_count = 0;
-	file_.sections.push_back(std::move(section));
+	file_->sections.push_back(std::move(section));
 	_refresh();
-	return static_cast<int>(file_.sections.size()) - 1;
+	return static_cast<int>(file_->sections.size()) - 1;
 }
 
 // --- I/O ---
@@ -214,7 +218,7 @@ PackedByteArray RtxtStringFile::to_byte_array() const {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	PackedByteArray out;
-	if (!opennova::rtxt::write(file_, bytes, error)) {
+	if (!opennova::rtxt::write(*file_, bytes, error)) {
 		UtilityFunctions::push_warning("RtxtStringFile: serialize failed: ", error.c_str());
 		return out;
 	}
@@ -232,8 +236,8 @@ Error RtxtStringFile::load_from_byte_array(const PackedByteArray &p_bytes) {
 		UtilityFunctions::push_warning("RtxtStringFile: parse failed: ", error.c_str());
 		return ERR_FILE_CORRUPT;
 	}
-	file_ = std::move(parsed);
-	file_.build_lookup();
+	*file_ = std::move(parsed);
+	file_->build_lookup();
 	return OK;
 }
 
@@ -251,21 +255,19 @@ String RtxtStringFile::format_miss_marker(const String &p_section, const String 
 			gd_to_std(p_section), gd_to_std(p_key)));
 }
 
-String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_override_table,
-		const Ref<RtxtStringFile> &p_table, const String &p_section,
-		const String &p_key) {
-	const opennova::rtxt::File *override_file =
-			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr;
+String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_table,
+		const String &p_section, const String &p_key) {
+	const std::shared_ptr<const opennova::rtxt::File> override_table = opennova::rtxt::text_override();
 	const opennova::rtxt::File *file =
 			p_table.is_valid() ? &p_table->get_native() : nullptr;
 	return std_to_gd(opennova::rtxt::lookup_with_override(
-			override_file, file, gd_to_std(p_section), gd_to_std(p_key)));
+			override_table.get(), file, gd_to_std(p_section), gd_to_std(p_key)));
 }
 
 // --- The process's text-override table (the engine holds it: rtxt::set_text_override) ---
 
 void RtxtStringFile::install_text_override() const {
-	opennova::rtxt::set_text_override(std::make_shared<const opennova::rtxt::File>(file_));
+	opennova::rtxt::set_text_override(std::make_shared<const opennova::rtxt::File>(*file_));
 }
 
 void RtxtStringFile::clear_text_override() {
@@ -279,7 +281,7 @@ std::shared_ptr<const opennova::rtxt::File> RtxtStringFile::installed_text_overr
 bool RtxtStringFile::find_text(const RtxtStringFile &p_table, const char *p_section,
 		const char *p_key, std::string &r_out) {
 	const opennova::rtxt::Entry *entry =
-			opennova::rtxt::find_with_text_override(p_table.file_, p_section, p_key);
+			opennova::rtxt::find_with_text_override(*p_table.file_, p_section, p_key);
 	if (entry == nullptr) return false;
 	r_out = entry->text;
 	return true;
@@ -289,21 +291,21 @@ String RtxtStringFile::text_or(const Ref<RtxtStringFile> &p_table, const String 
 		const String &p_key, const String &p_fallback) {
 	if (p_table.is_null()) return p_fallback;
 	const opennova::rtxt::Entry *entry = opennova::rtxt::find_with_text_override(
-			p_table->file_, gd_to_std(p_section), gd_to_std(p_key));
+			*p_table->file_, gd_to_std(p_section), gd_to_std(p_key));
 	return entry != nullptr ? std_to_gd(entry->text) : p_fallback;
 }
 
 bool RtxtStringFile::has_text(const Ref<RtxtStringFile> &p_table, const String &p_section,
 		const String &p_key) {
 	return p_table.is_valid() && opennova::rtxt::find_with_text_override(
-			p_table->file_, gd_to_std(p_section), gd_to_std(p_key)) != nullptr;
+			*p_table->file_, gd_to_std(p_section), gd_to_std(p_key)) != nullptr;
 }
 
 // --- The process-wide "Keys" table (engine controls/key_strings.h) ---
 
 void RtxtStringFile::install_key_strings() const {
 	// The engine copies the table; this resource stays the shell's registry entry.
-	opennova::controls::set_key_strings(file_);
+	opennova::controls::set_key_strings(*file_);
 }
 
 void RtxtStringFile::clear_key_strings() {
@@ -312,6 +314,14 @@ void RtxtStringFile::clear_key_strings() {
 
 bool RtxtStringFile::has_key_strings() {
 	return opennova::controls::has_key_strings();
+}
+
+Ref<RtxtStringFile> RtxtStringFile::over(std::shared_ptr<const opennova::rtxt::File> p_table) {
+	Ref<RtxtStringFile> binding;
+	if (p_table == nullptr) return binding;
+	binding.instantiate();
+	binding->file_ = std::const_pointer_cast<opennova::rtxt::File>(std::move(p_table));
+	return binding;
 }
 
 Ref<RtxtStringFile> RtxtStringFile::load_mission_table(const Ref<ResourceRoot> &root,
@@ -362,7 +372,7 @@ void RtxtStringFile::_bind_methods() {
 
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey", "text"), &RtxtStringFile::strip_hotkey);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("format_miss_marker", "section", "key"), &RtxtStringFile::format_miss_marker);
-	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "override_table", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
+	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
 	ClassDB::bind_static_method("RtxtStringFile",
 			D_METHOD("text_or", "table", "section", "key", "fallback"), &RtxtStringFile::text_or);
 	ClassDB::bind_static_method("RtxtStringFile",

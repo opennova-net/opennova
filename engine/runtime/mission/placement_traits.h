@@ -105,6 +105,18 @@ inline bool item_casts_dynamic_shadow(int item_type, uint32_t attrib2) {
 			(attrib2 & kItemAttrib2DynamicShadow) != 0;
 }
 
+// The render-slot ground-shadow profile's person class: a person-type caster
+// steepens the drape's depth-clip plane 4x (the shadowztex stage, not the
+// silhouette projection; renderer::slot_depth_clip) [orig:
+// RenderSlot_DrawSilhouetteDrape @0x5d5ca0, the itemdef type 3 gate @0x5d5d7f
+// (the +0x5C == 3 test @0x5d5d81)]. A vehicle's items.def `shadow` blob decal
+// (+0xA0, the drape fallback for a bound slot past the silhouette-capture
+// budget, via @0x5d59d0) is parsed but its leg draws nothing in JO
+// (renderer/render_slot_shadow.h, the blob leg).
+inline bool item_slot_shadow_person(int item_type) {
+	return item_type == kItemTypePerson;
+}
+
 // A placed item that cannot ride a static MultiMesh population and needs its
 // own model node: every person, every dynamic-shadow caster, an item with an
 // animation definition, or one carrying occlusion records (the per-instance

@@ -296,7 +296,9 @@ public:
 	// (the black @ 0x5c1474 / skyfog @ 0x5c1597 clear is the water mirror's,
 	// Render_MainScene; see water_mirror_clear_color).
 	// Every branch serves RENDER-SPACE (x2-gained) colors for the
-	// modulate2x-path device Clear (D-RMAT-7).
+	// modulate2x-path device Clear (D-RMAT-7): underwater g_EnvWaterColorLit =
+	// water x light >> 7. The device Clear's halving branch is the
+	// non-modulate2x fallback, which no served path takes [orig: @ 0x67715d].
 	Rgb frame_clear_color_for(bool eye_above_water) const;
 	// The NVG scene's clear: its target clears to the same waterline test's
 	// skyfog / lit water with no thermal branch [orig: NVG_RenderSceneToTarget
@@ -325,6 +327,13 @@ public:
 	Rgb cloud_highlight() const { return cloud_highlight_rt_; }
 	Rgb cloud_edge() const { return cloud_edge_rt_; }
 	Rgb color_src_gain() const { return color_src_gain_; }
+	// The light block's gain, the one every lit consumer multiplies by: the
+	// objects' ColorSrcGlobalGain (WorldLightValues::gain) and the gain the
+	// light coronas and the terrain light rows scale by, EffectWorld_AmbientScale.
+	// The modulator gain while an environment is loaded, the unlit 1 before.
+	// [orig: ColorSrcGlobalGain bind @ 0x58e05d; EffectWorld_RenderLightCoronas
+	//  @ 0x5aaf40, the ambient scale @ 0x5ab149..0x5ab1b8]
+	Rgb light_gain() const { return is_loaded() ? color_src_gain_ : Rgb{1.0f, 1.0f, 1.0f}; }
 
 	// --- keyframe TARGET getters ------------------------------------------
 	// Read straight from the interpolated keyframe state, never from the

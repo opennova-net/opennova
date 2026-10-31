@@ -88,9 +88,8 @@ bool TerrainTileInfo::blocks_foliage(float world_x,
 	// til_world_z_from_fixed decodes stored-negated z_fixed into the same
 	// terrain/Godot plane used by foliage candidates. This API accepts that
 	// decoded plane directly. The loaded mission .til is the same
-	// g_TerrainTileArray scanned by both foliage generators and surface overrides.
-	// [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
-	// Terrain_GetSurfaceTypeAtPosition @ 0x606510, see docs/tiles/til-re.md]
+	// g_TerrainTileArray scanned by both foliage generators and surface overrides
+	// (the engine's til_blocks_foliage carries the witness; docs/tiles/til-re.md).
 	return opennova::til_blocks_foliage(til, world_x, world_z, radius);
 }
 

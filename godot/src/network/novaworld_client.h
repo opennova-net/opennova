@@ -1,7 +1,6 @@
 #pragma once
 
 #include <net/novaworld/gate_probe.h>
-#include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -14,6 +13,8 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include <net/http/http_exchange.h>
+#include <net/novaworld/browser_transport.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
@@ -149,18 +150,19 @@ public:
 	// forgotten, so the next start() probes the gate again
 	// (opennova::NwuLobbySession::GateMemory::forget, D-NET-706).
 	static void forget_gate_response();
-	// Whether `host` names NovaLogic's NovaWorld: novaworld.net or a name under it, a root
-	// label's dot allowed (engine: net/novaworld/gate_probe.h is_novaworld_domain_host).
-	static bool is_novaworld_domain_host(const String &host);
 	// The menu's creation (the process's first main menu, and the menu made anew after a mods
 	// reload): the process's menu browser state made anew, its jar emptied and loaded from
 	// nw_cdata.coo in `dir`, the game's working directory, under the current volume's key
 	// (engine: MenuBrowserState::create, cookie_jar_key).
 	static void create_cookie_jar(const String &dir);
-	// A save site of the shell (the menu's teardown on the way out or before a mods reload, the
-	// NovaWorld screen's close, an external browser's open): the process's jar written to its file
-	// (engine: MenuBrowserState::save; a failure is only reported, as retail drops it).
+	// A save site of the shell (the NovaWorld screen's close, an external browser's open): the
+	// process's jar written to its file (engine: MenuBrowserState::save; a failure is only
+	// reported, as retail drops it).
 	static void save_cookie_jar();
+	// The menu's teardown that destroys it (the way out, a mods reload ahead of the menu's
+	// re-creation): the jar saved, then the browser's name list and cache list freed (engine:
+	// browser_menu_destroyed).
+	static void destroy_menu_browser();
 	// The process's _connectlog.txt (the game world's log device, which `/CONNECTLOG` arms):
 	// the NovaWorld gate and connect lines go to it (null: none).
 	static void set_process_connect_log(opennova::inmatch::ConnectLog *log);
@@ -324,31 +326,21 @@ private:
 	void sync_session_state(); // ClientSession::State -> our State + signals
 	void drain_session_notices(); // the server notifications (stop/punt/command/results)
 
-	// Server-browser HTTP leg. trigger_gsb() ships the GSB GET the flow builds; the
-	// completion callback feeds the response back and caches the parsed rows.
+	// Server-browser HTTP leg. trigger_gsb() ships the GSB GET the flow builds; its reply
+	// feeds the response back and caches the parsed rows.
 	void trigger_gsb();
-	void on_gsb_request_completed(int result, int response_code,
-	                              const PackedStringArray &headers,
-	                              const PackedByteArray &body);
+	void on_gsb_reply(const opennova::net::HttpReply &reply);
 
 	// The menu entry's HTTP chain (open_web_lobby) — sequenced by LobbyHttpFlow::on_enter_response.
-	void on_enter_request_completed(int result, int response_code,
-	                                const PackedStringArray &headers,
-	                                const PackedByteArray &body);
+	void on_enter_reply(const opennova::net::HttpReply &reply);
 	// Account login HTTP chain (ADR 0010 Phase 3) — sequenced by LobbyHttpFlow.
 	// A login's first step out of the flow (login, login_remembered): ship it or report it.
 	void begin_login(const opennova::LoginResult &r);
-	void on_login_request_completed(int result, int response_code,
-	                                const PackedStringArray &headers,
-	                                const PackedByteArray &body);
+	void on_login_reply(const opennova::net::HttpReply &reply);
 	// Join HTTP chain (ADR 0010 Phase 5) — sequenced by LobbyHttpFlow.
-	void on_join_request_completed(int result, int response_code,
-	                               const PackedStringArray &headers,
-	                               const PackedByteArray &body);
+	void on_join_reply(const opennova::net::HttpReply &reply);
 	// Host HTTP chain: the hosting page's HOSTKEY ahead of the host request.
-	void on_host_request_completed(int result, int response_code,
-	                               const PackedStringArray &headers,
-	                               const PackedByteArray &body);
+	void on_host_reply(const opennova::net::HttpReply &reply);
 	// The hosting leg's HTTP part failed: back to the verified lobby, host_failed(reason).
 	void fail_host_leg(const String &reason);
 	// The host request's wait ended: the HOSTKEY page's refresh (pending_host_page_) goes out.
@@ -370,8 +362,14 @@ private:
 	// so a multi-step login keeps a stable http_base(). set_context preserves the
 	// flow's shared cookie jar (NWHANDLE/PCID ride login -> GSB -> join).
 	void sync_flow_context();
-	// Ship one HttpRequestSpec over the given HTTPRequest child (method/url/headers/body).
-	Error ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec);
+	// Ship one HttpRequestSpec on one of the legs' channels (the engine's menu-browser transport,
+	// net/novaworld/browser_transport.h); a request still out on it is superseded.
+	void ship_spec(opennova::BrowserChannel &channel, const opennova::HttpRequestSpec &spec);
+	// Each frame: the legs' finished replies, handed to their legs on the main thread.
+	void pump_http_replies();
+	// The legs' transport: the menu browser's, over the platform's name lookup and the process's
+	// GetTickCount, retail's waits (60 s to connect, none on the reply).
+	static opennova::BrowserTransportOptions web_transport_options();
 
 	void enter_state(State next, const String &reason = String());
 
@@ -423,7 +421,7 @@ private:
 	std::vector<std::pair<std::string, std::string>> identity_vars_;
 
 	// Server browser.
-	HTTPRequest *browser_http_ = nullptr;   // child node, created in start()
+	opennova::BrowserChannel browser_http_{web_transport_options()}; // the GSB fetch
 	std::vector<opennova::GsbServerEntry> server_entries_; // the cached GSB list
 	bool gsb_request_in_flight_ = false;    // transport bookkeeping (cancel before re-issue)
 	int total_servers_ = 0;                 // GSB TS — list-wide server count
@@ -441,16 +439,17 @@ private:
 	void apply_ping_reply(int64_t rid, int ms, int64_t generation);
 	void apply_ping_results(const Dictionary &results, int64_t generation);
 
-	// Account login + join (ADR 0010 Phase 3/5). Separate child HTTPRequests so
-	// the multi-leg login/join sequences don't race the GSB fetch. The protocol/
-	// sequencing/cookie-jar all live in flow_ (engine/net/novaworld); these are pure pumps.
-	HTTPRequest *login_http_ = nullptr;
-	HTTPRequest *enter_http_ = nullptr; // the menu entry's startup-URL leg (open_web_lobby)
+	// Account login + join (ADR 0010 Phase 3/5). A channel per leg so the multi-leg
+	// login/join sequences don't race the GSB fetch. The protocol/sequencing/cookie-jar all
+	// live in flow_ (engine/net/novaworld); these are pure pumps.
+	opennova::BrowserChannel login_http_{web_transport_options()};
+	// The menu entry's startup-URL leg (open_web_lobby).
+	opennova::BrowserChannel enter_http_{web_transport_options()};
 	// A Login pressed while the entry's open was in flight: posted once the sign-in page lands.
 	bool pending_login_ = false;
 	String pending_login_user_, pending_login_pass_;
-	HTTPRequest *join_http_ = nullptr;
-	HTTPRequest *host_http_ = nullptr;
+	opennova::BrowserChannel join_http_{web_transport_options()};
+	opennova::BrowserChannel host_http_{web_transport_options()};
 	// The HOSTKEY page's refresh GET, held until the host request's wait ends, and its answer due.
 	opennova::HttpRequestSpec pending_host_page_;
 	bool host_page_in_flight_ = false;

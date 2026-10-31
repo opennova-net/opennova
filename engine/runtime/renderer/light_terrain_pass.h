@@ -31,7 +31,8 @@ namespace opennova::renderer {
 //  (the ps.1.1 pass at 0.4/r) or the fixed-function
 //  Light_SetupTerrainProjectedPass @0x6098b4 (ex `render_foliage_instance`:
 //  its argument is a g_LightInstanceTable slot index @0x5AA857, not a foliage
-//  instance); both take (handle, first-light flag) @0x60989a..0x6098b4. The
+//  instance); both take (handle, first-light flag) @0x60989a..0x6098b4, inside
+//  the per-light else-arm @0x609870..0x6098bc. The
 //  whole leg is skipped when g_PolyTrnUsePixelShaderPath == 0 @0x6095e4 or
 //  dword_319FB84 != 0 @0x60983f.]
 //
@@ -371,7 +372,8 @@ struct TerrainLightPassInputs {
 	// g_EffectWorldAmbientScale{R,G,B} — the modulator unpack the presenter
 	// already feeds the object pass (the env light-state gain).
 	std::array<float, 3> ambient_scale{1.0f, 1.0f, 1.0f};
-	// flt_2732DA{C,8,4} — terrain_per_channel_factor(the loaded recip).
+	// flt_2732DA{C,8,4} — terrain_per_channel_factor(the loaded recip), unpacked
+	// once per tick [orig: EffectWorld_TickInstancesAndLightScale @0x5aa1ef..0x5aa23f].
 	std::array<float, 3> terrain_factor{1.0f, 1.0f, 1.0f};
 	LightFlickerInputs flicker{};
 	// Adapter caps bit 0x100: the ps.1.1 pass (0.4/r, the unfolded c0)

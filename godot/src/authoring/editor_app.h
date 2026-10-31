@@ -1,10 +1,10 @@
 #pragma once
 
-#include <godot_cpp/classes/audio_stream_player.hpp>
 #include <godot_cpp/classes/file_dialog.hpp>
 #include <godot_cpp/classes/input_event.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
@@ -191,6 +191,8 @@ public:
 	// or "playing", and the project file it is of ("" while idle). The wire reads the workspace section's sound.
 	String get_sound_state() const;
 	String get_sound_path() const;
+	// Which of the playing sound's voices have started (a dialog's later line waits its time), in their order.
+	PackedInt32Array get_sound_voices_started() const;
 	// The tests' waits, states never clocks: the terrain sculpt's worker until it holds no bake
 	// (ProjectSession::wait_for_bakes), what it finished landing at the next pump; the decodes of the workspace's
 	// sound a pump began (PreviewSoundPlayer::wait), the play starting at the next pump.

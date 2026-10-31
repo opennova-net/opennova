@@ -93,8 +93,8 @@ int kind_of(MissionPool pool) {
 
 MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) :
 		layers_(std::make_unique<PreviewSceneLayers>(viewport, "Mission", true)) {
-	// Its camera is the 3D listener of its own world (DI-36: the Listen's channels pan about it, as the game's camera).
-	viewport.set_as_audio_listener_3d(true);
+	// Its camera is the listener of its own world (DI-36: the Listen's channels pan by their bearing from it, as
+	// the game's camera; PreviewSoundLoops).
 	Node3D &root = layers_->root();
 	listen_ = std::make_unique<PreviewSoundLoops>(&root);
 	const WorldSceneNodes &nodes = layers_->nodes();
@@ -1200,8 +1200,9 @@ void MissionViewportApplier::apply_shots_(const opennova::editor::MissionViewpor
 void MissionViewportApplier::apply_listen_(const opennova::editor::MissionViewport &mission) {
 	// The Listen's channels (DI-36) as the viewport's mix binds them now, heard while the picture is drawn.
 	const opennova::editor::MissionListen &listen = mission.listen();
+	const Transform3D listener = camera_ != nullptr ? camera_->get_global_transform() : Transform3D();
 	listen_->listen(project_root_, listen.channels(), mission.options().listen.on && listen.open() && !project_root_.empty(),
-			presented_);
+			presented_, camera_ != nullptr ? &listener : nullptr);
 }
 
 // --- the frame -----------------------------------------------------------------------------------

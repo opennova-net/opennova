@@ -67,13 +67,11 @@ GameWorld::GameWorld() :
 	panm_clock_.instantiate();
 	player_visuals_.instantiate();
 	player_visuals_->setup(this);
-	// The item-effect director and the light director, wired to this world:
-	// their two / three lent seams are typed reads off the placer's static
-	// item-effect sources, its static light draw sources (+ revision) and
-	// its item database, resolved lazily through the StaticSourceProvider
-	// this world implements (a placer exists only once a mission is placed).
-	item_fx_.instantiate();
-	item_fx_->setup_with_provider(this, this);
+	// The light director, wired to this world: its three lent seams are typed
+	// reads off the placer's static item-effect sources, its static light draw
+	// sources (+ revision) and its item database, resolved lazily through the
+	// StaticSourceProvider this world implements (a placer exists only once a
+	// mission is placed).
 	light_director_.instantiate();
 	light_director_->setup_with_provider(this, this);
 }
@@ -133,7 +131,6 @@ void GameWorld::_ready() {
 	sky_dome_ = nodes.sky;
 	clear_color_ = nodes.clear_color;
 	dispatcher_ = nodes.foliage;
-	sun_shadow_ = nodes.sun_shadow;
 	slot_shadow_ = nodes.slot_shadow;
 	// The effect set's GLOW and PROJSHAD passes load with it as the renderer starts: FrameFX's Q3
 	// glow source and the slot captures create their device shaders here, ahead of any mission
@@ -166,10 +163,6 @@ void GameWorld::_ready() {
 	// Freeze the retained weather node until a load selects autonomous
 	// bare/net rendering or prepares a mission-owned fixed tick.
 	set_weather_world_tick_driven(true);
-	// The env presenters never self-clock: the leg table drives their
-	// advance_frame at a defined ladder slot (render_environment_nodes_frame
-	// and render_water_frame); the render diagnostics report that.
-	env_presenters_world_driven_ = true;
 }
 
 void GameWorld::_process(double p_delta) {
@@ -621,7 +614,7 @@ opennova::inmatch::AdminConsole::Seams GameWorld::remote_admin_seams(const Ref<S
 	// GOTO MENUSTATE's close over the shell's in-game menu screen (engine inmatch/remote_admin.h
 	// ExitSite::AdminOverMenuScreen carries the witness).
 	seams.menu_screen_open = [this]() {
-		return menu_screen_probe_.is_valid() && bool(menu_screen_probe_.call());
+		return frontend_.is_valid() && frontend_->is_screen_open();
 	};
 	// The process's own client's HUD (a listen host, a joiner): CHAT GET reads its CHAT
 	// window and a refused CHAT SEND echoes into it (the HUD device, by its group).
@@ -909,12 +902,24 @@ Ref<PlayerViewmodelDef> GameWorld::local_player_viewmodel_def() {
 
 // --- the dev tools' seams ---------------------------------------------------
 
+// The retail master particle switch (the dev tools' "Hide particles"): the effect world's spawn
+// facade off, and on its lift the engine's slot-A attaches it refused, once
+// (world::ItemEmitterSystem::retry_hidden). The preference survives mission reloads: each freshly
+// built EffectWorld takes it (create_effect_world).
 void GameWorld::set_particles_hidden(bool p_hidden) {
-	item_fx_->set_particles_hidden(p_hidden);
+	const bool was_hidden = particles_hidden_;
+	particles_hidden_ = p_hidden;
+	if (EffectWorld *effect_world = get_effect_world()) {
+		effect_world->set_particles_hidden(p_hidden);
+	}
+	const Ref<Simulation> sim = get_sim();
+	if (was_hidden && !p_hidden && sim.is_valid()) {
+		sim->retry_hidden_item_effects();
+	}
 }
 
 bool GameWorld::is_particles_hidden() const {
-	return item_fx_->particles_hidden();
+	return particles_hidden_;
 }
 
 void GameWorld::set_foliage_hidden(bool p_hidden) {
@@ -1011,8 +1016,9 @@ void GameWorld::_bind_methods() {
 	// A pick-required join reached the player-paced deployment stage: the
 	// host granted the loadouts and holds this player respawn-pending until a
 	// deploy pick. The shell opens the DEATH deploy screen; the join watchdog
-	// has stopped (everything past this point is player-paced). [orig: 0x0A
-	// flags1 bit1 -> the DEATH screen; net-re 5.61]
+	// has stopped (everything past this point is player-paced). The 0x0A's flags1
+	// bit 1 raises it (engine replication ClientState::deploy_overlay_active carries
+	// the witness, net-re 5.61).
 	ADD_SIGNAL(MethodInfo(kSignalJoinDeployPickRequired));
 	// An ESTABLISHED in-match session went silent past the witnessed
 	// connection reap window (JO cs_dir0.timeout_ms = 120000 ms). Retail does
@@ -1222,7 +1228,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_player_profiles", "profiles"), &GameWorld::set_player_profiles);
 	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &GameWorld::set_game_config);
 	ClassDB::bind_method(D_METHOD("set_controls_model", "model"), &GameWorld::set_controls_model);
-	ClassDB::bind_method(D_METHOD("set_menu_screen_probe", "probe"), &GameWorld::set_menu_screen_probe);
+	ClassDB::bind_method(D_METHOD("set_frontend", "frontend"), &GameWorld::set_frontend);
 	ClassDB::bind_method(D_METHOD("set_restart_boot", "restart"), &GameWorld::set_restart_boot);
 	ClassDB::bind_method(D_METHOD("get_game_config"), &GameWorld::get_game_config);
 	ClassDB::bind_method(D_METHOD("on_nw_host_server_command", "verb", "target", "args"),
@@ -1309,7 +1315,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_foliage_hidden"), &GameWorld::is_foliage_hidden);
 	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"), &GameWorld::get_minimap_water_mask);
 	ClassDB::bind_method(D_METHOD("get_effect_world"), &GameWorld::get_effect_world);
-	ClassDB::bind_method(D_METHOD("get_item_effect_director"), &GameWorld::get_item_effect_director);
 	ClassDB::bind_method(D_METHOD("get_terrain_node"), &GameWorld::get_terrain_node);
 	ClassDB::bind_method(D_METHOD("get_foliage_dispatcher"), &GameWorld::get_foliage_dispatcher);
 	ClassDB::bind_method(D_METHOD("get_scene_overlay_cached_meshes"), &GameWorld::get_scene_overlay_cached_meshes);
@@ -1321,9 +1326,6 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_water_node"), &GameWorld::get_water_node);
 	ClassDB::bind_method(D_METHOD("get_celestial_node"), &GameWorld::get_celestial_node);
 	ClassDB::bind_method(D_METHOD("get_sky_dome_node"), &GameWorld::get_sky_dome_node);
-	ClassDB::bind_method(D_METHOD("get_sun_shadow_node"), &GameWorld::get_sun_shadow_node);
-	ClassDB::bind_method(D_METHOD("drives_environment_presenters"),
-			&GameWorld::drives_environment_presenters);
 	ClassDB::bind_method(D_METHOD("get_clear_color_node"), &GameWorld::get_clear_color_node);
 	ClassDB::bind_method(D_METHOD("get_mission_audio"), &GameWorld::get_mission_audio);
 

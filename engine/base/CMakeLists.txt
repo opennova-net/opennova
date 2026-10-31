@@ -1,6 +1,7 @@
 # opennova_base — the engine base services (project, vfs, resource_index, gameprofile,
 # title, pcapio, os_random, os_registry, proc, version), one STATIC group target (Shape A). The header-only
-# base/io leaf keeps its own INTERFACE target in its subdirectory.
+# base/io leaf keeps its own INTERFACE target in its subdirectory; the header-only base/platform
+# (the platform API a backend implements, ADR 0077 d2) needs no source here.
 #
 # base sits ABOVE formats in the Shape A chain (the deliberate inversion): vfs
 # consumes pff/scr/bfc1, so this group PUBLIC-links opennova_formats.
@@ -37,6 +38,7 @@ add_library(opennova_base STATIC
     # vfs — the engine-faithful PFF+loose+expansion mount stack
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_decode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/dir_case_index.cpp # a loose folder's files by name without case
 )
 
 # The ONE stamp (base/version/one_build.h): ONE's version, commit, staging flag and build time,

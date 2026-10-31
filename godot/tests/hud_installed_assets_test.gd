@@ -115,7 +115,7 @@ func test_tank_and_pilot_hud_entry_exit() -> void:
 		hud.set_hud_detail_level(0)
 		hud.set_player_context(view)
 		hud.set_weapon_state(true, 0, 0, 0, 0, false, false, false, 0)
-		hud.set_combat_state(view, Transform3D.IDENTITY, Projection.IDENTITY, false, null, "E")
+		hud.set_combat_state(view, null, "E")
 		var mounted_stats := hud.get_draw_list_stats()
 		assert_gt(mounted_stats.glyphs, 0, "the control seat displays its gear label")
 		if item_id == VehicleFixture.BLACKHAWK:
@@ -125,6 +125,6 @@ func test_tank_and_pilot_hud_entry_exit() -> void:
 		view = sim.get_local_player_view()
 		assert_false(view.mounted)
 		hud.set_player_context(view)
-		hud.set_combat_state(view, Transform3D.IDENTITY, Projection.IDENTITY, false, null, "E")
+		hud.set_combat_state(view, null, "E")
 		assert_lt(hud.get_draw_list_stats().glyphs, mounted_stats.glyphs,
 				"leaving the vehicle removes its control/instrument labels")

@@ -1,0 +1,10 @@
+POST /NWLogin.dll HTTP/1.0
+Host: nw.opennova.test
+Accept: text/html
+Accept-Language: en
+User-Agent: NovaLogic IBrowse 2.0
+Content-Length: 27
+Content-type: application/x-www-form-urlencoded
+Cookie: EPASK=1a2b;
+
+NWHANDLE=Walker&PASSWORD=x1

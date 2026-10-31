@@ -6,7 +6,6 @@
 #include <runtime/hud/hud_toggles.h> // HudToggleState::server_status_view
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/main_loop_clock.h> // main_loop_tick_count_clock (the frame lock's clock)
-#include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the frame lock clock)
 #include <runtime/inmatch/mission_exit.h> // kMissionExitReset (the quit row's exit)
 #include <runtime/inmatch/mission_rotation.h> // HostRotation::last_game (the LastGame row)
 #include <runtime/inmatch/napi_np_server_ctx.h> // the server rows' context
@@ -50,13 +49,17 @@ struct UpdateTail {
 
 void Session::set_frame_lock_clock(world::FrameLockClock *clock) { frame_lock_clock_ = clock; }
 
+world::FrameLockClock &Session::frame_clock() const {
+	return frame_lock_clock_ != nullptr ? *frame_lock_clock_ : main_loop_tick_count_clock();
+}
+
 int32_t Session::bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms,
 		int32_t &lock_sleeps) {
 	lock_stamp_ms = 0;
 	lock_sleeps = 0;
 	if (!input.frame_lock || input.frame_stamp_ms == 0) return accumulator_.bank(elapsed);
 	world::FrameLock lock;
-	lock.clock = frame_lock_clock_ != nullptr ? frame_lock_clock_ : &main_loop_tick_count_clock();
+	lock.clock = &frame_clock();
 	lock.stamp_ms = input.frame_stamp_ms;
 	const int32_t due = accumulator_.bank(elapsed, &lock);
 	if (lock.sleeps > 0) lock_stamp_ms = lock.stamp_ms;
@@ -1527,7 +1530,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// [orig: Game_MainLoop @0x52B630 - GetTickCount @0x52B798, kept @0x52B7AE; the lock's
 	//  restamp @0x52B8D7].
 	uint32_t frame_start_ms =
-			input.frame_stamp_ms != 0 ? input.frame_stamp_ms : world::frame_tick_count_ms();
+			input.frame_stamp_ms != 0 ? input.frame_stamp_ms : frame_clock().now_ms();
 	// A mission-start frame re-based the clock once it had rendered, so this frame banks only
 	// the time since that render: the embedder's main-loop clock read after the render
 	// (FrameInput::since_render_seconds) [orig: Game_MainLoop @0x52bac8..0x52bad2, GetTickCount
@@ -1557,7 +1560,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// The CPU share's inputs: this frame's work from its start stamp to the
 	// end of the drain, and the updates the drain ran, a paused one too [orig:
 	// @0x52ba4f; @0x52ba9b..0x52baa1].
-	accumulator_.record_frame_work(world::frame_tick_count_ms() - frame_start_ms, out.perf.updates);
+	accumulator_.record_frame_work(frame_clock().now_ms() - frame_start_ms, out.perf.updates);
 	const int64_t render_start = now_us();
 	// The render callback reads its view word after the drain and draws the scene frame or the
 	// status page in its place (draws_scene, with the head's cine and world-skip legs); each

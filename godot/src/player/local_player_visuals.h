@@ -76,14 +76,11 @@ public:
 	// mission start's class word).
 	void apply_local_player_spawn_loadout();
 
-	// The soldier's THIRD-PERSON gun. Built as a SIBLING of the avatar rather
-	// than a child: ObjectModel.rebuild() frees all of its children, so a
-	// weapon parented under the avatar would silently vanish whenever the
-	// body model rebuilds. It carries no skeleton and no clip -- the original
-	// stamps ONE matrix into every bone slot of this model, i.e. it is drawn
-	// rigid, posed entirely by its attach basis.
-	// [orig: BoneCallback_org0_World draw 5 @0x4e3c87..0x4e3d99; model =
-	//  WeaponDef.tpModel (+0x170, weapon.def gfx3) @0x4e3cd3]
+	// The soldier's THIRD-PERSON gun (world::local_held_weapon_present carries
+	// the witness: drawn rigid, posed entirely by its attach basis). Built as a
+	// SIBLING of the avatar rather than a child: ObjectModel.rebuild() frees all
+	// of its children, so a weapon parented under the avatar would silently
+	// vanish whenever the body model rebuilds.
 	ObjectModel *build_local_player_held_weapon(const String &p_graphic);
 	// The local avatar's item overlays (canopy, goggles, binoculars, carried
 	// object) build and parent exactly like its held weapon: world siblings of
@@ -91,7 +88,8 @@ public:
 	// (`p_body_drawn`: a view collected it, or a render slot captured it).
 	void present_local_player_person_overlays(PersonOverlayModels &p_overlays,
 			const opennova::world::PersonOverlays &p_state, ObjectModel *p_avatar,
-			bool p_body_drawn, PersonOverlayModels::Presentation p_presentation);
+			const Transform3D &p_avatar_world, bool p_body_drawn,
+			PersonOverlayModels::Presentation p_presentation);
 	// Build a GameWorld-managed avatar model for the local player (which has
 	// no BMS placement of its own). The caller (LocalPlayerPresenter)
 	// positions it and swaps its visual/shadow policy per first/third person.
@@ -115,8 +113,7 @@ public:
 	// A mount the embedder asks for: point the FP viewmodel at `weapon_name` and mount it in
 	// the sim on a fresh slot. Validates against weapon.def; the caller drops the old
 	// viewmodel so the per-frame pass rebuilds gun/arms from the new def. A loadout apply
-	// mounts in the sim itself [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 ->
-	// Player_MountWeaponSlot @0x4dfa40], and the shell then presents its def
+	// mounts in the sim itself, and the shell then presents its def
 	// (present_local_player_weapon), never this.
 	bool set_local_player_weapon_by_name(const String &p_weapon_name, bool p_preserve_slot_state = false);
 	// A switch the sim's own commit mounted (world::WeaponPresentationEvent::installed):
@@ -127,16 +124,10 @@ public:
 	// render/FSM state; nothing first-person draws until a weapon equips.
 	void clear_local_player_weapon();
 	// Build a GameWorld-managed FIRST-PERSON weapon viewmodel for the local
-	// player (shown in 1st person; the inverse of the 3rd-person avatar).
-	// Faithful composition: the equipped weapon's FP gun model PLUS the local
-	// player's CHARACTER arms, sharing one skeleton [orig:
-	// Player_RenderFirstPersonViewModel @0x4ded60 draws the weapon FP model,
-	// then the CharacterEntity's arms model (blip+8, the Avatars.def combo arms
-	// graphic @0x4df05f/@0x4deff4) with the same bone matrices, after
-	// Avatar_SetArmsCamoCtrl @0x4df008/@0x4df070]. The gun + animadm come from
-	// the mounted root's weapon.def (gfx1 / animadm (engine: formats/def/def.h); the file's gfx1a/gfx1b tokens are
-	// parsed-and-discarded by retail and never name the arms), the arms from
-	// the resolved character. Camera sway / fire-kick / ADS (engine: runtime/world/local_player_view.cpp) ride the viewmodel rig
+	// player (shown in 1st person; the inverse of the 3rd-person avatar): the
+	// engine's submit spec (renderer::fp_viewmodel_spec carries the witnesses:
+	// the equipped def's gun, the character's arms over the gun's rig, the
+	// def's clip set). Camera sway / fire-kick / ADS ride the viewmodel rig
 	// (player_viewmodel_rig.cpp). Null when the placer or both models fail to
 	// resolve.
 	Node3D *build_local_player_viewmodel();

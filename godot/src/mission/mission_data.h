@@ -80,8 +80,8 @@ public:
 	enum : uint32_t {
 		// Mirrors opennova::bms::AttribFlags. The option bits (surfaced as checkboxes) plus the 11
 		// game-mode bits (surfaced as the single-select Game mode dropdown via get/set_game_mode).
-		// ATTRIB_GAME_MODE_MASK is the union of the 11 mode bits [orig: 0xFF830000, the complement of
-		// the engine's `and 0x7CFFFF` clear in MissionGeneralInfo_DialogProc @0x4031cd, dfx2med.exe].
+		// ATTRIB_GAME_MODE_MASK is the union of the 11 mode bits (bms::kGameModeMask carries the
+		// witness).
 		ATTRIB_FORCE_INDOORS = 0x10, // game-side witness (forces the indoors blink bit every frame);
 		                             // not a dfx2med checkbox. Pinned to bms::AttribFlags in the .cpp.
 		ATTRIB_ROTATE_MAP_180 = 0x20,
@@ -119,9 +119,8 @@ public:
 		WAYPOINT_DOES_NOT_LOOP = 0x1,
 		WAYPOINT_PLAYER_ROUTE = 0x2,
 		// items.def id = wire type id + this offset (engine/runtime/mission kItemIdOffset;
-		// pinned by static_assert in the .cpp). Bound so GDScript never
-		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
-		// entity records — mission/mission.h]
+		// pinned by static_assert in the .cpp; the BMS entity records' item-id
+		// bias). Bound so GDScript never re-hardcodes the 100000.
 		ITEM_ID_OFFSET = 100000,
 	};
 

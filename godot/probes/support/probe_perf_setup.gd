@@ -56,7 +56,7 @@ static func node_census(tree: SceneTree) -> Dictionary:
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()
 		for cls in ["MeshInstance3D", "MultiMeshInstance3D", "GPUParticles3D",
-				"CPUParticles3D", "Camera3D", "AnimationPlayer", "AudioStreamPlayer3D",
+				"CPUParticles3D", "Camera3D", "AnimationPlayer",
 				"Skeleton3D"]:
 			if n.is_class(cls):
 				counts[cls] = int(counts.get(cls, 0)) + 1

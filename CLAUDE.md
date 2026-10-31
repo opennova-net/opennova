@@ -18,9 +18,9 @@ easier to relay than to rediscover.
   it runs, which `games::install_rules()` registers in a program that runs a match (STATIC
   `opennova_games_rules`, above `opennova_runtime`); engine/ never includes or links either. See
   `games/CLAUDE.md`.
-- `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
-  part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
-  `game/` (the game shell plus its game-level GDScript runtime),
+- `godot/` — the Godot 4.6.1 project, a platform and GPU backend (ADR 0077: the engine owns
+  everything above platform and GPU; `godot/` only shrinks): `src/` (the C++ GDExtension; see
+  `godot/src/CLAUDE.md`), `game/` (the game shell's GDScript, moving to engine C++),
   `editor/` (the OpenNova Editor's GDScript: its MCP service, catalog and tools,
   ADR 0046; loaded by path, never in a game export),
   `probes/` (the registered `game_probe` runtime probes, source-only and
@@ -29,9 +29,10 @@ easier to relay than to rediscover.
 - `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
   `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"), except `update/` and
   `revupdat/`, which build retail's names, `update.exe` and `revupdat.exe`. `common/` is
-  the shared socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap
-  I/O lives in `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working
-  directory.
+  the remote-admin TCP pump, the update listener and the command runner, deliberately
+  app-layer over the engine's sockets (`engine/net/socket`; the HTTP exchange is
+  `engine/net/http`, ADR 0077 d2; pcap I/O lives in `engine/base/pcapio`); `serve/`
+  (ADR 0051) keeps its files in its working directory.
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
@@ -49,6 +50,8 @@ easier to relay than to rediscover.
   `acidgambit`, `jo`, or `dfx2`; without it the folder's `UPDATE.WIZ` names the game
   (`JOPTR.CMD` JO, `DFX2.CMD` DFX2, `ACIDGAMBIT.CMD` or no wizard OP: Acid Gambit; ADR 0067 d2).
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
+  `tests/null_backend` is the headless platform backend (ADR 0077 d8, `opennova_null_backend`):
+  every `engine/base/platform` interface over simulated time and scripted input.
 - `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a
   `blender_<name>` row when Blender 5.x is on PATH, run against the source-tree add-on;
   the Blender packaging workflow runs them against the installed zip
@@ -137,8 +140,9 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   ADR 0043 d3) runs the tick over the kernel it binds. The C++ `GameWorld` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device
   work once per display frame through ONE static frame-leg table
-  (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9). A `godot/` line earns its place only as that device
-  work (node writes, GPU dispatch, input sampling, audio players) or a thin typed seam.
+  (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9), which ADR 0077 moves into the
+  engine. ADR 0077: the engine owns everything above platform and GPU, and Godot is the
+  platform and GPU backend, so a `godot/` line never gains behavior and the tree only shrinks.
   NovaLogic formats never touch Godot's resource system:
   documents read/write themselves (`load_from_path`/`save_to_path`).
 - Never carry raw original bytes through a writer to make a parity test pass — writers

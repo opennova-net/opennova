@@ -18,11 +18,14 @@
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <runtime/menu/menu_commands.h>
+#include <runtime/menu/mission_screen.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
 #include <runtime/menu/player_info_avatars.h>
+#include <runtime/menu/menu_screen_controller.h>
 
 #include <memory>
 #include <vector>
@@ -67,6 +70,21 @@ public:
 	int get_value() const { return value_.value; }
 };
 
+// A screen controller's binding: the engine controller (menu::MenuScreenController) a script
+// hands a driver (MenuDriver.claim_screen), with the host the controller reads its
+// models through. A subclass holds both and relays the device work its controller asks for (a
+// preview, an icon) as its own signals.
+class MenuScreenBinding : public RefCounted {
+	GDCLASS(MenuScreenBinding, RefCounted)
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	// The engine controller (C++ only); null for none.
+	virtual opennova::menu::MenuScreenController *screen_controller() { return nullptr; }
+};
+
 // The compiled-menu interaction driver: ONE MenuFrame (the engine draw-list /
 // pump surface) over a parsed MnuDocument. Every decision — navigation and
 // the back stack, the per-widget state store and its replay, ACTION dispatch,
@@ -87,9 +105,20 @@ class MenuDriver : public RefCounted {
 	opennova::menu::MenuFlow flow_;
 	opennova::menu::ModList mods_;
 	String mods_root_; // the game folder the Mods list's records were scanned in
-	opennova::menu::HostDialog host_dialog_;
 	opennova::menu::OptionsScreen options_;
 	opennova::menu::PlayerInfoAvatars avatars_;
+	// The commands the game binds on the open document by control name (wire_commands).
+	opennova::menu::MenuCommands commands_;
+	// The screen controller holding the open document (claim_screen) and its binding; the last one
+	// let go stays alive past a dispatch that released it. open_serial_ counts the opens (an event
+	// answered with another open is not the new document's); while an open runs, its events are
+	// the claimant's open() (opening_).
+	opennova::menu::MenuScreenController *wired_ = nullptr;
+	Ref<MenuScreenBinding> claimed_;
+	Ref<MenuScreenBinding> released_;
+	uint64_t open_serial_ = 0;
+	bool opening_ = false;
+	void release_wired_();
 	std::unique_ptr<FrameSeam> seam_;
 	ObjectID frame_id_;
 	ObjectID audio_id_;
@@ -98,8 +127,6 @@ class MenuDriver : public RefCounted {
 	Ref<MnuDocument> doc_;
 	Ref<ResourceRoot> root_;
 	Ref<MnsStyleSheet> style_;
-	// The expansion's string table every menu lookup tries first.
-	Ref<RtxtStringFile> override_text_;
 	Ref<RtxtStringFile> sp_menu_text_; // the campaign reader's menu table (set_single_player_source)
 	// The pointer the driver last made the OS cursor (the claim's CURSOR, or the
 	// transparent no-pointer image), by id: the frame's texture stays the frame's
@@ -158,8 +185,8 @@ public:
 				static_cast<int>(opennova::menu::OptionsWord::ObjectTexDetail),
 		OPTIONS_WORD_COUNT = static_cast<int>(opennova::menu::OptionsWord::kCount),
 	};
-	void set_mission_controls(const PackedStringArray &p_lists,
-			const PackedStringArray &p_briefings, const PackedStringArray &p_accepts);
+	// The single-player screen's lists, briefing panes and confirms are the engine's name sets
+	// (menu_commands.h), set at construction as the editor's Try mode sets them.
 	void clear_mission_rows() { flow_.clear_rows(); }
 	void seed_mission_list(int p_id, const TypedArray<MissionCatalogRow> &p_rows);
 	void select_mission(int p_id, int p_row, const String &p_fallback);
@@ -179,27 +206,17 @@ public:
 	bool select_campaign(int p_id, int p_row) { return flow_.select_campaign(runtime_, p_id, p_row); }
 	// A control's activation, true when it was a campaign-tab radio (engine MenuFlow::activate_tab).
 	bool activate_single_player_tab(const String &p_name);
-	// The Mods list (engine menu::ModList): the descriptions a pick fills (the shell's
-	// ModDescriptions names); the list filled with the base game's row and the expansion records of
-	// the bound root's folder (scanned once per folder, as the game scans once at boot), the one
-	// running highlighted; a row picked; and ACCEPT's pick ("" the base game).
-	void set_mod_descriptions(const PackedStringArray &p_names);
+	// The Mods list (engine menu::ModList): the descriptions a pick fills are the engine's
+	// ModDescriptions name set (set at construction); the list filled with the base game's row
+	// and the expansion records of the bound root's folder (scanned once per folder, as the game
+	// scans once at boot), the one running highlighted; a row picked; and ACCEPT's pick ("" the
+	// base game).
 	void seed_mod_list(int p_id);
 	void select_mod(int p_id, int p_row) { mods_.select(runtime_, p_id, p_row); }
 	String mod_list_pick(int p_id) const;
 	bool request_expansion(const String &p_name, const String &p_current, bool p_packed);
 	bool has_pending_expansion_reload() const { return flow_.has_pending_expansion(); }
 	String take_expansion_reload();
-	void seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows);
-	void filter_host_missions() { host_dialog_.filter(runtime_); }
-	void add_host_missions(const Ref<RtxtStringFile> &p_text);
-	void remove_host_missions() { host_dialog_.remove_selected(runtime_); }
-	bool can_start_host() const { return host_dialog_.can_start(); }
-	PackedStringArray selected_host_missions() const;
-	// The SELECTED_MISSIONS Switch cell's click and the rows' launch options
-	// (engine menu::HostDialog::toggle_switch / selected_launch_options).
-	void toggle_host_mission_switch(int p_row) { host_dialog_.toggle_switch(runtime_, p_row); }
-	PackedInt32Array selected_host_launch_options() const;
 	// The Options screens over the profile's current record (engine
 	// menu::OptionsScreen): the screen's binding records built from the
 	// record's table; null profiles = the catalog defaults, no words.
@@ -209,19 +226,49 @@ public:
 	// OptionsScreen::apply_policy), then the record's controls words
 	// (OptionsScreen::seed_profile), before the settings owner seeds its values.
 	void apply_options_policy(const Ref<PlayerProfiles> &p_profiles);
-	// The shell's name set by its token (engine menu_commands.h: "start", "exit", "return",
+	// The engine's name set by its token (menu_commands.h: "start", "exit", "return",
 	// "restart", "back", "novaworld", "mission_lists", "sp_lists", "briefings", "sp_accepts",
-	// "mod_lists", "mod_descriptions"): MenuShell's defaults, one table the editor's Try mode
-	// reads too. Empty for another token.
+	// "mod_lists", "mod_descriptions"), the one table the editor's Try mode reads too. Empty
+	// for another token.
 	static PackedStringArray command_names(const String &p_set);
-	// The command the game binds on the control `p_name` of the open document's
-	// screen `p_screen` (engine MenuCommands::wire / command_of over the runtime
-	// as it is now), as its token ("apply_loadout", "cancel_loadout", ...;
-	// menu_commands.h menu_command_token); "" for none.
-	String screen_command(const String &p_screen, const String &p_name, bool p_in_mission) const;
-	// The open document is the character screen's: it holds a screen named PLAYER_INFO (engine
-	// menu_commands.h is_player_info_document).
-	bool is_player_info_document() const;
+	// The commands the game binds on the open document by control name, in a mission or the
+	// front end (engine MenuCommands::wire, run after each open, as the editor's Try mode runs
+	// it); the readers below answer from it until the next open (which binds nothing until it
+	// is wired) or wire.
+	void wire_commands(bool p_in_mission) { commands_.wire(runtime_, p_in_mission); }
+	// The command bound to the control `p_name` of the screen `p_screen` (MenuCommands::command_of),
+	// as its token ("start_mission", "apply_loadout", ...; menu_commands.h menu_command_token);
+	// "" for none.
+	String screen_command(const String &p_screen, const String &p_name) const;
+	// The delegate that owns the document ("lan", "player_info"; "" the shell's own wiring) and
+	// the document's lists the game fills with its missions and with its expansions (widget ids).
+	String command_owner() const { return String(commands_.owner().c_str()); }
+	PackedInt32Array command_mission_lists() const;
+	PackedInt32Array command_mod_lists() const;
+	// The menu screen a running mission has up and the main frame's input law under it
+	// (engine menu/mission_screen.h carries the witness): whether one is up, whether its
+	// input passes through (DEATH or STAT under the menu's pass-through word: the input
+	// frame runs), and whether it holds the input frame (controls::PlayerActionPoll::menu_open).
+	enum MissionScreen {
+		MISSION_SCREEN_NONE = static_cast<int>(opennova::menu::MissionScreen::None),
+		MISSION_SCREEN_INGAME = static_cast<int>(opennova::menu::MissionScreen::Ingame),
+		MISSION_SCREEN_WEAPON = static_cast<int>(opennova::menu::MissionScreen::Weapon),
+		MISSION_SCREEN_COMMAND_MAP = static_cast<int>(opennova::menu::MissionScreen::CommandMap),
+		MISSION_SCREEN_VEHICLE = static_cast<int>(opennova::menu::MissionScreen::Vehicle),
+		MISSION_SCREEN_STAT = static_cast<int>(opennova::menu::MissionScreen::Stat),
+		MISSION_SCREEN_DEATH = static_cast<int>(opennova::menu::MissionScreen::Death),
+	};
+	static bool mission_screen_open(MissionScreen p_screen) {
+		return opennova::menu::mission_screen_open(static_cast<opennova::menu::MissionScreen>(p_screen));
+	}
+	static bool mission_screen_passes_input(MissionScreen p_screen, bool p_pass_through_word) {
+		return opennova::menu::mission_screen_passes_input(
+				static_cast<opennova::menu::MissionScreen>(p_screen), p_pass_through_word);
+	}
+	static bool mission_screen_holds_input(MissionScreen p_screen, bool p_pass_through_word) {
+		return opennova::menu::mission_screen_holds_input(
+				static_cast<opennova::menu::MissionScreen>(p_screen), p_pass_through_word);
+	}
 	// The front-end OPTIONS screen, whose every show re-runs the options
 	// preparation (engine OptionsScreen::is_front_screen).
 	static bool is_front_options_screen(const String &p_screen);
@@ -269,14 +316,6 @@ public:
 	int player_info_avatar_division() const { return avatars_.division; }
 	bool player_info_avatar_preview_changed() const { return avatars_.preview_changed; }
 	Ref<AvatarComboRow> player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const;
-	// The VEHICLE screen's ITEM_DISPLAY preview (engine inmatch::vehicle_preview_view): the eye
-	// for a model of `p_bounds` (its centre at the origin), the model's turn at `p_tick_ms`
-	// (the engine's render-space pose matrix, its x / z swapped into Godot's), the field across
-	// the rect's width in degrees, and the clear colour.
-	static Vector3 vehicle_preview_eye(const AABB &p_bounds);
-	static Basis vehicle_preview_model_basis(int64_t p_tick_ms);
-	static float vehicle_preview_fov();
-	static Color vehicle_preview_clear_color();
 	void preview_player_info_voice(const Ref<AvatarDatabase> &p_db, int p_voice);
 
 	MenuDriver();
@@ -297,11 +336,11 @@ public:
 	// Bind a parsed document and show `target_screen` (empty = the first
 	// screen). Rebuilds every per-document cache; runtime widget state is dropped.
 	// Every string table a screen reads is its windows' TEXT_RSRC (the frame
-	// loads them); `override_text` is the expansion's table tried first (null:
-	// none; the lookup order is the engine's, menu_text_tables.h).
+	// loads them); the process's text-override table is tried first (the engine's
+	// rtxt::text_override; the lookup order is the engine's, menu_text_tables.h).
 	bool open_document(const Ref<MnuDocument> &p_doc, const Ref<ResourceRoot> &p_root,
-			const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text,
-			const String &p_menu_file, const String &p_target_screen);
+			const Ref<MnsStyleSheet> &p_style, const String &p_menu_file,
+			const String &p_target_screen);
 	Ref<MnuDocument> document() const { return doc_; }
 	PackedStringArray get_screen_names() const;
 	bool show_screen(const String &p_name);
@@ -417,18 +456,13 @@ public:
 	void set_widget_clip_rect(int p_id, const Rect2i &p_rect);
 	// The engine runtime, for native screen companions (C++ only).
 	opennova::menu::MenuRuntime &runtime() { return runtime_; }
-	// The host screen's mission rotation and START gate (C++ only: the cfg block's restriction
-	// lists, GameConfigBlock).
-	opennova::menu::HostDialog &host_dialog() { return host_dialog_; }
 
 	// --- activation / actions ---
 	void activate(int p_id);
 	void spin_cycle(int p_id, int p_delta);
 	String spin_value_attr(int p_id) const;
-	// A spin list's row's enabled state (MenuRuntime::is_item_enabled), and the armory class
-	// spin's rows by the host's class mask (engine menu::enable_class_rows).
+	// A spin list's row's enabled state (MenuRuntime::is_item_enabled).
 	bool is_item_enabled(int p_id, int p_row) const { return runtime_.is_item_enabled(p_id, p_row); }
-	void enable_class_rows(int p_id, int p_class_allow_mask);
 	// One ACTION row run as the current screen's (MenuRuntime::dispatch_action).
 	bool dispatch_action_row(const Ref<MnuActionRow> &p_action);
 	// Direct play seam (voice preview etc.); emits sound_requested always.
@@ -459,6 +493,15 @@ public:
 
 	// Advance the blink/marquee clock; the shell's _process forwards its clock.
 	void tick(int64_t p_time_ms);
+
+	// --- screen controllers (engine menu_screen_controller.h) ---
+	// The document open now (a screen a mission opens by name, opened with open_document, or a
+	// delegate's document the shell hands its companion) is `p_screen`'s: its open() runs now with
+	// the open file and screen, the runtime's events reach it while it holds the document (after
+	// this driver's signals, the shell's handling among them), and its close() runs at
+	// release_screen() or the next open. False with no document open or no controller.
+	bool claim_screen(const Ref<MenuScreenBinding> &p_screen);
+	void release_screen();
 };
 
 } // namespace godot
@@ -466,3 +509,4 @@ public:
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsEffect);
 VARIANT_ENUM_CAST(godot::MenuDriver::OptionsWordIndex);
 VARIANT_ENUM_CAST(godot::MenuDriver::AvatarChange);
+VARIANT_ENUM_CAST(godot::MenuDriver::MissionScreen);

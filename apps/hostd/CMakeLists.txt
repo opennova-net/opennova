@@ -32,7 +32,7 @@ target_include_directories(opennova_hostd_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 
 target_link_libraries(opennova_hostd_core
     PUBLIC
-        opennova_app_common  # the command runner and the HTTP exchange (opennova_net, opennova_base)
+        opennova_app_common  # the command runner (and opennova_net: the sockets, the HTTP exchange)
         # Its own image and log stream on ECS (core/ecs_metadata.h), the machine's
         # CPU, memory, disk and network (core/proc_stats.h)
         opennova_novaworld_core

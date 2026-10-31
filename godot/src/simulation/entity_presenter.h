@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <runtime/world/body_present.h>
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/present_rows.h>
 #include <runtime/world/minefield.h>
@@ -46,7 +47,6 @@ namespace godot {
 
 class EffectLightDirector;
 class EffectWorld;
-class ItemEffectDirector;
 class MissionAudio;
 class MissionEnvironment;
 class ScarDrawList;
@@ -344,13 +344,12 @@ public:
 	// legs still run (a dedicated host binds no pass at all, MissionRoot's
 	// session step presents nothing there); `fx` (nullable) the effect
 	// legs; `lights` (nullable) the MF_Light muzzle glow and the death flash;
-	// `environment` (nullable) the scar fog cull + terrain light; `anchors`
-	// (nullable) the owner-anchor registry the wreck/piece/move effect groups
-	// anchor through.
+	// `environment` (nullable) the scar fog cull + terrain light. The wreck, piece and round
+	// effect groups are the engine's (world::DestructionEmitters, world::RoundEmitters).
 	void setup_passes(Node3D *p_container, const Ref<ItemDatabase> &p_item_db,
 			const Ref<ResourceRoot> &p_resource_root, MissionAudio *p_audio,
 			EffectWorld *p_fx, EffectLightDirector *p_lights,
-			MissionEnvironment *p_environment, ItemEffectDirector *p_anchors);
+			MissionEnvironment *p_environment);
 	// The presenting shell's listener: the camera position the driver pushes
 	// once per present frame (MissionFrameInput.set_camera_sample carries the
 	// same sample to the sim's fire-sound distance gate, world/fire_sound.h);
@@ -391,7 +390,6 @@ public:
 	// Built per call (the live census).
 	Ref<ThrowablePresentStats> get_throwable_present_stats() const;
 	Ref<ScarPresentStats> get_scar_present_stats() const;
-	bool has_active_wreck_fire(const String &p_owner_key) const;
 	void warm_fire_pipelines(const Vector3 &p_position);
 	// The load's forced frame's warm of the wire walk's cold spawns (GameWorld::
 	// build_person_pipeline_warm): one model per visual identity (type word, character id) among
@@ -478,16 +476,14 @@ public:
 	static void aim_apply_valid(Object *node, PresentRowsView snap,
 			int base, bool drive_root_basis);
 
-	// Third-person held-weapon placement — the ONE home (the witnessed
-	// calibration constants and the full derivation live at engine
-	// world/entity_pose.h). `body` may be the body root or the
-	// skeleton itself (resolved via find_skeleton); returns a Transform3D, or
-	// null when the skeleton cannot place one.
-	static Variant held_weapon_attach_transform(Object *body,
+	// Third-person held-weapon placement: the engine's (world::held_weapon_attach
+	// over the body's posed bone 16, world::posed_bone_frames), placed by the
+	// body's world transform as the presenter composed it; returns a
+	// Transform3D, or null when the body has no posed rig to place one.
+	static Variant held_weapon_attach_transform(ObjectModel *body, const Transform3D &body_world,
 			const Vector3 &attach_angles_bms, bool hand_frame);
+	// The hand frame's calibration over a bone basis (the engine's), for tests/tooling.
 	static Basis held_weapon_hand_frame_basis(const Basis &bone_model_to_world);
-	// The first Skeleton3D under `root` (or `root` itself), or null.
-	static Object *find_skeleton(Object *root);
 	// The engine calibration re-exported for tests/tooling (float/vector
 	// values cannot be class constants).
 	static Vector3 held_weapon_attach_nudge();
@@ -531,14 +527,6 @@ private:
 		int64_t submitted_rows = 0;
 		int64_t body_rows = 0;
 	};
-	enum BodyDispatchMode {
-		BODY_NONE = 0,
-		BODY_CLIP_AT,
-		BODY_BLEND_AT,
-		BODY_SLOT_AT,
-		BODY_SLOT_PLAY,
-	};
-
 	enum CtrlPublishField {
 		CTRL_PUBLISH_PART1 = 0,
 		CTRL_PUBLISH_PART2,
@@ -587,16 +575,9 @@ private:
 		// the cold/falling edge.
 		bool ctrl_publish_state_valid = false;
 		std::array<int32_t, CTRL_PUBLISH_COUNT> ctrl_publish_state = {};
+		// The body clip request last dispatched (world::placed_body_clip_request).
 		bool body_stamp_valid = false;
-		int32_t body_mode = BODY_NONE;
-		int32_t body_selector = -1;
-		int32_t body_phase = 0;
-		int32_t body_source_selector = -1;
-		int32_t body_source_phase = 0;
-		float body_blend_weight = 1.0f;
-		int32_t body_variant = 0;
-		int32_t body_source_variant = 0;
-		bool body_parked = false; // PF_ANIM_PHASE_PARKED on the clip/slot paths
+		opennova::world::BodyClipRequest body_request;
 		// The placed walk that last submitted the row (placed_walk_serial_).
 		uint64_t submitted_walk = 0;
 	};
@@ -618,11 +599,9 @@ private:
 		// model then (ObjectModel::get_husk_visual_id).
 		int32_t husk_applied = -1;
 		ObjectID husk_visual;
-		// The remote body-transition scalars (re-seeded from the per-handle
-		// cache on every plan build).
-		int32_t anim_state = -2;
-		int32_t anim_request = -1;
-		int32_t remote_body_tick = 0;
+		// The remote body-transition latch (world::present_wire_body; re-seeded
+		// from the per-handle cache on every plan build).
+		opennova::world::WireBodyLatch body_latch;
 		// Per-leg input caches for the measured every-frame legs (the 2026-08-04
 		// joiner profile: ~21us/row ungated over a full streamed world). Each
 		// holds the exact PF fields its leg consumes; an invalid cache forces
@@ -654,12 +633,6 @@ private:
 		int32_t foot_phase = -1;
 	};
 
-	struct RemoteBodyCache {
-		int32_t state = -2;
-		int32_t request = -1;
-		int32_t latch = 0;
-	};
-
 	// Mirrors the retail per-entity lighting fields (Terrain_SetupEffectForEntity
 	// @0x5c74a0; sun visibility Entity_ComputeSunVisibility @0x5c6800 -
 	// docs/render/render-lighting-re.md).
@@ -675,6 +648,13 @@ private:
 	// Stance bits gate the MATCHTERRAIN tier (Terrain_RenderSectorEntitiesBySide
 	// @0x5c7dc2..0x5c7ded - docs/foliage/foliage-re.md).
 	static void stamp_match_terrain(ObjectModel *model, const float *p, int base);
+	// The render-slot facts of the row: the march start's offset, the ride
+	// facts (PF_SLOT_RIDE_BITS) with the model of the entity it stands on, which
+	// is resolved only for a carrier's refNum-walk rider
+	// (renderer::slot_ride_walk_child), the seat facts (PF_SLOT_SEAT_BITS) with
+	// the model whose pool-0 walk draws it, and whether only the local view
+	// keeps it off the camera (renderer::SlotCasterVisibility).
+	void stamp_slot_facts(ObjectModel *model, const float *p, int base) const;
 	// The swap fade's six CTRL slots (OBJECT_DESTROY, OBJECT_DESTROY01..05) of a
 	// SUBMITTED row: a husked row (PF_HUSK) re-asserts its six phases at each
 	// submission, a row that published releases them once at its first
@@ -725,7 +705,6 @@ private:
 	void release_planned_rows();
 	void release_part_anim_outputs();
 	int64_t current_index_generation();
-	const String &infantry_key(int state);
 	Simulation *sim() const;
 
 	// --- The wire walk (entity_presenter_wire.cpp) ---
@@ -754,7 +733,6 @@ private:
 			PresentRowsView snap);
 	void apply_wire_body_anim(WireRow &row, ObjectModel *model,
 			PresentRowsView snap, int tick_delta);
-	void store_wire_remote_body_cache(const WireRow &row);
 	void update_wire_held_weapon(WireRow &row, Node3D *node,
 			PresentRowsView snap, bool body_visible);
 	// The same third-person gun leg for a placed person row (the host's and
@@ -813,12 +791,11 @@ private:
 	// infantry_anim_key(state) allocates its String per call natively; the
 	// state->key map is tiny and global-stable, so cache per presenter (both
 	// walks read it).
-	std::unordered_map<int, String> infantry_keys_;
 
 	// --- Wire walk state: the plan + per-row caches ---
 	std::vector<WireRow> wire_rows_;
 	std::vector<ObjectID> wire_deferred_ids_;
-	HashMap<int32_t, RemoteBodyCache> wire_remote_body_;
+	HashMap<int32_t, opennova::world::WireBodyLatch> wire_remote_body_;
 	// The footstep cursor (WireRow::foot_state, foot_phase) per wire handle:
 	// a cold re-plan rebuilds every WireRow, and a fresh cursor re-seeds at
 	// the playhead, dropping the steps the re-plan frame crossed.

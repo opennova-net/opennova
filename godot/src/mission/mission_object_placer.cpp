@@ -266,7 +266,6 @@ void MissionObjectPlacer::_check_epoch() {
 	}
 	built_epoch_ = epoch;
 	object_data_cache_.clear();
-	skeletal_cache_.clear();
 	static_batch_cache_.clear();
 	static_face_cache_.clear();
 	static_lod_profile_cache_.clear();
@@ -524,9 +523,9 @@ static Vector3i camo_vector(const std::array<int, 3> &p_camo) {
 }
 
 // The player's visual = the combo its packed character id resolves to: head +
-// body models in the world (retail draws BOTH with the entity's skeleton, each
-// after its own camo store [orig: Terrain_RenderSectorEntitiesBySide
-// @0x5c7fea..0x5c8020: CharacterEntity blip +4 head then +0 body, see docs/playerinfo/avatars-re.md]) and the arms
+// body models in the world (drawn BOTH with the entity's skeleton, each after
+// its own camo store: the engine's inmatch::PlayerVisualSpec carries the
+// witness, docs/playerinfo/avatars-re.md) and the arms
 // model in first person. `fallback` = no combo resolved: with an EMPTY registry
 // retail draws the entity's own item model @0x5c8039 (blip handles 0), which is
 // what this returns. The delta recorded under avatars-re D-PLAYERINFO-1 (FIXED;
@@ -593,8 +592,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	body->set_name(vformat("PlayerAvatar_%s", body_graphic.get_file().get_basename()));
 	body->set_avatar_part(ObjectModel::AVATAR_PART_BODY);
 	body->set_character_id(p_character_id & 0xffff);
-	// [orig: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
-	// @0x5c800f, see docs/playerinfo/avatars-re.md]
+	// The body's own camo store (renderer::kAvatarPartCamoRegisters).
 	AvatarDatabase::apply_part_camo(body, camo_vector(spec.body_camo),
 			"player_avatar:body_camo");
 	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
@@ -609,7 +607,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	if (head == nullptr) {
 		// A head that fails to build mirrors the zero-handle case: tear the
 		// composed body down and render the plain item model instead of a
-		// headless avatar. [orig: the both-or-neither gate above]
+		// headless avatar (PlayerVisualSpec::composes, the both-or-neither gate).
 		body->queue_free();
 		return build_animated_model(item_id, p_parent);
 	}
@@ -617,8 +615,7 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 			head_graphic.get_file().get_basename()));
 	head->set_avatar_part(ObjectModel::AVATAR_PART_HEAD);
 	head->set_character_id(p_character_id & 0xffff);
-	// [orig: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
-	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md]
+	// The head's own camo store (renderer::kAvatarPartCamoRegisters).
 	AvatarDatabase::apply_part_camo(head, camo_vector(spec.head_camo),
 			"player_avatar:head_camo");
 	head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
@@ -836,14 +833,10 @@ void MissionObjectPlacer::_configure_item_shadow(ObjectModel *p_model,
 	p_model->set_shadow_caster_enabled(item_casts_dynamic_shadow(
 			item_db_->get_item_type(p_item_id),
 			item_db_->get_attrib2(p_item_id)));
-	// The render-slot ground-shadow profile: person-type casters steepen the
-	// drape's depth-clip plane 4x (the shadowztex stage, not the silhouette
-	// projection), and vehicles may author an items.def `shadow` blob decal —
-	// the drape fallback for a bound slot past the silhouette-capture budget
-	// [orig: itemdef type 3 gate @0x5d5d7f, the +0xA0 decal via @0x5d59d0;
-	// see docs/render/render-lighting-re.md].
-	p_model->set_slot_shadow_person(
-			item_db_->get_item_type(p_item_id) == ItemDatabase::TYPE_PERSON);
+	// The render-slot ground-shadow profile (the engine's
+	// mission::item_slot_shadow_person carries the witness).
+	p_model->set_slot_shadow_person(opennova::mission::item_slot_shadow_person(
+			item_db_->get_item_type(p_item_id)));
 	// The same native entity-bound producer supplies live and batched draws.
 	// The model sphere remains the separate silhouette capture extent.
 	const String graphic = _graphic_for(p_item_id);
@@ -893,15 +886,15 @@ void MissionObjectPlacer::_configure_item_lighting(ObjectModel *p_model,
 			item_db_->get_light_transfer(p_item_id));
 }
 
-// Cached per (.adm, model bone table): two models can share one .adm (the FP
-// arms + gun both use ak47_1st.adm) yet carry different .3di pivots, so they
-// must not alias (witness: placement_traits.h ledger — the model is the rig
-// source, never the lossy .bad records).
+// The rig is the engine store's (AssetStore::skeletal_rig), cached there per (.adm, model bone
+// table, viewmodel or body): two models can share one .adm (the FP arms + gun both use
+// ak47_1st.adm) yet carry different .3di pivots, so they must not alias (witness:
+// placement_traits.h ledger — the model is the rig source, never the lossy .bad records).
 Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 		const String &p_adm_name, const PackedVector3Array &p_bone_origins,
 		const PackedInt32Array &p_bone_parents, bool p_first_person) {
 	// The def's name as authored opens <stem>.adm, or default.adm where the
-	// mounted roots do not carry that file, and the cache keys the RESOLVED name
+	// mounted roots do not carry that file, and the store keys the RESOLVED name
 	// (AnimMap_LoadAdmFile's extension swap and FileSystem_FileExists miss ahead
 	// of AnimMap_FindByName; engine anim/adm_fallback.h). An empty name loads
 	// no map. A present-but-broken file still fails below, as retail's parse
@@ -913,13 +906,6 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	if (adm_name.is_empty()) {
 		return Ref<SkeletalAnim>();
 	}
-	const String cache_key = adm_name + String(p_first_person ? "#fp#" : "#") +
-			String::num_int64(Variant(p_bone_origins).hash()) + String("#") +
-			String::num_int64(Variant(p_bone_parents).hash());
-	const Ref<SkeletalAnim> *cached = skeletal_cache_.getptr(cache_key);
-	if (cached != nullptr) {
-		return *cached;
-	}
 	const uint64_t load_start = Time::get_singleton()->get_ticks_usec();
 	Ref<SkeletalAnim> skeletal;
 	skeletal.instantiate();
@@ -929,7 +915,6 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	}
 	++load_profile_.rig_loads;
 	load_profile_.rig_us += Time::get_singleton()->get_ticks_usec() - load_start;
-	skeletal_cache_[cache_key] = skeletal;
 	return skeletal;
 }
 
@@ -1131,22 +1116,15 @@ int MissionObjectPlacer::update_static_lod_views(const ObjectLodFrame *p_frames,
 		// that projects below the sub-pixel floor, and the view's current one
 		// for an instance outside its frustum (retail never reaches the
 		// selector for an entity its collector rejected).
+		// (engine renderer::ObjectLodWalk::static_level decides it.)
 		const auto view_level = [&](const ObjectLodFrame &p_frame, bool p_hidden,
 										int p_current) {
-			if (p_hidden) {
-				return -1;
-			}
 			int32_t radius_q16 = 0;
-			if (!p_frame.valid ||
-					!p_frame.project_q16(instance.origin, instance.radius_q16, radius_q16)) {
-				return p_current;
-			}
-			if (opennova::renderer::object_subpixel_culled(radius_q16)) {
-				return -1;
-			}
-			return opennova::renderer::select_object_lod(profile.thresholds_q16,
-					radius_q16, p_frame.projection_scale, profile.available)
-					.lod_index;
+			const bool projected = !p_hidden && p_frame.valid &&
+					p_frame.project_q16(instance.origin, instance.radius_q16, radius_q16);
+			return opennova::renderer::ObjectLodWalk{ p_frame.projection_scale }.static_level(
+					p_hidden, projected, radius_q16, profile.thresholds_q16, profile.available,
+					p_current);
 		};
 		const int main_lod = view_level(p_frames[0], instance.occlusion_hidden,
 				instance.active_lod);

@@ -1,7 +1,5 @@
 #include "authoring/editor_app.h"
 
-#include <godot_cpp/classes/audio_stream_player.hpp>
-#include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
@@ -44,11 +42,11 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view/viewport_kind.h>
+#include <runtime/world/tick_count_clock.h>
 
 #include "authoring/mission_viewport_applier.h"
 #include "authoring/viewport_device.h"
 #include "authoring/viewport_devices.h"
-#include "lwf/wav_loader.h"
 #include "object/object_model.h"
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
@@ -118,6 +116,7 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 	ClassDB::bind_method(D_METHOD("get_sound_state"), &EditorApp::get_sound_state);
 	ClassDB::bind_method(D_METHOD("get_sound_path"), &EditorApp::get_sound_path);
+	ClassDB::bind_method(D_METHOD("get_sound_voices_started"), &EditorApp::get_sound_voices_started);
 	ClassDB::bind_method(D_METHOD("wait_for_bakes"), &EditorApp::wait_for_bakes);
 	ClassDB::bind_method(D_METHOD("wait_for_sound"), &EditorApp::wait_for_sound);
 	ClassDB::bind_method(D_METHOD("get_clip_voices_started"), &EditorApp::get_clip_voices_started);
@@ -213,7 +212,7 @@ String EditorApp::update_editor() {
 	if (refused.empty() && !FileAccess::file_exists(dir.path_join("OPENNOVA.WIZ")))
 		refused = "OPENNOVA.WIZ is missing from the editor's folder: download the editor again.";
 	if (refused.empty()) {
-		// As the game's UPDATE starts it (godot/game/runtime_updates.gd), less its game's arguments: the
+		// As the game's UPDATE starts it (boot_policy.h updater_install_arguments), less its game's arguments: the
 		// editor's folder is the app's own, which update.exe updates alone.
 		PackedStringArray arguments;
 		arguments.push_back("/RUN");
@@ -487,7 +486,8 @@ void EditorApp::_process(double p_delta) {
 		const uint64_t budget = uint64_t(budget_ms) * 1000;
 		devices_->step(session_->viewports(),
 				[start, budget] { return Time::get_singleton()->get_ticks_usec() - start < budget; });
-		ObjectModel::advance_awake_frame(p_delta);
+		// The models' clocks run on the engine's frame clock (GetTickCount's steps), as the game's.
+		ObjectModel::advance_awake_frame(static_cast<int64_t>(opennova::world::frame_tick_count_ms()));
 		session_->frame_times().add(opennova::editor::FramePhase::Devices,
 				opennova::editor::steady_clock_us() - devices_start);
 	}
@@ -845,6 +845,13 @@ String EditorApp::get_sound_state() const {
 
 String EditorApp::get_sound_path() const {
 	return get_sound_state() == "idle" ? String() : opennova::to_gd(sound_->path());
+}
+
+PackedInt32Array EditorApp::get_sound_voices_started() const {
+	PackedInt32Array out;
+	if (sound_)
+		for (const bool started : sound_->voices_started()) out.push_back(started ? 1 : 0);
+	return out;
 }
 
 void EditorApp::wait_for_bakes() {

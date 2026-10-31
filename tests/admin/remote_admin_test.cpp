@@ -539,7 +539,7 @@ void test_session_destroy_routes() {
 	for (const int32_t reason : {3, 4})
 		expect(menus_after(reason).find(zero) != std::string::npos, "the rotation's end and the rest destroy");
 	// A kept game type (A6's kick), then the pre-game menu's cancel of the next join (A7's BACK
-	// or ABORT_CANCEL; ours: NetSessionController._cancel_join_role_choice ->
+	// or ABORT_CANCEL; ours: inmatch::JoinFlow::cancel (state 9) ->
 	// GameWorld.pre_game_cancelled -> session_destroyed): its cleanup destroys.
 	expect(menus_after(kicked).find(kept) != std::string::npos, "kept again");
 	consoles.session_destroyed();

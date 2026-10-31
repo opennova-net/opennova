@@ -35,6 +35,16 @@ func _solid_texture(color: Color) -> ImageTexture:
 	return ImageTexture.create_from_image(image)
 
 
+## The Q3 compile reads an object material's published values, as ObjectModel's
+## stage and runtime writes publish them: a test that writes the material's
+## Diffuse1, SelfLumColor and AlphaGenValue publishes them too.
+func _publish_object_values(material: ShaderMaterial, diffuse: Texture2D,
+		self_lum: Vector3) -> void:
+	FrameFx.set_q3_object_diffuse(material, diffuse, 1000.0)
+	FrameFx.set_q3_object_self_lum(material, self_lum)
+	FrameFx.set_q3_object_alpha(material, 1.0)
+
+
 func _channel_peaks(image: Image) -> Dictionary:
 	var values := Vector3(-1.0, -1.0, -1.0)
 	var positions := [Vector2i.ZERO, Vector2i.ZERO, Vector2i.ZERO]
@@ -137,9 +147,11 @@ func _q3_lum_view(use_q3: bool) -> Dictionary:
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null \
 				and "/self_lit/" in material.shader.resource_path:
-			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			var published_diffuse := _solid_texture(Color.WHITE)
+			material.set_shader_parameter("u_diffuse", published_diffuse)
 			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			_publish_object_values(material, published_diffuse, Vector3.ONE)
 
 	var terminal: Node3D
 	if use_q3:
@@ -595,11 +607,12 @@ func test_pruned_q3_source_frees_its_device_buffer_on_an_empty_frame() -> void:
 	renderer.shutdown()
 
 
-func test_object_material_parameter_write_reaches_q3_through_its_invalidation() -> void:
-	# An object surface's material block (u_diffuse, u_rgb_mod, ...) is read
-	# once into its record; a stable frame reads no material. ObjectModel's
-	# runtime writes name the material (FrameFx.invalidate_q3_object_material),
-	# and the surfaces on it re-read the block exactly at their next sight.
+func test_object_material_parameter_write_reaches_q3_through_its_publish() -> void:
+	# An object surface's material block (Diffuse1, SelfLumColor, ...) is read
+	# once into its record from the values its producer published; a stable
+	# frame reads no material. ObjectModel's runtime writes publish the new
+	# values (FrameFx.set_q3_object_self_lum here), and the surfaces on it
+	# re-read the block exactly at their next sight.
 	var view := _q3_lum_view(true)
 	var renderer := view.terminal as FrameFx
 	var bulb := _first_visible_mesh(view.model)
@@ -622,8 +635,8 @@ func test_object_material_parameter_write_reaches_q3_through_its_invalidation() 
 	renderer.advance_frame()
 	var unnamed := renderer.get_backend_report()
 	assert_eq(int(unnamed.get("q3_material_reads_this_frame", -1)), 0,
-			"a write that names no material is not re-read per frame")
-	FrameFx.invalidate_q3_object_material(material)
+			"a material write the producer does not publish is never read")
+	FrameFx.set_q3_object_self_lum(material, Vector3(0.25, 0.25, 0.25))
 	var dim_image: Image = await _render_q3_frame(renderer)
 	var named := renderer.get_backend_report()
 	assert_gte(int(named.get("q3_material_reads_this_frame", 0)), 1,
@@ -953,7 +966,10 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	# The bloom's redraw draws through its own material, over the mirror the
 	# frame rendered last (environment/water_mirror.h bloom_water_mirror_image).
 	var water_material := water.get_night_vision_material()
-	water_material.set_shader_parameter("u_water_color", Vector3.ZERO)
+	# The black reflection stand-in through the producer's own setter (the
+	# Q3 redraw takes the lit colour from the water's published values, its
+	# noise pair and reflection from the material's bindings).
+	water.set_lit_water_color(Vector3.ZERO)
 	water_material.set_shader_parameter("u_has_reflection", false)
 	water_material.set_shader_parameter("u_noise_normal",
 			_solid_texture(Color(0.5, 0.5, 1.0, 1.0)))
@@ -974,9 +990,11 @@ func test_water_nv_redraw_keeps_additive_lum_copies_weighted_by_its_alpha() -> v
 	for row in model.get_surface_materials():
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null 				and "/self_lit/" in material.shader.resource_path:
-			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			var published_diffuse := _solid_texture(Color.WHITE)
+			material.set_shader_parameter("u_diffuse", published_diffuse)
 			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			_publish_object_values(material, published_diffuse, Vector3.ONE)
 	var slab := _first_visible_mesh(model)
 	assert_not_null(slab, "the mount fixture carries an additive LUM surface")
 	if slab == null:
@@ -1071,9 +1089,11 @@ func _additive_lum_slab_view(background: Color,
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null \
 				and "/self_lit/" in material.shader.resource_path:
-			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			var published_diffuse := _solid_texture(Color.WHITE)
+			material.set_shader_parameter("u_diffuse", published_diffuse)
 			material.set_shader_parameter("u_rgb_mod", Vector3(0.25, 0.25, 0.25))
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			_publish_object_values(material, published_diffuse, Vector3(0.25, 0.25, 0.25))
 	var slab := _first_visible_mesh(model)
 	assert_not_null(slab, "the fixture carries a LUM surface on %s" % shader_fragment)
 	var pixel := Vector2i.ZERO
@@ -1239,15 +1259,16 @@ func test_lum_q3_copy_stops_at_the_stage_textures_last_retail_mip_level() -> voi
 	var pixel := Vector2i(camera.unproject_position(
 			bulb.global_transform * bulb.get_aabb().get_center()))
 	var material := bulb.get_active_material(0) as ShaderMaterial
-	material.set_shader_parameter("u_diffuse", _red_level0_texture())
+	var red_level0 := _red_level0_texture()
+	material.set_shader_parameter("u_diffuse", red_level0)
 	material.set_shader_parameter("u_diffuse_max_lod", 1000.0)
-	FrameFx.invalidate_q3_object_material(material)
+	FrameFx.set_q3_object_diffuse(material, red_level0, 1000.0)
 	var unbounded: Image = await _render_q3_frame(renderer)
 	if not bool(renderer.get_backend_report().get("rd_available", false)):
 		pending("RenderingDevice unavailable under this Godot renderer")
 		return
 	material.set_shader_parameter("u_diffuse_max_lod", 0.0)
-	FrameFx.invalidate_q3_object_material(material)
+	FrameFx.set_q3_object_diffuse(material, red_level0, 0.0)
 	var ceiling: Image = await _render_q3_frame(renderer)
 	assert_not_null(unbounded)
 	assert_not_null(ceiling)
@@ -1338,9 +1359,11 @@ func _viewmodel_bulb_view(use_q3: bool) -> Dictionary:
 		var material := row as ShaderMaterial
 		if material != null and material.shader != null \
 				and "/self_lit/" in material.shader.resource_path:
-			material.set_shader_parameter("u_diffuse", _solid_texture(Color.WHITE))
+			var published_diffuse := _solid_texture(Color.WHITE)
+			material.set_shader_parameter("u_diffuse", published_diffuse)
 			material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 			material.set_shader_parameter("u_alpha_mod", 1.0)
+			_publish_object_values(material, published_diffuse, Vector3.ONE)
 	_stamp_viewmodel_surfaces(model)
 
 	var skeleton := model.get_skeleton()

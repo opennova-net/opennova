@@ -237,20 +237,9 @@ float Simulation::get_local_player_pitch_deg() const {
 	return static_cast<float>(static_cast<double>(p->pitch) * opennova::world::kDegreesPerBam);
 }
 
-int Simulation::get_local_player_body_anim_slot() const {
-	if (!kernel_->world.cached.local_player.valid()) return -1;
-	// The same Entity.body_anim_slot the present pass reads for NPC models (written by the
-	// infantry motor mirror, infantry.cpp). The avatar is shell-managed and not in the present
-	// registry, so main_game drives its body clip from this getter.
-	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
-	return e ? e->body_anim_slot : -1;
-}
-
 String Simulation::get_local_player_anim_key() const {
 	// The local player's full anim-state clip key ("anim_<name>"), straight from the motor's
-	// selected state. Unlike the 8-slot BodyAnim enum (get_local_player_body_anim_slot), this carries
-	// stance + jump (anim_idle_crouch / anim_walk_prone_forward / anim_jump_loop / ...), so
-	// main_game drives the 3rd-person avatar via play_body_clip(key) for full stance fidelity.
+	// selected state (the avatar's own request is world::local_avatar_present's).
 	// [orig: off_8135F0 names ARE the .adm keys without the "anim_" prefix]
 	if (!kernel_->world.cached.local_player.valid()) return String();
 	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
@@ -266,43 +255,6 @@ Simulation::Stance Simulation::get_local_player_stance() const {
 	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
 	if (!p) return STANCE_STAND;
 	return static_cast<Stance>(static_cast<int>(p->inf.stance));
-}
-
-int Simulation::get_local_player_anim_phase_ticks() const {
-	if (!kernel_->world.cached.local_player.valid()) return 0;
-	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
-	return p ? p->inf.clip_phase : 0;
-}
-
-String Simulation::get_local_player_anim_source_key() const {
-	if (!kernel_->world.cached.local_player.valid()) return String();
-	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
-	if (!p || !p->inf.body_blend_active()) return String();
-	return infantry_anim_key(p->inf.anim_prev);
-}
-
-int Simulation::get_local_player_anim_source_phase_ticks() const {
-	if (!kernel_->world.cached.local_player.valid()) return 0;
-	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
-	return p ? p->inf.anim_prev_clip_phase : 0;
-}
-
-float Simulation::get_local_player_anim_blend_weight() const {
-	if (!kernel_->world.cached.local_player.valid()) return 1.0f;
-	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
-	return p ? p->inf.anim_blend_weight : 1.0f;
-}
-
-int Simulation::get_local_player_anim_variant() const {
-	if (!kernel_->world.cached.local_player.valid()) return 0;
-	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
-	return p ? p->inf.anim_variant : 0;
-}
-
-int Simulation::get_local_player_anim_source_variant() const {
-	if (!kernel_->world.cached.local_player.valid()) return 0;
-	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
-	return p ? p->inf.anim_prev_variant : 0;
 }
 
 bool Simulation::get_local_player_anim_phase_parked() const {

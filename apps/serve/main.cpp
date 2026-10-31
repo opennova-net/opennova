@@ -23,7 +23,7 @@
 #include <net/novaworld/lobby_identity.h> // read_primary_screen_size
 #include <runtime/world/tick_accumulator.h>
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN

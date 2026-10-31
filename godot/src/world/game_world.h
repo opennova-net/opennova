@@ -24,6 +24,7 @@
 #include <runtime/inmatch/main_loop_clock.h> // MainLoopClock (the frame's timing)
 #include <runtime/inmatch/remote_admin.h> // RemoteAdminConsoles (the remote admin)
 #include <runtime/inmatch/server_log_devices.h> // ServerLogDevices (the server log switches)
+#include <runtime/mission/mission_load.h> // MissionLoadLegs (the load plan's legs)
 
 #include <memory>
 #include <runtime/renderer/object_lod.h> // the object detail rungs
@@ -35,13 +36,13 @@
 #include "network/admin_tcp_pump.h"
 #include "audio/mission_audio.h"
 #include "devtools/frame_stats.h"
+#include "frontend/game_frontend.h"
 #include "env/celestial.h"
 #include "env/environment_cube_capture.h"
 #include "env/mission_environment.h"
 #include "env/precipitation.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
-#include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "hud/player_hud_weapon_def.h"
@@ -82,7 +83,6 @@
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
-#include "world/item_effect_director.h"
 #include "world/load_timeline.h"
 #include "world/loading_screen_info.h"
 #include "world/occlusion_frame.h"
@@ -374,9 +374,8 @@ public:
 	// in-game menu: the world tick is the only pump for the session socket,
 	// so freezing it silences the connection and a peer eventually drops us
 	// on its connection timeout. Retail multiplayer cannot pause at all -- the
-	// ESC menu overlays a running match [orig: the pause path has no MP leg;
-	// the reaping side is cs_dir0.timeout_ms = 120000, CNapiNetwork_Init
-	// @0x4ca4a0].
+	// ESC menu overlays a running match (engine inmatch::Session::pause carries
+	// the witness).
 	bool is_net_session() const;
 	// The shell's ESC-pause session leg: the engine session pauses and resumes
 	// WITH the shell's pause overlay, so the paused state is a session fact
@@ -519,10 +518,10 @@ public:
 	// The shell's live binding table (ControlsBindings' model): every session's
 	// Simulation takes it for the console's SAVEKEYS (Simulation::set_controls_model).
 	void set_controls_model(const Ref<ControlsModel> &p_model) { controls_model_ = p_model; }
-	// The shell's in-game menu screen state (true while one is up), read live by the remote
-	// admin's GOTO MENUSTATE (AdminConsole::Seams::menu_screen_open; engine inmatch/remote_admin.h
-	// ExitSite::AdminOverMenuScreen carries the witness). Unset: none up.
-	void set_menu_screen_probe(const Callable &p_probe) { menu_screen_probe_ = p_probe; }
+	// The shell's frontend, whose screen stack says whether an in-game menu screen is up, read live
+	// by the remote admin's GOTO MENUSTATE (AdminConsole::Seams::menu_screen_open; engine
+	// inmatch/remote_admin.h ExitSite::AdminOverMenuScreen carries the witness). Unset: none up.
+	void set_frontend(const Ref<GameFrontend> &p_frontend) { frontend_ = p_frontend; }
 	// The next load is the single player's restart (Game_RestartRoundSP's Game_StartMission(1)):
 	// its sim boots with the engine's restart flag (KernelBootOptions::restart). The load
 	// consumes it.
@@ -675,8 +674,8 @@ public:
 	// The equipped weapon's HUD slice (error table, HUDCLIPGFX/HUDRNDGFX,
 	// clipsize, name), decoded from the resolved weapon.def row at this edge
 	// (ADR 0017) -- the HUD reads it per frame, mirroring the original HUD info
-	// struct's weapon-def pointer [orig: HUD_BuildEntityInfo @0x4b8561 ->
-	// hudInfo+552]. Null until a weapon resolves.
+	// struct's weapon-def pointer (engine hud/hud_entity_info.h carries the
+	// witness). Null until a weapon resolves.
 	Ref<PlayerHudWeaponDef> local_player_hud_weapon_def() const;
 	Ref<PlayerWeaponView> local_player_weapon_view() const;
 	TypedArray<PlayerWeaponEvent> drain_local_player_weapon_events();
@@ -700,10 +699,6 @@ public:
 	void route_mission_effects(const Array &p_effects);
 	Ref<ImageTexture> get_minimap_water_mask() const { return minimap_water_mask_; }
 	EffectWorld *get_effect_world() const;
-	// The per-item effect director (built once with the world; its
-	// attach/anchor bookkeeping reads through ItemEffectDirector's public
-	// seams).
-	Ref<ItemEffectDirector> get_item_effect_director() const { return item_fx_; }
 	// The live terrain node, for the F3 Terrain & foliage page's
 	// counters/knobs.
 	Terrain *get_terrain_node() const { return terrain_; }
@@ -730,10 +725,6 @@ public:
 	Water *get_water_node() const { return water_; }
 	Celestial *get_celestial_node() const { return celestial_; }
 	SkyDome *get_sky_dome_node() const { return sky_dome_; }
-	SunShadow *get_sun_shadow_node() const { return sun_shadow_; }
-	// Whether this world advances the env presenters (weather, sun shadow,
-	// sky, celestial, water) itself instead of their own _process.
-	bool drives_environment_presenters() const { return env_presenters_world_driven_; }
 	WorldEnvironment *get_clear_color_node() const { return clear_color_; }
 	MissionAudio *get_mission_audio() const;
 
@@ -759,6 +750,7 @@ public:
 	// (D-NET-1003). A synthetic driver stepping tick() banks its own delta.
 	double take_frame_elapsed_seconds();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
+	void on_wire_node_retired(int p_handle);
 	void on_frame_stats_capture_changed(bool p_active);
 	void on_nw_host_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
@@ -886,11 +878,14 @@ private:
 	// texcompression and particle-density words, the ragdoll bit), ahead of its effect system
 	// and its head.
 	void copy_mission_start_options();
-	// The mission start's head through its terrain past the copies (the tile info, the
-	// environment, the terrain); `r_timeline` takes the load's timeline, begun here when the
-	// caller began none.
-	int load_mission_head(const Ref<MissionData> &p_mission, const String &p_bms_name,
-			const Ref<ResourceRoot> &p_resource_root, Ref<LoadTimeline> &r_timeline);
+	// The load plan's legs over this world and the load's simulation (engine
+	// mission/mission_load.h): the legs hold `r_timeline` (the load's, which they begin when it is
+	// null), `r_host_sim` (the host session its head resolves) and `r_runtime_options` (the
+	// runtime's start's) by reference, so the caller keeps them for the load's call.
+	opennova::mission::MissionLoadLegs mission_load_legs(const Ref<MissionData> &p_mission,
+			const String &p_bms_name, const Ref<ResourceRoot> &p_resource_root,
+			Ref<LoadTimeline> &r_timeline, Ref<Simulation> &r_host_sim,
+			Ref<MissionSetupOptions> &r_runtime_options);
 	void start_mission_root();
 	void place_mission_objects(const Ref<MissionData> &p_mission);
 	// One load-progress present at `p_percent` (the loading screen's due rule gates it): the
@@ -944,19 +939,18 @@ private:
 	// builds_tile_cache_targets and loads_foliage_definitions, D-NET-1158, D-NET-1161,
 	// D-NET-1133). `p_timeline` takes it as one span. Nothing when no connect leg is pending.
 	void load_terrain_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
-	// The same stage's sky maps past the terrain's: the full arm loads the environment's cloud
-	// layers (WorldScene::load_sky_maps), a dedicated host's reduced arm none (D-NET-1170).
-	// `p_timeline` takes it as the span sky_maps on either arm.
-	void load_sky_maps(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
 	// The same stage's view effects, tracer pool and FrameFX past the HUD's textures: the full
 	// arm creates the NVG view's device objects (FrameFx::init_view_effects), the tracer pool's
 	// (EffectWorld::create_tracer_pool_devices) and FrameFX's pixel shaders with its "ffscan"
 	// scanlines (WorldScene::init_frame_fx_mission_textures), a dedicated host's reduced arm
-	// none (D-NET-1172, D-NET-1231). `p_timeline` takes it as the span
-	// frame_fx_textures on either arm.
-	void load_frame_fx_textures(const Ref<LoadTimeline> &p_timeline, bool p_dedicated_host);
+	// none (D-NET-1172, D-NET-1231).
+	void load_frame_fx_textures(bool p_dedicated_host);
 	void configure_foliage();
-	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name);
+	// The runtime's start (the host boot's phase A inside MissionRoot::setup), its options into
+	// `r_options`; its device tail past the mission start's place (finish_runtime_start).
+	int start_runtime(const Ref<MissionData> &p_mission, const String &p_bms_name,
+			Ref<MissionSetupOptions> &r_options);
+	void finish_runtime_start(const Ref<MissionSetupOptions> &p_options, const String &p_bms_name);
 	// The runtime's options the load knows at its start: the mission's names, the process's words
 	// and profiles, the playable gate and the session request the drive stages (start_runtime adds
 	// the terrain, the item table, the .til and the placer once the load built them).
@@ -973,7 +967,6 @@ private:
 	// (null: the empty table's projection) over the spawn loadout, in session or out. The fresh
 	// session's create reads it at the load's start, the placement again over the placer's table.
 	void project_local_character_profile(const Ref<AvatarDatabase> &p_avatar_db);
-	void run_mission_start();
 	void load_player_weapon_profile();
 	void start_mission_audio(const Ref<MissionData> &p_mission, const String &p_bms_name);
 	// `p_spawn_effects` false: the catalog was warmed already (a join's effect system load), so
@@ -1023,12 +1016,7 @@ private:
 	SkyDome *sky_dome_ = nullptr;
 	WorldEnvironment *clear_color_ = nullptr;
 	FoliageDispatcher *dispatcher_ = nullptr;
-	SunShadow *sun_shadow_ = nullptr;
 	SlotShadow *slot_shadow_ = nullptr;
-	// True once the env presenters' own _process is off and this world
-	// advances them from render_environment_nodes_frame (the render
-	// diagnostics report it).
-	bool env_presenters_world_driven_ = false;
 
 	// --- the mission state ---
 	Ref<TerrainData> terrain_data_;
@@ -1139,11 +1127,10 @@ private:
 	// local-player view decodes; it OWNS the equipped-weapon state and the
 	// staged spawn loadout.
 	Ref<LocalPlayerVisuals> player_visuals_;
-	// The per-item ITEMS.DEF effect director (ItemEffectDirector): the
-	// attached/static/controller item emitters, the effect-anchor resolvers,
-	// and the retail master particle switch (plain RefCounted -- it owns no
-	// Nodes).
-	Ref<ItemEffectDirector> item_fx_;
+	// The retail master particle switch (set_particles_hidden): off by default, it survives
+	// mission reloads. The per-item ITEMS.DEF effects are the engine's
+	// (world::ItemEmitterSystem).
+	bool particles_hidden_ = false;
 	Ref<EffectLightDirector> light_director_;
 	// The loaded mission's force-indoors attribute, the kernel's mission's
 	// (Simulation::mission_forces_indoors); handed to the occlusion frame's
@@ -1199,7 +1186,7 @@ private:
 	Ref<PlayerProfiles> player_profiles_;
 	Ref<GameConfigBlock> game_config_;
 	Ref<ControlsModel> controls_model_; // set_controls_model
-	Callable menu_screen_probe_;        // set_menu_screen_probe
+	Ref<GameFrontend> frontend_;        // set_frontend
 	bool restart_boot_ = false;          // set_restart_boot, consumed by the next load
 	// The process's map-rotation words, one for the world's whole run: retail's are
 	// process globals no session start resets, so a session that ended mid-map

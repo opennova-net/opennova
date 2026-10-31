@@ -877,8 +877,9 @@ void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z
         std::snprintf(cue.set_name, sizeof(cue.set_name), "%s", traits->door_open_set.c_str());
         world.out.slot_sounds.push_back(cue);
     }
-    // The def's first loop at the Position words, lane 0, 10 ticks, pitch 1.0, full volume
-    // (the +0x98 velocity pointer it passes is not carried) [orig: @0x4A21AD..0x4A21F2 ->
+    // The def's first loop at the Position words, lane 0, 10 ticks, pitch 1.0, full volume,
+    // the +0x98 words its velocity (+0x98, +0x9C and the vertical step at +0xA0) [orig:
+    // @0x4A21AD..0x4A21F2 ->
     //  SoundEmitter_RegisterSetLayers(def+0x82C)]. Retail reads the set with no null test
     //  [orig: SoundEmitter_RegisterSetLayers @0x528340 - `cmp [ebp+24h], ebx` @0x528381], so a
     // def with no first loop faults there on a session peer; ours registers none, a deliberate
@@ -898,6 +899,9 @@ void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z
     sound.volume_q8_8 = 0xFFFF;
     sound.lane = 0;
     sound.set_name = loop;
+    sound.velocity[0] = entity.veh.vel_x;
+    sound.velocity[1] = entity.veh.vel_y;
+    sound.velocity[2] = vel_z;
     world.out.sound_emitters.publish(std::move(sound));
 }
 
@@ -1206,24 +1210,31 @@ void tick_item_event_pool(World &world, int pool) {
         }
         if (entity->squib.motor) {
             tick_squib(world, *entity);
-            continue;
+        } else {
+            // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
+            // [orig: g_EnvWaterHeightFixed @0x26C6454].
+            tick_item_death_motion(world, *entity, world.tables.terrain, world.env.water_z,
+                    world.out.destruction);
+            // A genx row's own update, its parent follow, on the same cohort
+            // [orig: Entity_UpdateParentTransform @0x4A88B0 through @0x4C22E7 /
+            //  @0x4C2393].
+            entity = world.registry.get(handle);
+            if (entity != nullptr && entity->registry_spawn_id == lifetime &&
+                    entity->drop_motion != DropMotion::None)
+                update_dropped_object(world, *entity);
+            // An ele0 def's own mover, on the same cohort [orig: Entity_UpdateFallAndLandState
+            //  @0x4A20E0 through @0x4C22E7 / @0x4C2393].
+            entity = world.registry.get(handle);
+            if (entity != nullptr && entity->registry_spawn_id == lifetime && entity->elevator_motion)
+                update_item_elevator(world, *entity);
         }
-        // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
-        // [orig: g_EnvWaterHeightFixed @0x26C6454].
-        tick_item_death_motion(world, *entity, world.tables.terrain, world.env.water_z,
-                world.out.destruction);
-        // A genx row's own update, its parent follow, on the same cohort
-        // [orig: Entity_UpdateParentTransform @0x4A88B0 through @0x4C22E7 /
-        //  @0x4C2393].
+        // Pool 2's +0x1CC emitter re-pose follows the update callback, past its null-row test;
+        // the pool-3 walk runs none [orig: Entity_UpdateAllEntities @0x4C22D5..0x4C22E4, the
+        //  update @0x4C22EC..0x4C22FA; pool 3's visit ends at its call @0x4C2393].
         entity = world.registry.get(handle);
-        if (entity != nullptr && entity->registry_spawn_id == lifetime &&
-                entity->drop_motion != DropMotion::None)
-            update_dropped_object(world, *entity);
-        // An ele0 def's own mover, on the same cohort [orig: Entity_UpdateFallAndLandState
-        //  @0x4A20E0 through @0x4C22E7 / @0x4C2393].
-        entity = world.registry.get(handle);
-        if (entity != nullptr && entity->registry_spawn_id == lifetime && entity->elevator_motion)
-            update_item_elevator(world, *entity);
+        if (pool == 2 && entity != nullptr && entity->registry_spawn_id == lifetime &&
+                emitter_update_runs(world, *entity))
+            world.item_emitters.update_emitter_transform(world, *entity);
     }
 }
 

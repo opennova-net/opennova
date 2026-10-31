@@ -1,38 +1,21 @@
 #include "player/key_event_queue.h"
 
-#include "mnu/controls_model.h"
+#include "player/input_device.h"
 
-#include <godot_cpp/classes/global_constants.hpp>
-
-#include <runtime/controls/binding_set.h> // is_extended_vk
+#include <runtime/controls/device_messages.h>
 
 using namespace godot;
 
 void KeyEventQueue::push_key(const Ref<InputEventKey> &p_event, bool p_ctrl_down,
 		bool p_shift_down) {
 	if (p_event.is_null()) return;
-	// The message's VK is the layout's, as WM_KEYDOWN's wParam is (engine controls::KeyEvent
-	// carries the witness): Godot's keycode carries it (a synthetic event with none falls back to
-	// its physical key).
-	const Key keycode = p_event->get_keycode();
-	int vk = ControlsModel::vk_from_godot_key(
-			static_cast<int>(keycode != KEY_NONE ? keycode : p_event->get_physical_keycode()));
-	if (vk == 0) return;
-	namespace flag = opennova::controls::key_event_flag;
-	uint16_t flags = 0;
-	if (p_ctrl_down) flags |= flag::kCtrl;
-	if (p_shift_down) flags |= flag::kShift;
-	// The message's extended-key bit: keypad Enter is VK_RETURN on it (the binding model's
-	// 269 is the scan's code for it, controls::key_event_scan_code).
-	if (vk == 269) {
-		vk = 0x0D;
-		flags |= flag::kExtended;
-	} else if (opennova::controls::is_extended_vk(vk)) {
-		flags |= flag::kExtended;
-	}
-	if (p_event->is_echo()) flags |= flag::kRepeat;
+	// The key's entry is the engine's (controls::queued_key carries the witness): its VK and
+	// flag word from the device's key event.
+	const opennova::controls::QueuedKey key = opennova::controls::queued_key(
+			input_device::key_event(**p_event), p_ctrl_down, p_shift_down);
+	if (key.vk == 0) return;
 	events_[static_cast<size_t>(queue_.write_index())] = p_event;
-	queue_.push(vk, flags);
+	queue_.push(key.vk, key.flags);
 }
 
 Ref<InputEventKey> KeyEventQueue::pop_key() {

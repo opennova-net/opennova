@@ -9,19 +9,20 @@ Ref<PlayerViewmodelDef> PlayerViewmodelDef::from_weapon_def(const Ref<WeaponDef>
 	if (p_def.is_null()) {
 		return Ref<PlayerViewmodelDef>();
 	}
+	const opennova::renderer::FpViewmodelDef def = opennova::renderer::fp_viewmodel_def(p_def->value());
 	Ref<PlayerViewmodelDef> out;
 	out.instantiate();
-	out->weapon_name_ = p_def->get_name();
-	out->gfx1_ = p_def->get_gfx1();
-	out->gfx3_ = p_def->get_gfx3();
-	out->animadm_ = p_def->get_animadm();
-	out->pos_units_ = p_def->get_pos_units();
-	out->rot_bias_deg_ = p_def->get_rot_bias_deg();
-	out->tpos_units_ = p_def->get_tpos_units();
-	out->renderfov_h_deg_ = p_def->get_renderfov();
-	out->flags_ = p_def->get_flags();
-	out->scope_max_mag_ = p_def->get_scope_max_mag();
-	out->clipsize_ = p_def->get_clipsize();
+	out->weapon_name_ = String(def.weapon_name.c_str());
+	out->gfx1_ = String(def.gfx1.c_str());
+	out->gfx3_ = String(def.gfx3.c_str());
+	out->animadm_ = String(def.animadm.c_str());
+	out->pos_units_ = Vector3(def.pos_units[0], def.pos_units[1], def.pos_units[2]);
+	out->rot_bias_deg_ = Vector3(def.rot_bias_deg[0], def.rot_bias_deg[1], def.rot_bias_deg[2]);
+	out->tpos_units_ = Vector3(def.tpos_units[0], def.tpos_units[1], def.tpos_units[2]);
+	out->renderfov_h_deg_ = def.renderfov_h_deg;
+	out->flags_ = def.flags;
+	out->scope_max_mag_ = def.scope_max_mag;
+	out->clipsize_ = def.clipsize;
 	return out;
 }
 

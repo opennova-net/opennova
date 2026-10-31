@@ -1,5 +1,6 @@
 #include <runtime/renderer/material_texture.h>
 #include "resource_index/resource_root.h"
+#include "rtxt/text_tables.h"
 #include "util/data_format.h"
 
 #include "fnt/fnt_resource.h"
@@ -287,6 +288,18 @@ opennova::VfsLookupPolicy ResourceRoot::to_vfs_lookup_policy(LookupPolicy policy
 	}
 }
 
+ResourceRoot::LookupPolicy ResourceRoot::from_vfs_lookup_policy(opennova::VfsLookupPolicy p_policy) {
+	switch (p_policy) {
+		case opennova::VfsLookupPolicy::ForceLooseFirst:
+			return LOOKUP_FORCE_LOOSE_FIRST;
+		case opennova::VfsLookupPolicy::ForceArchiveOnly:
+			return LOOKUP_FORCE_ARCHIVE_ONLY;
+		case opennova::VfsLookupPolicy::SessionDefault:
+		default:
+			return LOOKUP_SESSION_DEFAULT;
+	}
+}
+
 bool ResourceRoot::is_valid_root(const String &path) {
 	const String clean = normalize_dir(path);
 	if (clean.is_empty()) {
@@ -364,6 +377,8 @@ Error ResourceRoot::set_root_dir(const String &path, const String &p_game_code) 
 		mount_kind_ = MountKind::Loose;
 		return OK;
 	}();
+	// The followed root installs the override table this mount left (TextTables).
+	TextTables::follow_mount(*this);
 	emit_signal("mounted");
 	return err;
 }
@@ -406,6 +421,8 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 					opennova::to_std(expansion_), load_point, allow_loose_override, table)) {
 		expansion_override_table_ = to_packed_bytes(table);
 	}
+	// The followed root installs the override table this mount left (TextTables).
+	TextTables::follow_mount(*this);
 	emit_signal("mounted");
 	return err;
 }
@@ -436,9 +453,8 @@ Error ResourceRoot::mount_runtime_archives_(const String &path, const String &ex
 		return ERR_CANT_OPEN;
 	}
 	if (scanned == opennova::ResourceIndex::InstallScan::NoArchive) {
-		// Retail aborts subsystem initialization when the fixed boot table opens no archives
-		// (a corrupt sole archive included), and the partial loose mount goes with it.
-		// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]
+		// The boot's no-archive refusal: the engine's scan_install dropped the partial
+		// mount (it carries the witness); this root lets go of its own state with it.
 		clear();
 		last_error_ = "No game data archives could be opened";
 		return ERR_FILE_NOT_FOUND;
@@ -539,7 +555,7 @@ void ResourceRoot::clear() {
 	texture_cache_.clear();
 	texture_registry_.clear();
 	texture_cache_epoch_ = 0;
-	resolve_memo_.clear();
+	resolve_memo_ = opennova::DirCaseIndex();
 	resolve_memo_epoch_ = 0;
 	resolve_memo_built_ = false;
 	opennova::clear_texture_resolver_caches();
@@ -576,46 +592,25 @@ String ResourceRoot::resolve_file(const String &name) {
 		last_error_ = "A file source has no directory to resolve a file in: " + file;
 		return String();
 	}
-	const String wanted = file.to_lower();
-
 	const uint64_t epoch = opennova::cache_epoch();
 	if (!resolve_memo_built_ || resolve_memo_epoch_ != epoch) {
-		Ref<DirAccess> dir = DirAccess::open(root_dir_);
-		if (dir.is_null()) {
+		if (!DirAccess::dir_exists_absolute(root_dir_)) {
 			last_error_ = "Resource directory cannot be opened: " + root_dir_;
 			return String();
 		}
-		resolve_memo_.clear();
-		dir->list_dir_begin();
-		String entry = dir->get_next();
-		while (!entry.is_empty()) {
-			if (!dir->current_is_dir()) {
-				const String key_string = entry.to_lower();
-				const std::string key = opennova::to_std(key_string);
-				auto it = resolve_memo_.find(key);
-				if (it != resolve_memo_.end()) {
-					// Case-variant duplicates poison the name: resolving it is an error.
-					it->second = String();
-				} else {
-					resolve_memo_.emplace(key, root_dir_.path_join(entry));
-				}
-			}
-			entry = dir->get_next();
-		}
-		dir->list_dir_end();
+		resolve_memo_ = opennova::DirCaseIndex::scan(opennova::to_std(root_dir_));
 		resolve_memo_built_ = true;
 		resolve_memo_epoch_ = epoch;
 	}
 
-	const auto found = resolve_memo_.find(opennova::to_std(wanted));
-	if (found == resolve_memo_.end()) {
-		return String();
-	}
-	if (found->second.is_empty()) {
+	const std::string wanted = opennova::to_std(file);
+	if (resolve_memo_.ambiguous(wanted)) {
+		// Case-variant duplicates poison the name: resolving it is an error.
 		last_error_ = "Duplicate resource filename: " + file;
 		return String();
 	}
-	return found->second;
+	const std::string found = resolve_memo_.find(wanted);
+	return found.empty() ? String() : root_dir_.path_join(opennova::to_gd(found));
 }
 
 PackedStringArray ResourceRoot::list_files(const String &suffix) const {

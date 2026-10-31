@@ -7,24 +7,6 @@
 
 namespace opennova::audio {
 
-int OneshotChannelPool::acquire(uint64_t wave, uint8_t volume, uint32_t sound_id) {
-	if (!wave || !volume) return -1;
-	int best = -1;
-	int minimum = 12 * volume;
-	for (size_t i = kFirstOneshotChannel; i < channels_.size(); ++i) {
-		const Channel &channel = channels_[i];
-		const int score = sound_id && channel.wave == wave && channel.sound_id == sound_id
-				? 0 : 6 * channel.volume;
-		if (score < minimum) { minimum = score; best = static_cast<int>(i); }
-	}
-	if (best >= 0) channels_[static_cast<size_t>(best)] = {wave, sound_id, volume};
-	return best;
-}
-
-void OneshotChannelPool::release(size_t channel) {
-	if (channel < channels_.size()) channels_[channel] = {};
-}
-
 int32_t find_bank_set(const lwf::File &bank, const std::string &name) {
 	if (name.empty()) {
 		return -1;
@@ -218,7 +200,7 @@ int64_t listener_distance_q16(const float world_pos[3], const float listener_pos
 OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 		const float world_pos[3], const float listener_pos[3], bool has_listener,
 		int64_t source_bms_id, uint32_t sound_id, OcclusionFn occl, void *occl_ctx,
-		SoundSelector &selector, uint8_t listener_view_flags) {
+		SoundSelector &selector, uint8_t listener_view_flags, int32_t emitter_vol) {
 	OneshotPlan plan;
 	if (!loc.valid() || loc.set < 0 || static_cast<size_t>(loc.set) >= bank.multis.size()) {
 		return plan;
@@ -247,13 +229,15 @@ OneshotPlan plan_oneshot_3d(const lwf::File &bank, const SetLocation &loc,
 			}
 		}
 	}
-    plan = plan_oneshot_at_distance(bank, loc, dist_q16, selector, listener_view_flags, has_listener);
+    plan = plan_oneshot_at_distance(bank, loc, dist_q16, selector, listener_view_flags, has_listener,
+            emitter_vol);
     plan.sound_id = sound_id;
     return plan;
 }
 
 OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &loc,
-        int64_t dist_q16, SoundSelector &selector, uint8_t listener_view_flags, bool attenuate) {
+        int64_t dist_q16, SoundSelector &selector, uint8_t listener_view_flags, bool attenuate,
+        int32_t emitter_vol) {
     OneshotPlan plan;
     if (!loc.valid() || loc.set < 0 || static_cast<size_t>(loc.set) >= bank.multis.size()) {
         return plan;
@@ -281,7 +265,7 @@ OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &l
 					static_cast<int64_t>(layer.min_distance) << 16,
 					static_cast<int64_t>(layer.falloff_radius) << 16,
 					static_cast<int32_t>(sndparm.volume),
-					static_cast<int32_t>(sndparm.clamp_volume));
+					static_cast<int32_t>(sndparm.clamp_volume), emitter_vol);
 			if (vol255 <= 0) {
 				continue;
 			}
@@ -292,9 +276,25 @@ OneshotPlan plan_oneshot_at_distance(const lwf::File &bank, const SetLocation &l
 		voice.sndparm = sidx;
 		voice.vol255 = vol255;
 		voice.pitch_q16 = pitch;
+		// [orig: `test byte ptr [esi+8], 1` @ 0x75ce52..0x75ce5f]
+		voice.positional = (layer.flags & 1u) != 0;
 		plan.voices.push_back(voice);
 	}
 	return plan;
+}
+
+bool open_oneshot_plan(Mixer &mixer, const OneshotPlan &plan, uint8_t pan, const OneshotWaveFn &wave_of) {
+	if (!plan.in_range) return false;
+	bool opened = false;
+	for (const OneshotVoice &voice : plan.voices) {
+		const MixWaveRef wave = wave_of(voice);
+		if (!wave) continue;
+		// [orig: SoundBank_PlayTriggerEntries @0x75CFA8..0x75CFE3 -> Audio_FindAndOpenChannel]
+		if (mixer.find_and_open(wave, voice.positional ? pan : 0, static_cast<uint8_t>(voice.vol255),
+					voice.pitch_q16, plan.sound_id) != 0)
+			opened = true;
+	}
+	return opened;
 }
 
 SetFire plan_set_fire(const lwf::File &bank, const SetLocation &loc, SoundSelector &selector,

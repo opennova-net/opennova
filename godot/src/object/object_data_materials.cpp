@@ -223,10 +223,9 @@ Array ObjectData::get_control_registers() const {
 		item["runtime_name"] =
 				from_native(threedi_ctrl_register_name(runtime_ordinal));
 		// Keep the authored model-local spelling available to editors, but
-		// expose the exact global slot selected by retail's loader fixup.
-		// Unknown and empty names intentionally resolve to ordinal zero.
-		// [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640; ordinal store @ 0x5B46E6;
-		//  CtrlName_ToOrdinal @ 0x57B290]
+		// expose the exact global slot selected by retail's loader fixup
+		// (threedi_ctrl_register_loader_ordinal carries the witness: unknown
+		// and empty names resolve to ordinal zero).
 		result.push_back(item);
 	}
 	return result;

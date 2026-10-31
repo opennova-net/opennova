@@ -42,23 +42,11 @@ String ConnectionError::reason_key() const {
 			opennova::inmatch::disconnect_reason_key(absent_ ? nullptr : &record_).key.c_str());
 }
 
-String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_override_table,
-		const Ref<RtxtStringFile> &p_gameerr) const {
+String ConnectionError::reason_text(const Ref<RtxtStringFile> &p_gameerr) const {
+	const std::shared_ptr<const opennova::rtxt::File> override_table = opennova::rtxt::text_override();
 	return opennova::cp1252_to_gd(opennova::inmatch::disconnect_reason_string(
-			absent_ ? nullptr : &record_,
-			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr,
+			absent_ ? nullptr : &record_, override_table.get(),
 			p_gameerr.is_valid() ? &p_gameerr->get_native() : nullptr));
-}
-
-bool ConnectionError::refuses_this_install() const {
-	// NCC007 (the protocol version (PV2) gate), GCC003 (a banned address), and the
-	// join build (GDC002..008) and expansion (GDC047, its version.txt GDC048) refusals.
-	if (absent_) return false;
-	if (record_.connect_error == 7) return true;
-	if (record_.connect_error == 14) return record_.connect_param == 3;
-	if (record_.connect_error != 0 || record_.disconnect_code != 2) return false;
-	const uint32_t dpc = record_.disconnect_param;
-	return (dpc >= 2 && dpc <= 8) || dpc == 47 || dpc == 48;
 }
 
 void ConnectionError::_bind_methods() {
@@ -72,9 +60,8 @@ void ConnectionError::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_disconnect_code"), &ConnectionError::get_disconnect_code);
 	ClassDB::bind_method(D_METHOD("get_disconnect_param"), &ConnectionError::get_disconnect_param);
 	ClassDB::bind_method(D_METHOD("reason_key"), &ConnectionError::reason_key);
-	ClassDB::bind_method(D_METHOD("reason_text", "override_table", "gameerr"),
+	ClassDB::bind_method(D_METHOD("reason_text", "gameerr"),
 			&ConnectionError::reason_text);
-	ClassDB::bind_method(D_METHOD("refuses_this_install"), &ConnectionError::refuses_this_install);
 }
 
 } // namespace godot

@@ -78,6 +78,26 @@ inline constexpr bool alpha_test_passes(float alpha, float reference, bool inver
 	return inverted ? alpha <= reference : alpha > reference;
 }
 
+// That test's device state from the MTRL flags byte and the material's
+// reference byte: on with flag bit 0, its reference the byte / 255 (the ref
+// byte feeds the compare exactly), inverted with flag bit 1; off, a zero
+// reference, not inverted.
+struct MaterialAlphaTest {
+	bool enabled = false;
+	float reference = 0.0f;
+	bool inverted = false;
+};
+inline constexpr MaterialAlphaTest material_alpha_test(uint32_t material_flags, int reference_byte) {
+	MaterialAlphaTest test;
+	if ((material_flags & 0x01u) == 0) {
+		return test;
+	}
+	test.enabled = true;
+	test.reference = static_cast<float>(reference_byte) / 255.0f;
+	test.inverted = (material_flags & 0x02u) != 0;
+	return test;
+}
+
 // Classify a material from its shader tag string + binary 3DI flag fields.
 // `material_flags` is the MTRL flags byte (THREEDI_MATERIAL_FLAG_*);
 // `emissive_type` is 2 for *_LUM variants; `is_glass_flag` mirrors the

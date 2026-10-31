@@ -327,8 +327,7 @@ func _present_husk(placer: MissionObjectPlacer, placed: Dictionary,
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(null, index, placer)
-	presenter.setup_passes(container, _items, null, null, null, null, null,
-			ItemEffectDirector.new())
+	presenter.setup_passes(container, _items, null, null, null, null, null)
 	presenter.present_destruction_drained(DestructionDrain.make([
 			HuskSwapEvent.make(placed.entities[0].bms_id, 6403)]), [])
 	var husks: Array[Node] = container.find_children("HuskModel*", "ObjectModel", true, false)

@@ -267,31 +267,6 @@ Ref<EffectSpawnReceipt> EffectScene::spawn(const Ref<EffectSpawnRequest> &p_requ
 	return spawn_receipt_record(receipt);
 }
 
-void EffectOwnerPoseBatch::add(int64_t p_owner_token, const Transform3D &p_transform) {
-	opennova::particle::EffectOwnerPoseUpdate update;
-	update.owner.value = token_from_godot(p_owner_token);
-	update.pose = native_pose(p_transform);
-	update.present = true;
-	updates_.push_back(update);
-}
-
-void EffectOwnerPoseBatch::add_absent(int64_t p_owner_token) {
-	opennova::particle::EffectOwnerPoseUpdate update;
-	update.owner.value = token_from_godot(p_owner_token);
-	update.present = false;
-	updates_.push_back(update);
-}
-
-void EffectScene::apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch) {
-	scene_->apply_owner_poses(p_batch.updates());
-	snapshot_dirty_ = true;
-}
-
-void EffectScene::apply_owner_poses(const EffectOwnerPoseBatch &p_batch) {
-	apply_owner_poses_in_place(p_batch);
-	advance_in_place(0.0);
-}
-
 void EffectScene::detach(int64_t p_group_id) {
 	scene_->detach(opennova::particle::EffectGroupId{
 		token_from_godot(p_group_id)
@@ -363,9 +338,8 @@ void EffectScene::set_global_wind(const Vector3 &p_wind) {
 	scene_->set_global_wind(native_vector(p_wind));
 }
 
-void EffectScene::set_view_frustum(const TypedArray<Plane> &p_planes,
-		const Vector3 &p_inside_probe) {
-	frustum_ = particle_view_frustum(p_planes, p_inside_probe);
+void EffectScene::set_view_frustum(const opennova::renderer::ViewFrustum &p_frustum) {
+	frustum_ = particle_view_frustum(p_frustum);
 }
 
 void EffectScene::clear_view_frustum() {

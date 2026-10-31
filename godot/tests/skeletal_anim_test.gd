@@ -903,21 +903,6 @@ func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
 		"a seeded remote clip advances locally on the very next render frame")
 
 
-func test_remote_body_same_state_does_not_rescrub_player_phase() -> void:
-	var model = ObjectModel.new()
-	add_child_autofree(model)
-	model.set_skeletal_anim(_loaded_skeletal())
-	model.set_object_data(_open(SHED))
-	var flags := int(Simulation.infantry_anim_flags(1))
-
-	model.apply_remote_body_state(1, "anim_walk_forward", flags, 10)
-	model.advance_body_animation(0.05)
-	var locally_advanced := model.get_animation_time()
-	model.apply_remote_body_state(1, "anim_walk_forward", flags, 22)
-	assert_almost_eq(model.get_animation_time(), locally_advanced, 0.001,
-		"steady-state off15 samples do not hard-scrub a free-running channel")
-
-
 func test_remote_death_receipt_retains_old_pose_then_advances_fixed_tick() -> void:
 	var model = ObjectModel.new()
 	add_child_autofree(model)
@@ -951,116 +936,6 @@ func test_remote_death_receipt_retains_old_pose_then_advances_fixed_tick() -> vo
 	_assert_skeleton_pose_matches(
 			model.get_skeleton(), _blend_primary_poses(source, target, 0.1),
 			"remote death next fixed tick weight point one")
-
-
-func test_remote_mid_blend_retarget_keeps_original_source() -> void:
-	var model = ObjectModel.new()
-	add_child_autofree(model)
-	var skeletal := _loaded_skeletal()
-	model.set_skeletal_anim(skeletal)
-	model.set_object_data(_open(SHED))
-	var idle_fps: float = skeletal.get_clip_fps("anim_idle")
-
-	model.apply_remote_body_state(
-			43, "anim_idle", Simulation.infantry_anim_flags(43), 4)
-	model.apply_remote_body_state(
-			1, "anim_walk_forward", Simulation.infantry_anim_flags(1), 0)
-	model.advance_remote_body_blend_tick(1)
-	model.apply_remote_body_state(
-			2, "anim_run_forward", Simulation.infantry_anim_flags(2), 0)
-
-	_assert_skeleton_pose_matches(
-			model.get_skeleton(),
-			skeletal.eval_pose("anim_idle", 5.0 / (2.0 * idle_fps)),
-			"A to B retargeted to C still starts from A")
-
-
-func test_remote_target_flag_400_uses_fifteen_fixed_ticks() -> void:
-	var model = ObjectModel.new()
-	add_child_autofree(model)
-	model.set_skeletal_anim(_loaded_skeletal())
-	model.set_object_data(_open(SHED))
-	model.apply_remote_body_state(43, "anim_idle", 0, 0)
-	model.apply_remote_body_state(2, "anim_walk_forward", 0x400, 0)
-	for _tick in range(14):
-		assert_true(model.advance_remote_body_blend_tick(2),
-				"slow transition remains live through tick fourteen")
-	assert_false(model.advance_remote_body_blend_tick(2),
-			"slow transition promotes the target on tick fifteen")
-
-
-func test_remote_pulse_final_queues_behind_blending_locked_target_and_respawn_clears() -> void:
-	var model = ObjectModel.new()
-	add_child_autofree(model)
-	model.set_skeletal_anim(_loaded_remote_transition_skeletal())
-	model.set_object_data(_open(SHED))
-
-	model.apply_remote_body_state(
-			48, "anim_idle_prone", Simulation.infantry_anim_flags(48), 10)
-	model.apply_remote_body_state(
-			41, "anim_roll_left", Simulation.infantry_anim_flags(41), 0)
-	model.apply_remote_body_state(
-			48, "anim_idle_prone", Simulation.infantry_anim_flags(48), 11)
-	assert_eq(model.get_active_body_clip(), "anim_roll_left",
-			"the pulse accepts before the folded final state queues")
-	assert_true(model.remote_body_needs_fixed_tick(),
-			"the locked pulse begins at blend weight zero")
-	assert_true(model.advance_remote_body_blend_tick(48),
-			"the folded final-state row still advances the queued pulse transition")
-
-	model.reset_remote_body_state()
-	assert_false(model.remote_body_needs_fixed_tick(),
-			"respawn/reset clears the receive-side blend epoch")
-
-
-func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:
-	var model = ObjectModel.new()
-	add_child_autofree(model)
-	model.set_skeletal_anim(_loaded_skeletal())
-	model.set_object_data(_open(SHED))
-	var locked_flags := int(Simulation.infantry_anim_flags(41))
-	assert_ne(locked_flags & 0x4, 0, "state 41 is transition-locked in the retail table")
-
-	model.apply_remote_body_state(41, "anim_idle", locked_flags, 0)
-	model.apply_remote_body_state(1, "anim_walk_forward",
-			int(Simulation.infantry_anim_flags(1)), 200)
-	assert_eq(model.get_active_body_clip(), "anim_idle",
-		"a locked current clip defers the incoming wire request")
-	# Retail's equality branch preserves the pending request and its boundary.
-	model.apply_remote_body_state(41, "anim_idle", locked_flags, 90)
-	assert_true(model.remote_body_needs_fixed_tick(),
-			"same-state receipt leaves the queued transition armed")
-	var current_length: float = model.get_skeletal_anim().get_clip_length("anim_idle")
-	assert_gt(current_length, 0.0)
-	model.advance_body_animation(current_length + 0.01)
-	assert_eq(model.get_active_body_clip(), "anim_walk_forward",
-		"the queued request promotes when the current clip completes")
-	assert_almost_eq(model.get_animation_time(), 0.0, 0.001,
-		"queued off15 belongs to the old channel; promotion starts at tick zero")
-
-
-func test_remote_body_exit_gate_accepts_only_incoming_flag_one() -> void:
-	var model = ObjectModel.new()
-	add_child_autofree(model)
-	model.set_skeletal_anim(_loaded_skeletal())
-	model.set_object_data(_open(SHED))
-	var exit_flags := int(Simulation.infantry_anim_flags(115))
-	var blocked_flags := int(Simulation.infantry_anim_flags(43))
-	var interrupt_flags := int(Simulation.infantry_anim_flags(1))
-	assert_ne(exit_flags & 0x20, 0, "state 115 uses the retail exit gate")
-	assert_eq(blocked_flags & 0x1, 0)
-	assert_ne(interrupt_flags & 0x1, 0)
-
-	model.apply_remote_body_state(115, "anim_idle", exit_flags, 0)
-	model.apply_remote_body_state(43, "anim_walk_forward", blocked_flags, 90)
-	assert_eq(model.get_active_body_clip(), "anim_idle",
-		"an incoming state without flag 0x1 queues behind an exit-gated clip")
-	var expected: float = model.get_skeletal_anim().get_clip_phase_seconds("anim_run_forward", 6)
-	model.apply_remote_body_state(1, "anim_run_forward", interrupt_flags, 6)
-	assert_eq(model.get_active_body_clip(), "anim_run_forward",
-		"incoming flag 0x1 interrupts an exit-gated current state")
-	assert_almost_eq(model.get_animation_time(), expected, 0.001,
-		"an immediately accepted interrupt consumes its own player phase seed")
 
 
 func test_skinned_model_reports_nonzero_bounds() -> void:

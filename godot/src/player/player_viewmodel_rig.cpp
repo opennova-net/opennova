@@ -155,17 +155,12 @@ void PlayerViewmodelRig::clear_viewmodel() {
 	vm_parts_.clear();
 }
 
-// The witnessed FP projection, fed to the object shaders as one global: the
-// gun draws INSIDE the beauty pass (retail's "viewmodel first" into the same
-// backbuffer) through the weapon renderfov -- a HORIZONTAL fov in degrees --
-// with the near plane swapped to 0.05 (engine: runtime/renderer/fp_viewmodel_spec.h) and the depth range clamped to the nearest tenth [orig:
-// Render_SetViewportDepth01 @0x58a7b0]. The renderfov and world frusta share
-// the frame's vertical scale (the FP pass pushes the world pass's scaleY
-// (engine: runtime/world/player_view.cpp)), so the shader needs only the focal ratio between them: the
-// engine's world::viewmodel_focal_ratio, the ratio of the horizontal
-// half-tangents on both axes whatever the aspect mode or surface -- which is
-// why the feed reads no camera projection (while the presenter's stretched
-// target draws, the gameplay camera carries only a culling superset;
+// The engine's FP projection (world::viewmodel_projection_feed carries the
+// witness), fed to the object shaders as one global: the gun draws INSIDE the
+// beauty pass through it. The renderfov and world frusta share the frame's
+// vertical scale, so the shader needs only the focal ratio between them,
+// which is why the feed reads no camera projection (while the presenter's
+// stretched target draws, the gameplay camera carries only a culling superset;
 // LocalPlayerPresenter view_projection). shaders/viewmodel_pass.gdshaderinc
 // applies it per flagged instance.
 void PlayerViewmodelRig::update_viewmodel_projection() {
@@ -173,10 +168,9 @@ void PlayerViewmodelRig::update_viewmodel_projection() {
 	if (cam == nullptr || !cam->is_inside_tree()) {
 		return;
 	}
-	const float near = static_cast<float>(Simulation::viewmodel_pass_near_z());
-	const float far = static_cast<float>(cam->get_far());
-	const float focal_ratio = opennova::world::viewmodel_focal_ratio(world_fov_h_deg_, renderfov_h_deg_);
-	const Vector4 feed(focal_ratio, near, far, 1.0f);
+	const opennova::world::ViewmodelProjectionFeed projection = opennova::world::viewmodel_projection_feed(
+			world_fov_h_deg_, renderfov_h_deg_, static_cast<float>(cam->get_far()));
+	const Vector4 feed(projection.focal_ratio, projection.near_z, projection.far_z, 1.0f);
 	if (feed == projection_feed_) {
 		return;
 	}
@@ -195,24 +189,13 @@ void PlayerViewmodelRig::update_viewmodel(const Ref<PlayerLocalView> &p_view,
 	if (p_view.is_valid()) {
 		world_fov_h_deg_ = p_view->get_fov_h_deg();
 	}
-	// The engine draws the FP model with the RAW VIEW MATRIX as its world
-	// transform, i.e. the model lives in VIEW space [orig:
-	// Player_RenderFirstPersonViewModel @0x4ded60]. So the viewmodel is
-	// parented to the CAMERA transform (view-relative), NOT oriented in world
-	// space -- a viewmodel must stay fixed to the view, not swing with the
-	// aim. PLAYER_VIEWMODEL_ROT lays the model's forward down-range (and picks
-	// the correct handedness so a right-handed weapon sits on the right);
-	// PLAYER_VIEWMODEL_POS_UNITS is the weapon.def `pos` view offset.
-	// camera x bias(def rot, about the eye in view axes) x axis map(rig -> camera).
-	// [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Def.Bone.rot to the
-	// view angles and rotates Def.Bone.pos into view orientation before adding
-	// to the eye.]
+	// The model lives in VIEW space, parented to the camera transform, never
+	// oriented in world space (renderer::fp_viewmodel_root carries the witness).
 	place_viewmodel_at_camera();
 	// The FP overlay rides its own visual layer: the beauty camera admits it
 	// and every mesh instance applies the renderfov projection + depth band
-	// (retail's "viewmodel first" draw into the same backbuffer [orig:
-	// Player_RenderFirstPersonViewModel @ 0x4ded60]); the mirror and capture
-	// cameras exclude the layer; Q3 admits it. The gameplay camera admits the world
+	// (world::viewmodel_projection_feed); the mirror and capture cameras
+	// exclude the layer; Q3 admits it. The gameplay camera admits the world
 	// shadow-caster marker layers; the viewmodel policy strips those markers
 	// so the gun never leaks into world shadows. Both stamps are edge-gated on
 	// the model (policy value / scene build serial), never per frame.
@@ -263,42 +246,18 @@ void PlayerViewmodelRig::place_viewmodel_at_camera() {
 	if (node == nullptr || cam == nullptr) {
 		return;
 	}
-	// The def cant plus the native authored ADS rotation; one basis rotates
-	// both the model and its view-local offset. The rig only maps axes. The
-	// composition is the engine's (renderer::fp_viewmodel_pose), which the
-	// editor's first-person eye places its viewmodel by too.
+	// The root is the engine's (renderer::fp_viewmodel_root over the sim's
+	// blended view bias and authored ADS rotation; harness sim doubles serve the
+	// same seam), which the editor's first-person eye places its viewmodel by
+	// too. Sampling the viewport size is this rig's device work; the
+	// 4:3-or-narrower RULE the bias's z drop keys on lives engine-side
+	// (world::player_view_narrow_aspect). Out-of-tree (teardown frames) passes
+	// 0x0, which the engine rule reads as narrow.
 	const Ref<Simulation> bias_sim = sim();
-	Vector3 rotation = rot_bias_def_;
-	if (bias_sim.is_valid()) rotation += bias_sim->local_player_viewmodel_rotation_bias_deg();
-	// The ADS pos -> tpos blend, the /256 scale, and the NoCardSwitch reload
-	// suppression run in the SIM (world/player_view.h player_view_bias_view_units,
-	// S8) -- one blended VIEW-FRAME offset per frame. Harness sim doubles
-	// implement the same seam.
-	// [orig: Player_UpdateFirstPersonCamera @0x4dd380 adds Bone(+0xF4) + the
-	//  interp bias; the interp CNetPlayerInterp_Setup @0x4df36e runs +0x10C ->
-	//  +0x124]
-	// The view/def frame is X = FORWARD, Y = LEFT, Z = UP -- proven by the aim
-	// ray's far point being {+65536000, 0, 0} through the SAME transform [orig:
-	// HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0) q16; the
-	// view-local rotate Math_FixedPointTransformPoint22 @0x4dd5d8]; the pose
-	// maps it onto Godot camera-local axes (x right, y up, -z forward):
-	//   view x (forward) -> Godot -z   (M4 tpos x -50.9 = ~0.2u BACK into the shoulder)
-	//   view y (left)    -> Godot -x
-	//   view z (up)      -> Godot  y   (e.g. MP5SD pos.z -183 -> grip ~0.715u below the eye)
-	// (The 2026-07-11 grill REFUTED the earlier x=right/y=forward reading: the
-	// AK's |x| ~= |y| masked the swap; the JOX/REVX M4 tpos made it glare -- the
-	// canted-ADS report. oscarmike's onhook-derived map agrees with the witnessed
-	// frame.) The velocity lead (>>7, clamps @0x4dd4f2..) and the prone Z drop
-	// (-1280 @0x4dd578) are recorded unported tails. Without a sim, the raw
-	// def units take the /256 scale the sim's blend otherwise applies [orig:
-	// flt_7D1D70=256 @0x544770].
-	Vector3 view_units = pos_units_ / static_cast<float>(Simulation::weapon_def_pos_scale());
+	Vector3 sim_rotation;
+	Vector3 sim_units;
 	if (bias_sim.is_valid()) {
-		// Sampling the viewport size is this rig's device work; the
-		// 4:3-or-narrower RULE the z drop keys on lives engine-side
-		// (world/player_view.h player_view_narrow_aspect; retail: the viewport
-		// block @0x4dd571). Out-of-tree (teardown frames) passes 0x0, which the
-		// engine rule reads as narrow -- the same posture as the old 4:3 default.
+		sim_rotation = bias_sim->local_player_viewmodel_rotation_bias_deg();
 		Vector2 vs;
 		Node *world_node = world();
 		if (world_node != nullptr && world_node->is_inside_tree()) {
@@ -306,13 +265,17 @@ void PlayerViewmodelRig::place_viewmodel_at_camera() {
 				vs = viewport->get_visible_rect().size;
 			}
 		}
-		view_units = bias_sim->local_player_viewmodel_bias_view_units(
+		sim_units = bias_sim->local_player_viewmodel_bias_view_units(
 				pos_units_, tpos_units_, static_cast<int>(vs.x), static_cast<int>(vs.y));
 	}
-	const float units[3] = { view_units.x, view_units.y, view_units.z };
-	const float bias_deg[3] = { rotation.x, rotation.y, rotation.z };
+	const float pos[3] = { pos_units_.x, pos_units_.y, pos_units_.z };
+	const float def_rot[3] = { rot_bias_def_.x, rot_bias_def_.y, rot_bias_def_.z };
 	const float rig_deg[3] = { rot_.x, rot_.y, rot_.z };
-	const opennova::renderer::FpViewmodelPose pose = opennova::renderer::fp_viewmodel_pose(units, bias_deg, rig_deg);
+	const float sim_view[3] = { sim_units.x, sim_units.y, sim_units.z };
+	const float sim_rot[3] = { sim_rotation.x, sim_rotation.y, sim_rotation.z };
+	const bool has_sim = bias_sim.is_valid();
+	const opennova::renderer::FpViewmodelPose pose = opennova::renderer::fp_viewmodel_root(
+			pos, def_rot, rig_deg, has_sim ? sim_view : nullptr, has_sim ? sim_rot : nullptr);
 	const Basis vm_basis(pose.basis[0], pose.basis[1], pose.basis[2], pose.basis[3], pose.basis[4], pose.basis[5],
 			pose.basis[6], pose.basis[7], pose.basis[8]);
 	// An unchanged write would still dirty every part into the flush's
@@ -394,8 +357,8 @@ void PlayerViewmodelRig::apply_viewmodel_control_registers(bool p_submit_viewmod
 
 // Pull the resolved weapon.def view record from the world; null when no
 // equipped weapon resolves in the mounted root -- nothing draws then, and the
-// placement values stay as they were. The def rows carry xyz raw
-// file units + yaw/pitch/roll degrees (engine: runtime/renderer/fp_viewmodel_spec.h).
+// placement values stay as they were (renderer::FpViewmodelDef carries the
+// field witnesses).
 void PlayerViewmodelRig::apply_viewmodel_def() {
 	LocalPlayerPresenter *owner = presenter();
 	const Ref<LocalPlayerVisuals> visuals = owner != nullptr ? owner->visuals() : Ref<LocalPlayerVisuals>();

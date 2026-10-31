@@ -1165,31 +1165,30 @@ static int32_t intrinsic_gsv(MusVM *vm, int top) {
 }
 
 /* Witnessed: [orig: AudioVM_Intrinsic_GSDV @ 0x672120].
-   Sets right-channel only. Reuse on_volume_changed but pass current(left)
-   unchanged; we don't track the previous left value, so pass `fixed` for
-   both channels and let the embedder disambiguate. */
+   Sets the target volume alone (dword_31C3804), which the stream ramps the
+   current one toward over the next track (audio::MusicStream). Hooks
+   on_volume_changed with -1 for the current volume: unchanged. */
 static int32_t intrinsic_gsdv(MusVM *vm, int top) {
     int32_t v = stack_word(vm, top);
     int32_t clipped = v;
     if (clipped < 0)   clipped = 0;
     if (clipped > 255) clipped = 255;
     int32_t fixed = clipped << 16;
-    /* GSDV only changes the right channel. We pass left=0 to indicate
-       "left unchanged" -- not perfectly faithful but the only practical
-       choice without a per-channel state mirror. */
     if (vm->hooks.on_volume_changed) {
-        vm->hooks.on_volume_changed(vm->hooks.user, 0, fixed);
+        vm->hooks.on_volume_changed(vm->hooks.user, -1, fixed);
     }
     return fixed;
 }
 
-/* [orig: AudioVM_Intrinsic_GFB @ 0x672150] `mov dword_31C37EC, 0; retn` -- takes
+/* [orig: AudioVM_Intrinsic_GFB @ 0x672150] `mov g_AudioStreamBytesLeft, 0; retn` -- takes
    NO args (does not deref the &TOS pointer) and sets no eax, so `method` pushes the
    handler's own address, the eax it was called through (@ 0x672D08 call eax) (D-MUS-26).
-   Side effect: clears the fade-base global dword_31C37EC, which the VM does not model. */
+   Side effect: empties the music stream (the bytes left of the track the last play selected,
+   which AudioVM_SelectStream @ 0x671BF0 seeds and AudioStream_Update @ 0x671C76 tests), the
+   stream pump's state: the embedder's on_flush_buffer. */
 static int32_t intrinsic_gfb(MusVM *vm, int top) {
-    (void)vm;
     (void)top;
+    if (vm->hooks.on_flush_buffer) vm->hooks.on_flush_buffer(vm->hooks.user);
     return kGfbAddr;
 }
 

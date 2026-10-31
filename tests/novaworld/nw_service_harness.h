@@ -18,7 +18,7 @@
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
-#include <net_sockets.h>
+#include <net/socket/socket.h>
 
 #include "common/test_database.h"
 #include "common/test_redis.h"

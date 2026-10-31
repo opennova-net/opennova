@@ -21,43 +21,20 @@ namespace godot {
 class LocalPlayerPresenter;
 class Simulation;
 
-// The local player's first-person viewmodel presentation (the former
+// The local player's first-person viewmodel device (the former
 // player_viewmodel_rig.gd, ADR 0043 slice G8), owned by LocalPlayerPresenter:
-// the FP projection feed (the renderfov focal ratio + depth band the object
-// shaders apply to flagged instances inside the beauty pass), the viewmodel
-// node + parts lifetime, the weapon.def placement (pos/tpos ADS lerp,
-// rotation bias, axis map), and the first-person control-register writers.
-// The presenter keeps the player camera, the avatar/held-weapon presentation,
-// and the third-person flag; per-frame inputs (the view snapshot, the weapon
-// view, the camera mode, the debug force flag) arrive as update_viewmodel
-// arguments. Registered and reachable through the presenter's viewmodel_rig()
-// because the vm_bone_dump probe sweeps the five placement tunables live.
-//
-// First-person weapon viewmodel placement, witnessed from weapon.def `pos`
-// (hip) / `tpos` (ADS). The original adds the equipped weapon's view-bias
-// offset to the eye in view-local space, rotated by the view orientation,
-// then draws the gun (gfx1) + character arms at that view root (engine: runtime/renderer/fp_viewmodel_spec.h). The weapon.def parser stores
-// the pos/tpos POSITION as `atof(str) * 256.0` (a 16.16 fixed-point world
-// coord; scale flt_7D1D70 @0x544770) and the ROTATION as degrees -> 32-bit
-// BAM (`* 0x0B60B60` = 2^32/360) (engine: runtime/renderer/fp_viewmodel_spec.h). The camera ftol's the stored float and adds it straight onto
-// g_view_pos (16.16), so the net WORLD offset is simply `file_value / 256`
-// -- see place_viewmodel_at_camera for the axis map and derivation. The Sighted/ADS
-// path eases `pos` -> `tpos` (the scope interp runs from the hip copy at
-// WeaponDef+0x10C to the tpos at +0x124 and publishes the difference as the
-// view bias (engine: runtime/world/player_view.h)),
-// rotation carried by the sim's authored pose interpolator; position still
-// uses its scalar fraction (D-WPN-39). (The `Flags & 2` leg of the
-// camera is the DEAD/round-end camera, not ADS.) The view fields flow from
-// the mounted root's weapon.def (apply_viewmodel_def <-
-// LocalPlayerVisuals.local_player_viewmodel_def, the equipped weapon's row);
-// the initial values are the witnessed JOX WPN_AK47AUTO line, which nothing
-// draws with until an equipped def replaces them. (The pre-def
-// constant (10, 0, -201) turned out to be the REVX-era WPN_AK47AUTO `pos` --
-// that SKU's def drives the AKM_1st viewmodel.) The witnessed scale +
-// fallback placement values live at engine renderer/fp_viewmodel_spec.h,
-// re-exported through Simulation statics. Tunable (properties, not
-// constants) so debug drivers can sweep placements live; the values are the
-// witnessed WPN_AK47AUTO def line + the current best facing.
+// the viewmodel node and parts lifetime, the root's stamp at the camera, the
+// FP projection shader global and the first-person CTRL register writes. What
+// it draws is the engine's: the root (renderer::fp_viewmodel_root over the
+// sim's blended view bias), the projection (world::viewmodel_projection_feed),
+// the submission gates (world::fp_viewmodel_retail_submit) and the writers
+// (world::fp_ctrl_register_writes), each carrying its witnesses. The
+// presenter keeps the player camera, the avatar and the third-person flag;
+// per-frame inputs arrive as update_viewmodel arguments. Registered and
+// reachable through the presenter's viewmodel_rig() because the vm_bone_dump
+// probe sweeps the five placement tunables live: they start at the engine's
+// witnessed WPN_AK47AUTO line (renderer::kFallbackPosUnits and siblings) until
+// an equipped def's rows replace them.
 class PlayerViewmodelRig : public RefCounted {
 	GDCLASS(PlayerViewmodelRig, RefCounted)
 
@@ -74,18 +51,9 @@ public:
 	Vector3 get_player_viewmodel_tpos_units() const { return tpos_units_; }
 	void set_player_viewmodel_tpos_units(const Vector3 &p_value) { tpos_units_ = p_value; }
 	// PLAYER_VIEWMODEL_ROT: the FP rig's model->camera AXIS MAP, euler DEGREES
-	// in CAMERA space. The FP rig is a T-posed character skeleton (BN01 Pelvis
-	// at the origin) that the wpn clips POSE into the hold facing downrange;
-	// the rig renders through the standard skeletal pipeline (import-flipped
-	// meshes + the bind-rotation rests, positions reconstructed from the model
-	// table), and the yaw-180 turns the rig's authored forward onto Godot's -Z
-	// camera forward -- the structural equivalent of the original drawing its
-	// composed render-frame bone matrices with the raw view matrix [orig:
-	// Player_RenderFirstPersonViewModel @0x4ded60 root = view transform; the
-	// S*A^T*S copy loops @0x40c4d8..0x40c57c realize the model->render map
-	// inside the composition]. Sign pinned against retail: the stock/grip
-	// anchor bottom-RIGHT at the hip idle (the pre-train build renders
-	// identically and was retail-confirmed).
+	// in CAMERA space: the yaw-180 of renderer::kViewmodelRigYawDeg, which
+	// carries the witness. Sign pinned against retail: the stock/grip anchor
+	// bottom-RIGHT at the hip idle.
 	Vector3 get_player_viewmodel_rot() const { return rot_; }
 	void set_player_viewmodel_rot(const Vector3 &p_value) { rot_ = p_value; }
 	// PLAYER_VIEWMODEL_ROT_BIAS_DEF: the witnessed per-weapon view-rotation
@@ -95,26 +63,13 @@ public:
 	// camera axes verified visually.
 	Vector3 get_player_viewmodel_rot_bias_def() const { return rot_bias_def_; }
 	void set_player_viewmodel_rot_bias_def(const Vector3 &p_value) { rot_bias_def_ = p_value; }
-	// PLAYER_VIEWMODEL_RENDERFOV_H_DEG: the FP render pass -- the original
-	// draws the viewmodel through its OWN projection: the weapon's `renderfov`
-	// (HORIZONTAL degrees; every JO weapon.def omits the key, so all use the
-	// record default 80.0) converted to vertical via the aspect, with the near
-	// plane swapped 0.2 -> 0.05 and the viewport depth range remapped so the
-	// world never overdraws it, then its own flush [orig:
-	// Player_RenderFirstPersonViewModel @0x4ded60:
-	// Render_SwapProjectionNearZ(0.05) @0x4dee29 / restore 0.2 @0x4df0aa, fov =
-	// WeaponDef+0x148 @0x4dee71 -> h->v conversion in
-	// Render_SetViewAndProjectionMatrices @0x58d900, depth remap
-	// Render_SetViewportDepth01 @0x58a7b0; default 80.0 = flt_7D1898 stored by
-	// AdmDef_InitEntryDefaults @0x53ff31; parser key 'renderfov' @0x54482a].
-	// Ported as a fold into the beauty pass: the viewmodel parts ride their own
-	// visual layer (the beauty camera and the focused Q3 adapter admit it, the
-	// rigid glow strips copying under the world projection; the mirror/capture
-	// cameras exclude it) and every flagged instance applies the renderfov focal ratio plus
-	// the near depth band in the object shaders
-	// (shaders/viewmodel_pass.gdshaderinc, fed by update_viewmodel_projection)
-	// -- the depth-remap's visible equivalent, drawn into the same frame as the
-	// world. (near-z lives engine-side: Simulation.viewmodel_pass_near_z())
+	// PLAYER_VIEWMODEL_RENDERFOV_H_DEG: the weapon `renderfov`, HORIZONTAL
+	// degrees, the FP pass's own projection (world::viewmodel_projection_feed
+	// carries the witness). Ported as a fold into the beauty pass: the parts
+	// ride their own visual layer (the beauty camera and the focused Q3 adapter
+	// admit it; the mirror/capture cameras exclude it) and every flagged
+	// instance applies the feed in the object shaders
+	// (shaders/viewmodel_pass.gdshaderinc, fed by update_viewmodel_projection).
 	float get_player_viewmodel_renderfov_h_deg() const { return renderfov_h_deg_; }
 	void set_player_viewmodel_renderfov_h_deg(float p_value) { renderfov_h_deg_ = p_value; }
 
@@ -177,9 +132,8 @@ public:
 	// parts.
 	void ensure_viewmodel();
 	// Drop the built FP viewmodel so the next update pass rebuilds gun/arms/FSM
-	// from the (changed) equipped weapon -- the armory ACCEPT re-mount [orig:
-	// WeaponLoadout_ApplyFromBuffer @0x565cd0 tail -> Player_MountWeaponSlot
-	// @0x4dfa40]. Retires the old draw and parts immediately; the next
+	// from the (changed) equipped weapon (the armory ACCEPT re-mount, a committed
+	// switch). Retires the old draw and parts immediately; the next
 	// presentation pass rebuilds and poses the replacement before rendering.
 	void refresh_viewmodel();
 	// How many times the viewmodel was dropped for a rebuild (a read seam: the
@@ -187,14 +141,11 @@ public:
 	int viewmodel_generation() const { return generation_; }
 	// The viewmodel leg of the presenter's clear-models path.
 	void clear_viewmodel();
-	// First-person weapon viewmodel: sit it in front of the eye, tracking the
-	// camera 1:1, shown in first person only (in 3P the body avatar shows
-	// instead). The original biases the CAMERA by the weapon's `pos`/`tpos`
-	// view offset and draws the model at the view root (engine: runtime/world/local_player_view.cpp); placing it in camera space is
-	// the faithful structural equivalent (camera.global_transform == the engine
-	// view transform here). Per-frame state arrives as arguments from the
-	// presenter's camera pass: the sim view snapshot, this tick's weapon view,
-	// the camera mode, the debug force flag.
+	// First-person weapon viewmodel: stamp the engine's root against the camera
+	// (camera.global_transform == the engine view transform here), shown in
+	// first person only (in 3P the body avatar shows instead). Per-frame state
+	// arrives as arguments from the presenter's camera pass: the sim view
+	// snapshot, this tick's weapon view, the camera mode, the debug force flag.
 	void update_viewmodel(const Ref<PlayerLocalView> &p_view, const Ref<PlayerWeaponView> &p_weapon_view,
 			bool p_third_person, bool p_force_visible);
 	// Re-place the gun and re-push its projection feed against the camera's

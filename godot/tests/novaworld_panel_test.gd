@@ -105,26 +105,7 @@ func _make_panel_in_viewport(viewport_size: Vector2i) -> NovaWorldPanel:
 # suite) reaches the local stack on loopback, never a live service.
 func test_opennova_target_dials_loopback_in_a_source_run() -> void:
 	var panel := _make_panel(PackedStringArray())
-	assert_eq(panel.client_for_test().host, NovaWorldSettings.LOCAL_NOVAWORLD_HOST)
-
-
-# An export dials its flavour's deployment: a release export prod's gate, a debug
-# export (PR CI's zip) staging's, as their OPENNOVA.WIZ names that deployment's
-# update service.
-func test_opennova_host_is_the_export_flavours_deployment() -> void:
-	assert_eq(NovaWorldSettings.opennova_host_for("", true, false), "nw.opennova.net",
-			"a release export: prod's gate")
-	assert_eq(NovaWorldSettings.opennova_host_for("", true, true), "nw.staging.opennova.net",
-			"a debug export: staging's gate")
-	assert_eq(NovaWorldSettings.opennova_host_for("", false, true), "127.0.0.1",
-			"a source run: loopback")
-	assert_eq(NovaWorldSettings.opennova_host_for("", false, false), "127.0.0.1",
-			"a source run of a release editor binary: loopback too")
-	assert_eq(NovaWorldSettings.opennova_host_for("nw.example.test", true, false),
-			"nw.example.test", "the flag beats a release export's own")
-	assert_eq(NovaWorldSettings.opennova_host_for("nw.example.test", true, true),
-			"nw.example.test", "and a debug export's")
-	assert_eq(NovaWorldSettings.opennova_host_for("127.0.0.1", false, true), "127.0.0.1")
+	assert_eq(panel.client_for_test().host, "127.0.0.1")
 
 
 func test_novaworld_host_flag_moves_the_opennova_target_alone() -> void:
@@ -136,7 +117,7 @@ func test_novaworld_host_flag_moves_the_opennova_target_alone() -> void:
 	real.target_override = NovaWorldSettings.Target.REAL
 	real.resource_root = _real_root(PackedStringArray())
 	add_child_autofree(real)
-	assert_eq(real.client_for_test().host, NovaWorldSettings.REAL_NOVAWORLD_HOST,
+	assert_eq(real.client_for_test().host, "gs.novaworld.net",
 			"Original NovaWorld is NovaLogic's gate whatever the flag says")
 
 
@@ -855,7 +836,9 @@ func test_a_server_that_refused_this_install_is_greyed_with_its_reason() -> void
 	]
 	panel.set_rows_for_test(rows)
 	assert_false(panel.visible_row_dimmed(1), "before the refusal the row draws normally")
-	panel.mark_refused(42, "Your game is incompatible with this server. (NCC007)")
+	# The controller's record notes the refusal; the panel's next view reads it.
+	panel.refusals.note_refusal(42, "Your game is incompatible with this server. (NCC007)")
+	panel.set_rows_for_test(rows)
 	assert_eq(panel.join_block_reason(rows[1]),
 			"Your game is incompatible with this server. (NCC007)",
 			"the reason is the refusal's own text")

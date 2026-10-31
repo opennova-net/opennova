@@ -12,18 +12,17 @@
 #include "simulation/entity_presenter.h"
 #include "world/game_world.h"
 #include "world/game_world_access.h"
-#include "world/item_effect_director.h"
 
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/callable.hpp>
-#include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <vector>
 
-#include <runtime/world/player_present.h>
+#include "util/string_convert.h"
 
 using namespace godot;
 
@@ -33,13 +32,9 @@ void PlayerWeaponEffects::setup(Node *p_world, LocalPlayerPresenter *p_presenter
 }
 
 void PlayerWeaponEffects::teardown() {
-	// Drop our anchors from the world-side ItemEffectDirector BEFORE losing
-	// the world reference: the director's registry is world-lifetime and its
-	// reset() deliberately leaves owner keys to their owners -- a discarded
-	// effects object would otherwise leave its bound-resolver entries pinned
-	// there forever (the Callable keeps this object alive, so the
-	// invalid-callable reap never fires).
-	unregister_effect_anchors();
+	// Release the live action handles BEFORE losing the world reference (their
+	// groups would otherwise keep emitting where they stand).
+	release_action_effects();
 	world_id_ = ObjectID();
 	presenter_id_ = ObjectID();
 }
@@ -71,10 +66,6 @@ MissionAudio *PlayerWeaponEffects::mission_audio() const {
 	return world_access::mission_audio(world());
 }
 
-Ref<ItemEffectDirector> PlayerWeaponEffects::effect_anchors() const {
-	return world_access::item_effect_director(world());
-}
-
 void PlayerWeaponEffects::reset() {
 	weapon_play_serial_ = -1;
 	weapon_view_.unref();
@@ -82,15 +73,12 @@ void PlayerWeaponEffects::reset() {
 
 void PlayerWeaponEffects::on_viewmodel_refresh() {
 	++viewmodel_generation_;
-	unregister_effect_anchors();
+	release_action_effects();
 }
 
-// A committed weapon switch from the sim: reinstall the FP viewmodel/FSM for
-// the newly equipped def [orig: the mount's model re-resolve -- the FP render
-// model follows the equipped slot, Player_CountWeaponEffectsAndUpdateViewModel
-// @ 0x4dc9e0]. Redundant reinstalls (the installed def already IS the target
-// and its viewmodel exists) are skipped so the queued SWITCHTO draw-in
-// survives.
+// A committed weapon switch from the sim: the FP viewmodel follows the newly
+// equipped def as the engine's world::weapon_switch_present says (it carries
+// the witness): kept, presented from the sim's own mount, or mounted here.
 bool PlayerWeaponEffects::apply_weapon_switch(const String &p_weapon_name,
 		bool p_preserve_slot_state, bool p_installed) {
 	const Ref<LocalPlayerVisuals> world_visuals = visuals();
@@ -98,15 +86,18 @@ bool PlayerWeaponEffects::apply_weapon_switch(const String &p_weapon_name,
 	if (world() == nullptr || world_visuals.is_null() || owner == nullptr) {
 		return false;
 	}
-	if (world_visuals->local_player_weapon_name().nocasecmp_to(p_weapon_name) == 0 &&
-			owner->viewmodel() != nullptr) {
-		return true;
+	bool switched = false;
+	switch (opennova::world::weapon_switch_present(opennova::to_std(world_visuals->local_player_weapon_name()),
+			opennova::to_std(p_weapon_name), owner->viewmodel() != nullptr, p_installed)) {
+		case opennova::world::WeaponSwitchPresent::kKeep:
+			return true;
+		case opennova::world::WeaponSwitchPresent::kPresentInstalled:
+			switched = world_visuals->present_local_player_weapon(p_weapon_name);
+			break;
+		case opennova::world::WeaponSwitchPresent::kMount:
+			switched = world_visuals->set_local_player_weapon_by_name(p_weapon_name, p_preserve_slot_state);
+			break;
 	}
-	// A switch the sim's commit mounted is device work here: the viewmodel follows the
-	// def the commit installed (world::WeaponPresentationEvent::installed).
-	const bool switched = p_installed
-			? world_visuals->present_local_player_weapon(p_weapon_name)
-			: world_visuals->set_local_player_weapon_by_name(p_weapon_name, p_preserve_slot_state);
 	if (switched) {
 		owner->refresh_viewmodel();
 	}
@@ -123,14 +114,38 @@ void PlayerWeaponEffects::apply_weapon_clear() {
 	owner->refresh_viewmodel();
 }
 
-void PlayerWeaponEffects::unregister_effect_anchors() {
-	const Ref<ItemEffectDirector> anchors = effect_anchors();
-	if (anchors.is_valid()) {
-		for (const String &key : registered_effect_anchor_keys_) {
-			anchors->unregister_effect_anchor(key);
+void PlayerWeaponEffects::release_action_effects() {
+	if (EffectWorld *fx = effect_world()) {
+		for (const KeyValue<String, ActionEffect> &kv : action_effects_) {
+			fx->stop_group(kv.value.group_id);
+			fx->release_slot_key(kv.key);
 		}
 	}
-	registered_effect_anchor_keys_.clear();
+	action_effects_.clear();
+}
+
+// The per-tick re-anchor of the live handles (engine world/player_present.h
+// kActionEffectSpawnPolicy carries the witness).
+void PlayerWeaponEffects::follow_action_effects() {
+	EffectWorld *fx = effect_world();
+	if (fx == nullptr) {
+		action_effects_.clear();
+		return;
+	}
+	Vector<String> gone;
+	for (const KeyValue<String, ActionEffect> &kv : action_effects_) {
+		const Variant pose = resolve_anchor(kv.value.userpoint);
+		if (pose.get_type() != Variant::TRANSFORM3D) {
+			fx->stop_group(kv.value.group_id);
+			gone.push_back(kv.key);
+		} else if (!fx->move_group(kv.value.group_id, pose)) {
+			gone.push_back(kv.key);
+		}
+	}
+	for (const String &key : gone) {
+		action_effects_.erase(key);
+		fx->release_slot_key(key);
+	}
 }
 
 void PlayerWeaponEffects::consume_pending(const Ref<PlayerWeaponView> &p_view) {
@@ -144,6 +159,8 @@ void PlayerWeaponEffects::consume_pending(const Ref<PlayerWeaponView> &p_view) {
 void PlayerWeaponEffects::consume(const Ref<PlayerWeaponView> &p_view,
 		const TypedArray<PlayerWeaponEvent> &p_events) {
 	weapon_view_ = p_view;
+	// The live action handles re-pose to this tick's userpoints first.
+	follow_action_effects();
 	// The batch facts the engine ordering reads, one per event.
 	std::vector<Ref<PlayerWeaponEvent>> events;
 	std::vector<opennova::world::WeaponBatchEvent> facts;
@@ -205,13 +222,12 @@ void PlayerWeaponEffects::consume(const Ref<PlayerWeaponView> &p_view,
 
 // The action-begin SOUND + MUZZLE legs: play the started ACTION's soundset
 // 3D-positional at the firing entity and spawn its particle effect at the
-// weapon model's user point [orig: ActionSlot_ExecuteActionWithEffect
-// @0x541860 plays the row's soundset and calls ActionSlot_SpawnEffect
-// @0x401f20 with the row's particle + userpoint; the one-shot 3D placement is
-// Sound_Play3DPositional @0x527cb0]. The ordered event batch preserves each
-// begin leg when several ticks land in one frame. The particle GATE (FIRE
-// only; suppressed at the settled scope in first person) is the engine's
-// local_fire_effect_admitted (world/player_present.h carries the witnesses).
+// weapon model's user point, one live handle per action slot (the engine's
+// kActionEffectSpawnPolicy carries the spawn's witness). The ordered event
+// batch preserves each begin leg when several ticks land in one frame. The
+// particle GATE (FIRE only; suppressed at the settled scope in first person)
+// is the engine's local_fire_effect_admitted (world/player_present.h carries
+// the witnesses).
 void PlayerWeaponEffects::fire_action_effects(const Ref<PlayerWeaponEvent> &p_event) {
 	if (world() == nullptr) {
 		return;
@@ -246,32 +262,30 @@ void PlayerWeaponEffects::fire_action_effects(const Ref<PlayerWeaponEvent> &p_ev
 	// the one forward pose every effect spawn shares (ptl-format-re.md,
 	// ActionSlot_SpawnEffect).
 	const Transform3D anchor_transform = EffectWorld::forward_pose(pos, forward);
-	// The owner-bound group re-reads the live userpoint pose through its
-	// anchor resolver for its whole life (the engine's
-	// kActionEffectSpawnPolicy: one live handle per action slot, follow the
-	// owner, the world render domain).
-	if (const Ref<ItemEffectDirector> anchors = effect_anchors(); anchors.is_valid()) {
-		anchors->register_effect_anchor(slot_key,
-				callable_mp(this, &PlayerWeaponEffects::resolve_anchor).bind(userpoint));
-		registered_effect_anchor_keys_.insert(slot_key);
-	}
+	// The engine's kActionEffectSpawnPolicy: one live handle per action slot, re-posed to the
+	// live userpoint each fixed tick for its whole life (follow_action_effects), the world render
+	// domain.
 	const opennova::world::ActionEffectSpawnPolicy &policy = opennova::world::kActionEffectSpawnPolicy;
 	Ref<EffectSpawnOptions> options;
 	options.instantiate();
 	options->set_admission(policy.suppress_while_owned ? EffectScene::ADMISSION_SUPPRESS_WHILE_OWNED
 														: EffectScene::ADMISSION_ALWAYS);
-	options->set_binding(policy.follow_owner ? EffectScene::BINDING_FOLLOW_OWNER : EffectScene::BINDING_WORLD);
 	options->set_render_domain(policy.world_render_domain ? EffectScene::RENDER_DOMAIN_WORLD
 														   : EffectScene::RENDER_DOMAIN_FIRST_PERSON);
 	options->set_slot_key(slot_key);
-	options->set_owner_key(slot_key);
-	options->set_owner_transform(anchor_transform);
-	options->set_has_owner_transform(true);
 	options->set_initial_age_ticks(std::max(p_event->get_age_ticks(), 0));
 	// The action slot's descriptor carries its entity as the tag (retail
 	// ActionSlot_SpawnEffect @ 0x401F20): the group takes the section gate.
 	options->set_section_tagged(true);
-	fx->spawn_effect_request(particle, anchor_transform, options);
+	const Ref<EffectSpawnReceipt> receipt =
+			fx->spawn_effect_request(particle, anchor_transform, options);
+	// A spawned group's handle is held; a suppressed one leaves the live handle as it was.
+	if (policy.follow_owner && receipt.is_valid() && receipt->get_spawned()) {
+		ActionEffect held;
+		held.group_id = receipt->get_group_id();
+		held.userpoint = userpoint;
+		action_effects_.insert(slot_key, held);
+	}
 }
 
 // The recoil-row DIRECT effect leg is entirely data-defined. Retail submits
@@ -304,9 +318,12 @@ Variant PlayerWeaponEffects::resolve_anchor(const String &p_userpoint) {
 	if (owner == nullptr) {
 		return Variant(); // torn down; a stale resolver poll must degrade, not error
 	}
-	const ActionPoint mounted = mounted_action_particle(p_userpoint);
-	if (mounted.valid) {
-		return EffectWorld::forward_pose(mounted.pos, mounted.dir);
+	const opennova::world::ActionAnchorPlan plan = anchor_plan(p_userpoint);
+	if (plan.count > 0 && plan.sources[0] == opennova::world::ActionAnchorSource::kMountedGun) {
+		const ActionPoint mounted = mounted_action_particle(p_userpoint);
+		if (mounted.valid) {
+			return EffectWorld::forward_pose(mounted.pos, mounted.dir);
+		}
 	}
 	if (owner->viewmodel() == nullptr) {
 		return Variant();
@@ -316,26 +333,28 @@ Variant PlayerWeaponEffects::resolve_anchor(const String &p_userpoint) {
 	return EffectWorld::forward_pose(pos, forward);
 }
 
-// Map a model-space action userpoint through the live fake-skinned weapon
-// bone. Rigid first-person gun parts ride the .adm skeleton by subobject/bone
-// index, so applying only the model root leaves authored muzzle points in the
-// rest pose (and, for the AK, behind the gameplay camera). Convert model
-// space into the bone's rest frame, then back through its current global
-// pose -- the ported equivalent of the original action-bone transform.
-// [orig: Entity_ComputeActionTransform @0x401310 -> ActionSlot_SpawnEffect @0x401f20]
+// Map a model-space action userpoint through the posed weapon bone. Rigid
+// first-person gun parts ride the .adm rig by subobject/bone index, so the
+// part's frame is the bone's model->world matrix from the engine's own pose
+// (world::posed_part_to_world, through ObjectModel::subobject_model_to_world).
 Transform3D PlayerWeaponEffects::action_particle_model_to_world(ObjectModel *p_part,
 		const Ref<ModelUserPoint> &p_info) {
 	return p_part != nullptr ? p_part->subobject_model_to_world(p_info->get_subobject()) : Transform3D();
 }
 
+opennova::world::ActionAnchorPlan PlayerWeaponEffects::anchor_plan(const String &p_userpoint) const {
+	LocalPlayerPresenter *owner = presenter();
+	const bool view = weapon_view_.is_valid();
+	return opennova::world::action_anchor_plan(owner != nullptr && !p_userpoint.is_empty(), view,
+			view && weapon_view_->get_borrowed_usegun_slot(), owner != nullptr && owner->is_third_person(),
+			view && weapon_view_->value().first_person_action_model);
+}
+
+// The borrowed UseGun carrier's named part point (the plan's mounted source).
 PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::mounted_action_particle(
 		const String &p_userpoint) const {
 	ActionPoint out;
-	LocalPlayerPresenter *owner = presenter();
-	if (owner == nullptr || weapon_view_.is_null() || p_userpoint.is_empty() ||
-			!opennova::world::action_particle_uses_mounted_gun(
-					weapon_view_->get_borrowed_usegun_slot(), owner->is_third_person(),
-					weapon_view_->value().first_person_action_model)) {
+	if (weapon_view_.is_null()) {
 		return out;
 	}
 	GameWorld *game_world = Object::cast_to<GameWorld>(world());
@@ -363,28 +382,18 @@ PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::mounted_action_particle(
 	return out;
 }
 
-// World-space spawn point for an ACTION particle: the named user point on a
-// viewmodel part (the gun carries the muzzle points), composed through its
-// live subobject/bone pose. Falls back to the entity origin. The
-// THIRD-PERSON action-particle anchor: the same authored
-// userpoint name resolved against the gfx3 world gun instead of the
-// first-person viewmodel -- the gfx1/gfx3 pick by the FP bit is the engine's
-// action_particle_uses_third_person_gun (world/player_present.h carries the
-// witness).
-//
-// This matters because the presenter's vm_parts are the FIRST-PERSON
-// viewmodel: it is re-pinned to the camera every frame and merely HIDDEN in
-// third person, never detached, so resolving against it while in third person
-// anchors the muzzle flash to the player's own eye. The weapon model is drawn
-// rigid at its attach transform, so a model-space userpoint just rides that
-// transform.
+// The THIRD-PERSON action-particle anchor (the plan's third-person source):
+// the same authored userpoint name resolved against the gfx3 world gun
+// instead of the first-person viewmodel. The viewmodel is re-pinned to the
+// camera every frame and merely HIDDEN in third person, never detached, so
+// resolving against it there would anchor the muzzle flash to the player's
+// own eye. The weapon model is drawn rigid at its attach transform, so a
+// model-space userpoint just rides that transform.
 PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::third_person_action_particle(
 		const String &p_userpoint) const {
 	ActionPoint out;
 	LocalPlayerPresenter *owner = presenter();
-	if (owner == nullptr ||
-			!opennova::world::action_particle_uses_third_person_gun(owner->is_third_person()) ||
-			p_userpoint.is_empty()) {
+	if (owner == nullptr) {
 		return out;
 	}
 	ObjectModel *held_weapon = owner->held_weapon();
@@ -411,80 +420,124 @@ PlayerWeaponEffects::ActionPoint PlayerWeaponEffects::third_person_action_partic
 	return out;
 }
 
-Vector3 PlayerWeaponEffects::action_particle_world_position(const String &p_userpoint) const {
-	const ActionPoint mounted = mounted_action_particle(p_userpoint);
-	if (mounted.valid) {
-		return mounted.pos;
-	}
-	const ActionPoint tp = third_person_action_particle(p_userpoint);
-	if (tp.valid) {
-		return tp.pos;
-	}
+bool PlayerWeaponEffects::first_person_particle_position(const String &p_userpoint, Vector3 &r_pos) const {
 	LocalPlayerPresenter *owner = presenter();
-	if (owner != nullptr && !p_userpoint.is_empty()) {
-		const TypedArray<ObjectModel> parts = owner->vm_parts();
-		for (int64_t i = 0; i < parts.size(); ++i) {
-			ObjectModel *part = Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i]));
-			if (part == nullptr) {
-				continue;
-			}
-			const Ref<ObjectData> data = part->get_object_data();
-			if (data.is_null()) {
-				continue;
-			}
-			const int count = data->get_user_point_count();
-			for (int j = 0; j < count; ++j) {
-				const Ref<ModelUserPoint> info = data->get_user_point_info(j);
-				if (info.is_valid() && info->get_name().nocasecmp_to(p_userpoint) == 0) {
-					const Transform3D model_to_world = action_particle_model_to_world(part, info);
-					return model_to_world.xform(info->get_position());
-				}
+	if (owner == nullptr) {
+		return false;
+	}
+	bool found = false;
+	owner->viewmodel_rig()->for_each_vm_part([&](ObjectModel *p_part) {
+		const Ref<ObjectData> data = found ? Ref<ObjectData>() : p_part->get_object_data();
+		if (data.is_null()) {
+			return;
+		}
+		const int count = data->get_user_point_count();
+		for (int j = 0; j < count && !found; ++j) {
+			const Ref<ModelUserPoint> info = data->get_user_point_info(j);
+			if (info.is_valid() && info->get_name().nocasecmp_to(p_userpoint) == 0) {
+				r_pos = action_particle_model_to_world(p_part, info).xform(info->get_position());
+				found = true;
 			}
 		}
+	});
+	return found;
+}
+
+bool PlayerWeaponEffects::first_person_particle_forward(const String &p_userpoint, Vector3 &r_dir) const {
+	LocalPlayerPresenter *owner = presenter();
+	if (owner == nullptr) {
+		return false;
 	}
-	// An unresolved userpoint has no model-origin leg: past the parent
-	// userpoint and the vehicle occupant legs, retail takes the ENTITY ORIGIN
-	// [orig: Entity_ComputeActionTransform @0x401310, the unresolved path
-	// @0x4016C0..0x401887, whose fallback site @0x401867..0x401887 copies
-	// entity+4/+8/+0xC]. Neither a viewmodel part's origin nor the eye stands in.
+	bool found = false;
+	owner->viewmodel_rig()->for_each_vm_part([&](ObjectModel *p_part) {
+		const Ref<ObjectData> data = found ? Ref<ObjectData>() : p_part->get_object_data();
+		if (data.is_null()) {
+			return;
+		}
+		const int count = data->get_user_point_count();
+		for (int j = 0; j < count && !found; ++j) {
+			const Ref<ModelUserPoint> info = data->get_user_point_info(j);
+			if (info.is_null() || info->get_name().nocasecmp_to(p_userpoint) != 0) {
+				continue;
+			}
+			const Vector3 world_direction =
+					action_particle_model_to_world(p_part, info).basis.xform(info->get_rotation());
+			if (world_direction.length_squared() > 0.000001f) {
+				r_dir = world_direction.normalized();
+				found = true;
+			}
+		}
+	});
+	return found;
+}
+
+// World-space spawn point for an ACTION particle: the plan's sources in order,
+// the entity origin last (world::action_anchor_plan carries the witness).
+Vector3 PlayerWeaponEffects::action_particle_world_position(const String &p_userpoint) const {
+	const opennova::world::ActionAnchorPlan plan = anchor_plan(p_userpoint);
+	for (int i = 0; i < plan.count; ++i) {
+		switch (plan.sources[i]) {
+			case opennova::world::ActionAnchorSource::kMountedGun: {
+				const ActionPoint mounted = mounted_action_particle(p_userpoint);
+				if (mounted.valid) {
+					return mounted.pos;
+				}
+				break;
+			}
+			case opennova::world::ActionAnchorSource::kThirdPersonGun: {
+				const ActionPoint tp = third_person_action_particle(p_userpoint);
+				if (tp.valid) {
+					return tp.pos;
+				}
+				break;
+			}
+			case opennova::world::ActionAnchorSource::kFirstPersonParts: {
+				Vector3 pos;
+				if (first_person_particle_position(p_userpoint, pos)) {
+					return pos;
+				}
+				break;
+			}
+			case opennova::world::ActionAnchorSource::kEntityOrigin:
+				break;
+		}
+	}
 	const Ref<Simulation> origin_sim = sim();
 	return origin_sim.is_valid() ? origin_sim->get_local_player_position() : Vector3();
 }
 
+// The spawn direction: the plan's gun sources in order, then the view forward.
 Vector3 PlayerWeaponEffects::action_particle_world_forward(const String &p_userpoint) const {
-	const ActionPoint mounted = mounted_action_particle(p_userpoint);
-	if (mounted.valid) {
-		return mounted.dir;
-	}
-	const ActionPoint tp = third_person_action_particle(p_userpoint);
-	if (tp.valid) {
-		return tp.dir;
+	const opennova::world::ActionAnchorPlan plan = anchor_plan(p_userpoint);
+	for (int i = 0; i < plan.count; ++i) {
+		switch (plan.sources[i]) {
+			case opennova::world::ActionAnchorSource::kMountedGun: {
+				const ActionPoint mounted = mounted_action_particle(p_userpoint);
+				if (mounted.valid) {
+					return mounted.dir;
+				}
+				break;
+			}
+			case opennova::world::ActionAnchorSource::kThirdPersonGun: {
+				const ActionPoint tp = third_person_action_particle(p_userpoint);
+				if (tp.valid) {
+					return tp.dir;
+				}
+				break;
+			}
+			case opennova::world::ActionAnchorSource::kFirstPersonParts: {
+				Vector3 dir;
+				if (first_person_particle_forward(p_userpoint, dir)) {
+					return dir;
+				}
+				break;
+			}
+			case opennova::world::ActionAnchorSource::kEntityOrigin:
+				break;
+		}
 	}
 	LocalPlayerPresenter *owner = presenter();
 	if (owner != nullptr) {
-		const TypedArray<ObjectModel> parts = owner->vm_parts();
-		for (int64_t i = 0; i < parts.size(); ++i) {
-			ObjectModel *part = Object::cast_to<ObjectModel>(static_cast<Object *>(parts[i]));
-			if (part == nullptr) {
-				continue;
-			}
-			const Ref<ObjectData> data = part->get_object_data();
-			if (data.is_null()) {
-				continue;
-			}
-			const int count = data->get_user_point_count();
-			for (int j = 0; j < count; ++j) {
-				const Ref<ModelUserPoint> info = data->get_user_point_info(j);
-				if (info.is_null() || info->get_name().nocasecmp_to(p_userpoint) != 0) {
-					continue;
-				}
-				const Transform3D model_to_world = action_particle_model_to_world(part, info);
-				const Vector3 world_direction = model_to_world.basis.xform(info->get_rotation());
-				if (world_direction.length_squared() > 0.000001f) {
-					return world_direction.normalized();
-				}
-			}
-		}
 		if (Camera3D *camera = owner->camera()) {
 			return -camera->get_global_transform().basis.get_column(2).normalized();
 		}
@@ -494,10 +547,8 @@ Vector3 PlayerWeaponEffects::action_particle_world_forward(const String &p_userp
 
 // The action-END sound leg: the finished ACTION's soundsetend, 3D-positional
 // at the firing entity -- the fire rows' per-shot gunshot (GS_*) and the
-// reload completion. [orig: ActionSlot_FinishActivePhase @0x53f7b0 -> the end
-// shim @0x401100 plays ActionDef+12 at the owner entity, gated on the phase
-// byte being 2 (ACTIVE); its dupsound repeat loop (+44/+48) is data-dead in
-// the JOX/REVX corpora]
+// reload completion; the sim's end leg gates it (world/weapon_fsm carries the
+// witness).
 void PlayerWeaponEffects::fire_action_end_sound(const Ref<PlayerWeaponEvent> &p_event) {
 	const String soundset = p_event->get_action_end_soundset();
 	if (world() == nullptr || soundset.is_empty()) {
@@ -524,11 +575,8 @@ void PlayerWeaponEffects::play_switch_deny_sound() {
 // the sim's gated channel position -- a replay resets the position to 0
 // through the sim (fire/recoil re-triggers). `variant` is the sim ring's
 // latched serve for multi-clip .adm rows -- both parts follow the ONE latch,
-// so arms and gun never split variants (engine: runtime/world/player_weapon.h). The playhead is
-// PINNED (external phase): retail's channel moves only in the weapon pump's
-// gated tick shim, never per render frame [orig: AnimChannel_AdvancePlayback
-// @ 0x40b140 rate = one 62 Hz tick of clip time; the gate
-// ActionSlot_ExecuteActionNoEffect @ 0x541a4d].
+// so arms and gun never split variants (engine: runtime/world/player_weapon.h).
+// The playhead is PINNED (world::weapon_batch_plan carries the witness).
 void PlayerWeaponEffects::play_viewmodel_clip(const String &p_key, int p_variant, int p_advance_ticks) {
 	if (p_key.is_empty()) {
 		return;
@@ -570,5 +618,5 @@ void PlayerWeaponEffects::pose_viewmodel_channel(const Ref<PlayerWeaponView> &p_
 }
 
 void PlayerWeaponEffects::_bind_methods() {
-	// The anchor resolvers bind through callable_mp; nothing is script-visible.
+	// Nothing is script-visible.
 }

@@ -40,6 +40,9 @@ inline constexpr int32_t kEndNotifyNeverLatches = 0x7FFFFFFF;
 // kernel, the inspect records, the root-motion and collision-pose caches,
 // the shell) calls. [orig: g_AnimStateNameTable @0x8135F0]
 std::string infantry_anim_key(int state);
+// The same key from one table built at first use, for the per-frame present walks that key a
+// body's channel every frame (an empty string for an out-of-range or unnamed state).
+const std::string &infantry_anim_key_ref(int state);
 
 // Per-state behavior flags. [orig: g_AnimStateFlagsTable @0x8139E8]
 extern const uint32_t kInfantryAnimFlags[kInfantryAnimStateCount];

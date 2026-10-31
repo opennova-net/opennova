@@ -96,7 +96,8 @@ constexpr TextureRole kRoles[] = {
 	Role(R::TerrainCharMap, L::Pcx8, kTexturePcx).size(S::SquarePowerOfTwoAtMost, 1024).no_alpha().row,
 	// --- Environment --------------------------------------------------------------------------------
 	// The archive loader naming the file twice, so a PCX takes its own palette's luminance as alpha
-	// [orig: Terrain_InitRenderingResources @ 0x578A97; Texture_LoadFromArchive @ 0x58BC21..0x58BCFB]
+	// [orig: Terrain_InitRenderingResources @ 0x578A97 / @ 0x578AA5 (sky_map1, sky_map2);
+	// Texture_LoadFromArchive @ 0x58BC21..0x58BCFB]
 	Role(R::SkyCloud, L::ArchiveSelfAlpha, kArchiveFormats).row,
 	// [orig: WaterRing_LoadResources @ 0x5DDC90]
 	Role(R::WaterWake, L::Archive, kArchiveFormats).row,

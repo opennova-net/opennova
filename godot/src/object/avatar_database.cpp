@@ -8,49 +8,22 @@
 #include "util/data_format.h"
 
 #include <formats/avatars/avatars.h>
-#include <formats/avatars/preview_animation.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/inmatch/join_character_profile.h>
-#include <runtime/menu/player_info_avatars.h>
+#include <runtime/renderer/model_controls.h>
 #include <net/npwire/character_id.h>
 
 #include <algorithm>
-#include <ctime>
 
 using namespace godot;
 using namespace opennova::avatars;
 using namespace opennova::threedi;
 
-float AvatarDatabase::preview_zoom_in_scale() {
-	return opennova::avatars::kPreviewZoomInScale;
-}
-String AvatarDatabase::preview_skeleton_bad() {
-	return String(opennova::avatars::kPreviewSkeletonBad);
-}
-String AvatarDatabase::preview_idle_bad() {
-	return String(opennova::avatars::kPreviewIdleBad);
-}
-int64_t AvatarDatabase::preview_initial_yaw_bam() {
-	// The clock word the reseed takes (the CRT _time64's seconds, a platform primitive).
-	return opennova::menu::player_info_preview_initial_yaw_bam(
-			static_cast<uint32_t>(std::time(nullptr)));
-}
-
-float AvatarDatabase::preview_blend_step(float p_blend, bool p_hovered) {
-	return opennova::menu::player_info_preview_blend_step(p_blend, p_hovered);
-}
-
-int64_t AvatarDatabase::preview_yaw_step(int64_t p_yaw, bool p_hovered, int64_t p_tick_ms) {
-	// GetTickCount's word: the low 32 bits of the millisecond clock.
-	return opennova::menu::player_info_preview_yaw_step(static_cast<int32_t>(p_yaw), p_hovered,
-			static_cast<uint32_t>(p_tick_ms));
-}
-
 PackedStringArray AvatarDatabase::part_camo_registers() {
 	PackedStringArray out;
-	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO1));
-	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO2));
-	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO3));
+	for (const int ordinal : opennova::renderer::kAvatarPartCamoRegisters) {
+		out.push_back(threedi_ctrl_register_name(ordinal));
+	}
 	return out;
 }
 
@@ -60,31 +33,16 @@ void AvatarDatabase::apply_part_camo(ObjectModel *p_model, const Vector3i &p_cam
 		return;
 	}
 	const PackedStringArray registers = part_camo_registers();
+	const std::array<int32_t, 3> values =
+			opennova::renderer::avatar_part_camo_values({p_camo.x, p_camo.y, p_camo.z});
 	p_model->begin_ctrl_update();
 	for (int i = 0; i < 3; ++i) {
-		// A zero-extended byte store, exactly the retail movzx + mov dword.
-		p_model->set_ctrl_override(p_owner, registers[i], p_camo[i] & 0xff);
+		p_model->set_ctrl_override(p_owner, registers[i], values[static_cast<size_t>(i)]);
 	}
 	p_model->end_ctrl_update();
 }
 
 void AvatarDatabase::_bind_methods() {
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_zoom_in_scale"),
-			&AvatarDatabase::preview_zoom_in_scale);
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_skeleton_bad"),
-			&AvatarDatabase::preview_skeleton_bad);
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_idle_bad"), &AvatarDatabase::preview_idle_bad);
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_initial_yaw_bam"), &AvatarDatabase::preview_initial_yaw_bam);
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_blend_step", "blend", "hovered"),
-			&AvatarDatabase::preview_blend_step);
-	ClassDB::bind_static_method("AvatarDatabase",
-			D_METHOD("preview_yaw_step", "yaw", "hovered", "tick_ms"),
-			&AvatarDatabase::preview_yaw_step);
 	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("apply_part_camo", "model", "camo", "owner"),
 			&AvatarDatabase::apply_part_camo);

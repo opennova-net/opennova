@@ -13,7 +13,7 @@
 #include <net/novaworld/gate_probe.h>
 
 #include "common/synthetic_mission.h"
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <atomic>
 #include <chrono>

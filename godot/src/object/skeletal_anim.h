@@ -85,9 +85,8 @@ public:
 	// p_key_to_bad maps each clip key (e.g. "anim_idle") to a clip .bad basename (e.g.
 	// "PI_Idle.BAD"); all resolved through the resource root. The skeleton .bad provides the
 	// shared bone offsets + bind pose; each clip is sampled against it. Missing clip .bads are
-	// skipped (a missing skeleton .bad fails).
-	// [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 -> BoneFile_Load("PI_Idle.BAD"/"Dt1rst.bad")
-	//  + AnimChannel_InitFromData; reimpl wraps both raw .bad files as one shared skeletal set.]
+	// skipped (a missing skeleton .bad fails). The engine's
+	// anim::SkeletalClips::load_from_files carries the witness.
 	bool load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
 			const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
@@ -107,6 +106,8 @@ public:
 	}
 
 	bool is_loaded() const { return rig_ != nullptr; }
+	// The shared rig itself, for the engine body channel a model binds (anim::BodyChannel::bind).
+	const opennova::assets::SkeletalRig &get_rig_handle() const { return rig_; }
 	String get_last_error() const { return last_error_; }
 
 	// The native seams the ragdoll corpses draw through (ADR 0060): the rig
@@ -197,13 +198,11 @@ public:
 			int p_wpn_prev_variant = 0, int p_source_variant = 0,
 			int p_target_variant = 0, bool p_person = false) const;
 
-	// The whole per-frame body-pose write in one call: evaluate the pose
+	// The script surface's whole body-pose write in one call: evaluate the pose
 	// (eval_pose_overlay when classes+deltas are non-empty, eval_pose otherwise)
-	// and write every bone's position/rotation/scale onto p_skeleton. Exactly the
-	// loop ObjectModel ran
-	// in GDScript — moved native because it executes per animated model per
-	// render frame (bone-count boxed Transform3Ds + 3 cross-boundary calls per
-	// bone from script dominated the present pass).
+	// and write every bone's position/rotation/scale onto p_skeleton. A model's
+	// own channel composes its pose in the engine (anim::BodyChannel::compose) and
+	// writes it through write_native_pose.
 	// p_person: the model draws through a Person's bone builder (every clip-posed
 	// model but a first-person view model), so its rows past the clip's bones take
 	// that builder's pose (SkeletalClips::pose_person_rows_past_clip), overlay or not.
@@ -244,17 +243,6 @@ public:
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
 			int p_wpn_prev_variant = 0) const;
-	void pose_skeleton_blended(Skeleton3D *p_skeleton,
-			const String &p_source_key, double p_source_playhead_seconds,
-			const String &p_target_key, double p_target_playhead_seconds,
-			float p_weight, const PackedInt32Array &p_classes,
-			const Basis *p_deltas, const String &p_wpn_key = String(),
-			double p_wpn_playhead_seconds = 0.0,
-			const String &p_wpn_prev_key = String(),
-			double p_wpn_prev_playhead_seconds = 0.0,
-			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
-			int p_wpn_prev_variant = 0, int p_source_variant = 0,
-			int p_target_variant = 0, bool p_person = false) const;
 
 	SkeletalAnim() = default;
 };

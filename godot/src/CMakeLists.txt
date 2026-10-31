@@ -58,6 +58,7 @@ add_library(opennova_bindings OBJECT
     network/novaworld_client.cpp
     network/host_session_options.cpp
     network/novaworld_server_row.cpp
+    network/novaworld_service_target.cpp
     network/novaworld_gate_info.cpp
     network/novaworld_server_browser.cpp
     network/ping_sweep_worker.cpp
@@ -71,6 +72,7 @@ add_library(opennova_bindings OBJECT
     network/net_session_policy.cpp
     network/connection_error.cpp
     network/join_screen_status.cpp
+    network/join_flow.cpp
     network/join_target.cpp
     terrain/terrain.cpp
     terrain/terrain_surface_inputs.cpp
@@ -102,7 +104,6 @@ add_library(opennova_bindings OBJECT
     env/environment_cube_capture.cpp
     env/sky_dome.cpp
     env/slot_shadow.cpp
-    env/sun_shadow.cpp
     env/water.cpp
     env/weather.cpp
     env/precipitation.cpp
@@ -136,6 +137,7 @@ add_library(opennova_bindings OBJECT
     render/q3_frame_adapter.cpp
     render/q3_geometry_cache.cpp
     render/q3_source_registry.cpp
+    render/rd_pipeline_state.cpp
     render/retained_array_mesh.cpp
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
@@ -200,6 +202,7 @@ add_library(opennova_bindings OBJECT
     hud/hud_map_pass_renderer.cpp
     hud/map_view_window.cpp
     hud/command_map_screen.cpp
+    hud/command_map_controller.cpp
     hud/hud_toggles.cpp
     hud/hud_chat_entry.cpp
     hud/end_round_transition.cpp
@@ -259,7 +262,6 @@ add_library(opennova_bindings OBJECT
     simulation/simulation_script_voice.cpp
     simulation/simulation_scars.cpp
     simulation/simulation_hud_feeds.cpp
-    world/item_effect_director.cpp
     world/occlusion_frame.cpp
     world/game_world.cpp
     world/game_world_frame.cpp
@@ -278,17 +280,13 @@ add_library(opennova_bindings OBJECT
     world/scar_presenter.cpp
     wac/wac_program.cpp
     lwf/lwf_data.cpp
-    lwf/wav_loader.cpp
-    lwf/wave_stream.cpp
-    audio/ambient_mixer.cpp
-    audio/sound_selector.cpp
-    audio/ambient_layer.cpp
     audio/sound_bank.cpp
     audio/mission_audio_records.cpp
     audio/mission_audio.cpp
-    audio/mission_audio_voice.cpp
+    audio/audio_out.cpp
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
+    rtxt/text_tables.cpp
     util/data_format.cpp
     util/dxt_texture.cpp
     util/paths.cpp
@@ -301,10 +299,9 @@ add_library(opennova_bindings OBJECT
     resource_index/mod_listing.cpp
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
-    audio/sbf_audio_stream.cpp
     audio/music_script.cpp
     audio/music_director.cpp
-    audio/music_pair_names.cpp
+    audio/music_pair.cpp
     mnu/mnu_document.cpp
     mnu/mnu_rows.cpp
     mnu/mns_stylesheet.cpp
@@ -313,14 +310,20 @@ add_library(opennova_bindings OBJECT
     mnu/menu_audio.cpp
     mnu/menu_driver.cpp
     mnu/player_info_loadout.cpp
-    mnu/armory_loadout.cpp
+    mnu/armory_screen.cpp
+    mnu/lan_multiplayer_menu.cpp
+    mnu/pre_game_controller.cpp
+    mnu/vehicle_menu_controller.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp
+    frontend/game_frontend.cpp
     player/game_config_block.cpp
+    player/player_options_state.cpp
     player/gameplay_camera.cpp
     player/local_player_presenter.cpp
     player/local_player_visuals.cpp
+    player/input_device.cpp
     player/key_event_queue.cpp
     player/key_lock_device.cpp
     player/player_input_router.cpp
@@ -328,6 +331,7 @@ add_library(opennova_bindings OBJECT
     player/player_move_intent.cpp
     player/player_info_kit_restore.cpp
     player/player_info_character_state.cpp
+    player/player_info_preview.cpp
     player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp

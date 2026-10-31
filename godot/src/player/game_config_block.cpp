@@ -1,4 +1,5 @@
 #include "player/game_config_block.h"
+#include "player/player_options_state.h"
 
 #include "mnu/menu_driver.h"
 #include "mnu/mnu_document.h" // the driver's Ref<MnuDocument> members
@@ -11,6 +12,7 @@
 
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/player_options.h>
 #include <iterator>
 
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -56,7 +58,20 @@ void take_launch_switches(inmatch::GameConfigBlock &p_block) {
 
 } // namespace
 
+Ref<PlayerOptionsState> GameConfigBlock::read_player_options() const {
+	return PlayerOptionsState::make(inmatch::read_player_options(block_.cfg()));
+}
+
+Ref<PlayerOptionsState> GameConfigBlock::write_player_options(
+		const Ref<PlayerOptionsState> &p_state) {
+	if (p_state.is_null()) return read_player_options();
+	return PlayerOptionsState::make(inmatch::write_player_options(block_.cfg(), p_state->value()));
+}
+
 void GameConfigBlock::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("read_player_options"), &GameConfigBlock::read_player_options);
+	ClassDB::bind_method(D_METHOD("write_player_options", "state"),
+			&GameConfigBlock::write_player_options);
 	ClassDB::bind_method(D_METHOD("set_path", "path"), &GameConfigBlock::set_path);
 	ClassDB::bind_method(D_METHOD("get_path"), &GameConfigBlock::get_path);
 	ClassDB::bind_method(D_METHOD("load"), &GameConfigBlock::load);
@@ -83,15 +98,6 @@ void GameConfigBlock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("host_screen"), &GameConfigBlock::host_screen);
 	ClassDB::bind_method(D_METHOD("populate_host_screen", "driver"), &GameConfigBlock::populate_host_screen);
 	ClassDB::bind_method(D_METHOD("read_host_screen", "driver"), &GameConfigBlock::read_host_screen);
-	ClassDB::bind_method(D_METHOD("populate_host_restrictions", "driver", "gametext", "menu_ui"),
-			&GameConfigBlock::populate_host_restrictions);
-	ClassDB::bind_method(D_METHOD("populate_host_weapon_list", "driver", "gametext", "menu_ui"),
-			&GameConfigBlock::populate_host_weapon_list);
-	ClassDB::bind_method(D_METHOD("host_restriction_list_pressed", "driver", "widget", "row", "column",
-								 "menu_ui"),
-			&GameConfigBlock::host_restriction_list_pressed);
-	ClassDB::bind_method(D_METHOD("host_restriction_radio_pressed", "driver", "control", "menu_ui"),
-			&GameConfigBlock::host_restriction_radio_pressed);
 }
 
 GameConfigBlock::GameConfigBlock() {
@@ -194,36 +200,6 @@ String GameConfigBlock::host_screen() const {
 
 void GameConfigBlock::read_host_screen(const Ref<MenuDriver> &p_driver) {
 	if (p_driver.is_valid()) inmatch::read_host_screen(p_driver->runtime(), block_.cfg(), *block_.title());
-}
-
-void GameConfigBlock::populate_host_restrictions(const Ref<MenuDriver> &p_driver,
-		const Ref<RtxtStringFile> &p_gametext, const Ref<RtxtStringFile> &p_menu_ui) {
-	if (p_driver.is_null()) return;
-	populate_host_weapon_list(p_driver, p_gametext, p_menu_ui);
-	inmatch::populate_host_class_list(p_driver->runtime(), block_.cfg(), *block_.title(), game_text_lookup(p_menu_ui));
-	const auto &classes = block_.cfg().class_availability;
-	p_driver->host_dialog().set_class_words(p_driver->runtime(), classes, std::size(classes));
-}
-
-void GameConfigBlock::populate_host_weapon_list(const Ref<MenuDriver> &p_driver,
-		const Ref<RtxtStringFile> &p_gametext, const Ref<RtxtStringFile> &p_menu_ui) {
-	if (p_driver.is_valid())
-		inmatch::populate_host_weapon_list(p_driver->runtime(), block_.cfg(), *block_.title(), block_.weapon_roster(),
-				game_text_lookup(p_gametext), game_text_lookup(p_menu_ui));
-}
-
-bool GameConfigBlock::host_restriction_list_pressed(const Ref<MenuDriver> &p_driver, const String &p_widget,
-		int p_row, int p_column, const Ref<RtxtStringFile> &p_menu_ui) {
-	return p_driver.is_valid() &&
-			inmatch::host_restriction_list_pressed(p_driver->runtime(), p_driver->host_dialog(), block_.cfg(),
-					*block_.title(), opennova::to_std(p_widget), p_row, p_column, game_text_lookup(p_menu_ui));
-}
-
-bool GameConfigBlock::host_restriction_radio_pressed(const Ref<MenuDriver> &p_driver, const String &p_control,
-		const Ref<RtxtStringFile> &p_menu_ui) {
-	return p_driver.is_valid() &&
-			inmatch::host_restriction_radio_pressed(p_driver->runtime(), p_driver->host_dialog(), block_.cfg(),
-					*block_.title(), block_.weapon_roster(), opennova::to_std(p_control), game_text_lookup(p_menu_ui));
 }
 
 void GameConfigBlock::join_choice(const Ref<GameConfigBlock> &p_block,

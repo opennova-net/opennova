@@ -6,13 +6,13 @@
 #include <vector>
 
 namespace opennova::hud {
-// The targeting and instrument inputs of HUD_BuildEntityInfo. Projection is
-// supplied by the device; all eligibility and draw policy remains native.
+// The targeting and instrument inputs of HUD_BuildEntityInfo. Every world point
+// projects through the HUD's projector (hud_viewport.h hud_project_world_point).
 // [orig: HUD_DrawCrosshair @0x592640; HUD_DrawScopeOverlayDetails @0x59E420;
 // HUD_RenderOverlays @0x5A7BB0; HUD_DrawAltitudeBar @0x59F050]
 struct HudProjectedPoint {
 	float x = 0, y = 0; // surface pixels
-	uint8_t clip = 0; // left/right/top/bottom/near = 1/2/4/8/16
+	uint8_t clip = 0; // left/right/top/bottom/near = 1/2/4/8/16 (hud_viewport.h)
 	bool valid = false;
 	// The view-space forward distance, Q16: the transformed point's first
 	// component, read before the frustum clip [orig: HUD_DrawEntityMarker
@@ -20,17 +20,6 @@ struct HudProjectedPoint {
 	// test against dword_A783D8].
 	int32_t depth_q16 = 0;
 };
-// The clip mask the projector returns for a point at normalized device
-// coordinates (ndc_x, ndc_y), y up: a point past a side plane sets that
-// plane's flag (left 1, right 2, top 4, bottom 8; a point on a plane is
-// inside), and one short of the near distance 16. A label caller skips its
-// label on any flag, a side plane as the near plane. [orig:
-// HUD_ClipPointToFrustumAndProject @0x591E50 -- the plane tests, each `jns`
-// past its clamp on a dot >= 0: @0x591EB7 (4, y to the top edge) / @0x59204F
-// (8, y to the bottom) / @0x5921E4 (1, x to the left) / @0x592379 (2, x to the
-// right); the near test @0x5924EC (0x10 @0x592575); the edge forcing
-// @0x592578..0x5925A8]
-uint8_t frustum_clip_mask(float ndc_x, float ndc_y, bool short_of_near);
 struct HudSprite {
 	int width = 0, height = 0;
 	bool valid = false;

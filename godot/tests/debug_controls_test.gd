@@ -480,11 +480,11 @@ func test_unavailable_owners_report_their_reason_rows() -> void:
 
 func test_audio_actions_validate_their_wire_args_and_mutate_the_mixer() -> void:
 	var refused: Array = [
-		[&"set_audio_bus_volume", ["SFX"]],
-		[&"set_audio_bus_volume", ["SFX", 99.0]],
+		[&"set_audio_bus_volume", ["Master"]],
+		[&"set_audio_bus_volume", ["Master", 99.0]],
 		[&"set_audio_bus_volume", [1, -10.0]],
 		[&"set_audio_bus_volume", ["", -10.0]],
-		[&"set_audio_bus_mute", ["SFX", 1]],
+		[&"set_audio_bus_mute", ["Master", 1]],
 		[&"set_audio_bus_solo", [true, true]],
 	]
 	for case in refused:

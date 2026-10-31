@@ -220,6 +220,27 @@ int main() {
 				"paired detail mip 1 must blend independently downsampled RGB at 160/96 and preserve base alpha");
 	}
 
+	// The second detail: the paired chain with a far texture, else the plain
+	// load whose creator fills the box chain.
+	{
+		using opennova::terrain::build_second_detail_levels;
+		const auto paired = build_second_detail_levels(base, &far_detail);
+		ok &= expect(!paired.device_chain && paired.levels.size() == mips.size(),
+				"a second detail with its far texture loads the paired levels as given");
+		if (!paired.device_chain && paired.levels.size() == mips.size() && !mips.empty()) {
+			ok &= expect(paired.levels[1].pixels == mips[1].pixels,
+					"the second detail's paired levels are build_paired_detail_mip_chain's");
+		}
+		const auto plain = build_second_detail_levels(base, nullptr);
+		ok &= expect(plain.device_chain && plain.levels.size() == 1 &&
+						plain.levels[0].pixels == base.pixels,
+				"a second detail without a far texture is the plain load with the creator's chain");
+		ok &= expect(build_second_detail_levels(Rgba8Image{}, &far_detail).levels.empty(),
+				"no second detail, no levels");
+		ok &= expect(opennova::terrain::kDetailBlendMapCreationFlags == 0x100001u,
+				"the DBlendmap's creation flags carry no level-count word");
+	}
+
 	// The detail layers are DXT1 on the reference adapter at every session
 	// texcompression_level (0x400100 below 1, the DXT5 request with its DXT1
 	// fallback from 1): without a far texture the layer is D3DX's filtered

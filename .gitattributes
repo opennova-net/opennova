@@ -56,6 +56,7 @@ fixtures/**/*.def -text -eol filter= diff= merge=
 fixtures/**/*.env -text -eol filter= diff= merge=
 fixtures/**/*.grm -text -eol filter= diff= merge= whitespace=cr-at-eol
 fixtures/**/*.hexcap -text -eol filter= diff= merge=
+fixtures/**/*.http -text -eol filter= diff= merge= whitespace=cr-at-eol
 fixtures/**/*.ini -text -eol filter= diff= merge=
 fixtures/**/*.mns -text -eol filter= diff= merge= whitespace=cr-at-eol
 fixtures/**/*.mnu -text -eol filter= diff= merge=

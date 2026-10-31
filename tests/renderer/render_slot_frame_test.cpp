@@ -5,13 +5,14 @@
 // first-person gate, the 80 u cull ahead of the fade, the attached-light and
 // sun ambient legs, the grazing lod and the march. The leaf laws have their
 // own vectors in render_slot_shadow_test.cpp; these pin how the frame
-// composes them.
+// composes them, the carrier's pool-0 and refNum walks among them.
 
 #include <runtime/renderer/render_slot_frame.h>
 
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <vector>
 
 static int failures = 0;
 
@@ -66,7 +67,214 @@ const SlotFrameSlot *find_slot(const SlotFrame &frame, uint64_t id) {
 
 }  // namespace
 
+// The frame's casters from their facts (slot_frame_casters): the hidden rule
+// with the render claims and the local view lifted, the exclusions (the
+// seated person's and the vehicle ride's among them), the pool-0 and
+// refNum-walk links, the local priority, the owner's lighting and the radii.
+void test_frame_casters_from_facts() {
+	std::vector<SlotCasterFacts> facts;
+	facts.reserve(32);
+	const auto fact = [&](uint64_t id) -> SlotCasterFacts & {
+		facts.emplace_back();
+		SlotCasterFacts &f = facts.back();
+		f.id = id;
+		f.position = {float(id), 2.0f, -float(id)};
+		f.model_sphere_radius = 1.5f;
+		f.entity_bound_radius = 2.0f;
+		return f;
+	};
+	fact(1);                                       // plain, shown
+	fact(2).visibility.present_visible = false;    // unclaimed sim hide: the draw hidden too
+	facts.back().visibility.draw_visible = false;
+	fact(3).visibility.render_claimed = true;      // occluded / sub-pixel, sim shown
+	facts.back().visibility.draw_visible = false;
+	fact(4).visibility.render_claimed = true;      // claimed and sim hidden
+	facts.back().visibility.present_visible = false;
+	facts.back().visibility.draw_visible = false;
+	fact(5).visibility.draw_visible = false;       // a direct hide of an attached draw
+	fact(6).visibility.scene_hidden = true;        // the editor hid its layer
+	fact(7).capture_with = 1;                      // a held weapon in 1's slot
+	fact(8).parented_under_caster = true;          // a seated rider
+	fact(9).ride_bits = kSlotRideVehicle | kSlotRideGroundVehicle;  // a vehicle on a vehicle, not in its group
+	fact(10);                                      // the local player
+	fact(11);                                      // the vehicle it rides
+	SlotCasterFacts &weapon = fact(12);            // an attached draw
+	weapon.lighting = {false, 0, 0};
+	weapon.has_light_owner = true;
+	weapon.owner_lighting = {true, 77, 3};
+	SlotCasterFacts &unstamped = fact(13);
+	unstamped.model_sphere_radius = 0.0f;
+	unstamped.fallback_radius = 0.2f;
+	SlotCasterFacts &preview = fact(14);
+	preview.model_sphere_radius = 0.0f;
+	preview.fallback_radius = 3.0f;
+	SlotCasterFacts &groupless = fact(15);
+	groupless.lighting = {true, 0, 9};
+	fact(16).ride_bits = kSlotRideVehicle;          // a vehicle on a non-vehicle (a building deck)
+	// A gun in carrier 1's refNum group, standing on it, with no slot of its own.
+	SlotCasterFacts &gun = fact(17);
+	gun.slot_record = false;
+	gun.ride_bits = kSlotRideGroundVehicle | kSlotRideGroundRefChild;
+	gun.ground_id = 1;
+	// A vehicle in carrier 1's group riding it, hidden by the sim: excluded, walked.
+	SlotCasterFacts &jeep = fact(18);
+	jeep.ride_bits = kSlotRideVehicle | kSlotRideGroundVehicle | kSlotRideGroundRefChild;
+	jeep.ground_id = 1;
+	jeep.visibility.present_visible = false;
+	jeep.visibility.draw_visible = false;
+	// In the group of a ground that is no vehicle: the walk is the vehicle carrier's.
+	SlotCasterFacts &deck = fact(19);
+	deck.ride_bits = kSlotRideGroundRefChild;
+	deck.ground_id = 1;
+	// A walk rider the embedder's scene hides, and one whose ground is not drawn.
+	SlotCasterFacts &layer = fact(20);
+	layer.ride_bits = kSlotRideGroundVehicle | kSlotRideGroundRefChild;
+	layer.ground_id = 1;
+	layer.visibility.scene_hidden = true;
+	fact(21).ride_bits = kSlotRideGroundVehicle | kSlotRideGroundRefChild;
+	// The seats on carrier 1 [orig: RenderSlot_SortAndAssign @ 0x5d6593..0x5d65ff;
+	// RenderSlot_RenderEntityAndChildren @ 0x5d78ea..0x5d7968]: its driver, a
+	// pool-0 person, excluded and walked.
+	SlotCasterFacts &driver = fact(22);
+	driver.seat_bits = slot_seat_bits(true, true, 5, false);
+	driver.seat_walk_id = 1;
+	// An item in a seat 2 (no person bit, not pool 0): a slot of its own, no walk.
+	SlotCasterFacts &crate = fact(23);
+	crate.seat_bits = slot_seat_bits(false, false, 2, false);
+	crate.seat_walk_id = 1;
+	// A UseGun gunner under a refNum gun standing on 1: excluded, walked by 1.
+	SlotCasterFacts &gunner = fact(24);
+	gunner.seat_bits = slot_seat_bits(true, true, 3, true);
+	gunner.seat_walk_id = 1;
+	// A UseGun gunner on a free-standing gun: a slot of its own.
+	fact(25).seat_bits = slot_seat_bits(true, true, 3, false);
+	// A passenger the sim hides: excluded, and walked all the same.
+	SlotCasterFacts &hidden_rider = fact(26);
+	hidden_rider.seat_bits = slot_seat_bits(true, true, 1, false);
+	hidden_rider.seat_walk_id = 1;
+	hidden_rider.visibility.present_visible = false;
+	hidden_rider.visibility.draw_visible = false;
+	// A passenger the embedder's scene hides: no walk.
+	SlotCasterFacts &layer_rider = fact(27);
+	layer_rider.seat_bits = slot_seat_bits(true, true, 1, false);
+	layer_rider.seat_walk_id = 1;
+	layer_rider.visibility.scene_hidden = true;
+	// A hull only the local view keeps off the camera (its Flags & 1 clear),
+	// claimed or not: its slot stays.
+	SlotCasterFacts &hull = fact(28);
+	hull.visibility.present_visible = false;
+	hull.visibility.draw_visible = false;
+	hull.visibility.local_view_suppressed = true;
+	SlotCasterFacts &claimed_hull = fact(29);
+	claimed_hull.visibility.present_visible = false;
+	claimed_hull.visibility.draw_visible = false;
+	claimed_hull.visibility.render_claimed = true;
+	claimed_hull.visibility.local_view_suppressed = true;
+
+	SlotFrameCasters casters;
+	slot_frame_casters(facts, 10, 11, casters);
+	CHECK(casters.casters.size() == facts.size());
+	CHECK(!casters.state_for(1).hidden);
+	CHECK(casters.state_for(2).hidden);
+	CHECK(!casters.state_for(3).hidden);  // the slot reads no render gate
+	CHECK(casters.state_for(4).hidden);
+	CHECK(casters.state_for(5).hidden);
+	CHECK(casters.state_for(6).hidden);
+	CHECK(casters.state_for(7).seat_parented && casters.state_for(8).seat_parented);
+	CHECK(!casters.state_for(1).seat_parented);
+	CHECK(casters.links.capture.size() == 1 && casters.links.capture[0].first == 7 &&
+			casters.links.capture[0].second == 1);
+	// The vehicle ride: a vehicle whose ground is a vehicle, in its carrier's
+	// group or not [orig: RenderSlot_SortAndAssign @ 0x5d6604..0x5d6627].
+	CHECK(casters.state_for(9).on_vehicle && casters.state_for(18).on_vehicle);
+	CHECK(!casters.state_for(16).on_vehicle && !casters.state_for(17).on_vehicle);
+	CHECK(!casters.state_for(1).on_vehicle);
+	// The refNum walk links the vehicle carrier's group riders, the sim-hidden
+	// one too [orig: RenderSlot_RenderEntityAndChildren @ 0x5d796a..0x5d79d6].
+	CHECK(casters.links.ride.size() == 2 && casters.links.ride[0].first == 17 &&
+			casters.links.ride[0].second == 1 && casters.links.ride[1].first == 18 &&
+			casters.links.ride[1].second == 1);
+	// The seat-parent exclusion is the person bit's alone, the UseGun seat's
+	// only under a refNum gun.
+	CHECK(casters.state_for(22).seat_parented && casters.state_for(24).seat_parented &&
+			casters.state_for(26).seat_parented && casters.state_for(27).seat_parented);
+	CHECK(!casters.state_for(23).seat_parented && !casters.state_for(25).seat_parented);
+	CHECK(casters.state_for(26).hidden && !casters.state_for(22).hidden);
+	// The pool-0 walk links its pool-0 riders, the sim-hidden one too.
+	CHECK(casters.links.seat.size() == 3 && casters.links.seat[0].first == 22 &&
+			casters.links.seat[0].second == 1 && casters.links.seat[1].first == 24 &&
+			casters.links.seat[1].second == 1 && casters.links.seat[2].first == 26 &&
+			casters.links.seat[2].second == 1);
+	// The local view's verdict is the capture's, never the sort's.
+	CHECK(!casters.state_for(28).hidden && !casters.state_for(29).hidden);
+	// Every fact is a caster; only a slot record registers.
+	CHECK(casters.find(17) != nullptr && casters.ids.size() == facts.size());
+	CHECK(casters.slot_ids.size() == facts.size() - 1);
+	bool gun_registered = false;
+	for (const uint64_t id : casters.slot_ids) {
+		gun_registered = gun_registered || id == 17;
+	}
+	CHECK(!gun_registered);
+	CHECK(casters.state_for(10).is_local_player_or_parent);
+	CHECK(casters.state_for(11).is_local_player_or_parent);
+	CHECK(!casters.state_for(1).is_local_player_or_parent);
+	CHECK(casters.state_for(99).hidden && casters.find(99) == nullptr);
+
+	// The attached draw reads its owner's lighting, and its query the owner's group.
+	CHECK(casters.state_for(12).interior);
+	const SlotCasterLightQuery *query = casters.light_query(12);
+	CHECK(query != nullptr && query->interior_bms == 77 && query->interior_section == 3);
+	CHECK(query != nullptr && near_f(query->bound_radius, 2.0f) && near_f(query->position[0], 12.0f));
+	// No group, no section.
+	const SlotCasterLightQuery *groupless_query = casters.light_query(15);
+	CHECK(groupless_query != nullptr && groupless_query->interior_section == 0);
+	CHECK(casters.state_for(15).interior);
+
+	// The radii: stamped, the 0.5 u floor of the fallback, the fallback itself.
+	const SlotFrameCaster *plain = casters.find(1);
+	CHECK(plain != nullptr && near_f(plain->capture_radius, 1.5f) &&
+			near_f(plain->state.bound_radius, 2.0f));
+	CHECK(plain != nullptr && near_f(plain->state.pos2d[0], 1.0f) &&
+			near_f(plain->state.pos2d[1], -1.0f));
+	const SlotFrameCaster *floor = casters.find(13);
+	CHECK(floor != nullptr && near_f(floor->capture_radius, 0.5f) &&
+			near_f(floor->state.bound_radius, 0.5f));
+	const SlotFrameCaster *bounds = casters.find(14);
+	CHECK(bounds != nullptr && near_f(bounds->capture_radius, 3.0f) &&
+			near_f(bounds->state.bound_radius, 3.0f));
+
+	// A frame with no local parent never matches id 0.
+	SlotFrameCasters none;
+	std::vector<SlotCasterFacts> zero(1);
+	slot_frame_casters(zero, 10, 0, none);
+	CHECK(!none.state_for(0).is_local_player_or_parent);
+}
+
+// The visibility rules: the sort reads the present intent alone, a capture
+// draws a draw's own geometry unless the local view swaps it out
+// [orig: RenderSlot_SortAndAssign @ 0x5d657d; Render_DestroyedSections
+// @ 0x449f12..0x449f45; Entity_RenderVehicleModel @ 0x4407f6..0x44084c].
+void test_visibility_rules() {
+	SlotCasterVisibility shown;
+	CHECK(slot_sort_shown(shown) && slot_capture_draws(shown));
+	SlotCasterVisibility claimed;
+	claimed.draw_visible = false;
+	claimed.render_claimed = true;
+	CHECK(slot_sort_shown(claimed) && slot_capture_draws(claimed));
+	SlotCasterVisibility sim_hidden;
+	sim_hidden.present_visible = false;
+	sim_hidden.draw_visible = false;
+	CHECK(!slot_sort_shown(sim_hidden) && !slot_capture_draws(sim_hidden));
+	SlotCasterVisibility swapped = sim_hidden;
+	swapped.local_view_suppressed = true;
+	CHECK(slot_sort_shown(swapped) && !slot_capture_draws(swapped));
+	swapped.render_claimed = true;
+	CHECK(slot_sort_shown(swapped) && !slot_capture_draws(swapped));
+}
+
 int main() {
+	test_frame_casters_from_facts();
+	test_visibility_rules();
 	SlotFrameInput input;
 	input.sun_direction = slot_projection_direction({0.6f, 0.8f, 0.0f});
 	input.sun_rgb = {0.9f, 0.8f, 0.7f};
@@ -106,7 +314,13 @@ int main() {
 	const std::function<float(float, float)> flat = [](float, float) { return 0.0f; };
 
 	// A held weapon (5) linked capture-with caster 1; it has no slot of its own.
-	const std::vector<std::pair<uint64_t, uint64_t>> links{{5, 1}, {9, 2}};
+	// 15 is seated person 13's gun.
+	SlotFrameLinks links;
+	links.capture = {{5, 1}, {9, 2}, {15, 13}};
+	// Persons 13 and 14 seated on carrier 1, ridden by its pool-0 walk.
+	links.seat = {{13, 1}, {14, 1}};
+	// Riders 10 and 11 in carrier 1's refNum walk; 12 rides the excluded 6.
+	links.ride = {{10, 1}, {12, 6}, {11, 1}};
 	std::vector<SlotAssignment> assignments{assignment(1, 0, 0), assignment(2, 1, 1),
 			assignment(3, 2, 2), assignment(4, 3, 3), assignment(6, 4, 4, true, true),
 			assignment(7, 5, 5), assignment(8, 6, -1, false)};
@@ -143,8 +357,13 @@ int main() {
 			CHECK(same3(slot->capture.center, {10.0f, 2.0f, 0.0f}));
 			const SlotCaptureViewAxes axes = slot_capture_view_axes(sun_unit);
 			CHECK(same3(slot->capture.axes.x, axes.x) && same3(slot->capture.axes.z, axes.z));
-			CHECK(slot->capture.casters.size() == 2 && slot->capture.casters[0] == 1 &&
-					slot->capture.casters[1] == 5);
+			// The caster, its capture-with child and its seated person's gun,
+			// then the pool-0 walk's riders, then the refNum walk's.
+			CHECK(slot->capture.casters.size() == 7 && slot->capture.casters[0] == 1 &&
+					slot->capture.casters[1] == 5 && slot->capture.casters[2] == 15 &&
+					slot->capture.casters[3] == 13 && slot->capture.casters[4] == 14 &&
+					slot->capture.casters[5] == 10 && slot->capture.casters[6] == 11);
+			CHECK(slot->capture.walk_begin == 3);
 			CHECK(slot->drape.drawn);
 			// The sun leg reads the RAW stored vertical (-0.8), not the unit one.
 			const std::array<float, 3> ambient =
@@ -174,6 +393,7 @@ int main() {
 		if (slot != nullptr) {
 			CHECK(slot->capture.armed);  // record 1 is off-phase; the dirty bit arms it
 			CHECK(slot->capture.casters.size() == 2 && slot->capture.casters[1] == 9);
+			CHECK(slot->capture.walk_begin == 2);  // no riders: the walks are empty
 			CHECK(!slot->drape.drawn && !slot->drape.patch_drawn);
 		}
 	}

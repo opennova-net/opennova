@@ -28,23 +28,6 @@ const BMS_ATTRIB_COOP := 0x1000000
 const BMS_ATTRIB_TDM := 0x20000000
 
 
-class _MissingBankMusicRoot extends RefCounted:
-	var script_reads := 0
-
-	func get_expansion() -> String:
-		return ""
-
-	func resolve_file(_name: String) -> String:
-		return ""
-
-	func has_file(name: String) -> bool:
-		return name.to_lower() == "menumus.bin"
-
-	func read_file(_name: String) -> PackedByteArray:
-		script_reads += 1
-		return PackedByteArray([1])
-
-
 const STATE_CONFIG_PATH := "user://opennova.cfg"
 
 var _state_config: TestFs.Snapshot
@@ -172,7 +155,8 @@ func test_hidden_menu_suspends_shell_frame_processing() -> void:
 
 
 func _cleanup(dir: String) -> void:
-	for f in ["main.mnu", "sp.mnu", "options.mnu", "game.mnu", "test.bms", "menumus.bin", "menumus.sbf"]:
+	for f in ["main.mnu", "sp.mnu", "options.mnu", "game.mnu", "lan.mnu", "test.bms", "menumus.bin",
+			"menumus.sbf"]:
 		DirAccess.remove_absolute(dir.path_join(f))
 	DirAccess.remove_absolute(dir)
 
@@ -647,8 +631,8 @@ class _RecordingCompanion extends MenuCompanion:
 	var built := 0
 	var released := 0
 
-	func owns_menu(driver: MenuDriver) -> bool:
-		return driver != null and driver.get_menu_file() == "main.mnu"
+	func owner_name() -> String:
+		return "lan"
 
 	func on_menu_built(driver: MenuDriver, file: String, screen: String,
 			root: ResourceRoot) -> void:
@@ -660,9 +644,18 @@ class _RecordingCompanion extends MenuCompanion:
 		released += 1
 
 
+# A document the engine gives the LAN delegate (menu::MenuCommands::wire: it holds
+# LAN_GAME_LIST), written as `file` in `dir`.
+func _write_lan_menu(dir: String, file := "lan.mnu") -> void:
+	TestFs.write_bytes(self, dir.path_join(file), MenuDriverFixture.screen_xml("LAN_MULTI_PLAYER",
+			MenuDriverFixture.wnd("list", "LAN_GAME_LIST", 20)
+			+ MenuDriverFixture.wnd("button", "START_GAME", 50)).to_utf8_buffer())
+
+
 func test_companion_released_when_document_changes_hands() -> void:
 	var dir := _make_dir()
 	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
+	_write_lan_menu(dir)
 	var shell = _make_shell(dir)
 	if shell == null:
 		pending("temp resource root unavailable")
@@ -670,14 +663,15 @@ func test_companion_released_when_document_changes_hands() -> void:
 		return
 	var stub := _RecordingCompanion.new()
 	shell.add_companion(stub)
-	assert_true(shell.open_menu("main.mnu", ""), "the claimed document opens")
+	assert_true(shell.open_menu("lan.mnu", ""), "the claimed document opens")
+	assert_eq(shell.get_driver().command_owner(), "lan", "the engine names the LAN delegate")
 	assert_eq(stub.built, 1, "the claiming companion is handed the wiring")
 	assert_eq(stub.released, 0)
 	assert_true(shell.open_menu("options.mnu", ""), "an unclaimed document opens")
 	assert_eq(stub.released, 1,
 			"losing the document releases the previously wired companion")
 	assert_eq(stub.built, 1, "no rebuild for a document it does not own")
-	assert_true(shell.open_menu("main.mnu", ""))
+	assert_true(shell.open_menu("lan.mnu", ""))
 	assert_eq(stub.built, 2, "re-claiming wires the companion again")
 	assert_eq(stub.released, 1, "a re-claim is not a release")
 	_cleanup(dir)
@@ -957,34 +951,35 @@ func test_missing_assets_degrade_without_crashing() -> void:
 	DirAccess.remove_absolute(dir)
 
 
-# A throwaway companion: claims the menu (or not) and records whether it was driven.
+# A throwaway companion: a delegate of `name`, recording whether it was driven.
 class _FakeCompanion extends MenuCompanion:
-	var owns: bool
+	var delegate: String
 	var built := false
-	func _init(p_owns: bool) -> void:
-		owns = p_owns
-	func owns_menu(_menu) -> bool:
-		return owns
+	func _init(p_delegate: String) -> void:
+		delegate = p_delegate
+	func owner_name() -> String:
+		return delegate
 	func on_menu_built(_menu, _file, _screen, _root) -> void:
 		built = true
 
 
-# The shell can hold several companions (mp.mnu + player.mnu); the first whose
-# owns_menu() claims a built menu drives it, and a non-owning companion is skipped.
-func test_multiple_companions_first_owner_drives_menu() -> void:
+# The shell can hold several companions (mp.mnu + player.mnu); the one the engine
+# names the document's owner drives it, and another delegate is skipped.
+func test_multiple_companions_the_engines_owner_drives_menu() -> void:
 	var dir := _make_dir()
+	_write_lan_menu(dir)
 	var shell = _make_shell(dir)
 	if shell == null:
 		pending("temp resource root unavailable in this environment")
 		_cleanup(dir)
 		return
-	var skipped := _FakeCompanion.new(false)
-	var owner := _FakeCompanion.new(true)
+	var skipped := _FakeCompanion.new("player_info")
+	var owner := _FakeCompanion.new("lan")
 	shell.add_companion(skipped)
 	shell.add_companion(owner)
-	shell.open_menu("main.mnu", "")  # re-wire with the companions installed
-	assert_false(skipped.built, "a non-owning companion is skipped")
-	assert_true(owner.built, "the first owning companion drives the menu")
+	shell.open_menu("lan.mnu", "")
+	assert_false(skipped.built, "another delegate's companion is skipped")
+	assert_true(owner.built, "the owner's companion drives the menu")
 	_cleanup(dir)
 
 
@@ -1391,11 +1386,7 @@ func test_front_options_back_discards_the_screen_edits_and_returns_to_main() -> 
 	var reloaded := PlayerOptions.new().current()
 	assert_eq(reloaded.music_volume, 40, "the config holds the entry music volume")
 	assert_eq(reloaded.sound_fx_volume, 50, "the config holds the entry sound-effects volume")
-	var music_bus := AudioServer.get_bus_index(PlayerOptions.MUSIC_BUS)
-	if music_bus >= 0:
-		assert_almost_eq(AudioServer.get_bus_volume_db(music_bus),
-				SoundSelector.volume_db_from_255(40), 0.001,
-				"the live music preview is rolled back")
+	assert_eq(int(AudioOut.option_volumes()[2]), 40, "the live music preview is rolled back")
 	_cleanup(dir)
 
 
@@ -1902,11 +1893,11 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 	assert_true(MusicService.open_menu_context(root), "menu context reopens")
 	assert_eq(MusicService.get_var(14), 0,
 		"menu reload also clears globals under the headless audio driver")
-	# A failed replacement open tears down the old pair and obeys the witnessed
-	# bank-first gate: retail never attempts to read the script after no .sbf.
-	var missing_root := _MissingBankMusicRoot.new()
+	# A failed replacement open tears down the old pair (the bank-first gate's own
+	# order is the ctest music_context's).
+	var missing_root := ResourceRoot.new()
 	assert_false(MusicService.open_menu_context(missing_root), "missing bank leaves silence")
-	assert_eq(missing_root.script_reads, 0, "missing-bank gate precedes VFS script read")
+	assert_eq(MusicService.current_context(), "", "a failed open keeps no context")
 	assert_null(MusicService.director().get_bank(), "failed open retains no old bank")
 	assert_null(MusicService.director().get_mus_script(), "failed open retains no old script")
 	root.clear()

@@ -37,7 +37,9 @@ class RtxtStringFile : public Resource {
 	GDCLASS(RtxtStringFile, Resource)
 
 private:
-	opennova::rtxt::File file_;
+	// Shared with the process's named-table registry (formats/rtxt/text_tables.h) when the
+	// table is registered there: one table, read by the engine and edited here.
+	std::shared_ptr<opennova::rtxt::File> file_ = std::make_shared<opennova::rtxt::File>();
 
 	void _refresh();  // rebuild lookup + recompute section counts
 
@@ -98,12 +100,12 @@ public:
 	// the marker text and the ordering; see rtxt.h for the witnesses) ---
 	// "??section:key??" — the visible marker a failed lookup renders.
 	static String format_miss_marker(const String &p_section, const String &p_key);
-	// Override-table-first section lookup: a hit in p_override_table (the
-	// active expansion's text bin) wins outright; a miss in both returns the
-	// miss marker. Either table may be null.
-	static String lookup_with_override(const Ref<RtxtStringFile> &p_override_table,
-			const Ref<RtxtStringFile> &p_table, const String &p_section,
-			const String &p_key);
+	// Override-table-first section lookup (rtxt::lookup_with_override): a hit in
+	// the process's text-override table (rtxt::text_override, the active
+	// expansion's text bin) wins outright; a miss in both returns the miss
+	// marker. The table may be null (the override table alone answers).
+	static String lookup_with_override(const Ref<RtxtStringFile> &p_table,
+			const String &p_section, const String &p_key);
 
 	// --- The process-wide "Keys" table (engine controls::key_strings.h) ---
 	// install_key_strings copies THIS table in as the binding-label table
@@ -142,7 +144,15 @@ public:
 			const String &p_key);
 
 	// Native access for the loader/saver.
-	const opennova::rtxt::File &get_native() const { return file_; }
+	const opennova::rtxt::File &get_native() const { return *file_; }
+	// The table as the registry holds it (formats/rtxt/text_tables.h).
+	std::shared_ptr<const opennova::rtxt::File> shared_native() const { return file_; }
+	// The table text converters every read and write here takes: a table's bytes as the
+	// shell's string (valid UTF-8 as itself, else cp1252) and back (cp1252 when it fits).
+	static String text_to_gd(const std::string &p_text);
+	static std::string text_from_gd(const String &p_text);
+	// A binding over a registered table (the registry's own, shared, never copied).
+	static Ref<RtxtStringFile> over(std::shared_ptr<const opennova::rtxt::File> p_table);
 };
 
 // The engine's game-text seam (hud/game_text_lookup.h) bound over a string

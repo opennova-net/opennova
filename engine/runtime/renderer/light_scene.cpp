@@ -756,8 +756,8 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 	constexpr int kSegments = 3;
 	// The primary device fog (renderer/device_fog.h carries the witness):
 	// the inputs already hold the Render_SetFogState start/end.
-	const auto fog_visibility = [&inputs](float dist) -> float {
-		return device_fog_visibility(dist, inputs.fog_start, inputs.fog_end,
+	const auto fog_visibility = [&inputs](float view_depth, float radial) -> float {
+		return device_fog_visibility(view_depth, radial, inputs.fog_start, inputs.fog_end,
 				inputs.fog_type, inputs.fog_enabled);
 	};
 	const std::array<float, 3> camera_world = {
@@ -898,11 +898,11 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 				// fade OUT with distance [orig: CD3DDevice_SetFogAndBlendMode
 				// (dev, 2) @ 0x5aafb6 -> case 2 @ 0x677740]. D3D fogs the
 				// vertices; the segment center is the same distance to
-				// within a half-size.
+				// within a half-size, its camera-plane depth the view depth.
 				const float seg_dx = center[0] - camera_world[0];
 				const float seg_dy = center[1] - camera_world[1];
 				const float seg_dz = center[2] - camera_world[2];
-				const float fog = fog_visibility(std::sqrt(
+				const float fog = fog_visibility(depth, std::sqrt(
 						seg_dx * seg_dx + seg_dy * seg_dy + seg_dz * seg_dz));
 				const float scale = fade * fog;
 				LightCoronaQuad quad;

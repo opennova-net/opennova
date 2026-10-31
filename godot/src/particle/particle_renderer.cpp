@@ -44,6 +44,7 @@
 #include <runtime/renderer/particle_atlas.h>
 #include <runtime/renderer/particle_color.h>
 #include <runtime/renderer/particle_frame.h>
+#include <runtime/renderer/particle_frame_plan.h>
 #include <runtime/renderer/particle_quad_inputs.h>
 #include <runtime/renderer/render_order.h>
 #include <runtime/renderer/particle_density.h>
@@ -57,6 +58,7 @@
 #include "particle/particle_material_cache.h"
 #include "render/display_decode.h"
 #include "render/frame_fx.h"
+#include "render/object_lod_frame.h"
 #include "render/rd_glsl.h" // call_device_create
 #include "render/scene_overlay_compositor.h"
 #include "render/world_environment_lookup.h"
@@ -66,31 +68,19 @@ using namespace godot;
 
 namespace {
 
-constexpr int kGraphicLayerCount = ParticleAtlasDevice::kGraphicLayerCount;
-constexpr std::size_t kMissingEntry = ParticleAtlasDevice::kMissingEntry;
-using DefinitionVisual = ParticleAtlasDevice::DefinitionVisual;
-using LayerVisual = ParticleAtlasDevice::LayerVisual;
+using Slot = opennova::renderer::ParticleDrawSlot;
 
-enum ParticleDrawSlot : std::size_t {
-	kWorldFarSide = 0,
-	kWorldCameraSide = 1,
-	kReflectionFarSide = 2,
-	kReflectionCameraSide = 3,
-	kSecondSceneFarSide = 4,
-	kSecondSceneCameraSide = 5,
-	kFirstPerson = 6,
-	// The post-scene distortion pass (class-7 emitters, main view).
-	kDistortion = 7,
-	// The weapon Inset pass's own water mirror.
-	kInsetMirrorFarSide = 8,
-	kInsetMirrorCameraSide = 9,
-	kParticleDrawSlotCount = 10,
+// One retained value per compile slot, indexed by the engine's slot.
+template <typename T>
+struct SlotArray {
+	std::array<T, opennova::renderer::kParticleDrawSlotCount> values{};
+	T &operator[](Slot p_slot) { return values[static_cast<std::size_t>(p_slot)]; }
+	const T &operator[](Slot p_slot) const { return values[static_cast<std::size_t>(p_slot)]; }
+	void fill(const T &p_value) { values.fill(p_value); }
 };
 
 using ParticleEffectPair = std::array<Ref<ParticleCompositorEffect>, 2>;
 
-using opennova::particle::GraphicLayer;
-using opennova::particle::Particle;
 
 // The view basis rows (world to view) as the engine's particle laws read them.
 std::array<float, 9> basis_rows(const Basis &basis) {
@@ -101,32 +91,8 @@ std::array<float, 9> basis_rows(const Basis &basis) {
 	return rows;
 }
 
-opennova::renderer::ParticleVec3 particle_vec(const opennova::particle::Vec3 &value) {
-	return {value.x, value.y, value.z};
-}
-
 opennova::renderer::ParticleVec3 particle_vec(const Vector3 &value) {
 	return {value.x, value.y, value.z};
-}
-
-void include_point(opennova::renderer::ParticleAabb &bounds,
-		const opennova::renderer::ParticleVec3 &point, float radius) {
-	const opennova::renderer::ParticleVec3 minimum{
-		point.x - radius, point.y - radius, point.z - radius};
-	const opennova::renderer::ParticleVec3 maximum{
-		point.x + radius, point.y + radius, point.z + radius};
-	if (!bounds.valid) {
-		bounds.min = minimum;
-		bounds.max = maximum;
-		bounds.valid = true;
-		return;
-	}
-	bounds.min.x = std::min(bounds.min.x, minimum.x);
-	bounds.min.y = std::min(bounds.min.y, minimum.y);
-	bounds.min.z = std::min(bounds.min.z, minimum.z);
-	bounds.max.x = std::max(bounds.max.x, maximum.x);
-	bounds.max.y = std::max(bounds.max.y, maximum.y);
-	bounds.max.z = std::max(bounds.max.z, maximum.z);
 }
 
 struct ParticleCameraFrame {
@@ -172,10 +138,7 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 		}
 	}
 	result.projection_valid = true;
-	// A point just past the near plane reads inside every plane (EffectWorld's
-	// NOVISNOUPDATE state takes its probe the same way).
-	result.frustum = particle_view_frustum(camera->get_frustum(),
-			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
+	result.frustum = particle_view_frustum(ObjectLodFrame::camera_frustum(camera));
 	return result;
 }
 
@@ -186,18 +149,12 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 opennova::particle::ParticleViewFrustum mirror_cull_frustum(Camera3D *camera) {
 	const Projection projection = camera->get_camera_projection();
 	const double focal_x = static_cast<double>(projection.columns[0][0]);
-	if (!(focal_x > 0.0))
+	if (!(focal_x > 0.0) || camera->get_far() <= camera->get_near())
 		return {};
-	const double fov_h = 2.0 * std::atan(1.0 / focal_x) * 180.0 / 3.14159265358979323846;
-	const Projection square = Projection::create_perspective(static_cast<real_t>(fov_h), 1.0f,
-			camera->get_near(), camera->get_far(), true);
-	const Transform3D transform = camera->get_camera_transform();
-	const Vector<Plane> planes = square.get_projection_planes(transform);
-	TypedArray<Plane> plane_array;
-	for (int index = 0; index < planes.size(); ++index)
-		plane_array.push_back(planes[index]);
-	return particle_view_frustum(plane_array,
-			transform.origin - transform.basis.get_column(2) * (camera->get_near() + 1.0f));
+	const float tan_half = static_cast<float>(1.0 / focal_x);
+	return particle_view_frustum(ObjectLodFrame::eye_frustum(camera->get_camera_transform(),
+			tan_half, tan_half, static_cast<float>(camera->get_near()),
+			static_cast<float>(camera->get_far())));
 }
 
 // One comparable value for "what this slot draws": FNV-1a over the compiled
@@ -447,27 +404,18 @@ void rebuild_camera_compositor(ParticleCameraCompositorState &state,
 	camera->set_compositor(state.installed);
 }
 
-// A Bump/Bumpadd quad's DIFFUSE channel depends on the view basis, so every
-// secondary view (the mirror, the second scene view) relights these quads in
-// place instead of rebuilding the whole snapshot.
-struct LitQuadInput {
-	std::size_t particle_index = 0;
-	float bump_scale = 0.0f;
-	float roll = 0.0f;
-	std::uint8_t alpha = 255;
-};
-
 } // namespace
 
 class ParticleRenderer::Impl {
 public:
 	ParticleFirstPersonBatch first_person;
-	std::array<opennova::renderer::ParticleFrameCompiler, kParticleDrawSlotCount> compilers;
+	SlotArray<opennova::renderer::ParticleFrameCompiler> compilers;
 	// A slot is present once it compiled for the current render and until
 	// clear_draws or a render without its camera retires it.
-	std::array<bool, kParticleDrawSlotCount> slot_present{};
-	opennova::renderer::ParticleFrameSnapshot render_snapshot;
-	std::vector<LitQuadInput> lit_quads;
+	SlotArray<bool> slot_present;
+	// The frame's render snapshot and its view-lit quads
+	// (renderer::build_particle_render_input).
+	opennova::renderer::ParticleRenderInput render_input;
 	ParticleAtlasDevice atlas;
 	ParticleMaterialCache materials;
 	// Pass A of the main view and of the second scene view as render-list
@@ -507,22 +455,11 @@ public:
 	ObjectID cached_environment_source;
 	std::int64_t cached_environment_generation =
 			std::numeric_limits<std::int64_t>::min();
-	std::array<float, 3> fog_color{0.5f, 0.6f, 0.8f};
-	float fog_start = 30000.0f;
-	float fog_end = 100000.0f;
-	std::int32_t fog_type = 1;
-	// The water mirror pair's fog: the reflected scene's particle passes run
-	// under the dry weather block whatever the main pass selects
-	// (EnvironmentState::build_water_mirror_fog).
-	std::array<float, 3> mirror_fog_color{0.5f, 0.6f, 0.8f};
-	float mirror_fog_start = 30000.0f;
-	float mirror_fog_end = 100000.0f;
-	std::int32_t mirror_fog_type = 1;
-	// The manager's two per-frame particle tints from the environment
-	// (engine: runtime/renderer/particle_quad_inputs.h ParticleQuadTints).
-	// Neutral until an environment source is attached.
-	std::array<float, 3> ambient_tint{1.0f, 1.0f, 1.0f};
-	std::array<float, 3> modulator_tint{1.0f, 1.0f, 1.0f};
+	// The frame's particle fog (the scene's and the water mirror pair's) and
+	// the manager's two tints, from the environment's engine state
+	// (renderer::particle_pass_environment). Unfogged and neutral until an
+	// environment source is attached.
+	opennova::renderer::ParticlePassEnvironment environment;
 
 	Impl() {
 		create_effects();
@@ -619,51 +556,10 @@ public:
 			return;
 		}
 
-		// Project defaults keep standalone previews useful. Runtime GameWorld
-		// supplies MissionEnvironment explicitly, avoiding RenderingServer global
-		// readback (which Godot rejects outside the editor).
-		fog_color = {0.5f, 0.6f, 0.8f};
-		fog_start = 30000.0f;
-		fog_end = 100000.0f;
-		fog_type = 1;
-		mirror_fog_color = fog_color;
-		mirror_fog_start = fog_start;
-		mirror_fog_end = fog_end;
-		mirror_fog_type = fog_type;
-		ambient_tint = {1.0f, 1.0f, 1.0f};
-		modulator_tint = {1.0f, 1.0f, 1.0f};
-		if (env != nullptr) {
-			const Vector3 color = env->get_scene_fog_color();
-			if (std::isfinite(color.x) && std::isfinite(color.y) &&
-					std::isfinite(color.z)) {
-				fog_color = {color.x, color.y, color.z};
-			}
-			auto finite_or = [](float value, float fallback) {
-				return std::isfinite(value) ? value : fallback;
-			};
-			fog_start = finite_or(env->get_scene_fog_start(), fog_start);
-			fog_end = finite_or(env->get_scene_fog_end(), fog_end);
-			fog_type = std::clamp<std::int32_t>(
-					env->get_scene_fog_type(), 0, 3);
-			const opennova::env::SceneFogValues mirror =
-					env->state().build_water_mirror_fog();
-			if (std::isfinite(mirror.color.r) && std::isfinite(mirror.color.g) &&
-					std::isfinite(mirror.color.b)) {
-				mirror_fog_color = {mirror.color.r, mirror.color.g, mirror.color.b};
-			}
-			mirror_fog_start = finite_or(mirror.start, mirror_fog_start);
-			mirror_fog_end = finite_or(mirror.end, mirror_fog_end);
-			mirror_fog_type = std::clamp<std::int32_t>(mirror.type, 0, 3);
-			auto finite_tint = [](const Vector3 &value, std::array<float, 3> fallback) {
-				if (std::isfinite(value.x) && std::isfinite(value.y) &&
-						std::isfinite(value.z)) {
-					return std::array<float, 3>{value.x, value.y, value.z};
-				}
-				return fallback;
-			};
-			ambient_tint = finite_tint(env->get_particle_ambient_tint(), ambient_tint);
-			modulator_tint = finite_tint(env->get_particle_modulator_tint(), modulator_tint);
-		}
+		// The environment's engine state; none (a preview) runs unfogged.
+		environment = opennova::renderer::particle_pass_environment(
+				env != nullptr ? &env->state() : nullptr,
+				env != nullptr && env->is_underwater_view());
 		cached_environment_source = source_id;
 		cached_environment_generation = has_generation ? generation :
 				std::numeric_limits<std::int64_t>::min();
@@ -817,169 +713,75 @@ public:
 		return far_distortion_scratch;
 	}
 
-	// Re-derives the view-dependent Bump/Bumpadd DIFFUSE channel for a second
-	// camera (the one other basis-dependent input, a camera-facing TOPALIGN
-	// quad's roll, keeps the main view's value). Each colour is recomputed from
-	// the retained LitQuadInput row and never from the value it replaces, so a
-	// relight leaves the snapshot lit for exactly this basis no matter which
-	// view compiled (and relit) before it.
-	void relight_render_snapshot(const Basis &view_basis) {
-		const std::array<float, 9> rows = basis_rows(view_basis);
-		for (const LitQuadInput &lit : lit_quads) {
-			render_snapshot.particles[lit.particle_index].primary_color =
-					opennova::renderer::particle_lit_primary_color(
-							lit.bump_scale, lit.roll, lit.alpha, rows);
+	// The compositor effect a world slot publishes into (null: the
+	// first-person slot, which uploads its own batch).
+	Ref<ParticleCompositorEffect> slot_effect(Slot p_slot) const {
+		switch (p_slot) {
+			case Slot::WorldFarSide: return world_effects[0];
+			case Slot::WorldCameraSide: return world_effects[1];
+			case Slot::ReflectionFarSide: return reflection_effects[0];
+			case Slot::ReflectionCameraSide: return reflection_effects[1];
+			case Slot::SecondSceneFarSide: return second_scene_effects[0];
+			case Slot::SecondSceneCameraSide: return second_scene_effects[1];
+			case Slot::InsetMirrorFarSide: return inset_mirror_effects[0];
+			case Slot::InsetMirrorCameraSide: return inset_mirror_effects[1];
+			case Slot::Distortion: return distortion_effect;
+			case Slot::FirstPerson: break;
 		}
+		return Ref<ParticleCompositorEffect>();
 	}
 
-	// A view without its camera this render: nothing published, nothing
-	// reported, and (its group already detached) nothing drawn.
-	void retire_view_pair(ParticleEffectPair &effects, ParticleDrawSlot far_slot,
-			ParticleDrawSlot camera_slot) {
-		for (Ref<ParticleCompositorEffect> &effect : effects)
+	// A slot no view compiles this render: nothing published, nothing
+	// reported, and (its view's group already detached) nothing drawn.
+	void retire_slot(Slot p_slot) {
+		const Ref<ParticleCompositorEffect> effect = slot_effect(p_slot);
+		if (effect.is_valid())
 			effect->clear_submission();
-		if (far_slot == kSecondSceneFarSide)
+		if (p_slot == Slot::SecondSceneFarSide)
 			second_scene_far_pass.clear();
-		slot_present[far_slot] = false;
-		slot_present[camera_slot] = false;
+		slot_present[p_slot] = false;
 	}
 
-	// Refills the retained flat snapshot (emitters + one particle run each)
-	// in the simulator's order. clear() keeps both vectors' capacity, so a
-	// steady-state frame allocates nothing here.
-	void build_render_snapshot(
-			const opennova::particle::ParticleFrameSnapshot &frame,
-			const Basis &view_basis) {
-		render_snapshot.frame_id = frame.frame_index;
-		render_snapshot.emitters.clear();
-		render_snapshot.particles.clear();
-		lit_quads.clear();
-		const std::vector<DefinitionVisual> &definition_visuals = atlas.definition_visuals();
-		const std::vector<opennova::renderer::ParticleAtlasEntry> &entries = atlas.entries();
-		if (!frame.definitions ||
-				definition_visuals.size() != frame.definitions->size())
+	// One compiled pass into its slot's device target: pass A of the main and
+	// the Inset view draws as render-list runs at kRungParticleFarSide
+	// (ParticleFarPass) with only its distortion on the compositor; the
+	// distortion slot publishes into FrameFX's type-0 row and gates it
+	// (renderer::particle_distortion_row_present); the first-person slot
+	// uploads its batch; every other slot publishes into its effect.
+	void upload_pass(ParticleRenderer *p_owner, const opennova::renderer::ParticlePassCompile &p_pass,
+			const opennova::renderer::ParticleDrawList &p_draw_list,
+			const ParticleCameraFrame &p_camera, int64_t p_time_ms, bool p_hidden) {
+		const bool thermal = p_pass.thermal;
+		if (p_pass.slot == Slot::FirstPerson) {
+			upload_first_person_draw_list(p_draw_list, p_hidden, thermal);
 			return;
-		render_snapshot.emitters.reserve(frame.emitters.size());
-		render_snapshot.particles.reserve(frame.particles.size());
-		const std::array<float, 9> view_rows = basis_rows(view_basis);
-		const opennova::renderer::ParticleQuadTints tints{ambient_tint, modulator_tint};
-
-		for (const opennova::particle::EffectEmitterFrameSnapshot &source_emitter :
-				frame.emitters) {
-			if (source_emitter.definition_index >= frame.definitions->size() ||
-					source_emitter.definition_index >= definition_visuals.size())
-				continue;
-			const opennova::particle::ParticleDef &definition =
-					(*frame.definitions)[source_emitter.definition_index];
-			const DefinitionVisual &visual =
-					definition_visuals[source_emitter.definition_index];
-
-			opennova::renderer::ParticleEmitterSnapshot emitter;
-			emitter.emitter_id = source_emitter.id;
-			emitter.position = particle_vec(source_emitter.position);
-			emitter.first_particle = render_snapshot.particles.size();
-			if (source_emitter.group_index < frame.groups.size() &&
-					frame.groups[source_emitter.group_index].render_domain ==
-						opennova::particle::EffectRenderDomain::FirstPerson) {
-				emitter.domain = opennova::renderer::ParticleRenderDomain::FirstPerson;
-			} else {
-				emitter.domain = opennova::renderer::ParticleRenderDomain::World;
-			}
-			emitter.distortion_class =
-					opennova::particle::particle_def_is_distortion_class(definition);
-			emitter.group_visible = source_emitter.group_index >= frame.groups.size() ||
-					frame.groups[source_emitter.group_index].section_visible;
-
-			int fallback_layer = 0;
-			for (int layer = 0; layer < kGraphicLayerCount; ++layer) {
-				if (visual.layers[static_cast<std::size_t>(layer)].present) {
-					fallback_layer = layer;
-					break;
-				}
-			}
-
-			const std::size_t first = std::min(source_emitter.first_particle,
-					frame.particles.size());
-			const std::size_t available = frame.particles.size() - first;
-			const std::size_t count = std::min(source_emitter.particle_count, available);
-
-			for (std::size_t particle_index = 0; particle_index < count;
-					++particle_index) {
-				const Particle &particle = frame.particles[first + particle_index];
-				// EffectScene::inspect uses the simulator's base half-size for
-				// manager/emitter bounds. Keep that authoritative sort box even
-				// when render LOD omits this particle; draw list output bounds below
-				// remain exact expanded quad bounds.
-				include_point(emitter.bounds, particle_vec(particle.position),
-						particle.size * 0.5f);
-
-				int layer_index = std::clamp<int>(
-						static_cast<int>(particle.graphic_layer), 0,
-						kGraphicLayerCount - 1);
-				if (!visual.layers[static_cast<std::size_t>(layer_index)].present)
-					layer_index = fallback_layer;
-				const LayerVisual &layer =
-						visual.layers[static_cast<std::size_t>(layer_index)];
-				const GraphicLayer &graphic =
-						definition.graphics[static_cast<std::size_t>(layer_index)];
-
-				// The quad's size, colour pair, flipbook frame and roll
-				// (engine: runtime/renderer/particle_quad_inputs.h).
-				const opennova::renderer::ParticleQuadInputs inputs =
-						opennova::renderer::particle_quad_inputs(particle, definition, graphic,
-								visual.ambient_lit, tints, view_rows);
-
-				opennova::renderer::ParticleQuadSnapshot quad;
-				// Each view's density stride reads the serial at quad build.
-				quad.serial = particle.serial;
-				quad.center = particle_vec(particle.position);
-				quad.half_width = inputs.half_extent;
-				quad.half_height = inputs.half_extent;
-				quad.roll = inputs.roll;
-				quad.yaw = particle.yaw;
-				quad.pitch = particle.pitch;
-				quad.camera_pull = source_emitter.camera_pull;
-				quad.primary_color = inputs.primary_color;
-				quad.secondary_color = inputs.secondary_color;
-				quad.alignment = inputs.alignment;
-				quad.state.pipeline = static_cast<opennova::renderer::ParticlePipeline>(layer.type);
-				quad.state.pass = layer.type == 7 ?
-						opennova::renderer::ParticleRenderPass::Distortion :
-						opennova::renderer::ParticleRenderPass::Color;
-
-				std::size_t entry_index = kMissingEntry;
-				if (!layer.frame_entries.empty()) {
-					entry_index = layer.frame_entries[
-							static_cast<std::size_t>(std::max(inputs.frame, 0)) %
-							layer.frame_entries.size()];
-				}
-				quad.visible = entry_index != kMissingEntry &&
-						entry_index < entries.size() &&
-						entries[entry_index].placement.valid;
-				if (quad.visible) {
-					const opennova::renderer::ParticleAtlasEntry &entry = entries[entry_index];
-					quad.state.atlas.page = entry.placement.page;
-					quad.state.atlas.type = entry.type;
-					quad.state.atlas.rect = entry.placement.rect;
-					quad.state.atlas.inset_u = entry.placement.inset_u;
-					quad.state.atlas.inset_v = entry.placement.inset_v;
-				}
-
-				// A lit quad keeps what another view's relight reads.
-				if (inputs.lit) {
-					LitQuadInput lit;
-					lit.particle_index = render_snapshot.particles.size();
-					lit.bump_scale = definition.bump_scale;
-					lit.roll = particle.rotation;
-					lit.alpha = inputs.lit_alpha;
-					lit_quads.push_back(lit);
-				}
-
-				render_snapshot.particles.push_back(quad);
-			}
-			emitter.particle_count =
-					render_snapshot.particles.size() - emitter.first_particle;
-			render_snapshot.emitters.push_back(emitter);
+		}
+		const Ref<ParticleCompositorEffect> effect = slot_effect(p_pass.slot);
+		if (p_pass.slot == Slot::WorldFarSide || p_pass.slot == Slot::SecondSceneFarSide) {
+			const bool main_view = p_pass.slot == Slot::WorldFarSide;
+			ParticleFarPass &far_pass = main_view ? world_far_pass : second_scene_far_pass;
+			far_pass.upload(p_owner, p_draw_list,
+					main_view ? ParticleFarPass::View::Main : ParticleFarPass::View::SecondScene,
+					[this, thermal](const opennova::renderer::ParticleDrawCommand &command) {
+						// Pass A binds the secondary materials too while the
+						// main scene's thermal byte is set.
+						return materials.far_material_for(command,
+								opennova::renderer::particle_thermal_material(
+										command.pipeline, thermal),
+								atlas.pages());
+					});
+			publish_world_draw_list(effect, far_distortion_only(p_draw_list),
+					p_camera.position, p_camera.forward, p_time_ms, thermal);
+			return;
+		}
+		publish_world_draw_list(effect, p_draw_list, p_camera.position, p_camera.forward,
+				p_time_ms, thermal);
+		if (p_pass.slot == Slot::Distortion) {
+			distortion_drawer->set_particles_present(
+					opennova::renderer::particle_distortion_row_present(p_draw_list.debug));
+			// The pass fog rides along for the tracer distortion ribbons.
+			const opennova::renderer::ParticlePassFog &fog = environment.fog;
+			distortion_drawer->set_pass_fog(fog.color, fog.start, fog.end, fog.type);
 		}
 	}
 
@@ -1002,10 +804,12 @@ public:
 		const bool water_mirror = effect == reflection_effects[0] ||
 				effect == reflection_effects[1] || effect == inset_mirror_effects[0] ||
 				effect == inset_mirror_effects[1];
-		submission->fog_color = water_mirror ? mirror_fog_color : fog_color;
-		submission->fog_start = water_mirror ? mirror_fog_start : fog_start;
-		submission->fog_end = water_mirror ? mirror_fog_end : fog_end;
-		submission->fog_type = water_mirror ? mirror_fog_type : fog_type;
+		const opennova::renderer::ParticlePassFog &fog =
+				water_mirror ? environment.mirror_fog : environment.fog;
+		submission->fog_color = fog.color;
+		submission->fog_start = fog.start;
+		submission->fog_end = fog.end;
+		submission->fog_type = fog.type;
 		if (draw_list.domain != opennova::renderer::ParticleRenderDomain::World) {
 			submission->valid = false;
 			submission->validation_error =
@@ -1515,26 +1319,75 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 	const opennova::renderer::ParticleFrameStrides strides = opennova::renderer::particle_frame_strides(
 			session_particle_density_, main_view_nvg_scene_, impl_->last_pass_lod_divisor);
 	impl_->last_pass_lod_divisor = strides.last_pass;
-	const std::uint32_t world_divisor = strides.main_view;
 
 	const ParticleCameraFrame world_camera = particle_camera_frame(camera);
-	const bool camera_above_water = world_camera.position.y >= water_height_;
+	const bool camera_above_water = opennova::renderer::scene_camera_above_water(
+			world_camera.position.y, water_height_);
 	impl_->refresh_environment(get_environment_source());
 	// The main scene hands its particle passes the frame's thermal byte; every
 	// other scene call passes zero (renderer::particle_thermal_material).
 	const MissionEnvironment *thermal_source =
 			Object::cast_to<MissionEnvironment>(get_environment_source());
 	const bool thermal = thermal_source != nullptr && thermal_source->is_thermal_view();
-	impl_->build_render_snapshot(frame, world_camera.view_basis);
-	auto compile_world = [&](ParticleDrawSlot slot,
-			opennova::renderer::ParticleWaterSubset subset,
-			const ParticleCameraFrame &view_camera,
-			const Ref<ParticleCompositorEffect> &effect, bool view_thermal,
-			std::uint32_t lod_divisor) {
+	opennova::renderer::build_particle_render_input(frame, impl_->atlas.definition_visuals(),
+			impl_->atlas.entries(), basis_rows(world_camera.view_basis),
+			impl_->environment.tints, impl_->render_input);
+
+	// The device state each view's compiles read: its camera frame (a mirror
+	// culls over its own square, renderer::ParticleViewInput::frustum) and
+	// whether the frame renders it.
+	auto mirror_rendered = [](Camera3D *p_mirror) {
+		const SubViewport *mirror_viewport = p_mirror != nullptr ?
+				Object::cast_to<SubViewport>(p_mirror->get_viewport()) : nullptr;
+		return mirror_viewport == nullptr ||
+				mirror_viewport->get_update_mode() != SubViewport::UPDATE_DISABLED;
+	};
+	std::array<ParticleCameraFrame, 4> view_cameras{};
+	view_cameras[static_cast<std::size_t>(opennova::renderer::ParticleFrameView::Main)] = world_camera;
+	opennova::renderer::ParticleFrameViews views;
+	views.main_above_water = camera_above_water;
+	views.thermal = thermal;
+	views.strides = strides;
+	views.mirror = reflection_camera != nullptr;
+	views.mirror_rendered = mirror_rendered(reflection_camera);
+	if (views.mirror) {
+		ParticleCameraFrame &mirror = view_cameras[static_cast<std::size_t>(
+				opennova::renderer::ParticleFrameView::Mirror)];
+		mirror = particle_camera_frame(reflection_camera);
+		mirror.frustum = mirror_cull_frustum(reflection_camera);
+	}
+	views.inset = second_scene_camera != nullptr;
+	if (views.inset) {
+		// The original runs its one scene routine again for this camera, so the
+		// far/camera-side bracket belongs to this view's own eye.
+		const ParticleCameraFrame second_camera = particle_camera_frame(second_scene_camera);
+		views.inset_above_water = opennova::renderer::scene_camera_above_water(
+				second_camera.position.y, water_height_);
+		view_cameras[static_cast<std::size_t>(opennova::renderer::ParticleFrameView::Inset)] =
+				second_camera;
+	}
+	views.inset_mirror = inset_mirror_camera != nullptr;
+	views.inset_mirror_rendered = mirror_rendered(inset_mirror_camera);
+	if (views.inset_mirror) {
+		ParticleCameraFrame &mirror = view_cameras[static_cast<std::size_t>(
+				opennova::renderer::ParticleFrameView::InsetMirror)];
+		mirror = particle_camera_frame(inset_mirror_camera);
+		mirror.frustum = mirror_cull_frustum(inset_mirror_camera);
+	}
+
+	// The engine's frame plan, executed in order: each compile builds its
+	// eye's view input and uploads into that slot's device target.
+	const opennova::renderer::ParticleFramePlan plan = opennova::renderer::plan_particle_frame(views);
+	for (std::size_t index = 0; index < plan.compile_count; ++index) {
+		const opennova::renderer::ParticlePassCompile &pass = plan.compiles[index];
+		const ParticleCameraFrame &view_camera = view_cameras[static_cast<std::size_t>(pass.view)];
+		if (pass.relight)
+			opennova::renderer::relight_particle_render_input(impl_->render_input,
+					basis_rows(view_camera.view_basis));
 		opennova::renderer::ParticleViewInput view;
-		view.lod_divisor = lod_divisor;
-		view.domain = opennova::renderer::ParticleRenderDomain::World;
-		view.water_subset = subset;
+		view.lod_divisor = pass.lod_divisor;
+		view.domain = pass.domain;
+		view.water_subset = pass.water_subset;
 		view.water_height = water_height_;
 		view.position = particle_vec(view_camera.position);
 		view.right = particle_vec(view_camera.right);
@@ -1544,150 +1397,22 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 				view.projection);
 		view.projection_valid = view_camera.projection_valid;
 		view.projection_near_is_one = true;
-		// Each world view's own eye: an emitter out of it never submits.
 		view.frustum = view_camera.frustum;
 		const opennova::renderer::ParticleDrawList &draw_list =
-				impl_->compilers[slot].compile(impl_->render_snapshot, view);
-		impl_->slot_present[slot] = true;
-		if (slot == kWorldFarSide || slot == kSecondSceneFarSide) {
-			// Pass A draws in the transparent list at kRungParticleFarSide
-			// (ParticleFarPass); only its distortion stays on the compositor.
-			ParticleFarPass &far_pass = slot == kWorldFarSide ?
-					impl_->world_far_pass : impl_->second_scene_far_pass;
-			far_pass.upload(this, draw_list,
-					slot == kWorldFarSide ? ParticleFarPass::View::Main :
-											ParticleFarPass::View::SecondScene,
-					[this, view_thermal](const opennova::renderer::ParticleDrawCommand &command) {
-						// Pass A binds the secondary materials too while the
-						// main scene's thermal byte is set.
-						return impl_->materials.far_material_for(command,
-								opennova::renderer::particle_thermal_material(
-										command.pipeline, view_thermal),
-								impl_->atlas.pages());
-					});
-			impl_->publish_world_draw_list(effect, impl_->far_distortion_only(draw_list),
-					view_camera.position, view_camera.forward, p_time_ms, view_thermal);
-			return;
-		}
-		impl_->publish_world_draw_list(effect, draw_list, view_camera.position,
-				view_camera.forward, p_time_ms, view_thermal);
-	};
-
-	compile_world(kWorldFarSide,
-			opennova::renderer::particle_water_subset_for_side(camera_above_water, false),
-			world_camera, impl_->world_effects[0], thermal, world_divisor);
-	compile_world(kWorldCameraSide,
-			opennova::renderer::particle_water_subset_for_side(camera_above_water, true),
-			world_camera, impl_->world_effects[1], thermal, world_divisor);
-	// The post-scene distortion pass: the class-7 emitters, compiled for the
-	// main eye and drawn by FrameFX's type-0 row through the drawer (retail
-	// FrameFX_DistortionPass @ 0x5838F8). The row's content gate reads the
-	// live class-7 emitters (EffectWorld_HasDistortionParticles
-	// @ 0x5F6640): every class-7 child of a visible group, ahead of the
-	// render submit's live-count and view tests, so the pass's emitters the
-	// submit left out count too; the pass fog rides along for the tracer
-	// distortion ribbons.
-	compile_world(kDistortion, opennova::renderer::ParticleWaterSubset::Distortion,
-			world_camera, impl_->distortion_effect, thermal, world_divisor);
-	const opennova::renderer::ParticleFrameDebugCounters &distortion =
-			impl_->compilers[kDistortion].draw_list().debug;
-	const std::size_t distortion_children = distortion.selected_emitters +
-			distortion.empty_emitters + distortion.frustum_culled_emitters;
-	impl_->distortion_drawer->set_particles_present(distortion_children > 0);
-	impl_->distortion_drawer->set_pass_fog(impl_->fog_color, impl_->fog_start,
-			impl_->fog_end, impl_->fog_type);
-
-	opennova::renderer::ParticleViewInput first_person_view;
-	first_person_view.domain = opennova::renderer::ParticleRenderDomain::FirstPerson;
-	first_person_view.water_subset = opennova::renderer::ParticleWaterSubset::All;
-	first_person_view.position = particle_vec(world_camera.position);
-	first_person_view.right = particle_vec(world_camera.right);
-	first_person_view.up = particle_vec(world_camera.up);
-	first_person_view.forward = particle_vec(world_camera.forward);
-	std::copy(world_camera.projection.begin(), world_camera.projection.end(),
-			first_person_view.projection);
-	first_person_view.projection_valid = world_camera.projection_valid;
-	first_person_view.projection_near_is_one = true;
-	first_person_view.lod_divisor = world_divisor;
-	// Retail draws every particle in the scene's world passes, against the scene's one viewport:
-	// no pass of its own culls a first-person particle by another eye
-	// (renderer::ParticleViewInput::frustum carries the witness).
-	first_person_view.frustum = world_camera.frustum;
-	const opennova::renderer::ParticleDrawList &first_person_draw =
-			impl_->compilers[kFirstPerson].compile(impl_->render_snapshot,
-					first_person_view);
-	impl_->slot_present[kFirstPerson] = true;
-	impl_->upload_first_person_draw_list(first_person_draw, hidden_, thermal);
-
-	// A secondary view compiles the same snapshot for its own eye. LitColor/Bump
-	// channels transform through the active view basis, so only those quads are
-	// relit for this view before its two consecutive compiles. The World and
-	// FirstPerson draw lists above already hold their own vertex copies, and a
-	// relight never reads the colour it replaces, so no view can change what
-	// another draws, whichever of them compiles first.
-	auto compile_secondary_pair = [&](const ParticleCameraFrame &view_camera,
-			bool above_water, ParticleDrawSlot far_slot,
-			ParticleDrawSlot camera_slot, const ParticleEffectPair &effects,
-			std::uint32_t lod_divisor) {
-		impl_->relight_render_snapshot(view_camera.view_basis);
-		compile_world(far_slot,
-				opennova::renderer::particle_water_subset_for_side(above_water, false),
-				view_camera, effects[0], false, lod_divisor);
-		compile_world(camera_slot,
-				opennova::renderer::particle_water_subset_for_side(above_water, true),
-				view_camera, effects[1], false, lod_divisor);
-	};
-
-	// A mirror's passes compile only on a frame whose water renders that mirror: its viewport left
-	// disabled, the reflected scene runs none (renderer::compiles_mirror_particles carries the
-	// witness, D-NET-1188). The reflected pass selects its water subsets by the prerender's
-	// below-water flag, the main eye's side, whether its eye is mirrored or not, and culls by
-	// its own eye over a square at its horizontal fov (renderer::ParticleViewInput::frustum
-	// carries the witness). The weapon Inset pass's own mirror runs the same pair after the
-	// main scene's passes, in the main scene's stride (renderer::ParticleFrameStrides).
-	auto compile_mirror_pair = [&](Camera3D *mirror, ParticleDrawSlot far_slot,
-			ParticleDrawSlot camera_slot, ParticleEffectPair &effects,
-			std::uint32_t lod_divisor) {
-		const SubViewport *mirror_viewport = mirror != nullptr ?
-				Object::cast_to<SubViewport>(mirror->get_viewport()) : nullptr;
-		const bool mirror_rendered = mirror_viewport == nullptr ||
-				mirror_viewport->get_update_mode() != SubViewport::UPDATE_DISABLED;
-		if (mirror != nullptr && opennova::renderer::compiles_mirror_particles(mirror_rendered)) {
-			ParticleCameraFrame mirror_camera = particle_camera_frame(mirror);
-			mirror_camera.frustum = mirror_cull_frustum(mirror);
-			compile_secondary_pair(mirror_camera, camera_above_water, far_slot, camera_slot,
-					effects, lod_divisor);
-		} else {
-			impl_->retire_view_pair(effects, far_slot, camera_slot);
-		}
-	};
-	compile_mirror_pair(reflection_camera, kReflectionFarSide, kReflectionCameraSide,
-			impl_->reflection_effects, strides.mirror);
-
-	if (second_scene_camera != nullptr) {
-		// The original runs its one scene routine again for this camera, so the
-		// far/camera-side bracket belongs to this view's own eye. The Inset eye
-		// is the main eye, so the two agree today; keying on the view's own
-		// frame keeps the bracket right for a second view placed anywhere else.
-		const ParticleCameraFrame second_camera =
-				particle_camera_frame(second_scene_camera);
-		compile_secondary_pair(second_camera,
-				second_camera.position.y >= water_height_, kSecondSceneFarSide,
-				kSecondSceneCameraSide, impl_->second_scene_effects, strides.inset);
-	} else {
-		impl_->retire_view_pair(impl_->second_scene_effects, kSecondSceneFarSide,
-				kSecondSceneCameraSide);
+				impl_->compilers[pass.slot].compile(impl_->render_input.snapshot, view);
+		impl_->slot_present[pass.slot] = true;
+		impl_->upload_pass(this, pass, draw_list, view_camera, p_time_ms, hidden_);
 	}
-	compile_mirror_pair(inset_mirror_camera, kInsetMirrorFarSide, kInsetMirrorCameraSide,
-			impl_->inset_mirror_effects, strides.inset_mirror);
+	for (std::size_t index = 0; index < plan.retired_count; ++index)
+		impl_->retire_slot(plan.retired[index]);
 }
 
 int64_t ParticleRenderer::get_rendered_quad_count() const {
 	if (!impl_)
 		return 0;
 	std::size_t total = 0;
-	for (const ParticleDrawSlot slot : {
-			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+	for (const Slot slot : {
+			Slot::WorldFarSide, Slot::WorldCameraSide, Slot::FirstPerson}) {
 		if (impl_->slot_present[slot])
 			total += impl_->compilers[slot].draw_list().debug.emitted_quads;
 	}
@@ -1698,8 +1423,8 @@ int64_t ParticleRenderer::get_draw_command_count() const {
 	if (!impl_)
 		return 0;
 	std::size_t total = 0;
-	for (const ParticleDrawSlot slot : {
-			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+	for (const Slot slot : {
+			Slot::WorldFarSide, Slot::WorldCameraSide, Slot::FirstPerson}) {
 		if (impl_->slot_present[slot])
 			total += impl_->compilers[slot].draw_list().debug.draw_commands;
 	}
@@ -1710,26 +1435,26 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	Dictionary result;
 	if (!impl_)
 		return result;
-	auto slot_report = [this](ParticleDrawSlot slot) {
+	auto slot_report = [this](Slot slot) {
 		return impl_->slot_present[slot] ?
 				draw_list_report(impl_->compilers[slot].draw_list()) :
 				Dictionary();
 	};
-	result["world_far_side"] = slot_report(kWorldFarSide);
+	result["world_far_side"] = slot_report(Slot::WorldFarSide);
 	// The render-list runs pass A drew this render (ParticleFarPass).
 	result["world_far_render_runs"] =
 			static_cast<int64_t>(impl_->world_far_pass.run_count());
 	result["second_scene_far_render_runs"] =
 			static_cast<int64_t>(impl_->second_scene_far_pass.run_count());
-	result["world_camera_side"] = slot_report(kWorldCameraSide);
-	result["reflection_far_side"] = slot_report(kReflectionFarSide);
-	result["reflection_camera_side"] = slot_report(kReflectionCameraSide);
-	result["second_scene_far_side"] = slot_report(kSecondSceneFarSide);
-	result["second_scene_camera_side"] = slot_report(kSecondSceneCameraSide);
-	result["inset_mirror_far_side"] = slot_report(kInsetMirrorFarSide);
-	result["inset_mirror_camera_side"] = slot_report(kInsetMirrorCameraSide);
-	result["first_person"] = slot_report(kFirstPerson);
-	result["distortion"] = slot_report(kDistortion);
+	result["world_camera_side"] = slot_report(Slot::WorldCameraSide);
+	result["reflection_far_side"] = slot_report(Slot::ReflectionFarSide);
+	result["reflection_camera_side"] = slot_report(Slot::ReflectionCameraSide);
+	result["second_scene_far_side"] = slot_report(Slot::SecondSceneFarSide);
+	result["second_scene_camera_side"] = slot_report(Slot::SecondSceneCameraSide);
+	result["inset_mirror_far_side"] = slot_report(Slot::InsetMirrorFarSide);
+	result["inset_mirror_camera_side"] = slot_report(Slot::InsetMirrorCameraSide);
+	result["first_person"] = slot_report(Slot::FirstPerson);
+	result["distortion"] = slot_report(Slot::Distortion);
 	result["distortion_backend"] = impl_->distortion_effect->get_backend_report();
 	result["distortion_present"] = impl_->distortion_drawer->frame_has_distortion();
 	result["distortion_ribbon_indices"] = static_cast<int64_t>(
@@ -1783,11 +1508,11 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["shutdown"] = shutdown_;
 	result["water_height"] = water_height_;
 	Dictionary environment_fog;
-	environment_fog["color"] = Vector3(impl_->fog_color[0],
-			impl_->fog_color[1], impl_->fog_color[2]);
-	environment_fog["start"] = impl_->fog_start;
-	environment_fog["end"] = impl_->fog_end;
-	environment_fog["type"] = impl_->fog_type;
+	const opennova::renderer::ParticlePassFog &fog = impl_->environment.fog;
+	environment_fog["color"] = Vector3(fog.color[0], fog.color[1], fog.color[2]);
+	environment_fog["start"] = fog.start;
+	environment_fog["end"] = fog.end;
+	environment_fog["type"] = fog.type;
 	result["environment_fog"] = environment_fog;
 	const std::vector<ParticleAtlasDevice::Page> &pages = impl_->atlas.pages();
 	const std::vector<opennova::renderer::ParticleAtlasEntry> &entries = impl_->atlas.entries();
@@ -1856,20 +1581,20 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 	Array result;
 	if (!impl_)
 		return result;
-	for (const ParticleDrawSlot slot : {
-			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+	for (const Slot slot : {
+			Slot::WorldFarSide, Slot::WorldCameraSide, Slot::FirstPerson}) {
 		if (!impl_->slot_present[slot])
 			continue;
 		for (const opennova::renderer::ParticleEmitterDrawBounds &bounds :
 				impl_->compilers[slot].draw_list().emitter_bounds) {
 			Dictionary value;
 			value["emitter_id"] = token_to_godot(bounds.emitter_id);
-			value["render_domain"] = slot == kFirstPerson ?
+			value["render_domain"] = slot == Slot::FirstPerson ?
 					static_cast<int>(opennova::renderer::ParticleRenderDomain::FirstPerson) :
 					static_cast<int>(opennova::renderer::ParticleRenderDomain::World);
-			value["draw_scope"] = slot == kWorldFarSide ?
+			value["draw_scope"] = slot == Slot::WorldFarSide ?
 					String("world_far_side") :
-					(slot == kWorldCameraSide ? String("world_camera_side") :
+					(slot == Slot::WorldCameraSide ? String("world_camera_side") :
 							String("first_person"));
 			value["first_quad"] = static_cast<int64_t>(bounds.first_quad);
 			value["quad_count"] = static_cast<int64_t>(bounds.quad_count);
@@ -1886,8 +1611,8 @@ void ParticleRenderer::collect_debug_emitter_bounds(
 	r_out.clear();
 	if (!impl_)
 		return;
-	for (const ParticleDrawSlot slot : {
-			kWorldFarSide, kWorldCameraSide, kFirstPerson}) {
+	for (const Slot slot : {
+			Slot::WorldFarSide, Slot::WorldCameraSide, Slot::FirstPerson}) {
 		if (!impl_->slot_present[slot])
 			continue;
 		const auto &bounds = impl_->compilers[slot].draw_list().emitter_bounds;

@@ -1,5 +1,5 @@
 #include "render/q3_source_registry.h"
-#include "render/material_params.h"
+#include "render/material_params.h" // server_rid
 
 #include <algorithm>
 #include <cmath>
@@ -30,7 +30,8 @@ constexpr std::uint64_t kMaterialSweepPeriod = 256;
 
 struct RegisteredMaterial {
 	ObjectMaterialClassification classification{};
-	// Moves on every re-registration and invalidate_object_material.
+	Q3ObjectMaterialValues values;
+	// Moves on every re-registration and every published update.
 	std::uint64_t version = 1;
 };
 
@@ -182,12 +183,14 @@ Q3SourceRecord &register_record(GeometryInstance3D *p_source) {
 } // namespace
 
 void Q3SourceRegistry::register_object_material(const Ref<Material> &p_material,
-		const ObjectMaterialClassification &p_classification) {
+		const ObjectMaterialClassification &p_classification,
+		const Q3ObjectMaterialValues &p_values) {
 	if (p_material.is_null())
 		return;
 	std::lock_guard<std::recursive_mutex> lock(g_mutex);
 	RegisteredMaterial &material = g_materials[p_material->get_instance_id()];
 	material.classification = p_classification;
+	material.values = p_values;
 	++material.version;
 }
 
@@ -199,8 +202,10 @@ void Q3SourceRegistry::clone_object_material(const Ref<Material> &p_source,
 	const auto found = g_materials.find(p_source->get_instance_id());
 	if (found == g_materials.end())
 		return;
+	const RegisteredMaterial source = found->second;
 	RegisteredMaterial &clone = g_materials[p_clone->get_instance_id()];
-	clone.classification = found->second.classification;
+	clone.classification = source.classification;
+	clone.values = source.values;
 	++clone.version;
 }
 
@@ -217,13 +222,49 @@ bool Q3SourceRegistry::object_material_classification(
 	return true;
 }
 
-void Q3SourceRegistry::invalidate_object_material(const Ref<Material> &p_material) {
+bool Q3SourceRegistry::object_material(const Ref<Material> &p_material,
+		ObjectMaterialClassification &r_classification, Q3ObjectMaterialValues &r_values) {
+	if (p_material.is_null())
+		return false;
+	std::lock_guard<std::recursive_mutex> lock(g_mutex);
+	const auto found = g_materials.find(p_material->get_instance_id());
+	if (found == g_materials.end())
+		return false;
+	r_classification = found->second.classification;
+	r_values = found->second.values;
+	return true;
+}
+
+void Q3SourceRegistry::update_object_runtime(const Ref<Material> &p_material,
+		const MaterialRuntime &p_runtime) {
 	if (p_material.is_null())
 		return;
 	std::lock_guard<std::recursive_mutex> lock(g_mutex);
 	const auto found = g_materials.find(p_material->get_instance_id());
-	if (found != g_materials.end())
-		++found->second.version;
+	if (found == g_materials.end())
+		return;
+	found->second.values.runtime = p_runtime;
+	++found->second.version;
+}
+
+void Q3SourceRegistry::update_object_diffuse(const Ref<Material> &p_material,
+		const Ref<Texture2D> &p_diffuse, float p_max_lod) {
+	if (p_material.is_null())
+		return;
+	std::lock_guard<std::recursive_mutex> lock(g_mutex);
+	const auto found = g_materials.find(p_material->get_instance_id());
+	if (found == g_materials.end())
+		return;
+	found->second.values.diffuse = p_diffuse;
+	found->second.values.diffuse_max_lod = p_max_lod;
+	++found->second.version;
+}
+
+void Q3SourceRegistry::publish_water(GeometryInstance3D *p_source,
+		const Q3WaterMaterialParameters &p_water) {
+	std::lock_guard<std::recursive_mutex> lock(g_mutex);
+	if (Q3SourceRecord *record = find_record(p_source))
+		record->water = p_water;
 }
 
 void Q3SourceRegistry::register_object_source(GeometryInstance3D *p_source,
@@ -502,11 +543,15 @@ void Q3SourceRegistry::refresh_rows(Q3SourceRecord &r_record,
 
 void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record,
 		Q3SurfaceRecord &r_surface, FrameCounters &r_counters) {
-	const Ref<ShaderMaterial> &material = r_surface.material;
-	if (material.is_null())
+	if (r_surface.material.is_null())
 		return;
+	// The surface material's published values (an unregistered material
+	// publishes none: no stage texture, the effect defaults).
+	const auto registered = g_materials.find(r_surface.material_id);
+	const Q3ObjectMaterialValues no_values;
+	const Q3ObjectMaterialValues &values = registered != g_materials.end() ?
+			registered->second.values : no_values;
 	if (p_record.source == Q3Source::Object) {
-		const auto registered = g_materials.find(r_surface.material_id);
 		const std::uint64_t version = registered != g_materials.end() ?
 				registered->second.version : 1;
 		if (r_surface.parameter_version == version)
@@ -517,51 +562,37 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 	r_surface.pack = Q3PackParameters();
 	r_surface.pack.source = p_record.source;
 	if (p_record.source == Q3Source::Object) {
-		r_surface.pack.uv_u = vector3_parameter(material, "u_uv_transform_u",
-				Vector3(1, 0, 0));
-		r_surface.pack.uv_v = vector3_parameter(material, "u_uv_transform_v",
-				Vector3(0, 1, 0));
+		const MaterialRuntime &runtime = values.runtime;
+		r_surface.pack.uv_u = Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20);
+		r_surface.pack.uv_v = Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21);
 		Q3ObjectMaterialParameters &object = r_surface.object;
 		object.classification = r_surface.classification;
-		const Ref<Texture2D> base = texture_parameter(material, "u_diffuse");
-		const Ref<Texture2D> detail = texture_parameter(material, "u_detail");
-		object.base_texture = lease_for(base);
-		object.detail_texture = lease_for(detail);
-		const Vector4 reflect = vector4_parameter(material, "u_reflect_color",
-				Vector4(0.75f, 0.75f, 0.75f, 0.75f));
-		object.reflect_color = {reflect.x, reflect.y, reflect.z, reflect.w};
-		const Vector3 self_lum = vector3_parameter(material, "u_rgb_mod",
-				Vector3(1, 1, 1));
-		object.self_lum_color = {self_lum.x, self_lum.y, self_lum.z, 1.0f};
-		object.alpha_mod = float_parameter(material, "u_alpha_mod", 1.0f);
-		object.diffuse_max_lod = float_parameter(material, "u_diffuse_max_lod",
-				kQ3NoMipCeiling);
-		object.detail_max_lod = float_parameter(material, "u_detail_max_lod",
-				kQ3NoMipCeiling);
-		r_surface.primary_texture_resource = base;
-		r_surface.secondary_texture_resource = detail;
+		object.base_texture = lease_for(values.diffuse);
+		object.detail_texture = lease_for(values.detail);
+		object.reflect_color = {runtime.reflect[0], runtime.reflect[1], runtime.reflect[2],
+			runtime.reflect[3]};
+		object.self_lum_color = {runtime.rgb_r, runtime.rgb_g, runtime.rgb_b, 1.0f};
+		object.alpha_mod = runtime.alpha;
+		object.diffuse_max_lod = values.diffuse_max_lod;
+		object.detail_max_lod = values.detail_max_lod;
+		r_surface.primary_texture_resource = values.diffuse;
+		r_surface.secondary_texture_resource = values.detail;
 		r_surface.tertiary_texture_resource.unref();
-		r_surface.primary_texture = server_rid(base);
-		r_surface.secondary_texture = server_rid(detail);
+		r_surface.primary_texture = server_rid(values.diffuse);
+		r_surface.secondary_texture = server_rid(values.detail);
 		r_surface.tertiary_texture = RID();
 		return;
 	}
 	if (p_record.source == Q3Source::Water) {
 		Q3WaterMaterialParameters &water = r_surface.water;
-		const Ref<Texture2D> reflection = texture_parameter(material, "u_reflection");
-		const Ref<Texture2D> noise_color = texture_parameter(material, "u_noise_color");
-		const Ref<Texture2D> noise_normal = texture_parameter(material, "u_noise_normal");
-		water.has_reflection = bool_parameter(material, "u_has_reflection",
-				reflection.is_valid());
+		water = p_record.water;
+		const Ref<ShaderMaterial> &material = r_surface.material;
+		const Ref<Texture2D> reflection = water_stage_texture(material, "u_reflection");
+		const Ref<Texture2D> noise_color = water_stage_texture(material, "u_noise_color");
+		const Ref<Texture2D> noise_normal = water_stage_texture(material, "u_noise_normal");
 		water.reflection_texture = lease_for(reflection);
 		water.noise_color_texture = lease_for(noise_color);
 		water.noise_normal_texture = lease_for(noise_normal);
-		const Vector3 water_color = vector3_parameter(material, "u_water_color",
-				Vector3(0.408f, 0.314f, 0.224f));
-		water.water_color = {water_color.x, water_color.y, water_color.z};
-		const Vector2 depth_range = vector2_parameter(material, "u_scene_depth_range",
-				Vector2(0.2f, 1025.0f));
-		water.scene_depth_range = {depth_range.x, depth_range.y};
 		r_surface.primary_texture_resource = noise_color;
 		r_surface.secondary_texture_resource = noise_normal;
 		r_surface.tertiary_texture_resource = reflection;
@@ -571,10 +602,8 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 		return;
 	}
 	Q3CelestialMaterialParameters &celestial = r_surface.celestial;
-	const Ref<Texture2D> diffuse = texture_parameter(material, "u_diffuse");
-	celestial.diffuse_texture = lease_for(diffuse);
-	celestial.diffuse_max_lod = float_parameter(material, "u_diffuse_max_lod",
-			kQ3NoMipCeiling);
+	celestial.diffuse_texture = lease_for(values.diffuse);
+	celestial.diffuse_max_lod = values.diffuse_max_lod;
 	// The body's own authored material draws; its bloom-pass SelfLumColor
 	// is the producer's per-frame value (Celestial evaluates the material's
 	// RgbGen at the bloom pass's UPL_INTENSITY).
@@ -582,10 +611,10 @@ void Q3SourceRegistry::refresh_surface_parameters(const Q3SourceRecord &p_record
 	// The blend is the one the body's material was classified with, never
 	// the source kind: the authored sun/moon/glare FF_ST_AD_LUM surfaces add.
 	celestial.blend = r_surface.classification.blend;
-	r_surface.primary_texture_resource = diffuse;
+	r_surface.primary_texture_resource = values.diffuse;
 	r_surface.secondary_texture_resource.unref();
 	r_surface.tertiary_texture_resource.unref();
-	r_surface.primary_texture = server_rid(diffuse);
+	r_surface.primary_texture = server_rid(values.diffuse);
 	r_surface.secondary_texture = RID();
 	r_surface.tertiary_texture = RID();
 }

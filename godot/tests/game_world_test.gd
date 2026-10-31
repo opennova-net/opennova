@@ -38,19 +38,6 @@ func _minimal_assets_dir() -> String:
 	return ProjectSettings.globalize_path(WorldFixture.BOOT_FIXTURE_DIR)
 
 
-func test_mission_load_reports_only_real_stage_checkpoints() -> void:
-	var world := WorldFixture.make_world(self)
-	var observed: Array[int] = []
-	world.load_progress.connect(func(percent: int) -> void:
-			if observed.is_empty() or observed[-1] != percent:
-				observed.append(percent))
-
-	assert_eq(WorldFixture.load_mission(
-			world, _minimal_assets_dir(), WorldFixture.MINIMAL_MISSION), OK)
-	assert_eq(observed, [0, 10, 20, 30, 40, 50, 60, 70, 80, 90],
-		"the real load pipeline reports exact stage starts through world ready")
-
-
 # The minimap's depthspin water mask is made with the terrain's textures, ahead of the
 # freeze and the HUD's textures, not at the load's end (engine
 # mission/mission_load_plan.h carries the witness, D-NET-1186): the textures leg
@@ -243,9 +230,9 @@ func _append_to_file(path: String, text: String) -> void:
 # --- Real item-fx fixtures (ADR 0034 / ADR 0043 rule 11): the item database is
 # the staged root's items.def parsed by the REAL placer, the models are the
 # committed synthetic .3di set staged under the graphics the rows name, and the
-# per-item effects are attached by the world's OWN ItemEffectDirector during the
-# mission load (reattach from on_effect_world_started, replayed by the warm
-# pass). mount.3di authors the MFlash01 user point but carries a live PANM
+# per-item effects are attached by the engine's slot-A walk once the load opens
+# the world's producers past the warm reset (world::ItemEmitterSystem; its gates,
+# controller edges and re-pose rule are ctest item_emitters). mount.3di authors the MFlash01 user point but carries a live PANM
 # track, so it always places as an individual ObjectModel (the node-attached
 # leg); gun.3di authors MFlash01 and batches (the static matched-anchor leg);
 # shed.3di authors no such point and batches (the static origin-fallback leg).
@@ -276,10 +263,6 @@ func _fx_object_data(fixture_dir: String, model_file: String) -> ObjectData:
 	return data
 
 
-func _fx_anchor_data() -> ObjectData:
-	return _fx_object_data("res://../fixtures/threedi/synth", "mount.3di")
-
-
 func _fx_gun_data() -> ObjectData:
 	return _fx_object_data("res://../fixtures/threedi/synth", "gun.3di")
 
@@ -292,15 +275,6 @@ func _fx_anchor_index_on(data: ObjectData) -> int:
 		if (mask & (1 << i)) != 0:
 			return i
 	return -1
-
-
-# The anchor point's index/info on the real model (MFlash01 on mount).
-func _fx_anchor_index() -> int:
-	return _fx_anchor_index_on(_fx_anchor_data())
-
-
-func _fx_anchor_info() -> ModelUserPoint:
-	return _fx_anchor_data().get_user_point_info(_fx_anchor_index())
 
 
 func _fx_gun_anchor_info() -> ModelUserPoint:
@@ -370,71 +344,19 @@ func _stage_item_fx_fixture(name: String, rows: Array) -> String:
 	return root_dir
 
 
-# The effect world's report rows attached to `node` (owner keys
-# "itemfx:<instance id>:<point index | origin>"), live ones only unless
-# `include_detached`; hidden groups only with `include_hidden`.
-func _fx_rows_for_node(world: GameWorld, node: Node, include_detached := false,
-		include_hidden := false) -> Array:
-	var out: Array = []
-	var prefix := "itemfx:%d:" % node.get_instance_id()
-	for row_v in world.get_effect_world().get_debug_group_report(include_hidden):
-		var row: EffectGroupReport = row_v
-		var owner: Variant = row.owner_key
-		if owner is String and String(owner).begins_with(prefix) \
-				and (include_detached or not row.detached):
-			out.append(row)
-	return out
-
-
-# The world-bound (unowned) report rows, optionally only those named `effect`
-# (the static item effects and the impact transients spawn unowned).
+# The report rows spawned under no shell slot key (the engine's producers': the
+# item effects and the impact transients), optionally only those named `effect`.
 func _fx_unowned_rows(world: GameWorld, effect := "", include_hidden := false) -> Array:
 	var out: Array = []
 	for row_v in world.get_effect_world().get_debug_group_report(include_hidden):
 		var row: EffectGroupReport = row_v
-		if row.owner_key != null:
+		if row.slot_key != null:
 			continue
 		if effect.is_empty() or row.name == effect:
 			out.append(row)
 	return out
 
 
-# The placed ObjectModel a mission record resolves to (the runtime's index).
-func _placed_node(world: GameWorld, placed: EntityRef) -> ObjectModel:
-	var bms_id := placed.bms_id
-	assert_gt(bms_id, 0, "the authored entity carries a BMS id")
-	var node := world.get_runtime().get_entity_index().resolve_single(bms_id) as ObjectModel
-	assert_not_null(node, "the authored entity placed a real ObjectModel")
-	return node
-
-
-# One vehicle_control_* lifecycle edge as Simulation.drain_effects emits it,
-# addressed at a placed record (net id, BMS id, packed spawn origin).
-func _control_effect(kind: String, net_id: int, placed: EntityRef) -> MissionEffect:
-	return MissionEffect.make(kind, net_id, placed.bms_id,
-			int(Simulation.spawn_origin_pack(placed.kind, placed.index)))
-
-
-# A wire-spawned presentation node the way the present pass's wire callback
-# hands one to the world's director (on_wire_node_spawned): a real ObjectModel
-# over the mount.3di anchor fixture, parented under the world FIRST
-# (set_object_data builds render children against the live global transform),
-# carrying the wire row's EntityRef.
-func _fx_wire_node(world: GameWorld, ref: EntityRef) -> ObjectModel:
-	var model := ObjectModel.new()
-	world.add_child(model)
-	model.set_object_data(_fx_anchor_data())
-	model.entity_ref = ref
-	return model
-
-
-# The staged ammo.def for the impact-routing tests: the minimal fixture rows
-# plus authored effects_table blocks, so a real terrain hit resolves a real
-# per-surface impact row through the witnessed bake (world/ammo_table.h). Every
-# plausible minimal-terrain surface tag carries the same pair so the assert is
-# surface-agnostic; the effect column names a synthetic .ptl effect the staged
-# catalog carries (synth_dirt_hit) so the REAL effect world interns a definition
-# for it; AM_SOUNDONLY authors 'none' effects (sound-only rows).
 const IMPACT_EFFECT := "synth_dirt_hit"
 const IMPACT_SOUND := "imp_bullet_dirt"
 const SOUND_ONLY_SOUND := "imp_gren_dirt"
@@ -586,7 +508,7 @@ func test_wire_header_missing_asset_reason_names_the_install() -> void:
 # (GameWorld's env-presenters-world-driven handoff; D-RORD-8's ordering).
 func test_env_presenters_are_pipeline_clocked_not_self_clocked() -> void:
 	var world := WorldFixture.make_world(self)
-	for presenter_name in ["Weather", "SkyDome", "Celestial", "Water", "SunShadow"]:
+	for presenter_name in ["Weather", "SkyDome", "Celestial", "Water"]:
 		var presenter := world.get_node_or_null(NodePath(presenter_name)) as Node
 		assert_not_null(presenter, "%s exists under the world" % presenter_name)
 		if presenter != null:
@@ -1044,7 +966,7 @@ func test_fx2ssn_executes_with_entity_orientation() -> void:
 	var spawn: EffectGroupReport = rows[0]
 	assert_eq(spawn.name, FX_PERSISTENT_EFFECT)
 	# The engine spawns it where the command runs, World-bound under no owner (D-PTL-26).
-	assert_null(spawn.owner_key, "a World-bound script group follows no owner")
+	assert_null(spawn.slot_key, "the engine's script group holds no shell slot key")
 	assert_eq(spawn.binding, EffectScene.BINDING_WORLD)
 	assert_almost_eq(spawn.transform.origin.x, 6.0, 0.01)
 	assert_almost_eq(spawn.transform.origin.z, -4.0, 0.01)
@@ -1093,7 +1015,7 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	add_child_autofree(world)
 	assert_true(world is GameWorld, "the root is the native GameWorld")
 	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial",
-			"SunShadow", "SlotShadow"]:
+			"SlotShadow"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
 	# The dispatcher sits beside the terrain, so the indoors terrain hide never
 	# reaches the MODEL masks (the occlusion frame gates its detail passes).
@@ -1214,6 +1136,7 @@ func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> v
 	assert_false(wire_mission.is_loaded(),
 			"an inexact wire header cannot leave the previous host metadata live")
 	assert_false(wire_mission.is_wire_header_only())
+
 
 func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 	# GameWorld::update_frame_clear_color writes the witnessed frame clear into the
@@ -1600,7 +1523,6 @@ func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
 		renderer.procedural_fallback_enabled = true
 	var options := EffectSpawnOptions.new()
 	options.admission = EffectScene.ADMISSION_ALWAYS
-	options.binding = EffectScene.BINDING_WORLD
 	options.render_domain = EffectScene.RENDER_DOMAIN_WORLD
 	var receipt := effect_world.spawn_effect_request(
 			"puff", Transform3D(Basis.IDENTITY, Vector3(2.0, 1.0, 3.0)), options)
@@ -2314,7 +2236,7 @@ func test_join_wire_asset_failure_is_edge_gated_per_session() -> void:
 # parked in slot state 3 short of the C2S 0x0A's world stream and never releases the 0x1A.
 # Nothing is loaded and no admission watch is armed, so the admission leg declines the ESC and
 # the preload's takes it (the shell offers it the preload's first, main_game.gd
-# _on_camera_escape).
+# _on_escape, the frontend's ESCAPE_CANCEL_LOAD route).
 func test_escape_aborts_the_joiner_game_start_wait() -> void:
 	var world := WorldFixture.make_world(self)
 	await get_tree().process_frame
@@ -2655,8 +2577,8 @@ func test_a_join_loads_its_terrain_at_the_sync_tail_and_the_rest_at_the_mission_
 # loads the next map's environment and terrain alone (D-NET-845; engine
 # inmatch/joiner_connection.h set_sync_tail_loading carries the witness). The host is a GameWorld
 # through its own map change (net/host_map_change_test.gd); its slot reset's S2C 0x25 ends the
-# joiner's round, exit 4, which the shell routes to the Game Loop (main_game.gd
-# _route_round_end).
+# joiner's round, exit 4, which the frontend routes to the Game Loop (frontend::Frontend::
+# route_exit's JoinerReload, main_game.gd _on_session_lost).
 func test_a_joiner_reload_loads_the_next_maps_terrain_at_its_sync_tail() -> void:
 	var host_world := WorldFixture.make_world(self)
 	var world := WorldFixture.make_world(self)
@@ -3658,328 +3580,17 @@ func test_effect_warm_temporarily_lifts_and_restores_the_particle_switch() -> vo
 	assert_eq(effects.live_group_count(), 0,
 			"the warm snapshot's runtime values reset before the load returns")
 	assert_true(effects.get_debug_group_report(true).is_empty(),
-			"persistent item effects reattach under the restored preference: deferred, not spawned")
-	var stats := world.get_item_effect_director().get_stats()
-	assert_eq(stats.pending_static, 1,
-			"the reattach saw the restored switch: the static source is deferred, not lost")
-	assert_eq(stats.registered_static, 0)
+			"persistent item effects attach under the restored preference: deferred, not spawned")
 	world.set_particles_hidden(false)
 	assert_eq(_fx_unowned_rows(world, FX_PERSISTENT_EFFECT).size(), 1,
 			"lifting the preference attaches the deferred persistent effect exactly once")
-	stats = world.get_item_effect_director().get_stats()
-	assert_eq(stats.registered_static, 1)
-	assert_eq(stats.pending_static, 0)
-
-
-func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
-	# Mission kinds preserve the original pool mapping. Pool 0 is not walked;
-	# pool 1 skips attrib 0x42; pools 2/3 skip only powerup bit 0x2.
-	# [orig: Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0,
-	#  gates @ 0x523233 / @ 0x523272 / @ 0x5232af]
-	# Every case is a mission record the REAL placer presents as an individual
-	# ObjectModel (mount.3di: MFlash01 + a live PANM track) and the world's own
-	# director walks at load. The pool-3 marker leg has no real twin (a placed
-	# marker never materializes a node); its shared powerup-only gate is pinned
-	# by the pool-2 building cases.
-	var root_dir := _stage_item_fx_fixture("pool_gates", [
-		{"id": 108001, "type": "person", "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108002, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108003, "attribs": "PlayerControl",
-				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108004, "type": "building", "attribs": "Powerup", "powerupdef": "GATE_PU",
-				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108005, "type": "building", "attribs": "PlayerControl",
-				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-	])
-	var cases := [
-		[MissionData.KIND_ORGANIC, 108001, 0],
-		[MissionData.KIND_ITEM, 108002, 1],
-		[MissionData.KIND_ITEM, 108003, 0],
-		[MissionData.KIND_BUILDING, 108004, 0],
-		[MissionData.KIND_BUILDING, 108005, 1],
-	]
-	var world := WorldFixture.make_world(self)
-	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
-	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
-			func(mission: MissionData) -> void:
-				for case_index in range(cases.size()):
-					var case: Array = cases[case_index]
-					placed.append(mission.add_entity(int(case[0]), int(case[1]),
-							Vector3(10 + 10 * case_index, 20, 0), Vector3.ZERO))), OK)
-	var db := world.get_item_db()
-	var nodes: Array[ObjectModel] = []
-	for case_index in range(cases.size()):
-		var case: Array = cases[case_index]
-		var node := _placed_node(world, placed[case_index])
-		nodes.append(node)
-		if node == null:
-			continue
-		assert_eq(_fx_rows_for_node(world, node).size(), int(case[2]),
-				"kind %d attrib 0x%x" % [int(case[0]), db.get_attrib(int(case[1]))])
-
-	assert_eq(world.get_effect_world().get_debug_group_report().size(), 2,
-			"only normal pool-1 plus allowed pool-2/3 entities attach")
-	var anchor_info := _fx_anchor_info()
-	var item_rows: Array = _fx_rows_for_node(world, nodes[1]) if nodes[1] != null else []
-	if item_rows.size() == 1:
-		var row: EffectGroupReport = item_rows[0]
-		assert_eq(String(row.owner_key),
-				"itemfx:%d:%d" % [nodes[1].get_instance_id(), _fx_anchor_index()],
-				"the emitter is keyed to the model's matched MFlash01 point")
-		assert_true(row.transform.origin
-				.is_equal_approx(nodes[1].global_transform * anchor_info.position),
-				"the effect anchors at the real model's MFlash01 point")
-		assert_eq(row.binding, EffectScene.BINDING_FOLLOW_OWNER,
-				"an entity-attached emitter follows its owner")
-	# A registered attachment is never duplicated by a re-run of the attach
-	# entry: neither the retry the particle switch triggers on re-enable nor a
-	# replayed wire-node callback (the same guarded entry) touches a registered
-	# node.
-	world.set_particles_hidden(true)
-	world.set_particles_hidden(false)
-	assert_eq(world.get_effect_world().get_debug_group_report().size(), 2,
-			"a replayed attach cannot duplicate an existing attach")
-	if nodes[1] != null:
-		world.get_item_effect_director().on_wire_node_spawned(
-				nodes[1], MissionData.KIND_ITEM, 108002)
-		assert_eq(_fx_rows_for_node(world, nodes[1]).size(), 1,
-				"a replayed wire-node callback cannot duplicate an existing attach")
-
-	# A persistent item first materialized while the retail master switch is off
-	# must attach once when particles are re-enabled; a mission loaded hidden
-	# otherwise loses that effect permanently.
-	world.set_particles_hidden(true)
-	world.unload()
-	placed.clear()
-	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
-			func(mission: MissionData) -> void:
-				placed.append(mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(10, 20, 0), Vector3.ZERO))
-				placed.append(mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(20, 20, 0), Vector3.ZERO))), OK)
-	assert_true(world.get_effect_world().get_debug_group_report(true).is_empty(),
-			"a hidden load defers every persistent attachment")
-	# A wire node may despawn while particles are disabled: the deferred entry
-	# of a freed node is pruned instead of retried.
-	var despawned := _placed_node(world, placed[1])
-	if despawned != null:
-		despawned.free()
-	world.set_particles_hidden(false)
-	assert_eq(world.get_effect_world().get_debug_group_report().size(), 1,
-			"re-enable retries the hidden-at-load persistent attachment once; "
-			+ "a node freed while hidden is pruned instead of retried")
-	world.set_particles_hidden(false)
-	assert_eq(world.get_effect_world().get_debug_group_report().size(), 1,
-			"steady enabled state cannot duplicate it")
-	assert_eq(world.get_item_effect_director().get_stats().pending_nodes, 0,
-			"the retried and pruned entries leave nothing pending")
-
-
-func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
-	# Shipped DBuggy1.3di: ITEMS.DEF item 101291 is PlayerControl (0x40) and
-	# authors Effect_whiteExhaust at model userpoint FX00. It stays dormant in
-	# the mission-start pool walk, then follows controller occupancy events.
-	# (The staged twin keeps the id and the PlayerControl attrib over the
-	# synthetic mount.3di / MFlash01 / Buildup fixtures; the node reaches the
-	# world's director the way the present pass's wire callback hands it over.)
-	const DBUGGY_ITEM := 101291
-	var root_dir := _stage_item_fx_fixture("dbuggy_lifecycle", [
-		{"id": DBUGGY_ITEM, "attribs": "PlayerControl",
-				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-	])
-	var world := WorldFixture.boot_minimal(self, root_dir)
-	var director := world.get_item_effect_director()
-	watch_signals(world)
-
-	var spawn_origin := int(Simulation.spawn_origin_pack(MissionData.KIND_ITEM, 3))
-	var started := MissionEffect.make("vehicle_control_started", 71, 9001, spawn_origin)
-	var stopped := MissionEffect.make("vehicle_control_stopped", 71, 9001, spawn_origin)
-
-	# The simulation event can precede the present pass's wire/model callback.
-	world.get_runtime().effects_drained.emit([started])
-	assert_eq(director.get_stats().control_active, 3,
-			"the start records every identity alias (net id, BMS id, spawn origin)")
-	assert_signal_not_emitted(world, "mission_effects",
-			"render-internal lifecycle events never leak to HUD consumers")
-	var node := _fx_wire_node(world,
-			EntityRef.make(MissionData.KIND_ITEM, 3, 9001, DBUGGY_ITEM))
-	director.on_wire_node_spawned(node, MissionData.KIND_ITEM, DBUGGY_ITEM)
-	assert_eq(director.get_stats().control_nodes, 1,
-			"the PlayerControl node registers for its controller lifecycle")
-	var rows := _fx_rows_for_node(world, node)
-	assert_eq(rows.size(), 1,
-			"a node presented after the start event attaches on arrival")
-	var first_group := 0
-	if rows.size() == 1:
-		var row: EffectGroupReport = rows[0]
-		first_group = int(row.id)
-		assert_eq(row.name, FX_PERSISTENT_EFFECT)
-		var anchor_info := _fx_anchor_info()
-		assert_eq(String(row.owner_key),
-				"itemfx:%d:%d" % [node.get_instance_id(), _fx_anchor_index()])
-		assert_true(row.transform.origin
-				.is_equal_approx(node.global_transform * anchor_info.position),
-				"the effect anchors at the real model's MFlash01 point")
-
-	# Replayed starts are idempotent; a single transition stop detaches the
-	# exact native group the receipt-bearing facade created.
-	world.get_runtime().effects_drained.emit([started])
-	assert_eq(_fx_rows_for_node(world, node).size(), 1)
-	world.get_runtime().effects_drained.emit([stopped])
-	assert_true(_fx_rows_for_node(world, node).is_empty(),
-			"the stop detaches the controller group")
-	var detached := _fx_rows_for_node(world, node, true)
-	assert_eq(detached.size(), 1)
-	if detached.size() == 1:
-		assert_eq(int((detached[0] as EffectGroupReport).id), first_group,
-				"the stop detaches exactly the group the start created")
-	assert_eq(director.get_stats().control_active, 0,
-			"the stop retires every identity alias")
-
-	# A later control transition can create a fresh group, and a mixed drain
-	# exposes only the public effect after consuming the lifecycle row.
-	world.get_runtime().effects_drained.emit([started])
-	rows = _fx_rows_for_node(world, node)
-	assert_eq(rows.size(), 1)
-	if rows.size() == 1:
-		assert_ne(int((rows[0] as EffectGroupReport).id), first_group,
-				"a later control transition creates a fresh group")
-	var public_effect := MissionEffect.make("text", 0, 0, 0, "still public")
-	world.get_runtime().effects_drained.emit([stopped, public_effect])
-	assert_true(_fx_rows_for_node(world, node).is_empty(),
-			"the mixed drain's lifecycle row still detaches the group")
-	assert_signal_emitted_with_parameters(
-			world, "mission_effects", [[public_effect]])
-
-
-func test_dbuggy_hidden_pending_is_cancelled_when_control_stops() -> void:
-	const DBUGGY_ITEM := 101291
-	var root_dir := _stage_item_fx_fixture("dbuggy_hidden_pending", [
-		{"id": DBUGGY_ITEM, "attribs": "PlayerControl",
-				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-	])
-	var world := WorldFixture.make_world(self)
-	world.set_particles_hidden(true)
-	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
-	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
-			func(mission: MissionData) -> void:
-				placed.append(mission.add_entity(
-						MissionData.KIND_ITEM, DBUGGY_ITEM, Vector3(10, 20, 0), Vector3.ZERO))), OK)
-	var node := _placed_node(world, placed[0])
-	if node == null:
-		return
-	var director := world.get_item_effect_director()
-	assert_true(world.get_effect_world().get_debug_group_report(true).is_empty(),
-			"the unchanged mission-start 0x42 gate keeps PlayerControl dormant")
-	var started := _control_effect("vehicle_control_started", 81, placed[0])
-	var stopped := _control_effect("vehicle_control_stopped", 81, placed[0])
-	# A start under the hidden switch defers the activation: the director's
-	# pending count reads the deferral, and the group that appears -- or not --
-	# when the switch lifts is its consequence.
-	world.get_runtime().effects_drained.emit([started])
-	assert_true(world.get_effect_world().get_debug_group_report(true).is_empty(),
-			"a hidden activation spawns nothing yet")
-	assert_eq(director.get_stats().pending_nodes, 1,
-			"a hidden activation is deferred, not lost")
-	world.get_runtime().effects_drained.emit([stopped])
-	assert_eq(director.get_stats().pending_nodes, 0,
-			"stop cancels a hidden activation before particles are re-enabled")
-	world.set_particles_hidden(false)
-	assert_true(_fx_rows_for_node(world, node, true).is_empty(),
-			"stop cancels a hidden activation before particles are re-enabled: "
-			+ "re-enable cannot resurrect a stopped controller attachment")
-	# The control leg: a hidden activation still live when the switch lifts
-	# attaches once, so the cancel above is a real cancel.
-	world.set_particles_hidden(true)
-	world.get_runtime().effects_drained.emit([started])
-	assert_true(world.get_effect_world().get_debug_group_report(true).is_empty())
-	assert_eq(director.get_stats().pending_nodes, 1)
-	world.set_particles_hidden(false)
-	assert_eq(_fx_rows_for_node(world, node).size(), 1,
-			"a live hidden activation attaches once when particles are re-enabled")
-	assert_eq(director.get_stats().pending_nodes, 0)
-
-
-func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
-	const DBUGGY_ITEM := 101291
-	var root_dir := _stage_item_fx_fixture("net_id_wire_alias", [
-		{"id": DBUGGY_ITEM, "attribs": "PlayerControl",
-				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-	])
-	var world := WorldFixture.boot_minimal(self, root_dir)
-	var director := world.get_item_effect_director()
-
-	world.get_runtime().effects_drained.emit(
-			[MissionEffect.make("vehicle_control_started", 77, 0, 0)])
-	assert_eq(director.get_stats().control_active, 1,
-			"the start records its simulation net id alias")
-	var model := _fx_wire_node(world,
-			EntityRef.make(MissionData.KIND_ITEM, 12, 0, DBUGGY_ITEM, 77))
-	director.on_wire_node_spawned(model, MissionData.KIND_ITEM, DBUGGY_ITEM)
-	assert_eq(director.get_stats().control_nodes, 1,
-			"the wire node registers for its controller lifecycle")
-	assert_true(_fx_rows_for_node(world, model).is_empty(),
-			"event a is a simulation net id, not the presentation wire handle")
-
-
-func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> void:
-	const PLAYER_CONTROL_ITEM := 101291
-	var root_dir := _stage_item_fx_fixture("wire_siblings", [
-		{"id": PLAYER_CONTROL_ITEM, "attribs": "PlayerControl",
-				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-	])
-	var world := WorldFixture.boot_minimal(self, root_dir)
-	var director := world.get_item_effect_director()
-
-	var siblings: Array[ObjectModel] = []
-	for wire_handle in [0x1004, 0x1005]:
-		var ref := EntityRef.make(MissionData.KIND_ITEM, 0xffffff, 0,
-				PLAYER_CONTROL_ITEM, wire_handle)
-		ref.origin_kind = 0xff
-		var model := _fx_wire_node(world, ref)
-		director.on_wire_node_spawned(model, MissionData.KIND_ITEM, PLAYER_CONTROL_ITEM)
-		siblings.append(model)
-		assert_true(_fx_rows_for_node(world, model).is_empty(),
-				"a synthetic emplacement attachment stays dormant until mounted")
-	assert_eq(director.get_stats().control_nodes, 2)
-
-	var start_first := MissionEffect.make("vehicle_control_started", 0, 0, -1, "", 0, 0x1004)
-	world.get_runtime().effects_drained.emit([start_first])
-	var first_rows := _fx_rows_for_node(world, siblings[0])
-	assert_eq(first_rows.size(), 1,
-			"mounting one synthetic emplacement starts only that sibling's effect")
-	assert_true(_fx_rows_for_node(world, siblings[1]).is_empty())
-	if first_rows.size() == 1:
-		assert_eq(String((first_rows[0] as EffectGroupReport).owner_key),
-				"itemfx:%d:%d" % [siblings[0].get_instance_id(), _fx_anchor_index()])
-
-	var stop_first := MissionEffect.make("vehicle_control_stopped", 0, 0, -1, "", 0, 0x1004)
-	var start_second := MissionEffect.make("vehicle_control_started", 0, 0, -1, "", 0, 0x1005)
-	world.get_runtime().effects_drained.emit([stop_first, start_second])
-	assert_true(_fx_rows_for_node(world, siblings[0]).is_empty(),
-			"the stop detaches exactly the mounted sibling's group")
-	assert_eq(_fx_rows_for_node(world, siblings[0], true).size(), 1)
-	var second_rows := _fx_rows_for_node(world, siblings[1])
-	assert_eq(second_rows.size(), 1)
-	if second_rows.size() == 1:
-		assert_eq(String((second_rows[0] as EffectGroupReport).owner_key),
-				"itemfx:%d:%d" % [siblings[1].get_instance_id(), _fx_anchor_index()],
-				"the shared synthetic origin cannot activate a neighboring attachment")
-	# The stopped sibling's group lingers detached until its particles die; the
-	# live (attached) census is one group: the neighbor's, never both.
-	var live := 0
-	for row_v in world.get_effect_world().get_debug_group_report():
-		if not (row_v as EffectGroupReport).detached:
-			live += 1
-	assert_eq(live, 1, "one live controller group: the neighbor's, never both")
 
 
 func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void:
-	# Real batched statics: the placer's value descriptors (StaticEffectSource)
-	# feed the world's director at load. gun.3di authors MFlash01 (the matched
-	# anchor); shed.3di authors no such point (the origin-fallback leg). The
-	# first-16 mask RULE (duplicates, beyond-16 exclusion) is native and pinned
-	# by the threedi user-point-mask ctest.
+	# Real batched statics: the engine's slot-A walk attaches them at the open.
+	# gun.3di authors MFlash01 (the matched anchor); shed.3di authors no such
+	# point (the origin leg). The first-16 mask RULE (duplicates, beyond-16
+	# exclusion) is native and pinned by the threedi user-point-mask ctest.
 	var root_dir := _stage_item_fx_fixture("static_descriptors", [
 		{"id": 108002, "graphic": FX_GUN_GRAPHIC,
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
@@ -4018,7 +3629,7 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 				"the matched point's emitter is held in the entity's effect slot")
 		assert_eq(first.binding, EffectScene.BINDING_WORLD)
 		assert_eq(first.render_domain, EffectScene.RENDER_DOMAIN_WORLD)
-		assert_null(first.owner_key, "static batches never invent follow owners")
+		assert_null(first.slot_key, "the engine's slot holds it, no shell key")
 		var anchor_info := _fx_gun_anchor_info()
 		var first_transform: Transform3D = first.transform
 		assert_true(first_transform.origin.is_equal_approx(
@@ -4034,8 +3645,10 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 		assert_eq((fallback[0] as EffectGroupReport).admission, EffectScene.ADMISSION_ALWAYS,
 				"the origin leg's emitter is stored nowhere")
 		var fallback_actual: Transform3D = (fallback[0] as EffectGroupReport).transform
-		assert_true(fallback_actual.is_equal_approx(fallback_transform),
-				"an unmatched userpoint falls back to the entity origin and basis")
+		assert_true(fallback_actual.origin.is_equal_approx(fallback_transform.origin),
+				"an unmatched userpoint falls back to the entity origin")
+		assert_true(fallback_actual.basis.z.is_equal_approx(Vector3.UP),
+				"the origin leg's descriptor carries no orientation: it aims up")
 	# The registered descriptors are never revisited: the retry the particle
 	# switch triggers on re-enable skips them.
 	world.set_particles_hidden(true)
@@ -4047,7 +3660,8 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 func test_a_model_less_effect_item_spawns_its_effect_at_its_origin() -> void:
 	# A def with no graphic that names a particle effect (jox01's FX_FireFlies_20m and
 	# FX_Moths_1m rows): nothing draws, but the mission start still spawns the effect, once at
-	# the entity's position and basis (StaticEffectSource::model_less carries the witness).
+	# the entity's position, unoriented (world::ItemEmitterSystem::spawn_bone_trail carries the
+	# witness).
 	var root_dir := _stage_item_fx_fixture("model_less", [
 		{"id": 108010, "type": "effect", "graphic": "", "effect": FX_FALLBACK_EFFECT},
 	])
@@ -4063,72 +3677,15 @@ func test_a_model_less_effect_item_spawns_its_effect_at_its_origin() -> void:
 	if rows.size() == 1:
 		var row: EffectGroupReport = rows[0]
 		assert_eq(row.binding, EffectScene.BINDING_WORLD)
-		assert_true(row.transform.is_equal_approx(MissionObjectPlacer.entity_transform(
-				Vector3(-5, 6, 7), Vector3(0, 45, 0))),
-				"the emitter stands at the entity's position and basis")
+		assert_true(row.transform.origin.is_equal_approx(MissionObjectPlacer.entity_transform(
+				Vector3(-5, 6, 7), Vector3(0, 45, 0)).origin),
+				"the emitter stands at the entity's position")
+		assert_true(row.transform.basis.z.is_equal_approx(Vector3.UP),
+				"its descriptor carries no orientation: it aims up")
 	world.set_particles_hidden(true)
 	world.set_particles_hidden(false)
 	assert_eq(_fx_unowned_rows(world, FX_FALLBACK_EFFECT).size(), 1,
 			"the registered descriptor is never revisited")
-
-
-func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
-	# The REAL MissionRoot pose chain: before the first completed logic tick
-	# there is no present snapshot (the authored Node seeds the spawn); once a
-	# tick completes, the owner follows the sim's client-view value pose; an
-	# identity absent from the snapshot detaches (null). The old runtime double
-	# also recorded that the entity_ref dictionary crossed the seam by identity;
-	# that probe lived on the double and is gone — the pose values below only
-	# resolve if the real seam consumed the same stable identity. The director's
-	# resolver has no public twin, so the chain is read where it lands: the
-	# attached group's pose after the effect world's owner sync, and the
-	# runtime's own presented_entity_effect_transform seam for the absent leg.
-	var root_dir := _stage_item_fx_fixture("item_owner_pose", [
-		{"id": 108002, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-	])
-	var world := WorldFixture.make_world(self)
-	var placed: Array = []  # mutated (append), never reassigned: lambda captures copy locals
-	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
-			func(mission: MissionData) -> void:
-				placed.append(mission.add_entity(
-						MissionData.KIND_ITEM, 108002, Vector3(6, 4, 5), Vector3.ZERO))), OK)
-	var node := _placed_node(world, placed[0])
-	if node == null:
-		return
-	var effects := world.get_effect_world()
-	var runtime := world.get_runtime()
-	var anchor_offset: Vector3 = _fx_anchor_info().position
-	assert_false(runtime.has_current_present_effect_snapshot(),
-			"no logic tick has completed yet: there is no present snapshot")
-	node.global_transform = Transform3D(Basis.IDENTITY, Vector3(99, 99, 99))
-	effects.advance_fixed_tick(Simulation.tick_dt())
-	var rows := _fx_rows_for_node(world, node)
-	assert_eq(rows.size(), 1)
-	if rows.size() == 1:
-		var origin := (rows[0] as EffectGroupReport).transform.origin
-		assert_true(origin.is_equal_approx(Vector3(99, 99, 99) + anchor_offset),
-				"before the first sim snapshot, the authored Node remains the safe spawn seed")
-
-	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
-	assert_true(runtime.has_current_present_effect_snapshot())
-	var presented: Variant = runtime.presented_entity_effect_transform(node.entity_ref)
-	assert_true(presented is Transform3D)
-	rows = _fx_rows_for_node(world, node)
-	assert_eq(rows.size(), 1)
-	if rows.size() == 1 and presented is Transform3D:
-		var value_pose := presented as Transform3D
-		assert_almost_eq(value_pose.origin.x, 6.0, 0.01,
-				"a fixed tick follows the current client-view value, not the stale presented Node")
-		assert_almost_eq(value_pose.origin.z, -4.0, 0.01,
-				"the value pose rides the canonical mission-to-Godot frame")
-		var origin := (rows[0] as EffectGroupReport).transform.origin
-		assert_true(origin.is_equal_approx(value_pose * anchor_offset),
-				"the attached group rides the value pose after the tick")
-
-	assert_null(runtime.presented_entity_effect_transform(
-			EntityRef.make(MissionData.KIND_BUILDING, 999, 999999)),
-			"an owner absent from this tick detaches instead of emitting once "
-			+ "from stale presentation")
 
 
 func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
@@ -4143,14 +3700,10 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 				mission.add_entity(
 						MissionData.KIND_ITEM, 108002, Vector3(3, 4, 5), Vector3.ZERO)), OK)
 	assert_true(world.get_effect_world().get_debug_group_report(true).is_empty(),
-			"a world-bound persistent source survives a hidden mission load as values, unspawned")
-	var director := world.get_item_effect_director()
-	assert_eq(director.get_stats().pending_static, 1,
-			"a world-bound persistent source survives a hidden mission load as values")
+			"a persistent item effect is not spawned under a hidden load")
 	world.set_particles_hidden(false)
 	assert_eq(_fx_unowned_rows(world, FX_PERSISTENT_EFFECT).size(), 1,
-			"re-enabling submits the deferred static source")
-	assert_eq(director.get_stats().pending_static, 0)
+			"re-enabling submits the deferred attach")
 	world.set_particles_hidden(false)
 	assert_eq(_fx_unowned_rows(world, FX_PERSISTENT_EFFECT).size(), 1,
 			"steady enabled state cannot duplicate it")
@@ -4483,7 +4036,8 @@ func test_emit_callback_uses_live_particle_groups_on_fixed_ticks() -> void:
 				continue
 			if first_group == 0:
 				first_group = group.id
-				assert_eq(group.binding, EffectScene.BINDING_FOLLOW_OWNER)
+				assert_eq(group.binding, EffectScene.BINDING_WORLD,
+						"the slot's group is world-bound; the pool walk re-poses it")
 				assert_gt(group.transform.origin.x, 9.0, "the native group uses the placed model's userpoint")
 			if group.id == first_group:
 				first_present = true

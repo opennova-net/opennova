@@ -541,8 +541,11 @@ terrain_static_shadow_world_light_from_environment_tuple(
 		float g0, float g1, float g2) noexcept {
 	// The direct getter tuple feeds renderer axes after the fixed matrix builder
 	// maps BMS XYZ into (-Y,Z,X), i.e. presentation (Z,Y,X). Reducing that
-	// permutation back to presentation world gives (g2,g1,g0).
-	// [orig: Environment_GetLightDirectionFloat @0x57D870;
+	// permutation back to presentation world gives (g2,g1,g0). The static
+	// projection consumes the getter's floats directly; only the later DOT3
+	// bake truncates the tuple to D3DCOLOR bytes.
+	// [orig: Environment_GetLightDirectionFloat @0x57D870 read by the
+	// collector getters @0x60D2F5/0x60D2FF and the projector setup @0x60D800;
 	// Math_BuildFixedPointToFloatMatrix4x4 @0x612402..0x612457]
 	return TerrainStaticShadowLightDirection{g2, g1, g0};
 }

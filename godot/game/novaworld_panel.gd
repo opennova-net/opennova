@@ -102,11 +102,11 @@ var _pending_expansion := ""  # the joined row's GSB Exp: the host's expansion
 # reads it for every row the table draws).
 var _installed_expansions := PackedStringArray()
 var _installed_listed := false
-# rid -> the reason a server refused this install earlier in the session (another
-# protocol version (PV2) or join build, an expansion mismatch, a banned address):
-# retrying cannot work.
-# The controller keeps the record across panel instances (mark_refused).
-var _refused_servers: Dictionary = {}
+# The servers that refused this install earlier in the process (another protocol
+# version (PV2) or join build, an expansion mismatch, a banned address: retrying
+# cannot work), each with its refusal's text: the controller's one record (engine
+# BrowserRefusals), set BEFORE _ready; a panel on its own keeps an empty one.
+var refusals := NovaWorldServerBrowser.new()
 # The rid of the row the last Join press went to (the controller reads it when
 # the join leaves the panel, to remember a refusal against it).
 var _joining_rid := 0
@@ -429,14 +429,9 @@ func _unwire_client(client: NovaWorldClient) -> void:
 			client.disconnect(signal_name, handler)
 
 
-# OpenNova dials our service's gate (NovaWorldSettings.opennova_host: prod's in
-# a release export, staging's in a debug one, loopback in a source run,
-# --novaworld-host over all three). "Original NovaWorld" points the same client at NovaLogic's live gate
-# (gs.novaworld.net), which no flag moves.
+# The gate the target dials (engine net/novaworld/service_target.h target_gate_host).
 func _resolved_host() -> String:
-	if _target == NovaWorldSettings.Target.REAL:
-		return NovaWorldSettings.REAL_NOVAWORLD_HOST
-	return NovaWorldSettings.opennova_host()
+	return NovaWorldServiceTarget.target_gate_host(_target)
 
 
 func _on_target_selected(index: int) -> void:
@@ -766,8 +761,9 @@ func _update_join_button(row: NovaWorldServerRow) -> void:
 func join_block_reason(row: NovaWorldServerRow) -> String:
 	if row == null:
 		return ""
-	if _refused_servers.has(row.rid):
-		return String(_refused_servers[row.rid])
+	var refusal := refusals.refusal_reason(row.rid)
+	if not refusal.is_empty():
+		return refusal
 	if not _lacks_expansion(row):
 		return ""
 	var host_exp := row.exp.strip_edges()
@@ -1081,7 +1077,7 @@ func _on_host_failed(reason: String) -> void:
 # by the game's command file: JOPTR.CMD, DFX2.CMD, ACIDGAMBIT.CMD or a player
 # game's), each installed into expansion/<code>/ by the updater: Install writes
 # that folder's UPDATE.WIZ and runs UPDATE, Update runs UPDATE, Remove deletes
-# the folder. The site is the OpenNova target's (NovaWorldSettings.web_base). The
+# the folder. The site is the OpenNova target's (NovaWorldServiceTarget.web_base). The
 # runtime holds no web session of the account, so its owner's private mods are
 # not listed here.
 
@@ -1108,7 +1104,7 @@ static func mods_url(web_base: String, command_file: String) -> String:
 func _request_mods() -> void:
 	if _mods_request != null:
 		return
-	var web_base := NovaWorldSettings.web_base()
+	var web_base := NovaWorldServiceTarget.web_base()
 	if web_base.is_empty():
 		_mods_failed("Mods come from OpenNova's NovaWorld, and this launch's gate is NovaLogic's.")
 		return
@@ -1532,13 +1528,6 @@ func visible_cell(row: int, column: NovaWorldServerBrowser.Column) -> String:
 	if row < 0 or row >= _view.size():
 		return ""
 	return NovaWorldServerBrowser.row_cells(_view[row], _ping_for(_view[row]))[column]
-
-
-## A server that refused this install this session, with the refusal's text
-## (the controller replays its record into each panel instance).
-func mark_refused(rid: int, reason: String) -> void:
-	_refused_servers[rid] = reason
-	_rebuild_view()
 
 
 ## The rid of the row the last Join press went to.

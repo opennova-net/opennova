@@ -19,6 +19,7 @@ namespace godot {
 
 class JoinTarget;
 class MenuDriver;
+class PlayerOptionsState;
 class ResourceRoot;
 class RtxtStringFile;
 
@@ -73,6 +74,11 @@ public:
 	int get_word(const String &p_key) const;
 	void set_word(const String &p_key, int p_value);
 
+	// The player's options over the block's words (engine runtime/inmatch/player_options.h):
+	// the normalized read, and the write of a record (normalized) that returns what it wrote.
+	Ref<PlayerOptionsState> read_player_options() const;
+	Ref<PlayerOptionsState> write_player_options(const Ref<PlayerOptionsState> &p_state);
+
 	// The host screen over the block (the engine's host_settings.h): the
 	// populate's write (the block's cap clamped to the screen's), each
 	// control's shown value by its name, and START's read of one control into
@@ -89,21 +95,6 @@ public:
 	// from the block, and START's read of them into it.
 	void populate_host_screen(const Ref<MenuDriver> &p_driver);
 	void read_host_screen(const Ref<MenuDriver> &p_driver);
-	// The screen's restriction lists over the block (the engine's populate_host_weapon_list /
-	// populate_host_class_list): the dialog's init fills both and gives its START gate the class
-	// words; the LAN screen's activation fills WEAPON_LIST again. `gametext` names the weapons
-	// (WepDes), `menu_ui` (Game.bin) the classes and the words.
-	void populate_host_restrictions(const Ref<MenuDriver> &p_driver, const Ref<RtxtStringFile> &p_gametext,
-			const Ref<RtxtStringFile> &p_menu_ui);
-	void populate_host_weapon_list(const Ref<MenuDriver> &p_driver, const Ref<RtxtStringFile> &p_gametext,
-			const Ref<RtxtStringFile> &p_menu_ui);
-	// A restriction list's cell press and a set-every-word radio's press (the engine's
-	// host_restriction_list_pressed / host_restriction_radio_pressed): false when the press was
-	// not one of theirs.
-	bool host_restriction_list_pressed(const Ref<MenuDriver> &p_driver, const String &p_widget, int p_row,
-			int p_column, const Ref<RtxtStringFile> &p_menu_ui);
-	bool host_restriction_radio_pressed(const Ref<MenuDriver> &p_driver, const String &p_control,
-			const Ref<RtxtStringFile> &p_menu_ui);
 	// Single player's mission start's block write after its save (the engine's
 	// GameConfigBlock::single_player_mission_start).
 	void single_player_mission_start() { block_.single_player_mission_start(); }

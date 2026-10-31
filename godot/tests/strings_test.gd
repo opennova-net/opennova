@@ -1,15 +1,9 @@
 extends GutTest
 
-## Strings runtime model tests: the named-table registry, the override
-## table consulted before every lookup, and the engine-faithful section-scoped
-## lookup with its visible ??section:key?? miss marker.
-##
-## Mirrors the original engine's table model: four global tables loaded at init
-## [orig: Game_InitSubsystems @ 0x4A6CD0], one expansion override table
-## [orig: TextResource_LoadOverrideTable @ 0x75D5C0], and miss formatting from
-## the error path [orig: GameErr_GetString @ 0x4C2C60].
-
-const TMP_TABLE := "user://strings_table_test.bin"
+## The Strings autoload over the engine's named string tables (TextTables): a registered table
+## reads back as the object registered, a table the registry holds alone comes back as a binding
+## over it, and clear() forgets the tables, the override table and the binding labels' table. The
+## lookup rules themselves are the engine's (ctest rtxt_text_tables).
 
 
 func before_each() -> void:
@@ -18,8 +12,6 @@ func before_each() -> void:
 
 func after_all() -> void:
 	Strings.clear()
-	if FileAccess.file_exists(TMP_TABLE):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(TMP_TABLE))
 
 
 func _make_table(section: String, key: String, text: String) -> RtxtStringFile:
@@ -29,75 +21,30 @@ func _make_table(section: String, key: String, text: String) -> RtxtStringFile:
 	return t
 
 
-func test_register_and_lookup_by_table_name() -> void:
-	Strings.register_table("gametext", _make_table("Item Names", "STR_ITM0001", "M4 Carbine"))
-	assert_not_null(Strings.get_table("GAMETEXT"), "table names are case-insensitive")
+func test_a_registered_table_reads_back_as_itself() -> void:
+	var table := _make_table("Item Names", "STR_ITM0001", "M4 Carbine")
+	Strings.register_table("gametext", table)
+	assert_same(Strings.get_table("GAMETEXT"), table, "names match without case")
 	assert_eq(Strings.lookup("gametext", "Item Names", "str_itm0001"), "M4 Carbine")
-
 	Strings.register_table("gametext", null)
 	assert_null(Strings.get_table("gametext"), "registering null unregisters")
 
 
-func test_lookup_miss_returns_engine_marker() -> void:
-	Strings.register_table("gameerr", _make_table("Errors", "ERR_NET", "Network failure"))
-	assert_eq(Strings.lookup("gameerr", "Errors", "NOPE"), "??Errors:NOPE??",
-		"a miss must produce the original engine's visible marker")
-	assert_eq(Strings.lookup("gameerr", "Wrong Section", "ERR_NET"), "??Wrong Section:ERR_NET??",
-		"section scoping is part of the lookup")
-	assert_eq(Strings.lookup("unregistered", "s", "k"), "??s:k??",
-		"an unknown table also resolves to the miss marker")
+## An edit through the registered binding is the registry's table: the engine reads the same one.
+func test_edits_reach_the_engine_registry() -> void:
+	var table := _make_table("Overlays", "STROVER_A", "Before")
+	Strings.register_table("gametext", table)
+	table.set_entry_text(0, "After")
+	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_A", "fb"), "After")
 
 
-func test_override_table_wins_before_named_tables() -> void:
-	Strings.register_table("gametext", _make_table("menu", "TITLE", "Base game title"))
-	Strings.set_override_table(_make_table("menu", "TITLE", "Expansion title"))
-	assert_eq(Strings.lookup("gametext", "menu", "TITLE"), "Expansion title",
-		"the override table is consulted first, like the expansion text bin")
-
-	Strings.set_override_table(null)
-	assert_eq(Strings.lookup("gametext", "menu", "TITLE"), "Base game title",
-		"clearing the override restores base lookups")
-
-
-## lookup_or and has_text search the one installed override table first (the engine's section
-## lookup, RtxtStringFile.text_or), a key it lacks reads the named table, an absent table answers
-## the fallback before any search.
-func test_lookup_or_reads_the_installed_override_first() -> void:
-	Strings.register_table("gametext", _make_table("Overlays", "STROVER_A", "Base"))
-	Strings.set_override_table(_make_table("Overlays", "STROVER_A", "Expansion"))
-	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_A", "fb"), "Expansion")
-	assert_true(Strings.has_text("gametext", "Overlays", "STROVER_A"))
-	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_B", "fb"), "fb")
-	assert_false(Strings.has_text("gametext", "Overlays", "STROVER_B"))
-	assert_eq(Strings.lookup_or("absent", "Overlays", "STROVER_A", "fb"), "fb",
-			"no table answers the fallback, the override unsearched")
-	assert_false(Strings.has_text("absent", "Overlays", "STROVER_A"))
-	Strings.set_override_table(null)
-	assert_eq(Strings.lookup_or("gametext", "Overlays", "STROVER_A", "fb"), "Base")
-
-
-func test_override_only_shadows_keys_it_has() -> void:
+func test_clear_forgets_the_tables_and_the_override() -> void:
 	Strings.register_table("gametext", _make_table("menu", "TITLE", "Base"))
-	Strings.set_override_table(_make_table("menu", "OTHER", "Override"))
-	assert_eq(Strings.lookup("gametext", "menu", "TITLE"), "Base",
-		"keys missing from the override fall through to the named table")
-
-
-func test_lookup_display_strips_hotkey() -> void:
-	Strings.register_table("menutxt", _make_table("menu", "BTN_OK", "{hot}OK"))
-	assert_eq(Strings.lookup("menutxt", "menu", "BTN_OK"), "{hot}OK", "lookup returns raw text")
-	assert_eq(Strings.lookup_display("menutxt", "menu", "BTN_OK"), "OK", "display strips the marker")
-	assert_eq(Strings.lookup_display("menutxt", "menu", "MISSING"), "??menu:MISSING??",
-		"the miss marker is never hotkey-stripped")
-
-
-func test_legacy_single_table_api_unchanged() -> void:
-	var t := _make_table("menu", "KEY", "value")
-	assert_eq(t.save_to_path(TMP_TABLE), OK)
-	assert_eq(Strings.load_table(TMP_TABLE), OK)
-	assert_true(Strings.is_loaded())
-	assert_eq(Strings.get_string("key"), "value")
-	assert_eq(Strings.get_string("missing", "fallback"), "fallback")
+	_make_table("menu", "OV", "Override").install_text_override()
+	Strings.register_table(Strings.TABLE_KEYHELP, _make_table("Keys", "SPACE", "Space"))
+	assert_true(RtxtStringFile.has_key_strings(), "keyhelp's registration installs the labels")
 	Strings.clear()
-	assert_false(Strings.is_loaded())
-	assert_null(Strings.get_override_table(), "clear() also resets the registry and override")
+	assert_null(Strings.get_table("gametext"))
+	assert_eq(Strings.lookup("gametext", "menu", "OV"), "??menu:OV??",
+		"clear() forgets the installed override")
+	assert_false(RtxtStringFile.has_key_strings(), "clear() forgets the binding labels")

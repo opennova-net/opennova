@@ -12,6 +12,7 @@
 #include <net/npwire/counting_datagram_socket.h>
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/charattr_table.h>  // CharAttrTable
+#include <runtime/inmatch/joiner_boot.h>     // JoinerSettings (the join's retained words)
 #include <runtime/inmatch/game_config.h>          // GameConfig
 #include <runtime/inmatch/joiner_connection.h>    // JoinerConnection::DiscoveredSession
 #include <runtime/inmatch/loaded_model_list.h>    // LoadedModelListEntry (the model-list readout)
@@ -124,33 +125,21 @@ struct SimulationNetState {
 	// --- the joiner's retained join inputs -----------------------------------
 	// The per-second joiner trace switch (`net_joiner_diagnostics`).
 	bool joiner_net_diagnostics = false;
-	// Retail authenticates with one packed Avatars.def selection for each side.
-	// GameWorld resolves the active profile before enable_join; retained here
-	// because a direct-loaded join rebuilds ClientRuntime at load.
-	opennova::inmatch::CharacterJoinVars join_character_vars{};
-	bool join_character_vars_set = false;
+	// The join's retained words (engine inmatch/joiner_boot.h JoinerSettings): the profile's
+	// packed Avatars.def selections, the JOIN checksum's install root, the APPID token, the CD
+	// cookie, the GLSVSS request, the browse row's 0x81, the load seams and the network type.
+	// Every runtime the join builds takes them, the dial's and a direct load's rebuild alike
+	// (inmatch::install_joiner_runtime).
+	opennova::inmatch::JoinerSettings joiner;
 	// The listen host's own type-2 connection consumes the same profile shape,
 	// installed before its authoritative player spawn.
 	opennova::inmatch::CharacterJoinVars local_character_vars{};
 	bool local_character_vars_set = false;
-	// The install root the joiner's JOIN VERSIONCRCSTRING checksum reads its
-	// loose expansion/<name>/version.txt from (D-NET-166). Empty keeps the
-	// golden "0". Retained across direct-load runtime rebuilds.
-	std::string join_expansion_version_root;
 	// The title the session speaks (set_protocol); null until the shell names one.
 	const opennova::Protocol *protocol = nullptr;
 	// The title the session runs as (set_game_title): its player caps and its rules; null until
 	// the shell names one (sim_internal::session_title then reads the mounted root's game).
 	const opennova::Title *game_title = nullptr;
-	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
-	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.
-	std::string app_id = "0";
-	// The joiner's S2C 0x11 load seam (JoinerConnection::set_sync_tail_loading): the shell's
-	// terrain load runs at the 0x11, ahead of the 0x0A. Retained across rebuilds.
-	bool join_sync_tail_loading = false;
-	// The joiner's final S2C 0x64 load seam (JoinerConnection::set_mission_data_loading): the
-	// shell's effect system load runs there, ahead of the 0x09. Retained across rebuilds.
-	bool join_mission_data_loading = false;
 	// The count of the loaded-model list frozen at this mission's load
 	// (finalize_loaded_model_challenge_snapshot): a host's S2C 0x68 cursor wrap.
 	uint32_t loaded_model_list_count = 0;
@@ -160,22 +149,6 @@ struct SimulationNetState {
 	// The same list's nodes head first, foliage included (inmatch::loaded_model_list_entries):
 	// the model-list readout's (an instrument).
 	std::vector<opennova::inmatch::LoadedModelListEntry> mission_start_model_entries;
-	// The joiner's network type (JoinTarget::network_type; retail's
-	// g_NapiNPCtx.network_type on the client). Retained across rebuilds.
-	opennova::inmatch::NetworkType join_network_type = opennova::inmatch::NetworkType::Lan;
-	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN (codes 23/24/25).
-	// Empty for LAN. Retained across direct-load runtime rebuilds.
-	std::vector<uint8_t> join_cd_cookie;
-	// The gate's GLSVSSREQUEST for a NovaWorld 0x00 JOIN (D-NET-723). Empty for LAN. Retained
-	// across direct-load runtime rebuilds.
-	std::string join_glsvss_request;
-	// The CD-key ids a LAN 0x00 JOIN leads with: this machine's activation as the process's
-	// record holds it at the join (machine_activation_cd_keys, network/novaworld_identity.h).
-	// Retained across direct-load runtime rebuilds.
-	opennova::cdkey::WireKeys join_cd_key_ids;
-	// The browse row's 0x81 record a join from it connects with (no 0x41).
-	// Retained across direct-load runtime rebuilds.
-	opennova::inmatch::JoinerConnection::DiscoveredSession join_discovered_session;
 	// The transport the join goes on with (JoinTarget.transport, D-NET-1019); null
 	// = enable_join binds its own over the client port range.
 	Ref<UdpPump> join_transport;

@@ -25,6 +25,7 @@
 #include <net/protocol/gate_tag.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/host_listing_binding.h> // the mission start's read (both hosts')
 #include <runtime/inmatch/loaded_model_list.h> // the S2C 0x68 cursor's wrap
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/mission_exit.h>
@@ -32,6 +33,7 @@
 #include <runtime/inmatch/punt_log.h> // the connect log's socket teardown line
 #include <runtime/inmatch/server_console.h> // the chat display wrap
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the start's update)
+#include <runtime/mission/mission_load.h> // the load plan's executor (the game's order)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
 #include <runtime/controls/controls.h> // title_catalog (the role's binding catalog)
@@ -536,32 +538,52 @@ bool Server::start_session(std::string &error) {
 //  @0x524A5D / @0x525251 follow].
 void Server::run_mission_start_update(const std::string &header_name, int32_t climate) {
 	if (listing_ == nullptr || lister_ == nullptr || lister_->finished()) return;
-	HostRegistration r = listing_columns();
+	// The mission start's own columns (inmatch::apply_mission_start_columns carries the witness):
+	// the mission text's title else the header's name, its climate, TimeOfDay 0, the last round's
+	// clock.
+	inmatch::MissionStartListing mission;
+	mission.mission_text_title = boot_.mission_text.get_string("info", "title");
+	mission.header_name = header_name;
+	mission.climate = climate;
+	mission.last_round_ticks = client_process_.round_time_remaining_ticks;
+	const hud::GameTextLookup gametext = [this](const char *section, const char *key,
+												 const char *fallback) {
+		return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
+	};
 	// The session the boot's head created ahead of this mission start (HostRole::create_session,
 	// D-NET-1254): its columns over the settings, as a bound listing reads them, the round-state
-	// init's GameServerBaffleKey and the cookie-key ring's first key among them.
+	// init's GameServerBaffleKey and the cookie-key ring's first key among them, then the mission
+	// start's over them, the read the game's listen host publishes too
+	// (inmatch::set_mission_start_columns).
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState called
 	//  @0x5695B3 (the g_GameServerBaffleKey store @0x51CB88, CSessionIdRing_Init called @0x51CB8E),
 	//  ahead of GameLoop_Init's Game_StartMission call @0x526377; Lobby_UpdateServerInfo @0x4FE8C0 -
 	//  the ring's current key @0x4FF191..0x4FF196, g_GameServerBaffleKey read @0x4FF1CC]
-	if (role_ != nullptr)
-		inmatch::read_session_listing_columns(r, role_->state.host_owner.ctx,
-				[this](const char *section, const char *key, const char *fallback) {
-					return game_text(have_gametext_ ? &gametext_ : nullptr, section, key, fallback);
-				});
-	// Then the mission start's own columns (inmatch::apply_mission_start_columns carries the
-	// witness): the mission text's title else the header's name, its climate, TimeOfDay 0, the last
-	// round's clock.
-	inmatch::apply_mission_start_columns(r, boot_.mission_text.get_string("info", "title"),
-			header_name, climate, client_process_.round_time_remaining_ticks);
+	inmatch::NapiNPServerCtx *ctx = role_ != nullptr ? &role_->state.host_owner.ctx : nullptr;
+	const inmatch::HostListingBinding::MatchContext match = [ctx] { return ctx; };
+	HostRegistration r = listing_columns();
+	if (ctx != nullptr) inmatch::read_mission_start_columns(r, *ctx, gametext, mission);
 	listing_->set_base(std::move(r));
+	inmatch::set_mission_start_columns(lister_->host_role(), match, gametext, mission);
 	lister_->publish_server_info(rotation_.round_count);
 	(void)lister_->tick(wall_ms());
 	// A hosting second listing publishes the same mission start on its own session.
 	if (second_lister_ != nullptr && second_published_ && second_lister_->hosting()) {
+		inmatch::set_mission_start_columns(second_lister_->host_role(), match, gametext, mission);
 		second_lister_->publish_server_info(rotation_.round_count);
 		(void)second_lister_->tick(wall_ms());
 	}
+}
+
+// A loading step of the mission load (mission/mission_load.h): the NovaWorld session's periodic
+// update, which retail's mission start runs past each loading present with no role test, a
+// dedicated host's too (inmatch::run_loading_step carries the witness, D-NET-1238), here the
+// listing's pass as the mission start's update runs it; nothing on a LAN host.
+void Server::run_loading_step_update() {
+	if (listing_ == nullptr || lister_ == nullptr || lister_->finished()) return;
+	(void)lister_->tick(wall_ms());
+	if (second_lister_ != nullptr && second_published_ && second_lister_->hosting())
+		(void)second_lister_->tick(wall_ms());
 }
 
 // The listing meets the mission that just started: the live source reads the new kernel and the
@@ -770,15 +792,12 @@ bool Server::read_host_file(std::string &error) {
 bool Server::boot_mission(bool next_mission, std::string &error) {
 	const inmatch::MissionRotation &list = rotation_.list;
 	// The map is the rotation's output, loaded from disk when its catalog row
-	// is a loose find and from the archives otherwise
-	// [orig: Game_StartMission @0x524769..0x524774 passes g_MapFileName and
-	//  g_MissionSourceIsLoose to the BMS load; Mission_LoadBMSFile
-	//  @0x40F51A..0x40F527 fopens a loose one].
+	// is a loose find and from the archives otherwise (mission_catalog::bms_lookup
+	// carries the witness).
 	const std::string map_file = list.map_file;
 	std::vector<uint8_t> bms_bytes;
 	if (!index_.read_file(map_file, bms_bytes,
-				list.map_source_is_loose ? VfsLookupPolicy::ForceLooseFirst
-										 : VfsLookupPolicy::ForceArchiveOnly)) {
+				mission_catalog::bms_lookup(list.map_source_is_loose))) {
 		error = "the mission '" + map_file + "' does not read";
 		return false;
 	}
@@ -943,7 +962,17 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		kernel_ = std::move(fresh);
 		return *kernel_;
 	};
-	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) {
+	// The load plan's order, the game's (mission/mission_load.h): a headless host fills the
+	// session's legs alone, so its boot leaves the mission start's head and the load end to the
+	// plan's points past the mission textures stage, as the game's Serve Only host does. Phase A
+	// runs the session's head, its window and its stage pumps itself (no device loads ahead of
+	// it), the freeze runs ahead of the render arm's last pumps and phase B, and the load end
+	// follows phase B.
+	request.render_arm_deferred = true;
+	mission::MissionLoadLegs legs;
+	legs.session.loading_step = [this] { run_loading_step_update(); };
+	legs.session.start_runtime = [this, &request, &error]() {
+		if (inmatch::boot_host_mission(std::move(request), boot_, error)) return 0;
 		// The session create's mpreset exit: retail's crt_exit(0) ends the
 		// process inside the create, so Game_Run's exit tail never runs (no
 		// game.cfg save, no banned.txt save, activesrvr.txt left behind); its
@@ -956,19 +985,30 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			reset_exit_ = true;
 			exit_save_owed_ = false;
 		}
-		return false;
-	}
-	// No device stages run between the phases on a headless host.
-	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
+		return 1;
+	};
+	legs.session.role = [] { return mission::MissionLoadRole::DedicatedHost; };
+	legs.session.mission_start_deferred = [this] { return boot_.mission_start_head_owed; };
 	// The mission start freezes its model-def list, whose count every S2C 0x68
 	// cursor wraps at: a dedicated host builds it from the mission's loads,
 	// with no renderer and no foliage leg [orig: Game_StartMission @0x524360
 	// (the dedicated jump @0x5259B4..0x5259BF, the call @0x525A6E) ->
 	// Render_InitMissionTextures @0x587120 (the reduced arm's call @0x58728C)
 	// -> CEffectWorld_ResolveMaterialsAndRebuildChallengeList @0x5B3A80].
-	loaded_model_list_count_ = static_cast<uint32_t>(inmatch::mission_start_model_page(
-			*kernel_, mission::boot_files_from_index(index_), &boot_.charattr,
-			/*authority=*/true, /*dedicated=*/true).size());
+	legs.session.freeze_model_list = [this] {
+		loaded_model_list_count_ = static_cast<uint32_t>(inmatch::mission_start_model_page(
+				*kernel_, mission::boot_files_from_index(index_), &boot_.charattr,
+				/*authority=*/true, /*dedicated=*/true).size());
+	};
+	legs.session.pump_render_arm = [this] { role_->pump_render_arm_ahead_of_textures(); };
+	// No device stages ran: phase B over the boot's own weather owner.
+	legs.session.mission_start_boundary = [this, &error]() {
+		return inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error) ? 0 : 1;
+	};
+	legs.session.end_host_load = [this] { inmatch::end_host_mission_load(boot_); };
+	mission::MissionLoadArm arm;
+	arm.dedicated = true;
+	if (mission::run_mission_load(arm, legs) != 0) return false;
 	++missions_played_;
 	io::logf(io::LogLevel::kInfo,
 			"opennova-serve: '%s' (%s) up: %d entities, terrain %s, WAC %s, %u player slot(s)",
@@ -1336,11 +1376,6 @@ SecondListingReport Server::second_listing_report() const {
 
 void Server::tick_second_listing() {
 	if (!second_listing_wanted() || listing_ == nullptr) return;
-	// The torn-down tries' web exchanges that landed go.
-	second_http_left_.erase(std::remove_if(second_http_left_.begin(), second_http_left_.end(),
-			[](const std::future<net::HttpReply> &left) {
-				return left.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-			}), second_http_left_.end());
 	if (second_stopped_) return;
 	const uint32_t now = wall_ms();
 	if (second_lister_ == nullptr) {
@@ -1473,9 +1508,8 @@ void Server::end_second_listing(bool stop_hosting) {
 	else
 		second_lister_->disconnect();
 	if (demux_ != nullptr) demux_->set_session_claim(nullptr, kSecondListingLane);
-	// A web exchange still out lands on its own: the lister goes without waiting on it.
-	std::future<net::HttpReply> left = second_lister_->release_http();
-	if (left.valid()) second_http_left_.push_back(std::move(left));
+	// A web exchange still out lands on its own: the lister goes without waiting on it
+	// (BrowserChannel drops it).
 	second_lister_.reset();
 	second_published_ = false;
 }
@@ -1634,7 +1668,6 @@ void Server::stop() {
 		lister_.reset();
 	}
 	second_resolve_ = {};
-	second_http_left_.clear();
 	listing_.reset();
 	demux_.reset();
 	datagrams_.reset();

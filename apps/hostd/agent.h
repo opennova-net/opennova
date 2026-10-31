@@ -43,7 +43,7 @@
 #include "tree_store.h"
 
 #include "core/proc_stats.h"
-#include "net_http.h"
+#include <net/http/http_exchange.h>
 
 #include <cstdint>
 #include <functional>
@@ -77,7 +77,7 @@ public:
 			const std::string &path, const std::string &bearer, const std::string &body) = 0;
 };
 
-// The real link: one HTTP exchange per call (apps/common/net_http.h) to
+// The real link: one HTTP exchange per call (net/http/http_exchange.h) to
 // `base_url`, "http://<host>:<port>" (the fleet program's internal name, or a
 // private address). Each call tries every IPv4 address the host resolves to,
 // in turn, until one takes the connection: while the fleet leader is replaced,

@@ -40,6 +40,20 @@ void expect(bool condition, const std::string &message) {
 int main() {
 	using namespace opennova::renderer;
 
+	// The alpha test's device state: on with flag bit 0, the reference byte / 255,
+	// inverted with bit 1; off, a zero reference.
+	{
+		const MaterialAlphaTest off = material_alpha_test(0x02u, 128);
+		expect(!off.enabled && off.reference == 0.0f && !off.inverted,
+		       "no alpha test without flag bit 0");
+		const MaterialAlphaTest on = material_alpha_test(0x01u, 51);
+		expect(on.enabled && on.reference == 51.0f / 255.0f && !on.inverted,
+		       "the reference byte feeds the compare exactly");
+		const MaterialAlphaTest inverted = material_alpha_test(0x03u, 255);
+		expect(inverted.enabled && inverted.reference == 1.0f && inverted.inverted,
+		       "flag bit 1 inverts the test");
+	}
+
 	// Retail's generated gsys_phong bytes, including its truncation rule.
 	expect(object_phong_map_texel(0, 0) == ObjectPhongMapTexel{0, 0, 0, 0},
 	       "PhongMap black endpoint");

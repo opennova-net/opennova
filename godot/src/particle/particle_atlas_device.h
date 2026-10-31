@@ -14,6 +14,7 @@
 
 #include <formats/particle/particle.h>
 #include <runtime/renderer/particle_atlas.h>
+#include <runtime/renderer/particle_frame_plan.h>
 
 #include "particle/particle_compositor.h"
 
@@ -27,8 +28,6 @@ namespace godot {
 // entry here.
 class ParticleAtlasDevice {
 public:
-	static constexpr int kGraphicLayerCount = 4;
-	static constexpr std::size_t kMissingEntry = std::numeric_limits<std::size_t>::max();
 
 	struct Page {
 		std::uint8_t type = 0;
@@ -44,19 +43,6 @@ public:
 		int device_side = 0;
 		bool dxt5 = false;
 		Ref<ImageTexture> texture;
-	};
-
-	struct LayerVisual {
-		bool present = false;
-		std::uint8_t type = 0;
-		int flip_frames = 1;
-		std::vector<std::size_t> frame_entries;
-	};
-
-	struct DefinitionVisual {
-		std::array<LayerVisual, kGraphicLayerCount> layers;
-		// The ambient tint pick (engine: runtime/renderer/particle_quad_inputs.h).
-		bool ambient_lit = false;
 	};
 
 	using Definitions = std::shared_ptr<const std::vector<opennova::particle::ParticleDef>>;
@@ -77,7 +63,7 @@ public:
 			const String &p_texture_dir, bool p_procedural_fallback, std::uint32_t p_page_flags,
 			const Callable &p_present = Callable());
 
-	const std::vector<DefinitionVisual> &definition_visuals() const { return definition_visuals_; }
+	const std::vector<opennova::renderer::ParticleDefinitionVisual> &definition_visuals() const { return definition_visuals_; }
 	const std::vector<opennova::renderer::ParticleAtlasEntry> &entries() const { return entries_; }
 	const std::vector<Page> &pages() const { return pages_; }
 	const std::shared_ptr<const ParticleAtlasSnapshot> &snapshot() const { return snapshot_; }
@@ -89,7 +75,7 @@ public:
 
 private:
 	Definitions definitions_;
-	std::vector<DefinitionVisual> definition_visuals_;
+	std::vector<opennova::renderer::ParticleDefinitionVisual> definition_visuals_;
 	std::vector<opennova::renderer::ParticleAtlasEntry> entries_;
 	std::vector<Page> pages_;
 	std::shared_ptr<const ParticleAtlasSnapshot> snapshot_;

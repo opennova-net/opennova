@@ -5,7 +5,6 @@
 #include "network/novaworld_identity.h"
 #include "resource_index/launch_flags.h"
 #include "rtxt/rtxt_string_file.h"
-#include "util/data_format.h"
 #include "util/string_convert.h"
 
 #include <runtime/inmatch/host_config.h> // transport_bind_ports / gate_bind_ports
@@ -15,8 +14,6 @@
 
 #include <array>
 #include <godot_cpp/classes/engine.hpp>
-#include <godot_cpp/classes/http_client.hpp>
-#include <godot_cpp/classes/http_request.hpp>
 #include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/core/class_db.hpp>
@@ -46,6 +43,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,16 +51,6 @@
 namespace godot {
 
 namespace {
-
-// HTTPRequest delivers response headers as "Name: value" lines; the flow finds Set-Cookie itself.
-std::vector<std::string> pba_to_strvec(const PackedStringArray &arr) {
-	std::vector<std::string> out;
-	out.reserve(static_cast<size_t>(arr.size()));
-	for (int i = 0; i < arr.size(); ++i) {
-		out.emplace_back(opennova::to_std(arr[i]));
-	}
-	return out;
-}
 
 const char *state_name(NovaWorldClient::State s) {
 	switch (s) {
@@ -114,14 +102,14 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop"), &NovaWorldClient::stop);
 	ClassDB::bind_method(D_METHOD("escape_connect"), &NovaWorldClient::escape_connect);
 	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
-	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("is_novaworld_domain_host", "host"),
-			&NovaWorldClient::is_novaworld_domain_host);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
 			&NovaWorldClient::forget_gate_response);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("create_cookie_jar", "dir"),
 			&NovaWorldClient::create_cookie_jar);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("save_cookie_jar"),
 			&NovaWorldClient::save_cookie_jar);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("destroy_menu_browser"),
+			&NovaWorldClient::destroy_menu_browser);
 	ClassDB::bind_method(D_METHOD("get_glsvss_request"), &NovaWorldClient::get_glsvss_request);
 	ClassDB::bind_method(D_METHOD("get_session_player_name", "profile_name"),
 			&NovaWorldClient::get_session_player_name);
@@ -163,22 +151,6 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_join_proxy"), &NovaWorldClient::has_join_proxy);
 	ClassDB::bind_method(D_METHOD("copy_join_proxy_to", "target"), &NovaWorldClient::copy_join_proxy_to);
 	ClassDB::bind_method(D_METHOD("get_join_lobby_number"), &NovaWorldClient::get_join_lobby_number);
-	// Bound so the HTTPRequest.request_completed signals can target them.
-	ClassDB::bind_method(
-		D_METHOD("on_gsb_request_completed", "result", "response_code", "headers", "body"),
-		&NovaWorldClient::on_gsb_request_completed);
-	ClassDB::bind_method(
-		D_METHOD("on_enter_request_completed", "result", "response_code", "headers", "body"),
-		&NovaWorldClient::on_enter_request_completed);
-	ClassDB::bind_method(
-		D_METHOD("on_login_request_completed", "result", "response_code", "headers", "body"),
-		&NovaWorldClient::on_login_request_completed);
-	ClassDB::bind_method(
-		D_METHOD("on_join_request_completed", "result", "response_code", "headers", "body"),
-		&NovaWorldClient::on_join_request_completed);
-	ClassDB::bind_method(
-		D_METHOD("on_host_request_completed", "result", "response_code", "headers", "body"),
-		&NovaWorldClient::on_host_request_completed);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "host"),     "set_host", "get_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT,    "gate_port"), "set_gate_port", "get_gate_port");
@@ -298,47 +270,6 @@ void NovaWorldClient::start() {
 	play_in_flight_ = false;
 	join_proxy_ = opennova::ProxyRendezvousConfig{};
 
-	// HTTP fetchers are child nodes. Created once and reused; each
-	// request_completed signal drives its own bound callback. browser_http_ is
-	// the GSB server browser (Phase 2); login_http_ runs the EPASK login chain
-	// (Phase 3); enter_http_ runs the menu entry's startup-URL leg (open_web_lobby);
-	// join_http_ runs the NWJoin handshake (Phase 5); host_http_ the NWHost leg.
-	if (browser_http_ == nullptr) {
-		browser_http_ = memnew(HTTPRequest);
-		add_child(browser_http_);
-		browser_http_->set_timeout(10.0);
-		browser_http_->connect("request_completed",
-		                       Callable(this, "on_gsb_request_completed"));
-	}
-	if (login_http_ == nullptr) {
-		login_http_ = memnew(HTTPRequest);
-		add_child(login_http_);
-		login_http_->set_timeout(10.0);
-		login_http_->connect("request_completed",
-		                     Callable(this, "on_login_request_completed"));
-	}
-	if (enter_http_ == nullptr) {
-		enter_http_ = memnew(HTTPRequest);
-		add_child(enter_http_);
-		enter_http_->set_timeout(10.0);
-		enter_http_->connect("request_completed",
-		                     Callable(this, "on_enter_request_completed"));
-	}
-	if (join_http_ == nullptr) {
-		join_http_ = memnew(HTTPRequest);
-		add_child(join_http_);
-		join_http_->set_timeout(10.0);
-		join_http_->connect("request_completed",
-		                    Callable(this, "on_join_request_completed"));
-	}
-	if (host_http_ == nullptr) {
-		host_http_ = memnew(HTTPRequest);
-		add_child(host_http_);
-		host_http_->set_timeout(10.0);
-		host_http_->connect("request_completed",
-		                    Callable(this, "on_host_request_completed"));
-	}
-
 	// The title the mounted game speaks and its gate tag (the title's, or the mount's
 	// gt.ssc's): a session without a witnessed identity does not start.
 	std::string protocol_error;
@@ -434,10 +365,6 @@ void NovaWorldClient::start() {
 	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
 }
 
-bool NovaWorldClient::is_novaworld_domain_host(const String &host) {
-	return opennova::is_novaworld_domain_host(host.utf8().get_data());
-}
-
 void NovaWorldClient::forget_gate_response() {
 	opennova::process_gate_memory().forget();
 }
@@ -446,6 +373,9 @@ void NovaWorldClient::forget_gate_response() {
 // reads it (engine: read_retail_machine_inputs; off Windows it reads nothing and the key is the
 // fingerprint of an all-zero volume).
 void NovaWorldClient::create_cookie_jar(const String &p_dir) {
+	// The menu's creation frees the browser's name list ahead of the jar's load (engine
+	// browser_menu_created).
+	opennova::browser_menu_created();
 	opennova::RetailMachineInputs volume;
 	opennova::read_retail_machine_inputs(volume);
 	opennova::process_menu_browser().create(
@@ -456,6 +386,12 @@ void NovaWorldClient::save_cookie_jar() {
 	std::string error;
 	if (!opennova::process_menu_browser().save(error))
 		UtilityFunctions::push_warning(String("NovaWorldClient: ") + opennova::to_gd(error));
+}
+
+// The teardown's save, then the destroyed menu's browser lists (engine browser_menu_destroyed).
+void NovaWorldClient::destroy_menu_browser() {
+	save_cookie_jar();
+	opennova::browser_menu_destroyed();
 }
 
 namespace {
@@ -535,21 +471,12 @@ void NovaWorldClient::stop() {
 			lobby_.send(dg);
 		}
 	}
-	if (browser_http_ != nullptr) {
-		browser_http_->cancel_request();
-	}
-	if (login_http_ != nullptr) {
-		login_http_->cancel_request();
-	}
-	if (enter_http_ != nullptr) {
-		enter_http_->cancel_request();
-	}
-	if (join_http_ != nullptr) {
-		join_http_->cancel_request();
-	}
-	if (host_http_ != nullptr) {
-		host_http_->cancel_request();
-	}
+	// The legs' requests still out end unreported.
+	browser_http_.cancel();
+	login_http_.cancel();
+	enter_http_.cancel();
+	join_http_.cancel();
+	host_http_.cancel();
 	gsb_request_in_flight_ = false;
 	authenticated_ = false;
 	pending_host_page_ = opennova::HttpRequestSpec{};
@@ -597,6 +524,7 @@ void NovaWorldClient::_process(double) {
 			host_role_.poll_request(clock_ms_);
 		poll_play();
 		publish_connect_or_host_wait();
+		pump_http_replies();
 		return;
 	}
 
@@ -606,6 +534,7 @@ void NovaWorldClient::_process(double) {
 
 	poll_play();
 	publish_connect_or_host_wait();
+	pump_http_replies();
 }
 
 void NovaWorldClient::pump_periodic_update() {
@@ -966,61 +895,41 @@ void NovaWorldClient::sync_flow_context() {
 	flow_.set_context(std::move(ctx));
 }
 
-// Map one HttpRequestSpec onto a given HTTPRequest child node (method/url/headers/body). The
-// menu browser's header set is the flow's (engine: LobbyHttpFlow::request_headers / post_headers,
-// D-NET-1251), which names its User-Agent, Accept and a post's Content-Length, so the
-// transport adds none of its own; Host leads them, as the browser's does, and no Accept-Encoding
-// rides along. Godot's client still writes its request line as HTTP/1.1 where the browser's is
-// HTTP/1.0.
-Error NovaWorldClient::ship_spec(HTTPRequest *http, const opennova::HttpRequestSpec &spec) {
-	PackedStringArray headers;
-	// The URL's host with no port, as the menu browser writes it (engine: browser_request_host,
-	// D-NET-1329).
-	const std::size_t scheme = spec.url.find("://");
-	const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
-	const std::size_t path_at = spec.url.find('/', host_at);
-	const std::string authority = spec.url.substr(host_at,
-			path_at == std::string::npos ? std::string::npos : path_at - host_at);
-	headers.push_back(opennova::to_gd("Host: " + opennova::browser_request_host(spec.url)));
-	for (const std::string &h : spec.headers) {
-		headers.push_back(opennova::to_gd(h));
-	}
-	http->set_accept_gzip(false);
-	// A menu-browser GET takes its nocachefix pair: the tick now and the server's resolved
-	// address (engine: browser_cache_bust_url, D-NET-1251). The host is resolved once and
-	// the request connects to that address, its Host line still the name, so the connect uses the
-	// address the pair reads, as the browser's does (one resolve into the request's +0x30 word,
-	// cited at browser_cache_bust_url in engine/net/novaworld/http_flow.h).
-	std::string url = spec.url;
-	if (spec.cache_bust) {
-		const std::size_t colon = authority.find(':');
-		IP *ip = IP::get_singleton();
-		const String address = ip != nullptr
-				? ip->resolve_hostname(opennova::to_gd(authority.substr(0, colon)), IP::TYPE_IPV4)
-				: String();
-		const PackedStringArray octets = address.split(".");
-		if (octets.size() != 4)
-			return ERR_CANT_RESOLVE;
-		std::array<uint8_t, 4> server{};
-		for (int i = 0; i < 4; ++i)
-			server[static_cast<std::size_t>(i)] = static_cast<uint8_t>(octets[i].to_int());
-		const std::string port = colon == std::string::npos ? std::string() : authority.substr(colon);
-		url = spec.url.substr(0, host_at) + opennova::to_std(address) + port +
-				(path_at == std::string::npos ? std::string() : spec.url.substr(path_at));
-		url = opennova::browser_cache_bust_url(url, opennova::world::frame_tick_count_ms(), server);
-	}
-	const HTTPClient::Method method = (spec.method == opennova::HttpMethod::Post)
-		? HTTPClient::METHOD_POST : HTTPClient::METHOD_GET;
-	return http->request(opennova::to_gd(url), headers, method, opennova::to_gd(spec.body));
+// The legs' transport: the menu browser's (engine: net/novaworld/browser_transport.h, D-NET-1251),
+// which resolves the server once through the browser's name list, writes the nocachefix pair over
+// that address, leads with the port-less Host line and the flow's header set, sends HTTP/1.0 as
+// the browser does and reads the reply in its framing, on a worker of its own; the lookup is the
+// platform's (net::resolve_ipv4).
+opennova::BrowserTransportOptions NovaWorldClient::web_transport_options() {
+	opennova::BrowserTransportOptions options;
+	options.lookup = [](const std::string &host, std::array<uint8_t, 4> &ip) {
+		opennova::net::Endpoint server;
+		if (!opennova::net::resolve_ipv4(host, server)) return false;
+		ip = server.ip;
+		return true;
+	};
+	options.tick_ms = opennova::world::frame_tick_count_ms;
+	return options;
+}
+
+void NovaWorldClient::ship_spec(opennova::BrowserChannel &channel,
+		const opennova::HttpRequestSpec &spec) {
+	channel.ship(spec);
+}
+
+// Each frame's end, after the session's pump: a finished leg's reply goes to its leg, on the main
+// thread (the transport's worker only fills it).
+void NovaWorldClient::pump_http_replies() {
+	if (std::optional<opennova::net::HttpReply> reply = browser_http_.take()) on_gsb_reply(*reply);
+	if (std::optional<opennova::net::HttpReply> reply = enter_http_.take()) on_enter_reply(*reply);
+	if (std::optional<opennova::net::HttpReply> reply = login_http_.take()) on_login_reply(*reply);
+	if (std::optional<opennova::net::HttpReply> reply = join_http_.take()) on_join_reply(*reply);
+	if (std::optional<opennova::net::HttpReply> reply = host_http_.take()) on_host_reply(*reply);
 }
 
 void NovaWorldClient::trigger_gsb() {
 	if (!authenticated_) {
 		emit_signal("server_list_failed", String("Sign in before loading games."));
-		return;
-	}
-	if (browser_http_ == nullptr) {
-		emit_signal("server_list_failed", String("The game browser is unavailable."));
 		return;
 	}
 	sync_flow_context();
@@ -1029,23 +938,13 @@ void NovaWorldClient::trigger_gsb() {
 		emit_signal("server_list_failed", String("The matchmaking service did not provide a game-list address."));
 		return;
 	}
-	if (gsb_request_in_flight_) {
-		browser_http_->cancel_request();
-	}
-	if (ship_spec(browser_http_, spec) != OK) {
-		gsb_request_in_flight_ = false;
-		UtilityFunctions::push_warning(String("[NovaWorldClient] GSB request did not start: ")
-			+ opennova::to_gd(spec.url));
-		emit_signal("server_list_failed", String("Could not request the game list."));
-		return;
-	}
+	// A list still loading is superseded (the channel's ship).
+	ship_spec(browser_http_, spec);
 	gsb_request_in_flight_ = true;
 }
 
-void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
-                                               const PackedStringArray &headers,
-                                               const PackedByteArray &body) {
-	(void)headers; // GSB does not merge Set-Cookie (the flow's contract)
+void NovaWorldClient::on_gsb_reply(const opennova::net::HttpReply &reply) {
+	// GSB does not merge Set-Cookie (the flow's contract).
 	gsb_request_in_flight_ = false;
 	if (!authenticated_) {
 		return; // cancelled by stop/reconnect
@@ -1053,15 +952,15 @@ void NovaWorldClient::on_gsb_request_completed(int result, int response_code,
 
 	// NOTE: on_gsb_response's arg order differs from login/join — body 3rd, out 4th, no headers.
 	opennova::GsbResponse parsed;
-	if (!flow_.on_gsb_response(result == HTTPRequest::RESULT_SUCCESS, response_code,
-	                           from_pba(body), parsed)) {
-		UtilityFunctions::push_warning(String("[NovaWorldClient] GSB fetch failed result=")
-			+ String::num_int64(result) + " code=" + String::num_int64(response_code));
-		if (result != HTTPRequest::RESULT_SUCCESS) {
+	if (!flow_.on_gsb_response(reply.transport_ok, reply.code, reply.body, parsed)) {
+		UtilityFunctions::push_warning(String("[NovaWorldClient] GSB fetch failed: ")
+			+ (reply.transport_ok ? String("code=") + String::num_int64(reply.code)
+			                      : opennova::to_gd(reply.error)));
+		if (!reply.transport_ok) {
 			emit_signal("server_list_failed", String("Could not reach the game browser."));
-		} else if (response_code != 200) {
+		} else if (reply.code != 200) {
 			emit_signal("server_list_failed", String("The matchmaking service could not load the game list (HTTP ")
-				+ String::num_int64(response_code) + String(")."));
+				+ String::num_int64(reply.code) + String(")."));
 		} else {
 			emit_signal("server_list_failed", String("The matchmaking service returned an unreadable game list."));
 		}
@@ -1157,10 +1056,6 @@ void NovaWorldClient::open_web_lobby() {
 		emit_signal("login_failed", String("The matchmaking service is still connecting."));
 		return;
 	}
-	if (enter_http_ == nullptr) {
-		emit_signal("login_failed", String("The matchmaking client is unavailable."));
-		return;
-	}
 	if (flow_.enter_active()) return; // the entry's open is already in flight
 	sync_flow_context();
 	const opennova::EnterResult r = flow_.enter();
@@ -1169,26 +1064,18 @@ void NovaWorldClient::open_web_lobby() {
 		return;
 	}
 	lobby_.connect_log(opennova::http_getting_line(r.request.url));
-	if (ship_spec(enter_http_, r.request) != OK) {
-		flow_.on_enter_response(false, 0, {}, {}); // drive the machine back to Idle
-		emit_signal("login_failed", String("Could not open the NovaWorld lobby."));
-	}
+	ship_spec(enter_http_, r.request);
 }
 
-void NovaWorldClient::on_enter_request_completed(int result, int response_code,
-                                                 const PackedStringArray &headers,
-                                                 const PackedByteArray &body) {
+void NovaWorldClient::on_enter_reply(const opennova::net::HttpReply &reply) {
 	if (state_ != STATE_CONNECTED || !flow_.enter_active()) {
-		return; // cancelled by stop/reconnect, or superseded by another lifecycle
+		return; // superseded by another lifecycle
 	}
-	const opennova::EnterResult r = flow_.on_enter_response(
-		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	const opennova::EnterResult r =
+		flow_.on_enter_response(reply.transport_ok, reply.code, reply.headers, reply.body);
 	switch (r.kind) {
 	case opennova::EnterResult::Kind::NeedRequest:
-		if (ship_spec(enter_http_, r.request) != OK) {
-			flow_.on_enter_response(false, 0, {}, {});
-			emit_signal("login_failed", String("Could not open the NovaWorld lobby."));
-		}
+		ship_spec(enter_http_, r.request);
 		break;
 	case opennova::EnterResult::Kind::Lobby:
 		// The service remembered the login: the lobby page, whose list load follows (a press that
@@ -1232,15 +1119,11 @@ void NovaWorldClient::login(const String &username, const String &password) {
 		emit_signal("login_failed", String("The matchmaking service is still connecting."));
 		return;
 	}
-	if (login_http_ == nullptr) {
-		emit_signal("login_failed", String("The matchmaking client is unavailable."));
-		return;
-	}
 	if (flow_.login_active()) {
 		return;  // a login is already in flight
 	}
 	// The entry's open is still in flight (the startup URL, NWStart): the sign-in page's form can
-	// only be posted once that page is shown, so the press waits for it (on_enter_request_completed).
+	// only be posted once that page is shown, so the press waits for it (on_enter_reply).
 	if (flow_.enter_active()) {
 		pending_login_ = true;
 		pending_login_user_ = username;
@@ -1256,10 +1139,7 @@ void NovaWorldClient::begin_login(const opennova::LoginResult &r) {
 	switch (r.kind) {
 	case opennova::LoginResult::Kind::NeedRequest:
 		// Prepare GET: sets the EPASK cookie (the bundle credentials encrypt under).
-		if (ship_spec(login_http_, r.request) != OK) {
-			flow_.on_login_response(false, 0, {}, {});  // drive the machine back to Idle
-			emit_signal("login_failed", String("Could not start sign-in."));
-		}
+		ship_spec(login_http_, r.request);
 		break;
 	case opennova::LoginResult::Kind::Failed:
 		// e.g. "no gate startup_url yet — connect first".
@@ -1311,7 +1191,7 @@ void NovaWorldClient::store_remember_login(bool p_checked) {
 // LobbyHttpFlow::login_remembered).
 void NovaWorldClient::login_remembered() {
 	authenticated_ = false;
-	if (state_ != STATE_CONNECTED || login_http_ == nullptr || flow_.login_active()) {
+	if (state_ != STATE_CONNECTED || flow_.login_active()) {
 		emit_signal("login_failed", String("The matchmaking service is still connecting."));
 		return;
 	}
@@ -1319,21 +1199,16 @@ void NovaWorldClient::login_remembered() {
 	begin_login(flow_.login_remembered());
 }
 
-void NovaWorldClient::on_login_request_completed(int result, int response_code,
-                                                 const PackedStringArray &headers,
-                                                 const PackedByteArray &body) {
+void NovaWorldClient::on_login_reply(const opennova::net::HttpReply &reply) {
 	if (state_ != STATE_CONNECTED || !flow_.login_active()) {
-		return; // cancelled by stop/reconnect, or superseded by another lifecycle
+		return; // superseded by another lifecycle
 	}
-	const opennova::LoginResult r = flow_.on_login_response(
-		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	const opennova::LoginResult r =
+		flow_.on_login_response(reply.transport_ok, reply.code, reply.headers, reply.body);
 	switch (r.kind) {
 	case opennova::LoginResult::Kind::NeedRequest:
 		// Re-ship on login_http_ (PREPARE -> NWSTART -> POST -> POLL, all in the flow).
-		if (ship_spec(login_http_, r.request) != OK) {
-			flow_.on_login_response(false, 0, {}, {});
-			emit_signal("login_failed", String("Could not continue sign-in."));
-		}
+		ship_spec(login_http_, r.request);
 		break;
 	case opennova::LoginResult::Kind::Succeeded:
 		authenticated_ = true;
@@ -1357,10 +1232,6 @@ void NovaWorldClient::join(int rid) {
 		emit_signal("join_failed", String("Sign in before joining a game."));
 		return;
 	}
-	if (join_http_ == nullptr) {
-		emit_signal("join_failed", String("The matchmaking join service is unavailable."));
-		return;
-	}
 	if (flow_.join_active() || play_in_flight_) {
 		return;  // a join is already in flight
 	}
@@ -1379,11 +1250,7 @@ void NovaWorldClient::join(int rid) {
 	case opennova::JoinResult::Kind::NeedRequest:
 		enter_state(STATE_JOINING);
 		// First NWJoin call: stores a NWJOINSESSIONTAG and returns the relay page.
-		if (ship_spec(join_http_, r.request) != OK) {
-			flow_.on_join_response(false, 0, {}, {});  // drive the machine back to Idle
-			enter_state(STATE_CONNECTED);
-			emit_signal("join_failed", String("Could not start the join request."));
-		}
+		ship_spec(join_http_, r.request);
 		break;
 	case opennova::JoinResult::Kind::Failed:
 		// Synchronous failure (e.g. "no server base URL — connect first") — no state change.
@@ -1394,22 +1261,16 @@ void NovaWorldClient::join(int rid) {
 	}
 }
 
-void NovaWorldClient::on_join_request_completed(int result, int response_code,
-                                                const PackedStringArray &headers,
-                                                const PackedByteArray &body) {
+void NovaWorldClient::on_join_reply(const opennova::net::HttpReply &reply) {
 	if (!authenticated_ || !flow_.join_active()) {
-		return; // cancelled by stop/reconnect, or superseded by another lifecycle
+		return; // superseded by another lifecycle
 	}
-	const opennova::JoinResult r = flow_.on_join_response(
-		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	const opennova::JoinResult r =
+		flow_.on_join_response(reply.transport_ok, reply.code, reply.headers, reply.body);
 	switch (r.kind) {
 	case opennova::JoinResult::Kind::NeedRequest:
 		// Re-ship on join_http_ (FIRST -> SECOND, both resolved in the flow).
-		if (ship_spec(join_http_, r.request) != OK) {
-			flow_.on_join_response(false, 0, {}, {});
-			enter_state(STATE_CONNECTED);
-			emit_signal("join_failed", String("Could not resolve the selected game."));
-		}
+		ship_spec(join_http_, r.request);
 		break;
 	case opennova::JoinResult::Kind::Resolved:
 		trace(String("join resolved host ") + opennova::cp1252_to_gd(r.host_ip) + ":"
@@ -1417,8 +1278,7 @@ void NovaWorldClient::on_join_request_completed(int result, int response_code,
 		start_playing(r);
 		// The .joi page's refresh (engine: JoinResult::request, D-NET-1251), behind the
 		// play leg it started; its answer settles the flow.
-		if (r.request.valid && ship_spec(join_http_, r.request) != OK)
-			(void)flow_.on_join_response(false, 0, {}, {});
+		if (r.request.valid) ship_spec(join_http_, r.request);
 		break;
 	case opennova::JoinResult::Kind::Settled:
 		break;
@@ -1607,10 +1467,11 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 		if (const std::string *host_url = flow_.browser_global("@HOST_URL@"))
 			lobby_.connect_log(opennova::http_hosting_line(*host_url));
 	}
-	if (first.kind != opennova::HostKeyResult::Kind::NeedRequest ||
-	    ship_spec(host_http_, first.request) != OK) {
+	if (first.kind != opennova::HostKeyResult::Kind::NeedRequest) {
 		fail_host_leg(opennova::to_gd(first.reason.empty() ? "host request failed" : first.reason));
+		return;
 	}
+	ship_spec(host_http_, first.request);
 }
 
 // The host request's wait ended, its result what it may: the HOSTKEY page's refresh goes out, as
@@ -1619,9 +1480,9 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 void NovaWorldClient::ship_host_page() {
 	const opennova::HttpRequestSpec page = pending_host_page_;
 	pending_host_page_ = opennova::HttpRequestSpec{};
-	if (!page.valid || host_http_ == nullptr) return;
-	host_page_in_flight_ = ship_spec(host_http_, page) == OK;
-	if (!host_page_in_flight_) flow_.on_host_response(false, 0, {}, {}); // settle the flow's leg
+	if (!page.valid) return;
+	ship_spec(host_http_, page);
+	host_page_in_flight_ = true;
 }
 
 void NovaWorldClient::fail_host_leg(const String &reason) {
@@ -1632,22 +1493,20 @@ void NovaWorldClient::fail_host_leg(const String &reason) {
 // The hosting page's chain: relay pages refresh to the next, the [HOSTKEY=...&] title resolves
 // the key and the host request goes out with it. A completion that lands after the hosting leg
 // was left (stop_hosting, stop) is dropped.
-void NovaWorldClient::on_host_request_completed(int result, int response_code,
-		const PackedStringArray &headers, const PackedByteArray &body) {
+void NovaWorldClient::on_host_reply(const opennova::net::HttpReply &reply) {
 	// The HOSTKEY page's refresh went out once the host request's wait ended: its answer settles
 	// the flow's leg whatever the hosting's state now.
 	if (host_page_in_flight_) {
 		host_page_in_flight_ = false;
-		flow_.on_host_response(result == HTTPRequest::RESULT_SUCCESS, response_code,
-				pba_to_strvec(headers), from_pba(body));
+		flow_.on_host_response(reply.transport_ok, reply.code, reply.headers, reply.body);
 		return;
 	}
 	if (state_ != STATE_HOSTING_REQUESTED || !flow_.host_active()) return;
-	const opennova::HostKeyResult r = flow_.on_host_response(
-		result == HTTPRequest::RESULT_SUCCESS, response_code, pba_to_strvec(headers), from_pba(body));
+	const opennova::HostKeyResult r =
+		flow_.on_host_response(reply.transport_ok, reply.code, reply.headers, reply.body);
 	switch (r.kind) {
 	case opennova::HostKeyResult::Kind::NeedRequest:
-		if (ship_spec(host_http_, r.request) != OK) fail_host_leg(String("host request failed"));
+		ship_spec(host_http_, r.request);
 		return;
 	case opennova::HostKeyResult::Kind::Resolved: {
 		// The page's HOSTKEY dispatches the leg: ConnectOrHost's checks run now, on the session
@@ -1699,7 +1558,7 @@ void NovaWorldClient::disconnect_at_exit() {
 // and keeps the verified session (CGameSession_StopHosting / StopPlaying, the
 // ClientSession statements).
 void NovaWorldClient::stop_hosting() {
-	if (host_http_ != nullptr) host_http_->cancel_request();
+	host_http_.cancel();
 	pending_host_page_ = opennova::HttpRequestSpec{};
 	if (host_page_in_flight_) {
 		host_page_in_flight_ = false;

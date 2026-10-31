@@ -40,8 +40,6 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 			"closed tools present the viewport directly")
 	_check(viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS,
 			"the shared texture keeps updating")
-	_check(viewport.audio_listener_enable_2d and viewport.audio_listener_enable_3d,
-			"the embedded runtime owns both audio listeners")
 	var direct := viewport.get_texture().get_image()
 	if direct != null and not direct.is_empty():
 		var direct_path := ctx.artifact_dir.path_join("direct.png")

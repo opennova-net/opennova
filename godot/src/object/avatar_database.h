@@ -9,7 +9,6 @@
 #include <godot_cpp/variant/vector3i.hpp>
 
 #include <formats/avatars/avatars.h>
-#include <formats/avatars/preview_animation.h>
 #include <runtime/inmatch/character_registry.h>
 
 #include <cstdint>
@@ -63,21 +62,6 @@ private:
 	const opennova::avatars::AvatarCombo *combo_at(int nat_index, int div_index, int combo_index) const;
 	Ref<AvatarComboRow> combo_row(int nat_index, int div_index, int combo_index) const;
 
-	// The witnessed menu preview constants, re-exported from engine
-	// avatars/preview_animation.h (float/String values cannot be class
-	// constants).
-	static float preview_zoom_in_scale();
-	static String preview_skeleton_bad();
-	static String preview_idle_bad();
-	// A fresh preview model's initial facing, its BAM word: the engine's draw
-	// (menu::player_info_preview_initial_yaw_bam, runtime/menu/player_info_avatars.h
-	// carries the witness) reseeded from the wall clock.
-	static int64_t preview_initial_yaw_bam();
-	// One menu update of the portrait's motion (menu::player_info_preview_blend_step /
-	// player_info_preview_yaw_step carry the witness).
-	static float preview_blend_step(float p_blend, bool p_hovered);
-	static int64_t preview_yaw_step(int64_t p_yaw, bool p_hovered, int64_t p_tick_ms);
-
 protected:
 	static void _bind_methods();
 
@@ -101,14 +85,8 @@ public:
 	enum { ALIGN_GOOD = opennova::avatars::AVATAR_ALIGN_GOOD, ALIGN_EVIL = opennova::avatars::AVATAR_ALIGN_EVIL };
 	// AvatarDiagnosticSeverity.
 	enum { DIAG_WARNING = opennova::avatars::AVATAR_DIAG_WARNING, DIAG_ERROR = opennova::avatars::AVATAR_DIAG_ERROR };
-	// The three CTRL registers a combo part's authored `camo` bytes drive
-	// (TEX_CAMO1..3 = .3di control-catalog ordinals 93..95). Retail zero-extends
-	// the bytes into the shared CTRL bus immediately before submitting THAT
-	// part, so head, body and arms each carry their own triplet — no scaling, no
-	// tint: the bytes are texture-variant selectors [orig: Avatar_SetHeadCamoCtrl
-	// @0x57a370 / Avatar_SetBodyCamoCtrl @0x57a390 / Avatar_SetArmsCamoCtrl
-	// @0x57a3b0 -> CTRL slots 0x83FFD0/D8/E0; world submits @0x5c7fec/@0x5c800f,
-	// preview @0x56113c/@0x56110b, first-person arms @0x4df008/@0x4df070, see docs/playerinfo/avatars-re.md].
+	// The three CTRL registers a combo part's authored `camo` bytes drive, by
+	// name (the engine's renderer::kAvatarPartCamoRegisters carries the witness).
 	static PackedStringArray part_camo_registers();
 	// Store one part's raw camo bytes (AvatarPartRow.camo) on `p_model` under
 	// `p_owner`.

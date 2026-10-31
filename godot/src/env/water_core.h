@@ -47,8 +47,8 @@ private:
 	bool strip_view_set = false;
 
 public:
-	// Regenerates both textures for the given 62 Hz frame counter
-	// [orig: called per frame from Render_WaterSurface @ 0x5c3326, see docs/env/env-tod-re.md].
+	// Regenerates both textures for the given 62 Hz frame counter, once per
+	// water pass (env::WaterFramePasses carries the witness).
 	void update(int p_frame_counter);
 
 	// RGBA8 bytes (128x128) for Image::create_from_data - the ridge

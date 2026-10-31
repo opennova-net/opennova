@@ -95,7 +95,7 @@ constexpr uint32_t kDeviceFactor = 0x10000u;
 // the header or before the count's samples the loader's pad and the mixer read on past them
 // (unwitnessed): ours refuses the first and plays the samples present of the second, the count
 // recorded as it says.
-bool decode_aud1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &error) {
+bool decode_aud1(const uint8_t *bytes, size_t size, bool fold_shift, WavPcm &out, std::string &error) {
 	if (size < 16) {
 		error = "the AUD1 buffer ends inside its 16-byte header";
 		return false;
@@ -131,14 +131,14 @@ bool decode_aud1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &er
 	// arithmetically (movzx ecx, byte [edi+0Dh]; movd mm4, ecx; psraw mm5 / mm6 / mm7, mm4 [orig:
 	// AudioChannel_ComputeMixCoefficients @ 0x7bd5e6..0x7bd5f3]), each unit halving the channel's
 	// volume; a count of 15 or more leaves no coefficient above 0 (each at most 0x7FFF; psraw past 15
-	// fills a word with its sign), so the channel plays silent for its length. Ours shifts the samples
-	// alike, s >> n, silence from 15 on. Retail scales each sample by the shifted coefficient,
-	// (s * (c >> n)) >> 16, where the shell's mixer scales by its volume (D-SND-8), so the low bits
-	// round apart, and mm6's negative words (the 2-channel blend table's +/-(80 * w) >> 7 pair and
-	// its 0xD500 constant, channels 1 and 2's fixed quadwords in the 4- to 8-channel modes) shifted
-	// 15 or more stay -1, a delayed tap of -1 for each sample above 0 (D-SND-51).
+	// fills a word with its sign), so the channel plays silent for its length. The game's decode
+	// keeps it for the mixer (audio::Mixer shifts the coefficients, as retail's), the samples as they
+	// are; the tooling's folds it onto the samples, s >> n, silence from 15 on, the level the mixer
+	// plays them at to within the coefficient's low bits.
 	const uint8_t shift = bytes[13];
-	if (shift != 0) {
+	out.loader_width = bytes[12];
+	out.loader_shift = shift;
+	if (fold_shift && shift != 0) {
 		for (size_t i = 0; i < present; ++i) {
 			const int16_t s = static_cast<int16_t>(io::read_u16_le(out.pcm16.data() + 2 * i));
 			const int16_t shifted = shift >= 15 ? int16_t(0) : static_cast<int16_t>(s >> shift);
@@ -416,7 +416,7 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	r_error.clear();
 	// The own buffer ahead of the RIFF compare [orig: Audio_LoadWavFileFromArchive @ 0x7664e2].
 	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AUD1"))
-		return decode_aud1(bytes, size, r_out, r_error);
+		return decode_aud1(bytes, size, false, r_out, r_error);
 	const WaveLoaderWalk walk = wave_loader_walk(bytes, size);
 	if (walk.refusal != WaveRefusal::None) {
 		r_error = std::string(walk.refusal == WaveRefusal::RatioFaults ? "the game's wave loader faults on it: "
@@ -437,6 +437,7 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	if (walk.bits == 8) {
 		pcm8_to_pcm16(src, data_size, r_out.pcm16);
 		r_out.loader_samples = walk.data_size;
+		r_out.loader_width = 1; // [orig: @ 0x766632]
 	} else if (walk.bits == 16) {
 		r_out.pcm16.assign(src, src + data_size);
 		r_out.loader_samples = walk.data_size >> 1;
@@ -461,7 +462,7 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	r_out = WavPcm{};
 	r_error.clear();
 	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AUD1"))
-		return decode_aud1(bytes, size, r_out, r_error);
+		return decode_aud1(bytes, size, true, r_out, r_error);
 	if (bytes == nullptr || size < 44) {
 		r_error = "buffer too small to be a WAV";
 		return false;

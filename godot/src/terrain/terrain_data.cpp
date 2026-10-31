@@ -1182,10 +1182,9 @@ Vector2 TerrainData::world_to_runtime_source_coords(float world_x, float world_z
 }
 
 Vector3 TerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p_to) const {
-	// The ENG-3 B1 segment raycast [orig: Terrain_RaycastHeightmapLoRes
-	// @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0 @ 0x60e710] over the
-	// RaycastSubstrate sampler adapter above; docs/terrain/terrain-re.md
-	// §Runtime terrain queries. Godot plane coords map straight onto the core's
+	// The engine's ENG-3 B1 segment raycast (terrain_query/terrain_raycast.h
+	// carries the witnesses) over the RaycastSubstrate sampler adapter above;
+	// docs/terrain/terrain-re.md §Runtime terrain queries. Godot plane coords map straight onto the core's
 	// axis-agnostic (x, y): (world_x, world_z), with world_y as the core's
 	// z = height axis, all quantized to 16.16 at this boundary.
 	const float nan = std::numeric_limits<float>::quiet_NaN();
@@ -1195,12 +1194,10 @@ Vector3 TerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p_to)
 	}
 
 	// Substrate pick: the live editable image when mounted, else the baked CPT.
-	// NO substrate at all -> the all-NAN miss. Retail's null-atlas raycast
-	// returns HIT there instead ("blocked" is the runtime's no-data default
-	// [orig: @ 0x60ccf7, see docs/terrain/terrain-re.md]) — that is runtime-substrate behavior; this binding is
-	// the editor-mode surface, so no-data misses: the same deliberate
-	// editor-guard divergence class as the sampler's kOutOfExtent
-	// (terrain_query/terrain_raycast.h header note).
+	// NO substrate at all -> the all-NAN miss: this binding is the editor-mode
+	// surface, the editor-guard divergence the engine's
+	// terrain_query/terrain_raycast.h header note records (the runtime's
+	// null-atlas raycast hits).
 	RaycastSubstrate substrate;
 	PackedByteArray live_pixels; // keeps the borrowed live mip-0 alive across the march
 	if (live_heightmap_pixels(heightmap_image, live_pixels, substrate.live_w, substrate.live_h)) {
@@ -1385,7 +1382,7 @@ bool TerrainData::replace_tile_lods(const PackedInt32Array &p_indices, const Arr
 
 int TerrainData::get_detail_foliage_index_fixed(int32_t atlas_x_fixed,
                                                     int32_t atlas_z_fixed) const {
-	// [orig: Foliage_SampleFoliageMapFlat @ 0x6066d0, see docs/terrain/terrain-re.md]
+	// The engine's flat detail lookup (formats/foliage foliage_sample_detail_flat_wrap).
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}

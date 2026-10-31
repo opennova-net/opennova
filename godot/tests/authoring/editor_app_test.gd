@@ -323,27 +323,19 @@ func test_play_dialog_plays_its_lines_in_turn() -> void:
 	_app.wait_for_sound()
 	_app.pump()
 	assert_eq(String(_app.get_sound_state()), "playing")
-	var players := _preview_players()
-	assert_eq(players.size(), 2, "a player for each line")
-	if players.size() != 2:
+	var voices_started: PackedInt32Array = _app.get_sound_voices_started()
+	assert_eq(voices_started.size(), 2, "a voice for each line")
+	if voices_started.size() != 2:
 		return
-	assert_true(players[0].playing and not players[1].playing, "the first line plays, the second waits")
-	while not players[1].playing and Time.get_ticks_msec() - started < 30000:
+	assert_true(voices_started[0] == 1 and voices_started[1] == 0, "the first line plays, the second waits")
+	while _app.get_sound_voices_started()[1] == 0 and Time.get_ticks_msec() - started < 30000:
 		OS.delay_msec(10)
 		_app.pump()
-	assert_true(players[1].playing, "the second line starts")
+	assert_eq(_app.get_sound_voices_started()[1], 1, "the second line starts")
 	assert_gte(Time.get_ticks_msec() - started, int(at * 1000.0) - 1, "the second line starts at its time, not before")
 	_request({"kind": "stop_sound"})
 	_app.pump()
 	assert_eq(String(_app.get_sound_state()), "idle", "stopped")
-
-
-# The preview player's voices, in the order it made them.
-func _preview_players() -> Array[AudioStreamPlayer]:
-	var out: Array[AudioStreamPlayer] = []
-	for node: Node in _app.find_children("PreviewSound*", "AudioStreamPlayer", true, false):
-		out.append(node as AudioStreamPlayer)
-	return out
 
 
 # The workspace section's sound (the MCP gaps lane).

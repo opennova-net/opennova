@@ -12,10 +12,36 @@ const MODEL_NAME := "crate.3di"
 const SKY_BODY_NAME := "crate_mtrl0_ad_lum_upl113.3di"
 const TICK := 1.0 / 62.0
 const FAR_CAMERA_POSITION := Vector3(50000.0, 64.0, -40000.0)
+# The terrain every fixture's glare and glint rays run over: the Tmap fixture
+# flattened to height 0, so a ray from above it clears. With no terrain loaded
+# the game's ray is blocked (retail's null-atlas HIT, terrain_query
+# terrain_field_ray_hit).
+const GROUND_STAGE := "celestial_test_ground"
+const GROUND_ATLAS_SIDE := 1024
+# The fixtures' water plane: above the flat ground, below the camera.
+const GLINT_WATER_HEIGHT := 10.0
+
+var _ground: TerrainData
+
+
+func before_all() -> void:
+	_ground = TerrainData.new()
+	_ground.set_trn_path(TestFs.staged_tmap(GROUND_STAGE))
+	assert_eq(_ground.load(), OK, "the Tmap fixture terrain must load")
+	var flat := PackedByteArray()
+	flat.resize(GROUND_ATLAS_SIDE * GROUND_ATLAS_SIDE * 2)
+	assert_true(_ground.patch_heights_raw16(
+			Rect2i(0, 0, GROUND_ATLAS_SIDE, GROUND_ATLAS_SIDE), flat),
+			"the fixture ground flattens to height 0")
+
+
+func after_all() -> void:
+	_ground = null
+	TestFs.release_staged_tmap(GROUND_STAGE)
 
 
 func _make_fixture(moon_name: String = "", body_name: String = MODEL_NAME,
-		fog_level: float = -1.0) -> Dictionary:
+		fog_level: float = -1.0, with_ground: bool = true) -> Dictionary:
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(
 			ProjectSettings.globalize_path(MODEL_FIXTURE_ROOT)), OK)
@@ -43,6 +69,8 @@ func _make_fixture(moon_name: String = "", body_name: String = MODEL_NAME,
 	var celestial := Celestial.new()
 	celestial.name = "CelestialUnderTest"
 	celestial.environment_path = NodePath("../CelestialTestEnv")
+	if with_ground:
+		celestial.set_terrain_data(_ground)
 	add_child_autofree(celestial)
 	celestial.set_resource_root(resource_root)
 	celestial.advance_frame(TICK)
@@ -401,8 +429,8 @@ func test_settle_glare_occlusion_reaches_the_dead_band_hold() -> void:
 	# The capture-refresh seam (the D-RLIT-2 fixture starvation): the glare
 	# brightness steps +-16 per frame toward popcount * 32 * fog/1000 with a
 	# +-16 dead-band hold [orig: Render_SkyboxSunGlow @ 0x5acdfb..0x5acf7f],
-	# so one zero-delta advance leaves a fresh accumulator dark. With no
-	# terrain loaded both jittered rays are clear every frame; the settle must
+	# so one zero-delta advance leaves a fresh accumulator dark. Over the flat
+	# fixture ground both jittered rays are clear every frame; the settle must
 	# fill the window (0xFF) and hold inside the dead-band around the
 	# fog-scaled target.
 	var fixture := _make_fixture()
@@ -482,7 +510,7 @@ func test_sun_veil_publishes_the_dot16_alpha_global_when_facing_the_sun() -> voi
 
 func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
 	# The water-reflected sun glint [orig: Environment_UpdateSunGlare @ 0x5ad130]: with
-	# a water height authored and no terrain (every visibility ray clear),
+	# a water height authored over the flat ground (every visibility ray clear),
 	# the settle must chase the glint accumulator to the full 4 * 64 and
 	# place the glare 3DI mirrored BELOW the eye (camera + sun * 128 with the
 	# height term negated). Without water the glint body stays hidden.
@@ -499,7 +527,7 @@ func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
 
 	# Author a water plane well below the camera and look along the sun so
 	# the mirrored view dot exceeds the witnessed dot^4 threshold.
-	fixture.environment.environment_data.set_water_height(-200.0)
+	fixture.environment.environment_data.set_water_height(GLINT_WATER_HEIGHT)
 	var sun_dir: Vector3 = env.get_sun_direction()
 	var mirrored := Vector3(sun_dir.x, -sun_dir.y, sun_dir.z)
 	var up := Vector3.RIGHT if absf(mirrored.y) > 0.9 else Vector3.UP
@@ -521,6 +549,19 @@ func test_water_glint_settles_and_mirrors_below_the_eye() -> void:
 	assert_gt(int((bodies.get("glint", {}) as Dictionary).get("upl", 0)), 0)
 
 
+func test_no_terrain_loaded_blocks_the_glare_rays() -> void:
+	# With no terrain loaded the game's terrain ray is blocked: retail's
+	# null-atlas test returns HIT before the march [orig:
+	# Terrain_RaycastHeightmapLoRes @ 0x60cce8..0x60ccf7], so neither jittered
+	# glare ray clears and the window stays empty.
+	var fixture := _make_fixture("", MODEL_NAME, -1.0, false)
+	var celestial: Celestial = fixture.celestial
+	celestial.settle_glare_occlusion()
+	var glare: Dictionary = celestial.get_diagnostics().get("glare_occlusion", {})
+	assert_eq(int(glare.get("window", -1)), 0, "no ray clears without terrain")
+	assert_eq(int(glare.get("brightness", -1)), 0, "and the glare stays dark")
+
+
 func _glint_state(celestial: Celestial) -> Dictionary:
 	return celestial.get_diagnostics().get("water_glint", {}) as Dictionary
 
@@ -539,7 +580,7 @@ func test_the_inset_pass_calls_the_glint_leg_again_at_its_camera() -> void:
 	assert_not_null(glint)
 	if glint == null:
 		return
-	env.environment_data.set_water_height(-200.0)
+	env.environment_data.set_water_height(GLINT_WATER_HEIGHT)
 	var sun_dir: Vector3 = env.get_sun_direction()
 	var mirrored := Vector3(sun_dir.x, -sun_dir.y, sun_dir.z)
 	var up := Vector3.RIGHT if absf(mirrored.y) > 0.9 else Vector3.UP

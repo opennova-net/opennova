@@ -26,6 +26,7 @@
 // Additive/Premult's ZERO/INVSRCCOLOR darkening (@ 0x5e8390..0x5e83a5).
 
 #include "res://shaders/color.gdshaderinc"
+#include "res://shaders/device_fog.gdshaderinc"
 
 #include "res://shaders/particle/particle_atlas.gdshaderinc"
 uniform bool has_texture = false;
@@ -57,20 +58,12 @@ void vertex() {
 	}
 }
 
-// The World compositor's fog visibility: type 0 exponential over the view
-// depth, every other type linear over the radial distance from the
-// environment-resolved start.
+// The World compositor's fog visibility: the device fog over the
+// environment-resolved pair (device_fog.gdshaderinc, the engine's law).
 float particle_far_fog_visibility(vec3 camera_position, vec3 camera_forward) {
-	if (opennova_fog_start == opennova_fog_end || opennova_fog_end <= 0.0) {
-		return 1.0;
-	}
-	if (opennova_fog_type == 0) {
-		float view_depth = max(dot(v_world_position - camera_position, camera_forward), 0.0);
-		return clamp(exp(-view_depth * (4.1588830833596715 / opennova_fog_end)), 0.0, 1.0);
-	}
-	float distance_to_eye = length(v_world_position - camera_position);
-	return clamp((opennova_fog_end - distance_to_eye) /
-			(opennova_fog_end - opennova_fog_start), 0.0, 1.0);
+	vec3 to_point = v_world_position - camera_position;
+	return device_fog_visibility(dot(to_point, camera_forward), length(to_point),
+			opennova_fog_start, opennova_fog_end, opennova_fog_type, true);
 }
 
 vec4 particle_far_texel(vec2 uv) {

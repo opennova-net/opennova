@@ -620,6 +620,13 @@ add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
 target_link_libraries(mission_load_plan_test PRIVATE opennova_runtime)
 add_test(NAME mission_load_plan COMMAND mission_load_plan_test)
 
+# The load plan's executor (mission/mission_load.h): each arm's order over recording legs (a
+# fresh session's, a headless dedicated host's as opennova-serve fills them, a wire joiner's S2C
+# 0x11 head and 0x1A load), the stage checkpoints, and the failures' stops.
+add_executable(mission_load_test mission/mission_load_test.cpp)
+target_link_libraries(mission_load_test PRIVATE opennova_runtime)
+add_test(NAME mission_load COMMAND mission_load_test)
+
 # fixtures/bms/synth_dense.bms: the synthetic dense mission (four populated
 # pools, zero-valued optional fields) authored through bms_edit and
 # written by bms::write; mission_bms and mission_mis_idempotency read it.
@@ -913,6 +920,25 @@ target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
 add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
 
+# The music stream pump (runtime/audio/music_stream_pump.h): the VM steps once
+# the track its last play selected stops sounding, a service frame's seven
+# updates, GFB's emptied stream, the context's begin and end.
+add_executable(music_stream_pump_test audio/music_stream_pump_test.cpp)
+target_link_libraries(music_stream_pump_test PRIVATE opennova_runtime)
+target_include_directories(music_stream_pump_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(music_stream_pump_test PRIVATE cxx_std_17)
+add_test(NAME music_stream_pump COMMAND music_stream_pump_test)
+
+# The music context (runtime/audio/music_context.h): the base and expansion
+# pairs (an expansion's names unconditional, never the base pair), the open's
+# order (the teardown, the bank's file before any script read), the one context
+# at a time, the mission start's Var1..Var12 seed on either outcome.
+add_executable(music_context_test audio/music_context_test.cpp)
+target_link_libraries(music_context_test PRIVATE opennova_runtime)
+target_include_directories(music_context_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(music_context_test PRIVATE cxx_std_17)
+add_test(NAME music_context COMMAND music_context_test)
+
 # The ambient channel pool (runtime/audio/ambient_channel_pool.h): rank-order
 # binds up to the budget, incumbents keep their channel, dropouts release,
 # unresolvable entrants cached out, a pinned pool never grows.
@@ -920,6 +946,37 @@ add_executable(ambient_channel_pool_test audio/ambient_channel_pool_test.cpp)
 target_link_libraries(ambient_channel_pool_test PRIVATE opennova_runtime)
 target_compile_features(ambient_channel_pool_test PRIVATE cxx_std_17)
 add_test(NAME ambient_channel_pool COMMAND ambient_channel_pool_test)
+
+# The mission's ambient emitters (runtime/audio/ambient_emitters.h), moved out of the
+# Godot mission audio (ADR 0077 R2) with its GUT logic pins: envs markers described
+# through the bank chain, the loudest eight bound (incumbents kept, entrants restarted),
+# the time-of-day slot and crossfade, one occlusion query per raw-audible marker, the
+# entity-attached lanes replayed at their producer ticks with their ids retired and
+# recycled, the unresolvable entrant cached out, the world clock's latch.
+add_executable(ambient_emitters_test audio/ambient_emitters_test.cpp)
+target_link_libraries(ambient_emitters_test PRIVATE opennova_runtime)
+target_compile_features(ambient_emitters_test PRIVATE cxx_std_17)
+add_test(NAME ambient_emitters COMMAND ambient_emitters_test)
+
+# The sound option words and the sound-effects option's park (runtime/audio/sound_options.h):
+# saved only when nothing is saved, restored once [orig: Sound_ParkEffectsVolume @ 0x5280b0;
+# Sound_RestoreEffectsVolume @ 0x5280d0].
+add_executable(sound_options_test audio/sound_options_test.cpp)
+target_link_libraries(sound_options_test PRIVATE opennova_runtime)
+target_include_directories(sound_options_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(sound_options_test PRIVATE cxx_std_17)
+add_test(NAME sound_options COMMAND sound_options_test)
+
+# The software mixer (runtime/audio/mixer.h, ADR 0077 d4): the stereo blend table, the bearing
+# pans, the coefficients, the step and the four-tap box, the coefficient shift, the channel calls
+# and the allocator, the buses' tail and the stereo stage, the channel-zero meter, the doppler,
+# the music stream, the listener's pans, the scripted voice on channel zero, and a mixed-buffer
+# golden of the minted fixture wave (fixtures/lwf/tone.wav).
+add_executable(audio_mixer_test audio/mixer_test.cpp)
+target_link_libraries(audio_mixer_test PRIVATE opennova_runtime)
+target_include_directories(audio_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(audio_mixer_test PRIVATE cxx_std_17)
+add_test(NAME audio_mixer COMMAND audio_mixer_test)
 
 # S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
 # entity pools, the authored soundloop slots passed through unfiltered, walk order,
@@ -1206,6 +1263,14 @@ target_include_directories(vfs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(vfs_test PRIVATE cxx_std_17)
 add_test(NAME vfs COMMAND vfs_test)
 
+# A loose folder's files by name without case (base/vfs/dir_case_index.h): the one index the
+# game's resource root, texture and sidecar resolves find a loose file by.
+add_executable(dir_case_index_test vfs/dir_case_index_test.cpp)
+target_link_libraries(dir_case_index_test PRIVATE opennova_base)
+target_include_directories(dir_case_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(dir_case_index_test PRIVATE cxx_std_17)
+add_test(NAME dir_case_index COMMAND dir_case_index_test)
+
 # The files a build read from a FileSource, by stamp (base/vfs/file_stamps.h).
 add_executable(file_stamps_test vfs/file_stamps_test.cpp)
 target_link_libraries(file_stamps_test PRIVATE opennova_base)
@@ -1241,7 +1306,7 @@ target_include_directories(scr_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME scr_unit COMMAND scr_unit_test)
 
 # RTXT localized string table tests
-foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
+foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup text_tables)
     add_executable(rtxt_${test}_test rtxt/${test}_test.cpp)
     target_link_libraries(rtxt_${test}_test PRIVATE opennova_formats)
     target_include_directories(rtxt_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
@@ -1383,6 +1448,13 @@ target_link_libraries(anim_remote_body_state_test PRIVATE opennova_runtime)
 target_include_directories(anim_remote_body_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME anim_remote_body_state COMMAND anim_remote_body_state_test)
 
+# A clip-posed model's body channel (runtime/anim/body_channel, ADR 0077 R2): the clip selection,
+# the blends, the remote arbitration, the layers, the composed pose and the frame clock.
+add_executable(anim_body_channel_test anim/body_channel_test.cpp)
+target_link_libraries(anim_body_channel_test PRIVATE opennova_runtime)
+target_include_directories(anim_body_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_body_channel COMMAND anim_body_channel_test)
+
 add_executable(anim_adm_root_motion_test anim/adm_root_motion_test.cpp)
 target_link_libraries(anim_adm_root_motion_test PRIVATE opennova_runtime)
 target_include_directories(anim_adm_root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1444,18 +1516,22 @@ target_include_directories(mission_def_table_read_test PRIVATE ${CMAKE_CURRENT_S
 add_test(NAME mission_def_table_read COMMAND mission_def_table_read_test)
 
 # Object renderer/shader tests
-foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
-        particle_atlas_contract particle_frame_compiler_contract particle_quad_inputs render_order
-        frame_fx_effects nvg_scope_lens q3_frame render_slot_frame render_slot_shadow
+foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_draw_frame light_spawn light_terrain_pass material_classify material_eval material_texture
+        particle_atlas_contract particle_frame_compiler_contract particle_frame_plan particle_quad_inputs render_order
+        frame_fx_effects nvg_scope_lens pipeline_state q3_frame render_slot_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
         texture_registry texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info
-        texture_roles fixed_texture_names)
+        texture_roles fixed_texture_names view_frustum triangle_strip)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
+
+# The device fog law's GLSL text checked against the .gdshader passes' copy of it.
+target_compile_definitions(renderer_device_fog_test PRIVATE
+    DEVICE_FOG_GDSHADERINC="${CMAKE_SOURCE_DIR}/godot/shaders/device_fog.gdshaderinc")
 
 # The NORMAL-pass coverage table checked against the object pipeline manifest's coverage_source.
 target_compile_definitions(renderer_material_classify_test PRIVATE
@@ -1718,6 +1794,14 @@ target_link_libraries(environment_state_test PRIVATE opennova_runtime)
 target_include_directories(environment_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME environment_state COMMAND environment_state_test)
 
+# The water pass orchestration (runtime/environment/water_frame): which of a
+# scene's water passes run, the Inset's own, the per-side pass fog end and the
+# noise pair's frame counter.
+add_executable(water_frame_test environment/water_frame_test.cpp)
+target_link_libraries(water_frame_test PRIVATE opennova_runtime)
+target_include_directories(water_frame_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME water_frame COMMAND water_frame_test)
+
 # The mission-start weather seed (runtime/environment/weather_seed): the
 # mission-selected ENV/BMS derivation and retail's 255-tick weather settle must
 # reach clients through the same real phase-2 projection every host embeds.
@@ -1726,6 +1810,12 @@ add_executable(weather_seed_test environment/weather_seed_test.cpp)
 target_link_libraries(weather_seed_test PRIVATE opennova_runtime opennova_net)
 target_include_directories(weather_seed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME weather_seed COMMAND weather_seed_test)
+
+# The weather's FLICKER / SWING CTRL registers (runtime/environment/weather_ctrl_registers):
+# the frame's pair and the wave rings a model hashes its position onto.
+add_executable(weather_ctrl_registers_test environment/weather_ctrl_registers_test.cpp)
+target_link_libraries(weather_ctrl_registers_test PRIVATE opennova_runtime)
+add_test(NAME weather_ctrl_registers COMMAND weather_ctrl_registers_test)
 
 # The weather home (runtime/world/weather_state): the WAC handler math, the
 # mission-start initializer, the wire sample apply, and the sim tick against a
@@ -1740,12 +1830,20 @@ target_include_directories(weather_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME weather_state COMMAND weather_state_test)
 
 # The per-item ITEMS.DEF particlefx law (runtime/world/item_effects): the
-# pool / controller attrib gates, the identity aliases, and the matched-
-# userpoint / origin-fallback attach plan over a synthetic model.
+# pool / controller attrib gates and the matched-userpoint / origin-fallback
+# attach plan over a synthetic model.
 add_executable(item_effects_test world/item_effects_test.cpp)
 target_link_libraries(item_effects_test PRIVATE opennova_runtime)
 target_include_directories(item_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME item_effects COMMAND item_effects_test)
+
+# The world's effect producers in the shared scene (ADR 0077 R2): slot A and its
+# walk, the claim edges, the particle switch's retry and the +0x1CC re-pose
+# (ItemEmitterSystem); the destruction rows' handles (DestructionEmitters); the
+# rounds' move emitters (RoundEmitters); the scene's group re-pose.
+add_executable(item_emitters_test world/item_emitters_test.cpp)
+target_link_libraries(item_emitters_test PRIVATE opennova_runtime)
+add_test(NAME item_emitters COMMAND item_emitters_test)
 
 # The present passes' shared law (runtime/world/present_passes): the husk
 # RENDER pick (husk first, apart from the piece pick), the destroyed entity's
@@ -2107,6 +2205,14 @@ target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
 
+# The game font's glyph advance (runtime/hud/game_font.h): the space and an empty
+# record advance by their own record and the spacing pad, decoded text by its
+# code-page byte's record.
+add_executable(hud_game_font_test hud/game_font_test.cpp)
+target_link_libraries(hud_game_font_test PRIVATE opennova_runtime)
+target_include_directories(hud_game_font_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_game_font COMMAND hud_game_font_test)
+
 # The flat HUD residual elements (GAMEINFO/ZONEINFO, CLOCK, TEAMID, HUDLS, the
 # objectives panel, /NOHUD, the squad colours, the clip-flash key).
 add_executable(hud_frame_elements_test hud/hud_frame_elements_test.cpp)
@@ -2253,6 +2359,22 @@ target_link_libraries(screen_history_test PRIVATE opennova_runtime)
 target_compile_features(screen_history_test PRIVATE cxx_std_17)
 add_test(NAME screen_history COMMAND screen_history_test)
 
+# The in-mission screen stack (menu/screen_stack.h): one screen up at a time, the open word's
+# refusal, the close request the next screen pass runs, the pass-through word's input law.
+add_executable(screen_stack_test menu/screen_stack_test.cpp)
+target_link_libraries(screen_stack_test PRIVATE opennova_runtime)
+target_compile_features(screen_stack_test PRIVATE cxx_std_17)
+add_test(NAME screen_stack COMMAND screen_stack_test)
+
+# The frontend (frontend/frontend.h) driven headless over recording legs: the start, the
+# MainMenu's init and its save points, the mission starts through the load executor's headless
+# legs, the screens, Esc and the use-item routes, the exits' routing, the quit's saves, the menu
+# mode's bank (ADR 0077 R3; formerly GUT's main_game lifecycle reads).
+add_executable(frontend_test frontend/frontend_test.cpp)
+target_link_libraries(frontend_test PRIVATE opennova_runtime)
+target_compile_features(frontend_test PRIVATE cxx_std_17)
+add_test(NAME frontend COMMAND frontend_test)
+
 # The loadout screens' shared text compositions (menu/loadout_labels.h): the WepDes
 # weapon label, the ammo row, the armory row order and the weight readout.
 add_executable(loadout_labels_test menu/loadout_labels_test.cpp)
@@ -2263,6 +2385,18 @@ add_test(NAME loadout_labels COMMAND loadout_labels_test)
 add_executable(loadout_screen_test menu/loadout_screen_test.cpp)
 target_link_libraries(loadout_screen_test PRIVATE opennova_runtime)
 add_test(NAME loadout_screen COMMAND loadout_screen_test)
+
+# The in-game armory's WEAPON screen (menu/armory_screen.h) driven headless over the runtime's store
+# and a faked host: the INIT's class spin, the on-show's order (the class resolve, the rows the mask
+# enables, the class pair, the stage under the team gate, the populate, the readout and the icons),
+# the class flip's page memory, the picks, a banned grenade, ACCEPT and CANCEL past the press latch,
+# the empty and missing tables, the authored fixtures/game/weapon.mnu's first-open weight, and a
+# DFX2 title's DEATH screen picker (DFX2-41) over another screen's runtime.
+add_executable(armory_screen_test menu/armory_screen_test.cpp)
+target_link_libraries(armory_screen_test PRIVATE opennova_runtime)
+target_include_directories(armory_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(armory_screen_test PRIVATE cxx_std_17)
+add_test(NAME armory_screen COMMAND armory_screen_test)
 
 # The loadout dialogs' list and state model (menu/loadout_screen.h's list fill,
 # reselects, clip count and accept pick; menu/player_info_loadout.h): the rows
@@ -2294,6 +2428,13 @@ add_executable(command_map_screen_test menu/command_map_screen_test.cpp)
 target_link_libraries(command_map_screen_test PRIVATE opennova_runtime)
 target_compile_features(command_map_screen_test PRIVATE cxx_std_17)
 add_test(NAME command_map_screen COMMAND command_map_screen_test)
+# The CMAP screen's controller (menu/command_map_controller.h, D-HUD-19) over an authored cmap.mnu and a
+# fake host: the show's order, every registered control's callback, the tab radios' rebinding and gates,
+# the waypoint name dialog and the delete button.
+add_executable(command_map_controller_test menu/command_map_controller_test.cpp)
+target_link_libraries(command_map_controller_test PRIVATE opennova_runtime)
+target_compile_features(command_map_controller_test PRIVATE cxx_std_17)
+add_test(NAME command_map_controller COMMAND command_map_controller_test)
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3281,6 +3422,20 @@ target_include_directories(player_present_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(player_present_test PRIVATE cxx_std_17)
 add_test(NAME player_present COMMAND player_present_test)
 
+# A person body's present inputs (runtime/world/body_present, ADR 0077 R2): the placed and avatar
+# clip requests, the wire body walk, the weapon channel and the overlay deltas.
+add_executable(world_body_present_test world/body_present_test.cpp)
+target_link_libraries(world_body_present_test PRIVATE opennova_runtime)
+target_include_directories(world_body_present_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME world_body_present COMMAND world_body_present_test)
+
+# The attach frames from the engine's own bone matrices (runtime/world/entity_pose, ADR 0077 R2):
+# the posed bone frames, the held gun, the overlays and the part frame.
+add_executable(world_entity_pose_attach_test world/entity_pose_attach_test.cpp)
+target_link_libraries(world_entity_pose_attach_test PRIVATE opennova_runtime)
+target_include_directories(world_entity_pose_attach_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME world_entity_pose_attach COMMAND world_entity_pose_attach_test)
+
 add_executable(player_view_test world/player_view_test.cpp)
 target_link_libraries(player_view_test PRIVATE opennova_runtime)
 target_include_directories(player_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3703,6 +3858,20 @@ target_include_directories(tick_digest_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(tick_digest_test PRIVATE cxx_std_17)
 add_test(NAME tick_digest COMMAND tick_digest_test)
 
+# The headless test backend (ADR 0077 d8): every engine/base/platform interface with no OS
+# behind it (simulated time, scripted input, in-memory files), a STATIC library any ctest that
+# wants a platform links. null_backend_mission runs the synthetic mission through the platform
+# seams (its files, the R2 load executor, frames banked from the platform clock, scripted input)
+# and pins tick_digest's committed chain: the platform changes nothing.
+add_library(opennova_null_backend STATIC null_backend/null_platform.cpp)
+target_include_directories(opennova_null_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(opennova_null_backend PUBLIC opennova_base)
+target_compile_features(opennova_null_backend PUBLIC cxx_std_17)
+add_executable(null_backend_mission_test null_backend/null_backend_mission_test.cpp)
+target_link_libraries(null_backend_mission_test PRIVATE opennova_null_backend opennova_runtime)
+target_compile_features(null_backend_mission_test PRIVATE cxx_std_17)
+add_test(NAME null_backend_mission COMMAND null_backend_mission_test)
+
 # Emplacement mount: the seat model + canonical root/child seat selection and attach
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
 # snapshot/restore rewind of a mount.
@@ -3837,6 +4006,11 @@ add_executable(server_browser_test novaworld/server_browser_test.cpp)
 target_link_libraries(server_browser_test PRIVATE opennova_net)
 target_include_directories(server_browser_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME server_browser COMMAND server_browser_test)
+# The NovaWorld service the menu dials (net/novaworld/service_target.h): the gates, the web site,
+# the stored and launch choices (ADR 0077 R3, from GUT).
+add_executable(novaworld_service_target_test novaworld/service_target_test.cpp)
+target_link_libraries(novaworld_service_target_test PRIVATE opennova_net)
+add_test(NAME novaworld_service_target COMMAND novaworld_service_target_test)
 
 # Byte-level oracle: decode the genuine .204 server-browser blob
 # (fixtures/novaworld/nw204_jop_2.gsb) through our retail-faithful parser.
@@ -4293,6 +4467,13 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# The LAN multiplayer screens' controller (inmatch/lan_multiplayer_menu.h, mp.mnu, the shell's "lan"
+# delegate) headless over the menu runtime and a fake host: the LAN screen's activation, the search
+# state, the list's keep-selection rule and the join, the host screen's pool, rotation, gate and START.
+add_executable(lan_multiplayer_menu_test npruntime/lan_multiplayer_menu_test.cpp)
+target_link_libraries(lan_multiplayer_menu_test PRIVATE opennova_runtime)
+target_include_directories(lan_multiplayer_menu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lan_multiplayer_menu COMMAND lan_multiplayer_menu_test)
 # The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7): the cfg table's
 # title, dfx2.exe's caps, score table seeds, linger, deploy protection and its want of a revive.
 add_executable(npruntime_title_host_rules_test npruntime/title_host_rules_test.cpp)
@@ -4320,6 +4501,12 @@ add_executable(npruntime_game_config_block_test npruntime/game_config_block_test
 target_link_libraries(npruntime_game_config_block_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_game_config_block_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_game_config_block COMMAND npruntime_game_config_block_test)
+# The player's options over the cfg block (inmatch/player_options.h): the defaults, the
+# boundary's clamps, the words read and written and the Options screens' word array.
+add_executable(npruntime_player_options_test npruntime/player_options_test.cpp)
+target_link_libraries(npruntime_player_options_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_player_options_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_player_options COMMAND npruntime_player_options_test)
 # The host's map rotation (D-NET-331): the list ops and cursor rules, the
 # round-end advance and its REPLAY wrap, the host screen's seed, the round end's
 # exit reason under REPLAY / LASTGAME, and the map change's router over the
@@ -4332,7 +4519,7 @@ add_test(NAME npruntime_mission_rotation COMMAND npruntime_mission_rotation_test
 # the one host boot runs a two-map rotation (a launch-option TDM map's two halves,
 # then the next map) while a LAN joiner keeps its one connection and reloads in
 # place; its team swaps for the second half and swaps back. opennova_app_common
-# for net_sockets + net_datagram_socket (ws2_32 on WIN32).
+# for net_datagram_socket over the engine's sockets (net/socket, ws2_32 on WIN32).
 add_executable(npruntime_map_change_test npruntime/map_change_test.cpp)
 target_include_directories(npruntime_map_change_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_map_change_test
@@ -4372,6 +4559,19 @@ add_test(NAME npruntime_player_list_vars COMMAND npruntime_player_list_vars_test
 add_executable(inmatch_joiner_role_test npruntime/joiner_role_test.cpp)
 target_link_libraries(inmatch_joiner_role_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME inmatch_joiner_role COMMAND inmatch_joiner_role_test)
+# The one joiner bring-up (inmatch/joiner_boot.h), headless: a JoinerRole booted over an in-memory
+# socket dials with every setting (its ClientAuth's APPID against a scripted ServerHello), a load's
+# rebuilt runtime takes the same, and a header-only join's streamed types settle in order.
+add_executable(inmatch_joiner_boot_test npruntime/joiner_boot_test.cpp)
+target_link_libraries(inmatch_joiner_boot_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(inmatch_joiner_boot_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME inmatch_joiner_boot COMMAND inmatch_joiner_boot_test)
+# The front end's join flow (inmatch/join_flow.h), headless over a scripted device: the enumerate,
+# the choice, the dial with its expansion switch, state 9, the launch flags' sessions, the install
+# refusal rule, the mission start's Host-list columns (ADR 0077 R3, from GUT).
+add_executable(inmatch_join_flow_test npruntime/join_flow_test.cpp)
+target_link_libraries(inmatch_join_flow_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME inmatch_join_flow COMMAND inmatch_join_flow_test)
 
 # The joiner session-drive policy (S10b): the preload's failure edge (no join wait has a deadline,
 # D-NET-1070), the S2C 0x7B promote validation, the admission/deploy/loss edge machine (frame
@@ -4596,6 +4796,15 @@ add_executable(npruntime_server_info_test npruntime/server_info_test.cpp)
 target_link_libraries(npruntime_server_info_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_server_info_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_server_info COMMAND npruntime_server_info_test)
+
+# The NovaWorld host listing's match side (inmatch/host_listing_binding.h), the one binding the
+# game's listen host and opennova-serve run: the hooks a bind installs and an unbind takes back,
+# the columns off the bound match, the registration, stale hooks doing nothing, the PlayerList
+# rows and the NWU session's facts (ADR 0051 d6, ADR 0077).
+add_executable(host_listing_binding_test npruntime/host_listing_binding_test.cpp)
+target_link_libraries(host_listing_binding_test PRIVATE opennova_runtime)
+target_include_directories(host_listing_binding_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME host_listing_binding COMMAND host_listing_binding_test)
 
 # The /PROFILE server log (inmatch/server_log_recorder.h, net/npwire/serverlog_encode.h,
 # formats/sph): the record writers against the decoder, a synthetic session recorded to
@@ -4884,7 +5093,8 @@ add_test(NAME npruntime_joiner_handshake_retry COMMAND npruntime_joiner_handshak
 # owner-loop (npruntime/host_session.h, the SAME loop the game's host runs), each on its own bound UDP
 # over the wire (single-thread poll-pump). Asserts mirror npruntime_client_runtime but over real
 # sockets, and adds the §5.2a S2C tag-order check (always-on, our host). opennova_runtime for the
-# minimal World/bms; opennova_app_common for net_sockets + net_datagram_socket (ws2_32 on WIN32).
+# minimal World/bms; opennova_app_common for net_datagram_socket over the engine's sockets
+# (net/socket, ws2_32 on WIN32).
 add_executable(npruntime_two_endpoint_socket_test npruntime/two_endpoint_socket_test.cpp)
 target_include_directories(npruntime_two_endpoint_socket_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(npruntime_two_endpoint_socket_test
@@ -4994,6 +5204,13 @@ target_link_libraries(asset_store_test PRIVATE opennova_runtime)
 target_include_directories(asset_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME asset_store COMMAND asset_store_test)
 
+# A foliage definition's model asset (runtime/assets/foliage_assets.h): the slot bounds as the
+# terrain load takes them, the LOD0 geometry, the :fd material row, the slot's status and the model key.
+add_executable(foliage_assets_test assets/foliage_assets_test.cpp)
+target_link_libraries(foliage_assets_test PRIVATE opennova_runtime opennova_formats)
+target_include_directories(foliage_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME foliage_assets COMMAND foliage_assets_test)
+
 # The files a running mission opens by a fixed name (runtime/assets/mission_fixed_files.h): each
 # set by the runtime's own constants, every name once.
 add_executable(mission_fixed_files_test assets/mission_fixed_files_test.cpp)
@@ -5060,6 +5277,29 @@ add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
 target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
 target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
 add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
+
+# The HUD's projection (hud/hud_viewport.h): the main viewport's words, the projector's centre,
+# side-plane clips, edge forcing and near flag, and the attach labels and friendly tags it feeds.
+add_executable(hud_viewport_test hud/hud_viewport_test.cpp)
+target_link_libraries(hud_viewport_test PRIVATE opennova_runtime)
+target_include_directories(hud_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_viewport_test PRIVATE cxx_std_17)
+add_test(NAME hud_viewport COMMAND hud_viewport_test)
+
+# The HUD's texture load plan (hud/hud_texture_load_plan.h): each set-up load's file, loader,
+# word and arm, and what the draws read back of the loaded textures.
+add_executable(hud_texture_load_plan_test hud/hud_texture_load_plan_test.cpp)
+target_link_libraries(hud_texture_load_plan_test PRIVATE opennova_runtime)
+target_include_directories(hud_texture_load_plan_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_texture_load_plan_test PRIVATE cxx_std_17)
+add_test(NAME hud_texture_load_plan COMMAND hud_texture_load_plan_test)
+
+# The HUD's frame feeds (inmatch/hud_frame_feeds.h) over a session with no role.
+add_executable(hud_frame_feeds_test hud/hud_frame_feeds_test.cpp)
+target_link_libraries(hud_frame_feeds_test PRIVATE opennova_runtime)
+target_include_directories(hud_frame_feeds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_frame_feeds_test PRIVATE cxx_std_17)
+add_test(NAME hud_frame_feeds COMMAND hud_frame_feeds_test)
 
 # opennova-hostd, the machine agent (apps/hostd; Linux only, as the app). The runtime
 # test drives its platform legs on a stub command runner that checks every argv: the
@@ -5472,7 +5712,8 @@ add_executable(netsim_client_replica_census_test netsim/client_replica_census_te
 target_link_libraries(netsim_client_replica_census_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_replica_census COMMAND netsim_client_replica_census_test)
 # The vehicle screen (D-NET-907): the first open's C2S 0x42, the poll's per-frame retry
-# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick.
+# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick,
+# and the screen's controller over the menu runtime (inmatch/vehicle_menu_controller.h).
 add_executable(npruntime_vehicle_menu_test npruntime/vehicle_menu_test.cpp)
 target_link_libraries(npruntime_vehicle_menu_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_vehicle_menu COMMAND npruntime_vehicle_menu_test)
@@ -5886,11 +6127,21 @@ add_test(NAME npruntime_host_boot_mission_start_update COMMAND npruntime_host_bo
 add_executable(npruntime_teardown_nwu_player_removed_test npruntime/teardown_nwu_player_removed_test.cpp)
 target_link_libraries(npruntime_teardown_nwu_player_removed_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_teardown_nwu_player_removed COMMAND npruntime_teardown_nwu_player_removed_test)
-# apps/common's HTTP transport writes no Host line of its own past a caller's: the serve's
-# NovaWorld legs carry the menu browser's port-less Host (D-NET-1329).
-add_executable(net_http_host_line_test serve/net_http_host_line_test.cpp)
-target_link_libraries(net_http_host_line_test PRIVATE opennova_app_common)
-add_test(NAME net_http_host_line COMMAND net_http_host_line_test)
+# The engine's HTTP exchange (net/http, ADR 0077 d2) over loopback: no Host line of its own past
+# a caller's (the menu browser's port-less Host, D-NET-1329), the menu browser's reply framing, a
+# 301 / 302 followed nowhere, the waits and the cancel.
+add_executable(http_exchange_test novaworld/http_exchange_test.cpp)
+target_link_libraries(http_exchange_test PRIVATE opennova_net)
+target_include_directories(http_exchange_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME http_exchange COMMAND http_exchange_test)
+# The menu browser's transport, the game's and serve's (D-NET-1251): the request bytes against
+# fixtures/novaworld/browser_get.http and browser_post.http, the name list, the channel's take,
+# cancel and supersede, retail's waits.
+add_executable(browser_transport_test novaworld/browser_transport_test.cpp)
+target_link_libraries(browser_transport_test PRIVATE opennova_net)
+target_include_directories(browser_transport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(browser_transport_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+add_test(NAME browser_transport COMMAND browser_transport_test)
 # The Host list's MI1..MI3: the host's net-quality send-window averages (D-NET-1330).
 add_executable(npruntime_listing_net_quality_columns_test npruntime/listing_net_quality_columns_test.cpp)
 target_link_libraries(npruntime_listing_net_quality_columns_test PRIVATE opennova_net opennova_runtime)
@@ -5906,6 +6157,12 @@ add_test(NAME cookie_jar COMMAND cookie_jar_test)
 add_executable(inmatch_tick_input_source_test frame/tick_input_source_test.cpp)
 target_link_libraries(inmatch_tick_input_source_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_tick_input_source COMMAND inmatch_tick_input_source_test)
+# The local player's input frame over fake seams (inmatch::PlayerInputFrame, ADR 0077 R2): the
+# record order, the rows' edges, the drained records' arms, the mouse events and the wheel's
+# notches, and the device messages onto retail's events (controls/device_messages.h).
+add_executable(inmatch_player_input_frame_test frame/player_input_frame_test.cpp)
+target_link_libraries(inmatch_player_input_frame_test PRIVATE opennova_runtime)
+add_test(NAME inmatch_player_input_frame COMMAND inmatch_player_input_frame_test)
 add_executable(controls_key_event_queue_test controls/key_event_queue_test.cpp)
 target_link_libraries(controls_key_event_queue_test PRIVATE opennova_runtime)
 add_test(NAME controls_key_event_queue COMMAND controls_key_event_queue_test)

@@ -375,8 +375,8 @@ func test_steps_inside_a_multi_tick_frame_land_on_their_own_ticks() -> void:
 			"the crouch press sampled mid-frame reached the sim")
 
 
-# The HUD's key rows run in every input frame too (PlayerInputRouter::
-# poll_hud_toggles carries the witness): a one-tick hudcolor press inside a
+# The HUD's key rows run in every input frame too (engine inmatch::
+# PlayerInputFrame::dispatch_hud_rows carries the witness): a one-tick hudcolor press inside a
 # six-tick frame fires on its own tick, where one poll after the frame would
 # read the row released and never fire it.
 func test_a_hud_row_pressed_inside_a_multi_tick_frame_fires_on_its_tick() -> void:
@@ -410,8 +410,8 @@ func test_a_hud_row_pressed_inside_a_multi_tick_frame_fires_on_its_tick() -> voi
 	assert_eq(presenter.take_hud_toggle_events(), PackedInt64Array(), "reading cleared them")
 
 
-# The talk rows run in every input frame too (PlayerInputRouter::
-# poll_talk_rows carries the witness): a one-tick press of the command row
+# The talk rows run in every input frame too (engine inmatch::
+# PlayerInputFrame::dispatch_record carries the witness): a one-tick press of the command row
 # (code 1) inside a six-tick frame opens the command line on its tick, where
 # one poll after the frame would read the row released and never open it;
 # a char step in the next frame types into the open line.

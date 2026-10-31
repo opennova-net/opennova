@@ -147,7 +147,7 @@ func _make_presenter(index: EntityIndex = null, root: ResourceRoot = null,
 	entities.setup(null, index, null)
 	for handle in wire_nodes:
 		entities.register_wire_node(int(handle), wire_nodes[handle])
-	entities.setup_passes(null, null, root, null, null, null, null, null)
+	entities.setup_passes(null, null, root, null, null, null, null)
 	return entities
 
 

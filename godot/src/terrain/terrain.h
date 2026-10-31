@@ -146,8 +146,6 @@ private:
 	// One id per page sweep: each traversal (main or Inset) is its own
 	// PolyTrn frame of the shared page cache.
 	uint64_t page_sweep_id = 0;
-	// The weather's time-set reset count this cache last answered (WeatherState::time_set_resets).
-	uint32_t seen_time_set_resets = 0;
 	void _create_pool_instances(PatchPool &r_pool, const RID &p_material);
 	void _free_pool_instances(PatchPool &r_pool);
 	void _hide_pool(PatchPool &r_pool);
@@ -193,11 +191,10 @@ private:
 	// the shared LightScene + the frame time each light frame (the SlotShadow
 	// precedent), and render_frame re-draws every patch with the <= 16 pool
 	// lights its own draw list overlaps — packed into one RGBAF rows texture
-	// indexed by the pool slot each patch instance carries [orig: the
-	// per-light else-arm of Terrain_RenderSectorBatch @0x6092A0 ->
-	// Light_SetupTerrainProjectedPass @0x5AA830; the collect/gates/constants
-	// are portable in opennova::renderer::LightScene::collect_terrain_pass_rows, see
-	// docs/render/render-lighting-re.md]. Godot instance uniforms carry
+	// indexed by the pool slot each patch instance carries (the collect, gates
+	// and constants are the engine's
+	// opennova::renderer::LightScene::collect_terrain_pass_rows and
+	// light_terrain_pass.h, which carry the witness). Godot instance uniforms carry
 	// neither arrays nor samplers and this shader already spends seven of the
 	// sixteen instance slots, so the rows ride a texture rather than the object
 	// pass's four scalar pairs — retail draws each of the sixteen, not four.
@@ -255,9 +252,6 @@ private:
 	void _on_terrain_changed();
 	void _on_tile_info_changed();
 	Ref<Shader> _load_terrain_shader();
-
-	static void _strip_to_list(const std::vector<uint16_t>& strip,
-	                           PackedInt32Array& out);
 
 
 protected:

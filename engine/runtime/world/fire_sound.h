@@ -214,4 +214,16 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params);
 void weapon_sound_publish(World &world, const Entity &owner,
                           const WeaponFsmDef &def, const WeaponFsmEvents &events);
 
+// The sound layer's reads of a channel's source. A one-shot's owner id (audio::oneshot_sound_id,
+// the packed handle tagged) names the entity whose place the frame's re-pan follows, while it
+// lives and is not the local player [orig: SoundEmitter_UpdateAndMixTop8 @0x528B00..0x528B52,
+// the channel's +8 entity, its ItemTypeIndex and the local player tested]; false for any other
+// id. The listener rides a source that is the local player, its parent (the seat it rides) or its
+// ground entity, whose pans centre [orig: Sound_Play3DPositional @0x527DCF..0x527DF8;
+// SoundEmitter_UpdateAndMixTop8 @0x5289A1..0x5289C0], by the owner id or by the registering
+// entity's spawn serial (an emitter channel's).
+bool sound_source_place(const World &world, uint32_t sound_id, int32_t position[3]);
+bool sound_source_ridden(const World &world, uint32_t sound_id);
+bool sound_spawn_ridden(const World &world, uint64_t spawn_id);
+
 } // namespace opennova::world

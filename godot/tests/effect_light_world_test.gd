@@ -256,7 +256,7 @@ func test_fire_present_dictionary_routes_mf_light_into_selected_output() -> void
 	# the director's on_muzzle_fire.
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup_passes(null, null, null, null, null, director, null, null)
+	presenter.setup_passes(null, null, null, null, null, director, null)
 	presenter.present_fires([_muzzle_fire(77, Vector3(1.0, 0.0, 0.0), 1)])
 	assert_eq(director.get_report().live, 1,
 			"the presented MF_Light event creates one muzzle glow")
@@ -296,8 +296,8 @@ func test_destruction_present_dictionary_routes_death_light_into_output() -> voi
 	# death-light column straight into the director's on_death_light.
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup_passes(null, null, null, null, null, director, null, null)
-	var drain := DestructionDrain.make([], [], 0, 0,
+	presenter.setup_passes(null, null, null, null, null, director, null)
+	var drain := DestructionDrain.make([], 0, 0,
 			PackedVector3Array([Vector3(2.0, 0.0, 0.0)]), PackedFloat32Array([6.0]))
 	presenter.present_destruction_drained(drain, [])
 	assert_eq(director.get_report().live, 1,
@@ -603,45 +603,6 @@ func _static_row_effect_scale(director: EffectLightDirector) -> float:
 	return atlas.get_pixel(9, 0).r
 
 
-func test_wire_node_exit_retires_its_cached_light_without_duplicate_registration() -> void:
-	var director := EffectLightDirector.new()
-	var node := ObjectModel.new()
-	add_child(node)
-	node.set_object_data(_fixture_object_data("shed.3di"))
-	director.on_wire_node_spawned(node, 0, 0)
-	director.on_wire_node_spawned(node, 0, 0)
-	assert_eq(director.get_report().live, 1,
-			"repeat delivery of one live wire node remains idempotent")
-	node.queue_free()
-	await get_tree().process_frame
-	assert_eq(director.get_report().live, 0,
-			"Entity_Destroy retires the one final entity+0x1B4 lease")
-
-
-func test_powerup_respawn_routes_authored_lght_once_per_live_entity() -> void:
-	var director := EffectLightDirector.new()
-	var first := ObjectModel.new()
-	add_child_autofree(first)
-	first.set_object_data(_fixture_object_data("shed.3di"))
-	first.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 0, 0, 41)
-	director.on_wire_node_spawned(first, MissionData.KIND_ITEM, 0)
-	director.on_wire_node_spawned(first, MissionData.KIND_ITEM, 0)
-	assert_eq(director.get_report().live, 1,
-			"one late powerup node spawns its LGHT exactly once")
-	first.queue_free()
-	await get_tree().process_frame
-	assert_eq(director.get_report().live, 0,
-			"pickup retirement clears the powerup's cached LGHT lease")
-
-	var respawn := ObjectModel.new()
-	add_child_autofree(respawn)
-	respawn.set_object_data(_fixture_object_data("shed.3di"))
-	respawn.entity_ref = EntityRef.make(MissionData.KIND_ITEM, -1, 0, 0, 41)
-	director.on_wire_node_spawned(respawn, MissionData.KIND_ITEM, 0)
-	assert_eq(director.get_report().live, 1,
-			"the replacement node takes the retail powerup_respawn LGHT path")
-
-
 func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
@@ -727,29 +688,3 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 			"authored LGHT remains at its spawn-time world position")
 	assert_false(followed_entity,
 			"authored LGHT has no per-frame entity follow path in retail")
-
-
-func test_reattach_rebinds_one_wire_exit_hook_without_accumulating_lights() -> void:
-	var packed := load("res://game/world/game_world.tscn") as PackedScene
-	var world := packed.instantiate() as GameWorld
-	add_child_autofree(world)
-	var root := MissionRoot.new()
-	root.name = "MissionRoot"
-	world.add_child(root)
-	var container := Node3D.new()
-	container.name = "MissionObjects"
-	root.add_child(container)
-	var node := ObjectModel.new()
-	container.add_child(node)
-	node.set_object_data(_fixture_object_data("shed.3di"))
-	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 91)
-	var director := EffectLightDirector.new()
-	director.setup(world, null)
-	director.reattach()
-	director.reattach()
-	assert_eq(director.get_report().live, 1,
-			"repeat reattach replaces the pool and exit hook instead of duplicating")
-	node.queue_free()
-	await get_tree().process_frame
-	assert_eq(director.get_report().live, 0,
-			"the rebound one-shot hook retires the node's replacement lease")

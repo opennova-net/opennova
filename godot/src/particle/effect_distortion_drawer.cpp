@@ -25,6 +25,8 @@
 #include "render/rd_glsl.h"
 #include "render/rd_uniforms.h"
 
+#include <runtime/renderer/device_fog.h>
+
 namespace godot {
 
 namespace {
@@ -84,23 +86,15 @@ layout(push_constant, std430) uniform RibbonPush {
 
 layout(location = 0) out vec4 frag_color;
 
+// The device fog (the engine's runtime/renderer/device_fog.h law) over the
+// pass pair, whose start is already Render_SetFogState's per-type start with
+// the overcast fold.
+@DEVICE_FOG@
 float fog_visibility() {
-	float fog_start = pc.camera_forward_fog_start.w;
-	float fog_end = pc.camera_position_fog_end.w;
-	if (fog_start == fog_end || fog_end <= 0.0) {
-		return 1.0;
-	}
-	vec3 camera_position = pc.camera_position_fog_end.xyz;
-	int fog_type = int(pc.fog_color_type.w);
-	if (fog_type == 0) {
-		float depth = max(dot(v_world_position - camera_position,
-				pc.camera_forward_fog_start.xyz), 0.0);
-		return clamp(exp(-depth * (4.1588830833596715 / fog_end)), 0.0, 1.0);
-	}
-	// The linear types run from the pass start, which is already
-	// Render_SetFogState's per-type start with the overcast fold.
-	float distance_to_eye = length(v_world_position - camera_position);
-	return clamp((fog_end - distance_to_eye) / (fog_end - fog_start), 0.0, 1.0);
+	vec3 to_point = v_world_position - pc.camera_position_fog_end.xyz;
+	return device_fog_visibility(dot(to_point, pc.camera_forward_fog_start.xyz),
+			length(to_point), pc.camera_forward_fog_start.w, pc.camera_position_fog_end.w,
+			int(pc.fog_color_type.w), true);
 }
 
 void main() {
@@ -113,6 +107,12 @@ void main() {
 	frag_color = vec4(mix(pc.fog_color_type.xyz, rgb, fog_visibility()), v_color.a);
 }
 )GLSL";
+
+std::string ribbon_fragment_shader_source() {
+	std::string source(kRibbonFragmentShader);
+	splice_token(source, "@DEVICE_FOG@", opennova::renderer::kDeviceFogGlsl);
+	return source;
+}
 
 void release(RenderingDevice *rd, RID &rid) {
 	if (rd != nullptr && rid.is_valid())
@@ -203,7 +203,8 @@ bool EffectDistortionDrawer::ensure_ribbon_device(RenderingDevice *p_rd) {
 	if (shader_.is_valid() && vertex_format_ != RenderingDevice::INVALID_FORMAT_ID)
 		return true;
 	Ref<RDShaderSPIRV> spirv;
-	if (!compile_rd_spirv(rd_, kRibbonVertexShader, kRibbonFragmentShader, spirv).empty())
+	if (!compile_rd_spirv(rd_, kRibbonVertexShader, ribbon_fragment_shader_source(), spirv)
+					.empty())
 		return false;
 	shader_ = rd_->shader_create_from_spirv(spirv, "OpenNova tracer distortion ribbons");
 	if (!shader_.is_valid())

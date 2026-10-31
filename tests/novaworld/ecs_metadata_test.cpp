@@ -19,7 +19,7 @@
 #include "common/http_reply_server.h"
 #include "common/test_expect.h"
 
-#include <net_sockets.h>
+#include <net/socket/socket.h>
 
 #include <cstdio>
 #include <string>

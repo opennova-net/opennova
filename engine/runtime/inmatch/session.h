@@ -378,7 +378,11 @@ struct FrameOutcome {
 	// still runs; its facial passes, its Inset pass and its HUD pass do not. The session
 	// stamps it into the local view (world::PlayerViewState::world_skipped)
 	// [orig: Render_ProcessMainSceneFrame @0x5CA171..0x5CA190 (ebx); the skips
-	//  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640 -> loc_5CAD2D].
+	//  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640 -> loc_5CAD2D]. The world block's sector
+	// walk is where each drawn model's runtime constants evaluate (its PANM registers and
+	// material generators), after the frame's collect and ahead of the particle composite, so
+	// a skipped world submits no model and evaluates none [orig: Terrain_RenderSectorModels
+	// @ 0x5c5d30 computes model runtime constants during the render sector walk].
 	bool world_skipped = false;
 	// The drawn scene frame calls its HUD pass (Session::hud_pass_called, the call site's gates:
 	// not past the world skip, a death.mnu trigger or the latch, the F1 help, the dead bit, a
@@ -714,8 +718,10 @@ public:
 	//  @0x526806..0x526867, CAdminServer_ProcessFrame @0x5268F1 past it]
 	void set_update_head(std::function<void()> head) { update_head_ = std::move(head); }
 	void set_update_tail(std::function<void()> tail) { update_tail_ = std::move(tail); }
-	// The frame lock's clock (FrameInput::frame_lock): the main loop's tick-count clock
-	// (world::frame_tick_count_ms) and a 1 ms sleep unless a test hands its own.
+	// The main loop's clock: the frame lock's (FrameInput::frame_lock) and the one the frame's
+	// start stamp and its CPU share read: the main loop's tick-count clock
+	// (world::frame_tick_count_ms) and a 1 ms sleep unless the embedder hands its own (a
+	// platform's, inmatch::PlatformFrameLockClock; a test's).
 	void set_frame_lock_clock(world::FrameLockClock *clock);
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
@@ -826,7 +832,11 @@ public:
 	// bank: retail's pause word gates the update's legs, never the main loop's bank
 	// (world::TickAccumulator); the pending one-shots drop, as nothing consumes a
 	// queued event under the menu and its close resets the queue. The pause row's
-	// own flip applies inside the update that reads it (run_updates).
+	// own flip applies inside the update that reads it (run_updates). Single player
+	// alone pauses: a network role's escape menu overlays a running match, which keeps
+	// ticking, as a silent peer is reaped past the transport's connection window
+	// [orig: the pause path has no MP leg; the reaping side is cs_dir0.timeout_ms =
+	// 120000, CNapiNetwork_Init @0x4ca4a0].
 	TransitionResult pause();
 	TransitionResult resume();
 	TransitionResult close();
@@ -895,6 +905,8 @@ private:
 	State state_ = State::Unloaded;
 	world::TickAccumulator accumulator_;
 	world::FrameLockClock *frame_lock_clock_ = nullptr; // null = the tick-count one
+	// The main loop's clock the session reads (set_frame_lock_clock).
+	world::FrameLockClock &frame_clock() const;
 	// The frame's bank with its lock when the input asks for one (live frames only): the
 	// ticks due; `lock_stamp_ms` the lock's last read when it slept, else 0.
 	int32_t bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms,

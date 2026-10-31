@@ -37,8 +37,8 @@
 #include "hosted/internal_listener.h"
 #include "hosted/model/fleet_repository.h"
 #include "hosted/protocol/agent_protocol.h"
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 #include "products/product_repository.h"
 
 #include <base/proc/child_process.h>

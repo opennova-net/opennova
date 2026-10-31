@@ -741,6 +741,152 @@ int test_program_controls_code() {
     return 0;
 }
 
+// --- 7b. PLAYER_INFO's dialog save into the weapon record --------------------------
+
+bool same_page(const playersav::KitPage &page, const std::vector<playersav::KitEntry> &entries) {
+    if (page.entries.size() != entries.size()) return false;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        const playersav::KitEntry &a = page.entries[i];
+        const playersav::KitEntry &b = entries[i];
+        if (a.name != b.name || a.ammo_primary != b.ammo_primary ||
+                a.ammo_secondary != b.ammo_secondary || a.flags != b.flags)
+            return false;
+    }
+    return true;
+}
+
+profile::CharacterSelection selection(int player_class, int team) {
+    profile::CharacterSelection s;
+    s.player_class = player_class;
+    s.team = team;
+    return s;
+}
+
+profile::CharacterSelection::Character character(int a, int b, int packed) {
+    profile::CharacterSelection::Character c;
+    c.avatar_a = a;
+    c.avatar_b = b;
+    c.avatar_packed = packed;
+    return c;
+}
+
+profile::CharacterSelection::Kit kit_page(int page_class, std::vector<playersav::KitEntry> entries) {
+    profile::CharacterSelection::Kit k;
+    k.page_class = page_class;
+    k.entries = std::move(entries);
+    return k;
+}
+
+// [orig: PlayerInfo_SaveFromDialog @0x55EE10 - the class loop @0x55EE3F..0x55EE6D, the shown
+//  side's bytes @0x55EE93..0x55EF38 by g_PlayerInfoTeamIndex, the kit through
+//  PlayerInfo_SerializeWeaponLoadout @0x55E4B0 into the populate's page]
+int test_character_selection() {
+    PlayerProfiles p(kJo);
+    PlayerProfiles::LoadInput in;
+    p.load(in, defaults());
+    // Slot 1 carries sentinels the slot-0 save must not touch, and slot 0's red side a
+    // character the save on blue must leave.
+    playersav::Side &other = p.weapon_sav().slots[1].blue;
+    other.player_class = 6;
+    other.avatar_a = 0x44;
+    other.avatar_packed = 0x1234;
+    playersav::Side &red = p.current_weapons().red;
+    red.avatar_a = 9;
+    red.avatar_b = 2;
+    red.avatar_packed = 0x8A49;
+
+    // The class to both sides, the character to the shown side alone.
+    profile::CharacterSelection blue = selection(9, 0);
+    blue.character = character(0, 0, 0x0400);
+    TEST_EXPECT(p.apply_character_selection(blue));
+    TEST_EXPECT(p.current_weapons().blue.player_class == 9 && red.player_class == 9);
+    TEST_EXPECT(p.current_weapons().blue.avatar_packed == 0x0400);
+    TEST_EXPECT(red.avatar_a == 9 && red.avatar_b == 2 && red.avatar_packed == 0x8A49);
+    profile::CharacterSelection shown_red = selection(9, 1);
+    shown_red.character = character(7, 0, 0x8407);
+    TEST_EXPECT(p.apply_character_selection(shown_red));
+    TEST_EXPECT(red.avatar_a == 7 && red.avatar_packed == 0x8407);
+    TEST_EXPECT(p.current_weapons().blue.avatar_packed == 0x0400);
+    TEST_EXPECT(other.player_class == 6 && other.avatar_a == 0x44 && other.avatar_packed == 0x1234);
+
+    // A shown side with no character keeps its bytes; the class is written all the same.
+    TEST_EXPECT(p.apply_character_selection(selection(7, 1)));
+    TEST_EXPECT(red.player_class == 7 && red.avatar_packed == 0x8407);
+
+    // The kit goes to the shown side's page of the class the populate restored, the
+    // other side's page untouched.
+    const std::vector<playersav::KitEntry> kit = {
+            {"WPN_KNIFE2", -1, -1, -1},
+            {"WPN_DRAGUNOV", 5, -1, 0},
+            {"WPN_357", 3, -1, 1},
+    };
+    const playersav::KitPage blue_page = p.current_weapons().blue.pages[8 - 5];
+    profile::CharacterSelection with_kit = selection(8, 1);
+    with_kit.kit = kit_page(8, kit);
+    TEST_EXPECT(p.apply_character_selection(with_kit));
+    TEST_EXPECT(same_page(red.pages[8 - 5], kit));
+    TEST_EXPECT(same_page(p.current_weapons().blue.pages[8 - 5], blue_page.entries));
+    // A class pick saves the dialog under the class it leaves: the page restored (5),
+    // whatever class the pick writes (8).
+    with_kit.kit->page_class = 5;
+    TEST_EXPECT(p.apply_character_selection(with_kit));
+    TEST_EXPECT(same_page(red.pages[0], kit) && red.player_class == 8);
+
+    // D-PLAYERINFO-26: a class byte that picks no page restored none, and the kit goes
+    // into the page of the class the save writes, as it does with no class given.
+    red.player_class = 3;
+    const std::vector<playersav::KitEntry> other_kit = {{"WPN_P1", -1, -1, 0}};
+    profile::CharacterSelection no_page = selection(6, 1);
+    no_page.kit = kit_page(3, other_kit);
+    TEST_EXPECT(p.apply_character_selection(no_page));
+    TEST_EXPECT(red.player_class == 6 && p.current_weapons().blue.player_class == 6);
+    TEST_EXPECT(same_page(red.pages[6 - 5], other_kit));
+    no_page.player_class = 9;
+    no_page.kit = kit_page(-1, other_kit);
+    TEST_EXPECT(p.apply_character_selection(no_page));
+    TEST_EXPECT(same_page(red.pages[9 - 5], other_kit));
+
+    // Every input is checked before the record changes.
+    const std::vector<uint8_t> before = p.weapon_sav_bytes();
+    profile::CharacterSelection bad = selection(7, 0);
+    bad.kit = kit_page(7, {{"WPN_P1", -1, -1, 0}, {"", -1, -1, -1}});
+    TEST_EXPECT(!p.apply_character_selection(bad));
+    TEST_EXPECT(!p.apply_character_selection(selection(4, 0)));
+    TEST_EXPECT(!p.apply_character_selection(selection(10, 0)));
+    TEST_EXPECT(!p.apply_character_selection(selection(7, -1)));
+    TEST_EXPECT(!p.apply_character_selection(selection(7, 2)));
+    profile::CharacterSelection wrong = selection(7, 0);
+    wrong.character = character(0, 0, 0x8400);
+    TEST_EXPECT(!p.apply_character_selection(wrong));
+    wrong.character = character(256, 0, 0x0400);
+    TEST_EXPECT(!p.apply_character_selection(wrong));
+    wrong.character = character(0, -1, 0x0400);
+    TEST_EXPECT(!p.apply_character_selection(wrong));
+    wrong.character = character(0, 0, 0x10000);
+    TEST_EXPECT(!p.apply_character_selection(wrong));
+    TEST_EXPECT(p.weapon_sav_bytes() == before);
+    return 0;
+}
+
+// A profile that was no weapon.sav: the save writes the defaults with the dialog's edits
+// [orig: PlayerProfile_SaveToFiles @0x54be00 writes its records whatever the load read].
+int test_character_selection_over_a_corrupt_file() {
+    const std::string junk = "NOTAPROFILE";
+    const std::vector<uint8_t> bytes(junk.begin(), junk.end());
+    PlayerProfiles p(kJo);
+    PlayerProfiles::LoadInput in;
+    in.weapon_sav = &bytes;
+    p.load(in, defaults());
+    profile::CharacterSelection s = selection(8, 0);
+    s.character = character(0, 0, 0x0200);
+    TEST_EXPECT(p.apply_character_selection(s));
+    const std::vector<uint8_t> saved = p.weapon_sav_bytes();
+    playersav::File back;
+    TEST_EXPECT(playersav::read(saved.data(), saved.size(), kJo.profile_magic, back));
+    TEST_EXPECT(back.slots[0].blue.avatar_packed == 0x0200 && back.slots[0].blue.player_class == 8);
+    return 0;
+}
+
 // --- 8. the shipped default weapon.sav, loaded and saved in memory ---------------
 
 int test_default_weapon_sav() {
@@ -927,6 +1073,8 @@ int main() {
         {"title_magic", test_title_magic},
         {"title_first_name", test_title_first_name},
         {"title_kit_pages", test_title_kit_pages},
+        {"character_selection", test_character_selection},
+        {"character_selection_over_a_corrupt_file", test_character_selection_over_a_corrupt_file},
     };
     int failures = 0;
     for (const Case &c : cases) {

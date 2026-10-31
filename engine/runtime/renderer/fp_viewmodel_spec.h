@@ -22,6 +22,9 @@
 namespace opennova::threedi {
 struct Threedi3di3;
 }
+namespace opennova::def {
+struct DefWeaponDef;
+}
 
 namespace opennova::renderer {
 
@@ -34,6 +37,14 @@ struct FpViewmodelSpec {
 	// The clip set. Empty for a def with no animadm (retail loads no anim map
 	// and draws the rig at the root matrix).
 	std::string adm;
+	// The model whose part table both submits pose by: the gun's. The arms
+	// draw with the gun's bone array, part i by the gun's part i, while `adm`
+	// supplies the clips; a table sized from the clip set's basename loses
+	// late animated gun parts where the two differ (M21B_1st's 42 parts
+	// against M21_1st's 40: the M14 magazine) [orig:
+	// Player_RenderFirstPersonViewModel @0x4ded60, the arms submit with the
+	// gun's array @0x4df088].
+	std::string rig;
 	// False when nothing is submitted, the mount is emplaced (Flags 0x80) or
 	// no character arms resolved: retail submits no arms in any of these.
 	bool show_arms = false;
@@ -54,6 +65,10 @@ inline constexpr float kFallbackRotBiasDeg[3] = {5.0f, 3.75f, 353.0f};
 // viewmodel draws [orig: Render_SwapProjectionNearZ(0.05) @ 0x4dee29,
 // restore @ 0x4df0aa].
 inline constexpr float kViewmodelPassNearZ = 0.05f;
+// The FP pass draws into the nearest tenth of the depth range, so the world
+// drawn after it never overdraws the gun [orig: Render_SetViewportDepth01
+// @0x58a7b0 - the viewport's MinZ 0.0 and MaxZ 0.1].
+inline constexpr float kViewmodelPassDepthMax = 0.1f;
 
 // The weapon `renderfov` default, HORIZONTAL degrees: every JO weapon.def
 // omits the key, so every viewmodel draws through the record default.
@@ -124,6 +139,52 @@ struct FpViewmodelPose {
 // first-person eye (DI-13) place the viewmodel by it.
 FpViewmodelPose fp_viewmodel_pose(const float view_units[3], const float rot_bias_deg[3],
 		const float rig_rot_deg[3]);
+
+// One frame's viewmodel root (fp_viewmodel_pose's inputs, resolved): the cant
+// is the def's `pos` rotation columns plus the sim's authored ADS rotation, one
+// basis turning both the model and its view-local offset; the offset is the
+// sim's blended VIEW-FRAME units (the ADS pos -> tpos blend, the /256 scale and
+// the reload suppression, world::player_view_bias_view_units). The camera adds
+// the def's Bone (+0xF4) and the interp's published bias, the interp running
+// the hip copy at +0x10C to the tpos at +0x124 [orig:
+// Player_UpdateFirstPersonCamera @0x4dd380; CNetPlayerInterp_Setup @0x4df36e].
+// `sim_view_units` / `sim_rot_bias_deg` null = no sim: the raw def `pos` takes
+// the /256 scale the sim's blend otherwise applies [orig: flt_7D1D70 = 256
+// @0x544770] and the cant is the def's alone. The velocity lead (>>7, the
+// clamps @0x4dd4f2..) is an unported tail.
+FpViewmodelPose fp_viewmodel_root(const float pos_units[3], const float def_rot_bias_deg[3],
+		const float rig_rot_deg[3], const float *sim_view_units, const float *sim_rot_bias_deg);
+
+// The weapon.def slice the first-person viewmodel reads, decoded from the
+// def's record: the gun model (gfx1) and the shared clip set (animadm; the
+// ARMS are the character's, never a def field, as fp_viewmodel_spec says), the
+// third-person world gun (gfx3, WeaponDef.tpModel +0x170 read @0x4e3cd3 -- the
+// IDB locals in WeaponDef_ResolveAllReferences @0x54042c are swapped: its
+// `model_1p` reads +0x170, which is this field), the hip and ADS view biases in
+// RAW def units (`pos` and `tpos` -> WeaponDef.CamOffsetTpos +0x124; / 256 =
+// world), the `pos` rotation columns in degrees (yaw, pitch, roll: the cant
+// added to the view angles), the FP projection's HORIZONTAL fov (the record
+// default 80.0, which no shipped JO def overrides), the flag mask (Flags & 3
+// gates the ADS toggle), the ADS magnification (0 = the key absent) and the
+// magazine size (0 = no clipsize key; the reload key is refused on a full
+// magazine) [orig: WeaponDef_ParseProperty @0x54d730; the pos/tpos handlers
+// @0x54476b/@0x54471f; renderfov @0x54482a, default flt_7D1898 @0x53ff31; the
+// reload input case @0x4e0420 compares the clip against clipsize before
+// WeaponSlot_RequestReload].
+struct FpViewmodelDef {
+	std::string weapon_name;
+	std::string gfx1;
+	std::string gfx3;
+	std::string animadm;
+	float pos_units[3] = {0.0f, 0.0f, 0.0f};
+	float rot_bias_deg[3] = {0.0f, 0.0f, 0.0f};
+	float tpos_units[3] = {0.0f, 0.0f, 0.0f};
+	float renderfov_h_deg = kWeaponRenderFovHDegDefault;
+	int flags = 0;
+	float scope_max_mag = 0.0f;
+	int clipsize = 0;
+};
+FpViewmodelDef fp_viewmodel_def(const def::DefWeaponDef &def);
 
 // TEX_TEAM is a signed-byte store immediately before the FP lighting, heat
 // and model-submit path [orig: Player_RenderFirstPersonViewModel
