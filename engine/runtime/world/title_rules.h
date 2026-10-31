@@ -388,6 +388,17 @@ struct TitleRules {
 	//  Entity_ResetToSpawnState @0x4B96F0 - @0x4B989B..0x4B98A2; Server_DeployPlayer @0x514990 -
 	//  Entity_RaiseHealthToMax @0x514A70 (dfx2.exe)]
 	bool spawn_reset_stores_def_health = false;
+
+	// --- DFX2-123: the round init's look yaw. ----------------------------------------------------
+	// joiner-side: the round init (world::LocalPlayer::reset_for_new_round, from the listen host's
+	// deploy and the joiner's own respawn arm) stores the local player's look yaw
+	// (g_LocalPlayerLookYaw) from its placed Yaw word under Jointops.exe; dfx2.exe's stores none.
+	// Both store it in the scored placement (Entity_FindBestSpawnPoint, world::spawn_select) and
+	// the joiner's arm ahead of the round init, so it shows on the host's deploys that skip the
+	// scored placement: a picked zone, a co-op start marker, the co-op checkpoint.
+	// [orig: Game_InitNewRound @0x422740 - `mov g_LocalPlayerLookYaw, edx` @0x4227E3] [orig:
+	//  Game_InitNewRound @0x422590 (no store) (dfx2.exe)]
+	bool round_init_look_yaw = true;
 };
 
 // One registry row: a title's code and the rules it runs.

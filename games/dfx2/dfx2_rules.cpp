@@ -223,6 +223,9 @@ world::TitleRules make() {
 	// DFX2-30: the spawn reset stores the def's health word [orig: Entity_ResetToSpawnState
 	//  @0x4B96F0 - `mov dx, [eax+17Ch]` @0x4B989B, `mov [esi+11Eh], dx` @0x4B98A2 (dfx2.exe)].
 	r.spawn_reset_stores_def_health = true;
+	// DFX2-123: the round init stores no look yaw [orig: Game_InitNewRound @0x422590 - the deploy
+	//  hold and +0x1E0 clears @0x42261E..0x422638, no g_LocalPlayerLookYaw store (dfx2.exe)].
+	r.round_init_look_yaw = false;
 	return r;
 }
 

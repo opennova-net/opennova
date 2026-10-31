@@ -2,6 +2,7 @@
 // picked-zone pose and the exact no-pick per-mode marker chains.
 // [orig: Server_PositionPlayerForSpawn @0x50cf60 -> Entity_FindBestSpawnPoint @0x50ccc0]
 #include <runtime/world/entity.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <string>
 
 using namespace opennova::world;
 
@@ -100,6 +102,39 @@ int main() {
         CHECK(approx(r.position.z, 3.0f));
         CHECK(r.heading_bam == placed_heading_bam(90));
         CHECK(w.zones.spawn_cycle_counter == 1);
+    }
+
+    // --- DFX2-123: the scored placement of the local player stores its look yaw, the placed
+    //     Yaw word, in both titles; Jointops.exe's round init stores the body's Yaw again,
+    //     dfx2.exe's none, so a look the placement did not set stands there.
+    // [orig: Entity_FindBestSpawnPoint @0x50CCC0 - @0x50CF45..0x50CF4D; Game_InitNewRound
+    //  @0x422740 - @0x4227E3] [orig: Entity_FindBestSpawnPoint - @0x50A08D; Game_InitNewRound
+    //  @0x422590 (no store) (dfx2.exe)]
+    for (const char *code : {"jo", "dfx2"}) {
+        const bool dfx2 = std::string(code) == "dfx2";
+        auto w_storage = std::make_unique<World>();
+        World &w = *w_storage;
+        w.rules.title_rules = &title_rules(code);
+        w.registry.configure_pool(0, 16);
+        w.registry.configure_pool(3, 16);
+        const EntityHandle self = spawn_body(w, {500.0f, 0.0f, 0.0f}, true);
+        spawn_marker(w, 6095, {200.0f, 10.0f, 3.0f}, 90);
+        auto local = std::make_unique<LocalPlayer>(w);
+        w.local_player_state = local.get();
+        w.cached.local_player = self;
+        local->input.look_heading = 12345;
+        const SpawnPointResult r = resolve_player_spawn_pose(
+            w, self, EntityHandle{}, 0, 0, 0x00000u);
+        CHECK(r.found && local->input.look_heading == placed_heading_bam(90));
+        // The round init over a body whose Yaw word the placement did not write.
+        Entity *body = w.registry.get(self);
+        CHECK(body != nullptr);
+        if (body == nullptr) continue;
+        body->heading = placed_heading_bam(45);
+        local->input.look_heading = 12345;
+        local->reset_for_new_round();
+        CHECK(local->input.look_heading == (dfx2 ? 12345 : placed_heading_bam(45)));
+        w.local_player_state = nullptr;
     }
 
     // --- The clamp-random arm draws one CRT value per candidate, in row

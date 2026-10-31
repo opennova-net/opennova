@@ -1123,11 +1123,16 @@ void LocalPlayer::reset_for_new_round() {
     world_.script.waypoints.reset_selection(world_.registry, *local,
             world_.waypoint_context().game_type);
     // The look yaw takes the player's +0x10 word, the heading the deploy just
-    // placed, never its whole-degree mirror (D-NET-376)
-    // [orig: Game_InitNewRound @0x4227DA..0x4227E3].
-    const w::AiEntity *motor = player_ai();
-    input.look_heading = motor != nullptr ? motor->heading
-                                          : local->heading;
+    // placed, never its whole-degree mirror (D-NET-376); dfx2.exe's round init stores
+    // none, so a deploy its scored placement skips (a picked zone, a co-op marker, the
+    // checkpoint) keeps the look the player had (TitleRules::round_init_look_yaw, DFX2-123)
+    // [orig: Game_InitNewRound @0x4227DA..0x4227E3] [orig: Game_InitNewRound @0x422590 -
+    //  no store, the round init ends @0x42262A (dfx2.exe)].
+    if (world_.rules.title().round_init_look_yaw) {
+        const w::AiEntity *motor = player_ai();
+        input.look_heading = motor != nullptr ? motor->heading
+                                              : local->heading;
+    }
     // The HUD buffers belong to the presenting device; one ordered effect
     // carries the reset without discarding unrelated mission events.
     Effect reset;
