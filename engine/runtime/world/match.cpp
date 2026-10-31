@@ -1872,8 +1872,8 @@ void Match::update_flag_objectives(World &world) {
         // ahead of the id switch, whatever its id: the attach alone (for a
         // non-flag def, its SPGOAL_PU play at the carrier), so no pickup score
         // and no 0x14 feed. The attach's own gate refuses an object someone
-        // already carries; its
-        // out-of-session-or-authority test always passes here.
+        // already carries; its out-of-session-or-authority test always passes
+        // here.
         // [orig: Entity_ProcessWaypointInteraction - Flags & 0x100 @0x4AD85B,
         //  mountedChild @0x4AD862, def+0x54 & 0x2000 @0x4AD86D,
         //  Entity_TryAttachCarriedObject @0x4AD878 and the return @0x4AD883;
