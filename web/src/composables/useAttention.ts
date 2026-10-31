@@ -3,12 +3,16 @@
 // the same answer. AdminLayout provides it, polled every 60 s while its gate is
 // open (a closed gate sends no admin request); a page mounted without it (a
 // test) reads its own. A failed read keeps the last answer (as of loadedAt)
-// and sets error: while error is set, that answer may be out of date.
+// and sets error: while error is set, that answer may be out of date. An
+// admin who does not see billing gets the answer without what opens the
+// Billing section (utils/billingAccess.ts).
 
 import { inject, provide, ref, watch, type InjectionKey, type Ref } from 'vue';
 import { fetchAttention } from '../api/attention';
 import type { Attention } from '../types/attention';
+import { seesBilling, withoutBilling } from '../utils/billingAccess';
 import { usePolling } from './usePolling';
+import { useSession } from './useSession';
 
 export const ATTENTION_POLL_MS = 60_000;
 
@@ -27,6 +31,7 @@ export interface AttentionState {
 const KEY: InjectionKey<AttentionState> = Symbol('attention');
 
 function readAttention(enabled: Ref<boolean>): AttentionState {
+  const { user } = useSession();
   const attention = ref<Attention | null>(null);
   const error = ref('');
   const loadedAt = ref<number | null>(null);
@@ -38,7 +43,7 @@ function readAttention(enabled: Ref<boolean>): AttentionState {
       const result = await fetchAttention(signal);
       if (signal.aborted) return false;
       if (result.ok) {
-        attention.value = result.value;
+        attention.value = seesBilling(user.value) ? result.value : withoutBilling(result.value);
         loadedAt.value = Date.now();
         error.value = '';
         failedAt.value = null;

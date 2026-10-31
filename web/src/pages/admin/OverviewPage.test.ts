@@ -9,14 +9,25 @@ import { fetchCosts } from '../../api/costs';
 import { fetchFleetStats } from '../../api/hostedStats';
 import { fetchJobsOverview } from '../../api/jobs';
 import { fetchOnline } from '../../api/online';
+import type { SessionUser } from '../../api/session';
+import { refreshSession } from '../../composables/useSession';
 import { adminBilling, fleetResponse } from '../../test/adminFixtures';
 import { tiersResponse } from '../../test/billingFixtures';
 import { costs, localCosts } from '../../test/costFixtures';
 import { overview } from '../../test/jobsFixtures';
 import { onlinePlayer, onlineResponse } from '../../test/onlineFixtures';
 import { serverStats } from '../../test/statsFixtures';
-import { attention } from '../../test/usageFixtures';
+import { attention, finding } from '../../test/usageFixtures';
 import { testRouter } from '../../test/router';
+
+const BIGGY: SessionUser = { id: 1, username: 'biggy', role: 'admin' };
+// The session /api/me answers: biggy, who sees billing, unless a test says.
+const session = vi.hoisted(() => ({ user: null as SessionUser | null }));
+
+vi.mock('../../api/session', async (original) => ({
+  ...(await original<typeof import('../../api/session')>()),
+  me: vi.fn(async () => ({ ok: true, value: session.user })),
+}));
 
 vi.mock('../../api/admin', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/admin')>()),
@@ -80,8 +91,10 @@ describe('OverviewPage', () => {
     return wrapper;
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    session.user = BIGGY;
+    await refreshSession();
     fleet.mockResolvedValue({ ok: true, value: fleetResponse() });
     status.mockResolvedValue({ ok: true, value: { maintenance_enabled: false, message: '' } });
     online.mockResolvedValue({ ok: true, value: onlineResponse([onlinePlayer('Ghost'), onlinePlayer('Viper', { state: 'lobby', server: null })]) });
@@ -182,5 +195,30 @@ describe('OverviewPage', () => {
     expect(aws).toHaveBeenCalledTimes(2);
     expect(needs.mock.calls.length).toBeGreaterThan(before);
     expect(tiers).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows another admin no money and reads none', async () => {
+    session.user = { id: 2, username: 'ghost', role: 'admin' };
+    await refreshSession();
+    billing.mockResolvedValue({ ok: true, value: adminBilling({ limits_hold: true, limits_hold_reason: 'would stop 9 of 12 owners', limits_hold_owners: 9, limits_hold_servers: 11 }) });
+    needs.mockResolvedValue({
+      ok: true,
+      value: attention({ findings: [finding('warn', 'is oversold', { subject: 'Capacity', link: '/admin/billing' })], alarms: [] }),
+    });
+    const page = await mountOverview();
+    expect(page.findAll('.stat-tile dt').map((d) => d.text())).toEqual([
+      'Players online',
+      'Servers live',
+      'Machines',
+      'NovaWorld sign-in',
+      'Jobs failed today',
+      'Releases to approve',
+    ]);
+    expect(page.find('.limits-hold').exists()).toBe(false);
+    expect(page.find('.attention-finding').exists()).toBe(false);
+    expect(page.find('a[href^="/admin/billing"]').exists()).toBe(false);
+    expect(billing).not.toHaveBeenCalled();
+    expect(aws).not.toHaveBeenCalled();
+    expect(tiers).not.toHaveBeenCalled();
   });
 });

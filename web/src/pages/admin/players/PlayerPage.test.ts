@@ -7,7 +7,9 @@ import { addCompAddress } from '../../../api/adminAddresses';
 import { fetchAccountCdKeys } from '../../../api/cdKeys';
 import { fetchOnline } from '../../../api/online';
 import { fetchProducts } from '../../../api/products';
+import type { SessionUser } from '../../../api/session';
 import { deleteUser, fetchUser, listUsers, setCompGrants, updateUser } from '../../../api/users';
+import { refreshSession } from '../../../composables/useSession';
 import { adminAddress } from '../../../test/addressFixtures';
 import { user, userDetail, userEntry } from '../../../test/adminFixtures';
 import { hostedServer } from '../../../test/hostedFixtures';
@@ -28,6 +30,15 @@ vi.mock('../../../api/cdKeys', () => ({ fetchAccountCdKeys: vi.fn() }));
 vi.mock('../../../api/adminAddresses', () => ({ addCompAddress: vi.fn() }));
 vi.mock('../../../api/online', () => ({ fetchOnline: vi.fn() }));
 vi.mock('../../../api/products', () => ({ fetchProducts: vi.fn() }));
+
+// The session /api/me answers: biggy, who sees billing, on an account no
+// test's player has, unless a test says.
+const BIGGY: SessionUser = { id: 900, username: 'biggy', role: 'admin' };
+const session = vi.hoisted(() => ({ user: null as SessionUser | null }));
+vi.mock('../../../api/session', async (original) => ({
+  ...(await original<typeof import('../../../api/session')>()),
+  me: vi.fn(async () => ({ ok: true, value: session.user })),
+}));
 
 const detail = vi.mocked(fetchUser);
 const list = vi.mocked(listUsers);
@@ -88,8 +99,10 @@ function section(wrapper: VueWrapper, heading: string) {
 describe('PlayerPage', () => {
   let confirm: MockInstance<typeof actionReview.confirmAction>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    session.user = BIGGY;
+    await refreshSession();
     confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     detail.mockResolvedValue({ ok: true, value: account() });
     keys.mockResolvedValue({
@@ -220,9 +233,25 @@ describe('PlayerPage', () => {
     expect(spare.text()).toContain('Admin grant');
     expect(spare.text()).toContain('Being set up');
 
+    expect(addresses.findAll('a').find((a) => a.text() === 'Manage addresses')!.attributes('href')).toBe('/admin/billing/addresses');
+
     // The Settings forms are on their tab.
     expect(wrapper.find('#player-profile').exists()).toBe(false);
     expect(wrapper.find('#user-comp-servers').exists()).toBe(false);
+  });
+
+  it('shows another admin its hosting, and no Stripe customer, subscription or billing link', async () => {
+    session.user = { id: 901, username: 'ghost', role: 'admin' };
+    await refreshSession();
+    const { wrapper } = await mountPage();
+    const hosting = section(wrapper, 'player-billing');
+    expect(hosting.get('h2').text()).toBe('Hosting');
+    expect(hosting.get('dl').text()).toContain('Tier 2');
+    expect(hosting.get('dl').text()).toContain('May start');
+    expect(hosting.text()).not.toContain('Stripe customer');
+    expect(hosting.text()).not.toContain('cus_test_7');
+    expect(hosting.find('table').exists()).toBe(false);
+    expect(wrapper.find('a[href^="/admin/billing"]').exists()).toBe(false);
   });
 
   it('keeps the profile, role, grant, comp address and deletion in Settings', async () => {
