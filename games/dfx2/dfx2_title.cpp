@@ -340,9 +340,10 @@ Title make() {
 	t.profile_single_player_kit = kSinglePlayerKit;
 	t.profile_class_kits = kProfileClassKits;
 	// DFX2-58: the map views' ceiling 6.0 (flt_7CC0C8): the CMAP window's [orig:
-	// CMapWindow_HandleEvent @0x546a60 - @0x5454e6, @0x546fcc] and the DEATH map pane's [orig:
-	// sub_550690 @0x550922 / @0x550967 (the reset @0x550974); CMap_OverlayInputHandler @0x551178
-	// (the right drag); DeathScreen_ZoomStep @0x550ca6 (the wheel) (dfx2.exe)].
+	// CMapWindow_HandleEvent @0x546a60 - @0x5454e6, @0x546fcc (dfx2.exe)] and the DEATH map
+	// pane's [orig: sub_550690 @0x550922 / @0x550967 (the reset @0x550974);
+	// CMap_OverlayInputHandler @0x551178 (the right drag); DeathScreen_ZoomStep @0x550ca6 (the
+	// wheel) (dfx2.exe)].
 	t.map_view_zoom_max = 6.0f;
 	// DFX2-41: the DEATH map pane's frame, four lines round the pane's rect in 0xFFE1DF4B after
 	// the map [orig: CMap_OverlayInputHandler @0x550fe6..0x551052 (the map, then the frame)
