@@ -1531,6 +1531,61 @@ void test_a_carrier_still_saves_its_own_flag() {
     CHECK(blue_entity->mounted_child == red_flag);
 }
 
+// The own-flag arm syncs the flag to its definition pose: at the pose it sends
+// nothing; near it (under 2 u) the 0x2F alone, the flag left where it lies; off
+// it the snap's 0x2F, then the save's 0x15 feed at the words the touch found and
+// its own 0x2F. An occupant does not stop the arm.
+// [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD921;
+//  Entity_SyncPositionFromDefinition @0x43A9B0 (@0x43A9F8, @0x43AA6B, @0x43AB40);
+//  Server_BroadcastFlagSaveEvent @0x517A90 (@0x517AED, @0x517B09)]
+void test_own_flag_touch_syncs_its_definition_pose() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 4);
+    WaypointContactHarness contacts(*world);
+    MatchRules ctf;
+    ctf.game_type = gt::kCaptureTheFlag;
+    ctf.score_values.emplace();
+    (*ctf.score_values)[9] = 3; // FLAGSAVE
+    world->match.configure(ctf);
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    world->registry.get(blue)->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle other = player(*world, 1, 2, "Other");
+    const EntityHandle flag = objective(*world, 4091, 1, {40.0f, 0.0f, 0.0f});
+    contacts.bind(flag);
+    auto touch = [&] {
+        contacts.touch(*world, blue, flag);
+        run_match_frame(*world);
+        return world->match.drain_gameplay_events();
+    };
+
+    // At the definition pose: nothing.
+    CHECK(touch().empty());
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 0);
+
+    // One unit off it: the 0x2F lane alone, the flag where it lies.
+    world->registry.get(flag)->position = {41.0f, 0.0f, 0.0f};
+    std::vector<MatchGameplayEvent> near_pose = touch();
+    CHECK(near_pose.size() == 1 && near_pose[0].kind == MatchGameplayEventKind::FlagDrop);
+    CHECK(world->registry.get(flag)->position.x == 41.0f);
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 0);
+
+    // Five units off it, an occupant named but the flag not hidden: the snap's
+    // 0x2F, then the save at the touched words.
+    world->registry.get(flag)->position = {45.0f, 0.0f, 0.0f};
+    world->registry.get(flag)->primary_occupant = other;
+    std::vector<MatchGameplayEvent> saved = touch();
+    CHECK(saved.size() == 2);
+    if (saved.size() == 2) {
+        CHECK(saved[0].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(saved[1].kind == MatchGameplayEventKind::FlagSave);
+        CHECK(saved[1].position.x == 45.0f);
+        CHECK(saved[1].objective_position.x == 40.0f);
+    }
+    CHECK(world->registry.get(flag)->position.x == 40.0f);
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 1);
+}
+
 // The entity update's own tail consumes the flag and bay touches its bodies'
 // movement resolves recorded, so the pickup lands in the frame that touched,
 // ahead of the next server tick. The handler returns at once off the
@@ -2098,6 +2153,7 @@ int main() {
     test_takeable_contact_carries_any_def();
     test_a_solid_neighbour_does_not_shadow_a_takeable_touch();
     test_a_carrier_still_saves_its_own_flag();
+    test_own_flag_touch_syncs_its_definition_pose();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();

@@ -678,13 +678,26 @@ void Match::return_flag_home(World &world, EntityHandle flag_handle,
 }
 
 void Match::record_flag_save(World &world, EntityHandle player_handle,
-                             EntityHandle flag_handle) {
+                             EntityHandle flag_handle, const EntityPosition &touched_at) {
     MatchPlayer *scorer = player(player_handle);
     const Entity *entity = world.registry.get(player_handle);
-    if (outcome_.ended || scorer == nullptr || entity == nullptr)
+    const Entity *flag = world.registry.get(flag_handle);
+    if (outcome_.ended || scorer == nullptr || entity == nullptr || flag == nullptr)
         return;
-    return_flag_home(world, flag_handle, MatchGameplayEventKind::FlagSave,
-                     player_handle);
+    // The save's 0x15 feed carries the flag's words as the touch found them
+    // (the sync has already snapped it home), then its 0x2F the flag as it now
+    // stands. [orig: Server_BroadcastFlagSaveEvent @0x517A90 - the feed
+    //  @0x517AB0..0x517AED, the 0x2F @0x517B09]
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagSave,
+                                player_handle,
+                                flag_handle,
+                                touched_at,
+                                flag->position,
+                                static_cast<uint8_t>(flag->flags),
+                                EntityHandle{},
+                                flag->ground_target,
+                                false,
+                                static_cast<uint16_t>(flag->item_id)});
     // [orig: GameEvent_ProcessScoring @0x52F550 case 8 @0x52f8d1..0x52f992 —
     //  ++stats[11] (slot dword 29) @0x52f8d7, points += scoringTable[83]
     //  (score.ini FLAGSAVE, VAR slot 9) @0x52f8ec, the team mirror
@@ -1854,41 +1867,28 @@ void Match::update_flag_objectives(World &world) {
             continue;
 
         // The own-flag arms (4091 for team 1, 4093 for team 2) test no carried
-        // object, so a Player carrying anything still saves its own flag.
-        // [orig: Entity_ProcessWaypointInteraction - 4091 @0x4AD8E9..0x4AD908
-        //  and 4093 @0x4AD8A1..0x4AD8C3 reach Entity_SyncPositionFromDefinition
-        //  with no +0x268 test, which only the pickup leg @0x4AD936 makes;
-        //  @0x4AD94B..0x4AD968 / @0x4AD903..0x4AD923 (dfx2.exe)]
+        // object and no occupant, so a Player carrying anything still saves its
+        // own flag. The arm syncs the flag to its definition pose: at the pose
+        // nothing; near it (a 2D distance and a height delta under 0x20000) the
+        // 0x2F alone; off it the snap home with its 0x2F, then the save: the
+        // 0x15 feed at the flag's words as the touch found them, scorer event 8
+        // and a second 0x2F.
+        // [orig: Entity_ProcessWaypointInteraction - 4091 @0x4AD8E9..0x4AD912,
+        //  4093 @0x4AD8A1..0x4AD8CD (the flag's +4/+8/+C read @0x4AD8B5..0x4AD8BB
+        //  ahead of the sync @0x4AD8C3), Server_BroadcastFlagSaveEvent
+        //  @0x4AD8DC; the pickup leg's +0x268 test @0x4AD936 is the only one;
+        //  @0x4AD949..0x4AD972 / @0x4AD903..0x4AD933 (dfx2.exe);
+        //  Entity_SyncPositionFromDefinition @0x43A9B0 - the pose @0x43A9F8,
+        //  the near 0x2F @0x43AA6B, the snap's @0x43AB40;
+        //  Server_BroadcastFlagSaveEvent @0x517A90 - 0x15 @0x517AED, event 8
+        //  @0x517B03, 0x2F @0x517B09]
         const bool own_flag =
             (carrier->team == 1 && target->item_id == kBlueFlag) ||
             (carrier->team == 2 && target->item_id == kRedFlag);
         if (own_flag) {
-            if (target->primary_occupant.valid())
-                continue;
-            CarryObjectiveState *state = carry_state(world, contact.target);
-            // An own flag is SAVED only when Entity_SyncPositionFromDefinition
-            // reports it displaced from its authored pose — a 2D distance or a
-            // height delta of at least 0x20000 (2 u); the return timer is not
-            // consulted, and an own flag at home does nothing (no pickup arm
-            // exists for it in any game type).
-            // [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD912
-            // / 4093 @0x4AD8A3..0x4AD8CD -> Entity_SyncPositionFromDefinition
-            // @0x43A9B0 (the 0x20000 tests @0x43AA3B/@0x43AA4D, return 1
-            // @0x43A9BE) -> Server_BroadcastFlagSaveEvent @0x4AD8D3]
-            if (state == nullptr)
-                continue;
-            const int64_t dx = int64_t{target->position.x.q16} -
-                               state->home.x.q16;
-            const int64_t dy = int64_t{target->position.y.q16} -
-                               state->home.y.q16;
-            const int64_t dz = int64_t{target->position.z.q16} -
-                               state->home.z.q16;
-            const bool displaced =
-                static_cast<int64_t>(std::sqrt(static_cast<long double>(
-                    dx * dx + dy * dy))) >= 0x20000 ||
-                (dz < 0 ? -dz : dz) >= 0x20000;
-            if (displaced)
-                record_flag_save(world, contact.source, contact.target);
+            const EntityPosition touched_at = target->position;
+            if (sync_flag_to_authored_pose(world, contact.target))
+                record_flag_save(world, contact.source, contact.target, touched_at);
             continue;
         }
 

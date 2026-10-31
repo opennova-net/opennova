@@ -615,7 +615,8 @@ class Match {
     // flag pickup's attach.
     void attach_carried_object(World &world, Entity &carrier, Entity &carried);
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);
-    void record_flag_save(World &world, EntityHandle player, EntityHandle flag);
+    void record_flag_save(World &world, EntityHandle player, EntityHandle flag,
+                          const EntityPosition &touched_at);
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
     void update_objective_proximity(const World &world);
