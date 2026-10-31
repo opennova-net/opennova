@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -26,6 +27,7 @@ static int failures = 0;
 int main() {
 	// The kernel on the heap: sizeof(MissionKernel) overflows MSVC's 1 MB stack in main.
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 
 	// A full 1024 atlas of varied heights over a 16 x 16 grid of quadrant-1 sectors.
 	constexpr int kDim = 1024;

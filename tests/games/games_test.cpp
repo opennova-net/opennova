@@ -17,6 +17,7 @@
 #include <net/novacrypto/cdkey.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/host_settings.h> // server_settings_title (DFX2-10's host words)
+#include <runtime/world/match.h> // MatchRules (the unset holder)
 #include <runtime/world/title_rules.h>
 
 #include <algorithm>
@@ -593,6 +594,18 @@ int main(int argc, char **argv) {
 		std::signal(SIGABRT, [](int) { std::_Exit(0); });
 		(void)world::title_rules("nosuchgame");
 		std::fputs("world::title_rules read a code no title has\n", stderr);
+		return 1;
+	}
+	// ctest games_unset_title_rules: a holder no fixture named rules for reads none: the suite
+	// installs no default (tests/common/install_games.cpp), so its first read aborts, naming it.
+	if (argc > 1 && std::string(argv[1]) == "--unset-rules") {
+#if defined(_MSC_VER)
+		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
+		std::signal(SIGABRT, [](int) { std::_Exit(0); });
+		const world::MatchRules unnamed;
+		(void)unnamed.title();
+		std::fputs("MatchRules read rules no fixture named\n", stderr);
 		return 1;
 	}
 	every_title_resolves();

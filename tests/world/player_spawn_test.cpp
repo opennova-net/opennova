@@ -14,6 +14,7 @@
 #include <cstdio>
 
 #include "channel_clip_source.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -85,6 +86,7 @@ int main() {
     // --- §5.2b spawn: a gated pool-0 player-infantry, motor mounted, local_player published.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
 
@@ -123,6 +125,7 @@ int main() {
     //     [orig: Entity_FindBestSpawnPoint @0x50CF38, @0x50CF4D]
     {
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 8);
         PlayerSpawn ps;
         ps.heading = static_cast<int32_t>(0xCC160000u);
@@ -142,6 +145,7 @@ int main() {
     //     field-17 tier denominator reads full (tier 2 / golden 0x28).
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
         w.tables.player.item_hp = 150; // the class-8 Player items.def hp, stamped by resolve_item_traits
@@ -170,6 +174,7 @@ int main() {
     // [orig: Entity_SpawnFromAnimSlotProperty @0x43C53C..0x43C54F]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
         PlayerSpawn solo;
@@ -184,6 +189,7 @@ int main() {
     // than leaking wider values into Entity or the int16 infantry mirror.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
         w.tables.player.has_item_def = true;
@@ -225,6 +231,7 @@ int main() {
     //  @0x42E91A, @0x42EA35]
     {
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 8);
         w.tables.player.has_item_def = true;
         w.tables.player.item_hp = 0;
@@ -254,6 +261,7 @@ int main() {
     }
     {
         World w; // item-less world: the spawn-seed fallback still spawns AT FULL (100/100)
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
         w.tables.player.has_item_def = false;
@@ -268,6 +276,7 @@ int main() {
     // --- retail listen-server player allocation starts after .bms-resident pool-0 organics.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
 
@@ -289,6 +298,7 @@ int main() {
     // --- input -> 8-way player body mapping (the witnessed mapping + opposing-key cancel).
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
         spawn_player(w, PlayerSpawn{});
@@ -344,6 +354,7 @@ int main() {
     // --- player body input path: raw input packs separately from NPC route orders.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
         spawn_player(w, PlayerSpawn{});
@@ -393,6 +404,7 @@ int main() {
     // --- motor drive: forward input advances pos along facing AND mirrors to the Entity.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         DirectionalClip clip(0x8000); // 0.5 u per tick along the selected state
         ai.root_motion = &clip;
@@ -434,6 +446,7 @@ int main() {
     //     entity+0x8C load @0x4B41E4; Q22 root rotation @0x4B41F0..0x4B4255]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         DirectionalClip clip(0x8000);
         ai.root_motion = &clip;
@@ -473,6 +486,7 @@ int main() {
     //     snapshot_of serializes, so the wire carries the current pose, not the stale spawn Z.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         test_world::ChannelClipSource channel_only;
         ai.root_motion = &channel_only; // the organic holds its channel
@@ -504,6 +518,7 @@ int main() {
     // --- player look: pitch applies and the look yaw is INSTANT (no body-turn smoothing).
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 8);
         spawn_player(w, PlayerSpawn{}); // spawn yaw 0 -> heading ~0x40000000

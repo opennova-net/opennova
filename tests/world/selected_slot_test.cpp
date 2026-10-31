@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -38,6 +39,7 @@ constexpr int32_t kPistol = 2 * 65;
 
 void test_an_unarmed_ride_mounts_the_stale_selected_slot() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	w::WeaponTable &table = world->tables.weapons;
 	table.entries.resize(3);
 	table.entries[1].valid = true;
@@ -84,6 +86,7 @@ void test_an_unarmed_ride_mounts_the_stale_selected_slot() {
 
 void test_a_seated_select_stores_the_selected_slot_alone() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	w::WeaponTable &table = world->tables.weapons;
 	table.entries.resize(3);
 	table.entries[1].valid = true;
@@ -113,6 +116,7 @@ void test_a_seated_select_stores_the_selected_slot_alone() {
 //  @0x49480B, @0x49481D..0x494831, a null slot's leg @0x494867..0x494898]
 struct BorrowRig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	w::LocalPlayer local{*world};
 	w::EntityHandle player_h, carrier_h;
 

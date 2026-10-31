@@ -22,6 +22,7 @@
 #include <string_view>
 #include <vector>
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -37,6 +38,7 @@ namespace {
 
 void test_spectator_field_follows_the_slot() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	w::Entity person;
@@ -44,6 +46,7 @@ void test_spectator_field_follows_the_slot() {
 	person.flags = person.engine_flags = w::kEntityFlagPlayer;
 	ns::LoopbackChannel a, b, c, d;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	ctx.config.max_players = 4; // the 0x22 pull answers slots inside the table only
@@ -93,6 +96,7 @@ void test_spectator_field_follows_the_slot() {
 //  NetPacket_SerializePlayerSync0x46 @0x505E80 - `& 0x7FFF` @0x505efb, the ack OR @0x505f07]
 void test_pull_reads_and_answers_as_retail() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	w::Entity person;
@@ -100,6 +104,7 @@ void test_pull_reads_and_answers_as_retail() {
 	person.flags = person.engine_flags = w::kEntityFlagPlayer;
 	ns::LoopbackChannel a, b;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	ctx.config.max_players = 3; // slots 0..2; slot 2 holds no player
@@ -195,6 +200,7 @@ struct AdmittedJoin {
 AdmittedJoin admit_and_sync(inmatch::NetworkType transport) {
 	AdmittedJoin out;
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	w::Entity person;
@@ -202,6 +208,7 @@ AdmittedJoin admit_and_sync(inmatch::NetworkType transport) {
 	person.flags = person.engine_flags = w::kEntityFlagPlayer;
 	ns::LoopbackChannel a, b;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	ctx.np_protocol.identity = title_protocol("jo");
@@ -266,8 +273,10 @@ void test_novaworld_account_fields_follow_the_join_cookie() {
 
 void test_join_ticket_rides_the_admission_join() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	ns::LoopbackChannel a;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = heap.get();
 	ctx.is_authority = ctx.is_in_session = 1;
 	ctx.np_protocol.identity = title_protocol("jo");
@@ -296,8 +305,10 @@ void test_join_ticket_rides_the_admission_join() {
 void test_join_keeps_the_last_cd() {
 	const auto admit = [](const std::vector<uint8_t> &body) {
 		auto heap = std::make_unique<w::World>();
+		test_titles::jo_world(*heap);
 		ns::LoopbackChannel a;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.world = heap.get();
 		ctx.is_authority = ctx.is_in_session = 1;
 		ctx.np_protocol.identity = title_protocol("jo");

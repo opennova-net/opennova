@@ -9,6 +9,7 @@
 #include <runtime/world/entity_pose.h>
 #include <runtime/world/angle.h>
 #include <formats/threedi/threedi_3di3.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::wac;
@@ -20,6 +21,7 @@ static int failures = 0;
 
 struct Fixture {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     Fixture() {
         for (int pool = 0; pool < 4; ++pool) world.registry.configure_pool(pool, 16);

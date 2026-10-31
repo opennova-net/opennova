@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -42,6 +43,7 @@ bool has_row(const std::string &text, const std::string &row) {
 
 struct Rig {
 	std::unique_ptr<NapiNPServerCtx> ctx = std::make_unique<NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	std::vector<std::string> sent;
 
 	Rig() {

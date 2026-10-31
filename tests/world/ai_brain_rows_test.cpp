@@ -18,6 +18,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_motor_detail.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -32,6 +33,7 @@ int failures = 0;
 // One pool-1 hull with a brain; the registry record carries the live words.
 struct Hull {
     std::unique_ptr<World> owned = std::make_unique<World>();
+    bool owned_jo = test_titles::jo_world(*owned);
     World &w = *owned;
     EntityHandle handle;
     AiEntity *ai = nullptr;
@@ -165,6 +167,7 @@ void test_evade_flee_leg_turns_about_at_combat_speed() {
 //  Entity_AlertNearbyAllies @0x466B77]
 void test_aircraft_dead_enter_wakes_as_team_zero() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(1, 4);
     const auto spawn_hull = [&](uint8_t team, float x) {
@@ -240,6 +243,7 @@ void test_class_walk_matches_the_retail_qsort() {
 #include "fixtures/ai_class_walk_vectors.inc"
     };
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     for (const auto &v : cases) {
         AiEntity ae;
         opennova::aip::Profile p;
@@ -266,6 +270,7 @@ void test_class_walk_matches_the_retail_qsort() {
 // brain[43] held before. [orig: Entity_InitVehicleAI @0x460294..0x460297]
 void test_allocator_copies_aim_skill_unconditionally() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     AiEntity ground;
     ground.brain.f[AiBrain::kAccuracy] = 3;
     opennova::aip::Profile p;
@@ -308,6 +313,7 @@ void test_class_init_keys_on_the_item_class() {
     helo.helo_patrol_climb = -100;
 
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     AiSystem &ai = owned->ai;
     const auto words = [&](const opennova::aip::Profile *p, bool helicopter) {
         AiEntity e;
@@ -346,6 +352,7 @@ void test_class_init_keys_on_the_item_class() {
 //  @0x43B158 (AIUSEWPZ), @0x43B1C1 (PLAYPARTANIM)]
 void test_change_ai_brain_arms_need_the_vehicle_brain() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(0, 2);
     w.registry.configure_pool(1, 2);
@@ -407,6 +414,7 @@ void test_change_ai_brain_arms_need_the_vehicle_brain() {
 //  20 @0x43B03A, 24 @0x43B00B, 25 @0x43AFDC; the default @0x43B336]
 void test_change_ai_slot_arms_without_a_token() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(0, 1);
     Entity person;
@@ -478,6 +486,7 @@ struct FlatField {
 //  Entity_CalcAverageGroundHeight call @0x4909F6)]
 void test_ground_samples_add_the_brain_floors() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     FlatField flat;
     w.tables.terrain = &flat.field;
@@ -540,6 +549,7 @@ void test_ground_samples_add_the_brain_floors() {
 //  @0x467BB0..0x467BBB]
 void test_ground_death_kills_children_on_the_hit_record() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(1, 4);
     w.rules.logic_authority = true;
@@ -613,6 +623,7 @@ void test_ground_death_kills_children_on_the_hit_record() {
 //  cbot @0x813390 -> jmp @0x462130, ctrn @0x8133C0 -> jmp @0x462140]
 void test_class_event_needs_a_brain_class_row() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(1, 4);
     Entity seed;

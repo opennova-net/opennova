@@ -45,6 +45,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 namespace inmatch = opennova::inmatch;
@@ -78,6 +79,7 @@ bool submit_loadout(inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection &co
 
 void in_match_writers() {
 	auto world_storage = std::make_unique<w::World>();
+	test_titles::jo_world(*world_storage);
 	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
@@ -85,6 +87,7 @@ void in_match_writers() {
 	auto role_storage = std::make_unique<inmatch::HostRole>();
 	inmatch::NapiNPServerCtx &ctx = role_storage->state.host_owner.ctx;
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 2;
 	config.num_teams = 2;
 	config.game_type = opennova::game_type::kTeamDeathmatch;
@@ -173,6 +176,7 @@ void in_match_writers() {
 //  Entity_SpawnFromAnimSlotProperty call @0x516B67]
 void remote_slot_class_at_round_init() {
 	auto world_storage = std::make_unique<w::World>();
+	test_titles::jo_world(*world_storage);
 	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
@@ -180,6 +184,7 @@ void remote_slot_class_at_round_init() {
 	auto role_storage = std::make_unique<inmatch::HostRole>();
 	inmatch::NapiNPServerCtx &ctx = role_storage->state.host_owner.ctx;
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.num_teams = 2;
 	config.game_type = opennova::game_type::kTeamDeathmatch;
@@ -291,6 +296,7 @@ void roster_sync() {
 //  @0x51d441..0x51d4aa]
 void host_player_list_rows() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	auto &list = ctx.np_protocol.connection_list;
 	list.resize(3);
 	list[0].type = inmatch::NapiNPConnection::kTypeClientSide;

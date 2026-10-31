@@ -11,6 +11,7 @@
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -289,6 +290,7 @@ void test_cache() {
 // texture word second and only for the scorch), and the slot contents.
 void test_add_entry() {
 	World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	world.registry.configure_pool(2, 4);
@@ -333,6 +335,7 @@ void test_add_entry() {
 	uint32_t expect_state = before;
 	{
 		World probe;
+		test_titles::jo_world(probe);
 		probe.prng16_state = before;
 		(void)probe.next_prng16();             // the spin
 		expect_texture_word = probe.next_prng16(); // the texture roll
@@ -362,6 +365,7 @@ void test_add_entry() {
 	CHECK(scar_add_entry(world, hit, *target, 1), "surface 15 takes the fallback");
 	{
 		World probe;
+		test_titles::jo_world(probe);
 		probe.prng16_state = before2;
 		probe.next_prng16();
 		CHECK(world.prng16_state == probe.prng16_state,
@@ -445,6 +449,7 @@ void test_add_entry() {
 //  then Math_TransformPointWithTranslation22 (translate, then rotate)]
 void test_entity_ring_section_local() {
 	World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 4);
 	Entity e;
 	e.kind = EntityKind::Item;

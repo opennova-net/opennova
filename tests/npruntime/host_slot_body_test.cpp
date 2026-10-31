@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "host_test_setup.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -49,8 +50,10 @@ int failures = 0;
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	ns::LoopbackChannel wire;
 
 	Rig() {
@@ -62,6 +65,7 @@ struct Rig {
 		world.tables.player.item_type_index = 1;
 		world.tables.player.item_type = 3;
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 4;
 		settings.game_type = 0x10000u; // a team game
 		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
@@ -190,6 +194,7 @@ void test_the_mission_start_restamps_the_rows_side_words() {
 void test_player_kill_0_runs_the_rows_transaction() {
 	Rig r;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = r.ctx->config.game_type; // a team game
 	r.world.match.configure(rules);
 	const w::EntityHandle body = inmatch::Server_SpawnHostSlotBody(*r.ctx, r.world);

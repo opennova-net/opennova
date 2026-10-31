@@ -17,6 +17,7 @@
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -548,6 +549,7 @@ void test_spawn_table_fill() {
 // past the list or without the local player [orig: sub_550CF0 @0x550e87..0x550eb1 (dfx2.exe)].
 void test_spawn_table_pan_target() {
 	World w;
+	test_titles::jo_world(w);
 	w.registry.configure_pool(0, 2);
 	w.registry.configure_pool(2, 2);
 	Entity zone;
@@ -749,6 +751,7 @@ struct RecordingCanvas : menu::MenuTableCellCanvas {
 // [orig: sub_550CF0 @0x550d55..0x550d86 (dfx2.exe)].
 void test_spawn_table_zone_name() {
 	World w;
+	test_titles::jo_world(w);
 	w.registry.configure_pool(1, 2);
 	Entity heli;
 	heli.has_item_def = true;
@@ -821,6 +824,7 @@ int main() {
 	// rebuilt when it moves or when invalidated.
 	{
 		World w;
+		test_titles::jo_world(w);
 		SpawnZoneRegistryCache cache;
 		CHECK(!cache.built);
 		cache.get(w, 0);

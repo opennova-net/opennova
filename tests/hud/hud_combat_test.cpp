@@ -22,6 +22,7 @@
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/world.h>
 #include "../common/test_font.h"
+#include "../common/title_fixture.h"
 
 // The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
 // the frame's title goes through require_title, so every frame names one.
@@ -394,6 +395,7 @@ static void map_cycle_by_title() {
 
 static void world_feeds() {
 	World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	Entity seed;
 	seed.alive = true;
@@ -485,11 +487,12 @@ static void world_feeds() {
 	read();
 	CHECK(!frame.hud_combat.state.target_brackets && !frame.hud_combat.state.inset_friendly);
 	MatchRules team;
+	test_titles::jo_match(team);
 	team.game_type = 0x10000u;
 	world.match.configure(team);
 	read();
 	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
-	world.match.configure(MatchRules{});
+	world.match.configure(test_titles::jo_match_of(MatchRules{}));
 	world.rules.mp_session = false;
 	read();
 	CHECK(frame.hud_combat.state.target_brackets && frame.hud_combat.state.inset_friendly);
@@ -637,6 +640,7 @@ static void world_feeds() {
 //  @0x5CA0F0 - the inset's call @0x5CA949 ahead of the pass's @0x5CACE3 / @0x5CAD04]
 static void cursor_records() {
 	auto world_heap = std::make_unique<World>();
+	test_titles::jo_world(*world_heap);
 	World &world = *world_heap;
 	world.registry.configure_pool(0, 8);
 	Entity seed;
@@ -742,6 +746,7 @@ static void parser_and_received_feedback() {
 	}
 	def::def_free_weapons(&defs);
 	replication::ClientReplicaPipeline peer;
+	test_titles::jo_folds(peer);
 	peer.set_protocol(title_protocol("jo"));
 	auto receive = [&](uint8_t flags) {
 		FrameUpdate frame;
@@ -774,6 +779,7 @@ static void parser_and_received_feedback() {
 }
 static void sent_feedback() {
 	World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 2);
 	Entity seed;
 	seed.alive = true;
@@ -784,6 +790,7 @@ static void sent_feedback() {
 	conn.transport = &transport;
 	conn.owned_entity = owner;
 	replication::ClientReplicaPipeline peer;
+	test_titles::jo_folds(peer);
 	peer.set_protocol(title_protocol("jo"));
 	auto send = [&]() {
 		CHECK(replication::emit_connection_s2c(world, conn, {}, 0, 0, 0, 0,

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -88,6 +89,7 @@ w::EntityHandle spawn_marker(w::World &world, int32_t row, int32_t x, int32_t y,
 // a marker on row 0 is a deck marker too while a deck type has no row (the find's 0).
 void test_a_deck_marker_moves_into_its_carrier_frame() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	world->registry.configure_pool(3, 8);
 	// The items.def rows: row 1 is type 6003, row 2 type 6005 (a flag, not a deck type);

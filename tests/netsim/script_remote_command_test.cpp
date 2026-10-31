@@ -22,6 +22,7 @@
 #include <runtime/wac/remote_command.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -37,6 +38,7 @@ namespace {
 
 struct Peer {
 	std::unique_ptr<World> storage = std::make_unique<World>();
+	bool storage_jo = test_titles::jo_world(*storage);
 	World &world = *storage;
 	Peer() {
 		world.registry.configure_pool(0, 16);
@@ -99,6 +101,7 @@ void test_host_records_reach_joiner_handlers() {
 	Peer joiner;
 	joiner.world.cached.local_player = joiner.spawn(11, 1);
 	replication::ClientReplicaPipeline view; // a joiner: not the authority recipient
+	test_titles::jo_folds(view);
 	CHECK(!view.authority_recipient());
 
 	// Bare words reach the string pool upper-cased. [orig: Script_Compile @0x4F3418..0x4F341D]
@@ -150,6 +153,7 @@ void test_host_records_reach_joiner_handlers() {
 void test_short_body_zero_fill_and_authority_gate() {
 	Peer joiner;
 	replication::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	std::vector<uint8_t> body;
 	const uint16_t index = static_cast<uint16_t>(wac_command_index("text#"));
 	body.push_back(uint8_t(index));
@@ -168,6 +172,7 @@ void test_short_body_zero_fill_and_authority_gate() {
 	}
 
 	replication::ClientReplicaPipeline authority;
+	test_titles::jo_folds(authority);
 	authority.set_authority_recipient(true);
 	authority.apply(s2c::SCRIPT_REMOTE_COMMAND, body);
 	CHECK(authority.drain_script_remote_commands().empty());
@@ -231,6 +236,7 @@ void test_soundset_operand_travels_as_unresolved() {
 	// A joiner holding the same catalog plays nothing for the 0 operand.
 	Peer joiner;
 	replication::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::SCRIPT_REMOTE_COMMAND, wire);
 	for (const opennova::ScriptRemoteCommand &command : view.drain_script_remote_commands()) {
 		std::vector<ScriptRemoteArg> args;

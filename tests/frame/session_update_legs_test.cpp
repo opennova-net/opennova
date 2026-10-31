@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <string>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -29,6 +30,7 @@ int failures = 0;
 // A host role that writes its ticks into the shared log and can end the session.
 struct LoggingRole final : Role {
 	mission::MissionKernel kernel;
+	bool kernel_jo = test_titles::jo_world(kernel.world);
 	std::string *log = nullptr;
 	int lose_at_tick = 0; // the tick that reports the session lost (0: none)
 	int ticks = 0;

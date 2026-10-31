@@ -38,6 +38,7 @@
 
 #include "conn_fixture.h"
 #include "host_test_setup.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -54,7 +55,9 @@ namespace {
 // A TDM host with two remote players, no start markers and no spawn zones.
 struct Fixture {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	std::unique_ptr<w::World> heap = std::make_unique<w::World>();
+	bool heap_jo = test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	std::vector<ns::UdpSessionTransport> transports;
 	std::vector<w::EntityHandle> players;
@@ -149,11 +152,14 @@ void test_a_markerless_deploy_leaves_the_body_where_it_stands() {
 //  NetPacket_SerializePlayerState - the yaw byte @0x4C0C5D]
 void test_a_markerless_add_takes_heading_word_zero() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 16);
 	world->registry.configure_pool(3, 16);
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.server_name = "DM";
 	settings.max_players = 2;
 	settings.game_type = 0; // deathmatch: the 6095 / 6002 chain
@@ -216,6 +222,7 @@ struct Source final : w::IRootMotionSource {
 //  @0x4B8BA5, the final bottom @0x4B8BB4]
 void test_the_warm_up_lifts_an_unparented_player_body() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 16);
 	Source source;
 	w::PlayerSpawn spawn;

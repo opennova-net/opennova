@@ -52,6 +52,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -80,8 +81,10 @@ struct Case {
 // One joiner in the form-post state (the JOIN accepted), no team-choose rule, a 0x01 read.
 void run_form_post(const Case &c) {
 	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+	test_titles::jo_world(*world);
 	world->crt_rand.seed(0x1234u);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.transport_mode = inmatch::NetworkType::Lan;
@@ -148,8 +151,10 @@ void test_the_side_passwords_second_test() {
 // in its stage. A completed admission is state 6 on, so a repeated 0x01 or JOIN is one of these.
 void run_out_of_turn(inmatch::GameAdmissionStage stage, uint8_t tag) {
 	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+	test_titles::jo_world(*world);
 	world->crt_rand.seed(0x1234u);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.transport_mode = inmatch::NetworkType::Lan;
@@ -197,8 +202,10 @@ AdmissionRun run_admission(inmatch::GameAdmissionStage stage,
 		const std::vector<ProtocolMessage> &records, uint8_t game_state = 0,
 		uint32_t watermark = 0) {
 	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+	test_titles::jo_world(*world);
 	world->crt_rand.seed(0x1234u);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.transport_mode = inmatch::NetworkType::Lan;
@@ -269,7 +276,9 @@ void test_the_echo_has_no_gate() {
 void test_the_echo_zeroes_the_nag_stamp() {
 	for (const uint8_t from : {uint8_t{0}, uint8_t{9}, uint8_t{7}}) {
 	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+	test_titles::jo_world(*world);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.world = world.get();
@@ -320,7 +329,9 @@ void test_a_lan_only_novaworld_host_lists_the_reported_address() {
 	};
 	for (const Gates &g : cases) {
 		auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+		test_titles::jo_world(*world);
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.is_authority = 1;
 		ctx.is_in_session = g.in_session;
 		ctx.transport_mode = g.transport;
@@ -412,7 +423,9 @@ void test_records_ahead_of_the_add_answer_nothing() {
 	CHECK(run.replies.empty());
 
 	auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+	test_titles::jo_world(*world);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.world = world.get();
@@ -451,8 +464,10 @@ void test_a_reject_ends_the_handling() {
 	using S = inmatch::GameAdmissionStage;
 	for (const bool echo_behind : {false, true}) {
 		auto world = std::make_unique<w::World>(); // heap: 1 MB stack
+		test_titles::jo_world(*world);
 		world->crt_rand.seed(0x1234u);
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
 		ctx.transport_mode = inmatch::NetworkType::Lan;

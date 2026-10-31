@@ -35,6 +35,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -68,7 +69,9 @@ public:
 
 struct Harness {
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	inmatch::JoinerRole role;
+	bool role_jo = test_titles::jo_joiner(role);
 	NullSocket socket;
 	inmatch::TickInput input;
 	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();

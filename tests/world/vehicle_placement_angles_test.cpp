@@ -17,6 +17,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -35,6 +36,7 @@ constexpr int32_t kRollMinus3 = -35782656; // ((-3 << 16) / 360) << 16
 
 struct Rig {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &w = *storage;
     EntityHandle veh_h;
     Rig() {

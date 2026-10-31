@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -57,7 +58,9 @@ namespace {
 // observer 2 (team 2), each body in the pool-0 slot `slots[i]`, no spawn zones.
 struct Fixture {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	std::unique_ptr<w::World> heap = std::make_unique<w::World>();
+	bool heap_jo = test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	std::vector<ns::UdpSessionTransport> transports;
 	std::vector<w::EntityHandle> players;
@@ -74,6 +77,7 @@ struct Fixture {
 		world.rules.logic_authority = true;
 		world.registry.configure_pool(0, 16);
 		w::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = 0x10000u;
 		world.match.configure(rules);
 		ctx.world = &world;

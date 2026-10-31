@@ -17,6 +17,7 @@
 
 #include <cstdio>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -349,11 +350,13 @@ void test_round_end_exit_reason() {
 	for (const Case &c : {Case{1, false, kMissionExitRoundOver}, Case{1, true, kMissionExitMapCycle},
 				 Case{0, false, kMissionExitMapCycle}, Case{0, true, kMissionExitMapCycle}}) {
 		world::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 8);
 		world.rules.mp_session = true;
 		HostRotation rotation;
 		rotation.last_game = c.last_game;
 		NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.world = &world;
 		ctx.rotation = &rotation;
 		ctx.is_authority = 1;
@@ -496,8 +499,10 @@ void test_router_halves_and_latch() {
 // The team assignment's side arms answer through the side-to-team map.
 void test_side_map_team_assignment() {
 	world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kTeamDeathmatch;
 	config.num_teams = 2;
 	config.mission_side_a_password = "blue"; // the pick's pair, the mission start's

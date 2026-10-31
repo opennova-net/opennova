@@ -32,6 +32,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -85,6 +86,7 @@ JoinRun run_join(bool novaworld) {
 	JoinRun run;
 	// The kernel lives on the heap: a World-carrying frame is megabytes.
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	kernel->world.registry.configure_pool(0, 16);
 	QueueSocket socket;
 	inmatch::JoinerRole role;

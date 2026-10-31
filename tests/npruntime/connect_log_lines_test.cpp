@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "host_test_setup.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ns = opennova::replication;
@@ -123,6 +124,7 @@ struct LoggedHost {
 	MemoryFiles files;
 	inmatch::ConnectLog log{files};
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 
 	explicit LoggedHost(inmatch::ConnectionMode mode, ns::ISessionTransport *own = nullptr) {
 		log.set_clock([] { return std::string("T"); });
@@ -327,6 +329,7 @@ void test_remote_joiner_client_lines() {
 	log.set_clock([] { return std::string("T"); });
 	log.start(inmatch::ConnectLogHeader{});
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			/*host_key=*/0x0FE0E119u);
 	const PeerAddr host_addr = peer_addr_from_octets({10, 0, 0, 1}, 32786);
@@ -334,6 +337,7 @@ void test_remote_joiner_client_lines() {
 	const std::string host_at = "10.0.0.1:32786";
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("LogJoiner", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);
@@ -466,6 +470,7 @@ void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
 	log.set_clock([] { return std::string("T"); });
 	log.start(inmatch::ConnectLogHeader{});
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			/*host_key=*/0x0FE0E119u);
 	const PeerAddr host_addr = peer_addr_from_octets({10, 0, 0, 1}, 32786);
@@ -474,6 +479,7 @@ void test_remote_joiner_manager_pass_ahead_of_the_client_pump() {
 	const std::string pn = kJo.pn != nullptr ? kJo.pn : "";
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("SplitJoiner", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);
@@ -600,10 +606,12 @@ void test_remote_joiner_duplicate_hellos() {
 		log.set_clock([] { return std::string("T"); });
 		log.start(inmatch::ConnectLogHeader{});
 		inmatch::NapiNPServerCtx host;
+		test_titles::jo_config(host.config);
 		inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, /*host_key=*/0x0FE0E11Au);
 		uint64_t now_ms = 1000;
 		inmatch::ClientRuntime client("DupJoiner", [&now_ms] { return now_ms; });
+		test_titles::jo_folds(client);
 		client.set_protocol(&kJo);
 		client.set_host_address(host_addr);
 		client.set_connect_log(&log);
@@ -692,6 +700,7 @@ void test_remote_joiner_destroy_tears_down_the_socket() {
 		log.start(inmatch::ConnectLogHeader{});
 		uint64_t now_ms = 1000;
 		inmatch::ClientRuntime client("TeardownJoiner", [&now_ms] { return now_ms; });
+		test_titles::jo_folds(client);
 		client.set_protocol(&kJo);
 		client.set_host_address(host_addr);
 		client.set_connect_log(&log);
@@ -764,10 +773,12 @@ void test_remote_joiner_destroy_drains_the_enumerator() {
 	log.set_clock([] { return std::string("T"); });
 	log.start(inmatch::ConnectLogHeader{});
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostOnly,
 			inmatch::SocketMode::Lan, /*host_key=*/0x0FE0E11Au);
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("DrainJoiner", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	client.set_host_address(host_addr);
 	client.set_connect_log(&log);

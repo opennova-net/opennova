@@ -45,6 +45,7 @@
 #include <deque>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -81,12 +82,14 @@ struct CaptureSocket final : opennova::IDatagramSocket {
 // A Serve Only host with one in-match remote, its clock injected.
 struct ClockHost {
 	inmatch::HostOwner owner;
+	bool owner_jo = test_titles::jo_config(owner.ctx.config);
 	uint32_t clock = 5000;
 
 	ClockHost() {
 		inmatch::set_connection_mode(owner.ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(owner.ctx, inmatch::SocketMode::Lan);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		inmatch::SessionStartup startup;
 		startup.protocol = opennova::title_protocol("jo");
 		inmatch::create_session(owner.ctx, config, startup, nullptr);

@@ -82,6 +82,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -108,7 +109,9 @@ constexpr double kFrame = 1.0 / 62.5;
 
 struct HandlerFixture {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	ns::UdpSessionTransport transport{ns::UdpSessionTransport::Role::Host};
 	w::EntityHandle player;
 
@@ -254,6 +257,7 @@ struct Host {
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
+		test_titles::jo_config(r.host_cfg.config);
 		r.host_cfg.protocol = &kJo;
 		r.mission = team_mission(map_file == "MAPA.BMS" ? "Map A" : "Map B");
 		r.mission_basename = mission::mission_base_name(map_file);
@@ -296,6 +300,7 @@ struct Host {
 		};
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			auto fresh = std::make_unique<mission::MissionKernel>();
+			test_titles::jo_world(fresh->world);
 			if (kernel) fresh->carry_across_load_from(*kernel);
 			kernel = std::move(fresh);
 			return *kernel;

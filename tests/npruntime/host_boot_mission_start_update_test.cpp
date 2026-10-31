@@ -52,6 +52,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -146,6 +147,7 @@ struct DedicatedHost {
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
+		test_titles::jo_config(r.host_cfg.config);
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::TeamDeathmatch;
 		mission::sync_counts(r.mission);
@@ -173,6 +175,7 @@ struct DedicatedHost {
 		terrain_ran = false;
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			auto fresh = std::make_unique<mission::MissionKernel>();
+			test_titles::jo_world(fresh->world);
 			if (kernel) fresh->carry_across_load_from(*kernel);
 			kernel = std::move(fresh);
 			return *kernel;

@@ -48,6 +48,7 @@
 
 #include "conn_fixture.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -118,7 +119,7 @@ int dispatch_fire(inmatch::NapiNPConnection &conn, std::vector<inmatch::NapiNPCo
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(0x06, body));
 	std::vector<ProtocolMessage> replies =
-			inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
+			inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn, msgs, 100, roster, &world);
 	return int(replies.size());
 }
 
@@ -128,11 +129,12 @@ void dispatch_gameplay(uint8_t tag, const std::vector<uint8_t> &body,
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(tag, body));
 	(void)inmatch::dispatch_session_replies(
-			inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
+			test_titles::jo_config_of(inmatch::GameConfig{}), conn, msgs, 100, roster, &world);
 }
 
 bool check_mounted_slot_select_fire_and_reload() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
@@ -334,6 +336,7 @@ bool check_mounted_slot_select_fire_and_reload() {
 // identical UDP datagram must neither append another round nor spend another cartridge.
 bool check_duplicate_c2s_session_does_not_refire() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
@@ -357,6 +360,7 @@ bool check_duplicate_c2s_session_does_not_refire() {
 	const std::string client_scrk = "CLIENT-REPLAY-SCRK";
 	const std::string server_scrk = "SERVER-REPLAY-SCRK";
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -430,6 +434,7 @@ bool check_duplicate_c2s_session_does_not_refire() {
 
 bool check_retail_fire_admission() {
     w::World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
     std::vector<inmatch::NapiNPConnection> roster;
@@ -518,6 +523,7 @@ bool check_retail_fire_admission() {
 // @0x4EC62B..0x4EC63A]
 bool check_fire_origin_keeps_the_words() {
     w::World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
     const auto shooter = w::spawn_remote_player(world, player_spawn(1));
@@ -547,6 +553,7 @@ bool check_fire_origin_keeps_the_words() {
 
 bool check_fire_owner_environment_and_origin() {
     w::World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
     const auto shooter = w::spawn_remote_player(world, player_spawn(1));
@@ -645,6 +652,7 @@ bool check_fire_owner_environment_and_origin() {
 //  @0x50BD2D..0x50BD56, the -14 @0x50C0A8..0x50C0B9, the -15 @0x50C13A..0x50C169]
 bool check_refused_fire_mirrors_the_weapon() {
     w::World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     const auto shooter = w::spawn_remote_player(world, player_spawn(1));
     auto *player = world.registry.get(shooter);
@@ -692,6 +700,7 @@ bool check_refused_fire_mirrors_the_weapon() {
 //  (the def test @0x541BB3); the refusal @0x50C13A..0x50C169]
 bool check_ungranted_combo_is_refused() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	std::vector<inmatch::NapiNPConnection> roster;
@@ -736,6 +745,7 @@ bool check_ungranted_combo_is_refused() {
 //  fire action @0x50C300..0x50C30D; WeaponSlot_CanFire @0x541BA0 reads slot+0x20]
 bool check_the_slot_weapon_fires() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	std::vector<inmatch::NapiNPConnection> roster;
@@ -774,6 +784,7 @@ bool check_the_slot_weapon_fires() {
 //  @0x540624..0x540627, Entity_GetScoreValueBySlotType @0x54078F..0x540799]
 bool check_controller_seat_reads_no_bucket() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
@@ -836,6 +847,7 @@ bool check_controller_seat_reads_no_bucket() {
 //  @0x50C33C..0x50C6FA; Weapon_ConsumeAmmo @0x542C75]
 bool check_the_fire_action_rejudges_the_round() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	std::vector<inmatch::NapiNPConnection> roster;
@@ -882,6 +894,7 @@ bool check_the_fire_action_rejudges_the_round() {
 //  Server_ClientFiredRound @0x50BD8F..0x50BDA5]
 bool check_the_ring_takes_the_fire_actions_words() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	std::vector<inmatch::NapiNPConnection> roster;
@@ -916,6 +929,7 @@ bool check_the_ring_takes_the_fire_actions_words() {
 //  @0x50BDF1; RoundData_AddRound hit_params[2] @0x4FDC10]
 bool check_an_alt_round_takes_its_ammo_byte() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	std::vector<inmatch::NapiNPConnection> roster;
@@ -969,6 +983,7 @@ bool check_an_alt_round_takes_its_ammo_byte() {
 //  ring+28 @0x4FDCF1..0x4FDCF5]
 bool check_a_ffff_sequence_word_takes_a_fresh_id() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
 	std::vector<inmatch::NapiNPConnection> roster;
@@ -1036,6 +1051,7 @@ struct CarrierPoints final : w::IPoseProvider {
 
 bool check_a_controller_seat_fires_from_the_userpoint() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
@@ -1117,6 +1133,7 @@ int main() {
 	if (!check_duplicate_c2s_session_does_not_refire()) return 1;
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0));        // host
@@ -1153,6 +1170,7 @@ int main() {
 	ns::UdpSessionTransport udp_c(ns::UdpSessionTransport::Role::Host);
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1281,7 +1299,7 @@ int main() {
 		put_u16(reload, uint16_t(3 * 65 + 2));
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(0x25, reload));
-		inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[1], msgs, 101, roster, &world);
+		inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], msgs, 101, roster, &world);
 		// Drain the relayed 0x49s so later checks stay clean.
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;

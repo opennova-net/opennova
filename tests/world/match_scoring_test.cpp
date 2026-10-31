@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -32,6 +33,7 @@ namespace gt = opennova::game_type;
 // [orig: scoringTable[74 + slot] reads, GameEvent_ProcessScoring @0x52F550]
 MatchRules rules(uint32_t game_type) {
     MatchRules out;
+    test_titles::jo_match(out);
     out.game_type = game_type;
     out.score_values.emplace();
     (*out.score_values)[2] = -5;  // FRIENDLYKILL
@@ -82,6 +84,7 @@ EntityHandle npc(World &world, uint8_t team, uint8_t item_type = 3) {
 
 std::unique_ptr<World> make_world(uint32_t game_type) {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->registry.configure_pool(1, 16);
     world->match.configure(rules(game_type));
@@ -223,6 +226,7 @@ void test_non_player_killer_credits_its_link() {
     MatchRules negative = rules(gt::kTeamDeathmatch);
     (*negative.score_values)[3] = -4;
     auto second = std::make_unique<World>();
+    test_titles::jo_world(*second);
     second->registry.configure_pool(0, 16);
     second->registry.configure_pool(1, 16);
     second->match.configure(negative);
@@ -296,6 +300,7 @@ void test_shot_scores_fire() {
     MatchRules fire = rules(gt::kTeamDeathmatch);
     (*fire.score_values)[0] = 1; // FIRE
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->match.configure(fire);
     const EntityHandle ace = player(*world, 0, 2);
@@ -319,6 +324,7 @@ void test_enemy_player_kill_bonuses() {
     (*bonus.score_values)[20] = 17; // FLAGCARRIERKILL
     (*bonus.score_values)[28] = 19; // ENEMYSNIPERKILL
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->registry.configure_pool(1, 16);
     world->match.configure(bonus);
@@ -357,6 +363,7 @@ void test_revive_scores_medicsave() {
     MatchRules medic = rules(gt::kTeamDeathmatch);
     (*medic.score_values)[7] = 4; // MEDICSAVE
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->match.configure(medic);
     const EntityHandle doc = player(*world, 0, 1);
@@ -376,6 +383,7 @@ void test_points_share_with_the_link() {
     (*share.score_values)[35] = 6; // ALIVE
     (*share.score_values)[36] = 1; // ALIVEQUANTUM
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->registry.configure_pool(1, 16);
     world->match.configure(share);
@@ -422,6 +430,7 @@ void test_round_clock_runs_through_the_linger() {
     MatchRules timed = rules(gt::kTeamDeathmatch);
     timed.game_time_minutes = 1;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->match.configure(timed);
     world->rules.mp_session = true;
@@ -485,6 +494,7 @@ void test_spectators_hold_no_objective() {
     koth.game_time_minutes = 5;
     koth.hill_limit_minutes = 99;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->registry.configure_pool(3, 16);
     world->match.configure(koth);
@@ -514,6 +524,7 @@ void test_periodic_score_needs_a_deployed_session_player() {
     (*periodic.score_values)[35] = 7;
     (*periodic.score_values)[36] = 1;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->match.configure(periodic);
     world->rules.mp_session = true;
@@ -548,6 +559,7 @@ void test_team_hold_decays_after_the_round() {
     koth.game_time_minutes = 5;
     koth.hill_limit_minutes = 99;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->registry.configure_pool(3, 16);
     world->match.configure(koth);
@@ -598,6 +610,7 @@ void test_heal_scores_medicheal() {
     MatchRules heal = rules(gt::kTeamDeathmatch);
     (*heal.score_values)[6] = 4;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->match.configure(heal);
     const EntityHandle medic = player(*world, 0, 1);
@@ -639,6 +652,7 @@ void test_dfx2_vehicle_attach_kill() {
         r.title_rules = c.title;
         (*r.score_values)[37] = 6; // VATTACHKILL
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 16);
         world->registry.configure_pool(1, 16);
         world->match.configure(r);
@@ -671,6 +685,7 @@ void test_dfx2_round_win_multiplier() {
         MatchRules r = rules(gt::kTeamDeathmatch);
         r.title_rules = title;
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 16);
         world->match.configure(r);
         const EntityHandle blue = player(*world, 0, 1);

@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace t = opennova::terrain;
@@ -41,6 +42,7 @@ int failures = 0;
 void test_the_second_pass_writes_the_records() {
 	for (const bool slot : { true, false }) {
 		auto owner = std::make_unique<World>();
+		test_titles::jo_world(*owner);
 		World &world = *owner;
 		world.registry.configure_pool(1, 4);
 		Entity h;
@@ -79,6 +81,7 @@ void test_the_second_pass_writes_the_records() {
 //  Entity_CheckCollisionState @0x47A2F6; Entity_CheckCollisionState @0x462A30 - @0x46326E]
 void test_the_light_second_pass_leaves_the_mid_hull_probe_out() {
 	auto owner = std::make_unique<World>();
+	test_titles::jo_world(*owner);
 	World &world = *owner;
 	world.registry.configure_pool(1, 4);
 	Entity h;
@@ -142,6 +145,7 @@ VehicleTraits truck() {
 
 void test_the_tracked_water_leg_raises_only_the_contact_copy() {
 	auto owner = std::make_unique<World>();
+	test_titles::jo_world(*owner);
 	World &world = *owner;
 	std::vector<uint16_t> heights(1024 * 1024, uint16_t(42 * 256));
 	std::vector<int> sectors(256, 1);
@@ -184,6 +188,7 @@ void test_the_tracked_water_leg_raises_only_the_contact_copy() {
 // [orig: Entity_ProcessWheeledVehiclePhysics @0x475DE0 - @0x4764AF..0x4764CC, @0x4774B0..0x4774D0]
 void test_the_tank_hull_bottom_carries_wheel_0s_compression() {
 	auto owner = std::make_unique<World>();
+	test_titles::jo_world(*owner);
 	World &world = *owner;
 	std::vector<uint16_t> heights(1024 * 1024, uint16_t(42 * 256));
 	std::vector<int> sectors(256, 1);

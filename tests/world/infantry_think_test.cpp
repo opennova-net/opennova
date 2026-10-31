@@ -26,6 +26,7 @@
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace io = opennova::io;
@@ -94,6 +95,7 @@ struct Rig {
     // (key & 0x3F != 0); heading phase (key>>2)&63 = 4, pitch phase 7.
     static constexpr uint32_t kKey = 16 + 3 * 512;
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &w = *storage;
     Clips clips;
     EntityHandle red_h, blue_h;

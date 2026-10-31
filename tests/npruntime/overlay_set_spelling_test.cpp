@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -71,6 +72,7 @@ int main() {
 	CHECK(sets.find("surface_wtr").name == "Surface_Wtr");
 
 	auto world_owner = std::make_unique<w::World>();
+	test_titles::jo_world(*world_owner);
 	w::World &world = *world_owner;
 	world.tables.sound_sets = &sets;
 	world.out.water_crossings.add(3 << 16, 4 << 16, 5 << 16, /*airborne=*/true);
@@ -85,6 +87,7 @@ int main() {
 	// Through the route: an in-match remote takes the same bytes as S2C 0x34.
 	ns::LoopbackChannel remote_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.world = &world;

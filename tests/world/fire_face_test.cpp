@@ -20,6 +20,7 @@
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/world.h>
 #include "common/test_paths.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -41,6 +42,7 @@ int failures = 0;
 struct Fixture {
 	ResourceIndex index;
 	World world;
+	bool world_jo = test_titles::jo_world(world);
 	def::DefItemDef definition{};
 	def::DefItemsFile definitions{};
 	LocalPlayerWeapon weapon;

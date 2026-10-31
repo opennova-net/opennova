@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -45,7 +46,9 @@ namespace {
 // A team host with two remote players (teams 1 and 2) and no spawn zones.
 struct Fixture {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	std::unique_ptr<w::World> heap = std::make_unique<w::World>();
+	bool heap_jo = test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	std::vector<ns::UdpSessionTransport> transports;
 	std::vector<w::EntityHandle> players;

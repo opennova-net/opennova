@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -36,6 +37,7 @@ Seat make_seat(SeatType type, uint8_t retail_slot, const char *name, uint8_t bon
 
 struct Rig {
     World w;
+    bool w_jo = test_titles::jo_world(w);
     EntityHandle veh, gun, driver, passenger, gunner;
     DefVehicleHudBlock block{};
     Rig() {

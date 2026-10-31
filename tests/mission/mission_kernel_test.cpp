@@ -27,6 +27,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -74,6 +75,7 @@ static void run_boot_trace_gates() {
         action.param1 = 12;
         mission.actions.push_back(action);
         ms::MissionKernel kernel;
+        test_titles::jo_world(kernel.world);
         kernel.open_document(mission, "boot-gates", {});
         ms::KernelBootOptions options;
         options.playable = false;
@@ -92,6 +94,7 @@ static void run_boot_trace_gates() {
 		bms::File m{};
 		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.open_document(std::move(m), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.joiner = true;
@@ -107,6 +110,7 @@ static void run_boot_trace_gates() {
 		bms::File m{};
 		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.open_document(std::move(m), "synth", ms::BootFileSource{});
 		ms::KernelBootOptions options;
 		std::string error;
@@ -129,6 +133,7 @@ static void test_joiner_installs_only_the_wac_terminator() {
 		bms::File m{};
 		m.organics.push_back(organic(1 << 16, 1 << 16, 0, /*team=*/1, /*yaw=*/90));
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.open_document(std::move(m), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.playable = false;
@@ -160,6 +165,7 @@ static void test_first_frame_tick_matches_on_host_and_joiner() {
 		bms::File mission{};
 		mission.items = {item(164, 0, 0, 0)};
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.open_document(mission, "first-frame", {});
 		ms::KernelBootOptions options;
 		options.playable = false;
@@ -208,6 +214,7 @@ static void test_numbered_vars_reset_after_premission_before_initial_wac() {
 		mission.actions = {set_variable(0, 17), set_variable(1, 40),
 				set_variable(1, 41), set_variable(255, 51), output};
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.world.script.vars.set_mission(256, 7);
 		kernel.open_document(std::move(mission), "synth",
 				source_kind == 0 ? ms::BootFileSource{} : source_over(&files));
@@ -257,6 +264,7 @@ static void test_empty_wac_clock_and_baseline_gate() {
         output.param1 = 12;
         mission.actions = {output};
         ms::MissionKernel kernel;
+        test_titles::jo_world(kernel.world);
         kernel.open_document(std::move(mission), "synth",
                 source_kind == 0 ? ms::BootFileSource{} : source_over(&files));
         ms::KernelBootOptions options;
@@ -297,6 +305,7 @@ static void test_empty_wac_clock_and_baseline_gate() {
 // [orig: WeaponSlot_InitFromDef @0x53EF35]
 static void test_restart_cancel_keeps_the_personal_slot_zoom() {
 	ms::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.open_document(bms::File{}, "synth", ms::BootFileSource{});
 	ms::KernelBootOptions options;
 	options.playable = false;
@@ -317,6 +326,7 @@ static void test_initial_wac_waits_for_the_weather_owner_once() {
     std::map<std::string, std::string> files;
     files["synth.wac"] = "if never then inc(v1) fov(40) endif\n";
     ms::MissionKernel kernel;
+    test_titles::jo_world(kernel.world);
     kernel.open_document(bms::File{}, "synth", source_over(&files));
     ms::KernelBootOptions options;
     options.playable = false;
@@ -346,6 +356,7 @@ static void test_vehicle_spawn_pose_is_captured_after_initial_wac() {
  std::map<std::string, std::string> files;
  files["synth.wac"] = "if never then teleport(7,42) endif\n";
  ms::MissionKernel kernel;
+ test_titles::jo_world(kernel.world);
  bms::File mission{};
  mission.items.push_back(item(164, 1 << 16, 2 << 16, 0));
  kernel.open_document(std::move(mission), "synth", source_over(&files));
@@ -389,6 +400,7 @@ static void test_sound_profiles_parse_once_and_keep_a_pre_boot_override() {
     files["SndProf.def"] = "begin alpha\r\nend\r\nbegin beta\r\nend\r\n";
     {
         ms::MissionKernel kernel;
+        test_titles::jo_world(kernel.world);
         kernel.open_document(bms::File{}, "synth", source_over(&files));
         ms::KernelBootOptions options;
         options.playable = false;
@@ -400,6 +412,7 @@ static void test_sound_profiles_parse_once_and_keep_a_pre_boot_override() {
     }
     {
         ms::MissionKernel kernel;
+        test_titles::jo_world(kernel.world);
         kernel.open_document(bms::File{}, "synth", source_over(&files));
         const std::string pre = "begin embedder\r\nend\r\n";
         kernel.world.tables.sound_profiles.parse(pre.data(), pre.size());
@@ -426,6 +439,7 @@ static void test_initial_wac_binds_the_preopened_music_context() {
         if (context_active) CHECK(mus::mus_vm_load_script(audio.get(), &music_script) == 0);
         mus::mus_vm_set_var(audio.get(), 7, 99);
         ms::MissionKernel kernel;
+        test_titles::jo_world(kernel.world);
         kernel.open_document(bms::File{}, "synth", source_over(&files));
         ms::KernelBootOptions options;
         options.playable = false;
@@ -482,6 +496,7 @@ static void test_board_walk_reaches_a_kernel_named_point() {
 		m.organics.push_back(organic(20 << 16, 20 << 16, 0, /*team=*/1, /*yaw=*/90));
 		m.organics[0].id = 31;
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.set_items_table(&items);
 		kernel.set_assets(&store);
 		kernel.open_document(std::move(m), "named", source_over(&files));
@@ -575,6 +590,7 @@ static void test_player_spawn_slice_reads_its_model_radius() {
 		m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 0));
 		m.items[0].id = 21;
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.set_items_table(&items);
 		kernel.set_assets(&store);
 		kernel.open_document(std::move(m), "slice", source_over(&files));
@@ -671,6 +687,7 @@ static void test_kernel_answers_an_anchor_off_the_def_graphic() {
 		m.items.push_back(item(/*type_id=*/164, 10 << 16, 20 << 16, 0));
 		m.items[0].id = 21;
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.set_items_table(&items);
 		kernel.set_assets(&store);
 		kernel.open_document(std::move(m), "anchor", source_over(&files));
@@ -738,6 +755,7 @@ static void test_the_load_warning_box_at_each_check() {
 		bms::File mission{};
 		mission.header.num_people = static_cast<uint32_t>(cap + 1);
 		ms::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.open_document(mission, "load-warning", {});
 		ms::KernelBootOptions options;
 		options.playable = false;
@@ -778,6 +796,7 @@ int main() {
 	files["synth.wac"] = "if never() then set(v1,1) endif\n";
 
 	ms::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.open_document(test_mission::two_entity_mission(), "synth", source_over(&files));
 
 	ms::KernelBootOptions options; // playable, wac, collision, seat_specs on; game_type 0 (SP)

@@ -28,6 +28,7 @@
 #include <runtime/world/world.h>
 
 #include "wac_listing.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::wac;
@@ -178,6 +179,7 @@ void test_vm_vectors() {
 		Catalogs catalogs;
 		const Program program = compile_source(vector.source, environment(catalogs, ""));
 		auto world = std::make_unique<world::World>();
+		test_titles::jo_world(*world);
 		world->registry.configure_pool(0, 64);
 		WacVm vm;
 		vm.load(program);

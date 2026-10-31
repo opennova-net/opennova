@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdio>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -34,6 +35,7 @@ using test_expect::expect;
 // A view holding one row of each class, so the person filter can be exercised.
 ns::ClientReplicaPipeline make_view() {
 	ns::ClientReplicaPipeline view([](uint16_t) { return nw::EntityClass::Player; });
+	test_titles::jo_folds(view);
 	ns::ClientEntityState &player = view.state().upsert(0x0001);
 	player.cls = nw::EntityClass::Player;
 	ns::ClientEntityState &infantry = view.state().upsert(0x0002);

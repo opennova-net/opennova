@@ -4,6 +4,7 @@
 #include <formats/def/def.h>
 #include <memory>
 #include <cstdio>
+#include "../common/title_fixture.h"
 using namespace opennova::world;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL %d: %s\n",__LINE__,#c); return 1; } } while(0)
 // The move-function row selects only the motor; the +0x2C8 spread (and the
@@ -19,6 +20,7 @@ static int test_squib_init_keys_on_ai_function() {
             sizeof(text)-1,&definitions)==0);
     CHECK(definitions.count==2);
     auto heap=std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w=*heap;
     w.registry.configure_pool(3,4);
     Entity marker; marker.kind=EntityKind::Marker;
@@ -49,6 +51,7 @@ int main() {
     CHECK(definitions.entries[0].door_type==20*65536);
     opennova::def::def_free_items(&definitions);
     auto heap=std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w=*heap;
     w.registry.configure_pool(0,4); w.registry.configure_pool(1,4); w.registry.configure_pool(3,4);
     w.tables.ammo.entries.resize(2);

@@ -29,6 +29,7 @@
 
 #include "conn_fixture.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -43,6 +44,7 @@ using test_expect::expect;
 // whose player body carries it, sends one C2S 0x48 whose body names another id (0x113F).
 bool run_the_host_takes_nothing_from_the_0x48_body() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 8);
 	w::PlayerSpawn spawn;
 	spawn.position = {0, 0, 0};
@@ -54,6 +56,7 @@ bool run_the_host_takes_nothing_from_the_0x48_body() {
 	const PeerAddr peer{0x0100007Fu, 30123};
 	const std::string client_scrk = "CLIENT-ACK-SCRK";
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = world.get();
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;

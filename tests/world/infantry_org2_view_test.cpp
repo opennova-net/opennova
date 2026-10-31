@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -181,6 +182,7 @@ enum class Mount { kPlain, kConfig3, kCrashed };
 // seat pose that reads it.
 void test_seated_player_runs_the_phase(Mount kind) {
 	auto wp = std::make_unique<w::World>();
+	test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
@@ -301,6 +303,7 @@ enum class Ride { kPassenger, kTurret, kDriver, kDriverFreeLook, kCrashed };
 // lag's first thirty-second steps into the Pitch, unless the vehicle is crashed.
 void test_seated_player_rides_its_mount(Ride kind) {
 	auto wp = std::make_unique<w::World>();
+	test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
@@ -371,6 +374,7 @@ void test_seated_player_rides_its_mount(Ride kind) {
 //  @0x4B57EB..0x4B5848]
 void test_kick_follows_the_view_clamp() {
 	auto wp = std::make_unique<w::World>();
+	test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
@@ -420,6 +424,7 @@ void test_dead_tail() {
 	for (const bool dead : {false, true}) {
 		for (const bool local : {false, true}) {
 			auto wp = std::make_unique<w::World>();
+			test_titles::jo_world(*wp);
 			w::World &world = *wp;
 			world.registry.configure_pool(0, 16);
 			w::Entity body;
@@ -455,6 +460,7 @@ void test_dead_tail() {
 // then its dead tail: its Yaw and look take that body heading and the 0x60 bits drop.
 void test_dead_tail_through_the_tick() {
 	auto wp = std::make_unique<w::World>();
+	test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
@@ -492,6 +498,7 @@ void test_corpse_leg_through_the_tick() {
 	enum class Kind { kDecay, kLeaveCorpse, kSilent, kLive };
 	for (const Kind kind : {Kind::kDecay, Kind::kLeaveCorpse, Kind::kSilent, Kind::kLive}) {
 		auto wp = std::make_unique<w::World>();
+		test_titles::jo_world(*wp);
 		w::World &world = *wp;
 		world.registry.configure_pool(0, 16);
 		static constexpr uint16_t kItem = 0x14B9;
@@ -559,6 +566,7 @@ void test_rain_ambient_dead_or_alive() {
 	for (const bool dead : {false, true}) {
 		for (const bool local : {false, true}) {
 			auto wp = std::make_unique<w::World>();
+			test_titles::jo_world(*wp);
 			w::World &world = *wp;
 			world.registry.configure_pool(0, 16);
 			world.weather.core.scalar_channels.rain_pct_fp = 0x8000;
@@ -595,6 +603,7 @@ void test_rain_ambient_dead_or_alive() {
 void test_reverb_rides_the_slow_pass() {
 	for (const bool local : {false, true}) {
 		auto wp = std::make_unique<w::World>();
+		test_titles::jo_world(*wp);
 		w::World &world = *wp;
 		world.registry.configure_pool(0, 16);
 		world.reverb.mission = world.reverb.selected = 3;
@@ -638,6 +647,7 @@ void test_reverb_rides_the_slow_pass() {
 void test_stance_sound_after_the_on_foot_site() {
 	for (const bool seated : {true, false}) {
 		auto wp = std::make_unique<w::World>();
+		test_titles::jo_world(*wp);
 		w::World &world = *wp;
 		world.registry.configure_pool(0, 16);
 		world.registry.configure_pool(1, 16);
@@ -690,6 +700,7 @@ void test_chase_camera_halves_a_drivers_pitch() {
 				Case{w::SeatType::Driver, 0, true, false},
 				Case{w::SeatType::Driver, 1, false, false}}) {
 		auto wp = std::make_unique<w::World>();
+		test_titles::jo_world(*wp);
 		w::World &world = *wp;
 		world.registry.configure_pool(0, 16);
 		auto local = std::make_unique<w::LocalPlayer>(world);

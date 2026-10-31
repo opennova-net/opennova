@@ -30,6 +30,7 @@
 #include <runtime/world/world.h>
 
 #include "common/boot_file_source.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -289,6 +290,7 @@ CollisionModel building_collision(double hx, double hy, double height) {
 
 struct Rig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     CollisionWorld cw;
     OcclusionWorld ow;
     Field field{0};
@@ -1864,6 +1866,7 @@ void test_round_restart_keeps_the_first_weld() {
     m.events.push_back(opennova::bms::Event{});
     std::map<std::string, std::string> files;
     auto kernel = std::make_unique<opennova::mission::MissionKernel>();
+    test_titles::jo_world(kernel->world);
     kernel->open_document(std::move(m), "synth", test_boot::source_over(&files));
     opennova::mission::KernelBootOptions options;
     options.playable = false;

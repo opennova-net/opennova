@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -288,6 +289,7 @@ int main() {
 		profile.auto_medic_off = 1;
 
 		GameConfig lan;
+		test_titles::jo_config(lan);
 		lan.server_name.clear();
 		lan.game_type = game_type::kTeamDeathmatch;
 		ShellHostSource source;

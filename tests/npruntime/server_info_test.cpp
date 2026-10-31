@@ -23,6 +23,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -63,10 +64,12 @@ void name_mission(bms::File &mission, const char *name, bms::ClimateType climate
 // a map change's next mission and a rename reach the next read.
 void test_columns_follow_the_session() {
 	world::World world;
+	test_titles::jo_world(world);
 	world.match.set_remaining_ticks(3720 * 7 + 5);
 	bms::File mission;
 	name_mission(mission, "Header Name", bms::ClimateType::Snow);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.mission = &mission;
 	ctx.config.server_name = "Live Name";
@@ -194,6 +197,7 @@ void test_columns_follow_the_session() {
 // [orig: Server_ToggleJoinLock @0x50D750..0x50D767; Server_InitNewRoundState @0x51CAAA]
 void test_join_lock_toggle() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	CHECK(inmatch::Server_ToggleJoinLock(ctx) && ctx.join_locked);
 	CHECK(!inmatch::Server_ToggleJoinLock(ctx) && !ctx.join_locked);
 	int updates = 0;

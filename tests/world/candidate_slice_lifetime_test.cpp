@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -45,6 +46,7 @@ void build_slices(CollisionWorld &collision, World &world) {
 
 void test_a_new_lifetime_reads_no_slice_between_builds() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &world = *wp;
     world.registry.configure_pool(1, 8);
     CollisionWorld collision;
@@ -64,6 +66,7 @@ void test_a_new_lifetime_reads_no_slice_between_builds() {
 
 void test_a_clone_walks_its_templates_slice() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &world = *wp;
     world.registry.configure_pool(1, 8);
     CollisionWorld collision;
@@ -90,6 +93,7 @@ void test_a_clone_walks_its_templates_slice() {
 
 void test_a_restart_drops_a_skipped_rows_slice() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &world = *wp;
     world.registry.configure_pool(1, 8);
     CollisionWorld collision;

@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -67,6 +68,7 @@ void test_single_node_lists_are_one_shot() {
     m.waypoint_records[3].waypoint_numbers = {1};
 
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.ai.is_authority = true;
     mission::promote_mission(m, w, mission::PromoteOptions{});
@@ -103,6 +105,7 @@ void test_single_node_lists_are_one_shot() {
 
 struct AirRig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &w = *wp;
     EntityHandle helo_h, pilot_h;
     VehicleTraits traits;
@@ -244,6 +247,7 @@ void test_item_type_index_is_the_first_row_ordinal() {
                                       sizeof(kItems) - 1, &items) == 0);
     CHECK(items.count == 5);
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 8);
@@ -392,6 +396,7 @@ bms::File unbounded_routes_mission() {
 void test_nav_reads_are_unbounded() {
     const bms::File m = unbounded_routes_mission();
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.ai.is_authority = true;
     mission::promote_mission(m, w, mission::PromoteOptions{});
@@ -463,6 +468,7 @@ void test_marker_fields_follow_the_marker_type() {
         m.markers.push_back(e);
     }
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     mission::promote_mission(m, *wp, mission::PromoteOptions{});
     const NavNodeTable &nav = wp->ai.nav;
     CHECK(nav.nodes.size() == std::size(rows));
@@ -520,6 +526,7 @@ void test_route_seed_is_the_slot_words() {
     };
     opts.item_attributes = [kTruck](int32_t type) { return type == kTruck ? kItemAttribAIData : 0u; };
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.ai.is_authority = true;
     mission::promote_mission(m, w, opts);
@@ -766,6 +773,7 @@ void test_boat_slip_bearing_truncates() {
 //  Entity_ClearHealthInBounds @0x509E89]
 void test_script_gates_read_the_item_type_index() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 4);
     Entity crate{};

@@ -38,6 +38,7 @@
 #include <cstdio>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -119,6 +120,7 @@ bool run_client_state_handle_lookup_contract() {
 // must clear a previously witnessed non-zero value rather than preserve it.
 bool run_world_stream_team_and_zone_fields_survive_client_fold() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 
 	nw::PoolSpawnRecord pool1;
 	pool1.slot_id = 0x1007;
@@ -234,6 +236,7 @@ int32_t codec_recon(int32_t wire, int32_t anchor) {
 bool run() {
 	// --- a World with one static AI-controlled Person entity in pool 0 ---
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::Entity seed;
 	seed.kind = w::EntityKind::Organic;
@@ -268,6 +271,7 @@ bool run() {
 		return type_id == 0x2000 ? nw::EntityClass::Infantry
 		                         : nw::EntityClass::Unknown;
 	});
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	// The spawn stream's row: a compact 0x0A never creates one
 	// [orig: NapiNPClientMsg_0x00A @0x42FEC0 — the pre-apply check
@@ -341,6 +345,7 @@ bool run_unresolved_carrier_record_drops_whole() {
 	ns::ClientReplicaPipeline view([](uint16_t) {
 		return nw::EntityClass::Player;
 	});
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.state().upsert(0x0003).type_id = 0x14B9; // the spawn stream's row
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
@@ -406,6 +411,7 @@ bool run_compact_pose_fields_survive_client_fold() {
 		if (type_id == 0x1500) return nw::EntityClass::Vehicle;
 		return type_id == 0x14B9 ? nw::EntityClass::Player : nw::EntityClass::Infantry;
 	});
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	// The spawn stream's rows: a compact never creates one.
 	view.state().upsert(0x0001).type_id = 0x14B9;
@@ -488,6 +494,7 @@ bool run_remote_lean_integrator_decays_before_ramping() {
 	frame.records.push_back(right);
 
 	ns::ClientReplicaPipeline view([](uint16_t) { return nw::EntityClass::Player; });
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.state().upsert(0x0001).type_id = 0x14B9; // the spawn stream's rows
 	view.state().upsert(0x0002).type_id = 0x14B9;
@@ -574,6 +581,7 @@ bool run_compact_lifecycle_survives_multi_frame_pump() {
 		return type_id == 0x14B9 ? nw::EntityClass::Player :
 				nw::EntityClass::Infantry;
 	});
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 
 	// The spawn stream's rows: a compact 0x0A never creates one
@@ -665,6 +673,7 @@ bool run_carrier_local_pose_lifts_after_later_carrier_record() {
 		return type_id == 0x1004 ? nw::EntityClass::Vehicle : nw::EntityClass::Infantry;
 	};
 	ns::ClientReplicaPipeline view(classify);
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.state().upsert(0x0002).type_id = 0x2000; // the spawn stream's rows
 	view.state().upsert(0x1007).type_id = 0x1004;
@@ -738,6 +747,7 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 		                         : nw::EntityClass::Infantry;
 	};
 	ns::ClientReplicaPipeline view(classify);
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	view.state().upsert(0x0002).type_id = 0x2000; // the spawn stream's rows
@@ -802,6 +812,7 @@ bool run_carried_child_follows_later_carrier_same_mover_tick() {
 // parent's full live BAM, not the stale coarse yaw_byte from the last record.
 bool run_no_callback_child_follows_live_parent_heading() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_item_class_resolver([](uint16_t type_id) {
 		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
@@ -861,6 +872,7 @@ bool run_no_callback_child_follows_live_parent_heading() {
 // old implementation also paired it with a linear handle scan for every child).
 bool run_attachment_refresh_indexes_large_client_state_once() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	std::size_t resolver_calls = 0;
 	view.set_item_class_resolver([&](uint16_t) {
 		++resolver_calls;
@@ -901,6 +913,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 	spawn.records.push_back(vehicle);
 
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(0x0D, nw::encode_pool_spawn_batch(spawn));
 	const ns::ClientEntityState *carrier = view.state().find(0x1007);
@@ -951,6 +964,7 @@ bool run_carrier_pitch_roll_persists_across_live_records() {
 // [orig: NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9, +0x28 @0x503C22]
 bool run_parented_pool_spawn_follows_and_hides() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 
 	w::Entity parent_seed;
@@ -999,6 +1013,7 @@ bool run_parented_pool_spawn_follows_and_hides() {
 	if (!expect(child_h.valid(), "attachment child spawned")) return false;
 
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_item_class_resolver([](uint16_t type_id) {
 		if (type_id == 0x1004) return nw::EntityClass::Vehicle;
@@ -1073,6 +1088,7 @@ bool run_parented_pool_spawn_follows_and_hides() {
 // codec -> client-view path: no collision-only or out-of-band replication heuristic.
 bool run_mounted_infantry_pose_fields_round_trip() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
@@ -1160,6 +1176,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 	// Seed the carrier through its existing pool-1 spawn before applying the local
 	// infantry sample, matching a real client that has completed load sync.
 	ns::ClientReplicaPipeline view(classify);
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
 	const ns::ClientEntityState *decoded_carrier = view.state().find(vh.packed);
@@ -1218,6 +1235,7 @@ bool run_header_only_records_are_ignored_by_replica_pipeline() {
 	ns::ClientReplicaPipeline view([](uint16_t t) {
 		return t == 0x0465 ? nw::class_from_tag("bldg") : nw::EntityClass::Unknown;
 	});
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.pump(channel);
 
@@ -1274,6 +1292,7 @@ std::vector<uint8_t> make_built_0c_uplink(
 // @0x4c2042-0x4c20a9, the hidden-only position stores @0x4C207E..0x4C208E; §5.10/§5.38]
 bool run_apply_player_intent_stages_remote_peer() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -1346,6 +1365,7 @@ bool run_apply_player_intent_stages_remote_peer() {
 bool run_wire_pose_drives_remote_airborne_jump_gate() {
 	FlatTerrain terrain;
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.tables.terrain = &terrain.field;
 	w::AiSystem &ai = world.ai;
@@ -1434,6 +1454,7 @@ bool run_wire_pose_drives_remote_airborne_jump_gate() {
 // Parity-critical negative: the host NEVER read-applies its OWN player (§5.38 / ADR-0012).
 bool run_apply_rejects_own_player() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;
@@ -1488,6 +1509,7 @@ bool run_apply_rejects_own_player() {
 bool run_remote_mounted_player_death_detaches_compact(bool idle_skip) {
 	FlatTerrain terrain;
 	auto world_heap = std::make_unique<w::World>();
+	test_titles::jo_world(*world_heap);
 	w::World &world = *world_heap;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
@@ -1594,6 +1616,7 @@ bool run_remote_mounted_player_death_detaches_compact(bool idle_skip) {
 // motion owns it (the authority runs its whole org2 update, D-NET-1012).
 bool run_motor_skips_client_wire_peer() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
 	peer.kind = w::EntityKind::Organic;

@@ -74,6 +74,7 @@
 #include <utility>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -161,7 +162,9 @@ public:
 // The kernel lives on the heap: a World-carrying frame is megabytes.
 struct Harness {
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	inmatch::JoinerRole role;
+	bool role_jo = test_titles::jo_joiner(role);
 	CountingSocket socket;
 	inmatch::TickInput input;
 	std::vector<std::string> seams;
@@ -913,6 +916,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 	// Keep an independent authority alive: a prediction-only test can pass
 	// while the host stays parked and every received compact pulls us back.
 	auto authority = std::make_unique<w::World>();
+	test_titles::jo_world(*authority);
 	replication::LoopbackChannel channel;
 	replication::Connection connection{
 			&channel, replication::TransportMode::Client, w::EntityHandle{self_handle}, 0};
@@ -6485,6 +6489,7 @@ bool run_the_loads_fill_reads_the_session_zoom_byte(uint32_t session_flags, int3
 	{
 		// The load's fresh kernel, bound ahead of its boot (Simulation::reset_world).
 		auto fresh = std::make_unique<mission::MissionKernel>();
+		test_titles::jo_world(fresh->world);
 		fresh->world.registry.configure_pool(0, 16);
 		std::swap(h.kernel, fresh);
 		h.role.bind(*h.kernel);

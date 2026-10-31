@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -17,6 +18,7 @@ int main() {
     // The movement gate (entity+36 bit 1) is cleared; the other Flags bits are preserved.
     {
         World w;
+        test_titles::jo_world(w);
         Entity e;
         e.flags = 0xF;                  // bits 0..3 set, including the gate bit 1
         entity_reset_to_spawn_state(w, e);
@@ -26,6 +28,7 @@ int main() {
     // The live Position is backed up into the spawn-point fields, and is itself untouched.
     {
         World w;
+        test_titles::jo_world(w);
         Entity e;
         e.position = {100.0f, 200.0f, 300.0f};
         e.spawn_position = Vec3{};
@@ -39,6 +42,7 @@ int main() {
     // An already-clear gate stays clear (the clear is a single AND, idempotent on the bit).
     {
         World w;
+        test_titles::jo_world(w);
         Entity e;
         e.flags = 0x4;                  // gate bit already clear
         entity_reset_to_spawn_state(w, e);
@@ -73,6 +77,7 @@ int main() {
     for (const char *code : {"jo", "dfx2"}) {
         const bool dfx2 = std::string(code) == "dfx2";
         World w;
+        test_titles::jo_world(w);
         w.rules.title_rules = &title_rules(code);
         w.registry.configure_pool(0, 2);
         Entity seed;

@@ -21,6 +21,7 @@
 #include <memory>
 #include <set>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -72,6 +73,7 @@ struct Org1Rig {
     FlatField ground;
     IdleSource source;
     std::unique_ptr<World> w = std::make_unique<World>();
+    bool w_jo = test_titles::jo_world(*w);
     EntityHandle handle;
 
     Org1Rig() {

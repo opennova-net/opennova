@@ -14,6 +14,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -57,6 +58,7 @@ const opennova::terrain::TerrainHeightField *ridge() {
 // adds the ridge, so every ray is clear by default.
 struct Rig {
     World w;
+    bool w_jo = test_titles::jo_world(w);
     int index = -1;
     EntityHandle target;
 
@@ -483,6 +485,7 @@ static void test_chase_matches_the_target_inside_min_chase() {
 //  `lea ecx,[ebx+7FFFFF80h]` @0x4723DA]
 static void test_aircraft_failed_rescan_drops_the_target() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 8);

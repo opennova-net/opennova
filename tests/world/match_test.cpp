@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "item_pool_step.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using test_world::step_item_pool;
@@ -42,6 +43,7 @@ constexpr uint32_t kCoop = gt::kCoop;
 
 MatchRules rules(uint32_t game_type, uint32_t game_time_minutes, uint32_t score_limit) {
     MatchRules out;
+    test_titles::jo_match(out);
     out.game_type = game_type;
     out.game_time_minutes = game_time_minutes;
     out.score_limit = score_limit;
@@ -315,9 +317,11 @@ void test_every_retail_default_score_row() {
 
 void test_retail_default_score_values() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
 
     MatchRules tdm_rules;
+    test_titles::jo_match(tdm_rules);
     tdm_rules.game_type = kTdm;
     world->match.configure(tdm_rules);
     const EntityHandle tdm_blue = player(*world, 0, 1, "TdmBlue");
@@ -327,6 +331,7 @@ void test_retail_default_score_values() {
     CHECK(world->match.player(tdm_red)->stats[MatchStats::kPoints] == 0);
 
     MatchRules aas_rules;
+    test_titles::jo_match(aas_rules);
     aas_rules.game_type = kAas;
     world->match.configure(aas_rules);
     const EntityHandle aas_blue = player(*world, 0, 1, "AasBlue");
@@ -334,6 +339,7 @@ void test_retail_default_score_values() {
     CHECK(world->match.player(aas_blue)->stats[MatchStats::kPoints] == 15);
 
     MatchRules coop_rules;
+    test_titles::jo_match(coop_rules);
     coop_rules.game_type = kCoop;
     world->match.configure(coop_rules);
     const EntityHandle coop_blue = player(*world, 0, 1, "CoopBlue");
@@ -344,6 +350,7 @@ void test_retail_default_score_values() {
 
 void test_tdm_scoring_is_event_exact() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->match.configure(rules(kTdm, 10, 50));
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -375,6 +382,7 @@ void test_tdm_scoring_is_event_exact() {
 
 void test_live_entity_team_and_class_drive_scoring_and_board() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->match.configure(rules(kTdm, 10, 50));
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -408,6 +416,7 @@ void test_live_entity_team_and_class_drive_scoring_and_board() {
 
 void test_tdm_limit_and_clock_decisions() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->match.configure(rules(kTdm, 1, 2));
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -445,10 +454,12 @@ void test_tdm_limit_and_clock_decisions() {
 
 void test_deathmatch_and_hill_outcomes() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(3, 4);
 
     MatchRules dm;
+    test_titles::jo_match(dm);
     dm.game_type = gt::kDeathmatch;
     dm.game_time_minutes = 1;
     dm.score_limit = 2;
@@ -465,6 +476,7 @@ void test_deathmatch_and_hill_outcomes() {
     CHECK(dm_clock.has_value() && *dm_clock == 0);
 
     MatchRules koth;
+    test_titles::jo_match(koth);
     koth.game_type = gt::kKingOfTheHill;
     koth.game_time_minutes = 1;
     koth.hill_limit_minutes = 2;
@@ -527,6 +539,7 @@ void test_deathmatch_and_hill_outcomes() {
 void test_retail_objective_proximity_state_and_kill_bonuses() {
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 8);
         MatchRules tdm = rules(kTdm, 10, 99);
@@ -556,6 +569,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 8);
         MatchRules tdm = rules(kTdm, 10, 99);
@@ -587,10 +601,12 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         world->registry.configure_pool(3, 4);
         MatchRules koth;
+        test_titles::jo_match(koth);
         koth.game_type = gt::kKingOfTheHill;
         world->match.configure(koth);
         const EntityHandle solo = player(*world, 0, 1, "Solo");
@@ -606,10 +622,12 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         world->registry.configure_pool(3, 4);
         MatchRules koth;
+        test_titles::jo_match(koth);
         koth.game_type = gt::kKingOfTheHill;
         world->match.configure(koth);
         const EntityHandle solo = player(*world, 0, 1, "Solo");
@@ -660,9 +678,11 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 void test_zone_time_split_reads_the_slot_team() {
     for (const uint8_t zone_team : {uint8_t{2}, uint8_t{1}}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         MatchRules aas;
+        test_titles::jo_match(aas);
         aas.game_type = gt::kAdvanceAndSecure;
         aas.score_values = default_match_score_values(aas.game_type, opennova::world::title_rules("jo"));
         (*aas.score_values)[32] = 3;
@@ -704,9 +724,11 @@ void test_zone_time_split_reads_the_slot_team() {
 void test_proximity_bits_shift_as_bytes() {
     auto pass = [](uint32_t game_type, int pool, uint8_t team) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(pool, 4);
         MatchRules match_rules;
+        test_titles::jo_match(match_rules);
         match_rules.game_type = game_type;
         world->match.configure(match_rules);
         const EntityHandle body = player(*world, 0, 1, "Body");
@@ -748,6 +770,7 @@ void test_proximity_bits_shift_as_bytes() {
 void test_proximity_tests_run_on_the_words() {
     auto objective_mask = [](int32_t dy) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 8);
         world->match.configure(rules(kTdm, 10, 99));
@@ -761,9 +784,11 @@ void test_proximity_tests_run_on_the_words() {
     CHECK(objective_mask(0xB500) == 0x00);
     auto zone_mask = [](int32_t dz) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         MatchRules aas;
+        test_titles::jo_match(aas);
         aas.game_type = gt::kAdvanceAndSecure;
         world->match.configure(aas);
         const EntityHandle body = player(*world, 0, 1, "Body");
@@ -798,6 +823,7 @@ void test_proximity_tests_run_on_the_words() {
 void test_kill_bonus_team_bits_shift_as_dwords() {
     for (const uint8_t killer_team : {uint8_t{33}, uint8_t{9}}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(3, 4);
         MatchRules tkoth = rules(gt::kTeamKingOfTheHill, 10, 99);
@@ -846,9 +872,11 @@ void test_kill_bonus_team_bits_shift_as_dwords() {
 void test_retail_objective_proximity_scoring_events() {
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(3, 4);
         MatchRules koth;
+        test_titles::jo_match(koth);
         koth.game_type = gt::kKingOfTheHill;
         world->match.configure(koth);
         const EntityHandle solo = player(*world, 0, 0, "Solo");
@@ -883,9 +911,11 @@ void test_retail_objective_proximity_scoring_events() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         MatchRules aas;
+        test_titles::jo_match(aas);
         aas.game_type = gt::kAdvanceAndSecure;
         aas.score_values = default_match_score_values(aas.game_type, opennova::world::title_rules("jo"));
         (*aas.score_values)[32] = 3;
@@ -932,6 +962,7 @@ void test_retail_objective_proximity_scoring_events() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         MatchRules tdm = rules(kTdm, 1, 99);
         (*tdm.score_values)[35] = 7;
@@ -962,8 +993,10 @@ void test_retail_objective_proximity_scoring_events() {
 void test_retail_zone_and_tkoth_win_quirks() {
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(1, 4);
         MatchRules aas;
+        test_titles::jo_match(aas);
         aas.game_type = gt::kAdvanceAndSecure;
         aas.game_time_minutes = 1;
         world->match.configure(aas);
@@ -981,9 +1014,11 @@ void test_retail_zone_and_tkoth_win_quirks() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(3, 4);
         MatchRules tkoth;
+        test_titles::jo_match(tkoth);
         tkoth.game_type = gt::kTeamKingOfTheHill;
         tkoth.game_time_minutes = 1;
         tkoth.hill_limit_minutes = 99;
@@ -1018,6 +1053,7 @@ void test_retail_zone_and_tkoth_win_quirks() {
 // CPlayerStats_RecordEvent @0x52caf8..0x52cbb3]
 void test_target_destroyed_shares_through_both_occupant_links() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 16);
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -1027,6 +1063,7 @@ void test_target_destroyed_shares_through_both_occupant_links() {
     world->registry.get(first)->primary_occupant = second;
 
     MatchRules demolition;
+    test_titles::jo_match(demolition);
     demolition.game_type = gt::kSearchAndDestroy;
     demolition.game_time_minutes = 1;
     world->match.configure(demolition);
@@ -1048,6 +1085,7 @@ void test_target_destroyed_shares_through_both_occupant_links() {
 
 void test_demolition_flag_and_flagball_gameplay() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 16);
     WaypointContactHarness contacts(*world);
@@ -1057,6 +1095,7 @@ void test_demolition_flag_and_flagball_gameplay() {
 
     for (const uint32_t game_type : {gt::kSearchAndDestroy, gt::kAttackDefend}) {
         MatchRules demolition;
+        test_titles::jo_match(demolition);
         demolition.game_type = game_type;
         demolition.game_time_minutes = 1;
         world->match.configure(demolition);
@@ -1076,6 +1115,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     }
 
     MatchRules ctf;
+    test_titles::jo_match(ctf);
     ctf.game_type = gt::kCaptureTheFlag;
     ctf.game_time_minutes = 1;
     ctf.flag_return_ticks = 210;
@@ -1132,6 +1172,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     // rearms its return counter; subsequent idle callbacks consume it.
     // [orig: flag update callback @0x408430; g_FlagReturnTime2 @0x24D2174]
     MatchRules timed_return;
+    test_titles::jo_match(timed_return);
     timed_return.game_type = gt::kFlagBall;
     timed_return.flag_return_ticks = 5;
     world->match.configure(timed_return);
@@ -1181,6 +1222,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->registry.despawn(timed_flag);
 
     MatchRules flag_ball;
+    test_titles::jo_match(flag_ball);
     flag_ball.game_type = gt::kFlagBall;
     flag_ball.game_time_minutes = 1;
     flag_ball.max_score = 2;
@@ -1201,6 +1243,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->registry.despawn(ball);
 
     MatchRules zero_flag_ball;
+    test_titles::jo_match(zero_flag_ball);
     zero_flag_ball.game_type = gt::kFlagBall;
     zero_flag_ball.max_score = 0;
     world->match.configure(zero_flag_ball);
@@ -1211,11 +1254,13 @@ void test_demolition_flag_and_flagball_gameplay() {
 
 void test_flag_me_keeps_retails_unreachable_score_arm() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
     WaypointContactHarness contacts(*world);
 
     MatchRules rules;
+    test_titles::jo_match(rules);
     rules.game_type = gt::kFlagMe;
     rules.max_score = 1;
     rules.score_values.emplace();
@@ -1274,11 +1319,13 @@ void test_flag_me_keeps_retails_unreachable_score_arm() {
 
 void test_flag_contact_requires_the_retail_move_callback_gate() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
     WaypointContactHarness contacts(*world);
 
     MatchRules rules;
+    test_titles::jo_match(rules);
     rules.game_type = gt::kFlagBall;
     world->match.configure(rules);
     const EntityHandle carrier = player(*world, 0, 1, "Carrier");
@@ -1317,6 +1364,7 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
 struct TakeableRig {
     static constexpr int32_t kTakeableId = 9001; // an authored non-flag def
     std::unique_ptr<World> world = std::make_unique<World>();
+    bool world_jo = test_titles::jo_world(*world);
     WaypointContactHarness contacts{*world};
     EntityHandle carrier;
     EntityHandle object;
@@ -1325,6 +1373,7 @@ struct TakeableRig {
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         MatchRules flag_ball;
+        test_titles::jo_match(flag_ball);
         flag_ball.game_type = gt::kFlagBall;
         flag_ball.score_values.emplace();
         (*flag_ball.score_values)[11] = 7; // FLAGPICKUP: a pickup score would show
@@ -1518,11 +1567,13 @@ void test_a_solid_neighbour_does_not_shadow_a_takeable_touch() {
 //  Entity_SyncPositionFromDefinition, the pickup's +0x268 test @0x4AD936]
 void test_a_carrier_still_saves_its_own_flag() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 8);
     WaypointContactHarness contacts(*world);
 
     MatchRules ctf;
+    test_titles::jo_match(ctf);
     ctf.game_type = gt::kCaptureTheFlag;
     ctf.game_time_minutes = 1;
     ctf.flag_return_ticks = 210;
@@ -1559,10 +1610,12 @@ void test_a_carrier_still_saves_its_own_flag() {
 //  Server_BroadcastFlagSaveEvent @0x517A90 (@0x517AED, @0x517B09)]
 void test_own_flag_touch_syncs_its_definition_pose() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
     WaypointContactHarness contacts(*world);
     MatchRules ctf;
+    test_titles::jo_match(ctf);
     ctf.game_type = gt::kCaptureTheFlag;
     ctf.score_values.emplace();
     (*ctf.score_values)[9] = 3; // FLAGSAVE
@@ -1729,10 +1782,12 @@ void test_pickup_leg_scores_even_when_the_attach_refuses() {
 //  clears @0x4AD9FF / @0x4ADA07; the 4093 arm's +0x268 test @0x4AD936]
 void test_bay_arm_alone_clears_a_defless_carried_link() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 8);
     WaypointContactHarness contacts(*world);
     MatchRules ctf;
+    test_titles::jo_match(ctf);
     ctf.game_type = gt::kCaptureTheFlag;
     world->match.configure(ctf);
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -1882,11 +1937,13 @@ void test_player_body_death_edge_drops_what_it_carries() {
 void test_entity_update_consumes_its_movement_contacts() {
     for (const bool authority : {false, true}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         WaypointContactHarness contacts(*world);
 
         MatchRules rules;
+        test_titles::jo_match(rules);
         rules.game_type = gt::kFlagBall;
         world->match.configure(rules);
         const EntityHandle carrier = player(*world, 0, 1, "Carrier");
@@ -1909,6 +1966,7 @@ void test_entity_update_consumes_its_movement_contacts() {
 
 void test_aas_capture_scoring_and_outcomes() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 8);
     world->match.configure(rules(kAas, 1, 0));
@@ -1942,11 +2000,13 @@ void test_aas_capture_scoring_and_outcomes() {
 
 void test_flagball_four_team_bays_consume_exact_contacts() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 8);
     WaypointContactHarness contacts(*world);
 
     MatchRules flagball;
+    test_titles::jo_match(flagball);
     flagball.game_type = gt::kFlagBall;
     flagball.max_score = 99;
     world->match.configure(flagball);
@@ -2065,11 +2125,13 @@ void test_non_ctf_capture_drops_the_flag_then_syncs_it_home() {
 
 void test_cac_combines_flag_and_zone_objectives() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 8);
     WaypointContactHarness contacts(*world);
 
     MatchRules cac;
+    test_titles::jo_match(cac);
     cac.game_type = gt::kConquerAndControl;
     cac.game_time_minutes = 1;
     world->match.configure(cac);
@@ -2115,6 +2177,7 @@ void test_cac_combines_flag_and_zone_objectives() {
 
 void test_end_result_is_frozen_in_retail_board_order() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->match.configure(rules(kTdm, 10, 5));
     const EntityHandle blue = player(*world, 2, 1, "Blue");
@@ -2143,6 +2206,7 @@ void test_end_result_is_frozen_in_retail_board_order() {
     CHECK(world->match.result().winner_team == 1);
 
     world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(1, 8);
     world->match.configure(rules(kAas, 10, 0));
     zone(*world, 1, 1);
@@ -2162,6 +2226,7 @@ void test_end_result_is_frozen_in_retail_board_order() {
 void test_end_round_team_row_count_rule() {
     auto expect_rows = [](uint32_t game_type, uint8_t team_count, uint8_t expected) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         MatchRules configured = rules(game_type, 10, 0);
         configured.team_count = team_count;
@@ -2205,9 +2270,11 @@ EntityHandle spawn_hill(World &world) {
 // @0x508DAD (the timer) / @0x508E0A (the fold)]
 void test_end_result_freezes_team_hold_timer() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(3, 4);
     MatchRules tkoth;
+    test_titles::jo_match(tkoth);
     tkoth.game_type = gt::kTeamKingOfTheHill;
     tkoth.game_time_minutes = 10;
     tkoth.hill_limit_minutes = 99;
@@ -2247,9 +2314,11 @@ void test_end_result_freezes_team_hold_timer() {
 //  Server_ProcessRoundEnd @0x51685E; Game_AccumulateTeamScores @0x508DB2..0x508DC2]
 void test_alive_readers_take_the_dead_bit_alone() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(3, 4);
     MatchRules tkoth;
+    test_titles::jo_match(tkoth);
     tkoth.game_type = gt::kTeamKingOfTheHill;
     tkoth.game_time_minutes = 10;
     tkoth.hill_limit_minutes = 99;
@@ -2293,9 +2362,11 @@ void test_alive_readers_take_the_dead_bit_alone() {
 //  @0x43C680]
 void test_alive_count_reads_the_slot_team() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(3, 4);
     MatchRules tkoth;
+    test_titles::jo_match(tkoth);
     tkoth.game_type = gt::kTeamKingOfTheHill;
     tkoth.game_time_minutes = 10;
     tkoth.hill_limit_minutes = 99;
@@ -2345,6 +2416,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // GameEvent_ProcessScoring @0x52F657]
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
@@ -2373,6 +2445,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (b) Every row tied at zero: a draw, no marker.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         player(*world, 3, 1, "Ace");
@@ -2386,6 +2459,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (c) A lone row: a draw at zero, a win with any positive score.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         player(*world, 3, 1, "Solo");
@@ -2404,6 +2478,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (d) Two rows tied at the top over a third: not a draw, but no marker.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
@@ -2421,8 +2496,10 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (e) KOTH orders by the hill ticks the primary selects, not points.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         MatchRules koth;
+        test_titles::jo_match(koth);
         koth.game_type = gt::kKingOfTheHill;
         koth.game_time_minutes = 10;
         koth.hill_limit_minutes = 99;
@@ -2442,6 +2519,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (f) A spectator-flagged top scorer receives no award.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
@@ -2460,6 +2538,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
 void test_coop_remains_script_owned() {
     for (const uint32_t game_type : {gt::kCoop, gt::kObjectiveCoop}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->match.configure(rules(game_type, 1, 50));
         const EntityHandle blue = player(*world, 0, 1, "Blue");

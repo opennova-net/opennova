@@ -47,6 +47,7 @@
 #include "conn_fixture.h"
 #include "../world/channel_clip_source.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -256,9 +257,11 @@ bool pull_round_board(inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection &
 
 void test_tdm_round_wire_and_linger() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.rules.mp_session = true;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = 0x10000u;
 	rules.score_limit = 1;
 	rules.score_values.emplace();
@@ -277,6 +280,7 @@ void test_tdm_round_wire_and_linger() {
 	ns::LoopbackChannel blue_wire;
 	ns::LoopbackChannel red_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -412,9 +416,11 @@ void test_tdm_round_wire_and_linger() {
 //  @0x50868E; Server_ProcessRoundEnd @0x51685E]
 void test_periodic_list_runs_through_the_linger() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.rules.mp_session = true;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = 0x10000u;
 	rules.score_limit = 1;
 	rules.score_values.emplace();
@@ -425,6 +431,7 @@ void test_periodic_list_runs_through_the_linger() {
 	ns::LoopbackChannel blue_wire;
 	ns::LoopbackChannel red_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -483,9 +490,11 @@ void test_periodic_list_runs_through_the_linger() {
 // board row. [orig: EndRoundScoreboard_SerializeHeader @0x5052a6..0x505381]
 void test_dm_round_wire_named_header() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.rules.mp_session = true;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kDeathmatch;
 	rules.score_limit = 1;
 	rules.score_values.emplace();
@@ -501,6 +510,7 @@ void test_dm_round_wire_named_header() {
 	ns::LoopbackChannel ace_wire;
 	ns::LoopbackChannel cid_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -563,8 +573,10 @@ void test_dm_round_wire_kill_order_and_tie() {
 	// points. The named rows and their scores follow kills.
 	{
 		w::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 8);
 		w::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = game_type::kDeathmatch;
 		rules.score_values.emplace();
 		(*rules.score_values)[3] = 10;
@@ -616,8 +628,10 @@ void test_dm_round_wire_kill_order_and_tie() {
 	// rows keep slot order, and nobody is awarded.
 	{
 		w::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 8);
 		w::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = game_type::kDeathmatch;
 		rules.score_values.emplace();
 		(*rules.score_values)[3] = 10;
@@ -666,8 +680,10 @@ size_t expected_board_stream_size(const EndRoundStats &board, size_t configured)
 // NapiNPClientMsg_0x056 @0x432174..0x4321a4]
 void test_tdm_inactive_columns_keep_configured_matrix_width() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamDeathmatch;
 	rules.score_values.emplace();
 	(*rules.score_values)[3] = 10;
@@ -730,9 +746,11 @@ void test_tdm_inactive_columns_keep_configured_matrix_width() {
 // @0x5092e5..0x5092e7 (the id-5 read), @0x508fa7 (the header team score)]
 void test_tkoth_board_five_rows_and_hold_column() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(3, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamKingOfTheHill;
 	rules.game_time_minutes = 10;
 	rules.hill_limit_minutes = 99;
@@ -812,10 +830,12 @@ void test_demolition_death_routes_score_and_round_wire() {
 	for (const uint32_t game_type : {
 			game_type::kSearchAndDestroy, game_type::kAttackDefend}) {
 		w::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 4);
 		world.registry.configure_pool(2, 4);
 		world.rules.mp_session = true;
 		w::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = game_type;
 		rules.game_time_minutes = 1;
 		world.match.configure(rules);
@@ -833,6 +853,7 @@ void test_demolition_death_routes_score_and_round_wire() {
 
 		ns::LoopbackChannel wire;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
@@ -901,10 +922,12 @@ void test_demolition_death_routes_score_and_round_wire() {
 
 void test_aas_round_wire() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	world.rules.mp_session = true;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kAdvanceAndSecure;
 	world.match.configure(rules);
 	const w::EntityHandle red = match_player(world, 4, 2, "Red");
@@ -919,6 +942,7 @@ void test_aas_round_wire() {
 
 	ns::LoopbackChannel wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -943,9 +967,11 @@ void test_aas_round_wire() {
 void test_coop_script_producers_share_round_wire() {
 	auto run_case = [](uint32_t game_type_code, bool use_wac) {
 		w::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 4);
 		world.rules.mp_session = true;
 		w::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = game_type_code;
 		world.match.configure(rules);
 		const w::EntityHandle red = match_player(world, 4, 2, "Red");
@@ -974,6 +1000,7 @@ void test_coop_script_producers_share_round_wire() {
 
 		ns::LoopbackChannel wire;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
@@ -1010,6 +1037,7 @@ void test_coop_script_producers_share_round_wire() {
 
 void test_aas_capture_events_carry_zone_numbers() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::CollisionWorld collision;
 	w::AiSystem &ai = world.ai;
 	install_collision_system(world, collision);
@@ -1018,6 +1046,7 @@ void test_aas_capture_events_carry_zone_numbers() {
 	world.registry.configure_pool(2, 4);
 	world.rules.mp_session = true;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = 0x10010u;
 	world.match.configure(rules);
 	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
@@ -1073,6 +1102,7 @@ void test_aas_capture_events_carry_zone_numbers() {
 
 	ns::LoopbackChannel wire, split_blue_wire, split_red_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1143,6 +1173,7 @@ void test_aas_capture_events_carry_zone_numbers() {
 
 void test_ctf_pickup_and_capture_wire_transaction() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::CollisionWorld collision;
 	w::AiSystem &ai = world.ai;
 	install_collision_system(world, collision);
@@ -1150,6 +1181,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	world.registry.configure_pool(1, 8);
 	world.rules.mp_session = true;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kCaptureTheFlag;
 	world.match.configure(rules);
 	const w::EntityHandle blue = match_player(world, 3, 1, "Blue");
@@ -1196,6 +1228,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	ns::LoopbackChannel wire;
 	ns::LoopbackChannel host_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1330,6 +1363,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 
 void test_flag_timeout_wire_transaction() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::CollisionWorld collision;
 	w::AiSystem &ai = world.ai;
 	install_collision_system(world, collision);
@@ -1337,6 +1371,7 @@ void test_flag_timeout_wire_transaction() {
 	world.registry.configure_pool(1, 8);
 	world.rules.mp_session = true;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kFlagBall;
 	rules.max_score = 99;
 	rules.flag_return_ticks = 5;
@@ -1373,6 +1408,7 @@ void test_flag_timeout_wire_transaction() {
 	ns::LoopbackChannel remote_wire;
 	ns::LoopbackChannel host_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1461,6 +1497,7 @@ void test_flag_timeout_wire_transaction() {
 // [orig: Server_CheckWinConditions @0x51AD5E, Server_ProcessRoundEnd(2) @0x51AD77]
 void test_sp_auto_lose_reads_the_dead_bit() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	w::Entity body;
 	body.kind = w::EntityKind::Organic;
@@ -1472,6 +1509,7 @@ void test_sp_auto_lose_reads_the_dead_bit() {
 	world.cached.local_player = player;
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 0;
@@ -1495,6 +1533,7 @@ void test_sp_auto_lose_reads_the_dead_bit() {
 //  `cmp is_in_session` @0x5166BC ahead of the linger store @0x5166C4]
 void test_sp_round_end_runs_the_slot_walk() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	w::Entity body;
 	body.kind = w::EntityKind::Organic;
@@ -1504,6 +1543,7 @@ void test_sp_round_end_runs_the_slot_walk() {
 	world.cached.local_player = player;
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 0;
@@ -1571,6 +1611,7 @@ int entity_death_records(ns::LoopbackChannel &wire, w::EntityHandle victim) {
 // @0x4FD400 is called from the damage paths only (@0x4E8133)]
 void test_org1_death_transaction_is_the_motor_edge() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	// The org1 people hold their channels: no clip plays, the motor edge runs.
 	test_world::ChannelClipSource channel_only;
@@ -1591,6 +1632,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	ns::LoopbackChannel host_loop;
 	ns::LoopbackChannel peer_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1696,9 +1738,11 @@ void test_org1_death_transaction_is_the_motor_edge() {
 // of the session test @0x4FD440); Server_BuildEndOfRoundScoreboard @0x508F30]
 void test_kill_event_unit_score_rides_every_session() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.rules.mp_session = true;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamDeathmatch;
 	rules.score_values.emplace();
 	(*rules.score_values)[3] = 10;
@@ -1715,6 +1759,7 @@ void test_kill_event_unit_score_rides_every_session() {
 	const w::EntityHandle scored = world.registry.spawn(0, npc);
 	const w::EntityHandle scripted = world.registry.spawn(0, npc);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1744,6 +1789,7 @@ void test_kill_event_unit_score_rides_every_session() {
 //  @0x4fd070]
 void test_census_counts_pool_one_vehicles() {
 	auto storage = std::make_unique<w::World>();
+	test_titles::jo_world(*storage);
 	w::World &world = *storage;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
@@ -1771,6 +1817,7 @@ int main() {
 	test_org1_death_transaction_is_the_motor_edge();
 	test_kill_event_unit_score_rides_every_session();
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 
@@ -1809,6 +1856,7 @@ int main() {
 
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 0; // SP: the tallies + the auto-lose leg are SP-only

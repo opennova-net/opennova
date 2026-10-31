@@ -13,6 +13,7 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -26,6 +27,7 @@ namespace {
 
 struct LocalWorld {
     world::World w;
+    bool w_jo = test_titles::jo_world(w);
     world::EntityHandle local;
     LocalWorld() {
         w.registry.configure_pool(0, 8);

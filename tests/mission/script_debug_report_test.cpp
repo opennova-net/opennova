@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <map>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -42,6 +43,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if elapse(1) then set(v1,1) endif\nif elapse(2) then inc(v1) endif\n";
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		CHECK(boot(kernel, files));
 		inmatch::LocalRole role;
 		role.bind(kernel);
@@ -77,6 +79,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if elapse(1) then nosuchcommand(v1) endif\n";
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		boot(kernel, files);  // a script that fails to compile still boots the world
 		const mission::ScriptDebugReport r = mission::script_debug_report(kernel);
 		CHECK(!r.first_error.empty());

@@ -20,6 +20,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using world::World;
@@ -68,6 +69,7 @@ static bms::Event simple_event(bms::EventFlags flags, int action_index) {
 // BMS sets V5=7; WAC reads the SAME V5 and reacts. Proves the shared var store.
 static void test_bms_to_wac_shared_var() {
     World w;
+    test_titles::jo_world(w);
     // A mission only advances while a human is in the world - retail holds the
     // WAC tick and the BMS event pump on `g_WacVarHumans || !g_WacVarTicks`
     // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
@@ -98,6 +100,7 @@ static void test_bms_to_wac_shared_var() {
 // Proves the WAC->BMS direction across the shared var + shared entity commands.
 static void test_wac_to_bms_shared_var() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 16);
     world::Entity tgt;
@@ -145,6 +148,7 @@ static void test_wac_to_bms_shared_var() {
 // @0xC6EAE8; Entity_UpdateInfantryAI @0x4bc5ea]
 static void test_wac_accuracyspread_drives_npc_aim() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
 
@@ -203,6 +207,7 @@ static void test_wac_accuracyspread_drives_npc_aim() {
 // script-forced detach remains available. [orig: @0xC6EADC / @0x43698B]
 static void test_wac_seatbelt_controls_local_use() {
 	World w;
+	test_titles::jo_world(w);
 	w.cached.humans = 1;
 	w.registry.configure_pool(0, 4);
 	w.registry.configure_pool(1, 4);
@@ -251,6 +256,7 @@ static void test_wac_seatbelt_controls_local_use() {
 // on passes 2,6,10,.. (ticks 32,96,160,224).
 static void test_bms_increment_and_threshold() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 8);
 
@@ -294,6 +300,7 @@ static void test_bms_increment_and_threshold() {
 //  @0x4F2920 - G# = 0xC6BA40 + 4n @0x4F2B66]
 static void test_misvar_index_runs_into_the_global_bank() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
 
@@ -362,6 +369,7 @@ static void test_misvar_index_runs_into_the_global_bank() {
 //  @0x4F5995 / @0x4F599F / @0x4F59AA); WacCmd_Elapse @0x4ECEF0]
 static void test_misvar_word_aliases_wac_state() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
 
@@ -412,6 +420,7 @@ static void test_misvar_word_aliases_wac_state() {
 // active && countdown==0) stays false while the delay counts.
 static void test_activation_delay() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     bms::Event e = simple_event(bms::EventFlags::None, 0);
@@ -439,6 +448,7 @@ static void test_activation_delay() {
 static void test_live_logic_trace_and_fire() {
     using mission::FireRequest;
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     bms::Event e{};
@@ -504,6 +514,7 @@ static void test_live_logic_trace_and_fire() {
     // A pre-mission and a post-mission event each run in their one pass: refused, nothing armed.
     {
         World pw;
+        test_titles::jo_world(pw);
         pw.cached.humans = 1;
         mission::BmsEventSystem passes;
         passes.load({simple_event(bms::EventFlags::PreMission, 0), simple_event(bms::EventFlags::PostMission, 0)}, {},
@@ -518,6 +529,7 @@ static void test_live_logic_trace_and_fire() {
     // the cooldown waits for the idle branch, then fires it again. Its chain never holds (V9 == 1).
     {
         World rw;
+        test_titles::jo_world(rw);
         rw.cached.humans = 1;
         bms::Event repeat{};
         repeat.flags = bms::EventFlags::ResetAfter;
@@ -548,6 +560,7 @@ static void test_live_logic_trace_and_fire() {
     // consumed although the natural chain was false [orig: EventTrigger_UpdateEntry @0x454c8b].
     {
         World iw;
+        test_titles::jo_world(iw);
         iw.cached.humans = 1;
         bms::Event input{};
         input.trigger_index = 0;
@@ -574,6 +587,7 @@ static void test_live_logic_trace_and_fire() {
 // delay values >= 513 wrap negative on the first decrement and fire one pass after arming.
 static void test_activation_delay_signed_wrap() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     bms::Event e = simple_event(bms::EventFlags::None, 0);
@@ -594,6 +608,7 @@ static void test_activation_delay_signed_wrap() {
 // event_fired() is a WINDOW: true from the fire until the cooldown expires.
 static void test_repeat_cooldown() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     bms::Event e = simple_event(bms::EventFlags::ResetAfter, 0);
@@ -651,6 +666,7 @@ static void test_dfx2_coop_checkpoint_marking() {
     };
     for (const Case &c : cases) {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         w.rules.title_rules = &world::title_rules(c.title);
@@ -693,6 +709,7 @@ static void test_signed_action_count_immediate_and_delayed() {
     for (const Case &c : cases) {
         for (int delay : {0, 1}) {
             World w;
+            test_titles::jo_world(w);
             w.cached.humans = 1;
             w.registry.configure_pool(0, 4);
             world::WaypointEntry marker;
@@ -754,6 +771,7 @@ static void test_signed_action_count_immediate_and_delayed() {
 static void test_trigger_count_is_signed_in_the_chain() {
     for (uint8_t count : {uint8_t{128}, uint8_t{255}}) {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         mission::BmsEventSystem sys;
         bms::Event event = simple_event(bms::EventFlags::None, 0);
@@ -781,6 +799,7 @@ static void test_trigger_count_is_signed_in_the_chain() {
 //  zero-reload jump @0x454CD5 to the latch clear @0x454D46].
 static void test_repeat_zero_refires_every_pass() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     mission::BmsEventSystem sys;
@@ -797,6 +816,7 @@ static void test_repeat_zero_refires_every_pass() {
 // [orig: UpdateAllWithFlag2 @0x454dc0 (flags&2) vs the (flags&6)==0 quarter pass]
 static void test_pre_mission_pass() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     mission::BmsEventSystem sys;
@@ -819,6 +839,7 @@ static void test_pre_mission_pass() {
 // in-engine action-dispatch path end to end.
 static void test_playpartanim_mutates_brain() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 8);
     world::Entity org;
@@ -869,6 +890,7 @@ static void test_playpartanim_mutates_brain() {
 // [orig: Entity_SetWaypointByTeam @0x43cdb4]
 static void test_redirect_actions_preserve_authored_node() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 8);
 
@@ -940,6 +962,7 @@ static void test_redirect_actions_preserve_authored_node() {
 // [orig: Entity_SetWaypointByTeam @0x43CDB4]
 static void test_redirect_actions_accept_boarding_and_stop_commands() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 8);
     world::Entity soldier{};
@@ -993,6 +1016,7 @@ static void test_redirect_actions_accept_boarding_and_stop_commands() {
 // action records as "unported_action" (diagnostic), never as a real effect.
 static void test_presentation_effects() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     bms::Event e = simple_event(bms::EventFlags::None, 0);
@@ -1026,6 +1050,7 @@ static void test_presentation_effects() {
 //  after the dispatch loops @0x454cbd; Game_SetShowWaypoints @0x58fb50]
 static void test_waypoint_track_integration() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     // The mission's waypoint track: entry 1 completes when EVENT 1 fires.
@@ -1068,6 +1093,7 @@ static void test_waypoint_track_integration() {
 // [orig: EventAction_Dispatch cases 14 @0x454500 / 15 @0x4545e0 / 35 @0x4546af]
 static void test_subgoal_state() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     w.script.subgoals.win_text_ids[2] = 7;   // header WinConditions slot 2 -> STRWINCOND007
@@ -1121,6 +1147,7 @@ static void test_subgoal_state() {
 //  @0x4fd110, ++g_SubGoalsWonCount @0x4fd117]
 static void test_subgoal_tally_gate() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     mission::BmsEventSystem sys;
@@ -1152,6 +1179,7 @@ static void test_subgoal_tally_gate() {
 // fire-once event becomes evaluable again on its next processing pass.
 static void test_output_text_and_reset_event() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     // Event 0 (passes at ticks 16/80/144): fire-once, unconditional, OutputText(7).
@@ -1180,6 +1208,7 @@ static void test_output_text_and_reset_event() {
 // gated on Event(0), fires while event 0's window is open.
 static void test_event_trigger_reads_window() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     // Event 0: repeat, cooldown 2 units -> window open ticks 16..144.
@@ -1272,6 +1301,7 @@ static void test_second_time_through_parity() {
     const bool before = mission::BmsEventSystem::second_time_through();
     for (int round = 0; round < 2; ++round) {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         mission::BmsEventSystem sys;
@@ -1303,6 +1333,7 @@ static void test_teammate_triggers() {
     };
     for (const Case &c : cases) {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         w.rules.mp_session = c.mp;
@@ -1328,6 +1359,7 @@ static void test_teammate_triggers() {
 // Entity_UpdatePlayerAwolCounter @0x439dc0 / probe @0x439d40; trigger @0x453d40]
 static void test_player_awol_counter_and_trigger() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     world::Aabb zone;
@@ -1364,6 +1396,7 @@ static void test_player_awol_counter_and_trigger() {
 
     // An inactive-only zone world never counts as out of bounds.
     World w2;
+    test_titles::jo_world(w2);
     w2.cached.humans = 1;
     w2.registry.configure_pool(0, 4);
     w2.registry.register_area("", zone, /*active=*/false);
@@ -1385,6 +1418,7 @@ static void test_player_awol_counter_and_trigger() {
 // [orig: Entity_IsLocalPlayerOutOfBounds @0x439D40 - @0x439D69..0x439D85]
 static void test_player_awol_probe_reads_the_record_words() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     world::Aabb zone;
@@ -1422,6 +1456,7 @@ static void test_player_awol_probe_reads_the_record_words() {
 //  @0x4F0FE6..0x4F100E]
 static void test_area_tests_read_the_record_words() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     world::Aabb zone;
     zone.min = {10.0f, 0.0f, -16384.0f};
@@ -1469,6 +1504,7 @@ static void test_player_mount_trigger_dispatch() {
     };
     for (const Case &c : cases) {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
@@ -1520,6 +1556,7 @@ static void test_player_input_bit_triggers() {
     };
     for (const Case &c : view_bits) {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         mission::BmsEventSystem sys;
@@ -1543,6 +1580,7 @@ static void test_player_input_bit_triggers() {
     // back (the retail xor), so that bit is NOT consumed.
     {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         mission::BmsEventSystem sys;
@@ -1564,6 +1602,7 @@ static void test_player_input_bit_triggers() {
     // runs the second predicate, so BOTH bits are consumed when it fires.
     {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         bms::Trigger a = make_trigger(bms::TriggerMainType::Player,
@@ -1589,6 +1628,7 @@ static void test_player_input_bit_triggers() {
     // matched predicate toggled the mirror.
     {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         const bms::Trigger a = make_trigger(bms::TriggerMainType::Player,
@@ -1616,6 +1656,7 @@ static void test_player_input_bit_triggers() {
     // [orig: @0x454cfa].
     {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         bms::Event e{};
@@ -1645,6 +1686,7 @@ static void test_player_input_bit_triggers() {
     // false, and only a forced word makes them true.
     {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         mission::BmsEventSystem sys;
@@ -1680,6 +1722,7 @@ static void test_player_input_bit_triggers() {
 // [orig: @0x453b99].
 static void test_player_berserk_trigger() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     world::Entity pl{};
@@ -1712,6 +1755,7 @@ static void test_player_berserk_trigger() {
 // Dialog_IsFinishedByIndex @0x44e220].
 static void test_player_dialog_triggers() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     // The mission's dialog bank: dlg007 (one line, its wave in the bank's
@@ -1820,6 +1864,7 @@ static void test_player_dialog_triggers() {
 // [orig: EventTrigger_AnySatchelInArea @0x547160].
 static void test_player_satchel_in_area_trigger() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 8);
@@ -1880,6 +1925,7 @@ static void test_player_satchel_in_area_trigger() {
 // ticks must never touch a PostMission-flag entry.
 static void test_post_pass_is_a_one_shot() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     mission::BmsEventSystem sys;
@@ -1912,6 +1958,7 @@ static bms::Trigger group_trigger(bms::GroupTriggerType sub, int p1, int p2 = 0,
 
 static void test_trigger_relations_group_records() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 16);
     w.registry.configure_pool(4, 4);
@@ -1991,6 +2038,7 @@ static void test_trigger_relations_group_records() {
 
 static void test_trigger_relations_matrices_and_visited() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     mission::BmsEventSystem sys;
@@ -2060,6 +2108,7 @@ static bms::Trigger single_trigger(bms::SingleTriggerType sub, int p1, int p2 = 
 // @0x43e780; Entity_ApplyCommand cases 5/22/6].
 static void test_single_alert_triggers() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 8);
     world::Entity org;
@@ -2113,6 +2162,7 @@ static void test_single_alert_triggers() {
 //  @0x4F0A81..0x4F0A8C]
 static void test_coop_single_triggers_name_each_player_by_slot() {
     World w;
+    test_titles::jo_world(w);
     w.rules.mp_session = true;
     w.rules.logic_authority = true;
     w.registry.configure_pool(0, 8);
@@ -2161,6 +2211,7 @@ static void test_coop_single_triggers_name_each_player_by_slot() {
 // HasHealthAboveThreshold @0x43e350 — pools 0-1, signed, no alive gate].
 static void test_single_health_triggers() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(2, 4);
@@ -2230,6 +2281,7 @@ static void test_single_health_triggers() {
 // gate) / Entity_IsSsnHoldingItemGroup @0x43e2f0].
 static void test_holding_triggers() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 8);
@@ -2308,6 +2360,7 @@ static void test_holding_triggers() {
 // Entity_CheckLineOfSight @0x4f17c0 (the ±30° facing cone)].
 static void test_single_distance_los_chain() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 8);
     world::Entity org;
@@ -2418,6 +2471,7 @@ static void test_single_distance_los_chain() {
 // [orig: the mission-start resolvers @0x453000/@0x453100 over record[0]]
 static void test_zone_refs_resolve_by_id() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     world::Aabb inner;
@@ -2464,6 +2518,7 @@ static void test_zone_refs_resolve_by_id() {
 // Entity_IsTeamInTriggerBounds @ 0x43c730]
 static void test_area_trigger_pool_and_identity_rules() {
     World w;
+    test_titles::jo_world(w);
     for (int pool = 0; pool < 4; ++pool) w.registry.configure_pool(pool, 4);
     world::Aabb box{{0.0f, 0.0f, -2.0f}, {10.0f, 10.0f, 2.0f}};
     w.registry.register_area("zone", box, true, 17);
@@ -2526,6 +2581,7 @@ static void test_area_trigger_pool_and_identity_rules() {
 // exactly the original's dangling-ref behavior. [orig: @0x45309e/@0x4530b9]
 static void test_dangling_zone_ref_neuters_trigger() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     bms::Event e = simple_event(bms::EventFlags::None, 0);
@@ -2554,6 +2610,7 @@ static void test_dangling_zone_ref_neuters_trigger() {
 static void test_flat_zone_box_neuters_trigger() {
     const auto run = [](bool flat) {
         World w;
+        test_titles::jo_world(w);
         w.cached.humans = 1;
         w.registry.configure_pool(0, 4);
         world::Aabb box;
@@ -2592,6 +2649,7 @@ static void test_flat_zone_box_neuters_trigger() {
 // Server_ProcessRoundEnd(1), one shared round end for both script front-ends].
 static void test_bluewin_ends_round() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     w.registry.configure_pool(0, 4);
     bms::Event e = simple_event(bms::EventFlags::None, 0);
@@ -2621,6 +2679,7 @@ static void test_bluewin_ends_round() {
 // before any client can be there to be told. Retail never reaches it.
 static void test_empty_host_holds_the_script() {
     world::World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);
     world::Entity victim;
     victim.net_id = 100;
@@ -2661,6 +2720,7 @@ static void test_empty_host_holds_the_script() {
     // The other half of the condition: before the VM has ever run, the script
     // advances regardless of who is watching.
     world::World w2;
+    test_titles::jo_world(w2);
     w2.cached.humans = 0;
     w2.cached.wac_ticks = 0;
     CHECK(w2.script_may_advance());
@@ -2671,6 +2731,7 @@ static void test_empty_host_holds_the_script() {
 static void test_wac_and_bms_share_admission_before_clock_or_human_writes() {
     for (bool change_clock : {false, true}) {
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 8);
         w.cached.humans = change_clock ? 0 : 1;
         wac::WacSystem script;
@@ -2710,6 +2771,7 @@ static void test_wac_and_bms_share_admission_before_clock_or_human_writes() {
 
 static void test_change_ai_command_family() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);
 
     world::Entity entity{};
@@ -2846,6 +2908,7 @@ static void test_change_ai_command_family() {
 
 static void test_structural_bms_actions() {
     World w;
+    test_titles::jo_world(w);
     for (int pool = 0; pool < 4; ++pool)
         w.registry.configure_pool(pool, 8);
 
@@ -2998,6 +3061,7 @@ static void test_structural_bms_actions() {
 
 static void test_bms_target_selectors_and_retail_noops() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     for (int pool = 0; pool <= 2; ++pool) w.registry.configure_pool(pool, 4);
     world::Entity seed{};
@@ -3135,6 +3199,7 @@ int main() {
     // fire nothing, so this pins the wp_number match specifically.
     {
         World pw;
+        test_titles::jo_world(pw);
         pw.registry.configure_pool(3, 8);
         auto put_marker = [&](int slot, int32_t type_id, int32_t wpn) {
             world::Entity m;

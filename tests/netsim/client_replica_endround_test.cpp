@@ -18,6 +18,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -71,6 +72,7 @@ void test_single_chunk_board() {
 	// Heap-allocated: ClientState is far too large for the 1 MB Windows
 	// test stack (the same trap #515 fixed in ai_test).
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*view_owned);
 	ClientReplicaPipeline &view = *view_owned;
 	const std::vector<uint8_t> board = make_board(3, "Ace", 11);
 	view.apply(s2c::END_ROUND_STATS,
@@ -85,6 +87,7 @@ void test_single_chunk_board() {
 // Split across two chunks: the board is NOT known until the second arrives.
 void test_two_chunk_reassembly() {
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*view_owned);
 	ClientReplicaPipeline &view = *view_owned;
 	const std::vector<uint8_t> board = make_board(4, "Bee", 22);
 	const uint16_t total = uint16_t(board.size());
@@ -104,6 +107,7 @@ void test_two_chunk_reassembly() {
 // decode against them.
 void test_offset_zero_resets_the_buffer() {
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*view_owned);
 	ClientReplicaPipeline &view = *view_owned;
 	const std::vector<uint8_t> longer = make_board(5, "LongerNameHere", 33);
 	view.apply(s2c::END_ROUND_STATS,
@@ -131,6 +135,7 @@ void test_offset_zero_resets_the_buffer() {
 // `known` must therefore tolerate an empty player list.
 void test_completion_is_by_byte_count() {
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*view_owned);
 	ClientReplicaPipeline &view = *view_owned;
 	const std::vector<uint8_t> board = make_board(7, "Dee", 55);
 	const uint16_t total = uint16_t(board.size());
@@ -157,6 +162,7 @@ void test_completion_is_by_byte_count() {
 // a zero head and replace a good board with an empty one -- the bug this pins.
 void test_stream_survives_completion() {
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*view_owned);
 	ClientReplicaPipeline &view = *view_owned;
 	const std::vector<uint8_t> board = make_board(8, "Eve", 66);
 	const uint16_t total = uint16_t(board.size());
@@ -177,6 +183,7 @@ void test_stream_survives_completion() {
 // A malformed board leaves `known` false rather than publishing a half-board.
 void test_undecodable_board_is_dropped() {
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*view_owned);
 	ClientReplicaPipeline &view = *view_owned;
 	LE e;
 	e.u16(4);

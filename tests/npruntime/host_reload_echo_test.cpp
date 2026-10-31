@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -62,6 +63,7 @@ void echo(replication::LoopbackChannel &loop, w::EntityHandle h) {
 
 void test_the_own_client_dips_a_named_persons_arms() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 8);
 	world->registry.configure_pool(1, 4);
 	const w::EntityHandle local = spawn_body(*world, 0, true, 3);
@@ -71,6 +73,7 @@ void test_the_own_client_dips_a_named_persons_arms() {
 	const w::EntityHandle gun = spawn_body(*world, 1, true, 2);
 	replication::LoopbackChannel loop;
 	auto own = std::make_unique<inmatch::ClientRuntime>(loop);
+	test_titles::jo_folds(*own);
 	for (const w::EntityHandle h : {local, remote, defless, gun}) echo(loop, h);
 	(void)own->Client_ProcessNetworkFrame(0);
 	// The echoes wait for the fold between two server ticks.

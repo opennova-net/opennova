@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -93,6 +94,7 @@ std::vector<uint8_t> make_til(
 struct TerrainFixture {
 	std::string server_scrk = "SERVER-TERRAIN-ASSET-SCRK";
 	inmatch::ClientRuntime runtime{"TerrainAssetJoiner"};
+	bool runtime_jo = test_titles::jo_folds(runtime);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	uint32_t tick = 0;
 
@@ -113,6 +115,7 @@ bool run_exact_bms_header_is_retained_and_reset() {
 	const std::string client_scrk = "CLIENT-WIRE-ASSET-SCRK";
 	const std::string server_scrk = "SERVER-WIRE-ASSET-SCRK";
 	inmatch::ClientRuntime runtime("WireAssetJoiner");
+	test_titles::jo_folds(runtime);
 	runtime.set_protocol(&kJo);
 	runtime.seed_session(
 			0x10203040u, 1u, client_scrk, server_scrk,

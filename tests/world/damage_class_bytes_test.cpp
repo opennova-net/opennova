@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -35,6 +36,7 @@ int failures = 0;
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<w::LocalPlayer> local;
 

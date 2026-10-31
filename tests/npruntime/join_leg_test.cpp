@@ -62,6 +62,7 @@
 #include <string_view>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -90,7 +91,9 @@ using test_expect::expect;
 // test-main stack under MSVC.
 struct JoinFixture {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	opennova::bms::File mission;
 	ns::UdpSessionTransport joiner_transport{ns::UdpSessionTransport::Role::Host};
 	ns::UdpSessionTransport existing_transport{ns::UdpSessionTransport::Role::Host};
@@ -119,6 +122,7 @@ struct JoinFixture {
 		opennova::mission::make_default(mission);
 
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 4;
 		if (settings != nullptr) config = *settings;
 		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly, socket,
@@ -773,7 +777,9 @@ bool run_slot_table_is_the_slot_limit() {
 // waiting for the spawn pump. Heap-held, as JoinFixture.
 struct SlotFixture {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	opennova::bms::File mission;
 	std::vector<std::unique_ptr<ns::UdpSessionTransport>> transports;
 
@@ -789,6 +795,7 @@ struct SlotFixture {
 		world->registry.spawn(3, start);
 		opennova::mission::make_default(mission);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 5;
 		config.dedicated_server = true;
 		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
@@ -1224,6 +1231,7 @@ bool run_an_orphaned_row_counts_against_the_session_cap() {
 //  @0x501664]
 bool run_an_orphaned_row_counts_on_its_side_in_the_balance_hold() {
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 8;
 	settings.game_type = opennova::game_type::kTeamDeathmatch;
 	settings.side_b_password = "bravo"; // arms the team-mode BuildFlags nibble

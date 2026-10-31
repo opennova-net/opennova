@@ -39,6 +39,7 @@
 #include <optional>
 #include <string>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -70,7 +71,9 @@ public:
 // The kernel lives on the heap: a World-carrying frame is megabytes.
 struct Harness {
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	inmatch::JoinerRole role;
+	bool role_jo = test_titles::jo_joiner(role);
 	SilentSocket socket;
 	inmatch::TickInput input;
 	w::EntityHandle tank;

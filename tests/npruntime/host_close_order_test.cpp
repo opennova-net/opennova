@@ -57,6 +57,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -102,6 +103,7 @@ struct CaptureSocket final : IDatagramSocket {
 struct ListenHost {
 	std::map<std::string, std::string> files;
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	std::unique_ptr<inmatch::HostRole> role = std::make_unique<inmatch::HostRole>();
 	std::unique_ptr<inmatch::ClientProcessState> process =
 			std::make_unique<inmatch::ClientProcessState>();
@@ -126,6 +128,7 @@ struct ListenHost {
 				static_cast<bms::AttribFlags>(kernel->mission.header.attrib_flags)));
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "close";
 			cfg.config.max_players = 4;

@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -57,6 +58,7 @@ Entity hull(bool modeled) {
 // its wake expiry; its sleep leg still runs.
 void test_the_tracked_solve_returns_for_no_model() {
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	Entity veh = hull(false);
 	veh.flags = kEntityFlagInAir;
@@ -87,6 +89,7 @@ void test_the_tracked_solve_returns_for_no_model() {
 // model-less hull; a model with no box extents runs nothing at all.
 void test_the_aircraft_solve_returns_for_no_model() {
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	Entity veh = hull(false);
 	veh.flags = kEntityFlagInAir | 0x8000u;
@@ -118,6 +121,7 @@ void test_the_aircraft_solve_returns_for_no_model() {
 //  @0x47C244..0x47C441, the null-model return @0x47C477..0x47C49F)]
 void test_a_model_less_tracked_hull_takes_no_stand_in() {
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	const EntityHandle h = world->registry.spawn(1, hull(false));
 	test_common::brain_hull(*world, h); // the mover runs past its head
@@ -142,6 +146,7 @@ void test_a_model_less_tracked_hull_takes_no_stand_in() {
 // Z, with no water-plane or terrain stand-in.
 void test_a_model_less_boat_keeps_its_latch() {
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	world->env.water_z = 20 << 16; // the hull sits under the water plane
 	const EntityHandle h = world->registry.spawn(1, hull(false));
@@ -166,6 +171,7 @@ void test_a_model_less_boat_keeps_its_latch() {
 //  the extractions @0x4819D4 / @0x481A54)]
 void test_the_platform_solve_leaves_a_model_less_hull_alone() {
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	world->ai.is_authority = true;
 	for (const bool grounded : {true, false}) {

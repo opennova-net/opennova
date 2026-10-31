@@ -15,20 +15,7 @@ std::vector<TitleRulesRow> &registry() {
 	return rows;
 }
 
-const TitleRules *&unset_slot() {
-	static const TitleRules *rules = nullptr;
-	return rules;
-}
-
 } // namespace
-
-void install_unset_title_rules(const TitleRules *rules) {
-	unset_slot() = rules;
-}
-
-const TitleRules *unset_title_rules() {
-	return unset_slot();
-}
 
 void install_title_rules(const TitleRulesRow *rows, size_t count) {
 	registry().assign(rows, rows + count);

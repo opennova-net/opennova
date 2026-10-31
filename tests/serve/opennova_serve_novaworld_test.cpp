@@ -60,6 +60,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -342,6 +343,7 @@ int main() {
 	uint16_t joiner_port = 0;
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	inmatch::ClientRuntime client("ListedJoiner");
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), game_ep, d.data(), d.size());

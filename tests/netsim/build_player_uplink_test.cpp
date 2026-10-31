@@ -30,6 +30,7 @@
 #include <memory>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -69,6 +70,7 @@ bool near_fixed(int32_t a, int32_t b, int32_t tolerance = 8) {
 // The state->struct field mapping (the inverse of apply_player_intent's reads).
 bool run_field_mapping() {
 	w::World source_world;
+	test_titles::jo_world(source_world);
 	w::Entity src_e{};
 	src_e.net_move_input = 3; // the +0x12C movement-input byte (NOT the visual anim slot)
 	src_e.equipped_adm_index = 0x08; // entity+0x2B0 — the wire byte-24 source (D-NET-143)
@@ -140,6 +142,7 @@ bool run_interest_person_bound_radius() {
 	replica.entities.push_back(person);
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	w::CollisionWorld collision;
 	world.collision = &collision; // no proxy: the radius comes from the type
@@ -190,6 +193,7 @@ bool run_interest_person_los_takes_the_entity_leg() {
 		person.rm_entity_flags = indoors ? w::kEntityFlagIndoors : 0u;
 		replica.entities.push_back(person);
 		w::World world;
+		test_titles::jo_world(world);
 		world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 		world.registry.configure_pool(0, 4);
 		w::CollisionWorld collision;
@@ -273,6 +277,7 @@ bool run_interest_person_los_passes_a_decoration() {
 	bool ok = true;
 	for (const uint8_t def_type : {uint8_t{2}, uint8_t{5}}) {
 		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
 		world->registry.configure_pool(0, 4);
 		world->registry.configure_pool(2, 4);
 		auto collision = std::make_unique<w::CollisionWorld>();
@@ -330,6 +335,7 @@ bool run_interest_person_los_passes_a_decoration() {
 // g_StatsCpuPercent` @0x4C1BBC]
 bool run_stat_bytes() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	w::Entity self{};
 	w::AiEntity body{};
@@ -388,6 +394,7 @@ bool run_interest_pairs_top4() {
 	replica.entities.push_back(row(0x1002, nw::EntityClass::Vehicle, 0, 3000, 0, 0));
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	w::Entity self{};
 	self.team = 1;
@@ -452,6 +459,7 @@ bool run_interest_pairs_top4() {
 //  the observer's scoped-variant selection Entity_UpdateInfantryPlayerBody @0x4b5deb]
 bool run_scope_flag_reaches_host() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
@@ -499,6 +507,7 @@ bool run_scope_flag_reaches_host() {
 bool run_roundtrip_to_host_staging(bool hidden) {
 	// Source: the joiner's live local-player pose (zero low-16 heading/pitch for exact round-trip).
 	w::World source_world;
+	test_titles::jo_world(source_world);
 	w::Entity src_e{};
 	src_e.body_anim_slot = -1;
 	w::AiEntity src_ae{};
@@ -513,6 +522,7 @@ bool run_roundtrip_to_host_staging(bool hidden) {
 
 	// Host World with the joiner's peer entity at handle H.
 	w::World world;
+	test_titles::jo_world(world);
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
@@ -569,6 +579,7 @@ bool run_roundtrip_to_host_staging(bool hidden) {
 // codec and host read-apply against the host's matching live relationship.
 bool run_mounted_moving_carrier_roundtrip() {
 	w::World source;
+	test_titles::jo_world(source);
 	source.registry.configure_pool(0, 8);
 	source.registry.configure_pool(1, 8);
 	w::AiSystem &source_ai_system = source.ai;
@@ -646,6 +657,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 	// Matching authority world and relationship. The same 0x0C packet must lift
 	// the local sample through the host carrier without disturbing the mount.
 	w::World host;
+	test_titles::jo_world(host);
 	host.registry.configure_pool(0, 8);
 	host.registry.configure_pool(1, 8);
 	w::AiSystem &host_ai_system = host.ai;
@@ -703,6 +715,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 // real wire path, and is lifted back to the original world pose on authority.
 bool run_ground_target_carrier_roundtrip() {
 	w::World source;
+	test_titles::jo_world(source);
 	source.registry.configure_pool(0, 8);
 	source.registry.configure_pool(2, 8);
 	w::AiSystem &source_ai_system = source.ai;
@@ -750,6 +763,7 @@ bool run_ground_target_carrier_roundtrip() {
 	            "ground carrier does not invent a mounted relationship")) return false;
 
 	w::World host;
+	test_titles::jo_world(host);
 	host.registry.configure_pool(0, 8);
 	host.registry.configure_pool(2, 8);
 	w::AiSystem &host_ai_system = host.ai;
@@ -792,6 +806,7 @@ bool run_ground_target_carrier_roundtrip() {
 // (including the 0xFF none sentinel) mirrors the failed AdmDef_GetEntryByIndex leg].
 bool run_equipped_adm_ingest_gate() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 8);
 	w::Entity peer;
@@ -852,6 +867,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 	auto sample = [](bool seeded, double yaw_deg, double pitch_deg, double roll_deg,
 	                 Sample &out) -> bool {
 		w::World world;
+		test_titles::jo_world(world);
 		world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 		world.registry.configure_pool(0, 8);
 		world.registry.configure_pool(1, 8);
@@ -953,6 +969,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 bool run_mounted_echo_names_the_seat_ground_link() {
 	bool ok = true;
 	w::World world;
+	test_titles::jo_world(world);
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
@@ -1027,6 +1044,7 @@ bool run_mounted_echo_names_the_seat_ground_link() {
 bool run_hud_cursor_names_a_remote_person() {
 	bool ok = true;
 	w::World world;
+	test_titles::jo_world(world);
 	world.weather.core.scalar_channels.fog_dist_fp = 0; // view distance 0: the view terms off
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);

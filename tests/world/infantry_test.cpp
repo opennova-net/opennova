@@ -49,6 +49,7 @@
 #include "common/mission_rig.h"
 #include "common/mission_set.h"
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -290,6 +291,7 @@ void test_motor_samples_existing_clip_before_selection() {
     };
     for (const bool local : {false, true}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         auto ai = std::make_unique<AiSystem>();
         ai->bind_registry(&world->registry);
         world->registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -377,6 +379,7 @@ void test_recoil_and_weapon_weight_kernels() {
 void test_hurt_volume_updates_registry_health() {
     Field flat([](int) { return static_cast<uint16_t>(0); });
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(2, 4);
 
@@ -431,6 +434,7 @@ void test_hurt_volume_updates_registry_health() {
 
 void test_remote_player_body_publishes_exact_change_team_contact() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
 
@@ -576,6 +580,7 @@ struct ClimbSource : IRootMotionSource {
 struct ClimbRig {
     Field flat{[](int) { return static_cast<uint16_t>(0); }};
     World world;
+    bool world_jo = test_titles::jo_world(world);
     CollisionWorld collision;
     AiSystem ai;
     ClimbSource src;
@@ -905,6 +910,7 @@ void test_org1_bare_cl_facing_press_drift() {
 
 void test_registry_max_health_drives_wounded_gait() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     Entity infantry;
     infantry.kind = EntityKind::Organic;
@@ -936,6 +942,7 @@ void test_registry_max_health_drives_wounded_gait() {
 //  @0x4B7335 / @0x4B734C]
 void test_prone_roll_waits_out_the_slide() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -967,6 +974,7 @@ void test_prone_roll_waits_out_the_slide() {
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B5F2C..0x4B622D]
 void test_player_body_health_adjust() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1057,6 +1065,7 @@ void test_player_body_health_adjust() {
 //  4th-tick @0x4b70ce, bases @0x4b7183-0x4b7226, idles @0x4b7228-0x4b7293]
 void test_remote_player_body_anim() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1169,6 +1178,7 @@ void test_remote_player_body_anim() {
 // [orig: MoveOrder&0x100 -> the prone local @0x4b4165-0x4b4181; prone jump gate @0x4b7e99]
 void test_remote_player_same_tick_prone_jump_is_rejected() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1211,6 +1221,7 @@ void test_remote_player_same_tick_prone_jump_is_rejected() {
 // [orig: `test Flags,1A002h` @0x4B7EA4; in-air bit 0x2000]
 void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1263,6 +1274,7 @@ void test_remote_player_airborne_jump_press_and_repress_are_rejected() {
 // [orig: `test Flags,1A002h` + carried `test al,40h` @0x4B7EA4..0x4B7EBD]
 void test_remote_player_jump_respects_world_state_flag_gates() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1324,6 +1336,7 @@ void test_remote_player_jump_respects_world_state_flag_gates() {
 // [orig: clamp/count @0x4b7de0-0x4b7e15; release @0x4b7e78; reload @0x4b7f06]
 void test_remote_player_jump_hold_release_cooldown_matches_retail() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1377,6 +1390,7 @@ void test_local_player_jump_respects_world_state_flag_gates() {
     Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
     const int32_t floor_z = fx(50);
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1453,6 +1467,7 @@ struct LandingRig {
     Field flat{[](int) { return static_cast<uint16_t>(50 * 256); }};
     const int32_t floor_z = fx(50);
     World w;
+    bool w_jo = test_titles::jo_world(w);
     AiSystem ai;
     TestSource src;
     Entity *ent = nullptr;
@@ -1622,6 +1637,7 @@ void test_ledge_edge_carried_bit_by_motor() {
 // jump from exactly this bit [orig: the packer @0x4df6fa-0x4df701].
 void test_local_player_uplink_carries_the_jump_bit() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1664,6 +1680,7 @@ void test_local_player_uplink_carries_the_jump_bit() {
 //  Input_HandleActionBinding_0 @0x4e0d39]
 void test_local_recoil_kick_persists_in_the_look() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -1708,6 +1725,7 @@ void test_player_body_chase_crosses_the_bam_seam() {
     // be UB), so legs planted at ~+157 deg chasing a yaw at ~-157 deg cross the seam
     // instead of sweeping the long way around; the body midpoint crosses with them.
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -1750,6 +1768,7 @@ void test_player_body_chase_crosses_the_bam_seam() {
 // @0x4B41F0..0x4B4255; additive integration @0x4B7CB4..0x4B7CEF]
 void test_player_root_uses_motor_head_body_heading() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -1780,6 +1799,7 @@ void test_player_body_chase_and_legs() {
     constexpr int32_t kLegTwist2 = 0x30000000; // 67.5 deg vs the yaw [orig: @0x4b4a23]
 
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -1842,6 +1862,7 @@ void test_player_body_chase_and_legs() {
 void test_npc_ledge_fall_keeps_clip() {
     Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -1874,6 +1895,7 @@ void test_npc_ledge_fall_keeps_clip() {
 void test_parachute_deployment_and_descent() {
     Field flat([](int) { return static_cast<uint16_t>(0); });
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     w.registry.configure_pool(0, 4);
     Entity player;
@@ -1916,6 +1938,7 @@ void test_parachute_deployment_and_descent() {
 void test_dead_player_ledge_fall_edge_is_suppressed() {
     Field ground0([](int) { return static_cast<uint16_t>(0); });
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -1954,6 +1977,7 @@ void test_dead_player_ledge_fall_edge_is_suppressed() {
 void test_player_idle_skip_throttle_no_bounce() {
     Field flat([](int) { return static_cast<uint16_t>(0); });
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(2, 4);
 
@@ -2019,6 +2043,7 @@ void test_player_idle_skip_throttle_no_bounce() {
 void test_local_player_swims_on_the_plane() {
     Field flat([](int) { return static_cast<uint16_t>(0); });
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(2, 4);
     world.env.water_z = fx(5.0);
@@ -2178,6 +2203,7 @@ void test_local_player_swims_on_the_plane() {
 //  @0x40b8c0 / AnimMap_UpdateEntity @0x40b77b; witness world-wac-ai-re.md §14.8]
 void test_player_weapon_channel() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -2264,6 +2290,7 @@ void test_player_weapon_channel() {
 //  AnimChannel_InitFromParams @0x410640; AnimChannel_BlendTwoChannels @0x410740]
 void test_player_weapon_channel_blend_window() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -2407,6 +2434,7 @@ void test_player_weapon_channel_variant_ring() {
         }
     };
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -2509,6 +2537,7 @@ void test_npc_channels_share_the_adm_variant_ring_heads() {
         }
     };
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -2764,6 +2793,7 @@ void test_secondary_loop_wrap_shares_the_ring_heads() {
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b5dc0..0x4b5e6f]
 void test_player_weapon_hold_kinds() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -2841,6 +2871,7 @@ void test_player_weapon_hold_kinds() {
 // exit defers to clip end.
 void test_player_weapon_attack_stamp() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -2915,6 +2946,7 @@ void test_player_weapon_attack_stamp() {
 // then the ease brings the term back toward rest.
 void test_player_arms_dip() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -2948,6 +2980,7 @@ void test_player_arms_dip() {
 // persistent arm-pitch offset on the corpse and the secondary playhead still advances.
 void test_player_weapon_channel_ticks_while_dead() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -2983,6 +3016,7 @@ void test_player_weapon_channel_ticks_while_dead() {
 // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48 -> @0x40B8C0]
 void test_ai_weapon_channel_mirrors_primary_before_advance() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3082,6 +3116,7 @@ struct GentleRamp : Field {
 void test_slope_standing_camera_stays_level() {
     GentleRamp ramp;
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3117,6 +3152,7 @@ void test_slope_standing_camera_stays_level() {
 void test_slope_prone_body_conforms_org2() {
     GentleRamp ramp;
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3161,6 +3197,7 @@ void test_slope_pass_org1_selector_and_chase() {
         return static_cast<uint16_t>(v > 65535 ? 65535 : v);
     });
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3230,6 +3267,7 @@ void test_slope_pass_org1_slides_downhill_across_and_facing_down() {
     const Case cases[] = {{static_cast<int32_t>(0x80000000u), -2048, 0}, {0x40000000, -2048, 0}};
     for (const Case &c : cases) {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         // The soldier binds its own pool-0 row: its position is the entity's words
         // (D-NET-507: the AI mirror is gone), as the sibling slope case does.
@@ -3261,6 +3299,7 @@ void test_slope_pass_org1_wraps_its_32_bit_slopes() {
     });
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3278,6 +3317,7 @@ void test_slope_pass_org1_wraps_its_32_bit_slopes() {
     }
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3302,6 +3342,7 @@ void test_slope_pass_org2_airborne_corpse_tumbles() {
     Field flat([](int) { return static_cast<uint16_t>(0); });
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3343,6 +3384,7 @@ void test_slope_pass_org2_airborne_corpse_tumbles() {
     // (e.pitch = look_pitch) on the local body.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3393,6 +3435,7 @@ void test_death_presentation() {
     // [orig: @0x4b9cc9 — the staged deathAnimStateId wins over the generic; consumed]
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(0, 4);
         Entity seed;
@@ -3419,6 +3462,7 @@ void test_death_presentation() {
     //  call @0x4B9F93; our despawn = hidden]
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(0, 4);
         Entity seed;
@@ -3452,6 +3496,7 @@ void test_death_presentation() {
     // [orig: the @0x4b9e54 skip]
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(0, 4);
         Entity seed;
@@ -3474,6 +3519,7 @@ void test_death_presentation() {
     // +0x148 = 62 @0x4b9f83; no terrain/collision wired = clear]
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(0, 4);
         Entity seed;
@@ -3500,6 +3546,7 @@ void test_death_presentation() {
 
 struct NpcRespawnRig {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     TestSource source;
     EntityHandle handle;
 
@@ -3546,6 +3593,7 @@ struct NpcRespawnRig {
 
 void test_new_remote_player_death_keeps_the_entity_until_deploy() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     w.registry.configure_pool(0, 4);
     w.rules.mp_session = true;
@@ -3790,6 +3838,7 @@ void test_primary_body_blend_windows_keep_independent_playheads() {
 
     auto exercise = [](int target_state, const auto &expected_weights) {
         auto w = std::make_unique<World>();
+        test_titles::jo_world(*w);
         auto ai = std::make_unique<AiSystem>();
         ai->bind_registry(&w->registry);
         w->registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3841,6 +3890,7 @@ void test_primary_body_mid_blend_retarget_keeps_original_primary() {
     constexpr int kReplacement = anim_state::kSit;
 
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     auto ai = std::make_unique<AiSystem>();
     ai->bind_registry(&w->registry);
     w->registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -3892,6 +3942,7 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     constexpr int kDeath = anim_state::kDeathBulletBase + 4;
 
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 4);
     Entity seed;
     seed.health = 100;
@@ -4002,6 +4053,7 @@ void test_gait_stance_transition_insert() {
     // with the walk deferred, and the clip-end promotion lands it.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4046,6 +4098,7 @@ void test_gait_stance_transition_insert() {
     // pre-insert behavior [orig: the table-entry != entry-0 gate @0x40b6a4].
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4076,6 +4129,7 @@ void test_gait_stance_transition_insert() {
 //  @0x5a3a84..0x5a3a98]
 void test_eye_offset_restamp() {
     World w;
+    test_titles::jo_world(w);
     AiSystem ai;
     ai.bind_registry(&w.registry);
     w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4195,6 +4249,7 @@ void test_infantry_parity_pins_2026_08_28() {
     // Mission-load defaults: fall-damage tolerance 13, accuracy spread 10.
     {
         World w;
+        test_titles::jo_world(w);
         CHECK(w.script.wac_values.fallmps == 13);
         CHECK(w.script.wac_values.accuracy_spread == 10);
     }
@@ -4203,6 +4258,7 @@ void test_infantry_parity_pins_2026_08_28() {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
         const int32_t floor_z = fx(50) + kFloorStand;
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4229,6 +4285,7 @@ void test_infantry_parity_pins_2026_08_28() {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
         const int32_t floor_z = fx(50) + kFloorStand;
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 4);
         AiSystem ai;
         ai.bind_registry(&w.registry);
@@ -4256,6 +4313,7 @@ void test_infantry_parity_pins_2026_08_28() {
     // toward the next node in the SAME think; 20 ticks holds for one think.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4268,6 +4326,7 @@ void test_infantry_parity_pins_2026_08_28() {
     }
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4281,6 +4340,7 @@ void test_infantry_parity_pins_2026_08_28() {
     // target, else 44; wasHit alone is NOT a term (it feeds the flinch instead).
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4308,6 +4368,7 @@ void test_infantry_parity_pins_2026_08_28() {
     // The hit flinch on the think cadence: idle -> cover_idle, run -> cover_run.
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4336,6 +4397,7 @@ void test_infantry_parity_pins_2026_08_28() {
 // think. [orig: Entity_UpdateInfantryAI @0x4bc23c..0x4bc25e, @0x4bc2a6]
 void test_pre_attack_wins_when_previously_idle() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 16);
     AiSystem &ai = w.ai;
     TestSource src;
@@ -4412,6 +4474,7 @@ void test_pre_attack_wins_when_previously_idle() {
 // @0x4BBE24..0x4BBE38]
 void test_combat_think_uses_sixteen_tick_cadence() {
     World world;
+    test_titles::jo_world(world);
     AiSystem ai;
     ai.bind_registry(&world.registry);
     world.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -4427,6 +4490,7 @@ void test_combat_think_uses_sixteen_tick_cadence() {
 
 void test_combat_fixture_acquires_a_target() {
     World w;
+    test_titles::jo_world(w);
     // The threat scan walks pools 0..1 by POOL CAPACITY, so an unconfigured pool
     // has capacity 0 and the candidate loop never iterates -- no acquisition, with
     // every other gate looking fine.
@@ -4505,6 +4569,7 @@ void test_combat_fixture_acquires_a_target() {
 //            else if (animMap[49]) { targetAnimState = 49; moveMode = 7; } } } ]
 void test_out_of_range_enemy_is_approached() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 16);
     AiSystem &ai = w.ai;
     TestSource src;
@@ -4731,6 +4796,7 @@ static void test_find_and_use_attachment_motor() {
         }
     } pose;
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
@@ -4790,6 +4856,7 @@ static void test_find_and_use_attachment_motor() {
 
 static void test_suspended_callback_preserves_independent_brain() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(1, 4);
     Entity seed; seed.net_id = 12; seed.item_id = 900; seed.kind = EntityKind::Item;
@@ -4815,6 +4882,7 @@ static void test_suspended_callback_preserves_independent_brain() {
 
 static void test_downwash_query_and_body_selection() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &world = *owned;
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
@@ -4958,6 +5026,7 @@ static void test_downwash_query_and_body_selection() {
 //  compare; org1 @0x4bd837..0x4bd843 cmp/jz loc_4BD87E]
 static void test_reselecting_current_state_arbitrates_player_but_skips_org1() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &world = *owned;
     world.registry.configure_pool(0, 4);
     Entity soldier;
@@ -5011,6 +5080,7 @@ static void test_reselecting_current_state_arbitrates_player_but_skips_org1() {
 static void test_aimed_think_clears_stale_detour_state() {
     struct Rig {
         World w;
+        bool w_jo = test_titles::jo_world(w);
         TestSource src;
         AiEntity *red = nullptr;
         AiEntity *blue = nullptr;
@@ -5139,6 +5209,7 @@ static void test_walking_aim_gates_on_the_body_cone() {
         enum : uint32_t { kKey = 16 + 3 * 512 };
         enum : int32_t { kAcc = 1 };
         World w;
+        bool w_jo = test_titles::jo_world(w);
         AiEntity *red = nullptr;
         AiEntity *blue = nullptr;
         Rig(int32_t red_x, int32_t red_y) {
@@ -5231,6 +5302,7 @@ struct AimRig {
     // Off the perception cadence (key & 0x1F != 0).
     enum : uint32_t { kKey = 16 + 3 * 512 };
     World w;
+    bool w_jo = test_titles::jo_world(w);
     AiEntity *red = nullptr;
     AiEntity *blue = nullptr;
     AimRig(int32_t red_x, int32_t red_y, int32_t red_z) {
@@ -5375,6 +5447,7 @@ static void test_mounted_gunner_aims_in_the_parent_frame() {
 // the calm-halved sight range therefore survives three scans out of four.
 static void test_short_phase_scan_miss_keeps_the_held_target() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 16);
     AiSystem &ai = w.ai;
     auto make = [&](int idx, uint8_t team, int32_t x) {
@@ -5452,6 +5525,7 @@ static void test_self_attachment_chases_the_s_point_through_a_combat_approach() 
         }
     } pose;
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 4);
@@ -5568,6 +5642,7 @@ static void test_npc_corpse_expiry_runs_the_shared_destroy() {
 void test_slope_probes_include_candidate_models() {
  Field flat([](int) { return static_cast<uint16_t>(0); });
  World world;
+ test_titles::jo_world(world);
  world.registry.configure_pool(0,4);
  world.registry.configure_pool(2,4);
  Entity solid;
@@ -5637,6 +5712,7 @@ static void test_bearing_due_minus_x_is_the_ftol_word() {
 //  @0x606620]
 static void test_prone_in_foliage_concealment() {
     World world;
+    test_titles::jo_world(world);
     std::array<int, 256> grid{};
     grid.fill(1);
     std::array<uint8_t, 16> grown{};
@@ -5717,6 +5793,7 @@ int main() {
     // [orig: 0x4b9910 dump 4600-4611 — step = (diff + 2) >> 2, clamp]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5734,6 +5811,7 @@ int main() {
     }
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5747,6 +5825,7 @@ int main() {
     // [orig: dump 2940-2952 — err > 536870880 (45 deg) -> 147; > 357913920 (30 deg) -> 1]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5764,6 +5843,7 @@ int main() {
     }
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5784,6 +5864,7 @@ int main() {
     // [orig: dump 2898-2906 alert; 3090-3151 wounded at def+380 >> 1; fallbacks 3010-3025]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5841,6 +5922,7 @@ int main() {
     // [orig: dump 2907-2924 — one-shot last node; dist gates 139264/270336, radius 139264]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5855,6 +5937,7 @@ int main() {
     }
     {
         World w; // jog clip missing -> falls back to run
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5868,6 +5951,7 @@ int main() {
     }
     {
         World w; // far approach (dist > 4.125u) skips the jog entirely
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5882,6 +5966,7 @@ int main() {
     }
     {
         World w; // wide arrival radius (>= 2.125u) doesn't jog
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5899,6 +5984,7 @@ int main() {
     // [orig: dump 1464-1532 — relmat marks, hold (wait+8)>>4, one-shot end cooldown 20]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5963,6 +6049,7 @@ int main() {
     // [orig: dump 1468-1477 — entity[106] = marker+16 on a wait-marker arrival]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5985,6 +6072,7 @@ int main() {
     //  only to movement-flagged (bit0) targets. burn=111 (0x004), emote_1=115 (0x020).]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -5999,6 +6087,7 @@ int main() {
     }
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6026,6 +6115,7 @@ int main() {
     // re-trigger; no staged +0x2C0 selection -> the generic 174 death_pungi]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai; // no source: the witnessed generic selection stands
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6043,6 +6133,7 @@ int main() {
         // [orig: AnimMap_RegisterEntity @0x40BB60; the edge's unchecked store
         //  @0x4B9D06]
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6058,6 +6149,7 @@ int main() {
     // ---- kJumpLoop forces forward delta 1024 ----  [orig: dump 4756]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6074,6 +6166,7 @@ int main() {
     // ---- no clip source: the selector holds and nothing moves ----
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6094,6 +6187,7 @@ int main() {
         const int32_t floor_z = fx(50) + kFloorStand;
 
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6127,6 +6221,7 @@ int main() {
         const int32_t floor_z = fx(50) + kFloorStand;
 
         World w; // a hop (2 gravity steps, vel -832 > -1057) lands without damage
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6150,6 +6245,7 @@ int main() {
         // [orig: org1 @0x4bf82e..0x4bf841 `imul eax, -1057; cmp ecx, eax; jg
         // skip` -- no compare against 0].
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6186,6 +6282,7 @@ int main() {
     {
         Field ground0([](int) { return static_cast<uint16_t>(0); }); // ground at 0
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6237,6 +6334,7 @@ int main() {
             return static_cast<uint16_t>(v > 65535 ? 65535 : v);
         });
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6267,6 +6365,7 @@ int main() {
         src.capsule_bottom = fx(1); // 1u origin->feet for the held idle pose
 
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6300,6 +6399,7 @@ int main() {
         src.capsule_bottom = fx(1);
 
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6332,6 +6432,7 @@ int main() {
         src.capsule_bottom = fx(1);
 
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6359,6 +6460,7 @@ int main() {
         src.capsule_bottom = fx(1);
 
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6391,6 +6493,7 @@ int main() {
         src.clips = {anim_state::kIdle};
         src.capsule_bottom = fx(1);
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6426,6 +6529,7 @@ int main() {
         src.clips = {anim_state::kIdle};
         src.capsule_bottom = fx(1);
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6487,6 +6591,7 @@ int main() {
         src.clips = {anim_state::kIdle};
         src.capsule_bottom = fx(1);
         World w;
+        test_titles::jo_world(w);
         w.rules.title_rules = &title_rules(code);
         AiSystem ai;
         ai.bind_registry(&w.registry);
@@ -6552,6 +6657,7 @@ int main() {
             const bool dfx2 = std::string(code) == "dfx2";
             Field flat([](int) { return static_cast<uint16_t>(0); });
             auto storage = std::make_unique<World>();
+            test_titles::jo_world(*storage);
             World &w = *storage;
             w.rules.title_rules = &title_rules(code);
             w.registry.configure_pool(0, 4);
@@ -6599,6 +6705,7 @@ int main() {
     //      prone bit 0x100 before crouch bit 0x200]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6648,6 +6755,7 @@ int main() {
     //      run_anim; scope Flags&0x10 @0x4b72e2; run_2 fallback @0x4b7311]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6700,6 +6808,7 @@ int main() {
     //      [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6; anims @0x4b731b-0x4b7354]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6754,6 +6863,7 @@ int main() {
     //      [orig: Entity_UpdateInfantryPlayerBody @0x4b5cff-0x4b5d6d]
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6797,6 +6907,7 @@ int main() {
     // ---- stance availability fallback: a model with no crouch/prone clips uses stand siblings ----
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6816,6 +6927,7 @@ int main() {
     }
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6843,6 +6955,7 @@ int main() {
         Field flat([](int) { return static_cast<uint16_t>(50 * 256); });
         const int32_t floor_z = fx(50);
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6904,6 +7017,7 @@ int main() {
     //      g_AnimStateFlagsTable movement-bit gate.] ----
     {
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)
@@ -6967,6 +7081,7 @@ int main() {
         src.clips[1] = {anim_state::kWalkCrouchForward, anim_state::kIdleCrouch};
 
         World w;
+        test_titles::jo_world(w);
         AiSystem ai;
         ai.bind_registry(&w.registry);
         w.registry.configure_pool(0, 8); // the brain's row (its position words)

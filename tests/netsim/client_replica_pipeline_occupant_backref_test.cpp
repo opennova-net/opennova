@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <cstdio>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -45,6 +46,7 @@ int32_t fixed_of(double v) { return static_cast<int32_t>(v * 65536.0); }
 
 int main() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_remote_motion_mode(true);
 	view.set_item_class_resolver([](uint16_t type)
 			-> ns::ClientReplicaPipeline::ItemClassResolution {

@@ -30,6 +30,7 @@
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_table_build.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 namespace fs = std::filesystem;
 using namespace opennova;
@@ -179,6 +180,7 @@ int main() {
 		// same-weapon re-bake reads a copy of the match's heads; the mount of
 		// a weapon whose file is missing binds default.adm.
 		world::World w;
+		test_titles::jo_world(w);
 		w.registry.configure_pool(0, 8);
 		world::Entity seed;
 		seed.kind = world::EntityKind::Organic;

@@ -28,6 +28,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace def = opennova::def;
@@ -130,6 +131,7 @@ def::DefPowerupFile shipped_and_synthetic() {
 
 struct Rig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     std::unique_ptr<LocalPlayer> local;
     def::DefItemsFile items{};
     EntityHandle picker;
@@ -702,6 +704,7 @@ void test_server_applies_remote_grants() {
     powerup_bind_entities(rig.world, rig.items);
 
     im::NapiNPServerCtx server;
+    test_titles::jo_config(server.config);
     server.np_protocol.connection_list.emplace_back();
     server.np_protocol.connection_list.emplace_back();
     im::NapiNPConnection &conn = server.np_protocol.connection_list[0];
@@ -1010,6 +1013,7 @@ void test_server_weapon_grant_fan() {
     powerup_bind_entities(rig.world, rig.items);
 
     im::NapiNPServerCtx server;
+    test_titles::jo_config(server.config);
     opennova::replication::LoopbackChannel remote_wire;
     opennova::replication::LoopbackChannel host_wire;
     server.np_protocol.connection_list.emplace_back();

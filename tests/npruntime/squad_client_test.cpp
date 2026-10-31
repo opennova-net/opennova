@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -46,7 +47,9 @@ int failures = 0;
 struct Client {
 	replication::LoopbackChannel wire;
 	inmatch::ClientRuntime runtime;
+	bool runtime_jo = test_titles::jo_folds(runtime);
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	w::EntityHandle local;
 	w::EntityHandle mate;
 

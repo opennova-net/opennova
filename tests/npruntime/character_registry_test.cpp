@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::avatars;
 
@@ -402,6 +403,7 @@ int main() {
 	//  @0x57B140 (the call @0x57B14F) -> CAvatarDefs_FindComboByPackedId]
 	{
 		auto ctx = std::make_unique<NapiNPServerCtx>();
+		test_titles::jo_config(ctx->config);
 		ctx->characters = registry;
 		CharacterJoinVars vars;
 		vars.char_id[0] = 0x0600;

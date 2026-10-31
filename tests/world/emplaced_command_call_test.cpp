@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -25,6 +26,7 @@ namespace {
 // occupant riding gun B.
 struct Rig {
 	std::unique_ptr<World> wp = std::make_unique<World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	World &w = *wp;
 	EntityHandle carrier, gun_a, gun_b, local, rider;
 

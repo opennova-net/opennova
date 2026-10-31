@@ -23,6 +23,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -69,6 +70,7 @@ struct Harness {
 	std::array<def::DefItemDef, 6> rows{};
 	def::DefItemsFile items{rows.data(), rows.size()};
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	Assets &assets;
 
 	explicit Harness(Assets &source) : assets(source) {

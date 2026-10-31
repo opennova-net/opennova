@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <memory>
 #include <set>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -48,6 +49,7 @@ struct Anchors : IPoseProvider {
 };
 struct Fixture {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     Motion motion;
     Anchors anchors;

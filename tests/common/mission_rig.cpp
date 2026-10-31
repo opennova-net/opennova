@@ -1,4 +1,5 @@
 #include "common/mission_rig.h"
+#include "common/title_fixture.h"
 
 #include <base/io/log.h>
 #include <base/gameprofile/game_type.h>
@@ -10,6 +11,8 @@
 namespace opennova::testrig {
 
 MissionRig::MissionRig() {
+	// The rules the rig's world runs: Joint Operations' (a fixture names its title's, no default does).
+	test_titles::jo_world(world);
 	local_role.bind(*this);
 	host_role.bind(*this);
 	host_role.set_kind(inmatch::RoleKind::ListenHost);

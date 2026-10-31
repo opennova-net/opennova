@@ -35,6 +35,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -69,6 +70,7 @@ void test_the_settle_keeps_the_trailer_words() {
 	rec.id = 21;
 	m.items.push_back(rec);
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	opennova::mission::promote_mission(m, *world, {});
 	const w::EntityHandle h = world->registry.find_by_net_id(21);
 	CHECK(h.valid());
@@ -101,6 +103,7 @@ void test_the_settle_keeps_the_trailer_words() {
 // @0x490310, 0 -> 14 @0x490377..0x49037D]. The bare physics tick left the brain at 0.
 void test_the_settle_runs_the_aircraft_mover() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	w::Entity seed;
 	seed.kind = w::EntityKind::Item;
@@ -134,6 +137,7 @@ void test_the_settle_runs_the_aircraft_mover() {
 
 struct ContactRig {
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	w::CollisionWorld collision;
 
 	ContactRig() {

@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -52,6 +53,7 @@ int main() {
     // --- the directory join -------------------------------------------------
     {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 8);
         world.registry.configure_pool(1, 4);
         AiSystem &ai = world.ai;
@@ -170,6 +172,7 @@ int main() {
     // --- the EntityCommands both-store mutators -----------------------------
     {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 4);
         AiSystem &ai = world.ai;
         const EntityHandle h =
@@ -208,6 +211,7 @@ int main() {
     //     inspection fields -------------------------------------------------
     {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 4);
         AiSystem &ai = world.ai;
         world.tables.item_names.set(5311, "Rifleman");
@@ -248,6 +252,7 @@ int main() {
     // --- the AI debug join (ai_debug_report) + the AiDetail brain block -----
     {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 8);
         AiSystem &ai = world.ai;
         TestMuzzleProvider muzzle;
@@ -418,6 +423,7 @@ int main() {
     // --- the report's row cap (followers still count the whole pool) --------
     {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 4);
         AiSystem &ai = world.ai;
         ai.nav.channels.resize(2);
@@ -439,6 +445,7 @@ int main() {
     // --- the overlay entity markers ------------------------------------------
     {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 8);
         const EntityHandle near_a = spawn_entity(world, 0, 5311, 1, "near", Vec3{2, 0, 0});
         const EntityHandle mid = spawn_entity(world, 0, 5311, 2, "mid", Vec3{20, 0, 0});

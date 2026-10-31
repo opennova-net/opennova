@@ -7,6 +7,7 @@
 #include <net/protocol/protocol.h> // title_protocol (the 0x0F fold reads its protocol)
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 static int failures = 0;
@@ -14,6 +15,7 @@ static int failures = 0;
 
 int main() {
     replication::ClientReplicaPipeline pipeline;
+    test_titles::jo_folds(pipeline);
     pipeline.set_protocol(title_protocol("jo"));
     std::vector<uint8_t> load(23 + kWorldStateAmmoPoolCount * 4 + 4);
     load[22] = 8;
@@ -34,6 +36,7 @@ int main() {
     CHECK(pipeline.state().cease_fire);
 
     auto world = std::make_unique<world::World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(2, 16);
     StaticEntityRecord record{};
     record.item_type_id = 1896;
@@ -86,6 +89,7 @@ int main() {
     //  @0x5044A6..0x5044B1]
     {
         auto host = std::make_unique<world::World>();
+        test_titles::jo_world(*host);
         host->registry.configure_pool(2, 8);
         world::Entity mines;
         mines.kind = world::EntityKind::Building;

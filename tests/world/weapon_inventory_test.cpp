@@ -19,6 +19,7 @@
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -375,6 +376,7 @@ void test_committed_switch_only_draws_after_holstering() {
     for (const bool same_category : {true, false}) {
         Fixture f;
         World world;
+        test_titles::jo_world(world);
         world.tables.weapons = f.t;
         WeaponInventory inv;
         inv.reset(f.t);
@@ -442,6 +444,7 @@ void test_to_special_hold_swap() {
     f.t.entries[static_cast<size_t>(point_aim)].flags = weapon_flag::kQuickSwitch;
     (void)mag;
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons = f.t;
     WeaponInventory inv;
     inv.reset(f.t);
@@ -535,6 +538,7 @@ void test_to_special_queue_defers() {
     const int point_aim = add_entry(f.t, "WPN_MAG58_POINTAIM", 4, 1, 100, 400, "AMMO_762", 1, 1);
     f.t.entries[static_cast<size_t>(point_aim)].flags = weapon_flag::kQuickSwitch;
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons = f.t;
     world.registry.configure_pool(0, 1);
     Entity seed;
@@ -677,6 +681,7 @@ static int test_knife_is_selectable() {
 static int test_local_held_weapon_visible() {
 	Fixture f;
 	World world;
+	test_titles::jo_world(world);
 	world.tables.weapons = f.t;
 	// The m4 row draws in first person.
 	world.tables.weapons.entries[static_cast<size_t>(f.m4)]
@@ -988,6 +993,7 @@ void test_pump_reads_the_bucket_through_the_seat() {
     auto &m4 = f.t.entries[f.m4];
     m4.ammo_bucket = 1;
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons = f.t;
     WeaponInventory inv;
     inv.reset(f.t);
@@ -1113,6 +1119,7 @@ void test_mount_slot_reload() {
 void test_an_accept_reset_keeps_the_current_slot() {
     Fixture f;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->tables.weapons = f.t;
     auto local = std::make_unique<LocalPlayer>(*world);
     WeaponInventory &inv = local->inventory;
@@ -1151,6 +1158,7 @@ void test_an_accept_reset_keeps_the_current_slot() {
 void test_the_current_slot_word() {
     Fixture f;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->tables.weapons = f.t;
     world->registry.configure_pool(0, 1);
     Entity seed;
@@ -1242,6 +1250,7 @@ void test_a_missed_select_sends_195_raw() {
     Fixture f;
     for (WeaponTableEntry &e : f.t.entries) e.teamfilter = 3;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->tables.weapons = f.t;
     world->rules.mp_session = true;
     world->registry.configure_pool(0, 1);

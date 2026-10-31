@@ -10,6 +10,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -25,6 +26,7 @@ bool expect(bool condition, const char *message) {
 // session's reset/close calls, and can report the session lost.
 struct TickProbe final : Role {
 	opennova::mission::MissionKernel kernel;
+	bool kernel_jo = test_titles::jo_world(kernel.world);
 	std::vector<TickInput> inputs;
 	std::vector<bool> rules_batch_flags; // World::rules.last_tick_of_batch as the tick saw it
 	std::vector<bool> head_flags;        // World::rules.update_head_stepped as the tick saw it

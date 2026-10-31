@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova::def;
 
@@ -125,6 +126,7 @@ int main() {
 	// same pool walk, at the registry's mission-frame positions.
 	// [orig: Entity_UpdateEnvSoundEmitter @0x4a8080 on streamed entities]
 	auto world_heap = std::make_unique<world::World>();
+	test_titles::jo_world(*world_heap);
 	world::World &world = *world_heap;
 	for (int pool = 0; pool < 4; ++pool) world.registry.configure_pool(pool, 8);
 	const auto spawn = [&](int pool, int32_t type, int32_t bms_id, float x) {

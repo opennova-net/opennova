@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -60,6 +61,7 @@ struct Field {
 
 struct Rig {
 	std::unique_ptr<World> heap = std::make_unique<World>();
+	bool heap_jo = test_titles::jo_world(*heap);
 	World &world = *heap;
 	CollisionWorld cw;
 	Field field;

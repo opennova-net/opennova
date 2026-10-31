@@ -22,6 +22,7 @@
 
 #include "channel_clip_source.h"
 #include "../common/hull_brain.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -45,6 +46,7 @@ void test_vehicle_death_rows() {
     // Vehicle @0x467de0 / AI_HandleEvent_ConsumeAll @0x458080; world-wac-ai-re §19]
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(1, 4);
         Entity seed;
@@ -103,6 +105,7 @@ void test_vehicle_death_rows() {
     // [orig: AI_TickState_VehicleDying @0x467cd0]
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -149,6 +152,7 @@ void test_vehicle_death_states_send_kill_record() {
     };
     for (int role = 0; role < 3; ++role) {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(1, 4);
         w.rules.logic_authority = role != 1; // role 1: a joiner
@@ -212,6 +216,7 @@ struct FakeMuzzleProvider : IPoseProvider {
 
 static void test_fire_pass_uses_embedder_fed_muzzle() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     Entity seed{};
     seed.net_id = 900;
@@ -270,6 +275,7 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
 //  @0x4b2767..0x4b278e when index 0 / no graphicModel / no table]
 static void test_weapon_fire_origin_fallback_chain() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     AiSystem sys;
     sys.bind_registry(&w.registry);
@@ -332,6 +338,7 @@ static void test_los_endpoints_use_muzzle_stamp() {
     static BandField band;
 
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     AiSystem sys;
     sys.bind_registry(&w.registry);
@@ -376,6 +383,7 @@ static void test_los_endpoints_use_muzzle_stamp() {
 // position; a person uses its time-phased eye offset.
 static void test_aim_origin_takes_the_non_person_leg() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     CollisionWorld collision;
@@ -504,6 +512,7 @@ static void test_aim_solution_uses_muzzle_stamp() {
     static AttackSource src;
 
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);
     Entity player_seed;
     player_seed.kind = EntityKind::Organic;
@@ -599,6 +608,7 @@ static void test_sm_turret_fire() {
     auto setup = [](std::unique_ptr<World> &w, AiSystem &sys, AiEntity *&e,
                     EntityHandle &tgt_h) {
         w = std::make_unique<World>();
+        test_titles::jo_world(*w);
         w->registry.configure_pool(0, 8);
         w->registry.configure_pool(1, 8);
         sys.bind_registry(&w->registry);
@@ -721,6 +731,7 @@ static void test_sm_turret_fire() {
 static void test_sm_fire_stamps_the_hull_adm_byte() {
     struct Rig {
         std::unique_ptr<World> w = std::make_unique<World>();
+        bool w_jo = test_titles::jo_world(*w);
         AiSystem sys;
         AiEntity *e = nullptr;
         EntityHandle hull;
@@ -864,6 +875,7 @@ struct DeathTransitionRootSource final : IRootMotionSource {
 //  @0x458273 (the death-event arm)]
 static void test_entity_update_stamps_the_session_fact() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     World &w = *heap;
     TickContext ctx{};
     ctx.world = &w;
@@ -899,6 +911,7 @@ static void test_entity_update_stamps_the_session_fact() {
 //  the pool-0 walk @0x4C2426; Entity_OnDamageReceived @0x4af859..0x4af878]
 static void test_round_hit_reaches_the_same_pass_body_update() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     World &w = *heap;
     w.registry.configure_pool(0, 8);
     seed_test_rifle_ammo(w);
@@ -951,6 +964,7 @@ static void test_round_hit_reaches_the_same_pass_body_update() {
 
 static void test_lethal_hit_blends_into_death_animation_without_position_jump() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);
     seed_test_rifle_ammo(w);
 
@@ -1086,6 +1100,7 @@ static void configure_rifleman(AiEntity &npc, uint16_t net_id, uint8_t team) {
 
 static void test_world_feed_never_engages_same_team() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     seed_test_rifle_ammo(*w);
 
@@ -1133,6 +1148,7 @@ static void test_world_feed_never_engages_same_team() {
 
 static void test_script_target_policy_reaches_infantry_and_weapons() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     Entity seed{};
     seed.kind = EntityKind::Organic;
@@ -1198,6 +1214,7 @@ static void test_script_target_policy_reaches_infantry_and_weapons() {
 
 static void test_guided_round_notification_and_ally_alert_scope() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 8);
     Entity seed{};
@@ -1238,6 +1255,7 @@ static void test_guided_round_notification_and_ally_alert_scope() {
 
 static void test_berserk_candidate_is_intentional_team_exception() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
 
     Entity candidate_seed{};
@@ -1297,6 +1315,7 @@ static void test_berserk_candidate_is_intentional_team_exception() {
 
 static void test_damage_hit_sets_retail_alert_state() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
 
     Entity shooter_seed{};
@@ -1369,6 +1388,7 @@ static void test_damage_hit_sets_retail_alert_state() {
 
 static void test_remote_player_hit_skips_npc_group_alert() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
 
     Entity shooter_seed{};
@@ -1408,6 +1428,7 @@ static void test_remote_player_hit_skips_npc_group_alert() {
 
 static void test_mounted_gunner_acquires_and_fires() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
     seed_test_rifle_ammo(*w);
@@ -1521,6 +1542,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
     const opennova::threedi::Threedi3di3 gfx3{};
     for (const bool third_person : {false, true}) {
         auto w = std::make_unique<World>();
+        test_titles::jo_world(*w);
         w->registry.configure_pool(0, 8);
         w->registry.configure_pool(1, 8);
         seed_test_rifle_ammo(*w);
@@ -1628,6 +1650,7 @@ static void test_weapon_fire_position_legs() {
         }
     };
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 4);
     CollisionWorld collision;
@@ -1767,6 +1790,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
     };
     for (const bool cannon : {true, false}) {
         auto w = std::make_unique<World>();
+        test_titles::jo_world(*w);
         w->registry.configure_pool(0, 8);
         w->registry.configure_pool(1, 8);
         seed_test_rifle_ammo(*w);
@@ -1886,6 +1910,7 @@ static void test_turret_gunners_scan_from_the_gun_point() {
 // [orig: the water block @0x482BB9..0x482C9D, gated on the 0x8000 latch]
 static void test_water_crossing_fires_once_on_entry() {
     World w;
+    test_titles::jo_world(w);
     w.env.water_z = to_fixed(12.0);
     WaterCrossQueue &q = w.out.water_crossings;
     CHECK(q.events.empty());
@@ -1914,6 +1939,7 @@ static void test_water_crossing_fires_once_on_entry() {
 // when he met the water - not by the fact that he is infantry.
 static void test_infantry_floats_and_splashes_once() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 4);
     w->env.water_z = to_fixed(12.0);
 
@@ -1988,6 +2014,7 @@ static void test_infantry_floats_and_splashes_once() {
 
 static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
     seed_test_rifle_ammo(*w);
@@ -2136,6 +2163,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
 //  Environment_InitDefaults @0x57C010 (@0x57C011..0x57C01E)]
 static void test_weapon_walk_pumps_hot_unoccupied_guns() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 8);
     w->tables.weapons.entries.resize(2);
@@ -2190,6 +2218,7 @@ static void test_weapon_walk_pumps_hot_unoccupied_guns() {
 //  slot order), then @0x5426CB..0x54271E (pool 1)]
 static void test_weapon_walk_visits_pool0_in_slot_order() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
     seed_test_rifle_ammo(*w);
@@ -2253,6 +2282,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
 //  @0x4DC847..0x4DC880]
 static void test_weapon_walk_runs_a_hot_gun_for_its_last_gunner() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
     seed_test_rifle_ammo(*w);
@@ -2334,6 +2364,7 @@ static void test_weapon_walk_runs_a_hot_gun_for_its_last_gunner() {
 // the cadence @0x4BF4DA, the stagger @0x4BF4E3..0x4BF4EE]
 static void test_mounted_request_copies_the_parent_adm_byte() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
     seed_test_rifle_ammo(*w);
@@ -2412,6 +2443,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
         }
     };
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
     seed_test_rifle_ammo(*w);
@@ -2475,6 +2507,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
 static void test_mounted_request_runs_for_a_passenger() {
     for (const bool armed : {true, false}) {
         auto w = std::make_unique<World>();
+        test_titles::jo_world(*w);
         w->registry.configure_pool(0, 8);
         w->registry.configure_pool(1, 8);
         seed_test_rifle_ammo(*w);
@@ -2545,6 +2578,7 @@ static void test_mounted_request_runs_for_a_passenger() {
 //  @0x472F23; WeaponSlot_InitFromEntityDef @0x546742]
 static void test_mounted_request_copies_the_parents_live_byte() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
     seed_test_rifle_ammo(*w);
@@ -2601,6 +2635,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
 
 static void test_mounted_look_traverses_before_fire_request() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
     seed_test_rifle_ammo(*w);
@@ -2670,6 +2705,7 @@ static void test_mounted_look_traverses_before_fire_request() {
 
 static void test_mounted_gunner_dismounts_into_death_animation() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 8);
     w->registry.configure_pool(1, 8);
 
@@ -2737,6 +2773,7 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
 //  @0x4B6977, the resolver call @0x4B7CF4; Entity_UpdateInfantryAI @0x4bf5a5..0x4bf5c3]
 static void run_mounted_collision_tail_phase(bool player_body) {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 4);
 
@@ -2807,6 +2844,7 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
 // call @0x48d181..0x48d1c4]
 static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 4);
 
@@ -2902,6 +2940,7 @@ static void test_joiner_evaluates_vehicle_idle_without_integrating_motor() {
 // relying on a proprietary model fixture.
 static void test_aircraft_combat_states() {
 	auto owned = std::make_unique<World>();
+	test_titles::jo_world(*owned);
 	World &w = *owned;
 	AiSystem &sys = w.ai;
 	w.registry.configure_pool(0, 8);
@@ -3043,6 +3082,7 @@ static void test_aircraft_combat_states() {
 //  @0x47258E..0x472599]
 static void test_aircraft_fire_stamps_the_hull_adm_byte() {
 	auto owned = std::make_unique<World>();
+	test_titles::jo_world(*owned);
 	World &w = *owned;
 	AiSystem &sys = w.ai;
 	w.registry.configure_pool(0, 8);
@@ -3140,6 +3180,7 @@ static void test_vehicle_weapon_pose_and_target_cleanup() {
 		}
 	} pose;
 	auto owned = std::make_unique<World>();
+	test_titles::jo_world(*owned);
 	World &w = *owned;
 	auto &sys = w.ai;
 	w.registry.configure_pool(0, 4);
@@ -3223,6 +3264,7 @@ static void test_vehicle_weapon_pose_and_target_cleanup() {
 // present and not a Player (@0x45841A..0x458433; air @0x45820D..0x458226).
 static void test_vehicle_class_state_machine_gates() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	w.registry.configure_pool(0, 2);
 	w.registry.configure_pool(1, 1);
@@ -3338,6 +3380,7 @@ static void test_vehicle_class_state_machine_gates() {
 // the next attach reuses [orig: Entity_InitVehicleAI's owner scan @0x460204..0x460222].
 static void test_dead_vehicle_despawn_frees_brain() {
 	auto owned = std::make_unique<World>();
+	test_titles::jo_world(*owned);
 	World &w = *owned;
 	w.registry.configure_pool(1, 2);
 	w.rules.vehicle_respawns = false;
@@ -3391,6 +3434,7 @@ namespace {
 // heading east, a live victim wherever the pin needs it, one ammo row.
 struct AircraftRig {
 	std::unique_ptr<World> owned = std::make_unique<World>();
+	bool owned_jo = test_titles::jo_world(*owned);
 	World &w = *owned;
 	AiSystem &sys = w.ai;
 	std::vector<uint16_t> heights = std::vector<uint16_t>(64 * 64, 0);
@@ -3591,6 +3635,7 @@ static void test_aircraft_combat_mover_pins() {
 //  EntityAI_ProcessAirStateMachine @0x458363 / @0x4583B0]
 void test_vehicle_brain_think_countdown() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
@@ -3750,6 +3795,7 @@ int main() {
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
         auto rows_heap = std::make_unique<World>(); // the brain's row (its position words)
+        test_titles::jo_world(*rows_heap);
         rows_heap->registry.configure_pool(0, 8);
         sys.bind_registry(&rows_heap->registry);
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -3799,6 +3845,7 @@ int main() {
         sys.attach(h2);
         CHECK(sys.for_handle(h2) != nullptr);
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         sys.on_load(w);
         CHECK(sys.for_handle(h0) == sys.at(i0));
@@ -3809,6 +3856,7 @@ int main() {
     // ---- state-machine dispatcher transition (authority) ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -3832,6 +3880,7 @@ int main() {
     // ---- reset-to-patrol enter handler (byte-exact: step=64, alert cleared) ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -3854,6 +3903,7 @@ int main() {
     // ---- AIEvent ring: timer decrement, expiry dispatch, transition, compaction ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -3888,6 +3938,7 @@ int main() {
     // -> AI_HandleCommand case 6 @0x4657a6..0x465816] ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -3973,6 +4024,7 @@ int main() {
     // ---- a HELO_LAND tick over an absent entity ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -3996,6 +4048,7 @@ int main() {
         CHECK(streq(body_anim_adm_key(-1), ""));
 
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(0, 8);
         Entity seed;
@@ -4096,6 +4149,7 @@ int main() {
     // ---- path follower: arrival advances the node + records relmat + outputs ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4143,6 +4197,7 @@ int main() {
     {
         for (int loopflag = 0; loopflag <= 1; ++loopflag) {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
@@ -4182,6 +4237,7 @@ int main() {
     // ---- state-16 tick: alive + no target -> walks the path ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4207,6 +4263,7 @@ int main() {
     // ---- state-16 tick: death queues crash (3) vs still (4) by speed ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4232,6 +4289,7 @@ int main() {
     // ---- path follower: state-17 uses 16*speed threshold + kSpeedA; un-halved output ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4261,6 +4319,7 @@ int main() {
     // ---- contrast: state-16 with the SAME timeDelta halves (threshold speed*step=1280) ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4300,6 +4359,7 @@ int main() {
     // ---- path follower: unresolvable waypoint -> freeze at current transform ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4343,6 +4403,7 @@ int main() {
     // ---- state-16 tick: can-fire + fire timer decrements by step ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4376,6 +4437,7 @@ int main() {
 
         // PRNG_Next16 is the same algorithm over a separate stream (dword_31BFBB0).
         auto prng_world_heap = std::make_unique<World>();
+        test_titles::jo_world(*prng_world_heap);
         World &prng_world = *prng_world_heap;
         prng_world.prng16_state = 1;
         CHECK(prng_world.next_prng16() == 0x8011u);
@@ -4413,6 +4475,7 @@ int main() {
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
         auto rows_heap = std::make_unique<World>(); // the scanner's row (its position words)
+        test_titles::jo_world(*rows_heap);
         rows_heap->registry.configure_pool(0, 8);
         sys.bind_registry(&rows_heap->registry);
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -4521,6 +4584,7 @@ int main() {
         // [orig: every case gates on the +80+4*class word @0x466ff3/0x467012/0x46702d/0x467048]
         {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
@@ -4535,6 +4599,7 @@ int main() {
         // buildings unseen. [orig: case 1 -> pool 1 only @0x467018-0x467024]
         {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
@@ -4551,6 +4616,7 @@ int main() {
         // [orig: case 2 -> pool 0, else-leg `test ebx,100h` reject @0x467165].
         {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
@@ -4568,6 +4634,7 @@ int main() {
         // vehicle removed, only the player-flagged organic remains visible.
         {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
@@ -4596,6 +4663,7 @@ int main() {
         // [orig: case 3 -> pool 2 @0x46704e].
         {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
@@ -4613,6 +4681,7 @@ int main() {
         // [orig: dist > uint16 +422/+420 @0x46723e/@0x467277].
         {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
@@ -4629,6 +4698,7 @@ int main() {
         // The round-end latch nulls acquisition [orig: g_RoundOver @0x24C1928].
         {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
@@ -4645,6 +4715,7 @@ int main() {
         // bypass over a better-scoring nearer enemy [orig: brain+148 read @0x467350].
         {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             make_world(w);
             auto sys_heap = std::make_unique<AiSystem>();
@@ -4673,6 +4744,7 @@ int main() {
             auto sys_heap = std::make_unique<AiSystem>();
             AiSystem &sys = *sys_heap;
             auto rows_heap = std::make_unique<World>(); // the scanner's row (its position words)
+            test_titles::jo_world(*rows_heap);
             rows_heap->registry.configure_pool(0, 8);
             sys.bind_registry(&rows_heap->registry);
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
@@ -4701,6 +4773,7 @@ int main() {
     // ---- death event on a non-authority in-session client zeroes health before the death tick ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4727,6 +4800,7 @@ int main() {
     // ---- engage_target: 8 relation ops in order, target set, fire-delay jitter, pending 17 ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4761,6 +4835,7 @@ int main() {
     // ---- engage_target: branch A (a brained target) guards jitter by base-delay; sign-extends relmat ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4796,6 +4871,7 @@ int main() {
     // The feed now scans the registry (D-AI-1): spawn a real pool-1 enemy.
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 16);
@@ -4845,6 +4921,7 @@ int main() {
     // ---- state-18 patrol tick: arrival clears the goal; otherwise fallback vs engage ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4894,6 +4971,7 @@ int main() {
     // ---- state-18 patrol tick: death queues an event; fire timer decrements ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4921,6 +4999,7 @@ int main() {
     // ---- combat event handler (states 16/17/18 event): damage/death/destroy transitions ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         auto sys_heap = std::make_unique<AiSystem>();
         AiSystem &sys = *sys_heap;
@@ -4970,6 +5049,7 @@ int main() {
     // call; g_EntityClassPhysicsTable @0x82ABC8 has no generic brain mover] ----
     {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(1, 8); // the brain's row (its position words)
         int idx = w.ai.attach(EntityHandle::make(1, 0));
@@ -5015,6 +5095,7 @@ int main() {
         static FiringSource fire_src;
 
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 8);

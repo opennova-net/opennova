@@ -16,6 +16,7 @@
 #include <initializer_list>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -45,6 +46,7 @@ bool applies_complete_prefix(
 		std::initializer_list<std::uint16_t> rejected_handles,
 		const char *page) {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	ns::ClientEntityState &sentinel = pipeline.state().upsert(0x4FFEu);
 	sentinel.type_id = 0x7EEFu;
 	sentinel.display_name = "preexisting";
@@ -129,6 +131,7 @@ bool test_organic_page_applies_complete_prefix() {
 
 bool test_player_character_identity_reaches_present_row() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	nw::OrganicSpawnBatch batch;
 	nw::OrganicSpawnRecord rec = organic_record(0x0014u, 0x14B9u, "custom");
 	rec.anim_slot = 3;
@@ -291,6 +294,7 @@ bool test_pool3_page_applies_complete_prefix() {
 
 bool test_empty_static_and_pool3_rows_are_tombstones() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 
 	nw::StaticEntityBatch static_live;
 	static_live.start_index = 7;
@@ -374,6 +378,7 @@ bool compact_state_was_reset(const ns::ClientEntityState &row) {
 
 bool test_repeated_load_records_reset_complete_replica_rows() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 
 	nw::PoolSpawnBatch pool1;
 	pool1.records.push_back(pool_spawn_record(0x1004u, 0x2504u, "pool1"));

@@ -38,6 +38,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -84,6 +85,7 @@ bms::File lifecycle_mission() {
 // One SP mission: a kernel, its SP listen-server role and the session over it.
 struct SpMission {
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	std::unique_ptr<im::HostRole> role = std::make_unique<im::HostRole>();
 	std::unique_ptr<im::Session> session;
 	// Run inside the boot's bring-up, past the role's (the round init it installed stands).
@@ -168,6 +170,7 @@ void test_counter_step_plays_text_end_on_arrival() {
 	};
 	for (const Case &c : cases) {
 		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
 		w::EpilogCine cine;
 		cine.active = true;
 		cine.frame = -1;
@@ -474,6 +477,7 @@ void test_counter_font_step_plays_the_tone() {
 	};
 	for (const Case &c : cases) {
 		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
 		w::EpilogCine cine;
 		cine.active = true;
 		cine.frame = -1;

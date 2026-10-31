@@ -4,6 +4,7 @@
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::wac;
@@ -32,6 +33,7 @@ static std::vector<uint8_t> wave_bytes() {
 
 struct Fixture {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     EntityHandle local, speaker;
     int reads = 0;
     Fixture() {

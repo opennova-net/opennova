@@ -43,6 +43,7 @@
 #include <memory>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -305,6 +306,7 @@ nw::EntityClass fan_class(uint16_t type_id) {
 // the anchor plus v on x and y with shot word 77.
 bool fan_case(int32_t v) {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 8);
 	world->registry.configure_pool(1, 8);
 	const w::EntityHandle me =

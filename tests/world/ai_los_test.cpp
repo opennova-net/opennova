@@ -16,6 +16,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -112,6 +113,7 @@ CollisionModel box_model(double hx, double hy, double height) {
 
 struct LosRig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     CollisionWorld cw;
     Field field;
 

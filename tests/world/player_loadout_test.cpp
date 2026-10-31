@@ -9,6 +9,7 @@
 #include <runtime/world/player_loadout.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -48,6 +49,7 @@ int add_entry(WeaponTable &t, const char *name, int cat, int rank, int clipsize,
 
 struct Rig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     LocalPlayerLoadout loadout;
     LocalPlayerWeapon weapon;
     WeaponInventory inventory;

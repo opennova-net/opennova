@@ -27,6 +27,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -46,6 +47,7 @@ bool near_f(float a, float b, float eps = 1e-4f) { return std::fabs(a - b) <= ep
 // its particle and userpoint.
 struct Rig {
 	World w;
+	bool w_jo = test_titles::jo_world(w);
 	EntityHandle local;
 
 	Rig() {
@@ -463,6 +465,7 @@ OcclusionFrameCamera view_camera(const float forward[3], const float right[3],
 //  @0x5C92E8..0x5C9301, the clip @0x5C930E..0x5C931F]
 void test_round_view_collect() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	w.tables.ammo.entries.resize(2);
 	w.tables.ammo.entries[1].valid = true;

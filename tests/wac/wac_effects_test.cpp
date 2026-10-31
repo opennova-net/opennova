@@ -9,6 +9,7 @@
 #include <runtime/mission/promote.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -39,6 +40,7 @@ static p::EffectSceneConfig catalog(bool stock = false) {
 
 struct Fixture {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     p::EffectScene scene;
     // The compiler's name catalog (MissionKernel::script_effect_catalog), built

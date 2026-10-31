@@ -12,6 +12,7 @@
 #include <runtime/world/weapon_fire_gate.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace wa = opennova::world::weapon_action;
@@ -1722,6 +1723,7 @@ void test_fireloop_emitter_waits_for_the_last_catch_up_tick() {
 // [orig: Server_ClientFiredRound @0x50c43e..0x50c475; Entity_IsMountableGun @0x434240]
 void test_gunner_origin_limit_follows_the_redirected_hull() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
     Entity hull;
@@ -1764,6 +1766,7 @@ void test_gunner_origin_limit_follows_the_redirected_hull() {
 // @0x53ef4f..0x53ef8b].
 void test_vehicle_slot_install_seeds_the_zero_yaw() {
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons.entries.resize(2);
     WeaponTableEntry &weapon = world.tables.weapons.entries[1];
     weapon.name = "WPN_PARALAX_TURRET";

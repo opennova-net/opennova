@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -176,6 +177,7 @@ struct Motor {
     Field field;
     RootSource root;
     std::unique_ptr<world::World> w = std::make_unique<world::World>();
+    bool w_jo = test_titles::jo_world(*w);
     world::EntityHandle handle;
 
     Motor(int dx, int dy, bool player = false, int32_t heading = 0) {

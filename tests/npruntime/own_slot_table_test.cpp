@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -75,9 +76,11 @@ void make_weapon(w::WeaponTableEntry &def, const char *name, int32_t category, i
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<w::LocalPlayer> local = std::make_unique<w::LocalPlayer>(world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	std::vector<inmatch::NapiNPConnection> roster;
 	w::EntityHandle player;
 
@@ -118,7 +121,7 @@ struct Rig {
 		req.terminated = true;
 		inmatch::ServerDispatchInputs inputs;
 		inputs.server_ctx = ctx.get();
-		return inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[0],
+		return inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), roster[0],
 				{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(req))}, 100,
 				roster, &world, inputs);
 	}
@@ -240,7 +243,7 @@ void test_the_armory_submit_feeds_the_own_accept() {
 	r.conn().link.armory_reuse_seconds = 0;
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = r.ctx.get();
-	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, r.conn(),
+	(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), r.conn(),
 			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(armory))}, 101,
 			r.roster, &r.world, inputs);
 	CHECK(r.conn().slot_class == 6);

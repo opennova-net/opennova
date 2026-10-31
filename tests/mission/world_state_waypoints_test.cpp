@@ -37,6 +37,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -97,6 +98,7 @@ std::vector<std::string> own_copy_names() {
 
 void run(std::map<std::string, std::string> &files) {
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
 	inmatch::HostRole &role = *role_storage;
@@ -116,6 +118,7 @@ void run(std::map<std::string, std::string> &files) {
 	CHECK(options.game_type == game_type::kDeathmatch);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "dm_route";
 		cfg.config.max_players = 4;

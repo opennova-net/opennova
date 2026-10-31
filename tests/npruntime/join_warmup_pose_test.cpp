@@ -30,6 +30,7 @@
 #include <set>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -73,6 +74,7 @@ struct Source final : w::IRootMotionSource {
 // World and the collision world are heap-held (the 1 MB test-main stack under MSVC).
 struct Rig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<w::CollisionWorld> collision = std::make_unique<w::CollisionWorld>();
 	Field field;
 	Source source;
@@ -179,6 +181,7 @@ bool run_the_player_class_init_zeroes_pitch_and_roll() {
 	constexpr int32_t kRollMinus7 = static_cast<int32_t>(0xFB060000u); // spawn_angle_bam(-7)
 	for (const bool player_row : {true, false}) {
 		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
 		world->registry.configure_pool(0, 8);
 		if (!player_row) world->tables.player.body_class = w::PlayerBodyClass::kItem;
 		w::PlayerSpawn spawn;
@@ -323,6 +326,7 @@ bool run_a_deck_marker_turns_through_the_transforms_fixed_point() {
 	                     Case{0x071C0000, static_cast<int32_t>(0xFB060000u), 977582, -71128207,
 	                          1211088}}) {
 		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
 		world->registry.configure_pool(2, 4);
 		world->registry.configure_pool(3, 4);
 		w::Entity deck;

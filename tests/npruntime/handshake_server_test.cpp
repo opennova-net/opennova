@@ -60,6 +60,7 @@
 #include <vector>
 #include "../common/test_expect.h"
 #include "lent_transport_tick.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -382,7 +383,9 @@ const ProtocolMessage *find_reply(
 bool run_lan_discovery_metadata_is_live_and_stateless() {
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.server_name = "Configured LAN Host";
 	config.game_type = 0x00010020u;
 	config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
@@ -496,7 +499,9 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 	// Zero-valued gated fields are absent on the wire. The discovery parser
 	// must still report the live zeroes rather than ServerHello builder defaults.
 	inmatch::NapiNPServerCtx dedicated;
+	test_titles::jo_config(dedicated.config);
 	inmatch::GameConfig dedicated_config;
+	test_titles::jo_config(dedicated_config);
 	dedicated_config.server_name = "Empty Dedicated Host";
 	dedicated_config.game_type = 0;
 	dedicated_config.max_players = 4;
@@ -546,7 +551,9 @@ bool run_lan_discovery_metadata_is_live_and_stateless() {
 bool run_mission_transfers_match_retail_lan_contract() {
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.server_name = "Untitled ";
 	config.mission_name = "Training: Grenade Launcher";
 	config.mission_file = "00TRg.bms";
@@ -825,7 +832,9 @@ bool run_tag60_mission_name_selects_by_game_type() {
 	for (const Case &test_case : cases) {
 		replication::LoopbackChannel loopback;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.server_name = "Tag60 Selector Host";
 		config.mission_name = test_case.header_name;
 		config.mission_file = test_case.file;
@@ -881,6 +890,7 @@ bool run_tag60_mission_name_selects_by_game_type() {
 
 bool run_reactive_replies() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 
 	const PeerAddr peer{0x0100007Fu, 30000};
@@ -1012,6 +1022,7 @@ bool run_reactive_replies() {
 // invented zero-id confirm re-bound the joiner to a vehicle archetype (D-NET-148).
 bool run_plain_join_tag29_draws_no_tag51() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 
 	const PeerAddr peer{0x0100007Fu, 30600};
@@ -1055,9 +1066,11 @@ bool run_plain_join_tag29_draws_no_tag51() {
 // staging call, no in-match second peer modeled here.)
 bool run_goodbye_despawns_player_entity() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 
 	world::World w;
+	test_titles::jo_world(w);
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(1, 8);
 	const world::EntityHandle h = w.registry.spawn(0, world::Entity{});
@@ -1129,8 +1142,10 @@ bool run_goodbye_despawns_player_entity() {
 // authoritative entity and roster membership must be torn down before the new session is admitted.
 bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	world::World w;
+	test_titles::jo_world(w);
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(1, 8);
 	ctx.world = &w;
@@ -1202,8 +1217,10 @@ bool run_same_endpoint_reconnect_fully_tears_down_old_session() {
 // inactivity. The reap must take the same complete entity/roster teardown path as keyed goodbye.
 bool run_inactive_peer_is_reaped() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	world::World w;
+	test_titles::jo_world(w);
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(1, 8);
 	ctx.world = &w;
@@ -1335,8 +1352,10 @@ bool run_inactive_peer_is_reaped() {
 // [orig: Server_HandlePlayerDisconnect @0x51B5C0 -> SpawnWaveList_RemovePlayer @0x52A410 @0x51b809]
 bool run_disconnect_removes_leaver_from_spawn_waves() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	world::World w;
+	test_titles::jo_world(w);
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(2, 8);
 	world::Entity player;
@@ -1396,6 +1415,7 @@ bool run_disconnect_removes_leaver_from_spawn_waves() {
 //  `msg_out_max >= 0` @0x628048]
 bool run_never_template_disables_reap_and_is_advertised() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	inmatch::parse_nstmout("never please", ctx.np_protocol.connection_template);
 	if (!expect(ctx.np_protocol.connection_template.timeout_ms == -1 &&
@@ -1449,7 +1469,9 @@ bool run_never_template_disables_reap_and_is_advertised() {
 //  @0x6261cd runs it before SendSessionInit @0x6261fc]
 bool run_configured_max_packet_size_lands_in_cs_field_13() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_packet_size = 2000;
 	config.max_players = 2; // a Serve Only host's smallest cap: one joiner and its own slot 0
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
@@ -1493,6 +1515,7 @@ bool run_mps_negotiates_the_connection_ceiling() {
 	uint16_t port = 30750;
 	for (const Case &c : cases) {
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, kHostKey);
 		const PeerAddr peer{0x0100007Fu, port++};
@@ -1570,6 +1593,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 			BadField{"BN", "0", 2}, {"VN", "3", 3}, {"MBN", "20042001", 4},
 			{"SOPD", "179", 8}, {"BT", "1", 6}, {"BT", "2", 7}, {"", "", 2}}) {
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, kHostKey);
 		ClientAuth auth = make_valid_client_auth(1, 0xA0000000u,
@@ -1605,6 +1629,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	//  the DB leg @0x4C733E]
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, kHostKey);
 		ClientAuth auth = make_valid_client_auth(1, 0xA0000001u,
@@ -1625,6 +1650,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	//  @0x5122A3..0x5122D5]
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, kHostKey);
 		ClientAuth auth = make_valid_client_auth(1, 0xA0000002u,
@@ -1638,6 +1664,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 				"the APPID join tag loads into the connection's join environment")) return false;
 
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		std::vector<inmatch::NapiNPConnection> roster(1);
 		inmatch::NapiNPConnection &joiner = roster.front();
 		joiner.join_environment = {0, 2, 1, 0, 20042002, 180};
@@ -1661,6 +1688,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 				"the build values' refusal still comes first")) return false;
 		joiner.join_environment.bn = 1;
 		inmatch::GameConfig expansion_config;
+		test_titles::jo_config(expansion_config);
 		expansion_config.expansion = "jox01";
 		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(expansion_config, &ctx, joiner, roster, join) == 9,
 				"the app-id leg runs ahead of the expansion's 47")) return false;
@@ -1677,9 +1705,11 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// down the pending node, so it occupies neither a player slot nor an entity.
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		world::World w;
+		test_titles::jo_world(w);
 		world::AiSystem &ai = w.ai;
 		w.registry.configure_pool(0, 16);
 		ctx.world = &w;
@@ -1722,6 +1752,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// VERSIONCRCSTRING="0". A malformed body cannot advance the FSM.
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		const PeerAddr peer{0x0100007Fu, 31331};
@@ -1751,6 +1782,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// @0x512331, reject DPC=48 @0x512341].
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		ctx.config.expansion_version_checksum = -559038737; // 0xDEADBEEF as i32
@@ -1807,6 +1839,7 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// gate @0x51231e].
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		ctx.config.expansion.clear();
@@ -1841,9 +1874,11 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 	// player becomes spawn-eligible only after the 256-byte challenge echo.
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		world::World w;
+		test_titles::jo_world(w);
 		world::AiSystem &ai = w.ai;
 		w.registry.configure_pool(0, 16);
 		ctx.world = &w;
@@ -1955,11 +1990,13 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 
 bool run_expansion_join_reasons_and_tlv_order() {
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.expansion = "jox01";
 	config.expansion_version_checksum = 55;
 	// The build gate reads the host's protocol, its context's; a fresh context runs no
 	// session leg.
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.np_protocol.identity = &kJo;
 	inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &ctx;
@@ -2007,6 +2044,7 @@ bool run_non_jo_peer_is_ignored() {
 	// The join legs validate the complete retail JO identity + HK echo (the @0x6213b0/@0x62b750
 	// gates). The four identity fields fail silently; server-side rejects have their own test.
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 31000};
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
@@ -2067,7 +2105,9 @@ bool run_non_jo_peer_is_ignored() {
 // A live handshake against a host that was NOT brought up (host_running == 0) is rejected.
 bool run_client_join_rejects_match_retail() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.server_password = "Secret";
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
@@ -2187,6 +2227,7 @@ bool run_client_join_rejects_match_retail() {
 
 bool run_handshake_rejected_when_host_down() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	if (!expect(ctx.np_protocol.host_running == 0, "host not running before create_session")) return false;
 	const PeerAddr peer{0x0100007Fu, 31100};
 
@@ -2204,7 +2245,9 @@ bool run_handshake_rejected_when_host_down() {
 bool run_listen_host_lifecycle() {
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 8; // co-op listen host: host loopback + up to 7 joiners (capacity gate)
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        kHostKey, &loopback, settings);
@@ -2246,12 +2289,15 @@ bool run_listen_host_lifecycle() {
 //  @0x4C90D7]
 bool run_post_handshake_slot_is_reserved_until_spawn() {
 	world::World world;
+	test_titles::jo_world(world);
 	world::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 8;
 	inmatch::test::bring_up_host(
 			ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
@@ -2410,12 +2456,15 @@ bool run_post_handshake_slot_is_reserved_until_spawn() {
 // kit. This regression therefore treats UDP boundaries as protocol semantics.
 bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 	world::World world;
+	test_titles::jo_world(world);
 	world::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = 0x00010020u;
 	config.max_players = 4;
 	config.expansion = "revx02";
@@ -2562,10 +2611,13 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 // makes the retail joiner build the wrong local identity before its loadout submit.
 bool run_full_player_info_is_recipient_scoped_lan_metadata() {
 	world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.player_name = "RetailHost403";
 	config.server_name = "Untitled ";
 	config.mission_name = "Training: Grenade Launcher";
@@ -2634,10 +2686,13 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 
 	for (const MissionIdentityCase &test_case : cases) {
 		world::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 8);
 
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.player_name = "RetailHost403";
 		config.server_name = "Untitled ";
 		config.mission_name = test_case.header_name;
@@ -2686,6 +2741,7 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 // the cached ServerAuth, not re-mint the server SCRK/SK.
 bool run_retransmit_0x42_keeps_keys() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 30800};
 	const std::string scrk = "TESTCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
@@ -2724,8 +2780,10 @@ bool run_retransmit_0x42_keeps_keys() {
 //  @0x620FF1; CNapiNPConnection_SendDisconnectPacket @0x61F2A0 - the key @0x61F3AF]
 bool run_zero_ck_join_is_admitted() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	world::World w;
+	test_titles::jo_world(w);
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(1, 8);
 	ctx.world = &w;
@@ -2767,6 +2825,7 @@ bool run_zero_ck_join_is_admitted() {
 //  match @0x626B72; CNapiNPConnection_ParseMessages @0x625BC0 - @0x625DDF]
 bool run_scrkless_join_keys_the_session_crypt() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr stranger{0x0100007Fu, 30815};
 	ClientHello hello = make_protocol_client_hello(kJo, 1);
@@ -2805,6 +2864,7 @@ bool run_reconnect_counters_echo_rcnt() {
 	uint16_t port = 30900;
 	for (const Case &c : cases) {
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		const PeerAddr peer{0x0100007Fu, port++};
 		ClientAuth auth = make_valid_client_auth(1, 0x24681357u, kHostKey, "Rejoiner",
@@ -2842,6 +2902,7 @@ bool run_reconnect_counters_echo_rcnt() {
 //  @0x62BF91 / @0x62BF96]
 bool run_the_join_keeps_the_reported_address() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 30950};
 	ClientAuth auth = make_valid_client_auth(1, 0x24681357u, kHostKey, "Reporter",
@@ -2872,6 +2933,7 @@ bool run_the_join_keeps_the_reported_address() {
 // CNapiNetwork_Init @0x4ca4a0 installs]
 bool run_host_server_hello_writes_its_own_identity() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	ctx.np_protocol.host_run_duration_ms = 123456u;
 	// A probe that passes the gate only through retail's own case-insensitive / PM-bypass
@@ -2925,7 +2987,9 @@ bool run_host_server_hello_writes_its_own_identity() {
 bool run_host_server_keys_draw_from_the_manager_lcg() {
 	static constexpr char kCharset[] = "0123456789BCDFGHJKLMNPQRSTVWXYZ";
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, config);
@@ -2985,6 +3049,7 @@ bool run_game_host_server_auth_carries_no_cu() {
 	uint16_t port = 30950;
 	for (const inmatch::NetworkType type : {inmatch::NetworkType::Lan, inmatch::NetworkType::NovaWorld}) {
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 		ctx.transport_mode = type;
 		const PeerAddr peer{0x0100007Fu, port++};
@@ -3038,7 +3103,9 @@ bool run_side_password_admission() {
 	};
 	for (const Case &test : cases) {
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.game_type = 0x10000u;
 		config.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
 		config.spectator_slots = -1;
@@ -3125,7 +3192,9 @@ bool run_spectator_admission_codes_match_retail() {
 	// connection; NapiNPProtocol_HandleClientJoin @0x62b750 has no spectator
 	// leg of its own]
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 1;
 	settings.spectator_slots = 1;
 	settings.spectator_password = "watch";
@@ -3218,6 +3287,7 @@ bool run_spectator_admission_codes_match_retail() {
 	// The build gate reads the host's protocol, its context's; a fresh context runs no
 	// session leg.
 	inmatch::NapiNPServerCtx gate_ctx;
+	test_titles::jo_config(gate_ctx.config);
 	gate_ctx.np_protocol.identity = &kJo;
 	inmatch::ServerDispatchInputs gate_inputs;
 	gate_inputs.server_ctx = &gate_ctx;
@@ -3264,6 +3334,7 @@ bool run_spectator_admission_codes_match_retail() {
 		// Spectating disabled: the gate latches, then punts DPC 14. (An empty
 		// expansion keeps the 0x00 payload to the bare VERSIONCRCSTRING TLV.)
 		inmatch::GameConfig disabled;
+		test_titles::jo_config(disabled);
 		disabled.expansion.clear();
 		std::vector<inmatch::NapiNPConnection> roster;
 		roster.push_back(make_gate_conn(1, ""));
@@ -3285,6 +3356,7 @@ bool run_spectator_admission_codes_match_retail() {
 	}
 
 	inmatch::GameConfig gate_config;
+	test_titles::jo_config(gate_config);
 	gate_config.expansion.clear();
 	gate_config.spectator_slots = 1;
 	gate_config.spectator_password = "watch";
@@ -3327,7 +3399,9 @@ bool run_spectator_admission_codes_match_retail() {
 
 bool run_capacity_rejects_when_full() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 2; // the 0x42 gate's shared count: two connections, no host loopback
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey,
 	                        nullptr, settings);
@@ -3404,9 +3478,11 @@ bool run_join_gate_admits_the_lineup_queue() {
 	// A positive spectator limit with the queue off: the gate is the bare cap.
 	{
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 1;
 		settings.spectator_slots = 2;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		host(ctx, settings);
 		if (!expect(settings.join_capacity() == 1 && last_join(ctx, 32301, 2) == 4u &&
 							inmatch::connection_count(ctx) == 1,
@@ -3417,10 +3493,12 @@ bool run_join_gate_admits_the_lineup_queue() {
 	// The queue on with a positive size: the cap plus the queue, then JFP 5.
 	{
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 1;
 		settings.use_lineup_queue = 1;
 		settings.lineup_queue_size = 2;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		host(ctx, settings);
 		if (!expect(settings.lineup_queue_open() && settings.join_capacity() == 3 &&
 							last_join(ctx, 32311, 3) == 0u && inmatch::connection_count(ctx) == 3,
@@ -3434,10 +3512,12 @@ bool run_join_gate_admits_the_lineup_queue() {
 	const std::pair<int32_t, int32_t> closed_queues[] = { { 0, 5 }, { 1, 0 }, { 1, -3 } };
 	for (const std::pair<int32_t, int32_t> &closed : closed_queues) {
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 1;
 		settings.use_lineup_queue = closed.first;
 		settings.lineup_queue_size = closed.second;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		host(ctx, settings);
 		if (!expect(!settings.lineup_queue_open() && settings.join_capacity() == 1 &&
 							last_join(ctx, 32331, 2) == 4u,
@@ -3447,10 +3527,12 @@ bool run_join_gate_admits_the_lineup_queue() {
 	// The add is 32-bit and the compare signed: a size that wraps the sum admits nothing.
 	{
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 2;
 		settings.use_lineup_queue = 1;
 		settings.lineup_queue_size = 0x7FFFFFFF;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		host(ctx, settings);
 		if (!expect(settings.join_capacity() < 0 && last_join(ctx, 32341, 1) == 5u &&
 							inmatch::connection_count(ctx) == 0,
@@ -3473,9 +3555,12 @@ bool run_join_gate_admits_the_lineup_queue() {
 //  @0x502AFD..0x502B10, the count @0x502B13..0x502B24; Server_PlayerAdd's row pick @0x51CC9A]
 bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 	world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 1;
 	settings.dedicated_server = true; // the slot limit 2: row 0 the host's, row 1 a joiner's
 	settings.use_lineup_queue = 1;
@@ -3589,6 +3674,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	cfg.mp_use_lineup_queue = 0;
 	const inmatch::HostScreenState serve_only = inmatch::host_session_settings(cfg, *opennova::title_by_code("jo"));
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, serve_only.config);
 	if (!expect(ctx.config.max_players == 2u && ctx.config.player_slot_limit() == 3u &&
@@ -3641,6 +3727,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 		queued.dedicated = 1;
 		const inmatch::HostScreenState stock = inmatch::host_session_settings(queued, *opennova::title_by_code("jo"));
 		inmatch::NapiNPServerCtx queued_ctx;
+		test_titles::jo_config(queued_ctx.config);
 		inmatch::test::bring_up_host(queued_ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Lan, kHostKey, nullptr, stock.config);
 		auto queued_join = [&](const PeerAddr &p, uint32_t ck, uint32_t now) {
@@ -3661,6 +3748,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 	const inmatch::HostScreenState listen = inmatch::host_session_settings(cfg, *opennova::title_by_code("jo"));
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx listen_ctx;
+	test_titles::jo_config(listen_ctx.config);
 	inmatch::test::bring_up_host(listen_ctx, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Lan, kHostKey, &loopback, listen.config);
 	return expect(listen_ctx.config.player_slot_limit() == 2u &&
@@ -3680,6 +3768,7 @@ bool run_dedicated_host_advertises_and_admits_its_cap() {
 // indices reproduce the golden bytes end-to-end — that equality is the live v16 wire gate.
 bool run_loadout_resolve_with_armory() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	// Every accepted 0x2F re-arms the player's armory-reuse cooldown (playerSlot+356 =
 	// armoryReuseTime) and a later nonzero-class submit is refused until it expires, so a
@@ -3698,6 +3787,7 @@ bool run_loadout_resolve_with_armory() {
 	DefWeaponsFile wf{};
 	if (!expect(def_parse_weapons(def_path.c_str(), &wf) == 0, "fixture weapon.def parses")) return false;
 	world::World world;
+	test_titles::jo_world(world);
 	world.tables.weapons = world::build_weapon_table(wf);
 	def_free_weapons(&wf);
 	DefAmmoFile af{};
@@ -3972,7 +4062,9 @@ bool run_loadout_resolve_with_armory() {
 // entries and the class-0 EMPTY grant is unambiguous.
 bool run_loadout_envelope_gates() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 8;
 	// ArmoryTimer 0: the accepted grants below re-arm playerSlot+356 with 0, so the
 	// next submit is judged by the envelope alone rather than refused by the cooldown.
@@ -3981,6 +4073,7 @@ bool run_loadout_envelope_gates() {
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey,
 	                        nullptr, settings);
 	world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	world::AiSystem &ai = world.ai; // the §5.2b spawn mounts the infantry motor
 	ctx.world = &world;
@@ -4194,6 +4287,7 @@ bool run_loadout_envelope_gates() {
 // D-NET-146]
 bool run_character_join_vars_parsed() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer{0x0100007Fu, 30900};
 
@@ -4231,6 +4325,7 @@ bool run_character_join_vars_parsed() {
 
 	// TR out-of-range clamps to 0xFF [orig: @0x4c752f tr != -1 && (u8)tr >= 2 -> -1].
 	inmatch::NapiNPServerCtx ctx2;
+	test_titles::jo_config(ctx2.config);
 	inmatch::test::bring_up_host(ctx2, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
 	const PeerAddr peer2{0x0100007Fu, 30901};
 	ClientAuth auth2 = auth;
@@ -4265,10 +4360,12 @@ bool run_integrity_replies_validate_computed_sources() {
 			uint32_t ammo_salt = 0, bool append_ping = false, bool nopunt = false) {
 		// A /NOPUNT host's context, else none (the dispatch's own).
 		inmatch::NapiNPServerCtx nopunt_ctx;
+		test_titles::jo_config(nopunt_ctx.config);
 		nopunt_ctx.nopunt = true;
 		inmatch::ServerDispatchInputs inputs;
 		inputs.server_ctx = nopunt ? &nopunt_ctx : nullptr;
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.integrity_sources = sources;
 		replication::UdpSessionTransport transport(
 				replication::UdpSessionTransport::Role::Host);
@@ -4446,7 +4543,9 @@ bool run_integrity_replies_validate_computed_sources() {
 // HUD's "Number of players" pinned at one.
 bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.player_name = "OpenNovaHost403";
 	inmatch::test::bring_up_host(
@@ -4454,6 +4553,7 @@ bool run_periodic_scoreboard_repairs_pre_sync_dropped_row() {
 			kHostKey, nullptr, config);
 
 	world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world::Entity host_entity;
 	host_entity.kind = world::EntityKind::Organic;

@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -134,6 +135,7 @@ void test_the_frame_rate_reads_the_locked_bank() {
 // test's or a probe's direct frame) never locks.
 struct ProbeRole final : inmatch::Role {
 	mission::MissionKernel kernel;
+	bool kernel_jo = test_titles::jo_world(kernel.world);
 	int ticks = 0;
 	ProbeRole() { bind(kernel); }
 	inmatch::RoleKind kind() const override { return inmatch::RoleKind::SinglePlayer; }
@@ -181,6 +183,7 @@ void test_the_session_locks_a_live_frame_only() {
 // the updates and the legs past the drain are disjoint spans inside the frame's wall.
 struct SpinRole final : inmatch::Role {
 	mission::MissionKernel kernel;
+	bool kernel_jo = test_titles::jo_world(kernel.world);
 	SpinRole() { bind(kernel); }
 	inmatch::RoleKind kind() const override { return inmatch::RoleKind::SinglePlayer; }
 	void run_tick(const inmatch::TickInput &) override {

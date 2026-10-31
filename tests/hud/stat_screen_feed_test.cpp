@@ -15,6 +15,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/menu/menu_runtime.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -218,6 +219,7 @@ void test_done_button() {
 	// The press: a joiner's runtime takes exit 4 and its linger ends; JO's title, or no joiner
 	// runtime (the authority, whose DONE never shows), takes nothing.
 	inmatch::ClientRuntime joiner("DoneJoiner");
+	test_titles::jo_folds(joiner);
 	joiner.state().end_round_linger_ticks = 1240;
 	CHECK(!stat_screen_done_pressed(&jo, &joiner));
 	CHECK(joiner.state().end_round_linger_ticks == 1240 &&

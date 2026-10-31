@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -31,6 +32,7 @@ int main() {
 		const inmatch::ServerLogs logs = devices.logs();
 		check(logs.inout != nullptr && !logs.inout_switch, "the log exists, the switch unset");
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.logs = logs;
 		inmatch::open_inout_log(ctx);
 		check(!logs.inout->enabled(), "unset: the socket open leaves it off");
@@ -41,6 +43,7 @@ int main() {
 		const inmatch::ServerLogs logs = devices.logs();
 		check(logs.inout != nullptr && logs.inout_switch, "the switch reaches the host context");
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.logs = logs;
 		inmatch::open_inout_log(ctx);
 		check(logs.inout->enabled() &&

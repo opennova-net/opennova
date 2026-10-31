@@ -21,6 +21,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/replication/client_replica_pipeline.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -79,6 +80,7 @@ uint16_t net_id_of(const ClientReplicaPipeline &view, uint16_t handle) {
 void test_organic_spawn_restamps_a_foreign_player_id() {
 	const CharacterRegistry table = minted_table();
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_character_registry(&table);
 	view.apply(s2c::ENTITY_SPAWN_BATCH, organic_spawn(0x0001, 1, kForeign, 0x0100u));
 	CHECK(net_id_of(view, 0x0001) == kGoodA);
@@ -92,11 +94,13 @@ void test_organic_spawn_restamps_a_foreign_player_id() {
 	CHECK(net_id_of(view, 0x0005) == kForeign);
 
 	ClientReplicaPipeline bare;
+	test_titles::jo_folds(bare);
 	bare.apply(s2c::ENTITY_SPAWN_BATCH, organic_spawn(0x0001, 1, kForeign, 0x0100u));
 	CHECK(net_id_of(bare, 0x0001) == kForeign);
 
 	const CharacterRegistry empty;
 	ClientReplicaPipeline emptied;
+	test_titles::jo_folds(emptied);
 	emptied.set_character_registry(&empty);
 	emptied.apply(s2c::ENTITY_SPAWN_BATCH, organic_spawn(0x0001, 1, kForeign, 0x0100u));
 	CHECK(net_id_of(emptied, 0x0001) == 0);
@@ -106,6 +110,7 @@ void test_organic_spawn_restamps_a_foreign_player_id() {
 void test_full_entity_spawn_restamps_a_foreign_player_id() {
 	const CharacterRegistry table = minted_table();
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_character_registry(&table);
 	FullEntitySpawnRecord rec;
 	rec.slot_id = 0x0010u;
@@ -127,6 +132,7 @@ void test_full_entity_spawn_restamps_a_foreign_player_id() {
 void test_team_assign_restamps_a_foreign_player_id() {
 	const CharacterRegistry table = minted_table();
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_character_registry(&table);
 	view.apply(s2c::ENTITY_SPAWN_BATCH, organic_spawn(0x0006, 1, kGoodA, 0x0100u));
 	TeamAssign assign;
@@ -147,6 +153,7 @@ void test_team_assign_restamps_a_foreign_player_id() {
 void test_team_change_confirm_restamps_a_foreign_player_id() {
 	const CharacterRegistry table = minted_table();
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_character_registry(&table);
 	view.apply(s2c::ENTITY_SPAWN_BATCH, organic_spawn(0x0007, 2, kEvilB, 0x0100u));
 	TeamAssign entry;

@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -24,6 +25,7 @@ namespace {
 
 struct Rig {
     std::unique_ptr<World> w = std::make_unique<World>();
+    bool w_jo = test_titles::jo_world(*w);
     EntityHandle a;
     EntityHandle b;
 

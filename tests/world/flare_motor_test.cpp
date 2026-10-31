@@ -21,6 +21,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -63,6 +64,7 @@ int32_t q16_mul(int32_t value, int32_t factor) {
 
 struct Rig {
     std::unique_ptr<World> w_heap = std::make_unique<World>();
+    bool w_heap_jo = test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     FlatField flat{0};
     EntityHandle source;

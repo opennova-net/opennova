@@ -31,6 +31,7 @@
 #include <memory>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -89,7 +90,9 @@ uint32_t steps_since(uint32_t before) { return opennova::next_connection_index()
 bool run_listen_host_answers_its_own_node() {
 	auto loopback = std::make_unique<opennova::replication::LoopbackChannel>();
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	const uint32_t before = opennova::next_connection_index();
 	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostClient,
@@ -121,7 +124,9 @@ bool run_listen_host_answers_its_own_node() {
 
 bool run_serve_only_host_counts_its_joiners() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 1;
 	config.use_lineup_queue = 0;
 	const uint32_t before = opennova::next_connection_index();
@@ -161,7 +166,9 @@ bool run_serve_only_host_counts_its_joiners() {
 // is sent its 0x82 again and nothing else.
 bool run_a_retransmitted_join_is_answered_by_its_0x82_alone() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
 			inmatch::SocketMode::Lan, kHostKey, nullptr, config);

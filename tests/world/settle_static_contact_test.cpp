@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -132,6 +133,7 @@ w::VehicleTraits chinook() {
 
 struct Rig {
 	std::unique_ptr<w::World> owner = std::make_unique<w::World>();
+	bool owner_jo = test_titles::jo_world(*owner);
 	std::unique_ptr<w::CollisionWorld> collision = std::make_unique<w::CollisionWorld>();
 	w::World &world = *owner;
 	// A flat 42.0 atlas: every texel's raw word 42 * 256, every sector mapped.

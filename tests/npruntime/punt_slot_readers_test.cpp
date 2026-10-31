@@ -22,6 +22,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -49,10 +50,12 @@ w::PlayerSpawn spawn_at(float x, uint8_t team) {
 
 int main() {
 	auto world_owner = std::make_unique<w::World>();
+	test_titles::jo_world(*world_owner);
 	w::World &world = *world_owner;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamDeathmatch;
 	world.match.configure(rules);
 	const w::EntityHandle leader_body = w::spawn_remote_player(world, spawn_at(0.0f, 1));
@@ -61,6 +64,7 @@ int main() {
 	world.match.upsert_player({member_body, 1, "Member"});
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;

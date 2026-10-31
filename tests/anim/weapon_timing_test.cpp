@@ -23,6 +23,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::threedi_cli;
 namespace wa = opennova::world::weapon_action;
@@ -60,6 +61,7 @@ const WeaponTimingRow *row(const WeaponTimingEntryPlan &plan, int id) {
 std::vector<int> game_shot_ticks(const WeaponTimingEntryPlan &plan, int updates) {
 	namespace w = opennova::world;
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	auto local = std::make_unique<w::LocalPlayer>(*world);
 	world->registry.configure_pool(0, 4);
 	w::Entity body;

@@ -48,6 +48,7 @@
 #include <vector>
 #include "../common/test_expect.h"
 #include "joiner_receive.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -411,6 +412,7 @@ bool check_captured_punt_closes_a_joiner_parked_at_the_deploy_screen() {
 bool check_runtime_host_close_bypasses_holdoff_and_discards_queued_traffic() {
 	uint64_t now_ms = 0x10203040u;
 	inmatch::ClientRuntime client("PuntedRuntime", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	client.seed_session(kServerKey, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, 0x0001, 0x14B9, 0, 1, false);
@@ -540,12 +542,14 @@ bool check_ordinary_settings_traffic_is_undisturbed() {
 bool check_host_control_punt(uint32_t charattr_silence,
 		uint32_t time_sync_silence, uint32_t expected_type) {
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	inmatch::set_connection_mode(owner.ctx, inmatch::ConnectionMode::HostOnly);
 	owner.ctx.is_in_session = 1;
 	owner.ctx.np_protocol.identity = &kJo;
 	owner.ctx.network_quality_broadcast_countdown = 100;
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
@@ -683,12 +687,14 @@ bool check_host_control_punts_are_ordered_before_the_countdown() {
 bool check_nopunt_keeps_the_control_quartet_from_punting() {
 	for (const uint32_t charattr : {8u, 7u}) {
 		inmatch::HostOwner owner;
+		test_titles::jo_config(owner.ctx.config);
 		inmatch::set_connection_mode(owner.ctx, inmatch::ConnectionMode::HostOnly);
 		owner.ctx.np_protocol.identity = &kJo;
 		owner.ctx.is_in_session = 1;
 		owner.ctx.nopunt = true;
 		owner.ctx.network_quality_broadcast_countdown = 100;
 		opennova::world::World world;
+		test_titles::jo_world(world);
 		world.rules.mp_session = true;
 		world.registry.configure_pool(0, 8);
 		const opennova::world::EntityHandle player =
@@ -739,6 +745,7 @@ bool check_nopunt_keeps_the_control_quartet_from_punting() {
 //  CNapiNPConnection_QueueMessage @0x628640 - the test @0x62864D..0x628654]
 bool check_described_connection_keeps_taking_records() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.host_running = 1;
@@ -913,6 +920,7 @@ bool check_described_connection_keeps_taking_records() {
 //  NapiNPMessage_Create bypass @0x628031..0x628112]
 bool check_host_description_bypasses_saturated_message_capacity() {
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	owner.ctx.is_authority = 1;
 	owner.ctx.is_in_session = 1;
 	owner.ctx.np_protocol.host_running = 1;
@@ -1018,6 +1026,7 @@ bool check_host_description_bypasses_saturated_message_capacity() {
 //  @0x4cab20/@0x4cabf0]
 bool check_host_pool_overflow_disconnects_with_msgcre() {
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	owner.ctx.is_authority = 1;
 	owner.ctx.is_in_session = 1;
 	owner.ctx.np_protocol.host_running = 1;
@@ -1299,6 +1308,7 @@ bool check_host_close_bursts_stop_to_every_connection() {
 
 bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.np_protocol.identity = &kJo;
 	ctx.is_in_session = 1;
@@ -1307,6 +1317,7 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 	ctx.np_protocol.host_run_duration_ms = 1234;
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
@@ -1438,12 +1449,14 @@ bool check_join_deploy_idle_punt_uses_state6_elapsed_time() {
 
 bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
 	ctx.network_quality_broadcast_countdown = 100;
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
@@ -1587,6 +1600,7 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 		int32_t suicides, bool host_own, bool expect_punt, const char *label,
 		bool round_over = false, bool nopunt = false) {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.nopunt = nopunt;
 	inmatch::set_connection_mode(ctx,
 			host_own ? inmatch::ConnectionMode::HostClient : inmatch::ConnectionMode::HostOnly);
@@ -1601,6 +1615,7 @@ bool check_violation_sweep_emits_type6(int32_t max_friendly_kills, int32_t team_
 	ctx.logs.punt = &punt_log;
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
@@ -1732,6 +1747,7 @@ bool check_violation_sweep_type6_arms() {
 //  Server_ProcessRoundEnd's slot state 7 @0x51685E; the sweep's state-6 gate @0x51AC0D]
 bool check_round_ending_second_walks_nobody() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
@@ -1744,12 +1760,14 @@ bool check_round_ending_second_walks_nobody() {
 	ctx.logs.punt = &punt_log;
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
 	// A Deathmatch with a one-kill limit: the slot's one enemy kill ends the round
 	// at the first periodic second's win check (winner 0).
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = opennova::game_type::kDeathmatch;
 	rules.score_limit = 1;
 	world.match.configure(rules);

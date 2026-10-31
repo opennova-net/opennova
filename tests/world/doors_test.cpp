@@ -17,6 +17,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/angle.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -71,6 +72,7 @@ static void test_parse_and_bind() {
     CHECK(items.entries[2].door_open_rate_q16 == INT32_MIN);
 
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(2, 4);
     Entity e;
     e.item_id = 1998;
@@ -100,6 +102,7 @@ struct Pivot final : IPoseProvider {
 
 static void test_motion_contact_sound_restart() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(2, 4);
     const auto h = door(w);
     Entity &e = *w.registry.get(h);
@@ -153,6 +156,7 @@ static void test_motion_contact_sound_restart() {
 
 static void test_wac_and_bms_pool_scope() {
     World w;
+    test_titles::jo_world(w);
     for (int p = 0; p < 4; ++p) w.registry.configure_pool(p, 4);
     const auto p0 = door(w, 0);
     const auto p1 = door(w, 1);
@@ -191,6 +195,7 @@ static void test_wac_and_bms_pool_scope() {
 
 static void test_pool_limit_and_wrapping_rate() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(2, 335);
     EntityHandle last;
     for (int i = 0; i < 334; ++i) last = door(w, 2, 7, 30);
@@ -205,6 +210,7 @@ static void test_pool_limit_and_wrapping_rate() {
     CHECK(!w.doors.group_open(w, 7));
 
     World wrap;
+    test_titles::jo_world(wrap);
     wrap.registry.configure_pool(2, 1);
     Entity &e = *wrap.registry.get(door(wrap, 2, 7, 1, -1));
     wrap.doors.command(wrap, e, 7);
@@ -229,6 +235,7 @@ static void test_door_building_pose() {
     OcclusionWorld occlusion;
     mission::CollisionResolveState resolve;
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(2, 1);
     const char source[] = "begin \"Iblock01\"\r\n id 101998\r\n type building\r\n"
             " graphic door\r\n ai_function door\r\n move_function door\r\n"

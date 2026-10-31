@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace ns = opennova::replication;
 
@@ -91,6 +92,7 @@ const ns::ClientMinimapOverlaySlot *find_slot(
 // under it about 70 KiB.
 int main() {
 	auto view_owner = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*view_owner);
 	ns::ClientReplicaPipeline &view = *view_owner;
 	auto &entity = view.state().upsert(0x2001);
 	entity.x = 10 << 16;
@@ -211,6 +213,7 @@ int main() {
 	{
 		opennova::replication::LoopbackChannel channel;
 		auto runtime_owner = std::make_unique<opennova::inmatch::ClientRuntime>(channel);
+		test_titles::jo_folds(*runtime_owner);
 		opennova::inmatch::ClientRuntime &runtime = *runtime_owner;
 		runtime.state().upsert(0x2001).team = 1;
 		auto receive = [&](uint8_t type, uint16_t seconds) {
@@ -338,6 +341,7 @@ int main() {
 	// MapOverlay_UpdateTimers(d)]
 	{
 		auto aged_owner = std::make_unique<ns::ClientReplicaPipeline>();
+		test_titles::jo_folds(*aged_owner);
 		ns::ClientReplicaPipeline &aged = *aged_owner;
 		auto &e = aged.state().upsert(0x2031);
 		e.cls = opennova::EntityClass::Vehicle;
@@ -393,6 +397,7 @@ int main() {
 	//  @0x59a7e0 -> MapOverlay_UpdateTimers @0x59a9ce]
 	{
 		auto kernel_owner = std::make_unique<opennova::mission::MissionKernel>();
+		test_titles::jo_world(kernel_owner->world);
 		opennova::mission::MissionKernel &kernel = *kernel_owner;
 		opennova::world::World &w = kernel.world;
 		w.registry.configure_pool(0, 4);
@@ -404,6 +409,7 @@ int main() {
 		w.cached.local_player = self;
 		opennova::replication::LoopbackChannel channel;
 		auto runtime_owner = std::make_unique<opennova::inmatch::ClientRuntime>(channel);
+		test_titles::jo_folds(*runtime_owner);
 		opennova::inmatch::ClientRuntime &runtime = *runtime_owner;
 		auto &e = runtime.state().upsert(0x2041);
 		e.cls = opennova::EntityClass::Vehicle;
@@ -449,6 +455,7 @@ int main() {
 	//  the menu pause only outside a session, UI_OptionsScreenInit @0x554dcf]
 	{
 		auto kernel_owner = std::make_unique<opennova::mission::MissionKernel>();
+		test_titles::jo_world(kernel_owner->world);
 		opennova::mission::MissionKernel &kernel = *kernel_owner;
 		opennova::world::World &w = kernel.world;
 		w.registry.configure_pool(0, 4);
@@ -460,6 +467,7 @@ int main() {
 		w.cached.local_player = self;
 		opennova::replication::LoopbackChannel channel;
 		auto runtime_owner = std::make_unique<opennova::inmatch::ClientRuntime>(channel);
+		test_titles::jo_folds(*runtime_owner);
 		opennova::inmatch::ClientRuntime &runtime = *runtime_owner;
 		auto &e = runtime.state().upsert(0x2051);
 		e.cls = opennova::EntityClass::Vehicle;
@@ -505,6 +513,7 @@ int main() {
 		// A paused single-player session: the frame's pass still runs, no
 		// tick ran, nothing ages.
 		auto kernel_owner = std::make_unique<opennova::mission::MissionKernel>();
+		test_titles::jo_world(kernel_owner->world);
 		opennova::mission::MissionKernel &kernel = *kernel_owner;
 		opennova::world::World &w = kernel.world;
 		w.registry.configure_pool(0, 4);
@@ -516,6 +525,7 @@ int main() {
 		w.cached.local_player = self;
 		opennova::replication::LoopbackChannel channel;
 		auto runtime_owner = std::make_unique<opennova::inmatch::ClientRuntime>(channel);
+		test_titles::jo_folds(*runtime_owner);
 		opennova::inmatch::ClientRuntime &runtime = *runtime_owner;
 		auto &e = runtime.state().upsert(0x2052);
 		e.cls = opennova::EntityClass::Vehicle;
@@ -545,6 +555,7 @@ int main() {
 	// slot's handle word -1]
 	{
 		auto reset_owner = std::make_unique<ns::ClientReplicaPipeline>();
+		test_titles::jo_folds(*reset_owner);
 		ns::ClientReplicaPipeline &reset_view = *reset_owner;
 		reset_view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2003, 3, 0x09, 0x10));
 		reset_view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2004, 3, 0x09, 0));

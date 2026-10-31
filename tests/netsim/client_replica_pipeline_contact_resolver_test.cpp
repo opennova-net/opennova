@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -122,6 +123,7 @@ struct ResolverCapture {
 
 int main() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	view.set_item_class_resolver([](uint16_t type)

@@ -30,6 +30,7 @@
 #include <iterator>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -89,6 +90,7 @@ std::vector<uint16_t> despawns_before_frame(const std::vector<ns::Datagram> &run
 // streams in the first frame.
 void test_bound_radius_moves_a_row_inside_the_gate() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle me = w::spawn_remote_player(world, at(0.0f, 1));
@@ -124,6 +126,7 @@ constexpr uint16_t kGuidedType = 0x0777;
 
 void test_a_guided_row_streams_its_header_alone() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle me = w::spawn_remote_player(world, at(0.0f, 1));
@@ -166,6 +169,7 @@ void test_a_guided_row_streams_its_header_alone() {
 // resolve to nothing (pool 5, past the pool's capacity) stay.
 void test_tracked_slots_despawn_ahead_of_the_frame() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle me = w::spawn_remote_player(world, at(0.0f, 1));
@@ -211,6 +215,7 @@ void test_tracked_slots_despawn_ahead_of_the_frame() {
 //  @0x4C1F37..0x4C1F3A; CPairList_ShellSortByValue `jge` @0x526D6B]
 void test_negative_score_keys_at_the_prior() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle me = w::spawn_remote_player(world, at(0.0f, 1));
@@ -257,6 +262,7 @@ void test_negative_score_keys_at_the_prior() {
 //  pool 1 @0x50EE7B..0x50EF04]
 void test_tick_displacement_reads_the_saved_pose() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
@@ -302,6 +308,7 @@ void test_tick_displacement_reads_the_saved_pose() {
 //  @0x50F312..0x50F331, the budget @0x50F34B, the no-progress test @0x50F0CC]
 void test_rows_and_rounds_take_turns() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle me = w::spawn_remote_player(world, at(0.0f, 1));

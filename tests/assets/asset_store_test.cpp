@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace fs = std::filesystem;
 using namespace opennova;
@@ -271,6 +272,7 @@ int main() {
 		const auto other_model_rig = store.skeletal_rig("soldier", origins, rig->parents());
 		TEST_EXPECT(other_model_rig && other_model_rig != model_rig);
 		auto kernel = std::make_unique<mission::MissionKernel>();
+		test_titles::jo_world(kernel->world);
 		kernel->set_assets(&store);
 		TEST_EXPECT(kernel->assets().model("thing") == model);
 		TEST_EXPECT(kernel->assets().skeletal_rig("soldier") == rig);

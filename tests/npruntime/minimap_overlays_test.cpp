@@ -20,6 +20,7 @@
 #include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -33,6 +34,7 @@ namespace {
 
 struct MapWorld {
     world::World w;
+    bool w_jo = test_titles::jo_world(w);
     world::EntityHandle local;
     MapWorld() {
         for (int pool = 0; pool < 5; ++pool) w.registry.configure_pool(pool, 8);

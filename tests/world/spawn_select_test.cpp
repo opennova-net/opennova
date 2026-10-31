@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -63,6 +64,7 @@ bool approx(float a, float b) { return std::fabs(a - b) < 1e-3f; }
 
 void credit_team_death(World &w, EntityHandle player) {
     MatchRules rules;
+    test_titles::jo_match(rules);
     rules.game_type = 0x10004u; // CTF; the death writes team Deaths (field 7).
     w.match.configure(rules);
     MatchPlayerIdentity identity;
@@ -83,6 +85,7 @@ int main() {
     // Entity_FindBestSpawnPoint @0x50CCC0]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(3, 16);
@@ -113,6 +116,7 @@ int main() {
     for (const char *code : {"jo", "dfx2"}) {
         const bool dfx2 = std::string(code) == "dfx2";
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.rules.title_rules = &title_rules(code);
         w.registry.configure_pool(0, 16);
@@ -151,6 +155,7 @@ int main() {
 
         auto pick = [](uint32_t seed) {
             auto w_storage = std::make_unique<World>();
+            test_titles::jo_world(*w_storage);
             World &w = *w_storage;
             w.registry.configure_pool(0, 16);
             w.registry.configure_pool(3, 16);
@@ -183,6 +188,7 @@ int main() {
 
         // The owned state rides the world snapshot beside prng16_state.
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.crt_rand.seed(7);
         const World::Snapshot snap = w.snapshot();
@@ -197,6 +203,7 @@ int main() {
     //     pool order under retail's descending shell sort.
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(3, 16);
@@ -217,6 +224,7 @@ int main() {
     //     Direct Co-op selection uses player-slot modulo count, not distance.
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(3, 16);
@@ -236,6 +244,7 @@ int main() {
     //     Entity_TransformLocalToWorld. Pitch/roll remain marker-local.
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(3, 16);
@@ -271,6 +280,7 @@ int main() {
     //  @0x43BE7E]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(3, 16);
@@ -286,6 +296,7 @@ int main() {
     }
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(3, 16);
@@ -309,6 +320,7 @@ int main() {
     {
         // A picked vehicle zone with no scatter: its live heading word.
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(3, 4);
@@ -332,6 +344,7 @@ int main() {
     // [orig: Server_PositionPlayerForSpawn @0x50D406..0x50D45A]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 4);
@@ -408,6 +421,7 @@ int main() {
     // [orig: Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(3, 16);
@@ -452,6 +466,7 @@ int main() {
 
         // Objective Co-op substitutes team 1 for the numbered-entity arm too.
         auto c_storage = std::make_unique<World>();
+        test_titles::jo_world(*c_storage);
         World &c = *c_storage;
         c.registry.configure_pool(1, 4);
         c.registry.configure_pool(3, 4);
@@ -475,6 +490,7 @@ int main() {
     // CPlayerStats_GetFieldPlusOne(..., 6) call)]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(3, 16);
@@ -487,6 +503,7 @@ int main() {
         CHECK(r.found && approx(r.position.x, 100.0f));
 
         auto coop_storage = std::make_unique<World>();
+        test_titles::jo_world(*coop_storage);
         World &coop = *coop_storage;
         coop.registry.configure_pool(0, 4);
         coop.registry.configure_pool(3, 4);
@@ -499,6 +516,7 @@ int main() {
         CHECK(r.found && approx(r.position.x, 50.0f));
 
         auto solo_storage = std::make_unique<World>();
+        test_titles::jo_world(*solo_storage);
         World &solo = *solo_storage;
         solo.registry.configure_pool(0, 4);
         solo.registry.configure_pool(3, 4);
@@ -518,10 +536,12 @@ int main() {
     // @0x52F657 team-row gate; Server_PositionPlayerForSpawn @0x50D1DB]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(3, 8);
         MatchRules rules;
+        test_titles::jo_match(rules);
         rules.game_type = 0x00000u;
         w.match.configure(rules);
         const EntityHandle ace = spawn_body(w, {}, true, true, 1);
@@ -547,6 +567,7 @@ int main() {
     //     a fourth, accidental dispatch policy.
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(3, 8);
         spawn_marker(w, 6095, {10.0f, 0.0f, 0.0f});
@@ -579,6 +600,7 @@ int main() {
     //     lift but does not enter the picked-zone 6007 scatter arm.
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(2, 4);
@@ -602,6 +624,7 @@ int main() {
     //     cycle exactly once.
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(3, 8);
         spawn_marker(w, 6001, {1.0f, 1.0f, 0.0f});
@@ -620,6 +643,7 @@ int main() {
     //  @0x50D04D..0x50D18D]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(2, 4);
         w.registry.configure_pool(3, 8);
@@ -659,6 +683,7 @@ int main() {
     // Entity_TransformLocalToWorld @0x43BD00]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(1, 4);
         w.registry.configure_pool(2, 4);
@@ -693,6 +718,7 @@ int main() {
     // With no in-radius 6007 candidate the retail counter is untouched.
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(2, 4);
         w.registry.configure_pool(3, 4);
@@ -717,6 +743,7 @@ int main() {
     //  Entity_HasAliveEntityOfTeam @0x4FC7B0]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(2, 4);
         const EntityHandle base = spawn_zone(w, 2, 1, 0);
@@ -737,6 +764,7 @@ int main() {
     // [orig: Config_SetDefaults @0x54D030; SpawnWaveList_BuildFromMission @0x52A920]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(1, 16);
         w.registry.configure_pool(2, 16);
@@ -761,6 +789,7 @@ int main() {
     //  SpawnWaveList_GetEntryInfo @0x52A700]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(2, 16);
@@ -801,6 +830,7 @@ int main() {
     //  SpawnWaveList_ResetOnZoneTeamChange @0x52A5B0]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(2, 8);
@@ -874,6 +904,7 @@ int main() {
     // [orig: Server_PositionPlayerForSpawn @0x50a0a0 (@0x50a5b2..0x50a60d) (dfx2.exe)]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(3, 16);
@@ -915,6 +946,7 @@ int main() {
     //  Math_FixedPointTransformPoint22 @0x50D00E, else +0x10000 @0x50D01C]
     {
         auto w_storage = std::make_unique<World>();
+        test_titles::jo_world(*w_storage);
         World &w = *w_storage;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 8);

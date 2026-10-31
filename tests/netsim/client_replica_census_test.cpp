@@ -20,6 +20,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/replication/client_replica_pipeline.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -51,6 +52,7 @@ bool slot_holds(const ClientServerCommandTable &table, std::size_t slot,
 
 void test_network_quality_lands_the_host_metric() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::NETWORK_QUALITY, {0xAB});
 	CHECK(view.state().net.host_metric == 0xAB);
 	// A longer body reads its first byte.
@@ -64,6 +66,7 @@ void test_network_quality_lands_the_host_metric() {
 
 void test_vehicle_spawn_availability_keeps_rows_and_the_flag() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	CHECK(!view.vehicle_spawn_availability().received);
 	VehicleSpawnAvailabilityList list;
 	list.rows.push_back({0x1004, 2, 4});
@@ -81,6 +84,7 @@ void test_vehicle_spawn_availability_keeps_rows_and_the_flag() {
 	// and raises the flag [orig: @0x429A7D / @0x429A8C, both exits @0x429ACE /
 	// @0x429AE7].
 	ClientReplicaPipeline cut;
+	test_titles::jo_folds(cut);
 	cut.apply(s2c::VEHICLE_SPAWN_AVAILABILITY, {3, 0x04, 0x10, 0x05});
 	const ClientVehicleSpawnAvailability &c = cut.vehicle_spawn_availability();
 	CHECK(c.received);
@@ -91,6 +95,7 @@ void test_vehicle_spawn_availability_keeps_rows_and_the_flag() {
 
 void test_server_command_entries_fill_the_table() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	// A stock host's six static entries, each id 0 "NULL": the first takes the
 	// empty slot 0, the rest match its id and rewrite it.
 	const std::vector<uint8_t> null_entry = command_entry(0, "NULL");
@@ -117,6 +122,7 @@ void test_server_command_entries_fill_the_table() {
 
 	// The authority's own view keeps none [orig: @0x425BB9].
 	ClientReplicaPipeline authority;
+	test_titles::jo_folds(authority);
 	authority.set_authority_recipient(true);
 	authority.apply(s2c::CHAT_HISTORY, null_entry);
 	CHECK(authority.state().server_commands[0][1] == 0);
@@ -124,6 +130,7 @@ void test_server_command_entries_fill_the_table() {
 
 void test_inert_tags_change_nothing() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	const auto revision = view.state().revision;
 	for (uint8_t tag : {s2c::RESERVED_NOOP_07, s2c::NOOP, s2c::RESERVED_NOOP_5E,
 				 s2c::RESERVED_NOOP_5F, s2c::RESERVED_NOOP_65, s2c::RESERVED_NOOP_7F})

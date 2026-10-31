@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -83,6 +84,7 @@ void test_title_rule() {
 
 void test_coop_advertises_the_session_title() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.np_protocol.identity = title_protocol("jo");
 	// The hosting gate every ServerCommand verb but SetMPReset tests (D-NET-383).
 	ctx.is_authority = 1;
@@ -133,6 +135,7 @@ void test_the_mission_block_carries_the_session_title() {
 	desert.text = "Desert Storm";
 	override_table.entries = {desert};
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kCoop;
 	config.mission_file = "CO01.BMS";
 	config.server_name = "Cfg Host";
@@ -140,6 +143,7 @@ void test_the_mission_block_carries_the_session_title() {
 	startup.protocol = title_protocol("jo");
 	startup.text_override = &override_table;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	// Not the authority, so the create's start_server installs no identity: the map change's
 	// block reads the context's, which names JO's.
 	ctx.np_protocol.identity = startup.protocol;

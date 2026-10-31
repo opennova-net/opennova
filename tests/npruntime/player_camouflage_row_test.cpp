@@ -27,6 +27,7 @@
 #include <string>
 
 #include "host_test_setup.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -64,6 +65,7 @@ const char kCharattr[] =
 
 struct Rig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	def::DefItemsFile items{};
 	uint16_t next_net_id = 0xFF00;
 
@@ -222,7 +224,9 @@ void test_the_add_arm_picks_its_camouflage_class() {
 	for (const Case &c : cases) {
 		Rig r(0);
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 4;
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Socketless, /*host_key=*/0, nullptr, settings);

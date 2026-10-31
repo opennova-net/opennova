@@ -17,6 +17,7 @@
 #include <runtime/world/entity.h>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -50,6 +51,7 @@ void test_a_fresh_row_has_no_restore_byte() {
 // next mission start then releases the converted slot on its swapped team.
 void test_the_swap_and_the_mission_start_restore_a_converted_slot() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.np_protocol.connection_list.push_back(slot(0, true, true, 2, 0x0058));
 	ctx.np_protocol.connection_list.push_back(slot(1, true, false, 0, 0x0059));
 	inmatch::HostRotation rotation;
@@ -72,6 +74,7 @@ void test_the_swap_and_the_mission_start_restore_a_converted_slot() {
 // a latched slot whose byte is 0 (a team-0 convert) keeps its latch and team.
 void test_the_mission_start_takes_the_byte_for_a_teamless_slot() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.np_protocol.connection_list.push_back(slot(0, true, true, 2, 0x0058));
 	ctx.np_protocol.connection_list.push_back(slot(0, true, true, 0, 0x0059));
 	inmatch::Server_ResetAllPlayerSlotFrameState(ctx);
@@ -91,6 +94,7 @@ void test_the_mission_start_takes_the_byte_for_a_teamless_slot() {
 //  @0x516753..0x516765, Server_AllocatePlayerSlotTable @0x51C250..0x51C25C]
 void test_the_mission_start_clears_the_ping_words_and_keeps_the_seed() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.np_protocol.connection_list.push_back(slot(1, true, false, 0, 0x0058));
 	inmatch::NapiNPConnection &row = ctx.np_protocol.connection_list[0];
 	row.reply.rtt_ms = 83;

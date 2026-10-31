@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -81,8 +82,10 @@ struct Session {
 // The side arm of the team assignment: side A's password answers through the map.
 uint8_t side_a_team(HostRotation &rotation) {
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 8);
 	GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kTeamDeathmatch;
 	config.num_teams = 2;
 	config.mission_side_a_password = "blue"; // the pick's pair, the mission start's

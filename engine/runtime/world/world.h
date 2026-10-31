@@ -709,11 +709,11 @@ struct MissionTables {
 struct SessionRules {
 	// The rules of the title the world runs as (title_rules.h; CONTEXT.md "Title"): the knobs the
 	// in-match code reads where dfx2.exe and Jointops.exe part, each cited on both binaries
-	// (docs/titles/dfx2-vs-jo-re.md §7, the §8 rows). Unset (unset_title_rules) until the embedder
+	// (docs/titles/dfx2-vs-jo-re.md §7, the §8 rows). Unset (null) until the embedder
 	// sets it from title_rules(code): the kernel's boot (mission::KernelBootOptions::title_rules),
 	// the host from its session config (inmatch configure_session_world), the joiner from its
 	// title (JoinerRole::set_rules). title() aborts while it is unset.
-	const TitleRules *title_rules = unset_title_rules();
+	const TitleRules *title_rules = nullptr;
 	const TitleRules &title() const { return require_title_rules(title_rules, "SessionRules"); }
 	// The live rules word. A role stamps it (HostRole: the config word in a
 	// session, 0x4204 out of one; a joiner its S2C 0x64 word); a world no

@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -66,6 +67,7 @@ std::vector<uint8_t> player_frame(uint8_t anim_state, uint8_t ratio) {
 
 int main() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.state().upsert(kPlayerHandle).type_id = kPlayerType; // the spawn stream's row

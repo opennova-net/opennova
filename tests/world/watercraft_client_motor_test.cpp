@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <limits>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -39,6 +40,7 @@ bool expect(bool cond, const char *msg) {
 
 struct Rig {
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	w::EntityHandle boat;
 	w::VehicleTraits traits;
 };
@@ -2063,6 +2065,7 @@ bool run_aircraft_glides_and_holds_altitude() {
 // physicsless Ground row remains inert.
 bool run_physicsless_air_dispatches_directly() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 	world.env.water_z = 0;
 	w::AiSystem &ai = world.ai;
@@ -2140,6 +2143,7 @@ bool run_physicsless_air_dispatches_directly() {
 // pin the positive side of that family boundary in the same public tick.
 bool run_client_family_sound_dispatch_scope() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 	world.env.water_z = 0;
 	w::AiSystem &ai = world.ai;

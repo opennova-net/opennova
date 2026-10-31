@@ -44,6 +44,7 @@
 #include <cstdio>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -112,6 +113,7 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id,
 // NetPacket_SerializeEntityStatesToPacket @0x50f07e] (D-NET-140 closed).
 bool run_fanout_and_per_connection_anchor() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 
@@ -203,6 +205,8 @@ bool run_fanout_and_per_connection_anchor() {
 	carry(udp_host, udp_join);
 
 	ns::ClientReplicaPipeline self_view, join_view;
+	test_titles::jo_folds(self_view);
+	test_titles::jo_folds(join_view);
 	self_view.set_protocol(nw::title_protocol("jo"));
 	join_view.set_protocol(nw::title_protocol("jo"));
 	// The host's own client parses the header-only frame where retail's parser
@@ -302,6 +306,7 @@ bool run_fanout_and_per_connection_anchor() {
 //     player is untouched.
 bool run_joiner_uplink_snaps_peer() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
@@ -370,6 +375,7 @@ bool run_joiner_uplink_snaps_peer() {
 //     the host never read-applies its own player (§5.38a / ADR-0012).
 bool run_self_uplink_rejected() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
@@ -400,6 +406,7 @@ bool run_self_uplink_rejected() {
 //     NetPacket_DispatchEntityPacketCallback @0x4D6A80 `entity == *owner_ctx`].
 bool run_cross_peer_uplink_rejected() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle peer_a =
@@ -451,6 +458,7 @@ bool run_cross_peer_uplink_rejected() {
 // with the retail client's local pool-0 slots 0..3.
 bool run_retail_player_slots_start_after_bms_organics() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 
@@ -476,6 +484,7 @@ bool run_retail_player_slots_start_after_bms_organics() {
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);
 	ns::ClientReplicaPipeline join_view;
+	test_titles::jo_folds(join_view);
 	join_view.set_protocol(nw::title_protocol("jo"));
 	// The spawn stream's rows for both players (a compact never creates one).
 	join_view.state().upsert(0x0004).type_id = 0x14B9;
@@ -498,6 +507,7 @@ bool run_retail_player_slots_start_after_bms_organics() {
 //     sub-blocks occur, low nibble 8 carries mounted ammo, and the byte wraps naturally.
 bool run_0a_subblock_phase_cycle() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
@@ -549,6 +559,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(fu.timer.timer_seconds == -1,
 			            "phase 1 sends -1 while the pre-round countdown runs")) return false;
 			ns::ClientReplicaPipeline fold;
+			test_titles::jo_folds(fold);
 			fold.set_protocol(nw::title_protocol("jo"));
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().round_time_remaining_ticks == -1,
@@ -567,6 +578,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(fu.weapon.uniform_team_mask == 0,
 			            "phase 0 owned-zone mask is 0 without a zone chain")) return false;
 			ns::ClientReplicaPipeline fold;
+			test_titles::jo_folds(fold);
 			fold.set_protocol(nw::title_protocol("jo"));
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().preround_delay_seconds == 0x23,
@@ -583,6 +595,7 @@ bool run_0a_subblock_phase_cycle() {
 			ns::LoopbackChannel fold_ch;
 			fold_ch.host_send(dg.tag, dg.body, false);
 			ns::ClientReplicaPipeline fold;
+			test_titles::jo_folds(fold);
 			fold.set_protocol(nw::title_protocol("jo"));
 			fold.pump(fold_ch);
 			if (!expect(fold.state().environment.rain_pct == 0x56u &&
@@ -605,6 +618,7 @@ bool run_0a_subblock_phase_cycle() {
 	world.preround_delay_seconds = 0;
 	{
 		opennova::world::MatchRules timed_rules;
+		test_titles::jo_match(timed_rules);
 		timed_rules.game_time_minutes = 2; // 7440 ticks -> 120 s on the wire
 		world.match.configure(timed_rules);
 		nw::FrameUpdate timed_fu;
@@ -621,6 +635,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(timed_fu.timer.timer_seconds == 120,
 			            "phase 1 projects the round clock as whole seconds")) return false;
 			ns::ClientReplicaPipeline fold;
+			test_titles::jo_folds(fold);
 			fold.set_protocol(nw::title_protocol("jo"));
 			fold.apply(dg.tag, dg.body);
 			if (!expect(fold.state().round_time_remaining_ticks == 62 * 120,
@@ -741,6 +756,7 @@ bool run_0a_subblock_phase_cycle() {
 			if (!expect(zone_fu.weapon.uniform_team_mask == expected,
 			            "phase 0 carries the recipient slot team's owned-zone walk")) return false;
 			ns::ClientReplicaPipeline fold;
+			test_titles::jo_folds(fold);
 			fold.set_protocol(nw::title_protocol("jo"));
 			fold.apply(zone_dg.tag, zone_dg.body);
 			if (!expect(fold.state().owned_zone_mask == static_cast<uint32_t>(expected),
@@ -797,6 +813,7 @@ bool run_0a_health_class_byte_packed() {
 	// resolved (player_item_hp = 150), the spawn seeds FULL health 150/150 [orig:
 	// Entity_InitFromItemDef @0x49e550] -> tier 2 -> 0x28, the golden joiner byte (D-NET-144).
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	world.tables.player.item_hp = 150; // the items.def class-8 Player hp (the traits-sweep stamp)
@@ -845,6 +862,7 @@ bool run_0a_health_class_byte_packed() {
 //      def gate @0x50F0FD), so it keeps the class-8 stand-in.
 bool run_0a_health_class_byte_hp0_row() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.tables.player.item_hp = 0; // the traits sweep stored the Player row's hp word 0
 	const w::EntityHandle h =
@@ -891,6 +909,7 @@ bool run_0a_health_class_byte_hp0_row() {
 //     no cursor; it is emergent from the age term of the priority key.
 bool run_0a_vehicle_budget_round_robin() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 64);
 	w::AiSystem &ai = world.ai;
@@ -1008,6 +1027,7 @@ bool run_0a_vehicle_budget_round_robin() {
 	// ClientReplicaPipeline LEARNS the vehicle class from the 0x0D pool-1 spawn batch and then decodes
 	// the vehicle compact bodies with its DEFAULT resolver (which alone cannot know them).
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
 	ns::test::emit_all(world, conns);
@@ -1058,6 +1078,7 @@ bool run_0a_vehicle_budget_round_robin() {
 //     reads @0x50e905/@0x50ea77, writes at the serialize site @0x50f17c].
 bool run_0a_priority_view_terms() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
@@ -1170,6 +1191,7 @@ bool run_0a_priority_view_terms() {
 //     the motion-delta boosts cancel between frames.
 bool run_0a_priority_dead_recipient_social_score() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
@@ -1281,6 +1303,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 // recipient's list, while the owner's own list keeps it (the self-exception).
 bool run_0a_owner_hidden_admission() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle a_h =
@@ -1334,6 +1357,7 @@ bool run_0a_owner_hidden_admission() {
 //     @0x4c0c7d).
 bool run_0a_player_record_field_sources() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
@@ -1415,6 +1439,7 @@ bool run_0a_player_record_field_sources() {
 //       mirror AiSystem::mirror_wire_anim]
 bool run_0a_anchor_is_the_recipient_eye() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle me =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
@@ -1512,6 +1537,7 @@ bool run_0a_round_score_and_los_read_the_body() {
 	// Rounds: the shot_seq names each one (the stable key).
 	for (const int32_t eye_z : {0, kEyeZ}) {
 		w::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 8);
 		const w::EntityHandle me =
 				w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
@@ -1558,6 +1584,7 @@ bool run_0a_round_score_and_los_read_the_body() {
 	// LOS: the replication ray starts at the body plus the 0.9 u lift.
 	for (const int32_t eye_z : {0, kEyeZ}) {
 		w::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 8);
 		world.registry.configure_pool(1, 8);
 		FanFlatTerrain terrain;
@@ -1613,6 +1640,7 @@ bool run_0a_round_score_and_los_read_the_body() {
 //      byte bits 0-1 [orig: tail read @0x4303e5 -> latches @0x430562/@0x430570].
 bool run_0a_deploy_hold_and_tail_stance() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle h =
@@ -1731,6 +1759,7 @@ nw::EntityClass attach_test_class(uint16_t type_id) {
 
 bool run_0x26_attach_mounted_echo() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
@@ -1853,6 +1882,7 @@ bool run_0x26_attach_mounted_echo() {
 
 bool run_mounted_g_slot_route_echo() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
@@ -1929,6 +1959,7 @@ bool run_mounted_g_slot_route_echo() {
 //     detaches + hard-snaps it to local-as-world coords (the v26 origin teleport).
 bool run_grounded_uplink_apply_and_echo() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
 	w::AiSystem &ai = world.ai;
@@ -2112,6 +2143,7 @@ bool run_pose_transform_roundtrip() {
 //     NetPacket_SerializeRoundEvent @0x504820].
 bool run_round_event_fanout() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle host_h =
@@ -2262,6 +2294,7 @@ bool run_round_event_fanout() {
 //  NetPacket_DeserializeRoundEvent @0x42F521]
 bool run_ai_round_reaches_the_joiner() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.logic_authority = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
@@ -2355,6 +2388,7 @@ bool run_ai_round_reaches_the_joiner() {
 //      @0x48b0ff; Entity_SerializeVehicleState @0x460560 modes 3/4 return -1]
 bool run_vehicle_drive_authority() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::AiSystem &ai = world.ai;
@@ -2552,6 +2586,7 @@ bool run_vehicle_drive_authority() {
 	// Decode through the real client fold as well: a child-first pool-0 row must
 	// reconstruct at the final same-frame pool-1 carrier, not at its pre-motor pose.
 	ns::ClientReplicaPipeline view(attach_test_class);
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	// The spawn stream's rows (a compact never creates one): the frame's own
 	// record identities, exactly as the world stream would have typed them.
@@ -2585,6 +2620,7 @@ bool run_vehicle_drive_authority() {
 //  @0x4421CD / @0x44219C]
 bool run_0a_priority_caches_hold_every_pool1_slot() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 300);
 	const w::EntityHandle host_h =
@@ -2645,6 +2681,7 @@ bool run_0a_priority_caches_hold_every_pool1_slot() {
 //  g_PreRoundDelayTimer, 0` @0x4FFA81 ahead of the /62 @0x4FFA97]
 bool run_0a_phase1_gate_reads_the_whole_countdown() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle host_h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
@@ -2685,6 +2722,7 @@ bool run_0a_phase1_gate_reads_the_whole_countdown() {
 //  NapiNPClientMsg_0x00A @0x4305EB]
 bool run_0a_tail_carries_the_armor_word() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
@@ -2726,6 +2764,7 @@ bool run_0a_tail_carries_the_armor_word() {
 //  `mov word ptr [eax+11Eh],0FFFFh`, Server_UpdatePlayerBreathTimers @0x50D819]
 bool run_0a_tail_carries_the_health_word_raw() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	const w::EntityHandle h =
 			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));

@@ -21,6 +21,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/weapon_table_build.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -102,6 +103,7 @@ constexpr const char *kWeaponDef =
 // running `rules` when given.
 struct Rig {
 	std::unique_ptr<World> owned_world = std::make_unique<World>();
+	bool owned_world_jo = test_titles::jo_world(*owned_world);
 	World &world = *owned_world;
 	std::unique_ptr<LocalPlayer> owned_local;
 	DefWeaponsFile defs{};

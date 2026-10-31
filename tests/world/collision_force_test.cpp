@@ -6,6 +6,7 @@
 #include <runtime/world/world.h>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 using namespace opennova::world;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 struct Motion final : IRootMotionSource {
@@ -20,6 +21,7 @@ static int32_t impulse(int64_t scale, int32_t table_q22) {
 }
 int main() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     World &world = *heap;
     world.registry.configure_pool(0, 4);
     Entity seed;
@@ -197,6 +199,7 @@ int main() {
     // In session, a non-team game type (DM) makes every hit an enemy hit.
     world.rules.mp_session = true;
     MatchRules dm;
+    test_titles::jo_match(dm);
     dm.game_type = 0;
     world.match.configure(dm);
     clear_dim();
@@ -204,6 +207,7 @@ int main() {
     CHECK(dim.fade_rate == 105);
     // A team game type (TDM 0x10000) keeps the friendly leg ...
     MatchRules tdm;
+    test_titles::jo_match(tdm);
     tdm.game_type = 0x10000u;
     world.match.configure(tdm);
     clear_dim();

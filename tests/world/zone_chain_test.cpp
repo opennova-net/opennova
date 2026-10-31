@@ -15,6 +15,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -94,6 +95,7 @@ void spawn_team_marker(World &w, int32_t type, Vec3 pos, uint8_t zone_no = 0) {
 // 6003/6004 base start markers (zone_number 0, as authored).
 struct AshFixture {
     World w;
+    bool w_jo = test_titles::jo_world(w);
     CollisionWorld collision;
     EntityHandle z1, z2a, z2b, z3;
     AshFixture() {
@@ -117,6 +119,7 @@ struct AshFixture {
         spawn_team_marker(w, 6003, {-394.1f, 449.6f, 11.0f});
         spawn_team_marker(w, 6004, {443.5f, -172.5f, 11.0f});
         MatchRules rules;
+        test_titles::jo_match(rules);
         rules.game_type = opennova::game_type::kAdvanceAndSecure;
         w.match.configure(rules);
         // A network session: the capture scoring runs only in one (D-NET-650).
@@ -276,6 +279,7 @@ void test_spawn_zone_presence_and_zone_info() {
     CHECK(zone_chain_zone_info_byte(f.w.zones.chain, *z1) == 1); // sole zone 1 -> rank 0
     // A zone-less world offers nothing to hold the deploy screen for.
     World bare;
+    test_titles::jo_world(bare);
     bare.registry.configure_pool(1, 4);
     CHECK(!bare.zones.has_spawn_zone());
 }
@@ -848,6 +852,7 @@ void test_spawn_zone_registry() {
 // @0x43EAE0, address compare @0x43ECC6]
 void test_spawn_zone_zero_key_uses_retail_pool_address_order() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 2);
     world.registry.configure_pool(2, 2);
 
@@ -903,6 +908,7 @@ void test_refused_touch_is_recorded_for_the_host() {
 // [orig: ZoneSlotChain_BuildFromMission @0x4A2E89..0x4A2E8D / @0x4A2ECD..0x4A2ED1]
 void test_the_sweep_reads_the_hidden_bit_alone() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(1, 8);
     const EntityHandle unlatched = spawn_zone(*w, 1, 1, {0.0f, 0.0f, 0.0f});
     const EntityHandle hidden = spawn_zone(*w, 2, 2, {10.0f, 0.0f, 0.0f});

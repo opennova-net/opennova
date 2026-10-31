@@ -56,6 +56,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -106,6 +107,7 @@ int main() {
 	// ---- host: a minimal World (one 6002 start marker => spawn-select + a 0x20 pool-3 record) + a
 	//      minimal in-memory mission (0x0B BMS header). Mirrors initial_state_burst_test. ----
 	w::World world;
+	test_titles::jo_world(world);
 	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
@@ -127,9 +129,11 @@ int main() {
 
 	// ---- host: stand up the dedicated HostOnly runtime (no local player). ----
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
+	test_titles::jo_config(host_cfg.config);
 	host_cfg.protocol = &kJo;
 	host_cfg.config.server_name = "OpenNova";
 	host_cfg.config.max_players = 16;
@@ -145,6 +149,7 @@ int main() {
 	// ---- joiner: a headless ClientRuntime over the joiner socket ----
 	const std::string kName = "SocketJoiner";
 	inmatch::ClientRuntime client(kName);
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 
 	// ---- capture both directions at the joiner boundary (for the §5.2a order decode; the 0x42/0x82

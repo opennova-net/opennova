@@ -37,6 +37,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
 #include <runtime/world/weapon_scope_zero.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -52,6 +53,7 @@ namespace {
 // A world with one live local organic, the shape the view cluster ticks over.
 struct LocalWorld {
     World w;
+    bool w_jo = test_titles::jo_world(w);
     AiSystem &ai = w.ai;
     EntityHandle local;
 
@@ -785,6 +787,7 @@ void test_nvg_toggle_plays_its_interface_sets() {
     }
     // No local player: the toggle is refused and plays nothing.
     World bare;
+    test_titles::jo_world(bare);
     LocalPlayerWeapon none;
     PlayerViewState idle;
     CHECK(!local_player_nvg_toggle(bare, none, idle));
@@ -1074,6 +1077,7 @@ void test_vehicle_seats_clear_the_nvg_restore_latch() {
 //  @0x43564e..0x435658; Player_MountWeaponSlot @0x4dfa4d..0x4dfa74, @0x4dfb75]
 void test_detach_mount_latch_target() {
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons.entries.resize(3);
     const int32_t categories[3] = {0, 3, 11};
     for (int i = 1; i <= 2; ++i) {
@@ -1778,6 +1782,7 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
 
 void test_tick_without_a_player_resolves_first_person() {
     World w;
+    test_titles::jo_world(w);
     PlayerViewState v;
     v.tp_anchor_valid = true;
     v.mount.control_seat = true;
@@ -2742,6 +2747,7 @@ void test_use_item_vehicle_loadout_zone_gates() {
     lw.w.registry.get(ground)->team = 0;
     CHECK(local_player_vehicle_zone_team_matches(lw.w));
     World empty;
+    test_titles::jo_world(empty);
     CHECK(!local_player_in_vehicle_loadout_zone(empty));
     CHECK(!local_player_vehicle_zone_team_matches(empty));
 }
@@ -2757,6 +2763,7 @@ void test_use_item_armory_zone_gate() {
     lw.entity().mounted = true; // a seated player takes the toggle latch instead
     CHECK(!local_player_in_armory_zone(lw.w));
     World empty;
+    test_titles::jo_world(empty);
     CHECK(!local_player_in_armory_zone(empty));
 }
 
@@ -2792,6 +2799,7 @@ void test_use_item_arm_order() {
     lw.entity().mounted = true;
     CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kMountChain);
     World empty;
+    test_titles::jo_world(empty);
     CHECK(local_player_use_item_arm(empty, s) == UseItemArm::kMountChain);
 }
 
@@ -2807,6 +2815,7 @@ void test_loadout_class_pick_and_resident_kit() {
     CHECK(local_loadout_set_player_class(lw.w, loadout, 9));
     CHECK(lw.entity().player_class == 9 && loadout.pending_player_class == -1);
     World no_player;
+    test_titles::jo_world(no_player);
     CHECK(local_loadout_set_player_class(no_player, loadout, 6));
     CHECK(loadout.pending_player_class == 6);
 
@@ -3288,6 +3297,7 @@ void test_scope_zero_request_keys_on_the_rule_bit_and_clicks() {
     local.weapon.slot.scope_zero = 1;
     local.weapon.slot.zero_pitch = 500;
     MatchRules team;
+    test_titles::jo_match(team);
     team.game_type = 0x10000u; // a team game admits nothing by itself
     lw.w.match.configure(team);
     lw.w.rules.mp_session = true; // in a session

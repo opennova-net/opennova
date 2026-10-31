@@ -13,6 +13,7 @@
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -121,6 +122,7 @@ int main() {
     // movers' own, AI_ProcessMovementStep @0x466E19] ----
     {
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(1, 1); // the brain's row (its position words)
         w.ai.terrain = &f;
         int idx = w.ai.attach(EntityHandle::make(1, 0));

@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -53,9 +54,11 @@ static int failures = 0;
 //  @0x59BF70; HUD_RenderAllOverlays @0x5A8070 -- the build @0x5A80BC]
 static void inset_target_name_cases() {
 	auto runtime_heap = std::make_unique<ClientRuntime>("host");
+	test_titles::jo_folds(*runtime_heap);
 	ClientRuntime &host_runtime = *runtime_heap;
 	// The kernel on the heap: main's frame already holds several (1 MB stack).
 	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 8);
 	world::Entity local;
@@ -231,8 +234,10 @@ static void inset_target_name_cases() {
 // TextResource_FindEntryBySectionAndKey @0x75D27B].
 static void voice_macro_override_cases() {
 	auto runtime_heap = std::make_unique<ClientRuntime>("macros");
+	test_titles::jo_folds(*runtime_heap);
 	// The kernel on the heap: main's frame already holds several (1 MB stack).
 	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 8);
 	world::Entity seed;
@@ -276,7 +281,9 @@ static void voice_macro_override_cases() {
 // [orig: Terrain_SetupEffectForEntity @0x5C74A0 per drawn entity].
 static void lighting_walk_keeps_the_row_at_l_cases() {
 	auto runtime_heap = std::make_unique<ClientRuntime>("LightAtL");
+	test_titles::jo_folds(*runtime_heap);
 	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	mission::MissionKernel &kernel = *kernel_heap;
 	world::World &w = kernel.world;
 	w.registry.configure_pool(0, 8);
@@ -312,11 +319,13 @@ static void lighting_walk_keeps_the_row_at_l_cases() {
 //  UI_ProcessEndRoundScreenTransition @0x5B8600 (`cmp g_ScoreboardDirty, 0` @0x5B8600)]
 static void serve_only_end_round_cases() {
 	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	mission::MissionKernel &kernel = *kernel_heap;
 	world::World &w = kernel.world;
 	w.rules.mp_session = true;
 	w.registry.configure_pool(0, 8);
 	world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kDeathmatch;
 	w.match.configure(rules);
 	world::Entity body;
@@ -326,6 +335,7 @@ static void serve_only_end_round_cases() {
 	w.match.upsert_player({ann, 1, "Ann"});
 	w.match.upsert_player({bob, 2, "A name longer than thirty-one characters"});
 	auto ctx = std::make_unique<NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	ctx->is_in_session = 1;
 	RoleView serve_only;
 	serve_only.host = ctx.get();
@@ -347,6 +357,7 @@ static void serve_only_end_round_cases() {
 	CHECK(in.player_names[2].empty() && in.player_scores[0] == 0 && in.player_scores[1] == 0);
 	// A listen host or a joiner keeps its client's folded words (none here).
 	ClientRuntime own("ServeOnlyOwn");
+	test_titles::jo_folds(own);
 	RoleView listen = serve_only;
 	listen.runtime = &own;
 	CHECK(!end_round_session_state(listen).header_known);
@@ -371,8 +382,10 @@ static void serve_only_end_round_cases() {
 //  seat), @0x5CACED..0x5CACFE (the dead bit, g_HelpScreenOpen); the calls @0x5CACE3 / @0x5CAD04]
 static void hud_pass_call_site_cases() {
 	auto runtime_heap = std::make_unique<ClientRuntime>("hud");
+	test_titles::jo_folds(*runtime_heap);
 	ClientRuntime &runtime = *runtime_heap;
 	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 8);
 	world::Entity seed;
@@ -432,6 +445,7 @@ static void hud_pass_call_site_cases() {
 void deploy_table_zone_cases() {
 	// The kernel and the view on the heap: main's frame already holds several (1 MB stack).
 	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	mission::MissionKernel &kernel = *kernel_heap;
 	world::World &w = kernel.world;
 	w.registry.configure_pool(0, 8);
@@ -519,6 +533,7 @@ void deploy_table_zone_cases() {
 	reg.entries = { truck_h, heli_h, psp_h };
 	replication::LoopbackChannel loop;
 	auto host_view_heap = std::make_unique<ClientRuntime>(loop);
+	test_titles::jo_folds(*host_view_heap);
 	ClientRuntime &host_view = *host_view_heap;
 	replication::ClientState &cs = host_view.state();
 	auto bank = [](replication::ClientMinimapOverlaySlot &slot, world::EntityHandle h) {
@@ -628,6 +643,7 @@ void deploy_table_zone_cases() {
 void vehicle_panel_rider_cases() {
 	// The kernel and the view on the heap: main's frame already holds several (1 MB stack).
 	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	mission::MissionKernel &kernel = *kernel_heap;
 	world::World &w = kernel.world;
 	w.registry.configure_pool(0, 8);
@@ -680,6 +696,7 @@ void vehicle_panel_rider_cases() {
 	w.registry.spawn(1, gun);
 	replication::LoopbackChannel loop;
 	auto host_view_heap = std::make_unique<ClientRuntime>(loop);
+	test_titles::jo_folds(*host_view_heap);
 	ClientRuntime &host_view = *host_view_heap;
 	replication::ClientRosterSlot ace;
 	ace.bound = true;
@@ -723,6 +740,7 @@ int main(int argc, char **argv) {
 #endif
 		std::signal(SIGABRT, [](int) { std::_Exit(0); });
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		RoleView untitled;
 		untitled.kernel = &kernel;
 		(void)death_shroud_revealed(untitled);
@@ -780,6 +798,7 @@ int main(int argc, char **argv) {
 	{
 		CHECK(scoreboard_session_vars(RoleView{}).server_name.empty());
 		NapiNPServerCtx host;
+		test_titles::jo_config(host.config);
 		host.config.server_name = std::string(40, 'S');
 		host.config.mission_name = "Dormant Volcano Isle";
 		host.config.mission_file = "ASH_I5A.BMS";
@@ -804,6 +823,7 @@ int main(int argc, char **argv) {
 
 	// A joiner's view: the 0x1D header + 0x56 board folded into its replica state.
 	ClientRuntime runtime("RoleFeeds");
+	test_titles::jo_folds(runtime);
 	replication::ClientState &cs = runtime.state();
 	cs.end_round.header_known = true;
 	cs.end_round.known = true;
@@ -841,6 +861,7 @@ int main(int argc, char **argv) {
 	//  +0x154 read @0x562724]
 	{
 		ClientRuntime local("StatLocal");
+		test_titles::jo_folds(local);
 		replication::ClientState &ls = local.state();
 		ls.end_round = cs.end_round;
 		ls.end_round.board.team_fields = { { 1, 1 } };
@@ -871,8 +892,10 @@ int main(int argc, char **argv) {
 	// 0x04 @0x425499].
 	{
 		ClientRuntime host_runtime("host");
+		test_titles::jo_folds(host_runtime);
 		host_runtime.state().end_round = cs.end_round;
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.world.registry.configure_pool(0, 8);
 		world::Entity seed;
 		seed.kind = world::EntityKind::Organic;
@@ -896,8 +919,10 @@ int main(int argc, char **argv) {
 	//  SET @0x405EF6 / @0x405F05]
 	{
 		ClientRuntime host_runtime("host");
+		test_titles::jo_folds(host_runtime);
 		host_runtime.state().death_screen_active = true; // the pass gates admit every team
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.world.registry.configure_pool(0, 8);
 		world::Entity local;
 		local.kind = world::EntityKind::Organic;
@@ -937,8 +962,10 @@ int main(int argc, char **argv) {
 		const BreathBarFacts j = breath_bar_facts(joiner);
 		CHECK(j.samples == 40 && j.breath_time == 25 && j.round_over);
 		ClientRuntime host_runtime("host-breath");
+		test_titles::jo_folds(host_runtime);
 		host_runtime.state().breath_samples = 12;
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.world.script.wac_values.breathtime = 30;
 		RoleView host;
 		host.runtime = &host_runtime;
@@ -952,6 +979,7 @@ int main(int argc, char **argv) {
 		// [orig: Server_ProcessRoundEnd @0x5164F0 (@0x5168E4); Server_DrawStatusScreen
 		//  @0x50A2D0 (`cmp g_RoundOver, 0` @0x50B286)].
 		NapiNPServerCtx serve_only_ctx;
+		test_titles::jo_config(serve_only_ctx.config);
 		RoleView serve_only;
 		serve_only.host = &serve_only_ctx;
 		serve_only.kernel = &kernel;
@@ -969,6 +997,7 @@ int main(int argc, char **argv) {
 	// HUD_DrawScoreOverlay @0x593e50; HUD_DrawTeamIdLine @0x59aa30].
 	{
 		ClientRuntime rt("hud-facts");
+		test_titles::jo_folds(rt);
 		replication::ClientState &st = rt.state();
 		st.permanent_death = true;
 		st.session_time_limit_minutes = 15;
@@ -990,6 +1019,7 @@ int main(int argc, char **argv) {
 		st.scoreboard.rows[1].clan = "CL";
 		st.session_status.mission_name = "Hill";
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.world.rules.mp_session = true;
 		kernel.world.registry.configure_pool(0, 8);
 		world::Entity seed;
@@ -1121,6 +1151,7 @@ int main(int argc, char **argv) {
 		RoleView bare;
 		CHECK(!joiner_deploy_hold_ready(bare) && !joiner_in_match_ready(bare, false));
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		RoleView jv;
 		jv.kernel = &kernel;
 		jv.runtime = &runtime;
@@ -1145,6 +1176,7 @@ int main(int argc, char **argv) {
 	// @0x553b53..0x553c4e; the entry gate @0x553bce..0x553bdd].
 	{
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		kernel.world.registry.configure_pool(2, 8);
 		world::Entity zone;
 		zone.kind = world::EntityKind::Item;
@@ -1264,6 +1296,7 @@ int main(int argc, char **argv) {
 		kernel.world.cached.local_player = kernel.world.registry.spawn(0, body);
 		replication::LoopbackChannel host_loop;
 		ClientRuntime host_view(host_loop);
+		test_titles::jo_folds(host_view);
 		auto zone_value = [&host_loop](world::EntityHandle h, uint8_t team, int32_t value,
 								  int32_t limit) {
 			std::vector<uint8_t> b = { static_cast<uint8_t>(h.packed),
@@ -1325,6 +1358,7 @@ int main(int argc, char **argv) {
 	//  aux @0x5d89b6..0x5d89b8].
 	{
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		world::World &w = kernel.world;
 		w.registry.configure_pool(0, 8);
 		w.registry.configure_pool(1, 8);
@@ -1400,6 +1434,7 @@ int main(int argc, char **argv) {
 	// slot address].
 	{
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		world::World &w = kernel.world;
 		w.registry.configure_pool(1, 4);
 		w.registry.configure_pool(2, 4);
@@ -1412,6 +1447,7 @@ int main(int argc, char **argv) {
 		const world::EntityHandle house = w.registry.spawn(2, building);
 		const uint32_t hit = (static_cast<uint32_t>(house.slot()) << 20) | (3u << 12);
 		ClientRuntime decoded_runtime("LightReuse");
+		test_titles::jo_folds(decoded_runtime);
 		replication::ClientEntityState decoded;
 		decoded.handle = world::EntityHandle::make(1, 0).packed;
 		decoded.type_id = 1296;
@@ -1453,6 +1489,7 @@ int main(int argc, char **argv) {
 	// rebuilds the cache.
 	{
 		mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		RoleView jv;
 		jv.kernel = &kernel;
 		jv.runtime = &runtime;

@@ -12,6 +12,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 namespace w = opennova::world;
@@ -292,6 +293,7 @@ void test_spawn_loadout_projection() {
 // ammo's. [orig: WeaponAction_Fire @0x542CB4 -> ActionSlot_SpawnEffect @0x401F27 / @0x402080]
 void test_host_slot_fire_presents_its_fire_row() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.tables.weapons.entries.resize(3);
 	w::WeaponTableEntry &gun = world.tables.weapons.entries[2];
 	gun.valid = true;

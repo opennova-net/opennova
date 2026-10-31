@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -65,6 +66,7 @@ int main() {
 	//  ramp @0x4B7DBF / @0x4B7DD6, the passenger test @0x4B6684 and its ramp
 	//  @0x4B66B5 / @0x4B66C3].
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	w::AiEntity body;
 	body.health = 100;
 	body.inf.lean_angle = 0x20000000;

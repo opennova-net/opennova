@@ -26,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -838,6 +839,7 @@ int main() {
 	//  the exit @0x57E53D]
 	{
 		opennova::world::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 4);
 		opennova::world::WeatherTickEvents events;
 		world.weather.tick_sim(&world, events);

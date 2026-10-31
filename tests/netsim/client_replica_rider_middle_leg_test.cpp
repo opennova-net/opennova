@@ -25,6 +25,7 @@
 #include <optional>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -112,6 +113,7 @@ bool on_hull(const ns::ClientEntityState &rider, const Pose &hull, int32_t lx) {
 
 struct View {
 	ns::ClientReplicaPipeline view;
+	bool view_jo = test_titles::jo_folds(view);
 	explicit View(bool split) {
 		view.set_protocol(nw::title_protocol("jo"));
 		view.set_remote_motion_mode(true);

@@ -12,6 +12,7 @@
 #include <runtime/world/player_view.h>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -39,6 +40,7 @@ void run_one_wac_execution(w::World &world, opennova::wac::WacSystem &system) {
 
 void test_fov_uses_the_shared_weather_current_and_snapshot() {
     w::World world;
+    test_titles::jo_world(world);
     world.weather.seed(w::WeatherSeed{});
     opennova::wac::CompileEnv compile_env;
     auto program = opennova::wac::compile_source("fov(40) store(v1)\n", compile_env);
@@ -77,6 +79,7 @@ void test_fov_uses_the_shared_weather_current_and_snapshot() {
 
 void test_scripted_sky_speed_reaches_the_wire() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
     // A mission only advances while a human is in the world - retail holds the
     // WAC tick and the BMS event pump on `g_WacVarHumans || !g_WacVarTicks`
@@ -104,6 +107,7 @@ void test_scripted_sky_speed_reaches_the_wire() {
 
 void test_movefog_publishes_retail_target_and_duration_step() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
 	world.cached.humans = 1;
 	w::WeatherSeed base;
@@ -129,6 +133,7 @@ void test_movefog_publishes_retail_target_and_duration_step() {
 
 void test_movefog_uses_live_fog_current() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
 	world.cached.humans = 1;
 	w::WeatherSeed base;
@@ -156,6 +161,7 @@ void test_movefog_uses_live_fog_current() {
 
 void test_rain_advances_on_the_explicit_weather_tick() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
 	world.cached.humans = 1;
 	w::WeatherSeed base;
@@ -181,6 +187,7 @@ void test_rain_advances_on_the_explicit_weather_tick() {
 
 void test_snow_kind_reaches_the_wire() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
 	world.cached.humans = 1;
 	w::WeatherSeed base;
@@ -204,6 +211,7 @@ void test_snow_kind_reaches_the_wire() {
 
 void test_overcast_advances_on_the_explicit_weather_tick() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
 	world.cached.humans = 1;
 	w::WeatherSeed base;
@@ -227,6 +235,7 @@ void test_overcast_advances_on_the_explicit_weather_tick() {
 
 void test_quake_uses_retail_six_tick_units_and_countdown() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
 	world.cached.humans = 1;
 	w::WeatherSeed base;
@@ -249,6 +258,7 @@ void test_quake_uses_retail_six_tick_units_and_countdown() {
 
 void test_tod_uses_retail_minute_to_fixed24_multiply() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
 	world.cached.humans = 1;
 	w::WeatherSeed base;
@@ -273,6 +283,7 @@ void test_tod_uses_retail_minute_to_fixed24_multiply() {
 
 void test_rgb_operands_and_skyfog_alias_reach_color_channels() {
     w::World world;
+    test_titles::jo_world(world);
     auto &core = world.weather.core;
     struct ColorCase {
         const char *command;
@@ -316,6 +327,7 @@ void test_rgb_operands_and_skyfog_alias_reach_color_channels() {
 
 void test_eager_wac_initializer_and_255_tick_boundary() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::WeatherTickEvents events;
 	world.cached.humans = 1;
 	w::WeatherSeed base;

@@ -12,6 +12,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -22,6 +23,7 @@ static int failures = 0;
 namespace {
 struct Rig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     Rig() {
         for (int pool = 0; pool < 4; ++pool) world.registry.configure_pool(pool, 128);
         world.tables.ammo.entries.resize(3);

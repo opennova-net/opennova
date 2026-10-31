@@ -16,6 +16,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -110,6 +111,7 @@ int main() {
     for (size_t i = 7; i < rows.size(); ++i) CHECK(rows[i] == 0u);
 
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 16);
     w.tables.class_attribute_flags = rows;
     CHECK(w.tables.class_has_attribute(5, MissionTables::kCharAttrMedic));
@@ -167,6 +169,7 @@ int main() {
     // The table a client installs from: its live copy when it has one, else the boot copy.
     {
         World iw;
+        test_titles::jo_world(iw);
         opennova::inmatch::CharAttrTable boot{};
         opennova::inmatch::CharAttrTable live{};
         boot.table.rows[4].active = 1;

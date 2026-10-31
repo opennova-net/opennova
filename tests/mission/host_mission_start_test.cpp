@@ -53,6 +53,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
@@ -83,6 +84,7 @@ uint32_t mission_game_type(const bms::File &mission) {
 inmatch::HostBringup single_player_bringup(uint32_t game_type,
 		inmatch::ClientProcessState *process = nullptr) {
 	inmatch::HostConfig cfg;
+	test_titles::jo_config(cfg.config);
 	cfg.protocol = &kJo;
 	cfg.config.server_name = "SINGLEPLAYERGAME";
 	cfg.config.max_players = 1;
@@ -98,6 +100,7 @@ inmatch::HostBringup single_player_bringup(uint32_t game_type,
 // A Serve Only host's bring-up record (a LAN session, no local player), over `process`.
 inmatch::HostBringup serve_only_bringup(uint32_t game_type, inmatch::ClientProcessState *process) {
 	inmatch::HostConfig cfg;
+	test_titles::jo_config(cfg.config);
 	cfg.protocol = &kJo;
 	cfg.config.server_name = "serve_only";
 	cfg.config.max_players = 4;
@@ -125,6 +128,7 @@ ServeOnlyStart run_serve_only_start(inmatch::ClientProcessState &process,
 	std::map<std::string, std::string> files;
 	files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost, nullptr);
 	inmatch::HostRole &role = *role_storage;
@@ -177,6 +181,7 @@ inmatch::TickInput tick_input() {
 void run_held_host() {
 	std::map<std::string, std::string> files;
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
 	inmatch::HostRole &role = *role_storage;
@@ -197,6 +202,7 @@ void run_held_host() {
 			zone->is_spawn_point = true;
 		}
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "mission_start";
 		cfg.config.max_players = 4;
@@ -307,6 +313,7 @@ struct Source final : w::IRootMotionSource {
 void run_own_join_warms_the_wired_body() {
 	std::map<std::string, std::string> files;
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
 	inmatch::HostRole &role = *role_storage;
@@ -323,6 +330,7 @@ void run_own_join_warms_the_wired_body() {
 	CHECK(options.game_type == game_type::kDeathmatch);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "own_join_warm_up";
 		cfg.config.max_players = 4;
@@ -387,6 +395,7 @@ void run_own_join_warms_the_wired_body() {
 void run_own_mission_start_submits_its_kit() {
 	std::map<std::string, std::string> files;
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
 	inmatch::HostRole &role = *role_storage;
@@ -398,6 +407,7 @@ void run_own_mission_start_submits_its_kit() {
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "own_kit_pair";
 		cfg.config.max_players = 4;
@@ -451,6 +461,7 @@ void run_own_mission_start_submits_its_kit() {
 void run_single_player_mission_start_submits_no_kit() {
 	std::map<std::string, std::string> files;
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>(
 			inmatch::RoleKind::SinglePlayer, nullptr);
@@ -463,6 +474,7 @@ void run_single_player_mission_start_submits_no_kit() {
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "SINGLEPLAYERGAME";
 		cfg.config.max_players = 1;
@@ -497,6 +509,7 @@ void run_first_round_init_seeds_the_own_buffer() {
 	std::map<std::string, std::string> files;
 	files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
 	inmatch::HostRole &role = *role_storage;
@@ -509,6 +522,7 @@ void run_first_round_init_seeds_the_own_buffer() {
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "own_buffer_seed";
 		cfg.config.max_players = 4;
@@ -564,6 +578,7 @@ void run_single_player_restart_repromotes_the_mission_kit() {
 		std::map<std::string, std::string> files;
 		files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		bms::File mission = two_entity_mission();
 		bms::WeaponLoadoutRecord row;
@@ -606,6 +621,7 @@ void run_single_player_restart_repromotes_the_mission_kit() {
 		std::map<std::string, std::string> files;
 		files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
@@ -640,6 +656,7 @@ void run_single_player_class_is_the_missions_type() {
 	for (const Case c : {Case{1, 1}, Case{2, 2}, Case{3, 3}, Case{0, 1}, Case{7, 1}}) {
 		std::map<std::string, std::string> files;
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
@@ -653,6 +670,7 @@ void run_single_player_class_is_the_missions_type() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "SINGLEPLAYERGAME";
 			cfg.config.max_players = 1;
@@ -700,6 +718,7 @@ void run_single_player_restart_keeps_the_class_word() {
 	for (int pass = 0; pass < 2; ++pass) {
 		std::map<std::string, std::string> files;
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
@@ -752,6 +771,7 @@ void run_single_player_restart_keeps_the_uptime_stamp() {
 	for (int pass = 0; pass < 3; ++pass) {
 		std::map<std::string, std::string> files;
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
@@ -765,6 +785,7 @@ void run_single_player_restart_keeps_the_uptime_stamp() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "SINGLEPLAYERGAME";
 			cfg.config.max_players = 1;
@@ -850,6 +871,7 @@ void run_a_single_player_fill_carries_into_a_serve_only_row() {
 		std::map<std::string, std::string> files;
 		files["weapon.def"] = "weapon WPN_KNIFE\r\nend\r\nweapon WPN_M4AUTO\r\nend\r\n";
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);

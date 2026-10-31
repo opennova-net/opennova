@@ -16,6 +16,7 @@
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::wac;
@@ -29,6 +30,7 @@ static int failures = 0;
 
 struct Fixture {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     Fixture() {
         world.registry.configure_pool(0, 16);
@@ -176,11 +178,13 @@ static void test_experience_both_occupant_links_and_zero_shares() {
 
 struct HostFixture : Fixture {
     nm::NapiNPServerCtx ctx;
+    bool ctx_jo = test_titles::jo_config(ctx.config);
     repl::UdpSessionTransport transport{repl::UdpSessionTransport::Role::Host};
     EntityHandle actor;
     explicit HostFixture(uint8_t type = nm::NapiNPConnection::kTypeServerSide) {
         nm::set_connection_mode(ctx, nm::ConnectionMode::HostOnly);
         nm::GameConfig config;
+        test_titles::jo_config(config);
         config.max_players = 4;
         nm::SessionStartup startup;
         startup.protocol = opennova::title_protocol("jo");

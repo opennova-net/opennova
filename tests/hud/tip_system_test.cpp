@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 #include <base/title/title.h>
+#include "../common/title_fixture.h"
 
 // The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
 // the frame's title goes through require_title, so every frame names one.
@@ -395,6 +396,7 @@ world::Entity make_vehicle(int32_t item_id, int32_t unit_type, world::SeatType s
 void test_world_boarding() {
 	using world::SeatType;
 	auto fixture = std::make_unique<world::World>();
+	test_titles::jo_world(*fixture);
 	world::World &w = *fixture;
 	w.registry.configure_pool(0, 16);
 	w.registry.configure_pool(1, 16);

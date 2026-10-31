@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -23,6 +24,7 @@ void brain_dispatch_vectors() {
 #include "fixtures/brain_dispatch_vectors.inc"
     };
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     auto &w = *world;
     w.registry.configure_pool(0, 1);
     w.registry.configure_pool(1, 1);
@@ -74,6 +76,7 @@ void player_motor_vectors() {
 #include "fixtures/vehicle_input_vectors.inc"
     };
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     auto &w = *world;
     w.registry.configure_pool(0, 1);
     w.registry.configure_pool(1, 1);
@@ -157,6 +160,7 @@ void aircraft_recovery_vectors() {
 #include "fixtures/aircraft_recovery_vectors.inc"
     };
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     auto &w = *world;
     w.registry.configure_pool(1, 8); // the brain's row (its position words)
     const int first = w.ai.attach(EntityHandle::make(1, 0));
@@ -189,6 +193,7 @@ void aircraft_recovery_vectors() {
 void crowded_brain_tick() {
     for (bool authority : {false, true}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         auto &w = *world;
         constexpr int count = 80;
         w.registry.configure_pool(1, count);

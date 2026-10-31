@@ -46,6 +46,7 @@
 #include <memory>
 #include <set>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -113,6 +114,7 @@ struct Source final : w::IRootMotionSource {
 // off the every-64th edge. Heap-held (the 1 MB test-main stack under MSVC).
 struct Rig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<w::CollisionWorld> collision = std::make_unique<w::CollisionWorld>();
 	Source source;
 	w::EntityHandle body;
@@ -275,6 +277,7 @@ w::CollisionModel ladder_model() {
 // Heap-held (the 1 MB test-main stack under MSVC).
 struct LadderRig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<w::CollisionWorld> collision = std::make_unique<w::CollisionWorld>();
 	Source source;
 	w::EntityHandle body;
@@ -408,6 +411,7 @@ bool run_the_reset_leaves_the_stance_bits() {
 bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	Source source;
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->ai.root_motion = &source;
 	world->ai.is_authority = true;
 	world->tables.player.has_item_def = true;
@@ -436,7 +440,9 @@ bool run_the_deploy_pushes_the_body_out_of_a_wall() {
 	collision->build_initial_tables(*world);
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 8;
 	settings.game_type = opennova::game_type::kCoop;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,

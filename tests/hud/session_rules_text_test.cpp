@@ -21,6 +21,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::hud;
@@ -93,14 +94,17 @@ static void check_server_config_strings() {
 static void check_replica_arms() {
 	// The authority's own report, through the client's 0x58 arm.
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.server_name = "Host";
 	config.mission_name = "Mission";
 	config.game_type = game_type::kTeamDeathmatch;
 	config.max_players = 12;
 	config.score_limit = 50;
 	world::World w;
+	test_titles::jo_world(w);
 	const std::vector<uint8_t> body = inmatch::serialize_session_status(config, 61000, true, &w);
 	replication::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	pipeline.state().local_clock_ms = 32;
 	pipeline.apply(s2c::SESSION_STATUS, body);
 	const replication::ClientSessionStatus &s = pipeline.state().session_status;
@@ -124,9 +128,11 @@ static void check_co_op_key_nine() {
 	// 8 needs a session [orig: Server_BuildStatusReport @0x530cb0..0x530ce1,
 	// @0x530e71].
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kCoop;
 	config.round_time_limit_minutes = 30;
 	world::World w;
+	test_titles::jo_world(w);
 	SessionStatusBlock block;
 	std::vector<uint8_t> body = inmatch::serialize_session_status(config, 0, true, &w);
 	CHECK(decode_session_status(body.data(), body.size(), block));

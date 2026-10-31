@@ -4,6 +4,7 @@
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::wac;
@@ -31,6 +32,7 @@ struct Motion : IRootMotionSource {
 
 struct Fixture {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     Motion motion;
     EntityHandle actor;
     Fixture() {

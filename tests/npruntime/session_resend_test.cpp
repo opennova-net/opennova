@@ -27,6 +27,7 @@
 #include <vector>
 #include "../common/test_expect.h"
 #include "joiner_receive.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -99,6 +100,7 @@ bool check_session_header_key_validation() {
 	// Host: a correctly encrypted packet addressed to a different server-local SK must be dropped
 	// before its sequence or ACK can enter this connection.
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	seed_host(ctx);
 	SessionSequencing client_tx{1, 0};
 	std::vector<uint8_t> wrong_c2s;
@@ -187,6 +189,7 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 
 	// Host mirror: frontier=1, then C2S seq3 before seq2 in one socket drain.
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	seed_host(ctx);
 	ctx.np_protocol.connection_list[0].seq.last_inbound_seq = 1;
 	SessionSequencing client_tx{2, 0};
@@ -228,6 +231,7 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 
 bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	seed_host(ctx);
 	inmatch::JoinerConnection joiner("LossRecovery");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
@@ -398,6 +402,7 @@ public:
 //  SendSessionPacket @0x6239b6; PumpRecvQueues tail -> SendMissingSeqList @0x6269ce]
 bool check_host_receive_pump_sends_ignore_the_s2c_boundary() {
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	seed_host(owner.ctx);
 	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
 	inmatch::arm_s2c_send_holdoff(conn, 12);
@@ -464,6 +469,7 @@ bool check_host_receive_pump_sends_ignore_the_s2c_boundary() {
 //  the 0x57 send SendFiltered(0x57, 1, 62) @0x51e450]
 bool check_host_flush_counter_ages_finite_records_per_tick() {
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	seed_host(owner.ctx);
 	inmatch::admit_peer(owner, kPeer);
 	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
@@ -513,6 +519,7 @@ bool check_host_flush_counter_ages_finite_records_per_tick() {
 // @0x6292a9 -> BuildOutgoingPackets @0x6292b4; the clear @0x628629]
 bool check_host_owes_an_ack_for_c2s_records() {
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	seed_host(owner.ctx);
 	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
 	inmatch::arm_s2c_send_holdoff(conn, 12);
@@ -561,6 +568,7 @@ bool check_host_owes_an_ack_for_c2s_records() {
 // HandleNewConnection @0x4c81ca]
 bool check_host_frames_under_the_negotiated_ceiling() {
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	seed_host(owner.ctx);
 	inmatch::admit_peer(owner, kPeer);
 	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
@@ -585,6 +593,7 @@ bool check_host_frames_under_the_negotiated_ceiling() {
 bool check_host_list_walk_replays_after_every_datagram() {
 	constexpr PeerAddr kPeerB{0x0100007Fu, 30125};
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	seed_host(owner.ctx);
 	inmatch::NapiNPConnection b = owner.ctx.np_protocol.connection_list[0];
 	b.peer = kPeerB;
@@ -627,6 +636,7 @@ bool check_host_list_walk_replays_after_every_datagram() {
 //  test @0x626960]
 bool check_host_drops_a_queued_copy_parsed_in_order() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	seed_host(ctx);
 	ctx.np_protocol.connection_list[0].seq.last_inbound_seq = 1;
 	const SessionCrypto c2s{kClientScrk, {}, kServerKey};
@@ -650,6 +660,7 @@ bool check_host_drops_a_queued_copy_parsed_in_order() {
 // [orig: CNapiNPConnection_PumpSendIntervals `cmp [esi+7A8h], 0` @0x629053]
 bool check_host_keepalive_waits_while_a_packet_is_held() {
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	seed_host(owner.ctx);
 	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
 	ScriptedDatagramSocket sock;
@@ -677,6 +688,7 @@ bool check_host_keepalive_waits_while_a_packet_is_held() {
 
 bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	seed_host(ctx);
 	inmatch::JoinerConnection joiner("LossRecovery");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
@@ -803,6 +815,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 // three reconstructed packets, each under its old sequence, in request order.
 bool check_multi_sequence_resend_request_reconstructs_each() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	seed_host(ctx);
 	inmatch::JoinerConnection joiner("MultiNack");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
@@ -847,6 +860,7 @@ bool check_multi_sequence_resend_request_reconstructs_each() {
 // accepted but sends nothing; neither halves the next 0x0A budget.
 bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	seed_host(ctx);
 	std::vector<uint8_t> framed;
 	if (!expect(inmatch::frame_in_match_s2c(ctx, kPeer, 0x49, {0xE1}, framed) &&
@@ -908,6 +922,7 @@ bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
 // at FINAL may cross the host's public in-match event seam.
 bool check_c2s_fragments_dispatch_once_after_final() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	seed_host(ctx);
 	SessionSequencing client_tx{1, 0};
 

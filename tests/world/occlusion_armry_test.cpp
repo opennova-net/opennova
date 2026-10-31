@@ -34,6 +34,7 @@
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::threedi;
@@ -166,6 +167,7 @@ bool occlusion_from_3di(const Threedi3di3 &model, OcclusionModel &out) {
 
 struct Rig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     CollisionWorld cw;
     OcclusionWorld ow;
     Field field{0};

@@ -65,6 +65,7 @@
 
 #include "conn_fixture.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -97,9 +98,11 @@ size_t count_tag(const std::vector<ns::Datagram> &datagrams, uint8_t tag) {
 
 struct HostFixture {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	// The World is heap-held: a check holding several fixtures stays inside the 1 MB MSVC
 	// stack.
 	std::unique_ptr<w::World> world_storage = std::make_unique<w::World>();
+	bool world_storage_jo = test_titles::jo_world(*world_storage);
 	w::World &world = *world_storage;
 	std::vector<ns::UdpSessionTransport> transports;
 	std::vector<w::EntityHandle> players;
@@ -157,6 +160,7 @@ bool check_ping_ring_and_strikes() {
 	HostFixture f(1);
 	inmatch::NapiNPConnection &conn = f.conn(0);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	// Eleven samples: the cursor pre-increments 1..10, sample 10 lands on the
 	// cursor dword itself, so the twelfth wraps to 0.
 	for (uint32_t i = 1; i <= 11; ++i)
@@ -181,7 +185,7 @@ bool check_ping_ring_and_strikes() {
 	// A compliant sample resets the max strike counter.
 	HostFixture g(1);
 	inmatch::NapiNPConnection &other = g.conn(0);
-	config = inmatch::GameConfig{};
+	config = test_titles::jo_config_of(inmatch::GameConfig{});
 	config.do_max_ping_check = true;
 	config.max_ping = 100;
 	for (int i = 0; i < 20; ++i)
@@ -202,7 +206,7 @@ bool check_ping_ring_and_strikes() {
 	HostFixture d(1);
 	inmatch::NapiNPConnection &debug = d.conn(0);
 	debug.join_environment.db = 1;
-	config = inmatch::GameConfig{};
+	config = test_titles::jo_config_of(inmatch::GameConfig{});
 	config.do_min_ping_check = true;
 	config.min_ping = 500;
 	for (int i = 0; i < 21; ++i)
@@ -1025,6 +1029,7 @@ bool check_medic_revive_transaction() {
 		body->health = 0;
 	}
 	w::MatchRules medic_rules;
+	test_titles::jo_match(medic_rules);
 	medic_rules.game_type = 0x10000u; // TDM
 	medic_rules.score_values.emplace();
 	(*medic_rules.score_values)[7] = 4; // MEDICSAVE
@@ -1099,6 +1104,7 @@ bool check_medic_revive_gates() {
 		victim->alive = false;
 		f.conn(0).link.downed_revive_seconds = 120;
 		w::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = 0x10000u; // TDM
 		rules.score_values.emplace();
 		(*rules.score_values)[7] = 4; // MEDICSAVE
@@ -1196,6 +1202,7 @@ bool check_medic_heal_transaction() {
 	patient->health = 40;
 	patient->position = {12.0f, 34.0f, 5.0f};
 	w::MatchRules heal_rules;
+	test_titles::jo_match(heal_rules);
 	heal_rules.game_type = 0x10000u; // TDM
 	heal_rules.score_values.emplace();
 	(*heal_rules.score_values)[6] = 3; // MEDICHEAL
@@ -1696,6 +1703,7 @@ bool check_change_team() {
 	p1.reply.score_delta_sound_value = 9;
 	p1.link.armory_reuse_seconds = 5;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = 0x10000u;
 	f.world.match.configure(rules);
 	f.world.match.upsert_player({f.players[0], 1, "P1"});

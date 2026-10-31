@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -23,6 +24,7 @@ static int failures = 0;
 
 int main() {
 	mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	world::World &w = kernel.world;
 
 	// An empty world: nothing to report, nothing to pick.
@@ -82,6 +84,7 @@ int main() {
 		static const int unmapped[256] = { 0 };
 		for (const int *grid : { mapped, unmapped }) {
 			mission::MissionKernel ground;
+			test_titles::jo_world(ground.world);
 			ground.collision.terrain = &flat;
 			ground.world.tables.surface_map.data = raster;
 			ground.world.tables.surface_map.width = 2;

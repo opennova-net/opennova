@@ -31,6 +31,7 @@
 #include <vector>
 #include "../common/test_expect.h"
 #include "joiner_receive.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -151,8 +152,10 @@ bool run_dropped_hello_and_auth_recover() {
 	const PeerAddr peer{0x0100007Fu, 32769};
 
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	uint64_t now_ms = 0;
 	inmatch::ClientRuntime client("RetryJoiner", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	const std::vector<uint8_t> first_hello = client.start();
 	if (!expect(is_opcode(first_hello, SESSION_OPCODE_CLIENT_HELLO),
@@ -261,10 +264,12 @@ bool run_dropped_hello_and_auth_recover() {
 bool run_unanswered_client_join_fails_after_30000_ms() {
 	const PeerAddr peer{0x0100007Fu, 32770};
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E113u);
 	uint64_t now_ms = 5000;
 	inmatch::ClientRuntime client("TimeoutJoiner", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	const std::vector<uint8_t> hello = client.start();
 	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
@@ -392,6 +397,7 @@ bool run_discovered_join_sends_its_0x42_at_the_next_pump() {
 bool run_enumerated_join_sends_its_0x42_a_pass_after_the_0x81() {
 	const PeerAddr peer{0x0100007Fu, 32773};
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E115u);
 
@@ -474,6 +480,7 @@ bool run_discovered_row_join_skips_the_hello() {
 	const PeerAddr scanner{0x0100007Fu, 32771};
 	const PeerAddr joiner_peer{0x0100007Fu, 32772};
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E114u);
 	// The browse: one probe, one 0x81, projected into the row record.
@@ -490,6 +497,7 @@ bool run_discovered_row_join_skips_the_hello() {
 	}
 	uint64_t now_ms = 7000;
 	inmatch::ClientRuntime client("RowJoiner", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
@@ -523,6 +531,7 @@ bool run_discovered_row_join_skips_the_hello() {
 		return false;
 	}
 	inmatch::ClientRuntime bare("BareJoiner", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(bare);
 	bare.set_protocol(&kJo);
 	return expect(is_opcode(bare.start(), SESSION_OPCODE_CLIENT_HELLO),
 	              "a bare dial (no row record) still sends the 0x41 first");
@@ -651,6 +660,7 @@ bool run_one_connection_index_per_join() {
 
 	const PeerAddr joiner_peer{0x0100007Fu, 32790};
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 	                             inmatch::SocketMode::Socketless, 0x0FE0E119u);
 	LanDiscoveryBrowser browser;
@@ -973,7 +983,9 @@ bool run_server_auth_acceptance_follows_retail() {
 bool run_cs_block_drives_the_joiner_ceiling_and_intervals() {
 	const PeerAddr peer{0x0100007Fu, 32771};
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_packet_size = 576;
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E114u, nullptr, config);
@@ -1235,11 +1247,13 @@ public:
 bool run_server_active_probe_recovers_settings() {
 	const PeerAddr peer{0x0100007Fu, 32769};
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	inmatch::test::bring_up_host(owner.ctx, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E112u);
 	ScriptedDatagramSocket sock;
 	uint64_t now_ms = 0;
 	inmatch::ClientRuntime client("SettingsProbe", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 
 	sock.inbound.emplace_back(peer, client.start());

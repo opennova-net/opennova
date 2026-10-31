@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -42,6 +43,7 @@ struct Factory : ITeammateSpawner {
 };
 struct Fixture {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     Factory factory{world};
     mission::BmsEventSystem events;

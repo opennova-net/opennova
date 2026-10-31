@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -58,6 +59,7 @@ w::Entity &with_def(w::Entity &e, int32_t type_index = 1) {
 struct FourPoolWorld final : w::World {
 	explicit FourPoolWorld(bool pool1_ai_capable = false) {
 		w::World &world = *this;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 8);
 		world.registry.configure_pool(1, 8);
 		world.registry.configure_pool(2, 8);
@@ -198,6 +200,7 @@ bool run_pool1_spawn_non_ai() {
 
 bool run_pool1_spawn_mount_handles() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 	w::Entity carrier;
 	carrier.kind = w::EntityKind::Item;
@@ -251,6 +254,7 @@ bool run_pool1_spawn_mount_handles() {
 //  (flag 0x100 @0x503BD3), `mov eax, [ebp+28h]` @0x503C22]
 bool run_pool1_spawn_parent_is_the_occupant() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 8);
 	w::Entity person;
@@ -323,6 +327,7 @@ bool run_pool2_static_slot_alignment() {
 	// A building at a NON-zero slot must pad lower slots with empty-slot sentinels so the
 	// client's slot = start_index + index stays correct.
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(2, 8);
 	w::Entity a; a.kind = w::EntityKind::Building; a.item_id = 0x10; world.registry.spawn(2, with_def(a));
 	w::Entity b; b.kind = w::EntityKind::Building; b.item_id = 0x20; world.registry.spawn(2, with_def(b));
@@ -350,6 +355,7 @@ bool run_pool2_static_slot_alignment() {
 //  @0x442230 raises `used` only @0x44228B]
 bool run_pool2_static_walks_to_the_used_count() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(2, 8);
 	for (uint16_t i = 0; i < 4; ++i) {
 		w::Entity b;
@@ -388,6 +394,7 @@ bool run_pool2_static_walks_to_the_used_count() {
 //  word @0x50462C; ItemList_FindIndexByTypeId @0x49E100, the miss @0x49E131]
 bool run_pool2_static_unknown_type_is_a_zero_word() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(2, 4);
 	w::Entity known;
 	known.kind = w::EntityKind::Building;
@@ -418,6 +425,7 @@ bool run_pool2_static_used_count_is_the_load_count() {
 	}
 	file.buildings[2].bmsi_attributes = 0x80; // multiplayer only: rejected offline
 	w::World world;
+	test_titles::jo_world(world);
 	const opennova::mission::PromoteResult r = opennova::mission::promote_mission(file, world);
 	// No items.def here: stamp the rows the trait sweep would resolve.
 	std::vector<w::EntityHandle> statics;
@@ -443,6 +451,7 @@ bool run_pool2_static_used_count_is_the_load_count() {
 //  @0x504601, radius @0x50460F]
 bool run_pool2_zone_block_rides_the_chain() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(2, 4);
 	w::Entity trigger;
 	trigger.kind = w::EntityKind::Building;
@@ -547,6 +556,7 @@ bool run_pool2_zone_block_rides_the_chain() {
 //  page @0x51BC50 / @0x51BCBA]
 bool run_zone_outs_carry_within_a_call() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 4);
 	world.registry.configure_pool(2, 4);
 	w::Entity trigger;
@@ -659,6 +669,7 @@ bool run_pool3_marker() {
 //  word @0x503673, the count @0x503687, the start word @0x5034C5]
 bool run_pool3_marker_empty_slot_is_a_zero_word() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(3, 8);
 	for (int i = 0; i < 3; ++i) {
 		w::Entity m;
@@ -692,6 +703,7 @@ bool run_pool3_marker_empty_slot_is_a_zero_word() {
 //  word @0x503673; ItemList_FindIndexByTypeId @0x49E100, the miss @0x49E131]
 bool run_pool3_marker_unknown_type_is_a_zero_word() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(3, 4);
 	w::Entity unknown;
 	unknown.kind = w::EntityKind::Marker;
@@ -729,6 +741,7 @@ bool run_pools_are_disjoint() {
 // NetPacket_WritePlayerState @0x4ff6d0/@0x4ff7b8] (D-NET-136).
 bool run_pool0_player_bit0_is_per_entity() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	const auto spawn_player = [&](uint32_t flags) {
 		w::Entity player;
@@ -791,6 +804,7 @@ bool run_nonplayer_records_carry_the_flags_word() {
 // trying to repair. [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180]
 bool run_full_entity_spawn_player() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	w::Entity player;
 	player.kind = w::EntityKind::Organic;
@@ -1005,6 +1019,7 @@ bool run_full_entity_spawn_itemdef_gates() {
 //  @0x503ECC..0x503ED3, `test dword [def+54h],40000h` @0x503F1F..0x503F43]
 bool run_pool1_zone_block_rides_its_sources() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 4);
 	w::Entity spawn_point;
 	spawn_point.kind = w::EntityKind::Item;
@@ -1049,6 +1064,7 @@ bool run_pool1_zone_block_rides_its_sources() {
 //  NetPacket_SerializePool2StaticToBuffer @0x504554..0x504588]
 bool run_palm_state_rides_its_callbacks() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 4);
 	world.registry.configure_pool(2, 4);
 	w::Entity palm;
@@ -1097,6 +1113,7 @@ bool run_palm_state_rides_its_callbacks() {
 //  @0x503C22..0x503C49; NetPacket_SerializeObjectToBuffer @0x504e8c..0x504fb4]
 bool run_freed_carrier_row_keeps_the_target_handle() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 	w::Entity carrier;
 	carrier.kind = w::EntityKind::Item;

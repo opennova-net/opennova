@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -49,7 +50,9 @@ void run_the_columns_follow_the_send_window() {
 	// A HostOnly authority in session over a live world, no player slot eligible. Heap-held
 	// (MSVC's 1 MB test-main stack).
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::set_connection_mode(*ctx, inmatch::ConnectionMode::HostOnly);
 	ctx->is_in_session = 1;
 	world->rules.mp_session = true;

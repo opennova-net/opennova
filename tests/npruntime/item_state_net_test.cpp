@@ -12,6 +12,7 @@
 #include <memory>
 #include <cstdio>
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -45,7 +46,9 @@ std::vector<std::vector<uint8_t>> take(ns::LoopbackChannel &channel, uint8_t tag
 //  @0x5470F9..0x547100)]
 int joiner_kill_runs_the_brain_client_arm() {
     inmatch::ClientRuntime joiner("brain-kill");
+    test_titles::jo_folds(joiner);
     auto world_heap = std::make_unique<w::World>();
+    test_titles::jo_world(*world_heap);
     w::World &world = *world_heap;
     world.rules.logic_authority = false;
     world.rules.mp_session = true;
@@ -124,6 +127,7 @@ int joiner_kill_runs_the_brain_client_arm() {
 
 int main() {
     auto heap = std::make_unique<w::World>();
+    test_titles::jo_world(*heap);
     auto &world = *heap;
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
@@ -141,6 +145,7 @@ int main() {
     const auto local = world.registry.spawn(0, person);
     ns::LoopbackChannel alive_wire, dead_wire, local_wire, waiting_wire;
     inmatch::NapiNPServerCtx ctx;
+    test_titles::jo_config(ctx.config);
     ctx.world = &world;
     ctx.is_authority = ctx.is_in_session = 1;
     ctx.np_protocol.identity = title_protocol("jo");
@@ -181,6 +186,7 @@ int main() {
     auto states = take(dead_wire, s2c::KILL_SYNC);
     CHECK(states.size() == 1 && states[0][2] == 255 && states[0][3] == 255);
     ns::ClientReplicaPipeline replica;
+    test_titles::jo_folds(replica);
     replica.apply(s2c::KILL_SYNC, states[0]);
     const auto deaths = replica.drain_effect_commands();
     CHECK(deaths.size() == 1 && std::get<ns::EntityDeathEvent>(deaths[0]).item_state && std::get<ns::EntityDeathEvent>(deaths[0]).hit_section == -1);
@@ -212,7 +218,9 @@ int main() {
     CHECK(decode_explosion_effect(nullptr,0,decoded));
     CHECK(decoded.type == 0 && decoded.source == 0);
     inmatch::ClientRuntime joiner("effects");
+    test_titles::jo_folds(joiner);
     auto joiner_world = std::make_unique<w::World>();
+    test_titles::jo_world(*joiner_world);
     joiner_world->rules.logic_authority = false;
     joiner_world->rules.mp_session = true;
     joiner_world->registry.configure_pool(1,8);

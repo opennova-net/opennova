@@ -22,6 +22,7 @@
 #include <climits>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::threedi;
 using namespace opennova::world;
@@ -250,6 +251,7 @@ void test_a_one_object_carrier_takes_the_simple_seat_bone() {
 	const Case cases[] = {{1, 0u, true}, {2, 0u, false}, {1, kItemAttribEweap, false}};
 	for (const Case &c : cases) {
 		auto world = std::make_unique<World>();
+		test_titles::jo_world(*world);
 		Entity carrier;
 		carrier.item_type = 9; // a decoration, no vehicle
 		carrier.item_attrib = c.attrib;

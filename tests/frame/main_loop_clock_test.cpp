@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -42,6 +43,7 @@ struct FakeClock final : world::FrameLockClock {
 // A Serve Only role over a bare kernel that counts its ticks.
 struct CountingRole final : Role {
 	mission::MissionKernel kernel;
+	bool kernel_jo = test_titles::jo_world(kernel.world);
 	int ticks = 0;
 	CountingRole() { bind(kernel); }
 	RoleKind kind() const override { return RoleKind::DedicatedHost; }

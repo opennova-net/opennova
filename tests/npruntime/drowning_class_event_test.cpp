@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -41,7 +42,9 @@ namespace {
 
 void test_the_drowning_runs_the_class_callback() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
@@ -96,6 +99,7 @@ void test_the_drowning_runs_the_class_callback() {
 //  @0x407B0B..0x407B33; Entity_SendDetachPacket @0x435518 / @0x43552A]
 void test_the_seat_leave_splits_on_the_session_peer_bit() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 4);

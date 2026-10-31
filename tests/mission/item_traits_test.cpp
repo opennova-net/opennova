@@ -33,6 +33,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -405,6 +406,7 @@ void test_graphic_model_is_the_loads_result() {
         CHECK(index.scan(root, std::string(), VfsMountMode::LooseOnly));
         assets::AssetStore models{&index};
         auto wp = std::make_unique<World>();
+        test_titles::jo_world(*wp);
         World &w = *wp;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 8);
@@ -462,6 +464,7 @@ void test_graphic_model_is_the_loads_result() {
         for (const assets::AssetStore *models : {static_cast<const assets::AssetStore *>(nullptr),
                      &sourceless}) {
             World w;
+            test_titles::jo_world(w);
             w.registry.configure_pool(1, 4);
             const EntityHandle kept_h = spawn(w, 1, 701, EntityKind::Item);
             mission::resolve_item_traits(w, defs, {}, models);
@@ -492,6 +495,7 @@ void test_a_bay_takes_its_groups_unit_types() {
     CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(kDefs),
             sizeof(kDefs) - 1, &defs) == 0);
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(2, 4);
     const EntityHandle bay = spawn(w, 2, 1400, EntityKind::Item);
@@ -514,6 +518,7 @@ static void test_regional_loops_bind_loaded_sets() {
     DefItemsFile rows = {};
     CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(kRows), sizeof(kRows) - 1, &rows) == 0);
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 4);
     static const char kProfile[] =
@@ -640,6 +645,7 @@ int main() {
     std::strcpy(bunker->particleother, "po_bunker");
 
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);  // organics
     w.registry.configure_pool(1, 10); // items/vehicles
     w.registry.configure_pool(2, 16); // buildings (bunker, bush, unknown, the 7 class rows, the 2 sway rows + the 4 section rows)
@@ -1301,6 +1307,7 @@ int main() {
     {
         player->hp = 200;
         World sp;
+        test_titles::jo_world(sp);
         sp.registry.configure_pool(0, 8);
         sp.rules.mp_session = false;
         sp.rules.difficulty = 1;
@@ -1336,6 +1343,7 @@ int main() {
         rifle->mana = 40;
         rifle->destroy_timing_ticks[0] = 77;
         World mw;
+        test_titles::jo_world(mw);
         mw.registry.configure_pool(1, 4);
         mw.registry.configure_pool(3, 4);
         const EntityHandle marker_h = spawn(mw, 3, 510, EntityKind::Marker);

@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 namespace env = opennova::env;
@@ -328,6 +329,7 @@ world::Entity person_at(float x, int team) {
 
 void test_the_entity_walk_skips_the_local_player_and_its_near_teammates() {
 	auto heap = std::make_unique<world::World>();
+	test_titles::jo_world(*heap);
 	world::World &w = *heap;
 	for (int pool = 0; pool < 3; ++pool)
 		w.registry.configure_pool(pool, 4);
@@ -366,6 +368,7 @@ void test_the_entity_walk_skips_the_local_player_and_its_near_teammates() {
 // Render_SkyboxSunGlow @ 0x5aceae..0x5acede; Physics_RaycastAgainstEntityPool @ 0x538720].
 void test_a_joiner_walks_the_wire_persons() {
 	auto heap = std::make_unique<world::World>();
+	test_titles::jo_world(*heap);
 	world::World &w = *heap;
 	for (int pool = 0; pool < 3; ++pool)
 		w.registry.configure_pool(pool, 4);

@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ns = opennova::replication;
@@ -56,6 +57,7 @@ const Protocol *dfx2() { return title_protocol("dfx2"); }
 // its world's co-op checkpoint at `checkpoint`.
 std::vector<uint8_t> phase3_frame(const Protocol *protocol, uint16_t checkpoint = 0xFFFF) {
 	world::World w;
+	test_titles::jo_world(w);
 	w.rules.title_rules = &world::title_rules("jo");
 	w.script.coop_checkpoint_slot = checkpoint;
 	w.registry.configure_pool(0, 1);
@@ -104,6 +106,7 @@ void host_fan_writes_the_checkpoint() {
 
 void joiner_view_keeps_the_checkpoint() {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*view);
 	view->set_protocol(dfx2());
 	view->set_rules(&world::title_rules("dfx2"));
 	view->set_game_type(0x30020u);
@@ -119,6 +122,7 @@ void joiner_view_keeps_the_checkpoint() {
 	view->apply(s2c::PER_FRAME_UPDATE, encode_frame_update(marked));
 	expect(view->state().coop_checkpoint_revision == 1, "the same checkpoint is no change");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*jo_view);
 	jo_view->set_protocol(jo());
 	jo_view->set_rules(&world::title_rules("jo"));
 	jo_view->set_game_type(0x30020u);
@@ -134,6 +138,7 @@ void weapon_restrictions_keep_the_titles_armory_value() {
 	// count 2: index 5 value 3, index 6 value 2
 	const std::vector<uint8_t> body = {2, 5, 3, 6, 2};
 	auto dfx2_view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*dfx2_view);
 	dfx2_view->set_protocol(dfx2());
 	dfx2_view->set_rules(&world::title_rules("dfx2"));
 	dfx2_view->apply(s2c::WEAPON_RESTRICTIONS, body);
@@ -141,6 +146,7 @@ void weapon_restrictions_keep_the_titles_armory_value() {
 	               dfx2_view->state().weapon_availability[6] == 1,
 	       "a DFX2 joiner keeps 3 (armory only) and drops 2");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*jo_view);
 	jo_view->set_protocol(jo());
 	jo_view->set_rules(&world::title_rules("jo"));
 	jo_view->apply(s2c::WEAPON_RESTRICTIONS, body);
@@ -165,6 +171,7 @@ std::vector<uint8_t> coop_world_state_load() {
 void world_state_folds_the_done_records() {
 	const std::vector<uint8_t> body = coop_world_state_load();
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*view);
 	view->set_protocol(dfx2());
 	view->set_rules(&world::title_rules("dfx2"));
 	view->set_game_type(0x30020u);
@@ -176,6 +183,7 @@ void world_state_folds_the_done_records() {
 	expect(state.coop_checkpoint == 5u && state.coop_checkpoint_revision == 0,
 	       "its checkpoint is the last done record's slot, no walk");
 	auto jo_view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*jo_view);
 	jo_view->set_protocol(jo());
 	jo_view->set_rules(&world::title_rules("jo"));
 	jo_view->set_game_type(0x30020u);
@@ -188,6 +196,7 @@ void world_state_folds_the_done_records() {
 	// The joiner's track legs: the route rebuilt with the done bytes, then a new checkpoint
 	// (slot 6 on the 0x0A) marks the route through it.
 	world::World w;
+	test_titles::jo_world(w);
 	w.rules.title_rules = &world::title_rules("dfx2");
 	inmatch::ReplicaTrackSeen seen;
 	inmatch::apply_replica_track(w, state, 0x30020u, true, seen);
@@ -205,6 +214,7 @@ void world_state_folds_the_done_records() {
 	expect(route[2].done, "the new checkpoint's marker is marked done");
 
 	world::World jo_world;
+	test_titles::jo_world(jo_world);
 	jo_world.rules.title_rules = &world::title_rules("jo");
 	inmatch::ReplicaTrackSeen jo_seen;
 	inmatch::apply_replica_track(jo_world, jo_view->state(), 0x30020u, true, jo_seen);
@@ -222,6 +232,7 @@ void world_state_raises_the_deploy_screen() {
 	std::vector<uint8_t> body = coop_world_state_load(); // its flags byte 0
 	const auto folded = [&](const Protocol *protocol, const char *code, bool death_screen) {
 		auto view = std::make_unique<ns::ClientReplicaPipeline>();
+		test_titles::jo_folds(*view);
 		view->set_protocol(protocol);
 		view->set_rules(&world::title_rules(code));
 		view->set_game_type(0x30020u);

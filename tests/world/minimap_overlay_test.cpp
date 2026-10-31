@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 namespace world = opennova::world;
 
@@ -142,6 +143,7 @@ int main() {
 	// the emplacement. [orig: Entity_ClassifyForMinimap @0x50FCF3..0x50FD4F]
 	{
 		world::World w;
+		test_titles::jo_world(w);
 		w.registry.configure_pool(1, 4);
 		world::Entity parent = base_entity();
 		parent.item_type = 1;
@@ -192,6 +194,7 @@ int main() {
 	// [orig: Entity_ClassifyForMinimap @0x50FB43..0x50FB9C]
 	{
 		world::World w;
+		test_titles::jo_world(w);
 		w.tables.powerups.loaded = true;
 		w.tables.powerups.rows.resize(5);
 		w.tables.powerups.rows[0].hp = -1;            // med pack

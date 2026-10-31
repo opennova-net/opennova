@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -49,6 +50,7 @@ constexpr int kFire = 149;    // attack_1
 // dispatch's Input_ResetAllState does inside its update.
 struct TickRecorder final : Role {
 	opennova::mission::MissionKernel kernel;
+	bool kernel_jo = test_titles::jo_world(kernel.world);
 	std::vector<TickInput> inputs;
 	std::vector<uint32_t> ticks;
 	int reset_at = -1;

@@ -49,6 +49,7 @@
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -483,6 +484,7 @@ int test_the_shot_is_the_games_npc_shot() {
 	const ClipFireShot &advanced = fire.shots()[2];
 	// The game: a world of the project's ammo, one org1 body at its origin, level, facing +x, the item's bytes.
 	auto heap = std::make_unique<world::World>();
+	test_titles::jo_world(*heap);
 	world::World &game = *heap;
 	game.tables.ammo = *table;
 	game.registry.configure_pool(0, 4);

@@ -418,17 +418,11 @@ void install_title_rules(const TitleRulesRow *rows, size_t count);
 // a project's target game, past their NoProject stop.
 const TitleRules &title_rules(std::string_view title_code);
 
-// The rules a holder (SessionRules, MatchRules, WaypointCycleContext, inmatch::GameConfig) starts
-// with, before the embedder or the session sets its title's: null in every program, so a read
-// before that aborts (require_title_rules) and no title's rules are ever run by default. The test
-// suite's registration point alone installs one (tests/common/install_games.cpp: Joint Operations',
-// which every fixture ran before titles had rules), so a fixture that builds a World with no
-// session keeps its expectations.
-void install_unset_title_rules(const TitleRules *rules);
-const TitleRules *unset_title_rules();
-
-// The rules a holder runs: the pointer the embedder or the session set from title_rules. A read
-// while it is unset aborts, naming `holder`.
+// The rules a holder runs (SessionRules, MatchRules, WaypointCycleContext, inmatch::GameConfig, a
+// joiner role and its replica folds): the pointer the embedder or the session set from title_rules,
+// null until then in every program and every test (a fixture names its title's,
+// tests/common/title_fixture.h), so no title's rules ever run by default. A read while it is unset
+// aborts, naming `holder`.
 [[noreturn]] void title_rules_unset(const char *holder);
 inline const TitleRules &require_title_rules(const TitleRules *rules, const char *holder) {
 	if (rules == nullptr) title_rules_unset(holder);

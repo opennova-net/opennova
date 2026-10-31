@@ -26,6 +26,7 @@
 
 #include <string>
 #include <variant>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -116,6 +117,7 @@ std::vector<uint8_t> make_sync_removal(uint8_t slot) {
 // Name/clan join into the row from the roster at apply time.
 void test_row_fields_and_flags() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC,
 			make_sync(7, 0xFF, kPlayerSyncHasName | kPlayerSyncHasTeamString,
 					"SPAGHETTI", "TAG"));
@@ -156,6 +158,7 @@ void test_row_fields_and_flags() {
 // A spectator row sets bit0 and reports team 0 from the remaining bits.
 void test_spectator_bit() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(2, "Belsman"));
 	view.apply(s2c::PLAYER_LIST, make_list(0x00, {{2, 0, 0, 0, 0x01}}, 1, 1));
 	const ClientScoreboard &sb = view.state().scoreboard;
@@ -170,6 +173,7 @@ void test_spectator_bit() {
 // invention — refuted 2026-08-19.)
 void test_empty_update_clears_board() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(1, "A"));
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(2, "B"));
 	view.apply(s2c::PLAYER_LIST,
@@ -186,6 +190,7 @@ void test_empty_update_clears_board() {
 // inactive slots and queues the C2S 0x22 retry [orig: @0x42fc05..0x42fc3a]).
 void test_unknown_slot_rows_drop() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(1, "KNOWN"));
 	view.apply(s2c::PLAYER_LIST,
 			make_list(0x01, {{1, 0, 5, 50, 0x02}, {9, 0, 3, 30, 0x04}}, 2, 0));
@@ -203,6 +208,7 @@ void test_unknown_slot_rows_drop() {
 // slot so later rows drop) [orig: @0x42fd4c records vs @0x434730 unlink].
 void test_row_names_survive_removal() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(5, "SPAGHETTI"));
 	view.apply(s2c::PLAYER_LIST, make_list(0x00, {{5, 0, 1, 0, 0x02}}, 1, 0));
 	view.apply(s2c::PLAYER_SYNC, make_sync_removal(5));
@@ -223,6 +229,7 @@ void test_row_names_survive_removal() {
 // [orig: PlayerSlotTable_GetOrInitSlot @0x4346c0]).
 void test_removal_resets_slot() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC,
 			make_sync(3, 4,
 					kPlayerSyncHasName | kPlayerSyncHasTeamString | kPlayerSyncHasQuality,
@@ -246,6 +253,7 @@ void test_removal_resets_slot() {
 // non-removal sync restamps it [orig: @0x431477/@0x431480].
 void test_roster_fields_are_last_write_wins_per_bit() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "Belsman", 6));
 	CHECK(view.state().roster[3].entity_slot == 6);
 	view.apply(s2c::PLAYER_SYNC,
@@ -259,6 +267,7 @@ void test_roster_fields_are_last_write_wins_per_bit() {
 // names were decode-era guesses) [orig: @0x50dc62/@0x50dd30].
 void test_team_table_fields() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_LIST, make_list_with_teams(0x01, {},
 			{{0, 0, 0, 0}, {10, 200, 7, 1}, {8, 150, 0, 2}}, 0, 0));
 	const ClientScoreboard &sb = view.state().scoreboard;
@@ -276,6 +285,7 @@ void test_team_table_fields() {
 // @0x42fe00 / @0x42fe16] — a negative team total prints negative.
 void test_team_scores_sign_extend() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_LIST, make_list_with_teams(0x01, {},
 			{{0, 0, 0, 0}, {0xFFFE, 0x8000, 0, 0}, {5, 0xFFFF, 0, 0}}, 0, 0));
 	const ClientScoreboard &sb = view.state().scoreboard;
@@ -321,6 +331,7 @@ std::vector<uint8_t> make_clan(uint8_t action, uint32_t net_id, const std::strin
 // @0x4348f0; the label copy @0x42fd85].
 void test_clan_registry_fold() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "Rock", 5));
 	view.apply(s2c::PLAYER_SYNC, make_sync_account(3, 5, 0x1234));
 	CHECK(view.state().roster[3].account_id == 0x1234);
@@ -364,6 +375,7 @@ void test_clan_registry_fold() {
 	CHECK(view.state().roster[5].registry_clan.empty());
 	// The authority's own loopback never folds 0x6A.
 	ClientReplicaPipeline host;
+	test_titles::jo_folds(host);
 	host.set_authority_recipient(true);
 	host.apply(s2c::CLAN_ROSTER, make_clan(1, 0x55, "H", "HOST"));
 	CHECK(host.state().clan_registry.empty());
@@ -374,6 +386,7 @@ void test_clan_registry_fold() {
 // [orig: @0x423d21 / @0x423d8a; Napi_CopyString(rec, .., 32) @0x42fd59].
 void test_projection_entity_facts() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC,
 			make_sync(3, 5, kPlayerSyncHasName | kPlayerSyncHasTeamString,
 					"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "CLANTAG"));
@@ -412,6 +425,7 @@ void test_flag_carrier_latch() {
 		return b;
 	};
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	ClientEntityState flag;
 	flag.handle = 0x1010;
 	flag.type_id = 4091;
@@ -438,6 +452,7 @@ void test_flag_carrier_latch() {
 // same [orig: @0x4315fc].
 void test_row_team_refreshes_entity() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	ClientEntityState entity;
 	entity.handle = 5; // pool 0, slot 5
 	view.state().entities.push_back(entity);
@@ -463,6 +478,7 @@ void test_row_team_refreshes_entity() {
 // field write or removal — moves ClientState.revision too.
 void test_roster_sync_bumps_revision() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	const std::uint64_t rev0 = view.state().revision;
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "GHOST", 5));
 	CHECK(view.state().revision == rev0 + 1); // the bind + name
@@ -485,6 +501,7 @@ void test_roster_sync_bumps_revision() {
 // @0x4241e2; entity gate @0x423d1b; players subtraction @0x4231dd].
 void test_projection_joins_and_counts() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC,
 			make_sync(3, 5,
 					kPlayerSyncHasName | kPlayerSyncHasTeamString | kPlayerSyncHasQuality,
@@ -514,6 +531,7 @@ void test_projection_joins_and_counts() {
 // strings survive [orig: the wipe @0x434730; the entity gate @0x423d1b].
 void test_projection_tracks_live_slot() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC,
 			make_sync(3, 5, kPlayerSyncHasName | kPlayerSyncHasQuality,
 					"DRIVER", nullptr, -1, 1));
@@ -556,6 +574,7 @@ void test_overlay_label_key_map() {
 // No 0x16 yet -> unknown header, cleared rows, zero counts.
 void test_projection_unknown_is_empty() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	std::vector<hud::ScoreboardEntry> rows{hud::ScoreboardEntry{}};
 	const ClientScoreboardHeader h = project_scoreboard(view.state(), rows);
 	CHECK(!h.known);
@@ -567,6 +586,7 @@ void test_projection_unknown_is_empty() {
 // [orig: @0x42fb9d]; a -2 own-goal reads -2 from the row, never 65534.
 void test_score_sign_extends() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "OWNGOAL", 5));
 	view.apply(s2c::PLAYER_LIST, make_list(0x00, {{3, 0, 0xFFFE, 0, 0x02}}, 1, 0));
 	CHECK(view.state().scoreboard.rows.size() == 1);
@@ -580,6 +600,7 @@ void test_score_sign_extends() {
 // [orig: NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
 void test_score_delta_sound_fold() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::SCORE_DELTA_SOUND, {0x0A, 0x00, 0x00, 0x00});
 	CHECK(view.state().score_feedback.score == 10);
 	CHECK(view.state().score_feedback.delta == 10);
@@ -607,6 +628,7 @@ void test_score_delta_sound_fold() {
 // [orig: @0x422350..0x4223C5 (dfx2.exe)]
 void test_score_fanfare_arms() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.state().exp_fanfare = 0x1405; // lo 5 (KILLTONE), hi 20 (HEADSHOTTONE)
 	view.apply(s2c::SCORE_DELTA_SOUND, {0x02, 0x00, 0x00, 0x00}); // +2: HIT
 	CHECK(view.state().score_feedback.fanfare_arms == 1);
@@ -630,6 +652,7 @@ void test_score_fanfare_arms() {
 //  CineTracker_RecordTimeEntry @0x422410]
 void test_score_tracker_fold() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	const ClientScoreTracker &t = view.state().score_tracker;
 	view.apply(s2c::SCORE_TRACKER_TIME, {0x64, 0x00, 0x00, 0x00});
 	CHECK(!t.valid && view.score_tracker_entries().empty());
@@ -660,6 +683,7 @@ void test_score_tracker_fold() {
 
 void test_spawn_wave_status_fold() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::SPAWN_WAVE_STATUS,
 	           {1, 0x01, 0x20, 0x03, 0x00, 2, 0x0A, 0x00,
 	            0x01, 0x00, 0x02, 0x00});
@@ -681,6 +705,7 @@ void test_spawn_wave_status_fold() {
 // A malformed body is counted, not folded.
 void test_malformed_body_is_rejected() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_LIST, {0x00});   // truncated: no row count
 	CHECK(!view.state().scoreboard.known);
 }
@@ -688,6 +713,7 @@ void test_malformed_body_is_rejected() {
 
 void test_permanent_death_live_count() {
     ClientReplicaPipeline view;
+    test_titles::jo_folds(view);
     std::vector<uint8_t> config(51, 0);
     config[48] = 0xA0; // trailing 0x8000 permanent-death + 0x2000 spectators
     view.apply(s2c::SESSION_CONFIG, config);
@@ -726,6 +752,7 @@ void test_permanent_death_live_count() {
 //  @0x428643, the handle gates @0x428679..0x42868c]
 void test_visible_players_fold() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(2, "Belsman", 5));
 	VisiblePlayers v;
 	v.entries.push_back({2, 0x0005});
@@ -759,6 +786,7 @@ void test_visible_players_fold() {
 // [orig: NapiNPClientMsg_HandleSpawnSlot @0x4317B0]
 void test_spawn_slot_notice_fold() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_local_player_slot(1);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "Other", 4));
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(1, "Me", 2));
@@ -807,6 +835,7 @@ void test_spawn_slot_notice_fold() {
 // [orig: NapiNPClientMsg_TeamAssign @0x431a15, @0x431ab2..0x431b05]
 void test_team_assign_refresh() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "Other", 4));
 	TeamAssign assign;
 	assign.entity_handle = 0x0004;
@@ -829,6 +858,7 @@ void test_team_assign_refresh() {
 // [orig: NapiNPClientMsg_HandleEmote @0x427E90; Chat_DispatchToChannel @0x42B9CD]
 void test_emote_and_local_chat_effects() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	EmoteBroadcast b;
 	b.emote = 2;
 	b.player_index = 7;

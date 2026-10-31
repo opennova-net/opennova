@@ -12,6 +12,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/world/infantry_internal.h>
+#include "../common/title_fixture.h"
 
 namespace {
 // Root-only BAD: ramps make the production loader's timing observable.
@@ -386,6 +387,7 @@ int main() {
 	// capsule-bottom history holds it) and the promotion lands the tick after.
 	{
 		opennova::replication::ClientReplicaPipeline view;
+		test_titles::jo_folds(view);
 		view.set_protocol(opennova::title_protocol("jo"));
 		view.set_item_class_resolver(&classify);
 		view.set_remote_motion_mode(true);

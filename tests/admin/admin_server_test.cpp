@@ -40,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -132,10 +133,12 @@ public:
 
 struct Host {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	MemoryFiles files;
 	inmatch::NapiLog net_log{files, inmatch::kNetLogFileName};
 	std::vector<std::string> system_lines;
 	std::unique_ptr<w::World> heap = std::make_unique<w::World>();
+	bool heap_jo = test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	std::vector<ns::UdpSessionTransport> transports;
 	std::vector<w::EntityHandle> players;
@@ -152,6 +155,7 @@ struct Host {
 		ctx.is_in_session = 1;
 		ctx.np_protocol.identity = title_protocol("jo");
 		w::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = 0x10000u;
 		world.match.configure(rules);
 		ctx.config.game_type = 0x10000u; // TDM

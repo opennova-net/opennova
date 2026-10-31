@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -59,6 +60,7 @@ std::vector<uint16_t> words(const std::vector<uint8_t> &page) {
 
 std::unique_ptr<w::World> make_world() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	for (int pool = 0; pool < 3; ++pool) world->registry.configure_pool(pool, 64);
 	return world;
 }
@@ -138,6 +140,7 @@ void test_host_request() {
 
 	ns::LoopbackChannel wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.world = &world;
@@ -207,6 +210,7 @@ void test_stamps_read_the_process_clock() {
 
 	ns::LoopbackChannel wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.world = &world;

@@ -122,9 +122,9 @@ struct GameConfig {
 	// the rules it runs (world::title_rules: its built-in score table, its timers and the knobs the
 	// session stamps on its World, world::SessionRules::title_rules). Both unset until set_title,
 	// from the launch's title: opennova-serve's /game, the game's mount (the single player's too);
-	// title_rules() aborts while the rules are (world::unset_title_rules).
+	// title_rules() aborts while the rules are (world::require_title_rules).
 	const Title *title = nullptr;
-	const world::TitleRules *rules = world::unset_title_rules();
+	const world::TitleRules *rules = nullptr;
 	void set_title(const Title &t) {
 		title = &t;
 		rules = &world::title_rules(t.code);

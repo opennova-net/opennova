@@ -20,6 +20,7 @@
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -160,6 +161,7 @@ void test_mode_word() {
 // and a six-tick hold appends one round, a seven-tick hold two.
 struct Rig {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     LocalPlayer local{world};
     WeaponInventory inv;

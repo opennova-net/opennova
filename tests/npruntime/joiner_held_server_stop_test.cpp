@@ -40,6 +40,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -139,6 +140,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 
 	// The kernel lives on the heap: a World-carrying frame is megabytes.
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	kernel->world.registry.configure_pool(0, 16);
 	CaptureSocket socket;
 	// The connect log, on: the transport's teardown writes its line after the held server's
@@ -149,6 +151,7 @@ Outcome close_with_a_held_server(int32_t reason) {
 	connect_log.start(inmatch::ConnectLogHeader{});
 	socket.files = &files;
 	inmatch::JoinerRole role;
+	test_titles::jo_joiner(role);
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
 	role.set_protocol(&kJo);
@@ -276,9 +279,11 @@ void test_the_join_attempts_pump_steps_the_held_server() {
 	}
 
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	kernel->world.registry.configure_pool(0, 16);
 	QueueSocket socket;
 	inmatch::JoinerRole role;
+	test_titles::jo_joiner(role);
 	role.bind(*kernel);
 	role.set_socket(&socket, kHost);
 	role.set_protocol(&kJo);
@@ -336,8 +341,10 @@ struct HeldAttempt {
 	inmatch::ConnectLog connect{files};
 	inmatch::ClientProcessState process;
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	QueueSocket socket;
 	inmatch::JoinerRole role;
+	bool role_jo = test_titles::jo_joiner(role);
 	uint32_t now = 0;
 	SessionSequencing joiner; // the held joiner's own sequencing
 

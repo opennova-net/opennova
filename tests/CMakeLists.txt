@@ -3911,6 +3911,10 @@ add_test(NAME games COMMAND games_test)
 add_test(NAME games_unknown_title_rules COMMAND games_test --unknown-rules)
 set_tests_properties(games_unknown_title_rules PROPERTIES PASS_REGULAR_EXPRESSION
     "world::title_rules: no title rules are installed under the code \"nosuchgame\"")
+# A rules holder no fixture named aborts at its first read: the suite installs no default title's.
+add_test(NAME games_unset_title_rules COMMAND games_test --unset-rules)
+set_tests_properties(games_unset_title_rules PROPERTIES PASS_REGULAR_EXPRESSION
+    "MatchRules: no title rules: ")
 
 add_executable(session_protocol_test novaworld/session_protocol_test.cpp)
 target_link_libraries(session_protocol_test PRIVATE opennova_net)

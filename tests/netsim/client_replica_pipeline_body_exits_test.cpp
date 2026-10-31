@@ -38,6 +38,7 @@
 #include <optional>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -140,6 +141,7 @@ std::vector<uint8_t> frame(const std::vector<Row> &rows, double hull_x = 50.0) {
 std::unique_ptr<ns::ClientReplicaPipeline> make_view(opennova::world::IRootMotionSource &src,
 		bool remote_motion = true) {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*view);
 	view->set_protocol(nw::title_protocol("jo"));
 	view->set_remote_motion_mode(remote_motion);
 	view->set_root_motion_source(&src);
@@ -574,6 +576,7 @@ void test_gun_channel_leaves_the_gunner_aim_heading() {
 	ns::ClientEntityState &rider = *view->state().find(kSeatedInfantry);
 	rider.pitch_bam = 0x30000000;
 	auto world = std::make_unique<opennova::world::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 8);
 	std::vector<opennova::mission::ItemSeatSpec> specs(1);
 	specs[0].type_id = kHullType;

@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -48,6 +49,7 @@ VehicleTraits parent_traits(bool attrib_parent) {
 
 struct Rig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &w = *wp;
     EntityHandle veh_h;
     explicit Rig(bool attrib_parent = true, uint8_t ref_num = 5) {

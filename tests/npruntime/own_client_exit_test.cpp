@@ -62,6 +62,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -101,7 +102,9 @@ const std::string kServerRemoved = "0.0.0.0:0 : SERVER PLAYER REMOVED \"Host\"."
 // dedicated host with the remote alone. Heap-held: the World.
 struct ListenHost {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	MemoryFiles files;
 	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
 	ns::LoopbackChannel own_loop;
@@ -510,6 +513,7 @@ void test_a_screens_confirmation_drops_the_death_menu_latch() {
 				ExitSite::AdminOverMenuScreen, ExitSite::Input}) {
 		ns::LoopbackChannel loop;
 		auto own = std::make_unique<inmatch::ClientRuntime>(loop);
+		test_titles::jo_folds(*own);
 		ns::ClientState &state = own->state();
 		CHECK(state.take_death_menu_open(/*triggered=*/true, /*menu_open=*/false));
 		inmatch::RemoteAdminBinding binding;
@@ -532,9 +536,11 @@ void test_a_screens_confirmation_drops_the_death_menu_latch() {
 void test_the_restart_drops_the_death_menu_latch() {
 	for (const bool session : {false, true}) {
 		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
 		world->rules.mp_session = session;
 		ns::LoopbackChannel loop;
 		auto own = std::make_unique<inmatch::ClientRuntime>(loop);
+		test_titles::jo_folds(*own);
 		ns::ClientState &state = own->state();
 		CHECK(state.take_death_menu_open(/*triggered=*/true, /*menu_open=*/false));
 		CHECK(inmatch::ingame_restart(*world, own.get()) == !session);

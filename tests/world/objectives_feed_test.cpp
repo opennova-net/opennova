@@ -11,6 +11,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -38,6 +39,7 @@ struct Table {
 
 void test_row_walk() {
 	World w;
+	test_titles::jo_world(w);
 	SubgoalState &sg = w.script.subgoals;
 	sg.win_text_ids[1] = 3;
 	sg.win_text_ids[2] = 5;  // no text authored for this id
@@ -75,6 +77,7 @@ void test_row_walk() {
 
 void test_empty_panel() {
 	World w;
+	test_titles::jo_world(w);
 	std::vector<opennova::hud::HudObjectiveRow> rows;
 	rows.push_back(opennova::hud::HudObjectiveRow{});
 	Table table;

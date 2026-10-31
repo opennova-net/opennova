@@ -37,6 +37,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -56,6 +57,7 @@ int failures = 0;
 // A bare world with the local player's body (use_item_dead_drop's rig).
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<w::LocalPlayer> local = std::make_unique<w::LocalPlayer>(world);
 	w::EntityHandle player;
@@ -239,7 +241,9 @@ public:
 
 struct Harness {
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	inmatch::JoinerRole role;
+	bool role_jo = test_titles::jo_joiner(role);
 	CountingSocket socket;
 	inmatch::TickInput input;
 	Harness() {

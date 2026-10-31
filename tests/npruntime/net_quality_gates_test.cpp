@@ -20,6 +20,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -37,7 +38,9 @@ void expect(bool cond, const char *what) {
 // A HostOnly authority in session over a live world. Heap-held (MSVC's 1 MB test-main stack).
 struct Host {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	Host() {
 		inmatch::set_connection_mode(*ctx, inmatch::ConnectionMode::HostOnly);
 		ctx->is_in_session = 1;

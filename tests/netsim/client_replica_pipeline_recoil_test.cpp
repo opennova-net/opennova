@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -45,6 +46,7 @@ using test_expect::expect;
 
 int main() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	ns::ClientEntityState &player = view.state().upsert(1);
 	player.cls = nw::EntityClass::Player;
 	player.recoil_pitch = 1 << 18;
@@ -82,6 +84,7 @@ int main() {
 	// exact Game_StartMission seed is even, selecting the positive yaw leg below.
 	// These are retail-oracle literals, not a reimplementation in the test.
 	ns::ClientReplicaPipeline order_view;
+	test_titles::jo_folds(order_view);
 	for (uint16_t handle = 1; handle <= 6; ++handle) {
 		ns::ClientEntityState &row = order_view.state().upsert(handle);
 		row.cls = nw::EntityClass::Player;
@@ -98,6 +101,7 @@ int main() {
 	// compact update overwrites it from the real coarse yaw while retaining the
 	// byte exactly for codec identity.
 	ns::ClientReplicaPipeline wire_view;
+	test_titles::jo_folds(wire_view);
 	wire_view.set_protocol(nw::title_protocol("jo"));
 	wire_view.set_item_class_resolver(&classify);
 	// The spawn stream's row: a compact 0x0A never creates one

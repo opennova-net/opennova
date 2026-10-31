@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace ns = opennova::replication;
 
@@ -35,6 +36,7 @@ void add_player(ns::ClientReplicaPipeline &view, uint16_t handle, uint8_t flags 
 
 ns::ClientReplicaPipeline make_view() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	add_player(view, kLocal);
 	add_player(view, 0x0000);
 	add_player(view, 0x0001, 0x02); // dead
@@ -72,6 +74,7 @@ int main() {
 	// No candidate but the local player: target and sub-mode reset.
 	{
 		ns::ClientReplicaPipeline view;
+		test_titles::jo_folds(view);
 		add_player(view, kLocal);
 		add_player(view, 0x0003, 0x02);
 		view.set_spectate_local_handle(kLocal);

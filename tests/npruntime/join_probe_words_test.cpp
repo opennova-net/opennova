@@ -34,6 +34,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -56,8 +57,10 @@ int g_failures = 0;
 // words the echo must return and awaits it.
 void test_probe_words() {
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	world->crt_rand.seed(0x1234u);
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	ctx->world = world.get();
 	ctx->np_protocol.host_start_tick = 100000u;
 	ctx->np_protocol.host_run_duration_ms = 3216u;
@@ -91,6 +94,7 @@ const Protocol &kJo = *title_protocol("jo");
 // `process`, kept standing so its server ticks can run (the role, declared last, goes first).
 struct HostMission {
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	std::unique_ptr<inmatch::HostRole> role = std::make_unique<inmatch::HostRole>();
 	inmatch::NapiNPServerCtx &ctx() { return role->state.host_owner.ctx; }
 };
@@ -107,6 +111,7 @@ std::unique_ptr<HostMission> start_mission(inmatch::ClientProcessState &process,
 	options.game_type = game_type::for_mission_attribs(kernel.mission.header.attrib_flags);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "probe_words";
 		cfg.config.max_players = 4;

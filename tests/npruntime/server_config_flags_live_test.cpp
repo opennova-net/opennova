@@ -48,6 +48,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -62,7 +63,9 @@ constexpr uint32_t kTeamChoose = inmatch::GameConfig::kMpAttribTeamChoose;
 std::unique_ptr<inmatch::NapiNPServerCtx> host(uint32_t type, bool team_choose,
 		const std::string &side_a_password = std::string()) {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.game_type = type;
 	config.mp_attributes = team_choose ? (config.mp_attributes | kTeamChoose)
@@ -146,7 +149,9 @@ bool run_a_map_change_keeps_the_creates_words() {
 //  CAdminServer_HandleSetCommand - CAdminServer_SetSidePassword (+0x60) @0x406284]
 bool run_a_map_change_keeps_the_settings_passwords() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.game_type = game_type::kTeamDeathmatch;
 	config.server_password = "sesame";
@@ -182,7 +187,9 @@ opennova::ServerHello hello_of(const inmatch::NapiNPServerCtx &ctx) {
 
 bool run_the_hello_reads_the_protocols_copies() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.server_name = "Named Host";
 	config.server_password = "sesame";
@@ -209,7 +216,9 @@ bool run_the_hello_reads_the_protocols_copies() {
 	            "a lone SET ServerPassword clears the protocol's copy"))
 		return false;
 	auto untitled = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(untitled->config);
 	inmatch::GameConfig unnamed;
+	test_titles::jo_config(unnamed);
 	unnamed.max_players = 4;
 	unnamed.server_name.clear();
 	inmatch::test::bring_up_host(*untitled, inmatch::ConnectionMode::HostOnly,
@@ -235,6 +244,7 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	session.player_name = "Callsign";
 	session.session_channel = inmatch::GameSessionChannel::Lan;
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			/*host_key=*/0, nullptr, session);
 	if (!expect((ctx->config.mp_attributes & kTeamChoose) == 0 &&

@@ -44,6 +44,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -155,6 +156,7 @@ struct Host {
 
 	inmatch::HostBootRequest request() {
 		inmatch::HostBootRequest r;
+		test_titles::jo_config(r.host_cfg.config);
 		r.host_cfg.protocol = &kJo;
 		r.mission = deathmatch_mission();
 		r.mission_basename = "synth";
@@ -173,6 +175,7 @@ struct Host {
 		r.boot_options.player_limit = 9;
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			kernel = std::make_unique<mission::MissionKernel>();
+			test_titles::jo_world(kernel->world);
 			return *kernel;
 		};
 		r.before_terrain = [](mission::MissionKernel &k) {
@@ -719,6 +722,7 @@ int main() {
 		inmatch::Session session(role);
 		inmatch::HostBoot boot;
 		inmatch::HostBootRequest r;
+		test_titles::jo_config(r.host_cfg.config);
 		r.host_cfg.protocol = &kJo;
 		r.mission = deathmatch_mission();
 		r.mission_basename = "synth";
@@ -731,6 +735,7 @@ int main() {
 		r.boot_options.terrain = false;
 		r.fresh_kernel = [&]() -> mission::MissionKernel & {
 			kernel = std::make_unique<mission::MissionKernel>();
+			test_titles::jo_world(kernel->world);
 			return *kernel;
 		};
 		std::string error;

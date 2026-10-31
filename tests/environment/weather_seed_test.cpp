@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -49,6 +50,7 @@ bool seed_from_env(const char *text, const opennova::bms::Header &header, w::Wor
 
 void test_resource_values_reach_the_real_wire_projection() {
 	w::World world;
+	test_titles::jo_world(world);
     // A mission only advances while a human is in the world - retail holds the
     // WAC tick and the BMS event pump on `g_WacVarHumans || !g_WacVarTicks`
     // (World::script_may_advance). These harnesses model a mission IN PROGRESS,
@@ -84,6 +86,7 @@ void test_resource_values_reach_the_real_wire_projection() {
 
 void test_bms_fog_override_precedes_the_environment_resource() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.cached.humans = 1;
 	opennova::bms::Header header{};
 	header.attrib_flags = opennova::bms::AttribFlags::FogDistanceOverrideEnable;
@@ -97,6 +100,7 @@ void test_bms_fog_override_precedes_the_environment_resource() {
 
 void test_mission_start_prewarms_255_environment_ticks() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.cached.humans = 1;
 	opennova::bms::Header header{};
 	header.start_time = 0x0540;
@@ -117,6 +121,7 @@ void test_prewarm_runs_complete_weather_ticks_after_eager_scripts() {
 	// embedders run the eager WAC execution first (the kernel boot's tail),
 	// then the 255-tick prewarm, leaving exactly 45.
 	w::World world;
+	test_titles::jo_world(world);
 	world.cached.humans = 1;
 	w::WeatherSeed base;
 	base.fog_level_q16 = 733 << 16;

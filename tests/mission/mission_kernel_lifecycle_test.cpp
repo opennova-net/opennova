@@ -24,6 +24,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -109,6 +110,7 @@ int main() {
 		m.actions = {action, won};
 		std::map<std::string, std::string> files;
 		auto kernel = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel->world);
 		kernel->open_document(std::move(m), "synth", source_over(&files));
 		kernel->set_items_table(&items);
 		ms::KernelBootOptions options;
@@ -149,6 +151,7 @@ int main() {
 		m.actions = {set_word(768, 5), set_word(3328, 0x01020304), set_word(3584, 77)};
 		std::map<std::string, std::string> files;
 		auto kernel = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel->world);
 		kernel->open_document(std::move(m), "synth", source_over(&files));
 		ms::KernelBootOptions options;
 		options.playable = false;
@@ -163,6 +166,7 @@ int main() {
 	// --- the ordering guards ---------------------------------------------------
 	{
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		ms::KernelBootOptions options;
 		std::string error;
@@ -174,6 +178,7 @@ int main() {
 	}
 	{
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		std::string error;
 		CHECK(!kernel.open("./definitely/not/a/mounted/root", "nowhere.bms", error));
@@ -187,6 +192,7 @@ int main() {
 			items << "begin \"Crate\"\r\n  id 104000\r\n  type object\r\nend\r\n";
 		}
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		std::string error;
 		CHECK(!kernel.open(dir.root(), "nowhere.bms", error));
@@ -198,6 +204,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		files["items.def"] = "begin \"Crate\"\r\n  id 104000\r\n  type object\r\nend\r\n";
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		CHECK(kernel.items_ok && kernel.items.count == 1);
@@ -211,6 +218,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then set(v1,1) endif\n";
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -297,6 +305,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = source;
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -311,6 +320,7 @@ int main() {
 	{
 		std::map<std::string, std::string> files;
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -332,6 +342,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "var a\ninc(a)\nv1 = a\n";
 		auto first_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(first_box->world);
 		ms::MissionKernel &first = *first_box;
 		first.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -342,6 +353,7 @@ int main() {
 		CHECK(first.world.script.vars.get_mission(256) == 1); // `a` is slot 0 of the declared half
 
 		auto second_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(second_box->world);
 		ms::MissionKernel &second = *second_box;
 		second.world.script.vars.carry_from(first.world.script.vars);
 		CHECK(second.world.script.vars.get_mission(256) == 1);
@@ -356,6 +368,7 @@ int main() {
 		std::map<std::string, std::string> other;
 		other["synth.wac"] = "var b\nv2 = b\n";
 		auto third_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(third_box->world);
 		ms::MissionKernel &third = *third_box;
 		third.world.script.vars.carry_from(second.world.script.vars);
 		third.open_document(two_entity_mission(), "synth", source_over(&other));
@@ -374,6 +387,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "random(1000)\n";
 		auto first_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(first_box->world);
 		ms::MissionKernel &first = *first_box;
 		first.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -387,6 +401,7 @@ int main() {
 		std::map<std::string, std::string> reader;
 		reader["synth.wac"] = "v3 = RND\nv4 = RND\n";
 		auto second_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(second_box->world);
 		ms::MissionKernel &second = *second_box;
 		second.carry_across_load_from(first);
 		CHECK(second.world.script.vars.wac.rnd == first_rnd);
@@ -453,6 +468,7 @@ int main() {
 		options.playable = false;
 		std::string error;
 		auto first = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(first->world);
 		first->open_document(premission_probe(), "synth", source_over(&files));
 		CHECK(first->boot(options, error));
 		w::ScriptVarStore &left = first->world.script.vars;
@@ -465,6 +481,7 @@ int main() {
 		left.set_bank_word(3584, 0x55);
 
 		auto second = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(second->world);
 		second->carry_across_load_from(*first);
 		second->open_document(premission_probe(), "synth", source_over(&files));
 		CHECK(second->boot(options, error));
@@ -489,6 +506,7 @@ int main() {
 		field.slots[0] = {10 << 16, 0, 2 << 16, 0}; // a drop 10 east, 2 up
 		renderer::PrecipitationDrawFrame frame;
 		auto first_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(first_box->world);
 		ms::MissionKernel &first = *first_box;
 		// The first mission's last call: 1/16 east of the origin, mode 0.
 		renderer::PrecipitationCamera last;
@@ -496,6 +514,7 @@ int main() {
 		renderer::compile_precipitation_frame(field, 0x10000, 0, 0, last,
 				first.precipitation_draw, frame);
 		auto second_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(second_box->world);
 		ms::MissionKernel &second = *second_box;
 		second.carry_across_load_from(first);
 		CHECK(second.precipitation_draw.last_camera_q16[0] == 0x1000);
@@ -511,6 +530,7 @@ int main() {
 		// A kernel that carried nothing measures from the zeroed origin: no
 		// motion at the origin.
 		auto fresh_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(fresh_box->world);
 		renderer::compile_precipitation_frame(field, 0x10000, 0, 0, origin,
 				fresh_box->precipitation_draw, frame);
 		CHECK(!frame.vertices.empty() && std::fabs(frame.vertices[0] - 10.0f) < 0.001f);
@@ -523,8 +543,10 @@ int main() {
 	//  Weapon_GetFlareDeflectChance @0x5382A0]. (D-NET-64)
 	{
 		auto first = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(first->world);
 		first->world.server_num_players = 3;
 		auto second = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(second->world);
 		second->carry_across_load_from(*first);
 		CHECK(second->world.server_num_players == 3);
 	}
@@ -537,9 +559,11 @@ int main() {
 	//  @0x57DEAE..0x57E061; Game_StartMission @0x524360 - the eager WAC pass @0x525CB3]
 	{
 		auto first = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(first->world);
 		CHECK(first->world.weather.night_phase == 0);
 		first->world.weather.night_phase = 1;
 		auto second = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(second->world);
 		second->carry_across_load_from(*first);
 		w::WeatherSeed noon;
 		noon.tod_fixed24 = 12u << 24;
@@ -563,18 +587,21 @@ int main() {
 	{
 		constexpr uint8_t kSlotId = 2; // a joiner's own S2C 0x04 slot
 		auto first = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(first->world);
 		w::RoundSim &left = first->world.round_sim;
 		left.local_slot_id = kSlotId;
 		CHECK(left.allocate_slot(first->world, w::RoundSim::kFreshRoundWord) == 1);
 		CHECK(left.allocate_slot(first->world, w::RoundSim::kFreshRoundWord) == 2);
 		CHECK(left.rounds[2].shot_seq == ((kSlotId << 9) | 2));
 		auto second = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(second->world);
 		second->carry_across_load_from(*first);
 		w::RoundSim &next = second->world.round_sim;
 		next.local_slot_id = kSlotId;
 		CHECK(next.allocate_slot(second->world, w::RoundSim::kFreshRoundWord) == 3);
 		CHECK(next.rounds[3].shot_seq == ((kSlotId << 9) | 3));
 		auto fresh = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(fresh->world);
 		w::RoundSim &own = fresh->world.round_sim;
 		own.local_slot_id = kSlotId;
 		CHECK(own.allocate_slot(fresh->world, w::RoundSim::kFreshRoundWord) == 1);
@@ -590,6 +617,7 @@ int main() {
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "if never() then set(v1,1) endif\n";
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -606,6 +634,7 @@ int main() {
 	{
 		std::map<std::string, std::string> files;
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
 		ms::KernelBootOptions options;
@@ -674,6 +703,7 @@ int main() {
 
 		std::map<std::string, std::string> files;
 		auto kernel_box = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_box->world);
 		ms::MissionKernel &kernel = *kernel_box;
 		kernel.open_document(m, "synth", source_over(&files));
 		ms::KernelBootOptions options;

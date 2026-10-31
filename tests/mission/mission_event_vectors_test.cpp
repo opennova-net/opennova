@@ -19,6 +19,7 @@
 
 #include <runtime/mission/event_runtime.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using world::World;
@@ -109,6 +110,7 @@ int run_case(const int32_t *row, int32_t length, int index) {
     }
 
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     World &w = *world;
     w.cached.humans = 1;
     for (int pool = 0; pool <= 3; ++pool) w.registry.configure_pool(pool, 64);

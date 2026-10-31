@@ -67,6 +67,7 @@
 #include <utility>
 #include <vector>
 #include <cstring>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -129,6 +130,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	// (spawn-select + a 0x20 pool-3 record) and a pool-2 building so the 0x10
 	// static page carries a real record; a minimal in-memory 0x0B BMS mission.
 	w::World world;
+	test_titles::jo_world(world);
 	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	// The trait sweep's player row: a typed body is no empty slot (D-NET-486).
@@ -168,11 +170,13 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	// strings/values; the host key is pinned) so the coverage never depends on
 	// anything minted at run time. Headless Listen host.
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	ns::LoopbackChannel host_loop;
 	owner.host_loopback = &host_loop;
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
+	test_titles::jo_config(host_cfg.config);
 	host_cfg.protocol = &kJo;
 	host_cfg.config.server_name = "OpenNova self-capture host";
 	host_cfg.config.max_players = 16;
@@ -191,6 +195,7 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	// paced wait loops release as they would in real time, whatever the machine's speed.
 	uint64_t client_ms = 1;
 	inmatch::ClientRuntime client("SelfCapture", [&client_ms] { return client_ms; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	// The shell installs the mounted fresh profile; this script has no Avatars.def, so it
 	// installs the stock file's (the witnessed oracle, D-NET-833).

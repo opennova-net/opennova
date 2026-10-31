@@ -12,6 +12,7 @@
 #include <cstring>
 #include "item_pool_step.h"
 #include <runtime/particle/script_effects.h>
+#include "../common/title_fixture.h"
 using namespace opennova::world;
 using test_world::step_item_pool;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n",__LINE__,#c);return 1; } } while(0)
@@ -41,6 +42,7 @@ EntityHandle spawn(World &w, int pool, int id, ItemDeathClass cls) {
 //  @0x4C22E7]
 int test_elevator_mover() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     for (int pool = 0; pool <= 2; ++pool) w.registry.configure_pool(pool, 8);
     const auto lift = spawn(w, 1, 20, ItemDeathClass::kElevator);
@@ -133,6 +135,7 @@ int test_elevator_mover() {
 }
 int test_regional_sound() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(2, 8);
     const auto h = spawn(w, 2, 10, ItemDeathClass::kEnvironmentSound);
@@ -207,10 +210,12 @@ int test_regional_sound() {
 }
 int test_flag_callback() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     MatchRules rules;
+    test_titles::jo_match(rules);
     rules.flag_return_ticks = 5;
     w.match.configure(rules);
     const auto h = spawn(w, 1, 4091, ItemDeathClass::kFlag);
@@ -248,6 +253,7 @@ int test_flag_callback() {
 }
 int test_building_collapse() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(2, 8);
     const auto h = spawn(w, 2, 20, ItemDeathClass::kCollapsingBuilding);
@@ -308,6 +314,7 @@ int test_building_collapse() {
 }
 int test_crane_pair_and_fade() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(2, 8);
     const auto base_handle = spawn(w, 2, 30, ItemDeathClass::kCrane);
@@ -390,6 +397,7 @@ int test_crane_pair_and_fade() {
 int test_emitter_lifetime() {
     namespace p = opennova::particle;
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(2, 8);
     const auto h = spawn(w, 2, 40, ItemDeathClass::kEmitter);
@@ -458,6 +466,7 @@ int test_emitter_lifetime() {
 int test_entity_slot_shared() {
     namespace p = opennova::particle;
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(2, 8);
     const auto h = spawn(w, 2, 40, ItemDeathClass::kEmitter);
@@ -522,7 +531,7 @@ struct TestPieceSpawner : IItemPieceSpawner {
     }
 };
 int test_palm_sections() {
-    auto heap = std::make_unique<World>(); auto &w = *heap;
+    auto heap = std::make_unique<World>(); test_titles::jo_world(*heap); auto &w = *heap;
     w.registry.configure_pool(2, 8); w.rules.mp_session = true;
     TestPieceSpawner spawner(w); w.item_piece_spawner = &spawner;
     const auto h = spawn(w, 2, 21, ItemDeathClass::kPalm);
@@ -611,7 +620,7 @@ int test_palm_sections() {
     return 0;
 }
 int test_tower_sections() {
-    auto heap = std::make_unique<World>(); auto &w = *heap;
+    auto heap = std::make_unique<World>(); test_titles::jo_world(*heap); auto &w = *heap;
     w.registry.configure_pool(2, 16); w.rules.mp_session = true;
     TestPieceSpawner spawner(w); w.item_piece_spawner = &spawner;
     const auto h = spawn(w, 2, 50, ItemDeathClass::kTower);
@@ -792,6 +801,7 @@ int test_piece_spawn_class_selectors() {
             " move_function squib\r\n render_function tree\r\n hp 100\r\n end\r\n";
     opennova::def::DefItemsFile items{};
     opennova::mission::MissionKernel kernel;
+    test_titles::jo_world(kernel.world);
     CHECK(boot_piece_kernel(kernel, items, definitions, sizeof(definitions) - 1));
     Entity seed;
     seed.kind = EntityKind::Building; seed.item_id = 5050; seed.item_type = 5;
@@ -846,6 +856,7 @@ int test_piece_spawn_class_selectors() {
             " move_function door\r\n hp 100\r\n end\r\n";
     opennova::def::DefItemsFile door_items{};
     opennova::mission::MissionKernel door_kernel;
+    test_titles::jo_world(door_kernel.world);
     CHECK(boot_piece_kernel(door_kernel, door_items, door_fragment, sizeof(door_fragment) - 1));
     const auto door_leaf = door_kernel.spawn_item_piece(palm_fragment_seed());
     CHECK(door_leaf.valid() && door_kernel.world.registry.get(door_leaf)->door_motion);
@@ -866,6 +877,7 @@ int test_psec_tower_section_clone_stays_inert() {
     CHECK(opennova::def::def_parse_items_memory(
             reinterpret_cast<const unsigned char *>(definitions), sizeof(definitions)-1, &items) == 0);
     opennova::mission::MissionKernel kernel;
+    test_titles::jo_world(kernel.world);
     kernel.open_document(opennova::bms::File{}, "piece", {});
     kernel.set_items_table(&items);
     opennova::mission::KernelBootOptions options;
@@ -925,6 +937,7 @@ int test_destroy_fade_phases() {
 //  @0x4E2958; GameLoop_RenderFrame @0x52134E]
 int test_husk_swap_stage() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(2, 8);
     CollisionWorld collision;
@@ -1030,6 +1043,7 @@ int test_husk_swap_stage() {
 //  @0x460048..0x46004E, +0x38 = def+0xF8 @0x460053..0x460059]
 int test_vehicle_respawn_rearms_the_final_husk() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(1, 4);
     CollisionWorld collision;
@@ -1066,6 +1080,7 @@ int test_vehicle_respawn_rearms_the_final_husk() {
 //  Entity_PublishSwapFadePhases @0x4A9304]
 int test_nvg_person_keeps_its_upfx_phases_through_the_draw() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(0, 4);
     Entity seed;
@@ -1101,6 +1116,7 @@ int test_nvg_person_keeps_its_upfx_phases_through_the_draw() {
 // Entity_PublishSwapFadePhases @0x5C4200]
 int test_cohort_walk_runs_no_swap_fade() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(2, 16);
     w.rules.mp_session_peer = true;
@@ -1164,6 +1180,7 @@ int test_cohort_walk_runs_no_swap_fade() {
 
 int test_destroy_phases_and_ambient() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(2, 8);
     auto &e = *w.registry.get(spawn(w, 2, 70, ItemDeathClass::kGnrl));
@@ -1271,11 +1288,13 @@ int test_destroy_phases_and_ambient() {
 }
 int test_class_scoring_and_explosion_draws() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     w.registry.configure_pool(0,8);
     w.registry.configure_pool(1,8);
     w.rules.mp_session = true;
     MatchRules rules;
+    test_titles::jo_match(rules);
     rules.game_type = 0x90002; // Search and Destroy
     w.match.configure(rules);
     Entity player;
@@ -1406,6 +1425,7 @@ int test_section_mask_hides_no_person_part() {
 int test_type_index_zero_rows_take_no_visit() {
     for (const int pool : {1, 2, 3}) {
         auto heap = std::make_unique<World>();
+        test_titles::jo_world(*heap);
         auto &w = *heap;
         w.registry.configure_pool(pool, 4);
         // The fall is a client of the ground query: a world with no collision world
@@ -1472,6 +1492,7 @@ int main() {
     if (test_regional_sound() != 0) return 1;
     if (test_elevator_mover() != 0) return 1;
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     auto &w = *heap;
     for (int pool = 0; pool <= 3; ++pool) w.registry.configure_pool(pool, 8);
     const auto p1 = spawn(w, 1, 1, ItemDeathClass::kElevator);

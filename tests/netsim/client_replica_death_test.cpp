@@ -15,6 +15,7 @@
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/protocol/protocol.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -43,6 +44,7 @@ FrameUpdate phase0_frame(uint8_t penalty, uint8_t revive, uint8_t hold) {
 
 void test_sub_block_0_timers_fold_and_retain() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*owned);
 	ClientReplicaPipeline &view = *owned;
 	view.set_protocol(title_protocol("jo"));
 	FrameUpdate first = phase0_frame(7, 120, 3);
@@ -101,6 +103,7 @@ std::vector<uint8_t> wave_body(uint16_t zone, uint16_t index, uint16_t countdown
 
 void test_self_wave_zone() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*owned);
 	ClientReplicaPipeline &view = *owned;
 	view.set_viewer_handle(0x0005);
 	view.apply(s2c::SPAWN_WAVE_STATUS, wave_body(0x1003, 2, 14, {0x0002, 0x0005}));
@@ -138,6 +141,7 @@ std::vector<uint8_t> world_state_load_body(uint8_t game_flags) {
 //  NapiNPClientMsg_0x00A @0x42ff82 g_DeployScreenActive = (flags1 >> 1) & 1]
 void test_deploy_overlay_follows_the_host() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*owned);
 	ClientReplicaPipeline &view = *owned;
 	view.set_protocol(title_protocol("jo"));
 	CHECK(!view.state().deploy_overlay_active);
@@ -174,6 +178,7 @@ void test_deploy_overlay_follows_the_host() {
 //  Game_CloseInGameScreens @0x54b954 on the close-on-clear leg]
 void test_death_menu_open_latch() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*owned);
 	ClientReplicaPipeline &view = *owned;
 	view.set_protocol(title_protocol("jo"));
 	auto take = [&](bool menu_open = false) {
@@ -248,6 +253,7 @@ int hud_blanks(ClientReplicaPipeline &view) {
 //  @0x42e407 -> `mov g_HUDDetailLevel, 3` @0x42e412]
 void test_world_state_load_blanks_the_hud_only_with_the_death_screen_up() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*owned);
 	ClientReplicaPipeline &view = *owned;
 	view.set_protocol(title_protocol("jo"));
 	FrameUpdate fu;
@@ -278,6 +284,7 @@ void test_world_state_load_blanks_the_hud_only_with_the_death_screen_up() {
 //  then CTipSystem_HandleEvent(22)]
 void test_death_edge_raises_the_spectator_tip() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*owned);
 	ClientReplicaPipeline &view = *owned;
 	view.set_protocol(title_protocol("jo"));
 	FrameUpdate fu;
@@ -305,6 +312,7 @@ void test_death_edge_raises_the_spectator_tip() {
 // an unknown tag — the arm that once bumped the wrong counter.
 void test_truncated_known_body_counts_as_malformed() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*owned);
 	ClientReplicaPipeline &view = *owned;
 	const std::size_t malformed_before = view.malformed_bodies();
 	const std::size_t unknown_before = view.unknown_tags();

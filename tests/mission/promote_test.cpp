@@ -22,6 +22,7 @@
 
 #include "../common/synthetic_mission.h"
 #include "../world/channel_clip_source.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -121,6 +122,7 @@ static void test_bms_record_index_is_pool_slot() {
     m.organics[0].id = 31;
 
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     AiSystem *ai = &w->ai;
     const mission::PromoteResult r = mission::promote_mission(m, *w, {});
     CHECK(r.spawned == 3);
@@ -209,6 +211,7 @@ static void test_emplacement_attachments() {
     co.item_seat_specs.push_back(gun_item);
 
     auto cw = std::make_unique<World>();
+    test_titles::jo_world(*cw);
     AiSystem *cai = &cw->ai;
     const mission::PromoteResult cr =
             mission::promote_mission(cm, *cw, co);
@@ -372,6 +375,7 @@ static void test_emplacement_attachments() {
 //  @0x4415E1..0x4415EC, Entity_UpdateTransformAndTurret called @0x44164B]
 static void test_addeweap_child_spawns_on_its_record_and_the_ewep_init_composes() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 8);
     Entity carrier_seed;
@@ -484,6 +488,7 @@ static void test_attachment_pass_walks_the_loaded_rows() {
     o.item_seat_specs = {tank, nested, building};
 
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     mission::promote_mission(m, *w, o);
     int turrets = 0, grandchildren = 0;
     const Entity *roof = nullptr;
@@ -509,6 +514,7 @@ __attribute__((noinline))
 #endif
 static void test_emplacement_parent_death_keeps_children() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 8);
 
@@ -577,6 +583,7 @@ static void test_emplacement_parent_death_keeps_children() {
 
 static void test_unresolved_emplacement_preserves_streamed_pose() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(1, 8);
 
     Entity parent_seed{};
@@ -633,6 +640,7 @@ static void test_friendly_tag_names_and_gather() {
         return idx == 5 ? std::string("123456789012345XYZ") : std::string();
     };
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     AiSystem *ai = &w->ai;
     mission::promote_mission(m, *w, o);
 
@@ -813,6 +821,7 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
 	helo1.data.aim_skill = 4;
 	opts.ai_profiles.push_back(helo1);
 	World world;
+	test_titles::jo_world(world);
     AiSystem &ai = world.ai;
     ai.is_authority = true;
     const mission::PromoteResult r = mission::promote_mission(m, world, opts);
@@ -840,6 +849,7 @@ static void test_nameless_vehicle_takes_the_retail_default_profile() {
 		// Exactly ONE PRNG C draw per placed vehicle: f[200] is the fresh stream's
 		// first value and the promoted world's next draw is the fresh stream's second.
 		World fresh;
+		test_titles::jo_world(fresh);
 		CHECK(air.brain.f[200] == static_cast<int32_t>(fresh.next_prng16_c()) % 0x80000);
 		CHECK(world.next_prng16_c() == fresh.next_prng16_c());
 	}
@@ -890,6 +900,7 @@ static void test_vehicle_records_seed_the_ai_slot() {
     opts.item_seat_specs.push_back(spec);
     brain_class_items(opts, {kTruckType});
     World world;
+    test_titles::jo_world(world);
     world.ai.is_authority = true;
     const mission::PromoteResult r = mission::promote_mission(m, world, opts);
     CHECK(r.brains == 1);
@@ -944,6 +955,7 @@ static void test_script_spatial_tables_are_promoted_and_replaced() {
     box.max_x = box.max_y = box.max_z = -(2 << 16); // load normalizes
     mission.bounding_boxes.push_back(box);
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     mission::promote_mission(mission, *w, {});
     const Area *promoted = w->registry.area(0);
     CHECK(promoted != nullptr && promoted->zone_id == 37);
@@ -1008,6 +1020,7 @@ static void test_bms_admission_preserves_holes_and_signed_thresholds() {
             Case{true, 9, 4, 0x10008, {true,true,false,false,true,true,true,true,false}},
             Case{true, 8, 4, 0x10004, {true,true,true,false,true,true,false,true,false}}}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->rules.mp_session = c.session;
         mission::PromoteOptions options;
         options.player_limit = c.limit;
@@ -1041,6 +1054,7 @@ static void test_bms_admission_preserves_holes_and_signed_thresholds() {
         CHECK(file.organics[0].type_id == 5305); // the document remains authored
     }
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->rules.teammates_disabled = true;
     mission::promote_mission(file, *world);
     CHECK(world->registry.get(EntityHandle::make(0, 0)) == nullptr);
@@ -1060,6 +1074,7 @@ static void test_bms_pool0_used_window_is_the_accepted_count() {
     }
     file.organics[1].bmsi_attributes = 0x40; // single-player only: rejected in a session
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->rules.mp_session = true;
     mission::PromoteOptions options;
     options.player_limit = 8;
@@ -1100,6 +1115,7 @@ static void test_pool_capacities_size_the_load() {
         file.items.back().id = 1000 + i;
     }
     auto retail = std::make_unique<World>();
+    test_titles::jo_world(*retail);
     const mission::PromoteResult clipped = mission::promote_mission(file, *retail);
     CHECK(retail->registry.pool_capacity(1) == 1200 && clipped.dropped == 14);
     CHECK(retail->registry.get(EntityHandle::make(1, 1199)) != nullptr);
@@ -1110,6 +1126,7 @@ static void test_pool_capacities_size_the_load() {
     CHECK(pool_capacity(0) == 256 && pool_capacity(1) == 4096 && pool_capacity(2) == 4096 &&
           pool_capacity(3) == 4096 && pool_capacity(4) == 1024 && pool_capacity(5) == 0);
     auto scaled = std::make_unique<World>();
+    test_titles::jo_world(*scaled);
     const mission::PromoteResult kept = mission::promote_mission(file, *scaled);
     set_pool_capacities(kRetailPoolCapacity);
     CHECK(scaled->registry.pool_capacity(1) == 4096 && kept.dropped == 0);
@@ -1162,6 +1179,7 @@ static void test_dfx2_warns_of_a_table_past_its_pool() {
         boxed.clear();
         quit_at = c.quit_at;
         auto w = std::make_unique<World>();
+        test_titles::jo_world(*w);
         w->rules.title_rules = &title_rules(c.code);
         w->rules.projectile_authority = c.authority;
         const mission::PromoteResult r = mission::promote_mission(file, *w, opts);
@@ -1279,6 +1297,7 @@ static void test_bms_pool_used_counts_are_the_load_counts() {
     file.markers[0].bmsi_attributes = 0x80;
     file.organics[0].bmsi_attributes = 0x80;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     mission::promote_mission(file, *world);
     CHECK(world->registry.pool_used(1) == 2);
     CHECK(world->registry.pool_used(2) == 3);
@@ -1297,6 +1316,7 @@ static void test_bms_admission_zeros_rejected_marker_projections() {
     file.markers[1].type_id = 2043;
     file.markers[1].x = 200;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     const auto result = mission::promote_mission(file, *world);
     CHECK(result.spawned == 1 && result.dropped == 1);
     CHECK(world->registry.get(EntityHandle::make(3, 0)) == nullptr);
@@ -1340,6 +1360,7 @@ static void test_attachment_children_take_the_spawn_phase_stagger() {
     o.item_seat_specs = {carrier};
 
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->bms_spawn_phase_counter = 500; // a previous load's: the load zeroes it
     mission::promote_mission(m, *w, o);
     // Stamps 0, 11 (items), 22 (bunker), 33, 44, 55 (organics 0, 2 and 3): 66.
@@ -1394,6 +1415,7 @@ static void test_bms_ai_attribute_fold() {
     mission::PromoteOptions opts;
     opts.item_attributes = [](int32_t type) { return type == 1307 ? kItemAttribAIData : 0u; };
     World world;
+    test_titles::jo_world(world);
     mission::promote_mission(m, world, opts);
 
     const Entity *s = world.registry.get(world.registry.find_by_net_id(1));
@@ -1446,6 +1468,7 @@ static void test_bms_range_slots_read_their_own_fields() {
     bare.max_attack_distance = 0;
     m.organics.push_back(bare);
     World world;
+    test_titles::jo_world(world);
     mission::promote_mission(m, world, mission::PromoteOptions{});
 
     const Entity *g = world.registry.get(world.registry.find_by_net_id(1));
@@ -1492,6 +1515,7 @@ static void test_item_brain_follows_class_and_attrib() {
     };
     opts.item_attributes = [](int32_t type) { return type == 1237 ? kItemAttribAIData : 0u; };
     World world;
+    test_titles::jo_world(world);
     const mission::PromoteResult r = mission::promote_mission(m, world, opts);
     CHECK(r.brains == 1);
     CHECK(world.ai.for_handle(EntityHandle::make(1, 0)) != nullptr);
@@ -1571,6 +1595,7 @@ int main() {
     m.markers[2].id = 12;
 
     World world;
+    test_titles::jo_world(world);
     AiSystem &ai = world.ai;
     ai.is_authority = true;
 
@@ -1691,6 +1716,7 @@ int main() {
         ma.organics[0].id = 1;
         ma.organics[1].id = 2;
         World wz;
+        test_titles::jo_world(wz);
         AiSystem &aiz = wz.ai;
         mission::promote_mission(ma, wz);
         CHECK(wz.registry.area(0) != nullptr);  // the zone populated the table (was empty before)
@@ -1716,6 +1742,7 @@ int main() {
         radii.markers.back().type_id = 2044;
 
         World radius_world;
+        test_titles::jo_world(radius_world);
         AiSystem &radius_ai = radius_world.ai;
         mission::promote_mission(radii, radius_world);
         std::array<float, 3> promoted_radii{};
@@ -1758,6 +1785,7 @@ int main() {
         wm.waypoint_records[2] = blue;
 
         World ww;
+        test_titles::jo_world(ww);
         AiSystem &wai = ww.ai;
         mission::promote_mission(wm, ww);
         CHECK(ww.script.waypoints.entries.size() == 2);    // the blue route only
@@ -1777,6 +1805,7 @@ int main() {
         wm.waypoint_records[2].marker_count = 3;
         wm.waypoint_records[2].waypoint_numbers = {0, 7, 800};
         World zw;
+        test_titles::jo_world(zw);
         mission::promote_mission(wm, zw);
         CHECK(zw.script.waypoints.entries.size() == 2);
         if (zw.script.waypoints.entries.size() == 2) {
@@ -1803,6 +1832,7 @@ int main() {
         om.waypoint_records[2].marker_count = 2;
         om.waypoint_records[2].waypoint_numbers = {0, 1};
         World ow;
+        test_titles::jo_world(ow);
         mission::promote_mission(om, ow);
         CHECK(ow.script.waypoints.entries.size() == 2);
         if (ow.script.waypoints.entries.size() == 2) {
@@ -1857,6 +1887,7 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
+        test_titles::jo_world(cw);
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
 		stamp_fixture_carrier_defs(cw);
@@ -1903,6 +1934,7 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
+        test_titles::jo_world(cw);
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
 		stamp_fixture_carrier_defs(cw);
@@ -1948,6 +1980,7 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
+        test_titles::jo_world(cw);
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
 		stamp_fixture_carrier_defs(cw);
@@ -1998,6 +2031,7 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
+        test_titles::jo_world(cw);
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
 		stamp_fixture_carrier_defs(cw);
@@ -2041,6 +2075,7 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
+        test_titles::jo_world(cw);
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
 		stamp_fixture_carrier_defs(cw);
@@ -2082,6 +2117,7 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
+        test_titles::jo_world(cw);
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
 		stamp_fixture_carrier_defs(cw);
@@ -2190,6 +2226,7 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
+        test_titles::jo_world(cw);
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
 		stamp_fixture_carrier_defs(cw);
@@ -2248,6 +2285,7 @@ int main() {
         co.item_seat_specs.push_back(seats);
 
         World cw;
+        test_titles::jo_world(cw);
         AiSystem &cai = cw.ai;
         mission::promote_mission(cm, cw, co);
 		stamp_fixture_carrier_defs(cw);

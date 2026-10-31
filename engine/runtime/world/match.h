@@ -34,7 +34,7 @@ struct MatchRules {
     // The rules of the session's title (title_rules.h): the built-in score table an absent
     // score_values selects (default_match_score_values) and the scoring knobs of DFX2-15. Unset
     // until the session sets it (inmatch configure_session_world); title() aborts while it is.
-    const TitleRules *title_rules = unset_title_rules();
+    const TitleRules *title_rules = nullptr;
     const TitleRules &title() const { return require_title_rules(title_rules, "MatchRules"); }
     uint32_t game_type = 0;
     uint32_t game_time_minutes =

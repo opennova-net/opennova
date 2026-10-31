@@ -11,6 +11,7 @@
 
 #include <runtime/world/wire_body_sound.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -52,6 +53,7 @@ void seed_world(World &w) {
 // and the footstep is dipped by the capsule bottom.
 void test_foley_precedes_feet_and_positions() {
     World w;
+    test_titles::jo_world(w);
     seed_world(w);
     const int32_t body[3] = {10 * kUnit, 20 * kUnit, 5 * kUnit};
     // Word: SSAudio1 (0x20) + SSAudio3 (0x80) + LEFT foot (0x1).
@@ -78,6 +80,7 @@ void test_foley_precedes_feet_and_positions() {
 // slot wins over ground; the water plane beats both.
 void test_slot_pick_reads_carrier_and_water() {
     World w;
+    test_titles::jo_world(w);
     seed_world(w);
     const int32_t body[3] = {0, 0, 5 * kUnit};
     const uint32_t words[1] = {0x1u};
@@ -99,6 +102,7 @@ void test_slot_pick_reads_carrier_and_water() {
 // (character_id 0) keeps the primary even when id 0 is marked female.
 void test_female_select_is_player_only() {
     World w;
+    test_titles::jo_world(w);
     seed_world(w);
     w.tables.character_traits.set(9, true);
     w.tables.character_traits.set(0, true);
@@ -119,6 +123,7 @@ void test_female_select_is_player_only() {
 // SP_Woman authors no right-ground set, and SP_Man authors no ssaudio2.
 void test_empty_set_plays_nothing() {
     World w;
+    test_titles::jo_world(w);
     seed_world(w);
     w.tables.character_traits.set(9, true);
     const int32_t body[3] = {0, 0, 0};
@@ -130,6 +135,7 @@ void test_empty_set_plays_nothing() {
 // Words consume in playhead order — two crossed frames fire both, in order.
 void test_multi_word_order() {
     World w;
+    test_titles::jo_world(w);
     seed_world(w);
     const int32_t body[3] = {0, 0, 0};
     const uint32_t words[3] = {0x1u, 0u, 0x2u};
@@ -143,6 +149,7 @@ void test_multi_word_order() {
 
 void test_degenerate_inputs() {
     World w;
+    test_titles::jo_world(w);
     seed_world(w);
     const int32_t body[3] = {0, 0, 0};
     wire_body_slot_sounds(w, nullptr, 4, 0, 42, 0, 7, false, body);

@@ -23,6 +23,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace {
@@ -50,6 +51,7 @@ struct Source final : IRootMotionSource {
 
 struct Rig {
     std::unique_ptr<World> owned = std::make_unique<World>();
+    bool owned_jo = test_titles::jo_world(*owned);
     Source source;
     EntityHandle handle;
     Rig(int id = 0) {
@@ -500,6 +502,7 @@ struct StandSource final : IRootMotionSource {
 
 struct StillPeople {
     std::unique_ptr<World> owned = std::make_unique<World>();
+    bool owned_jo = test_titles::jo_world(*owned);
     StandSource source;
     std::vector<EntityHandle> bodies;
     StillPeople() {

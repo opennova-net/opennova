@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "host_test_setup.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -57,8 +58,10 @@ constexpr uint8_t kAk = 2;
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	std::unique_ptr<inmatch::ClientProcessState> process =
 			std::make_unique<inmatch::ClientProcessState>();
 	replication::LoopbackChannel loop;
@@ -78,6 +81,7 @@ struct Rig {
 		// The role's binding of the process's list (HostRole::apply_rule_words).
 		world.loadout_weapon_names = &process->loadout_weapon_names;
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 4;
 		settings.game_type = 0x10000u;
 		inmatch::test::bring_up_host(*ctx, mode, inmatch::SocketMode::Socketless, 0,
@@ -132,6 +136,7 @@ void test_a_dedicated_host_keeps_the_initializers_first_weapon() {
 void test_a_listen_hosts_own_list_names_every_body_after_its_fold() {
 	Rig r(inmatch::ConnectionMode::HostClient);
 	auto own_client = std::make_unique<inmatch::ClientRuntime>(r.loop);
+	test_titles::jo_folds(*own_client);
 	CHECK(inmatch::Server_ProcessPendingPlayerSpawns(*r.ctx, r.world) >= 1);
 	inmatch::test::round_init_own_body(*r.ctx); // the mission start's round init (D-NET-1233)
 	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb)) == kM4);

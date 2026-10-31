@@ -37,6 +37,7 @@
 
 #include "channel_clip_source.h"
 #include "../common/hull_brain.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -66,6 +67,7 @@ test_world::ChannelClipSource channel_only;
 
 struct Rig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &w = *wp;
     AiSystem &sys = w.ai;
     EntityHandle veh_h, player_h;
@@ -241,6 +243,7 @@ void check_pose(const Entity &entity, const MountedPose &expected) {
 //  @0x43655F..0x43656E (the subtract @0x43656c)]
 void test_usegun_attach_presnaps_local_look() {
     World w;
+    test_titles::jo_world(w);
     AiSystem &ai = w.ai;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
@@ -424,6 +427,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
     const SeatType control_types[] = {SeatType::Driver, SeatType::Controller};
     for (const SeatType control_type : control_types) {
         World w;
+        test_titles::jo_world(w);
         AiSystem &ai = w.ai;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
@@ -493,6 +497,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
 //  @0x4B654E..0x4B655A, no +0x10)]
 void test_remote_passenger_keeps_its_wire_look() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     AiSystem &ai = w.ai;
     w.registry.configure_pool(0, 4);
@@ -555,6 +560,7 @@ void test_live_pose_provider_and_static_fallback() {
     // EntityCommands mount consumes the host pose on the attach edge.
     {
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
         FakeMountedPoseProvider provider;
@@ -597,6 +603,7 @@ void test_live_pose_provider_and_static_fallback() {
     // live position and carries the full orientation into its body frame.
     {
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
         AiSystem &ai = w.ai;
@@ -675,6 +682,7 @@ void test_live_pose_provider_and_static_fallback() {
         // independent look, then resolves the final Hn+1 parent phase. The local
         // path already exposes current input before its single resolve.
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
         AiSystem &ai = w.ai;
@@ -810,6 +818,7 @@ void test_live_pose_provider_and_static_fallback() {
     // Null and declining providers both preserve the known static fallback.
     {
         World w;
+        test_titles::jo_world(w);
         Entity vehicle;
         vehicle.position = {10.0f, 20.0f, 30.0f};
         vehicle.heading = placed_heading_bam(90);
@@ -1292,6 +1301,7 @@ void test_toggle_nearest_seat() {
 //  Entity_RequestVehicleAttach @0x4364A0]
 void test_best_seat_walks_vehicle_children() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 8);
 
@@ -1392,6 +1402,7 @@ void test_best_seat_walks_vehicle_children() {
 // [orig: Entity_FindBestSeatSlot @ 0x4351F0, slice/root/filter/tie @ 0x43521E / @ 0x435228 / @ 0x435289 / @ 0x4352BC / @ 0x435417]
 void test_best_seat_uses_proximity_order() {
     World w;
+    test_titles::jo_world(w);
     CollisionWorld collision;
     w.collision = &collision;
     w.registry.configure_pool(1, 9600); // revx02 allocation, only four live rows
@@ -1720,6 +1731,7 @@ void test_attach_scan_never_built_fallback_and_initial_empty_slice() {
 //  Entity_BuildProximityListsFromPools @0x43C4EB]
 void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
     World w;
+    test_titles::jo_world(w);
     AiSystem &ai = w.ai;
     CollisionWorld cw;
     w.collision = &cw;
@@ -2179,6 +2191,7 @@ void test_carrier_without_a_def_takes_no_rider() {
 		// The best-seat search passes over a def-less child whose UseGun seat
 		// outweighs the root's sitex seat (0x20000 against 0x200000).
 		World w;
+		test_titles::jo_world(w);
 		w.registry.configure_pool(0, 4);
 		w.registry.configure_pool(1, 4);
 		Entity root;
@@ -2326,6 +2339,7 @@ void test_carrier_without_a_model_takes_no_rider() {
 		// The best-seat search passes over a modelless child whose UseGun seat
 		// outweighs the root's sitex seat.
 		World w;
+		test_titles::jo_world(w);
 		w.registry.configure_pool(0, 4);
 		w.registry.configure_pool(1, 4);
 		Entity root;
@@ -2807,6 +2821,7 @@ void test_bms_mount_predicates() {
 // @0x4FF6B0 (the route @0x4FFE18)]
 void test_mounted_ammo_slot_route() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(1, 8);
 
     // Retail gates on the item definition and the EWeap attrib before ANY
@@ -2930,6 +2945,7 @@ void test_mounted_ammo_slot_route() {
 void test_sighted_vehicle_weapon_seeds_its_zero_pitch() {
     for (const int32_t flags : {0x2, 0x0}) {
         World w;
+        test_titles::jo_world(w);
         w.tables.weapons.entries.resize(2);
         WeaponTableEntry &gun = w.tables.weapons.entries[1];
         gun.name = "WPN_SIGHTED";
@@ -2958,6 +2974,7 @@ void test_sighted_vehicle_weapon_seeds_its_zero_pitch() {
 
 void test_entity_def_slot_init_seeds_the_words() {
     World w;
+    test_titles::jo_world(w);
     w.tables.weapons.entries.resize(4);
     WeaponTableEntry &weapon = w.tables.weapons.entries[3];
     weapon.name = "WPN_LATE_MOUNT";
@@ -3021,6 +3038,7 @@ void test_entity_def_slot_init_seeds_the_words() {
 //  WeaponSlot_InitFromDef @0x53EEF7 / @0x53EF2D..0x53EF44]
 void test_entity_def_slot_init_seeds_the_zoom() {
     World w;
+    test_titles::jo_world(w);
     w.tables.weapons.entries.resize(3);
     WeaponTableEntry &cannon = w.tables.weapons.entries[1];
     cannon.name = "WPN_M1TURRET";
@@ -4632,6 +4650,7 @@ void test_driver_animation() {
 // dialogs ("group 1 enters area X") track the player through it.
 void test_player_spawn_group() {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     AiSystem &sys = w.ai;
     w.registry.configure_pool(0, 8);
@@ -4754,6 +4773,7 @@ void test_attach_labels_armory_mode() {
 // with one registry pass rather than recomputed independently for every candidate.
 void test_attach_labels_build_enemy_occupancy_once() {
     World w;
+    test_titles::jo_world(w);
     CollisionWorld collision;
     w.collision = &collision;
     w.registry.configure_pool(0, 128);
@@ -5114,6 +5134,7 @@ void test_seat_and_emplacement_keep_subdegree_carrier_pose() {
     point.subobject_index = 0;
 
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     carrier.health = 100;
@@ -5462,6 +5483,7 @@ static void test_seat_bone_failure_runs_the_seat_tail() {
     };
     for (const bool authority : {true, false}) {
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
         NoSeatBone provider;
@@ -5529,6 +5551,7 @@ static void test_player_seat_bone_failure_detaches_on_the_authority() {
     for (const bool resolves : {false, true}) {
         for (const bool authority : {true, false}) {
             auto w_heap = std::make_unique<World>();
+            test_titles::jo_world(*w_heap);
             World &w = *w_heap;
             w.registry.configure_pool(0, 4);
             w.registry.configure_pool(1, 4);
@@ -5604,6 +5627,7 @@ static void test_remote_rider_detach_pass_ends_at_the_mounted_site() {
         bool resolve_seat_bone(World &, const Entity &, int) override { return false; }
     };
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
@@ -5662,6 +5686,7 @@ static void test_remote_rider_detach_pass_ends_at_the_mounted_site() {
 static void test_a_seated_death_detaches_on_the_authority_alone() {
     for (const bool authority : {true, false}) {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
@@ -5708,6 +5733,7 @@ static void test_a_seated_death_detaches_on_the_authority_alone() {
 // @0x4C2158..0x4C21F1 ahead of the pool-0 walk @0x4C2426]
 static void test_board_pass_on_an_attached_gun_stays_on_foot() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
     w.ai.root_motion = &channel_only; // the soldier holds its channel
@@ -5795,6 +5821,7 @@ static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
     const auto run = [](int32_t order, int32_t target_ssn, bool authority, SeatType type,
                         bool resolves, bool item_def) {
         World w;
+        test_titles::jo_world(w);
         w.registry.configure_pool(0, 4);
         w.registry.configure_pool(1, 4);
         SeatBoneProvider provider;
@@ -5893,6 +5920,7 @@ static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
 // [orig: Entity_GetBoneTransformAndOrientation @0x4B0C50]
 static void test_entity_pose_seat_bone_lookup() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(1, 4);
     CollisionWorld collision;
     w.collision = &collision;
@@ -5947,6 +5975,7 @@ static void test_entity_pose_seat_bone_lookup() {
 // Entity_TeleportTeamToSpawn @0x43D390 (the clears)]
 void test_an_anchorless_child_copies_only_a_stale_carrier() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 4);
     Entity carrier;
@@ -6029,6 +6058,7 @@ void test_an_anchorless_child_copies_only_a_stale_carrier() {
 // class init's update @0x44164B)]
 void test_an_anchored_child_saves_its_previous_pose() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 4);
     FakeMountedPoseProvider provider;
