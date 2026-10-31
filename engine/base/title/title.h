@@ -447,8 +447,9 @@ struct Title {
 	// player's team (or there is no local player), else of the evil side, which its avatar blip
 	// (entity+0x3C) then names, the body drawn, the local first-person arms and the profile sounds'
 	// sex alike (inmatch::drawn_player_character, the present rows' PF_CHARACTER_ID; the local
-	// player's own body and arms, inmatch::drawn_local_player_character; the profile sounds still
-	// take the spawn's pick, every stock DFX2 head being male). False
+	// player's own body and arms, inmatch::drawn_local_player_character; the profile sounds, the
+	// world's character traits inmatch::install_viewer_side_pick fills, which every sound path
+	// reads through world::player_blip_character, the local player the viewer). False
 	// (Jointops.exe's): the blip keeps the spawn's pick, the NetId, or the first combo of the side
 	// its Team names.
 	// [orig: Terrain_RenderSectorEntitiesBySide @0x5C7D50 - the blip read @0x5C7FD6;

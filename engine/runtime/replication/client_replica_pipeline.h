@@ -364,13 +364,15 @@ public:
 	// A sound-profile slot one replica body's mover leg played this tick, at
 	// the body's position when it played, with the identity the embedder
 	// resolves it through: the row's items.def type and, for a player, its
-	// packed avatar id (the wire net_id) that picks the female binding
+	// packed avatar id (the wire net_id) and its Team, from which the character
+	// its avatar blip names picks the female binding (world::player_blip_character)
 	// [orig: Entity_GetProfileSlotSound @0x528300 ->
 	// Entity_PlaySound3D_FullVolume @0x528E20].
 	struct ReplicaSlotSound {
 		uint16_t handle = 0xFFFF;
 		uint16_t type_id = 0;
 		uint16_t character_id = 0; // a player's net_id; 0 for an org1 body
+		uint8_t team = 0; // the row's Team, 0 while none is known
 		uint8_t slot = 0;
 		int32_t pos[3] = {};
 	};
@@ -386,6 +388,7 @@ public:
 		uint16_t handle = 0xFFFF;
 		uint16_t type_id = 0;
 		uint16_t character_id = 0; // a player's net_id; 0 for an org1 body
+		uint8_t team = 0; // the row's Team, 0 while none is known
 		bool on_entity = false;
 		uint32_t events = 0;
 		int32_t capsule_bottom = 0;

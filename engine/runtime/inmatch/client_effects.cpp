@@ -203,13 +203,15 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
     }
     // The profile-slot plays the remote bodies' mover legs made this tick,
     // each at the position its leg played it: the slot resolves through the
-    // body's items.def profile, a player's female binding picked by its
-    // packed avatar id (player-only), the resolved-id-0 slot playing nothing.
+    // body's items.def profile, a player's female binding picked by the
+    // character its avatar blip names (player-only; the title's viewer-side
+    // pick, DFX2-53), the resolved-id-0 slot playing nothing.
     // [orig: Entity_GetProfileSlotSound @0x528300, the female byte
     //  @0x52831c -> Entity_PlaySound3D_FullVolume @0x528E20]
     for (const auto &sound : view_.drain_slot_sounds()) {
         const bool female = sound.character_id != 0 &&
-                world.tables.character_traits.is_female(sound.character_id);
+                world.tables.character_traits.is_female(
+                        world::player_blip_character(world, sound.character_id, sound.team));
         const std::string *set = audio::organic_slot_set(world.tables.sound_profiles,
                 world.tables.organic_sound_profiles, sound.type_id, female, sound.slot);
         if (set == nullptr) continue;

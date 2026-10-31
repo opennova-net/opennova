@@ -101,7 +101,9 @@ enum PresentField : int {
 	// blip (entity+0x3C) names as the local view draws it: the one the 0x0C spawn
 	// echoes (entity+0x15C), or the title's per-frame viewer-side pick (DFX2-53,
 	// inmatch::drawn_player_character); 0 when not a player. Keys the composed
-	// head/body presented for that row.
+	// head/body presented for that row and, on a listen host, the sex of its wire
+	// body sounds (Simulation::present_wire_body_sounds; a joiner's replica bodies
+	// take the same pick per tick, world::player_blip_character).
 	PF_CHARACTER_ID,
 	// The decoded wire carrier link, -1 for none: for a standing player this
 	// is the groundEntity it stands on (entity+0x28) — the same link the

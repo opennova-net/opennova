@@ -775,6 +775,7 @@ void row_root_motion_tick(ClientEntityState &es, const world::TitleRules &rules,
 		sound.type_id = es.type_id;
 		sound.character_id = es.cls == EntityClass::Player
 				? static_cast<uint16_t>(es.net_id) : 0;
+		sound.team = es.team_known ? es.team : uint8_t{0};
 		sound.slot = slot;
 		sound.pos[0] = x;
 		sound.pos[1] = y;
@@ -921,6 +922,7 @@ void row_root_motion_tick(ClientEntityState &es, const world::TitleRules &rules,
 		word.handle = es.handle;
 		word.type_id = es.type_id;
 		word.character_id = es.cls == EntityClass::Player ? static_cast<uint16_t>(es.net_id) : 0;
+		word.team = es.team_known ? es.team : uint8_t{0};
 		word.on_entity = es.carrier_handle != wire_handle::kInvalid ||
 				es.resolved_ground != wire_handle::kInvalid;
 		word.events = frame.events;

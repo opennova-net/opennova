@@ -120,6 +120,19 @@ struct CharacterTraitsTable {
         bool female = false;
     };
     std::vector<Row> rows;
+    // DFX2-53: the sex is read off a player person's avatar blip (+0x3C, its byte +0xC), which a
+    // title whose sector render picks the blip again every frame it draws the person
+    // (Title::player_avatar_by_viewer_side) points at the first combo of the good side
+    // (side_first[0]) while there is no local player or the person is on its team, else of the
+    // evil side (side_first[1]): inmatch::install_viewer_side_pick installs the two beside the
+    // rows, the pick inmatch::drawn_player_character makes over the registry. Unset
+    // (Jointops.exe's): the blip keeps the spawn's pick, the NetId.
+    // [orig: Entity_GetProfileSlotSound @0x525490 - the blip @0x52549F, its sex byte @0x5254AC;
+    //  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - the Team compare @0x5C6EEE..0x5C6F00, the
+    //  blip stored @0x5C6F3D..0x5C6F42; MinimapSlot_InitBlipFromPackedId @0x579500 - the sex byte
+    //  @0x579542 (dfx2.exe)]
+    bool by_viewer_side = false;
+    uint16_t side_first[2] = {0, 0};
 
     void set(uint16_t character_id, bool female) {
         for (Row &row : rows) {
@@ -134,7 +147,18 @@ struct CharacterTraitsTable {
             if (row.character_id == character_id) return row.female;
         return false;
     }
-    void clear() { rows.clear(); }
+    // The character a player person's blip names: `net_id`, the spawn's pick (entity+0x15C), or
+    // under the viewer-side pick its side's first combo against the viewer.
+    uint16_t drawn_character(uint16_t net_id, bool viewer, uint8_t team,
+                             uint8_t viewer_team) const {
+        if (!by_viewer_side) return net_id;
+        return side_first[viewer && team != viewer_team ? 1 : 0];
+    }
+    void clear() {
+        rows.clear();
+        by_viewer_side = false;
+        side_first[0] = side_first[1] = 0;
+    }
 };
 
 // ----------------------------------------------------------------------------

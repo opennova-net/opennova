@@ -42,6 +42,7 @@
 #include <runtime/inmatch/loadout_submit.h> // apply_weapon_loadout_name_list (the 0x5A name list)
 #include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x5A row), the replica re-pick
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
+#include <runtime/world/infantry_sound.h> // player_blip_character (the replica bodies' sound sex)
 #include <runtime/world/local_player_view.h> // local_player_view_refresh (the mount-change edge)
 #include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
 #include <runtime/world/player_weapon.h>
@@ -1351,11 +1352,15 @@ void JoinerRole::pump() {
 	rt.view().tick_remote_motion_after_self();
 	// Every replica body's sound block this tick, in walk order: its event word's foley at the
 	// body, its feet at foot level through the slot pick (one source per body: the wire
-	// presenter plays none on a joiner).
+	// presenter plays none on a joiner), a player's in the sex of the character its avatar blip
+	// names (the title's viewer-side pick, DFX2-53).
 	for (const replication::ClientReplicaPipeline::ReplicaBodySoundWord &word :
 			rt.view().drain_body_sound_words())
 		world::wire_body_slot_sounds(world, &word.events, 1, word.capsule_bottom, word.type_id,
-				word.character_id, word.handle, word.on_entity, word.pos);
+				word.character_id != 0
+						? world::player_blip_character(world, word.character_id, word.team)
+						: uint16_t{0},
+				word.handle, word.on_entity, word.pos);
 	lap.mark(devtools::Slot::SIM_CLIENT_WORLD);
 	// The door callback's C2S 0x1A requests this tick raised, queued in raise
 	// order for the next send boundary (world/doors.cpp carries the witness).
