@@ -11,16 +11,6 @@
 
 namespace opennova::hud {
 
-namespace {
-
-// One design coordinate onto the surface, in integers [orig: Viewport_ScaleToVirtualCoords
-// @0x5d2b20 - (v * dim + extent/2) / extent, the divide truncating toward zero].
-int virtual_scale(int v, int surface, int extent) {
-	return static_cast<int>((static_cast<int64_t>(v) * surface + extent / 2) / extent);
-}
-
-} // namespace
-
 void HudFrameCompiler::start_exp_points_fade(const HudFrameState &state) {
 	// Each 0x81 whose delta sounds the EXP_FANFARE ladder starts the fade with its tier, reading
 	// g_HUDColors.active and the hudpos line as they stand; the replica counts them, and the pass
@@ -73,8 +63,8 @@ void HudFrameCompiler::element_exp_points(const HudFrameState &state, float w, f
 	const GameFont &bold = have_bold ? label_font_bold_ : font_;
 	const float bold_scale = have_bold ? label_scale_ : hud_font_scale_;
 	if (bold.font() == nullptr) return;
-	const int x = virtual_scale(pos.x, static_cast<int>(w), 1024);
-	int y = virtual_scale(pos.y, static_cast<int>(h), 768);
+	const int x = design_to_screen_x(pos.x, static_cast<int32_t>(w));
+	int y = design_to_screen_y(pos.y, static_cast<int32_t>(h));
 	emit_slot_text(label_font_bold_, label_scale_, xp.text.label.c_str(), static_cast<float>(x),
 			static_cast<float>(y), half_bright_argb(active), 0u);
 	const float char_h = static_cast<float>(static_cast<int>(bold.char_height('0', bold_scale)));
