@@ -55,6 +55,9 @@ inline constexpr GameTextKey kGameTextEpilogTeamUnits{kGameTextEpilog, "STREPILO
 inline constexpr GameTextKey kGameTextEpilogFriendlyUnits{kGameTextEpilog, "STREPILOG_FRIENDLYUNITS"};
 inline constexpr GameTextKey kGameTextMissionFailed{kGameTextOverlays, "STROVER_MISSION_FAILED"};
 inline constexpr GameTextKey kGameTextEpilogKeyInfo{kGameTextEpilog, "STREPILOG_KEYINFO"};
+// dfx2.exe's win screen's heading, which only that executable reads (so not a flow key every
+// title's mission reads) [orig: sub_5740E0 @0x5744a0 / @0x5744bf (dfx2.exe)].
+inline constexpr GameTextKey kGameTextMissionWon{kGameTextOverlays, "STROVER_MISSION_WON"};
 // Every one, in the order above.
 inline constexpr GameTextKey kMissionFlowKeys[] = {
 		kGameTextNewObjective, kGameTextMissionObjectives, kGameTextWaypointTo,

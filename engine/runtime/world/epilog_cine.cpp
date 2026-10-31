@@ -71,15 +71,18 @@ CineEvent text_fade(int32_t start, CineTextSource source, const char *section, c
 // [orig: CineEventEpilogCounter_Construct @0x5732C0 (this, start, duration,
 //  +0x430, +0x434, +0x438, +0x43C, label, +0x420, +0x424, +0x428, +0x42C,
 //  +0x14)]
-CineEvent epilog_counter(int32_t start, const char *label_key, int32_t row_y, int32_t value,
-		int32_t max) {
+// The live builds pass the label at x 192 and the count-up column at x 832; the
+// value column is Jointops.exe's 692 or dfx2.exe's 832 [orig: @0x5765F6..0x576611;
+// sub_5740E0 @0x574555..0x57455f (dfx2.exe)].
+CineEvent epilog_counter(int32_t start, const char *label_key, int32_t value_x, int32_t row_y,
+		int32_t value, int32_t max) {
 	CineEvent e;
 	e.kind = CineEventKind::EpilogCounter;
 	e.start = start;
 	e.duration = kEpilogHoldFrames;
 	e.label_key = label_key;
 	e.label_x = 192;
-	e.value_x = 692;
+	e.value_x = value_x;
 	e.count_x = 832;
 	e.row_y = row_y;
 	// The live epilog's every line passes -1 as its points target and rate,
@@ -547,9 +550,13 @@ void EpilogCine::update_win(World &world) {
 		if (frame >= win_build_frame) win_state = 4;
 		break;
 	case 4:
-		// [orig: `cmp dword_26970F4, 0` @0x5764DB]
+		// [orig: `cmp dword_26970F4, 0` @0x5764DB] [orig: sub_5740E0 - `cmp dword_269846C, 0`
+		//  @0x57437d (dfx2.exe)]
 		if (!frame_drawn) break;
-		build_win_screen(world);
+		if (mission.debriefing_screens)
+			build_win_debriefing_screen(world);
+		else
+			build_win_screen(world);
 		++win_state; // [orig: @0x5767D7]
 		break;
 	case 5:
@@ -589,18 +596,80 @@ void EpilogCine::build_win_screen(const World &world) {
 	// [orig: @0x5765D0..0x576776 — y 160 / 208 / 256 / 304]
 	const hud::EndRoundStatisticsInput in = end_round_statistics_input(world);
 	const int32_t first = line_start + 124; // [orig: @0x5765E1]
-	events.push_back(epilog_counter(first, hud::kGameTextEpilogObjectiveBonus.key, 160, in.subgoals_won,
-			in.subgoals_defined));
-	events.push_back(epilog_counter(first + 60, hud::kGameTextEpilogEnemyUnits.key, 208,
+	events.push_back(epilog_counter(first, hud::kGameTextEpilogObjectiveBonus.key, 692, 160,
+			in.subgoals_won, in.subgoals_defined));
+	events.push_back(epilog_counter(first + 60, hud::kGameTextEpilogEnemyUnits.key, 692, 208,
 			hud::end_round_enemy_units(in), in.enemy_unit_total)); // [orig: @0x576649]
-	events.push_back(epilog_counter(first + 120, hud::kGameTextEpilogTeamUnits.key, 256, in.team_unit_kills,
-			-1)); // [orig: @0x5766C9]
-	events.push_back(epilog_counter(first + 180, hud::kGameTextEpilogFriendlyUnits.key, 304,
+	events.push_back(epilog_counter(first + 120, hud::kGameTextEpilogTeamUnits.key, 692, 256,
+			in.team_unit_kills, -1)); // [orig: @0x5766C9]
+	events.push_back(epilog_counter(first + 180, hud::kGameTextEpilogFriendlyUnits.key, 692, 304,
 			in.friendly_unit_kills, -1)); // [orig: @0x57672A]
 	// The key help, 120 frames past the last counter, y 700 [orig: @0x5767B9 /
 	//  @0x5767D2].
 	events.push_back(text_fade(first + 300, CineTextSource::GameText, hud::kGameTextEpilogKeyInfo.section,
 			hud::kGameTextEpilogKeyInfo.key, 0, 700, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
+}
+
+void EpilogCine::build_win_debriefing_screen(World &world) {
+	// The same states and build delay as Jointops.exe's; the fades, the
+	// letterbox and the image as the lose screen's, the heading names the
+	// mission, three counters at x 832 and 32 apart from 62 frames past it (no
+	// FRIENDLYUNITS line), then the mission's debriefing and the key help.
+	// [orig: sub_5740E0 case 4 - the flag @0x57438e (dfx2.exe)]
+	screen_active = true;
+	const int32_t t = frame + kEpilogWinScreenDelay; // [orig: @0x574398]
+	// [orig: @0x5743bb / @0x5743f9, solid colour 0]
+	events.push_back(image_fade(t, kEpilogFadeFrames, "", CineFadeMode::In, 0,
+			CineFadeSource::SolidColor, 0u, 0));
+	const int32_t fade_out = t + kEpilogFadeFrames; // [orig: @0x5743d6]
+	events.push_back(image_fade(fade_out, kEpilogFadeFrames, "", CineFadeMode::Out, 0,
+			CineFadeSource::SolidColor, 0u, 0));
+	events.push_back(letterbox(fade_out, kEpilogDebriefingLetterboxFrames,
+			kEpilogScreenLetterboxMode, 0)); // [orig: @0x574426]
+	const int32_t image_start = fade_out + 1; // [orig: @0x574430]
+	events.push_back(image_fade(image_start, kEpilogHoldFrames, "jo_Epil.tga",
+			CineFadeMode::Hold, 0, CineFadeSource::Image, 0u, 0)); // [orig: @0x574456]
+	// MISSION WON sprintf'd over the mission's title [orig: @0x5744a0 / @0x5744bf, the
+	//  sprintf @0x5744a6 / @0x5744c5; CCineEventTextFade_Construct @0x57450e - (heading, 223200,
+	//  "CineText", buffer, 0, 110, -3, 100, 140, 1024, 0, 1, 0xFFFF00)].
+	const int32_t heading = image_start + kEpilogFadeFrames; // [orig: @0x5744d2]
+	CineEvent won = text_fade(heading, CineTextSource::GameTextFormat,
+			hud::kGameTextMissionWon.section, hud::kGameTextMissionWon.key, 0, 110, -3, 100, 140,
+			1024, 0, 1, 0xFFFF00);
+	won.text = heading_title();
+	events.push_back(won);
+	// The counters, their values Jointops.exe's, frozen at the build: the won
+	// subgoals over the defined ones, the clamped enemy buckets over the enemy
+	// total, the team sum with no max; the friendly line is not built.
+	// [orig: @0x574513..0x574658 - (start, 223200, 192, 832, 832, y, label, -1, -1, value, max, 1)
+	//  at y 210 @0x57456c, 242 @0x5745f6, 274 @0x574658; the starts @0x574524 / @0x57458b /
+	//  @0x57460c]
+	const hud::EndRoundStatisticsInput in = end_round_statistics_input(world);
+	const int32_t first = heading + kEpilogDebriefingLineDelay;
+	events.push_back(epilog_counter(first, hud::kGameTextEpilogObjectiveBonus.key, 832, 210,
+			in.subgoals_won, in.subgoals_defined));
+	events.push_back(epilog_counter(first + 60, hud::kGameTextEpilogEnemyUnits.key, 832, 242,
+			hud::end_round_enemy_units(in), in.enemy_unit_total));
+	events.push_back(epilog_counter(first + 120, hud::kGameTextEpilogTeamUnits.key, 832, 274,
+			in.team_unit_kills, -1));
+	const int32_t cursor = first + 180; // [orig: @0x574663]
+	// The mission's WIN_DEBRIEFING, from the entry's table, when it holds the key,
+	// at (47, 475) in a box 930 wide and unbounded below; it moves nothing on.
+	// A mission the catalog does not list has no entry to read (retail's
+	// dereferences its entry).
+	// [orig: TextResource_FindEntryBySectionAndKey(entry+1040, "Info", "WIN_DEBRIEFING")
+	//  @0x574771, the entry and its text pointer @0x574776..0x574782; sub_570FD0 @0x5747c1 -
+	//  (cursor, 223200, text, 47, 475, -2, 140, 140, 930, 0, 1, 0xFFFFFF)]
+	if (mission.entry && mission.win_debriefing.has_value()) {
+		CineEvent debriefing = text_fade(cursor, CineTextSource::Text, "", "", 47, 475, -2, 140,
+				140, 930, 0, 1, 0xFFFFFF);
+		debriefing.text = *mission.win_debriefing;
+		events.push_back(debriefing);
+	}
+	// The key help 60 frames past the cursor, y 700 [orig: @0x574817 / @0x57481d].
+	events.push_back(text_fade(cursor + 60, CineTextSource::GameText,
+			hud::kGameTextEpilogKeyInfo.section, hud::kGameTextEpilogKeyInfo.key, 0, 700, -2, 140,
+			140, 1024, 100, 1, 0xFFFFFF));
 }
 
 bool EpilogCine::playback_active() {

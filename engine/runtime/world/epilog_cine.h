@@ -395,8 +395,9 @@ private:
 	void update_win(World &world);
 	void build_lose_screen();
 	void build_win_screen(const World &world);
-	// dfx2.exe's lose screen (EpilogMission::debriefing_screens).
+	// dfx2.exe's lose and win screens (EpilogMission::debriefing_screens).
 	void build_lose_debriefing_screen();
+	void build_win_debriefing_screen(World &world);
 	// The heading's sprintf argument: the entry's title, or with no entry or an
 	// empty title the session status's mission name.
 	const std::string &heading_title() const;

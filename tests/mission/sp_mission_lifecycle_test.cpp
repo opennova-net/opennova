@@ -298,6 +298,70 @@ void test_dfx2_lose_screen() {
 	}
 }
 
+// DFX2-65: dfx2.exe's win screen. Jointops.exe's states and build delay; the black fades,
+// the one-frame letterbox and the image a frame later as its lose screen's, MISSION WON
+// sprintf'd over the entry's title at y 110 in Impact38 yellow, 62 frames on the objectives,
+// enemy and team counters 60 apart at y 210 / 242 / 274 with the value at x 832 (no
+// FRIENDLYUNITS line), then the entry's WIN_DEBRIEFING at (47, 475), 930 wide, and the key help
+// 60 frames on at y 700.
+// [orig: sub_5740E0 case 4 @0x57437d..0x57481d (dfx2.exe)]
+void test_dfx2_win_screen() {
+	const std::map<std::string, std::string> files;
+	for (const bool debriefed : {true, false}) {
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		w::EpilogCine &cine = world.epilog;
+		cine.mission = dfx2_mission(debriefed);
+		world.kill_stats.subgoals_won = 1;
+		world.process_round_end(1);
+		for (int i = 0; i < 200 && !cine.screen_active; ++i) (void)m.frame();
+		CHECK(cine.screen_active && cine.win_state == 5 && cine.frame == 97);
+		const int t = 96 + 1; // the build at frame 96
+		const w::CineEvent *fade1 = find_event(cine, w::CineEventKind::ImageFade, 0);
+		const w::CineEvent *fade2 = find_event(cine, w::CineEventKind::ImageFade, 1);
+		const w::CineEvent *backdrop = find_event(cine, w::CineEventKind::ImageFade, 2);
+		CHECK(fade1 != nullptr && fade1->start == t && fade1->solid_color == 0u &&
+				fade1->fade_mode == w::CineFadeMode::In);
+		CHECK(fade2 != nullptr && fade2->start == t + 48 && fade2->solid_color == 0u);
+		CHECK(backdrop != nullptr && backdrop->start == t + 49 && backdrop->image == "jo_Epil.tga");
+		const w::CineEvent *bars = find_event(cine, w::CineEventKind::Letterbox, 1);
+		CHECK(bars != nullptr && bars->start == t + 48 && bars->duration == 1 &&
+				bars->letterbox_mode == 2);
+		const w::CineEvent *won = find_event(cine, w::CineEventKind::TextFade, 0);
+		CHECK(won != nullptr && won->start == t + 97 &&
+				won->text_source == w::CineTextSource::GameTextFormat &&
+				won->text_section == "Overlays" && won->text_key == "STROVER_MISSION_WON" &&
+				won->text == "Op Red" && won->y == 110 && won->font == -3 && won->box_height == 0 &&
+				won->color_mask == 0xFFFF00u);
+		const int first = t + 97 + 62;
+		const char *labels[3] = {"STREPILOG_OBJECTIVEBONUS", "STREPILOG_ENEMYUNITS",
+				"STREPILOG_TEAMUNITS"};
+		for (int i = 0; i < 3; ++i) {
+			const w::CineEvent *line = find_event(cine, w::CineEventKind::EpilogCounter, i);
+			CHECK(line != nullptr && line->start == first + 60 * i && line->label_key == labels[i] &&
+					line->row_y == 210 + 32 * i && line->label_x == 192 && line->value_x == 832 &&
+					line->count_x == 832 && line->points_target == -1 && line->points_rate == -1);
+		}
+		CHECK(find_event(cine, w::CineEventKind::EpilogCounter, 3) == nullptr);
+		const w::CineEvent *objective = find_event(cine, w::CineEventKind::EpilogCounter, 0);
+		CHECK(objective != nullptr && objective->value == 1);
+		const int cursor = first + 180;
+		const w::CineEvent *debriefing = find_event(cine, w::CineEventKind::TextFade, 1);
+		const w::CineEvent *help = find_event(cine, w::CineEventKind::TextFade, debriefed ? 2 : 1);
+		if (debriefed) {
+			CHECK(debriefing != nullptr && debriefing->text_source == w::CineTextSource::Text &&
+					debriefing->text == "Won." && debriefing->start == cursor &&
+					debriefing->x == 47 && debriefing->y == 475 && debriefing->box_width == 930 &&
+					debriefing->box_height == 0 && debriefing->banner_y == -1);
+		}
+		CHECK(help != nullptr && help->text_key == "STREPILOG_KEYINFO" && help->y == 700 &&
+				help->start == cursor + 60);
+		CHECK(find_event(cine, w::CineEventKind::TextFade, debriefed ? 3 : 2) == nullptr);
+	}
+}
+
 // D-NET-1233: the single player's session create adds its own slot with no body (the own
 // arm stores g_LocalPlayerEntity, which every teardown zeroes), and its mission start's round
 // init spawns the body, hidden, past the PreMission pass; Player_InitPlayer and the start's
@@ -903,6 +967,7 @@ int main() {
 	test_counter_step_plays_text_end_on_arrival();
 	test_the_local_body_is_born_at_the_round_init();
 	test_dfx2_lose_screen();
+	test_dfx2_win_screen();
 	if (failures == 0) std::printf("sp_mission_lifecycle: OK\n");
 	return failures == 0 ? 0 : 1;
 }
