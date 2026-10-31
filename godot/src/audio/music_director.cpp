@@ -2,18 +2,17 @@
 // (runtime/audio/music_stream_pump.h), and is the pump's device. The engine carries each
 // witness (formats/mus mus_vm.cpp, the pump):
 //   mus_vm_load_script                             (the script load)
-//   the play / playw opcodes' hook                 -> StreamDevice::start_track
+//   the play / playw opcodes' hook                 -> StreamDevice::start_track (MusicStream)
 //   the state opcode's hook                        -> StreamDevice::section_entered
 //   the GEcho intrinsic's hook                     -> StreamDevice::echo
 
 #include "audio/music_director.h"
 #include "audio/music_pair_names.h"
 
+#include "audio/audio_out.h"
 #include "audio/music_script.h"
-#include "audio/sbf_audio_stream.h"
 #include "audio/sbf_bank.h"
 
-#include <godot_cpp/classes/audio_stream.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -22,7 +21,7 @@
 using namespace godot;
 using namespace opennova::mus;
 
-MusicDirector::MusicDirector() {
+MusicDirector::MusicDirector() : _stream(AudioOut::mixer()) {
 	_vm = mus_vm_create();
 	_pump.install(_vm, &_device);
 }
@@ -119,7 +118,6 @@ void MusicDirector::load_mus_script(const Ref<MusicScript> &p_script) {
 	if (_vm != nullptr && (p_script.is_null() || p_script != _script)) {
 		mus_vm_unload_script(_vm);
 		_pump.end();
-		_active_play = nullptr;
 	}
 	_script = p_script;
 }
@@ -130,6 +128,17 @@ Ref<MusicScript> MusicDirector::get_mus_script() const {
 
 void MusicDirector::set_bank(const Ref<SbfBank> &p_bank) {
 	_bank = p_bank;
+	_open_stream();
+}
+
+void MusicDirector::_open_stream() {
+	if (_bank.is_null() || _bank->archive() == nullptr) {
+		_stream.close();
+		return;
+	}
+	const PackedByteArray &bytes = _bank->file_bytes();
+	_stream.open(_bank->archive(), bytes.ptr(), static_cast<size_t>(bytes.size()),
+			AudioOut::options().music());
 }
 
 Ref<SbfBank> MusicDirector::get_bank() const {
@@ -155,26 +164,18 @@ bool MusicDirector::get_auto_start() const {
 // --- Lifecycle ---------------------------------------------------------
 
 void MusicDirector::_ready() {
-	for (int i = 0; i < _player_pool_size; ++i) {
-		AudioStreamPlayer *p = memnew(AudioStreamPlayer);
-		p->set_name(String("MusPlayer_") + String::num_int64(i));
-		p->set_bus(_audio_bus);
-		add_child(p);
-		_players.push_back(p);
-	}
+	AudioOut::attach(this);
 	if (_auto_start && _script.is_valid()) {
 		start();
 	}
 }
 
 void MusicDirector::_process(double p_delta) {
-	for (int i = _playbacks.size() - 1; i >= 0; --i) {
-		if (ObjectDB::get_instance(_playbacks[i]) == nullptr) {
-			_playbacks.remove_at(i);
-		}
-	}
+	// The music option's word as the global volume, which the options' accept writes
+	// (engine audio::MusicStream::set_global_volume).
+	_stream.set_global_volume(AudioOut::options().music());
 	// The engine's pump paces the VM: one play per track, stepped once the track
-	// this node streams has stopped sounding.
+	// has streamed out, its blocks streamed while the music channels' queue has room.
 	if (_pump.service_frame((uint32_t)(p_delta * 1000.0)) ==
 			opennova::audio::MusicPumpOutcome::Failed) {
 		const char *msg = mus_vm_last_error(_vm);
@@ -184,11 +185,7 @@ void MusicDirector::_process(double p_delta) {
 
 void MusicDirector::_exit_tree() {
 	stop();
-	// AudioStreamPlayer children are owned by the Node tree and freed
-	// automatically; just drop our pointers so the next _ready can rebuild.
-	_players.clear();
-	_next_player = 0;
-	_active_play = nullptr;
+	_stream.close();
 }
 
 // --- Methods -----------------------------------------------------------
@@ -216,7 +213,7 @@ bool MusicDirector::open_context(const Ref<SbfBank> &p_bank, const Ref<MusicScri
 	}
 	_bank = p_bank;
 	_script = p_script;
-	_active_play = nullptr;
+	_open_stream();
 	_pump.begin(); // a fresh context: the first frame steps the VM to its first play
 	return true;
 }
@@ -234,8 +231,8 @@ void MusicDirector::start() {
 		UtilityFunctions::push_warning("MusicDirector: ", String(msg ? msg : "mus_vm_load_script failed"));
 		return;
 	}
-	_active_play = nullptr;
 	mus_vm_start(_vm);
+	_open_stream();
 	_pump.begin(); // a fresh context: the first frame steps the VM to its first play
 }
 
@@ -244,24 +241,12 @@ void MusicDirector::stop() {
 		mus_vm_stop(_vm);
 	}
 	_pump.end();
-	for (int i = 0; i < _players.size(); ++i) {
-		if (_players[i]) {
-			_players[i]->stop();
-			// A stopped player still owns its AudioStream (and therefore the old
-			// SBF bank). Drop it so a context teardown actually releases the pair.
-			_players[i]->set_stream(Ref<AudioStream>());
-		}
-	}
-	_active_play = nullptr;
+	// The context stopped: the music channels flushed (engine audio::MusicStream::close).
+	_stream.close();
 }
 
 bool MusicDirector::has_pending_playback() const {
-	for (int i = 0; i < _playbacks.size(); ++i) {
-		if (ObjectDB::get_instance(_playbacks[i]) != nullptr) {
-			return true;
-		}
-	}
-	return false;
+	return _pump.streaming();
 }
 
 void MusicDirector::pause() {
@@ -318,39 +303,6 @@ int MusicDirector::vm_state() const {
 }
 
 // --- The pump's device --------------------------------------------------
-
-void MusicDirector::StreamDevice::start_track(uint32_t p_entry) {
-	MusicDirector &self = _owner;
-	// The one music stream switches to the selected entry from its start, so a
-	// track still sounding (the shipped handler's GFB steps over one) stops.
-	if (self._active_play != nullptr && self._active_play->is_playing()) {
-		self._active_play->stop();
-	}
-	self._active_play = nullptr;
-	if (self._bank.is_null() || self._players.is_empty()) {
-		return;
-	}
-	Ref<SbfAudioStream> stream = self._bank->get_stream_at((int)p_entry);
-	if (stream.is_null()) {
-		return;
-	}
-	AudioStreamPlayer *p = self._players[self._next_player % self._players.size()];
-	self._next_player++;
-	if (p == nullptr) {
-		return;
-	}
-	p->set_stream(stream);
-	p->play();
-	Ref<AudioStreamPlayback> playback = p->get_stream_playback();
-	if (playback.is_valid()) {
-		self._playbacks.push_back(ObjectID(playback->get_instance_id()));
-	}
-	self._active_play = p;
-}
-
-bool MusicDirector::StreamDevice::track_sounding() const {
-	return _owner._active_play != nullptr && _owner._active_play->is_playing();
-}
 
 void MusicDirector::StreamDevice::section_entered(const char *p_name) {
 	_owner.emit_signal("section_entered", StringName(p_name ? p_name : ""));

@@ -7,22 +7,21 @@
 #include <utility>
 #include <vector>
 
-#include <godot_cpp/classes/audio_stream_player.hpp>
-#include <godot_cpp/classes/audio_stream_player3d.hpp>
-#include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/variant/transform3d.hpp>
 
 #include <editor/preview/preview_ambient_mix.h>
 #include <editor/preview/preview_waves.h>
 #include <editor/session/view/workspace_view.h>
 #include <formats/lwf/wav_pcm.h>
+#include <runtime/audio/mixer.h>
 
 namespace godot {
 
 // The editor's one preview sound player (the sound lane, DI-02): the device half of the workspace's sound
 // (WorkspaceView::Sound, the session's play_sound). Each voice is a project wave decoded as the game decodes
-// it (lwf::wav_decode_pcm16, boxed by WavLoader) on a worker, then played at once with the others at the
+// it (lwf::wav_decode_pcm16) on a worker, then opened on the engine mixer's one-shot channels with the others at the
 // pitch and volume the session's pick gave it (preview/sound_preview.h: the set's and the member's pitch
 // composed, the member's volume): the picks are the session's, the player only sounds them. A voice that
 // starts later (a dialog's next line, DI-32: WorkspaceView::Voice::start_ms) starts that long after the
@@ -48,6 +47,13 @@ public:
 	State state() const { return state_; }
 	// The first voice's wave ("" idle).
 	const std::string &path() const { return path_; }
+	// Whether each voice that decoded has started, in their order (the tests' read).
+	std::vector<bool> voices_started() const {
+		std::vector<bool> out;
+		for (const Voice &voice : voices_)
+			if (voice.wave) out.push_back(voice.started);
+		return out;
+	}
 
 private:
 	struct Decode {
@@ -58,7 +64,10 @@ private:
 	struct Voice {
 		opennova::editor::WorkspaceView::Voice voice;
 		std::future<Decode> job;
-		AudioStreamPlayer *player = nullptr;
+		opennova::audio::MixWaveRef wave;
+		opennova::audio::MixWaveRef right; // a stereo decode's right channel
+		uint32_t handle = 0;
+		uint32_t right_handle = 0;
 		bool started = false;
 	};
 	Node *parent_ = nullptr;
@@ -69,13 +78,13 @@ private:
 };
 
 // The project's waves as the preview plays them: each decoded once as the game decodes it (editor::PreviewWaves, on
-// a worker, kept until its file changes) and boxed as a stream (WavLoader). What the clip sounds' and the Listen's
+// a worker, kept until its file changes) into the mixer's buffer. What the clip sounds' and the Listen's
 // players share.
 class PreviewWaveStreams {
 public:
-	// The wave at the full path `p_file`: its stream once decoded, null meanwhile (its decode begun on a worker the
+	// The wave at the full path `p_file`: its buffer once decoded, null meanwhile (its decode begun on a worker the
 	// first time it is asked) and for one that did not decode (`r_failed`).
-	Ref<AudioStreamWAV> stream(const std::string &p_file, bool &r_failed);
+	opennova::audio::MixWaveRef stream(const std::string &p_file, bool &r_failed);
 	// The streams of `p_files` dropped (their waves decoded anew: their files changed).
 	void drop(const std::vector<std::string> &p_files);
 	void forget() {
@@ -88,8 +97,8 @@ public:
 
 private:
 	struct Boxed {
-		uint64_t serial = 0; // the decode it boxes
-		Ref<AudioStreamWAV> stream;
+		uint64_t serial = 0; // the decode it holds
+		opennova::audio::MixWaveRef wave;
 	};
 	opennova::editor::PreviewWaves waves_;
 	std::map<std::string, Boxed> streams_; // by the wave's full path
@@ -97,7 +106,7 @@ private:
 
 // The clip sounds' player (DI-04): the device half of the sounds a clip's events fire in the model preview
 // (ProjectSession::clip_sounds_since). Each sound's voices start together beside those still playing, a
-// player each, freed as it ends, once their waves decode (editor::PreviewVoiceQueue: a wave decoded as the
+// mixer channel each, once their waves decode (editor::PreviewVoiceQueue: a wave decoded as the
 // game decodes it once, kept until its file changes). The picks, pitches and volumes are the session's;
 // this only sounds them.
 class PreviewSoundVoices {
@@ -121,20 +130,18 @@ public:
 	int playing() const;
 
 private:
-	// The players kept at most: the oldest stopped for a new one past it.
+	// The voices kept at most: the oldest stopped for a new one past it.
 	static constexpr size_t kMaxPlayers = 24;
 	Node *parent_ = nullptr;
 	PreviewWaveStreams streams_;
 	opennova::editor::PreviewVoiceQueue queue_{ streams_.waves() }; // after streams_: it reads its waves
-	std::vector<AudioStreamPlayer *> players_;
+	std::vector<uint32_t> players_; // mixer handles
 	uint64_t started_ = 0;
 };
 
 // The Listen's channels (DI-36): the device half of a mission view's MissionListen. Each channel its mix binds plays its
-// wave looping on an AudioStreamPlayer3D of its own at the channel's place in the device's world, whose camera is the
-// listener, so Godot's panner pans it as the game's own ambient channels are panned (D-SND-8), unattenuated (the volume
-// is the mix's, through the engine's volume law), on the game's ambient bus (SoundBank::configure_ambient_player, as
-// MissionAudio binds a channel); its pitch the member's times the registration's.
+// wave looping on the engine mixer's emitter channel of its number (4 + i), panned by its bearing from the device's
+// camera as the game's emitter channels are (audio::positional_pan), at the mix's volume and its play word.
 // A channel another candidate took (its `started` moved) starts its wave again from its beginning, as the game's
 // channel opened anew does (D-SND-6); a free one stops. The picks, the places and the volumes are the session's; this
 // only sounds them.
@@ -153,14 +160,16 @@ public:
 	PreviewSoundLoops(const PreviewSoundLoops &) = delete;
 	PreviewSoundLoops &operator=(const PreviewSoundLoops &) = delete;
 
-	// The channels as they stand now (channel i the i-th) of the project under `p_root`; `p_audible` false holds each
-	// voice paused where it stands (the picture not drawn).
-	void follow(const std::string &p_root, const std::vector<Channel> &p_channels, bool p_audible);
+	// The channels as they stand now (channel i the i-th) of the project under `p_root`, panned from `p_listener` (the
+	// device's camera; null, centred); `p_audible` false holds each voice silent where it stands (the picture not
+	// drawn).
+	void follow(const std::string &p_root, const std::vector<Channel> &p_channels, bool p_audible,
+			const Transform3D *p_listener);
 	// A Listen's channels (a mission's or an environment's mix, editor/preview/preview_ambient_mix) followed while
 	// `p_on`, else every voice stopped; heard while the picture is drawn: `p_presented` counts the pictures presented,
 	// and once it has stood still kHeldFrames calls the voices hold paused.
 	void listen(const std::string &p_root, const std::vector<opennova::editor::MissionSoundChannel> &p_channels, bool p_on,
-			uint64_t p_presented);
+			uint64_t p_presented, const Transform3D *p_listener = nullptr);
 	// Whether the last listen() left the voices sounding (the picture drawn within kHeldFrames calls).
 	bool audible() const { return idle_frames_ < kHeldFrames; }
 	static constexpr int kHeldFrames = 30;
@@ -180,7 +189,7 @@ private:
 	struct Voice {
 		uint64_t started = 0;
 		std::string file;
-		AudioStreamPlayer3D *player = nullptr;
+		uint32_t handle = 0; // the mixer's, on emitter channel 4 + i
 		bool failed = false;
 		bool paused = false; // held (the picture not drawn)
 	};

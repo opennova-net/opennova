@@ -27,6 +27,7 @@
 #include <formats/dbf/dbf.h>
 #include <formats/lwf/lwf.h>
 #include <formats/rtxt/rtxt.h>
+#include <runtime/audio/mixer.h>
 
 namespace opennova::audio {
 
@@ -167,6 +168,13 @@ struct DialogClip {
 // >> 16, about twice the wave's length; 12 for a wave that did not load or a
 // rate of 0 [orig: Dialog_LoadAudioClip @ 0x44dd87..0x44ddbf].
 uint32_t dialog_clip_hold(const DialogClip &clip);
+
+// A line's record on the dialog channel, as the play hook writes it before the open: pan 0, the
+// play factor 0x10000 and the line's volume through the dialogue option, 255's for a line of
+// volume 0 [orig: Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527560 - the pan @ 0x527575, the play
+// factor @ 0x52757c, the scale @ 0x527585..0x52758f, 255's @ 0x527598; called through dword_A8A23C
+// @ 0x44de50]; the open is the mixer's on kDialogChannel [orig: Dialog_LoadAudioClip @ 0x44de8b].
+ChannelParams dialog_line_params(MixWaveRef wave, int line_volume, int32_t dialogue_option);
 
 // The dialog table and the dialog channel's voices: the registered history and
 // the 16 slots (Dialog_Register, Dialog_UpdatePlayback, Dialog_ResetAll, the

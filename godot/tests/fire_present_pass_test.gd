@@ -6,8 +6,8 @@ extends GutTest
 # present_passes() drains the typed Simulation and forwards the same rows),
 # and the audio sink is a REAL MissionAudio over a staged root whose mission
 # bank authors every set the rows name (ADR 0043 rule 11: no production
-# subclass). Its recent-fires ring, mixer channel census, and the spawned
-# AudioStreamPlayer3D voices under the container are the read seams.
+# subclass). Its recent-fires ring, mixer channel census and the engine
+# mixer's channel reads are the read seams.
 
 # Every set the drained rows below name, authored into the staged mission bank
 # (one layer each, playing the fixture tone).
@@ -44,14 +44,6 @@ func _staged_audio(container: Node3D) -> MissionAudio:
 	var stats := _audio.setup(mission, "fire.bms", container)
 	assert_eq(int(stats.banks_loaded), 1, "the staged mission bank loads")
 	return _audio
-
-
-# The positional voices MissionAudio spawned under `container`.
-func _voices(container: Node) -> Array[AudioStreamPlayer3D]:
-	var out: Array[AudioStreamPlayer3D] = []
-	for value in container.find_children("*", "AudioStreamPlayer3D", true, false):
-		out.append(value as AudioStreamPlayer3D)
-	return out
 
 
 func _event(pos: Vector3, source_bms_id: int, is_local_player: bool = false) -> FirePresentationEvent:
@@ -101,7 +93,6 @@ func test_drained_fire_sounds_play_with_source_identity() -> void:
 		assert_eq(fired[1].position, Vector3(4, 1, 2))
 		assert_eq(fired[1].source_bms_id, 0)
 		assert_true(fired[1].played)
-	assert_eq(_voices(container).size(), 2, "each drained row spawned one positional voice")
 	assert_eq(presenter.get_fire_present_stats().sounds, 2)
 	presenter.teardown()
 
@@ -643,7 +634,6 @@ func test_slot_sounds_play_immediately() -> void:
 		assert_eq(fired[0].position, Vector3(400, 0, 0))
 		assert_eq(fired[1].set_name, "FREEFALL")
 		assert_true(fired[1].played)
-	assert_eq(_voices(container).size(), 2, "each named slot row spawned one positional voice")
 	assert_eq(presenter.get_fire_present_stats().sounds, 2,
 			"the pass counts every slot row the bank played")
 	presenter.teardown()
@@ -671,12 +661,7 @@ func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
 	assert_eq(ids.size(), 1, "the idle lane registers one voice in the shared emitter mix")
 	assert_eq(int(audio.get_perf_counters().active_channels), 1)
 	if ids.size() == 1:
-		var voice := audio.ambient_player_for_candidate(ids[0])
-		assert_not_null(voice, "the registered lane holds a physical channel")
-		if voice != null:
-			assert_true(voice.position.is_equal_approx(idle.pos),
-					"the voice rides the row's emitter position")
-			assert_true(voice.playing)
-			assert_eq((voice.stream as AudioStreamWAV).loop_mode,
-					AudioStreamWAV.LOOP_FORWARD, "the engine emitter is a persistent loop")
+		var channel := audio.ambient_channel_for_candidate(ids[0])
+		assert_between(channel, 4, 11, "the registered lane holds an emitter channel")
+		assert_true(audio.channel_sounding(channel), "the engine emitter plays its loop")
 	presenter.teardown()

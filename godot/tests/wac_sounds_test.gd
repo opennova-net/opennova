@@ -9,12 +9,13 @@ func after_each() -> void:
 	staged_dirs.clear()
 
 
-func _playing_voices(audio: MissionAudio) -> Array[AudioStreamPlayer3D]:
-	var voices: Array[AudioStreamPlayer3D] = []
-	for child in audio.get_children():
-		if child is AudioStreamPlayer3D and child.playing and not child.is_queued_for_deletion():
-			voices.append(child)
-	return voices
+# The one-shot channels of the engine mixer (12..25) that play a wave.
+func _playing_oneshots(audio: MissionAudio) -> Array[int]:
+	var out: Array[int] = []
+	for channel in range(12, 26):
+		if audio.channel_sounding(channel):
+			out.append(channel)
+	return out
 
 
 func test_script_sound_distance_and_target_paths_reach_audio() -> void:
@@ -27,6 +28,7 @@ func test_script_sound_distance_and_target_paths_reach_audio() -> void:
 	var bank := LwfData.new()
 	assert_true(bank.load_bytes(FileAccess.get_file_as_bytes(root_dir.path_join("game.lwf"))))
 	bank.set_set_field(0, "target_id", 1) # positional fires cull beyond one unit
+	bank.set_layer_field(0, 0, "heading", true) # the layer pans from its bearing
 	bank.set_member_field(0, 0, 0, "volume", 255)
 	bank.set_member_field(0, 0, 0, "clamp_volume", 255)
 	assert_eq(bank.save_file(root_dir.path_join("game.lwf")), OK)
@@ -50,9 +52,16 @@ func test_script_sound_distance_and_target_paths_reach_audio() -> void:
 	assert_eq(sim.get_mission_variable(2), 0)
 	assert_eq(sim.get_mission_variable(3), 0)
 	assert_eq(sim.get_mission_variable(4), 1)
+	# The sound-effects option at full: the distance sound's emitter volume is the option word
+	# [orig: Sound_PlayTriggerSetScaled @ 0x527b9d].
+	var options := AudioOut.option_volumes()
+	AudioOut.set_option_volumes(255, int(options[1]), int(options[2]))
+	# The process's one mixer starts this play with every channel on the silent buffer.
+	world.shutdown_audio_channels()
 	world.get_runtime().play()
 	world.tick(Vector3.ZERO, Transform3D(), 0.02)
-	var voices := _playing_voices(audio)
+	AudioOut.set_option_volumes(int(options[0]), int(options[1]), int(options[2]))
+	var voices := _playing_oneshots(audio)
 	var records := audio.recent_fired_soundsets()
 	assert_eq(records.size(), 3)
 	if records.size() == 3:
@@ -63,10 +72,6 @@ func test_script_sound_distance_and_target_paths_reach_audio() -> void:
 		world.unload()
 		return
 	var first := voices[0]
-	assert_not_null(first.stream)
-	assert_gt((first.stream as AudioStreamWAV).data.size(), 0, "the real WAV reached a physical player")
-	assert_almost_eq(first.volume_db, SoundBank.volume_db_from_255(63), 0.001,
-			"explicit half-radius distance produces the native layer gain")
-	assert_almost_eq(first.position.z, 1.0, 0.0001, "bearing 128 is behind the camera")
-	assert_almost_eq(first.position.x, 0.0, 0.0001)
+	assert_eq(audio.channel_volume(first), 63, "explicit half-radius distance produces the native layer gain")
+	assert_eq(audio.channel_pan(first), 128, "bearing 128 is the pan byte behind the listener")
 	world.unload()

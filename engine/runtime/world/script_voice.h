@@ -25,6 +25,10 @@ public:
     // loaded bank member with its pitch jitter (SoundBank_SelectTriggerEntryFromBank).
     using SetResolver =
             std::function<std::optional<SetSelection>(const std::string &, uint8_t, bool)>;
+    // The dialogue option word as the process holds it (g_DialogueVolume @0x24D20C8, the
+    // audio::SoundOptions dialogue word): a WAC start scales the voice's gain by it and every
+    // frame's distance curve clamps at it. None reads 255.
+    using DialogueVolume = std::function<int32_t()>;
     struct State {
         std::shared_ptr<const lwf::WavPcm> clip;
         std::string filename;
@@ -33,10 +37,13 @@ public:
         int32_t max_distance = 0;
         bool channel_active = false;
         uint32_t pitch_q16 = 0x10000u;
-        // The gain byte: a voice wave's the title's (TitleRules::script_voice_volume, 210 for
-        // Jointops.exe, DFX2-42), a set's its bank member's; the channel plays it as
-        // (gain * the dialogue volume + 128) >> 8 through the distance curve (sample)
-        // [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688; Audio_UpdateAmbientStream @ 0x4edb22].
+        // The gain byte (g_SoundTriggerVolume): a voice wave's the title's gain
+        // (TitleRules::script_voice_volume, 210 for Jointops.exe, DFX2-42) stored as
+        // (gain * the dialogue volume + 128) >> 8, 209 at full; a set's its bank member's. The
+        // channel plays it through the distance curve clamped at the dialogue volume (sample)
+        // [orig: Wac_PlayScriptedVoiceWave @ 0x4ed65f..0x4ed688; WacCmd_SsnWave
+        // @ 0x4f7956..0x4f7989; WacCmd_SsnRadio @ 0x4f7a3a..0x4f7a63; Audio_UpdateAmbientStream
+        // @ 0x4edb0d..0x4edb22].
         int32_t volume = 0;
         // The anchor is a decoded remote row the world holds no entity for
         // (a joiner's speaker): its position rides track_row_anchor.
@@ -53,6 +60,7 @@ public:
 
     void set_file_reader(FileReader reader) { read_file_ = std::move(reader); }
     void set_set_resolver(SetResolver resolver) { resolve_set_ = std::move(resolver); }
+    void set_dialogue_volume(DialogueVolume reader) { dialogue_volume_ = std::move(reader); }
     // Radio and revive voice share channel zero; an active voice declines a
     // new set before member selection. The portrait is the speaker, while
     // the acoustic anchor is the local body.
@@ -109,8 +117,10 @@ private:
     bool start(World &world, const std::string &filename, EntityHandle anchor,
             EntityHandle portrait, int32_t max_distance);
     void stop();
+    int32_t dialogue_volume() const { return dialogue_volume_ ? dialogue_volume_() : 255; }
     FileReader read_file_;
     SetResolver resolve_set_;
+    DialogueVolume dialogue_volume_;
     State state_;
     uint64_t serial_ = 0;
 };

@@ -24,12 +24,13 @@ void MusicStreamPump::install(mus::MusVM *vm, MusicStreamDevice *device) {
 	hooks.on_flush_buffer = on_flush_buffer;
 	hooks.on_section_entered = on_section_entered;
 	hooks.on_echo = on_echo;
+	hooks.on_volume_changed = on_volume_changed;
 	mus::mus_vm_set_hooks(vm_, &hooks);
 }
 
 void MusicStreamPump::begin() {
 	running_ = vm_runs(vm_);
-	streaming_ = false;
+	if (device_ != nullptr) device_->flush();
 }
 
 void MusicStreamPump::resume() {
@@ -38,30 +39,29 @@ void MusicStreamPump::resume() {
 
 void MusicStreamPump::end() {
 	running_ = false;
-	streaming_ = false;
+	if (device_ != nullptr) device_->flush();
 }
 
 MusicPumpOutcome MusicStreamPump::service_frame(uint32_t dt_ms) {
 	if (!running_ || vm_ == nullptr) return MusicPumpOutcome::Idle;
 	for (int update = 0; update < kServiceUpdates; ++update) {
-		if (streaming_) {
-			// The track streams on while it sounds: the stream's queue is full, the frame
-			// done [orig: AudioStream_Update @ 0x671c95 -> return 1].
-			if (device_ != nullptr && device_->track_sounding()) break;
-			// It has streamed out: its bytes left reach 0 [orig: @ 0x671d61].
-			streaming_ = false;
+		if (device_ == nullptr || !device_->streaming()) {
+			// The step [orig: AudioStream_Update @ 0x671c7f -> AudioVM_RunInstance @ 0x672ee0], the
+			// update done [orig: @ 0x671c84].
+			mus::mus_vm_tick(vm_, dt_ms);
+			const mus::MusVMState state = mus::mus_vm_state(vm_);
+			// PAUSED is the embedder's pause and resume; only a VM stopped, halted or in error
+			// ends the context.
+			if (state != mus::MUS_VM_RUNNING && state != mus::MUS_VM_PAUSED) {
+				running_ = false;
+				return state == mus::MUS_VM_ERROR ? MusicPumpOutcome::Failed : MusicPumpOutcome::Ended;
+			}
+			continue;
 		}
-		// The step [orig: AudioStream_Update @ 0x671c7f -> AudioVM_RunInstance @ 0x672ee0].
-		mus::mus_vm_tick(vm_, dt_ms);
-		const mus::MusVMState state = mus::mus_vm_state(vm_);
-		// PAUSED is the embedder's pause and resume; only a VM stopped, halted or in error
-		// ends the context.
-		if (state != mus::MUS_VM_RUNNING && state != mus::MUS_VM_PAUSED) {
-			running_ = false;
-			return state == mus::MUS_VM_ERROR ? MusicPumpOutcome::Failed : MusicPumpOutcome::Ended;
-		}
-		// The step selected a track: it streams through the rest of the frame.
-		if (streaming_) break;
+		// The stream's queue full: the frame done [orig: AudioStream_Update @ 0x671c95 -> return 1].
+		if (device_->queue_full()) break;
+		// One block [orig: @ 0x671ca4..0x671db3].
+		device_->stream_block();
 	}
 	return MusicPumpOutcome::Running;
 }
@@ -69,17 +69,15 @@ MusicPumpOutcome MusicStreamPump::service_frame(uint32_t dt_ms) {
 void MusicStreamPump::on_play_sound(void *user, uint32_t entry, int wait) {
 	(void)wait;  // play and playw both start the entry (D-MUS-11)
 	MusicStreamPump *self = static_cast<MusicStreamPump *>(user);
-	if (self == nullptr) return;
 	// The entry's bytes seed the stream [orig: AudioVM_SelectStream @ 0x671bf0].
-	self->streaming_ = true;
-	if (self->device_ != nullptr) self->device_->start_track(entry);
+	if (self != nullptr && self->device_ != nullptr) self->device_->start_track(entry);
 }
 
 void MusicStreamPump::on_flush_buffer(void *user) {
 	MusicStreamPump *self = static_cast<MusicStreamPump *>(user);
 	// [orig: AudioVM_Intrinsic_GFB @ 0x672150 - g_AudioStreamBytesLeft = 0]: the next update
 	// steps the script, whatever the track still sounding.
-	if (self != nullptr) self->streaming_ = false;
+	if (self != nullptr && self->device_ != nullptr) self->device_->flush();
 }
 
 void MusicStreamPump::on_section_entered(void *user, const char *name) {
@@ -90,6 +88,12 @@ void MusicStreamPump::on_section_entered(void *user, const char *name) {
 void MusicStreamPump::on_echo(void *user, int32_t value) {
 	MusicStreamPump *self = static_cast<MusicStreamPump *>(user);
 	if (self != nullptr && self->device_ != nullptr) self->device_->echo(value);
+}
+
+void MusicStreamPump::on_volume_changed(void *user, int32_t current_16_16, int32_t target_16_16) {
+	MusicStreamPump *self = static_cast<MusicStreamPump *>(user);
+	if (self != nullptr && self->device_ != nullptr)
+		self->device_->volume_changed(current_16_16, target_16_16);
 }
 
 } // namespace opennova::audio

@@ -1,6 +1,9 @@
 #include <cstdio>
 #include <cstring>
 #include <runtime/audio/ambient_mixer.h>
+#include <runtime/audio/mixer.h>
+#include <runtime/audio/script_voice_player.h>
+#include <runtime/audio/sound_listener.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
@@ -77,6 +80,53 @@ static void test_wave_ready_and_physical_completion() {
     f.world.script.voice.finish(frame.serial, frame.state.clip.get());
     f.script("if waveready() then inc(v4) endif\n");
     CHECK(f.world.script.vars.get_mission(4) == 1);
+}
+
+// The dialogue option scales a WAC start's gain, (210 * option + 128) >> 8, and clamps the
+// distance curve; a radio set's member volume stands as it is [orig: Wac_PlayScriptedVoiceWave
+// @0x4ED65F..0x4ED688; Audio_UpdateAmbientStream @0x4EDB0D..0x4EDB22].
+static void test_the_dialogue_option_scales_and_clamps_the_voice() {
+    Fixture f;
+    int32_t dialogue = 128;
+    f.world.script.voice.set_dialogue_volume([&dialogue] { return dialogue; });
+    f.script("wave(\"tone.wav\")\n");
+    auto frame = f.world.script.voice.frame(f.world, {});
+    CHECK(frame.state.volume == (210 * 128 + 128) >> 8); // 105, the start's word
+    CHECK(frame.local && frame.volume == 103);           // ((105 * 255) >> 8) through inv^2
+    dialogue = 64;                                       // the option moves mid-line: the clamp follows
+    frame = f.world.script.voice.frame(f.world, {});
+    CHECK(frame.state.volume == 105 && frame.volume == 64);
+}
+
+// The game's own buffer, AUD1, which its wave loader takes unchecked, reaches channel zero at its
+// header's pitch word: 32768, half the 44100 Hz device rate. The start's play factor stays unity,
+// so the channel steps 256 of a sample's 512 a device frame [orig: Audio_LoadWavFileFromArchive
+// @0x766603..0x76663C; Audio_Play3DPositionalSound @0x4ECD79 -> AudioChannel_PlaySound(0, ...);
+// the step @0x7BD5F6..0x7BD622].
+static void test_aud1_voice_reaches_channel_zero_at_its_header_pitch() {
+    Fixture f;
+    f.world.script.voice.set_file_reader([](const std::string &name, std::vector<uint8_t> &out) {
+        if (name != "tone.wav") return false;
+        out.assign(16 + 22050, 0); // signed PCM8; the zero-filled payload is silence
+        std::memcpy(out.data(), "AUD1", 4);
+        const uint32_t count = 22050, pitch = 32768;
+        for (int i = 0; i < 4; ++i) {
+            out[size_t(4 + i)] = uint8_t(count >> (8 * i));
+            out[size_t(8 + i)] = uint8_t(pitch >> (8 * i));
+        }
+        out[12] = 1;
+        return true;
+    });
+    f.script("wave(\"tone.wav\")\n");
+    const auto frame = f.world.script.voice.frame(f.world, {});
+    CHECK(frame.state.clip && frame.state.clip->loader_pitch_q16 == 32768);
+    opennova::audio::Mixer mixer;
+    opennova::audio::SoundListener listener;
+    opennova::audio::ScriptVoicePlayer voice;
+    voice.follow(mixer, listener, frame);
+    const opennova::audio::ChannelParams &channel = mixer.channel(opennova::audio::kVoiceChannel);
+    CHECK(voice.handle() != 0 && channel.wave && channel.wave->pitch_q16 == 32768);
+    CHECK(channel.play_q16 == 0x10000u && mixer.step(opennova::audio::kVoiceChannel) == 256);
 }
 
 static void test_failed_replacement_invalidates_before_loading() {
@@ -292,7 +342,8 @@ static void test_entity_voice_anchors_at_the_speaker_or_falls_back_to_a_oneshot(
 }
 
 // DFX2-42: a voice wave starts at its title's gain byte: Jointops.exe's 210, dfx2.exe's 240,
-// at every start (wave, SSNwave, SSNradio), heard as (gain * 255 + 128) >> 8 at full volume.
+// at every start (wave, SSNwave, SSNradio), stored through the dialogue option as
+// (gain * 255 + 128) >> 8 at full volume and heard at that through the curve.
 // [orig: Wac_PlayScriptedVoiceWave @0x4ED688; WacCmd_SsnWave @0x4F7989; WacCmd_SsnRadio @0x4F7A63]
 // [orig: WacCmd_SsnWave @0x4F4A40; @0x4F4B20; @0x4EA745 (dfx2.exe)]
 static void test_voice_waves_start_at_the_title_gain() {
@@ -303,7 +354,7 @@ static void test_voice_waves_start_at_the_title_gain() {
             f.world.rules.title_rules = &title_rules(code);
             f.script(line);
             const auto frame = f.world.script.voice.frame(f.world, {});
-            CHECK(frame.state.clip && frame.state.volume == gain);
+            CHECK(frame.state.clip && frame.state.volume == (gain * 255 + 128) >> 8);
             // The local anchor's: the gain through the curve at distance 0, its 100-unit radius.
             if (frame.local)
                 CHECK(frame.volume == opennova::audio::calc_distance_volume(
@@ -317,6 +368,8 @@ int main() {
     test_wave_ready_and_physical_completion();
     test_entity_voice_anchors_at_the_speaker_or_falls_back_to_a_oneshot();
     test_radio_sets_share_channel_zero_and_keep_unity_pitch();
+    test_the_dialogue_option_scales_and_clamps_the_voice();
+    test_aud1_voice_reaches_channel_zero_at_its_header_pitch();
     test_failed_replacement_invalidates_before_loading();
     test_spatial_speaker_and_radio_anchor();
     test_invalid_speaker_does_not_interrupt_and_dead_anchor_stops();

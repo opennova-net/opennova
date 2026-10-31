@@ -1,8 +1,8 @@
 #include "audio/mission_audio.h"
 
+#include "audio/audio_out.h"
 #include "dbf/dbf_data.h"
 #include "lwf/lwf_data.h"
-#include "lwf/wav_loader.h"
 #include "mission/mission_data.h"
 #include "mission/mission_info.h"
 #include "object/item_database.h"
@@ -11,55 +11,29 @@
 #include "simulation/simulation.h"
 #include "util/string_convert.h"
 
-#include <godot_cpp/classes/audio_effect.hpp>
-#include <godot_cpp/classes/audio_effect_reverb.hpp>
-#include <godot_cpp/classes/audio_server.hpp>
 #include <godot_cpp/classes/time.hpp>
-#include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
-#include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/gameprofile/resource_missing.h>
+#include <base/io/fixed.h>
+#include <base/io/strutil.h>
 #include <formats/lwf/lwf.h>
 #include <formats/lwf/wav_pcm.h>
-#include <runtime/audio/envs_markers.h>
 #include <runtime/audio/bank_chain.h>
+#include <runtime/audio/envs_markers.h>
 #include <runtime/audio/oneshot_play.h>
-#include <runtime/audio/volume_law.h>
+#include <runtime/audio/sound_options.h>
 #include <runtime/mission/mission_sidecars.h>
-#include <base/io/strutil.h>
 
 #include <cmath>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 using namespace godot;
 
 namespace {
-
-constexpr const char *kAmbientBus = "Ambient";
-constexpr const char *kSfxBus = "SFX";
-constexpr const char *kVoiceBus = "Voice";
-// The buses the sound-effects option drives, by the engine park's outputs
-// (audio::EffectsVolumePark::kEffectsOutput / kAmbientOutput).
-constexpr const char *kEffectsOptionBuses[opennova::audio::EffectsVolumePark::kOutputCount] = {
-	kSfxBus, kAmbientBus
-};
-
-// The thunder bearing is an 8-bit binary angle (one byte = a full turn;
-// world/weather_state.h WeatherSound.bearing).
-constexpr double kBearingBam8Turn = 256.0;
-// Hard-silent floor for out-of-mix voices (the engine's volume law).
-constexpr double kSilentDb = opennova::audio::kVolumeSilentDb;
-
-// The bus a candidate's table plays on: a placed marker's layers the Ambient
-// bus, an entity-attached lane's the SFX bus.
-StringName ambient_bus(opennova::audio::AmbientSource p_source) {
-	return StringName(p_source == opennova::audio::AmbientSource::Marker ? kAmbientBus : kSfxBus);
-}
 
 // The ambient mix's occlusion seam (audio::OcclusionFn): the frame's Simulation
 // (the witnessed two-ray LOS), else the test override, else the raw distance.
@@ -92,12 +66,19 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "mission", "mission_name", "container"), &MissionAudio::setup);
 	ClassDB::bind_method(D_METHOD("get_stats"), &MissionAudio::get_stats);
 	ClassDB::bind_method(D_METHOD("active_ambient_candidate_ids"), &MissionAudio::active_ambient_candidate_ids);
-	ClassDB::bind_method(D_METHOD("ambient_player_for_candidate", "candidate_id"),
-			&MissionAudio::ambient_player_for_candidate);
+	ClassDB::bind_method(D_METHOD("ambient_channel_for_candidate", "candidate_id"),
+			&MissionAudio::ambient_channel_for_candidate);
 	ClassDB::bind_method(D_METHOD("ambient_candidate_wave", "candidate_id"), &MissionAudio::ambient_candidate_wave);
 	ClassDB::bind_method(D_METHOD("set_ambient_markers_enabled", "enabled"),
 			&MissionAudio::set_ambient_markers_enabled);
-	ClassDB::bind_method(D_METHOD("dialog_voice"), &MissionAudio::dialog_voice);
+	ClassDB::bind_method(D_METHOD("is_dialog_voice_playing"), &MissionAudio::is_dialog_voice_playing);
+	ClassDB::bind_method(D_METHOD("dialog_voice_handle"), &MissionAudio::dialog_voice_handle);
+	ClassDB::bind_method(D_METHOD("script_voice_handle"), &MissionAudio::script_voice_handle);
+	ClassDB::bind_method(D_METHOD("stop_dialog_line"), &MissionAudio::stop_dialog_line);
+	ClassDB::bind_method(D_METHOD("channel_volume", "channel"), &MissionAudio::channel_volume);
+	ClassDB::bind_method(D_METHOD("channel_pan", "channel"), &MissionAudio::channel_pan);
+	ClassDB::bind_method(D_METHOD("channel_play", "channel"), &MissionAudio::channel_play);
+	ClassDB::bind_method(D_METHOD("channel_sounding", "channel"), &MissionAudio::channel_sounding);
 	ClassDB::bind_method(D_METHOD("get_perf_counters"), &MissionAudio::get_perf_counters);
 	ClassDB::bind_method(D_METHOD("get_bank"), &MissionAudio::get_bank);
 	ClassDB::bind_method(D_METHOD("apply_sound_emitters", "events"), &MissionAudio::apply_sound_emitters);
@@ -112,8 +93,6 @@ void MissionAudio::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("play_wac_wave", "filename"), &MissionAudio::play_wac_wave);
 	ClassDB::bind_method(D_METHOD("follow_script_voice"), &MissionAudio::follow_script_voice);
 	ClassDB::bind_method(D_METHOD("update_script_voice"), &MissionAudio::update_script_voice);
-	ClassDB::bind_method(D_METHOD("_on_script_voice_finished", "serial", "player_id"),
-			&MissionAudio::_on_script_voice_finished);
 	ClassDB::bind_method(D_METHOD("set_time_of_day_hhmm", "hhmm"), &MissionAudio::set_time_of_day_hhmm);
 	ClassDB::bind_method(D_METHOD("advance_ticks", "logic_tick"), &MissionAudio::advance_ticks);
 	ClassDB::bind_method(D_METHOD("set_simulation", "sim"), &MissionAudio::set_simulation);
@@ -195,20 +174,6 @@ void MissionAudio::_attach_under(Node3D *p_container) {
 	root_attached_ = true;
 }
 
-// Drop every voice child (the physical channels, the one-shot voices, the
-// dialog and WAC voices): the former audio root's teardown. Deferred like
-// that root's queue_free was -- the children stay in the tree until the idle
-// free, so a same-frame reader (and GUT's orphan monitor) sees no strays.
-void MissionAudio::_free_voice_nodes() {
-	const TypedArray<Node> children = get_children();
-	for (int64_t i = 0; i < children.size(); ++i) {
-		Node *child = Object::cast_to<Node>(children[i]);
-		if (child != nullptr) {
-			child->queue_free();
-		}
-	}
-}
-
 Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, const String &p_mission_name,
 		Node3D *p_container) {
 	stats_.instantiate();
@@ -216,12 +181,10 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		return stats_;
 	}
 	const Ref<MissionInfo> mission_info = p_mission->get_info();
-	// A repeated setup is not the normal owner lifecycle, but it must not orphan
-	// an earlier physical pool or carry dialog state into the next mission.
-	_stop_all_ambient_channels();
+	// A repeated setup is not the normal owner lifecycle, but it must not leave
+	// an earlier mission's channels sounding or carry dialog state into the next.
+	_reset_ambient_channels();
 	_reset_mission_playback_state();
-	_free_voice_nodes();
-	channel_players_.clear();
 	ambient_.clear();
 	warned_ambient_decode_failure_ = false;
 
@@ -274,6 +237,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	}
 
 	_attach_under(p_container);
+	AudioOut::attach(this);
 
 	std::vector<opennova::audio::EnvsMarker> marker_rows;
 	// S13 (ADR 0028): the faithful envs dispatch + the four soundloop slot
@@ -308,7 +272,6 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	}
 
 	ambient_.restart();
-	_apply_reverb(mission_info.is_valid() ? mission_info->get_reverb() : 0);
 	_apply_music(mission_info.is_valid() ? mission_info->get_music() : 0);
 	return stats_;
 }
@@ -325,16 +288,38 @@ TypedArray<int64_t> MissionAudio::active_ambient_candidate_ids() const {
 	return out;
 }
 
-AudioStreamPlayer3D *MissionAudio::_channel_player(int p_channel) const {
-	if (p_channel < 0 || static_cast<size_t>(p_channel) >= channel_players_.size()) {
-		return nullptr;
-	}
-	return Object::cast_to<AudioStreamPlayer3D>(
-			ObjectDB::get_instance(channel_players_[static_cast<size_t>(p_channel)]));
+int MissionAudio::ambient_channel_for_candidate(int p_candidate_id) const {
+	const int channel = p_candidate_id < 0 ? -1 : ambient_.channel_of(p_candidate_id);
+	return channel < 0 ? -1 : opennova::audio::kFirstAmbientChannel + channel;
 }
 
-AudioStreamPlayer3D *MissionAudio::ambient_player_for_candidate(int p_candidate_id) const {
-	return p_candidate_id < 0 ? nullptr : _channel_player(ambient_.channel_of(p_candidate_id));
+namespace {
+
+const opennova::audio::ChannelParams *mixer_channel(int p_channel) {
+	if (p_channel < 0 || size_t(p_channel) >= opennova::audio::kAudioChannelCount) return nullptr;
+	return &AudioOut::mixer().channel(p_channel);
+}
+
+} // namespace
+
+int MissionAudio::channel_volume(int p_channel) const {
+	const opennova::audio::ChannelParams *params = mixer_channel(p_channel);
+	return params ? int(params->volume) : 0;
+}
+
+int MissionAudio::channel_pan(int p_channel) const {
+	const opennova::audio::ChannelParams *params = mixer_channel(p_channel);
+	return params ? int(params->pan) : 0;
+}
+
+int64_t MissionAudio::channel_play(int p_channel) const {
+	const opennova::audio::ChannelParams *params = mixer_channel(p_channel);
+	return params ? int64_t(params->play_q16) : 0;
+}
+
+bool MissionAudio::channel_sounding(int p_channel) const {
+	const opennova::audio::ChannelParams *params = mixer_channel(p_channel);
+	return params && params->wave && params->wave != opennova::audio::silent_mix_wave();
 }
 
 String MissionAudio::ambient_candidate_wave(int p_candidate_id) const {
@@ -346,16 +331,8 @@ void MissionAudio::set_ambient_markers_enabled(bool p_enabled) {
 	ambient_markers_enabled_ = p_enabled;
 }
 
-AudioStreamPlayer *MissionAudio::_dialog_voice_node() const {
-	return Object::cast_to<AudioStreamPlayer>(ObjectDB::get_instance(dialog_voice_id_));
-}
-
-AudioStreamPlayer *MissionAudio::_wac_voice_node() const {
-	return Object::cast_to<AudioStreamPlayer>(ObjectDB::get_instance(wac_voice_id_));
-}
-
-AudioStreamPlayer *MissionAudio::dialog_voice() const {
-	return _dialog_voice_node();
+bool MissionAudio::is_dialog_voice_playing() const {
+	return dialog_handle_ != 0 && AudioOut::mixer().validate(dialog_handle_) != 0;
 }
 
 Ref<MissionAudioPerf> MissionAudio::get_perf_counters() const {
@@ -370,7 +347,7 @@ Ref<MissionAudioPerf> MissionAudio::get_perf_counters() const {
 	perf->set_tick_us(perf_tick_us_);
 	perf->set_markers(perf_markers_);
 	perf->set_voice_writes(perf_voice_writes_);
-	perf->set_physical_channels(static_cast<int64_t>(channel_players_.size()));
+	perf->set_physical_channels(static_cast<int64_t>(ambient_.channel_count()));
 	perf->set_active_channels(active_channels);
 	perf->set_ambient_decode_failures(static_cast<int64_t>(ambient_.failed_count()));
 	return perf;
@@ -397,98 +374,52 @@ void MissionAudio::apply_sound_emitter_events(
 }
 
 void MissionAudio::play_weather_sounds(
-		const std::vector<opennova::world::WeatherSoundEvent> &p_events,
-		const Transform3D &p_camera_xform) {
-    for (const auto &event : p_events) {
-        _play_listener_relative(opennova::world::kThunderSoundSet, event.distance_q16, event.bearing, p_camera_xform);
-    }
+		const std::vector<opennova::world::WeatherSoundEvent> &p_events, const Transform3D &) {
+	for (const auto &event : p_events) {
+		_play_listener_relative(opennova::world::kThunderSoundSet, event.distance_q16, event.bearing);
+	}
 }
 
 void MissionAudio::play_script_sounds(
-        const std::vector<opennova::world::ScriptSoundEvent> &p_events,
-        const Transform3D &p_camera_xform) {
-    for (const auto &event : p_events) {
-        if (event.kind == opennova::world::ScriptSoundEvent::Kind::Interface)
-            ui_soundset(opennova::to_gd(event.name));
-        else
-            _play_listener_relative(opennova::to_gd(event.name), event.distance_q16,
-                    event.bearing, p_camera_xform);
-    }
+		const std::vector<opennova::world::ScriptSoundEvent> &p_events, const Transform3D &) {
+	for (const auto &event : p_events) {
+		if (event.kind == opennova::world::ScriptSoundEvent::Kind::Interface)
+			ui_soundset(opennova::to_gd(event.name));
+		else
+			_play_listener_relative(opennova::to_gd(event.name), event.distance_q16, event.bearing);
+	}
 }
 
-void MissionAudio::_play_listener_relative(const String &p_name, int32_t p_distance_q16,
-        int32_t p_bearing, const Transform3D &p_camera_xform) {
-    if (bank_.is_null() || !root_attached_) {
-        return;
-    }
-    // Retail passes the raw bearing and distance straight to the trigger player.
-    // Godot supplies the device panner (D-SND-8); a unit offset preserves the
-    // bearing even for zero distance. The native plan owns attenuation.
-    const Vector3 forward = -p_camera_xform.basis.get_column(2);
-    const auto bearing = static_cast<uint8_t>(p_bearing);
-    const Vector3 direction = forward.rotated(Vector3(0, 1, 0),
-            static_cast<real_t>(static_cast<double>(bearing) * Math_TAU / kBearingBam8Turn));
-    const Vector3 position = p_camera_xform.origin + direction;
-    _record_fire(p_name, position, 0, false,
-            bank_->play_oneshot_at_distance(this, position, p_name, StringName(kSfxBus),
-                    p_distance_q16));
+void MissionAudio::_play_listener_relative(const String &p_name, int32_t p_distance_q16, int32_t p_bearing) {
+	if (bank_.is_null() || !root_attached_) {
+		return;
+	}
+	// The raw bearing and distance straight to the trigger player (SoundBank::play_oneshot_at_distance);
+	// the native plan owns attenuation.
+	_record_fire(p_name, last_camera_pos_, 0, false,
+			bank_->play_oneshot_at_distance(p_name, p_distance_q16, static_cast<uint8_t>(p_bearing)));
 }
 
 void MissionAudio::shutdown_audio_channels() {
-	if (bank_.is_valid()) {
-		bank_->reset_oneshots(this);
-	}
-	_stop_all_ambient_channels();
-	const Ref<Simulation> sim = _simulation();
-	if (opennova::audio::DialogQueue *queue = sim.is_valid() ? sim->dialog_queue() : nullptr) {
-		for (const uint64_t voice : queue->voices()) {
-			if (AudioStreamPlayer *dialog = Object::cast_to<AudioStreamPlayer>(
-						ObjectDB::get_instance(ObjectID(voice)))) {
-				dialog->stop();
-			}
-		}
-	}
-	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
-		dialog->stop();
-	}
-	if (AudioStreamPlayer *wac = _wac_voice_node()) {
-		wac->stop();
-	}
+	// Every channel opened on the silent buffer (engine audio::Mixer::init_all) and the emitter
+	// handles dropped; the dialog queue and the scripted voice see their handles stop validating.
+	AudioOut::mixer().init_all();
+	ambient_.release_channels();
 }
 
 void MissionAudio::set_world_sound_parked(bool p_parked) {
-	if (p_parked == effects_park_.parked()) return;
-	AudioServer *server = AudioServer::get_singleton();
-	int buses[opennova::audio::EffectsVolumePark::kOutputCount] = { -1, -1 };
-	for (int i = 0; i < opennova::audio::EffectsVolumePark::kOutputCount; ++i) {
-		if (server != nullptr) buses[i] = server->get_bus_index(StringName(kEffectsOptionBuses[i]));
-	}
-	opennova::audio::EffectsVolumePark::Levels levels{};
-	if (p_parked) {
-		for (int i = 0; i < opennova::audio::EffectsVolumePark::kOutputCount; ++i) {
-			if (buses[i] >= 0) levels[static_cast<size_t>(i)] = server->get_bus_volume_db(buses[i]);
-		}
-		if (!effects_park_.park(levels)) return;
-		for (const int bus : buses) {
-			if (bus >= 0) {
-				server->set_bus_volume_db(bus,
-						static_cast<float>(opennova::audio::EffectsVolumePark::parked_db()));
-			}
-		}
-		return;
-	}
-	if (!effects_park_.restore(levels)) return;
-	for (int i = 0; i < opennova::audio::EffectsVolumePark::kOutputCount; ++i) {
-		if (buses[i] >= 0) {
-			server->set_bus_volume_db(buses[i], static_cast<float>(levels[static_cast<size_t>(i)]));
-		}
-	}
+	if (p_parked)
+		AudioOut::options().park();
+	else
+		AudioOut::options().restore();
+}
+
+bool MissionAudio::is_world_sound_parked() const {
+	return AudioOut::options().parked();
 }
 
 void MissionAudio::stop_dialog_line() {
-	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
-		dialog->stop();
-	}
+	AudioOut::mixer().reset(dialog_handle_);
 }
 
 // The local player's own action-slot presentation arrives as source -1 with no
@@ -503,31 +434,41 @@ int MissionAudio::_oneshot_sound_id(int p_source_bms_id, int p_sound_id) {
 			opennova::audio::kNoSourceHandle, p_source_bms_id));
 }
 
+SoundBank::Hearing MissionAudio::_hearing(int p_sound_id) const {
+	SoundBank::Hearing hearing;
+	hearing.listener = last_camera_pos_.is_finite() ? &listener_ : nullptr;
+	const Ref<Simulation> sim = _simulation();
+	hearing.ridden = sim.is_valid() && sim->sound_source_ridden(static_cast<uint32_t>(p_sound_id));
+	return hearing;
+}
+
 bool MissionAudio::fire_soundset(const String &p_name, const Vector3 &p_world_pos, int p_source_bms_id,
 		int p_sound_id) {
 	if (bank_.is_null() || !root_attached_) {
 		return _record_fire(p_name, p_world_pos, p_source_bms_id, false, false);
 	}
+	const int sound_id = _oneshot_sound_id(p_source_bms_id, p_sound_id);
 	return _record_fire(p_name, p_world_pos, p_source_bms_id, false,
-			bank_->play_oneshot_3d(this, p_world_pos, p_name, StringName(kSfxBus), last_camera_pos_,
-					p_source_bms_id, _oneshot_sound_id(p_source_bms_id, p_sound_id)));
+			bank_->play_oneshot_3d(p_world_pos, p_name, last_camera_pos_, _hearing(sound_id),
+					p_source_bms_id, sound_id));
 }
 
 bool MissionAudio::ui_soundset(const String &p_name) {
 	if (bank_.is_null() || !root_attached_) {
 		return false;
 	}
-	return bank_->play_interface_oneshot(this, p_name, StringName(kSfxBus));
+	return bank_->play_interface_oneshot(p_name);
 }
 
 bool MissionAudio::slot_soundset(const String &p_name, const Vector3 &p_world_pos,
-        int p_source_bms_id, int p_sound_id) {
-    if (bank_.is_null() || !root_attached_) {
-        return _record_fire(p_name, p_world_pos, p_source_bms_id, true, false);
-    }
-    return _record_fire(p_name, p_world_pos, p_source_bms_id, true,
-            bank_->play_oneshot_3d(this, p_world_pos, p_name, StringName(kSfxBus), last_camera_pos_,
-                    p_source_bms_id, _oneshot_sound_id(p_source_bms_id, p_sound_id)));
+		int p_source_bms_id, int p_sound_id) {
+	if (bank_.is_null() || !root_attached_) {
+		return _record_fire(p_name, p_world_pos, p_source_bms_id, true, false);
+	}
+	const int sound_id = _oneshot_sound_id(p_source_bms_id, p_sound_id);
+	return _record_fire(p_name, p_world_pos, p_source_bms_id, true,
+			bank_->play_oneshot_3d(p_world_pos, p_name, last_camera_pos_, _hearing(sound_id),
+					p_source_bms_id, sound_id));
 }
 
 bool MissionAudio::play_dialog(int p_wav_id) {
@@ -566,7 +507,9 @@ bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
 	if (line.file.empty()) {
 		return false;
 	}
-	return _spawn_dialog_voice(_resolve_wav(opennova::to_gd(line.file).get_file()), line.volume) != nullptr;
+	const uint32_t handle = _play_dialog_wave(_resolve_wav(opennova::to_gd(line.file).get_file()), line.volume);
+	if (handle != 0) dialog_handle_ = handle;
+	return handle != 0;
 }
 
 String MissionAudio::resolve_dialog_wave(int p_wav_id) {
@@ -586,32 +529,16 @@ std::vector<opennova::audio::DialogLineRef> MissionAudio::_resolve_dialog_lines(
 			dialog_sounds_loaded_ ? &dialog_sounds_ : nullptr, p_wav_id);
 }
 
-AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &p_stream, int p_volume) {
-	if (p_stream.is_null()) {
-		return nullptr;
-	}
-	AudioStreamPlayer *voice = memnew(AudioStreamPlayer);
-	voice->set_name("DialogVoice");
-	if (AudioServer::get_singleton()->get_bus_index(StringName(kVoiceBus)) >= 0) {
-		voice->set_bus(StringName(kVoiceBus));
-	}
-	voice->set_stream(p_stream);
-	// The line plays at the play factor 0x10000, centred: the dialog's play hook writes both into the
-	// line's record before the open [orig: Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x52757c, called through dword_A8A23C
-	// @ 0x44de50]. A decoded wave's player takes its scale through WavLoader::pitch_scale_for (the
-	// mixer's step of the wave, a boxed rate's too).
-	voice->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(p_stream, 1.0)));
-	voice->set_volume_db(opennova::audio::volume_db_from_byte(p_volume));
-	add_child(voice);
-	voice->play();
-	voice->connect("finished", Callable(voice, "queue_free"));
-	return voice;
+uint32_t MissionAudio::_play_dialog_wave(const opennova::audio::MixWaveRef &p_wave, int p_volume) {
+	if (!p_wave) return 0;
+	return AudioOut::mixer().open(opennova::audio::kDialogChannel,
+			opennova::audio::dialog_line_params(p_wave, p_volume, AudioOut::options().dialogue()));
 }
 
 // A line the dialog queue loads: its wave read and decoded through the VFS (a
 // missing .wav extension tolerated), what the game's wave loader records of it
 // for the line's hold (runtime/audio/dialog_queue dialog_clip_hold) and, when the
-// engine's gate lets it play, a voice of the dialog channel at the wave's volume
+// engine's gate lets it play, its wave on the dialog channel at the wave's volume
 // byte. The authority's leg (its chat lines and the co-op broadcast) runs after it
 // in the engine (Simulation::tick_dialog_queue; docs/audio/lwf-dbf-sound-re.md D-SND-42).
 opennova::audio::DialogClip MissionAudio::_load_dialog_line(
@@ -631,9 +558,10 @@ opennova::audio::DialogClip MissionAudio::_load_dialog_line(
 			clip.samples = decoded.loader_samples;
 			clip.pitch_q16 = decoded.loader_pitch_q16;
 			if (!p_play) return clip;
-			if (AudioStreamPlayer *voice = _spawn_dialog_voice(WavLoader::from_pcm(decoded), p_line.volume)) {
-				dialog_voice_id_ = ObjectID(voice->get_instance_id());
-				clip.voice = static_cast<uint64_t>(voice->get_instance_id());
+			const uint32_t handle = _play_dialog_wave(opennova::audio::mix_wave_from_pcm(decoded), p_line.volume);
+			if (handle != 0) {
+				dialog_handle_ = handle;
+				clip.voice = handle;
 			}
 		}
 	}
@@ -641,9 +569,8 @@ opennova::audio::DialogClip MissionAudio::_load_dialog_line(
 }
 
 bool MissionAudio::_dialog_voice_playing(uint64_t p_voice) const {
-	const AudioStreamPlayer *voice =
-			Object::cast_to<AudioStreamPlayer>(ObjectDB::get_instance(ObjectID(p_voice)));
-	return voice != nullptr && voice->is_playing();
+	// The queue's channel gate (engine audio::DialogQueue::tick).
+	return p_voice != 0 && AudioOut::mixer().validate(static_cast<uint32_t>(p_voice)) != 0;
 }
 
 bool MissionAudio::play_wac_wave(const String &p_filename) {
@@ -653,47 +580,43 @@ bool MissionAudio::play_wac_wave(const String &p_filename) {
 		follow_script_voice();
 		return loaded;
 	}
-	// Standalone tooling shares the same interrupt-before-load rule.
-	if (AudioStreamPlayer *previous = _wac_voice_node()) previous->stop();
+	// Standalone tooling shares the scripted voice's interrupt-before-load rule on channel zero
+	// (engine world::ScriptVoiceChannel::start).
+	AudioOut::mixer().reset(tool_voice_handle_);
+	tool_voice_handle_ = 0;
 	if (!root_attached_ || resource_root_.is_null() || p_filename.is_empty()) {
 		return false;
 	}
-	const Ref<AudioStreamWAV> stream = _resolve_wav(p_filename);
-	if (stream.is_null()) {
+	const opennova::audio::MixWaveRef wave = _resolve_wav(p_filename);
+	if (!wave) {
 		UtilityFunctions::push_warning(vformat("MissionAudio: WAC wave '%s' did not resolve", p_filename));
 		return false;
 	}
-	// The engine's channel rule: one dedicated voice, reset before each play.
-	AudioStreamPlayer *voice = _wac_voice_node();
-	if (voice == nullptr) {
-		voice = memnew(AudioStreamPlayer);
-		voice->set_bus(_script_voice_bus());
-		add_child(voice);
-		wac_voice_id_ = ObjectID(voice->get_instance_id());
-	}
-	voice->set_stream(stream);
-	voice->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(stream, 1.0)));
-	voice->play(); // play() on an active player restarts it -> interrupts the previous wave
-	return true;
+	tool_voice_handle_ = AudioOut::mixer().open(opennova::audio::kVoiceChannel,
+			opennova::audio::voice_params(wave, 0, opennova::audio::kVolumeByteMax, 0x10000));
+	return tool_voice_handle_ != 0;
 }
 
 // Resolve + cache a .wav by filename through the VFS (tolerates a missing .wav
-// extension). Returns the decoded AudioStreamWAV, or null.
-Ref<AudioStreamWAV> MissionAudio::_resolve_wav(const String &p_filename) {
-	const String key = p_filename.to_lower();
-	if (const Ref<AudioStreamWAV> *cached = wac_wav_cache_.getptr(key)) {
-		return *cached;
+// extension). Returns the decoded buffer, or null.
+opennova::audio::MixWaveRef MissionAudio::_resolve_wav(const String &p_filename) {
+	const std::string key = opennova::to_std(p_filename.to_lower());
+	if (const auto cached = wac_waves_.find(key); cached != wac_waves_.end()) {
+		return cached->second;
 	}
 	PackedByteArray bytes = resource_root_->read_file(p_filename);
-	if (bytes.is_empty() && !key.ends_with(".wav")) {
+	if (bytes.is_empty() && !p_filename.to_lower().ends_with(".wav")) {
 		bytes = resource_root_->read_file(p_filename + String(".wav"));
 	}
-	Ref<AudioStreamWAV> stream;
-	if (!bytes.is_empty()) {
-		stream = WavLoader::from_bytes(bytes);
+	opennova::audio::MixWaveRef wave;
+	opennova::lwf::WavPcm pcm;
+	std::string error;
+	if (!bytes.is_empty() &&
+			opennova::lwf::wav_decode_pcm16(bytes.ptr(), static_cast<size_t>(bytes.size()), pcm, error)) {
+		wave = opennova::audio::mix_wave_from_pcm(pcm);
 	}
-	wac_wav_cache_[key] = stream;
-	return stream;
+	wac_waves_[key] = wave;
+	return wave;
 }
 
 void MissionAudio::set_time_of_day_hhmm(double p_hhmm) {
@@ -701,13 +624,14 @@ void MissionAudio::set_time_of_day_hhmm(double p_hhmm) {
 }
 
 void MissionAudio::advance_ticks(int64_t p_logic_tick) {
+	logic_tick_ = p_logic_tick;
 	follow_script_voice();
 	ambient_.advance_to_logic_tick(p_logic_tick);
 }
 
 void MissionAudio::set_simulation(const Ref<Simulation> &p_sim) {
 	const Ref<Simulation> previous = _simulation();
-	if (previous.is_valid() && previous != p_sim) previous->set_script_voice_resolver({});
+	if (previous.is_valid() && previous != p_sim) previous->set_script_voice_resolver({}, {});
 	simulation_id_ = p_sim.is_valid() ? ObjectID(p_sim->get_instance_id()) : ObjectID();
 	_install_voice_resolver();
 	if (bank_.is_valid()) {
@@ -722,23 +646,55 @@ void MissionAudio::set_occlusion_override(const Callable &p_override) {
 	}
 }
 
+void MissionAudio::set_listener_view(const Transform3D &p_camera) {
+	last_camera_pos_ = p_camera.origin;
+	// The view in the mission frame's 16.16 units (presentation (x, y, z) is mission (x, -z, y))
+	// and its yaw from its facing, -Z.
+	const Vector3 origin = p_camera.origin;
+	const int32_t at[3] = { int32_t(origin.x * opennova::io::kFp16One),
+		int32_t(-origin.z * opennova::io::kFp16One), int32_t(origin.y * opennova::io::kFp16One) };
+	const Vector3 facing = -p_camera.basis.get_column(2);
+	const int32_t yaw = opennova::audio::listener_yaw(double(facing.x), double(-facing.z));
+	// The listener moves over the frame's logic ticks; with no simulation (a tool) each view
+	// places it anew.
+	if (_simulation().is_null() || listener_tick_ < 0) {
+		listener_.place(at, yaw);
+		listener_tick_ = logic_tick_;
+		return;
+	}
+	const int64_t ticks = logic_tick_ - listener_tick_;
+	listener_tick_ = logic_tick_;
+	listener_.update(at, yaw, ticks > 0 ? static_cast<uint32_t>(ticks) : 0u);
+}
+
 void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
+	tick_view(Transform3D(Basis(), p_camera_pos), p_delta);
+}
+
+void MissionAudio::tick_view(const Transform3D &p_camera, double p_delta) {
 	const uint64_t start = Time::get_singleton()->get_ticks_usec();
-	last_camera_pos_ = p_camera_pos;
+	AudioOut::attach(this);
+	set_listener_view(p_camera);
 	// The frame this pass mixes renders: the next dialog tick starts a fresh
 	// line's hold (runtime/audio/dialog_queue DialogQueue::tick).
 	dialog_frame_rendered_ = true;
 	// The scripted voice's device follows its channel here; its update is the scene frame's
 	// (update_script_voice).
 	follow_script_voice();
-	int writes = 0;
+	const Ref<Simulation> sim = _simulation();
+	opennova::audio::Mixer &mixer = AudioOut::mixer();
+	// Every channel playing for an entity follows it (engine audio::repan_entity_channels).
+	if (sim.is_valid()) {
+		const Simulation *source = sim.ptr();
+		opennova::audio::repan_entity_channels(mixer, listener_,
+				[source](uint32_t p_id, int32_t r_position[3]) { return source->sound_source_place(p_id, r_position); });
+	}
 	if (!ambient_.live()) {
 		perf_markers_ = 0;
 		perf_voice_writes_ = 0;
 		perf_tick_us_ = static_cast<int64_t>(Time::get_singleton()->get_ticks_usec() - start);
 		return;
 	}
-	const Ref<Simulation> sim = _simulation();
 	// A header-only join's envs emitters, once the host's world stream has
 	// landed (pool 3, the markers, streams last, before the match opens).
 	if (world_envs_pending_ && sim.is_valid() && sim->is_joined_in_match() && item_db_.is_valid()) {
@@ -746,94 +702,44 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 		ambient_.add_envs_markers(sim->envs_markers_from_world(item_db_->native_items()));
 		ambient_.restart();
 	}
-	// The engine plans the frame; the stream resolve is the one device step it
-	// asks for, once per entrant, answered here and kept for the bind.
-	struct Entrant {
-		Ref<AudioStreamWAV> stream;
-		StringName bus;
-	};
-	std::unordered_map<int32_t, Entrant> entrants;
-	const auto resolve = [&](int32_t p_candidate_id,
-								 const opennova::audio::AmbientCandidateRef &p_candidate) {
-		const Ref<AudioStreamWAV> stream = _resolve_ambient_stream(p_candidate);
-		if (stream.is_null()) return false;
-		entrants[p_candidate_id] = Entrant{ stream, ambient_bus(p_candidate.source) };
-		return true;
-	};
 	AmbientOcclusion occlusion;
 	occlusion.sim = sim.ptr();
 	occlusion.override_fn = &occlusion_override_;
 	const bool occluded = occlusion.sim != nullptr || occlusion_override_.is_valid();
-	const float listener[3] = { static_cast<float>(p_camera_pos.x),
-		static_cast<float>(p_camera_pos.y), static_cast<float>(p_camera_pos.z) };
+	const Vector3 camera = p_camera.origin;
+	const float listener[3] = { static_cast<float>(camera.x), static_cast<float>(camera.y),
+		static_cast<float>(camera.z) };
 	const opennova::audio::AmbientChannelPlan &plan = ambient_.frame(listener,
-			static_cast<float>(p_delta), root_attached_, resolve,
+			static_cast<float>(p_delta), root_attached_,
+			[this](int32_t, const opennova::audio::AmbientCandidateRef &p_candidate) {
+				return _resolve_ambient_wave(p_candidate) != nullptr;
+			},
 			occluded ? &ambient_occlusion : nullptr, &occlusion);
-	while (static_cast<int>(channel_players_.size()) < plan.channel_count) _new_channel();
-
-	for (const int channel_index : plan.released) {
-		if (AudioStreamPlayer3D *player = _channel_player(channel_index)) {
-			player->stop();
-			player->set_stream(Ref<AudioStream>());
-			player->set_volume_db(static_cast<float>(kSilentDb));
-			player->set_process_mode(Node::PROCESS_MODE_DISABLED);
-		}
-		writes += 1;
-	}
-	for (const opennova::audio::AmbientChannelPlan::Bind &bind : plan.binds) {
-		AudioStreamPlayer3D *player = _channel_player(bind.channel);
-		const auto entrant = entrants.find(bind.row.candidate_id);
-		if (player == nullptr || entrant == entrants.end()) continue;
-		const Ref<AudioStreamWAV> &stream = entrant->second.stream;
-		SoundBank::configure_ambient_player(player, stream, entrant->second.bus);
-		player->set_position(Vector3(bind.row.pos[0], bind.row.pos[1], bind.row.pos[2]));
-		player->set_volume_db(static_cast<float>(SoundBank::volume_db_from_255(bind.row.vol)));
-		player->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(stream,
-				_pitch_scale(bind.row.pitch_q16))));
-		player->set_process_mode(Node::PROCESS_MODE_INHERIT);
-		player->play();
-		writes += 1;
-	}
-	for (const opennova::audio::AmbientChannelPlan::Bind &update : plan.updates) {
-		AudioStreamPlayer3D *incumbent = _channel_player(update.channel);
-		if (incumbent == nullptr) continue;
-		bool changed = false;
-		const Vector3 pos(update.row.pos[0], update.row.pos[1], update.row.pos[2]);
-		if (incumbent->get_position() != pos) {
-			incumbent->set_position(pos);
-			changed = true;
-		}
-		const double db = SoundBank::volume_db_from_255(update.row.vol);
-		if (!Math::is_equal_approx(static_cast<double>(incumbent->get_volume_db()), db)) {
-			incumbent->set_volume_db(static_cast<float>(db));
-			changed = true;
-		}
-		const double pitch_scale = WavLoader::pitch_scale_for(incumbent->get_stream(),
-				_pitch_scale(update.row.pitch_q16));
-		if (!Math::is_equal_approx(static_cast<double>(incumbent->get_pitch_scale()), pitch_scale)) {
-			incumbent->set_pitch_scale(static_cast<float>(pitch_scale));
-			changed = true;
-		}
-		if (changed) writes += 1;
-	}
+	const Simulation *source = sim.ptr();
+	ambient_.play(mixer, listener_, AudioOut::options().sound_fx(),
+			[this](int32_t, const opennova::audio::AmbientCandidateRef &p_candidate) {
+				return _resolve_ambient_wave(p_candidate);
+			},
+			[source](uint64_t p_spawn_id) { return source != nullptr && source->sound_spawn_ridden(p_spawn_id); });
 	perf_markers_ = ambient_.marker_count();
-	perf_voice_writes_ = writes;
+	// The channels opened or reset this frame (an incumbent's re-pan and re-level each frame is
+	// no write: retail sets every one of the eight each frame).
+	perf_voice_writes_ = static_cast<int>(plan.released.size() + plan.binds.size());
 	perf_tick_us_ = static_cast<int64_t>(Time::get_singleton()->get_ticks_usec() - start);
 	_publish_ambient_stats();
 }
 
-Ref<AudioStreamWAV> MissionAudio::_resolve_ambient_stream(
+opennova::audio::MixWaveRef MissionAudio::_resolve_ambient_wave(
 		const opennova::audio::AmbientCandidateRef &p_candidate) {
 	const String wave = opennova::to_gd(p_candidate.wave);
-	const Ref<AudioStreamWAV> stream =
-			bank_.is_valid() ? bank_->resolve_ambient_wave(wave) : Ref<AudioStreamWAV>();
-	if (stream.is_null() && !warned_ambient_decode_failure_) {
+	const opennova::audio::MixWaveRef buffer = bank_.is_valid() ? bank_->resolve_wave(wave) : nullptr;
+	if (!buffer && !warned_ambient_decode_failure_) {
 		warned_ambient_decode_failure_ = true;
 		UtilityFunctions::push_warning(vformat(
 				"MissionAudio: ambient WAV '%s' failed to decode; excluding failed candidates from the eight-channel mix",
 				wave));
 	}
-	return stream;
+	return buffer;
 }
 
 void MissionAudio::_publish_ambient_stats() {
@@ -846,76 +752,42 @@ void MissionAudio::_publish_ambient_stats() {
 	stats_->set_ambient_candidates(ambient.candidates);
 	stats_->set_ambient_candidates_validated(ambient.candidates_validated);
 	stats_->set_ambient_decode_failures(ambient.decode_failures);
-	stats_->set_physical_channels(static_cast<int>(channel_players_.size()));
+	stats_->set_physical_channels(ambient_.channel_count());
 }
 
-// One more physical channel: the engine pool decided the growth under its
-// budget, on an attached root.
-void MissionAudio::_new_channel() {
-	AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
-	player->set_name(vformat("AmbientChannel%d", static_cast<int64_t>(channel_players_.size())));
-	player->set_volume_db(static_cast<float>(kSilentDb));
-	player->set_process_mode(Node::PROCESS_MODE_DISABLED);
-	add_child(player);
-	channel_players_.push_back(ObjectID(player->get_instance_id()));
-}
-
-void MissionAudio::_stop_all_ambient_channels() {
+void MissionAudio::_reset_ambient_channels() {
+	opennova::audio::Mixer &mixer = AudioOut::mixer();
+	for (int channel = 0; channel < opennova::audio::kAmbientMixChannels; ++channel)
+		mixer.reset(ambient_.channel_handle(channel));
 	ambient_.release_channels();
-	for (size_t channel = 0; channel < channel_players_.size(); ++channel) {
-		if (AudioStreamPlayer3D *player = _channel_player(static_cast<int>(channel))) {
-			player->stop();
-			player->set_stream(Ref<AudioStream>());
-			player->set_volume_db(static_cast<float>(kSilentDb));
-			player->set_process_mode(Node::PROCESS_MODE_DISABLED);
-		}
-	}
 }
 
 void MissionAudio::_reset_mission_playback_state() {
 	_stop_script_voice(true);
-	// Dialog and WAC voices are mission-owned even though they use separate
-	// physical players from ambience. Stop them before replacing their audio
-	// root so no playback crosses missions; the dialog table is the world's,
-	// which the next mission's boot starts empty.
-	const Ref<Simulation> sim = _simulation();
-	if (opennova::audio::DialogQueue *queue = sim.is_valid() ? sim->dialog_queue() : nullptr) {
-		for (const uint64_t voice : queue->voices()) {
-			if (AudioStreamPlayer *dialog = Object::cast_to<AudioStreamPlayer>(
-						ObjectDB::get_instance(ObjectID(voice)))) {
-				dialog->stop();
-			}
-		}
-	}
-	if (AudioStreamPlayer *dialog = _dialog_voice_node()) {
-		dialog->stop();
-	}
-	if (AudioStreamPlayer *wac = _wac_voice_node()) {
-		wac->stop();
-	}
-	dialog_voice_id_ = ObjectID();
+	// The dialog and scripted-voice channels are mission-owned: silenced before the next
+	// mission's, the dialog table being the world's, which the next mission's boot starts empty.
+	opennova::audio::Mixer &mixer = AudioOut::mixer();
+	mixer.reset(dialog_handle_);
+	mixer.reset(tool_voice_handle_);
+	dialog_handle_ = 0;
+	tool_voice_handle_ = 0;
 	dialog_frame_rendered_ = false;
-	wac_voice_id_ = ObjectID();
-	wac_wav_cache_.clear();
+	wac_waves_.clear();
 	dbf_.unref();
 	dialog_sounds_ = opennova::lwf::File();
 	dialog_sounds_loaded_ = false;
 }
 
 void MissionAudio::teardown() {
-	// Freeing the voice children drops the dialog + wac voice nodes too; the
-	// queue and its voices are cleared so nothing crosses missions. A parked
-	// world-sound volume is released first, as the teardown's cine release puts the
+	// A parked world-sound option is released first, as the teardown's cine release puts the
 	// saved option back (engine EpilogCine::world_sound_parked carries the witness).
 	set_world_sound_parked(false);
-	_apply_reverb(0);
-	_stop_all_ambient_channels();
+	_reset_ambient_channels();
 	_reset_mission_playback_state();
-	_free_voice_nodes();
 	root_attached_ = false;
-	channel_players_.clear();
 	ambient_.clear();
 	warned_ambient_decode_failure_ = false;
+	listener_tick_ = -1;
 	// The last mission's fires are no reading of the next.
 	recent_fire_head_ = 0;
 	recent_fire_count_ = 0;
@@ -924,14 +796,6 @@ void MissionAudio::teardown() {
 }
 
 // --- Internals ---
-
-// The player's pitch: the channel's play word (the engine's
-// audio::emitter_play_word over the native mix row's pitch_q16, which carries the
-// witness), as a scale; a word whose step is 0 plays at the mixer's least step
-// through the player's scale (WavLoader::pitch_scale_for).
-double MissionAudio::_pitch_scale(int p_pitch_q16) {
-	return opennova::lwf::pitch_from_q16(opennova::audio::emitter_play_word(p_pitch_q16));
-}
 
 void MissionAudio::_load_bank(const String &p_lwf_name) {
 	if (!resource_root_->has_file(p_lwf_name)) {
@@ -945,19 +809,6 @@ void MissionAudio::_load_bank(const String &p_lwf_name) {
 	}
 }
 
-// The original mixer copies its selected preset, but the live sample path has
-// no consumer for those values. Region selection lives in World::reverb;
-// see the original-output witness in docs/audio/lwf-dbf-sound-re.md.
-void MissionAudio::_apply_reverb(int /*p_reverb_id*/) {
-    AudioServer *audio_server = AudioServer::get_singleton();
-    const int bus_idx = audio_server->get_bus_index(StringName(kAmbientBus));
-    if (bus_idx < 0) return;
-    for (int i = audio_server->get_bus_effect_count(bus_idx) - 1; i >= 0; --i) {
-        const Ref<AudioEffect> effect = audio_server->get_bus_effect(bus_idx, i);
-        if (Object::cast_to<AudioEffectReverb>(effect.ptr())) audio_server->remove_bus_effect(bus_idx, i);
-    }
-}
-
 // Witnessed no-op: the .bms header `music` field has NO live consumer in retail
 // JO -- the only per-entry music starter (Sbf_StartEntry @ 0x4ed910, the WAC
 // `music` handler) targets a stream whose opener (Sbf_OpenFile_Gamemus
@@ -965,4 +816,49 @@ void MissionAudio::_apply_reverb(int /*p_reverb_id*/) {
 // data the mission editor round-trips (docs/audio/mus-sbf-re.md §Game music
 // driving). Kept as the seam in case a sibling title turns out to consume it.
 void MissionAudio::_apply_music(int /*p_music_id*/) {
+}
+
+void MissionAudio::_install_voice_resolver() {
+    const Ref<Simulation> sim = _simulation();
+    if (sim.is_null()) return;
+    const ObjectID bank_id = bank_.is_valid() ? ObjectID(bank_->get_instance_id()) : ObjectID();
+    sim->set_script_voice_resolver([bank_id](const std::string &name, uint8_t listener_view_flags,
+            bool bank_member) -> std::optional<opennova::world::ScriptVoiceChannel::SetSelection> {
+        auto *bank = Object::cast_to<SoundBank>(ObjectDB::get_instance(bank_id));
+        return bank ? bank->select_radio_set(name, listener_view_flags, bank_member) : std::nullopt;
+    }, [] { return AudioOut::options().dialogue(); });
+}
+
+void MissionAudio::meter_out() {
+    const Ref<Simulation> sim = _simulation();
+    if (sim.is_valid()) sim->set_audio_out_meter(AudioOut::mixer().meter());
+}
+
+void MissionAudio::_stop_script_voice(bool p_report_finished) {
+    const opennova::world::ScriptVoiceChannel::Frame &frame = script_voice_.frame();
+    if (p_report_finished && frame.state.clip) {
+        const Ref<Simulation> sim = _simulation();
+        if (sim.is_valid()) sim->finish_script_voice(frame.serial, frame.state.clip.get());
+    }
+    script_voice_.stop(AudioOut::mixer());
+}
+
+void MissionAudio::follow_script_voice() {
+    const Ref<Simulation> sim = _simulation();
+    if (sim.is_null() || !root_attached_) return;
+    script_voice_.follow(AudioOut::mixer(), listener_,
+            sim->script_voice_state(last_camera_pos_.is_finite() ? last_camera_pos_ : Vector3()));
+}
+
+void MissionAudio::update_script_voice() {
+    const Ref<Simulation> sim = _simulation();
+    if (sim.is_null() || !root_attached_) return;
+    // The scene frame's voice update (engine audio::ScriptVoicePlayer): the validation, whose
+    // lapse the world finishes, then the anchor reset and the distance gain
+    // (world::ScriptVoiceChannel::frame), the device following the channel and placing it.
+    opennova::audio::Mixer &mixer = AudioOut::mixer();
+    if (script_voice_.lapsed(mixer)) _stop_script_voice(true);
+    const auto frame = sim->script_voice_frame(last_camera_pos_.is_finite() ? last_camera_pos_ : Vector3());
+    script_voice_.follow(mixer, listener_, frame);
+    script_voice_.place(mixer, listener_, frame);
 }

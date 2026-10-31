@@ -121,6 +121,14 @@ void emit_emitter(World &world, Entity &vehicle, uint8_t lane, int slot,
     ev.pitch_q16 = pitch_q16;
     ev.volume_q8_8 = volume_q8_8;
     ev.set_name = set_name;
+    // The lanes' velocity: savedLivePose less the Position words [orig:
+    // Entity_ProcessMovementSoundEffects @0x529538..0x52955F, passed @0x5297A5 / @0x529863 /
+    // @0x5298A7].
+    if (vehicle.saved_live_valid) {
+        ev.velocity[0] = int32_t(uint32_t(vehicle.saved_live_pos[0]) - uint32_t(vehicle.position.x.q16));
+        ev.velocity[1] = int32_t(uint32_t(vehicle.saved_live_pos[1]) - uint32_t(vehicle.position.y.q16));
+        ev.velocity[2] = int32_t(uint32_t(vehicle.saved_live_pos[2]) - uint32_t(vehicle.position.z.q16));
+    }
     if (pitch_q16 != 0 && volume_q8_8 != 0) {
         vehicle.veh.sound_anchor_until_tick =
                 ev.emitted_tick + lifetime_ticks;

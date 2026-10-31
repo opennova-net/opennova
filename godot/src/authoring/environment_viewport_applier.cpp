@@ -27,9 +27,8 @@ const EnvironmentViewport &environment_of(const opennova::editor::ViewportModel 
 
 EnvironmentViewportApplier::EnvironmentViewportApplier(SubViewport &viewport) :
 		layers_(std::make_unique<PreviewSceneLayers>(viewport, "EnvironmentPreview", false)) {
-	// Its camera is the 3D listener of its own world (S23 C: the Listen's rain loops pan about it,
-	// as the game's camera).
-	viewport.set_as_audio_listener_3d(true);
+	// Its camera is the listener of its own world (S23 C: the Listen's rain loops pan about it, as
+	// the game's camera; PreviewSoundLoops pans by its bearing from it).
 	listen_ = std::make_unique<PreviewSoundLoops>(&layers_->root());
 }
 
@@ -96,8 +95,10 @@ void EnvironmentViewportApplier::apply_listen_(const EnvironmentViewport &model)
 	// Heard while the picture is drawn (held a moment past its last drawn frame, as the mission
 	// device's Listen is).
 	const opennova::editor::EnvironmentListen &listen = model.listen();
+	const Camera3D *camera = layers_->camera();
+	const Transform3D listener = camera != nullptr ? camera->get_global_transform() : Transform3D();
 	listen_->listen(project_root_, listen.channels(), model.options().listen.on && listen.open() && !project_root_.empty(),
-			presented_);
+			presented_, camera != nullptr ? &listener : nullptr);
 }
 
 void EnvironmentViewportApplier::clear() {

@@ -428,4 +428,50 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
             source_bms_id, source_handle);
 }
 
+namespace {
+
+// The entity a one-shot's owner id tags (audio::oneshot_sound_id: 0x10000 | packed handle).
+const Entity *sound_source_entity(const World &world, uint32_t sound_id) {
+    if ((sound_id & 0xFFFF0000u) != 0x10000u) return nullptr;
+    EntityHandle handle;
+    handle.packed = static_cast<uint16_t>(sound_id & 0xFFFFu);
+    return world.registry.get(handle);
+}
+
+// The local player, the seat it rides and its ground entity.
+void ridden_entities(const World &world, const Entity *out[3]) {
+    const Entity *local = world.registry.get(world.cached.local_player);
+    out[0] = local;
+    out[1] = local != nullptr ? world.registry.get(local->mount_target) : nullptr;
+    out[2] = local != nullptr ? world.registry.get(local->ground_target) : nullptr;
+}
+
+} // namespace
+
+bool sound_source_place(const World &world, uint32_t sound_id, int32_t position[3]) {
+    const Entity *source = sound_source_entity(world, sound_id);
+    if (source == nullptr || source->handle == world.cached.local_player) return false;
+    position[0] = source->position.x.q16;
+    position[1] = source->position.y.q16;
+    position[2] = source->position.z.q16;
+    return true;
+}
+
+bool sound_source_ridden(const World &world, uint32_t sound_id) {
+    const Entity *source = sound_source_entity(world, sound_id);
+    if (source == nullptr) return false;
+    const Entity *ridden[3];
+    ridden_entities(world, ridden);
+    return source == ridden[0] || source == ridden[1] || source == ridden[2];
+}
+
+bool sound_spawn_ridden(const World &world, uint64_t spawn_id) {
+    if (spawn_id == 0) return false;
+    const Entity *ridden[3];
+    ridden_entities(world, ridden);
+    for (const Entity *entity : ridden)
+        if (entity != nullptr && entity->registry_spawn_id == spawn_id) return true;
+    return false;
+}
+
 } // namespace opennova::world

@@ -27,8 +27,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/bank_chain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/dialog_queue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/envs_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/mixer.cpp # the 26-channel software mixer: one 16-bit stereo stream
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/music_stream.cpp # the SBF track streamed onto mixer channels 1 and 2
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/music_stream_pump.cpp # the music VM's pacing: one play per track
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/oneshot_play.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/script_voice_player.cpp # the scripted voice on mixer channel 0
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_listener.cpp # the listener, the bearing pans and the doppler
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_selector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
     # Frame statistics remain available without the debug-only ImGui tools.

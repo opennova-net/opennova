@@ -714,8 +714,10 @@ public:
 	//  @0x526806..0x526867, CAdminServer_ProcessFrame @0x5268F1 past it]
 	void set_update_head(std::function<void()> head) { update_head_ = std::move(head); }
 	void set_update_tail(std::function<void()> tail) { update_tail_ = std::move(tail); }
-	// The frame lock's clock (FrameInput::frame_lock): the main loop's tick-count clock
-	// (world::frame_tick_count_ms) and a 1 ms sleep unless a test hands its own.
+	// The main loop's clock: the frame lock's (FrameInput::frame_lock) and the one the frame's
+	// start stamp and its CPU share read: the main loop's tick-count clock
+	// (world::frame_tick_count_ms) and a 1 ms sleep unless the embedder hands its own (a
+	// platform's, inmatch::PlatformFrameLockClock; a test's).
 	void set_frame_lock_clock(world::FrameLockClock *clock);
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
@@ -895,6 +897,8 @@ private:
 	State state_ = State::Unloaded;
 	world::TickAccumulator accumulator_;
 	world::FrameLockClock *frame_lock_clock_ = nullptr; // null = the tick-count one
+	// The main loop's clock the session reads (set_frame_lock_clock).
+	world::FrameLockClock &frame_clock() const;
 	// The frame's bank with its lock when the input asks for one (live frames only): the
 	// ticks due; `lock_stamp_ms` the lock's last read when it slept, else 0.
 	int32_t bank_frame(double elapsed, const FrameInput &input, uint32_t &lock_stamp_ms,

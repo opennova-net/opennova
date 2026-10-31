@@ -47,25 +47,6 @@ func test_the_pcm_edits_refuse_an_adpcm_bank() -> void:
 	assert_eq(bank.save_to_path(DST_ADPCM + ".out"), OK, "the ADPCM bank still writes from its model")
 
 
-# An ADPCM stream's length is the frames its wave decodes (up to 4068 a block against the entry's
-# samples left), not the byte-paired form's 2048 a chunk.
-func test_an_adpcm_stream_reports_its_decoded_length() -> void:
-	var bytes := FileAccess.get_file_as_bytes(SRC)
-	bytes.encode_u32(8, 0)
-	var file := FileAccess.open(DST_ADPCM, FileAccess.WRITE)
-	file.store_buffer(bytes)
-	file.close()
-	var bank := SbfBank.new()
-	bank.load_from_path(DST_ADPCM)
-	assert_gt(bank.get_entry_count(), 0, "the flagged copy loads")
-	for index in range(bank.get_entry_count()):
-		var stream: SbfAudioStream = bank.get_stream_at(index)
-		var wav: AudioStreamWAV = stream.get_wav()
-		var frames := wav.data.size() / 4
-		assert_almost_eq(stream.get_length() * 22050.0, float(frames), 0.01,
-				"stream %d's length is its decoded frames" % index)
-
-
 func test_add_entry_keeps_every_other_stream_as_read() -> void:
 	var bank := SbfBank.new()
 	bank.load_from_path(SRC)

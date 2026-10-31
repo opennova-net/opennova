@@ -43,19 +43,19 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		await ctx.wait_ms(settle_ms)
 		var channels: Array = []
 		for id: Variant in audio.active_ambient_candidate_ids():
-			var player := audio.ambient_player_for_candidate(int(id))
-			if player == null:
+			var channel := audio.ambient_channel_for_candidate(int(id))
+			if channel < 0:
 				continue
-			var db := player.volume_db
+			# The mixer channel's bytes: the option-scaled volume, the bearing pan, the play word.
 			channels.append({
 				"candidate": int(id),
+				"channel": channel,
 				"wave": audio.ambient_candidate_wave(int(id)),
-				"volume_db": snappedf(db, 0.01),
-				"volume": roundi(255.0 * db_to_linear(db)),
-				"pitch": snappedf(player.pitch_scale, 0.001),
-				"at": _mission(player.global_position),
+				"volume": audio.channel_volume(channel),
+				"pan": audio.channel_pan(channel),
+				"play": audio.channel_play(channel),
 			})
-		channels.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a["volume_db"]) > float(b["volume_db"]))
+		channels.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["volume"]) > int(b["volume"]))
 		var camera := ctx.tree.root.get_viewport().get_camera_3d()
 		var row := {
 			"label": String(point.get("label", "point %d" % index)),
@@ -64,7 +64,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		}
 		ctx.log("%s: %d channels" % [row["label"], channels.size()])
 		for channel: Dictionary in channels:
-			ctx.log("  %s %d (%.1f dB) at %s" % [channel["wave"], channel["volume"], channel["volume_db"], str(channel["at"])])
+			ctx.log("  %s %d pan %d on channel %d" % [channel["wave"], channel["volume"], channel["pan"], channel["channel"]])
 		results.append(row)
 	return ProbeVerdict.passed("%d point(s) read" % results.size(), {"points": results})
 

@@ -135,8 +135,9 @@ int sbf_decode_all(const uint8_t *raw_bytes, size_t raw_size,
    read @ 0x671CBC, the split @ 0x671D56, the countdown @ 0x671D61;
    Audio_SubmitStereoSampleSplit @ 0x7BD222..0x7BD233, `shr ecx,1; cmp ecx,3;
    jbe` / `cmp ecx,800h; ja` to the return before any store]. A chunk the
-   decoder refuses, or one past the bytes, ends the stream. The Godot player
-   hands this PCM to the mixer whole (godot/src/audio/sbf_audio_stream.cpp). */
+   decoder refuses, or one past the bytes, ends the stream. The engine's music stream
+   (runtime/audio/music_stream) queues the chunks onto the mixer a block at a time; the
+   editor's music bank takes the PCM whole. */
 std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
                                       uint32_t block_size, uint32_t flags = SBF_FLAGS_BYTE_PAIRED_STEREO,
                                       uint32_t sample_length = 0);

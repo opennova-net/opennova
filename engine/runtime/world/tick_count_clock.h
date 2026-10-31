@@ -13,6 +13,8 @@
 // inmatch::host_monotonic_milliseconds, the joiner's connection, the NovaWorld session), as do
 // the main loop's CPU share and its mission-start re-base.
 
+#include <base/platform/clock.h>
+
 #include <cstdint>
 
 namespace opennova::world {
@@ -41,6 +43,14 @@ uint32_t frame_tick_count_ms();
 // connection): GetTickCount64 on Windows, whose low 32 bits are GetTickCount; elsewhere
 // tick_count_ms64_from_us over the monotonic clock.
 uint64_t frame_tick_count_ms64();
+
+// The main loop's clock over a platform backend's monotonic clock (base/platform/clock.h), never
+// 0: tick_count_ms_from_us at its reading. The backend supplies the time alone; the system
+// timer's steps are the engine's, so every backend's loop banks the same 15 and 16 ms steps.
+inline uint32_t frame_tick_count_ms(const platform::Clock &clock) {
+	const uint32_t now = tick_count_ms_from_us(clock.now_us());
+	return now != 0 ? now : 1u;
+}
 
 // The elapsed time a frame's presentation clocks advance by (the free-running body clips, the part
 // sweeps, a model's own PANM DWORD): the main loop's clock read once a frame, less the previous

@@ -877,8 +877,9 @@ void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z
         std::snprintf(cue.set_name, sizeof(cue.set_name), "%s", traits->door_open_set.c_str());
         world.out.slot_sounds.push_back(cue);
     }
-    // The def's first loop at the Position words, lane 0, 10 ticks, pitch 1.0, full volume
-    // (the +0x98 velocity pointer it passes is not carried) [orig: @0x4A21AD..0x4A21F2 ->
+    // The def's first loop at the Position words, lane 0, 10 ticks, pitch 1.0, full volume,
+    // the +0x98 words its velocity (+0x98, +0x9C and the vertical step at +0xA0) [orig:
+    // @0x4A21AD..0x4A21F2 ->
     //  SoundEmitter_RegisterSetLayers(def+0x82C)]. Retail reads the set with no null test
     //  [orig: SoundEmitter_RegisterSetLayers @0x528340 - `cmp [ebp+24h], ebx` @0x528381], so a
     // def with no first loop faults there on a session peer; ours registers none, a deliberate
@@ -898,6 +899,9 @@ void update_elevator(World &world, Entity &entity, int32_t &lift, int32_t &vel_z
     sound.volume_q8_8 = 0xFFFF;
     sound.lane = 0;
     sound.set_name = loop;
+    sound.velocity[0] = entity.veh.vel_x;
+    sound.velocity[1] = entity.veh.vel_y;
+    sound.velocity[2] = vel_z;
     world.out.sound_emitters.publish(std::move(sound));
 }
 

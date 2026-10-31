@@ -1403,11 +1403,7 @@ func test_front_options_back_discards_the_screen_edits_and_returns_to_main() -> 
 	var reloaded := PlayerOptions.new().current()
 	assert_eq(reloaded.music_volume, 40, "the config holds the entry music volume")
 	assert_eq(reloaded.sound_fx_volume, 50, "the config holds the entry sound-effects volume")
-	var music_bus := AudioServer.get_bus_index(PlayerOptions.MUSIC_BUS)
-	if music_bus >= 0:
-		assert_almost_eq(AudioServer.get_bus_volume_db(music_bus),
-				SoundSelector.volume_db_from_255(40), 0.001,
-				"the live music preview is rolled back")
+	assert_eq(int(AudioOut.option_volumes()[2]), 40, "the live music preview is rolled back")
 	_cleanup(dir)
 
 

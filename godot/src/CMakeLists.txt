@@ -280,14 +280,10 @@ add_library(opennova_bindings OBJECT
     world/tick_accumulator.cpp
     wac/wac_program.cpp
     lwf/lwf_data.cpp
-    lwf/wav_loader.cpp
-    lwf/wave_stream.cpp
-    audio/sound_selector.cpp
-    audio/ambient_layer.cpp
     audio/sound_bank.cpp
     audio/mission_audio_records.cpp
     audio/mission_audio.cpp
-    audio/mission_audio_voice.cpp
+    audio/audio_out.cpp
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     util/data_format.cpp
@@ -302,7 +298,6 @@ add_library(opennova_bindings OBJECT
     resource_index/mod_listing.cpp
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
-    audio/sbf_audio_stream.cpp
     audio/music_script.cpp
     audio/music_director.cpp
     audio/music_pair_names.cpp

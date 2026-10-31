@@ -9,8 +9,9 @@
 // (device_messages.h) and inmatch::PlayerInputFrame.
 //
 // The design follows SDL3's, GLFW's and sokol_app's model: polled events (a key, a mouse
-// button, the mouse's motion, the wheel), each delivered in the order the device saw it, plus a
-// state snapshot read on demand (the cursor, the buttons held, the lock keys). A key event
+// button, the mouse's motion, the wheel, the window's keyboard focus), each delivered in the order
+// the device saw it, plus a state snapshot read on demand (the cursor, the buttons held, the lock
+// keys). The device that produces them is base/platform/input_device.h. A key event
 // carries both a physical scancode and a layout key code, as SDL3's SDL_KeyboardEvent (scancode
 // + key) and GLFW's key callback (key + scancode) do; both are engine enums, never a backend's
 // own codes: a backend converts its events and polls into these. Mouse buttons, motion and the
@@ -96,13 +97,25 @@ struct MouseWheelEvent {
 	float y = 0.0f;
 };
 
+// The window gaining or losing the keyboard focus. It rides the input events in the order the
+// window saw it, as the focus messages reach retail's window procedure between its key messages
+// (an Alt held into an Alt+Tab is a key-down ahead of the focus loss), and as SDL3's queue and
+// sokol_app's event callback deliver their focus events among the keys: the engine's key-state
+// reset on each (controls::KeyStateReset carries the witness) must see the key messages around
+// it in their order.
+// [orig: Game_WindowProc @0x7624c0 - WM_KILLFOCUS @0x762664, WM_SETFOCUS @0x76268B]
+struct FocusEvent {
+	bool gained = false;
+};
+
 struct InputEvent {
-	enum class Type : uint8_t { None, Key, MouseButton, MouseMotion, MouseWheel };
+	enum class Type : uint8_t { None, Key, MouseButton, MouseMotion, MouseWheel, Focus };
 	Type type = Type::None;
 	KeyEvent key;
 	MouseButtonEvent button;
 	MouseMotionEvent motion;
 	MouseWheelEvent wheel;
+	FocusEvent focus;
 };
 
 // The state snapshot as the device reads it now.

@@ -396,6 +396,14 @@ std::string own_command_line() {
 #endif
 }
 
+int64_t own_process_id() {
+#ifdef _WIN32
+	return static_cast<int64_t>(GetCurrentProcessId());
+#else
+	return static_cast<int64_t>(::getpid());
+#endif
+}
+
 std::vector<std::string> filter_environment(const std::vector<std::string> &names) {
 	std::vector<std::string> out;
 	for (const std::string &entry : current_environment()) {

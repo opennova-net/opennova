@@ -2,7 +2,7 @@ extends GutTest
 
 ## A quit with the music streaming (C-164, the D-7 reproduction): a child launch
 ## whose MusicService streams the synthetic fixture bank and quits from code
-## mid-stream, bypassing the shell's orderly drain (support/
+## mid-stream, bypassing the shell's orderly shutdown (support/
 ## forced_quit_music_child.gd), exits 0. Before the SBF stream handed the
 ## AudioServer a built-in AudioStreamWAV playback, the server's teardown, which
 ## Godot runs after unregistering every extension class, freed the extension

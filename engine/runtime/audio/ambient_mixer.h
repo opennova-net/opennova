@@ -18,9 +18,9 @@
 //   [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0, called from the Game Loop mode
 //   render callback GameLoop_RenderFrame @ 0x521341].
 //
-// The embedder keeps everything Godot: LWF data access, stream decode, the eight
-// persistent AudioStreamPlayer3D channels (D-SND-6), and bus/pan/doppler mapping
-// (D-SND-8). Positions are world-space floats (1 unit = 1 game unit); distances enter
+// The embedder keeps the LWF data access and the decode; the eight emitter channels, their
+// pans and their doppler are the engine mixer's (AmbientEmitters::play over runtime/audio/mixer
+// and sound_listener). Positions are world-space floats (1 unit = 1 game unit); distances enter
 // the witnessed curve as Q16.16, exactly like the GDScript form this replaces.
 #pragma once
 
@@ -47,16 +47,18 @@ int32_t emitter_layer_volume(int64_t dist_q16, int32_t falloff_u, int32_t min_u,
                              int32_t vol_byte, int32_t member_vol, int32_t clamp_vol);
 
 // Layer volume for the ONE-SHOT fire-time snapshot [orig:
-// SoundBank_PlayTriggerEntries @ 0x75cf14..0x75cf8b]: the proximity stage
-// ((d/min)^2, only under min_distance) feeds the falloff stage
-// ((1 - d/falloff)^2, NOT rebased — the one-shot path differs from the emitter
-// path here); distances and radii all Q16.16. A layer with NO falloff radius
-// plays at the RAW emitter volume (255) — member volume is not consulted, and
-// a min-only layer's proximity result is discarded with it [orig: @ 0x75cf88
-// the no-falloff branch stores emitter_info[2]].
+// SoundBank_PlayTriggerEntries @ 0x75cf14..0x75cf8b]: the member volume scaled
+// by the emitter's, (member * (emitter + 1)) >> 8 [orig: @ 0x75cf17..0x75cf25],
+// through the proximity stage ((d/min)^2, only under min_distance) into the
+// falloff stage ((1 - d/falloff)^2, NOT rebased — the one-shot path differs from
+// the emitter path here); distances and radii all Q16.16. A layer with NO
+// falloff radius plays at the RAW emitter volume — member volume is not
+// consulted, and a min-only layer's proximity result is discarded with it
+// [orig: @ 0x75cf88 the no-falloff branch stores emitter_info[2]]. The emitter
+// volume is the sound-effects option's scale of the caller's (SoundOptions).
 int32_t oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
                              int64_t falloff_q16, int32_t member_vol,
-                             int32_t clamp_vol);
+                             int32_t clamp_vol, int32_t emitter_vol = 255);
 
 // The entity-attached keep-alive as the slot stores it: the registration copies
 // the caller's lifetime into a 16-bit slot word and the mix reads it back
@@ -108,6 +110,13 @@ struct AmbientCandidate {
     int32_t vol = 0; // 0..255 through the witnessed curve (crossfade + member + clamp)
     int32_t pitch_q16 = 0x10000; // registration pitch; placed markers use unity (0x10000)
     float pos[3] = {0.0f, 0.0f, 0.0f};
+    // The registering entity (0 a placed marker), which the pan centres where the listener
+    // rides it [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5289A1..0x5289C0, the slot's +0x14
+    // against the local player, its parent and ground entity]; and the slot's velocity, the
+    // doppler's [orig: the slot's +0x18..+0x20, SoundEmitter_RegisterSetLayers @ 0x528417..
+    // 0x528451], each 16.16 in the mission frame.
+    uint64_t source_spawn_id = 0;
+    int32_t velocity[3] = {0, 0, 0};
 };
 
 // The play word a looping emitter's channel takes: its slot's registration
@@ -116,8 +125,8 @@ struct AmbientCandidate {
 // AudioChannel_OpenSlotChecked call @ 0x528adb (its handle stored @ 0x528ae3)
 // and the AudioChannel_SetAndPlay call @ 0x528a5c; the layer member's authored
 // pitch is never a play factor (member 0 is read for its wave, volume and clamp
-// alone, @ 0x528649; D-SND-56). Read unsigned and exact; its doppler is
-// unported (Sound_ApplyDopplerShift, called @ 0x52896a; D-SND-8). A slot
+// alone, @ 0x528649; D-SND-56). Read unsigned and exact; the doppler then moves
+// it (Sound_ApplyDopplerShift, called @ 0x52896a; audio::doppler_play_word). A slot
 // whose word is 0 never reaches a channel: the mix skips it before candidacy
 // (@ 0x528582) and a lane registered with 0 is cleared
 // (AmbientMixer::register_emitter, SoundEmitter_RegisterSetLayers @ 0x528340),
@@ -177,10 +186,13 @@ public:
     // (the port's source anchor).
     void update_emitter_source(uint64_t source_spawn_id, const float pos[3],
                                int64_t source_bms_id);
+    // `velocity` (16.16, the mission frame; null none) is the slot's doppler velocity [orig:
+    // SoundEmitter_RegisterSetLayers @ 0x528417..0x528451].
     void register_emitter(uint64_t source_spawn_id, int32_t lane,
                           const float pos[3], int64_t source_bms_id,
                           int32_t lifetime_ticks, int32_t pitch_q16,
-                          int32_t volume_q8_8, std::vector<LayerDesc> layers);
+                          int32_t volume_q8_8, std::vector<LayerDesc> layers,
+                          const int32_t *velocity = nullptr);
 
     // Embedder clock pump (HHMM already converted to hours by the embedder).
     void set_time_of_day_hours(float hours) { tod_hours_ = hours; }
@@ -239,6 +251,7 @@ private:
         int32_t lane = 0;
         float pos[3] = {0.0f, 0.0f, 0.0f};
         int64_t source_bms_id = 0;
+        int32_t velocity[3] = {0, 0, 0};
         std::vector<LayerDesc> layers;
         int64_t occl_stamp = -1;
         int64_t occl_dist_q16 = -1;

@@ -4,8 +4,9 @@
 // sounds and selection flags that decide which member plays when the set is triggered. This is
 // the faithful port of the engine's per-layer member selection, pulled out of the Godot layer
 // (now godot/src/audio/sound_bank) so the engine core stays C++ and a headless server can
-// resolve the same member without Godot. The embedder keeps the lwf data access and the
-// AudioStreamPlayer spawning; this only decides WHICH member index plays.
+// resolve the same member without Godot. The embedder keeps the lwf data access, and the
+// channel the member opens is the mixer's (runtime/audio/mixer); this only decides WHICH member
+// index plays.
 //
 // Grilled vs Jointops.exe 2026-06-09 (see docs/audio/lwf-dbf-sound-re.md):
 // [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0 / SoundBank_SelectTriggerEntryFromBank @ 0x75bf20]
@@ -15,6 +16,11 @@
 // [orig: PRNG_ScaledRandom @ 0x75be50] one global ROL-LCG stream drives every pick:
 //   state = ROL32(state + ROL32(state, 11), 3); index = (count * (state & 0xFF)) >> 8;
 // seeded statically with 0x2B0749C1 [orig: .data @ 0x85A3DC] and never reseeded.
+// The per-layer selection state (the playlist record's cursor +2, anchor +12, cycle bit 0x100)
+// survives a round restart: Game_RestartRoundSP @0x5263A0 re-enters Game_StartMission, whose bank
+// loop (Game_StartMission @0x52544A -> SoundBank_LoadIfExists @0x527530) returns early on an
+// already loaded slot [orig: SoundBank_OpenFile @0x75CAA5]; only Game_TeardownMission @0x522600
+// frees the banks. The embedder's selector therefore lives as long as its banks.
 #pragma once
 
 #include <cstdint>

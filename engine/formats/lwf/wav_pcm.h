@@ -30,6 +30,16 @@ struct WavPcm {
 	// the count @ 0x766609 / @ 0x76670e / @ 0x7667ba, the ratio @ 0x76662d / @ 0x766735 / @ 0x7667e1].
 	uint32_t loader_samples = 0;
 	uint32_t loader_pitch_q16 = 0;
+	// The AUD1 buffer's +12 width byte and +13 shift byte as the loader leaves them: the RIFF decodes
+	// write 1 for 8-bit samples and 2 for 16-bit and IMA ADPCM ones, and a shift of 0 [orig:
+	// Audio_LoadWavFileFromArchive @ 0x766632..0x766636, @ 0x76673b..0x76673f, @ 0x7667e6..0x7667ea]; an AUD1's
+	// own. The mixer reads the samples as 16-bit where the width is 2 and 8-bit otherwise [orig:
+	// AudioChannel_BindSampleBuffer @ 0x7bd692] and shifts the channel's mix coefficients by the
+	// shift [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5e6..0x7bd5f3] (audio::Mixer), so
+	// wav_decode_pcm16 leaves an AUD1's samples unshifted; the tooling's lenient decode folds the
+	// shift onto them, the level the mixer plays them at to within its low bits.
+	uint8_t loader_width = 2;
+	uint8_t loader_shift = 0;
 };
 
 // Why the game's wave loader refuses a RIFF WAVE (docs/audio/lwf-dbf-sound-re.md, "The wave loader's
@@ -78,8 +88,8 @@ WaveLoaderWalk wave_loader_walk(const uint8_t *bytes, size_t size);
 
 // Decode a wave as the game's loader takes it [orig: Audio_LoadWavFileFromArchive @ 0x766480] to
 // 16-bit PCM: the loader's own AUD1 buffer (a sample count, a Q16 pitch ratio to the 44100 Hz device,
-// mono signed samples, 16-bit where its width byte is 2 and 8-bit otherwise, shifted down by its byte
-// at +13; the bytes past its count excluded), copied unchecked, else a RIFF WAVE through
+// mono signed samples, 16-bit where its width byte is 2 and 8-bit otherwise, its +13 shift kept
+// for the mixer (WavPcm::loader_shift); the bytes past its count excluded), copied unchecked, else a RIFF WAVE through
 // wave_loader_walk, its samples by their width alone: 8 bits PCM (unsigned, upconverted signed<<8),
 // 16 bits PCM (passthrough), 4 bits mono block
 // IMA ADPCM by the loader's own decode, exactly the fact chunk's count of its own nibble steps, read

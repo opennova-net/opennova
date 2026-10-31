@@ -336,11 +336,11 @@ func test_debug_actions_reject_coercible_or_nonfinite_numeric_input() -> void:
 		},
 		{
 			"id": "set_audio_bus_volume",
-			"args": {"bus": "SFX", "volume_db": "quiet"},
+			"args": {"bus": "Master", "volume_db": "quiet"},
 		},
 		{
 			"id": "set_audio_bus_mute",
-			"args": {"bus": "SFX", "muted": 1},
+			"args": {"bus": "Master", "muted": 1},
 		},
 	]
 	for row in cases:
