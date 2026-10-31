@@ -661,14 +661,17 @@ UpdateOutcome request_update(db::Database &db, int64_t server_id, const std::str
 	return UpdateOutcome::Requested;
 }
 
-size_t request_update_all(db::Database &db, std::optional<int64_t> product_id) {
+size_t request_update_all(db::Database &db, std::optional<int64_t> product_id, const std::string &serve_image) {
+	// Behind on its data, or pinned to another server build than the fleet's (server_build_outdated).
 	std::string sql = std::string("UPDATE hosted_servers s SET update_requested = true, updated_at = now() WHERE ") +
-			kLiveServerSql + " AND NOT update_requested AND (" + kOutdatedSql + ")";
+			kLiveServerSql + " AND NOT update_requested AND ((" + kOutdatedSql +
+			") OR ($1::text <> '' AND s.serve_image <> '' AND s.serve_image <> $1::text))";
+	std::vector<BindValue> binds{ BindValue(serve_image) };
 	if (product_id) {
-		db.exec(sql + " AND (s.product_id = $1 OR s.expansion_id = $1);", { BindValue(*product_id) });
-	} else {
-		db.exec(sql + ";");
+		sql += " AND (s.product_id = $2 OR s.expansion_id = $2)";
+		binds.push_back(BindValue(*product_id));
 	}
+	db.exec(sql + ";", binds);
 	return static_cast<size_t>(db.changes());
 }
 

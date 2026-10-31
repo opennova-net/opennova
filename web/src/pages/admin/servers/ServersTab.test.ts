@@ -35,6 +35,9 @@ const stopOne = vi.mocked(stopFleetServer);
 const stopListed = vi.mocked(stopListedServer);
 const updateAll = vi.mocked(updateAllServers);
 
+// A server behind its game's current release, as the service answers it.
+const OUTDATED: Partial<FleetServer> = { outdated: true, update_available: true, update_kinds: ['content'] };
+
 // Server 1, JO on machine 3 slot 3, listed on River Patrol in TDM; a DFX2
 // server of owner7's; a player's own JO server (rid 21), an anonymous DFX2 one
 // (rid 22), and the listing hosted server 1 holds (rid 20), which is no row of
@@ -165,7 +168,7 @@ describe('ServersTab', () => {
 
   it("takes the game from the URL: its hosted servers and its lobby's listings, and its update alone", async () => {
     updateAll.mockResolvedValue({ ok: true, value: 1 });
-    fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [serverOne(), { ...dfx2Server(), outdated: true }] }) });
+    fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [serverOne(), { ...dfx2Server(), ...OUTDATED }] }) });
     const page = await mountTab(`/admin/servers?product=${DFX2_PRODUCT.id}`);
     expect((page.get('#servers-product').element as HTMLSelectElement).value).toBe(String(DFX2_PRODUCT.id));
     expect(rows().map((r) => r.get('th a').text())).toEqual(['Server 7', 'Red Base']);
@@ -242,7 +245,7 @@ describe('ServersTab', () => {
     const button = () => page.findAll('button').find((b) => b.text() === 'Update outdated…')!;
     expect((button().element as HTMLButtonElement).disabled).toBe(true);
     page.unmount();
-    fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [serverOne({ outdated: true })] }) });
+    fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [serverOne(OUTDATED)] }) });
     await mountTab('/admin/servers?owner=owner1');
     const update = wrapper!.findAll('button').find((b) => b.text() === 'Update outdated…')!;
     expect((update.element as HTMLButtonElement).disabled).toBe(true);
@@ -253,8 +256,8 @@ describe('ServersTab', () => {
       ok: true,
       value: fleetResponse({
         servers: [
-          serverOne({ outdated: true, restarts: 2 }),
-          fleetServer(3, { update_requested: true, outdated: true }),
+          serverOne({ ...OUTDATED, restarts: 2 }),
+          fleetServer(3, { ...OUTDATED, update_requested: true }),
           fleetServer(4, { state: 'failed', failure_reason: 'it crashed 3 times in an hour' }),
         ],
       }),
@@ -265,6 +268,36 @@ describe('ServersTab', () => {
     expect(rows()[1].get('.server-release').text()).toContain('Update requested');
     expect(rows()[1].get('.server-release').text()).not.toContain('Outdated');
     expect(rows().at(-1)!.text()).toContain('it crashed 3 times in an hour');
+  });
+
+  it('shows the build a server runs and a newer one waiting, which the update takes', async () => {
+    updateAll.mockResolvedValue({ ok: true, value: 1 });
+    fleet.mockResolvedValue({
+      ok: true,
+      value: fleetResponse({
+        servers: [
+          serverOne({
+            update_available: true,
+            update_kinds: ['server_build'],
+            build: { version: '0.0.23.6053', commit: '9eabb5d' },
+            build_available: { version: '0.0.23.6055', commit: 'ebc5aeb' },
+          }),
+          fleetServer(3, { build: { version: '0.0.23.6055', commit: 'ebc5aeb' } }),
+        ],
+      }),
+    });
+    const page = await mountTab();
+    const release = rows()[0].get('.server-release');
+    expect(release.get('.server-build').text()).toBe('ONE 0.0.23.6053 9eabb5d');
+    expect(release.get('.server-build-update').text()).toBe('New server build: ONE 0.0.23.6053 → ONE 0.0.23.6055');
+    expect(release.text()).not.toContain('Outdated');
+    expect(rows()[1].get('.server-build').text()).toBe('ONE 0.0.23.6055 ebc5aeb');
+    expect(rows()[1].find('.server-update').exists()).toBe(false);
+
+    await page.findAll('button').find((b) => b.text() === 'Update outdated…')!.trigger('click');
+    await flushPromises();
+    expect(confirm).toHaveBeenCalledWith('Update 1 outdated server? Each restarts and drops its players.');
+    expect(updateAll).toHaveBeenCalledWith();
   });
 
   it('says so when the listings could not be read, and keeps the fleet', async () => {

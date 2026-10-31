@@ -605,7 +605,7 @@ writes need the CSRF header.
 | `POST /api/admin/fleet/machines/<id>/end` | admin | the machine to `ending`, its servers placed again (no restart counted), its agent refused: 202; 404; 409 `not_live` |
 | `GET /api/admin/fleet/roll` | admin | a fleet roll's preview (`model/fleet_roll.h`): each machine that takes servers with its image (EC2's), its servers and `replace` (another image than `ONNET_FLEET_IMAGE_ID`, or one not known) or `keep`, and the ids to replace |
 | `POST /api/admin/fleet/roll` | admin | `{"machines": [<id>, ...]}`: each drains onto machines launched for them from the templates as they are (a new image, template or user-data reaches those; hostd and the serve image reach machines in place): 202 with their ids; 400 `invalid_field` for no list, or a machine that takes no servers |
-| `POST /api/admin/hosted/update-all` | admin | `{}` or `{"product_id": n}`: every live server behind its products' current trees marked `update_requested`: 202 with how many; 400 |
+| `POST /api/admin/hosted/update-all` | admin | `{}` or `{"product_id": n}`: every live server behind its products' current trees, or on an older serve image than the release's, marked `update_requested`: 202 with how many; 400 |
 | `GET /api/admin/hosted/<id>/stats`, `GET /api/admin/hosted/stats` | admin | any server's stats, and the fleet's |
 | `GET /api/admin/hosted/usage` | admin | every live server's use of its slot (its newest sample within 3 min and its last hour summed), by machine and slot, with each machine's and the fleet's totals and the slots' limits; 429 |
 | `POST /api/admin/hosted/<id>/stop` | admin | 202; 404; 409 `not_live` |

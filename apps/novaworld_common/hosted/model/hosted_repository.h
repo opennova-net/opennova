@@ -414,9 +414,10 @@ enum class UpdateOutcome : uint8_t { Requested, NotFound, NotLive, UpToDate };
 // it by placing the server again, and every start pins both the current trees and the
 // fleet's serve image, so one update brings either or both.
 UpdateOutcome request_update(db::Database &db, int64_t server_id, const std::string &serve_image);
-// Every live server whose pins are behind its products' current trees (of product
-// `product_id`, as base or expansion, when set); how many were marked.
-size_t request_update_all(db::Database &db, std::optional<int64_t> product_id);
+// Every live server whose pins are behind its products' current trees, or that runs an older
+// server build than `serve_image` (server_build_outdated), as request_update takes either (of
+// product `product_id`, as base or expansion, when set); how many were marked.
+size_t request_update_all(db::Database &db, std::optional<int64_t> product_id, const std::string &serve_image);
 // Whether a live server's pins are behind its products' current trees.
 bool server_outdated(db::Database &db, int64_t server_id);
 // Whether a live server runs an older server build than the fleet starts servers on now: the
