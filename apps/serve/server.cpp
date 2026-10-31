@@ -666,7 +666,8 @@ bool Server::mount(std::string &error) {
 	have_text_override_ = !text_override_table_.empty() &&
 			rtxt::parse(text_override_table_.data(), text_override_table_.size(), text_override_,
 					override_error);
-	assets_ = std::make_unique<assets::AssetStore>(&index_);
+	// The server draws nothing: its models keep what the simulation reads (assets::ModelData).
+	assets_ = std::make_unique<assets::AssetStore>(&index_, assets::ModelData::Simulation);
 	// In the title's order (Title::mission_list_order carries the witness).
 	catalog_ = mission_catalog::build(index_, have_text_override_ ? &text_override_ : nullptr,
 			title_by_code(game_code_)->mission_list_order);

@@ -243,6 +243,9 @@ int main() {
 	CHECK(tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 	CHECK(!tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 	CHECK(tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
+	// The server draws nothing: the mission's models keep what the simulation reads alone
+	// (assets::ModelData), which holds a JO:TAC server under its slot's memory.
+	CHECK(server.kernel().assets().model_data() == assets::ModelData::Simulation);
 	// Serve Only: the dedicated role, no local client; the host's own slot 0's hidden body,
 	// owned by connection 0, is its local player (D-NET-352) [orig:
 	//  Server_InitAllPlayerEntitiesForRound @0x516B56..0x516B72; Game_StartMission

@@ -4,12 +4,18 @@
 #include <runtime/assets/asset_store.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/anim/skeletal_clips.h>
+#include <runtime/renderer/object_lod.h>
+#include <runtime/world/collision_model.h>
+#include <runtime/world/entity_pose.h>
+#include <runtime/world/model_geometry.h>
+#include <runtime/world/occlusion.h>
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -81,6 +87,128 @@ static int the_mount_refuses_what_the_game_load_refuses(const fs::path &models) 
 	TEST_EXPECT(index.scan(root.path.string(), {}, VfsMountMode::LooseOnly));
 	assets::AssetStore store{&index};
 	for (const Case &c : cases) TEST_EXPECT((store.model(c.name) != nullptr) == c.loads);
+	return 0;
+}
+
+// What the simulation reads of a model, compared between a Full store's and a Simulation store's
+// load of one file: the header, the LODs' RMDL words, strips, render objects and part animations,
+// the user points, the collision and occlusion counts, CTRL and MTRX, and the derivations the
+// mission load and the world take from a model.
+static int expect_same_simulation_view(
+		const threedi::Threedi3di3 &full, const threedi::Threedi3di3 &sim) {
+	TEST_EXPECT(sim.version == full.version);
+	TEST_EXPECT(sim.header.has_header == full.header.has_header);
+	TEST_EXPECT(std::strcmp(sim.header.name, full.header.name) == 0);
+	TEST_EXPECT(sim.header.mesh_type == full.header.mesh_type);
+	TEST_EXPECT(sim.header.lod_count_decl == full.header.lod_count_decl);
+	TEST_EXPECT(sim.header.max_radius_fp16 == full.header.max_radius_fp16);
+	TEST_EXPECT(sim.lod_count == full.lod_count);
+	for (size_t i = 0; i < full.lod_count && i < sim.lod_count; ++i) {
+		const threedi::ThreediLod &a = full.lods[i];
+		const threedi::ThreediLod &b = sim.lods[i];
+		TEST_EXPECT(std::memcmp(a.model_type, b.model_type, sizeof(a.model_type)) == 0);
+		TEST_EXPECT(a.lod_threshold == b.lod_threshold);
+		TEST_EXPECT(a.rmdl_render_object_count == b.rmdl_render_object_count);
+		TEST_EXPECT(
+				a.strip_count == b.strip_count && a.render_object_count == b.render_object_count);
+		TEST_EXPECT(a.part_animation_count == b.part_animation_count);
+		if (a.strip_count == b.strip_count && a.strip_count > 0)
+			TEST_EXPECT(std::memcmp(a.strips, b.strips, a.strip_count * sizeof(*a.strips)) == 0);
+		if (a.render_object_count == b.render_object_count && a.render_object_count > 0)
+			TEST_EXPECT(std::memcmp(a.render_objects, b.render_objects,
+								a.render_object_count * sizeof(*a.render_objects)) == 0);
+	}
+	TEST_EXPECT(sim.user_point_count == full.user_point_count);
+	if (sim.user_point_count == full.user_point_count && full.user_point_count > 0)
+		TEST_EXPECT(std::memcmp(sim.user_points, full.user_points,
+							full.user_point_count * sizeof(*full.user_points)) == 0);
+	TEST_EXPECT((sim.collision == nullptr) == (full.collision == nullptr));
+	if (sim.collision != nullptr && full.collision != nullptr) {
+		const threedi::ThreediCollisionModel &a = *full.collision;
+		const threedi::ThreediCollisionModel &b = *sim.collision;
+		TEST_EXPECT(a.plane_count == b.plane_count && a.volume_count == b.volume_count);
+		TEST_EXPECT(a.vertex_count == b.vertex_count && a.normal_count == b.normal_count);
+		TEST_EXPECT(a.face_count == b.face_count && a.object_count == b.object_count);
+		TEST_EXPECT(a.translation_count == b.translation_count);
+		TEST_EXPECT(a.model_data.num_objects == b.model_data.num_objects);
+		TEST_EXPECT(std::memcmp(a.model_data.bbox_fp16, b.model_data.bbox_fp16,
+							sizeof(a.model_data.bbox_fp16)) == 0);
+	}
+	TEST_EXPECT(sim.occlusion_vertex_count == full.occlusion_vertex_count);
+	TEST_EXPECT(sim.occlusion_face_count == full.occlusion_face_count);
+	TEST_EXPECT(sim.occlusion_object_count == full.occlusion_object_count);
+	TEST_EXPECT(sim.occlusion_plane_count == full.occlusion_plane_count);
+	TEST_EXPECT(sim.part_animation_count == full.part_animation_count);
+	TEST_EXPECT(sim.ctrl.count == full.ctrl.count && sim.mtrx.count == full.mtrx.count);
+
+	TEST_EXPECT(world::model_bound_radius_q16_from_3di(sim) ==
+			world::model_bound_radius_q16_from_3di(full));
+	TEST_EXPECT(world::model_is_skinned(sim, 0) == world::model_is_skinned(full, 0));
+	TEST_EXPECT(world::model_has_collision(sim) == world::model_has_collision(full));
+	TEST_EXPECT(
+			renderer::model_lod_thresholds_q16(sim) == renderer::model_lod_thresholds_q16(full));
+	std::vector<anim::Vec3> full_origins, sim_origins;
+	std::vector<int> full_parents, sim_parents;
+	TEST_EXPECT(world::model_bone_table(sim, sim_origins, sim_parents) ==
+			world::model_bone_table(full, full_origins, full_parents));
+	TEST_EXPECT(sim_parents == full_parents && sim_origins.size() == full_origins.size());
+	for (size_t i = 0; i < full_origins.size() && i < sim_origins.size(); ++i)
+		TEST_EXPECT(sim_origins[i].x == full_origins[i].x &&
+				sim_origins[i].y == full_origins[i].y && sim_origins[i].z == full_origins[i].z);
+	float full_anchor[3] = {}, sim_anchor[3] = {};
+	threedi::threedi_3di3_ground_anchor(&full, full_anchor);
+	threedi::threedi_3di3_ground_anchor(&sim, sim_anchor);
+	TEST_EXPECT(std::memcmp(full_anchor, sim_anchor, sizeof(full_anchor)) == 0);
+	world::CollisionModel full_collision, sim_collision;
+	TEST_EXPECT(world::collision_model_from_3di(sim.collision, sim_collision, true) ==
+			world::collision_model_from_3di(full.collision, full_collision, true));
+	TEST_EXPECT(sim_collision.vertices.size() == full_collision.vertices.size());
+	TEST_EXPECT(sim_collision.face_vertices.size() == full_collision.face_vertices.size());
+	world::OcclusionModel full_occlusion, sim_occlusion;
+	TEST_EXPECT(world::occlusion_model_from_3di(sim, sim_occlusion) ==
+			world::occlusion_model_from_3di(full, full_occlusion));
+	TEST_EXPECT(sim_occlusion.vertices.size() == full_occlusion.vertices.size());
+	return 0;
+}
+
+// opennova-serve's store (assets::ModelData::Simulation) frees what only a renderer reads, each
+// LOD's vertex and index buffers, the materials and the lights, and keeps everything else as a
+// Full store's model of the same file holds it; the game's store keeps it all. Every synthetic
+// model, the refused ones refused by both.
+static int a_simulation_store_keeps_what_the_simulation_reads(const fs::path &models) {
+	ResourceIndex index;
+	TEST_EXPECT(index.scan(models.string(), {}, VfsMountMode::LooseOnly));
+	assets::AssetStore full{ &index };
+	assets::AssetStore sim{ &index, assets::ModelData::Simulation };
+	TEST_EXPECT(full.model_data() == assets::ModelData::Full);
+	TEST_EXPECT(sim.model_data() == assets::ModelData::Simulation);
+	size_t compared = 0, full_vertices = 0, full_indices = 0, full_materials = 0;
+	for (const fs::directory_entry &entry : fs::directory_iterator(models)) {
+		if (entry.path().extension() != ".3di")
+			continue;
+		const std::string name = entry.path().stem().string();
+		const assets::Model a = full.model(name);
+		const assets::Model b = sim.model(name);
+		TEST_EXPECT((a == nullptr) == (b == nullptr));
+		if (a == nullptr || b == nullptr)
+			continue;
+		++compared;
+		for (size_t i = 0; i < a->lod_count; ++i) {
+			full_vertices += a->lods[i].vertices.count;
+			full_indices += a->lods[i].indices.count;
+		}
+		full_materials += a->material_count;
+		for (size_t i = 0; i < b->lod_count; ++i) {
+			TEST_EXPECT(b->lods[i].vertices.items == nullptr && b->lods[i].vertices.count == 0);
+			TEST_EXPECT(b->lods[i].indices.indices == nullptr && b->lods[i].indices.count == 0);
+		}
+		TEST_EXPECT(b->materials == nullptr && b->material_count == 0);
+		TEST_EXPECT(b->lights == nullptr && b->light_count == 0);
+		if (expect_same_simulation_view(*a, *b) != 0)
+			return 1;
+	}
+	TEST_EXPECT(compared >= 10);
+	TEST_EXPECT(full_vertices > 0 && full_indices > 0 && full_materials > 0);
 	return 0;
 }
 
@@ -219,6 +347,8 @@ int main() {
 	TEST_EXPECT(pose.size() == retained_rig->bone_count());
 
 	if (the_mount_refuses_what_the_game_load_refuses(models) != 0) return 1;
+	if (a_simulation_store_keeps_what_the_simulation_reads(models) != 0)
+		return 1;
 
 	assets::AssetStore empty;
 	TEST_EXPECT(!empty.model("thing"));

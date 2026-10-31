@@ -945,6 +945,13 @@ int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &ou
 // Free allocations inside a Threedi3di3.
 void threedi_3di3_free(Threedi3di3 *model);
 
+// Free what only a renderer reads: each LOD's vertex and index buffers (their counts zeroed),
+// the materials and the lights. Everything else stays as read: the LODs' RMDL words, strips,
+// render objects and part animations, the user points, the collision and occlusion data, CTRL,
+// MTRX and the header. A headless server's model store keeps its models so (assets::ModelData);
+// the writer no longer takes a model so freed.
+void threedi_3di3_free_render_buffers(Threedi3di3 *model);
+
 // Compute a model's placement "ground anchor" — the point of the model that
 // should sit at an object's placed position. Resolution order:
 //   1. The first userpoint whose name matches "ground" case-insensitively.
