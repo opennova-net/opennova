@@ -8,6 +8,7 @@
 // [orig: Server_DrawStatusScreen @0x50a2d0; HUD_DrawPlayerScoreList
 //  @0x500300; UI_DrawQuitConfirmDialog @0x5b8eb0;
 //  HUD_DrawServerConsoleLines @0x5ba0a0]
+#include <base/title/title.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_math.h>
@@ -446,6 +447,33 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 // The page stands in for the whole scene frame: a dedicated host's (no session peer) always, a
 // peer's while its status view is up on the authority (GameLoop_RenderFrame @0x521355,
 // @0x521CD6..0x521CEF).
+// A dedicated host's CHAT console lines: Jointops.exe draws them with the inline tags off (a '<'
+// a glyph), dfx2.exe parses them (DFX2-88) [orig: HUD_DrawServerConsoleLines @0x5BA0A0 - flags
+// 256 @0x5BA0E6] [orig: sub_5B8FF0 @0x5B8FF0 - `push 0` @0x5B9036 (dfx2.exe)].
+void test_console_line_tags(const fnt_font_t *font) {
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	CHECK(jo != nullptr && !jo->hud_message_tags);
+	CHECK(dfx2 != nullptr && dfx2->hud_message_tags);
+	auto glyphs_at_608 = [&](const opennova::Title *title) {
+		HudFrameCompiler compiler;
+		compiler.configure(HudLayout{}, font);
+		compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f, font);
+		HudFrameState state;
+		state.title = title;
+		ServerStatusPageState page = listen_page(8);
+		page.mp_session_peer = false;
+		page.console_rows.push_back({"a<ch>b", 0xFFFFFFFFu});
+		compiler.compile_server_status_page(state, page, 10000, true, 1024.0f, 768.0f);
+		const Run *row = run_at(runs_on(compiler.server_status_page_list(), kHudFontSlotLabelBold),
+				10.0f, 608.0f);
+		return row != nullptr ? row->count : size_t(0);
+	};
+	CHECK(glyphs_at_608(jo) == 6);
+	CHECK(glyphs_at_608(nullptr) == 6);
+	CHECK(glyphs_at_608(dfx2) == 2);
+}
+
 void test_main_frame_draws_scene() {
 	using opennova::hud::main_frame_draws_scene;
 	// A dedicated host: the page whatever the view word holds.
@@ -468,6 +496,7 @@ int main() {
 	test_score_rows();
 	test_page_compile(&font);
 	test_dedicated_host_twin(&font);
+	test_console_line_tags(&font);
 	test_main_frame_draws_scene();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

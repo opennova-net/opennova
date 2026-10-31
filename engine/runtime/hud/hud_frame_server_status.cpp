@@ -6,6 +6,7 @@
 //  Vehicle_ComputeSuspensionBoneTransforms) @0x5ba0a0;
 //  HUD_DrawPlayerScoreList @0x500300]
 
+#include <base/title/title.h> // Title::hud_message_tags
 #include <runtime/hud/hud_frame.h>
 #include <cstdio>
 #include <string>
@@ -41,8 +42,8 @@ void HudFrameCompiler::element_quit_dialog(const HudFrameState &state, float w, 
 	++draw_list_.elements_drawn;
 }
 
-void HudFrameCompiler::element_server_console_lines(const ServerStatusPageState &page, float w,
-		float h) {
+void HudFrameCompiler::element_server_console_lines(const ServerStatusPageState &page,
+		const Title *title, float w, float h) {
 	// The four newest raw lines, oldest at the top, from y 608 in steps of 24
 	// at x 10: a peer's SYSTEM ring with the inline tags on, a dedicated
 	// host's CHAT ring with them off. An empty slot leaves its row blank; a
@@ -52,8 +53,12 @@ void HudFrameCompiler::element_server_console_lines(const ServerStatusPageState 
 	//  SYSTEM raw slots 3..0 from unk_B41438 @0x5ba117 (flags 0), the CHAT
 	//  raw slots 3..0 from unk_B3EC30 @0x5ba0bd (flags 256); the colour
 	//  write-back @0x5ba0de / @0x5ba12e; `+= 24` @0x5ba107 / @0x5ba154]
+	// dfx2.exe's dedicated host draws its CHAT lines with the tags on too
+	// (Title::hud_message_tags, DFX2-88) [orig: sub_5B8FF0 @0x5b8ff0 - `push 0`
+	// @0x5b9036 (dfx2.exe)].
 	const bool mp_session_peer = page.mp_session_peer;
-	const uint32_t flags = mp_session_peer ? 0u : kFontTagsDisabled;
+	const uint32_t flags =
+			mp_session_peer || (title != nullptr && title->hud_message_tags) ? 0u : kFontTagsDisabled;
 	if (!mp_session_peer && !page.console_rows.empty()) {
 		// A host with no client of its own: the feed carries its CHAT ring's
 		// rows (inmatch/server_console.h), oldest first.
@@ -158,7 +163,7 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	emit_text_at_virtual_pos(bold, bs, ".", tick_x, 736, w, h, kPageWhite, 0);
 	status_ticker_ = (status_ticker_ + 1) & 0x1F;
 
-	element_server_console_lines(page, w, h);
+	element_server_console_lines(page, state.title, w, h);
 	// The windows draw in the page's order, each box over what came before
 	// it (an order break per window: the renderer groups by kind only
 	// within a run).

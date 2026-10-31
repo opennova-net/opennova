@@ -188,6 +188,9 @@ Title make() {
 	// DFX2-85: the stance icon tinted by the health band [orig: sub_5A1A50 @0x5A1A50 -
 	//  @0x5A1AB0..0x5A1AD4 (dfx2.exe)].
 	t.hud_stance_health_tint = true;
+	// DFX2-88: the message lines parse their tags [orig: sub_5B8CC0 @0x5B8DED, sub_5B8FF0
+	//  @0x5B9036, sub_5B8E80 @0x5B8FAD (dfx2.exe)].
+	t.hud_message_tags = true;
 	return t;
 }
 

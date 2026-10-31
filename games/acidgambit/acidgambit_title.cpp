@@ -50,6 +50,7 @@ Title make() {
 	t.hud_scope_no_magnification = jo_title().hud_scope_no_magnification;
 	t.hud_crosshair_fixed = jo_title().hud_crosshair_fixed;
 	t.hud_stance_health_tint = jo_title().hud_stance_health_tint;
+	t.hud_message_tags = jo_title().hud_message_tags;
 	return t;
 }
 

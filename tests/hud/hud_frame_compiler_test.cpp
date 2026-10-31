@@ -2627,6 +2627,41 @@ void test_message_log_element(const fnt_font_t *font) {
 		if (g.color == opennova::hud::half_bright_argb(0xFF80A0FFu)) chat_y = g.y_top;
 	CHECK(std::fabs(chat_y - (expected_y - 0.5f)) < 1.0f,
 			"a single line sits in the bottom row, not the top");
+
+	// The CHAT column draws its tags off under Jointops.exe (a '<' a glyph) and parses them under
+	// dfx2.exe; the SYSTEM column parses them in both (DFX2-88) [orig: HUD_DrawMessageLog
+	// `push 100h` @0x5b9e9d, flags 0 @0x5b9ecc] [orig: sub_5B8CC0 - `push 0` @0x5b8ded
+	// (dfx2.exe)].
+	const auto column_glyphs = [&](const opennova::Title *title, uint32_t *system_glyphs) {
+		HudLayout wide = layout; // one display line: no wrap
+		wide.chat_box_x1 = 32;
+		wide.chat_box_x2 = 1000;
+		HudFrameCompiler tagged;
+		tagged.configure(wide, font);
+		tagged.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+		tagged.push_chat_line("a<ch>b", 0xFF80A0FFu, 0);
+		tagged.push_feed_line("c<ch>d", 0xFFAFAFAFu, 0);
+		HudFrameState s;
+		s.message_log_shown = true;
+		s.title = title;
+		// The window's rows only (the feed draws the same lines up top): the CHAT column left of
+		// the middle, the SYSTEM column right of it.
+		uint32_t chat = 0;
+		*system_glyphs = 0;
+		for (const auto &g : tagged.compile(s, 1024.0f, 768.0f).glyphs) {
+			if (g.y_top < 300.0f) continue;
+			if (g.x_top_left < 512.0f) ++chat;
+			else ++*system_glyphs;
+		}
+		return chat;
+	};
+	uint32_t jo_system = 0, dfx2_system = 0;
+	const uint32_t jo_chat = column_glyphs(opennova::title_by_code("jo"), &jo_system);
+	CHECK(jo_chat == 6,
+			"JO's chat column draws its '<ch>' as glyphs");
+	CHECK(column_glyphs(opennova::title_by_code("dfx2"), &dfx2_system) == 2,
+			"dfx2's chat column parses its '<ch>'");
+	CHECK(jo_system == 2 && dfx2_system == 2, "the system column parses its tags in both");
 }
 
 // A mission start zeroes the main-frame counter (world::HudFrameCounters), and the same start

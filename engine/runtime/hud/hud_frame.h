@@ -1763,7 +1763,9 @@ private:
 	// y 608, the status page 480.
 	void element_chat_input(const HudFrameState &state, float w, float h, float y = 608.0f);
 	void element_quit_dialog(const HudFrameState &state, float w, float h);
-	void element_server_console_lines(const ServerStatusPageState &page, float w, float h);
+	// `title`: the session's (HudFrameState::title), its CHAT lines' tags (DFX2-88).
+	void element_server_console_lines(const ServerStatusPageState &page, const Title *title,
+			float w, float h);
 	void element_player_score_list(const ServerStatusPageState &page, float w, float h);
 	void element_end_round_overlay(const HudFrameState &state, float w, float h);
 	void element_kill_announcement(const HudFrameState &state, float w, float h);

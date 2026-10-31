@@ -11,6 +11,7 @@
 // [orig: Viewport_ScreenToVirtual @0x5b9e23/@0x5b9e33]; the text rows stay in
 // screen pixels [orig: HUD_DrawTextAligned_HalfBright (ex sub_5D2F20) @0x5b9ebc/@0x5b9f02 takes viewport x/y].
 
+#include <base/title/title.h> // Title::hud_message_tags
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_message_log.h>
 
@@ -90,10 +91,14 @@ void HudFrameCompiler::element_message_log(const HudFrameState &state, float w,
 					run.quads.end());
 		}
 	};
-	// CHAT down the left, left-aligned [orig: @0x5b9ebc, x = 32*w/1024 + 2];
-	// SYSTEM down the right, right-aligned at 990*w/1024 [orig: @0x5b9f02,
-	// draw mode 1].
-	column(chat_lines_, chat_x_px, 0u);
+	// CHAT down the left, left-aligned, its inline tags off: a '<' is a glyph
+	// [orig: @0x5b9ebc, x = 32*w/1024 + 2, `push 100h` @0x5b9e9d]; dfx2.exe's
+	// parses them (Title::hud_message_tags, DFX2-88) [orig: sub_5B8CC0
+	// @0x5b8cc0 - `push 0` @0x5b8ded (dfx2.exe)]. SYSTEM down the right,
+	// right-aligned at 990*w/1024, its tags on in both [orig: @0x5b9f02, draw
+	// mode 1, flags 0 @0x5b9ecc].
+	const bool chat_tags = state.title != nullptr && state.title->hud_message_tags;
+	column(chat_lines_, chat_x_px, chat_tags ? 0u : kFontTagsDisabled);
 	column(feed_lines_, system_x_px, kFontAlignRight);
 	++draw_list_.elements_drawn;
 }

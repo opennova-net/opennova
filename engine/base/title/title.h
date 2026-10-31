@@ -242,6 +242,15 @@ struct Title {
 	// [orig: HUD_DrawStanceIndicator @0x599F10 (dword_2723AE8 @0x599FE1)] [orig: sub_5A1A50
 	//  @0x5A1A50 (dfx2.exe) - HUD_ClassifyHealthBand @0x5A1AB6, the triple @0x5A1AC2..0x5A1AD4]
 	bool hud_stance_health_tint = false;
+	// DFX2-88: the chat lines of the J window's CHAT column and of a dedicated host's console
+	// lines parse their inline tags, as every other line does; Jointops.exe draws those two with
+	// the tags off (flag 0x100), a '<' a glyph. Its third reader, the console window, is
+	// HUD_DrawConsoleMessagesOverlay, which OpenNova does not port.
+	// [orig: HUD_DrawMessageLog @0x5B9D70 (push 100h @0x5B9E9D); HUD_DrawServerConsoleLines
+	//  @0x5BA0A0 (@0x5BA0E6); HUD_DrawConsoleMessagesOverlay @0x5B9F30 (@0x5BA05D)]
+	// [orig: sub_5B8CC0 @0x5B8DED, sub_5B8FF0 @0x5B9036, sub_5B8E80 @0x5B8FAD, each push 0
+	//  (dfx2.exe)]
+	bool hud_message_tags = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title
