@@ -1582,6 +1582,8 @@ void test_own_flag_touch_syncs_its_definition_pose() {
         CHECK(saved[1].kind == MatchGameplayEventKind::FlagSave);
         CHECK(saved[1].position.x == 45.0f);
         CHECK(saved[1].objective_position.x == 40.0f);
+        // Both records name the flag's occupant as the serializer's parent.
+        CHECK(saved[0].parent == other && saved[1].parent == other);
     }
     CHECK(world->registry.get(flag)->position.x == 40.0f);
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 1);

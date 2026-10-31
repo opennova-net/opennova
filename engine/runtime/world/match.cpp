@@ -591,7 +591,7 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     // [orig: Entity_ProcessWaypointInteraction - Entity_TryAttachCarriedObject
     //  @0x4AD944 (@0x43C1F0: the def @0x43C1F4, +0x170 @0x43C20C),
     //  Server_DispatchScoringEvent @0x4AD94B (@0x50C910: GameEvent_ProcessScoring
-    //  event 10 @0x50C938), `mov [esi+124h], 0` @0x4AD955]
+    //  event 10 @0x50C938), `mov [esi+124h], ebx` @0x4AD955 (ebx 0)]
     // [orig: the twin's @0x4AD9A4..0x4AD9B5 (dfx2.exe)]
     if (flag->has_item_def && !flag->primary_occupant.valid())
         attach_carried_object(world, *carrier, *flag);
@@ -651,7 +651,8 @@ void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried
     // [orig: Entity_AttachCarriedObject - the authority / session tests
     //  @0x43C19F / @0x43C1A8, g_FlagReturnTime2 against 5 @0x43C1B1..0x43C1B9,
     //  the +0x2A4 stores @0x43C1BC / @0x43C1CE, Server_SendDestructibleDeathPacket
-    //  @0x43C1C2] [orig: the twin's @0x43BF9F..0x43BFCE (dfx2.exe)]
+    //  @0x43C1C2, the <5 arm's @0x43C1D8]
+    // [orig: the twin's @0x43BF9F..0x43BFCE, @0x43BFD8 (dfx2.exe)]
     if (!world.rules.logic_authority || !world.rules.mp_session)
         return;
     if (CarryObjectiveState *state = carry_state(world, carried.handle))
@@ -713,15 +714,17 @@ void Match::record_flag_save(World &world, EntityHandle player_handle,
         return;
     // The save's 0x15 feed carries the flag's words as the touch found them
     // (the sync has already snapped it home), then its 0x2F the flag as it now
-    // stands. [orig: Server_BroadcastFlagSaveEvent @0x517A90 - the feed
-    //  @0x517AB0..0x517AED, the 0x2F @0x517B09]
+    // stands, its parent the flag's +0x170 occupant as the serializer writes it.
+    // [orig: Server_BroadcastFlagSaveEvent @0x517A90 - the feed
+    //  @0x517AB0..0x517AED, the 0x2F @0x517B09; NetPacket_SerializeEntityWithParentAndTarget
+    //  @0x505810 (entity[92] @0x5058AA)]
     gameplay_events_.push_back({MatchGameplayEventKind::FlagSave,
                                 player_handle,
                                 flag_handle,
                                 touched_at,
                                 flag->position,
                                 static_cast<uint8_t>(flag->flags),
-                                EntityHandle{},
+                                flag->primary_occupant,
                                 flag->ground_target,
                                 false,
                                 static_cast<uint16_t>(flag->item_id)});
@@ -1937,7 +1940,7 @@ void Match::update_flag_objectives(World &world) {
         // (the Flag Me OR @0x4AD966..0x4AD976), 4100 @0x4AD9A6..0x4AD9D2,
         // 4102 @0x4AD9E3, 4103 @0x4AD9D6; the def tests @0x4AD98F / @0x4AD9BF /
         // @0x4AD9FD to the clears @0x4AD9FF / @0x4ADA07; capture @0x4ADA19]
-        // [orig: the twin's arms @0x4AD9D6..0x4ADA79 (dfx2.exe)]
+        // [orig: the twin's arms @0x4AD9BE..0x4ADA79 (dfx2.exe)]
         if (carrier->mounted_child.valid()) {
             const int32_t bay = target->item_id;
             const bool bay_team =
