@@ -337,9 +337,10 @@ public:
 	void set_radio_request_icon_viewer(bool p_viewer);
 	// The HUD's per-frame role facts (engine inmatch::hud_role_facts_feed):
 	// the breath bar, the MP session lines, the open voice menus, the
-	// connection indicators and the HUDLS slot bar's scan, whose icons this
-	// loads only while the layout's HUDLS_SYSTEM draws the bar. No sim leaves
-	// every one empty.
+	// connection indicators, the EXPPOINTS element, the title, the lone-gunner
+	// fact, the vehicle panel's rider lines, the Inset's name and reticle and
+	// the HUDLS slot bar's scan, whose icons this loads only while the layout's
+	// HUDLS_SYSTEM draws the bar. No sim leaves every one empty.
 	void set_role_facts(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
 	// The overlay-panel pass's key-toggled state (engine hud_toggles.h): the F9
 	// emotes and F10 radio menus' open flags, which make the next role-facts

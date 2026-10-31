@@ -4,7 +4,8 @@
 #include <vector>
 
 #include <base/io/fixed.h> // float_to_fp16_16_sat
-#include <runtime/hud/hud_game_text.h> // hud_session_text
+#include <runtime/hud/hud_exp_points.h> // hud_exp_points_text
+#include <runtime/hud/hud_game_text.h> // hud_session_text / hud_vehicle_rider_text
 #include <runtime/hud/hud_lfp_panel.h> // lfp_under_attack_text / lfp_ready_text
 #include <runtime/hud/hud_math.h> // FriendlyTagMode
 #include <runtime/hud/hud_takeover_status.h> // compose_takeover_status
@@ -79,8 +80,18 @@ void hud_role_facts_feed(const HudFeedSource &source, uint32_t voice_menus,
 	state.start_timer.seconds = facts.start_timer_seconds;
 	state.start_timer.label = overlays("STROVER59");
 	state.start_timer.footer = overlays("STROVER63");
+	// The EXPPOINTS element's words and its Overlays strings (hud/hud_exp_points.h).
+	state.exp_points = facts.exp_points;
+	hud::hud_exp_points_text(gametext, state.exp_points.text);
+	state.title = facts.title;
+	state.lone_gunner = facts.lone_gunner;
+	// The vehicle panel's rider lines and their weapon texts (hud::HudVehicleRider carries the
+	// witness).
+	state.vehicle_riders = facts.vehicle_riders;
+	hud::hud_vehicle_rider_text(gametext, state.vehicle_riders);
 	out.inset_target_name = facts.inset_target_name;
-	hud::hud_session_text(gametext, state.session.text);
+	out.inset_reticle_quad = facts.inset_reticle_quad;
+	hud::hud_session_text(gametext, state.session.game_type, state.session.text);
 	out.slot_bar_loads = hudls_system != 0;
 	for (size_t c = 0; c < state.slot_bar.size(); ++c) {
 		hud::HudSlotBarSlot &slot = state.slot_bar[c];

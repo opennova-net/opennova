@@ -92,6 +92,10 @@ void project_friendly_tags(const std::vector<world::FriendlyTagSource> &tags,
 		// gate is HudFrameState::radio_request_icon_viewer.
 		tag.radio_request = t.radio_request;
 		tag.squad_color_index = t.squad_color_index;
+		// DFX2-87's reach facts: the HUD target cursor's entity and the slot +0x3C word's match
+		// (the gather carries the witness).
+		tag.cursor_target = t.cursor_target;
+		tag.same_account = t.same_account;
 		out.push_back(std::move(tag));
 	}
 }

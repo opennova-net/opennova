@@ -65,12 +65,11 @@ bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
 }
 
 opennova::inmatch::HudFeedSource Simulation::hud_feed_source() {
-	// The role view, the spawn-zone registry the zone panel and the takeover dialog key
-	// on, and a joiner's seat occupancy (its decoded rows) for the attach-label scan.
+	// The role view (a joiner's seat occupancy rides it, for the attach-label scan) and the
+	// spawn-zone registry the zone panel and the takeover dialog key on.
 	opennova::inmatch::HudFeedSource source;
 	source.view = role_view();
 	source.zones = &deploy_zone_registry();
-	source.occupancy = is_joiner() ? joiner_role_ : nullptr;
 	return source;
 }
 

@@ -35,7 +35,8 @@ struct HudTextureLoad {
 
 // The HUD's set-up loads for one build. Both arms load the box styles' atlases and the
 // connection icons; the full arm (`full_arm`; a dedicated host's reduced arm loads none of the
-// HUD's own art) also loads, ahead of them, the combat sprites and the static frame
+// HUD's own art) also loads, ahead of them, the combat sprites (the scope crosshair among them,
+// in its alpha-mode role) and the static frame
 // (`frame_present`: the layout's frame_pos), and after them the tip panel, the zone panel's
 // icons and tiles, the HUDLS pair, the stance records, the crosshair of `crosshair_style` in the
 // mode `crosshair_alpha` names, the map icon strip, the compass ring, the radar slices and the

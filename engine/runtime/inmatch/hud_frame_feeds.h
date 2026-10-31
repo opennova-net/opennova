@@ -16,19 +16,14 @@
 #include <runtime/hud/hud_viewport.h>
 #include <runtime/inmatch/role_feeds.h>
 
-namespace opennova::world {
-class VehicleOccupancySource;
-}
-
 namespace opennova::inmatch {
 
-// What the feeds read of the running session: the role view, the mission's spawn-zone registry
-// (the zone letters and pick indices) and the occupancy source of a joiner's seat scan (its
-// decoded rows; null on every other role).
+// What the feeds read of the running session: the role view (a joiner's seat scan reads its
+// occupancy, RoleView::occupancy) and the mission's spawn-zone registry (the zone letters and
+// pick indices).
 struct HudFeedSource {
 	RoleView view;
 	const world::SpawnZoneRegistry *zones = nullptr;
-	const world::VehicleOccupancySource *occupancy = nullptr;
 };
 
 // THE AAS ZONE STATUS PANEL and THE TAKEOVER DIALOG off one zone push: the panel's game type
@@ -51,21 +46,26 @@ void hud_friendly_tags_feed(const HudFeedSource &source, bool shown,
 		const hud::HudViewport &viewport, float fog_distance_units, hud::HudFrameState &state);
 
 // What the role-facts feed hands back besides the frame state: the weapon inset's friendly name
-// (the combat feed's target name) and, while the layout's HUDLS_SYSTEM draws the slot bar, the
-// icon each category's slot loads (its first def's hud_loadout_select texture, in the HUD
-// loader's alpha mode; "" for an empty category).
+// and the title's Inset reticle quad (the combat feed's target name and reticle, set into the
+// combat state each frame) and, while the layout's HUDLS_SYSTEM draws the slot bar, the icon each
+// category's slot loads (its first def's hud_loadout_select texture, in the HUD loader's alpha
+// mode; "" for an empty category).
 struct HudRoleFeed {
 	std::string inset_target_name;
+	bool inset_reticle_quad = false; // HudRoleFacts::inset_reticle_quad (DFX2-45)
 	bool slot_bar_loads = false;
 	std::array<std::string, 10> slot_bar_icons;
 };
 
 // THE HUD'S ROLE FACTS (hud_role_facts) into the frame state: the open F9 / F10 menus' rows,
 // the breath bar with its Overlays/STROVER91 label, the pause text (STROVER7), the MP session
-// lines with their strings (hud::hud_session_text), the squad orders, the connection indicators,
-// the frame-rate overlay, the connection status line (STROVER54) and the start timer (STROVER59 /
-// STROVER63), and the HUDLS slot bar's scan with each slot's key label (`slot_bar_key_labels`,
-// binding record 200 + the def's category) while `hudls_system` draws the bar.
+// lines with their strings (hud::hud_session_text, by the session's game type), the squad
+// orders, the connection indicators, the frame-rate overlay, the connection status line
+// (STROVER54) and the start timer (STROVER59 / STROVER63), the EXPPOINTS element with its strings
+// (hud::hud_exp_points_text), the session's title and the lone-gunner fact, the vehicle panel's
+// rider lines with their weapon texts (hud::hud_vehicle_rider_text), and the HUDLS slot bar's
+// scan with each slot's key label (`slot_bar_key_labels`, binding record 200 + the def's
+// category) while `hudls_system` draws the bar.
 void hud_role_facts_feed(const HudFeedSource &source, uint32_t voice_menus,
 		const hud::GameTextLookup &gametext, uint32_t hudls_system,
 		const std::array<std::string, 12> &slot_bar_key_labels, hud::HudFrameState &state,

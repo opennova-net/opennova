@@ -1257,8 +1257,8 @@ void HudOverlay::set_attach_labels(const Ref<RtxtStringFile> &p_gametext,
 	if (p_sim.is_valid()) {
 		const opennova::inmatch::HudFeedSource source = p_sim->hud_feed_source();
 		if (source.view.kernel != nullptr)
-			opennova::hud::fill_attach_labels(source.view.kernel->local, source.occupancy, viewport_,
-					game_text_lookup(p_gametext), state_.attach_labels);
+			opennova::hud::fill_attach_labels(source.view.kernel->local, source.view.occupancy,
+					viewport_, game_text_lookup(p_gametext), state_.attach_labels);
 	}
 	queue_redraw();
 }
@@ -1423,6 +1423,7 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	opennova::inmatch::hud_role_facts_feed(source, voice_menus_, game_text_lookup(p_gametext),
 			static_cast<uint32_t>(layout_.hudls.system), slot_bar_key_labels_, state_, feed);
 	inset_target_name_ = feed.inset_target_name;
+	inset_reticle_quad_ = feed.inset_reticle_quad;
 	if (feed.slot_bar_loads) {
 		for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
 			opennova::hud::HudSprite icon;
