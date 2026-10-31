@@ -37,7 +37,8 @@ constexpr const char *kReadDefs[] = {
 // Arial16b / 16n above, over 640 / 800 / 1024; Impac22b and Impac38b over 800.
 // [orig: HUD_InitAllFonts @0x51EE20 - the widths @0x51EE7E / @0x51EEAB, the names
 //  @0x51EE8A..0x51EF0E, the scale @0x51EF26, Impac22b @0x51EF48 and Impac38b @0x51EF7B over 800
-//  @0x51EF62]
+//  @0x51EF62, the divide's magic 0x51EB851F @0x51EF53..0x51EF62 shifting by 8 (`sar edx, 8`
+//  @0x51EF5A)]
 constexpr TitleHudFontTier kHudFontTiers[] = {
 	{640, "Arial14n.fnt", "Arial12b.fnt", 640},
 	{800, "Arial14n.fnt", "Arial14b.fnt", 800},

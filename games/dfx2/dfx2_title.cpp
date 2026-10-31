@@ -23,7 +23,8 @@ constexpr const char *kAbsentResourceRoles[] = { "cmap_menu", "vehicle_menu", "n
 // over 1600 (DFX2-80).
 // [orig: HUD_InitAllFonts @0x51BD70 (dfx2.exe) - the widths @0x51BDCE / @0x51BDFE / @0x51BE2E /
 //  @0x51BE5B / @0x51BE88, the names @0x51BDDA..0x51BECD, the scale @0x51BEE1, Impac44b @0x51BF0D
-//  and Impac76b @0x51BF40 over 1600 @0x51BF2E / @0x51BF53]
+//  and Impac76b @0x51BF40 over 1600 @0x51BF2E / @0x51BF53, the divide's magic 0x51EB851F
+//  @0x51BF12..0x51BF21 shifting by 9 (`sar edx, 9` @0x51BF19)]
 constexpr TitleHudFontTier kHudFontTiers[] = {
 	{640, "Arial14n.fnt", "Arial12b.fnt", 640},
 	{800, "Arial14n.fnt", "Arial14b.fnt", 800},
