@@ -29,7 +29,7 @@ struct File;
 }
 
 namespace opennova::controls {
-struct Catalog; // runtime/controls/controls.h
+struct Catalog; // base/title/controls_catalog.h
 }
 
 namespace opennova::profile {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <base/title/controls_catalog.h> // controls::Catalog (Title::controls)
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -8,10 +10,6 @@
 namespace opennova::gamecfg {
 enum class ConfigTable : uint8_t; // formats/gamecfg/game_cfg.h
 } // namespace opennova::gamecfg
-
-namespace opennova::controls {
-struct Catalog; // runtime/controls/controls.h
-} // namespace opennova::controls
 
 namespace opennova {
 
@@ -427,8 +425,8 @@ struct Title {
 	// DFX2-63: the mission loading screen's text (TitleLoadingScreen); null where no binary of the
 	// title was read for it, which composites none.
 	const TitleLoadingScreen *loading_screen = nullptr;
-	// DFX2-110: the static binding catalog the executable compiles in (runtime/controls/
-	// controls.h Catalog): every row's action code, config token, class, flags and default
+	// DFX2-110: the static binding catalog the executable compiles in (controls_catalog.h
+	// controls::Catalog): every row's action code, config token, class, flags and default
 	// bindings, which the default binding table player.sav's entries merge into, the live
 	// binding records, the key-config and help screens and every by-code reader take. Null:
 	// Jointops.exe's (controls::default_catalog).

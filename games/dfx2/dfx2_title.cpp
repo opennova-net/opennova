@@ -1,7 +1,7 @@
 #include "dfx2.h"
 
+#include <base/title/controls_catalog.h>
 #include <formats/gamecfg/game_cfg.h>
-#include <runtime/controls/controls.h>
 
 namespace opennova::games {
 

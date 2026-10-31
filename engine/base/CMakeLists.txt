@@ -15,6 +15,7 @@ add_library(opennova_base STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.cpp
     # title — the titles a game runs as (each game's rows are games/<code>/'s, games::install())
     ${CMAKE_CURRENT_SOURCE_DIR}/title/title.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/title/controls_catalog.cpp # a title's static binding catalog's data
     # os_random — the operating system's CSPRNG (the NovaWorld service's secrets and ids)
     ${CMAKE_CURRENT_SOURCE_DIR}/os_random/os_random.cpp
     # os_registry — a registry string value as NovaLogic's executables read and write one (a DFX2
