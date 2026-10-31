@@ -37,16 +37,15 @@ bool WorkingDirectoryFiles::write(const std::string &name, std::string_view byte
 }
 
 ConnectLogHeader connect_log_header(std::string_view title_code) {
-	std::string unwitnessed;
-	const Title *title =
-			resolve_title_protocol(title_code, unwitnessed) != nullptr ? title_by_code(title_code) : nullptr;
-	if (title == nullptr) title = &default_title();
+	// TITLE is the title's own, VER1 / VER2 the protocol's it speaks: two axes, neither read
+	// through the other.
+	const Title &title = require_title_code(title_code, "connect_log_header");
 	ConnectLogHeader header;
 	header.exe = read_exe_basename();
-	header.title = title->title_text != nullptr ? title->title_text : "";
+	header.title = title.title_text != nullptr ? title.title_text : "";
 	// VERSION, g_VersionText: the engine build's, ONE's wire version text (punt_log.h).
 	header.version = one_build().wire_version().retail_text();
-	if (const Protocol *protocol = title_protocol(title->code)) {
+	if (const Protocol *protocol = title_protocol(title.code)) {
 		header.ver1 = protocol->ver1 != nullptr ? protocol->ver1 : "";
 		header.ver2 = protocol->ver2 != nullptr ? protocol->ver2 : "";
 	}

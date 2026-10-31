@@ -37,8 +37,8 @@ private:
 
 // The _connectlog.txt header of a process launched as the title `title_code`: the running
 // executable's basename, ONE's wire version text (the engine build's VERSION), the title's TITLE
-// and the protocol's version pair. A code that names no title whose protocol is witnessed in full
-// (resolve_title_protocol) heads it as the default title's (base/title/title.h).
+// and the version pair of the protocol it speaks (empty where unwitnessed). A code no installed
+// title has aborts, named (require_title_code): a launch's code is the one it resolved.
 ConnectLogHeader connect_log_header(std::string_view title_code);
 
 // The devices the switches arm. The net log is the protocol manager's, which the process
