@@ -496,8 +496,8 @@ int dfx2_save_writes_slotmachine() {
 	GameCfg dfx2 = defaults({}, 0, 0, ConfigTable::Dfx2);
 	dfx2.enable_slotmachine = 0;
 	const std::string text = write(dfx2, {});
-	const size_t rate = text.find("audio_rate           = 44100\n");
-	const size_t slot = text.find("enable_slotmachine   = 0\n");
+	const size_t rate = text.find("audio_rate           = 44100\r\n");
+	const size_t slot = text.find("enable_slotmachine   = 0\r\n");
 	const size_t blood = text.find("NoBlood              = ");
 	TEST_EXPECT(rate != std::string::npos && slot != std::string::npos && blood != std::string::npos);
 	TEST_EXPECT(rate < slot && slot < blood);
