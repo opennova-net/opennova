@@ -145,6 +145,58 @@ void test_the_waypoint_tint(const fnt_font_t *font) {
 	CHECK(w.waypoint_altitude_color == 0u && w.waypoint_altitude_band == 0);
 }
 
+// DFX2-93: a done objective under dfx2.exe's title is a green square cleared inside its box, the
+// corners (x + 2, y + 2)..(x + 15, y + 15) through the integer design scaling and opaque; under
+// Jointops.exe's (and a null title) a red X of six lines. The box x is 15 + 24, the first row's y
+// 240 + 24 [orig: sub_5B9890 @0x5B9AFC..0x5B9B12; sub_5D38C0 @0x5D38C0 (dfx2.exe)]
+// [orig: HUD_DrawWinConditions @0x5BABA4..0x5BAC5B].
+void test_the_objective_done_mark(const fnt_font_t *font) {
+	CHECK(title("dfx2").hud_objective_done_fill);
+	CHECK(!title("jo").hud_objective_done_fill);
+	CHECK(!title("acidgambit").hud_objective_done_fill);
+	HudLayout layout;
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	HudFrameState state;
+	state.objectives_header = "HDR";
+	state.objectives.push_back({"AB", true});
+	const auto marks = [&](const opennova::Title *t, float w, float h, std::vector<HudQuad> &fills,
+							   size_t &red_lines) {
+		state.title = t;
+		const HudDrawList &list = compiler.compile(state, w, h);
+		const Span s = element_span(list, HudElement::Objectives);
+		fills.clear();
+		red_lines = 0;
+		if (!s.found) return;
+		for (size_t i = s.span.begin.quads; i < s.span.end.quads; ++i)
+			if (list.quads[i].color == 0xFF00C000u) fills.push_back(list.quads[i]);
+		for (size_t i = s.span.begin.lines; i < s.span.end.lines; ++i)
+			if (list.lines[i].color == 0xFFFF0000u) ++red_lines;
+	};
+	std::vector<HudQuad> fills;
+	size_t red = 0;
+	marks(&title("dfx2"), 1024.0f, 768.0f, fills, red);
+	CHECK(fills.size() == 1 && red == 0);
+	if (fills.size() == 1) {
+		CHECK(fills[0].filled && fills[0].texture == kHudTexNone);
+		CHECK(fills[0].x0 == 41.0f && fills[0].y0 == 266.0f);
+		CHECK(fills[0].x1 == 54.0f && fills[0].y1 == 279.0f);
+	}
+	// Twice the design size: (41 * 2048 + 512) / 1024 = 82, (266 * 1536 + 384) / 768 = 532.
+	marks(&title("dfx2"), 2048.0f, 1536.0f, fills, red);
+	CHECK(fills.size() == 1 && fills[0].x0 == 82.0f && fills[0].y0 == 532.0f &&
+			fills[0].x1 == 108.0f && fills[0].y1 == 558.0f);
+	marks(&title("jo"), 1024.0f, 768.0f, fills, red);
+	CHECK(fills.empty() && red == 6);
+	marks(nullptr, 1024.0f, 768.0f, fills, red);
+	CHECK(fills.empty() && red == 6);
+	// An open row draws neither.
+	state.objectives[0].done = false;
+	marks(&title("dfx2"), 1024.0f, 768.0f, fills, red);
+	CHECK(fills.empty() && red == 0);
+}
+
 } // namespace
 
 int main() {
@@ -152,6 +204,7 @@ int main() {
 	fnt_font_t font = test_font::uniform_test_font();
 	test_the_lone_gunner_panel(&font);
 	test_the_waypoint_tint(&font);
+	test_the_objective_done_mark(&font);
 	opennova::fnt::fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

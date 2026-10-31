@@ -249,7 +249,22 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w, f
 		line(bx + 16.0f, row_y, bx + 16.0f, row_y + 16.0f, box_c);
 		line(bx + 16.0f, row_y + 16.0f, bx, row_y + 16.0f, box_c);
 		line(bx, row_y + 16.0f, bx, row_y, box_c);
-		if (row.done) {
+		if (row.done && state.title != nullptr && state.title->hud_objective_done_fill) {
+			// dfx2.exe's done mark is a green square inside the box: a device clear of the rect
+			// (x + 2, y + 2)..(x + 15, y + 15), each corner through the integer design scaling,
+			// opaque whatever the panel alpha, as a clear writes its colour (DFX2-93)
+			// [orig: sub_5B9890 @0x5B9890 - sub_5D38C0(ctx, x + 2, y + 2, x + 15, y + 15,
+			//  0xFF00C000) @0x5B9AFC..0x5B9B12; sub_5D38C0 @0x5D38C0 - CD3DDevice_GetViewportRect
+			//  @0x5D38D0, the corners @0x5D38D9..0x5D3968, CGfxDevice_SetClearColor @0x5D3972,
+			//  CGfxDevice_Clear(rect, 1) @0x5D3988 (dfx2.exe)].
+			const int32_t cx = static_cast<int32_t>(bx);
+			const int32_t cy = static_cast<int32_t>(row_y);
+			const int32_t surface_h = static_cast<int32_t>(h);
+			emit_rect(static_cast<float>(design_to_screen_x(cx + 2, surface_w)),
+					static_cast<float>(design_to_screen_y(cy + 2, surface_h)),
+					static_cast<float>(design_to_screen_x(cx + 15, surface_w)),
+					static_cast<float>(design_to_screen_y(cy + 15, surface_h)), 0xFF00C000u, true);
+		} else if (row.done) {
 			// The done mark is a RED X — both diagonals, each tripled with
 			// one-pixel offsets [orig: the six calls @0x5babc1..0x5bac5b,
 			// colour 0xFFFF0000].

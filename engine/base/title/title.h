@@ -117,6 +117,12 @@ struct Title {
 	// local player's, +-2.0 apart. On the Title: the executable's own HUD.
 	// [orig: HUD_UpdateWaypointAltitudeColor @0x590970] [orig: sub_58EDF0 @0x58EDF0 (dfx2.exe)]
 	bool hud_waypoint_active_tint = false;
+	// DFX2-93: the executable's objectives panel marks a done row with a green square, a device
+	// clear inside its box; false (Jointops.exe): a red X, both diagonals tripled. On the Title:
+	// the executable's own HUD.
+	// [orig: HUD_DrawWinConditions @0x5BA940 (@0x5BABA4..0x5BAC5B)] [orig: sub_5B9890 @0x5B9890
+	//  (@0x5B9AFA..0x5B9B12) (dfx2.exe)]
+	bool hud_objective_done_fill = false;
 	// DFX2-41: the deploy screen picks the loadout. death.mnu's DEATH screen carries PRIMARY /
 	// SECONDARY / ACCESSORY lists its activation fills for the player's class, and the screen's
 	// close on its triggers' clear submits them (the loadout apply, a C2S 0x2F in session); its
