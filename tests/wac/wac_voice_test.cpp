@@ -126,6 +126,10 @@ static void test_aud1_voice_reaches_channel_zero_at_its_header_pitch() {
     voice.follow(mixer, listener, frame);
     const opennova::audio::ChannelParams &channel = mixer.channel(opennova::audio::kVoiceChannel);
     CHECK(voice.handle() != 0 && channel.wave && channel.wave->pitch_q16 == 32768);
+    // The open leaves the position at -1, so the step loads with the next device frame
+    // [orig: AudioChannel_Open @0x76691C..0x7669E6].
+    int16_t out[2] = {};
+    mixer.render(out, 1);
     CHECK(channel.play_q16 == 0x10000u && mixer.step(opennova::audio::kVoiceChannel) == 256);
 }
 
