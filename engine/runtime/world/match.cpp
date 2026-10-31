@@ -902,7 +902,11 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
     const EntityHandle flag_handle = carrier->mounted_child;
     Entity *flag = world.registry.get(flag_handle);
     // The flag's carry state (its definition pose) is read ahead of the drop's
-    // turn; any other def has none.
+    // turn; any other def has none. The drop leaves the flag's return window
+    // as it stands: the flag's own service re-arms it, and so does an
+    // in-session attach. [orig: Entity_DropCarriedObject @0x439DF0..0x439F3D
+    //  stores no +0x2A4; its writers Entity_UpdateIdleCheck @0x408520 /
+    //  @0x408533 / @0x40853B and Entity_AttachCarriedObject @0x43C1BC / @0x43C1CE]
     const bool flag_row = flag != nullptr && is_flag(flag->item_id);
     CarryObjectiveState *state = flag_row ? carry_state(world, flag_handle) : nullptr;
     carrier->mounted_child = EntityHandle{};
@@ -912,21 +916,12 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
     drop_object_from_carrier(world, *flag, drop_carrier_pose(world, *carrier));
     flag->alive = true;
     // The drop's 0x2F (the authority's, in a session) sends only for the three
-    // flags: Server_SendDestructibleDeathPacket returns for any other def, and
-    // only a flag has a return window.
+    // flags: Server_SendDestructibleDeathPacket returns for any other def.
     // [orig: Entity_DropCarriedObject - the authority / session tests
     //  @0x439F29 / @0x439F31, the call @0x439F34; Server_SendDestructibleDeathPacket
     //  @0x50D900 - the 4091/4093/4095 tests @0x50D90A..0x50D920]
     // [orig: the sender's tests @0x50AABA..0x50AAD0 (dfx2.exe)]
-    if (!flag_row)
-        return;
-    // The dropped-flag service re-arms the return window whenever the flag is
-    // not idle: 210 when the configured time is below 5, else the configured
-    // seconds. [orig: Entity_UpdateIdleCheck @0x408531..0x40853B]
-    state->return_ticks = rules_.flag_return_ticks < 5
-                              ? 210
-                              : static_cast<int32_t>(rules_.flag_return_ticks);
-    if (!world.rules.logic_authority)
+    if (!flag_row || !world.rules.logic_authority)
         return;
     gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
                                 player_handle,

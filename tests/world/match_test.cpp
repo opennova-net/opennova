@@ -1804,6 +1804,50 @@ void test_flag_attach_in_session_sends_a_second_state() {
     CHECK(notebook.world->match.drain_gameplay_events().empty());
 }
 
+// A drop leaves the flag's return window as its last service left it: a window
+// a carry counted down (the carried flag displaced, its ground link a def-less
+// row) keeps counting after the drop, the return landing on the third service
+// after it; a re-arm at the drop would have added two more.
+// [orig: Entity_DropCarriedObject @0x439DF0..0x439F3D (no +0x2A4 store);
+//  Entity_UpdateIdleCheck - the ground arm @0x408504..0x408520, the re-arm
+//  @0x408531..0x40853B, the expiry @0x40854C]
+void test_a_drop_leaves_the_flags_return_window() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 4);
+    MatchRules flag_ball;
+    flag_ball.game_type = gt::kFlagBall;
+    flag_ball.flag_return_ticks = 5;
+    world->match.configure(flag_ball);
+    const EntityHandle carrier = player(*world, 0, 1, "Blue");
+    const EntityHandle flag = objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+    Entity defless;
+    defless.kind = EntityKind::Item;
+    defless.item_type_index = 7;
+    defless.alive = true;
+    defless.position = {40.0f, 0.0f, 0.0f};
+    const EntityHandle ground = world->registry.spawn(1, defless);
+    Entity *row = world->registry.get(flag);
+    world->match.tick_flag_event(*world, *row); // at home: the window armed at 5
+
+    Entity *body = world->registry.get(carrier);
+    body->position = {40.0f, 0.0f, 0.0f};
+    body->mounted_child = flag;
+    row->primary_occupant = carrier;
+    row->flags |= kEntityFlagCarried;
+    row->position = {40.0f, 0.0f, 0.0f};
+    row->ground_target = ground;
+    world->match.tick_flag_event(*world, *row); // 4
+    world->match.tick_flag_event(*world, *row); // 3
+    world->match.drop_carried_object(*world, carrier);
+    CHECK(!body->mounted_child.valid() && row->ground_target == ground);
+    world->match.tick_flag_event(*world, *row); // 2
+    world->match.tick_flag_event(*world, *row); // 1
+    CHECK(row->position.x == 40.0f);
+    world->match.tick_flag_event(*world, *row); // 0: the return
+    CHECK(row->position.x == 0.0f && row->position.y == 0.0f);
+}
+
 // A Player body's death edge lets go of what it carries on every peer, past the
 // round's end too: the drop at the edge has no gate.
 // [orig: Entity_UpdateInfantryPlayerBody - Entity_DropCarriedObject @0x4B4D0D]
@@ -2470,6 +2514,7 @@ int main() {
     test_pickup_leg_scores_even_when_the_attach_refuses();
     test_bay_arm_alone_clears_a_defless_carried_link();
     test_flag_attach_in_session_sends_a_second_state();
+    test_a_drop_leaves_the_flags_return_window();
     test_player_body_death_edge_drops_what_it_carries();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
