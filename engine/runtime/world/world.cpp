@@ -1057,7 +1057,7 @@ void World::restore(const Snapshot &s) {
     facials = s.facials;
     match = s.match;
     // The cine's drawn flag is process-lifetime (only the cine render pass
-    // writes it), so the rewind keeps it. [orig: dword_26970F4 — Cine_RenderOverlays
+    // writes it), so the rewind keeps it. [orig: g_CineFrameDrawn — Cine_RenderOverlays
     //  @0x570C66]
     const bool cine_frame_drawn = epilog.frame_drawn;
     // The end screens' mission is the embedder's (the menu's table outlives the

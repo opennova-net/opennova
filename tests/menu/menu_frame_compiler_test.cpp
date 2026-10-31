@@ -915,7 +915,7 @@ void test_text_placement_and_truncation(const fnt_font_t *font) {
 // A menu font measures and draws at its texels whatever its design width: the menu font
 // cache writes 1.0 over the loader's 800 / design_width, where the HUD's fonts keep it
 // [orig: CFontCache_LoadOrGetFont @ 0x6530e7, CFontCache_EnsureFontLoaded @ 0x653ea0 -
-// flt_84C10C into the font's +0x12EC] (D-FNT-7). A 1600-designed font (the HUD's
+// g_MenuFontScale into the font's +0x12EC] (D-FNT-7). A 1600-designed font (the HUD's
 // scale 0.5) centres OK's "OK" where the 800-designed one does: 17 wide, x = 52.
 void test_menu_font_draws_at_its_texels() {
 	fnt_font_t wide = test_font::uniform_test_font();
@@ -965,8 +965,9 @@ void test_menu_font_draws_at_its_texels() {
 // A static's appearance texture set at run time (MenuWidgetState::image): its default state takes
 // the IMAGE type and the texture, interned past the configure's slots, drawn over the rect once
 // its size is known; another state, or no image, draws as authored (nothing for an empty
-// APPEARANCE) [orig: sub_646450 @0x646450 - the channel's IMAGE bit @0x64647c, the load
-// @0x646497; its twin sub_6D3760 @0x6d3760, CAMPAIGN_IMAGE's @0x560464 (dfx2.exe)].
+// APPEARANCE) [orig: CWnd_SetAppearanceTexture @0x646450 - the channel's IMAGE bit @0x64647c, the
+// load @0x646497; its twin CWnd_SetAppearanceTexture @0x6d3760, CAMPAIGN_IMAGE's @0x560464
+// (dfx2.exe)].
 void test_runtime_image_appearance() {
 	const char *xml = R"(
 <SCREEN>

@@ -22,8 +22,8 @@ void read_session_listing_columns(
 			gametext, "GateTypeAbbrev", game_type::host_abbreviation_key(config.game_type), "");
 	// The mission text's [info] title, else, when it reads empty, the mission header's name
 	// [orig: MissionText_GetString("info", "title") @0x4FE989..0x4FE993; the strlen test and
-	//  dword_A761D4, the header's mission_name (header +4), @0x4FE99D..0x4FE9AD; the SetOrCreate
-	//  @0x4FE9D0]
+	//  g_MissionHeaderName, the header's mission_name (header +4), @0x4FE99D..0x4FE9AD; the
+	//  SetOrCreate @0x4FE9D0]
 	if (!ctx.mission_text_title.empty())
 		r.mission_name = ctx.mission_text_title;
 	else if (ctx.mission != nullptr)

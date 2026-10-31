@@ -449,7 +449,7 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 // @0x521CD6..0x521CEF).
 // A dedicated host's CHAT console lines: Jointops.exe draws them with the inline tags off (a '<'
 // a glyph), dfx2.exe parses them (DFX2-88) [orig: HUD_DrawServerConsoleLines @0x5BA0A0 - flags
-// 256 @0x5BA0E6] [orig: sub_5B8FF0 @0x5B8FF0 - `push 0` @0x5B9036 (dfx2.exe)].
+// 256 @0x5BA0E6] [orig: HUD_DrawServerConsoleLines @0x5B8FF0 - `push 0` @0x5B9036 (dfx2.exe)].
 void test_console_line_tags(const fnt_font_t *font) {
 	const opennova::Title *jo = opennova::title_by_code("jo");
 	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");

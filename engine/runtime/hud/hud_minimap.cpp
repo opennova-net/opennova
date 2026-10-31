@@ -941,7 +941,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	if (flags & 0x80000u) draw_tracked_callout(c);
 	// dfx2.exe's DEATH map: the KOTH ring and the location labels past its labels and its laser
 	// leg (DFX2-50). [orig: the twin of MapOverlay_DrawView @0x5a48a0 - @0x5a4a62..0x5a4aba, past
-	//  sub_5A3850 @0x5a4a3e and Render_LaserSightEffect @0x5a4a55 (dfx2.exe)]
+	//  HUD_DrawEntityLabelsAndMarkers @0x5a4a3e and Render_LaserSightEffect @0x5a4a55 (dfx2.exe)]
 	if (input.death_map_pass && input.overlays != nullptr && input.overlays->death_map_zone_markers)
 		draw_death_map_zone_markers(c);
 	// The nearest-FARP chevron: an idle or lit flash timer 14 and a FARP the

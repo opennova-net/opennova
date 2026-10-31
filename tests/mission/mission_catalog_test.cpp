@@ -160,7 +160,7 @@ int main() {
 		// whose file is the first token, without case, to the second read as an unsigned decimal
 		// ("//" lines skipped, a negative wrapping, an overflow clamping to ULONG_MAX); the save
 		// writes "%s\t%d\r\n" per row through a text-mode stream, CR CR LF
-		// [orig: sub_563070 @ 0x563070; HighScore_SaveToFile @ 0x563100].
+		// [orig: HighScore_ParseLineCallback @ 0x563070; HighScore_SaveToFile @ 0x563100].
 		std::vector<catalog::Row> rows(4);
 		rows[0].file = "A.bms";
 		rows[1].file = "b.bms";
@@ -431,9 +431,9 @@ int main() {
 
 		// DFX2-64, DFX2-65: the [Info] WIN_DEBRIEFING and LOSE_DEBRIEFING dfx2.exe's end screens
 		// read of the row's table, each present when the table holds the key, its text empty or
-		// not; the override's first, which is searched with no table too [orig: sub_575990
-		// @0x575c9e..0x575cac, sub_5740E0 @0x574771..0x574782; TextResource_FindEntryBySectionAndKey
-		// @0x7269b0 (dfx2.exe)].
+		// not; the override's first, which is searched with no table too [orig:
+		// Cine_EpilogLoseUpdate @0x575c9e..0x575cac, Cine_EpilogStateMachineUpdate
+		// @0x574771..0x574782; TextResource_FindEntryBySectionAndKey @0x7269b0 (dfx2.exe)].
 		bool tables_ok = true;
 		const auto info_table = [&](const std::vector<std::pair<const char *, const char *>> &keys) {
 			opennova::rtxt::File file;

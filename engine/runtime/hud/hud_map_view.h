@@ -152,9 +152,9 @@ struct DeathMapFitInput {
 //  target; dword_25A3988 the zoom ease; byte_25A39A4/A5 the drag latches;
 //  dword_25A39A8/AC the last mouse point; dword_25A3998/399C the window size;
 //  flt_25A3994 the pixel ratio; dword_25A39BC the init latch. dfx2.exe's
-//  twins: flt_25A1F68, dword_25A1F60/64, dword_25A1F40/3C, dword_25A1F38,
-//  byte_25A1F54/55, dword_25A1F58/5C, dword_25A1F48/4C, flt_25A1F44,
-//  dword_25A1F6C (dfx2.exe)]
+//  twins: g_DeathMapZoom, g_DeathMapPanX/Y, g_DeathMapTargetX/Y, g_DeathMapZoomEase,
+//  g_DeathMapLeftDrag/RightDrag, dword_25A1F58/5C, dword_25A1F48/4C, flt_25A1F44,
+//  g_DeathScreenLoaded (dfx2.exe)]
 struct DeathMapView {
 	MapViewPan view;
 	int32_t target_x = 0;
@@ -194,7 +194,7 @@ struct DeathMapView {
 	// zoom ease's word is set, a zoom above 0.8 takes x0.96 a frame.
 	// [orig: DeathScreen_UpdateShroudReveal @0x554730 — @0x554784..0x5547b4,
 	//  the zoom ease @0x5547ad..0x5547d8; per frame from
-	//  UI_ProcessMenuScreenFrame @0x54e67c] [orig: sub_552770
+	//  UI_ProcessMenuScreenFrame @0x54e67c] [orig: DeathScreen_UpdateShroudReveal
 	//  @0x5527eb..0x552845, flt_7C5DCC 0.8, flt_7D3EF0 0.96 (dfx2.exe)]
 	void ease_frame();
 	// The SPAWNPOINTS_TABLE press on a zone's row: the pan target is the zone less the local
@@ -209,7 +209,7 @@ struct DeathMapView {
 	// handler then looks up DEATH/SPAWNPOINTS_TABLE and deselects every row
 	// (world::deploy_map_moved); Jointops.exe's death.mnu authors no
 	// SPAWNPOINTS_TABLE (its list is SPAWNPOINTS_LIST), so there the lookup
-	// fails, dfx2.exe's does [orig: sub_550F40 @0x5511c7..0x5511da (dfx2.exe)].
+	// fails, dfx2.exe's does [orig: CMap_OverlayInputHandler @0x5511c7..0x5511da (dfx2.exe)].
 	// A move with neither drag armed by its button clears both latches.
 	// `wheel` is the wheel remainder for kWheel (> 0 forward).
 	// [orig: CMap_OverlayInputHandler @0x554310 — the down/up cases
@@ -500,8 +500,8 @@ void map_view_crosshair(const HudMinimapInput &view, const MapViewRect &rect,
 inline constexpr uint32_t kDeathMapMask = 0x2022u;
 // The names bit of that mask, the labels call's 4th argument: dfx2.exe's DEATH view passes 0
 // (HudMinimapOverlays::death_map_no_names, DFX2-115).
-// [orig: the twin of MapOverlay_DrawView @0x5a48a0 - `push 0` @0x5a4a30 into sub_5A3850
-//  @0x5a4a3e (dfx2.exe)]
+// [orig: the twin of MapOverlay_DrawView @0x5a48a0 - `push 0` @0x5a4a30 into
+//  HUD_DrawEntityLabelsAndMarkers @0x5a4a3e (dfx2.exe)]
 inline constexpr uint32_t kDeathMapNamesBit = 0x2000u;
 
 // Compiles the DEATH MAP window: the terrain + marker walk through the

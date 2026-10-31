@@ -155,7 +155,7 @@ LoadingFonts loading_fonts(const Title &game, int image_w) {
 }
 
 int loading_progress_line_count(const Title &game, int stage) {
-	// [orig: sub_51EC60 - the cap `cmp 10h; jl` then 15 @0x51f16f..0x51f17b, the loop
+	// [orig: Render_LoadingScreen - the cap `cmp 10h; jl` then 15 @0x51f16f..0x51f17b, the loop
 	//  @0x51f184 (dfx2.exe)]
 	if (game.loading_screen == nullptr || game.loading_screen->progress_pitch <= 0) return 0;
 	if (stage >= kLoadingProgressStageCap + 1) return kLoadingProgressStageCap;
@@ -194,7 +194,8 @@ LoadingTextBox loading_progress_line_box(const Title &game, int line, int image_
 	if (row == nullptr) return out;
 	const int pitch = row->wide_width > 0 && image_w >= row->wide_width ? row->progress_pitch_wide
 																		: row->progress_pitch;
-	// [orig: sub_51EC60 - (20, pitch * n + 96, 661, 530), alignment 3 @0x51f2c2..0x51f2df (dfx2.exe)]
+	// [orig: Render_LoadingScreen - (20, pitch * n + 96, 661, 530), alignment 3
+	//  @0x51f2c2..0x51f2df (dfx2.exe)]
 	out.x = kLoadingProgressX;
 	out.y = pitch * line + kLoadingProgressTop;
 	out.width = kLoadingProgressRight - kLoadingProgressX;

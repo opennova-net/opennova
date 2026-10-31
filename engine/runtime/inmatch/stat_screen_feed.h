@@ -123,18 +123,18 @@ void fill_stat_results(menu::MenuRuntime &menu, int table,
 
 // DFX2-97: the STAT screen's DONE, under a title whose executable registers it
 // (Title::stat_screen_done; Jointops.exe registers no DONE and its pass shows none). The show
-// hides it, after the fill and the tabs [orig: sub_561780 @0x561780 - CWnd_SetShown(DONE, 0)
-// @0x561812..0x561834 (dfx2.exe)]; the menu-screen pass shows it each frame while the round-reset
-// hold the joiner's S2C 0x25 raised is up (ClientState::round_reset_hold, cleared by the next
-// 0x0F) [orig: sub_561000 @0x561000, from the pass @0x54B901 (dfx2.exe)]; a press off the
-// authority stores mission exit 4 and ends the end-round linger, the countdown then exiting at
-// once [orig: sub_561130 @0x561130 - the 0x3000001 test @0x561138, the authority test @0x561141,
-// g_MissionExitReason = 4 @0x561143, g_EndRoundLingerTimer = 0 @0x56114d; registered by
-// sub_5616C0 @0x56173b..0x561756 (dfx2.exe)]. The hold is raised off the authority alone
-// [orig: NapiNPClientMsg_GameReset @0x422650 (@0x422698) (dfx2.exe)], so the authority's
-// DONE stays hidden and its press arm is never reached: `joiner_runtime` is the joiner's runtime,
-// null on any other role (no press runs). Each returns whether it acted; a menu with no STAT
-// DONE, or a null title, does nothing.
+// hides it, after the fill and the tabs [orig: StatScreen_ShowCallback @0x561780 -
+// CWnd_SetShown(DONE, 0) @0x561812..0x561834 (dfx2.exe)]; the menu-screen pass shows it each frame
+// while the round-reset hold the joiner's S2C 0x25 raised is up (ClientState::round_reset_hold,
+// cleared by the next 0x0F) [orig: StatScreen_UpdateDoneButton @0x561000, from the pass @0x54B901
+// (dfx2.exe)]; a press off the authority stores mission exit 4 and ends the end-round linger, the
+// countdown then exiting at once [orig: StatScreen_OnDone @0x561130 - the 0x3000001 test @0x561138,
+// the authority test @0x561141, g_MissionExitReason = 4 @0x561143, g_EndRoundLingerTimer = 0
+// @0x56114d; registered by HUD_CacheStatPanelValues @0x56173b..0x561756 (dfx2.exe)]. The hold is
+// raised off the authority alone [orig: NapiNPClientMsg_GameReset @0x422650 (@0x422698)
+// (dfx2.exe)], so the authority's DONE stays hidden and its press arm is never reached:
+// `joiner_runtime` is the joiner's runtime, null on any other role (no press runs). Each returns
+// whether it acted; a menu with no STAT DONE, or a null title, does nothing.
 bool stat_screen_hide_done(menu::MenuRuntime &menu, const Title *title);
 bool stat_screen_show_done(menu::MenuRuntime &menu, const Title *title, bool round_reset_hold);
 bool stat_screen_done_pressed(const Title *title, ClientRuntime *joiner_runtime);

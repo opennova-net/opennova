@@ -100,7 +100,7 @@ struct ActionDef {
   // Static row +0x00: the action code the row's record dispatches, the case
   // Input_HandleActionBinding switches on (e.g. MedicReq 217, escape 18, the
   // weapon rows 200..210), and the slot the boot's re-lay puts the record in.
-  // [orig: word_8159A8 + 108 * row]
+  // [orig: g_BindingRows + 108 * row]
   int code = 0;
 };
 
@@ -129,7 +129,7 @@ struct Catalog {
   const ActionDef *for_token(const char *token) const;
 };
 
-// Jointops.exe's catalog, the 119 static rows at word_8159A8 but row 66: the one a
+// Jointops.exe's catalog, the 119 static rows at g_BindingRows but row 66: the one a
 // title with no catalog of its own runs (Title::controls null).
 const Catalog &default_catalog();
 // The catalog `title`'s executable compiles in: Title::controls, else
@@ -144,7 +144,7 @@ const Catalog &title_catalog(const Title &title);
 // cycleweaponP / N (212 / 214) cycle.
 // [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210 @0x4e1144 ->
 //  Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
-//  Player_CycleWeaponSlot @0x4dfe70] [orig: sub_4DD4C0 @0x4DD4C0 - cases 200-210
+//  Player_CycleWeaponSlot @0x4dfe70] [orig: Input_HandleActionBinding_0 @0x4DD4C0 - cases 200-210
 //  @0x4de239..0x4de24d (dfx2.exe)]
 inline constexpr int kWeaponCategoryCodeFirst = 200;
 inline constexpr int kWeaponCategoryCodeLast = 210;

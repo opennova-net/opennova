@@ -206,8 +206,8 @@ bool stat_screen_hide_done(menu::MenuRuntime &menu, const Title *title) {
 }
 
 bool stat_screen_show_done(menu::MenuRuntime &menu, const Title *title, bool round_reset_hold) {
-	// [orig: sub_561000 - `if (dword_24BAF0C)` @0x561007, CWnd_SetShown(DONE, 1) @0x561026
-	//  (dfx2.exe)]
+	// [orig: StatScreen_UpdateDoneButton - `if (g_RoundResetHold)` @0x561007, CWnd_SetShown(DONE,
+	//  1) @0x561026 (dfx2.exe)]
 	if (!round_reset_hold) return false;
 	const int done = stat_done_widget(menu, title);
 	if (done < 0) return false;
@@ -217,7 +217,7 @@ bool stat_screen_show_done(menu::MenuRuntime &menu, const Title *title, bool rou
 
 bool stat_screen_done_pressed(const Title *title, ClientRuntime *joiner_runtime) {
 	if (title == nullptr || !title->stat_screen_done || joiner_runtime == nullptr) return false;
-	// [orig: sub_561130 - g_MissionExitReason = 4 @0x561143, g_EndRoundLingerTimer = 0
+	// [orig: StatScreen_OnDone - g_MissionExitReason = 4 @0x561143, g_EndRoundLingerTimer = 0
 	//  @0x56114d (dfx2.exe)]
 	joiner_runtime->set_mission_exit_reason(kMissionExitRoundOver);
 	joiner_runtime->state().end_round_linger_ticks = 0;

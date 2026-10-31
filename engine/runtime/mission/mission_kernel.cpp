@@ -1046,7 +1046,7 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	//  eager WAC pass (Game_StartMission @0x525CB3) reads the last mission's phase, and a mission
 	//  with no TOD keyframes keeps it throughout] [orig: g_EnvIsNightPhase @0x26C77D4 (dfx2.exe)]
 	world.weather.night_phase = previous.world.weather.night_phase;
-	// [orig: dword_26970F4, whose only live writer is the cine render pass
+	// [orig: g_CineFrameDrawn, whose only live writer is the cine render pass
 	//  Cine_RenderOverlays @0x570C66]
 	world.epilog.frame_drawn = previous.world.epilog.frame_drawn;
 	// [orig: dword_2C05A14 (the mode) and dword_2C05A18..20 (the camera),

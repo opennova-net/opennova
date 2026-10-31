@@ -293,8 +293,8 @@ int main() {
     // --- DFX2-82's riders: the control seat's resolved occupant, then each gun child's UseGun
     //     occupant once per definition gun-slot byte holding its bone, with its slot weapon's
     //     attachtextid (none without a weapon or a key; the root's slot under the route bit)
-    //     [orig: sub_5A3DF0 @0x5A44BE..0x5A4530, @0x5A41C0..0x5A429D, @0x5A476C..0x5A478E
-    //     (dfx2.exe); Entity_GetWeaponSlots @0x543378..0x543383 (dfx2.exe)].
+    //     [orig: HUD_DrawVehicleHealthBars @0x5A44BE..0x5A4530, @0x5A41C0..0x5A429D,
+    //     @0x5A476C..0x5A478E (dfx2.exe); Entity_GetWeaponSlots @0x543378..0x543383 (dfx2.exe)].
     {
         Rig r;
         std::vector<VehiclePanelRider> riders;

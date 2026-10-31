@@ -106,15 +106,15 @@ std::string waypoint_label_text(const std::string &name, const WaypointNameKey &
 // 05, 06, 17, 18, 01 and the A&D suffixes strcli20 / strcli21 [orig:
 // HUD_DrawTeamIdLine @0x59AAED..0x59AC96]; and dfx2.exe's GAMEINFO board's (DFX2-114) game type
 // label, Overlays by game_type::overlay_label_key ("" for an unlisted type), and the "(of" pair
-// Client/STRCLI07 / STRCLI08 [orig: sub_59ABF0 - HUD_GetGameTypeOverlayLabel called @0x59AE0E,
-// STRCLI07 @0x59B263, STRCLI08 @0x59B467 (dfx2.exe)].
+// Client/STRCLI07 / STRCLI08 [orig: HUD_DrawGameTimerOverlay - HUD_GetGameTypeOverlayLabel called
+// @0x59AE0E, STRCLI07 @0x59B263, STRCLI08 @0x59B467 (dfx2.exe)].
 struct HudSessionText;
 void hud_session_text(const GameTextLookup &gametext, uint32_t game_type, HudSessionText &out);
 
 // DFX2-82's rider lines' weapon texts: a gunner's attachtextid through Overlays, a miss ""
 // (the weapon parse stores GameText_GetString's result at def+0x3A0, which the line prints);
-// a rider without a key keeps none [orig: WeaponDefs_ParseLineCallback @0x544D6C; sub_5A3DF0
-// @0x5A4786 (dfx2.exe)].
+// a rider without a key keeps none [orig: WeaponDefs_ParseLineCallback @0x544D6C;
+// HUD_DrawVehicleHealthBars @0x5A4786 (dfx2.exe)].
 struct HudVehicleRider;
 void hud_vehicle_rider_text(const GameTextLookup &gametext, std::vector<HudVehicleRider> &riders);
 

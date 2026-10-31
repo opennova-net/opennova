@@ -44,9 +44,9 @@ inline constexpr int32_t kDeployRefreshTicks = 16;
 //  (g_DeployScreenActive || (int)(g_CurrentTick - g_CameraLerpStartTick) >
 //  240)` @0x554737..0x554752, CWnd_SetShown(DEATH_SHROUD, 1) @0x554771,
 //  `(g_CurrentTick & 0xF) == 0` -> UI_UpdateDeathScreenContent @0x55477d;
-//  run from UI_ProcessMenuScreenFrame @0x54e67c] [orig: sub_552770 @0x552770 -
+//  run from UI_ProcessMenuScreenFrame @0x54e67c] [orig: DeathScreen_UpdateShroudReveal @0x552770 -
 //  @0x552777..0x552792, the MAIN and DEATH_SHROUD shows @0x5527a4..0x5527d3,
-//  sub_551E10 and sub_5503A0 @0x5527e1 / @0x5527e6 (dfx2.exe)]
+//  sub_551E10 and DeathScreen_UpdateTeamLists @0x5527e1 / @0x5527e6 (dfx2.exe)]
 inline bool death_shroud_revealed(bool deploy_screen_active, int32_t ticks_since_death,
 		int32_t reveal_ticks) {
 	return deploy_screen_active || ticks_since_death > reveal_ticks;
@@ -239,9 +239,9 @@ inline bool deploy_loadout_shown(uint8_t team, bool permanent_death, bool dead) 
 // (World::ingame_restart_command), out of a session in an assault game (0x10020, the 0x20000 bit
 // aside) with the local player dead, after the in-game screens' close and a queued deploy pick
 // 0 (input 12); otherwise nothing.
-// [orig: sub_550BF0 @0x550bf0 - the click @0x550bf8, the gates @0x550bff..0x550c1e,
+// [orig: DeathScreen_OnRestartLevel @0x550bf0 - the click @0x550bf8, the gates @0x550bff..0x550c1e,
 //  Game_CloseInGameScreens @0x550c20, Input_QueueEvent(12, 0) @0x550c2d, g_MissionExitReason = 4
-//  @0x550c35; registered by sub_5512A0 @0x551310 (dfx2.exe)]
+//  @0x550c35; registered by UI_RegisterDeathScreenCallbacks @0x551310 (dfx2.exe)]
 inline bool deploy_restart_level_allowed(uint32_t game_type, bool in_session, bool dead) {
 	return (game_type & 0xFFFDFFFFu) == 0x10020u && !in_session && dead;
 }
@@ -355,10 +355,10 @@ bool fill_deploy_spawn_table(menu::MenuRuntime &menu, const std::vector<DeployTa
 // player's behind "<cC0C0FF>" / "<cFFC0C0>"; then STATIC_TEAM "Team: <c%08X>%s", the local
 // team's colour (0xFF00FF00 team 0, 0xFFFF0000 team 2, 0xFF00AFFF else) and its name
 // (Client STRCLI19 team 0, 05 team 1, 06 team 2, 17 team 3, 18 team 4, else 01).
-// [orig: sub_5503A0 @0x5503a0 - the row walk @0x55040d..0x5505c3 (the entity @0x550437..0x550459,
-//  never reset between rows), the team test @0x550466, the marks @0x550496 / @0x550536, the
-//  names @0x5504af / @0x55054f, the line ends @0x55059a, the texts @0x5505e6 / @0x5505fd,
-//  STATIC_TEAM @0x55060f..0x55066d; sub_5B6820 @0x5b6820 (dfx2.exe)]
+// [orig: DeathScreen_UpdateTeamLists @0x5503a0 - the row walk @0x55040d..0x5505c3 (the entity
+//  @0x550437..0x550459, never reset between rows), the team test @0x550466, the marks @0x550496 /
+//  @0x550536, the names @0x5504af / @0x55054f, the line ends @0x55059a, the texts @0x5505e6 /
+//  @0x5505fd, STATIC_TEAM @0x55060f..0x55066d; HUD_GetTeamName @0x5b6820 (dfx2.exe)]
 struct DeployTeamListPlayer {
 	uint8_t team = 0; // the entity's team byte (+354)
 	bool local = false;
@@ -405,7 +405,7 @@ void apply_deploy_activation(menu::MenuRuntime &menu, const DeployActivation &ac
 //  @0x550d3c, column 1 @0x550d41, CTableWnd_GetCellRecord @0x550d55, SpawnZoneList_GetByIndex
 //  @0x550d69, the name @0x550d75..0x550d86, CGameFont_GetCharExtent @0x550d95,
 //  HUD_DrawTextCentered_HalfBright @0x550dc8, DrawCell(2) @0x550dde, the state test @0x550de3,
-//  CGfxDevice_SetQuadDiffuse @0x550dfb, sub_6B5410 (Line2D_Draw) @0x550e0d..0x550e37 (dfx2.exe)]
+//  CGfxDevice_SetQuadDiffuse @0x550dfb, Line2D_DrawXY (Line2D_Draw) @0x550e0d..0x550e37 (dfx2.exe)]
 void deploy_table_paint(const menu::MenuTableCellEvent &event, menu::MenuTableCellCanvas &canvas,
 		const std::string &zone_name);
 // That label's text for a row whose column-1 value is `cell1_value`: the SpawnZoneList zone at
@@ -441,8 +441,8 @@ bool deploy_table_pan_target(const World &world, const SpawnZoneRegistry &zones,
 		int32_t &dx, int32_t &dy);
 // The DEATH map's move leg past its pan / zoom (hud::DeathMapView::on_event's true): DEATH's
 // SPAWNPOINTS_TABLE, where the screen has one, has every row deselected. False without it.
-// [orig: CMap_OverlayInputHandler @0x55452e..0x554541] [orig: sub_550F40 @0x5511c7..0x5511da
-//  (dfx2.exe)]
+// [orig: CMap_OverlayInputHandler @0x55452e..0x554541] [orig: CMap_OverlayInputHandler
+//  @0x5511c7..0x5511da (dfx2.exe)]
 bool deploy_map_moved(menu::MenuRuntime &menu);
 
 // Both instruction widgets and the permanent-death status pair. A secured

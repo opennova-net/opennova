@@ -148,8 +148,8 @@ std::string text_table_name(const std::string &file);
 inline constexpr const char *kTextInfoSection = "Info";
 inline constexpr const char *kTextTitleKey = "TITLE";
 inline constexpr const char *kTextBriefingKey = "BRIEFING";
-// The two [Info] keys dfx2.exe's end screens read of the same table [orig: sub_575990 @0x575c93,
-// sub_5740E0 @0x574766 (dfx2.exe)].
+// The two [Info] keys dfx2.exe's end screens read of the same table [orig: Cine_EpilogLoseUpdate
+// @0x575c93, Cine_EpilogStateMachineUpdate @0x574766 (dfx2.exe)].
 inline constexpr const char *kTextWinDebriefingKey = "WIN_DEBRIEFING";
 inline constexpr const char *kTextLoseDebriefingKey = "LOSE_DEBRIEFING";
 // Whether the archive walk lists an entry as a mission: its name from the FIRST '.' on is ".bms",
@@ -188,8 +188,8 @@ public:
 	// starting '/') sets the score of every row whose file is its first token, without case, to its
 	// second token read as an unsigned decimal.
 	// [orig: HUD_LoadHighScoreText @ 0x5630e0 -> File_ParseASCIIFileWithCallback @ 0x53d980 with
-	//  sub_563070 @ 0x563070 (the stricmp on entry+0 @ 0x56309d, CRT_strtoul(token 2, 10) into
-	//  entry+0x11E4 @ 0x5630c2; every row, no break)]
+	//  HighScore_ParseLineCallback @ 0x563070 (the stricmp on entry+0 @ 0x56309d, CRT_strtoul(token
+	//  2, 10) into entry+0x11E4 @ 0x5630c2; every row, no break)]
 	void apply_text(const std::string &text);
 	// hiscore.txt as the save writes it: "%s\t%d\r\n" per row in catalog order through a
 	// text-mode "w" stream, which writes each '\n' as CR LF, so a line ends CR CR LF.

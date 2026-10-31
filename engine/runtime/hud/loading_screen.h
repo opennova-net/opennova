@@ -73,7 +73,7 @@ inline constexpr int kLoadingBandBottom = 500;
 // with no loading-screen row.
 // [orig: Render_LoadingScreen @0x521fec..0x522006 (`neg bl; sbb; and 0FFFFFF87h; add 30Eh` over
 //  the custom flag), the band's three draws @0x52200f..0x522050]
-// [orig: sub_51EC60 @0x51ef69..0x51ef73 (the width less 139 or 18), the draws
+// [orig: Render_LoadingScreen @0x51ef69..0x51ef73 (the width less 139 or 18), the draws
 //  @0x51ef90..0x51efd1 (dfx2.exe)]
 int loading_band_right(const Title &game, bool custom_background, int image_w);
 
@@ -191,7 +191,8 @@ inline constexpr const char *kLoadingServerMessageLabelFallback =
 // a title with no row. The small one is the server message's (and the progress lines'), the large
 // one the band's.
 // [orig: Render_LoadingScreen - "Arials18.fnt" @ 0x521eec, "Arial22.fnt" @ 0x521f5a]
-// [orig: sub_51EC60 - the width tests `cmp 500h` @0x51ee41 / @0x51eebd / @0x51f0f2 (dfx2.exe)]
+// [orig: Render_LoadingScreen - the width tests `cmp 500h` @0x51ee41 / @0x51eebd / @0x51f0f2
+//  (dfx2.exe)]
 struct LoadingFonts {
 	const char *small = nullptr;
 	const char *large = nullptr;
@@ -205,7 +206,7 @@ LoadingFonts loading_fonts(const Title &game, int image_w);
 // the lines from the eighth on empty; each in the small font with its 120 tab width, left-aligned
 // in (20, 96 + pitch * n) .. (661, 530), the title's pitch 20 under its wide width and 40 from it
 // (TitleLoadingScreen::progress_pitch). Every call composites them, single player's too.
-// [orig: sub_51EC60 @0x51f0e6..0x51f2ea - the font @0x51f0e6..0x51f161, the cap
+// [orig: Render_LoadingScreen @0x51f0e6..0x51f2ea - the font @0x51f0e6..0x51f161, the cap
 //  @0x51f16f..0x51f17b, the switch @0x51f199 (the keys and fallbacks @0x51f1af..0x51f2a2, the
 //  empty line @0x51f2ba), the draw @0x51f2c2..0x51f2ea (dfx2.exe)]
 inline constexpr int kLoadingProgressStageCap = 15;
@@ -538,7 +539,8 @@ void loading_draw_text_block(LoadingSurface &surface, const opennova::fnt::fnt_f
 // the title's right edge over `custom_background`, the label in its colour): the title, the
 // mission and the game type in the large font; the server message's label and body in the small
 // one where the message is not empty. Code-page text; a null font draws nothing.
-// [orig: Render_LoadingScreen @ 0x521fe1-0x522123] [orig: sub_51EC60 @0x51ef57..0x51f0a4 (dfx2.exe)]
+// [orig: Render_LoadingScreen @ 0x521fe1-0x522123] [orig: Render_LoadingScreen
+//  @0x51ef57..0x51f0a4 (dfx2.exe)]
 void composite_loading_session_text(LoadingSurface &surface,
 		const opennova::fnt::fnt_font_t *large, const opennova::fnt::fnt_font_t *small,
 		const std::string &title, const std::string &mission, const std::string &game_type,
@@ -548,7 +550,7 @@ void composite_loading_session_text(LoadingSurface &surface,
 // The progress lines composited into the surface past the session block: `lines` the stage's
 // texts (loading_progress_line_count of them, each its key's text or its fallback), each in its
 // loading_progress_line_box in the small font with its 120 tab width. A null font draws nothing.
-// [orig: sub_51EC60 @0x51f184..0x51f2ea (dfx2.exe)]
+// [orig: Render_LoadingScreen @0x51f184..0x51f2ea (dfx2.exe)]
 void composite_loading_progress_lines(LoadingSurface &surface,
 		const opennova::fnt::fnt_font_t *small, const std::vector<std::string> &lines,
 		const Title &game);

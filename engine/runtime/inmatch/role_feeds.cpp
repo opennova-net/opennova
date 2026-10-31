@@ -347,7 +347,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	if (view.runtime != nullptr) out.squad_orders = view.runtime->state().squad_orders;
 	// The EXPPOINTS element's words (DFX2-36): the 0x81 score and its fanfare arms, the tracker's
 	// valid word and its two values [orig: dword_A7BA40 / dword_A7BA4C / dword_A7BA54 /
-	//  dword_A7BA58, read by sub_59B7E0 @0x59B998 / @0x59BA38..0x59BA48 (dfx2.exe)].
+	//  dword_A7BA58, read by HUD_DrawExpPoints @0x59B998 / @0x59BA38..0x59BA48 (dfx2.exe)].
 	out.exp_points.element = view.title != nullptr && view.title->hud_exp_points;
 	out.title = view.title;
 	out.lone_gunner = view.kernel != nullptr && world::local_rides_solo_turret(view.kernel->world);
@@ -472,21 +472,22 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 			s.teams[t].koth_hold = sb.teams[t].koth_hold;
 		}
 		s.team_count = static_cast<int>(sb.team_count);
-		if (view.joiner) s.time_limit_minutes = cs.session_time_limit_minutes; // dword_A821C0
+		// g_JoinerTimeLimitMinutes
+		if (view.joiner) s.time_limit_minutes = cs.session_time_limit_minutes;
 		// dfx2.exe's GAMEINFO board (DFX2-114): the 0x16 records (no entity read: the board
 		// takes the record's own name, score, slot id and bit 0), the timed flag, the local
 		// body's slot byte, and a joiner's session record, "" until its first S2C 0x58
-		// [orig: sub_59ABF0 - dword_A7BB30 + 56r @0x59B4E4, g_ScoreboardFlags @0x59B575,
-		//  g_LocalPlayerEntity+0x154 @0x59B54B, g_ServerMissionName @0x59AE5C (dfx2.exe);
-		//  Server_BuildStatusReport @0x530A60 - the memset @0x530A6B and the authority gate
-		//  ahead of the name @0x530AA1, rebuilt at each Game_StartMission]
+		// [orig: HUD_DrawGameTimerOverlay - dword_A7BB30 + 56r @0x59B4E4, g_ScoreboardFlags
+		//  @0x59B575, g_LocalPlayerEntity+0x154 @0x59B54B, g_ServerMissionName @0x59AE5C
+		//  (dfx2.exe); Server_BuildStatusReport @0x530A60 - the memset @0x530A6B and the authority
+		//  gate ahead of the name @0x530AA1, rebuilt at each Game_StartMission]
 		(void)replication::project_scoreboard(cs, s.rows);
 		s.timed = sb.timed;
 		s.local_slot = view.runtime->local_body_slot();
 		if (view.joiner) s.mission_name = cs.session_status.mission_name;
 	}
 	// The authority's own report's name, at most 63 characters [orig: Napi_CopyString(report +
-	// 36, dword_A761D4, 64) @0x530AA1], and the mount's expansion [orig: g_ExpansionName
+	// 36, g_MissionHeaderName, 64) @0x530AA1], and the mount's expansion [orig: g_ExpansionName
 	// @0x59AE4E (dfx2.exe)].
 	if (!view.joiner && view.host != nullptr)
 		s.mission_name = view.host->config.mission_name.substr(0, 63);
@@ -656,7 +657,7 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 	// (a joiner's decoded remote person by its row's handle), as the scene frame's tags pass finds
 	// it ahead of the HUD pass's rebuild; and the local player's own slot, found by its entity as
 	// PlayerSlot_FindByEntityPtr walks the table, whose +0x3C word a player's slot matches.
-	// [orig: sub_5A27F0 @0x5A27F0 - PlayerSlot_FindByEntityPtr(g_PlayerSlotTable,
+	// [orig: HUD_DrawEntityLabel @0x5A27F0 - PlayerSlot_FindByEntityPtr(g_PlayerSlotTable,
 	//  g_LocalPlayerEntity) @0x5A28AD, `mov edx, [esi+3Ch]; cmp edx, [eax+3Ch]` @0x5A28B9, the
 	//  cursor test @0x5A2E47 (dfx2.exe)]
 	const world::HudTargetCursor &cursor = view.kernel->local.hud_target_cursor_at_scene();
@@ -1844,7 +1845,7 @@ void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out) {
 	}
 	out.status_suffix = state.scoreboard_status_suffix != 0; // [orig: @0x423ef8]
 	out.timed = state.scoreboard.timed;                       // [orig: g_ScoreboardFlags & 2]
-	// [orig: `is_authority ? g_KothLimitMinutes : dword_A821C0` @0x423a4b]
+	// [orig: `is_authority ? g_KothLimitMinutes : g_JoinerTimeLimitMinutes` @0x423a4b]
 	out.time_limit = !view.joiner && view.host != nullptr
 			? static_cast<int>(view.host->config.time_limit_minutes)
 			: static_cast<int>(state.session_time_limit_minutes);
@@ -1879,7 +1880,7 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 	if (view.runtime != nullptr) {
 		const replication::ClientState &state = view.runtime->state();
 		f.round_over = state.spawn_success_gate;  // [orig: g_RoundOver]
-		f.reset_hold = state.round_reset_hold;         // [orig: dword_24C195C]
+		f.reset_hold = state.round_reset_hold;         // [orig: g_RoundResetHold]
 		f.team_game = (view.runtime->game_type() & 0x10000u) != 0u; // [orig: @0x49b9bf]
 	}
 	// [orig: g_NapiNPCtx.is_in_session / is_authority] — the authority's

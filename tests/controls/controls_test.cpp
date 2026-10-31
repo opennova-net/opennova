@@ -1023,7 +1023,7 @@ bool test_joystick_toggle_pass() {
 // the row whose +0x00 code is i, so the death screen's record 217 is
 // MedicReq and the HUDLS key label's record 200 + category is the weapon
 // category row (201..209 Knife..medpack, 211 magazine); 200 and 210 hold the
-// zero record, which formats to "" [orig: word_8159A8 + 108 * row;
+// zero record, which formats to "" [orig: g_BindingRows + 108 * row;
 // KeyBinding_SortBySequentialId @0x498260; g_BindingRowMedicReq @0x81B534;
 // HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f].
 bool test_action_codes() {
@@ -1057,7 +1057,7 @@ bool test_action_codes() {
 // ScopeZeroDec / ScopeZeroInc / commander_menu, move second keys onto F2..F5 and carry their own
 // cheat CRCs; every other row is Jointops.exe's field for field.
 // [orig: the table @0x8148A0, rows 31..38 @0x8155B4..0x8158A8, 53 @0x815EFC, 96..109
-//  @0x817120..0x81769C, 113..117 @0x81784C..0x8179FC (dfx2.exe); word_8159A8 + 108 * row]
+//  @0x817120..0x81769C, 113..117 @0x81784C..0x8179FC (dfx2.exe); g_BindingRows + 108 * row]
 bool test_dfx2_catalog() {
   const opennova::Title *jo_title = opennova::title_by_code("jo");
   const opennova::Title *dfx2_title = opennova::title_by_code("dfx2");

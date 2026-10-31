@@ -299,9 +299,9 @@ std::vector<uint8_t> join_cd_cookie(const CookieJar &jar);
 // connect's first state clears and nothing sets, so it runs whenever the jar holds an NWACT.
 // True when it ran.
 // [orig: UI_ProcessLANSessionStateMachine @0x556ff0 (dfx2.exe) - the NWACT read (0x7FF pushed
-//  @0x55752c, the call @0x55753e), the empty test @0x557547, the word dword_25C5CA8 tested
-//  @0x557551 (its one store, 0, @0x557047), CDKey_WriteActivationFromNWACT called @0x557569, the
-//  jar's NWACT set to "" (@0x7bf886) @0x55757e]
+//  @0x55752c, the call @0x55753e), the empty test @0x557547, the word g_NovaWorldActivationHold
+//  tested @0x557551 (its one store, 0, @0x557047), CDKey_WriteActivationFromNWACT called @0x557569,
+//  the jar's NWACT set to "" (@0x7bf886) @0x55757e]
 bool consume_activation(CookieJar &jar, cdkey::KeyInfo &info, const cdkey::KeyChains *chains,
 		std::string_view fingerprint, const cdkey::KeyStore &store);
 

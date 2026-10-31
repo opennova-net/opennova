@@ -62,7 +62,7 @@ int main() {
 		// Arial20b under 1280 pixels of background and Arial40b from it in both slots, the band
 		// to the width less 139 / 18, and the stage's lines (DFX2-63)
 		// [orig: Render_LoadingScreen @0x521eec / @0x521f5a / @0x521fec..0x522006]
-		// [orig: sub_51EC60 @0x51ee41..0x51eecb, @0x51ef69..0x51ef73, @0x51f0e6..0x51f2ea
+		// [orig: Render_LoadingScreen @0x51ee41..0x51eecb, @0x51ef69..0x51ef73, @0x51f0e6..0x51f2ea
 		//  (dfx2.exe)].
 		const opennova::Title &jo = *opennova::title_by_code("jo");
 		const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
@@ -304,7 +304,7 @@ int main() {
 		// DFX2-64: a line's text by its source: the gametext string, the stored banner, the
 		// gametext as sprintf's format over the node's text (dfx2.exe's headings), the node's
 		// own text (the text-pointer TextFade's debriefing).
-		// [orig: sub_575990 @0x575b65, sub_570FD0 @0x570fd0 (dfx2.exe)]
+		// [orig: Cine_EpilogLoseUpdate @0x575b65, CineEventTextFade_Construct @0x570fd0 (dfx2.exe)]
 		opennova::world::CineEvent heading = line;
 		heading.box_width = 1024;
 		heading.text = "Op";
@@ -317,7 +317,7 @@ int main() {
 		heading.text_source = opennova::world::CineTextSource::Banner;
 		check(cine_event_line(heading, "FAILED %s", "B") == "B", "the stored banner");
 		// The debriefing's y follows the stored banner: 230 without one, 262 with one
-		// [orig: sub_575990 @0x5759ad / @0x575c01 (dfx2.exe)].
+		// [orig: Cine_EpilogLoseUpdate @0x5759ad / @0x575c01 (dfx2.exe)].
 		opennova::world::CineEvent debriefing = line;
 		debriefing.text_source = opennova::world::CineTextSource::Text;
 		debriefing.text = "GO";
@@ -339,7 +339,7 @@ int main() {
 
 		// The label slots: a TextFade's word, -3 Impact38 and -2 Large at the large scale, -1
 		// Bold at the tier's, any other none; a counter's Large.
-		// [orig: CCineEventTextFade_Draw @0x57311d; sub_5711C0 @0x5712bd (dfx2.exe)]
+		// [orig: CCineEventTextFade_Draw @0x57311d; CCineEventTextFade_Draw @0x5712bd (dfx2.exe)]
 		HudLabelFontChoice choice;
 		choice.normal_fnt = "n.fnt";
 		choice.bold_fnt = "b.fnt";

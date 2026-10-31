@@ -571,7 +571,7 @@ void deploy_table_zone_cases() {
 	CHECK(!deploy_table_zones(bare, reg, 0, 0, gametext, zones) && zones.empty());
 	// DFX2-41's team lists: per Tab-board row the entity the roster slot drives in a session,
 	// else the one the walk held (never reset), the local player at first; a title without the
-	// lists gives none [orig: sub_5503A0 @0x55040d..0x5505c3 (dfx2.exe)].
+	// lists gives none [orig: DeathScreen_UpdateTeamLists @0x55040d..0x5505c3 (dfx2.exe)].
 	std::vector<world::DeployTeamListPlayer> players;
 	CHECK(!deploy_team_list_players(view, players));
 	opennova::Title dfx2;
@@ -613,8 +613,8 @@ void deploy_table_zone_cases() {
 // DFX2-82's rider lines: the driver and each gunner named as HUD_GetEntityDisplayName names
 // them (the roster slot's name and clan, else the entity's own), a rider without a definition
 // dropped, and nothing on foot or for a title without the lines.
-// [orig: sub_5A3DF0 @0x5A4711..0x5A4871 (dfx2.exe); HUD_GetEntityDisplayName @0x58DD40
-//  (dfx2.exe)]
+// [orig: HUD_DrawVehicleHealthBars @0x5A4711..0x5A4871 (dfx2.exe); HUD_GetEntityDisplayName
+//  @0x58DD40 (dfx2.exe)]
 void vehicle_panel_rider_cases() {
 	// The kernel and the view on the heap: main's frame already holds several (1 MB stack).
 	auto kernel_heap = std::make_unique<mission::MissionKernel>();
@@ -980,8 +980,8 @@ int main() {
 				f.session.teams[2].ctf_flag == 1 && f.session.team_count == 4);
 		// dfx2.exe's GAMEINFO board's facts (DFX2-114): the 0x16 records as the board projects
 		// them, the timed flag, the local body's slot byte, a joiner's 0x58 mission name and the
-		// kernel's mounted expansion (none here) [orig: sub_59ABF0 @0x59AE5C, @0x59B4E4,
-		// @0x59B54B, @0x59B575 (dfx2.exe)].
+		// kernel's mounted expansion (none here) [orig: HUD_DrawGameTimerOverlay @0x59AE5C,
+		// @0x59B4E4, @0x59B54B, @0x59B575 (dfx2.exe)].
 		CHECK(f.session.rows.size() == 6 && f.session.rows[1].slot_id == 3 &&
 				f.session.rows[1].score1 == -5 && f.session.rows[1].spectator &&
 				f.session.rows[1].name == "CL Ann");

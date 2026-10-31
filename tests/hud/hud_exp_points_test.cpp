@@ -1,8 +1,8 @@
 // DFX2-36: dfx2.exe's EXPPOINTS element (runtime/hud/hud_exp_points.h): the fade a 0x81 fanfare
 // starts and each draw steps, its tiers, its strings, the title that draws it, and the compiled
 // element (the label, the score pulsed and tinted, the tracker's two lines, its gates).
-// [orig: sub_59B730 @0x59B730; sub_59B7E0 @0x59B7E0; sub_5A6D20 @0x5A6D20 (@0x5A6EDE);
-//  @0x422350..0x4223C5; HUD_InitOverlaySystem @0x5A3490 (dfx2.exe)]
+// [orig: HUD_StartExpPointsFade @0x59B730; HUD_DrawExpPoints @0x59B7E0; HUD_RenderOverlays
+//  @0x5A6D20 (@0x5A6EDE); @0x422350..0x4223C5; HUD_InitOverlaySystem @0x5A3490 (dfx2.exe)]
 #include <base/title/title.h>
 #include <runtime/hud/hud_exp_points.h>
 #include <runtime/hud/hud_frame.h>
@@ -106,7 +106,7 @@ float middle(const GameFontQuad &q) {
 // the tracker's lines one '0' height (16) apart while it is valid and neither value negative; the
 // declutter slot, the hidden word and the title each keep it off, and an arm while the title draws
 // none starts no fade.
-// [orig: sub_59B7E0 @0x59B7E0; sub_5A6D20 @0x5A6EDE; @0x422350..0x4223C5 (dfx2.exe)]
+// [orig: HUD_DrawExpPoints @0x59B7E0; HUD_RenderOverlays @0x5A6EDE; @0x422350..0x4223C5 (dfx2.exe)]
 void test_the_compiled_element(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.exp_points = {100, 200, 0, 200, true};

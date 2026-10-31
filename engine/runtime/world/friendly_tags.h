@@ -70,8 +70,8 @@ struct FriendlyTagSource {
     // the entity is the HUD target cursor's (g_HUDTargetCursorEntity), and a player's slot +0x3C
     // word (PlayerSlotFacts::account_id) equals the local player's slot's. Both are filled after
     // the walks (inmatch::collect_friendly_tags).
-    // [orig: sub_5A27F0 @0x5A27F0 - the slot word compare @0x5A28B9..0x5A28BF, the cursor test
-    //  @0x5A2E47 (dfx2.exe)]
+    // [orig: HUD_DrawEntityLabel @0x5A27F0 - the slot word compare @0x5A28B9..0x5A28BF, the cursor
+    //  test @0x5A2E47 (dfx2.exe)]
     uint32_t account_id = 0;
     bool cursor_target = false;
     bool same_account = false;

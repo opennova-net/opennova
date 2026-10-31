@@ -73,7 +73,7 @@ CineEvent text_fade(int32_t start, CineTextSource source, const char *section, c
 //  +0x14)]
 // The live builds pass the label at x 192 and the count-up column at x 832; the
 // value column is Jointops.exe's 692 or dfx2.exe's 832 [orig: @0x5765F6..0x576611;
-// sub_5740E0 @0x574555..0x57455f (dfx2.exe)].
+// Cine_EpilogStateMachineUpdate @0x574555..0x57455f (dfx2.exe)].
 CineEvent epilog_counter(int32_t start, const char *label_key, int32_t value_x, int32_t row_y,
 		int32_t value, int32_t max) {
 	CineEvent e;
@@ -99,9 +99,9 @@ CineEvent epilog_counter(int32_t start, const char *label_key, int32_t value_x, 
 // dfx2.exe's two score rows: Jointops.exe's counter columns, the count-up's
 // -1 target and rate, no max, in Impact38 (-3), the label and the columns in
 // `color` with the alpha byte raised.
-// [orig: sub_571770 @0x571770 (this, start, duration, +0x430, +0x434, +0x438, +0x43C, label,
-//  +0x420, +0x424, +0x428, +0x42C, +0x450, +0x448 / +0x44C (a14 | 0xFF000000), +0x14); the
-//  calls @0x5746f1 / @0x574753 (dfx2.exe)]
+// [orig: CineEventEpilogCounterFont_Construct @0x571770 (this, start, duration, +0x430, +0x434,
+//  +0x438, +0x43C, label, +0x420, +0x424, +0x428, +0x42C, +0x450, +0x448 / +0x44C (a14 |
+//  0xFF000000), +0x14); the calls @0x5746f1 / @0x574753 (dfx2.exe)]
 CineEvent epilog_counter_font(int32_t start, const char *label_key, int32_t row_y, int32_t value,
 		uint32_t color) {
 	CineEvent e = epilog_counter(start, label_key, 832, row_y, value, -1);
@@ -203,7 +203,7 @@ void EpilogCine::activate_event(CineEvent &e, World &world) {
 	case CineEventKind::EpilogCounterFont:
 		// The count-up column's start: the count at 0, the first step four
 		// frames away [orig: CineEventEpilogCounter's start @0x573370 —
-		//  +0x440 = 0, +0x444 = 4 @0x57337a] [orig: sub_571840 @0x571840 /
+		//  +0x440 = 0, +0x444 = 4 @0x57337a] [orig: CineEventEpilogCounterFont_Start @0x571840 /
 		//  @0x57184a (dfx2.exe)].
 		e.points = 0;
 		e.points_cooldown = kEpilogCounterStepWait;
@@ -275,7 +275,7 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 		// and the step that lands on the target plays TEXT_END; every step
 		// re-arms the wait. The live epilog's -1 target and rate step the count
 		// up from 0, away from the target, so it never lands and never sounds.
-		// (The step's busy flag dword_269721C, raised while the count is off
+		// (The step's busy flag g_CineCounterBusy, raised while the count is off
 		// its target, has no reader.)
 		// [orig: CineEventEpilogCounter_Step @0x573390 — the wait @0x5733ab..0x5733b8;
 		//  the step @0x5733c0..0x5733fa; the arrival @0x573400..0x57340e ->
@@ -439,8 +439,8 @@ void EpilogCine::update_lose(World &world) {
 		break;
 	case 1:
 		// The screen builds on the first dispatch after a cine frame has
-		// rendered [orig: `cmp dword_26970F4, 0` @0x5744FD]
-		// [orig: sub_575990 - `cmp dword_269846C, 0` @0x575a23 (dfx2.exe)].
+		// rendered [orig: `cmp g_CineFrameDrawn, 0` @0x5744FD]
+		// [orig: Cine_EpilogLoseUpdate - `cmp g_CineFrameDrawn, 0` @0x575a23 (dfx2.exe)].
 		if (!frame_drawn) break;
 		if (mission.debriefing_screens)
 			build_lose_debriefing_screen();
@@ -502,8 +502,8 @@ void EpilogCine::build_lose_screen() {
 }
 
 const std::string &EpilogCine::heading_title() const {
-	// [orig: sub_575990 @0x575b0a..0x575b2b - the entry test and the strlen;
-	//  sub_5740E0 @0x57446c..0x57448b (dfx2.exe)]
+	// [orig: Cine_EpilogLoseUpdate @0x575b0a..0x575b2b - the entry test and the strlen;
+	//  Cine_EpilogStateMachineUpdate @0x57446c..0x57448b (dfx2.exe)]
 	return mission.entry && !mission.title.empty() ? mission.title : mission.server_mission_name;
 }
 
@@ -512,7 +512,7 @@ void EpilogCine::build_lose_debriefing_screen() {
 	// the letterbox fades out over one frame, the image starts a frame later, the
 	// heading names the mission in Impact38 yellow, and the lines below it start
 	// 62 frames past it, the mission's debriefing among them.
-	// [orig: sub_575990 - the screen flag @0x575a32 (dfx2.exe)]
+	// [orig: Cine_EpilogLoseUpdate - the screen flag @0x575a32 (dfx2.exe)]
 	screen_active = true;
 	const int32_t t = frame + kEpilogLoseScreenDelay; // [orig: @0x575a38]
 	// The fade pair, solid colour 0 [orig: @0x575a5c / @0x575a99].
@@ -585,8 +585,8 @@ void EpilogCine::update_win(World &world) {
 		if (frame >= win_build_frame) win_state = 4;
 		break;
 	case 4:
-		// [orig: `cmp dword_26970F4, 0` @0x5764DB] [orig: sub_5740E0 - `cmp dword_269846C, 0`
-		//  @0x57437d (dfx2.exe)]
+		// [orig: `cmp g_CineFrameDrawn, 0` @0x5764DB] [orig: Cine_EpilogStateMachineUpdate - `cmp
+		//  g_CineFrameDrawn, 0` @0x57437d (dfx2.exe)]
 		if (!frame_drawn) break;
 		if (mission.debriefing_screens)
 			build_win_debriefing_screen(world);
@@ -650,7 +650,7 @@ void EpilogCine::build_win_debriefing_screen(World &world) {
 	// letterbox and the image as the lose screen's, the heading names the
 	// mission, three counters at x 832 and 32 apart from 62 frames past it (no
 	// FRIENDLYUNITS line), then the mission's debriefing and the key help.
-	// [orig: sub_5740E0 case 4 - the flag @0x57438e (dfx2.exe)]
+	// [orig: Cine_EpilogStateMachineUpdate case 4 - the flag @0x57438e (dfx2.exe)]
 	screen_active = true;
 	const int32_t t = frame + kEpilogWinScreenDelay; // [orig: @0x574398]
 	// [orig: @0x5743bb / @0x5743f9, solid colour 0]
@@ -698,10 +698,10 @@ void EpilogCine::build_win_debriefing_screen(World &world) {
 	// [orig: Entity_ValidatePtr(g_LocalPlayerEntity) @0x574666 (the active slot whose
 	//  entity it is), CPlayerStats_GetFieldPlusOne(slot+0x48, 0x1C) @0x57467b, `cmp
 	//  [entry+0x11E4], points; jnb` @0x574687, the store @0x57468f, the colours
-	//  @0x574695 / @0x57469c; sub_571770 @0x5746f1 - (cursor, 223200, 192, 832, 832, 354,
-	//  STREPILOG_TOTALEXP, -1, -1, points, -1, -3, 0xFFFF00, 1), @0x574753 - (cursor + 60,
-	//  .., 402, STREPILOG_HIGHSCORE, -1, -1, entry+0x11E4, -1, -3, colour, 1); the cursor
-	//  @0x5746fb / @0x574758 (dfx2.exe)]
+	//  @0x574695 / @0x57469c; CineEventEpilogCounterFont_Construct @0x5746f1 - (cursor, 223200,
+	//  192, 832, 832, 354, STREPILOG_TOTALEXP, -1, -1, points, -1, -3, 0xFFFF00, 1), @0x574753 -
+	//  (cursor + 60, .., 402, STREPILOG_HIGHSCORE, -1, -1, entry+0x11E4, -1, -3, colour, 1); the
+	//  cursor @0x5746fb / @0x574758 (dfx2.exe)]
 	if (const MatchPlayer *slot = world.match.player(world.cached.local_player)) {
 		const int32_t points = slot->stats[MatchStats::kPoints];
 		uint32_t best_color = 0xFFFFFFFFu;
@@ -749,7 +749,7 @@ bool EpilogCine::playback_active() {
 void EpilogCine::render_pass() {
 	// [orig: Cine_RenderOrEndPlayback @0x575A57 — the running gate; the time-range recalc
 	//  @0x575A59; the draw @0x575A8A -> Cine_RenderOverlays, whose tail raises
-	//  dword_26970F4 @0x570C66; past the end the cine stops @0x575A6B]
+	//  g_CineFrameDrawn @0x570C66; past the end the cine stops @0x575A6B]
 	if (!active) return;
 	if (frame < end_frame())
 		frame_drawn = true;

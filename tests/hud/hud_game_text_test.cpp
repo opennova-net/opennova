@@ -218,7 +218,7 @@ int main() {
 		CHECK(t.attacking == " - Attacking" && t.defending.empty());
 		// dfx2.exe's GAMEINFO board (DFX2-114): the game type's Overlays label by
 		// HUD_GetGameTypeOverlayLabel's rung, "" for an unlisted type; the "(of" pair
-		// [orig: sub_59ABF0 @0x59AE0E, @0x59B263, @0x59B467 (dfx2.exe)].
+		// [orig: HUD_DrawGameTimerOverlay @0x59AE0E, @0x59B263, @0x59B467 (dfx2.exe)].
 		CHECK(t.game_type_label == "Team Deathmatch" && t.of_team_a == "(of" && t.of_team_b.empty());
 		hud_session_text(session, 8u, t);
 		CHECK(t.game_type_label == "Deathmatch");
@@ -227,7 +227,7 @@ int main() {
 	}
 
 	// DFX2-82's rider weapon texts: a key through Overlays ("" on a miss), none without a key
-	// [orig: sub_5A3DF0 @0x5A4786 (dfx2.exe)].
+	// [orig: HUD_DrawVehicleHealthBars @0x5A4786 (dfx2.exe)].
 	{
 		const GameTextLookup overlays = table_of({ { "Overlays/attach_50cal", "50 Cal" } });
 		std::vector<HudVehicleRider> riders(3);

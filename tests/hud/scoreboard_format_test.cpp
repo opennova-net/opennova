@@ -180,7 +180,7 @@ void test_class_suffix_and_leak() {
 }
 
 // dfx2.exe's board carries no class suffix and stashes none (Title::hud_kill_list_no_class,
-// DFX2-83): the same rows read bare [orig: sub_423890 @0x423890 - the team arm's format
+// DFX2-83): the same rows read bare [orig: HUD_DrawKillList @0x423890 - the team arm's format
 // @0x423BB1 (dfx2.exe)] [orig: HUD_DrawKillList @0x423A30 - the stash @0x423DC3].
 void test_dfx2_board_has_no_class_suffix() {
 	const opennova::Title *jo = opennova::title_by_code("jo");

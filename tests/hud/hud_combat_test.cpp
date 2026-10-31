@@ -98,7 +98,7 @@ static void geometry_and_draw() {
 				  [](auto &l) { return l.color == 0xFFFF5050u; }) == 4);
 	// DFX2-45: a title whose Inset reticle is the quad draws no arms, the ring the same; with
 	// scopexh.tga unloaded no quad either [orig: Render_WeaponInsetScene @0x5C9E96..0x5C9F47]
-	// [orig: sub_591440 @0x5C8E40, `test ecx, ecx; jz` @0x591460 (dfx2.exe)].
+	// [orig: HUD_DrawInsetReticleQuad @0x5C8E40, `test ecx, ecx; jz` @0x591460 (dfx2.exe)].
 	s.combat.inset_reticle_quad = true;
 	const auto &quad = compiler.compile(s, 1024, 768);
 	CHECK(quad.tris.size() == 570);
@@ -107,8 +107,8 @@ static void geometry_and_draw() {
 	}));
 	// Loaded, scopexh.tga spans the aperture's design rect (639, 223)..(961, 545) after the
 	// ring, in g_HUDColors.active halved at full alpha, 0xFF7F2828 under the hit flag; clipped
-	// to the design screen it takes auxiliaryColors[1] [orig: sub_591440 @0x591440..0x59148D;
-	// HUD_DrawTexturedQuadCentered @0x58EE20 (dfx2.exe)].
+	// to the design screen it takes auxiliaryColors[1] [orig: HUD_DrawInsetReticleQuad
+	// @0x591440..0x59148D; HUD_DrawTexturedQuadCentered @0x58EE20 (dfx2.exe)].
 	const auto scope_tris = [](const HudDrawList &d) {
 		std::vector<HudTri> out;
 		for (const HudTri &t : d.tris)
@@ -367,7 +367,7 @@ static void mortar_map_callbacks() {
 
 // The map key's cycle, the title's (DFX2-90): Jointops.exe's 0 -> 2 -> 3 -> 0 and any other mode
 // to 0; dfx2.exe's 0 -> 3 -> 0, never the window [orig: HUD_CycleMapMode @0x520BC0]
-// [orig: sub_51DB80 @0x51DB80 (dfx2.exe)].
+// [orig: HUD_CycleMapMode @0x51DB80 (dfx2.exe)].
 static void map_cycle_by_title() {
 	const opennova::Title *jo = opennova::title_by_code("jo");
 	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");

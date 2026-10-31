@@ -448,7 +448,7 @@ struct HudMinimapInput {
 	// dfx2.exe's walk finds each one's position and name and draws nothing
 	// (Title::hud_map_no_bank_names, DFX2-81).
 	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A49E0 - the draw @0x5A4F95]
-	// [orig: sub_5A3850 @0x5A3850 - @0x5A3D53..0x5A3DD4, no draw (dfx2.exe)]
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A3850 - @0x5A3D53..0x5A3DD4, no draw (dfx2.exe)]
 	bool bank_names = true;
 	// The pass is MapOverlay_DrawView's (the DEATH map, DeathMapCompiler), not HUD_DrawMapOverlay's.
 	bool death_map_pass = false;
@@ -788,7 +788,7 @@ struct HudMapControl {
 	// The map key's step, the title's (Title::hud_map_cycle_skips_window, DFX2-90): Jointops.exe's
 	// 0 -> 2 -> 3 -> 0, any other mode to 0; dfx2.exe's 0 -> 3, any other mode to 0.
 	// [orig: HUD_CycleMapMode @0x520BC0 - 0 -> 2 @0x520BC5..0x520BC9, `cmp eax, 2; setnz;
-	//  sub 1; and 3` @0x520BD4..0x520BE2] [orig: sub_51DB80 @0x51DB80 (dfx2.exe) - `neg; sbb;
+	//  sub 1; and 3` @0x520BD4..0x520BE2] [orig: HUD_CycleMapMode @0x51DB80 (dfx2.exe) - `neg; sbb;
 	//  and 0FFFFFFFDh; add 3` @0x51DB85..0x51DB8F]
 	int cycle(bool skips_window) {
 		if (skips_window)

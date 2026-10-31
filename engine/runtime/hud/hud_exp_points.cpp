@@ -1,5 +1,6 @@
 // DFX2-36: the EXPPOINTS element's fade and strings (hud_exp_points.h carries the witness map).
-// [orig: sub_59B730 @0x59B730; sub_59B7E0 @0x59B7E0; HUD_InitOverlaySystem @0x5A3490 (dfx2.exe)]
+// [orig: HUD_StartExpPointsFade @0x59B730; HUD_DrawExpPoints @0x59B7E0; HUD_InitOverlaySystem
+//  @0x5A3490 (dfx2.exe)]
 
 #include <runtime/hud/hud_exp_points.h>
 
@@ -19,7 +20,7 @@ constexpr int kChannelByte[3] = {2, 1, 0};
 
 void hud_exp_points_fade_start(HudExpPointsFade &fade, bool hidden, uint16_t duration,
 		uint32_t color, uint32_t active, int32_t pulse_percent) {
-	// [orig: sub_59B730 @0x59B730 (dfx2.exe); the declaration carries the order]
+	// [orig: HUD_StartExpPointsFade @0x59B730 (dfx2.exe); the declaration carries the order]
 	if (hidden || duration == 0) return; // @0x59B738 / @0x59B746
 	fade.intensity = 1.0f;               // @0x59B751
 	for (int i = 0; i < 3; ++i) {
@@ -34,7 +35,7 @@ void hud_exp_points_fade_start(HudExpPointsFade &fade, bool hidden, uint16_t dur
 }
 
 HudExpPointsPulse hud_exp_points_fade_step(HudExpPointsFade &fade, uint32_t active) {
-	// [orig: sub_59B7E0 @0x59B7E0 (dfx2.exe); the declaration carries the order]
+	// [orig: HUD_DrawExpPoints @0x59B7E0 (dfx2.exe); the declaration carries the order]
 	HudExpPointsPulse out;
 	out.color = active;
 	const float v = fade.intensity - fade.rate; // @0x59B805..0x59B811

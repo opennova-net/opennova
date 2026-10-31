@@ -77,9 +77,9 @@ void HudFrameCompiler::element_service_prompt(const HudFrameState &s, float w, f
 		return;
 	// dfx2.exe's head legs carry no pre-round branch: a running pre-round timer draws no armory
 	// line, and its bay line waits on the same `!g_ClientPreRoundTimer` test Jointops.exe's does
-	// (DFX2-94) [orig: sub_5BCD20 @0x5BCD20 - `cmp g_ClientPreRoundTimer` then the 0x800 flag
-	//  @0x5BCDAA..0x5BCDBD ahead of STROVER_VEHICLEBAY_INFO @0x5BCDFE, no STROVER_ARMORY_*
-	//  (dfx2.exe)].
+	// (DFX2-94) [orig: HUD_DrawGameplayOverlays @0x5BCD20 - `cmp g_ClientPreRoundTimer` then the
+	//  0x800 flag @0x5BCDAA..0x5BCDBD ahead of STROVER_VEHICLEBAY_INFO @0x5BCDFE, no
+	//  STROVER_ARMORY_* (dfx2.exe)].
 	if (c.service_prompt == 1 && s.title != nullptr && s.title->hud_drops_armory_prompt)
 		return;
 	if (c.service_prompt && (s.hud_detail_level < 3 || c.service_above_declutter))
@@ -106,8 +106,9 @@ void HudFrameCompiler::element_inset_cues(const HudFrameState &s, float w, float
 			// clipToScreen, in g_HUDColors.active halved, 0x7F2828 under the hit flag, at full
 			// alpha; an unloaded texture draws none.
 			// [orig: the twin of Render_WeaponInsetScene @0x5C86B0 - Viewport_ScreenToVirtual
-			//  @0x5C8E0F / @0x5C8E23, the extent @0x5C8E28..0x5C8E3F, sub_591440 @0x5C8E40;
-			//  sub_591440 @0x591440..0x59148D - `sar 1; and 7F7F7Fh` @0x591440..0x591447,
+			//  @0x5C8E0F / @0x5C8E23, the extent @0x5C8E28..0x5C8E3F, HUD_DrawInsetReticleQuad
+			//  @0x5C8E40 (dfx2.exe)] [orig: HUD_DrawInsetReticleQuad @0x591440..0x59148D -
+			//  `sar 1; and 7F7F7Fh` @0x591440..0x591447,
 			//  dword_A7BA9C -> 0x7F2828 @0x59144C..0x591455, the texture 0x2724E2C read
 			//  @0x59145A, `test ecx, ecx; jz` @0x591460, `or FF000000h` @0x591464,
 			//  clipToScreen 1 @0x591469, the centre @0x59146C..0x591488,

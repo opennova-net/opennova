@@ -111,7 +111,7 @@ public:
 	// scale the loader stored, which the font then draws and measures at: the
 	// title's (Title::menu_font_scale; Jointops.exe's 1.0, its texels) [orig:
 	// CFontCache_LoadOrGetFont @ 0x6530e7, CFontCache_EnsureFontLoaded @ 0x653ea0
-	// - fld flt_84C10C (1.0f), fstp [font+0x12EC]] (D-FNT-7); 0, a HUD font, keeps
+	// - fld g_MenuFontScale (1.0f), fstp [font+0x12EC]] (D-FNT-7); 0, a HUD font, keeps
 	// the loader's.
 	void set_font(const opennova::fnt::fnt_font_t *font, float menu_scale = 0.0f) {
 		font_ = font;
@@ -201,8 +201,8 @@ private:
 // @0x67e9fd / @0x67ea35]), so every step rounds to single precision. The scale is the font's
 // own: 800 / design_width for a HUD font [orig: GameFont_LoadFromBlob @0x674781..0x67479e, from
 // HUD_LoadFontIntoSlot @0x580437], 1.0 for a menu font, which the font cache writes over it
-// [orig: CFontCache_LoadOrGetFont @0x6530e7; CFontCache_EnsureFontLoaded @0x653ea0, flt_84C10C].
-// GameFont::char_width and the editor's font view measure a glyph through it.
+// [orig: CFontCache_LoadOrGetFont @0x6530e7; CFontCache_EnsureFontLoaded @0x653ea0,
+// g_MenuFontScale]. GameFont::char_width and the editor's font view measure a glyph through it.
 int glyph_extent(const opennova::fnt::fnt_uv_t &uv, int32_t glyph_spacing, float scale,
 		float scale_x = 1.0f);
 

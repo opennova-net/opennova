@@ -187,9 +187,9 @@ void HudFrameCompiler::element_game_info(const HudFrameState &state, float w, fl
 }
 
 std::vector<std::string> game_info_leader_lines(const HudSessionState &s) {
-	// Four places, score and row each -1 [orig: sub_59ABF0 @0x59B4B3..0x59B4DE (dfx2.exe)]; a
-	// non-spectator row (the record's bit-0 byte +0x34 clear) takes the first place whose score
-	// it beats, signed, and REPLACES its row [orig: @0x59B4F0..0x59B514 (dfx2.exe)].
+	// Four places, score and row each -1 [orig: HUD_DrawGameTimerOverlay @0x59B4B3..0x59B4DE
+	// (dfx2.exe)]; a non-spectator row (the record's bit-0 byte +0x34 clear) takes the first place
+	// whose score it beats, signed, and REPLACES its row [orig: @0x59B4F0..0x59B514 (dfx2.exe)].
 	std::array<int32_t, 4> top;
 	std::array<int, 4> place;
 	top.fill(-1);
@@ -246,8 +246,8 @@ std::vector<std::string> game_info_leader_lines(const HudSessionState &s) {
 bool HudFrameCompiler::game_info_board(const HudFrameState &state, float w, float h) {
 	// dfx2.exe's GAMEINFO board, past the zone line it shares with Jointops.exe's: every line
 	// bold at GAMEINFO's x in its alignment, half-bright in the twin as this frame restamped it
-	// [orig: sub_59ABF0 @0x59ABF0 - the restamp @0x59AC25..0x59AC3A into `alpha` and the frame's
-	// copy, read @0x59AE29 / @0x59AFB7 (dfx2.exe)].
+	// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - the restamp @0x59AC25..0x59AC3A into `alpha` and
+	// the frame's copy, read @0x59AE29 / @0x59AFB7 (dfx2.exe)].
 	const HudSessionState &s = state.session;
 	const HudPosRecord &gi = layout_.game_info;
 	const uint32_t color = hud_colors_active_;
@@ -261,9 +261,10 @@ bool HudFrameCompiler::game_info_board(const HudFrameState &state, float w, floa
 	int y = gi.y;
 	bool drew = false;
 	// Under the MSNTITLE slot: in a session the game type's label, one line; then the mission
-	// name with the expansion's in brackets when one is mounted [orig: `cmp dword_2724FF8, 0`
-	// (slot 0) @0x59ADF7; is_in_session @0x59AE04; HUD_GetGameTypeOverlayLabel @0x59AE0E, drawn
-	// @0x59AE42; "%s (%s)" @0x59AE6B, "%s" @0x59AE84, drawn @0x59AEAB (dfx2.exe)].
+	// name with the expansion's in brackets when one is mounted [orig:
+	// `cmp g_HUDDeclutterVisible, 0` (slot 0) @0x59ADF7; is_in_session @0x59AE04;
+	// HUD_GetGameTypeOverlayLabel @0x59AE0E, drawn @0x59AE42; "%s (%s)" @0x59AE6B, "%s" @0x59AE84,
+	// drawn @0x59AEAB (dfx2.exe)].
 	if (state.declutter_visible[kDeclutterMsnTitle]) {
 		if (s.in_session) {
 			emit_text_at_virtual_pos(label_font_bold_, label_scale_, s.text.game_type_label.c_str(),

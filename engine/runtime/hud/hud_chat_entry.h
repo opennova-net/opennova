@@ -82,7 +82,7 @@ struct ChatEntryFacts {
 	bool death_screen = false;       // [orig: g_DeathScreenActive]
 	bool round_over = false;         // [orig: g_RoundOver]
 	bool in_session = false;         // [orig: g_NapiNPCtx.is_in_session]
-	// Set by S2C 0x25 on a client, cleared by S2C 0x0F [orig: dword_24C195C
+	// Set by S2C 0x25 on a client, cleared by S2C 0x0F [orig: g_RoundResetHold
 	// — NapiNPClientMsg_GameReset @0x42284e, NapiNPClientMsg_0x00F @0x42e396].
 	bool reset_hold = false;
 	bool team_game = false;          // [orig: g_GameType & 0x10000]

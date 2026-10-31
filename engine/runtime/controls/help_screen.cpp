@@ -12,7 +12,7 @@ namespace {
 
 // Each catalog record's help order, the dword at +0x10 the sort reads
 // second (0 sorts last as 999999) [orig: KeyBinding_CompareEntries @0x4965f0;
-// the static table word_8159A8, 108-byte records].
+// the static table g_BindingRows, 108-byte records].
 constexpr int kHelpOrder[] = {
 	0, 0, 1001, 1003, 1005, 1007, 1009, 1011, 1013, 1015,                     // 0-9
 	1017, 1019, 1021, 1022, 1023, 1024, 1025, 2031, 2032, 2033,               // 10-19

@@ -46,8 +46,9 @@ struct WeatherSeed {
 // The mission clock as a host's map change keeps it for the next mission: the 8.24 time and its
 // per-tick advance, read off the old mission at its teardown (the session's time-of-day
 // continuity, inmatch/map_change.h HostMapChange::kept_clock).
-// [orig: Game_TeardownMission @0x522350 - sub_57C4D0's g_EnvCurTimeFixed24 into dword_24D5A04
-//  @0x522539, sub_57C4E0's g_EnvTodAdvancePerTick into dword_24D5A08 @0x522543]
+// [orig: Game_TeardownMission @0x522350 - Environment_GetCurrentTime's g_EnvCurTimeFixed24 into
+//  dword_24D5A04 @0x522539, Environment_GetTodRate's g_EnvTodAdvancePerTick into dword_24D5A08
+//  @0x522543]
 struct TodClock {
     uint32_t tod_fixed24 = 0;
     uint32_t tod_advance_per_tick = 0;

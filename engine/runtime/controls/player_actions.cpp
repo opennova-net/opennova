@@ -42,8 +42,8 @@ const ActionRow kRowsHead[] = {
 // 10); rows 39/40 cycle '[' / ']'.
 // [orig: input cases 200-210 @ 0x4e1144 ->
 //  Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
-//  Player_CycleWeaponSlot @ 0x4dfe70] [orig: sub_4DD4C0 - cases 200-210 @0x4de239..0x4de24d
-//  (dfx2.exe)]
+//  Player_CycleWeaponSlot @ 0x4dfe70] [orig: Input_HandleActionBinding_0 - cases 200-210
+//  @0x4de239..0x4de24d (dfx2.exe)]
 const ActionRow kRowsTail[] = {
 	// P is retail action 212 (+1: the next-higher weapon slot, or a +2 step of
 	// a variable optic), N is 214 (-1 / -2), although the catalog names P
@@ -111,7 +111,7 @@ std::vector<ActionRow> action_rows(const Catalog &catalog) {
 }
 
 // A catalog row's dispatch code by its config token; a token no row carries reads -1
-// [orig: word_8159A8 + 108 * row].
+// [orig: g_BindingRows + 108 * row].
 int code_of(const Catalog &catalog, const char *token) {
 	const ActionDef *def = catalog.for_token(token);
 	return def != nullptr ? def->code : -1;

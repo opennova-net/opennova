@@ -67,7 +67,7 @@ struct HudToggleState {
 	// from the session settings @0x551D0F].
 	bool mp_verbose = kMpVerboseDefault;
 	// The F9 AudioEmote and F10 RadioMacro menus (catalog rows 101 / 102,
-	// dispatch 33 / 54) [orig: dword_24C18D4 / dword_24C18D8 — `xor 1` then the
+	// dispatch 33 / 54) [orig: g_EmotesMenuOpen / g_RadioMenuOpen — `xor 1` then the
 	// keeping init @0x49b6c9 / @0x49b6e2].
 	bool emotes_menu_open = false;
 	bool radio_menu_open = false;
@@ -76,11 +76,12 @@ struct HudToggleState {
 	// the word too, which only its respawn init and escape chain write (both clear it), so no
 	// key reaches it there. While it holds the gameplay overlays draw the briefing panel
 	// (hud_briefing_window).
-	// [orig: dword_24C18D0 - Game_InitRespawnState @0x49938B, the escape leg @0x49B2DA..0x49B2E2,
-	//  HUD_DrawGameplayOverlays @0x5BE16B -> HUD_DrawBriefingPanel @0x5BE174]
-	// [orig: dword_24BAE80 - Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F,
-	//  Game_InitRespawnState @0x49939B, the escape leg @0x49B2EA..0x49B2F2, sub_5BCD20 @0x5BCFAC
-	//  -> sub_5B9BB0 (HUD_DrawBriefingPanel's twin) @0x5BCFB5 (dfx2.exe)]
+	// [orig: g_BriefingPanelOpen - Game_InitRespawnState @0x49938B, the escape leg
+	//  @0x49B2DA..0x49B2E2, HUD_DrawGameplayOverlays @0x5BE16B -> HUD_DrawBriefingPanel @0x5BE174]
+	// [orig: g_BriefingPanelOpen - Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F,
+	//  Game_InitRespawnState @0x49939B, the escape leg @0x49B2EA..0x49B2F2,
+	//  HUD_DrawGameplayOverlays @0x5BCFAC -> HUD_DrawBriefingPanel (HUD_DrawBriefingPanel's twin)
+	//  @0x5BCFB5 (dfx2.exe)]
 	bool briefing_panel_open = false;
 	// The single-player pause word's bit 0: the pause row (catalog 70,
 	// dispatch 25) flips it out of a session, the in-game menu sets it on
@@ -368,13 +369,14 @@ void hud_toggles_reset_mission(HudToggleState &state);
 // overlays (HudFrameCompiler::compile_gameplay_overlay_windows).
 // [orig: HUD_DrawGameplayOverlays @0x5BDE60 - dword_24C18C8 @0x5BE12C, in a session
 //  HUD_DrawEndGameScreen @0x5BE13E, out of one HUD_DrawBriefingPanel @0x5BE145;
-//  HUD_DrawWinConditions @0x5BE163; dword_24C18D0 @0x5BE16B -> HUD_DrawBriefingPanel
+//  HUD_DrawWinConditions @0x5BE163; g_BriefingPanelOpen @0x5BE16B -> HUD_DrawBriefingPanel
 //  @0x5BE174; HUD_DrawSinglePlayerHowTo @0x5B9210 has no caller]
-// [orig: sub_5BCD20 @0x5BCD20 - dword_24BAE78 @0x5BCF6D, in a session sub_5BBF20 @0x5BCF7F,
-//  out of one sub_5B8160 (the HUD_DrawSinglePlayerHowTo twin: HUD_DrawLabelBox(200, 40, 824,
-//  728), the rect (235, 75)..(789, 693), GameText_GetString("Overlays",
-//  "STROVER_SPMISSIONHOWTO"), HUD_DrawWrappedText from line 0) @0x5BCF86; sub_5B9890
-//  @0x5BCFA4; dword_24BAE80 @0x5BCFAC -> sub_5B9BB0 @0x5BCFB5 (dfx2.exe)]
+// [orig: HUD_DrawGameplayOverlays @0x5BCD20 - dword_24BAE78 @0x5BCF6D, in a session
+//  HUD_DrawEndGameScreen @0x5BCF7F, out of one HUD_DrawSinglePlayerHowTo (the
+//  HUD_DrawSinglePlayerHowTo twin: HUD_DrawLabelBox(200, 40, 824, 728), the rect (235, 75)..(789,
+//  693), GameText_GetString("Overlays", "STROVER_SPMISSIONHOWTO"), HUD_DrawWrappedText from line 0)
+//  @0x5BCF86; sub_5B9890 @0x5BCFA4; g_BriefingPanelOpen @0x5BCFAC -> HUD_DrawBriefingPanel
+//  @0x5BCFB5 (dfx2.exe)]
 enum class HudBriefingWindow : uint8_t { None, Briefing, HowTo, EndGame };
 HudBriefingWindow hud_briefing_window(const HudToggleState &state, bool in_session,
 		bool sp_how_to);
@@ -396,7 +398,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 // g_EpilogScreenActive, cleared beside the pause word, is only ever raised
 // while the SP round-over latch holds (the SP round end sets it before the
 // epilog cine starts, and a session never runs the epilog), so this chain
-// never sees it; dword_24C18D0 and dword_B76494 have no reachable setter;
+// never sees it; g_BriefingPanelOpen and dword_B76494 have no reachable setter;
 // g_CScreenActive (ex dword_24C18B8) rises only from the cine editor's dialog. The quit
 // dialog closes third, after the voice-macro menus; with none open the tail
 // runs the init keeping the dialog word, then opens the dialog on the
@@ -581,8 +583,8 @@ void hud_toggles_restart_round(HudToggleState &state);
 
 // A menu pick closes its menu with a plain store, no respawn init (the
 // special-key handler's digit arms; the pick itself is the controls poll's).
-// [orig: Input_HandleSpecialKeys — `dword_24C18D4 = 0` @0x49c75c (emotes),
-//  `dword_24C18D8 = 0` @0x49c7a8 (radio)]
+// [orig: Input_HandleSpecialKeys — `g_EmotesMenuOpen = 0` @0x49c75c (emotes),
+//  `g_RadioMenuOpen = 0` @0x49c7a8 (radio)]
 void hud_toggles_close_voice_menu(HudToggleState &state, bool radio);
 
 // The verbose toggle's toast key [orig: STRMISC_VERBOSE_ON / _OFF @0x49b78f].

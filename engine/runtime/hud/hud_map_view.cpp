@@ -823,8 +823,8 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 	// The player crosshair [orig: MapOverlay_DrawView @0x5a5d32..0x5a5ed6].
 	map_view_crosshair(input, frame.rect, facts, hud_frame, out.over_lines);
 	// The title's frame after the map: top, right, bottom, left, in the quad colour
-	// [orig: sub_550F40 - CGfxDevice_SetQuadDiffuse @0x550ff9, sub_6B5410 (Line2D_Draw)
-	//  @0x55100f / @0x551026 / @0x55103c / @0x551052 (dfx2.exe)].
+	// [orig: CMap_OverlayInputHandler - CGfxDevice_SetQuadDiffuse @0x550ff9, Line2D_DrawXY
+	//  (Line2D_Draw) @0x55100f / @0x551026 / @0x55103c / @0x551052 (dfx2.exe)].
 	if (frame.frame_color != 0) {
 		const float l = static_cast<float>(frame.rect.left);
 		const float t = static_cast<float>(frame.rect.top);

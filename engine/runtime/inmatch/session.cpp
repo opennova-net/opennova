@@ -120,7 +120,7 @@ void Role::apply_input(const TickInput &input) {
 	// [orig: Input_ProcessAnalogBindings @0x4995F0 - Input_QueueEvent(row code)
 	//  @0x499660; Input_HandleActionBinding @0x49AD40 - the head @0x49AD8D..0x49AE23]
 	// Each by its row's code: forward 152, back 151, strafe 156 / 157, lean 148 / 147, jump
-	// 153, FreeLook 176, look up / down 155 / 154, turn 158 / 159 [orig: word_8159A8 + 108 *
+	// 153, FreeLook 176, look up / down 155 / 154, turn 158 / 159 [orig: g_BindingRows + 108 *
 	// rows 2..8, 97, 12..15].
 	const auto held = [this](bool down, int code) { return down && action_head_admits(code); };
 	kernel.local.set_movement_keys(held(movement.forward, 152), held(movement.back, 151),
@@ -343,7 +343,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// a console line's local CRC arm or its echo's walk (by any row's token, so any
 	// catalog code) all reach the one dispatcher (D-NET-1302).
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 55 @0x49B20B, case 217
-	//  @0x49B4B4; the catalog codes word_8159A8 + 108 * row; Input_ProcessFrame @0x49D520 -
+	//  @0x49B4B4; the catalog codes g_BindingRows + 108 * row; Input_ProcessFrame @0x49D520 -
 	//  the drain's one Input_HandleActionBinding call @0x49D5D8; NapiClientCmd_ParseAndExecute
 	//  @0x4329C0 - the token walk @0x432A64..0x432A94 over all 768 records, the CRC walk
 	//  @0x432AA9..0x432B3E, Input_QueueEvent(record, ..) @0x432B4C / @0x432BA1;

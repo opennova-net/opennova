@@ -320,7 +320,7 @@ void draw_entity_labels_and_markers(MapCompile &c) {
 	// entity, named by Entity_GetDisplayName when it returns one; dfx2.exe's
 	// draws none of them (HudMinimapInput::bank_names, DFX2-81).
 	// [orig: @0x5a4ef5..0x5a4f95; Entity_GetDisplayName @0x59BF70]
-	// [orig: sub_5A3850 @0x5a3850 - @0x5a3dc5..0x5a3dce (dfx2.exe)]
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a3850 - @0x5a3dc5..0x5a3dce (dfx2.exe)]
 	if (!c.input.bank_names) return;
 	for (const HudMinimapMarker &m : c.input.markers) {
 		if (static_cast<HudMinimapBank>(m.bank) != HudMinimapBank::kTransient)

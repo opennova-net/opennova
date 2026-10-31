@@ -56,9 +56,10 @@ inline constexpr GameTextKey kGameTextEpilogFriendlyUnits{kGameTextEpilog, "STRE
 inline constexpr GameTextKey kGameTextMissionFailed{kGameTextOverlays, "STROVER_MISSION_FAILED"};
 inline constexpr GameTextKey kGameTextEpilogKeyInfo{kGameTextEpilog, "STREPILOG_KEYINFO"};
 // dfx2.exe's win screen's heading, which only that executable reads (so not a flow key every
-// title's mission reads) [orig: sub_5740E0 @0x5744a0 / @0x5744bf (dfx2.exe)].
+// title's mission reads) [orig: Cine_EpilogStateMachineUpdate @0x5744a0 / @0x5744bf (dfx2.exe)].
 inline constexpr GameTextKey kGameTextMissionWon{kGameTextOverlays, "STROVER_MISSION_WON"};
-// Its two score rows' labels [orig: sub_5740E0 @0x5746cc / @0x57472e (dfx2.exe)].
+// Its two score rows' labels [orig: Cine_EpilogStateMachineUpdate @0x5746cc / @0x57472e
+//  (dfx2.exe)].
 inline constexpr GameTextKey kGameTextEpilogTotalExp{kGameTextEpilog, "STREPILOG_TOTALEXP"};
 inline constexpr GameTextKey kGameTextEpilogHighScore{kGameTextEpilog, "STREPILOG_HIGHSCORE"};
 // Every one, in the order above.

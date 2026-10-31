@@ -1201,7 +1201,7 @@ struct ClientScoreFeedback {
 	// embedder's (Simulation::take_score_feedback).
 	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42BEF0 -> @0x422350..0x4223C5 (dfx2.exe) - the
 	//  delta @0x422363..0x422367, the EXP_FANFARE gate @0x422369..0x42237B, the tiers
-	//  @0x422380..0x4223BE, sub_59B730 called @0x4223C5]
+	//  @0x422380..0x4223BE, HUD_StartExpPointsFade called @0x4223C5]
 	uint32_t fanfare_arms = 0;
 	hud::ScoreTone fanfare_tone = hud::ScoreTone::None;
 };
@@ -1492,7 +1492,7 @@ struct ClientState {
 	uint32_t session_rules_flags = 0;
 	// The session's KOTH time limit in minutes, the 0x08 record's second rule
 	// dword — a joiner's GAMEINFO team timers read this copy where the
-	// authority reads its own g_KothLimitMinutes [orig: dword_A821C0, stored
+	// authority reads its own g_KothLimitMinutes [orig: g_JoinerTimeLimitMinutes, stored
 	// @0x428218; read by HUD_DrawGameTimerOverlay @0x59CCEB, and by the Tab
 	// board's KOTH countdowns @0x423281 / @0x423a58].
 	int32_t session_time_limit_minutes = 0;
@@ -1504,7 +1504,7 @@ struct ClientState {
 	// @0x4244ac].
 	uint16_t flag_carrier_handle = 0xFFFF;
 	// The talk keys' reset hold: raised by S2C 0x25 on a client, lowered by
-	// the next S2C 0x0F [orig: dword_24C195C — NapiNPClientMsg_GameReset
+	// the next S2C 0x0F [orig: g_RoundResetHold — NapiNPClientMsg_GameReset
 	// @0x42284e, NapiNPClientMsg_0x00F @0x42e396; read by the talk arms
 	// @0x49b9ad].
 	bool round_reset_hold = false;
@@ -1636,8 +1636,8 @@ struct ClientState {
 	// stub), until the embedder takes it. A clear with no latch up runs no close leg.
 	// [orig: Render_ProcessMainSceneFrame @0x5cac8e (the latch test), nullsub_137 @0x5cac97,
 	//  Game_CloseInGameScreens @0x5cac9c]
-	// [orig: sub_5C9000 @0x5c9000 - the latch test @0x5c9c00, sub_550BA0 @0x5c9c09,
-	//  Game_CloseInGameScreens @0x5c9c0e (dfx2.exe)]
+	// [orig: Render_ProcessMainSceneFrame @0x5c9000 - the latch test @0x5c9c00, sub_550BA0
+	//  @0x5c9c09, Game_CloseInGameScreens @0x5c9c0e (dfx2.exe)]
 	bool death_menu_closed_on_clear = false;
 	bool take_death_menu_close() {
 		const bool ran = death_menu_closed_on_clear;

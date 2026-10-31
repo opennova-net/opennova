@@ -538,7 +538,7 @@ void test_compiler_crosshair_user_options(const fnt_font_t *font) {
 			"spread off collapses to the zero-spread geometry (arms centered)");
 
 	// dfx2.exe's crosshair holds still (DFX2-84): the spread input moves no arm, as the
-	// option's off does [orig: sub_590A80 @0x590A80 - `fmul flt_7C2244` (0.0) @0x590F7F
+	// option's off does [orig: HUD_DrawCrosshair @0x590A80 - `fmul flt_7C2244` (0.0) @0x590F7F
 	// (dfx2.exe)].
 	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
 	const opennova::Title *jo = opennova::title_by_code("jo");
@@ -559,7 +559,7 @@ void test_compiler_crosshair_user_options(const fnt_font_t *font) {
 
 	// In a Controller / Driver seat (camera mode 1) Jointops.exe swaps the driver crosshair in;
 	// dfx2.exe keeps the ordinary one in the user's colour [orig: HUD_DrawCrosshair
-	// @0x592bf8..0x592c2d] [orig: sub_590A80 @0x590A80, no swap (dfx2.exe)].
+	// @0x592bf8..0x592c2d] [orig: HUD_DrawCrosshair @0x590A80, no swap (dfx2.exe)].
 	HudLayout seats = layout;
 	seats.combat.driver_crosshair.valid = true;
 	seats.combat.driver_crosshair.width = 32;
@@ -1602,8 +1602,8 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 
 	// dfx2.exe's modes reach by range (DFX2-87): FAR/BRIEF names every tag; FULL names a tag
 	// within its reach (50 u an AI organic, 300 u a player, 1000 u a player of the local slot's
-	// +0x3C word) or the cursor's, and ticks beyond; BRIEF ticks [orig: sub_5A27F0 @0x5A27F0 -
-	// @0x5A288C..0x5A28C1, @0x5A2E47, @0x5A2F04, @0x5A309A (dfx2.exe)].
+	// +0x3C word) or the cursor's, and ticks beyond; BRIEF ticks [orig: HUD_DrawEntityLabel
+	// @0x5A27F0 - @0x5A288C..0x5A28C1, @0x5A2E47, @0x5A2F04, @0x5A309A (dfx2.exe)].
 	{
 		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
 		const opennova::Title *jo = opennova::title_by_code("jo");
@@ -2669,7 +2669,7 @@ void test_message_log_element(const fnt_font_t *font) {
 
 	// The CHAT column draws its tags off under Jointops.exe (a '<' a glyph) and parses them under
 	// dfx2.exe; the SYSTEM column parses them in both (DFX2-88) [orig: HUD_DrawMessageLog
-	// `push 100h` @0x5b9e9d, flags 0 @0x5b9ecc] [orig: sub_5B8CC0 - `push 0` @0x5b8ded
+	// `push 100h` @0x5b9e9d, flags 0 @0x5b9ecc] [orig: HUD_DrawMessageLog - `push 0` @0x5b8ded
 	// (dfx2.exe)].
 	const auto column_glyphs = [&](const opennova::Title *title, uint32_t *system_glyphs) {
 		HudLayout wide = layout; // one display line: no wrap
@@ -3199,8 +3199,8 @@ void test_scope_details(const fnt_font_t *font) {
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "whole HUD hide suppresses scope details");
     state.hud_detail_level = 0; scope.active = false;
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "lowered or unavailable optics show no readouts");
-    // dfx2.exe's overlay draws no magnification readout (DFX2-86) [orig: sub_59CEE0 @0x59CEE0
-    // (dfx2.exe)]; Jointops.exe's draws it [orig: @0x59E9AC].
+    // dfx2.exe's overlay draws no magnification readout (DFX2-86) [orig:
+    // HUD_DrawScopeOverlayDetails @0x59CEE0 (dfx2.exe)]; Jointops.exe's draws it [orig: @0x59E9AC].
     const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
     const opennova::Title *jo = opennova::title_by_code("jo");
     CHECK(dfx2 != nullptr && dfx2->hud_scope_no_magnification, "dfx2.exe drops the readout");
@@ -3402,7 +3402,7 @@ void test_bordered_image_sites(const fnt_font_t *font) {
 		return n;
 	};
 	// dfx2.exe tints the frame by the HUD info's health band, the stance triple, where
-	// Jointops.exe takes stanceicon_color (DFX2-85) [orig: sub_5A1A50 @0x5A1A50 -
+	// Jointops.exe takes stanceicon_color (DFX2-85) [orig: HUD_DrawStanceIndicator @0x5A1A50 -
 	// @0x5A1AB0..0x5A1AD4 (dfx2.exe)] [orig: HUD_DrawStanceIndicator @0x599F76].
 	{
 		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");

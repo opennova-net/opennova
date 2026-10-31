@@ -154,7 +154,7 @@ void test_windows_ride_the_top_layer(const fnt_font_t *font) {
 	state.map_legend.title = "Map Legend";
 	// The table and its row step are the title's (DFX2-89): Jointops.exe's 26 entries 40 a row,
 	// the medic one the cross [orig: HUD_DrawHelpScreenIcons @0x497480 - @0x497524]; dfx2.exe's 20,
-	// no medic, 52 a row [orig: sub_497490 @0x497490 - @0x497534 (dfx2.exe)].
+	// no medic, 52 a row [orig: HUD_DrawHelpScreenIcons @0x497490 - @0x497534 (dfx2.exe)].
 	const opennova::Title *jo = opennova::title_by_code("jo");
 	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
 	CHECK(jo != nullptr && jo->hud_map_legend != nullptr && jo->hud_map_legend->count == 26 &&
@@ -252,7 +252,8 @@ void test_briefing_markup_draws_plain(const fnt_font_t *font) {
 // dfx2.exe's in the text box's bottom corners, each corner scaled twice (DFX2-95)
 // [orig: HUD_DrawGameplayOverlays @0x5be135..0x5be145; HUD_DrawEndGameScreen @0x5bd070 -
 //  the gate @0x5bd10f, the tab width @0x5bd12d..0x5bd14a, the wrap @0x5bdd36 and its store
-//  @0x5bdd4b, the footer @0x5bdd7d..0x5bde31] [orig: sub_5BBF20 @0x5BCC3D..0x5BCCF0 (dfx2.exe)].
+//  @0x5bdd4b, the footer @0x5bdd7d..0x5bde31] [orig: HUD_DrawEndGameScreen @0x5BCC3D..0x5BCCF0
+//   (dfx2.exe)].
 void test_end_game_screen(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
@@ -349,7 +350,7 @@ void test_end_game_screen(const fnt_font_t *font) {
 // conditions, and in a session beside the end-game screen.
 // [orig: HUD_DrawGameplayOverlays @0x5BE12C..0x5BE145, HUD_DrawWinConditions @0x5BE163,
 //  @0x5BE16B..0x5BE174, HelpScreen_Draw @0x5BE179]
-// [orig: sub_5BCD20 @0x5BCF6D..0x5BCF86, sub_5B9890 @0x5BCFA4, @0x5BCFAC..0x5BCFB5,
+// [orig: HUD_DrawGameplayOverlays @0x5BCF6D..0x5BCF86, sub_5B9890 @0x5BCFA4, @0x5BCFAC..0x5BCFB5,
 //  HelpScreen_Draw @0x5BCFBA (dfx2.exe)]
 void test_briefing_windows_order(const fnt_font_t *font) {
 	HudFrameCompiler compiler;

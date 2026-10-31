@@ -319,7 +319,8 @@ static int test_loaded_ahead() {
 
 // A widget's run-time image (MenuFrameCompiler::add_runtime_texture): the slot past the configure's
 // loads at once, its size reported and its key kept with theirs; a name nothing reads is noted
-// and draws nothing [orig: sub_646450 @0x646450 - CTextureManager_LoadOrFindTexture @0x646497].
+// and draws nothing [orig: CWnd_SetAppearanceTexture @0x646450 - CTextureManager_LoadOrFindTexture
+//  @0x646497].
 static int test_runtime_texture_loads() {
 	opennova::mnu::Document doc;
 	TEST_EXPECT(parse(kScreen, doc));

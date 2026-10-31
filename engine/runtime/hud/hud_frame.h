@@ -136,9 +136,9 @@ enum HudTexture : int32_t {
 	kHudTexLogoBoat,
 	// scopexh.tga (hud_texture_names.h kHudScopeCrosshairTexture), loaded in alpha mode into its
 	// record by both titles; dfx2.exe's weapon Inset draws it over the aperture (DFX2-45)
-	// [orig: HUD_LoadAllTextures @0x59E127..0x59E133 -> dword_2723AB0, the texture at +4]
-	// [orig: HUD_LoadAllTextures @0x59CBE7..0x59CBF3 -> dword_2724E28, the texture at +4
-	//  0x2724E2C (dfx2.exe)].
+	// [orig: HUD_LoadAllTextures @0x59E127..0x59E133 -> g_HUDScopeCrosshairTexInfo, the texture at
+	// +4] [orig: HUD_LoadAllTextures @0x59CBE7..0x59CBF3 -> g_HUDScopeCrosshairTexInfo, the texture
+	//  at +4 0x2724E2C (dfx2.exe)].
 	kHudTexScopeCrosshair,
 	// The HUDLS weapon slot bar: the bracket and the more-available marker
 	// (hudpos-named, loaded alpha mode 0) and one icon per weapon category
@@ -875,8 +875,8 @@ struct HudVehiclePanelState {
 // bottom-left corner one bold 'W' height apart, half-bright tagcolor_good, tags on. The role
 // feed names each (inmatch::fill_vehicle_panel_riders, HUD_GetEntityDisplayName) and gives the
 // gun weapon's attachtextid; the embedder resolves it through Overlays (hud_vehicle_rider_text).
-// [orig: sub_5A3DF0 @0x5A3DF0 - the anchor @0x5A3F1B..0x5A3F23, the pitch
-//  GameFont_MeasureCharHeight('W') @0x5A4700, the lines @0x5A4711..0x5A4871, dword_2724E48
+// [orig: HUD_DrawVehicleHealthBars @0x5A3DF0 - the anchor @0x5A3F1B..0x5A3F23, the pitch
+//  GameFont_MeasureCharHeight('W') @0x5A4700, the lines @0x5A4711..0x5A4871, g_HudposTagcolorGood
 //  (tagcolor_good, HUD_ParseHudposToken @0x59FB0B) (dfx2.exe)]
 struct HudVehicleRider {
 	std::string name;
@@ -972,7 +972,7 @@ struct HudSessionState {
 	int remaining_count = 0;             // g_ScoreboardDeadRowCount (the live count)
 	int row_count = 0;                   // g_ScoreboardRowCount
 	int spectator_count = 0;             // g_ScoreboardSpectatorCount
-	// T: g_KothLimitMinutes on the authority, the S2C 0x64 copy dword_A821C0
+	// T: g_KothLimitMinutes on the authority, the S2C 0x64 copy g_JoinerTimeLimitMinutes
 	// on a joiner [orig: HUD_DrawGameTimerOverlay @0x59CCDB..0x59CCEB].
 	int32_t time_limit_minutes = 0;
 	// The 0x16 team table by team byte 0..4: score1 (movsx), the KOTH hold byte and the CTF
@@ -985,10 +985,10 @@ struct HudSessionState {
 	// joiner's S2C 0x58 copy, "" before one), the mounted expansion, the 0x16 rows (the record's
 	// name, score1, slot id and bit 0), the timed flag (g_ScoreboardFlags & 2) and the local
 	// player entity's slot byte (+0x154; 0xFF while destroyed, -1 with no runtime).
-	// [orig: sub_59ABF0 @0x59ABF0 - g_ServerMissionName / g_ExpansionName @0x59AE4E..0x59AE84,
-	//  the rows dword_A7BB30 + 56r @0x59B4E4..0x59B527, g_ScoreboardFlags @0x59B575, entity+0x154
-	//  @0x59B54B (dfx2.exe); Server_BuildStatusReport @0x530A60 (the authority's name
-	//  @0x530AA1)]
+	// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - g_ServerMissionName / g_ExpansionName
+	//  @0x59AE4E..0x59AE84, the rows dword_A7BB30 + 56r @0x59B4E4..0x59B527, g_ScoreboardFlags
+	//  @0x59B575, entity+0x154 @0x59B54B (dfx2.exe); Server_BuildStatusReport @0x530A60 (the
+	//  authority's name @0x530AA1)]
 	std::string mission_name;
 	std::string expansion;
 	std::vector<ScoreboardEntry> rows;
@@ -1022,8 +1022,8 @@ struct HudSessionState {
 // placed row is the local player's (its slot byte), the first non-spectator row of that slot
 // follows them. Each is "%3i %s" (score1, name), or under the timed flag "%2i:%02i %s" of
 // 60 * T less score1. The 0x8000000 debug arm is dead.
-// [orig: sub_59ABF0 @0x59ABF0 - the places @0x59B4B3..0x59B527, the lines @0x59B530..0x59B617,
-//  the local row @0x59B61D..0x59B70F (dfx2.exe)]
+// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - the places @0x59B4B3..0x59B527, the lines
+//  @0x59B530..0x59B617, the local row @0x59B61D..0x59B70F (dfx2.exe)]
 std::vector<std::string> game_info_leader_lines(const HudSessionState &session);
 
 // One weapon category's slot-bar scan result (world/hud_slot_bar_feed.h owns

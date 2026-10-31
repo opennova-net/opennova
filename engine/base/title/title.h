@@ -74,8 +74,8 @@ enum class MissionListOrder : uint8_t { FileName, Title };
 // it): one entry per icon, its gametext Hud key, TSDicon strip cell, size factor and ARGB, laid in
 // two columns from design y 144 a design `row_step` apart.
 // [orig: HUD_DrawHelpScreenIcons @0x497480 - the 44-byte records from aHudIconPerson, name +0x00,
-//  cell +0x20, size +0x24, colour +0x28, the walk ending on an empty name] [orig: sub_497490
-//  @0x497490 (dfx2.exe)]
+//  cell +0x20, size +0x24, colour +0x28, the walk ending on an empty name] [orig:
+//  HUD_DrawHelpScreenIcons @0x497490 (dfx2.exe)]
 struct TitleHudMapLegendIcon {
 	const char *name = nullptr;
 	uint8_t cell = 0;
@@ -153,8 +153,9 @@ struct Title {
 	// lines). Jointops.exe parses the EXPPOINTS line and reads none of it, and its 0x81 starts no
 	// fade. On the Title, not the title's rules nor its Protocol: it is the executable's own HUD,
 	// single player's too, and changes no wire byte and no world.
-	// [orig: HUD_ParseHudposToken @0x59F370 (@0x5A0463..0x5A04AF, no reader)] [orig: sub_5A6D20
-	//  @0x5A6EDE, sub_59B7E0 @0x59B7E0, sub_59B730 called @0x4223C5 (dfx2.exe)]
+	// [orig: HUD_ParseHudposToken @0x59F370 (@0x5A0463..0x5A04AF, no reader)] [orig:
+	//  HUD_RenderOverlays @0x5A6EDE, HUD_DrawExpPoints @0x59B7E0, HUD_StartExpPointsFade called
+	//  @0x4223C5 (dfx2.exe)]
 	bool hud_exp_points = false;
 	// DFX2-91: the executable's HUD draws the lone-gunner panel, the HUD side of DFX2-37: while the
 	// local player is a lone gunner (world::local_rides_solo_turret), the overlay panels' pass
@@ -180,16 +181,16 @@ struct Title {
 	// (STROVER_ARMORY_INFO / _WAIT): a running pre-round timer draws no service line, as the
 	// vehicle bay's waits on its end in both. False (Jointops.exe): the armory line while it
 	// runs and no menu screen is open. On the Title: the executable's own HUD.
-	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 (@0x5BDEE9..0x5BDF45)] [orig: sub_5BCD20
-	//  @0x5BCD20 (@0x5BCDAA..0x5BCE30) (dfx2.exe)]
+	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 (@0x5BDEE9..0x5BDF45)] [orig:
+	//  HUD_DrawGameplayOverlays @0x5BCD20 (@0x5BCDAA..0x5BCE30) (dfx2.exe)]
 	bool hud_drops_armory_prompt = false;
 	// DFX2-95: the executable's in-session end-game (I) screen puts its footer in the text box's
 	// bottom corners: "Page n of 4" right-aligned at its right edge and the paging hint
 	// left-aligned at its left, both at the box's bottom (each point scaled again). False
 	// (Jointops.exe): both lines centred on the screen, at y 700 and 720. On the Title: the
 	// executable's own HUD (HudFrameCompiler::element_end_game_screen).
-	// [orig: HUD_DrawEndGameScreen @0x5BD070 (@0x5BDD67..0x5BDE31)] [orig: sub_5BBF20 @0x5BBF20
-	//  (@0x5BCC3D..0x5BCCF0) (dfx2.exe)]
+	// [orig: HUD_DrawEndGameScreen @0x5BD070 (@0x5BDD67..0x5BDE31)] [orig: HUD_DrawEndGameScreen
+	//  @0x5BBF20 (@0x5BCC3D..0x5BCCF0) (dfx2.exe)]
 	bool hud_end_game_footer_corners = false;
 	// DFX2-41: the deploy screen picks the loadout. death.mnu's DEATH screen carries PRIMARY /
 	// SECONDARY / ACCESSORY lists its activation fills for the player's class, and the screen's
@@ -283,18 +284,18 @@ struct Title {
 	// the executable's own HUD, single player's too, and changes no wire byte and no world.
 	// DFX2-90: the map key steps off -> fullscreen -> off, never the north-up window (mode 2);
 	// Jointops.exe's steps off -> window -> fullscreen -> off (hud::HudMapControl::cycle).
-	// [orig: HUD_CycleMapMode @0x520BC0] [orig: sub_51DB80 @0x51DB80 (dfx2.exe)]
+	// [orig: HUD_CycleMapMode @0x520BC0] [orig: HUD_CycleMapMode @0x51DB80 (dfx2.exe)]
 	bool hud_map_cycle_skips_window = false;
 	// DFX2-83: the Tab board's rows carry no " (class)" suffix; Jointops.exe's stashes the class
 	// name of a row whose entity shares the local team and appends it to the next drawn row
 	// (hud::ScoreboardRowComposer).
 	// [orig: HUD_DrawKillList @0x423A30 (the stash @0x423D64..0x423DC3, " (%s)" @0x424104)]
-	// [orig: sub_423890 @0x423890 (dfx2.exe) - "%s<ch>%s<co> [%02ld]" @0x423BB1, no stash]
+	// [orig: HUD_DrawKillList @0x423890 (dfx2.exe) - "%s<ch>%s<co> [%02ld]" @0x423BB1, no stash]
 	bool hud_kill_list_no_class = false;
 	// DFX2-86: a scoped weapon's overlay draws no magnification readout (Hud/hud_scope_mag at
 	// hudpos SCOPEMAG); its range and zero readouts are Jointops.exe's.
 	// [orig: HUD_DrawScopeOverlayDetails @0x59E420 (the readout @0x59E97C..0x59E9F6)]
-	// [orig: sub_59CEE0 @0x59CEE0 (dfx2.exe) - the zero readout @0x59D428 ends it]
+	// [orig: HUD_DrawScopeOverlayDetails @0x59CEE0 (dfx2.exe) - the zero readout @0x59D428 ends it]
 	bool hud_scope_no_magnification = false;
 	// DFX2-84: the crosshair's arms hold still and a Controller / Driver seat keeps the ordinary
 	// crosshair: Jointops.exe spreads the arms by the weapon's ERROR row for the stance (prone,
@@ -302,13 +303,14 @@ struct Title {
 	// words, and in camera mode 1 swaps a Controller / Driver seat to the driver crosshair, its
 	// arms closed, in half-bright palette 1.
 	// [orig: HUD_DrawCrosshair @0x592640 (the spread @0x592b25..0x592bf5, the seat swap
-	//  @0x592bf8..0x592c2d)] [orig: sub_590A80 @0x590A80 (dfx2.exe) - the projection times
+	//  @0x592bf8..0x592c2d)] [orig: HUD_DrawCrosshair @0x590A80 (dfx2.exe) - the projection times
 	//  flt_7C2244 (0.0) @0x590F7F, no seat swap]
 	bool hud_crosshair_fixed = false;
 	// DFX2-85: the stance icon takes the stance colour triple (hudpos stancecolor_good / _middle /
 	// _bad) by the HUD info's health band, where Jointops.exe's takes stanceicon_color.
-	// [orig: HUD_DrawStanceIndicator @0x599F10 (dword_2723AE8 @0x599F76)] [orig: sub_5A1A50
-	//  @0x5A1A50 (dfx2.exe) - HUD_ClassifyHealthBand @0x5A1AB6, the triple @0x5A1AC2..0x5A1AD4]
+	// [orig: HUD_DrawStanceIndicator @0x599F10 (dword_2723AE8 @0x599F76)] [orig:
+	//  HUD_DrawStanceIndicator @0x5A1A50 (dfx2.exe) - HUD_ClassifyHealthBand @0x5A1AB6, the triple
+	//  @0x5A1AC2..0x5A1AD4]
 	bool hud_stance_health_tint = false;
 	// DFX2-88: the chat lines of the J window's CHAT column and of a dedicated host's console
 	// lines parse their inline tags, as every other line does; Jointops.exe draws those two with
@@ -316,8 +318,8 @@ struct Title {
 	// HUD_DrawConsoleMessagesOverlay, which OpenNova does not port.
 	// [orig: HUD_DrawMessageLog @0x5B9D70 (push 100h @0x5B9E9D); HUD_DrawServerConsoleLines
 	//  @0x5BA0A0 (@0x5BA0E6); HUD_DrawConsoleMessagesOverlay @0x5B9F30 (@0x5BA05D)]
-	// [orig: sub_5B8CC0 @0x5B8DED, sub_5B8FF0 @0x5B9036, sub_5B8E80 @0x5B8FAD, each push 0
-	//  (dfx2.exe)]
+	// [orig: HUD_DrawMessageLog @0x5B8DED, HUD_DrawServerConsoleLines @0x5B9036,
+	//  HUD_DrawConsoleMessagesOverlay @0x5B8FAD, each push 0 (dfx2.exe)]
 	bool hud_message_tags = false;
 	// DFX2-89: the F12 map legend (TitleHudMapLegend): Jointops.exe's 26 entries 40 design units a
 	// row, dfx2.exe's 20 (no medic, personmedicable, lfp, farp or armoury entry, a pwrweap one) 52
@@ -329,14 +331,14 @@ struct Title {
 	// and the brief tick beyond, BRIEF (3) the tick. Jointops.exe's FULL draws every name, its mode
 	// 1 the name within 300 u and nothing beyond.
 	// [orig: HUD_DrawEntityLabel @0x5A39B0 (the mode tests @0x5A3FC3..0x5A40D4)]
-	// [orig: sub_5A27F0 @0x5A27F0 (dfx2.exe) - the reach @0x5A288C..0x5A28C1, the mode switch
-	//  @0x5A2E1F..0x5A309A]
+	// [orig: HUD_DrawEntityLabel @0x5A27F0 (dfx2.exe) - the reach @0x5A288C..0x5A28C1, the mode
+	//  switch @0x5A2E1F..0x5A309A]
 	bool hud_tag_ranges = false;
 	// DFX2-81: the map's second name walk draws nothing: dfx2.exe still finds each same-team
 	// transient-bank person's position and display name, and draws no label; Jointops.exe's names
 	// them in the regular label face (hud::HudMinimapInput::bank_names).
 	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A49E0 (@0x5A4EDE..0x5A4FA3, the draw @0x5A4F95)]
-	// [orig: sub_5A3850 @0x5A3850 (dfx2.exe) - @0x5A3D53..0x5A3DD4]
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A3850 (dfx2.exe) - @0x5A3D53..0x5A3DD4]
 	bool hud_map_no_bank_names = false;
 	// DFX2-41: the DEATH screen's activation writes STATIC_GAMETYPE, "Gametype: <cFFFF40>%s" over
 	// the game type's Overlays label (world::apply_deploy_activation). False (Jointops.exe): its
@@ -356,8 +358,9 @@ struct Title {
 	// load scopexh.tga; Jointops.exe's twin of the quad's helper has no caller.
 	// [orig: Render_WeaponInsetScene @0x5C9740 - the arms @0x5C9E96..0x5C9F47; the dead twin
 	//  @0x5930E0..0x593132] [orig: the twin @0x5C86B0 - Viewport_ScreenToVirtual @0x5C8E0F /
-	//  @0x5C8E23, sub_591440 @0x5C8E40; sub_591440 @0x591440..0x59148D, its texture 0x2724E2C
-	//  (+4 of dword_2724E28) loaded by HUD_LoadAllTextures @0x59CBE7..0x59CBF3 (dfx2.exe)]
+	//  @0x5C8E23, HUD_DrawInsetReticleQuad @0x5C8E40; HUD_DrawInsetReticleQuad @0x591440..0x59148D,
+	//  its texture 0x2724E2C (+4 of g_HUDScopeCrosshairTexInfo) loaded by HUD_LoadAllTextures
+	//  @0x59CBE7..0x59CBF3 (dfx2.exe)]
 	bool inset_reticle_quad = false;
 	// DFX2-47: the side of FrameFX's two square work targets ([fx+4] / [fx+8]) and of every pass
 	// that draws into the work rect (runtime/renderer/frame_fx_effects.h frame_fx_work_side):
@@ -377,8 +380,8 @@ struct Title {
 	// capture_rings_under_layers).
 	// [orig: HUD_DrawMapOverlay @0x5A5F40 - the one pool-3 walk @0x5A750A, past
 	//  MapOverlay_RenderAllLayers @0x5A6D2B] [orig: the twin @0x5A4FC0 - the walk @0x5A5DA3
-	//  (6027 @0x5A5DDE, 6028's sub_5958E0 @0x5A5E68) ahead of MapOverlay_RenderAllLayers
-	//  @0x5A5E8D, the usual walk @0x5A667B (dfx2.exe)]
+	//  (6027 @0x5A5DDE, 6028's Minimap_DrawCaptureZoneRing @0x5A5E68) ahead of
+	//  MapOverlay_RenderAllLayers @0x5A5E8D, the usual walk @0x5A667B (dfx2.exe)]
 	bool map_capture_rings_under_layers = false;
 	// DFX2-50: the DEATH screen's map pass (MapOverlay_DrawView) walks pool 3 twice more: the
 	// 6027 / 6028 capture-zone rings ahead of its marker layers, and past its labels and laser
@@ -386,10 +389,11 @@ struct Title {
 	// HudMinimapOverlays::death_map_zone_markers). Jointops.exe's pass walks pool 3 never.
 	// [orig: MapOverlay_DrawView @0x5A58E0 - MapOverlay_RenderAllLayers @0x5A5A11,
 	//  HUD_DrawEntityLabelsAndMarkers @0x5A5A29, Render_LaserSightEffect @0x5A5A40, then the zone
-	//  walk] [orig: the twin @0x5A48A0 - the capture walk @0x5A49C2..0x5A4A0D (sub_5958E0
-	//  @0x5A4A0D) ahead of MapOverlay_RenderAllLayers @0x5A4A26; the KOTH / location walk
-	//  @0x5A4A62..0x5A4ABA (Minimap_DrawKothZoneRing @0x5A4AA2, sub_595710 @0x5A4ABA) past the
-	//  laser leg @0x5A4A55 and its flush @0x5A4A5D (dfx2.exe)]
+	//  walk] [orig: the twin @0x5A48A0 - the capture walk @0x5A49C2..0x5A4A0D
+	//  (Minimap_DrawCaptureZoneRing @0x5A4A0D) ahead of MapOverlay_RenderAllLayers @0x5A4A26; the
+	//  KOTH / location walk @0x5A4A62..0x5A4ABA (Minimap_DrawKothZoneRing @0x5A4AA2,
+	//  Minimap_DrawLocationLabel @0x5A4ABA) past the laser leg @0x5A4A55 and its flush @0x5A4A5D
+	//  (dfx2.exe)]
 	bool death_map_zone_markers = false;
 	// DFX2-63: the mission loading screen's text (TitleLoadingScreen); null where no binary of the
 	// title was read for it, which composites none.
@@ -413,8 +417,8 @@ struct Title {
 	bool stat_screen_done = false;
 	// The scale the menu font cache writes into every menu font it loads (the font's +0x12EC),
 	// which the menus' text draws and measures at (menu::MenuFrameCompiler::set_font_scale,
-	// D-FNT-7): Jointops.exe's 1.0, its flt_84C10C, which no code writes, so a menu glyph is its
-	// texels [orig: CFontCache_LoadOrGetFont @0x652f70 (@0x6530e7); CFontCache_EnsureFontLoaded
+	// D-FNT-7): Jointops.exe's 1.0, its g_MenuFontScale, which no code writes, so a menu glyph is
+	// its texels [orig: CFontCache_LoadOrGetFont @0x652f70 (@0x6530e7); CFontCache_EnsureFontLoaded
 	// @0x653de0 (@0x653ea0)].
 	float menu_font_scale = 1.0f;
 	// DFX2-72: the host screen's combat-vehicle missions (menu::HostDialog; the BMS header's
@@ -439,8 +443,9 @@ struct Title {
 	// death_map_no_names, the DEATH mask without bit 13); the slots' markers stay.
 	// [orig: MapOverlay_DrawView @0x5A58E0 - HUD_DrawEntityLabelsAndMarkers(rect, 0x40000000, 1,
 	//  1, 0xFF) @0x5A5A29, its flag gating the slot names @0x5A4DBB and the second walk @0x5A4ED6]
-	//  [orig: the twin @0x5A48A0 - sub_5A3850(rect, 0x40000000, 1, 0, 0xFF) @0x5A4A3E (the 0 pushed
-	//  @0x5A4A30); sub_5A3850 @0x5A3850 - the same gates @0x5A3C31 / @0x5A3D4B (dfx2.exe)]
+	//  [orig: the twin @0x5A48A0 - HUD_DrawEntityLabelsAndMarkers(rect, 0x40000000, 1, 0, 0xFF)
+	//  @0x5A4A3E (the 0 pushed @0x5A4A30); HUD_DrawEntityLabelsAndMarkers @0x5A3850 - the same
+	//  gates @0x5A3C31 / @0x5A3D4B (dfx2.exe)]
 	bool death_map_no_names = false;
 	// DFX2-53: the sector render picks a player person's character again every frame it draws it,
 	// relative to the viewer: the first combo of the good side while the person is on the local
@@ -466,15 +471,15 @@ struct Title {
 	// in the restamped colour (hud::HudFrameCompiler::element_game_info). Jointops.exe's draws
 	// TKOTH's two timers alone, at GAMEINFO, in the colour from before its restamp.
 	// [orig: HUD_DrawGameTimerOverlay @0x59CC80 (the timers @0x59CE8F..0x59D007)]
-	// [orig: sub_59ABF0 @0x59ABF0 (dfx2.exe) - the mission line @0x59ADF7..0x59AEAB, the lists
-	//  @0x59AEB7..0x59B70F]
+	// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 (dfx2.exe) - the mission line @0x59ADF7..0x59AEAB,
+	//  the lists @0x59AEB7..0x59B70F]
 	bool hud_game_info_board = false;
 	// DFX2-82: the vehicle panel lists its riders below the silhouette, the driver's
 	// "<name>  <i>(Driver)<-i>" then up to two gunners' "<name>  <i>(<gun weapon's attach
 	// text>)<-i>" ("(Gunner)" without one) (hud::HudVehicleRider). Jointops.exe's panel draws
 	// the markers and their digits alone.
 	// [orig: HUD_DrawVehicleHealthBars @0x5A4FD0 (the "X" @0x5A586B ends it)]
-	// [orig: sub_5A3DF0 @0x5A3DF0 (dfx2.exe) - the lines @0x5A4700..0x5A4871]
+	// [orig: HUD_DrawVehicleHealthBars @0x5A3DF0 (dfx2.exe) - the lines @0x5A4700..0x5A4871]
 	bool hud_vehicle_panel_riders = false;
 	// DFX2-64, DFX2-65: the single-player end screens name the mission and debrief it
 	// (runtime/world/epilog_cine.h, EpilogMission): black fades, a one-frame letterbox, the
@@ -484,8 +489,8 @@ struct Title {
 	// gametext heading in the large white face and no debriefing. On the Title: the
 	// executable's own end screens.
 	// [orig: Cinematic_EpilogUpdate @0x577950 (the mode-2 leg @0x574491..0x5747EB);
-	//  Cine_EpilogStateMachineUpdate @0x576240] [orig: sub_575E10 @0x575E10 -> sub_575990
-	//  @0x575990, sub_5740E0 @0x5740E0 (dfx2.exe)]
+	//  Cine_EpilogStateMachineUpdate @0x576240] [orig: Cinematic_EpilogUpdate @0x575E10 ->
+	//  Cine_EpilogLoseUpdate @0x575990, Cine_EpilogStateMachineUpdate @0x5740E0 (dfx2.exe)]
 	bool epilog_debriefing_screens = false;
 	// DFX2-74: the PLAYER_INFO combo list's row text (menu::PlayerInfoAvatars): true, each row
 	// "<head> - <body>", the two parts' display names; false, every row's text empty, its value

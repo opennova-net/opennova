@@ -26,8 +26,9 @@ constexpr const char *kCampaignMissionList = "CA_MISSION_LIST";
 constexpr const char *kCampaignBriefing = "BRIEFING";
 constexpr const char *kCampaignImageOverlay = "CAMPAIGN_IMAGE_OVERLAY";
 constexpr const char *kCampaignImage = "CAMPAIGN_IMAGE";
-// The appearance state the campaign images take: the default's, mask 1 [orig: sub_6D3760(.., 1,
-//  0x300651) @0x560464, @0x5604a4, @0x560cac, @0x560cfc (dfx2.exe)].
+// The appearance state the campaign images take: the default's, mask 1 [orig:
+//  CWnd_SetAppearanceTexture(.., 1, 0x300651) @0x560464, @0x5604a4, @0x560cac, @0x560cfc
+//  (dfx2.exe)].
 constexpr uint32_t kCampaignImageStates = 1u;
 constexpr const char *kInstantActionList = "IA_LIST";
 constexpr const char *kInstantActionBriefing = "IA_BRIEFING";
@@ -226,8 +227,8 @@ void MenuFlow::show_campaign(MenuRuntime &menu, size_t index) {
 }
 
 // CAMPAIGN_IMAGE's default appearance takes the named image, loaded at once
-// [orig: UI_FindScreenControl(CAMPAIGN_IMAGE) @0x56044b, sub_6D3760 @0x560464; sub_560BC0
-//  @0x560c5d, @0x560cac (dfx2.exe)].
+// [orig: UI_FindScreenControl(CAMPAIGN_IMAGE) @0x56044b, CWnd_SetAppearanceTexture @0x560464;
+//  sub_560BC0 @0x560c5d, @0x560cac (dfx2.exe)].
 void MenuFlow::set_campaign_image(MenuRuntime &menu) {
 	const int image = menu.widget_id(kCampaignImage);
 	if (image >= 0) menu.set_widget_image(image, kCampaignImageStates, campaign_image_);
@@ -239,8 +240,8 @@ void MenuFlow::show_overlay(MenuRuntime &menu, bool complete) {
 	const int overlay = menu.widget_id(kCampaignImageOverlay);
 	if (overlay < 0) return;
 	menu.set_widget_shown(overlay, complete);
-	// Shown, it takes campaign.def's complete_overlay image [orig: sub_6D3760(byte_25DB320)
-	//  @0x5604a4, @0x560cfc (dfx2.exe)].
+	// Shown, it takes campaign.def's complete_overlay image [orig:
+	//  CWnd_SetAppearanceTexture(byte_25DB320) @0x5604a4, @0x560cfc (dfx2.exe)].
 	if (complete)
 		menu.set_widget_image(overlay, kCampaignImageStates, campaigns_.complete_overlay);
 }
@@ -375,8 +376,8 @@ void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows,
 			const int item = static_cast<int>(std::strtol(menu.item_value(spin, i).c_str(), nullptr, 10));
 			bool used = item == game_type::kHostFilterAll;
 			// DFX2-72: the combat-vehicle value is enabled by any combat-vehicle mission of the
-			// whole list [orig: sub_556B30 @0x556b30 - the 254 test @0x556cd5, the walk over
-			// entry+0x1134 == 2 @0x556cf5..0x556d11 (dfx2.exe)].
+			// whole list [orig: UI_InitHostSettingsDialog @0x556b30 - the 254 test @0x556cd5, the
+			// walk over entry+0x1134 == 2 @0x556cf5..0x556d11 (dfx2.exe)].
 			if (vehicle_missions_ && item == game_type::kHostFilterVehicle) {
 				for (size_t m = 0; !used && m < rows.size(); ++m)
 					used = rows[m].mission_type == game_type::kHostVehicleMissionType;
@@ -398,10 +399,11 @@ void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows,
 // remove's re-show, not under its own category.
 // [orig: HostDialog_FilterMissionListByGameType @0x556fe0 - (category == value || value == 255)
 //  @0x55717c; HostDialog_AddRemoveSelectedMissions @0x557c10 - the remove's re-show, the same
-//  test @0x557da1..0x557db7; sub_555180 @0x555180 - (category == value && entry+0x1134 != 2) ||
-//  value == 255 || (entry+0x1134 == 2 && value == 254) @0x555300..0x555334; the remove's re-show
-//  in sub_556180's chunk @0x555f87..0x555faf: category == value || value == 255 ||
-//  (entry+0x1134 == 2 && value == 254) (dfx2.exe)]
+//  test @0x557da1..0x557db7; HostDialog_FilterMissionListByGameType @0x555180 - (category == value
+//  && entry+0x1134 != 2) || value == 255 || (entry+0x1134 == 2 && value == 254)
+//  @0x555300..0x555334; the remove's re-show in HostDialog_SelectedMissionsTableEvent's chunk
+//  @0x555f87..0x555faf: category == value || value == 255 || (entry+0x1134 == 2 && value == 254)
+//  (dfx2.exe)]
 bool HostDialog::listed_under_(const MissionChoice &row, int value, bool removed) const {
 	if (value == game_type::kHostFilterAll) return true;
 	const bool vehicle = vehicle_missions_ && row.mission_type == game_type::kHostVehicleMissionType;
@@ -458,8 +460,8 @@ void HostDialog::add_selected(MenuRuntime &menu, const hud::GameTextLookup &text
 		const char *key = game_type::host_abbreviation_key(row.game_type);
 		// The ADD sets the row's launch option to its default: a team mode and
 		// not an objective mode [orig: @0x557E72..0x557E94]; under the title's
-		// DFX2-72 default, 0 for every row [orig: sub_556180's chunk - `mov
-		// [esi+eax+1140h], 0` @0x556076 (dfx2.exe)].
+		// DFX2-72 default, 0 for every row [orig: HostDialog_SelectedMissionsTableEvent's chunk -
+		// `mov [esi+eax+1140h], 0` @0x556076 (dfx2.exe)].
 		const int32_t option =
 				!switch_starts_off_ && game_type::host_rotation_default(row.game_type) ? 1 : 0;
 		menu.table_add_row(table, {row.text, text ? text("GateTypeAbbrev", key, key) : key,
@@ -485,8 +487,8 @@ void HostDialog::remove_selected(MenuRuntime &menu) {
 		menu.table_remove_row(table, row);
 		if (row >= 0 && row < static_cast<int>(selected_.size())) {
 			// Its list row enabled again when it lists under the last filtered value, by the
-			// remove's own test [orig: @0x557cce..0x557dc7; sub_556180's chunk
-			// @0x555f87..0x555fbf (dfx2.exe)].
+			// remove's own test [orig: @0x557cce..0x557dc7; HostDialog_SelectedMissionsTableEvent's
+			// chunk @0x555f87..0x555fbf (dfx2.exe)].
 			const int picked = selected_[static_cast<size_t>(row)];
 			shown_[static_cast<size_t>(picked)] =
 					listed_under_(pool_[static_cast<size_t>(picked)], filter_value_, true);

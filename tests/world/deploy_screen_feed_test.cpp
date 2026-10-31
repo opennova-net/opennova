@@ -294,7 +294,7 @@ void test_instruction_branches() {
 // The DEATH_SHROUD reveal: at once under the deploy overlay, else only past
 // the title's ticks since the death stamp (a signed difference): Jointops.exe's
 // 240, dfx2.exe's 360; the refresh runs on each tick whose low four bits are
-// zero. [orig: DeathScreen_UpdateShroudReveal @0x554752] [orig: sub_552770
+// zero. [orig: DeathScreen_UpdateShroudReveal @0x554752] [orig: DeathScreen_UpdateShroudReveal
 // @0x552792 (dfx2.exe)]
 void test_shroud_reveal_and_refresh() {
 	const int32_t jo = opennova::Title().death_shroud_reveal_ticks;
@@ -389,7 +389,7 @@ void test_loadout_picker_gate() {
 	CHECK(!deploy_loadout_shown(0, false, false));
 	CHECK(!deploy_loadout_shown(2, true, true));
 	// RESTART_LEVEL: an assault game (the 0x20000 bit aside), out of a session, the local
-	// player dead [orig: sub_550BF0 @0x550bff..0x550c1e (dfx2.exe)].
+	// player dead [orig: DeathScreen_OnRestartLevel @0x550bff..0x550c1e (dfx2.exe)].
 	CHECK(deploy_restart_level_allowed(0x10020u, false, true));
 	CHECK(deploy_restart_level_allowed(0x30020u, false, true));
 	CHECK(!deploy_restart_level_allowed(0x10020u, true, true));
@@ -532,7 +532,8 @@ void test_spawn_table_fill() {
 	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
 	click = deploy_table_click(rt, table, 9, menu::kTableRowDefault, true);
 	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
-	// The map's move deselects every row [orig: sub_550F40 @0x5511c7..0x5511da (dfx2.exe)].
+	// The map's move deselects every row [orig: CMap_OverlayInputHandler @0x5511c7..0x5511da
+	//  (dfx2.exe)].
 	rt.table_set_row_selected(table, 2, true);
 	CHECK(!rt.table_selected_rows(table).empty() && deploy_map_moved(rt) &&
 			rt.table_selected_rows(table).empty());
@@ -567,8 +568,8 @@ void test_spawn_table_pan_target() {
 // DFX2-41: the team lists: a team-1 entity's name in the blue list, any other's in the red, the
 // local player's behind its list's colour, each line ending CR LF; STATIC_TEAM the local team's
 // colour and name; the three written where the screen has them.
-// [orig: sub_5503A0 @0x5503a0 - @0x550466..0x55059a, @0x55060f..0x55066d; sub_5B6820 @0x5b6820
-//  (dfx2.exe)]
+// [orig: DeathScreen_UpdateTeamLists @0x5503a0 - @0x550466..0x55059a, @0x55060f..0x55066d;
+//  HUD_GetTeamName @0x5b6820 (dfx2.exe)]
 void test_team_lists() {
 	const hud::GameTextLookup names = [](const char *, const char *key, const char *fallback) {
 		const std::string k = key;

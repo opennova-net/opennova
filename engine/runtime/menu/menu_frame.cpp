@@ -934,8 +934,9 @@ void MenuFrameCompiler::emit_appearance(const WidgetNode &node,
 		return;
 	}
 	// A texture set at run time ORs the IMAGE type into the state's appearance and loads its
-	// texture, the file's own height, its MAP_STATE as authored [orig: sub_646450 @0x646450 -
-	// `*channel |= 2` @0x64647c, CTextureManager_LoadOrFindTexture(.., 0xFFFFFFFF) @0x646497].
+	// texture, the file's own height, its MAP_STATE as authored [orig: CWnd_SetAppearanceTexture
+	// @0x646450 - `*channel |= 2` @0x64647c, CTextureManager_LoadOrFindTexture(.., 0xFFFFFFFF)
+	// @0x646497].
 	if (ws != nullptr && ws->has_image && (ws->image_states & (1u << appearance_slot)) != 0) {
 		StatePass pass = node.states[appearance_slot];
 		pass.has_image = true;

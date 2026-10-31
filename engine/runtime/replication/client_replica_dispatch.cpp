@@ -15,7 +15,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (decode_session_config(body.data(), body.size(), config)) {
 			game_type_ = static_cast<uint32_t>(config.fields[3]);
 			game_type_known_ = true;
-			// [orig: `mov dword_A821C0, esi` @0x428218 — the second rule dword]
+			// [orig: `mov g_JoinerTimeLimitMinutes, esi` @0x428218 — the second rule dword]
 			state_.session_time_limit_minutes = config.fields[1];
 			const bool permanent_death = (config.bitflags & 0x8000u) != 0;
 			const bool spectators_allowed = (config.bitflags & 0x2000u) != 0;
@@ -95,7 +95,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		//  `if (game_flags & 1) g_DeployScreenActive = !g_DeathScreenActive`
 		//  @0x42e2f8]
 		// The talk keys' reset hold clears on every 0x0F, authority or not
-		// [orig: `mov dword_24C195C, eax` (0) @0x42e396].
+		// [orig: `mov g_RoundResetHold, eax` (0) @0x42e396].
 		state_.round_reset_hold = false;
 		// The session status is reset at the mission start, ahead of this
 		// 0x0F: its completion burst's C2S 0x2D asks the host for the fresh
@@ -355,7 +355,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		// A client raises the talk keys' reset hold until the next 0x0F and
 		// the round-over latch; the authority's arm only counts
 		// [orig: NapiNPClientMsg_GameReset @0x422800 — the is_authority test
-		// @0x422803, `g_RoundOver = 1` @0x422849, `dword_24C195C = 1`
+		// @0x422803, `g_RoundOver = 1` @0x422849, `g_RoundResetHold = 1`
 		// @0x42284e].
 		if (!authority_recipient_) {
 			state_.round_reset_hold = true;

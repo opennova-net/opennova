@@ -143,11 +143,11 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 		// 5. dfx2.exe's rider lines (DFX2-82): from the silhouette's bottom-left corner on
 		// screen, one bold 'W' height a line, the driver then two gunners at most, each
 		// left-aligned half-bright in tagcolor_good with the tags on (flags 1)
-		// [orig: sub_5A3DF0 - Viewport_ScaleToVirtualCoords(x, y + tex_h) @0x5A3F1B..0x5A3F23;
-		//  GameFont_MeasureCharHeight('W', bold) @0x5A4700; "%s  <i>(Driver)<-i>" @0x5A4727,
-		//  "%s  <i>(%s)<-i>" @0x5A479F / @0x5A4831, "%s  <i>(Gunner)<-i>" @0x5A47B7 / @0x5A4849;
-		//  HUD_DrawTextLeft_HalfBright(bold, x, y, text, dword_2724E48, 1) @0x5A474C, @0x5A47DE,
-		//  @0x5A4871 (dfx2.exe)].
+		// [orig: HUD_DrawVehicleHealthBars - Viewport_ScaleToVirtualCoords(x, y + tex_h)
+		//  @0x5A3F1B..0x5A3F23; GameFont_MeasureCharHeight('W', bold) @0x5A4700; "%s
+		//  <i>(Driver)<-i>" @0x5A4727, "%s  <i>(%s)<-i>" @0x5A479F / @0x5A4831, "%s
+		//  <i>(Gunner)<-i>" @0x5A47B7 / @0x5A4849; HUD_DrawTextLeft_HalfBright(bold, x, y, text,
+		//  g_HudposTagcolorGood, 1) @0x5A474C, @0x5A47DE, @0x5A4871 (dfx2.exe)].
 		if (state.title != nullptr && state.title->hud_vehicle_panel_riders) {
 			const float x = sx(static_cast<float>(base_x), w);
 			float y = sy(static_cast<float>(base_y + vp.silhouette_h), h);

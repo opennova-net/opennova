@@ -167,12 +167,12 @@ void append_death_blur(std::vector<FrameFxStep> &steps, std::int32_t elapsed_tic
 // (2.5 f + 0.5) / 512 from base 1/1024, the U taps reduced. Jointops.exe's
 // dispatcher carries it with no caller; dfx2.exe's scene frame calls it.
 // [orig: FrameFX_ApplyScreenEffect @0x584440 - the capture @0x584487, type 5
-//  @0x58449d..0x5844ba; sub_583B60 @0x583B60 - f @0x583B83..0x583BA6, base
+//  @0x58449d..0x5844ba; FrameFX_LowHealthRing @0x583B60 - f @0x583B83..0x583BA6, base
 //  flt_7D68F4 @0x583BA8, radius flt_7D7BFC / flt_7C3B94 / flt_7D83A4
 //  @0x583BB8..0x583BEC, source [fx+4] @0x583BB1, the viewport rect and the
 //  reduced byte @0x583BE0 / @0x583BE8, stage [fx+14h] @0x583BAE, taps 5
 //  @0x583C03, count 1 @0x583BE4, c0 = (0, 0, 0, f) @0x583BF7..0x583C17]
-// [orig: sub_581FE0 @0x581fe0, dispatched by FrameFX_ApplyScreenEffect @0x5828c0 case 5
+// [orig: FrameFX_LowHealthRing @0x581fe0, dispatched by FrameFX_ApplyScreenEffect @0x5828c0 case 5
 //  @0x58293a; FrameFX_BuildScarDecalVertices @0x582ab0 (dfx2.exe)]
 void append_low_health_ring(std::vector<FrameFxStep> &steps, float strength) {
 	append_capture_and_downsample(steps);

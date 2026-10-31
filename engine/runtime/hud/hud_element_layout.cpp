@@ -111,7 +111,7 @@ const std::vector<HudElementLayout> &element_rows() {
 		{ HudElement::ConnectStatus, point("CONNECTSTATUS"), "", "", {}, false },
 		{ HudElement::StartTimer, extents("STARTTIMER"), "", "", {}, false },
 		{ HudElement::ExpPoints, point("EXPPOINTS"), "EXPPOINTS",
-		  "[orig: sub_5A6D20 (dfx2.exe), the slot-9 cmp @ 0x5A6EDE]", {}, false },
+		  "[orig: HUD_RenderOverlays (dfx2.exe), the slot-9 cmp @ 0x5A6EDE]", {}, false },
 		{ HudElement::Spinmap,
 		  { at("HUDSPINMAPX1", 0, X, Near), at("HUDSPINMAPY1", 0, Y, Near), at("HUDSPINMAPX2", 0, X, Far),
 		    at("HUDSPINMAPY2", 0, Y, Far), at("MAPCOORDS", 0, X, Point, false), at("MAPCOORDS", 1, Y, Point, false) },

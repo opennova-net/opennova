@@ -54,7 +54,7 @@ void HudFrameCompiler::element_server_console_lines(const ServerStatusPageState 
 	//  raw slots 3..0 from unk_B3EC30 @0x5ba0bd (flags 256); the colour
 	//  write-back @0x5ba0de / @0x5ba12e; `+= 24` @0x5ba107 / @0x5ba154]
 	// dfx2.exe's dedicated host draws its CHAT lines with the tags on too
-	// (Title::hud_message_tags, DFX2-88) [orig: sub_5B8FF0 @0x5b8ff0 - `push 0`
+	// (Title::hud_message_tags, DFX2-88) [orig: HUD_DrawServerConsoleLines @0x5b8ff0 - `push 0`
 	// @0x5b9036 (dfx2.exe)].
 	const bool mp_session_peer = page.mp_session_peer;
 	const uint32_t flags =

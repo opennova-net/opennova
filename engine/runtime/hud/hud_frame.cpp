@@ -616,9 +616,9 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	//  delta @0x590984, `jge` @0x59098C, `jle` @0x5909A8, the stores @0x59098E..0x5909C9].
 	// dfx2.exe's step reads no altitude: the colour is g_HUDColors.active as it stands (ahead of
 	// the frame's GAMEINFO restamp) halved alpha and all, the band 2 (DFX2-92)
-	// [orig: sub_5A71E0 - the call @0x5A72CF; sub_58EDF0 @0x58EDF0 - g_WaypointActiveByte
-	//  @0x58EDF0, `sar eax, 1; and eax, 7F7F7F7Fh` @0x58EDFE..0x58EE00, the stores
-	//  @0x58EE05 / @0x58EE0A (dfx2.exe)].
+	// [orig: HUD_RenderAllOverlays - the call @0x5A72CF; sub_58EDF0 @0x58EDF0 -
+	//  g_WaypointActiveByte @0x58EDF0, `sar eax, 1; and eax, 7F7F7F7Fh` @0x58EDFE..0x58EE00, the
+	//  stores @0x58EE05 / @0x58EE0A (dfx2.exe)].
 	if (record_map_.waypoint_present && state.title != nullptr &&
 			state.title->hud_waypoint_active_tint) {
 		waypoint_altitude_color_ = (hud_colors_active_ >> 1) & 0x7F7F7F7Fu;
@@ -679,7 +679,7 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 		element_weapon_cluster(state, surface_w, surface_h);
 		element_(HudElement::Heat, [&] { element_heat(state, surface_w, surface_h); });
 		// dfx2.exe's EXPPOINTS element follows the icons, ahead of the CLOCK pair (DFX2-36)
-		// [orig: sub_5A6D20 @0x5A6D20 (dfx2.exe) - @0x5A6ED9..0x5A6EEC].
+		// [orig: HUD_RenderOverlays @0x5A6D20 (dfx2.exe) - @0x5A6ED9..0x5A6EEC].
 		element_(HudElement::ExpPoints, [&] { element_exp_points(state, surface_w, surface_h); });
 		// The CLOCK pair follows the heat bar and the icons in the dispatcher
 		// [orig: HUD_RenderOverlays @0x5A7D75..0x5A7D7C].
@@ -754,7 +754,7 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 // chat input line, then the kill banner [orig: HUD_DrawOverlayPanels @0x5C0060 -
 // UI_ProcessEndRoundScreenTransition @0x5c0072 (-> HUD_DrawEndRoundStatsOverlay @0x5b8679),
 // the stats' gate @0x5c0083 and call @0x5c0092, the message log's @0x5c009a / @0x5c00a4,
-// `cmp g_DeathScreenActive` @0x5c00cf..0x5c00f9 (dword_24C18D4 @0x5c00d8, dword_24C18D8
+// `cmp g_DeathScreenActive` @0x5c00cf..0x5c00f9 (g_EmotesMenuOpen @0x5c00d8, g_RadioMenuOpen
 // @0x5c00ea), dword_A87050 @0x5c0120, the input line @0x5c014e, the kill banner @0x5c0184;
 // the caller Render_ProcessMainSceneFrame @0x5cae3b]. dfx2.exe draws its lone-gunner panel
 // between the input line and the kill banner (element_lone_gunner_panel, DFX2-91). The host's
@@ -829,9 +829,10 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 		layered_(HudElement::Scoreboard, [&] { element_scoreboard(state, w, h); });
 	// The I window: in a session the end-game screen, out of one the briefing panel (dfx2.exe's
 	// the single-player how-to, DFX2-96) [orig: `cmp g_NapiNPCtx.is_in_session, 0` @0x5be135,
-	// HUD_DrawEndGameScreen @0x5be13e, HUD_DrawBriefingPanel @0x5be145] [orig: sub_5BCD20 -
-	// sub_5BBF20 @0x5BCF7F, sub_5B8160 @0x5BCF86 (dfx2.exe)]; the embedder raises the one the
-	// session picks (hud_toggles.h hud_briefing_window).
+	// HUD_DrawEndGameScreen @0x5be13e, HUD_DrawBriefingPanel @0x5be145] [orig:
+	// HUD_DrawGameplayOverlays - HUD_DrawEndGameScreen @0x5BCF7F, HUD_DrawSinglePlayerHowTo
+	// @0x5BCF86 (dfx2.exe)]; the embedder raises the one the session picks (hud_toggles.h
+	// hud_briefing_window).
 	layered_(HudElement::Briefing, [&] {
 		element_end_game_screen(state, w, h);
 		element_briefing(state.briefing, w, h);
@@ -839,8 +840,9 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	layered_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
 	// The briefing panel's own window, in a session or out of one, over the win conditions:
 	// dfx2.exe's Objectives window; Jointops.exe never sets the word (DFX2-96)
-	// [orig: `cmp dword_24C18D0, 0` @0x5be16b, HUD_DrawBriefingPanel @0x5be174]
-	// [orig: sub_5BCD20 - `cmp dword_24BAE80, 0` @0x5BCFAC, sub_5B9BB0 @0x5BCFB5 (dfx2.exe)].
+	// [orig: `cmp g_BriefingPanelOpen, 0` @0x5be16b, HUD_DrawBriefingPanel @0x5be174]
+	// [orig: HUD_DrawGameplayOverlays - `cmp g_BriefingPanelOpen, 0` @0x5BCFAC,
+	//  HUD_DrawBriefingPanel @0x5BCFB5 (dfx2.exe)].
 	layered_(HudElement::BriefingPanel, [&] { element_briefing(state.briefing_panel, w, h); });
 	layered_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
 	// The quit dialog below the blank level [orig: `cmp g_HUDDetailLevel, 3`
@@ -878,7 +880,8 @@ void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w
     }
     // Jointops.exe's magnification readout; dfx2.exe's overlay ends at the zero readout
     // (Title::hud_scope_no_magnification, DFX2-86) [orig: Player_IsEquippedWeaponScoped
-    // @0x59e97c, hud_scope_mag @0x59e9ac] [orig: sub_59CEE0 @0x59cee0 - @0x59d428 (dfx2.exe)].
+    // @0x59e97c, hud_scope_mag @0x59e9ac] [orig: HUD_DrawScopeOverlayDetails @0x59cee0 - @0x59d428
+    //  (dfx2.exe)].
     const bool magnification = state.title == nullptr || !state.title->hud_scope_no_magnification;
     if (scope.scoped && magnification)
         draw(hud_sprintf(scope.magnification_format, scope.magnification), layout_.scope_mag, color);
@@ -1332,10 +1335,11 @@ void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 	const int prev_a = stance_prev_alpha(elapsed, ramp);
 	// The frames' colour: Jointops.exe's hudpos stanceicon_color; dfx2.exe's the stance colour
 	// triple by the HUD info's health ratio, the health bar's, through HUD_ClassifyHealthBand
-	// (Title::hud_stance_health_tint, DFX2-85) [orig: dword_2723AE8 @0x599f76] [orig: sub_5A1A50
-	// @0x5a1a50 - HUD_ClassifyHealthBand(distance) @0x5a1ab0..0x5a1ab6, g_StanceColorGood /
-	// Middle / Bad @0x5a1ac2..0x5a1ad4, its RGB under the fade's alpha @0x5a1b43 (dfx2.exe);
-	// HUD_ClassifyHealthBand @0x59a160 (dfx2.exe), > 0xC000 good, > 0x6FFF middle].
+	// (Title::hud_stance_health_tint, DFX2-85) [orig: dword_2723AE8 @0x599f76] [orig:
+	// HUD_DrawStanceIndicator @0x5a1a50 - HUD_ClassifyHealthBand(distance) @0x5a1ab0..0x5a1ab6,
+	// g_StanceColorGood / Middle / Bad @0x5a1ac2..0x5a1ad4, its RGB under the fade's alpha
+	// @0x5a1b43 (dfx2.exe); HUD_ClassifyHealthBand @0x59a160 (dfx2.exe), > 0xC000 good, > 0x6FFF
+	// middle].
 	uint32_t tint = layout_.stance_tint;
 	if (state.title != nullptr && state.title->hud_stance_health_tint) {
 		const int band = health_color_band_fp16(hud_info_health_ratio_fp16(state));
@@ -1517,7 +1521,7 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 	}
 	// dfx2.exe's crosshair holds still and keeps its own record (Title::hud_crosshair_fixed,
 	// DFX2-84): its arms' offset is the projection times 0.0, and no Controller / Driver seat
-	// swaps in the driver record [orig: sub_590A80 @0x590a80 - `fmul flt_7C2244` (0.0)
+	// swaps in the driver record [orig: HUD_DrawCrosshair @0x590a80 - `fmul flt_7C2244` (0.0)
 	// @0x590f7f, the arms @0x590fb0..0x591032 (dfx2.exe)].
 	const bool fixed = state.title != nullptr && state.title->hud_crosshair_fixed;
 	const bool driver = state.combat.driver_crosshair && !fixed;

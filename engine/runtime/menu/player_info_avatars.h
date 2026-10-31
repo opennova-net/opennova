@@ -63,10 +63,10 @@ inline constexpr const char *kPlayerInfoVoiceBank = "menu.lwf";
 // @0x6469b8 against the mask @0x6469c2; CListWnd_OnCommand @0x643cb0 (0x5000001 @0x643ec4);
 // CSpinListWnd_SelectNext @0x64b910 (0x6000001 @0x64b993)]. Jointops.exe registers it for 5 and 9
 // [orig: PlayerInfo_RegisterAllControls @0x561470 - 0x220 @0x561597], dfx2.exe for 6 alone
-// [orig: sub_55F720 @0x55f720 - 0x40 @0x55f847 (dfx2.exe)]; the one body runs either way, the
-// value it stores the picked row's (the list event's +0x10, the step's +8) [orig:
-// PlayerInfo_HandleComboListSelect @0x55fe00 (@0x55fe12..0x55fe1e, @0x55fe3f); sub_55E0C0
-// @0x55e0c0 (@0x55e0d2..0x55e0de, @0x55e0ff) (dfx2.exe)].
+// [orig: PlayerInfo_RegisterAllControls @0x55f720 - 0x40 @0x55f847 (dfx2.exe)]; the one body runs
+// either way, the value it stores the picked row's (the list event's +0x10, the step's +8) [orig:
+// PlayerInfo_HandleComboListSelect @0x55fe00 (@0x55fe12..0x55fe1e, @0x55fe3f);
+// PlayerInfo_HandleComboListSelect @0x55e0c0 (@0x55e0d2..0x55e0de, @0x55e0ff) (dfx2.exe)].
 const char *player_info_combo_list_event(const Title &title);
 
 // The preview model's initial facing, a BAM word: the preview init reseeds the
@@ -77,7 +77,7 @@ const char *player_info_combo_list_event(const Title &title);
 // per-thread stream steps
 // [orig: PlayerInfo_InitPreviewModel @0x5600d0 -- srand(_time64(0))
 //  @0x560120..0x560128, rand() @0x5601a2, cdq / idiv 0B4h @0x5601a7..0x5601ad,
-//  imul 0B60B60h into dword_25DC53C @0x5601b1..0x5601b7].
+//  imul 0B60B60h into g_PlayerPreviewYaw @0x5601b1..0x5601b7].
 int32_t player_info_preview_initial_yaw_bam(uint32_t seed);
 
 // The PLAYER_INFO portrait's motion, stepped once a menu update (the game loop's
@@ -91,15 +91,15 @@ int32_t player_info_preview_initial_yaw_bam(uint32_t seed);
 // the pointer over PLAYER_PREVIEW alone, under a title that hovers it at all
 // (Title::player_info_preview_hover): dfx2.exe's twin clears the hover each
 // update, so its portrait spins at rest and never zooms or sways
-// [orig: sub_55BED0 @0x55bed0, from Menu_UpdateFrame @0x54fb57 - `xor eax, eax`
-//  / `mov dword_25DAAE4, eax` @0x55bf03..0x55bf05 under the registered screen's
+// [orig: PlayerInfo_UpdatePlayerPreviewAnimation @0x55bed0, from Menu_UpdateFrame @0x54fb57 - `xor
+//  eax, eax` / `mov g_PlayerPreviewHovered, eax` @0x55bf03..0x55bf05 under the registered screen's
 //  flag, the target 0 @0x55bf0a, the rest spin @0x55bf9c (dfx2.exe)].
 // [orig: PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0, from Menu_UpdateFrame
 //  @0x5528f7 - the hover walk exiting after PLAYER_PREVIEW @0x55dc36, the blend
-//  flt_25DC538 * 0.95 (flt_7C6FB8) + target * 0.05 (flt_7C68E8) @0x55dc4b..0x55dc61,
+//  g_PlayerPreviewZoomBlend * 0.95 (flt_7C6FB8) + target * 0.05 (flt_7C68E8) @0x55dc4b..0x55dc61,
 //  GetTickCount @0x55dc71 (the unsigned fix-up @0x55dc7b), * 0.0008 (flt_7D5B78),
 //  fsin, * 2^28 (flt_7D5B74) @0x55dc81..0x55dc8f, the error + 0x58000000
-//  @0x55dca4, * -0.05 (flt_7D5B70) @0x55dca8..0x55dcb2, the yaw store dword_25DC53C
+//  @0x55dca4, * -0.05 (flt_7D5B70) @0x55dca8..0x55dcb2, the yaw store g_PlayerPreviewYaw
 //  @0x55dcb9, the rest spin @0x55dcc4; PlayerInfo_RenderPlayerPreview3D @0x5609c0
 //  reads both @0x560a67 / @0x560c3b] (D-PLAYERINFO-37).
 float player_info_preview_blend_step(float blend, bool hovered);

@@ -201,7 +201,8 @@ void test_record_fills_a_lone_combo_spin_list() {
 }
 // The COMBO_LIST callback hears its own control's value change: a combo box's select under
 // Jointops.exe, a spin list's step under dfx2.exe [orig: PlayerInfo_RegisterAllControls
-// @0x561597 (0x220); sub_55F720 @0x55f847 (0x40) (dfx2.exe)], as the runtime names each.
+// @0x561597 (0x220); PlayerInfo_RegisterAllControls @0x55f847 (0x40) (dfx2.exe)], as the runtime
+// names each.
 void test_combo_list_event() {
 	CHECK(std::string(player_info_combo_list_event(kJo)) == "combo");
 	CHECK(std::string(player_info_combo_list_event(kDfx2)) == "spinlist");

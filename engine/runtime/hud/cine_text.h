@@ -64,8 +64,9 @@ std::string cine_epilog_count_text(int32_t points_target, int32_t points_rate, i
 // A TextFade's line by its source (world::CineTextSource), each string in the game's code page:
 // `game_text` (the gametext string the node's section and key name), `banner` (the stored banner,
 // empty for none), sprintf's fill of `game_text` with the node's `text` (dfx2.exe's headings
-// [orig: sub_575990 @0x575b65, sub_5740E0 @0x5744c5 (dfx2.exe)]), or the node's `text` (the
-// text-pointer TextFade's [orig: sub_570FD0 @0x570fd0 - the text pointer +0xA0 (dfx2.exe)]).
+// [orig: Cine_EpilogLoseUpdate @0x575b65, Cine_EpilogStateMachineUpdate @0x5744c5 (dfx2.exe)]), or
+// the node's `text` (the text-pointer TextFade's [orig: CineEventTextFade_Construct @0x570fd0 - the
+// text pointer +0xA0 (dfx2.exe)]).
 std::string cine_event_line(const world::CineEvent &e, const std::string &game_text,
 		const std::string &banner);
 
@@ -81,8 +82,8 @@ GameFontRun cine_event_text_run(const world::CineEvent &e, const std::string &ga
 // other two one file each) and its scale (the bold slot's, else the large one's, which Impact38
 // shares).
 // [orig: CCineEventTextFade_Draw @0x573020 - the switch @0x57311d (-3 @0x573137, -2 @0x573130,
-//  -1 @0x573129); CineEventEpilogCounter_Draw @0x5734de (Large)] [orig: sub_5711C0 @0x5712bd
-//  (dfx2.exe)]
+//  -1 @0x573129); CineEventEpilogCounter_Draw @0x5734de (Large)] [orig: CCineEventTextFade_Draw
+//  @0x5712bd (dfx2.exe)]
 int32_t cine_event_font(const world::CineEvent &e);
 const char *cine_font_file(const HudLabelFontChoice &choice, int32_t font);
 float cine_font_scale(const HudLabelFontChoice &choice, int32_t font);

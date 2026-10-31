@@ -457,8 +457,8 @@ public:
 	// The widget's appearance texture for the states `states` (bit n the appearance state n) set
 	// to `file` at run time, as the game sets a static's: each named state's appearance takes the
 	// IMAGE type and the texture, loaded at once by the texture manager, its own height
-	// [orig: sub_646450 @0x646450 (CTextureManager_LoadOrFindTexture @0x646497, the height
-	//  0xFFFFFFFF); its twin sub_6D3760 @0x6d3760 (dfx2.exe)].
+	// [orig: CWnd_SetAppearanceTexture @0x646450 (CTextureManager_LoadOrFindTexture @0x646497, the
+	//  height 0xFFFFFFFF); its twin CWnd_SetAppearanceTexture @0x6d3760 (dfx2.exe)].
 	void set_widget_image(int id, uint32_t states, const std::string &file);
 	// The file the widget's run-time image names ("" none set).
 	std::string widget_image(int id) const;

@@ -93,7 +93,7 @@ void HudFrameCompiler::element_message_log(const HudFrameState &state, float w,
 	};
 	// CHAT down the left, left-aligned, its inline tags off: a '<' is a glyph
 	// [orig: @0x5b9ebc, x = 32*w/1024 + 2, `push 100h` @0x5b9e9d]; dfx2.exe's
-	// parses them (Title::hud_message_tags, DFX2-88) [orig: sub_5B8CC0
+	// parses them (Title::hud_message_tags, DFX2-88) [orig: HUD_DrawMessageLog
 	// @0x5b8cc0 - `push 0` @0x5b8ded (dfx2.exe)]. SYSTEM down the right,
 	// right-aligned at 990*w/1024, its tags on in both [orig: @0x5b9f02, draw
 	// mode 1, flags 0 @0x5b9ecc].

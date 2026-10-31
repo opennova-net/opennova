@@ -1626,7 +1626,8 @@ void test_campaign_tabs() {
 	// c2 waits on c1; a title-less row shows its file name.
 	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C1"}));
 	CHECK(!menu.is_widget_shown(overlay) && flow.campaign_image() == "a.tga");
-	// CAMPAIGN_IMAGE's default appearance takes the image [orig: sub_6D3760 @0x560464 (dfx2.exe)].
+	// CAMPAIGN_IMAGE's default appearance takes the image [orig: CWnd_SetAppearanceTexture
+	//  @0x560464 (dfx2.exe)].
 	const int image = menu.widget_id("CAMPAIGN_IMAGE");
 	CHECK(menu.widget_image(image) == "a.tga" && menu.widget_image(overlay).empty());
 	// IA_LIST: free.bms alone (the campaign ones incomplete, objective Co-op out, DM out).
@@ -1845,9 +1846,10 @@ void test_row_switch_callers() {
 // type 2) under GAME_TYPE 254 and not under their own game type, enables 254 at its init when one
 // is in the catalog, writes every ADD's Switch 0, and its remove re-shows a removed one under its
 // own value too, until the next filter; Jointops.exe lists every mission under its own value.
-// [orig: sub_555180 @0x555180 (@0x555300..0x555334); sub_556B30 @0x556b30 (@0x556cd5..0x556d18);
-//  sub_556180's chunk @0x555df0 (@0x556076, @0x555f87..0x555faf) (dfx2.exe);
-//  HostDialog_FilterMissionListByGameType @0x556fe0 (@0x55717c)]
+// [orig: HostDialog_FilterMissionListByGameType @0x555180 (@0x555300..0x555334);
+//  UI_InitHostSettingsDialog @0x556b30 (@0x556cd5..0x556d18);
+//  HostDialog_SelectedMissionsTableEvent's chunk @0x555df0 (@0x556076, @0x555f87..0x555faf)
+//  (dfx2.exe); HostDialog_FilterMissionListByGameType @0x556fe0 (@0x55717c)]
 void test_host_dialog_vehicle_missions() {
 	auto doc = flow_document();
 	for (mnu::Window &w : doc.screens[0].roots[0].children)

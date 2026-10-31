@@ -54,9 +54,9 @@ enum class CineEventKind : uint8_t {
 	// builds two; Jointops.exe carries the class (vtable @0x7D6A1C, the step
 	// CineNode_ColorFadeUpdate @0x5736C0) and never constructs one (its
 	// constructor @0x5735D0 has no caller) [orig: CineEventEpilogCounterFont,
-	// vtable ??_7CineEventEpilogCounterFont@@6B@ @0x7D5AD4 - sub_571770 @0x571770,
-	// the start sub_571840 @0x571840, the step CineNode_ColorFadeUpdate @0x571860,
-	// the draw Render_EpilogCounter @0x571A40 (dfx2.exe)].
+	// vtable ??_7CineEventEpilogCounterFont@@6B@ @0x7D5AD4 - CineEventEpilogCounterFont_Construct
+	// @0x571770, the start CineEventEpilogCounterFont_Start @0x571840, the step
+	// CineNode_ColorFadeUpdate @0x571860, the draw Render_EpilogCounter @0x571A40 (dfx2.exe)].
 	EpilogCounterFont,
 };
 
@@ -119,7 +119,7 @@ struct CineEvent {
 	int32_t y = 0;           // +0xAC (float)
 	// The y the line takes while a banner is stored (-1: `y` alone): dfx2.exe's
 	// lose screen sets its debriefing's y from a cursor at 230 that a stored banner
-	// moves to 262 [orig: sub_575990 - 230 @0x5759ad, 262 @0x575c01 (dfx2.exe)].
+	// moves to 262 [orig: Cine_EpilogLoseUpdate - 230 @0x5759ad, 262 @0x575c01 (dfx2.exe)].
 	// The banner is the embedder's (CineTextSource::Banner), so the draw applies
 	// it; no write moves it past the build (the screen holds the script tick).
 	int32_t banner_y = -1;
@@ -150,7 +150,8 @@ struct CineEvent {
 	// An EpilogCounterFont's colours, each its constructor's colour with the
 	// alpha byte raised: the label's (+0x44C) and the value and count columns'
 	// (+0x448); its label slot is `font` (+0x450). A plain counter draws both in
-	// -1. [orig: sub_571770 @0x5717e0..0x5717ff, the font @0x57180f (dfx2.exe)]
+	// -1. [orig: CineEventEpilogCounterFont_Construct @0x5717e0..0x5717ff, the font @0x57180f
+	//  (dfx2.exe)]
 	uint32_t label_color = 0xFFFFFFFFu;
 	uint32_t value_color = 0xFFFFFFFFu;
 
@@ -207,8 +208,8 @@ inline constexpr int32_t kEpilogScreenLetterboxMode = 2;
 // dfx2.exe's screens (EpilogMission::debriefing_screens): the letterbox fades
 // out over one frame from the fade-out's start, the image starts a frame later,
 // and the lines below the heading start 62 frames past it
-// [orig: sub_575990 - CCineEventLetterbox_Construct(t + 48, 1, 2, 0) @0x575ac5,
-//  the image @0x575acf, the lines @0x575bb2; sub_5740E0 @0x574426 / @0x574430 /
+// [orig: Cine_EpilogLoseUpdate - CCineEventLetterbox_Construct(t + 48, 1, 2, 0) @0x575ac5,
+//  the image @0x575acf, the lines @0x575bb2; Cine_EpilogStateMachineUpdate @0x574426 / @0x574430 /
 //  @0x574524 (dfx2.exe)].
 inline constexpr int32_t kEpilogDebriefingLetterboxFrames = 1;
 inline constexpr int32_t kEpilogDebriefingLineDelay = 62;
@@ -234,12 +235,12 @@ inline constexpr const char *kEpilogCounterEndSoundset = "TEXT_END";
 // Sound_PlayInterfaceTriggerSet(g_SndHeadshotTone) @0x5718a5, the registry's
 // HEADSHOTTONE row @0x82E894; its arrival's TEXT_END @0x5718f7 (dfx2.exe)].
 // The round end's parked sound-effects volume plays both at 0 (both screens'
-// SP tail parks it [orig: Server_ProcessRoundEnd @0x513730 -> sub_525240
+// SP tail parks it [orig: Server_ProcessRoundEnd @0x513730 -> Sound_ParkEffectsVolume
 // @0x513bae (dfx2.exe)]), as the embedder's device does.
 inline constexpr const char *kEpilogCounterToneSoundset = "HEADSHOTTONE";
 // The effect a raised high score posts for the embedder, which writes it into
 // the process mission table's row (a = the score, str = the entry's file), as
-// dfx2.exe's win screen writes the entry's +0x11E4 [orig: sub_5740E0 @0x57468f
+// dfx2.exe's win screen writes the entry's +0x11E4 [orig: Cine_EpilogStateMachineUpdate @0x57468f
 // (dfx2.exe)].
 inline constexpr const char *kEpilogHighScoreEffect = "high_score";
 
@@ -289,7 +290,7 @@ enum class EpilogCineMode : int32_t { None = 0, Win = 1, Lose = 2 };
 // What the end screens read of the mission the round plays, which the embedder
 // sets at each mission boot. Jointops.exe's screens read none of it.
 // `debriefing_screens` is the title's (Title::epilog_debriefing_screens): dfx2.exe's
-// screens. The entry is the menu's current mission-table entry (dword_2527358 in
+// screens. The entry is the menu's current mission-table entry (g_CurrentMissionEntry in
 // dfx2.exe, the single-player list's pick, which Game_StartMission re-reads from
 // the rotation's row): its title (+1044), its table's (+1040) [Info]
 // WIN_DEBRIEFING and LOSE_DEBRIEFING, and its high score (+0x11E4, the
@@ -302,7 +303,7 @@ enum class EpilogCineMode : int32_t { None = 0, Win = 1, Lose = 2 };
 //  SinglePlayer_HandleStartEvent @0x560eb4; MissionList_ScanAndBuildFromFiles
 //  @0x5620d0 - the table +1040 @0x5623db (dfx2.exe)] [orig: Game_StartMission
 //  @0x525b95 -> Server_BuildStatusReport @0x530a60 - Napi_CopyString(+36,
-//  dword_A761D4, 64) @0x530aa1 under is_authority]
+//  g_MissionHeaderName, 64) @0x530aa1 under is_authority]
 // A debriefing is present when the table holds its key, its text empty or not
 // (the screens test the entry's text pointer, not its first byte).
 struct EpilogMission {
@@ -354,7 +355,7 @@ struct EpilogCine {
 	// A cine frame has rendered since the process started: the end screens
 	// build only once one has. Process-lifetime: only the cine render pass
 	// writes it (Cine_RenderOverlays @0x570C66), so it crosses every load.
-	// [orig: dword_26970F4]
+	// [orig: g_CineFrameDrawn]
 	bool frame_drawn = false;
 	// The fade states' full-screen quad and its alpha: the live path never
 	// raises the quad (only the unreachable flyaway state 3 does)

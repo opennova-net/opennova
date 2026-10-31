@@ -213,7 +213,7 @@ void test_death_menu_open_latch() {
 	CHECK(!view.state().take_death_menu_open(false, false));
 	CHECK(!view.state().death_menu_open_latch);
 	// That clear found the latch up: the close leg ran, once [orig: @0x5cac8e..0x5cac9c]
-	// [orig: sub_5C9000 @0x5c9c00..0x5c9c0e (dfx2.exe)].
+	// [orig: Render_ProcessMainSceneFrame @0x5c9c00..0x5c9c0e (dfx2.exe)].
 	CHECK(view.state().take_death_menu_close());
 	CHECK(!view.state().take_death_menu_close());
 	// A clear with no latch up runs none.

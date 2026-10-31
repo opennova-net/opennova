@@ -182,8 +182,8 @@ void test_clock(const fnt_font_t *font) {
 // DFX2-114, dfx2.exe's GAMEINFO board: under MSNTITLE the game type's label (in a session) and
 // "<mission> (<expansion>)", then one line lower under TRGTCNT the team lines or the leader
 // lines, every line bold at GAMEINFO one '0' height apart in the restamped twin.
-// [orig: sub_59ABF0 @0x59ABF0 - @0x59ADF7..0x59AEAB, @0x59AEB3..0x59AEEC, TDM @0x59B2BC, TKOTH
-//  @0x59AF0A..0x59B222, the leader lines @0x59B4B3..0x59B70F (dfx2.exe)]
+// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - @0x59ADF7..0x59AEAB, @0x59AEB3..0x59AEEC, TDM
+//  @0x59B2BC, TKOTH @0x59AF0A..0x59B222, the leader lines @0x59B4B3..0x59B70F (dfx2.exe)]
 void test_game_info_board(const fnt_font_t *font) {
 	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
 	const opennova::Title *jo = opennova::title_by_code("jo");
@@ -282,7 +282,7 @@ void test_game_info_board(const fnt_font_t *font) {
 }
 
 // The leader lines' places replace, never shift; the local row follows when unplaced.
-// [orig: sub_59ABF0 @0x59B4F0..0x59B514, @0x59B61D..0x59B70F (dfx2.exe)]
+// [orig: HUD_DrawGameTimerOverlay @0x59B4F0..0x59B514, @0x59B61D..0x59B70F (dfx2.exe)]
 void test_game_info_leader_lines() {
 	HudSessionState s;
 	const auto row = [&](const char *name, int16_t score, uint8_t slot, bool spectator) {
@@ -317,7 +317,7 @@ void test_game_info_leader_lines() {
 // DFX2-82, dfx2.exe's rider lines under the vehicle panel: left-aligned in the bold slot from
 // the silhouette's bottom-left corner, one bold 'W' height a line, half-bright tagcolor_good,
 // the driver's then at most two gunners'; none for Jointops.exe.
-// [orig: sub_5A3DF0 @0x5A3F1B..0x5A3F23, @0x5A4700, @0x5A4711..0x5A4871 (dfx2.exe)]
+// [orig: HUD_DrawVehicleHealthBars @0x5A3F1B..0x5A3F23, @0x5A4700, @0x5A4711..0x5A4871 (dfx2.exe)]
 void test_vehicle_panel_riders(const fnt_font_t *font) {
 	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
 	const opennova::Title *jo = opennova::title_by_code("jo");

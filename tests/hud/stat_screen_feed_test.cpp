@@ -189,8 +189,8 @@ void test_tab_filter_hides_filled_rows() {
 // DFX2-97: the STAT screen's DONE. dfx2.exe's show hides it, its menu-screen pass shows it while
 // the joiner's S2C 0x25 round-reset hold is up, and its press stores mission exit 4 and ends the
 // end-round linger; Jointops.exe registers no DONE and its pass's call is an empty stub.
-// [orig: sub_561780 @0x561780 (@0x561812..0x561834); sub_561000 @0x561000; sub_561130 @0x561130
-//  (@0x561143, @0x56114d) (dfx2.exe); nullsub_130 @0x562130]
+// [orig: StatScreen_ShowCallback @0x561780 (@0x561812..0x561834); StatScreen_UpdateDoneButton
+//  @0x561000; StatScreen_OnDone @0x561130 (@0x561143, @0x56114d) (dfx2.exe); nullsub_130 @0x562130]
 void test_done_button() {
 	mnu::Document doc = stat_document();
 	mnu::Window done;

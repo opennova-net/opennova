@@ -312,8 +312,8 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus = 0);
 // riders world::vehicle_panel_riders walks over the role's occupancy, each named by
 // HUD_GetEntityDisplayName (a rider whose definition this client lacks drops out, as retail's
 // def tests skip it) with its gun weapon's attachtextid. Empty on foot, without a kernel or a
-// replica. [orig: sub_5A3DF0 @0x5A3DF0 - HUD_GetEntityDisplayName @0x5A4714 / @0x5A4765 /
-// @0x5A47F7 (dfx2.exe)]
+// replica. [orig: HUD_DrawVehicleHealthBars @0x5A3DF0 - HUD_GetEntityDisplayName @0x5A4714 /
+// @0x5A4765 / @0x5A47F7 (dfx2.exe)]
 void fill_vehicle_panel_riders(const RoleView &view, std::vector<hud::HudVehicleRider> &out);
 
 // Every stat.mnu RESULTLIST row (the tabs hide filled rows: stat_screen_filter_rows):
@@ -444,7 +444,7 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 // row names, in a session, while it drives a body; else the one the walk held, the local
 // player at first), its team byte as this client holds it, whether it is the local player and
 // its name as the HUD names an entity.
-// [orig: sub_5503A0 @0x55040d..0x5505c3 (dfx2.exe)]
+// [orig: DeathScreen_UpdateTeamLists @0x55040d..0x5505c3 (dfx2.exe)]
 bool deploy_team_list_players(const RoleView &view, std::vector<world::DeployTeamListPlayer> &out);
 
 // The DEATH screen's show / activation writes for THIS client (world::apply_deploy_activation):

@@ -8,11 +8,11 @@
 // the EXPPOINTS line and draws nothing (its four words have no reader), and its 0x81 has no fade,
 // so the element is a title's (Title::hud_exp_points). HudFrameCompiler::element_exp_points draws
 // it.
-// [orig: sub_5A6D20 @0x5A6D20 (dfx2.exe) - g_HUDDeclutterVisible[9] (dword_272501C) @0x5A6EDE,
-//  sub_59B7E0 called @0x5A6EE7 between sub_597F80 @0x5A6ED9 and the CLOCK pair @0x5A6EEC;
-//  NapiNPClientMsg_ScoreDeltaSound @0x42BEF0 -> @0x422350..0x4223E5, sub_59B730 called
-//  @0x4223C5 (dfx2.exe); HUD_ParseHudposToken @0x59F370 (@0x5A0463..0x5A04AF -> dword_27236B4..C0,
-//  no reader)]
+// [orig: HUD_RenderOverlays @0x5A6D20 (dfx2.exe) - g_HUDDeclutterVisible[9] (dword_272501C)
+//  @0x5A6EDE, HUD_DrawExpPoints called @0x5A6EE7 between sub_597F80 @0x5A6ED9 and the CLOCK pair
+//  @0x5A6EEC; NapiNPClientMsg_ScoreDeltaSound @0x42BEF0 -> @0x422350..0x4223E5,
+//  HUD_StartExpPointsFade called @0x4223C5 (dfx2.exe); HUD_ParseHudposToken @0x59F370
+//  (@0x5A0463..0x5A04AF -> dword_27236B4..C0, no reader)]
 
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/hud/score_fanfare.h>
@@ -50,9 +50,9 @@ struct HudExpPointsFade {
 // A fade's start: nothing while the element is hidden or for a duration of 0; else the intensity
 // 1, each channel's distance `color - active` as two zero-extended bytes subtracted in 16 bits, the
 // rate 1 / duration and the pulse percent * 0.01 - 1.
-// [orig: sub_59B730 @0x59B730 (dfx2.exe) - the hidden test @0x59B731, the duration's 16-bit test
-//  @0x59B73E..0x59B746, the 1.0 @0x59B751, the red / green / blue distances @0x59B764..0x59B7AF,
-//  the rate @0x59B760..0x59B7B7, the pulse @0x59B7BD..0x59B7CB]
+// [orig: HUD_StartExpPointsFade @0x59B730 (dfx2.exe) - the hidden test @0x59B731, the duration's
+//  16-bit test @0x59B73E..0x59B746, the 1.0 @0x59B751, the red / green / blue distances
+//  @0x59B764..0x59B7AF, the rate @0x59B760..0x59B7B7, the pulse @0x59B7BD..0x59B7CB]
 void hud_exp_points_fade_start(HudExpPointsFade &fade, bool hidden, uint16_t duration,
 		uint32_t color, uint32_t active, int32_t pulse_percent);
 
@@ -60,7 +60,7 @@ void hud_exp_points_fade_start(HudExpPointsFade &fade, bool hidden, uint16_t dur
 // pulse times it plus 1 and its colour g_HUDColors.active with each channel byte plus its
 // distance times the intensity, truncated, added in 8 bits; at 0 or below the fade clears to zero
 // and the number draws at scale 1 in g_HUDColors.active.
-// [orig: sub_59B7E0 @0x59B7E0 (dfx2.exe) - the step @0x59B805..0x59B81D, the test
+// [orig: HUD_DrawExpPoints @0x59B7E0 (dfx2.exe) - the step @0x59B805..0x59B81D, the test
 //  @0x59B823..0x59B82C, the scale @0x59B83B..0x59B85E, the red @0x59B832 / @0x59B862..0x59B891,
 //  the green @0x59B86A / @0x59B895..0x59B8BA, the blue @0x59B88A / @0x59B8BE..0x59B8E8, the chop
 //  control word `or eax, 0C00h` at each fistp, the clear @0x59B8F6..0x59B91B]

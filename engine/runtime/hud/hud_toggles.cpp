@@ -42,8 +42,8 @@ uint32_t respawn_init(HudToggleState &s, bool in_session) {
 	s.quit_dialog_open = false; // [orig: g_QuitDialogOpen @0x499368]
 	s.help_open = false;
 	s.map_legend_open = false;
-	s.emotes_menu_open = false; // [orig: dword_24C18D4 @0x499377]
-	s.radio_menu_open = false;  // [orig: dword_24C18D8 @0x49937c]
+	s.emotes_menu_open = false; // [orig: g_EmotesMenuOpen @0x499377]
+	s.radio_menu_open = false;  // [orig: g_RadioMenuOpen @0x49937c]
 	s.end_round_stats_open = false;
 	s.briefing_mode = 0;
 	s.briefing_panel_open = false; // [orig: @0x49938B] [orig: @0x49939B (dfx2.exe)]
@@ -84,7 +84,7 @@ uint32_t toggle_briefing(HudToggleState &s, bool in_session) {
 // 79, 82, 84 (+0x00 / +0x4B), then dfx2.exe's rows 53 and 99. A title's catalog that carries
 // no row of the code (dfx2.exe's has no dotsize, no commander_menu; Jointops.exe's no
 // Objectives, no EmoteToggle) binds nothing to it.
-// [orig: word_8159A8 + 108 * row, the token @+0x4B] [orig: rows 53 @0x815EFC, 99 @0x817264
+// [orig: g_BindingRows + 108 * row, the token @+0x4B] [orig: rows 53 @0x815EFC, 99 @0x817264
 //  (dfx2.exe)]
 struct RowId {
 	int code;
@@ -237,7 +237,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// DFX2-96: the Objectives row (flags 0x05000800, no bit 0): out of a session it flips the
 	// briefing panel's window, then the keeping init; in one it re-dispatches Briefing.
 	// [orig: Input_HandleActionBinding @0x49AD50 case 58 - the session test @0x49B6DB, the
-	//  re-dispatch Input_HandleActionBinding(53) @0x49B6E4..0x49B6EE, `xor dword_24BAE80, 1`
+	//  re-dispatch Input_HandleActionBinding(53) @0x49B6E4..0x49B6EE, `xor g_BriefingPanelOpen, 1`
 	//  @0x49B6FB, the keeping init @0x49B702..0x49B707 (dfx2.exe)]
 	if (s.objectives.step(k.objectives, k.active) && admitted(kRowObjectives)) {
 		if (k.in_session) {
@@ -374,8 +374,8 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	}
 	// The F9 emotes and F10 radio menus: flip, then the keeping init (so
 	// opening one closes the other). Both rows are live-player rows.
-	// [orig: case 33 `xor dword_24C18D4, 1` @0x49b6c9 + the wrapper @0x49b6d5;
-	//  case 54 `xor dword_24C18D8, 1` @0x49b6e2 + the wrapper @0x49b6ee; the
+	// [orig: case 33 `xor g_EmotesMenuOpen, 1` @0x49b6c9 + the wrapper @0x49b6d5;
+	//  case 54 `xor g_RadioMenuOpen, 1` @0x49b6e2 + the wrapper @0x49b6ee; the
 	//  row flag test @0x49ad8a..0x49ada0]
 	if (s.audio_emote.step(k.audio_emote, bit0_active && bit0_operand_clear) &&
 			admitted(kRowAudioEmote)) {
@@ -454,11 +454,11 @@ uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 		s.paused = false;
 		return kEscapeClosedWindow | kPauseCleared;
 	}
-	if (s.emotes_menu_open) { // [orig: dword_24C18D4 @0x49b267]
+	if (s.emotes_menu_open) { // [orig: g_EmotesMenuOpen @0x49b267]
 		s.emotes_menu_open = false;
 		return kEscapeClosedWindow;
 	}
-	if (s.radio_menu_open) { // [orig: dword_24C18D8 @0x49b27a]
+	if (s.radio_menu_open) { // [orig: g_RadioMenuOpen @0x49b27a]
 		s.radio_menu_open = false;
 		return kEscapeClosedWindow;
 	}

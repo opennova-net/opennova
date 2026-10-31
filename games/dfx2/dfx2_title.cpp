@@ -65,8 +65,8 @@ constexpr const char *const *kProfileClassKits[] = {
 
 // dfx2.exe's F12 map legend: 20 records, no medic, personmedicable, lfp, farp or armoury entry and
 // a pwrweap one, 52 design units a row (DFX2-89).
-// [orig: sub_497490 @0x497490 (dfx2.exe) - the records from aHudIconPerson @0x8144F8 to the empty
-//  name @0x814868, the row step `mov [esp+8Ch], 34h` @0x497534]
+// [orig: HUD_DrawHelpScreenIcons @0x497490 (dfx2.exe) - the records from aHudIconPerson @0x8144F8
+//  to the empty name @0x814868, the row step `mov [esp+8Ch], 34h` @0x497534]
 constexpr TitleHudMapLegendIcon kHudMapLegendIcons[] = {
 	{"hud_icon_person", 3, 1.0f, 0x7F7F7F7Fu},
 	{"hud_icon_persondead", 8, 1.0f, 0x7F2F3F7Fu},
@@ -96,10 +96,10 @@ constexpr TitleHudMapLegend kHudMapLegend{
 // DFX2-63: dfx2.exe's loading screen: both fonts Arial20b.fnt under 1280 pixels of background and
 // Arial40b.fnt from it, the label in 6CBF00, the band to the width less 139 over a custom
 // background and less 18 over the stock one, and the stage's progress lines 20 (40) apart.
-// [orig: sub_51EC60 @0x51EC60 - the width tests @0x51EE41 / @0x51EEBD, "Arial40b.fnt" @0x51EE48 /
-//  @0x51EEC4, "Arial20b.fnt" @0x51EE4F / @0x51EECB, the label "<c6CBF00>%s:\r\n<cFFFFFF>"
-//  @0x51F008, the band @0x51EF69..0x51EF73, the lines' font and pitch @0x51F0E6..0x51F108
-//  (dfx2.exe)]
+// [orig: Render_LoadingScreen @0x51EC60 - the width tests @0x51EE41 / @0x51EEBD, "Arial40b.fnt"
+//  @0x51EE48 / @0x51EEC4, "Arial20b.fnt" @0x51EE4F / @0x51EECB, the label
+//  "<c6CBF00>%s:\r\n<cFFFFFF>" @0x51F008, the band @0x51EF69..0x51EF73, the lines' font and pitch
+//  @0x51F0E6..0x51F108 (dfx2.exe)]
 constexpr TitleLoadingScreen kLoadingScreen{"Arial20b.fnt", "Arial20b.fnt", 1280, "Arial40b.fnt",
 		"Arial40b.fnt", 0x6CBF00u, 139, 18, true, 20, 40};
 
@@ -287,8 +287,8 @@ Title make() {
 	//  control's registration, @0x556318..0x55640b) (dfx2.exe)]
 	t.host_screen = "NW_MULTI_PLAYER";
 	// DFX2-36: the EXPPOINTS element and its 0x81 fade.
-	// [orig: sub_5A6D20 @0x5A6D20 (@0x5A6EDE..0x5A6EE7); sub_59B7E0 @0x59B7E0; sub_59B730 called
-	//  @0x4223C5 (dfx2.exe)]
+	// [orig: HUD_RenderOverlays @0x5A6D20 (@0x5A6EDE..0x5A6EE7); HUD_DrawExpPoints @0x59B7E0;
+	//  HUD_StartExpPointsFade called @0x4223C5 (dfx2.exe)]
 	t.hud_exp_points = true;
 	// DFX2-91: the lone-gunner panel [orig: sub_5BEEA0 @0x5BEFBA..0x5BEFEC; sub_5B8050 @0x5B8050
 	//  (dfx2.exe)].
@@ -299,10 +299,10 @@ Title make() {
 	// DFX2-93: a done objective's mark is a green square [orig: sub_5B9890 @0x5B9890
 	//  (@0x5B9AFA..0x5B9B12) (dfx2.exe)].
 	t.hud_objective_done_fill = true;
-	// DFX2-94: no pre-round armory line [orig: sub_5BCD20 @0x5BCD20 (@0x5BCDAA..0x5BCE30)
-	//  (dfx2.exe)].
+	// DFX2-94: no pre-round armory line [orig: HUD_DrawGameplayOverlays @0x5BCD20
+	//  (@0x5BCDAA..0x5BCE30) (dfx2.exe)].
 	t.hud_drops_armory_prompt = true;
-	// DFX2-95: the end-game screen's footer in the text box's corners [orig: sub_5BBF20
+	// DFX2-95: the end-game screen's footer in the text box's corners [orig: HUD_DrawEndGameScreen
 	//  @0x5BBF20 (@0x5BCC3D..0x5BCCF0) (dfx2.exe)].
 	t.hud_end_game_footer_corners = true;
 	// DFX2-41 / DFX2-38: the DEATH screen's activation fills the three category lists, its close
@@ -341,19 +341,20 @@ Title make() {
 	t.profile_class_kits = kProfileClassKits;
 	// DFX2-58: the map views' ceiling 6.0 (flt_7CC0C8): the CMAP window's [orig:
 	// CMapWindow_HandleEvent @0x546a60 - @0x5454e6, @0x546fcc] and the DEATH map pane's [orig:
-	// sub_550690 @0x550922 / @0x550967 (the reset @0x550974); sub_550F40 @0x551178 (the right
-	// drag); sub_550C60 @0x550ca6 (the wheel) (dfx2.exe)].
+	// sub_550690 @0x550922 / @0x550967 (the reset @0x550974); CMap_OverlayInputHandler @0x551178
+	// (the right drag); DeathScreen_ZoomStep @0x550ca6 (the wheel) (dfx2.exe)].
 	t.map_view_zoom_max = 6.0f;
 	// DFX2-41: the DEATH map pane's frame, four lines round the pane's rect in 0xFFE1DF4B after
-	// the map [orig: sub_550F40 @0x550fe6..0x551052 (the map, then the frame) (dfx2.exe)].
+	// the map [orig: CMap_OverlayInputHandler @0x550fe6..0x551052 (the map, then the frame)
+	//  (dfx2.exe)].
 	t.death_map_frame_color = 0xFFE1DF4Bu;
 	// DFX2-41: the reveal 360 ticks past the death, MAIN shown before the shroud; the activation
-	// hides MAIN with it [orig: sub_552770 @0x552792 (360), CWnd_SetShown(MAIN, 1) @0x5527b1;
-	// sub_550690 - CWnd_SetShown(MAIN, 0) @0x5507b8 (dfx2.exe)].
+	// hides MAIN with it [orig: DeathScreen_UpdateShroudReveal @0x552792 (360), CWnd_SetShown(MAIN,
+	// 1) @0x5527b1; sub_550690 - CWnd_SetShown(MAIN, 0) @0x5507b8 (dfx2.exe)].
 	t.death_shroud_reveal_ticks = 360;
 	t.death_shroud_main = true;
-	// DFX2-41: the team lists [orig: sub_5503A0 @0x5503a0, called by sub_552770 @0x5527e6
-	// (dfx2.exe)].
+	// DFX2-41: the team lists [orig: DeathScreen_UpdateTeamLists @0x5503a0, called by
+	// DeathScreen_UpdateShroudReveal @0x5527e6 (dfx2.exe)].
 	t.death_screen_team_lists = true;
 	// DFX2-60: the campaign and instant-action tabs [orig: sub_560510 @0x560510 (sub_560190 called
 	//  @0x560525, the IA_LIST test @0x560596, IA_BRIEFING @0x5606a6); sub_560ED0 @0x560ed0 (the tab
@@ -372,30 +373,30 @@ Title make() {
 	// (dfx2.exe)].
 	t.death_respawn_penalty_line = true;
 	// The HUD's own draws (DFX2-81..DFX2-90).
-	// DFX2-90: the map key steps off <-> fullscreen [orig: sub_51DB80 @0x51DB80, called from the
-	//  dispatcher's case 28 @0x4DD702 (dfx2.exe)].
+	// DFX2-90: the map key steps off <-> fullscreen [orig: HUD_CycleMapMode @0x51DB80, called from
+	//  the dispatcher's case 28 @0x4DD702 (dfx2.exe)].
 	t.hud_map_cycle_skips_window = true;
-	// DFX2-83: the Tab board's rows carry no class suffix [orig: sub_423890 @0x423890 - the team
-	//  arm's format @0x423BB1 (dfx2.exe)].
+	// DFX2-83: the Tab board's rows carry no class suffix [orig: HUD_DrawKillList @0x423890 - the
+	//  team arm's format @0x423BB1 (dfx2.exe)].
 	t.hud_kill_list_no_class = true;
-	// DFX2-86: no magnification readout [orig: sub_59CEE0 @0x59CEE0 - the zero readout @0x59D428
-	//  ends it (dfx2.exe)].
+	// DFX2-86: no magnification readout [orig: HUD_DrawScopeOverlayDetails @0x59CEE0 - the zero
+	//  readout @0x59D428 ends it (dfx2.exe)].
 	t.hud_scope_no_magnification = true;
-	// DFX2-84: the crosshair holds still, and no seat swaps it [orig: sub_590A80 @0x590A80 -
+	// DFX2-84: the crosshair holds still, and no seat swaps it [orig: HUD_DrawCrosshair @0x590A80 -
 	//  @0x590F7F, the arms @0x590FB0..0x591032 (dfx2.exe)].
 	t.hud_crosshair_fixed = true;
-	// DFX2-85: the stance icon tinted by the health band [orig: sub_5A1A50 @0x5A1A50 -
+	// DFX2-85: the stance icon tinted by the health band [orig: HUD_DrawStanceIndicator @0x5A1A50 -
 	//  @0x5A1AB0..0x5A1AD4 (dfx2.exe)].
 	t.hud_stance_health_tint = true;
-	// DFX2-88: the message lines parse their tags [orig: sub_5B8CC0 @0x5B8DED, sub_5B8FF0
-	//  @0x5B9036, sub_5B8E80 @0x5B8FAD (dfx2.exe)].
+	// DFX2-88: the message lines parse their tags [orig: HUD_DrawMessageLog @0x5B8DED,
+	//  HUD_DrawServerConsoleLines @0x5B9036, HUD_DrawConsoleMessagesOverlay @0x5B8FAD (dfx2.exe)].
 	t.hud_message_tags = true;
 	t.hud_map_legend = &kHudMapLegend; // DFX2-89
-	// DFX2-87: the tags' modes reach by range [orig: sub_5A27F0 @0x5A27F0 - @0x5A288C..0x5A28C1,
-	//  @0x5A2E1F..0x5A309A (dfx2.exe)].
+	// DFX2-87: the tags' modes reach by range [orig: HUD_DrawEntityLabel @0x5A27F0 -
+	//  @0x5A288C..0x5A28C1, @0x5A2E1F..0x5A309A (dfx2.exe)].
 	t.hud_tag_ranges = true;
-	// DFX2-81: the map's second name walk draws nothing [orig: sub_5A3850 @0x5A3850 -
-	//  @0x5A3D53..0x5A3DD4 (dfx2.exe)].
+	// DFX2-81: the map's second name walk draws nothing [orig: HUD_DrawEntityLabelsAndMarkers
+	//  @0x5A3850 - @0x5A3D53..0x5A3DD4 (dfx2.exe)].
 	t.hud_map_no_bank_names = true;
 	// DFX2-41: STATIC_GAMETYPE [orig: sub_550690 @0x550b41..0x550b77 (dfx2.exe)].
 	t.death_screen_game_type_line = true;
@@ -406,9 +407,10 @@ Title make() {
 	//  @0x5CEEE0 - 0x1E0 @0x5CEF75, 0x2AA @0x5CEF7D, 0x220 @0x5CEF85, 0x2BE @0x5CEF8D (dfx2.exe)].
 	t.nvg_gain_rect = TitleRect{ 480, 682, 544, 702 };
 	// DFX2-45: the Inset's reticle is the scopexh.tga quad, drawn where the four arms draw in
-	//  Jointops.exe [orig: the twin of Render_WeaponInsetScene @0x5C86B0 - sub_591440 @0x5C8E40;
-	//  sub_591440 @0x591440..0x59148D over 0x2724E2C, +4 of dword_2724E28, which
-	//  HUD_LoadAllTextures loads with scopexh.tga @0x59CBE7..0x59CBF3 (dfx2.exe)].
+	//  Jointops.exe [orig: the twin of Render_WeaponInsetScene @0x5C86B0 - HUD_DrawInsetReticleQuad
+	//  @0x5C8E40; HUD_DrawInsetReticleQuad @0x591440..0x59148D over 0x2724E2C, +4 of
+	//  g_HUDScopeCrosshairTexInfo, which HUD_LoadAllTextures loads with scopexh.tga
+	//  @0x59CBE7..0x59CBF3 (dfx2.exe)].
 	t.inset_reticle_quad = true;
 	// DFX2-47: the 512-square FrameFX work targets [orig: the twin of FrameFX_CreateRenderTargets
 	//  @0x5820C0 - `mov eax, 200h` @0x582177; FrameFX_DrawPass @0x580F30 reads the same two words
@@ -428,26 +430,31 @@ Title make() {
 	// DFX2-110: its own binding catalog (above).
 	t.controls = &kControls;
 	// DFX2-96: the I window's how-to, the briefing panel the Objectives window's.
-	// [orig: sub_5BCD20 @0x5BCD20 - sub_5B8160 @0x5BCF86, dword_24BAE80 -> sub_5B9BB0 @0x5BCFB5;
-	//  Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F (dfx2.exe)]
+	// [orig: HUD_DrawGameplayOverlays @0x5BCD20 - HUD_DrawSinglePlayerHowTo @0x5BCF86,
+	//  g_BriefingPanelOpen -> HUD_DrawBriefingPanel @0x5BCFB5; Input_HandleActionBinding @0x49AD50
+	//  case 58 @0x49B6DB..0x49B70F (dfx2.exe)]
 	t.hud_sp_how_to = true;
-	// DFX2-97: the STAT screen's DONE [orig: sub_5616C0 @0x5616c0 - DONE -> sub_561130
-	//  @0x56173b..0x561756; sub_561780 @0x561780 (the hide @0x561812..0x561834); sub_561000
-	//  @0x561000, from the menu-screen pass @0x54b901 (dfx2.exe)], the twins of
+	// DFX2-97: the STAT screen's DONE [orig: HUD_CacheStatPanelValues @0x5616c0 - DONE ->
+	//  StatScreen_OnDone @0x56173b..0x561756; StatScreen_ShowCallback @0x561780 (the hide
+	//  @0x561812..0x561834); StatScreen_UpdateDoneButton @0x561000, from the menu-screen pass
+	//  @0x54b901 (dfx2.exe)], the twins of
 	// HUD_CacheStatPanelValues @0x5627a0, StatScreen_ShowCallback @0x562840 and nullsub_130 @0x562130.
 	t.stat_screen_done = true;
-	// The menu font scale 0.5: the shell's resource init stores flt_7C2A2C (0.5f) in flt_84DD50
-	// ahead of the menu, and the font cache writes that into every menu font's +0x12EC [orig:
-	// Menu_InitShellResources @0x54f750 (@0x54f750..0x54f759); CFontCache_LoadOrGetFont @0x6d8490
-	// (@0x6d8607..0x6d8611); CFontCache_EnsureFontLoaded @0x6d9300 (@0x6d93c0..0x6d93cb)
-	// (dfx2.exe)]. Jointops.exe's twin of the init stores nothing there (@0x552500).
+	// The menu font scale 0.5: the shell's resource init stores flt_7C2A2C (0.5f) in
+	// g_MenuFontScale ahead of the menu, and the font cache writes that into every menu font's
+	// +0x12EC [orig: Menu_InitShellResources @0x54f750 (@0x54f750..0x54f759);
+	// CFontCache_LoadOrGetFont @0x6d8490 (@0x6d8607..0x6d8611); CFontCache_EnsureFontLoaded
+	// @0x6d9300 (@0x6d93c0..0x6d93cb) (dfx2.exe)]. Jointops.exe's twin of the init stores nothing
+	// there (@0x552500).
 	t.menu_font_scale = 0.5f;
 	// DFX2-72: the host screen's combat-vehicle filter and its ADD's Switch default [orig:
-	//  sub_555180 @0x555180 (@0x555300..0x555334), the twin of
-	//  HostDialog_FilterMissionListByGameType @0x556fe0; sub_556B30 @0x556b30 (@0x556cd5..
-	//  0x556d18), the twin of UI_InitHostSettingsDialog @0x558960; the ADD / REMOVE chunk of
-	//  sub_556180 @0x555df0 (the 0 @0x556076, the re-show @0x555f87..0x555faf), the twin of
-	//  HostDialog_AddRemoveSelectedMissions @0x557c10 (dfx2.exe)].
+	//  HostDialog_FilterMissionListByGameType @0x555180 (@0x555300..0x555334), the twin of
+	//  HostDialog_FilterMissionListByGameType @0x556fe0; UI_InitHostSettingsDialog @0x556b30
+	//  (@0x556cd5..
+	//  0x556d18), the twin of UI_InitHostSettingsDialog @0x558960; the ADD / REMOVE
+	//  chunk of HostDialog_SelectedMissionsTableEvent @0x555df0 (the 0 @0x556076, the re-show
+	//  @0x555f87..0x555faf), the twin of HostDialog_AddRemoveSelectedMissions @0x557c10
+	//  (dfx2.exe)].
 	t.host_vehicle_missions = true;
 	t.host_switch_starts_off = true;
 	// DFX2-73: the three category lists carry no NONE row [orig: UI_PopulateThreeCategoryLists
@@ -456,20 +463,21 @@ Title make() {
 	// twin of Jointops.exe's @0x566db0, which inserts it at row 0 of each @0x566f05..0x566f34.
 	t.armory_lists_none_row = false;
 	// DFX2-115: the DEATH map names no one [orig: the twin of MapOverlay_DrawView @0x5A48A0 -
-	//  `push 0` @0x5A4A30, sub_5A3850 @0x5A4A3E (dfx2.exe)].
+	//  `push 0` @0x5A4A30, HUD_DrawEntityLabelsAndMarkers @0x5A4A3E (dfx2.exe)].
 	t.death_map_no_names = true;
 	// DFX2-53: each player drawn as the first combo of its viewer-relative side [orig:
 	//  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EA6..0x5C6F42 (dfx2.exe)].
 	t.player_avatar_by_viewer_side = true;
-	// DFX2-114: the GAMEINFO session board [orig: sub_59ABF0 @0x59ABF0, called from sub_5A71E0
-	//  @0x5A7609 (dfx2.exe)].
+	// DFX2-114: the GAMEINFO session board [orig: HUD_DrawGameTimerOverlay @0x59ABF0, called from
+	//  HUD_RenderAllOverlays @0x5A7609 (dfx2.exe)].
 	t.hud_game_info_board = true;
-	// DFX2-82: the vehicle panel's rider lines [orig: sub_5A3DF0 @0x5A3DF0 - @0x5A4700..0x5A4871
-	//  (dfx2.exe)].
+	// DFX2-82: the vehicle panel's rider lines [orig: HUD_DrawVehicleHealthBars @0x5A3DF0 -
+	//  @0x5A4700..0x5A4871 (dfx2.exe)].
 	t.hud_vehicle_panel_riders = true;
 	// DFX2-64, DFX2-65: the end screens name the mission and debrief it.
-	// [orig: sub_575990 @0x575990 (the lose screen), sub_5740E0 @0x5740E0 case 4 (the win
-	//  screen), both from sub_575E10 @0x575E10 by g_CineMode (dfx2.exe)]
+	// [orig: Cine_EpilogLoseUpdate @0x575990 (the lose screen), Cine_EpilogStateMachineUpdate
+	//  @0x5740E0 case 4 (the win screen), both from Cinematic_EpilogUpdate @0x575E10 by g_CineMode
+	//  (dfx2.exe)]
 	t.epilog_debriefing_screens = true;
 	// DFX2-74: the PLAYER_INFO combo list's rows carry no text: the populate still reads both
 	// parts' names, then formats the empty string at 0x7BF886 with no argument and inserts that
@@ -478,14 +486,14 @@ Title make() {
 	//  (dfx2.exe)].
 	t.player_info_combo_names = false;
 	// DFX2-75: COMBO_LIST's callback heard on a spin list's step alone, its player.mnu's control a
-	// spin list [orig: sub_55F720 @0x55f720 - the mask 0x40 @0x55f847, sub_55E0C0 registered
-	//  @0x55f853 (dfx2.exe)].
+	// spin list [orig: PlayerInfo_RegisterAllControls @0x55f720 - the mask 0x40 @0x55f847,
+	//  PlayerInfo_HandleComboListSelect registered @0x55f853 (dfx2.exe)].
 	t.player_info_combo_spins = true;
 	// DFX2-76: the PLAYER_INFO portrait never hovers: the twin of
 	// PlayerInfo_UpdatePlayerPreviewAnimation tests no window under the pointer and stores 0 as
 	// the hover each update, so the blend's target is 0 and the yaw spins 0x800000 [orig:
-	//  sub_55BED0 @0x55bed0 - @0x55bf03..0x55bf05, the target @0x55bf0a, the spin @0x55bf9c
-	//  (dfx2.exe)].
+	//  PlayerInfo_UpdatePlayerPreviewAnimation @0x55bed0 - @0x55bf03..0x55bf05, the target
+	//  @0x55bf0a, the spin @0x55bf9c (dfx2.exe)].
 	t.player_info_preview_hover = false;
 	return t;
 }

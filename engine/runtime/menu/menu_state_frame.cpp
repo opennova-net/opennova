@@ -275,7 +275,8 @@ void MenuStateFrame::set_widget_rect(int index, int left, int top, int right, in
 void MenuStateFrame::set_widget_image(int index, uint32_t states, const std::string &file) {
 	frame_set_image(state_, index, states, file);
 	// The texture loaded at once, its own height, as the game's frame loads it (godot MenuFrame::
-	// set_widget_image) [orig: sub_646450 @0x646450 - CTextureManager_LoadOrFindTexture @0x646497].
+	// set_widget_image) [orig: CWnd_SetAppearanceTexture @0x646450 -
+	//  CTextureManager_LoadOrFindTexture @0x646497].
 	if (configured_ && compiler_.add_runtime_texture(file) >= 0 && textures_added_) textures_added_(compiler_);
 	++serial_;
 }

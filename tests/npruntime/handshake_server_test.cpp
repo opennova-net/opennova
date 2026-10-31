@@ -795,7 +795,7 @@ bool decode_tag60_mission_strings(const ProtocolMessage &message,
 // MISSIONNAME: the stock Co-op selector's map file; every other mode the
 // mission text's [info]/title, else (an empty title) the header's name
 // (GameConfig::mission_name). [orig: Game_SerializeMissionInfoToDataStream
-// @0x523620 -- the coop arm @0x523758, [info]/title @0x5237df, dword_A761D4
+// @0x523620 -- the coop arm @0x523758, [info]/title @0x5237df, g_MissionHeaderName
 // @0x52380d]
 bool run_tag60_mission_name_selects_by_game_type() {
 	struct Case {

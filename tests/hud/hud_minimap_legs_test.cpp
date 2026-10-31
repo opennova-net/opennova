@@ -708,8 +708,8 @@ void test_entity_labels_and_markers() {
 	full.markers = {person};
 	const HudMapLabel *label = find_label(compiler.compile(full), "^SGT  Brown");
 	CHECK(label != nullptr && label->font == 2, "loop 2 names the person in the regular face");
-	// dfx2.exe's walk names nobody (DFX2-81) [orig: sub_5A3850 @0x5A3850 - @0x5A3D53..0x5A3DD4
-	// (dfx2.exe)].
+	// dfx2.exe's walk names nobody (DFX2-81) [orig: HUD_DrawEntityLabelsAndMarkers @0x5A3850 -
+	// @0x5A3D53..0x5A3DD4 (dfx2.exe)].
 	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
 	const opennova::Title *jo = opennova::title_by_code("jo");
 	CHECK(dfx2 != nullptr && dfx2->hud_map_no_bank_names && jo != nullptr &&

@@ -257,10 +257,10 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w, f
 			// dfx2.exe's done mark is a green square inside the box: a device clear of the rect
 			// (x + 2, y + 2)..(x + 15, y + 15), each corner through the integer design scaling,
 			// opaque whatever the panel alpha, as a clear writes its colour (DFX2-93)
-			// [orig: sub_5B9890 @0x5B9890 - sub_5D38C0(ctx, x + 2, y + 2, x + 15, y + 15,
-			//  0xFF00C000) @0x5B9AFC..0x5B9B12; sub_5D38C0 @0x5D38C0 - CD3DDevice_GetViewportRect
-			//  @0x5D38D0, the corners @0x5D38D9..0x5D3968, CGfxDevice_SetClearColor @0x5D3972,
-			//  CGfxDevice_Clear(rect, 1) @0x5D3988 (dfx2.exe)].
+			// [orig: sub_5B9890 @0x5B9890 - Render_FillViewportRect(ctx, x + 2, y + 2, x + 15, y +
+			//  15, 0xFF00C000) @0x5B9AFC..0x5B9B12; Render_FillViewportRect @0x5D38C0 -
+			//  CD3DDevice_GetViewportRect @0x5D38D0, the corners @0x5D38D9..0x5D3968,
+			//  CGfxDevice_SetClearColor @0x5D3972, CGfxDevice_Clear(rect, 1) @0x5D3988 (dfx2.exe)].
 			const int32_t cx = static_cast<int32_t>(bx);
 			const int32_t cy = static_cast<int32_t>(row_y);
 			const int32_t surface_h = static_cast<int32_t>(h);
@@ -393,10 +393,10 @@ void HudFrameCompiler::element_end_game_screen(const HudFrameState &state, float
 	if (state.title != nullptr && state.title->hud_end_game_footer_corners) {
 		// DFX2-95: "Page n of 4" right-aligned at the box's right edge and the hint left-aligned
 		// at its left, both at its bottom plus the safe top; the corners already scaled are
-		// scaled again, and the bottom once from 644 [orig: sub_5BBF20 @0x5BBF20 - the unscaled
-		// bottom var_1288 @0x5BBF8F..0x5BBF9A; HUD_DrawTextRightAligned_HalfBright(bold, x, y,
-		// text, -1, 1) @0x5BCC3D..0x5BCC84; HUD_DrawTextLeft_HalfBright(bold, x, y, text, -1, 1)
-		// @0x5BCCAE..0x5BCCF0; the flags 1 select nothing, HUD_DrawTextRightAligned_HalfBright
+		// scaled again, and the bottom once from 644 [orig: HUD_DrawEndGameScreen @0x5BBF20 - the
+		// unscaled bottom var_1288 @0x5BBF8F..0x5BBF9A; HUD_DrawTextRightAligned_HalfBright(bold,
+		// x, y, text, -1, 1) @0x5BCC3D..0x5BCC84; HUD_DrawTextLeft_HalfBright(bold, x, y, text, -1,
+		// 1) @0x5BCCAE..0x5BCCF0; the flags 1 select nothing, HUD_DrawTextRightAligned_HalfBright
 		// @0x57ECD0 testing 0x100 and 2 (dfx2.exe)].
 		const float y = static_cast<float>(design_to_screen_y(644, sh)) + kSafeTop;
 		emit_slot_text(label_font_bold_, label_scale_, eg.page_line.c_str(),
@@ -465,7 +465,7 @@ void HudFrameCompiler::element_map_legend(const HudFrameState &state, float w, f
 	//  through Viewport_ScaleToVirtualCoords @0x4974e1/@0x49750d/@0x49752f].
 	// The table and the step are the title's (Title::hud_map_legend, DFX2-89):
 	// Jointops.exe's 40 [orig: @0x497524], dfx2.exe's 52 over its own table
-	// [orig: sub_497490 @0x497490 - @0x497534 (dfx2.exe)].
+	// [orig: HUD_DrawHelpScreenIcons @0x497490 - @0x497534 (dfx2.exe)].
 	const HudMapLegendState &ml = state.map_legend;
 	emit_label_box(128.0f, 96.0f, 896.0f, 672.0f, ml.title, 0xFFFFFFFFu, w, h);
 	const TitleHudMapLegend *legend =

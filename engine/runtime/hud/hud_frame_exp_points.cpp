@@ -1,7 +1,8 @@
 // DFX2-36: dfx2.exe's EXPPOINTS element, its fade's start at the pass's head and its draw in
 // the dispatcher's walk (hud_exp_points.h carries the witness map). Every input rides
 // HudFrameState::exp_points, filled by the role feed (inmatch/role_feeds.h hud_role_facts).
-// [orig: sub_59B730 @0x59B730; sub_59B7E0 @0x59B7E0; sub_5A6D20 @0x5A6D20 (dfx2.exe)]
+// [orig: HUD_StartExpPointsFade @0x59B730; HUD_DrawExpPoints @0x59B7E0; HUD_RenderOverlays
+//  @0x5A6D20 (dfx2.exe)]
 
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_game_text.h>
@@ -16,8 +17,8 @@ void HudFrameCompiler::start_exp_points_fade(const HudFrameState &state) {
 	// g_HUDColors.active and the hudpos line as they stand; the replica counts them, and the pass
 	// starts the last one's (each start overwrites the whole fade, so only the last of a frame's
 	// stands).
-	// [orig: @0x422350..0x4223C5 (dfx2.exe) - sub_59B730 called @0x4223C5 with the tier's
-	//  duration and colour; hud_exp_points.h carries the tiers]
+	// [orig: @0x422350..0x4223C5 (dfx2.exe) - HUD_StartExpPointsFade called @0x4223C5 with the
+	//  tier's duration and colour; hud_exp_points.h carries the tiers]
 	const HudExpPointsState &xp = state.exp_points;
 	if (!exp_fade_primed_) {
 		exp_fade_arms_seen_ = xp.fade_arms;
@@ -41,9 +42,10 @@ void HudFrameCompiler::element_exp_points(const HudFrameState &state, float w, f
 	// colour; then, while the S2C 0x80 / 0x82 tracker is valid and neither value is negative, the
 	// session and total lines, each one bold '0' height (rounded) lower. A tracker with no 0x82
 	// draws no lines: their other arm, g_DebugCheatFlags & 0x8000000, is dead (nothing sets it).
-	// [orig: sub_5A6D20 @0x5A6D20 (dfx2.exe) - `cmp dword_272501C, 0` @0x5A6EDE; sub_59B7E0
-	//  @0x59B7E0 (dfx2.exe) - the hidden test @0x59B7F1, the step @0x59B805..0x59B91B, the anchor
-	//  dword_2724A2C / dword_2724A30 through Viewport_ScaleToVirtualCoords @0x59B921..0x59B945,
+	// [orig: HUD_RenderOverlays @0x5A6D20 (dfx2.exe) - `cmp dword_272501C, 0` @0x5A6EDE;
+	//  HUD_DrawExpPoints @0x59B7E0 (dfx2.exe) - the hidden test @0x59B7F1, the step
+	//  @0x59B805..0x59B91B, the anchor dword_2724A2C / dword_2724A30 through
+	//  Viewport_ScaleToVirtualCoords @0x59B921..0x59B945,
 	//  HUD_DrawTextLeft_HalfBright(g_HUDLabelFontBold, x, y, label, alpha, 0) @0x59B962,
 	//  GameFont_MeasureCharHeight('0') @0x59B96E, GameFont_MeasureTextWidth(label) @0x59B98B, the
 	//  score's x @0x59B994..0x59B9AD and y @0x59B9B1..0x59B9CF, sprintf("%d", dword_A7BA40)

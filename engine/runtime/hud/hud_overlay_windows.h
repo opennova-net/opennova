@@ -65,8 +65,8 @@ struct HudBriefingState {
 	bool shown = false;
 	std::string text;
 	// DFX2-96: the box holds the single-player how-to (hud_toggles.h hud_briefing_window): the
-	// text from its first line, no page kept [orig: sub_5B8160 - HUD_DrawWrappedText(.., 0)
-	// (dfx2.exe)].
+	// text from its first line, no page kept [orig: HUD_DrawSinglePlayerHowTo -
+	// HUD_DrawWrappedText(.., 0) (dfx2.exe)].
 	bool how_to = false;
 };
 
@@ -80,7 +80,7 @@ struct HudBriefingState {
 struct HudEndGameScreenState {
 	bool shown = false;
 	bool valid = false;  // g_SessionStatus' valid word (@0x5bd10f)
-	int page = 0;        // the page the text was built for [orig: dword_28E3D6C]
+	int page = 0;        // the page the text was built for [orig: g_BriefingPage]
 	std::string text;
 	bool tags_live = false; // EndGameScreenPage::tags_live
 	std::string page_line;  // KeyHelp Text/PAGE over (page + 1, 4)
@@ -89,7 +89,7 @@ struct HudEndGameScreenState {
 
 // The briefing pages: the current page and each page's first wrapped line;
 // the drawer writes the next page's start when the page overflows, and the
-// page keys walk them [orig: dword_28E3D6C (page), g_BriefingPageLineOffsets
+// page keys walk them [orig: g_BriefingPage (page), g_BriefingPageLineOffsets
 // @0x28E3D70 (ten starts); HUD_CycleBriefingPage @0x5B9150 (the reset and the cycle)].
 struct HudBriefingPages {
 	static constexpr int kPages = 10;

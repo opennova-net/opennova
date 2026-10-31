@@ -122,7 +122,7 @@ struct QueuedKeys : Keys {
 	bool held_off_keyboard(const char *token) const override { return off.count(token) != 0; }
 };
 
-// The dispatch code of a catalog token's row [orig: word_8159A8 + 108 * row].
+// The dispatch code of a catalog token's row [orig: g_BindingRows + 108 * row].
 int code_of(const char *token) {
 	const ActionDef *def = opennova::controls::default_catalog().for_token(token);
 	return def != nullptr ? def->code : -1;
@@ -836,7 +836,7 @@ bool test_respawn_edges_on_ctrl_r() {
 // head gates by that row's flags (V-L2-s8, D-NET-710): seat1 (row 17) 182, scope (row 105) 6,
 // cycleweaponP (row 39) 212; the held-USE digit's seat pick and the USE release's mount toggle
 // call their handlers directly, past no head.
-// [orig: word_8159A8 + 108 * row (the catalog's codes); Input_HandleSpecialKeys @0x49c5c0 -
+// [orig: g_BindingRows + 108 * row (the catalog's codes); Input_HandleSpecialKeys @0x49c5c0 -
 //  the seat index @0x49c6e6..0x49c6ed, Entity_FindAvailableSeat (the call @0x49c702);
 //  Input_ProcessFrame @0x49d520 - the release
 //  edge @0x49d6c1..0x49d6dc]
@@ -1191,8 +1191,8 @@ bool test_to_special_release_over_a_screen() {
 // names (code - 200): dfx2.exe's Powerup0 (200) category 0, Grenades (204) 4, Accessory (205)
 // 5, Powerup9 (209) 9, Detonator (210) 10; Jointops.exe's Accessory (207) 7, Detonator (208) 8.
 // A code no row of the title carries names no request.
-// [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210 @0x4e1144] [orig: sub_4DD4C0 -
-//  cases 200-210 @0x4de239..0x4de24d (dfx2.exe)]
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210 @0x4e1144] [orig:
+//  Input_HandleActionBinding_0 - cases 200-210 @0x4de239..0x4de24d (dfx2.exe)]
 bool test_title_weapon_rows() {
 	const Catalog &jo = title_catalog(*opennova::title_by_code("jo"));
 	const Catalog &dfx2 = title_catalog(*opennova::title_by_code("dfx2"));

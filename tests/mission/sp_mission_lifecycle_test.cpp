@@ -215,7 +215,7 @@ w::EpilogMission dfx2_mission(bool with_debriefings) {
 // image a frame later, MISSION FAILED sprintf'd over the entry's title in Impact38 yellow 48
 // frames on, then 62 frames on the banner and the entry's LOSE_DEBRIEFING (x 192, 640 wide,
 // y 230, 262 past a banner) and the key help 124 frames past those (32 more past a debriefing).
-// [orig: sub_575990 @0x575a38..0x575dac (dfx2.exe)]
+// [orig: Cine_EpilogLoseUpdate @0x575a38..0x575dac (dfx2.exe)]
 void test_dfx2_lose_screen() {
 	const std::map<std::string, std::string> files;
 	for (const bool debriefed : {true, false}) {
@@ -304,7 +304,7 @@ void test_dfx2_lose_screen() {
 // enemy and team counters 60 apart at y 210 / 242 / 274 with the value at x 832 (no
 // FRIENDLYUNITS line), then the entry's WIN_DEBRIEFING at (47, 475), 930 wide, and the key help
 // 60 frames on at y 700.
-// [orig: sub_5740E0 case 4 @0x57437d..0x57481d (dfx2.exe)]
+// [orig: Cine_EpilogStateMachineUpdate case 4 @0x57437d..0x57481d (dfx2.exe)]
 void test_dfx2_win_screen() {
 	const std::map<std::string, std::string> files;
 	for (const bool debriefed : {true, false}) {
@@ -387,7 +387,7 @@ void test_dfx2_win_screen() {
 // equal or lower one keeps it and draws it white; a negative total is a huge unsigned one, so it
 // raises; with no entry the cine's own 0 is raised and nothing is posted; with no local slot
 // neither row is built and the cursor stays.
-// [orig: sub_5740E0 @0x574666..0x574758 (dfx2.exe)]
+// [orig: Cine_EpilogStateMachineUpdate @0x574666..0x574758 (dfx2.exe)]
 void test_dfx2_high_score() {
 	const std::map<std::string, std::string> files;
 	struct Case {
@@ -1089,7 +1089,7 @@ int main() {
 		CHECK(!rw.epilog.active && rw.epilog.mode == w::EpilogCineMode::None);
 		CHECK(rw.epilog.events.empty() && !rw.epilog.screen_active);
 		// The process-lifetime words cross over: the entity-update counter and
-		// the cine's drawn flag [orig: g_EntityUpdateCounter; dword_26970F4].
+		// the cine's drawn flag [orig: g_EntityUpdateCounter; g_CineFrameDrawn].
 		CHECK(rw.entity_update_counter == counter_at_exit);
 		CHECK(rw.epilog.frame_drawn);
 		CHECK(!fresh.world().epilog.frame_drawn);

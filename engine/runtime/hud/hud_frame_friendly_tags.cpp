@@ -205,9 +205,9 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float s
 		// FAR/BRIEF within 300 u (friendly_tag_text_visible), its BRIEF ticks. dfx2.exe's
 		// FAR/BRIEF names every tag, its FULL names a tag within its reach or the HUD target
 		// cursor's and ticks the rest, its BRIEF ticks (Title::hud_tag_ranges, DFX2-87)
-		// [orig: sub_5A27F0 @0x5a27f0 - the switch's case 1 @0x5a2f04, case 2's `v76 >= v77 &&
-		//  a1 != g_HUDTargetCursorEntity` @0x5a2e47 into the tick @0x5a30a0, case 3 @0x5a309a
-		//  (dfx2.exe)].
+		// [orig: HUD_DrawEntityLabel @0x5a27f0 - the switch's case 1 @0x5a2f04, case 2's `v76 >=
+		//  v77 && a1 != g_HUDTargetCursorEntity` @0x5a2e47 into the tick @0x5a30a0, case 3
+		//  @0x5a309a (dfx2.exe)].
 		bool text_form = false;
 		bool tick_form = false;
 		if (state.title != nullptr && state.title->hud_tag_ranges) {

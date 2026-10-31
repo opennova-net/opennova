@@ -157,8 +157,8 @@ void damage_blur_replaces_then_cross_fades() {
 // health ceiling takes the capture, its downsample and the Ring pass at alpha
 // min(sqrt((0x10000 - fraction) / 32768), 1), radius (2.5 f + 0.5) / 512, base 1/1024; it runs
 // ahead of the death blur. Jointops.exe's scene frame never calls it.
-// [orig: sub_583B60 @0x583B60; FrameFX_DrawPass @0x582bb0 (the 10 vertices)] [orig: the twin of
-//  Render_ProcessMainSceneFrame @0x5c9000 - @0x5c98e2..0x5c995d (dfx2.exe)]
+// [orig: FrameFX_LowHealthRing @0x583B60; FrameFX_DrawPass @0x582bb0 (the 10 vertices)] [orig: the
+//  twin of Render_ProcessMainSceneFrame @0x5c9000 - @0x5c98e2..0x5c995d (dfx2.exe)]
 void low_health_ring_runs_below_the_ceiling_under_its_title() {
 	FrameFxPlannerState state;
 	ScriptedRand rand;

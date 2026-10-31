@@ -148,7 +148,7 @@ void test_the_waypoint_tint(const fnt_font_t *font) {
 // DFX2-93: a done objective under dfx2.exe's title is a green square cleared inside its box, the
 // corners (x + 2, y + 2)..(x + 15, y + 15) through the integer design scaling and opaque; under
 // Jointops.exe's (and a null title) a red X of six lines. The box x is 15 + 24, the first row's y
-// 240 + 24 [orig: sub_5B9890 @0x5B9AFC..0x5B9B12; sub_5D38C0 @0x5D38C0 (dfx2.exe)]
+// 240 + 24 [orig: sub_5B9890 @0x5B9AFC..0x5B9B12; Render_FillViewportRect @0x5D38C0 (dfx2.exe)]
 // [orig: HUD_DrawWinConditions @0x5BABA4..0x5BAC5B].
 void test_the_objective_done_mark(const fnt_font_t *font) {
 	CHECK(title("dfx2").hud_objective_done_fill);
@@ -199,7 +199,7 @@ void test_the_objective_done_mark(const fnt_font_t *font) {
 
 // DFX2-94: under dfx2.exe's title the pre-round armory line (prompt 1) draws nothing, menu open or
 // not; the bay and FARP lines (2, 3, 4) draw as under Jointops.exe's, which draws all four
-// [orig: sub_5BCD20 @0x5BCDAA..0x5BCE30 (dfx2.exe)] [orig: HUD_DrawGameplayOverlays
+// [orig: HUD_DrawGameplayOverlays @0x5BCDAA..0x5BCE30 (dfx2.exe)] [orig: HUD_DrawGameplayOverlays
 // @0x5BDEE9..0x5BDF45].
 void test_the_armory_line(const fnt_font_t *font) {
 	CHECK(title("dfx2").hud_drops_armory_prompt);
@@ -227,7 +227,7 @@ void test_the_armory_line(const fnt_font_t *font) {
 
 // DFX2-95: dfx2.exe's end-game (I) screen footer sits in the text box's corners; Jointops.exe's
 // (and Acid Gambit's, its HUD) centres both lines (hud_overlay_windows_test pins the layout)
-// [orig: sub_5BBF20 @0x5BCC3D..0x5BCCF0 (dfx2.exe)] [orig: HUD_DrawEndGameScreen
+// [orig: HUD_DrawEndGameScreen @0x5BCC3D..0x5BCCF0 (dfx2.exe)] [orig: HUD_DrawEndGameScreen
 // @0x5BDD67..0x5BDE31].
 void test_the_end_game_footer_is_dfx2s() {
 	CHECK(title("dfx2").hud_end_game_footer_corners);

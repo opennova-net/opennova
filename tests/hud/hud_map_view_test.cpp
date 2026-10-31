@@ -376,7 +376,8 @@ void test_death_compile() {
         CHECK(out.over_lines[0].color == 0x704040FFu);
     }
     // A pane with a frame (dfx2.exe's, its title's colour) draws it after the crosshair: top,
-    // right, bottom, left round the rect [orig: sub_550F40 @0x550ff9..0x551052 (dfx2.exe)].
+    // right, bottom, left round the rect [orig: CMap_OverlayInputHandler @0x550ff9..0x551052
+    //  (dfx2.exe)].
     {
         DeathMapFrame framed = frame;
         framed.frame_color = 0xFFE1DF4Bu;
@@ -651,7 +652,7 @@ void test_command_waypoints() {
 // ceiling clear the word.
 // [orig: DeathScreen_UpdateShroudReveal @0x5547b9..0x5547d8; CMap_OverlayInputHandler
 //  @0x5544cb / @0x5545ce; DeathScreen_UpdateUI @0x55340c] [orig: sub_550CF0 @0x550e9f..0x550eb1;
-//  sub_552770 @0x552820..0x552845 (dfx2.exe)]
+//  DeathScreen_UpdateShroudReveal @0x552820..0x552845 (dfx2.exe)]
 void test_death_zoom_ease() {
     DeathMapView v;
     v.on_load();
@@ -679,8 +680,8 @@ void test_death_zoom_ease() {
 
 // The title's pane: dfx2.exe's ceiling 6.0 for the right drag, the wheel and the fit (a fit
 // landing on it resets the pan and the target), and its frame colour on the render.
-// [orig: sub_550F40 @0x551178; sub_550C60 @0x550ca6; sub_550690 @0x550922 / @0x550974
-//  (dfx2.exe)]
+// [orig: CMap_OverlayInputHandler @0x551178; DeathScreen_ZoomStep @0x550ca6; sub_550690 @0x550922 /
+//  @0x550974 (dfx2.exe)]
 void test_death_title_pane() {
     opennova::Title dfx2;
     dfx2.map_view_zoom_max = 6.0f;
@@ -772,7 +773,7 @@ void test_death_zone_markers() {
 // its marker alone where the title's map view passes 0 (dfx2.exe's).
 // [orig: MapOverlay_DrawView @0x5a58e0 - @0x5a5a1b..0x5a5a29; HUD_DrawEntityLabelsAndMarkers
 //  @0x5a49e0 - the names gate @0x5a4dbb] [orig: the twin @0x5a48a0 - `push 0` @0x5a4a30;
-//  sub_5A3850 @0x5a3850 - @0x5a3c31 (dfx2.exe)]
+//  HUD_DrawEntityLabelsAndMarkers @0x5a3850 - @0x5a3c31 (dfx2.exe)]
 void test_death_map_names() {
     DeathMapView v;
     v.on_load();

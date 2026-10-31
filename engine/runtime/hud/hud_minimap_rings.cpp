@@ -220,9 +220,9 @@ static void koth_zone_ring(MapCompile &c, const HudMinimapOverlays &ov,
 
 // The location label: the g_LocationNames entry at the entity's int16 +0x280 index, bold,
 // centred on the UNROTATED projection, (alpha << 24) + 0x9F9F9F — the half-bright drawer forces
-// that alpha opaque. [orig: @0x5a75a8..0x5a7600 (ctx+64's alpha); sub_5973B0 @0x5973B0, the
-// DEATH map's (its 255) in dfx2.exe's twin sub_595710 @0x595710; the index is stamped by
-// Entity_SpawnFromBMSRecord @0x40F180..0x40F20C]
+// that alpha opaque. [orig: @0x5a75a8..0x5a7600 (ctx+64's alpha); Minimap_DrawLocationLabel
+// @0x5973B0, the DEATH map's (its 255) in dfx2.exe's twin Minimap_DrawLocationLabel @0x595710; the
+// index is stamped by Entity_SpawnFromBMSRecord @0x40F180..0x40F20C]
 static void location_label(MapCompile &c, const HudMinimapOverlays &ov,
 		const HudMinimapPoolEntity &e) {
 	if (e.location_index < 0 || static_cast<size_t>(e.location_index) >= ov.location_names.size())
@@ -265,8 +265,8 @@ void draw_capture_zone_rings(MapCompile &c) {
 	const HudMinimapOverlays *ov = c.input.overlays;
 	if (ov == nullptr) return;
 	// [orig: the twin of HUD_DrawMapOverlay @0x5a4fc0 - the walk @0x5a5da9..0x5a5e68: 6027's
-	//  ring inline @0x5a5de3..0x5a5e3a, 6028's through sub_5958E0 @0x5a5e68 (sub_5958E0 @0x5958e0,
-	//  the same ring) (dfx2.exe)]
+	//  ring inline @0x5a5de3..0x5a5e3a, 6028's through Minimap_DrawCaptureZoneRing @0x5a5e68
+	//  (Minimap_DrawCaptureZoneRing @0x5958e0, the same ring) (dfx2.exe)]
 	for (const HudMinimapPoolEntity &e : ov->pool3)
 		if (e.def_id == 6027 || e.def_id == 6028)
 			capture_zone_ring(c, e);
@@ -276,8 +276,8 @@ void draw_death_map_zone_markers(MapCompile &c) {
 	const HudMinimapOverlays *ov = c.input.overlays;
 	if (ov == nullptr) return;
 	// [orig: the twin of MapOverlay_DrawView @0x5a48a0 - the walk @0x5a4a62..0x5a4aba:
-	//  Minimap_DrawKothZoneRing @0x5a4aa2 for 6006, sub_595710(entity, 255) @0x5a4aba for 2044
-	//  (dfx2.exe)]
+	//  Minimap_DrawKothZoneRing @0x5a4aa2 for 6006, Minimap_DrawLocationLabel(entity, 255)
+	//  @0x5a4aba for 2044 (dfx2.exe)]
 	for (const HudMinimapPoolEntity &e : ov->pool3) {
 		if (e.def_id == def::DEF_TYPE_KOTH_CENTRE)
 			koth_zone_ring(c, *ov, e);

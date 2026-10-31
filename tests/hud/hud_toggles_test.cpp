@@ -1007,7 +1007,7 @@ static void test_row_tokens_are_the_catalog_rows() {
 // it. Out of a session its I window draws the how-to where Jointops.exe's draws the briefing
 // panel, which dfx2.exe's draws for the Objectives window.
 // [orig: Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F; Game_InitRespawnState
-//  @0x49939B; the escape leg @0x49B2EA; sub_5BCD20 @0x5BCF74..0x5BCFB5 (dfx2.exe)]
+//  @0x49939B; the escape leg @0x49B2EA; HUD_DrawGameplayOverlays @0x5BCF74..0x5BCFB5 (dfx2.exe)]
 void test_objectives_window() {
 	CHECK(std::strcmp(hud_toggle_row_token(kRowObjectives), "Objectives") == 0 &&
 			hud_toggle_row_code(kRowObjectives) == 58);
@@ -1038,7 +1038,7 @@ void test_objectives_window() {
 	// how-to, either's the end-game screen in one. The briefing panel's own word is not the
 	// I window's: it changes none of this (it draws at its own slot, after the win conditions).
 	// [orig: HUD_DrawGameplayOverlays @0x5BE12C..0x5BE145, @0x5BE16B..0x5BE174]
-	// [orig: sub_5BCD20 @0x5BCF6D..0x5BCF86, @0x5BCFAC..0x5BCFB5 (dfx2.exe)]
+	// [orig: HUD_DrawGameplayOverlays @0x5BCF6D..0x5BCF86, @0x5BCFAC..0x5BCFB5 (dfx2.exe)]
 	HudToggleState w;
 	w.briefing_mode = kBriefingModeOpen;
 	for (const bool panel : {false, true}) {
