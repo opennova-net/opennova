@@ -2,6 +2,7 @@
 // AI system, then the AI is ticked to prove the brains/nav are wired to the real mission
 // data (entities patrol their authored routes). See engine/runtime/mission/promote.cpp.
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +12,7 @@
 #include <string>
 
 #include <base/io/log.h>
+#include <formats/mission/bms_edit.h>
 #include <runtime/mission/promote.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/friendly_tags.h>
@@ -1224,6 +1226,38 @@ static void test_dfx2_walks_the_loadout_chunk_unrepaired() {
                              record("WPN_AK47AUTO", "", "1", "2") };
     mission::stash_mission_loadout_rules(file, title_rules("dfx2"), availability, kit);
     CHECK(same(kit, { { "WPN_M4AUTO", 5, 2, 0 } }));
+
+    // A parsed chunk is walked as the file holds it: a three-string record followed by an empty
+    // string ends Jointops.exe's repaired records there (the empty string takes the name's place),
+    // while dfx2.exe's stride takes that empty string as A's fourth and walks on to B, stopping
+    // on the chunk's closing NUL.
+    // [orig: AIProfile_SanitizeConfigData @0x40CFE0] [orig: Mission_LoadBMSFile @0x40F330 - the
+    //  stride's empty fourth @0x40F652, the next stride @0x40F6B1 (dfx2.exe)]
+    bms::File parsed;
+    {
+        bms::File blank;
+        mission::make_default(blank);
+        std::vector<uint8_t> bytes;
+        std::string error;
+        CHECK(bms::write(blank, bytes, error));
+        static const char kChunk[] = "A\0-1\0-1\0\0B\0-1\0-1\0-1\0"; // and the literal's closing NUL
+        bytes.insert(bytes.begin() + bms::kHeaderSize, kChunk, kChunk + sizeof(kChunk));
+        bytes[offsetof(bms::Header, weapon_loadout_chunk_len)] = static_cast<uint8_t>(sizeof(kChunk));
+        CHECK(bms::parse(bytes.data(), bytes.size(), parsed, error));
+    }
+    CHECK(parsed.loadout.entries.size() == 1 && parsed.loadout.entries[0].name == "A" &&
+          !parsed.loadout.entries[0].has_flags);
+    CHECK((parsed.loadout.chunk_strings ==
+           std::vector<std::string>{ "A", "-1", "-1", "", "B", "-1", "-1", "-1", "" }));
+    mission::stash_mission_loadout_rules(parsed, title_rules("jo"), availability, kit);
+    CHECK(same(kit, { { "A", -1, -1, -1 } }));
+    mission::stash_mission_loadout_rules(parsed, title_rules("dfx2"), availability, kit);
+    CHECK(same(kit, { { "A", -1, -1, 0 }, { "B", -1, -1, -1 } }));
+    // An edit of the records leaves the chunk the parse read: the walk takes the strings the
+    // writer writes for them, as the file a save writes holds.
+    parsed.loadout.entries[0].name = "C";
+    mission::stash_mission_loadout_rules(parsed, title_rules("dfx2"), availability, kit);
+    CHECK(same(kit, { { "C", -1, -1, 0 } }));
 }
 
 // Each pool's used count after the load: pools 1..3 take their record count, a

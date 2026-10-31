@@ -577,6 +577,7 @@ bool contains_nul(const std::string& value) {
 }
 
 bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_t>& out, std::string& error);
+bool weapon_loadout_equal(const WeaponLoadout& a, const WeaponLoadout& b);
 
 // The first three strings are opaque. Only a missing fourth string is repaired;
 // an alphabetic, zero-valued candidate remains the next record's name.
@@ -599,6 +600,16 @@ bool loadout_has_fourth_field(const std::string& value) {
 
 void parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& out) {
     out.entries.clear();
+    // Every string of the chunk as it stands, for the walk that reads it unrepaired
+    // (loadout_chunk_strings): split at each NUL, empty strings kept; a damaged chunk's
+    // unterminated last bytes are one more (D-EVT-7).
+    out.chunk_strings.clear();
+    for (size_t start = 0; start < raw.size();) {
+        size_t end = start;
+        while (end < raw.size() && raw[end] != 0) ++end;
+        out.chunk_strings.emplace_back(reinterpret_cast<const char*>(raw.data() + start), end - start);
+        start = end + 1;
+    }
     // A damaged chunk can end inside a record (shipped missions do: mission_corpus names them).
     // Bound those reads to this chunk: missing string bytes read as NUL, like
     // the other format fields, instead of retail's read beyond raw_loadout.
@@ -748,6 +759,27 @@ bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first) {
             return false;
     }
     return back.entries.size() == loadout.entries.size();
+}
+
+std::vector<std::string> loadout_chunk_strings(const WeaponLoadout& loadout) {
+    if (!loadout.chunk_strings.empty()) {
+        std::vector<uint8_t> chunk;
+        for (const std::string& value : loadout.chunk_strings) {
+            chunk.insert(chunk.end(), value.begin(), value.end());
+            chunk.push_back(0);
+        }
+        WeaponLoadout parsed;
+        parse_weapon_loadout_chunk(chunk, parsed);
+        if (weapon_loadout_equal(parsed, loadout)) return loadout.chunk_strings;
+    }
+    std::vector<std::string> out;
+    for (const WeaponLoadoutRecord& entry : loadout.entries) {
+        out.push_back(entry.name);
+        out.push_back(entry.ammo_primary);
+        out.push_back(entry.ammo_secondary);
+        if (entry.has_flags) out.push_back(entry.flags.empty() ? "-1" : entry.flags);
+    }
+    return out;
 }
 
 bool is_bms(const uint8_t* data, size_t size) {

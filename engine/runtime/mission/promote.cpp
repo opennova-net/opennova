@@ -1334,25 +1334,21 @@ void stash_mission_loadout_rules(
         return entry;
     };
     if (!rules.bms_loadout_sanitized) {
-        // dfx2.exe walks the chunk as the file holds it: a record that wrote three strings
-        // (has_flags false) gives three, so its stride takes the next record's name as the
-        // fourth, and the strides after it start on that record's numbers, names the walk's
-        // def lookup then drops (world::weapon_kit_filter_by_availability). An empty string
-        // where a name is due ends the walk. A stride past the chunk's last string reads empty
-        // strings, the parse's bound on a short chunk (D-EVT-7): the first is the chunk's
-        // closing NUL, where retail's walk then reads on into its stack buffer.
+        // dfx2.exe walks the chunk as the file holds it, four strings a stride, any of the three
+        // after the name empty: a record that wrote three strings (has_flags false) gives three,
+        // so its stride takes the next record's name as the fourth, and the strides after it
+        // start on that record's numbers, names the walk's def lookup then drops
+        // (world::weapon_kit_filter_by_availability); a stride whose fourth is the empty string
+        // the repair stops at walks on past it (bms::WeaponLoadout::chunk_strings). An empty
+        // string where a name is due ends the walk. A stride past the chunk's last string reads
+        // empty strings, the parse's bound on a short chunk (D-EVT-7), where retail's walk reads
+        // on into its stack buffer.
         // [orig: Mission_LoadBMSFile @0x40F330 - strlen @0x40F599, the stride
         //  @0x40F610..0x40F65D, the next stride and its NUL test @0x40F6B1..0x40F6B6 (dfx2.exe)]
-        std::vector<const std::string *> strings;
-        for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
-            strings.push_back(&row.name);
-            strings.push_back(&row.ammo_primary);
-            strings.push_back(&row.ammo_secondary);
-            if (row.has_flags) strings.push_back(&row.flags);
-        }
+        const std::vector<std::string> strings = bms::loadout_chunk_strings(mission.loadout);
         static const std::string kNone;
         const auto at = [&](size_t i) -> const std::string & {
-            return i < strings.size() ? *strings[i] : kNone;
+            return i < strings.size() ? strings[i] : kNone;
         };
         for (size_t i = 0; !at(i).empty(); i += 4)
             r_kit_rows.push_back(kit_row(at(i), at(i + 1), at(i + 2), at(i + 3)));
