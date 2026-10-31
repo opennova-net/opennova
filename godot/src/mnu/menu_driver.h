@@ -362,6 +362,13 @@ public:
 	// A stat tab's filter over the filled table: the rows shown or hidden by their team
 	// (inmatch stat_screen_feed.h stat_screen_filter_rows carries the witness).
 	void filter_stat_results(int p_id, int p_tab);
+	// DFX2-97: the STAT screen's DONE under `sim`'s title (engine inmatch/stat_screen_feed.h
+	// stat_screen_hide_done, stat_screen_show_done and stat_screen_done_pressed carry the
+	// witness): the show's hide, a frame's show while the role's round-reset hold is up, and a
+	// press, which acts on a joiner alone. Each false when it did nothing.
+	bool hide_stat_done(const Ref<Simulation> &p_sim);
+	bool show_stat_done(const Ref<Simulation> &p_sim);
+	bool stat_done_pressed(const Ref<Simulation> &p_sim);
 	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
 	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
 	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);

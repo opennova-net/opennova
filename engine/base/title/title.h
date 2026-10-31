@@ -404,6 +404,12 @@ struct Title {
 	// (runtime/hud/hud_toggles.h hud_briefing_window). False (Jointops.exe): the Briefing window
 	// draws the briefing panel; the how-to has no caller. On the Title: the executable's own HUD.
 	bool hud_sp_how_to = false;
+	// DFX2-97: the end-round STAT screen's DONE (inmatch/stat_screen_feed.h): its show hides it,
+	// the menu-screen pass shows it while a joiner's S2C 0x25 round-reset hold is up, and its press
+	// ends the joiner's end-round linger (mission exit 4). False (Jointops.exe): no DONE is
+	// registered and the pass's call there is an empty stub [orig: nullsub_130 @0x562130, from
+	// UI_ProcessMenuScreenFrame @0x54e681; HUD_CacheStatPanelValues @0x5627a0].
+	bool stat_screen_done = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

@@ -19,6 +19,7 @@
 #include "simulation/simulation.h"
 #include "util/string_convert.h"
 
+#include <runtime/inmatch/joiner_role.h> // the STAT DONE press's runtime
 #include <runtime/inmatch/role_feeds.h> // deploy_table_zones
 #include <base/title/title.h>
 #include <runtime/inmatch/stat_screen_feed.h>
@@ -742,6 +743,24 @@ void MenuDriver::set_deploy_list_items(int p_id, const TypedArray<DeployListRow>
 	runtime_.set_widget_items(p_id, opennova::world::deploy_list_items(rows));
 }
 
+bool MenuDriver::hide_stat_done(const Ref<Simulation> &p_sim) {
+	if (p_sim.is_null()) return false;
+	return opennova::inmatch::stat_screen_hide_done(runtime_, p_sim->role_view().title);
+}
+
+bool MenuDriver::show_stat_done(const Ref<Simulation> &p_sim) {
+	if (p_sim.is_null()) return false;
+	const opennova::inmatch::RoleView view = p_sim->role_view();
+	const bool hold = view.runtime != nullptr && view.runtime->state().round_reset_hold;
+	return opennova::inmatch::stat_screen_show_done(runtime_, view.title, hold);
+}
+
+bool MenuDriver::stat_done_pressed(const Ref<Simulation> &p_sim) {
+	if (p_sim.is_null() || !p_sim->is_joiner() || p_sim->joiner_role_ == nullptr) return false;
+	return opennova::inmatch::stat_screen_done_pressed(p_sim->role_view().title,
+			p_sim->joiner_role_->client_runtime());
+}
+
 bool MenuDriver::fill_deploy_spawn_table(const Ref<Simulation> &p_sim, Object *p_hud,
 		const Ref<RtxtStringFile> &p_gametext) {
 	const opennova::hud::HudLayout defaults;
@@ -1339,6 +1358,9 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::fill_stat_results);
 	ClassDB::bind_method(D_METHOD("filter_stat_results", "id", "tab"),
 			&MenuDriver::filter_stat_results);
+	ClassDB::bind_method(D_METHOD("hide_stat_done", "sim"), &MenuDriver::hide_stat_done);
+	ClassDB::bind_method(D_METHOD("show_stat_done", "sim"), &MenuDriver::show_stat_done);
+	ClassDB::bind_method(D_METHOD("stat_done_pressed", "sim"), &MenuDriver::stat_done_pressed);
 	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
 			&MenuDriver::set_deploy_list_items);
 	ClassDB::bind_method(D_METHOD("fill_deploy_spawn_table", "sim", "hud", "gametext"),

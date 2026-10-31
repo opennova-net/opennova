@@ -179,6 +179,9 @@ func tick() -> void:
 			_tear_down_screens()
 			_open_stat_screen(sim)
 	elif is_open():
+		# The menu-screen pass's DONE leg: shown while the round-reset hold is up, under a title
+		# that registers it (MenuDriver.show_stat_done; DFX2-97).
+		_driver.show_stat_done(sim)
 		_driver.tick(_view.frame_clock_ms)
 
 
@@ -239,6 +242,9 @@ func _populate(sim: Simulation) -> void:
 		if overall >= 0:
 			_driver.set_widget_checked(overall, true)
 	_fill_table(sim, list_id)
+	# The show ends by hiding DONE, under a title that registers it (MenuDriver.hide_stat_done;
+	# DFX2-97).
+	_driver.hide_stat_done(sim)
 
 
 # One table fill: the columns the populate defines (stat.mnu's RESULTLIST
@@ -286,6 +292,11 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 	if widget_name.nocasecmp_to("CONFIRM_YES") == 0:
 		close()
 		exit_to_menu_requested.emit()
+		return
+	# DONE ends a joiner's end-round linger, under a title that registers it
+	# (MenuDriver.stat_done_pressed; DFX2-97).
+	if widget_name.nocasecmp_to("DONE") == 0:
+		_driver.stat_done_pressed(_view.sim() if _view != null else null)
 		return
 	# The tab radios map onto the engine's tab index [orig:
 	# StatScreen_StatFilterTabHandler @0x562140, registered with params 0/1/2 by

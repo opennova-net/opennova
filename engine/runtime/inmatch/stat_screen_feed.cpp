@@ -1,7 +1,10 @@
 #include <runtime/inmatch/stat_screen_feed.h>
 
 #include <base/io/cp1252.h>
+#include <base/title/title.h>
 #include <runtime/hud/end_round_overlay.h> // stat_field_string_index
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/mission_exit.h> // kMissionExitRoundOver
 #include <runtime/menu/menu_runtime.h>
 
 #include <cstdio>
@@ -182,6 +185,43 @@ void fill_stat_results(menu::MenuRuntime &menu, int table,
 			break;
 		}
 	}
+}
+
+namespace {
+
+// The STAT screen's DONE, found by name [orig: UI_FindScreenControl(g_GameMenu, "STAT",
+// "DONE") @0x561819 / @0x561012 (dfx2.exe)]; -1 when the title registers none.
+int stat_done_widget(const menu::MenuRuntime &menu, const Title *title) {
+	if (title == nullptr || !title->stat_screen_done) return -1;
+	return menu.widget_id("DONE");
+}
+
+} // namespace
+
+bool stat_screen_hide_done(menu::MenuRuntime &menu, const Title *title) {
+	const int done = stat_done_widget(menu, title);
+	if (done < 0) return false;
+	menu.set_widget_shown(done, false); // [orig: @0x561834 (dfx2.exe)]
+	return true;
+}
+
+bool stat_screen_show_done(menu::MenuRuntime &menu, const Title *title, bool round_reset_hold) {
+	// [orig: sub_561000 - `if (dword_24BAF0C)` @0x561007, CWnd_SetShown(DONE, 1) @0x561026
+	//  (dfx2.exe)]
+	if (!round_reset_hold) return false;
+	const int done = stat_done_widget(menu, title);
+	if (done < 0) return false;
+	menu.set_widget_shown(done, true);
+	return true;
+}
+
+bool stat_screen_done_pressed(const Title *title, ClientRuntime *joiner_runtime) {
+	if (title == nullptr || !title->stat_screen_done || joiner_runtime == nullptr) return false;
+	// [orig: sub_561130 - g_MissionExitReason = 4 @0x561143, g_EndRoundLingerTimer = 0
+	//  @0x56114d (dfx2.exe)]
+	joiner_runtime->set_mission_exit_reason(kMissionExitRoundOver);
+	joiner_runtime->state().end_round_linger_ticks = 0;
+	return true;
 }
 
 } // namespace opennova::inmatch

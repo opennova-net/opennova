@@ -431,6 +431,11 @@ Title make() {
 	// [orig: sub_5BCD20 @0x5BCD20 - sub_5B8160 @0x5BCF86, dword_24BAE80 -> sub_5B9BB0 @0x5BCFB5;
 	//  Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F (dfx2.exe)]
 	t.hud_sp_how_to = true;
+	// DFX2-97: the STAT screen's DONE [orig: sub_5616C0 @0x5616c0 - DONE -> sub_561130
+	//  @0x56173b..0x561756; sub_561780 @0x561780 (the hide @0x561812..0x561834); sub_561000
+	//  @0x561000, from the menu-screen pass @0x54b901 (dfx2.exe)], the twins of
+	// HUD_CacheStatPanelValues @0x5627a0, StatScreen_ShowCallback @0x562840 and nullsub_130 @0x562130.
+	t.stat_screen_done = true;
 	return t;
 }
 
