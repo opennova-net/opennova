@@ -364,8 +364,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// the next client frame's countdown stores mission exit 4; DFX2's 1240 ticks
 			// first) [orig: `mov g_EndRoundLingerTimer, ebx` (0) @0x42281f ->
 			//  Client_ProcessNetworkFrame @0x42c3d3] [orig: `mov g_EndRoundLingerTimer, 4D8h`
-			//  @0x42269d in sub_422650; the countdown @0x42e21e..0x42e22e in sub_42DFF0
-			//  (dfx2.exe)].
+			//  @0x42269d in NapiNPClientMsg_GameReset @0x422650 (dfx2.exe); the countdown
+			//  @0x42e21e..0x42e22e in sub_42DFF0 (dfx2.exe)].
 			state_.end_round_linger_ticks =
 					protocol_in_match(protocol_).s2c_25.end_round_linger_ticks;
 		}

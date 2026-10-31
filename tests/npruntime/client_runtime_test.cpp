@@ -7198,9 +7198,10 @@ bool run_game_reset_ends_the_round_linger() {
 
 // A DFX2 joiner's end-round linger: its 0x25 arms the linger at 1240 ticks where JO's zeroes it,
 // so the board stands that long before the countdown stores mission exit 4 (DFX2-17's joiner leg,
-// ProtocolInMatch::s2c_25), sub_422650 the twin of NapiNPClientMsg_GameReset.
-// [orig: `mov g_EndRoundLingerTimer, 4D8h` @0x42269d in sub_422650; the countdown
-//  @0x42e21e..0x42e22e in sub_42DFF0 (dfx2.exe)] [orig: NapiNPClientMsg_GameReset @0x422800]
+// ProtocolInMatch::s2c_25), dfx2.exe's NapiNPClientMsg_GameReset the twin of Jointops.exe's.
+// [orig: `mov g_EndRoundLingerTimer, 4D8h` @0x42269d in NapiNPClientMsg_GameReset @0x422650;
+//  the countdown @0x42e21e..0x42e22e in sub_42DFF0 (dfx2.exe)]
+// [orig: NapiNPClientMsg_GameReset @0x422800]
 bool run_dfx2_game_reset_keeps_the_board() {
 	constexpr uint32_t kServerKey = 0x4C494E48u;
 	const std::string client_scrk = "CLIENT-LINGER2-SCRK";

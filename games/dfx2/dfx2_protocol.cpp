@@ -75,7 +75,7 @@ Protocol make() {
 	// [orig: NapiNPServer_HandleChatMessage @0x510b32..0x510b6a (dfx2.exe)]
 	m.s2c_14.chat_squad_tag_wrapped = true;
 	// S2C 0x25 (DFX2-17): a joiner's reset arms the end-round linger at 1240 ticks.
-	// [orig: sub_422650 @0x42269d (dfx2.exe)], the twin of
+	// [orig: NapiNPClientMsg_GameReset @0x422650 - @0x42269d (dfx2.exe)], the twin of
 	// [orig: NapiNPClientMsg_GameReset @0x422800]
 	m.s2c_25.end_round_linger_ticks = 1240;
 	// S2C 0x5A (DFX2-35): a joiner's apply selects the grant's last primary row.
