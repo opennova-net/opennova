@@ -1473,6 +1473,26 @@ void test_takeable_contact_carries_any_def() {
     }
 }
 
+// A solid neighbour does not shadow a MoveCB touch: the resolver asks every
+// candidate of the slice in turn against the same test points, so an object
+// lying on a table reaches the handler in the same pass whose push-out (and the
+// body trace's contact item) is the table's. [orig: Entity_MovementCollisionResolver
+//  @0x4B2F5A..0x4B2FF5 - each candidate's Entity_ComputeBoneCollisionForce call
+//  @0x4B2F9B, the MoveCB branch to Entity_ProcessWaypointInteraction @0x4B2FF5 and
+//  back to the candidate loop @0x4B30AF; the solid fold @0x4B3002..0x4B30AF]
+void test_a_solid_neighbour_does_not_shadow_a_takeable_touch() {
+    TakeableRig rig;
+    World &world = *rig.world;
+    constexpr int32_t kTableId = 1437;
+    const EntityHandle table =
+        objective(world, kTableId, 0, {0.0f, 0.0f, 0.0f}, /*item_attrib=*/0);
+    rig.contacts.bind(table);
+    rig.touch_and_run();
+    CHECK(rig.contacts.collision.dbg_last_contact_item == kTableId);
+    CHECK(rig.carrier_entity().mounted_child == rig.object);
+    CHECK(world.commands.group_holding_group(1, 4));
+}
+
 // A Player carrying an object still saves its own displaced flag: the own-flag
 // arms make no carried-object test, only the pickup leg does.
 // [orig: Entity_ProcessWaypointInteraction - 4091 @0x4AD8E9..0x4AD908 ->
@@ -2076,6 +2096,7 @@ int main() {
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();
     test_takeable_contact_carries_any_def();
+    test_a_solid_neighbour_does_not_shadow_a_takeable_touch();
     test_a_carrier_still_saves_its_own_flag();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
