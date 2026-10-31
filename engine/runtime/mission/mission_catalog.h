@@ -186,19 +186,21 @@ public:
 	void reset(const std::vector<Row> &rows);
 	// hiscore.txt's text over the table: each line the walk hands its callback (a first token not
 	// starting '/') sets the score of every row whose file is its first token, without case, to its
-	// second token read as an unsigned decimal.
+	// second token read as an unsigned decimal. The token is the file's bytes and a row's file its
+	// cp1252 bytes (a loose row's held as UTF-8), compared as cp1252_stricmp folds them (D-MNU-39).
 	// [orig: HUD_LoadHighScoreText @ 0x5630e0 -> File_ParseASCIIFileWithCallback @ 0x53d980 with
 	//  HighScore_ParseLineCallback @ 0x563070 (the stricmp on entry+0 @ 0x56309d, CRT_strtoul(token
 	//  2, 10) into entry+0x11E4 @ 0x5630c2; every row, no break)]
 	void apply_text(const std::string &text);
 	// hiscore.txt as the save writes it: "%s\t%d\r\n" per row in catalog order through a
-	// text-mode "w" stream, which writes each '\n' as CR LF, so a line ends CR CR LF.
+	// text-mode "w" stream, which writes each '\n' as CR LF, so a line ends CR CR LF; each file
+	// in its cp1252 bytes.
 	// [orig: HighScore_SaveToFile @ 0x563100 - fopen("hiscore.txt", "w") @ 0x563110, the fprintf
 	//  @ 0x563146 of entry+0 and entry+0x11E4]
 	std::string text() const;
 	bool empty() const { return rows_.empty(); }
-	// The score of the first row whose file is `file` (without case); 0 for none. set_score sets
-	// that row's.
+	// The score of the first row whose file is `file` (a row's file, compared as apply_text
+	// compares a token); 0 for none. set_score sets that row's.
 	int32_t score(const std::string &file) const;
 	void set_score(const std::string &file, int32_t score);
 

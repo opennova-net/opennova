@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_set>
 
@@ -346,6 +347,14 @@ uint32_t crt_strtoul10(const char *s) {
 	return negative ? 0u - out : out;
 }
 
+// Whether a row's file is `name`, a name in the page's bytes: _stricmp over entry+0, which folds
+// through the ".ACP" locale, so the names compare as their cp1252 bytes, as the catalog's own sort
+// does (D-MNU-39); a loose row's file is the UTF-8 the scan made of its name.
+// [orig: HighScore_ParseLineCallback @ 0x563070 - the stricmp @ 0x56309d]
+bool file_is(const std::string &file, std::string_view name) {
+	return cp1252_stricmp(utf8_to_retail_text(file), name) == 0;
+}
+
 } // namespace
 
 void HighScoreTable::reset(const std::vector<Row> &rows) {
@@ -357,7 +366,7 @@ void HighScoreTable::reset(const std::vector<Row> &rows) {
 void HighScoreTable::apply_text(const std::string &text) {
 	io::for_each_config_file_line(text.data(), text.size(), [this](io::ConfigTokens &line) {
 		for (Entry &entry : rows_)
-			if (strutil::iequals(line.tokens[0], entry.file))
+			if (file_is(entry.file, line.tokens[0]))
 				entry.score = static_cast<int32_t>(crt_strtoul10(line.tokens[1]));
 		return false;
 	});
@@ -366,7 +375,9 @@ void HighScoreTable::apply_text(const std::string &text) {
 std::string HighScoreTable::text() const {
 	std::string out;
 	for (const Entry &entry : rows_) {
-		out += entry.file;
+		// The name in the page's bytes, as entry+0 holds it [orig: HighScore_SaveToFile @ 0x563100 -
+		//  the fprintf @ 0x563146].
+		out += utf8_to_retail_text(entry.file);
 		out += '\t';
 		out += std::to_string(entry.score);
 		out += "\r\r\n";
@@ -375,14 +386,16 @@ std::string HighScoreTable::text() const {
 }
 
 int32_t HighScoreTable::score(const std::string &file) const {
+	const std::string name = utf8_to_retail_text(file);
 	for (const Entry &entry : rows_)
-		if (strutil::iequals(entry.file, file)) return entry.score;
+		if (file_is(entry.file, name)) return entry.score;
 	return 0;
 }
 
 void HighScoreTable::set_score(const std::string &file, int32_t score) {
+	const std::string name = utf8_to_retail_text(file);
 	for (Entry &entry : rows_)
-		if (strutil::iequals(entry.file, file)) {
+		if (file_is(entry.file, name)) {
 			entry.score = score;
 			return;
 		}

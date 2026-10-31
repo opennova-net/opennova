@@ -182,6 +182,22 @@ int main() {
 		reread.reset(rows);
 		reread.apply_text(table.text());
 		TEST_EXPECT(reread.text() == table.text());
+
+		// A loose row's file is the UTF-8 the scan made of its name ("Café.bms"): the save writes
+		// its cp1252 bytes, and a line's token, the file's bytes, matches it as _stricmp folds
+		// cp1252 under ".ACP" (0xC9 É to 0xE9 é) [orig: HighScore_SaveToFile @ 0x563100 - the
+		// fprintf @ 0x563146; HighScore_ParseLineCallback @ 0x563070 - the stricmp @ 0x56309d]
+		// (D-MNU-39).
+		std::vector<catalog::Row> loose(1);
+		loose[0].file = "Caf\xC3\xA9.bms";
+		loose[0].loose = true;
+		catalog::HighScoreTable accented;
+		accented.reset(loose);
+		accented.apply_text("CAF\xC9.BMS\t77\r\r\n");
+		TEST_EXPECT(accented.score("Caf\xC3\xA9.bms") == 77);
+		TEST_EXPECT(accented.text() == "Caf\xE9.bms\t77\r\r\n");
+		accented.set_score("CAF\xC3\x89.BMS", 5);
+		TEST_EXPECT(accented.score("caf\xC3\xA9.bms") == 5);
 	}
 
 	const fs::path root = fs::temp_directory_path() / test_paths_unique("opennova_mission_catalog_test");
