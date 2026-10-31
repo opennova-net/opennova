@@ -15,6 +15,10 @@
 #include <string>
 #include <vector>
 
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
+
 using namespace opennova::hud;
 using opennova::fnt::fnt_font_t;
 
@@ -115,6 +119,7 @@ void test_the_compiled_element(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
 	state.exp_points.element = true;
 	state.exp_points.score = 42;

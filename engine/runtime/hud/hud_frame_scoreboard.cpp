@@ -160,7 +160,8 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	ctx.time_limit = sb.time_limit;
 	ctx.local_team = sb.local_team;
 	// dfx2.exe's board appends no class (Title::hud_kill_list_no_class, DFX2-83).
-	ctx.class_suffix = state.title == nullptr || !state.title->hud_kill_list_no_class;
+	ctx.class_suffix =
+			!require_title(state.title, "hud::element_scoreboard").hud_kill_list_no_class;
 	ScoreboardRowComposer composer(ctx, sb.class_names);
 
 	// One GLOBAL rank counter in wire order — both columns share it, and it

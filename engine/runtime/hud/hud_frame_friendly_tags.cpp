@@ -210,7 +210,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float s
 		//  @0x5a309a (dfx2.exe)].
 		bool text_form = false;
 		bool tick_form = false;
-		if (state.title != nullptr && state.title->hud_tag_ranges) {
+		if (require_title(state.title, "hud::element_friendly_tags").hud_tag_ranges) {
 			const bool in_reach = tag.dist_q16 < friendly_tag_reach_q16(tag.player, tag.same_account);
 			text_form = state.friendly_tag_mode == kFriendlyTagModeFarBrief ||
 					(state.friendly_tag_mode == kFriendlyTagModeFull &&

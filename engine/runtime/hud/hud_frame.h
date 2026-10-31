@@ -1134,8 +1134,9 @@ struct HudFrameState {
 	HudExpPointsState exp_points;    // element_exp_points (DFX2-36)
 	// The title the session runs as (inmatch::RoleView::title; before a session's role facts, and
 	// in the editor's HUD preview, its root's title): the HUD's own variants by its hud_* fields
-	// (Title::hud_lone_gunner_panel, ...). Null draws Jointops.exe's variants but none of a title's
-	// own tables: the map legend (Title::hud_map_legend) draws its box alone.
+	// (Title::hud_lone_gunner_panel, ...). The embedder sets it before a compile: every read goes
+	// through require_title (base/title/title.h), so an element that reads it with none aborts,
+	// naming itself, where Jointops.exe's variants once drew.
 	const Title *title = nullptr;
 	// The local player is a lone gunner (world::local_rides_solo_turret): the lone-gunner panel's
 	// fact (element_lone_gunner_panel, DFX2-91).
@@ -1829,7 +1830,7 @@ private:
 	void element_chat_input(const HudFrameState &state, float w, float h, float y = 608.0f);
 	void element_quit_dialog(const HudFrameState &state, float w, float h);
 	// `title`: the session's (HudFrameState::title), its CHAT lines' tags (DFX2-88).
-	void element_server_console_lines(const ServerStatusPageState &page, const Title *title,
+	void element_server_console_lines(const ServerStatusPageState &page, const Title &title,
 			float w, float h);
 	void element_player_score_list(const ServerStatusPageState &page, float w, float h);
 	void element_end_round_overlay(const HudFrameState &state, float w, float h);

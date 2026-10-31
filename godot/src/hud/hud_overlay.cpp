@@ -564,8 +564,10 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	root_ = p_root;
 	// The title a session over the root runs as (ResourceRoot::session_title: the game's launch
 	// title, the editor HUD preview's project's), whose HUD variants draw until set_role_facts
-	// hands the session's own each frame; none with no root.
-	state_.title = p_root.is_valid() ? &ResourceRoot::session_title(p_root) : nullptr;
+	// hands the session's own each frame; with no root, the game the process was launched as (a
+	// launch that names none runs as the default title, ADR 0067 d2). The compile reads no
+	// default of its own (hud::HudFrameState::title).
+	state_.title = &ResourceRoot::session_title(p_root);
 	layout_ = HudLayout{};
 	crosshair_alpha_mode_ = false; // the HUD init loads the crosshair in colour mode
 	textures_ = {};

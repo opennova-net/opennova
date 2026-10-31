@@ -253,7 +253,8 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w, f
 		line(bx + 16.0f, row_y, bx + 16.0f, row_y + 16.0f, box_c);
 		line(bx + 16.0f, row_y + 16.0f, bx, row_y + 16.0f, box_c);
 		line(bx, row_y + 16.0f, bx, row_y, box_c);
-		if (row.done && state.title != nullptr && state.title->hud_objective_done_fill) {
+		if (row.done &&
+				require_title(state.title, "hud::element_objectives").hud_objective_done_fill) {
 			// dfx2.exe's done mark is a green square inside the box: a device clear of the rect
 			// (x + 2, y + 2)..(x + 15, y + 15), each corner through the integer design scaling,
 			// opaque whatever the panel alpha, as a clear writes its colour (DFX2-93)
@@ -390,7 +391,7 @@ void HudFrameCompiler::element_end_game_screen(const HudFrameState &state, float
 		pages.starts[eg.page + 1] = next;
 	// The footer, bold, half-bright white [orig: KeyHelp Text/PAGE and Text/CHANGE_SCREEN].
 	const uint32_t footer_color = half_bright_argb(0xFFFFFFFFu);
-	if (state.title != nullptr && state.title->hud_end_game_footer_corners) {
+	if (require_title(state.title, "hud::element_end_game_screen").hud_end_game_footer_corners) {
 		// DFX2-95: "Page n of 4" right-aligned at the box's right edge and the hint left-aligned
 		// at its left, both at its bottom plus the safe top; the corners already scaled are
 		// scaled again, and the bottom once from 644 [orig: HUD_DrawEndGameScreen @0x5BBF20 - the
@@ -469,7 +470,7 @@ void HudFrameCompiler::element_map_legend(const HudFrameState &state, float w, f
 	const HudMapLegendState &ml = state.map_legend;
 	emit_label_box(128.0f, 96.0f, 896.0f, 672.0f, ml.title, 0xFFFFFFFFu, w, h);
 	const TitleHudMapLegend *legend =
-			state.title != nullptr ? state.title->hud_map_legend : nullptr;
+			require_title(state.title, "hud::element_map_legend").hud_map_legend;
 	const int icon_count = legend != nullptr ? legend->count : 0;
 	const float label_dx = sx(32.0f, w);
 	const float label_dy = sy(8.0f, h);
@@ -613,7 +614,8 @@ void HudFrameCompiler::element_lone_gunner_panel(const HudFrameState &state, flo
 	//  Viewport_ScaleToVirtualCoords @0x57F00F, HUD_DrawTextCentered_HalfBright @0x57F032
 	//  (dfx2.exe)]
 	// [orig: @0x5B9100..0x5B9149 (no function, no xref), the string @0x7DB408]
-	if (state.title == nullptr || !state.title->hud_lone_gunner_panel || !state.lone_gunner)
+	if (!require_title(state.title, "hud::element_lone_gunner_panel").hud_lone_gunner_panel ||
+			!state.lone_gunner)
 		return;
 	emit_label_box(320.0f, 500.0f, 704.0f, 600.0f, std::string(), 0xFFFFFFFFu, w, h);
 	const int32_t x = design_to_screen_x(512, static_cast<int32_t>(w));

@@ -16,6 +16,11 @@
 
 #include <cstdio>
 #include <memory>
+#include <base/title/title.h>
+
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
 
 using namespace opennova::hud;
 
@@ -41,6 +46,7 @@ void test_the_head_returns_before_the_pass() {
 	compiler->configure(layout, &font);
 	compiler->configure_label_fonts(&font, &font, &font, 1.0f, 1.0f, &font);
 	auto state = std::make_unique<HudFrameState>();
+	state->title = &kJoTitle;
 	state->health_fraction = 1.0f;
 	state->end_round.shown = true;
 	state->end_round.lines = {{"D", 300}};
@@ -79,6 +85,7 @@ void test_the_item_flash_ticks_behind_the_head() {
 	compiler->configure(layout, &font);
 	compiler->configure_label_fonts(&font, &font, &font, 1.0f, 1.0f, &font);
 	auto state = std::make_unique<HudFrameState>();
+	state->title = &kJoTitle;
 	state->health_fraction = 1.0f;
 
 	// The pass runs at tick 100: the timers' last tick is 100.
@@ -153,6 +160,7 @@ void test_the_big_map_reads_the_last_record_and_altitude_colour() {
 	compiler->configure(HudLayout{}, &font);
 	compiler->configure_label_fonts(&font, &font, &font, 1.0f, 1.0f, &font);
 	auto state = std::make_unique<HudFrameState>();
+	state->title = &kJoTitle;
 	state->minimap.map_mode = 3;
 	state->minimap.terrain.present = true;
 	state->minimap.terrain.sector_count = 16;
@@ -214,6 +222,7 @@ void test_the_scene_frame_call_site_gates_the_pass() {
 	compiler->configure(layout, &font);
 	compiler->configure_label_fonts(&font, &font, &font, 1.0f, 1.0f, &font);
 	auto state = std::make_unique<HudFrameState>();
+	state->title = &kJoTitle;
 	state->health_fraction = 1.0f;
 	state->end_round.shown = true;
 	state->end_round.lines = {{"D", 300}};
@@ -261,6 +270,7 @@ void test_the_scene_frame_call_site_gates_the_pass() {
 	corner.spinmap_rect = {800.0f, 20.0f, 200.0f, 200.0f, true};
 	radar->configure(corner, &font);
 	auto view = std::make_unique<HudFrameState>();
+	view->title = &kJoTitle;
 	const uint32_t both = HudFrameCompiler::kRadarGatePass | HudFrameCompiler::kRadarGateMapSite;
 	CHECK(radar->radar_frame_gates(*view) == both);
 	view->overlay_pass_called = false;

@@ -2138,6 +2138,10 @@ add_executable(hud_title_draws_test hud/hud_title_draws_test.cpp)
 target_link_libraries(hud_title_draws_test PRIVATE opennova_runtime)
 target_include_directories(hud_title_draws_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_title_draws COMMAND hud_title_draws_test)
+# A frame that names no title aborts, named, at its first reader (base/title/title.h require_title).
+add_test(NAME hud_title_draws_untitled COMMAND hud_title_draws_test --untitled)
+set_tests_properties(hud_title_draws_untitled PROPERTIES PASS_REGULAR_EXPRESSION
+    "hud::[a-z_]+: no title: ")
 
 # The spinmap's bit-10 legs: the dmgslice marks and the threat ring.
 add_executable(hud_minimap_radar_test hud/hud_minimap_radar_test.cpp)

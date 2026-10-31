@@ -15,6 +15,11 @@
 #include <runtime/hud/hud_frame.h>
 
 #include "../common/test_font.h"
+#include <base/title/title.h>
+
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
 
 using namespace opennova;
 using namespace opennova::hud;
@@ -152,6 +157,7 @@ void element() {
 	HudFrameCompiler compiler;
 	compiler.configure(layout, &font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	HudCaptureLabel label;
 	label.type = kMarkerTypeZoneOwn;
 	label.palette = 3;

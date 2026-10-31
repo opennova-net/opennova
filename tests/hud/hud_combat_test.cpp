@@ -22,6 +22,10 @@
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/world.h>
 #include "../common/test_font.h"
+
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
 using namespace opennova;
 using namespace opennova::hud;
 using namespace opennova::world;
@@ -63,6 +67,7 @@ static void geometry_and_draw() {
 	HudFrameCompiler compiler;
 	compiler.configure(layout, nullptr);
 	HudFrameState s;
+	s.title = &kJoTitle;
 	s.weapon.active = true;
 	s.combat.target_cursor = true;
 	s.combat.target_point = { 100, 200, 0, true };
@@ -181,6 +186,7 @@ static void mortar_map_and_world_cues() {
 	HudFrameCompiler compiler;
 	compiler.configure({}, nullptr);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.minimap.map_mode = 2;
 	state.combat.impact_map = true;
 	state.combat.impact_x_q16 = 80 << 16;
@@ -262,6 +268,7 @@ static void combat_text_font_slots() {
 		});
 	};
 	HudFrameState s;
+	s.title = &kJoTitle;
 	s.combat.vehicle_controls = true;
 	s.combat.gear = 1;
 	s.combat.gear_text = { "Med", "Low", "High" };
@@ -817,6 +824,7 @@ static void integer_screen_mapping() {
 	HudFrameCompiler compiler;
 	compiler.configure(layout, nullptr);
 	HudFrameState s;
+	s.title = &kJoTitle;
 	s.weapon.active = true; // the targeting cues ride the weapon cluster
 	s.combat.target_cursor = true;
 	s.combat.target_point = { 499, 300, 0, true };
@@ -929,6 +937,7 @@ static void vehicle_bay_logos() {
 	HudFrameCompiler compiler;
 	compiler.configure(layout, nullptr);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	HudBayLogo logo;
 	logo.type = 5;
 	logo.palette = 3;

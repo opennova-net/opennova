@@ -156,7 +156,7 @@ void HudFrameCompiler::element_game_info(const HudFrameState &state, float w, fl
 	// through the X axis [orig: GameFont_MeasureCharHeight('0', bold) @0x59CE65
 	// into both outX and outY; Viewport_ScreenToVirtual @0x59CE81; the y step
 	// reads outX @0x59CF60].
-	if (state.title != nullptr && state.title->hud_game_info_board) {
+	if (require_title(state.title, "hud::element_game_info").hud_game_info_board) {
 		// dfx2.exe's rewrite below the zone line (DFX2-114).
 		drew = game_info_board(state, w, h) || drew;
 	} else if (game_type == 0x10001u) {
