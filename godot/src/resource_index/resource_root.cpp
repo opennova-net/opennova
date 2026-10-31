@@ -311,13 +311,18 @@ const opennova::Protocol *ResourceRoot::protocol(std::string &error) const {
 }
 
 std::string ResourceRoot::session_title_code(const Ref<ResourceRoot> &root) {
-	// The launch's game as the boot mount picks it: `/game`'s, else the launch folder's product.
-	return opennova::to_std(root.is_valid() ? root->game_code_ : LaunchFlags::game(String()));
+	// The live mount's game; a root with nothing mounted, like none, names no game: the launch's,
+	// as the boot mount picks it (`/game`'s, else the launch folder's product, the default title's
+	// for a folder that names none: ADR 0067 d2).
+	if (root.is_valid() && !root->game_code_.is_empty()) return opennova::to_std(root->game_code_);
+	return opennova::to_std(LaunchFlags::game(String()));
 }
 
 const opennova::Title &ResourceRoot::session_title(const Ref<ResourceRoot> &root) {
-	const opennova::Title *title = opennova::title_by_code(session_title_code(root));
-	return title != nullptr ? *title : opennova::default_title();
+	// A code no installed title has is a named error, never the default title's: the runtime's
+	// launch refuses such a `/game` first (game_runtime_root.gd, LaunchFlags::product_supported),
+	// and a mount names its caller's game, the default title's for none (mount_title_code).
+	return opennova::require_title_code(session_title_code(root), "ResourceRoot::session_title");
 }
 
 const opennova::Protocol *ResourceRoot::session_protocol(const Ref<ResourceRoot> &root,
@@ -456,6 +461,7 @@ Error ResourceRoot::mount_runtime_archives_(const String &path, const String &ex
 
 Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files,
 		const String &game_code) {
+	const String code = mount_title_code(game_code);
 	expansion_ = String();
 	game_code_ = String();
 	expansion_override_table_ = PackedByteArray();
@@ -473,7 +479,7 @@ Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> file
 		return ERR_INVALID_PARAMETER;
 	}
 	root_dir_ = String(opennova::ResourceIndex::kSourceRootDir);
-	game_code_ = game_code;
+	game_code_ = code;
 	last_error_ = String();
 	mount_kind_ = MountKind::Source;
 	return OK;

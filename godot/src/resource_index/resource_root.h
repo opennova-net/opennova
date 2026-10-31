@@ -116,12 +116,12 @@ public:
 	// mounted or the title is unknown or its protocol is not yet witnessed in full.
 	const opennova::Protocol *protocol(std::string &error) const;
 	// C++-side seam (not bound): the title code a session over `root` runs as: the live mount's
-	// (game_code), or, with no root, the game the process was launched as (LaunchFlags::game:
-	// `/game`'s, else the launch folder's product, as the boot mount picks it).
+	// (game_code), or, with no root or nothing mounted, the game the process was launched as
+	// (LaunchFlags::game: `/game`'s, else the launch folder's product, as the boot mount picks it).
 	static std::string session_title_code(const Ref<ResourceRoot> &root);
-	// C++-side seam (not bound): the title a session over `root` runs as, session_title_code's
-	// (the default title's for an unknown code, as its rules are: world::title_rules): its player
-	// caps and its rules (inmatch::GameConfig::set_title, world::title_rules).
+	// C++-side seam (not bound): the title a session over `root` runs as, session_title_code's:
+	// its player caps and its rules (inmatch::GameConfig::set_title, world::title_rules). A code no
+	// installed title has aborts, named (require_title_code), never the default title's.
 	static const opennova::Title &session_title(const Ref<ResourceRoot> &root);
 	// C++-side seam (not bound): the protocol a session over `root` speaks, session_title_code's
 	// title's (the mount's: protocol()). Null, with `error` saying why, when it is not witnessed
