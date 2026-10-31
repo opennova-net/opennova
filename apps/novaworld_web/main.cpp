@@ -225,8 +225,10 @@ int run(const program::Boot &boot) {
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
 	// The images the release pins: the launch templates' (a fleet roll's
-	// preview) and hostd's, each machine's held against them.
-	http.set_fleet_release({ hosting.fleet.image_id, hosting.fleet.hostd_image });
+	// preview) and hostd's, each machine's held against them, and opennova-serve's,
+	// each hosted server's (a newer server build waits for a server on another).
+	http.set_fleet_release(
+			{ hosting.fleet.image_id, hosting.fleet.hostd_image, hosting.fleet.serve_image });
 	// The static addresses: on or off, and the zone they are named in.
 	http.set_addresses(hosting.addresses_on, hosting.fleet.address_zone);
 	// Whether a start may also list its server on NovaLogic's NovaWorld.

@@ -108,11 +108,14 @@ struct Finding {
 };
 
 // The images the release pins: the launch templates' (ONNET_FLEET_IMAGE_ID, an
-// AMI id) and hostd's (ONNET_HOSTED_HOSTD_IMAGE, the reference its task
-// definition names); "" for one not known here.
+// AMI id), hostd's (ONNET_HOSTED_HOSTD_IMAGE, the reference its task
+// definition names) and opennova-serve's (ONNET_HOSTED_SERVE_IMAGE, pinned by
+// digest, which every start pins: hosted_repository.h server_build_outdated);
+// "" for one not known here.
 struct ReleaseImages {
 	std::string image_id;
 	std::string agent_image;
+	std::string serve_image;
 };
 
 // Whether machine `m` runs another image than the release pins: its own image

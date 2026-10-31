@@ -634,17 +634,19 @@ void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
 			{ BindValue(server_id), BindValue(base_tree_id), db::int_or_null(expansion_tree_id) });
 }
 
-UpdateOutcome request_update(db::Database &db, int64_t server_id) {
+UpdateOutcome request_update(db::Database &db, int64_t server_id, const std::string &serve_image) {
 	db::Transaction tx(db);
 	const auto rows = db.query(
 			std::string("SELECT update_requested, (") + kLiveServerSql + ") AS live, (" + kOutdatedSql +
-					") AS outdated FROM hosted_servers s WHERE id = $1 FOR NO KEY UPDATE;",
+					") AS outdated, serve_image FROM hosted_servers s WHERE id = $1 FOR NO KEY UPDATE;",
 			{ BindValue(server_id) });
 	if (rows.empty())
 		return UpdateOutcome::NotFound;
 	const bool requested = rows.front().as_int(0).value_or(0) != 0;
 	const bool live = rows.front().as_int(1).value_or(0) != 0;
-	const bool outdated = rows.front().as_int(2).value_or(0) != 0;
+	const std::string pinned = rows.front().as_text(3).value_or("");
+	const bool outdated = rows.front().as_int(2).value_or(0) != 0 ||
+			(!pinned.empty() && !serve_image.empty() && pinned != serve_image);
 	if (!live)
 		return UpdateOutcome::NotLive;
 	if (requested) {
@@ -668,6 +670,11 @@ size_t request_update_all(db::Database &db, std::optional<int64_t> product_id) {
 		db.exec(sql + ";");
 	}
 	return static_cast<size_t>(db.changes());
+}
+
+bool server_build_outdated(const HostedServer &s, const std::string &serve_image) {
+	return is_live(s.state) && !s.serve_image.empty() && !serve_image.empty() &&
+			s.serve_image != serve_image;
 }
 
 bool server_outdated(db::Database &db, int64_t server_id) {

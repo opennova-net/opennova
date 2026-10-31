@@ -61,8 +61,9 @@ const char kUsage[] =
 		"                      [--also-master-host <gate>] [--also-master-gate-port <n>]\n"
 		"                      [--also-credentials <file>]\n"
 		"                      [--status-page on|off] [--stats-file <file>] [--exit-file <file>]\n"
-		"                      [--second-listing-file <file>]\n"
+		"                      [--second-listing-file <file>] [--build-file <file>]\n"
 		"                      [--send-holdoff-ticks <n>] [--entity-send-budget <bytes>]\n"
+		"       opennova-serve --version [--resource-dir <game dir>] [/game <code>]\n"
 		"  --resource-dir   the game install to serve from (its PFF set, as opennova.exe takes "
 		"it)\n"
 		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per "
@@ -112,6 +113,11 @@ const char kUsage[] =
 		"  --second-listing-file\n"
 		"                   rewrite this file whenever the second listing's state changes (off,\n"
 		"                   trying, listed, retrying or not_listed, with why), one JSON line\n"
+		"  --build-file     write ONE's build (its version and commit) to this file as the\n"
+		"                   server starts, one JSON line\n"
+		"  --version        print the server's versions on one line and exit: the game and the\n"
+		"                   release --resource-dir holds, ONE's build and the protocol (ONE's\n"
+		"                   build alone without --resource-dir and /game)\n"
 		"  /PROFILE <path>  record each mission to <path>.sph (retail's server log)\n"
 		"  /PUNTLOG, /PUNT.TXT, /CHEATLOG\n"
 		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
@@ -231,6 +237,8 @@ constexpr OwnOption kServeOwnOptions[] = {
 	{"--stats-file", true},
 	{"--exit-file", true},
 	{"--second-listing-file", true},
+	{"--build-file", true},
+	{"--version", false},
 	{"--send-holdoff-ticks", true},
 	{"--entity-send-budget", true},
 };
@@ -339,11 +347,19 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 		} else if (a == "--second-listing-file") {
 			if (!value(out.second_listing_file))
 				return 1;
+		} else if (a == "--build-file") {
+			if (!value(out.build_file))
+				return 1;
+		} else if (a == "--version") {
+			out.print_version = true;
 		} else if (a.rfind("--", 0) == 0) {
 			error = "unknown option '" + a + "'";
 			return 1;
 		}
 	}
+	// The line names the game from what was given; a run's requirements are not a version's.
+	if (out.print_version)
+		return 0;
 	if (out.resource_dir.empty()) {
 		error = "--resource-dir <game dir> is required";
 		return 1;
@@ -365,31 +381,54 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 	return 0;
 }
 
+namespace {
+
+// The launch's product and the title it runs as, chosen as the game's launch chooses them:
+// /game when given, else the folder's UPDATE.WIZ, a folder with none being OpenNova's own
+// (boot_policy.h launch_product, ADR 0067 d2).
+LaunchProduct serve_launch_product(const ServeOptions &options) {
+	LaunchFlags flags;
+	flags.game = strutil::to_lower(options.game);
+	flags.game_given = !options.game.empty();
+	flags.resource_dir = options.resource_dir;
+	return launch_product(flags, folder_product(options.resource_dir));
+}
+
+std::string launch_version_line(const ServeOptions &options, const LaunchProduct &product) {
+	Versions versions;
+	// A player game's name is its command file's PRODUCT, the page's bytes.
+	versions.game = retail_text_to_utf8(product.name);
+	versions.game_version = launch_product_version(options.resource_dir, product);
+	versions.one = one_build();
+	// The title the launch runs as: its name where the product has none, the protocol it speaks.
+	title_versions(product.game, versions);
+	return version_line(versions);
+}
+
+} // namespace
+
+std::string serve_version_line(const ServeOptions &options) {
+	// No folder and no /game: the launch would name OpenNova's own game by default, which a
+	// --version alone says nothing of.
+	if (options.resource_dir.empty() && options.game.empty()) {
+		Versions versions;
+		versions.one = one_build();
+		return version_line(versions);
+	}
+	return launch_version_line(options, serve_launch_product(options));
+}
+
 Server::Server(ServeOptions options) : options_(std::move(options)) {
 	// The switch every read of the process takes [orig: g_LanSwitch, read by
 	// Game_LoadConfig @0x5514B1].
 	config_.set_lan_switch(options_.lan_switch);
-	// The launch's product and the title it runs as, chosen as the game's launch
-	// chooses them: /game when given, else the folder's UPDATE.WIZ, a folder with none being
-	// OpenNova's own (boot_policy.h launch_product, ADR 0067 d2).
-	LaunchFlags flags;
-	flags.game = strutil::to_lower(options_.game);
-	flags.game_given = !options_.game.empty();
-	flags.resource_dir = options_.resource_dir;
-	const LaunchProduct product = launch_product(flags, folder_product(options_.resource_dir));
+	const LaunchProduct product = serve_launch_product(options_);
 	game_code_ = product.game;
 	// A /game the launch does not know is the title's own refusal (resolve_title); a foreign
 	// folder with no /game names no game at all.
-	foreign_folder_ = !flags.game_given && !product.supported;
+	foreign_folder_ = options_.game.empty() && !product.supported;
 	product_command_ = product.command;
-	Versions versions;
-	// A player game's name is its command file's PRODUCT, the page's bytes.
-	versions.game = retail_text_to_utf8(product.name);
-	versions.game_version = launch_product_version(options_.resource_dir, product);
-	versions.one = one_build();
-	// The title the launch runs as: its name where the product has none, the protocol it speaks.
-	title_versions(product.game, versions);
-	version_line_ = opennova::version_line(versions);
+	version_line_ = launch_version_line(options_, product);
 }
 
 Server::~Server() {

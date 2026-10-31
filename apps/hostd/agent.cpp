@@ -143,6 +143,14 @@ std::optional<hosted::SecondListingStatus> parse_second_listing(std::string_view
 	return out;
 }
 
+std::optional<hosted::ServeBuild> parse_serve_build(std::string_view text) {
+	hosted::ServeBuild out;
+	std::string error;
+	if (!hosted::decode_serve_build(text, out, error))
+		return std::nullopt;
+	return out;
+}
+
 // --- the link ------------------------------------------------------------------
 
 HttpServiceLink::HttpServiceLink(std::string base_url, int timeout_ms, Resolver resolve) :
@@ -351,10 +359,12 @@ void Agent::refresh_machine(const std::vector<ContainerInfo> &observed, uint64_t
 		return;
 	machine_read_ = true;
 	machine_at_ = now;
-	// Each running server's last minute of ticks, while its file is fresh, and
-	// its second listing's state, which it writes only when that changes.
+	// Each running server's last minute of ticks, while its file is fresh, its
+	// second listing's state, which it writes only when that changes, and its
+	// build, which it writes once as it starts.
 	ticks_.clear();
 	listings_.clear();
+	builds_.clear();
 	const auto fresh_before =
 			std::chrono::system_clock::now() - std::chrono::milliseconds(kTickStaleMs);
 	for (const ContainerInfo &c : observed) {
@@ -365,6 +375,10 @@ void Agent::refresh_machine(const std::vector<ContainerInfo> &observed, uint64_t
 		if (slots_.read_written(c.slot, hosted::kSecondListingFileName, text, written)) {
 			if (auto listing = parse_second_listing(text))
 				listings_[c.name] = std::move(*listing);
+		}
+		if (slots_.read_written(c.slot, hosted::kBuildFileName, text, written)) {
+			if (auto build = parse_serve_build(text))
+				builds_[c.name] = std::move(*build);
 		}
 		if (!slots_.read_written(c.slot, hosted::kTickStatsFileName, text, written) ||
 				written < fresh_before)
@@ -482,6 +496,9 @@ hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) co
 			const auto listing = listings_.find(c.name);
 			if (listing != listings_.end())
 				r.second_listing = listing->second;
+			const auto build = builds_.find(c.name);
+			if (build != builds_.end())
+				r.build = build->second;
 		}
 		// Why it ended: the line it wrote at a non-zero exit, in its slot's
 		// directory until the container is removed.

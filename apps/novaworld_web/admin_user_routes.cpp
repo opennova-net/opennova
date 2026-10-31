@@ -203,7 +203,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 			out["capacity"] = billing::sold_capacity_json(*db_conn, sellable(*db_conn), now);
 			std::vector<crow::json::wvalue> servers;
 			for (const hosted::HostedServer &s : hosted::list_servers_of(*db_conn, id))
-				servers.push_back(hosted::server_json(*db_conn, s, false, address_zone_));
+				servers.push_back(
+						hosted::server_json(*db_conn, s, false, serve_image_, address_zone_));
 			out["servers"] = std::move(servers);
 			std::vector<crow::json::wvalue> addresses;
 			for (const hosted::HostedAddress &a : hosted::addresses_of(*db_conn, id))

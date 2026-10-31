@@ -176,6 +176,26 @@ void test_print_rule() {
 	CHECK(printed.find("Frames 40") != std::string::npos);
 	CHECK(printed.find("new line") != std::string::npos);
 	std::fclose(out);
+
+	// Given the server's version line, every print opens with it, above the page.
+	std::FILE *headed = std::tmpfile();
+	CHECK(headed != nullptr);
+	if (headed == nullptr)
+		return;
+	const std::string line =
+			"Joint Operations \xC2\xB7 ONE 0.0.22.123 (a1b2c3d, staging) \xC2\xB7 JO protocol 16";
+	serve::StatusConsole versioned(headed, line);
+	page = synthetic_page();
+	CHECK(versioned.present(page, 5000));
+	page.console_rows[1].text = "another line";
+	CHECK(versioned.present(page, 5200));
+	const std::string pages = read_file(headed);
+	const std::string head =
+			"\nopennova-serve " + line + "\n" + hud::server_status_server_line(page).text;
+	const size_t first = pages.find(head);
+	CHECK(first == 0);
+	CHECK(first != std::string::npos && pages.find(head, first + 1) != std::string::npos);
+	std::fclose(headed);
 }
 
 // A client-less host context with two in-match players on loopback wires.

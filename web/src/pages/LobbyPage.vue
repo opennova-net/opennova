@@ -46,6 +46,7 @@ const rows = computed<ServerRow[]>(() => [
     key: `opennova-${host.id}`, to: `/lobby/${host.id}`, source: 'opennova', game: game.slug, gameName: game.displayName,
     serverName: host.serverName, mission: host.mission || '', gameType: host.gameType || '',
     players: host.players, maxPlayers: host.maxPlayers || 0, expansion: host.expansion || '', password: Boolean(host.locked),
+    build: host.build ?? null,
   }))),
   ...(novalogic.value?.enabled && novalogicAt.value !== null ? novalogic.value.servers.map((server, index): ServerRow => ({
     key: `novalogic-${server.id}-${index}`, to: `/lobby/novalogic/${server.id}`, source: 'novalogic',

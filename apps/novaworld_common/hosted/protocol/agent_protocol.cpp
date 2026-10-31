@@ -5,6 +5,7 @@
 #include <base/io/json.h>
 #include <base/io/sha256.h>
 #include <base/project/project_manifest.h> // is_expansion_code
+#include <base/version/version.h>
 
 #include <algorithm>
 #include <set>
@@ -242,6 +243,29 @@ bool read_second_listing(const JsonValue &v, SecondListingStatus &out, std::stri
 	return true;
 }
 
+// A server's build (agent_protocol.h ServeBuild): a version Version::parse takes, spelled as it
+// spells it back, and "" or a short sha.
+bool read_serve_build(const JsonValue &v, ServeBuild &out, std::string &error) {
+	if (!v.is_object())
+		return fail(error, "a build is no object");
+	if (!io::json_members_known(v, { "version", "commit" }, "build", error))
+		return false;
+	ServeBuild read;
+	if (!read_string(v, "version", read.version, error) ||
+			!read_string(v, "commit", read.commit, error))
+		return false;
+	const auto version = Version::parse(read.version);
+	if (!version || version->text() != read.version)
+		return fail(error, "a build's version is not one to four numbers");
+	if (!read.commit.empty() &&
+			(read.commit.size() < 7 || read.commit.size() > 40 || !all_of(read.commit, [](char c) {
+				return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+			})))
+		return fail(error, "a build's commit is no short sha");
+	out = std::move(read);
+	return true;
+}
+
 bool read_machine_stats(const JsonValue &v, MachineStats &out, std::string &error) {
 	if (!v.is_object())
 		return fail(error, "machine is no object");
@@ -308,7 +332,7 @@ bool read_report(const JsonValue &v, ContainerReport &out, std::string &error) {
 	if (!io::json_members_known(v,
 				{ "name", "slot", "state", "waiting", "exit_code", "oom", "started_at", "reason",
 						"cpu_percent", "memory_bytes", "egress_bytes", "net_in_bytes", "tick",
-						"second_listing" },
+						"second_listing", "build" },
 				"container", error))
 		return false;
 	if (!read_string(v, "name", out.name, error))
@@ -375,6 +399,15 @@ bool read_report(const JsonValue &v, ContainerReport &out, std::string &error) {
 		if (!read_second_listing(*listing, read, error))
 			return false;
 		out.second_listing = std::move(read);
+	}
+	out.build.reset();
+	if (const JsonValue *build = v.get("build")) {
+		if (out.state != ContainerState::Running)
+			return fail(error, "a container's build comes with a running one alone");
+		ServeBuild read;
+		if (!read_serve_build(*build, read, error))
+			return false;
+		out.build = std::move(read);
 	}
 	return true;
 }
@@ -764,6 +797,11 @@ bool decode_second_listing(std::string_view json, SecondListingStatus &out, std:
 	return parse_object(json, v, error) && read_second_listing(v, out, error);
 }
 
+bool decode_serve_build(std::string_view json, ServeBuild &out, std::string &error) {
+	JsonValue v;
+	return parse_object(json, v, error) && read_serve_build(v, out, error);
+}
+
 // --- the bootstrap ----------------------------------------------------------------
 
 std::string encode_agent_hello(const AgentHello &hello) {
@@ -875,6 +913,13 @@ std::string encode_sync_request(const SyncRequest &request) {
 		// Present only on a running one whose server reports a second listing.
 		if (c.second_listing)
 			entry.set("second_listing", second_listing_json(*c.second_listing));
+		// Present only on a running one whose server reports its build.
+		if (c.build) {
+			JsonValue build = JsonValue::make_object();
+			build.set("version", io::json_string(c.build->version));
+			build.set("commit", io::json_string(c.build->commit));
+			entry.set("build", std::move(build));
+		}
 		containers.push(std::move(entry));
 	}
 	v.set("containers", std::move(containers));

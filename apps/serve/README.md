@@ -25,15 +25,17 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
                [--also-master-host <gate>] [--also-master-gate-port <n>]
                [--also-credentials <file>]
                [--status-page on|off] [--stats-file <file>] [--exit-file <file>]
-               [--second-listing-file <file>]
+               [--second-listing-file <file>] [--build-file <file>]
                [--send-holdoff-ticks <n>] [--entity-send-budget <bytes>]
                [/PROFILE <path>] [/PUNTLOG | /PUNT.TXT] [/CHEATLOG] [/NETLOG] [/INOUT]
                [/CONNECTLOG | /NOCONNECTLOG]
+opennova-serve --version [--resource-dir <game dir>] [/game <code>]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--resource-dir <dir>` | The install to serve from (its `.pff` set), as `opennova.exe` takes it. Required. |
+| `--version` | Print the server's version line (below, "Title") and exit with 0, as `opennova-hostd --version` does: `opennova-serve OP: Acid Gambit 0.1.4 · ONE 0.0.22.123 (a1b2c3d, staging) · JO protocol 16`. It needs no `/HOST`; `--resource-dir` and `/game` only name the game the line opens with, and with neither the line is ONE's build alone (`opennova-serve ONE 0.0.22.123 (a1b2c3d, staging)`). |
 | `/HOST <file>` | The host file (below). Required. |
 | `--rotation-first` | Start at the first `Mission` entry. Hosted servers use this to play their saved rotation in order; without it, retail's last-entry starting behavior applies. |
 | `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as Joint Operations' switch does (a host file with no `MaxPlayers` line leaves it unread). `dfx2.exe` has no such switch, so a `/game dfx2` server reads none. |
@@ -90,7 +92,11 @@ Force: Xtreme 2's. A code no title has, or a title whose protocol is not yet wit
 (today every one but `jo`, `dfx2` and `acidgambit`), stops the start with exit code 1 and a
 message naming the unwitnessed fields. It logs its version line as it starts
 (`opennova-serve: <line>`: the game, the release its folder holds, ONE's build and the
-protocol). A listing
+protocol; ONE's build is `one_build()`'s label, its version with a staging build's run
+number and its commit), heads every print of the status page with it ("The console and the
+logs") and prints it for `--version`. On Windows the server sets its console to UTF-8 while it
+runs, so the line's separators show as they are, and gives the console its own code page back
+at the exit. A listing
 that logs in (`--master-host` with `--credentials`) also needs the title's sign-in submit control
 (the title's web-flow part), and refuses the same way a title without it.
 
@@ -336,7 +342,10 @@ A retail dedicated server shows its status page in place of the game: the player
 the server line, the team block, the round clock, the frame and login counts and the four
 newest chat lines. `opennova-serve` prints that same page as text on its standard output
 whenever its rows change (the slots, the server line, the team block or the chat lines;
-the clock and the counts ride along). A line typed on its standard input goes into the
+the clock and the counts ride along). Each print opens with one line of OpenNova's own above
+the page, none of retail's: `opennova-serve <version line>` ("Title"), so a running server
+always shows the game, ONE's build and the protocol it runs however far its start's log has
+scrolled. A line typed on its standard input goes into the
 page's chat input as a retail operator types it on the server's window: the Global talk opens
 (Ctrl+T), the line is typed, and Enter sends it to every player in the match. Global is the
 one talk a server with no player of its own can send. The page's labels come from the
@@ -389,6 +398,11 @@ line by line.
   or explicit admin session end exits with 0 and writes `completed:rotation` or
   `completed:admin-session`, so the supervisor can distinguish it from a crash.
   Other clean exits write nothing.
+- **`--build-file <file>`**: the build the server runs, written once as it starts (a new
+  file renamed over the old), one JSON line: `{"version": "0.0.22.123", "commit": "a1b2c3d"}`,
+  `one_build()`'s version (a staging build's run number among it) and its commit's short sha
+  (`""` for a build that names none). Its supervisor forwards it, so the service shows each
+  hosted server's own build beside its listing.
 - **`--second-listing-file <file>`**: the second listing's state ("Two listings" above), so
   its supervisor can show whether and why the server is listed there without reading its
   log. The server rewrites the file (a new file renamed over the old) whenever the state

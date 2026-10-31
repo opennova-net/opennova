@@ -113,6 +113,22 @@ describe('LobbyPage', () => {
     expect(page.find('a[href="/play#online"]').exists()).toBe(true);
   });
 
+  it('names the ONE build of each server NovaWorld hosts, and none for any other', async () => {
+    const own = ours(2);
+    own.games[0].hosts[0].build = { version: '0.0.22.123', commit: 'a1b2c3d' };
+    own.games[0].hosts[1].build = null;
+    readOurs.mockResolvedValue(own);
+    const { page } = await open();
+    const rows = page.findAll('tbody tr.server-row');
+    const built = rows.find((r) => r.text().includes('Our Server 0'))!;
+    expect(built.get('.server-build').text()).toBe('ONE 0.0.22.123 a1b2c3d');
+    expect(built.get('th').text()).toContain('Joint Operations · OpenNova · ONE 0.0.22.123 a1b2c3d');
+    // A server its owner hosts, and NovaLogic's, name no build.
+    expect(rows.filter((r) => r.find('.server-build').exists())).toHaveLength(1);
+    // The phone list says the same.
+    expect(page.findAll('.server-mobile .server-build').map((b) => b.text())).toEqual(['ONE 0.0.22.123 a1b2c3d']);
+  });
+
   it('restores URL filters together and changes them without dropping unrelated URL state', async () => {
     const { page, router } = await open('/lobby?source=novalogic&game=jop_2_consumer&type=TDM&hideFull=1&hidePassworded=1&campaign=community');
     expect(names(page)).toEqual([]);

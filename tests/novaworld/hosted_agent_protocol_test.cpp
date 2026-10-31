@@ -581,6 +581,68 @@ int test_sync_request_second_listing() {
 	return 0;
 }
 
+// A running server's ONE build (its --build-file): absent unless reported, its shapes, only on a
+// running container, and the file's own line read by the same rules.
+int test_sync_request_build() {
+	hosted::SyncRequest request;
+	request.agent_version = "0123abcd";
+	request.containers = { sample_report(0, ContainerState::Running) };
+	hosted::SyncRequest back;
+	std::string error;
+	// A report without it (an agent or a server from before it) reads as no build.
+	const std::string none = hosted::encode_sync_request(request);
+	TEST_EXPECT(none.find("\"build\"") == std::string::npos);
+	TEST_EXPECT(hosted::decode_sync_request(none, back, error) && !back.containers[0].build);
+
+	request.containers[0].build = hosted::ServeBuild{ "0.0.22.123", "a1b2c3d" };
+	const std::string json = hosted::encode_sync_request(request);
+	TEST_EXPECT(json.find("\"build\"") != std::string::npos &&
+			json.find("\"version\": \"0.0.22.123\"") != std::string::npos &&
+			json.find("\"commit\": \"a1b2c3d\"") != std::string::npos);
+	TEST_EXPECT(hosted::decode_sync_request(json, back, error) && back.containers[0].build &&
+			(*back.containers[0].build == hosted::ServeBuild{ "0.0.22.123", "a1b2c3d" }));
+	// No commit named.
+	request.containers[0].build = hosted::ServeBuild{ "0.0.22", "" };
+	TEST_EXPECT(hosted::decode_sync_request(hosted::encode_sync_request(request), back, error) &&
+			back.containers[0].build && back.containers[0].build->commit.empty());
+
+	const auto reads = [](const std::string &member) {
+		hosted::ServeBuild out;
+		std::string why;
+		return hosted::decode_serve_build(member, out, why);
+	};
+	TEST_EXPECT(reads("{\"version\":\"0.0.22\",\"commit\":\"\"}") &&
+			reads("{\"version\":\"1.7.5.7\",\"commit\":"
+				  "\"0123456789abcdef0123456789abcdef01234567\"}"));
+	// The version Version::parse takes, spelled as it spells it back.
+	TEST_EXPECT(!reads("{\"version\":\"\",\"commit\":\"a1b2c3d\"}") &&
+			!reads("{\"version\":\"V0.0.22\",\"commit\":\"a1b2c3d\"}") &&
+			!reads("{\"version\":\"0.0.22.1.2\",\"commit\":\"a1b2c3d\"}") &&
+			!reads("{\"version\":\"0.00.22\",\"commit\":\"a1b2c3d\"}") &&
+			!reads("{\"version\":\"0..22\",\"commit\":\"a1b2c3d\"}"));
+	// The commit "" or 7..40 lower-case hex digits.
+	TEST_EXPECT(!reads("{\"version\":\"0.0.22\",\"commit\":\"a1b2c3\"}") &&
+			!reads("{\"version\":\"0.0.22\",\"commit\":\"A1B2C3D\"}") &&
+			!reads("{\"version\":\"0.0.22\",\"commit\":\"a1b2c3g\"}") &&
+			!reads("{\"version\":\"0.0.22\",\"commit\":\"" + std::string(41, 'a') + "\"}"));
+	// Both members, nothing else.
+	TEST_EXPECT(!reads("{\"version\":\"0.0.22\"}") && !reads("{\"commit\":\"a1b2c3d\"}") &&
+			!reads("{\"version\":\"0.0.22\",\"commit\":\"a1b2c3d\",\"staging\":true}") &&
+			!reads("{\"version\":22,\"commit\":\"a1b2c3d\"}") && !reads("[]") &&
+			!reads("not json"));
+	// opennova-serve's own line (apps/serve/run_reports.h build_file_json) reads.
+	hosted::ServeBuild line;
+	TEST_EXPECT(hosted::decode_serve_build(
+						"{\"version\":\"0.0.22.123\",\"commit\":\"a1b2c3d\"}\n", line, error) &&
+			line.version == "0.0.22.123" && line.commit == "a1b2c3d");
+	// Only on a running container.
+	request.containers = { sample_report(1, ContainerState::Exited) };
+	request.containers[0].build = hosted::ServeBuild{ "0.0.22", "a1b2c3d" };
+	TEST_EXPECT(!hosted::decode_sync_request(hosted::encode_sync_request(request), back, error) &&
+			error.find("running") != std::string::npos);
+	return 0;
+}
+
 // What a report says of the machine itself: its image, the agent's log stream, its use
 // and the trees it holds, each with its shapes; a starting container's wait.
 int test_sync_request_machine() {
@@ -884,6 +946,7 @@ int main() {
 		{ "protocol", test_protocol },
 		{ "sync_request", test_sync_request },
 		{ "sync_request_second_listing", test_sync_request_second_listing },
+		{ "sync_request_build", test_sync_request_build },
 		{ "sync_request_machine", test_sync_request_machine },
 		{ "sync_reply", test_sync_reply },
 	};

@@ -114,6 +114,8 @@ int test_migrations_create_expected_tables() {
 				"d8f06d51e1c899863541c14fbe805dc03ec232ae3671f17689941626c3331f79" },
 		{ "0015_reissue_cd_key_activations.sql",
 				"974b9ebb1fcc50d3ad42bda10fd7a78154f5a3220613f38e7b19892ebf3c4bd8" },
+		{ "0016_slot_reports_build.sql",
+				"2bd5104be947433c3d9122d91c0e63ee08a56cd55a7504d611df5f106a89d7a1" },
 	};
 	for (size_t i = 0; i < std::size(recorded_files); ++i) {
 		const std::string text =

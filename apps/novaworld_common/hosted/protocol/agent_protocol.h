@@ -48,7 +48,8 @@
 //                                                 "not_listed",
 //                                        ["try": <int>, "tries": <int>,] ["next_try_at": <int>,]
 //                                        ["reason": "<why>", ["tag": "NWEC<digits>"],]
-//                                        ["slots": [<int>, ...]]}]}],
+//                                        ["slots": [<int>, ...]]}],
+//                    ["build": {"version": "<ONE's version>", "commit": "<short sha>" | ""}]}],
 //    ["listing_failed": true]}
 //   -> 200 {"protocol": 3, "drain": <bool>,
 //           "desired": [{"name", "slot", "image", "uid",
@@ -107,7 +108,13 @@
 // which only a start the service renders it for does (a server whose owner asked:
 // hosted/model/hosted_settings.h render_serve_args) with the serve image the same
 // release's service pins, so an agent sends it to a service that reads it; a
-// service of this protocol reads a report without it as no state.
+// service of this protocol reads a report without it as no state. A running
+// container carries its server's ONE build the same way (`build`, its
+// --build-file, which holds this member's own JSON: decode_serve_build): the
+// version and the commit the server says it runs, which the service shows
+// beside its listing. The file is written only by a start the service renders
+// --build-file for, so this member too reaches only a service that reads it,
+// and a report without it is a build not known.
 // Each desired container names its log stream (`log`), where its output goes
 // (docker's awslogs driver, or the agent's --log-dir). `files` carries the slot's working directory
 // (the bytes in standard base64: the host file is cp1252) and is sent until
@@ -314,6 +321,19 @@ struct SecondListingStatus {
 	std::vector<int> slots;
 };
 
+// A server's ONE build, as the server says it of itself (opennova-serve's --build-file:
+// base/version/one_build.h one_build()): its version ("0.0.22"; a staging build's
+// "0.0.22.123", base/version/version.h Version::parse's form) and its commit's short sha
+// ("a1b2c3d": 7..40 lower-case hex digits; "" for a build that names none).
+struct ServeBuild {
+	std::string version;
+	std::string commit;
+	bool operator==(const ServeBuild &other) const {
+		return version == other.version && commit == other.commit;
+	}
+	bool operator!=(const ServeBuild &other) const { return !(*this == other); }
+};
+
 struct ContainerReport {
 	std::string name;
 	int slot = 0;
@@ -332,6 +352,8 @@ struct ContainerReport {
 	std::optional<TickHealth> tick; // running, with a fresh --stats-file
 	// Running, with a --second-listing-file that reads.
 	std::optional<SecondListingStatus> second_listing;
+	// Running, with a --build-file that reads.
+	std::optional<ServeBuild> build;
 };
 
 // The machine's own use, as its agent read it (core/proc_stats.h).
@@ -432,5 +454,8 @@ bool decode_sync_reply(std::string_view json, SyncReply &out, std::string &error
 // agent reads a server's --second-listing-file with it, so a file of any other shape says
 // nothing.
 bool decode_second_listing(std::string_view json, SecondListingStatus &out, std::string &error);
+// A container report's `build` as its own JSON text, by the same strict read: the agent reads a
+// server's --build-file with it.
+bool decode_serve_build(std::string_view json, ServeBuild &out, std::string &error);
 
 } // namespace opennova::novaworld_server::hosted

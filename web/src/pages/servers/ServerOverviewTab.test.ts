@@ -85,8 +85,8 @@ describe('ServerOverviewTab', () => {
   });
 
   it("names the newer version and updates the owner's server after a confirmation", async () => {
-    update.mockResolvedValue({ ok: true, value: hostedServer(1, { update_available: true, update_requested: true }) });
-    const page = await mountTab(hostedServer(1, { update_available: true }));
+    update.mockResolvedValue({ ok: true, value: hostedServer(1, { update_available: true, update_kinds: ['content'], update_requested: true }) });
+    const page = await mountTab(hostedServer(1, { update_available: true, update_kinds: ['content'] }));
     expect(mine).toHaveBeenCalledTimes(1);
     const callout = page.get('#hosted-server-update');
     expect(callout.text()).toContain('Joint Operations 1.0.9 available');
@@ -95,18 +95,51 @@ describe('ServerOverviewTab', () => {
     expect(confirm).toHaveBeenCalledWith('Update Server 1? It restarts and its players drop.');
     expect(update).toHaveBeenCalledWith(1);
     expect(page.get('[role="status"]').text()).toBe('Server 1 is updating.');
-    expect(page.emitted('changed')?.[0]).toEqual([hostedServer(1, { update_available: true, update_requested: true })]);
+    expect(page.emitted('changed')?.[0]).toEqual([hostedServer(1, { update_available: true, update_kinds: ['content'], update_requested: true })]);
+  });
+
+  it('shows the build it runs, and offers a new server build with the same update', async () => {
+    const running = { version: '0.0.22.5', commit: 'abc1234' };
+    const page = await mountTab(hostedServer(1, { build: running }));
+    expect(page.get('#hosted-server-build').text()).toBe('ONE 0.0.22.5 abc1234');
+    expect(page.find('#hosted-server-update').exists()).toBe(false);
+    page.unmount();
+
+    // A build-only update: its words name both builds, and the button updates as a data update does.
+    update.mockResolvedValue({ ok: true, value: hostedServer(1, { update_available: true, update_requested: true }) });
+    const built = await mountTab(
+      hostedServer(1, { update_available: true, update_kinds: ['server_build'], build: running, build_available: { version: '0.0.22.9', commit: 'def5678' } }),
+    );
+    const callout = built.get('#hosted-server-update');
+    expect(callout.text()).toContain('New server build: ONE 0.0.22.5 → ONE 0.0.22.9');
+    expect(callout.text()).not.toContain('Update available');
+    expect(callout.text()).not.toContain('Joint Operations 1.0.9 available');
+    await callout.get('button').trigger('click');
+    await flushPromises();
+    expect(update).toHaveBeenCalledWith(1);
+    built.unmount();
+
+    // Both kinds: two badges. The new build not known yet: it says so plainly.
+    const both = await mountTab(hostedServer(1, { update_available: true, update_kinds: ['content', 'server_build'], build: running }));
+    expect(both.get('#hosted-server-update').text()).toContain('Joint Operations 1.0.9 available');
+    expect(both.get('.hosted-server-build-update').text()).toBe('New server build available');
+    both.unmount();
+    // Builds that read alike by version are told apart by their commits.
+    const alike = await mountTab(
+      hostedServer(1, { update_available: true, update_kinds: ['server_build'], build: running, build_available: { version: '0.0.22.5', commit: 'fff0000' } }),
+    );
+    expect(alike.get('.hosted-server-build-update').text()).toBe('New server build: ONE 0.0.22.5 abc1234 → ONE 0.0.22.5 fff0000');
   });
 
   it('says an update was requested, with no button', async () => {
-    const page = await mountTab(hostedServer(1, { update_available: true, update_requested: true }));
+    const page = await mountTab(hostedServer(1, { update_available: true, update_kinds: ['content'], update_requested: true }));
     expect(page.text()).toContain('Update requested');
     expect(page.find('#hosted-server-update').exists()).toBe(false);
   });
 
   it('shows the owner the refusal, and tells the page when the server is gone', async () => {
     update.mockResolvedValue({ ok: false, error: { code: 'up_to_date', status: 409, message: 'Your server already runs the current data.' } });
-    const page = await mountTab(hostedServer(1, { update_available: true }));
+    const page = await mountTab(hostedServer(1, { update_available: true, update_kinds: ['content'] }));
     await page.get('#hosted-server-update button').trigger('click');
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toBe('Your server already runs the current data.');
@@ -114,7 +147,7 @@ describe('ServerOverviewTab', () => {
   });
 
   it("reads the admin's games for the version, and offers the admin no update here", async () => {
-    const page = await mountTab(hostedServer(1, { update_available: true }), 'admin');
+    const page = await mountTab(hostedServer(1, { update_available: true, update_kinds: ['content'] }), 'admin');
     expect(mine).not.toHaveBeenCalled();
     expect(adminProducts).toHaveBeenCalledTimes(1);
     const callout = page.get('#hosted-server-update');

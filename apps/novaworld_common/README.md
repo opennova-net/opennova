@@ -786,7 +786,13 @@ HostKey is unwitnessed.
 | `GET /api/hosts` | admin | every listed server as the lobby stores it, with the joiners `/NWJoin.dll` recorded |
 
 The public `/api/lobbies` and the GSB name no owner, and no joiner's account or
-address; `GET /api/hosts`, which names both, is an admin route. The owner pushes to
+address; `GET /api/hosts`, which names both, is an admin route. Each listing in
+`/api/lobbies` and `/api/lobbies/<rid>` carries `build`, the ONE build its server runs
+(`{"version", "commit"}`, each null when not named), where the service knows it: a running
+hosted server's, as the server writes it for its machine's agent (its `--build-file`,
+`hosted/README.md`). Any other listing's is null: a player's own `opennova-serve` lists
+through the retail wire alone, whose host request carries no build (its `Version` is ONE's
+three numbers and a fourth 0, `OneBuild::wire_version`), and a retail server has none. The owner pushes to
 its own servers through `POST /api/me/hosts/<rid>/command` and `/stop` ("Pushing
 statements to a listed server" above).
 

@@ -1,7 +1,9 @@
 #include "lobby_routes.h"
 
 #include "hosted/console_commands.h"
+#include "hosted/hosted_routes.h" // serve_build_json
 #include "hosted/model/console_queue.h"
+#include "hosted/model/fleet_repository.h"
 #include "hosted/model/hosted_repository.h"
 #include "http_json.h"
 #include "products/product_repository.h"
@@ -42,12 +44,20 @@ ExpansionNames expansion_names(db::Database &db) {
 	return out;
 }
 
+// The ONE build a listing's server runs, by the account its HostKey names: a running hosted
+// server's, as the server says it of itself (hosted/model/fleet_repository.h
+// running_builds_by_account). Any other listing's is not known: a server its owner hosts reports
+// nothing but the retail listing, which carries no build.
+using ListingBuilds = std::map<int64_t, hosted::ServeBuild>;
+
 // A listing as the lobby's card shows it. camelCase to match the web LobbyHost
 // type (snake_case rendered every host as "Unnamed Server 0/0"). hostIp/hostPort
 // are the join address. The host's own text comes in its code page (a stock
 // host's cp1252) and goes out as UTF-8; the GSB keeps the host's bytes for stock
-// clients. `slug` is its game's.
-crow::json::wvalue card_of(const hostdb::HostRow &h, const ExpansionNames &names, const std::string &slug) {
+// clients. `slug` is its game's. `build` is its server's ONE build ({version, commit}, each
+// null when not named), null where none is known (ListingBuilds).
+crow::json::wvalue card_of(const hostdb::HostRow &h, const ExpansionNames &names,
+		const std::string &slug, const ListingBuilds &builds) {
 	crow::json::wvalue card;
 	card["id"]         = h.rid;
 	card["serverName"] = retail_text_to_utf8(h.server_name);
@@ -63,6 +73,11 @@ crow::json::wvalue card_of(const hostdb::HostRow &h, const ExpansionNames &names
 	const auto named   = names.find({ slug, h.exp });
 	card["expansion"]  = named != names.end() ? named->second : retail_text_to_utf8(h.exp);
 	card["locked"]     = h.locked == "Y";
+	const auto build = h.host_user_id ? builds.find(*h.host_user_id) : builds.end();
+	if (build != builds.end())
+		card["build"] = hosted::serve_build_json(build->second);
+	else
+		card["build"] = nullptr;
 	return card;
 }
 
@@ -91,6 +106,7 @@ crow::response LobbyRoutes::list() {
 		const auto games = catalog::available_games(*db_conn);
 		const auto host_rows = hostdb::list_hosts(*db_conn);
 		const auto names = expansion_names(*db_conn);
+		const auto builds = hosted::running_builds_by_account(*db_conn);
 		games_json.reserve(games.size());
 		for (const auto &g : games) {
 			crow::json::wvalue game;
@@ -99,7 +115,7 @@ crow::response LobbyRoutes::list() {
 			std::vector<crow::json::wvalue> hosts;
 			for (const auto &h : host_rows) {
 				if (h.game != g.lobby_name) continue;
-				hosts.push_back(card_of(h, names, g.slug));
+				hosts.push_back(card_of(h, names, g.slug, builds));
 			}
 			game["hosts"] = std::move(hosts);
 			games_json.push_back(std::move(game));
@@ -137,7 +153,7 @@ crow::response LobbyRoutes::one(uint64_t rid) {
 			slug = g.slug;
 			display_name = g.display_name;
 		}
-		out = card_of(*row, expansion_names(*db), slug);
+		out = card_of(*row, expansion_names(*db), slug, hosted::running_builds_by_account(*db));
 		out["game"]["slug"]        = slug;
 		out["game"]["displayName"] = display_name;
 		if (const auto minutes = strutil::parse_int(row->time_left)) out["timeLeft"] = *minutes;
