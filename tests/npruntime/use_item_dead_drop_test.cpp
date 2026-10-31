@@ -101,6 +101,7 @@ struct RoleRig {
 	bool kernel_storage_jo = test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	std::unique_ptr<inmatch::HostRole> role_storage = std::make_unique<inmatch::HostRole>();
+	bool role_storage_jo = test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	RoleRig(bool session_peer) {
 		role.bind(kernel);

@@ -145,6 +145,7 @@ struct ProbeRole final : inmatch::Role {
 
 void test_the_session_locks_a_live_frame_only() {
 	auto role = std::make_unique<ProbeRole>();
+	test_titles::jo_controls(*role);
 	auto session = std::make_unique<inmatch::Session>(*role);
 	CHECK(session->begin_load().applied() && session->complete_load().applied());
 	FakeClock clock;
@@ -196,6 +197,7 @@ struct SpinRole final : inmatch::Role {
 
 void test_the_frame_names_its_phases() {
 	auto role = std::make_unique<SpinRole>();
+	test_titles::jo_controls(*role);
 	auto session = std::make_unique<inmatch::Session>(*role);
 	CHECK(session->begin_load().applied() && session->complete_load().applied());
 	FakeClock clock;

@@ -5,7 +5,9 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/radar_contacts.h>
 
+#include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <utility>
@@ -84,12 +86,27 @@ bool load(Session &session) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
 	using opennova::world::TickAccumulator;
+
+	// ctest inmatch_session_no_controls: a role no embedder named a binding catalog for reads none:
+	// its first read aborts, naming the invariant, where Jointops.exe's catalog once stood in
+	// (inmatch::Role::controls). The abort's handler exits clean, so ctest reads the message.
+	if (argc > 1 && std::string(argv[1]) == "--no-controls") {
+#if defined(_MSC_VER)
+		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
+		std::signal(SIGABRT, [](int) { std::_Exit(0); });
+		const std::unique_ptr<TickProbe> unnamed(new TickProbe());
+		(void)unnamed->controls();
+		std::fputs("a role read a binding catalog no embedder named\n", stderr);
+		return 1;
+	}
 
 	// Lifecycle transitions are explicit and invalid transitions are inert.
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!expect(session.state() == State::Unloaded,
@@ -114,6 +131,7 @@ int main() {
 	// One frame sample feeds every catch-up tick, with edges consumed once.
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -156,6 +174,7 @@ int main() {
 	// drains one quantum on the tick phase.
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -179,6 +198,7 @@ int main() {
 	// [orig: Game_MainLoop @0x52B630 — clamp @0x52B83E, EMA @0x52B85B].
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -200,6 +220,7 @@ int main() {
 	// [orig: Game_MainLoop g_StatsAvgFps @0x52B98F, drain @0x52BA08].
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -222,6 +243,7 @@ int main() {
 	// @0x5caeff..0x5caf0e; Game_MainLoop @0x52B75C, @0x52bac8..0x52bad2].
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -266,6 +288,7 @@ int main() {
 	//  @0x5CAE62..0x5CAE94, the count-down @0x5CAF08, the re-base flag @0x5CAF0E].
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -299,6 +322,7 @@ int main() {
 	// Game_MainLoop @0x52B70F..0x52B757, @0x52B766].
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -344,6 +368,7 @@ int main() {
 	//  Render_ProcessMainSceneFrame @0x5CAEFF..0x5CAF0E].
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		target.probe_kind = RoleKind::Joiner;
 		target.waiting = true;
@@ -377,6 +402,7 @@ int main() {
 		opennova::hud::HudToggleState view_up;
 		view_up.server_status_view = true;
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		target.probe_kind = RoleKind::ListenHost;
 		Session session(target);
@@ -406,6 +432,7 @@ int main() {
 		opennova::hud::HudToggleState view_down;
 		{
 			auto target_heap = std::make_unique<TickProbe>();
+			test_titles::jo_controls(*target_heap);
 			TickProbe &target = *target_heap;
 			target.probe_kind = RoleKind::ListenHost;
 			Session session(target);
@@ -440,6 +467,7 @@ int main() {
 			// count the three start frames down from the first of them, so the fourth frame
 			// drawn is still re-based (had the page frame counted one, it would bank).
 			auto target_heap = std::make_unique<TickProbe>();
+			test_titles::jo_controls(*target_heap);
 			TickProbe &target = *target_heap;
 			target.probe_kind = RoleKind::ListenHost;
 			Session session(target);
@@ -463,6 +491,7 @@ int main() {
 		}
 		{
 			auto target_heap = std::make_unique<TickProbe>();
+			test_titles::jo_controls(*target_heap);
 			TickProbe &target = *target_heap;
 			target.probe_kind = RoleKind::DedicatedHost;
 			Session session(target);
@@ -477,6 +506,7 @@ int main() {
 		}
 		{
 			auto target_heap = std::make_unique<TickProbe>();
+			test_titles::jo_controls(*target_heap);
 			TickProbe &target = *target_heap;
 			target.probe_kind = RoleKind::Joiner;
 			Session session(target);
@@ -495,6 +525,7 @@ int main() {
 	// store @0x52B866, the drain's phase @0x52BA6B)]. Manual step stays local-only.
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -542,6 +573,7 @@ int main() {
 			}
 		};
 		auto target = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target);
 		Session session(*target);
 		if (!load(session)) return 1;
 		opennova::world::World &world = target->kernel.world;
@@ -666,6 +698,7 @@ int main() {
 			}
 		};
 		auto target = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target);
 		target->probe_kind = kind;
 		Session session(*target);
 		if (!load(session)) return 1;
@@ -717,6 +750,7 @@ int main() {
 	//  @0x57E9C7, the tickdown @0x57E9DA]
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -737,6 +771,7 @@ int main() {
 	// Network roles cannot pause, step, or reset.
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		target.probe_kind = RoleKind::ListenHost;
 		Session session(target);
@@ -758,6 +793,7 @@ int main() {
 	// Joiners expose their pre-load connection state.
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		target.probe_kind = RoleKind::Joiner;
 		Session session(target);
@@ -771,6 +807,7 @@ int main() {
 	// A terminal tick cancels the rest of the batch and fails the session.
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -790,6 +827,7 @@ int main() {
 	// @0x521cf9].
 	{
 		auto target_heap = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target_heap);
 		TickProbe &target = *target_heap;
 		Session session(target);
 		if (!load(session)) return 1;
@@ -820,6 +858,7 @@ int main() {
 	//  HUD_RenderAllOverlays @0x5A8185..0x5A81BF]
 	{
 		auto target = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target);
 		Session session(*target);
 		if (!load(session)) return 1;
 		opennova::world::World &world = target->kernel.world;
@@ -881,6 +920,7 @@ int main() {
 	//  @0x5CAC6D; GameLoop_RenderFrame's view word @0x521CD6]
 	{
 		auto target = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target);
 		target->probe_kind = RoleKind::ListenHost;
 		Session session(*target);
 		if (!load(session)) return 1;
@@ -934,6 +974,7 @@ int main() {
 	//  @0x5293A5..0x5293AF); GameLoop_RenderFrame @0x521CF9]
 	{
 		auto target = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target);
 		Session session(*target);
 		if (!load(session)) return 1;
 		opennova::world::World &world = target->kernel.world;
@@ -978,6 +1019,7 @@ int main() {
 	//  NapiNPClientMsg_SetSpectatorMode @0x425A18; NapiNPClientMsg_0x00A @0x42FFA0]
 	{
 		auto target = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target);
 		Session session(*target);
 		if (!load(session)) return 1;
 		opennova::world::World &world = target->kernel.world;
@@ -1027,6 +1069,7 @@ int main() {
 	}
 	{
 		auto target = std::make_unique<TickProbe>();
+		test_titles::jo_controls(*target);
 		Session session(*target);
 		if (!load(session)) return 1;
 		if (!expect(session.pause().applied(), "the statistics' pause applies")) return 1;
@@ -1051,6 +1094,7 @@ int main() {
 	{
 		const auto catchup = [](double long_frame) {
 			auto target = std::make_unique<TickProbe>();
+			test_titles::jo_controls(*target);
 			Session session(*target);
 			if (!load(session)) return -1;
 			FrameInput in;
@@ -1087,6 +1131,7 @@ int main() {
 		const auto next_frame = [](double first_seconds, bool scaled, size_t raise_after,
 				int32_t first_ticks) -> int {
 			auto target = std::make_unique<TickProbe>();
+			test_titles::jo_controls(*target);
 			Session session(*target);
 			if (!load(session)) return -1;
 			target->raise_after_ticks = raise_after;

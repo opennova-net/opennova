@@ -81,6 +81,7 @@ int main() {
 	ms::MissionKernel kernel;
 	test_titles::jo_world(kernel.world);
 	inmatch::HostRole role;
+	test_titles::jo_controls(role);
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
 	kernel.open_document(two_entity_mission(), "synth", source_over(&files));

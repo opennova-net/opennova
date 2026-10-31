@@ -105,6 +105,7 @@ struct ListenHost {
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
 	bool kernel_jo = test_titles::jo_world(kernel->world);
 	std::unique_ptr<inmatch::HostRole> role = std::make_unique<inmatch::HostRole>();
+	bool role_jo = test_titles::jo_controls(*role);
 	std::unique_ptr<inmatch::ClientProcessState> process =
 			std::make_unique<inmatch::ClientProcessState>();
 	CaptureSocket socket;
@@ -643,6 +644,7 @@ void test_the_remapped_exit_reads_the_own_client_record() {
 	if (live) CHECK(inmatch::disconnect_reason_key(&*live).section == nullptr);
 
 	inmatch::HostRole dedicated; // no own client
+	test_titles::jo_controls(dedicated);
 	CHECK(!dedicated.own_client_error_record());
 	CHECK(inmatch::disconnect_reason_key(nullptr).key == "ERR1");
 }

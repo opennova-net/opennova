@@ -224,6 +224,7 @@ void test_destroy_drops_carried_flag() {
 // queue and leaves the later 0x25 on the transport.
 void test_map_change_destroys_before_its_pump() {
 	auto role = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
+	test_titles::jo_controls(*role);
 	auto kernel = std::make_unique<mission::MissionKernel>();
 	test_titles::jo_world(kernel->world);
 	w::World &world = kernel->world;

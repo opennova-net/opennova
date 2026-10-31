@@ -96,6 +96,7 @@ struct HostMission {
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
 	bool kernel_jo = test_titles::jo_world(kernel->world);
 	std::unique_ptr<inmatch::HostRole> role = std::make_unique<inmatch::HostRole>();
+	bool role_jo = test_titles::jo_controls(*role);
 	inmatch::NapiNPServerCtx &ctx() { return role->state.host_owner.ctx; }
 };
 

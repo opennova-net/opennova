@@ -32,6 +32,7 @@ int main() {
     auto kernel = std::make_unique<mission::MissionKernel>();
     test_titles::jo_world(kernel->world);
     inmatch::JoinerRole role;
+    test_titles::jo_joiner(role);
     role.set_rules(opennova::world::title_rules("jo"));
     role.set_protocol(&kJo);
     role.bind(*kernel);

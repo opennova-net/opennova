@@ -101,6 +101,7 @@ void run(std::map<std::string, std::string> &files) {
 	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;

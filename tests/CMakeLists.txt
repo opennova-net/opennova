@@ -721,6 +721,10 @@ add_test(NAME wav_source COMMAND wav_source_test)
 add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
 target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_session COMMAND inmatch_session_test)
+# A role no embedder named a binding catalog for aborts at its first read (Role::controls).
+add_test(NAME inmatch_session_no_controls COMMAND inmatch_session_test --no-controls)
+set_tests_properties(inmatch_session_no_controls PROPERTIES PASS_REGULAR_EXPRESSION
+    "Role::controls: no binding catalog: ")
 
 # The main loop's clock both hosts drive (inmatch/main_loop_clock.h): the elapsed time, the
 # frame lock's stamp handoff, the render re-base, a load inside a frame never banked.

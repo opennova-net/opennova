@@ -108,6 +108,7 @@ void a_locked_session_frame_sleeps_and_hands_its_stamp_back() {
 	MainLoopClock clock(&fake);
 	gamecfg::GameCfg cfg = gamecfg::defaults();
 	CountingRole role;
+	test_titles::jo_controls(role);
 	Session session(role);
 	session.set_frame_lock_clock(&fake);
 	CHECK(session.begin_load().applied() && session.complete_load().applied());
@@ -134,6 +135,7 @@ void a_load_inside_a_frame_is_never_banked() {
 	gamecfg::GameCfg cfg = gamecfg::defaults();
 	cfg.lock_framerate = 0;
 	CountingRole role;
+	test_titles::jo_controls(role);
 	Session session(role);
 	CHECK(session.begin_load().applied() && session.complete_load().applied());
 	(void)session.advance(clock.begin_frame(&cfg));
@@ -155,6 +157,7 @@ void a_load_inside_a_frame_is_never_banked() {
 	// A direct frame of the same delta (the old loop's, with no render stamp) banks the load
 	// up to the bank's 500 ms clamp: 31 updates at once.
 	CountingRole direct_role;
+	test_titles::jo_controls(direct_role);
 	Session direct(direct_role);
 	CHECK(direct.begin_load().applied() && direct.complete_load().applied());
 	FrameInput late;

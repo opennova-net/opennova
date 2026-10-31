@@ -162,6 +162,7 @@ struct Harness {
 		const w::Vec3 before = kernel->local.player_position();
 		kernel->local.input.forward = true;
 		inmatch::LocalRole role;
+		test_titles::jo_controls(role);
 		role.bind(*kernel);
 		for (int i = 0; i < 40; ++i) role.run_tick(inmatch::TickInput{});
 		kernel->local.input.forward = false;
@@ -269,6 +270,7 @@ void no_clips_then_rearm(Assets &assets) {
 	const w::Vec3 before = h.kernel->local.player_position();
 	h.kernel->local.input.forward = true;
 	inmatch::LocalRole role;
+	test_titles::jo_controls(role);
 	role.bind(*h.kernel);
 	for (int i = 0; i < 10; ++i) role.run_tick(inmatch::TickInput{});
 	CHECK(h.kernel->local.player_position().x == before.x);
@@ -316,6 +318,7 @@ void joiner_resolves_empty_registry(Assets &assets) {
 	h.boot(false, false);
 	QuietSocket socket;
 	inmatch::JoinerRole role;
+	test_titles::jo_joiner(role);
 	role.set_rules(opennova::world::title_rules("jo"));
 	role.set_protocol(&kJo);
 	role.bind(*h.kernel);

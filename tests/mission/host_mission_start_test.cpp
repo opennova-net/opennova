@@ -131,6 +131,7 @@ ServeOnlyStart run_serve_only_start(inmatch::ClientProcessState &process,
 	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost, nullptr);
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	kernel.open_document(two_entity_mission(), "serve_only_buffer", source_over(&files));
@@ -184,6 +185,7 @@ void run_held_host() {
 	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -316,6 +318,7 @@ void run_own_join_warms_the_wired_body() {
 	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -398,6 +401,7 @@ void run_own_mission_start_submits_its_kit() {
 	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -465,6 +469,7 @@ void run_single_player_mission_start_submits_no_kit() {
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>(
 			inmatch::RoleKind::SinglePlayer, nullptr);
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -512,6 +517,7 @@ void run_first_round_init_seeds_the_own_buffer() {
 	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -625,6 +631,7 @@ void run_single_player_restart_repromotes_the_mission_kit() {
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		kernel.open_document(two_entity_mission(), "sp_restart_literal", source_over(&files));
@@ -660,6 +667,7 @@ void run_single_player_class_is_the_missions_type() {
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		bms::File mission = two_entity_mission();
@@ -722,6 +730,7 @@ void run_single_player_restart_keeps_the_class_word() {
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		bms::File mission = two_entity_mission();
@@ -775,6 +784,7 @@ void run_single_player_restart_keeps_the_uptime_stamp() {
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -875,6 +885,7 @@ void run_a_single_player_fill_carries_into_a_serve_only_row() {
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>(
 				inmatch::RoleKind::SinglePlayer, nullptr);
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		bms::File mission = two_entity_mission();

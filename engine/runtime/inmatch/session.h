@@ -430,10 +430,15 @@ public:
 	virtual void bind(mission::MissionKernel &kernel) { kernel_ = &kernel; }
 	mission::MissionKernel *kernel() const { return kernel_; }
 	// The binding catalog of the title the role runs as (controls::title_catalog), whose row
-	// flags the dispatcher's head reads by a code (action_head_admits): Jointops.exe's until
-	// the embedder names its session title's. `catalog` outlives the role.
+	// flags the dispatcher's head reads by a code (action_head_admits): none until the embedder
+	// names its session title's (Simulation::adopt_role, opennova-serve), and a read with none
+	// aborts, naming the invariant, where Jointops.exe's catalog once stood in. `catalog`
+	// outlives the role.
 	void set_controls(const controls::Catalog &catalog) { controls_ = &catalog; }
-	const controls::Catalog &controls() const { return *controls_; }
+	const controls::Catalog &controls() const {
+		if (controls_ == nullptr) controls_missing();
+		return *controls_;
+	}
 	// The title the role runs as (CONTEXT.md "Title"), the session's: the embedder names it beside the
 	// controls (Simulation::adopt_role, opennova-serve), a joiner's before create_runtime (its
 	// runtimes' fresh-profile kit, ClientRuntime::set_title). The frame's role view carries it
@@ -650,8 +655,10 @@ public:
 			const ClientRuntime *runtime, bool joiner, bool local_dead, bool in_session);
 
 protected:
+	// controls() with none: aborts, naming the invariant.
+	[[noreturn]] static void controls_missing();
 	mission::MissionKernel *kernel_ = nullptr;
-	const controls::Catalog *controls_ = &controls::default_catalog();
+	const controls::Catalog *controls_ = nullptr; // set_controls
 	const Title *title_ = nullptr; // set_title
 	bool input_reset_pending_ = false; // take_input_reset
 	controls::InputEventQueue input_events_; // input_events

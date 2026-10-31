@@ -186,6 +186,7 @@ struct DedicatedHost {
 			catalog_row("MAPB.BMS", bms::AttribFlags::TeamDeathmatch)};
 	inmatch::HostRotation rotation;
 	inmatch::HostRole role{inmatch::RoleKind::DedicatedHost};
+	bool role_jo = test_titles::jo_controls(role);
 	inmatch::Session session{role};
 	inmatch::HostBoot boot;
 	std::unique_ptr<mission::MissionKernel> kernel;
@@ -389,6 +390,7 @@ struct ListenHost {
 			catalog_row("ADMAP.BMS", bms::AttribFlags::AttackAndDefend)};
 	inmatch::HostRotation rotation;
 	inmatch::HostRole role{inmatch::RoleKind::ListenHost};
+	bool role_jo = test_titles::jo_controls(role);
 	inmatch::Session session{role};
 	inmatch::HostBoot boot;
 	std::unique_ptr<mission::MissionKernel> kernel;

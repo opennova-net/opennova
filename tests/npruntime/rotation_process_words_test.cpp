@@ -50,6 +50,7 @@ mission_catalog::Row row(const char *file, bms::AttribFlags mode) {
 struct Session {
 	std::vector<mission_catalog::Row> cat;
 	std::unique_ptr<HostRole> role = std::make_unique<HostRole>(RoleKind::DedicatedHost);
+	bool role_jo = test_titles::jo_controls(*role);
 
 	Session(HostRotation &rotation, const std::vector<mission_catalog::Row> &catalog,
 			const std::vector<int32_t> &rows, const std::vector<int32_t> &switches)

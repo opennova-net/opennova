@@ -1248,6 +1248,7 @@ bool check_server_goodbye_closes_the_joiner() {
 //  @0x62A4F9, CNapiNPConnection_DrainMessageQueues called @0x62A50A]
 bool check_host_close_bursts_stop_to_every_connection() {
 	inmatch::HostRole role;
+	test_titles::jo_controls(role);
 	inmatch::HostOwner &owner = role.state.host_owner;
 	owner.ctx.is_authority = 1;
 	owner.ctx.is_in_session = 1;

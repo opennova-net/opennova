@@ -305,6 +305,7 @@ void test_joiner_console() {
 	const std::string server_scrk = "SERVER-ADMIN-JOINER-SCRK";
 	uint64_t now = 7000;
 	auto joiner = std::make_unique<inmatch::JoinerRole>();
+	test_titles::jo_joiner(*joiner);
 	joiner->set_rules(opennova::world::title_rules("jo"));
 	joiner->runtime = std::make_unique<inmatch::ClientRuntime>("AdminJoiner", [&now] { return now; });
 	test_titles::jo_folds(*joiner->runtime);
@@ -1006,6 +1007,7 @@ void test_joiner_set_holds() {
 	test_titles::jo_world(kernel->world);
 	kernel->world.registry.configure_pool(0, 16);
 	auto role = std::make_unique<inmatch::JoinerRole>();
+	test_titles::jo_joiner(*role);
 	role->set_rules(opennova::world::title_rules("jo"));
 	role->bind(*kernel);
 	CaptureSocket socket;

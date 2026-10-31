@@ -85,6 +85,7 @@ void in_match_writers() {
 	world.registry.configure_pool(3, 16);
 	ns::LoopbackChannel loopback;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::NapiNPServerCtx &ctx = role_storage->state.host_owner.ctx;
 	inmatch::GameConfig config;
 	test_titles::jo_config(config);
@@ -182,6 +183,7 @@ void remote_slot_class_at_round_init() {
 	world.registry.configure_pool(3, 16);
 	ns::LoopbackChannel loopback;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::NapiNPServerCtx &ctx = role_storage->state.host_owner.ctx;
 	inmatch::GameConfig config;
 	test_titles::jo_config(config);

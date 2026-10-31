@@ -473,6 +473,7 @@ int main() {
 		e.cls = opennova::EntityClass::Vehicle;
 		runtime.view().apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2051, 10, 0x0A, 0));
 		RadarProbeRole role;
+		test_titles::jo_controls(role);
 		role.runtime = &runtime;
 		role.bind(kernel);
 		opennova::inmatch::Session session(role);
@@ -531,6 +532,7 @@ int main() {
 		e.cls = opennova::EntityClass::Vehicle;
 		runtime.view().apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2052, 10, 0x0A, 0));
 		RadarProbeRole role;
+		test_titles::jo_controls(role);
 		role.runtime = &runtime;
 		role.probe_kind = opennova::inmatch::RoleKind::SinglePlayer;
 		role.bind(kernel);

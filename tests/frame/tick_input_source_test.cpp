@@ -136,6 +136,7 @@ FrameOutcome six_tick_frame(Session &session, TickRecorder &role, ScriptedDevice
 
 struct Run {
 	std::unique_ptr<TickRecorder> role = std::make_unique<TickRecorder>();
+	bool role_jo = test_titles::jo_controls(*role);
 	std::unique_ptr<ScriptedDevice> device = std::make_unique<ScriptedDevice>();
 	std::unique_ptr<Session> session = std::make_unique<Session>(*role);
 	int64_t start = -1;
@@ -217,6 +218,7 @@ void test_unchanged_input_packs_unchanged_ticks() {
 	int samples[2] = {};
 	for (int per_tick = 0; per_tick < 2; ++per_tick) {
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		auto device = std::make_unique<SteadyDevice>();
 		Session session(*role);
 		CHECK(load(session), "the session runs");
@@ -291,6 +293,7 @@ void test_the_mouse_pump_spreads_four_times_the_cursor_over_the_updates() {
 // no per-tick source; a menu screen's ticks consume none of it.
 void test_the_session_spreads_the_frames_cursor_over_its_ticks() {
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	Session session(*role);
 	CHECK(load(session), "the session runs");
 	FrameInput in;
@@ -350,6 +353,7 @@ FrameOutcome cursor_frame(Session &session, int32_t cursor_dx, uint32_t held = 0
 void test_the_pump_across_the_single_player_pause() {
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		Session session(*role);
 		CHECK(load(session), "the session runs");
 		CHECK(cursor_frame(session, 10).ticks_run() == 3, "three ticks");
@@ -363,6 +367,7 @@ void test_the_pump_across_the_single_player_pause() {
 	}
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		Session session(*role);
 		CHECK(load(session), "the session runs");
 		CHECK(cursor_frame(session, 10).ticks_run() == 3, "three ticks");
@@ -402,6 +407,7 @@ void test_the_pump_across_the_single_player_pause() {
 //  @0x5264E6..0x526508)]
 void test_an_input_reset_leaves_the_pumps_words() {
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	role->reset_at = 0;
 	Session session(*role);
 	CHECK(load(session), "the session runs");
@@ -417,6 +423,7 @@ void test_an_input_reset_leaves_the_pumps_words() {
 void test_a_latched_fire_press_needs_its_binding_held_at_the_dispatch() {
 	for (int still_held = 0; still_held < 2; ++still_held) {
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		Session session(*role);
 		CHECK(load(session), "the session runs");
 		// A cold bank drains nothing under 4 ms (inmatch_session_test's
@@ -469,6 +476,7 @@ void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 		// A cold bank drains nothing under 4 ms, then a 14 ms frame drains one
 		// quantum on the tick phase (inmatch_session_test's zero-tick frame).
 		auto idle_role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*idle_role);
 		Rows idle_rows;
 		Session idle_session(*idle_role);
 		CHECK(load(idle_session), "the session runs");
@@ -485,6 +493,7 @@ void test_rows_poll_once_per_update_and_never_in_a_no_update_frame() {
 				"the next frame's one update polls once over its sample");
 	}
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	Rows rows;
 	Session session(*role);
 	CHECK(load(session), "the session runs");
@@ -552,6 +561,7 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 	};
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		KeyDevice device;
 		Session session(*role);
 		CHECK(load(session), "the session runs");
@@ -576,6 +586,7 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 		// The key passes in the first (paused) update; the second update's pass
 		// lowers the word: its tick carries no edge of the first's sample.
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		KeyDevice device;
 		Session session(*role);
 		CHECK(load(session), "the session runs");
@@ -596,6 +607,7 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 	}
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		KeyDevice device;
 		Session session(*role);
 		CHECK(load(session), "the session runs");
@@ -658,6 +670,7 @@ void test_the_update_drains_its_records_in_queue_order() {
 	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		RecordDevice device;
 		device.role = role.get();
 		device.per_sample = {{201, 203}, {19}};
@@ -672,6 +685,7 @@ void test_the_update_drains_its_records_in_queue_order() {
 	}
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		RecordDevice device;
 		device.role = role.get();
 		device.per_sample = {{201, 300, 203}, {19}};
@@ -686,6 +700,7 @@ void test_the_update_drains_its_records_in_queue_order() {
 	}
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		RecordDevice device;
 		device.role = role.get();
 		device.per_sample = {{201, 203}};
@@ -701,6 +716,7 @@ void test_the_update_drains_its_records_in_queue_order() {
 	}
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		RecordDevice device;
 		device.role = role.get();
 		device.per_sample = {{201}};
@@ -740,6 +756,7 @@ void test_the_reload_record_meets_the_head_in_key_order() {
 	};
 	for (const bool reload_first : {true, false}) {
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		spawn_local_player(*role);
 		role->kernel.local.queue_deferred_event(role->kernel.local.kToSpecialCode); // a deferred ToSpecial
 		// An equipped weapon the case can reload: a magazine short of its capacity, a pool.
@@ -795,6 +812,7 @@ void test_the_deferred_fire_record() {
 	};
 	for (const int face : {0, 1, 2, 3}) { // held; up; a cease fire; a pause row ahead of it
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		spawn_local_player(*role);
 		opennova::world::LocalPlayer &local = role->kernel.local;
 		local.weapon.active = true;
@@ -846,6 +864,7 @@ void test_a_menu_screen_an_update_opens_gates_the_frames_later_updates() {
 		}
 	};
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	MenuDevice device;
 	Session session(*role);
 	CHECK(load(session), "the session runs");
@@ -897,6 +916,7 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 		}
 	};
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	PickDevice device;
 	device.role = role.get();
 	Session session(*role);
@@ -945,6 +965,7 @@ void test_the_fire_record_tests_its_binding_live() {
 	};
 	for (const int face : {0, 1, 2}) { // held; up; held under a cease fire
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		spawn_local_player(*role);
 		// An equipped weapon on a live body: the press leg reads the slot
 		// (world::local_weapon_press_fire).
@@ -976,6 +997,7 @@ void test_the_fire_record_tests_its_binding_live() {
 	};
 	for (const bool keys : {false, true}) { // the mouse's binding; a key's
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		spawn_local_player(*role);
 		opennova::world::LocalPlayerWeapon &w = power_throw(*role);
 		FireDevice device;
@@ -993,6 +1015,7 @@ void test_the_fire_record_tests_its_binding_live() {
 	}
 	for (const bool cease : {false, true}) { // a running windup, the binding up at its record
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		spawn_local_player(*role);
 		opennova::world::LocalPlayerWeapon &w = power_throw(*role);
 		w.power_throw_start_tick = 450;
@@ -1060,6 +1083,7 @@ void test_the_weapon_rows_take_the_whole_head() {
 	{
 		// The pre-round timer: the press drops, the reload passes.
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		opennova::world::LocalPlayerWeapon &w = arm(*role);
 		role->kernel.world.cached.client_preround_timer = 5;
 		Device device;
@@ -1084,6 +1108,7 @@ void test_the_weapon_rows_take_the_whole_head() {
 		// A burst's deferred fire record (the recoil's re-queue) and a reload record, with the
 		// round running and over.
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		opennova::world::LocalPlayerWeapon &w = arm(*role);
 		opennova::world::World &world = role->kernel.world;
 		if (round_over) CHECK(world.match.finish(0, world), "the round ends");
@@ -1127,6 +1152,7 @@ void test_the_hud_toggle_rows_take_the_whole_head() {
 			hud::hud_toggle_row_code(hud::kRowPause);
 	CHECK(pause == 25, "the pause row's code");
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	spawn_local_player(*role);
 	opennova::world::World &world = role->kernel.world;
 	world.registry.get(world.cached.local_player)->health = 100;
@@ -1193,6 +1219,7 @@ void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
 	three.delta_seconds = TickAccumulator::kTickDt * 3.0;
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		UseDevice device;
 		device.role = role.get();
 		device.codes = {201, 300, use};
@@ -1207,6 +1234,7 @@ void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
 	}
 	{
 		auto role = std::make_unique<TickRecorder>();
+		test_titles::jo_controls(*role);
 		UseDevice device;
 		device.role = role.get();
 		device.codes = {use};
@@ -1251,6 +1279,7 @@ void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 					static_cast<int32_t>(0xFF623840u),
 			"the test line's CRC is the row's token");
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	spawn_local_player(*role);
 	opennova::world::World &world = role->kernel.world;
 	ClientLocalCommandSeams seams;
@@ -1345,6 +1374,7 @@ void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
 		}
 	};
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	spawn_local_player(*role);
 	opennova::world::World &world = role->kernel.world;
 	Session session(*role);
@@ -1421,6 +1451,7 @@ void test_a_typed_token_reaches_the_embedders_arm() {
 		}
 	};
 	auto role = std::make_unique<TickRecorder>();
+	test_titles::jo_controls(*role);
 	spawn_local_player(*role);
 	Session session(*role);
 	CHECK(load(session), "the session runs");

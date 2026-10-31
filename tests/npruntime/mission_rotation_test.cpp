@@ -381,6 +381,7 @@ struct RouterRig {
 	std::vector<mission_catalog::Row> cat = catalog();
 	HostRotation rotation;
 	HostRole role{RoleKind::DedicatedHost};
+	bool role_jo = test_titles::jo_controls(role);
 
 	explicit RouterRig(const std::vector<int32_t> &rows, std::vector<int32_t> switches) {
 		seed_rotation_from_host_screen(rotation, cat, rows, switches);

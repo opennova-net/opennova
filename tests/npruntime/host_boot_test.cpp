@@ -149,6 +149,7 @@ struct Host {
 	std::map<std::string, std::string> files = mount();
 	std::unique_ptr<mission::MissionKernel> kernel;
 	inmatch::HostRole role{inmatch::RoleKind::DedicatedHost};
+	bool role_jo = test_titles::jo_controls(role);
 	inmatch::Session session{role};
 	inmatch::HostBoot boot;
 	int32_t water_at_bringup = -1;
@@ -719,6 +720,7 @@ int main() {
 		std::map<std::string, std::string> files = mount();
 		std::unique_ptr<mission::MissionKernel> kernel;
 		inmatch::LocalRole role;
+		test_titles::jo_controls(role);
 		inmatch::Session session(role);
 		inmatch::HostBoot boot;
 		inmatch::HostBootRequest r;

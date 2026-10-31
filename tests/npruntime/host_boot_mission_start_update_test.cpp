@@ -128,6 +128,7 @@ struct DedicatedHost {
 	std::vector<mission_catalog::Row> catalog{catalog_row("MAPA.BMS"), catalog_row("MAPB.BMS")};
 	inmatch::HostRotation rotation;
 	inmatch::HostRole role{inmatch::RoleKind::DedicatedHost};
+	bool role_jo = test_titles::jo_controls(role);
 	inmatch::Session session{role};
 	inmatch::HostBoot boot;
 	std::unique_ptr<mission::MissionKernel> kernel;

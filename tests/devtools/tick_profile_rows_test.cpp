@@ -101,6 +101,7 @@ void test_local_role_ticks_fit_the_row_tree() {
 	CHECK(kernel.world.profile == &kernel.profile, "the world laps onto the kernel's profile");
 	kernel.profile.set_active(true);
 	inmatch::LocalRole role;
+	test_titles::jo_controls(role);
 	role.bind(kernel);
 
 	const Slot kExpected[] = {

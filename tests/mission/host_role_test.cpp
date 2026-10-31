@@ -108,6 +108,7 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -164,6 +165,7 @@ void check_own_world_state_location_names(std::map<std::string, std::string> &fi
 	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -239,6 +241,7 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		auto &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -313,6 +316,7 @@ void check_listen_host_own_deploy_reads_its_protocol(std::map<std::string, std::
 		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		auto &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -371,6 +375,7 @@ void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::s
 	test_titles::jo_world(kernel_storage->world);
 	auto &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	auto &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -430,6 +435,7 @@ void check_listen_host_console_punts_only_through_server(
 	test_titles::jo_world(kernel_storage->world);
 	auto &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	auto &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -508,6 +514,7 @@ void check_single_player_console_line_rides_the_loopback(
 	auto &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::SinglePlayer,
 			nullptr);
+	test_titles::jo_controls(*role_storage);
 	auto &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -598,6 +605,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		auto &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -740,6 +748,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
 		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -820,6 +829,7 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
 		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -879,6 +889,7 @@ void check_serve_only_net_quality_indicators(std::map<std::string, std::string> 
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
 		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -957,6 +968,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
 		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -991,6 +1003,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
 		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -1077,6 +1090,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1247,6 +1261,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		auto &role = *role_storage;
 		role.bind(kernel);
 		kernel.open_document(two_entity_mission(), "tank_slots", source_over(&files));
@@ -1354,6 +1369,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1440,6 +1456,7 @@ int main() {
         test_titles::jo_world(kernel_storage->world);
         ms::MissionKernel &kernel = *kernel_storage;
         auto role_storage = std::make_unique<inmatch::HostRole>();
+        test_titles::jo_controls(*role_storage);
         inmatch::HostRole &role = *role_storage;
         role.bind(kernel);
         kernel.open_document(two_entity_mission(), "respawn", source_over(&files));
@@ -1528,7 +1545,9 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto host_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*host_storage);
 		auto local_storage = std::make_unique<inmatch::LocalRole>();
+		test_titles::jo_controls(*local_storage);
 		inmatch::Role &role = frame_kind == 2
 				? static_cast<inmatch::Role &>(*local_storage)
 				: static_cast<inmatch::Role &>(*host_storage);
@@ -1632,6 +1651,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1713,6 +1733,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1787,6 +1808,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1909,6 +1931,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -2054,6 +2077,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -2106,6 +2130,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		bms::File mission = two_entity_mission();
@@ -2149,6 +2174,7 @@ int main() {
 			test_titles::jo_world(kernel_storage->world);
 			ms::MissionKernel &kernel = *kernel_storage;
 			auto role_storage = std::make_unique<inmatch::HostRole>();
+			test_titles::jo_controls(*role_storage);
 			inmatch::HostRole &role = *role_storage;
 			role.bind(kernel);
 			bms::File mission = two_entity_mission();
@@ -2191,6 +2217,7 @@ int main() {
 			test_titles::jo_world(kernel_storage->world);
 			ms::MissionKernel &kernel = *kernel_storage;
 			auto role_storage = std::make_unique<inmatch::HostRole>();
+			test_titles::jo_controls(*role_storage);
 			inmatch::HostRole &role = *role_storage;
 			role.bind(kernel);
 			bms::File mission = two_entity_mission();
@@ -2240,6 +2267,7 @@ int main() {
 		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -2307,6 +2335,7 @@ int main() {
 	//  @0x51D7EA..0x51D7FB].
 	{
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.observe_cpu_share(37);
 		CHECK(role.state.host_owner.ctx.stats_cpu_percent == 37);

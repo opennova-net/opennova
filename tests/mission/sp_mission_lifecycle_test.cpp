@@ -87,6 +87,7 @@ struct SpMission {
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
 	bool kernel_jo = test_titles::jo_world(kernel->world);
 	std::unique_ptr<im::HostRole> role = std::make_unique<im::HostRole>();
+	bool role_jo = test_titles::jo_controls(*role);
 	std::unique_ptr<im::Session> session;
 	// Run inside the boot's bring-up, past the role's (the round init it installed stands).
 	std::function<void()> after_bringup;

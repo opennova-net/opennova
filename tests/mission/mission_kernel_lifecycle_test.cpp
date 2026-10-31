@@ -717,6 +717,7 @@ int main() {
 		CHECK(kernel.world.script.vars.get_mission(11) == 0);
 
 		opennova::inmatch::LocalRole role;
+		test_titles::jo_controls(role);
 		role.bind(kernel);
 		role.close();
 		CHECK(kernel.world.script.vars.get_mission(9) == 1);  // no trigger: the sweep ran once

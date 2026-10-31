@@ -12,6 +12,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "title_fixture.h"
 
 namespace test_boot {
 
@@ -37,6 +38,7 @@ inline opennova::mission::BootFileSource source_over(
 // kernel itself owns no tick).
 inline void tick_no_net(opennova::mission::MissionKernel &kernel) {
 	opennova::inmatch::LocalRole role;
+	test_titles::jo_controls(role);
 	role.bind(kernel);
 	role.run_tick(opennova::inmatch::TickInput{});
 }

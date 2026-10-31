@@ -46,6 +46,7 @@ int main() {
 		test_titles::jo_world(kernel.world);
 		CHECK(boot(kernel, files));
 		inmatch::LocalRole role;
+		test_titles::jo_controls(role);
 		role.bind(kernel);
 		for (int i = 0; i < 200; ++i) role.run_tick(inmatch::TickInput{});
 

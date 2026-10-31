@@ -119,6 +119,7 @@ void test_the_dedicated_host_alone_presents_no_entity() {
 	for (const im::RoleKind kind : {im::RoleKind::SinglePlayer, im::RoleKind::ListenHost,
 				 im::RoleKind::Joiner, im::RoleKind::DedicatedHost}) {
 		KindRole role(kind);
+		test_titles::jo_controls(role);
 		const auto session = std::make_unique<im::Session>(role);
 		CHECK(session->presents_entities() == (kind != im::RoleKind::DedicatedHost));
 	}
