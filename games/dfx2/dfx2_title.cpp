@@ -511,6 +511,10 @@ Title make() {
 	//  PlayerInfo_UpdatePlayerPreviewAnimation @0x55bed0 - @0x55bf03..0x55bf05, the target
 	//  @0x55bf0a, the spin @0x55bf9c (dfx2.exe)].
 	t.player_info_preview_hover = false;
+	// DFX2-121: the corner radar's spawn zoom is the constant 4.0 [orig: Player_InitPlayer
+	//  @0x4DE6F0 - `mov dword_B6FA3C, 40000h` @0x4DE847, the twin of Jointops.exe's mission-scaled
+	//  g_SpinmapZoom store @0x4E1763 (dfx2.exe)].
+	t.spinmap_spawn_zoom_q16 = 0x40000;
 	return t;
 }
 

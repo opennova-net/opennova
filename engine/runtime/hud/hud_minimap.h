@@ -757,21 +757,26 @@ struct HudMapControl {
 	// 0.0625, 1.0), spin = 65536*X, big = 524288*X. The completed-pass retail
 	// probe resolves the ambiguous FPU ordering directly: 00TRa authors 0.61
 	// and retail submits zoom 25559 (0.39 Q16). Zero/unauthored map_zoom keeps
-	// X = 1, matching the plain defaults a joiner sees.
+	// X = 1, matching the plain defaults a joiner sees. dfx2.exe's spin reset
+	// is its constant 0x40000 instead (Title::spinmap_spawn_zoom_q16, DFX2-121).
 	// [orig: Player_InitPlayer @0x4e1693..0x4e1763 — g_BmsMapZoom @0xA7640C
 	//  (g_BmsHeaderBlock+0x23C, bulk fread), floor flt_7C486C = 0.0625,
 	//  x flt_7CD424 = 524288 -> g_BigMapZoom, x flt_7C32BC = 65536 ->
-	//  g_SpinmapZoom]
+	//  g_SpinmapZoom] [orig: Player_InitPlayer @0x4DE6F0 - @0x4DE832..0x4DE847
+	//  (dfx2.exe)]
 	int32_t spawn_zoom_q16 = kSpinmapZoomDefault;
 	int32_t spawn_big_zoom_q16 = kBigMapZoomDefault;
 
 	// Stamp the mission's authored map_zoom (BMS header float) at promotion;
 	// the current values snap to the new spawn defaults like the player init.
-	void set_mission_map_zoom(float map_zoom) {
+	// `title_spin_zoom_q16` is the title's spin reset (Title::spinmap_spawn_zoom_q16):
+	// 0 takes the mission's.
+	void set_mission_map_zoom(float map_zoom, int32_t title_spin_zoom_q16) {
 		float x = map_zoom <= 0.0f ? 1.0f : 1.0f - map_zoom;
 		if (x > 1.0f) x = 1.0f;
 		if (x < 0.0625f) x = 0.0625f;
-		spawn_zoom_q16 = static_cast<int32_t>(65536.0f * x);
+		spawn_zoom_q16 = title_spin_zoom_q16 != 0 ? title_spin_zoom_q16
+				: static_cast<int32_t>(65536.0f * x);
 		spawn_big_zoom_q16 = static_cast<int32_t>(524288.0f * x);
 		zoom_q16 = spawn_zoom_q16;
 		big_zoom_q16 = spawn_big_zoom_q16;

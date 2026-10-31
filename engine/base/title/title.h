@@ -544,6 +544,15 @@ struct Title {
 	// player_info_preview_yaw_step): true, the pointer over PLAYER_PREVIEW zooms and sways it;
 	// false, never hovered, so it spins at rest and never zooms (jo_title.cpp, dfx2_title.cpp).
 	bool player_info_preview_hover = true;
+
+	// DFX2-121: the corner radar's spawn zoom (Q16) Player_InitPlayer stores
+	// (hud::HudMapControl::set_mission_map_zoom): 0, Jointops.exe's 65536 x the mission's map_zoom
+	// factor X = clamp(1 - map_zoom, 0.0625, 1.0); dfx2.exe stores 0x40000 whatever the mission.
+	// The big map's 524288 x X is the same in both. On the Title: the executable's own HUD.
+	// [orig: Player_InitPlayer @0x4E15F0 - @0x4E1741..0x4E1763] [orig: Player_InitPlayer
+	//  @0x4DE6F0 - the big map @0x4DE832..0x4DE842, `mov dword_B6FA3C, 40000h` @0x4DE847
+	//  (dfx2.exe)]
+	int32_t spinmap_spawn_zoom_q16 = 0;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

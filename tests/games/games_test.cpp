@@ -110,7 +110,7 @@ auto title_fields_past_identity(const Title &t) {
 			host_switch_starts_off, host_armory_word, armory_lists_none_row, death_map_no_names,
 			player_avatar_by_viewer_side, hud_game_info_board, hud_vehicle_panel_riders,
 			epilog_debriefing_screens, player_info_combo_names, player_info_combo_spins,
-			player_info_preview_hover] = t;
+			player_info_preview_hover, spinmap_spawn_zoom_q16] = t;
 	(void)code;
 	(void)display_name;
 	(void)title_text;
@@ -138,6 +138,10 @@ auto title_fields_past_identity(const Title &t) {
 			armory_lists_none_row, death_map_no_names, player_avatar_by_viewer_side,
 			hud_game_info_board, hud_vehicle_panel_riders, epilog_debriefing_screens,
 			player_info_combo_names, player_info_combo_spins, player_info_preview_hover);
+			menu_font_scale, host_vehicle_missions, host_switch_starts_off, armory_lists_none_row,
+			death_map_no_names, player_avatar_by_viewer_side, hud_game_info_board,
+			hud_vehicle_panel_riders, epilog_debriefing_screens, player_info_combo_names,
+			player_info_combo_spins, player_info_preview_hover, spinmap_spawn_zoom_q16);
 }
 
 // Each of two titles' fields past the identity equal, a failure naming the field by its index in
@@ -308,6 +312,14 @@ void retail_local_input_title_values() {
 	CHECK(std::string(dfx2.friendly_tag_toast_literals[1]) == "Friendly Tags: On" &&
 			std::string(dfx2.friendly_tag_toast_literals[2]) == "Friendly Tags: Smart");
 	CHECK(dfx2.friendly_tags_skip_mode_1_on_death_screen);
+}
+
+// The Title's HUD rows of DFX2-121 and after (docs/titles/dfx2-vs-jo-re.md §8):
+// JO's the defaults, DFX2's dfx2.exe's, OP: Acid Gambit's JO's (acidgambit_speaks_jo).
+void retail_gap_title_values() {
+	const Title &jo = games::jo_title();
+	const Title &dfx2 = games::dfx2_title();
+	CHECK(jo.spinmap_spawn_zoom_q16 == 0 && dfx2.spinmap_spawn_zoom_q16 == 0x40000); // DFX2-121
 }
 
 // A protocol's in-match sheet: every knob of its ProtocolInMatch, and its CD key (Protocol::cd_key,
@@ -564,6 +576,7 @@ int main() {
 	every_title_runs_rules();
 	retail_rules_values();
 	retail_local_input_title_values();
+	retail_gap_title_values();
 	bump_rule_sheet_per_protocol();
 	config_table_fills_the_titles_mission_word();
 	title_parts_of_the_version_line();

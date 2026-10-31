@@ -506,10 +506,12 @@ TypedArray<SoundEmitterRow> Simulation::drain_sound_emitters() {
 void Simulation::finish_kernel_boot() {
 	world_installed_ = true;
 	apply_host_session_mission_header(kernel_->mission);
-	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
-	// (witness at hud::HudMapControl::set_mission_map_zoom — the
-	// Player_InitPlayer derivation off the BMS header float).
-	kernel_->local.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom);
+	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults, the
+	// title's constant spin reset over it (witness at
+	// hud::HudMapControl::set_mission_map_zoom — the Player_InitPlayer derivation off
+	// the BMS header float; Title::spinmap_spawn_zoom_q16).
+	kernel_->local.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom,
+			game_title().spinmap_spawn_zoom_q16);
 	if (!kernel_->wac_loaded && assets_.wac_program && assets_.wac_program->is_ok())
 		kernel_->wac.set_program(assets_.wac_program->native_program(), kernel_->world);
 }
