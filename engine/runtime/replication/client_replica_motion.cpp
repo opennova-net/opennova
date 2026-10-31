@@ -955,16 +955,36 @@ void row_root_motion_tick(ClientEntityState &es, const world::TitleRules &rules,
 	    (es.rm_entity_flags & 0x2000u) != 0) {
 		if ((es.move_input & 0x08u) != 0) {
 			const int32_t dirpad = static_cast<int32_t>(es.move_input & 0x07u);
+			const double pad = static_cast<double>(dirpad) * 0.7853975; // [orig: dbl_7C9BB0]
 			const double ang =
 					static_cast<double>(
 							static_cast<int16_t>(es.heading_bam >> 16)) *
 							9.587371826171875e-05 + // [orig: dbl_7C9BC0]
-					static_cast<double>(dirpad) * 0.7853975; // [orig: dbl_7C9BB0]
+					pad;
 			const int32_t nx =
 					static_cast<int32_t>(std::cos(ang) * -64.0); // flt_7C9BD8
 			const int32_t ny = static_cast<int32_t>(std::sin(ang) * -64.0);
-			es.rm_vel_xy[0] -= nx;
-			es.rm_vel_xy[1] -= ny;
+			if (rules.airborne_steer_glide) {
+				// dfx2.exe's glide (DFX2-112): the pair also takes the fall's (-vz) >> 7 along
+				// the angle, and the steer turns savedLivePitch (+0x90) and Roll (+0x18) by the
+				// pad angle's cosine and sine at 2^22.
+				// [orig: the twin of Entity_UpdateInfantryPlayerBody @0x4B4140 - Q
+				//  @0x4B794B..0x4B7956, the pair's adds @0x4B7990 / @0x4B79B4, +0x90
+				//  @0x4B79D3, Roll @0x4B79E2 (dfx2.exe)]
+				const double q = static_cast<double>(
+						static_cast<int32_t>(0u - static_cast<uint32_t>(es.rm_vel_z)) >> 7);
+				const int32_t qx = static_cast<int32_t>(q * std::cos(ang));
+				const int32_t qy = static_cast<int32_t>(q * std::sin(ang));
+				es.rm_vel_xy[0] = io::bam_add(es.rm_vel_xy[0], io::bam_sub(qx, nx));
+				es.rm_vel_xy[1] = io::bam_add(es.rm_vel_xy[1], io::bam_sub(qy, ny));
+				const int32_t turn_pitch = static_cast<int32_t>(std::cos(pad) * 4194304.0);
+				const int32_t turn_roll = static_cast<int32_t>(std::sin(pad) * 4194304.0);
+				es.rm_body_pitch = io::bam_add(es.rm_body_pitch, turn_pitch);
+				es.roll_bam = io::bam_add(es.roll_bam, turn_roll);
+			} else {
+				es.rm_vel_xy[0] -= nx;
+				es.rm_vel_xy[1] -= ny;
+			}
 			if ((es.rm_entity_flags & 0x20u) != 0 && es.rm_vel_z <= -14336 &&
 			    dirpad == 0) {
 				es.rm_vel_xy[0] -= nx;

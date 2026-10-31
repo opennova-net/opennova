@@ -166,7 +166,7 @@ void retail_rules_values() {
 	CHECK(jo.part_spin.full == 186413 && jo.part_spin.mid == 163110 && jo.part_spin.low == 139809 &&
 			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
 	CHECK(jo.map_zoom_max_q16 == 0x100000); // section 7.12
-	CHECK(!jo.parachute_opens_on_jump);
+	CHECK(!jo.parachute_opens_on_jump && !jo.airborne_steer_glide);
 	// Section 5.3: every mode's toast the gametext key's, no death-screen step.
 	for (const char *literal : jo.friendly_tag_toast_literals) CHECK(literal == nullptr);
 	CHECK(!jo.friendly_tags_skip_mode_1_on_death_screen);
@@ -190,7 +190,7 @@ void retail_rules_values() {
 	CHECK(dfx2.bms_table_warnings); // DFX2-24
 	CHECK(!dfx2.bms_loadout_sanitized); // DFX2-27
 	CHECK(!dfx2.mission_start_sets_difficulty); // DFX2-28
-	CHECK(dfx2.parachute_opens_on_jump); // DFX2-111
+	CHECK(dfx2.parachute_opens_on_jump && dfx2.airborne_steer_glide); // DFX2-111, DFX2-112
 	CHECK(dfx2.part_spin.full == 372827 && dfx2.part_spin.mid == 326222 && // DFX2-23
 			dfx2.part_spin.low == 279619 && dfx2.part_spin.ground_decay == 372827 &&
 			dfx2.part_spin.helo_decay == 93206);
@@ -290,6 +290,7 @@ std::string joiner_rules_row(const world::TitleRules &r) {
 			std::to_string(r.part_spin.ground_decay) + "/" +
 			std::to_string(r.part_spin.helo_decay) +
 			" parachute_opens_on_jump=" + std::to_string(r.parachute_opens_on_jump) +
+			" airborne_steer_glide=" + std::to_string(r.airborne_steer_glide) +
 			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit) +
 			" script_voice_volume=" + std::to_string(r.script_voice_volume) +
 			" trail_surface_alternate=" + std::to_string(r.trail_surface_alternate);
@@ -352,6 +353,7 @@ void bump_rule_sheet_per_protocol() {
 			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
 			"narrow_still_player_radius=0 emplaced_solo_holds_fire=0 "
 			"part_spin=186413/163110/139809/186413/46603 parachute_opens_on_jump=0 "
+			"airborne_steer_glide=0 "
 			"spawn_kit=jo_single_player_page script_voice_volume=210 trail_surface_alternate=0";
 	const std::string dfx2 =
 			"S 0x0A: s2c_0a.objective_checkpoint=1 slot_state.join_state_fixed=1\n"
@@ -373,6 +375,7 @@ void bump_rule_sheet_per_protocol() {
 			"route_done_records=1 emplaced_turret_update=1 emplaced_solo_planar_slew=3848520 "
 			"narrow_still_player_radius=1 emplaced_solo_holds_fire=1 "
 			"part_spin=372827/326222/279619/372827/93206 parachute_opens_on_jump=1 "
+			"airborne_steer_glide=1 "
 			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
 			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE script_voice_volume=240 "
 			"trail_surface_alternate=1";

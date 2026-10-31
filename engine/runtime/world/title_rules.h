@@ -319,6 +319,18 @@ struct TitleRules {
 	//  arm @0x4B7C57..0x4B7CA4 (dfx2.exe)]
 	bool parachute_opens_on_jump = false;
 
+	// --- DFX2-112: the airborne steer's glide. -------------------------------------------------
+	// joiner-side: every peer's player body pass steers an airborne body (the authority's
+	// AiSystem body tick and a joiner's replica rows alike). While the moving bit is held both
+	// push the slide pair 64 along the look and pad angle A; dfx2.exe also adds ftol(cos A * Q)
+	// and ftol(sin A * Q), Q = (-vz) >> 7, and turns savedLivePitch (+0x90) and Roll (+0x18) by
+	// ftol(cos / sin of the pad angle * 2^22).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B78B7..0x4B793D] [orig: the twin
+	//  @0x4B4140 - Q @0x4B794B..0x4B7956, the pair @0x4B7962..0x4B79BA, +0x90 @0x4B79D3, Roll
+	//  @0x4B79E2, the canopy's double @0x4B79E5..0x4B7A13; dbl_7C8A28, dbl_7C8A38, flt_7C8A54
+	//  (-64), flt_7C8A50 (4194304) (dfx2.exe)]
+	bool airborne_steer_glide = false;
+
 	// --- Section 7.12: the radar and big-map zoom cap (the local player's own view). -------------
 	// The zoom-out key's cap (Q16, a world-extent multiplier) over the corner radar's zoom and, while
 	// a map mode is up, the big map's (hud::HudMapControl::zoom_step); the x1.15 / x0.85 steps and

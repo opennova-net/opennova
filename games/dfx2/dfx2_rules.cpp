@@ -203,6 +203,9 @@ world::TitleRules make() {
 	// DFX2-111: the canopy opens on the jump bit [orig: the twin of Entity_UpdateInfantryPlayerBody
 	// @0x4B4140 - @0x4B7BCD (dfx2.exe)].
 	r.parachute_opens_on_jump = true;
+	// DFX2-112: the airborne glide [orig: the twin of Entity_UpdateInfantryPlayerBody @0x4B4140 -
+	// @0x4B7933..0x4B7A13 (dfx2.exe)].
+	r.airborne_steer_glide = true;
 	// Section 7.12: the zoom-out cap, 0x80000 for the radar and the big map alike
 	// [orig: Input_HandleActionBinding @0x49ad50 - case 361, `cmp eax, 80000h` @0x49bf27 /
 	// @0x49bf57 (dfx2.exe)].
