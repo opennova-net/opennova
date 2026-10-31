@@ -203,6 +203,13 @@ struct Title {
 	// and ADVANCED_TAB controls (menu::OptionsScreen::apply_title). False (Jointops.exe): they show
 	// as authored.
 	bool options_hides_advanced = false;
+	// DFX2-41: the DEATH screen's second instruction with no spawn zone for a team's player:
+	// outside an assault game, or in a 0x20000 one while dead, a dead player under a penalty
+	// reads "<PENALTYTIMER> <cFF4040><n><co> <SECONDS>.", else RESPAWN4 under 0x20000 and RESPAWN3
+	// otherwise; an assault game's other case RESPAWN4 (world::build_deploy_instructions). False
+	// (Jointops.exe): RESPAWN3 outside assault, RESPAWN4 or, dead out of 0x20000, RESPAWN5
+	// [orig: UI_UpdateDeathScreenContent @0x5536a0 - @0x554271..0x5542ef].
+	bool death_respawn_penalty_line = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

@@ -724,7 +724,12 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 			}
 		}
 	}
+	instructions.penalty_line = view.title != nullptr && view.title->death_respawn_penalty_line;
+	instructions.penalty_seconds = penalty;
 	v.instructions = world::build_deploy_instructions(instructions, gametext);
+	// [orig: `!g_DeployScreenActive && !dead` -> return @0x5538d1] [orig: @0x552041 (dfx2.exe)]
+	v.content_refresh = v.instructions.permanent_death || instructions.dead ||
+			(view.runtime != nullptr && view.runtime->state().deploy_overlay_active);
 	v.statics_text = world::deploy_statics_text(statics_in, medic_key_label, gametext);
 	char zone_key[32];
 	std::snprintf(zone_key, sizeof zone_key, "STRWPNAME%03d", line.zone_index + 1);

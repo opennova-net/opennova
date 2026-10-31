@@ -169,6 +169,9 @@ Title make() {
 	// twin of UI_PopulateRenderAndAudioSettings @0x55c830, which ends at the Bink slots
 	// (@0x55d530).
 	t.options_hides_advanced = true;
+	// DFX2-41: the no-zone instruction's penalty line [orig: sub_551E10 @0x55266f..0x55274f
+	// (dfx2.exe)].
+	t.death_respawn_penalty_line = true;
 	return t;
 }
 

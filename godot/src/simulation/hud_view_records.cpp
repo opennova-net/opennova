@@ -250,4 +250,5 @@ void DeployStatus::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_loadout)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, restart_level)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, shroud_main)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, content_refresh)
 }

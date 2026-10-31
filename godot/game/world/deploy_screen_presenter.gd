@@ -432,7 +432,7 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT),
 			ControlsBindings.model().display_text_for_token("MedicReq"))
 	_apply_statics(status)
-	if status.permanent_death:
+	if status.permanent_death or not status.content_refresh:
 		return
 	# A title whose DEATH screen picks the loadout lists its spawn points in SPAWNPOINTS_TABLE:
 	# the engine collects the zones, builds the rows and refills the table, its scroll top and
@@ -569,6 +569,10 @@ func _restart_level() -> void:
 # binding's display string.
 func _apply_statics(status: DeployStatus) -> void:
 	_apply_team_service_buttons(status.show_team_buttons)
+	# Past the permanent-death branch the refresh writes nothing unless the deploy overlay is
+	# up or the local player is dead (engine DeployScreenStatus::content_refresh).
+	if not status.permanent_death and not status.content_refresh:
+		return
 	var instruction_id := _driver.widget_id("STATIC_INSTRUCTIONS_MSG")
 	var instruction2_id := _driver.widget_id("STATIC_INSTRUCTIONS2_MSG")
 	if instruction_id >= 0 and instruction2_id >= 0:

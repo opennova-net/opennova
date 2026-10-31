@@ -254,10 +254,30 @@ DeployInstructions build_deploy_instructions(
     }
     const char *key = "STROVER_RESPAWN1";
     if (!in.has_spawn_zones) {
-        if (in.team == 0) key = "STROVER_SPECTATORSPAWN";
-        else if (!assault) key = "STROVER_RESPAWN3";
-        else key = (in.game_type & 0x20000u) != 0 || !in.dead
-                ? "STROVER_RESPAWN4" : "STROVER_RESPAWN5";
+        if (in.team == 0) {
+            key = "STROVER_SPECTATORSPAWN";
+        } else if (in.penalty_line) {
+            // [orig: sub_551E10 - the test @0x5526a5, the penalty line @0x5526b8..0x552708,
+            //  RESPAWN4 @0x552711..0x55272f, RESPAWN3 @0x552733, RESPAWN4 @0x5526a9 (dfx2.exe)]
+            if (!assault || ((in.game_type & 0x20000u) != 0 && in.dead)) {
+                if (in.dead && in.penalty_seconds != 0) {
+                    char line[256];
+                    std::snprintf(line, sizeof line, "%s <cFF4040>%i<co> %s.",
+                            text("STROVER_PENALTYTIMER").c_str(), in.penalty_seconds,
+                            text("SECONDS").c_str());
+                    out.second_text = line;
+                    return out;
+                }
+                key = (in.game_type & 0x20000u) != 0 ? "STROVER_RESPAWN4" : "STROVER_RESPAWN3";
+            } else {
+                key = "STROVER_RESPAWN4";
+            }
+        } else if (!assault) {
+            key = "STROVER_RESPAWN3";
+        } else {
+            key = (in.game_type & 0x20000u) != 0 || !in.dead
+                    ? "STROVER_RESPAWN4" : "STROVER_RESPAWN5";
+        }
     }
     out.second_text = text(key);
     return out;

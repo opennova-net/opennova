@@ -412,6 +412,9 @@ struct DeployInstructionsInput {
     std::string kill_announcement;
     int32_t round_ticks = -1;
     int alive_players = 0;
+    // Title::death_respawn_penalty_line, and the penalty seconds it reads (dword_A85B5C).
+    bool penalty_line = false;
+    int penalty_seconds = 0;
 };
 struct DeployInstructions {
     bool permanent_death = false;
@@ -444,6 +447,11 @@ struct DeployScreenStatus {
     std::string respawn_text;
     int medic_cooldown_ticks = 0;
     int medic_request_serial = 0;
+    // Whether the refresh writes anything past the permanent-death branch: only under the
+    // deploy overlay or with the local player dead; else it returns there, every static, the
+    // list or the table and the instructions left as they stand.
+    // [orig: UI_UpdateDeathScreenContent @0x5538d1] [orig: sub_551E10 @0x552041 (dfx2.exe)]
+    bool content_refresh = false;
     bool team_buttons_shown = false; // deploy_team_buttons_shown
     bool loadout_shown = false;      // deploy_loadout_shown
     bool restart_level = false;      // deploy_restart_level_allowed

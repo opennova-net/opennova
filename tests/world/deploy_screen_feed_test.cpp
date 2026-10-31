@@ -606,7 +606,42 @@ void test_team_lists() {
 	CHECK(rt.get_widget_text(rt.widget_id("STATIC_TEAM")) == lists.team);
 }
 
+// DFX2-41: the no-zone second instruction, dfx2.exe's: a dead player under a penalty outside
+// assault reads the penalty line; assault reads RESPAWN4 where Jointops.exe's dead player reads
+// RESPAWN5 [orig: sub_551E10 @0x55266f..0x55274f (dfx2.exe); UI_UpdateDeathScreenContent
+// @0x554271..0x5542ef].
+void test_penalty_line_instruction() {
+	const hud::GameTextLookup keys = [](const char *, const char *key, const char *) {
+		return std::string(key);
+	};
+	DeployInstructionsInput in;
+	in.team = 1;
+	in.dead = true;
+	in.game_type = 0x10001u;
+	in.penalty_seconds = 7;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN3");
+	in.penalty_line = true;
+	CHECK(build_deploy_instructions(in, keys).second_text ==
+			"STROVER_PENALTYTIMER <cFF4040>7<co> SECONDS.");
+	in.penalty_seconds = 0;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN3");
+	in.game_type = 0x10020u; // assault, out of 0x20000, dead
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN4");
+	in.penalty_line = false;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN5");
+	in.penalty_line = true;
+	in.game_type = 0x30020u;
+	in.penalty_seconds = 3;
+	CHECK(build_deploy_instructions(in, keys).second_text ==
+			"STROVER_PENALTYTIMER <cFF4040>3<co> SECONDS.");
+	in.penalty_seconds = 0;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN4");
+	in.has_spawn_zones = true;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN1");
+}
+
 int main() {
+	test_penalty_line_instruction();
 	test_team_lists();
 	test_loadout_picker_gate();
 	test_spawn_table_rows();
