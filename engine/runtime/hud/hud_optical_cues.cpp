@@ -100,10 +100,15 @@ void HudFrameCompiler::element_inset_cues(const HudFrameState &s, float w, float
 			const uint32_t color = c.hit_feedback ? 0xFFFF5050u : 0xFF00FF00u;
 			const float x = g.center_x, y = g.center_y, dx = float(g.cross_dx),
 						dy = float(g.cross_dy);
-			for (int sign : { -1, 1 }) {
-				draw_list_.lines.push_back({ x + sign * dx, y, x + sign * 2 * dx, y, 1, color });
-				draw_list_.lines.push_back({ x, y + sign * dy, x, y + sign * 2 * dy, 1, color });
-			}
+			// The four crosshair arms; a title whose reticle is the quad (DFX2-45) draws that
+			// instead, of a texture nothing loads, so nothing draws.
+			// [orig: Render_WeaponInsetScene @0x5C9E96..0x5C9F47] [orig: sub_591440 @0x5C8E40,
+			//  its texture's test @0x591460 (dfx2.exe)]
+			if (!c.inset_reticle_quad)
+				for (int sign : { -1, 1 }) {
+					draw_list_.lines.push_back({ x + sign * dx, y, x + sign * 2 * dx, y, 1, color });
+					draw_list_.lines.push_back({ x, y + sign * dy, x, y + sign * 2 * dy, 1, color });
+				}
 			if (c.inset_friendly) {
 				for (int sx : { -1, 1 })
 					for (int sy : { -1, 1 })

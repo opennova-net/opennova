@@ -1693,6 +1693,7 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.title = facts.title;
 	state_.lone_gunner = facts.lone_gunner;
 	inset_target_name_ = facts.inset_target_name;
+	inset_reticle_quad_ = facts.inset_reticle_quad;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
 		opennova::hud::HudSlotBarSlot &slot = state_.slot_bar[c];

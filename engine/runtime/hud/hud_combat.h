@@ -124,6 +124,10 @@ struct HudCombatState {
 	// The inset's friendly name, the role's display-name lookup of the HUD
 	// target cursor (inmatch::HudRoleFacts::inset_target_name); empty draws none.
 	std::string target_name;
+	// DFX2-45: the title's Inset reticle is a quad of a texture no load writes, so the four
+	// crosshair arms do not draw (inmatch::HudRoleFacts::inset_reticle_quad, Title::
+	// inset_reticle_quad).
+	bool inset_reticle_quad = false;
 	int32_t impact_x_q16 = 0, impact_y_q16 = 0, impact_radius_q16 = 0;
 	uint16_t impact_distance_m = 0;
 	float inset_fov_over_zoom = 0, designator_scale = 1;

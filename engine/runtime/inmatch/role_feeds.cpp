@@ -350,6 +350,8 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	out.exp_points.element = view.title != nullptr && view.title->hud_exp_points;
 	out.title = view.title;
 	out.lone_gunner = view.kernel != nullptr && world::local_rides_solo_turret(view.kernel->world);
+	// The Inset's reticle (DFX2-45).
+	out.inset_reticle_quad = view.title != nullptr && view.title->inset_reticle_quad;
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
 		out.exp_points.score = cs.score_feedback.score;

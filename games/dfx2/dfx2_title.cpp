@@ -236,6 +236,11 @@ Title make() {
 	// DFX2-44: the NVG gain scale at the bottom centre [orig: the twin of NVG_DrawMaskAndGain
 	//  @0x5CEEE0 - 0x1E0 @0x5CEF75, 0x2AA @0x5CEF7D, 0x220 @0x5CEF85, 0x2BE @0x5CEF8D (dfx2.exe)].
 	t.nvg_gain_rect = TitleRect{ 480, 682, 544, 702 };
+	// DFX2-45: the Inset's reticle quad, its texture never loaded [orig: the twin of
+	//  Render_WeaponInsetScene @0x5C86B0 - sub_591440 @0x5C8E40, where Jointops.exe draws the four
+	//  arms; sub_591440 @0x591440 - `test ecx, ecx; jz` @0x591460 over the never-written
+	//  0x2724E2C (dfx2.exe)].
+	t.inset_reticle_quad = true;
 	return t;
 }
 

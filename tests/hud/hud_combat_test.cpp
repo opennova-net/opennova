@@ -96,6 +96,15 @@ static void geometry_and_draw() {
 	const auto &hit = compiler.compile(s, 1024, 768);
 	CHECK(std::count_if(hit.lines.begin(), hit.lines.end(),
 				  [](auto &l) { return l.color == 0xFFFF5050u; }) == 4);
+	// DFX2-45: a title whose Inset reticle is the quad draws no arms, the ring the same
+	// [orig: Render_WeaponInsetScene @0x5C9E96..0x5C9F47; sub_591440 @0x5C8E40 (dfx2.exe)].
+	s.combat.inset_reticle_quad = true;
+	const auto &quad = compiler.compile(s, 1024, 768);
+	CHECK(quad.tris.size() == 570);
+	CHECK(std::none_of(quad.lines.begin(), quad.lines.end(), [](auto &l) {
+		return l.color == 0xFFFF5050u || l.color == 0xFF00FF00u;
+	}));
+	s.combat.inset_reticle_quad = false;
 	s.binoculars_view_active = true;
 	CHECK(compiler.compile(s, 1024, 768).tris.empty());
 	CHECK(sprites(compiler.last_draw_list(), kHudTexVehicleLag) == 0);

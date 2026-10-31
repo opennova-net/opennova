@@ -19,6 +19,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/radio_call.h>
+#include <base/title/title.h> // title_by_code (DFX2-45)
 
 #include <cstdio>
 #include <initializer_list>
@@ -612,6 +613,15 @@ int main() {
 	voice_macro_override_cases();
 	lighting_walk_keeps_the_row_at_l_cases();
 	serve_only_end_round_cases();
+	// DFX2-45: the role's title names the Inset reticle; no title draws the arms.
+	{
+		RoleView view;
+		CHECK(!hud_role_facts(view).inset_reticle_quad);
+		view.title = title_by_code("jo");
+		CHECK(!hud_role_facts(view).inset_reticle_quad);
+		view.title = title_by_code("dfx2");
+		CHECK(hud_role_facts(view).inset_reticle_quad);
+	}
 	// The bare local role: nothing folded, nothing gathered.
 	{
 		RoleView bare;

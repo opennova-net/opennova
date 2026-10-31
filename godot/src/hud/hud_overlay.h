@@ -598,6 +598,7 @@ private:
 	// The role's inset friendly name (set_role_facts), set into the combat state
 	// set_combat_state copies from the view.
 	std::string inset_target_name_;
+	bool inset_reticle_quad_ = false; // the title's Inset reticle (set_role_facts)
 	std::array<std::string, 12> slot_bar_key_labels_; // by def category (set_slot_bar_key_labels)
 	bool server_status_shown_ = false;                // set_server_status_page
 	bool scene_3d_was_disabled_ = false;              // the viewport's own setting under the page

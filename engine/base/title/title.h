@@ -309,6 +309,14 @@ struct Title {
 	// nvg_scale_rect): Jointops.exe's (960, 32)..(1008, 64) at the top right, dfx2.exe's
 	// (480, 682)..(544, 702) at the bottom centre. Zero unwitnessed.
 	TitleRect nvg_gain_rect;
+	// DFX2-45: the weapon Inset's reticle is a textured quad over the aperture's rect, not
+	// Jointops.exe's four crosshair arms (runtime/hud HudFrameCompiler::element_inset_cues). dfx2.exe
+	// draws its quad through a helper whose texture global no load writes, so nothing draws there;
+	// the ring and the friendly brackets stay.
+	// [orig: Render_WeaponInsetScene @0x5C9740 - the arms @0x5C9E96..0x5C9F47] [orig: the twin
+	//  @0x5C86B0 - Viewport_ScreenToVirtual @0x5C8E0F / @0x5C8E23, sub_591440 @0x5C8E40; sub_591440
+	//  @0x591440, its texture 0x2724E2C read @0x59145A and written nowhere (dfx2.exe)]
+	bool inset_reticle_quad = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

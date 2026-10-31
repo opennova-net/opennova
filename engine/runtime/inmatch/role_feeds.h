@@ -258,6 +258,9 @@ struct HudRoleFacts {
 	// [orig: Render_WeaponInsetScene -- g_HUDTargetCursorEntity @0x5CA0A4, the call
 	//  @0x5CA0AB, the null test @0x5CA0B3..0x5CA0B5; HUD_BuildEntityInfo @0x4B87ED..0x4B8825]
 	std::string inset_target_name;
+	// DFX2-45: the session's title draws the Inset's reticle quad in place of the four arms
+	// (Title::inset_reticle_quad).
+	bool inset_reticle_quad = false;
 	// The frame-rate overlay: shown while the local cheat word's 0x400 bit stands
 	// (World::rules.frame_rate_overlay), over the view's frame-rate window.
 	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - `test g_DebugCheatFlags, 400h` @0x5BDEB5;
