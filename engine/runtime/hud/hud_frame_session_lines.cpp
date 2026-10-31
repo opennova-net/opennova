@@ -246,8 +246,8 @@ std::vector<std::string> game_info_leader_lines(const HudSessionState &s) {
 bool HudFrameCompiler::game_info_board(const HudFrameState &state, float w, float h) {
 	// dfx2.exe's GAMEINFO board, past the zone line it shares with Jointops.exe's: every line
 	// bold at GAMEINFO's x in its alignment, half-bright in the twin as this frame restamped it
-	// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - the restamp @0x59AC25..0x59AC3A into `alpha` and
-	// the frame's copy, read @0x59AE29 / @0x59AFB7 (dfx2.exe)].
+	// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - the restamp @0x59AC25..0x59AC3A into
+	// `g_HUDColors.active` and the frame's copy, read @0x59AE29 / @0x59AFB7 (dfx2.exe)].
 	const HudSessionState &s = state.session;
 	const HudPosRecord &gi = layout_.game_info;
 	const uint32_t color = hud_colors_active_;

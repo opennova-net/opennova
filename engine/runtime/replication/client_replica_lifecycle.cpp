@@ -297,7 +297,7 @@ void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
 
 // [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — entity->animSlot = the
 //  fourth field @0x431b3a, entity->NetId = the third @0x431b46, then the
-//  avatar rebind MinimapSlot_FindOrAllocByEntityId @0x431b8c into
+//  avatar rebind CAvatarDefs_FindOrAllocCharacterBlip @0x431b8c into
 //  CharacterEntity @0x431b91]
 void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_id,
 		uint8_t anim_slot) {

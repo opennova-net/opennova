@@ -50,8 +50,8 @@ GameFontRun cine_text_fade_run(const GameFont &font, float scale, const std::str
 //  colour halved, alpha forced @0x5804D8..0x5804F0]
 // An EpilogCounterFont's row is the same in its own slot, the label halved in `label_color` and
 // the columns in `value_color`, the alpha forced (a plain counter passes -1 for both)
-// [orig: Render_EpilogCounter @0x571a40 - HUD_DrawTextLeft_HalfBright(.., +0x44C, 0) @0x571b14,
-//  the value @0x571b73 and the count @0x571bc0 in +0x448 (dfx2.exe)].
+// [orig: CineEventEpilogCounterFont_Draw @0x571a40 - HUD_DrawTextLeft_HalfBright(.., +0x44C, 0)
+//  @0x571b14, the value @0x571b73 and the count @0x571bc0 in +0x448 (dfx2.exe)].
 GameFontRun cine_epilog_counter_run(const GameFont &font, float scale, const std::string &label,
 		const std::string &value, const std::string &count, int32_t label_x, int32_t value_x,
 		int32_t count_x, int32_t row_y, uint32_t label_color, uint32_t value_color,
@@ -78,9 +78,10 @@ GameFontRun cine_event_text_run(const world::CineEvent &e, const std::string &ga
 
 // The HUD label slot a cine node draws in: a TextFade's and an EpilogCounterFont's font word, -3
 // Impact38, -2 Large, -1 Bold (any other word the HUD's own font table, which no epilog node
-// names: none here); a plain counter's Large [orig: Render_EpilogCounter @0x571ad3 (dfx2.exe)]. The slot's file at a choice (hud_label_font_choice: the bold slot the width's tier's, the
-// other two one file each) and its scale (the bold slot's, else the large one's, which Impact38
-// shares).
+// names: none here); a plain counter's Large [orig: CineEventEpilogCounterFont_Draw @0x571ad3
+// (dfx2.exe)]. The slot's file at a choice (hud_label_font_choice: the bold slot the width's
+// tier's, the other two one file each) and its scale (the bold slot's, else the large one's,
+// which Impact38 shares).
 // [orig: CCineEventTextFade_Draw @0x573020 - the switch @0x57311d (-3 @0x573137, -2 @0x573130,
 //  -1 @0x573129); CineEventEpilogCounter_Draw @0x5734de (Large)] [orig: CCineEventTextFade_Draw
 //  @0x5712bd (dfx2.exe)]

@@ -458,7 +458,8 @@ void test_dfx2_high_score() {
 // DFX2-66: an EpilogCounterFont's step is the plain counter's and plays HEADSHOTTONE on each step
 // it takes off its target, ahead of the move; TEXT_END on the arrival. The live rows' -1 target
 // and rate step away, so the tone plays every fifth dispatch and TEXT_END never.
-// [orig: CineNode_ColorFadeUpdate @0x571860 - the tone @0x5718a5, TEXT_END @0x5718f7 (dfx2.exe)]
+// [orig: CineEventEpilogCounterFont_Step @0x571860 - the tone @0x5718a5, TEXT_END @0x5718f7
+//  (dfx2.exe)]
 void test_counter_font_step_plays_the_tone() {
 	struct Case {
 		int32_t target, rate;
@@ -717,7 +718,7 @@ int main() {
 		// -1 target, so neither TEXT_END nor HEADSHOTTONE plays (the counter
 		// class whose step plays HEADSHOTTONE, CineEventEpilogCounterFont, is
 		// never constructed) [orig: @0x5765F6..0x5765F8; the dead constructor
-		// @0x5735d0, its step CineNode_ColorFadeUpdate @0x5736fe].
+		// @0x5735d0, its step CineEventEpilogCounterFont_Step @0x5736fe].
 		const w::CineEvent *first_line = find_event(cine, w::CineEventKind::EpilogCounter, 0);
 		CHECK(first_line != nullptr && first_line->points > 0);
 		CHECK(count_sounds(world, "TEXT_END") == 0);

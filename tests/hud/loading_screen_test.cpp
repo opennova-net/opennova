@@ -360,8 +360,8 @@ int main() {
 		      "a line's slot is its word, a counter's the large");
 
 		// DFX2-66: an EpilogCounterFont draws in its own slot and colours: the label halved in
-		// +0x44C, the value in +0x448, the alpha forced [orig: Render_EpilogCounter @0x571ad3 /
-		// @0x571b14 / @0x571b73 (dfx2.exe)].
+		// +0x44C, the value in +0x448, the alpha forced [orig: CineEventEpilogCounterFont_Draw
+		// @0x571ad3 / @0x571b14 / @0x571b73 (dfx2.exe)].
 		opennova::world::CineEvent font_row = counter;
 		font_row.kind = opennova::world::CineEventKind::EpilogCounterFont;
 		font_row.font = -3;

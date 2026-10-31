@@ -105,7 +105,7 @@ enum class FrameFxTaps : std::uint8_t {
 	// FrameFX_BuildTiledQuad @0x5819c0: a 256 x 64-pixel tiling of the
 	// source with a per-draw texel offset.
 	Tiled = 4,
-	// FrameFX_BuildScarDecalVertices @0x584630: a ten-vertex strip around the
+	// FrameFX_BuildRingTapStrip @0x584630: a ten-vertex strip around the
 	// rect's border, between the rect and its inner rect at 0.3..0.7 of it (the
 	// hole draws nothing): the inner corners carry four taps at their own UV,
 	// the outer ones the Rotated taps, so the offset grows linearly across each
@@ -113,13 +113,13 @@ enum class FrameFxTaps : std::uint8_t {
 	// draws it with 10 vertices for its 6. Only the low-health ring uses it.
 	// [orig: FrameFX_DrawPass @0x582bb0 (the 10), @0x582cf8..0x582d36 (the
 	//  call: base, sin, cos, radius, the reduced byte, 0, 0.5);
-	//  FrameFX_BuildScarDecalVertices @0x5846bb..0x5846e3 (the 0.3 / 0.7 inner
+	//  FrameFX_BuildRingTapStrip @0x5846bb..0x5846e3 (the 0.3 / 0.7 inner
 	//  rect), @0x584749..0x584888 (the strip)]
 	Ring = 5,
 };
 
 // The ring builder's inner rect, as fractions of the rect (flt_7D4B34 0.3,
-// flt_7D7C08 0.7). [orig: FrameFX_BuildScarDecalVertices @0x5846a0 / @0x5846cd]
+// flt_7D7C08 0.7). [orig: FrameFX_BuildRingTapStrip @0x5846a0 / @0x5846cd]
 inline constexpr float kFrameFxRingInnerMin = 0.30000001f;
 inline constexpr float kFrameFxRingInnerMax = 0.69999999f;
 

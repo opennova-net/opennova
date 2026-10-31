@@ -6,7 +6,8 @@
 // its own scratch key under HKEY_CURRENT_USER\Software\OpenNovaTest (common/scratch_registry.h),
 // over which it runs the virtualized read and write.
 // [orig: NapiRegistry_OpenKeyPath @0x619e80 - the component count @0x619ee7, the root names
-//  @0x61a010..0x61a0ae; CScrollWnd_SetRange @0x619d70; NapiRegistry_SetStringValue @0x619dc0]
+//  @0x61a010..0x61a0ae; NapiRegistry_QueryStringValue @0x619d70; NapiRegistry_SetStringValue
+//  @0x619dc0]
 
 #include <base/os_registry/os_registry.h>
 

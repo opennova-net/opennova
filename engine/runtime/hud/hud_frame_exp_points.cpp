@@ -46,10 +46,10 @@ void HudFrameCompiler::element_exp_points(const HudFrameState &state, float w, f
 	//  HUD_DrawExpPoints @0x59B7E0 (dfx2.exe) - the hidden test @0x59B7F1, the step
 	//  @0x59B805..0x59B91B, the anchor dword_2724A2C / dword_2724A30 through
 	//  Viewport_ScaleToVirtualCoords @0x59B921..0x59B945,
-	//  HUD_DrawTextLeft_HalfBright(g_HUDLabelFontBold, x, y, label, alpha, 0) @0x59B962,
-	//  GameFont_MeasureCharHeight('0') @0x59B96E, GameFont_MeasureTextWidth(label) @0x59B98B, the
-	//  score's x @0x59B994..0x59B9AD and y @0x59B9B1..0x59B9CF, sprintf("%d", dword_A7BA40)
-	//  @0x59B998..0x59B9D3, CGameFont_DrawText at the slot's scales times the fade's
+	//  HUD_DrawTextLeft_HalfBright(g_HUDLabelFontBold, x, y, label, g_HUDColors.active, 0)
+	//  @0x59B962, GameFont_MeasureCharHeight('0') @0x59B96E, GameFont_MeasureTextWidth(label)
+	//  @0x59B98B, the score's x @0x59B994..0x59B9AD and y @0x59B9B1..0x59B9CF, sprintf("%d",
+	//  dword_A7BA40) @0x59B998..0x59B9D3, CGameFont_DrawText at the slot's scales times the fade's
 	//  @0x59B9E9..0x59BA16 in ((colour >> 1) & 0x7F7F7F) | 0xFF000000 @0x59B9F6..0x59BA06 (the
 	//  half-bright drawer's arguments, flags 0) @0x59BA33, the tracker's valid word @0x59BA38, the
 	//  two values' sign tests @0x59BA40..0x59BA56, the dead cheat arm @0x59BA6B, the pitch

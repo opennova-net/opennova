@@ -72,10 +72,10 @@ HudExpPointsPulse hud_exp_points_fade_step(HudExpPointsFade &fade, uint32_t acti
 
 // The fade a tone of the EXP_FANFARE ladder starts: a HIT 31 draws toward g_HUDColors.active (no
 // tint), a KILL 62 toward palette entry 4, a HEADSHOT 93 toward entry 5; None starts none.
-// [orig: @0x422380..0x4223C5 (dfx2.exe) - `mov eax, 1Fh` / alpha @0x422385..0x422391, 3Eh /
-//  dword_24BADF8 @0x42239F..0x4223AB, 5Dh / dword_24BADFC @0x4223B2..0x4223BE;
-//  HUD_InitTeamColorTable @0x51C200 (dfx2.exe) - entry 4 0xFFF0F000 @0x51C237, entry 5 0xFFFF5050
-//  @0x51C219]
+// [orig: @0x422380..0x4223C5 (dfx2.exe) - `mov eax, 1Fh` / g_HUDColors.active @0x422385..0x422391,
+//  3Eh / g_HUDColors.palette[4] @0x42239F..0x4223AB, 5Dh / g_HUDColors.palette[5]
+//  @0x4223B2..0x4223BE; HUD_InitTeamColorTable @0x51C200 (dfx2.exe) - entry 4 0xFFF0F000 @0x51C237,
+//  entry 5 0xFFFF5050 @0x51C219]
 struct HudExpPointsTier {
 	uint16_t duration = 0;
 	int palette = -1; // -1: g_HUDColors.active

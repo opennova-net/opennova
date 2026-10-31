@@ -606,7 +606,7 @@ void HudFrameCompiler::element_lone_gunner_panel(const HudFrameState &state, flo
 	// Jointops.exe carries the same drawer and string with no caller.
 	// [orig: sub_5BEEA0 @0x5BEEA0 (dfx2.exe) - the gate @0x5BEFBA..0x5BEFE9, sub_5B8050 called
 	//  @0x5BEFEC between sub_5B7FE0 @0x5BEFB2 and HUD_DrawKillAnnounceBanner @0x5BEFFE;
-	//  sub_5B8050 @0x5B8050 (dfx2.exe) - palette entry 4 dword_24BADF8 @0x5B8055,
+	//  sub_5B8050 @0x5B8050 (dfx2.exe) - palette entry 4 g_HUDColors.palette[4] @0x5B8055,
 	//  HUD_DrawLabelBox(ctx, 320, 500, 704, 600, NULL, -1) @0x5B805B..0x5B8074,
 	//  HUD_DrawTextCenteredScaled(&g_HUDLabelFontLarge, 512, 528, text, entry 4, 1)
 	//  @0x5B8079..0x5B8090, the string @0x7DA540; HUD_DrawTextCenteredScaled @0x57F000 -

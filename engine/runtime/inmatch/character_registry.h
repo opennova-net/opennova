@@ -113,9 +113,9 @@ PlayerVisualSpec resolve_player_visual_spec(const opennova::avatars::AvatarsFile
 // they take this pick too, through the world's character traits (install_viewer_side_pick).
 // [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - `test [esi+24h], 100h` @0x5C6EA6, the
 //  g_LocalPlayerEntity test @0x5C6EE6 and the Team compare `cmp dl, [eax+162h]; setnz`
-//  @0x5C6EEE..0x5C6F00, EntitySlot_LookupAndPackEntry @0x5C6F0A (0 without a local player
-//  @0x5C6F25), MinimapSlot_FindOrAllocByEntityId into +0x3C @0x5C6F3D; EntitySlot_LookupAndPackEntry
-//  @0x5791C0, CAvatarDefs_PackFirstComboOfAlignment's twin (dfx2.exe)]
+//  @0x5C6EEE..0x5C6F00, CAvatarDefs_PackFirstComboOfAlignment @0x5C6F0A (0 without a local
+//  player @0x5C6F25), CAvatarDefs_FindOrAllocCharacterBlip into +0x3C @0x5C6F3D;
+//  CAvatarDefs_PackFirstComboOfAlignment @0x5791C0 (dfx2.exe)]
 uint16_t drawn_player_character(const Title *title, const CharacterRegistry *registry,
 		uint16_t net_id, bool viewer, uint8_t team, uint8_t viewer_team);
 

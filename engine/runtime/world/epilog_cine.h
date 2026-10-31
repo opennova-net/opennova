@@ -52,11 +52,12 @@ enum class CineEventKind : uint8_t {
 	// A score line in a label slot and colours of its own, whose count-up step
 	// plays HEADSHOTTONE on each step off its target: dfx2.exe's win screen
 	// builds two; Jointops.exe carries the class (vtable @0x7D6A1C, the step
-	// CineNode_ColorFadeUpdate @0x5736C0) and never constructs one (its
+	// CineEventEpilogCounterFont_Step @0x5736C0) and never constructs one (its
 	// constructor @0x5735D0 has no caller) [orig: CineEventEpilogCounterFont,
 	// vtable ??_7CineEventEpilogCounterFont@@6B@ @0x7D5AD4 - CineEventEpilogCounterFont_Construct
 	// @0x571770, the start CineEventEpilogCounterFont_Start @0x571840, the step
-	// CineNode_ColorFadeUpdate @0x571860, the draw Render_EpilogCounter @0x571A40 (dfx2.exe)].
+	// CineEventEpilogCounterFont_Step @0x571860, the draw CineEventEpilogCounterFont_Draw @0x571A40
+	// (dfx2.exe)].
 	EpilogCounterFont,
 };
 
@@ -231,7 +232,7 @@ inline constexpr int32_t kEpilogCounterStepWait = 4;
 // of g_SndTextEnd, the registry @0x82F590's TEXT_END row].
 inline constexpr const char *kEpilogCounterEndSoundset = "TEXT_END";
 // The interface set an EpilogCounterFont's step plays on each step it takes
-// off its target, ahead of the step [orig: CineNode_ColorFadeUpdate @0x571860 -
+// off its target, ahead of the step [orig: CineEventEpilogCounterFont_Step @0x571860 -
 // Sound_PlayInterfaceTriggerSet(g_SndHeadshotTone) @0x5718a5, the registry's
 // HEADSHOTTONE row @0x82E894; its arrival's TEXT_END @0x5718f7 (dfx2.exe)].
 // The round end's parked sound-effects volume plays both at 0 (both screens'

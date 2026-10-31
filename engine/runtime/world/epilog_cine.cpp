@@ -133,7 +133,7 @@ uint32_t cine_event_draw_argb(const CineEvent &e) {
 	case CineEventKind::EpilogCounter:
 		return hud::half_bright_argb(0xFFFFFFFFu);
 	case CineEventKind::EpilogCounterFont:
-		// [orig: Render_EpilogCounter @0x571b14 - the label in +0x44C (dfx2.exe)]
+		// [orig: CineEventEpilogCounterFont_Draw @0x571b14 - the label in +0x44C (dfx2.exe)]
 		return hud::half_bright_argb(e.label_color);
 	default:
 		return 0;
@@ -284,7 +284,7 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 		// step off its target, before it moves (the live rows' -1 target and
 		// rate: every fifth dispatch), and its rand() colour pulse runs under
 		// flags bit 1, which no live row sets.
-		// [orig: CineNode_ColorFadeUpdate @0x571860 - the wait @0x57187b..0x571888, the
+		// [orig: CineEventEpilogCounterFont_Step @0x571860 - the wait @0x57187b..0x571888, the
 		//  tone @0x57189c..0x5718a5, the step @0x5718aa..0x5718e9, TEXT_END @0x5718f7, the
 		//  re-arm @0x5718ff, the pulse @0x57190d (dfx2.exe)]
 		if (e.points_cooldown != 0) {
