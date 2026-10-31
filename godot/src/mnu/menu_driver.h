@@ -384,6 +384,10 @@ public:
 	// The DEATH screen's show writes from `sim` (engine inmatch/role_feeds.h deploy_activation and
 	// world/deploy_screen_feed.h apply_deploy_activation carry the witnesses).
 	void apply_deploy_activation(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
+	// The DEATH SPAWNPOINTS_TABLE's custom draw installed on this driver's frame (engine
+	// world/deploy_screen_feed.h deploy_table_paint carries the witness); false without the
+	// table. The zone names stay empty: the definitions' uiname (+0x40) is not parsed.
+	bool install_deploy_table_painter();
 	// The CTableWnd reads (engine menu_table_row.h).
 	int table_cell_value(int p_id, int p_row, int p_col) const;
 	PackedInt32Array table_selected_rows(int p_id) const;

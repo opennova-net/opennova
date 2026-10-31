@@ -784,6 +784,18 @@ void MenuDriver::apply_deploy_activation(const Ref<Simulation> &p_sim,
 			p_sim->role_view(), game_text_lookup(p_gametext)));
 }
 
+bool MenuDriver::install_deploy_table_painter() {
+	MenuFrame *frame = frame_();
+	const int index = frame_index(runtime_.find_screen_control("DEATH", "SPAWNPOINTS_TABLE"));
+	if (frame == nullptr || index < 0) return false;
+	frame->set_table_cell_painter(index,
+			[](const opennova::menu::MenuTableCellEvent &event,
+					opennova::menu::MenuTableCellCanvas &canvas) {
+				opennova::world::deploy_table_paint(event, canvas, std::string());
+			});
+	return true;
+}
+
 bool MenuDriver::deploy_map_moved() {
 	return opennova::world::deploy_map_moved(runtime_);
 }
@@ -1316,6 +1328,8 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("deploy_table_click", "id", "row", "state", "double_click"),
 			&MenuDriver::deploy_table_click);
 	ClassDB::bind_method(D_METHOD("deploy_map_moved"), &MenuDriver::deploy_map_moved);
+	ClassDB::bind_method(D_METHOD("install_deploy_table_painter"),
+			&MenuDriver::install_deploy_table_painter);
 	ClassDB::bind_method(D_METHOD("apply_deploy_activation", "sim", "gametext"),
 			&MenuDriver::apply_deploy_activation);
 	ClassDB::bind_method(D_METHOD("fill_deploy_team_lists", "sim", "gametext"),

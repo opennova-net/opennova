@@ -12,6 +12,7 @@
 #include <base/title/title.h>
 #include <formats/mnu/mnu.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/spawn_select.h>
@@ -683,7 +684,65 @@ void test_deploy_activation() {
 	CHECK(!rt.is_widget_shown(rt.widget_id("SPAWNPOINTS_TABLE")));
 }
 
+// The SPAWNPOINTS_TABLE's custom draw: a data cell's flags-1 pass, column 1's name in the HUD
+// label face at the cell's foot (0xFF404040 on a locked row), the content, a state-2 cell's
+// four-line frame; the header only its content [orig: sub_550CF0 @0x550d29..0x550e37
+// (dfx2.exe)].
+struct RecordingCanvas : menu::MenuTableCellCanvas {
+	std::vector<std::string> ops;
+	void draw_cell(int row, int column, int flags) override {
+		ops.push_back("cell " + std::to_string(row) + " " + std::to_string(column) + " " +
+				std::to_string(flags));
+	}
+	void clear_rect(uint32_t, float, float, float, float) override { ops.push_back("clear"); }
+	void line(uint32_t argb, float x0, float y0, float x1, float y1) override {
+		char buf[96];
+		std::snprintf(buf, sizeof buf, "line %08X %g %g %g %g", argb, x0, y0, x1, y1);
+		ops.push_back(buf);
+	}
+	void hud_label(const std::string &text, float x, float foot, uint32_t argb) override {
+		char buf[96];
+		std::snprintf(buf, sizeof buf, "label %s %g %g %08X", text.c_str(), x, foot, argb);
+		ops.push_back(buf);
+	}
+};
+
+void test_spawn_table_paint() {
+	menu::MenuTableCellEvent cell;
+	cell.row = 2;
+	cell.column = 1;
+	cell.state = 2;
+	cell.left = 10;
+	cell.top = 20;
+	cell.right = 85;
+	cell.bottom = 68;
+	RecordingCanvas canvas;
+	deploy_table_paint(cell, canvas, "Blackhawk");
+	CHECK(canvas.ops.size() == 7);
+	if (canvas.ops.size() == 7) {
+		CHECK(canvas.ops[0] == "cell 2 1 1");
+		CHECK(canvas.ops[1] == "label Blackhawk 47 66 FFDDDDDD");
+		CHECK(canvas.ops[2] == "cell 2 1 2");
+		CHECK(canvas.ops[3] == "line FF7F7F7F 10 20 85 20");
+		CHECK(canvas.ops[6] == "line FF7F7F7F 10 68 10 20");
+	}
+	RecordingCanvas locked;
+	cell.state = 1;
+	deploy_table_paint(cell, locked, "Blackhawk");
+	CHECK(locked.ops.size() == 3 && locked.ops[1] == "label Blackhawk 47 66 FF404040");
+	RecordingCanvas other;
+	cell.column = 2;
+	deploy_table_paint(cell, other, "Blackhawk");
+	CHECK(other.ops.size() == 2 && other.ops[0] == "cell 2 2 1" && other.ops[1] == "cell 2 2 2");
+	RecordingCanvas header;
+	cell.row = -1;
+	cell.state = 0;
+	deploy_table_paint(cell, header, "");
+	CHECK(header.ops.size() == 1 && header.ops[0] == "cell -1 2 2");
+}
+
 int main() {
+	test_spawn_table_paint();
 	test_deploy_activation();
 	test_penalty_line_instruction();
 	test_team_lists();

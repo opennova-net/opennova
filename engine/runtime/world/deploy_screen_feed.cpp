@@ -4,6 +4,7 @@
 #include <runtime/hud/feed_format.h>
 #include <runtime/hud/hud_vehicle_panel.h>
 #include <runtime/menu/list_sort.h>
+#include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
@@ -522,6 +523,26 @@ void apply_deploy_activation(menu::MenuRuntime &menu, const DeployActivation &ac
 	if (briefing >= 0) menu.set_widget_text(briefing, activation.briefing);
 	const int game_type = activation.game_type_line ? find("STATIC_GAMETYPE") : -1;
 	if (game_type >= 0) menu.set_widget_text(game_type, "Gametype: <cFFFF40>" + activation.game_type_label);
+}
+
+void deploy_table_paint(const menu::MenuTableCellEvent &event, menu::MenuTableCellCanvas &canvas,
+		const std::string &zone_name) {
+	const float l = event.left, t = event.top, r = event.right, b = event.bottom;
+	if (event.row != -1) {
+		canvas.draw_cell(event.row, event.column, 1);
+		if (event.column == 1 && !zone_name.empty()) {
+			const float x = static_cast<float>((static_cast<int>(l) + static_cast<int>(r)) >> 1);
+			canvas.hud_label(zone_name, x, b - 2.0f, event.state == 1 ? 0xFF404040u : 0xFFDDDDDDu);
+		}
+	}
+	canvas.draw_cell(event.row, event.column, 2);
+	if (event.state == 2) {
+		const uint32_t frame = 0xFF7F7F7Fu;
+		canvas.line(frame, l, t, r, t);
+		canvas.line(frame, r, t, r, b);
+		canvas.line(frame, r, b, l, b);
+		canvas.line(frame, l, b, l, t);
+	}
 }
 
 bool deploy_map_moved(menu::MenuRuntime &menu) {

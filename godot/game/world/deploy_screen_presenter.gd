@@ -644,6 +644,10 @@ func _ensure_menu() -> bool:
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
+	# A title whose DEATH screen has the spawn table draws its custom cells (engine
+	# world::deploy_table_paint carries the witness).
+	if _picks_loadout():
+		_driver.install_deploy_table_painter()
 	_mount_map_window()
 	return true
 

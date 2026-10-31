@@ -20,6 +20,8 @@
 
 namespace opennova::menu {
 class MenuRuntime; // runtime/menu/menu_runtime.h
+struct MenuTableCellEvent; // runtime/menu/menu_frame.h
+class MenuTableCellCanvas;
 } // namespace opennova::menu
 
 namespace opennova::world {
@@ -384,6 +386,20 @@ struct DeployActivation {
 	std::string game_type_label; // HUD_GetGameTypeOverlayLabel's text
 };
 void apply_deploy_activation(menu::MenuRuntime &menu, const DeployActivation &activation);
+
+// The SPAWNPOINTS_TABLE's custom draw (event 0x8000002; death.mnu authors every BODY column
+// CUSTOM_DRAW): a data cell's row-state appearance (CTableWnd_DrawCell flags 1), on column 1
+// the zone vehicle's definition name (`zone_name`, its +0x40; none: nothing) in the HUD label
+// face centred at the cell's foot less 2, 0xFF404040 on a state-1 row and 0xFFDDDDDD otherwise;
+// then every cell's content (flags 2), and round a state-2 cell four 0xFF7F7F7F lines, top,
+// right, bottom, left.
+// [orig: sub_550CF0 @0x550cf0 - the event @0x550d23, the row test @0x550d2f, DrawCell(1)
+//  @0x550d3c, column 1 @0x550d41, CTableWnd_GetCellRecord @0x550d55, SpawnZoneList_GetByIndex
+//  @0x550d69, the name @0x550d75..0x550d86, CGameFont_GetCharExtent @0x550d95,
+//  HUD_DrawTextCentered_HalfBright @0x550dc8, DrawCell(2) @0x550dde, the state test @0x550de3,
+//  CGfxDevice_SetQuadDiffuse @0x550dfb, sub_6B5410 (Line2D_Draw) @0x550e0d..0x550e37 (dfx2.exe)]
+void deploy_table_paint(const menu::MenuTableCellEvent &event, menu::MenuTableCellCanvas &canvas,
+		const std::string &zone_name);
 
 class World;
 struct SpawnZoneRegistry;

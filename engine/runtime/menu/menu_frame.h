@@ -377,6 +377,17 @@ public:
 	virtual void draw_cell(int row, int column, int flags) = 0;
 	virtual void clear_rect(uint32_t argb, float left, float top, float right, float bottom) = 0;
 	virtual void line(uint32_t argb, float x0, float y0, float x1, float y1) = 0;
+	// HUD_DrawTextCentered_HalfBright(g_HUDLabelFont, x, foot - the font's 'W' height, text,
+	// argb): the HUD label face, centred on `center_x`, its top the 'W' extent above `foot`, at
+	// half brightness. A canvas with no HUD label face draws nothing (the menu frame's has none).
+	// [orig: CGameFont_GetCharExtent @0x6b1980 (g_HUDLabelFont, 'W'), HUD_DrawTextCentered_HalfBright
+	//  @0x57eb00 (dfx2.exe)]
+	virtual void hud_label(const std::string &text, float center_x, float foot, uint32_t argb) {
+		(void)text;
+		(void)center_x;
+		(void)foot;
+		(void)argb;
+	}
 };
 
 // A table's registered custom-draw handler (the control callback bound on the
