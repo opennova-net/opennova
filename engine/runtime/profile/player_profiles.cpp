@@ -206,7 +206,8 @@ void set_voice_override(playersav::ProfileRecord &record, int side, int value) {
 	record.voice[static_cast<size_t>(side)] = static_cast<uint8_t>(value);
 }
 
-PlayerProfiles::PlayerProfiles(const Title &title) : magic_(title.profile_magic) {}
+PlayerProfiles::PlayerProfiles(const Title &title)
+	: magic_(title.profile_magic), first_name_(title.profile_first_name) {}
 
 void PlayerProfiles::select_slot(int slot) {
 	slot_ = (slot < 0 || slot >= static_cast<int>(playersav::kProfileSlots)) ? 0 : slot;
@@ -217,8 +218,12 @@ void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) 
 	slot_ = 0;                     // [orig: @0x54f516]
 	init_defaults(player_.slots[0], weapons_.slots[0], defaults);  // [orig: @0x54f51b]
 	// GetUserNameA(+4, 16) [orig: @0x54f535]: a name that does not fit the
-	// buffer with its NUL fails and leaves the cleared field.
-	if (in.user_name.size() < playersav::kNameMaxChars) player_.slots[0].name = in.user_name;
+	// buffer with its NUL fails and leaves the cleared field. A title that
+	// names record 0 copies its name instead [orig: @0x54c770..0x54c78a (dfx2.exe)].
+	if (first_name_ != nullptr)
+		player_.slots[0].name = first_name_;
+	else if (in.user_name.size() < playersav::kNameMaxChars)
+		player_.slots[0].name = in.user_name;
 	player_.slots[0].flags &= ~playersav::kRecordFlagNoName;  // [orig: @0x54f53b]
 	for (size_t s = 1; s < playersav::kProfileSlots; ++s)     // [orig: @0x54f55b]
 		init_defaults(player_.slots[s], weapons_.slots[s], defaults);

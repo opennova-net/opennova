@@ -740,6 +740,30 @@ int test_title_magic() {
     return 0;
 }
 
+// --- 10. the title's record 0 name ------------------------------------------------
+// dfx2.exe names the fresh record 0 "Bravo 1" where Jointops.exe reads the account
+// [orig: PlayerProfile_LoadAllFromDisk @0x54c720 - @0x54c770..0x54c78a (dfx2.exe)]; player.sav's
+// record 0 still reads over it.
+
+int test_title_first_name() {
+    PlayerProfiles d(games::dfx2_title());
+    PlayerProfiles::LoadInput in;
+    in.user_name = "cdouglass";
+    d.load(in, defaults());
+    TEST_EXPECT(d.player_sav().slots[0].name == "Bravo 1" && d.player_sav().slots[0].flags == 0);
+    TEST_EXPECT(d.player_sav().slots[1].name.empty());
+    in.user_name = std::string(16, 'u');
+    d.load(in, defaults());
+    TEST_EXPECT(d.player_sav().slots[0].name == "Bravo 1");
+    d.player_sav().slots[0].name = "Sandman";
+    const std::vector<uint8_t> player = d.player_sav_bytes();
+    in.player_sav = &player;
+    PlayerProfiles back(games::dfx2_title());
+    back.load(in, defaults());
+    TEST_EXPECT(back.player_sav().slots[0].name == "Sandman");
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -763,6 +787,7 @@ int main() {
         {"program_controls_code", test_program_controls_code},
         {"default_weapon_sav", test_default_weapon_sav},
         {"title_magic", test_title_magic},
+        {"title_first_name", test_title_first_name},
     };
     int failures = 0;
     for (const Case &c : cases) {

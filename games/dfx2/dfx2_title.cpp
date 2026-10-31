@@ -89,6 +89,10 @@ Title make() {
 	//  header @0x5490ae; PlayerProfile_LoadAllFromDisk @0x54c720 - edi = 0x44465832 @0x54c7dc,
 	//  the player.sav gate @0x54c800, the weapon.sav gate @0x54c93f (dfx2.exe)].
 	t.profile_magic = 0x44465832u;
+	// Record 0's fresh name, "Bravo 1", where Jointops.exe reads the account's [orig:
+	//  PlayerProfile_LoadAllFromDisk @0x54c720 - the eight bytes @0x7d2d84 copied over the name
+	//  @0x54c770..0x54c78a; no GetUserNameA call (dfx2.exe)].
+	t.profile_first_name = "Bravo 1";
 	return t;
 }
 

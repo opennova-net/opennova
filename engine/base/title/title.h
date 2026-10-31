@@ -122,6 +122,10 @@ struct Title {
 	// titles share. Jointops.exe's "FPBC", dfx2.exe's "2XFD": neither game reads the other's
 	// profile files. 0 unwitnessed.
 	uint32_t profile_magic = 0;
+	// The name the profile load gives record 0 before player.sav's records are read over it
+	// (runtime/profile/player_profiles.h): dfx2.exe's literal "Bravo 1"; null, the process's
+	// account name, as Jointops.exe reads it through GetUserNameA.
+	const char *profile_first_name = nullptr;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

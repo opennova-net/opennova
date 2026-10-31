@@ -19,7 +19,7 @@ std::string process_account_name();
 
 // The profile opennova-serve's own row runs under: the boot's profile load. Every record is
 // seeded fresh, the first named after the account (a name the 16-byte buffer cannot hold leaves
-// it empty), then player.sav's records are read over them and weapon.sav's, each when the
+// it empty) or the title's name for it (Title::profile_first_name), then player.sav's records are read over them and weapon.sav's, each when the
 // process's working directory holds it; game.cfg's player_index picks the current record (an
 // index past the records reads the first). The mission start copies its name onto the row's
 // body as the local profile's, which every joiner's 0x0C carries; the session create's profile

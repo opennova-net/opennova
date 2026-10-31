@@ -118,7 +118,8 @@ class PlayerProfiles {
 public:
 	// The profile of `title`, the title the process runs as (CONTEXT.md "Title"):
 	// its magic (Title::profile_magic) gates both files at the load and heads
-	// both at the save.
+	// both at the save, and its record 0 name (Title::profile_first_name) names
+	// the fresh record 0.
 	explicit PlayerProfiles(const Title &title);
 
 	// The files the load reads; a null pointer is a file that does not exist.
@@ -126,13 +127,15 @@ public:
 		const std::vector<uint8_t> *player_sav = nullptr;
 		const std::vector<uint8_t> *weapon_sav = nullptr;
 		// The account name GetUserNameA reads into a 16-byte buffer: a longer
-		// one fails and leaves the field empty [orig: @0x54f525..0x54f535].
+		// one fails and leaves the field empty [orig: @0x54f525..0x54f535]. A
+		// title that names its record 0 (Title::profile_first_name) reads none.
 		std::string user_name;
 	};
 
 	// [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0]: every record seeded,
-	// record 0 named for the account, player.sav's records read over them and
-	// each one's bindings merged into the defaults, then weapon.sav's. A file
+	// record 0 named for the account (or the title's name for it), player.sav's
+	// records read over them and each one's bindings merged into the defaults,
+	// then weapon.sav's. A file
 	// shorter than its records leaves the defaults past its end, as the
 	// original's File_Read into the seeded memory does.
 	void load(const LoadInput &in, const ProfileDefaults &defaults);
@@ -235,7 +238,8 @@ public:
 	void clear_intro_pending();
 
 private:
-	uint32_t magic_ = 0;  // Title::profile_magic
+	uint32_t magic_ = 0;                // Title::profile_magic
+	const char *first_name_ = nullptr;  // Title::profile_first_name
 	playersav::PlayerSav player_;
 	playersav::File weapons_;
 	int slot_ = 0;
