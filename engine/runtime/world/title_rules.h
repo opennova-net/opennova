@@ -412,9 +412,10 @@ struct TitleRulesRow {
 // reaches it calls games::install_rules() at its start (games/games.h, opennova_games_rules).
 void install_title_rules(const TitleRulesRow *rows, size_t count);
 
-// The rules title `title_code` runs, compared case-insensitively: the default title's
-// (base/title/title.h default_title) for an empty or unknown code. (A session's protocol has no
-// such default: protocol_in_match aborts for a session with none.)
+// The rules title `title_code` runs, compared case-insensitively. An empty code or one no installed
+// title has aborts, naming the code: no default title's rules stand in (as a session's protocol
+// has no default: protocol_in_match aborts for a session with none). The editor's previews run
+// a project's target game, past their NoProject stop.
 const TitleRules &title_rules(std::string_view title_code);
 
 // The rules a holder (SessionRules, MatchRules, WaypointCycleContext, inmatch::GameConfig) starts

@@ -20,7 +20,9 @@
 #include <runtime/world/title_rules.h>
 
 #include <algorithm>
+#include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <iterator>
 #include <string>
 #include <tuple>
@@ -223,7 +225,8 @@ void unwitnessed_titles_refused() {
 }
 
 // Every installed title runs installed rules: JO's for jo and for the titles that run JO's (the
-// same object), DFX2's its own; an empty or unknown code runs the default title's.
+// same object), DFX2's its own. An empty or unknown code runs none: it aborts, named (ctest
+// games_unknown_title_rules).
 void every_title_runs_rules() {
 	const world::TitleRules &jo = world::title_rules("jo");
 	CHECK(&jo == &games::jo_rules());
@@ -232,7 +235,6 @@ void every_title_runs_rules() {
 	for (const char *code : { "acidgambit", "dfx", "bhd" })
 		CHECK(&world::title_rules(code) == &jo);
 	CHECK(&games::acidgambit_rules() == &jo);
-	CHECK(&world::title_rules("") == &jo && &world::title_rules("nosuchgame") == &jo);
 }
 
 // JO's rules are the defaults (Jointops.exe's, the baseline the ports were witnessed on); DFX2's
@@ -580,7 +582,19 @@ void title_parts_of_the_version_line() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	// ctest games_unknown_title_rules: the rules of a code no installed title has abort, naming the
+	// code (world::title_rules), where the default title's once stood in. The abort's handler exits
+	// clean, so ctest reads the message (PASS_REGULAR_EXPRESSION).
+	if (argc > 1 && std::string(argv[1]) == "--unknown-rules") {
+#if defined(_MSC_VER)
+		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
+		std::signal(SIGABRT, [](int) { std::_Exit(0); });
+		(void)world::title_rules("nosuchgame");
+		std::fputs("world::title_rules read a code no title has\n", stderr);
+		return 1;
+	}
 	every_title_resolves();
 	retail_protocols_complete();
 	acidgambit_speaks_jo();

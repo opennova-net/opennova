@@ -129,7 +129,8 @@ const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 }
 
 bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene, const std::vector<MissionStartSeat> &seats) {
-	game_ = view.project.document ? view.project.document->target_game : std::string();
+	// The open project's target game: the mission view runs this past its NoProject stop.
+	game_ = view.project.document->target_game;
 	std::vector<MissionPoseInput> inputs;
 	for (const MissionEntityMark &entity : scene.entities()) {
 		if (entity.pool != MissionPool::Organic) continue;

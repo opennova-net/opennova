@@ -114,14 +114,13 @@ void MissionMapViewportApplier::rebuild(const opennova::editor::ViewportModel &m
 		const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &) {
 	clear();
 	HudOverlay *hud = overlay();
-	if (!hud || !view.findings.assets) return;
+	// No project, no preview: nothing is mounted or drawn (the model stops at its NoProject state).
+	if (!hud || !view.project.open || !view.findings.assets) return;
 	const opennova::editor::MissionMapViewport &map = map_of(model);
 	// The project's files, the open documents standing in for theirs, each read noted with its stamp,
 	// mounted as the project's target game so the map draws its title's HUD (ResourceRoot::session_title).
 	stamped_ = std::make_shared<opennova::StampedFiles>(view.findings.assets);
-	root_->mount_files(stamped_, view.project.document
-					? opennova::to_gd(view.project.document->target_game)
-					: String());
+	root_->mount_files(stamped_, opennova::to_gd(view.project.document->target_game));
 	// The HUD's layout the map draws through (its fonts, its icon strip, its colours): the project's hudpos.def, else
 	// the unauthored layout the game carries on over.
 	Ref<HudPos> layout;

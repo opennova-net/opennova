@@ -3907,6 +3907,10 @@ add_executable(games_test games/games_test.cpp)
 target_link_libraries(games_test PRIVATE opennova_games_rules)
 target_include_directories(games_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME games COMMAND games_test)
+# The rules of a code no installed title has abort, named (world::title_rules: no default title's).
+add_test(NAME games_unknown_title_rules COMMAND games_test --unknown-rules)
+set_tests_properties(games_unknown_title_rules PROPERTIES PASS_REGULAR_EXPRESSION
+    "world::title_rules: no title rules are installed under the code \"nosuchgame\"")
 
 add_executable(session_protocol_test novaworld/session_protocol_test.cpp)
 target_link_libraries(session_protocol_test PRIVATE opennova_net)

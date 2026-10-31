@@ -416,7 +416,8 @@ void HudViewport::follow_scope_(const SessionView &view) {
 	if (!range_) range_ = std::make_unique<WeaponRange>();
 	WeaponRangeSetup setup;
 	setup.files = view.findings.assets;
-	setup.game = view.project.document ? view.project.document->target_game : std::string();
+	// The open project's target game: the viewport runs this past its NoProject stop.
+	setup.game = view.project.document->target_game;
 	setup.catalog = "weapon.def";
 	setup.weapon = weapon->name;
 	setup.target.range = float(options_.range);
