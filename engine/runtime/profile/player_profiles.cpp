@@ -121,7 +121,7 @@ std::array<std::string, playersav::kMacroCount> default_macros(
 }
 
 void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
-		const ProfileDefaults &defaults) {
+		const ProfileDefaults &defaults, const Title &title) {
 	// [orig: memset(profile, 0, 0x3C80) @0x54bb76, then the seeds: the record's
 	//  member defaults are the unconditional ones — +0 "0211" @0x54bb94, +52 = 1
 	//  @0x54bbb7, +1372 = 1 @0x54bbba, +1424 = 128 @0x54bbc0, +1464 = 1
@@ -147,7 +147,8 @@ void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
 	// The weapon record: both class bytes 8 [orig: @0x54bbe0, @0x54bbe3], each
 	// side's character [orig: @0x54bbea..0x54bc17], the single-player page
 	// [orig: @0x54bced] and each side's five class pages [orig:
-	// @0x54bcf7..0x54bde4].
+	// @0x54bcf7..0x54bde4], the title's pages where it names its own
+	// (Title::profile_class_kits carries dfx2.exe's witness).
 	weapons.blue.player_class = 8;
 	weapons.red.player_class = 8;
 	weapons.blue.avatar_a = defaults.avatars[0].nationality;
@@ -156,9 +157,17 @@ void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
 	weapons.red.avatar_a = defaults.avatars[1].nationality;
 	weapons.red.avatar_b = defaults.avatars[1].division;
 	weapons.red.avatar_packed = defaults.avatars[1].packed;
-	weapons.single_player = playersav::default_single_player_page();
+	weapons.single_player = title.profile_single_player_kit != nullptr
+			? playersav::kit_page_of_names(title.profile_single_player_kit)
+			: playersav::default_single_player_page();
 	for (size_t i = 0; i < playersav::kKitPagesPerSide; ++i) {
 		const uint8_t klass = static_cast<uint8_t>(playersav::kMinPlayerClass + i);
+		if (title.profile_class_kits != nullptr) {
+			weapons.blue.pages[i] = playersav::kit_page_of_names(title.profile_class_kits[i]);
+			weapons.red.pages[i] = playersav::kit_page_of_names(
+					title.profile_class_kits[playersav::kKitPagesPerSide + i]);
+			continue;
+		}
 		weapons.blue.pages[i] = playersav::default_kit_page(playersav::SideId::Blue, klass);
 		weapons.red.pages[i] = playersav::default_kit_page(playersav::SideId::Red, klass);
 	}
@@ -206,8 +215,7 @@ void set_voice_override(playersav::ProfileRecord &record, int side, int value) {
 	record.voice[static_cast<size_t>(side)] = static_cast<uint8_t>(value);
 }
 
-PlayerProfiles::PlayerProfiles(const Title &title)
-	: magic_(title.profile_magic), first_name_(title.profile_first_name) {}
+PlayerProfiles::PlayerProfiles(const Title &title) : title_(&title) {}
 
 void PlayerProfiles::select_slot(int slot) {
 	slot_ = (slot < 0 || slot >= static_cast<int>(playersav::kProfileSlots)) ? 0 : slot;
@@ -216,17 +224,17 @@ void PlayerProfiles::select_slot(int slot) {
 void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) {
 	const int saved_slot = slot_;  // [orig: @0x54f4e9]
 	slot_ = 0;                     // [orig: @0x54f516]
-	init_defaults(player_.slots[0], weapons_.slots[0], defaults);  // [orig: @0x54f51b]
+	init_defaults(player_.slots[0], weapons_.slots[0], defaults, *title_);  // [orig: @0x54f51b]
 	// GetUserNameA(+4, 16) [orig: @0x54f535]: a name that does not fit the
 	// buffer with its NUL fails and leaves the cleared field. A title that
 	// names record 0 copies its name instead [orig: @0x54c770..0x54c78a (dfx2.exe)].
-	if (first_name_ != nullptr)
-		player_.slots[0].name = first_name_;
+	if (title_->profile_first_name != nullptr)
+		player_.slots[0].name = title_->profile_first_name;
 	else if (in.user_name.size() < playersav::kNameMaxChars)
 		player_.slots[0].name = in.user_name;
 	player_.slots[0].flags &= ~playersav::kRecordFlagNoName;  // [orig: @0x54f53b]
 	for (size_t s = 1; s < playersav::kProfileSlots; ++s)     // [orig: @0x54f55b]
-		init_defaults(player_.slots[s], weapons_.slots[s], defaults);
+		init_defaults(player_.slots[s], weapons_.slots[s], defaults, *title_);
 
 	first_run_ = false;  // [orig: @0x54f57c]
 	uint32_t extra = 0;
@@ -235,7 +243,7 @@ void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) 
 		extra = h.extra;
 		// The title's magic [orig: @0x54f5b4..0x54f5c6] [orig: @0x54c800..0x54c812
 		//  (dfx2.exe)]
-		if (h.magic == magic_ && h.version == kVersion) {
+		if (h.magic == title_->profile_magic && h.version == kVersion) {
 			if ((h.flags & playersav::kHeaderFlagLatched) != 0) header_latched_ = true;
 			for (size_t s = 0; s < playersav::kProfileSlots; ++s) {
 				// [orig: File_Read(record, 0x3C80) @0x54f5ec]
@@ -262,12 +270,12 @@ void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) 
 	if (in.weapon_sav != nullptr) {
 		const Header h = read_header(*in.weapon_sav);
 		// [orig: @0x54f6ef..0x54f6fd] [orig: @0x54c93f..0x54c94d (dfx2.exe)]
-		if (h.magic == magic_ && h.version == kVersion) {
-			std::vector<uint8_t> image = playersav::write(weapons_, magic_);
+		if (h.magic == title_->profile_magic && h.version == kVersion) {
+			std::vector<uint8_t> image = playersav::write(weapons_, title_->profile_magic);
 			overlay(image, playersav::kHeaderBytes, *in.weapon_sav, playersav::kHeaderBytes,
 					playersav::kProfileSlots * playersav::kRecordBytes);
 			playersav::File file;
-			if (playersav::read(image.data(), image.size(), magic_, file)) {
+			if (playersav::read(image.data(), image.size(), title_->profile_magic, file)) {
 				// The header words are the image's: the weapon.sav load keeps
 				// neither.
 				file.flags = weapons_.flags;
@@ -285,7 +293,7 @@ std::vector<uint8_t> PlayerProfiles::player_sav_bytes() const {
 	playersav::PlayerSav out = player_;
 	out.flags = header_latched_ ? playersav::kHeaderFlagLatched : 0u;
 	out.extra = static_cast<uint32_t>(header_byte_) << 24;
-	return playersav::write(out, magic_);
+	return playersav::write(out, title_->profile_magic);
 }
 
 std::vector<uint8_t> PlayerProfiles::weapon_sav_bytes() const {
@@ -293,7 +301,7 @@ std::vector<uint8_t> PlayerProfiles::weapon_sav_bytes() const {
 	playersav::File out = weapons_;
 	out.flags = header_latched_ ? playersav::kHeaderFlagLatched : 0u;
 	out.extra = static_cast<uint32_t>(header_byte_) << 24;
-	return playersav::write(out, magic_);
+	return playersav::write(out, title_->profile_magic);
 }
 
 bool PlayerProfiles::rename(const std::string &text) {
@@ -335,7 +343,7 @@ void PlayerProfiles::commit_name(const std::string &text) {
 void PlayerProfiles::reset_current(const ProfileDefaults &defaults) {
 	// [orig: PlayerInfo_OnDeleteQueryYes — g_curProfileSlot < 5 @0x561412, InitDefaults
 	//  @0x561435, +52 |= 1 @0x561442]
-	init_defaults(current(), current_weapons(), defaults);
+	init_defaults(current(), current_weapons(), defaults, *title_);
 	current().flags |= playersav::kRecordFlagNoName;
 }
 

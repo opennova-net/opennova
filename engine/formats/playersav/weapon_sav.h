@@ -141,6 +141,9 @@ std::vector<uint8_t> write(const File &in, uint32_t magic);
 // when neither the mission nor the profile carries one [orig:
 // Game_StartMission @0x5246be; Game_ApplySessionSettingsToGlobals @0x5519e4].
 KitPage default_single_player_page();
+// A page of `names` (null-terminated), each entry "<name> -1 -1 -1", as the
+// static page blobs hold them; null or an empty list is an empty page.
+KitPage kit_page_of_names(const char *const *names);
 // nullptr-free: a class outside [5,9] returns an empty page.
 KitPage default_kit_page(SideId side, uint8_t player_class);
 

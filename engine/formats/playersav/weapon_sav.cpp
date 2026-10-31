@@ -305,6 +305,17 @@ KitPage default_single_player_page()
             "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
 }
 
+KitPage kit_page_of_names(const char *const *names)
+{
+    KitPage page;
+    for (const char *const *name = names; name != nullptr && *name != nullptr; ++name) {
+        KitEntry entry;
+        entry.name = *name;
+        page.entries.push_back(entry);
+    }
+    return page;
+}
+
 KitPage default_kit_page(SideId side, uint8_t klass)
 {
     if (klass < kMinPlayerClass || klass > kMaxPlayerClass)

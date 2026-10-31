@@ -112,7 +112,7 @@ int test_init_defaults() {
     record.name = "stale";
     record.sp_no_char_abilities = 1;
     playersav::Record weapons;
-    profile::init_defaults(record, weapons, d);
+    profile::init_defaults(record, weapons, d, kJo);
     TEST_EXPECT(record.name.empty() && record.flags == playersav::kRecordFlagNoName);
     TEST_EXPECT(record.sp_no_char_abilities == 0 && record.sp_gps_icons == 1);
     TEST_EXPECT(record.intro_pending == -1 && record.mouse_sensitivity == 128);
@@ -128,7 +128,7 @@ int test_init_defaults() {
 
     // The two inner joystick seeds hang off the first [orig: @0x54bc64].
     d.joystick_caps = 2 | 4;
-    profile::init_defaults(record, weapons, d);
+    profile::init_defaults(record, weapons, d, kJo);
     TEST_EXPECT(record.joystick_cap_1 == 0 && record.joystick_cap_2 == 0 && record.joystick_cap_4 == 0);
     return 0;
 }
@@ -764,6 +764,48 @@ int test_title_first_name() {
     return 0;
 }
 
+// --- 11. the title's kit pages (DFX2-29) ----------------------------------------------
+// dfx2.exe's fresh weapon record takes its own pages: the single-player page at 0x832368, and on
+// each side classes 7 and 8 the XM4AUTO and M4AUTO pages, classes 5, 6 and 9 empty pages (static
+// buffers nothing writes) [orig: PlayerProfile_InitDefaults @0x548db0 - @0x548f67,
+// @0x548f94..0x548fe0 (side 1), @0x548ff9..0x549045 (side 0) (dfx2.exe)].
+
+int test_title_kit_pages() {
+    const auto names = [](const playersav::KitPage &page) {
+        std::string out;
+        for (const playersav::KitEntry &e : page.entries) out += e.name + " ";
+        return out;
+    };
+    playersav::ProfileRecord record;
+    playersav::Record weapons;
+    profile::init_defaults(record, weapons, defaults(), games::dfx2_title());
+    TEST_EXPECT(names(weapons.single_player) ==
+            "WPN_M4AUTO WPN_M4 WPN_MK23 WPN_AT4 WPN_GRENADEFB WPN_GRENADEHE WPN_GRENADESM WPN_KNIFE ");
+    const std::string xm4 = "WPN_XM4AUTO WPN_XM4 WPN_XMK23 WPN_XAT4 WPN_GRENADEFB WPN_GRENADEHE "
+                            "WPN_GRENADESM WPN_KNIFE ";
+    const std::string m4 = "WPN_M4AUTO WPN_MK23 WPN_SATCHEL_CHARGE WPN_GRENADEFB WPN_GRENADEHE "
+                           "WPN_GRENADESM WPN_KNIFE ";
+    for (const playersav::Side *side : {&weapons.blue, &weapons.red}) {
+        TEST_EXPECT(side->pages[0].entries.empty() && side->pages[1].entries.empty());
+        TEST_EXPECT(names(side->pages[2]) == xm4);
+        TEST_EXPECT(names(side->pages[3]) == m4);
+        TEST_EXPECT(side->pages[4].entries.empty());
+        TEST_EXPECT(side->player_class == 8);
+    }
+    TEST_EXPECT(weapons.blue.pages[2].entries[0].ammo_primary == -1);
+    // A DFX2 profile's load seeds every record so.
+    PlayerProfiles p(games::dfx2_title());
+    PlayerProfiles::LoadInput none;
+    p.load(none, defaults());
+    TEST_EXPECT(names(p.weapon_sav().slots[4].red.pages[3]) == m4);
+    TEST_EXPECT(p.weapon_sav().slots[0].blue.pages[0].entries.empty());
+    // JO's stay the format's.
+    profile::init_defaults(record, weapons, defaults(), kJo);
+    TEST_EXPECT(weapons.red.pages[4].entries[0].name == "WPN_AK74AUTO");
+    TEST_EXPECT(weapons.single_player.entries[2].name == "WPN_colt45");
+    return 0;
+}
+
 }  // namespace
 
 int main() {
@@ -788,6 +830,7 @@ int main() {
         {"default_weapon_sav", test_default_weapon_sav},
         {"title_magic", test_title_magic},
         {"title_first_name", test_title_first_name},
+        {"title_kit_pages", test_title_kit_pages},
     };
     int failures = 0;
     for (const Case &c : cases) {

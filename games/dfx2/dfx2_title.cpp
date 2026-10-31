@@ -34,6 +34,33 @@ constexpr TitleHudFontTier kHudFontTiers[] = {
 };
 constexpr TitleHudFonts kHudFonts{kHudFontTiers, "Impac44b.fnt", "Impac76b.fnt", 1600};
 
+// dfx2.exe's static kit pages, each a null-terminated list of the page's weapon names (every entry
+// "<name> -1 -1 -1").
+// The single-player page: WPN_MK23 where Jointops.exe's names WPN_colt45; WPN_M4 is on the page and
+// absent from DFX2's data, which retail drops the same way (docs/titles/dfx2-vs-jo-re.md DFX2-33).
+// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x832368, 2048) @0x52188f / @0x54ec2a, the
+//  profile's copy @0x548f67 (dfx2.exe)]
+constexpr const char *kSinglePlayerKit[] = { "WPN_M4AUTO", "WPN_M4", "WPN_MK23", "WPN_AT4",
+	"WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
+// DFX2-29: a fresh profile's class pages. On each side classes 7 and 8 take the XM4AUTO and M4AUTO
+// pages (each side its own copy of the same names), classes 5, 6 and 9 an empty page: static
+// buffers nothing writes, each read by the copy alone. Jointops.exe gives every class its own page
+// per side (playersav::default_kit_page).
+// [orig: PlayerProfile_InitDefaults @0x548db0 - side 0 @0x548ff9..0x549051: byte_254D468,
+//  byte_254C468, the page at 0x832b68, the page at 0x833b68, byte_254A468; side 1
+//  @0x548f94..0x548fec: byte_254CC68, byte_254BC68, the page at 0x833368, the page at 0x834368,
+//  byte_2549C68 (dfx2.exe)]
+constexpr const char *kXm4AutoKit[] = { "WPN_XM4AUTO", "WPN_XM4", "WPN_XMK23", "WPN_XAT4",
+	"WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
+constexpr const char *kM4AutoKit[] = { "WPN_M4AUTO", "WPN_MK23", "WPN_SATCHEL_CHARGE",
+	"WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
+constexpr const char *kEmptyKit[] = { nullptr };
+// Side 0's classes 5..9, then side 1's (Title::profile_class_kits).
+constexpr const char *const *kProfileClassKits[] = {
+	kEmptyKit, kEmptyKit, kXm4AutoKit, kM4AutoKit, kEmptyKit,
+	kEmptyKit, kEmptyKit, kXm4AutoKit, kM4AutoKit, kEmptyKit,
+};
+
 Title make() {
 	Title t;
 	t.code = "dfx2";
@@ -98,6 +125,10 @@ Title make() {
 	//  MaxPlayers stores its atol alone [orig: ServerConfig_ApplyHostSetting @0x4a6060 -
 	//  @0x4a6289..0x4a6296 (dfx2.exe)].
 	t.max_players_switch = false;
+	// DFX2-29: a fresh profile's kit pages (above); the single-player page is the rules' spawn kit
+	// too (DFX2-33, dfx2_rules.cpp).
+	t.profile_single_player_kit = kSinglePlayerKit;
+	t.profile_class_kits = kProfileClassKits;
 	return t;
 }
 

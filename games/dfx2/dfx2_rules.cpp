@@ -118,14 +118,6 @@ double dfx2_hit_zone_damage_multiplier(int32_t hit_zone) {
 	return world::hit_zone_is_critical(hit_zone) ? 3.0 : 1.0;
 }
 
-// dfx2.exe compiles in its own profile-less spawn page, WPN_MK23 where Jointops.exe's names
-// WPN_colt45; WPN_M4 is on the page and absent from DFX2's data, which retail drops the same way
-// (docs/titles/dfx2-vs-jo-re.md DFX2-33).
-// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x832368, 2048) @0x52188f / @0x54ec2a, the
-//  profile's copy @0x548f67 (dfx2.exe)]
-constexpr const char *kSpawnKit[] = { "WPN_M4AUTO", "WPN_M4", "WPN_MK23", "WPN_AT4",
-	"WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
-
 // dfx2.exe's rules: Jointops.exe's code, edited at the sites each knob names
 // (docs/titles/dfx2-vs-jo-re.md §7, the §8 rows; runtime/world/title_rules.h carries Jointops.exe's
 // side of each).
@@ -200,8 +192,11 @@ world::TitleRules make() {
 	// AI_CheckVehicleStuckState @0x4652a0 (dfx2.exe)].
 	r.ai_vehicle_near_reach = 0x40000;
 	r.ai_vehicle_write_off_count = 1860;
-	// DFX2-33: the page above.
-	r.spawn_kit = kSpawnKit;
+	// DFX2-33: the profile-less spawn page dfx2.exe compiles in, the single-player page a fresh
+	// profile takes too (dfx2_title.cpp's kSinglePlayerKit holds the names)
+	// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x832368, 2048) @0x52188f / @0x54ec2a
+	//  (dfx2.exe)].
+	r.spawn_kit = dfx2_title().profile_single_player_kit;
 	// DFX2-37: the lone gunner's fire [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0
 	// (dfx2.exe) - @0x4DD8FE..0x4DD92C, @0x4DDABB..0x4DDADB].
 	r.emplaced_solo_holds_fire = true;

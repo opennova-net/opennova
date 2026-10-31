@@ -74,9 +74,10 @@ std::array<std::string, playersav::kMacroCount> default_macros(
 // A fresh record and its weapon record [orig: PlayerProfile_InitDefaults
 // @0x54bb40]: the record cleared and seeded, the weapon record's two class
 // bytes, avatar bytes and kit pages written (the rest of it kept, as the
-// original writes only those).
+// original writes only those). The kit pages are `title`'s
+// (Title::profile_single_player_kit, profile_class_kits).
 void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
-		const ProfileDefaults &defaults);
+		const ProfileDefaults &defaults, const Title &title);
 
 // The table a loaded record keeps: the defaults, each entry whose action code
 // and token (without case) a saved entry matches taking that entry's eight
@@ -118,8 +119,9 @@ class PlayerProfiles {
 public:
 	// The profile of `title`, the title the process runs as (CONTEXT.md "Title"):
 	// its magic (Title::profile_magic) gates both files at the load and heads
-	// both at the save, and its record 0 name (Title::profile_first_name) names
-	// the fresh record 0.
+	// both at the save, its record 0 name (Title::profile_first_name) names
+	// the fresh record 0, and its kit pages seed every fresh weapon record
+	// (init_defaults). `title` outlives the profile (the registry's titles do).
 	explicit PlayerProfiles(const Title &title);
 
 	// The files the load reads; a null pointer is a file that does not exist.
@@ -238,8 +240,7 @@ public:
 	void clear_intro_pending();
 
 private:
-	uint32_t magic_ = 0;                // Title::profile_magic
-	const char *first_name_ = nullptr;  // Title::profile_first_name
+	const Title *title_;
 	playersav::PlayerSav player_;
 	playersav::File weapons_;
 	int slot_ = 0;
