@@ -621,6 +621,21 @@ void test_pool3_walk() {
 	for (const HudMapGeomVertex &v : p.geom)
 		if (v.color == 0x40FF2020u) red_fill = true;
 	CHECK(red_ring && red_fill, "the 6027 ring with its 0x40 fill");
+	// DFX2-49: dfx2.exe's map walks the capture rings ahead of the marker layers too, so each
+	// draws twice, the first ahead of every other sprite of the walk's mask.
+	// [orig: the twin of HUD_DrawMapOverlay @0x5a4fc0 - @0x5a5da3..0x5a5e68 ahead of
+	//  MapOverlay_RenderAllLayers @0x5a5e8d (dfx2.exe)]
+	const auto red_rings = [](const HudMapPass &pass) {
+		int n = 0;
+		for (const HudMapSprite &s : pass.sprites)
+			if (s.texture == kHudMapTextureNone && s.color == 0xFFFF2020u) ++n;
+		return n;
+	};
+	CHECK(red_rings(p) == 1, "Jointops.exe's map draws the ring once");
+	ov.capture_rings_under_layers = true;
+	const HudMapPass &twice = compiler.compile(in);
+	CHECK(red_rings(twice) == 2, "dfx2.exe's map draws it under the layers and over them");
+	ov.capture_rings_under_layers = false;
 
 	HudMinimapPoolEntity koth;
 	koth.def_id = 6006;

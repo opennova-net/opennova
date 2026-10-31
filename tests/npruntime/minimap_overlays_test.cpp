@@ -274,7 +274,22 @@ void test_joiner_rows_feed_loop_one() {
 
 } // namespace
 
+// DFX2-49: the session's title names the map's under-layer capture rings; no title none.
+static void test_title_map_legs() {
+    inmatch::MinimapOverlayInputs in;
+    hud::HudMinimapOverlays out;
+    inmatch::build_minimap_overlays(in, out);
+    CHECK(!out.capture_rings_under_layers);
+    in.title = title_by_code("jo");
+    inmatch::build_minimap_overlays(in, out);
+    CHECK(!out.capture_rings_under_layers);
+    in.title = title_by_code("dfx2");
+    inmatch::build_minimap_overlays(in, out);
+    CHECK(out.capture_rings_under_layers);
+}
+
 int main() {
+    test_title_map_legs();
     test_entity_facts_are_stamped();
     test_overlays_gather();
     test_player_slot_table_feeds_loop_one();

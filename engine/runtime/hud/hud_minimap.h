@@ -305,6 +305,9 @@ struct HudMinimapOverlays {
 	std::vector<std::string> zone_wp_names;
 	std::string objective_point_format; // STROVER_OBJECTIVEPOINT_SHORT
 	std::string defensive_position_format; // STROVER_DEFENSIVEPOSITION
+	// The session's title walks the capture-zone rings under the marker layers too
+	// (Title::map_capture_rings_under_layers, DFX2-49).
+	bool capture_rings_under_layers = false;
 };
 
 // The HUD_BuildMapOverlayView parameter block's mask bytes (the M cycle

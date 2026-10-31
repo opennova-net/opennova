@@ -328,6 +328,16 @@ struct Title {
 	//  @0x5CAA97: types 0, 4, 1, 2)] [orig: the twin of Render_ProcessMainSceneFrame @0x5C9000 -
 	//  @0x5C98DE..0x5C995D (dfx2.exe)]
 	bool low_health_screen_effect = false;
+	// DFX2-49: the map pass (HUD_DrawMapOverlay: the corner minimap, the M-cycle big map, the
+	// command map) walks pool 3 once more ahead of its marker layers when its mask carries
+	// 0x810, drawing each 6027 / 6028 capture-zone ring there too: under the marker banks, and
+	// again in the usual walk over them (runtime/hud HudMinimapOverlays::
+	// capture_rings_under_layers).
+	// [orig: HUD_DrawMapOverlay @0x5A5F40 - the one pool-3 walk @0x5A750A, past
+	//  MapOverlay_RenderAllLayers @0x5A6D2B] [orig: the twin @0x5A4FC0 - the walk @0x5A5DA3
+	//  (6027 @0x5A5DDE, 6028's sub_5958E0 @0x5A5E68) ahead of MapOverlay_RenderAllLayers
+	//  @0x5A5E8D, the usual walk @0x5A667B (dfx2.exe)]
+	bool map_capture_rings_under_layers = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

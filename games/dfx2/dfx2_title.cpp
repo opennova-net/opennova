@@ -249,6 +249,9 @@ Title make() {
 	//  the fraction @0x5C991D, FrameFX_ApplyScreenEffect(5, (0x10000 - fraction) / 32768)
 	//  @0x5C995D (dfx2.exe)].
 	t.low_health_screen_effect = true;
+	// DFX2-49: the capture-zone rings under the map's marker layers too [orig: the twin of
+	//  HUD_DrawMapOverlay @0x5A4FC0 - @0x5A5DA3..0x5A5E68 (dfx2.exe)].
+	t.map_capture_rings_under_layers = true;
 	return t;
 }
 

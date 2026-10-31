@@ -911,6 +911,12 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// bit9 clear: its zwrite overwrote the mask wherever a tile landed.
 	c.disc_crop = mask_laid && (terrain_disc_crop || !terrain_drawn);
 
+	// A title whose map walks the capture-zone rings ahead of the marker banks too (DFX2-49).
+	// [orig: the twin of HUD_DrawMapOverlay @0x5a4fc0 - `test 810h` @0x5a5da3, ahead of
+	//  MapOverlay_RenderAllLayers @0x5a5e8d (dfx2.exe)]
+	if ((flags & 0x810u) != 0 && input.overlays != nullptr &&
+			input.overlays->capture_rings_under_layers)
+		draw_capture_zone_rings(c);
 	// The marker banks, then the legs in retail pass order.
 	// [orig: HUD_DrawMapOverlay @0x5a6d17..0x5a789b]
 	if (flags & 0x2u) {

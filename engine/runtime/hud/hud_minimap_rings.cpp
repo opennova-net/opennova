@@ -192,6 +192,16 @@ void ring_blip(MapCompile &c, int32_t x_q16, int32_t y_q16, int32_t z_q16,
 	emit_ring_band(c, px, py, radius, color | 0xFF000000u, fill, layer);
 }
 
+// A capture-zone ring: 6027 red with a 0x40 fill, 6028 blue, the radius max(entity+0, 64 wu),
+// min 6 px.
+// [orig: @0x5a761b..0x5a7664 / @0x5a7690..0x5a76d9 —
+//  Minimap_DrawRingBlip(pos, rgb | 0x50000000, rgb | 0x40000000, 6)]
+static void capture_zone_ring(MapCompile &c, const HudMinimapPoolEntity &e) {
+	const int32_t radius = std::max(e.radius_q16, 0x400000);
+	const uint32_t rgb = e.def_id == 6027 ? 0xFF2020u : 0x4060FFu;
+	ring_blip(c, e.x, e.y, radius, rgb | 0x50000000u, rgb | 0x40000000u, 6, 4);
+}
+
 // The pool-3 walk (mask & 0x810): the 6006 KOTH ring under bit4, the 2044
 // location labels under bit11, and the 6027/6028 capture-zone rings whenever
 // the walk runs.
@@ -243,17 +253,20 @@ void draw_pool3_walk(MapCompile &c) {
 			c.out.labels.push_back(label);
 			continue;
 		}
-		if (e.def_id == 6027 || e.def_id == 6028) {
-			// The capture-zone rings: 6027 red with a 0x40 fill, 6028 blue,
-			// the radius max(entity+0, 64 wu), min 6 px.
-			// [orig: @0x5a761b..0x5a7664 / @0x5a7690..0x5a76d9 —
-			//  Minimap_DrawRingBlip(pos, rgb | 0x50000000, rgb | 0x40000000, 6)]
-			const int32_t radius = std::max(e.radius_q16, 0x400000);
-			const uint32_t rgb = e.def_id == 6027 ? 0xFF2020u : 0x4060FFu;
-			ring_blip(c, e.x, e.y, radius, rgb | 0x50000000u, rgb | 0x40000000u,
-					6, 4);
-		}
+		if (e.def_id == 6027 || e.def_id == 6028)
+			capture_zone_ring(c, e);
 	}
+}
+
+void draw_capture_zone_rings(MapCompile &c) {
+	const HudMinimapOverlays *ov = c.input.overlays;
+	if (ov == nullptr) return;
+	// [orig: the twin of HUD_DrawMapOverlay @0x5a4fc0 - the walk @0x5a5da9..0x5a5e68: 6027's
+	//  ring inline @0x5a5de3..0x5a5e3a, 6028's through sub_5958E0 @0x5a5e68 (sub_5958E0 @0x5958e0,
+	//  the same ring) (dfx2.exe)]
+	for (const HudMinimapPoolEntity &e : ov->pool3)
+		if (e.def_id == 6027 || e.def_id == 6028)
+			capture_zone_ring(c, e);
 }
 
 } // namespace opennova::hud::minimap_detail

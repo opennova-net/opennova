@@ -193,6 +193,7 @@ Ref<HudMapOverlays> Simulation::get_hud_minimap_overlays(
 	in.authority_location_names =
 			view.host != nullptr ? &view.host->mission_location_names : nullptr;
 	in.gametext = game_text_lookup(p_gametext);
+	in.title = view.title;
 	if (runtime_ && runtime_->has_self_handle()) in.self_handle = runtime_->self_handle();
 	if (player_.profile_record_set) in.own_auto_medic_off = player_.profile_record.auto_medic_off;
 	opennova::hud::HudMinimapOverlays value;
