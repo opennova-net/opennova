@@ -4,15 +4,14 @@ extends RefCounted
 ## Owns one asynchronous shell-to-world load handoff: the cancellable operation,
 ## loading-screen presentation, progress/session signal wiring, completed-frame
 ## barrier, loader invocation, and deferred settlement. MainGame owns only shell
-## mode and the decision to reveal or tear down the world.
-## [orig: Render_LoadingScreen @ 0x521d10; LoadingScreen_UpdateAndPresent
-## @ 0x586be0; LoadingScreen_ReleaseEffect @ 0x525d52]
+## mode and the decision to reveal or tear down the world. The screen's witnesses
+## are the engine's (runtime/hud/loading_screen.h, mission/mission_load_plan.h).
 
 signal load_failed(reason: String)
 
 ## Forwarded from the screen when the SP start-mission splash finishes its
-## final background-only frame [orig: Game_ShowStartMissionSplash returns ->
-## LoadingScreen_ReleaseEffect @ 0x525d45].
+## final background-only frame, the effect's release (engine
+## hud::StartMissionSplash carries the witness).
 signal splash_dismissed
 
 var _owner: Node = null
@@ -130,8 +129,8 @@ func has_background() -> bool:
 
 
 ## Whether this load carries an MP session — the SP splash gate's session
-## half; SP `load_info` never sets `in_session`
-## [orig: the !is_in_session leg of the splash gate @ 0x525d38].
+## half; SP `load_info` never sets `in_session` (engine
+## hud::start_mission_splash_due carries the witness).
 func is_session_load() -> bool:
 	return _load_info != null and _load_info.in_session
 
@@ -172,12 +171,9 @@ func begin_start_mission_splash() -> bool:
 ## single-player load with a custom (sidecar) background (the engine's gate,
 ## runtime/hud/loading_background.h start_mission_splash_due), raise the splash,
 ## and run its device legs — hide the OS cursor (the splash draws the cursor
-## art itself [orig: Mouse_SetCallback(0) @ 0x520862], restored on the
-## dismissal edge) and fire the one-shot START_MISSION (fire-and-forget;
-## playback never gates dismissal [orig: play @ 0x5208fd; the exit tests
-## read only the input state @ 0x520a2d/0x520a36])
-## [orig: Game_ShowStartMissionSplash @ 0x520820, called @ 0x525d42, gated
-## @ 0x525d38 on g_LoadScreenHasCustomBg + single player]. The headless
+## art itself), restored on the dismissal edge, and fire the one-shot
+## START_MISSION, which never gates dismissal (engine hud::StartMissionSplash
+## carries the legs' witnesses). The headless
 ## skip is deliberate shell policy, not witnessed behavior: fixture SP loads
 ## resolve a sidecar image and would otherwise hold the presentation forever
 ## with no input to dismiss it.
@@ -272,7 +268,7 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 	if _root == null:
 		return
 	# A missing sidecar/loadscrn image leaves the screen dark; LoadingScreen owns
-	# that exact texture-miss path [orig: Render_LoadingScreen @ 0x521eb0].
+	# that exact texture-miss path (engine hud::loading_background carries the witness).
 	if _layer == null:
 		_layer = CanvasLayer.new()
 		_layer.name = "LoadingLayer"
@@ -296,9 +292,8 @@ func _show_screen(load_info: LoadingScreenInfo) -> void:
 func _on_join_session_info(info: LoadingScreenInfo) -> void:
 	# The joiner's S2C 0x60 session variables fill the same session strings retail
 	# resolves before its wire-header world load, at the transfer's parse and again
-	# with the S2C 0x11's mission file
-	# [orig: Client_ParseServerSessionVariables @ 0x5202f0 -> loading title/mission
-	# buffers @ 0x51f533/0x51f53a].
+	# with the S2C 0x11's mission file (engine net/npwire/session_vars.h carries the
+	# witness).
 	if _screen != null and _presentation_active:
 		_screen.update_session_info(_root, info)
 

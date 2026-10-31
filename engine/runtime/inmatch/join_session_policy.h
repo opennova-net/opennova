@@ -56,8 +56,10 @@ inline constexpr std::size_t kJoinWireMissionHeaderBytes = 616u;
 // record's expansion over the pending name and switches THE ONE global mount
 // in place before it connects [orig: UI_JoinSelectedSession @0x5699d0
 // (expansion copy @0x569afa, switch @0x569b02, connect @0x569ded) ->
-// Expansion_SwitchTo @0x5688c0], then IGNORES the switch result — a missing
-// expansion .pff fails the @0x568914 gate and retail connects on its own data
+// Expansion_SwitchTo @0x5688c0 -> PFF_CloseAllOpenArchives @0x4a4380 /
+// PFF_OpenAllArchives @0x4a4310, no second mount object], then IGNORES the
+// switch result — a missing expansion .pff fails the @0x568914 gate and
+// retail connects on its own data
 // set anyway, reproducing the ADM index-space corruption D-NET-178 records.
 // We refuse that join instead (tracked divergence, deliberate). A LAN joiner
 // has no browse row, so the drive runs this on S2C 0x7B field 7. All

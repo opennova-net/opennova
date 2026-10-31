@@ -984,13 +984,11 @@ void GameWorld::render_foliage_frame() {
 	const int64_t foliage_start = now_us();
 	perf_foliage_us_ = 0;
 	if (world_ready_ && dispatcher_ != nullptr) {
-		// The silhouette tier is the hide-in-grass mechanic: retail's
-		// sector-entity walk generates model foliage only around the
-		// visible CROUCHED/PRONE infantry standing on terrain -- never around
-		// placed objects, whose MoveOrder stays 0
-		// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
-		// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7]; the
-		// occlusion leg's visible-entity walk selected them this frame.
+		// The silhouette tier is the hide-in-grass mechanic: model foliage only
+		// around the visible CROUCHED/PRONE infantry standing on terrain, never
+		// around placed objects; the occlusion leg's visible-entity walk
+		// selected them this frame (engine inmatch/occlusion_collect.cpp carries
+		// the witness).
 		PackedVector3Array silhouette_anchors;
 		MissionRoot *runtime = get_runtime();
 		if (runtime != nullptr) {
@@ -1342,10 +1340,10 @@ void GameWorld::apply_blink_frame() {
 
 // The local-player VIEW placement, as a device leg: the camera/viewmodel
 // move from the state THIS frame's session tick produced, BEFORE
-// occlusion/iris/particles read the camera (D-RORD-8) [orig: the render
-// frame builds its view from the current player state before
-// collect+submit, Render_ProcessMainSceneFrame @ 0x5ca0f0]. A world without
-// a presenter (tests, dedicated) skips it; main_game covers the frames that
+// occlusion/iris/particles read the camera (D-RORD-8; engine
+// world::local_player_view_frame carries the witness: the render frame
+// composes its view before its collect and submit). A world without a
+// presenter (tests, dedicated) skips it; main_game covers the frames that
 // never reach this leg.
 void GameWorld::present_local_view_frame() {
 	LocalPlayerPresenter *presenter = local_view_presenter();
@@ -1567,8 +1565,7 @@ void GameWorld::apply_occlusion_frame() {
 
 void GameWorld::sample_iris_frame() {
 	if (world_ready_) {
-		// The iris re-target reads the render view too (D-RORD-8) [orig:
-		// retail re-targets from the local player's view every render pass].
+		// The iris re-target reads the render view too (D-RORD-8).
 		stamp_iris_samples(render_camera_xform());
 	}
 }
@@ -1638,17 +1635,15 @@ void GameWorld::mix_audio_frame(int p_ticks_run, bool p_rendered) {
 	const int64_t audio_start = now_us();
 	MissionAudio *audio = get_mission_audio();
 	if (world_ready_ && audio != nullptr) {
-		// Ambient soundloop regions read that same clock [orig:
-		// Entity_CalcTimeOfDayRegion @ 0x408110].
+		// Ambient soundloop regions read that same clock (engine
+		// audio/ambient_mixer.h carries this leg's witnesses).
 		if (env_ != nullptr) {
 			audio->set_time_of_day_hhmm(env_->get_time_of_day());
 		}
-		// Marker eval/registration rides the sim's logic-tick clock -- the
-		// witnessed pool-2 stagger [orig: Entity_UpdateAllEntities @ 0x4c225a];
-		// the per-frame call below is only the live-slot mix + voice binds
-		// [orig: SoundEmitter_UpdateAndMixTop8 @ 0x521341]. A world with no
-		// ticking runtime (editor idle) free-runs the eval clock off render
-		// delta instead.
+		// Marker eval/registration rides the sim's logic-tick clock (the pool-2
+		// stagger); the per-frame call below is only the live-slot mix + voice
+		// binds of the render callback. A world with no ticking runtime (editor
+		// idle) free-runs the eval clock off render delta instead.
 		MissionRoot *runtime = get_runtime();
 		post_load_part("audio_ticks");
 		if (p_ticks_run > 0 && runtime != nullptr) {
@@ -1699,8 +1694,8 @@ void GameWorld::render_material_frame() {
 	// part/body anim, staggered env restamp) -- the ex-self-clocked
 	// ObjectModel _process, now one static driver over the shared awake set
 	// at a defined ladder slot (after occlusion resolves visibility, before
-	// the particle composite) [orig: Terrain_RenderSectorModels @ 0x5c5d30
-	// computes model runtime constants during the render sector walk].
+	// the particle composite; engine inmatch::FrameOutcome::world_skipped
+	// carries the sector walk's witness).
 	// Every view drawing the world this frame, each its own scene pass: view
 	// 0 the frame's image (the stretched target's camera while it is live)
 	// over the surface width, the retail viewport width the focal and frame
@@ -1948,9 +1943,8 @@ void GameWorld::render_light_frame() {
 // with the pool lights that patch overlaps.
 //
 // Retail re-draws each terrain batch once more per passing pool light,
-// additively, through the two-stage projected-texture pass
-// [orig: Terrain_RenderSectorBatch @0x6092A0, the per-light else-arm
-// @0x609870..0x6098BC -> Light_SetupTerrainProjectedPass @0x5AA830]. The
+// additively, through the two-stage projected-texture pass (engine
+// renderer/light_terrain_pass.h carries the witness). The
 // collect (<= 16 per batch, both light groups cleared, the authored
 // terrain-disable flag), the projection contract and the pixel constants are
 // portable in renderer::LightScene::collect_terrain_pass_rows; the Terrain
@@ -2065,9 +2059,8 @@ void GameWorld::sample_water_render_stats(bool p_stats_on) {
 	frame_stats_->add(FrameStats::RENDER_WATER_GPU,
 			static_cast<int64_t>(rs->viewport_get_measured_render_time_gpu(rid) * 1000.0));
 	// What the mirror pass actually re-rendered (previous frame): the
-	// witnessed reflection re-renders the world scene [orig:
-	// Water_ReflectionPrerender @ 0x5c2780], so its submission count is a
-	// first-class stats row.
+	// reflection re-renders the world scene (engine environment/water_mirror.h
+	// carries the witness), so its submission count is a first-class stats row.
 	frame_stats_->add(FrameStats::RENDER_WATER_OBJECTS,
 			rs->viewport_get_render_info(rid, RenderingServer::VIEWPORT_RENDER_INFO_TYPE_VISIBLE,
 					RenderingServer::VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME));
@@ -2087,9 +2080,8 @@ void GameWorld::stop_water_render_stats() {
 
 // The marched iris-exposure feed (D-RLIT-2): three camera-ray samples from
 // the sim each render frame, consumed by Weather's exposure re-target on its
-// next tick [orig: Environment_ApplyFogAndAmbient @ 0x57e512 ->
-// Environment_ComputeAmbientLightAlongDirection @ 0x5c7a00 -- retail re-targets from
-// the local player's view every render pass]. The render-occlusion frame it
+// next tick, from the local player's view every render pass (engine
+// formats/env/env_weather.h carries the witness). The render-occlusion frame it
 // used to share a section with (blink letter gates + the section-mask/portal
 // apply) is OcclusionFrame (godot/src/world/occlusion_frame.cpp); the iris
 // march stays here as the weather feed.
@@ -2117,21 +2109,15 @@ void GameWorld::restore_idle_frame_clear_color() {
 	clear_color_->get_environment()->set_bg_color(idle_frame_clear_color_);
 }
 
-// The witnessed frame clear: the thermal view's flat grey, else the
-// horizon-blended skyfog while the eye is strictly above the water, the lit
-// water color at or below it [orig: Render_ProcessMainSceneFrame
-// @ 0x5ca771..0x5ca792 - clear color = thermal ? 0x808080 : cam above water ?
-// skyfog[0] : g_EnvWaterColorLit, the `jle` inclusive of the waterline; no
-// blink letter reaches the beauty clear]. The selection is the engine's
-// frame_clear_color_for, and the thermal latch reaches it through
+// The frame clear: the thermal view's flat grey, else the horizon-blended
+// skyfog while the eye is strictly above the water, the lit water color at or
+// below it. The selection is the engine's frame_clear_color_for (it carries
+// the witness), and the thermal latch reaches it through
 // MissionEnvironment::set_thermal_view, whose generation bump re-runs this
 // leg. Every branch serves RENDER-SPACE (x2-gained) colors, consumed
-// VERBATIM by the modulate2x-path Clear this renderer reproduces (D-RMAT-7):
-// above water the post-blend DOUBLED skyfog, underwater g_EnvWaterColorLit =
-// water x light >> 7; the halving branch [orig: @ 0x67715d] is the
-// non-modulate2x fallback with no Godot analog. The ClearColor Environment
-// must stay BG_COLOR with ambient disabled - BG_SKY with no sky renders black
-// and swallows these writes (GUT-pinned).
+// VERBATIM by the modulate2x-path Clear this renderer reproduces (D-RMAT-7).
+// The ClearColor Environment must stay BG_COLOR with ambient disabled - BG_SKY
+// with no sky renders black and swallows these writes (GUT-pinned).
 void GameWorld::update_frame_clear_color() {
 	if (clear_color_ == nullptr || clear_color_->get_environment().is_null() || env_ == nullptr) {
 		return;

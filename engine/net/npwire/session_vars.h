@@ -9,7 +9,8 @@
 // [orig: Game_SerializeMissionInfoToDataStream @0x523620 (the stream + the
 //  authority's direct copies); Client_ParseServerSessionVariables @0x5202f0;
 //  the host's self-parse SaveFile_SendAndWaitForServerAck @0x5204c4..0x5204f5;
-//  the readers HUD_GetLoadingScreenTextByGameType @0x51f300]
+//  the readers HUD_GetLoadingScreenTextByGameType @0x51f300, which hands the
+//  loading screen its title and mission buffers @0x51f533 / @0x51f53a]
 
 #include <cstddef>
 #include <cstdint>

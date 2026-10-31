@@ -31,7 +31,8 @@ namespace opennova::renderer {
 //  (the ps.1.1 pass at 0.4/r) or the fixed-function
 //  Light_SetupTerrainProjectedPass @0x6098b4 (ex `render_foliage_instance`:
 //  its argument is a g_LightInstanceTable slot index @0x5AA857, not a foliage
-//  instance); both take (handle, first-light flag) @0x60989a..0x6098b4. The
+//  instance); both take (handle, first-light flag) @0x60989a..0x6098b4, inside
+//  the per-light else-arm @0x609870..0x6098bc. The
 //  whole leg is skipped when g_PolyTrnUsePixelShaderPath == 0 @0x6095e4 or
 //  dword_319FB84 != 0 @0x60983f.]
 //

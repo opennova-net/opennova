@@ -296,7 +296,9 @@ public:
 	// (the black @ 0x5c1474 / skyfog @ 0x5c1597 clear is the water mirror's,
 	// Render_MainScene; see water_mirror_clear_color).
 	// Every branch serves RENDER-SPACE (x2-gained) colors for the
-	// modulate2x-path device Clear (D-RMAT-7).
+	// modulate2x-path device Clear (D-RMAT-7): underwater g_EnvWaterColorLit =
+	// water x light >> 7. The device Clear's halving branch is the
+	// non-modulate2x fallback, which no served path takes [orig: @ 0x67715d].
 	Rgb frame_clear_color_for(bool eye_above_water) const;
 	// The NVG scene's clear: its target clears to the same waterline test's
 	// skyfog / lit water with no thermal branch [orig: NVG_RenderSceneToTarget

@@ -287,6 +287,18 @@ opennova::VfsLookupPolicy ResourceRoot::to_vfs_lookup_policy(LookupPolicy policy
 	}
 }
 
+ResourceRoot::LookupPolicy ResourceRoot::from_vfs_lookup_policy(opennova::VfsLookupPolicy p_policy) {
+	switch (p_policy) {
+		case opennova::VfsLookupPolicy::ForceLooseFirst:
+			return LOOKUP_FORCE_LOOSE_FIRST;
+		case opennova::VfsLookupPolicy::ForceArchiveOnly:
+			return LOOKUP_FORCE_ARCHIVE_ONLY;
+		case opennova::VfsLookupPolicy::SessionDefault:
+		default:
+			return LOOKUP_SESSION_DEFAULT;
+	}
+}
+
 bool ResourceRoot::is_valid_root(const String &path) {
 	const String clean = normalize_dir(path);
 	if (clean.is_empty()) {

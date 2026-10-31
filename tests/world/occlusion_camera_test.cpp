@@ -39,6 +39,14 @@ int main() {
 	check(kViewFovWordRadians != 3.14159265358979323846 / 180.0 / 65536.0,
 			"the stored multiplier is not the exact quotient");
 
+	// The frame's letter view: the force-indoors attribute ORs the indoors letter in and
+	// keeps the player's others [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
+	check(frame_blink_letters(0x8u, true) == (0x8u | kBlinkIndoorsBit),
+			"force-indoors ORs the indoors letter over the player's");
+	check(frame_blink_letters(0x8u, false) == 0x8u, "no attribute keeps the player's letters");
+	check(mission_forces_indoors(kMissionAttribForceIndoors) && !mission_forces_indoors(0x8u),
+			"the attribute bit is 0x10");
+
 	OcclusionViewSpec view;
 	view.eye[0] = 10.0f;
 	view.eye[1] = 5.0f;

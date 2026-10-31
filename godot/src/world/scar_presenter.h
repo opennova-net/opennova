@@ -11,9 +11,9 @@
 // ONE top-level mesh, one surface per (texture strip, building) batch. Entity
 // ring batches are SECTION-LOCAL to the owner model's struck section and are
 // parented under that section's render-part node, so they ride the carrier's
-// pose for free [orig: Scar_RenderCache @0x5CD830 transforms an entity ring's
-// slots through `bones + bone << 6` at draw time; the shared ring draws its
-// positions as-is — see docs/world/world-wac-ai-re.md §24.9]. An owner with
+// pose for free: retail transforms an entity ring's slots through its bone
+// matrix at draw time and draws the shared ring's positions as-is (engine
+// renderer/scar_draw_list.h carries the witness). An owner with
 // no node (a statically batched prop: a MultiMesh row, nothing to parent
 // under) draws its ring from the list's world-space form instead — the same
 // slots the engine took through the owner's live section matrix — on the
@@ -27,9 +27,8 @@
 // (shaders/scar_quad_hole.gdshader: the same plus the GREATER/128 alpha test,
 // z-write, cull none). The ONLY device folds are the view-space pull that
 // replaces the D3D depth bias and the winding the sim packer applies with the
-// coordinate fold [orig: the scar batch drawer Scar_DrawBatches (ex Terrain_RenderFoliageBatches)
-// @0x5ccd10 — the IDB's kong misnomer, Scar_DrawBatches proposed — under
-// Scar_RenderAllCaches @0x5CDF70; the strip table Scar_LoadTextures @0x5CC2E0].
+// coordinate fold (engine renderer/scar_draw_list.h carries the drawer's
+// witness, world/impact_scar.h the strip table's).
 //
 // The present pass: pulls the sim's scar draw list once per present frame
 // (Simulation.get_scar_draw_list — World::scars compiled by

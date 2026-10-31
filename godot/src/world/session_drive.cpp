@@ -449,10 +449,8 @@ Ref<MissionData> SessionDrive::open_join_mission_header(const String &p_bms) {
 // 0x2F kit and the host's S2C 0x5A grant / round events (D-NET-178). Retail
 // switches THE ONE global mount in place on this same leg -- it copies the
 // session record's expansion over the pending name, switches, and only then
-// connects [orig: UI_JoinSelectedSession @ 0x5699d0 (expansion copy
-// @ 0x569afa, switch @ 0x569b02, connect @ 0x569ded) -> Expansion_SwitchTo
-// @ 0x5688c0 -> PFF_CloseAllOpenArchives @ 0x4a4380 / PFF_OpenAllArchives
-// @ 0x4a4310]. There is no second mount object. Retail takes back the
+// connects (engine inmatch/join_session_policy.h carries the witness). There
+// is no second mount object. Retail takes back the
 // expansion the switch left at the return to the main menu; the shell keeps
 // running on the host's expansion after the session (D-NET-622). The
 // keep/remount/fail DECISION is native (inmatch::decide_join_expansion); this

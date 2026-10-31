@@ -18,6 +18,7 @@
 #include <runtime/ragdoll/ragdoll_option.h>
 #include <runtime/environment/celestial_frame.h> // builds_celestial_draws (the bodies' arm)
 #include <runtime/environment/environment_state.h>
+#include <runtime/mission/mission_catalog.h> // bms_lookup (the runtime .bms read)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h> // builds_placement_draws (the dedicated host's placement)
 #include <runtime/terrain/terrain_load_legs.h> // the dedicated arm's terrain legs
@@ -151,9 +152,11 @@ int GameWorld::load_mission_on_root(const String &p_bms_name, const Ref<Resource
 		timeline->set_gpu_marks(true);
 		last_load_timeline_ = timeline;
 	}
-	// The runtime BMS path bypasses loose overrides even under /d.
-	// [orig: Mission_LoadBMSFromPFF @ 0x40d43c]
-	if (!p_root->has_file(p_bms_name, ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY)) {
+	// An archive row's .bms reads past the loose overrides even under /d (engine
+	// mission_catalog::bms_lookup carries the witness).
+	const ResourceRoot::LookupPolicy bms_lookup =
+			ResourceRoot::from_vfs_lookup_policy(opennova::mission_catalog::bms_lookup(false));
+	if (!p_root->has_file(p_bms_name, bms_lookup)) {
 		emit_signal(kSignalLoadFailed,
 				vformat("%s not found in %s", p_bms_name, p_root->get_root_dir()));
 		timeline->finish();
@@ -162,8 +165,7 @@ int GameWorld::load_mission_on_root(const String &p_bms_name, const Ref<Resource
 	timeline->span("document");
 	Ref<MissionData> mission;
 	mission.instantiate();
-	if (mission->open_from_resource_root(p_root, p_bms_name,
-				ResourceRoot::LOOKUP_FORCE_ARCHIVE_ONLY) != OK) {
+	if (mission->open_from_resource_root(p_root, p_bms_name, bms_lookup) != OK) {
 		emit_signal(kSignalLoadFailed,
 				vformat("failed to parse %s: %s", p_bms_name, mission->get_last_error()));
 		timeline->finish();
@@ -736,13 +738,14 @@ void GameWorld::unload() {
 		mission_audio->teardown();
 		mission_audio->queue_free(); // the node is the audio root; the world owned it
 	}
-	// Tear down the game music context [orig: AudioVM_StopMusicContext @ 0x671e00].
-	// The game shell re-opens menu music on its return to the front end
-	// (MainGame connects this to MusicService.stop_context).
+	// Tear down the game music context (engine audio MusicStreamPump::end carries
+	// the stop's witness). The game shell re-opens menu music on its return to the
+	// front end (MainGame connects this to MusicService.stop_context).
 	emit_signal(kSignalMusicContextClosed);
-	// Blink frame gates and every occlusion override reset with the mission
-	// [orig: the letter-bit clear @ 0x525c45 at mission start] — an unload while
-	// indoors must not leave the next mission's terrain/sky/water hidden. The
+	// Blink frame gates and every occlusion override reset with the mission, as
+	// the letter bits clear at the mission start (engine mission/mission_load_plan.h
+	// carries the witness): an unload while indoors must not leave the next
+	// mission's terrain/sky/water hidden. The
 	// release clears the occlusion-hidden bit, so every node lands on its own
 	// present intent — see OcclusionFrame.reset.
 	occlusion_->reset();
@@ -881,10 +884,8 @@ void GameWorld::run_mission_start_environment_boundary() {
 // Retail loads <mission>.til (else the terrain's polytrn_tileinfo) into one
 // shared g_TerrainTileArray used by terrain overlays/surface overrides, network
 // initial state, and both foliage generators' radius-2 blocker. The file rule
-// is the engine's (mission::read_placed_tiles carries its witness).
-// [orig: Terrain_LoadTileInfoFile @ 0x60a740, policy force @ 0x60a74e;
-// Terrain_GetSurfaceTypeAtPosition @ 0x606510;
-// Foliage_PathBlockedByPlacedTile @ 0x606490]
+// is the engine's (mission::read_placed_tiles carries its witness; the readers,
+// terrain_query/surface_type_map.h and formats/til's foliage blocker, theirs).
 void GameWorld::load_mission_tile_info(const String &p_bms_name, const Ref<MissionData> &p_mission,
 		const Ref<ResourceRoot> &p_resource_root, const PackedByteArray &p_wire_til_bytes,
 		bool p_wire_is_authoritative) {
@@ -1387,9 +1388,8 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	// host streams to joiners so their g_LoadingProgress climbs 5 -> 6 and
 	// terrain finishes loading (net-re §5.37). The tile-overlay .til is named
 	// after the MISSION (localres.pff: ASH_I5A.til), not the terrain tileinfo
-	// [orig: Terrain_LoadTileInfoFile @ 0x60a740;
-	// Terrain_SerializeTiles @ 0x6080f0]. Reuse the payload parsed before
-	// terrain build.
+	// (engine inmatch/host_boot.cpp carries the load's and the serializer's
+	// witnesses). Reuse the payload parsed before terrain build.
 	if (!mission_til_bytes_.is_empty()) {
 		opts->set_terrain_til(mission_til_bytes_);
 	}
@@ -1477,7 +1477,7 @@ void GameWorld::start_mission_audio(const Ref<MissionData> &p_mission, const Str
 	MissionAudio *mission_audio = MissionAudio::create(resource_root_, item_db);
 	mission_audio_id_ = ObjectID(mission_audio->get_instance_id());
 	// Sound occlusion runs LOS through the sim's collision world + terrain
-	// [orig: Sound_ApplyOcclusionDistance @ 0x529970]; hosts without a sim mix
+	// (engine world/collision.h carries the witness); hosts without a sim mix
 	// unoccluded.
 	mission_audio->set_simulation(get_sim());
 	Ref<MissionAudioStats> stats = mission_audio->setup(p_mission, p_bms_name, this);
@@ -1760,9 +1760,9 @@ Node3D *GameWorld::build_person_pipeline_warm(const Vector3 &p_position,
 	return warm;
 }
 
-// Mission-start load of EVERY mounted .ptl into the runtime effect world
-// [orig: CEffectSystem_Init @ 0x5f6070 <- Game_StartMission @ 0x524980 — no fixed
-// file list: the loose ptl\*.ptl set and every PFF .ptl entry both parse].
+// Mission-start load of EVERY mounted .ptl into the runtime effect world: no fixed
+// file list, the loose ptl\*.ptl set and every PFF .ptl entry both parse (engine
+// ResourceIndex::effect_files and mission/mission_load_plan.h carry the witness).
 EffectWorld *GameWorld::create_effect_world(const Ref<ResourceRoot> &p_resource_root,
 		const Ref<LoadTimeline> &p_timeline) {
 	EffectWorld *effect_world = memnew(EffectWorld);
@@ -1873,9 +1873,9 @@ void GameWorld::start_effect_world() {
 		}
 		// The sim-side water plane (env.water_z): the footstep water pick, the
 		// landing legs, AND the destruction paths (submerged wrecks skip pieces,
-		// the wreck fire steams out) all gate on it [orig: g_EnvWaterHeightFixed
-		// @ 0x26C6454; world-wac-ai-re §24]. Idempotent; re-pushed after runtime
-		// start too (either side may come up first).
+		// the wreck fire steams out) all gate on it (engine world/world.h carries
+		// the witness). Idempotent; re-pushed after runtime start too (either side
+		// may come up first).
 		Ref<Simulation> water_sim = get_sim();
 		if (water_sim.is_valid()) {
 			water_sim->set_water_z(water_->get_water_height());
