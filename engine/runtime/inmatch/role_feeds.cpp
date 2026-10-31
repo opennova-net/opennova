@@ -1666,6 +1666,55 @@ SessionVars scoreboard_session_vars(const RoleView &view) {
 	return vars;
 }
 
+namespace {
+
+// HUD_BuildRulesAndBriefingText's inputs as this client holds them: a joiner's 0x7E strings, the
+// authority's mission briefings, the game type, the local team and the spawn-zone test; false on
+// the bare local role.
+bool rules_briefing_inputs(const RoleView &view, hud::RulesBriefingInputs &inputs) {
+	if (view.runtime == nullptr || view.kernel == nullptr) return false;
+	const replication::ClientState &state = view.runtime->state();
+	const world::World &w = view.kernel->world;
+	if (view.joiner) {
+		inputs.config_first = replication::server_config_first_text(state.server_config_strings);
+		inputs.config_second = replication::server_config_second_text(state.server_config_strings);
+	} else if (view.host != nullptr) {
+		inputs.authority = true;
+		// MissionText info/briefing3 and info/briefing2, else info/briefing
+		// [orig: HUD_BuildRulesAndBriefingText @0x5b92d0 — the authority arm].
+		inputs.briefing3 = view.host->mission_briefing3;
+		inputs.briefing2 = view.host->mission_briefing2;
+	} else {
+		return false;
+	}
+	inputs.game_type = view.runtime->game_type();
+	// [orig: `g_LocalPlayerEntity ? ->Team (+0x162) : 0` @0x5b92de..0x5b92f1]
+	if (const world::Entity *local = w.registry.get(w.cached.local_player))
+		inputs.local_team = static_cast<int8_t>(local->team);
+	inputs.spawn_zones = w.zones.has_spawn_zone(); // SpawnZoneList_HasAny
+	return true;
+}
+
+} // namespace
+
+world::DeployActivation deploy_activation(const RoleView &view, const hud::GameTextLookup &gametext) {
+	world::DeployActivation out;
+	out.permanent_dead = view.runtime != nullptr && view.runtime->state().permanent_death &&
+			local_player_dead(view);
+	out.table = view.title != nullptr && view.title->death_screen_loadout;
+	out.game_type_line = view.title != nullptr && view.title->death_screen_game_type_line;
+	const uint32_t type = view.runtime != nullptr ? view.runtime->game_type() : 0u;
+	// [orig: HUD_GetGameTypeOverlayLabel @0x5b75d0 (dfx2.exe); its twin @0x5b8680]
+	out.game_type_label = hud::game_text(gametext, hud::kGameTextOverlays,
+			game_type::overlay_label_key(type), "");
+	hud::RulesBriefingInputs inputs;
+	if (rules_briefing_inputs(view, inputs)) {
+		out.has_briefing = true;
+		hud::append_rules_and_briefing_text(out.briefing, inputs, true, gametext);
+	}
+	return out;
+}
+
 bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
 		std::string &out) {
 	if (view.runtime == nullptr || view.kernel == nullptr) return false;

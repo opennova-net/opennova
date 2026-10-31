@@ -417,6 +417,14 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 // [orig: sub_5503A0 @0x55040d..0x5505c3 (dfx2.exe)]
 bool deploy_team_list_players(const RoleView &view, std::vector<world::DeployTeamListPlayer> &out);
 
+// The DEATH screen's show / activation writes for THIS client (world::apply_deploy_activation):
+// the permanent-death state of the local player, the session title's table and game-type line,
+// the game type's Overlays label, and BRIEFING's rules and briefing text, built as the CMAP's
+// rules text reads its inputs (none on the bare local role).
+// [orig: HUD_BuildRulesAndBriefingText @0x5b92d0, called from DeathScreen_UpdateUI @0x5534d6]
+// [orig: sub_550690 @0x550b17 (dfx2.exe)]
+world::DeployActivation deploy_activation(const RoleView &view, const hud::GameTextLookup &gametext);
+
 bool deploy_table_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		uint32_t stance_middle, uint32_t stance_bad, const hud::GameTextLookup &gametext,
 		std::vector<world::DeployTableZone> &out);

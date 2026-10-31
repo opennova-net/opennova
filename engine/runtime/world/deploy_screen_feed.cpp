@@ -507,6 +507,23 @@ void fill_deploy_team_lists(menu::MenuRuntime &menu, const DeployTeamLists &list
 	if (team >= 0) menu.set_widget_text(team, lists.team);
 }
 
+void apply_deploy_activation(menu::MenuRuntime &menu, const DeployActivation &activation) {
+	const auto find = [&menu](const char *name) { return menu.find_screen_control("DEATH", name); };
+	if (activation.permanent_dead) {
+		for (const char *name : { "STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG",
+					 "STATIC_INSTRUCTIONS2_MSG", "STATIC_LIST_TITLE", "SPAWNPOINTS_LIST" }) {
+			const int id = find(name);
+			if (id >= 0) menu.set_widget_shown(id, false);
+		}
+		const int table = activation.table ? find("SPAWNPOINTS_TABLE") : -1;
+		if (table >= 0) menu.set_widget_shown(table, false);
+	}
+	const int briefing = activation.has_briefing ? find("BRIEFING") : -1;
+	if (briefing >= 0) menu.set_widget_text(briefing, activation.briefing);
+	const int game_type = activation.game_type_line ? find("STATIC_GAMETYPE") : -1;
+	if (game_type >= 0) menu.set_widget_text(game_type, "Gametype: <cFFFF40>" + activation.game_type_label);
+}
+
 bool deploy_map_moved(menu::MenuRuntime &menu) {
 	const int table = menu.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
 	if (table < 0) return false;

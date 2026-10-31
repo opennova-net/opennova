@@ -365,6 +365,26 @@ DeployTeamLists deploy_team_lists(const std::vector<DeployTeamListPlayer> &playe
 // has it.
 void fill_deploy_team_lists(menu::MenuRuntime &menu, const DeployTeamLists &lists);
 
+// The DEATH screen's show (Jointops.exe's) / activation (dfx2.exe's) writes past the map fit,
+// the team buttons and the loadout picker: under permanent death with the local player dead,
+// STATIC_MEDIC_MSG1, STATIC_CALLMEDIC_MSG, STATIC_INSTRUCTIONS2_MSG, STATIC_LIST_TITLE and
+// SPAWNPOINTS_LIST hidden, and SPAWNPOINTS_TABLE for a title whose screen has one; BRIEFING's
+// text the rules and briefing (HUD_BuildRulesAndBriefingText(buffer, 1), when the role builds
+// one); STATIC_GAMETYPE "Gametype: <cFFFF40>%s" over the game type's Overlays label, for a title
+// that writes it. Each control where the screen has it.
+// [orig: DeathScreen_UpdateUI @0x553150 - @0x55318c..0x553234, BRIEFING @0x5534bf..0x5534eb]
+// [orig: sub_550690 @0x550690 - @0x5506ca..0x550793, BRIEFING @0x550af0..0x550b2f,
+//  STATIC_GAMETYPE @0x550b41..0x550b77 (dfx2.exe)]
+struct DeployActivation {
+	bool permanent_dead = false;
+	bool table = false;
+	bool has_briefing = false;
+	std::string briefing;
+	bool game_type_line = false;
+	std::string game_type_label; // HUD_GetGameTypeOverlayLabel's text
+};
+void apply_deploy_activation(menu::MenuRuntime &menu, const DeployActivation &activation);
+
 class World;
 struct SpawnZoneRegistry;
 // The table's cell event (0x8000001) on a data row whose state is not 1 (locked), by its press

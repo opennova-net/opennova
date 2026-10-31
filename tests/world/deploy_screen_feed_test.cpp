@@ -640,7 +640,51 @@ void test_penalty_line_instruction() {
 	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN1");
 }
 
+// The show's writes: the permanent-death hides (the table for a title with one), BRIEFING's
+// text, a title's STATIC_GAMETYPE line [orig: DeathScreen_UpdateUI @0x55318c..0x553234,
+// @0x5534bf..0x5534eb] [orig: sub_550690 @0x5506ca..0x550793, @0x550af0..0x550b77 (dfx2.exe)].
+void test_deploy_activation() {
+	mnu::Document doc;
+	mnu::Screen death;
+	death.name = "DEATH";
+	mnu::Window root;
+	root.name = "MAIN";
+	root.type = mnu::WindowType::Window;
+	for (const char *name : { "STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG", "STATIC_INSTRUCTIONS2_MSG",
+				 "STATIC_LIST_TITLE", "SPAWNPOINTS_TABLE", "BRIEFING", "STATIC_GAMETYPE" }) {
+		mnu::Window w;
+		w.name = name;
+		w.type = std::string(name) == "SPAWNPOINTS_TABLE" ? mnu::WindowType::Table
+				: std::string(name) == "BRIEFING" ? mnu::WindowType::MultilineEdit
+				: mnu::WindowType::Static;
+		root.children.push_back(w);
+	}
+	death.roots.push_back(root);
+	doc.screens.push_back(death);
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "death.mnu", "");
+	DeployActivation a;
+	a.has_briefing = true;
+	a.briefing = "Rules";
+	a.game_type_label = "Co-op";
+	apply_deploy_activation(rt, a);
+	CHECK(rt.get_widget_text(rt.widget_id("BRIEFING")) == "Rules");
+	CHECK(rt.get_widget_text(rt.widget_id("STATIC_GAMETYPE")).empty()); // no line for JO
+	CHECK(rt.is_widget_shown(rt.widget_id("STATIC_MEDIC_MSG1")));
+	a.game_type_line = true;
+	a.permanent_dead = true;
+	apply_deploy_activation(rt, a);
+	CHECK(rt.get_widget_text(rt.widget_id("STATIC_GAMETYPE")) == "Gametype: <cFFFF40>Co-op");
+	CHECK(!rt.is_widget_shown(rt.widget_id("STATIC_MEDIC_MSG1")) &&
+			!rt.is_widget_shown(rt.widget_id("STATIC_LIST_TITLE")));
+	CHECK(rt.is_widget_shown(rt.widget_id("SPAWNPOINTS_TABLE"))); // no table for JO's code
+	a.table = true;
+	apply_deploy_activation(rt, a);
+	CHECK(!rt.is_widget_shown(rt.widget_id("SPAWNPOINTS_TABLE")));
+}
+
 int main() {
+	test_deploy_activation();
 	test_penalty_line_instruction();
 	test_team_lists();
 	test_loadout_picker_gate();

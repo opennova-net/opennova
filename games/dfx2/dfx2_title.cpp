@@ -228,6 +228,8 @@ Title make() {
 	// DFX2-81: the map's second name walk draws nothing [orig: sub_5A3850 @0x5A3850 -
 	//  @0x5A3D53..0x5A3DD4 (dfx2.exe)].
 	t.hud_map_no_bank_names = true;
+	// DFX2-41: STATIC_GAMETYPE [orig: sub_550690 @0x550b41..0x550b77 (dfx2.exe)].
+	t.death_screen_game_type_line = true;
 	return t;
 }
 

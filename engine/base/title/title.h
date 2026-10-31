@@ -288,6 +288,10 @@ struct Title {
 	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A49E0 (@0x5A4EDE..0x5A4FA3, the draw @0x5A4F95)]
 	// [orig: sub_5A3850 @0x5A3850 (dfx2.exe) - @0x5A3D53..0x5A3DD4]
 	bool hud_map_no_bank_names = false;
+	// DFX2-41: the DEATH screen's activation writes STATIC_GAMETYPE, "Gametype: <cFFFF40>%s" over
+	// the game type's Overlays label (world::apply_deploy_activation). False (Jointops.exe): its
+	// show writes no such line [orig: DeathScreen_UpdateUI @0x553150].
+	bool death_screen_game_type_line = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

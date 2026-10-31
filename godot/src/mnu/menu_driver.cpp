@@ -777,6 +777,13 @@ bool MenuDriver::fill_deploy_team_lists(const Ref<Simulation> &p_sim,
 	return true;
 }
 
+void MenuDriver::apply_deploy_activation(const Ref<Simulation> &p_sim,
+		const Ref<RtxtStringFile> &p_gametext) {
+	if (p_sim.is_null() || !p_sim->kernel_) return;
+	opennova::world::apply_deploy_activation(runtime_, opennova::inmatch::deploy_activation(
+			p_sim->role_view(), game_text_lookup(p_gametext)));
+}
+
 bool MenuDriver::deploy_map_moved() {
 	return opennova::world::deploy_map_moved(runtime_);
 }
@@ -1309,6 +1316,8 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("deploy_table_click", "id", "row", "state", "double_click"),
 			&MenuDriver::deploy_table_click);
 	ClassDB::bind_method(D_METHOD("deploy_map_moved"), &MenuDriver::deploy_map_moved);
+	ClassDB::bind_method(D_METHOD("apply_deploy_activation", "sim", "gametext"),
+			&MenuDriver::apply_deploy_activation);
 	ClassDB::bind_method(D_METHOD("fill_deploy_team_lists", "sim", "gametext"),
 			&MenuDriver::fill_deploy_team_lists);
 	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),

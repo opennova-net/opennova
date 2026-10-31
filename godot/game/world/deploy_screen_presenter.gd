@@ -241,6 +241,9 @@ func open() -> bool:
 			ControlsBindings.model().display_text_for_token("MedicReq"))
 	_apply_team_service_buttons(status.show_team_buttons)
 	_activate_loadout(status)
+	# The show's other writes: the permanent-death hides, BRIEFING and a title's STATIC_GAMETYPE
+	# (engine world::apply_deploy_activation carries the witness).
+	_driver.apply_deploy_activation(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	# The show hides the shroud (and, for a title that hides it with the shroud, MAIN); the
 	# per-frame reveal shows them and runs the content refresh (_process).
 	_shroud_main = status.shroud_main

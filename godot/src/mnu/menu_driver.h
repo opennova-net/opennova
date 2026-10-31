@@ -381,6 +381,9 @@ public:
 	// them (engine inmatch/role_feeds.h deploy_team_list_players and world/deploy_screen_feed.h
 	// deploy_team_lists carry the witnesses). False for any other title.
 	bool fill_deploy_team_lists(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
+	// The DEATH screen's show writes from `sim` (engine inmatch/role_feeds.h deploy_activation and
+	// world/deploy_screen_feed.h apply_deploy_activation carry the witnesses).
+	void apply_deploy_activation(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
 	// The CTableWnd reads (engine menu_table_row.h).
 	int table_cell_value(int p_id, int p_row, int p_col) const;
 	PackedInt32Array table_selected_rows(int p_id) const;
