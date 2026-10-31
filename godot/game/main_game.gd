@@ -159,7 +159,7 @@ func _init() -> void:
 	_join_screen.choice_committed.connect(_on_join_choice_committed)
 
 
-func _on_player_options_changed(state: PlayerOptions.State) -> void:
+func _on_player_options_changed(state: PlayerOptionsState) -> void:
 	# update() applied the device-global audio once already. The aspect mode
 	# never reaches a running mission: the view and the HUD take it at the next
 	# mission start (_on_world_loaded), as retail's projection takes only the

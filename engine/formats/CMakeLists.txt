@@ -157,6 +157,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/writer.cpp
     # rtxt — localized string tables
     ${CMAKE_CURRENT_SOURCE_DIR}/rtxt/rtxt.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rtxt/text_tables.cpp # the named string tables registry
     # sbf — sound banks
     ${CMAKE_CURRENT_SOURCE_DIR}/sbf/sbf.cpp
     # score — score.ini scoring config (ordered GAMETYPE rows: FIELD/VAR values)

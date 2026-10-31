@@ -1,8 +1,8 @@
 // The witnessed interactive-music driving policy — which AudioVM variable
 // slots the shells write, the mission-start seed values, and the hardcoded
-// music-pair naming scheme. One home for the menu shell, the game world, and
-// the Godot MusicDirector binding (which re-exports these; the GDScript
-// service consumes the re-exports and never restates a value).
+// music-pair naming scheme. One home for the music context (music_context.h, which
+// resolves and opens the pair and seeds the game context) and the Godot
+// MusicDirector binding (which re-exports the slots).
 //
 // Full driving witness: docs/audio/mus-sbf-re.md §Game music driving.
 #pragma once

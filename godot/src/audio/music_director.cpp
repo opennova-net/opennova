@@ -7,16 +7,22 @@
 //   the GEcho intrinsic's hook                     -> StreamDevice::echo
 
 #include "audio/music_director.h"
-#include "audio/music_pair_names.h"
+#include "audio/music_pair.h"
 
 #include "audio/audio_out.h"
 #include "audio/music_script.h"
 #include "audio/sbf_bank.h"
+#include "resource_index/resource_root.h"
+#include "util/string_convert.h"
+#include "util/texture_path_resolver.h"
 
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
+
+#include <cstring>
 
 using namespace godot;
 using namespace opennova::mus;
@@ -65,12 +71,16 @@ void MusicDirector::_bind_methods() {
 	BIND_CONSTANT(GAME_VAR_HEALTH_PCT);
 	BIND_CONSTANT(GAME_VAR_TEAM);
 	BIND_CONSTANT(GAME_HEALTH_SEED);
-	ClassDB::bind_static_method("MusicDirector",
-			D_METHOD("resolve_menu_music_pair", "expansion_name"),
+	ClassDB::bind_static_method("MusicDirector", D_METHOD("resolve_menu_music_pair", "root"),
 			&MusicDirector::resolve_menu_music_pair);
-	ClassDB::bind_static_method("MusicDirector",
-			D_METHOD("resolve_game_music_pair", "expansion_name"),
+	ClassDB::bind_static_method("MusicDirector", D_METHOD("resolve_game_music_pair", "root"),
 			&MusicDirector::resolve_game_music_pair);
+	ClassDB::bind_method(D_METHOD("open_menu_context", "root", "script_override", "bank_override"),
+			&MusicDirector::open_menu_context, DEFVAL(String()), DEFVAL(String()));
+	ClassDB::bind_method(D_METHOD("open_game_context", "root"), &MusicDirector::open_game_context);
+	ClassDB::bind_method(D_METHOD("stop_context"), &MusicDirector::stop_context);
+	ClassDB::bind_method(D_METHOD("get_context"), &MusicDirector::get_context);
+	ClassDB::bind_method(D_METHOD("get_context_script"), &MusicDirector::get_context_script);
 
 	// Properties (inspector). We deliberately do NOT expose a script property
 	// because Godot scans for set_script/get_script pairs as the built-in script
@@ -90,23 +100,131 @@ void MusicDirector::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("echo", PropertyInfo(Variant::INT, "arg")));
 }
 
-// --- Witnessed music-pair naming (pure re-export) -----------------------
+// --- The music context (engine runtime/audio/music_context.h) ------------
 
-static Ref<MusicPairNames> music_pair_record(const opennova::audio::MusicPairNames &names) {
-	Ref<MusicPairNames> out;
+namespace {
+
+// The mounted root as the context reads it.
+class RootMusicFiles final : public opennova::audio::MusicFiles {
+public:
+	explicit RootMusicFiles(ResourceRoot &p_root) : _root(p_root) {}
+	std::string expansion() const override { return opennova::to_std(_root.get_expansion()); }
+	std::string root_dir() const override { return opennova::to_std(_root.get_root_dir()); }
+	std::string find_loose(const std::string &p_dir, const std::string &p_name) const override {
+		return opennova::to_std(opennova::resolve_file_in_dir(opennova::to_gd(p_dir), opennova::to_gd(p_name)));
+	}
+	std::string resolve_file(const std::string &p_name) const override {
+		return opennova::to_std(_root.resolve_file(opennova::to_gd(p_name)));
+	}
+	bool has_file(const std::string &p_name) const override {
+		return _root.has_file(opennova::to_gd(p_name));
+	}
+	bool read_file(const std::string &p_name, std::vector<uint8_t> &r_out) const override {
+		const PackedByteArray bytes = _root.read_file(opennova::to_gd(p_name));
+		r_out.assign(bytes.ptr(), bytes.ptr() + bytes.size());
+		return !bytes.is_empty();
+	}
+
+private:
+	ResourceRoot &_root;
+};
+
+Ref<MusicPair> music_pair_record(opennova::audio::MusicContextKind p_kind, const Ref<ResourceRoot> &p_root) {
+	Ref<MusicPair> out;
 	out.instantiate();
-	out->assign(names);
+	if (p_root.is_valid())
+		out->assign(opennova::audio::resolve_music_pair(p_kind, RootMusicFiles(*p_root.ptr())));
 	return out;
 }
 
-Ref<MusicPairNames> MusicDirector::resolve_menu_music_pair(const String &p_expansion_name) {
-	return music_pair_record(opennova::audio::menu_music_pair_names(
-			p_expansion_name.utf8().get_data()));
+} // namespace
+
+Ref<MusicPair> MusicDirector::resolve_menu_music_pair(const Ref<ResourceRoot> &p_root) {
+	return music_pair_record(opennova::audio::MusicContextKind::Menu, p_root);
 }
 
-Ref<MusicPairNames> MusicDirector::resolve_game_music_pair(const String &p_expansion_name) {
-	return music_pair_record(opennova::audio::game_music_pair_names(
-			p_expansion_name.utf8().get_data()));
+Ref<MusicPair> MusicDirector::resolve_game_music_pair(const Ref<ResourceRoot> &p_root) {
+	return music_pair_record(opennova::audio::MusicContextKind::Game, p_root);
+}
+
+bool MusicDirector::_open(opennova::audio::MusicContextKind p_kind, const Ref<ResourceRoot> &p_root,
+		const String &p_script_override, const String &p_bank_override) {
+	if (p_root.is_null())
+		return _context.open(p_kind, nullptr, _context_player);
+	const RootMusicFiles files(*p_root.ptr());
+	return _context.open(p_kind, &files, _context_player, opennova::to_std(p_script_override),
+			opennova::to_std(p_bank_override));
+}
+
+bool MusicDirector::open_menu_context(const Ref<ResourceRoot> &p_root, const String &p_script_override,
+		const String &p_bank_override) {
+	return _open(opennova::audio::MusicContextKind::Menu, p_root, p_script_override, p_bank_override);
+}
+
+bool MusicDirector::open_game_context(const Ref<ResourceRoot> &p_root) {
+	return _open(opennova::audio::MusicContextKind::Game, p_root, String(), String());
+}
+
+void MusicDirector::stop_context() {
+	_context.stop(_context_player);
+}
+
+String MusicDirector::get_context() const {
+	return String(opennova::audio::music_context_name(_context.kind()));
+}
+
+Ref<MusicScript> MusicDirector::get_context_script() const {
+	return _context.kind() != opennova::audio::MusicContextKind::None ? _script : Ref<MusicScript>();
+}
+
+void MusicDirector::ContextPlayer::stop_context() {
+	_owner.stop();
+	_owner.set_bank(Ref<SbfBank>());
+	_owner.load_mus_script(Ref<MusicScript>());
+	_owner.set_script_name(StringName());
+	_bank.unref();
+	_script.unref();
+}
+
+bool MusicDirector::ContextPlayer::load_bank(const std::string &p_path) {
+	// The bank streams loose from disk by path: no file there is the open's file leg.
+	const String path = opennova::to_gd(p_path);
+	if (!FileAccess::file_exists(path))
+		return false;
+	_bank.instantiate();
+	_bank->load_from_path(path);
+	return true;
+}
+
+bool MusicDirector::ContextPlayer::load_script_file(const std::string &p_path) {
+	_script.instantiate();
+	return _script->load_from_path(opennova::to_gd(p_path)) == OK;
+}
+
+int MusicDirector::ContextPlayer::load_script_bytes(const std::vector<uint8_t> &p_bytes,
+		const std::string &p_name) {
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(p_bytes.size()));
+	if (!p_bytes.empty())
+		std::memcpy(bytes.ptrw(), p_bytes.data(), p_bytes.size());
+	_script.instantiate();
+	_script->load_from_decrypted_bytes(bytes, opennova::to_gd(p_name));
+	return _script->get_script_count();
+}
+
+void MusicDirector::ContextPlayer::drop_script() {
+	_script.unref();
+}
+
+bool MusicDirector::ContextPlayer::open_vm() {
+	const bool opened = _owner.open_context(_bank, _script);
+	_bank.unref();
+	_script.unref();
+	return opened;
+}
+
+void MusicDirector::ContextPlayer::set_var(int p_index, int32_t p_value) {
+	_owner.set_var(p_index, p_value);
 }
 
 // --- Property setters / getters ----------------------------------------

@@ -30,6 +30,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/mixer.cpp # the 26-channel software mixer: one 16-bit stereo stream
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/music_stream.cpp # the SBF track streamed onto mixer channels 1 and 2
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/music_stream_pump.cpp # the music VM's pacing: one play per track
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio/music_context.cpp # the one music context: the pair, the open order, the seed
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/oneshot_play.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/script_voice_player.cpp # the scripted voice on mixer channel 0
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_listener.cpp # the listener, the bearing pans and the doppler
@@ -492,6 +493,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_file.cpp              # the retail /HOST host file (opennova-serve, ADR 0051)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_config.cpp            # game.cfg onto the host session (opennova-serve, ADR 0051 d2)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/game_config_block.cpp      # the process's game.cfg block, both embedders (D-NET-335)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/player_options.cpp         # the player's options over the cfg block
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_boot.cpp              # the one host boot, both phases (ADR 0051 d4)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/mission_rotation.cpp       # the map rotation and its session words (D-NET-331)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/rotation_admin.cpp         # the admin MISSION verbs over the rotation (ADR 0051 PR5b)

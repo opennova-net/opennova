@@ -1,32 +1,10 @@
 extends Node
 
-## Runtime localized-string lookup. Autoload singleton over RtxtStringFile
-## tables (NovaLogic .bin string tables), mirroring the original engine's
-## table model:
-##  - Named tables for the four globals Jointops.exe loads at init (gameerr,
-##    gametext, vmacros, keyhelp) plus per-mission/menu tables
-##    [orig: Game_InitSubsystems @ 0x4A6CD0].
-##  - One override table consulted before every lookup — the original loads
-##    the active expansion's text bin there (expansion\<exp>\<exp>.bin); the
-##    engine holds it (rtxt::text_override, RtxtStringFile.install_text_override),
-##    and this registry only installs the one the mounted root carries
-##    [orig: TextResource_LoadOverrideTable @ 0x75D5C0].
-##  - lookup(table, section, key) misses resolve to "??section:key??", the
-##    marker the original formats for its error table
-##    [orig: GameErr_GetString @ 0x4C2C60].
-## The case-insensitive matching, first-match-wins and {hot} marker handling
-## live in engine/formats/rtxt via the RtxtStringFile resource.
-##
-## The single-table convenience API (load_table/get_string/...) below predates
-## the registry and keeps working unchanged; it reads the default table.
+## The process's named string tables for the shell's scripts (autoload "Strings"): the engine's
+## registry (TextTables over engine/formats/rtxt/text_tables.h) holds the tables, follows the
+## expansion override table and owns every lookup rule (the override table first, the miss
+## marker, the menu tokens' chain); this autoload only names the tables and sections.
 
-# The lookup-miss marker and the override-first ordering are the engine's
-# RtxtStringFile.format_miss_marker / lookup_with_override statics, over the
-# engine's one installed override table — the witnesses live at the engine
-# home, engine/formats/rtxt rtxt.h.
-
-## The named tables (the registry below carries the witness) and the RTXT
-## sections the game reads by name; every caller spells them through these.
 const TABLE_GAMETEXT := "gametext"
 const TABLE_MISSION := "mission"
 const SECTION_OVERLAYS := "Overlays"
@@ -35,164 +13,47 @@ const SECTION_CLIENT := "Client"
 const SECTION_LOADING_TEXT := "LoadingText"
 const TABLE_MENUTXT := "menutxt"
 const TABLE_GAMEUI := "gameui"
-## keyhelp.bin: the "Keys" table every key-binding label (modifier prefixes,
-## the " or " separator, mouse and key names) resolves through. Registering it
-## installs it process-wide for the engine's binding formatters
-## (RtxtStringFile.install_key_strings -> controls::set_key_strings, the
-## KeyHelp_GetStringWithFallback lookup over retail's g_TextKeyHelp).
 const TABLE_KEYHELP := "keyhelp"
-## gameerr.bin: the "Generic Error Strings" the post-mission error dialog shows
-## (STRE_CDTROUBLE / STRE_SYSTEM / STRE_PIRATE / STRE_BADMISSION).
 const TABLE_GAMEERR := "gameerr"
 const SECTION_GENERIC_ERRORS := "Generic Error Strings"
 const SECTION_MENU := "Menu"
 
-var _table: RtxtStringFile
-var _tables: Dictionary = {}
-## The root whose expansion override table is installed (track_expansion_override).
-var _override_source: ResourceRoot
-
-
-## Loads a strings .bin from a res:// or absolute path. Returns OK on success.
-func load_table(path: String) -> Error:
-	var table := RtxtStringFile.new()
-	var err := table.load_from_path(path)
-	if err != OK:
-		return err
-	_table = table
-	return OK
-
-
-func is_loaded() -> bool:
-	return _table != null
-
-
-## Returns the raw localized text (including any {hot} marker), or default.
-func get_string(key: StringName, default: String = "") -> String:
-	if _table == null or not _table.has_string(key):
-		return default
-	return _table.get_string(key)
-
 
 func clear() -> void:
-	_table = null
-	_tables.clear()
-	_untrack_override_source()
-	RtxtStringFile.clear_text_override()
-	# The installed "Keys" table goes with the registry: every binding label
-	# falls back to its literal until the next keyhelp registration.
-	RtxtStringFile.clear_key_strings()
+	TextTables.clear()
 
 
-## --- Named-table registry [orig: Game_InitSubsystems @ 0x4A6CD0] ---
-
-## Registers a loaded table under a name ("gametext", "gameerr", ...). Passing
-## null unregisters. Names are case-insensitive.
 func register_table(name: String, table: RtxtStringFile) -> void:
-	var id := name.to_lower()
-	if table == null:
-		_tables.erase(id)
-	else:
-		_tables[id] = table
-	# keyhelp.bin doubles as the engine's process-wide "Keys" binding-label
-	# table (TABLE_KEYHELP): registering installs it, unregistering forgets it.
-	if id == TABLE_KEYHELP:
-		if table != null:
-			table.install_key_strings()
-		else:
-			RtxtStringFile.clear_key_strings()
+	TextTables.register_table(name, table)
 
 
 func get_table(name: String) -> RtxtStringFile:
-	return _tables.get(name.to_lower())
+	return TextTables.get_table(name)
 
 
-## One RTXT .bin read off a mounted resource root; null when there is no root,
-## the root carries no such file, or it does not parse.
 func load_rtxt(root: ResourceRoot, file: String) -> RtxtStringFile:
-	if root == null:
-		return null
-	var bytes := root.read_file(file)
-	if bytes.is_empty():
-		return null
-	var table := RtxtStringFile.new()
-	if table.load_from_byte_array(bytes) != OK:
-		return null
-	return table
+	return TextTables.load_rtxt(root, file)
 
 
-## --- Override table [orig: TextResource_LoadOverrideTable @ 0x75D5C0] ---
-
-## Installs the expansion override table `root` carries and follows the root:
-## every later mount of it (the menu's expansion switch, a join's) installs the
-## table that mount left. Which file serves the table, and when, is the engine's
-## rule (ResourceRoot.get_expansion_override_table over vfs_expansion_override_table,
-## docs/interface/rtxt-strings-re.md "The override table's source"). A null root
-## stops following and clears the table.
 func track_expansion_override(root: ResourceRoot) -> void:
-	if root != _override_source:
-		_untrack_override_source()
-		_override_source = root
-		if root != null:
-			root.mounted.connect(_install_override_from_source)
-	_install_override_from_source()
+	TextTables.track_expansion_override(root)
 
 
-# The engine holds the one table every lookup searches first (the menus', the
-# HUD's, the join screen's and this registry's alike): the root's, or none.
-func _install_override_from_source() -> void:
-	var bytes := PackedByteArray()
-	if _override_source != null:
-		bytes = _override_source.get_expansion_override_table()
-	var table := RtxtStringFile.new()
-	if not bytes.is_empty() and table.load_from_byte_array(bytes) == OK:
-		table.install_text_override()
-	else:
-		RtxtStringFile.clear_text_override()
-
-
-func _untrack_override_source() -> void:
-	if _override_source != null and _override_source.mounted.is_connected(_install_override_from_source):
-		_override_source.mounted.disconnect(_install_override_from_source)
-	_override_source = null
-
-
-## --- Engine-faithful lookup (engine: formats/rtxt/rtxt.h) ---
-
-## Section-scoped lookup against a named table, override-table-first. A miss
-## returns "??section:key??", the visible marker the original engine produces,
-## so missing strings are debuggable instead of silently blank. The ordering
-## and marker are the engine's RtxtStringFile.lookup_with_override; adopting
-## it also adopts the engine's found-entry-with-empty-text-is-a-HIT behavior
-## (returns "" — the earlier .gd version returned the miss marker for an
-## authored empty string).
 func lookup(table_name: String, section: String, key: String) -> String:
-	return RtxtStringFile.lookup_with_override(_tables.get(table_name.to_lower()), section, key)
+	return TextTables.lookup(table_name, section, key)
 
 
-## The override table's entry, else the named table's own, or `fallback` when
-## the table is absent or neither has the key: no miss marker, the form the HUD
-## overlay and label lookups take. The engine's section lookup over the one
-## installed override table (RtxtStringFile.text_or; D-NET-675).
 func lookup_or(table_name: String, section: String, key: String, fallback: String) -> String:
-	return RtxtStringFile.text_or(get_table(table_name), section, key, fallback)
+	return TextTables.lookup_or(table_name, section, key, fallback)
 
 
-## Whether lookup_or finds the key: in the override table or the named table.
 func has_text(table_name: String, section: String, key: String) -> bool:
-	return RtxtStringFile.has_text(get_table(table_name), section, key)
+	return TextTables.has_text(table_name, section, key)
 
 
-## A menu UI token: menutxt's "Menu" section, then gameui's, else the fallback
-## (the armory, player-info and DEATH-screen tokens all resolve this way).
-## [orig: the menu tokens resolve against the menu resource (game.bin) via
-##  TextResource_GetStringWithFallback(resource, "Menu", key) @0x562ee0]
 func menu_text(key: String, fallback: String) -> String:
-	return lookup_or(TABLE_MENUTXT, SECTION_MENU, key,
-			lookup_or(TABLE_GAMEUI, SECTION_MENU, key, fallback))
+	return TextTables.menu_text(key, fallback)
 
 
-## lookup() with the {hot} accelerator marker stripped for display (the miss
-## marker never carries a {hot} token, so stripping the result is exact).
 func lookup_display(table_name: String, section: String, key: String) -> String:
-	return RtxtStringFile.strip_hotkey(lookup(table_name, section, key))
+	return TextTables.lookup_display(table_name, section, key)

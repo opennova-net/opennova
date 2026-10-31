@@ -42,7 +42,6 @@ const ScoreboardPresenterScript := preload("res://game/world/scoreboard_presente
 const VehiclePanelPresenterScript := preload("res://game/world/vehicle_panel_presenter.gd")
 const MessageLogPresenterScript := preload("res://game/world/message_log_presenter.gd")
 const EndRoundStatisticsPresenterScript := preload("res://game/world/end_round_statistics_presenter.gd")
-const HudTextTables := preload("res://game/world/hud_text_tables.gd")
 const LfpPanelPresenterScript := preload("res://game/world/lfp_panel_presenter.gd")
 
 var _world: GameWorld = null
@@ -538,7 +537,7 @@ func _init_overlay_system(mission_file: String) -> void:
 	else:
 		_map_grid_origin_present = false
 		_game_hud.set_minimap_grid_origin(Vector2.ZERO, false)
-	HudTextTables.register(root, mission_file)
+	TextTables.register_mission_tables(root, mission_file)
 	# The objectives-panel header, resolved once against the freshly registered
 	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
 	if Strings.has_text(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS, "STROVER_MISSIONOBJECTIVES"):

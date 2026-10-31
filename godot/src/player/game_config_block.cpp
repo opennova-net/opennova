@@ -1,4 +1,5 @@
 #include "player/game_config_block.h"
+#include "player/player_options_state.h"
 
 #include "mnu/menu_driver.h"
 #include "mnu/mnu_document.h" // the driver's Ref<MnuDocument> members
@@ -11,6 +12,7 @@
 
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/player_options.h>
 #include <iterator>
 
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -56,7 +58,20 @@ void take_launch_switches(inmatch::GameConfigBlock &p_block) {
 
 } // namespace
 
+Ref<PlayerOptionsState> GameConfigBlock::read_player_options() const {
+	return PlayerOptionsState::make(inmatch::read_player_options(block_.cfg()));
+}
+
+Ref<PlayerOptionsState> GameConfigBlock::write_player_options(
+		const Ref<PlayerOptionsState> &p_state) {
+	if (p_state.is_null()) return read_player_options();
+	return PlayerOptionsState::make(inmatch::write_player_options(block_.cfg(), p_state->value()));
+}
+
 void GameConfigBlock::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("read_player_options"), &GameConfigBlock::read_player_options);
+	ClassDB::bind_method(D_METHOD("write_player_options", "state"),
+			&GameConfigBlock::write_player_options);
 	ClassDB::bind_method(D_METHOD("set_path", "path"), &GameConfigBlock::set_path);
 	ClassDB::bind_method(D_METHOD("get_path"), &GameConfigBlock::get_path);
 	ClassDB::bind_method(D_METHOD("load"), &GameConfigBlock::load);
