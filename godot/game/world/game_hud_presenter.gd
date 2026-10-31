@@ -1281,7 +1281,8 @@ func _poll_toggle_rows(sim: Simulation, gameplay_input_active: bool) -> int:
 			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
 			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
 			ControlsBindings.model().is_token_fire_signed(
-					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
+					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)),
+			0, HudToggles.sim_death_screen(sim), HudToggles.sim_friendly_tags_skip_mode_1(sim))
 
 
 static func _authority(sim: Simulation) -> bool:

@@ -47,6 +47,15 @@ int64_t HudToggles::dispatch(int p_rows_fired, bool p_active,
 					p_death_screen, p_friendly_tags_skip_mode_1)));
 }
 
+bool HudToggles::sim_death_screen(const Ref<Simulation> &p_sim) {
+	return p_sim.is_valid() && p_sim->local_death_screen_active();
+}
+
+bool HudToggles::sim_friendly_tags_skip_mode_1(const Ref<Simulation> &p_sim) {
+	const opennova::world::TitleRules *rules = p_sim.is_valid() ? p_sim->session_title_rules() : nullptr;
+	return rules != nullptr && rules->friendly_tags_skip_mode_1_on_death_screen;
+}
+
 int HudToggles::escape(bool p_in_session, bool p_round_over, bool p_authority) {
 	opennova::hud::HudEscapeInput input;
 	input.in_session = p_in_session;
@@ -169,6 +178,10 @@ void HudToggles::_bind_methods() {
 								 "death_screen", "friendly_tags_skip_mode_1"),
 			&HudToggles::dispatch, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false),
 			DEFVAL(0), DEFVAL(false), DEFVAL(false));
+	ClassDB::bind_static_method("HudToggles", D_METHOD("sim_death_screen", "sim"),
+			&HudToggles::sim_death_screen);
+	ClassDB::bind_static_method("HudToggles", D_METHOD("sim_friendly_tags_skip_mode_1", "sim"),
+			&HudToggles::sim_friendly_tags_skip_mode_1);
 	ClassDB::bind_method(D_METHOD("escape", "in_session", "round_over", "authority"),
 			&HudToggles::escape, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("session_init", "in_session", "mp_session_peer"),

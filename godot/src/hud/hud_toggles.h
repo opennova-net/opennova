@@ -124,6 +124,11 @@ public:
 			bool p_authority = false, bool p_mp_session_peer = false,
 			bool p_mouse_scale_negative = false, int p_head_drops = 0,
 			bool p_death_screen = false, bool p_friendly_tags_skip_mode_1 = false);
+	// The two friendly-tags inputs of a poll or a dispatch, from `sim`: the client death-screen
+	// latch, and the session title's rule over it (engine HudKeyPoll::death_screen); false with
+	// no sim or no session rules.
+	static bool sim_death_screen(const Ref<Simulation> &p_sim);
+	static bool sim_friendly_tags_skip_mode_1(const Ref<Simulation> &p_sim);
 	// The escape action's HUD-window close chain; returns the Event bits.
 	int escape(bool p_in_session, bool p_round_over, bool p_authority = false);
 	// The session create / destroy's status-view rule (engine
