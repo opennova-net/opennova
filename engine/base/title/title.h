@@ -269,7 +269,7 @@ struct Title {
 	bool hud_crosshair_fixed = false;
 	// DFX2-85: the stance icon takes the stance colour triple (hudpos stancecolor_good / _middle /
 	// _bad) by the HUD info's health band, where Jointops.exe's takes stanceicon_color.
-	// [orig: HUD_DrawStanceIndicator @0x599F10 (dword_2723AE8 @0x599FE1)] [orig: sub_5A1A50
+	// [orig: HUD_DrawStanceIndicator @0x599F10 (dword_2723AE8 @0x599F76)] [orig: sub_5A1A50
 	//  @0x5A1A50 (dfx2.exe) - HUD_ClassifyHealthBand @0x5A1AB6, the triple @0x5A1AC2..0x5A1AD4]
 	bool hud_stance_health_tint = false;
 	// DFX2-88: the chat lines of the J window's CHAT column and of a dedicated host's console

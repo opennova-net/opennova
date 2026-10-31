@@ -7,8 +7,7 @@
 // The overlay-panel pass's voice-macro menus and the SP pause text live here
 // too (HUD_DrawOverlayPanels @0x5c0060).
 
-#include <base/title/title.h> // Title::hud_lone_gunner_panel
-#include <base/title/title.h> // Title::hud_map_legend
+#include <base/title/title.h> // Title::hud_lone_gunner_panel, Title::hud_map_legend
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_medic_cross.h>
 

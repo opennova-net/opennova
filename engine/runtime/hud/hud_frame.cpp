@@ -1314,7 +1314,7 @@ void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 	const int prev_a = stance_prev_alpha(elapsed, ramp);
 	// The frames' colour: Jointops.exe's hudpos stanceicon_color; dfx2.exe's the stance colour
 	// triple by the HUD info's health ratio, the health bar's, through HUD_ClassifyHealthBand
-	// (Title::hud_stance_health_tint, DFX2-85) [orig: dword_2723AE8 @0x599fe1] [orig: sub_5A1A50
+	// (Title::hud_stance_health_tint, DFX2-85) [orig: dword_2723AE8 @0x599f76] [orig: sub_5A1A50
 	// @0x5a1a50 - HUD_ClassifyHealthBand(distance) @0x5a1ab0..0x5a1ab6, g_StanceColorGood /
 	// Middle / Bad @0x5a1ac2..0x5a1ad4, its RGB under the fade's alpha @0x5a1b43 (dfx2.exe);
 	// HUD_ClassifyHealthBand @0x59a160 (dfx2.exe), > 0xC000 good, > 0x6FFF middle].

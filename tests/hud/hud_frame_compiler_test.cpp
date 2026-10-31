@@ -3403,7 +3403,7 @@ void test_bordered_image_sites(const fnt_font_t *font) {
 	};
 	// dfx2.exe tints the frame by the HUD info's health band, the stance triple, where
 	// Jointops.exe takes stanceicon_color (DFX2-85) [orig: sub_5A1A50 @0x5A1A50 -
-	// @0x5A1AB0..0x5A1AD4 (dfx2.exe)] [orig: HUD_DrawStanceIndicator @0x599FE1].
+	// @0x5A1AB0..0x5A1AD4 (dfx2.exe)] [orig: HUD_DrawStanceIndicator @0x599F76].
 	{
 		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
 		const opennova::Title *jo = opennova::title_by_code("jo");
