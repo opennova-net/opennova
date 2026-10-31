@@ -445,8 +445,10 @@ struct Title {
 	// DFX2-53: the sector render picks a player person's character again every frame it draws it,
 	// relative to the viewer: the first combo of the good side while the person is on the local
 	// player's team (or there is no local player), else of the evil side, which its avatar blip
-	// (entity+0x3C) then names, the body drawn and the profile sounds' sex alike
-	// (inmatch::drawn_player_character, the present rows' PF_CHARACTER_ID). False
+	// (entity+0x3C) then names, the body drawn, the local first-person arms and the profile sounds'
+	// sex alike (inmatch::drawn_player_character, the present rows' PF_CHARACTER_ID; the local
+	// player's own body and arms, inmatch::drawn_local_player_character; the profile sounds still
+	// take the spawn's pick, every stock DFX2 head being male). False
 	// (Jointops.exe's): the blip keeps the spawn's pick, the NetId, or the first combo of the side
 	// its Team names.
 	// [orig: Terrain_RenderSectorEntitiesBySide @0x5C7D50 - the blip read @0x5C7FD6;

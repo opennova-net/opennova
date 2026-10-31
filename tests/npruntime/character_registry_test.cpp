@@ -144,6 +144,20 @@ int main() {
 				"no viewer draws everyone good");
 		check(drawn_player_character(dfx2, nullptr, 0x8207, true, 2, 1) == 0x8207,
 				"no registry passes the id through");
+		// The local player is its own viewer: its body and first-person arms draw as the good
+		// side's first combo, an evil (and female) spawn's id included; Jointops.exe's keep the id.
+		// [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EEE..0x5C6F00;
+		//  Player_RenderFirstPersonViewModel @0x4DBE00 - @0x4DC08F (dfx2.exe)]
+		check(drawn_local_player_character(dfx2, &registry, 0x8207) == 0x0200,
+				"an evil local player draws as the first good combo");
+		check(drawn_local_player_character(dfx2, &registry, 0x0400) == 0x0200,
+				"a good local player draws as the first good combo");
+		check(drawn_local_player_character(jo, &registry, 0x8207) == 0x8207,
+				"Jointops.exe's local player draws its spawn's id");
+		check(drawn_local_player_character(ag, &registry, 0x8207) == 0x8207,
+				"Acid Gambit's local player draws its spawn's id");
+		check(drawn_local_player_character(dfx2, nullptr, 0x8207) == 0x8207,
+				"no registry passes the local id through");
 	}
 
 	// The fresh profile: first good / first evil, rifleman both sides, the

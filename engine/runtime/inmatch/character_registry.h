@@ -114,4 +114,19 @@ PlayerVisualSpec resolve_player_visual_spec(const opennova::avatars::AvatarsFile
 uint16_t drawn_player_character(const Title *title, const CharacterRegistry *registry,
 		uint16_t net_id, bool viewer, uint8_t team, uint8_t viewer_team);
 
+// DFX2-53, the local player: the character its own avatar blip names, which its body draws (third
+// person) and its first-person arms take (blip +8), drawn_player_character with the person its own
+// viewer. The view collect takes the local body like any person and first person skips only its
+// parts' draw, in the bone callback, after the sector render has picked the blip again, so under
+// the per-frame pick it is the good side's first combo whatever the spawn's `net_id`.
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5C7BD0 - only the Flags & 1 gate @0x5C7C5F..0x5C7C64;
+//  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - no local-player test ahead of the pick
+//  @0x5C6EA6..0x5C6F42, the Team compare against itself @0x5C6EEE..0x5C6F00;
+//  BoneCallback_org0_World @0x4E0A40 - the first-person skip @0x4E0BB3..0x4E0BCA;
+//  Player_RenderFirstPersonViewModel @0x4DBE00 - the arms from g_LocalPlayerEntity+0x3C +8
+//  @0x4DC08F..0x4DC0A8 / @0x4DC0FF..0x4DC110 (dfx2.exe)] [orig: Player_RenderFirstPersonViewModel
+//  @0x4DED60 - the same reads @0x4DEFEF / @0x4DF05F]
+uint16_t drawn_local_player_character(const Title *title, const CharacterRegistry *registry,
+		uint16_t net_id);
+
 } // namespace opennova::inmatch

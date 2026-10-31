@@ -6,6 +6,7 @@
 #include <formats/mission/bms.h>
 #include <base/io/fixed.h>
 #include <base/gameprofile/game_type.h>
+#include <runtime/inmatch/character_registry.h> // drawn_local_player_character (DFX2-53)
 #include <runtime/inmatch/spectator_session.h>
 #include <runtime/world/music_vars.h>
 #include <runtime/world/player_look.h>
@@ -346,16 +347,22 @@ int Simulation::get_local_player_team() const {
 }
 
 int Simulation::get_local_player_character_id() const {
-	// The packed character id the AUTHORITY stamped on the local player
-	// (entity+0x15C): the host's own spawn from its installed per-side profile
-	// vars, a joiner's from its named 0x0C record — the one word every observer
-	// keys the composed head/body (and the local first-person arms) on, so the
-	// shell never re-derives side-by-team itself (the stamp's witness lives at
+	// The character the local player's own body and first-person arms draw as: the
+	// packed id the AUTHORITY stamped on it (entity+0x15C; the host's own spawn from
+	// its installed per-side profile vars, a joiner's from its named 0x0C record), so
+	// the shell never re-derives side-by-team itself (the stamp's witness lives at
 	// server_spawn.cpp / joiner_role.cpp; the reader side is
-	// docs/playerinfo/avatars-re.md, TEX_CAMO section).
+	// docs/playerinfo/avatars-re.md, TEX_CAMO section), as the title's sector render
+	// draws it (engine inmatch::drawn_local_player_character, DFX2-53).
+	const opennova::inmatch::CharacterRegistry *characters =
+			assets_.character_registry_mounted ? &assets_.character_registry : nullptr;
+	const auto drawn = [&](uint16_t net_id) {
+		return static_cast<int>(opennova::inmatch::drawn_local_player_character(
+				&session_title(net_, assets_.root), characters, net_id));
+	};
 	if (kernel_ && kernel_->world.cached.local_player.valid()) {
 		const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
-		if (e) return static_cast<int>(e->minimap_net_id);
+		if (e) return drawn(e->minimap_net_id);
 	}
 	// A joiner that has learned its record but not yet materialized L (the
 	// deploy-screen hold, the challenge prewarm) reads the word its 0x0C fold
@@ -365,8 +372,8 @@ int Simulation::get_local_player_character_id() const {
 		const opennova::replication::ClientEntityState *self =
 				runtime_->state().find(runtime_->self_handle());
 		if (self != nullptr && self->cls == opennova::EntityClass::Player)
-			return static_cast<int>(self->net_id);
-		return static_cast<int>(runtime_->spawn_pose().net_id);
+			return drawn(static_cast<uint16_t>(self->net_id));
+		return drawn(static_cast<uint16_t>(runtime_->spawn_pose().net_id));
 	}
 	return 0;
 }

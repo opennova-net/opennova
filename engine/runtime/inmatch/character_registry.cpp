@@ -125,6 +125,12 @@ uint16_t drawn_player_character(const Title *title, const CharacterRegistry *reg
 			viewer && team != viewer_team ? AVATAR_ALIGN_EVIL : AVATAR_ALIGN_GOOD);
 }
 
+uint16_t drawn_local_player_character(const Title *title, const CharacterRegistry *registry,
+		uint16_t net_id) {
+	// Its Team is the viewer's own.
+	return drawn_player_character(title, registry, net_id, true, 0, 0);
+}
+
 // [orig: CAvatarDefs_PackFirstComboOfAlignment @0x57ad40 — the loop
 // @0x57ad6b..0x57ad80 returns the first side match, the entry-0 fallback
 // @0x57ad84..0x57adda]
