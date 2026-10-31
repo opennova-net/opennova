@@ -47,6 +47,18 @@ bool game_load_accepts(const threedi::Threedi3di3 &model) {
 			 model.header.mesh_type == threedi::THREEDI_MESH_SKINNED);
 }
 
+// A mounted model's load: the file's model, null where the game's load refuses it, a Simulation
+// store's with its render buffers freed (ModelData).
+Model load_model(const std::vector<uint8_t> &bytes, ModelData model_data) {
+	auto parsed = parsed_owner<threedi::Threedi3di3, threedi::threedi_3di3_free>();
+	if (threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), parsed.get()) != 0 ||
+			!game_load_accepts(*parsed))
+		return {};
+	if (model_data == ModelData::Simulation)
+		threedi::threedi_3di3_free_render_buffers(parsed.get());
+	return parsed;
+}
+
 // The store's key for a .bad load: the file the game's load opens for the query's file name
 // (anim::bad_file_name), lowercase.
 std::string bad_key(const std::string &name) {
@@ -57,6 +69,7 @@ std::string bad_key(const std::string &name) {
 
 struct AssetStore::Impl {
 	const ResourceIndex *index = nullptr;
+	ModelData model_data = ModelData::Full;
 	uint64_t source_revision = 0;
 	uint64_t epoch = 0;
 	std::unordered_map<std::string, Model> models;
@@ -65,12 +78,15 @@ struct AssetStore::Impl {
 	std::unordered_map<std::string, SkeletalRig> rigs;
 };
 
-AssetStore::AssetStore(const ResourceIndex *index) : impl_(std::make_unique<Impl>()) {
+AssetStore::AssetStore(const ResourceIndex *index, ModelData model_data) :
+		impl_(std::make_unique<Impl>()) {
 	impl_->index = index;
+	impl_->model_data = model_data;
 	invalidate();
 }
 AssetStore::~AssetStore() = default;
 const ResourceIndex *AssetStore::index() const { return impl_->index; }
+ModelData AssetStore::model_data() const { return impl_->model_data; }
 bool AssetStore::has_source() const { return impl_->index && !impl_->index->root_dir().empty(); }
 
 void AssetStore::invalidate() const {
@@ -95,8 +111,8 @@ Model AssetStore::model(const std::string &graphic) const {
 	if (found != impl_->models.end()) return found->second;
 	Model result;
 	std::vector<uint8_t> bytes;
-	if (impl_->index->read_file(key, bytes) && !bytes.empty()) result = parse_model(bytes.data(), bytes.size());
-	if (result && !game_load_accepts(*result)) result = {};
+	if (impl_->index->read_file(key, bytes) && !bytes.empty())
+		result = load_model(bytes, impl_->model_data);
 	impl_->models.emplace(key, result);
 	return result;
 }

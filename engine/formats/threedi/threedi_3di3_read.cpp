@@ -1505,6 +1505,27 @@ void threedi_3di3_free(Threedi3di3 *model)
     free_model_arrays(model);
 }
 
+void threedi_3di3_free_render_buffers(Threedi3di3 *model)
+{
+    if (!model) {
+        return;
+    }
+    for (size_t i = 0; model->lods && i < model->lod_count; ++i) {
+        ThreediLod *lod = &model->lods[i];
+        free(lod->vertices.items);
+        free(lod->indices.indices);
+        memset(&lod->vertices, 0, sizeof(lod->vertices));
+        memset(&lod->indices, 0, sizeof(lod->indices));
+    }
+    free(model->materials);
+    model->materials = NULL;
+    model->material_count = 0;
+    model->material_record_size = 0;
+    free(model->lights);
+    model->lights = NULL;
+    model->light_count = 0;
+}
+
 int threedi_3di3_read(const char *path, Threedi3di3 *out_model)
 {
     if (!path || !out_model) {
