@@ -104,6 +104,9 @@ var _world_load_pending := false
 # The mission a `--mission` launch starts in, until its load ends: one that fails is named on a
 # line of the log the editor's Play reads back (ResourceRoot.launch_mission_failed_marker()).
 var _launch_mission := ""
+# The started mission's campaign words (campaign, its place; -1 none), the menu pick's, which
+# the round end hands the profile (MenuShell.start_requested).
+var _mission_campaign := Vector2i(-1, 0)
 var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> the cine's screen)
 var _sp_restart_info: LoadingScreenInfo = null  # the last SP load: the restart's entry
 var _sp_restart_loader := Callable()
@@ -994,8 +997,9 @@ func _is_use_item_key(keycode: Key) -> bool:
 
 # --- Menu <-> world transitions ----------------------------------------------
 
-func _on_start_requested(bms_name: String) -> void:
-	_save_profile_for_single_player()
+func _on_start_requested(bms_name: String, campaign := -1, campaign_mission := 0) -> void:
+	_mission_campaign = Vector2i(campaign, campaign_mission)
+	_save_profile_for_single_player(campaign)
 	# Single-player: the loading screen is the sidecar image alone — no session
 	# text [orig: the not-in-session path draws only the background @ 0x521ebe].
 	start_world_load(
@@ -1004,12 +1008,13 @@ func _on_start_requested(bms_name: String) -> void:
 
 
 # The single-player start's profile legs: the started mission's campaign index
-# into the current record (the catalog's, -1 on every row), then the profile
-# and game.cfg saved ahead of the session, whose create reads the cfg block's
-# mpreset word (engine: PlayerProfiles.record_mission_start;
-# docs/gamecfg/game-cfg-re.md, the save points).
-func _save_profile_for_single_player() -> void:
-	PlayerProfile.store().record_mission_start(-1)
+# into the current record (the menu's pick's, -1 for none: a launch that names a
+# file, or a mission no campaign holds), then the profile and game.cfg saved
+# ahead of the session, whose create reads the cfg block's mpreset word (engine:
+# PlayerProfiles.record_mission_start; docs/gamecfg/game-cfg-re.md, the save
+# points).
+func _save_profile_for_single_player(campaign := -1) -> void:
+	PlayerProfile.store().record_mission_start(campaign)
 	PlayerProfile.save()
 	GameCfgStore.save()
 	# Then the start's block write after the save: the attribute word's
@@ -1022,6 +1027,7 @@ func _save_profile_for_single_player() -> void:
 ## Boot an exact loose mission through the same loading
 ## presentation and GameWorld lifecycle as menu play.
 func start_loose_mission(bms_name: String) -> void:
+	_mission_campaign = Vector2i(-1, 0)
 	_save_profile_for_single_player()
 	start_world_load(
 		LoadingScreenInfo.for_mission(bms_name),
@@ -1046,6 +1052,7 @@ func start_saved_mission(saved_path: String, bms_name: String, profile: Dictiona
 		return ERR_FILE_CANT_OPEN
 	if not profile.is_empty():
 		set_local_player_profile(profile)
+	_mission_campaign = Vector2i(-1, 0)
 	_save_profile_for_single_player()
 	start_world_load(LoadingScreenInfo.for_mission(bms_name),
 			_world.load_mission_data.bind(mission, bms_name))
@@ -2150,15 +2157,18 @@ func _teardown_presenters() -> void:
 
 
 # The mission teardown's profile step (and the SP restart's): outside a session
-# it runs only once the round is over, then the profile's +1460 word goes back
-# and the profile is saved. No catalog row carries a campaign, so no
-# completion byte is written (engine: PlayerProfiles.record_round_end).
+# it runs only once the round is over; a won round (the 0x1D's winner team 1)
+# of a campaign mission writes its completion byte, then the profile's +1460
+# word goes back and the profile is saved (engine: PlayerProfiles.record_round_end;
+# the started mission's campaign words, _mission_campaign).
 func _record_round_end() -> void:
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim == null:
 		return
 	var in_session := sim.is_host_listening() or sim.is_joiner()
-	if PlayerProfile.store().record_round_end(in_session, sim.is_round_over(), -1, -1, false):
+	var won := sim.get_end_round_winner_team() == 1
+	if PlayerProfile.store().record_round_end(in_session, sim.is_round_over(),
+			_mission_campaign.x, _mission_campaign.y, won):
 		PlayerProfile.save()
 
 

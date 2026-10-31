@@ -104,6 +104,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/item_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/seat_spec_extract.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/campaign.cpp # DFX2-60: campaign.def's campaigns over the mission table
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_sidecars.cpp # the files the game finds by a mission's name, as one table

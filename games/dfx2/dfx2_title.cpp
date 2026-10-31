@@ -143,6 +143,11 @@ Title make() {
 	// DFX2-41: the team lists [orig: sub_5503A0 @0x5503a0, called by sub_552770 @0x5527e6
 	// (dfx2.exe)].
 	t.death_screen_team_lists = true;
+	// DFX2-60: the campaign and instant-action tabs [orig: sub_560510 @0x560510 (sub_560190 called
+	//  @0x560525, the IA_LIST test @0x560596, IA_BRIEFING @0x5606a6); sub_560ED0 @0x560ed0 (the tab
+	//  radios, CA_LIST and CA_MISSION_LIST registered), run by sub_560F90 @0x560f90 (dfx2.exe)], the
+	// twins of SinglePlayer_PopulateMissionList @0x561840 and UI_InitSinglePlayerScreen @0x562080.
+	t.sp_campaign_tabs = true;
 	return t;
 }
 

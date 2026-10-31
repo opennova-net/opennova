@@ -1546,6 +1546,7 @@ public:
 	// (queue_chat_message), the menu picks (C2S 0x14 / 0x13) and the crew key's denied tone.
 	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;
 	bool is_round_over() const; // the world's round-over latch (MatchOutcome::ended)
+	int get_end_round_winner_team() const; // the 0x1D header's winner team, 0 before one
 	// The charattr property latches the session's restriction step raised, one
 	// bit a property (inmatch charattr_pack_disabled, the S2C 0x42 body).
 	int get_charattr_disabled_word() const;

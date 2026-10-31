@@ -593,6 +593,13 @@ target_link_libraries(mission_static_sources_test PRIVATE opennova_runtime)
 target_include_directories(mission_static_sources_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_static_sources COMMAND mission_static_sources_test)
 
+# DFX2-60: dfx2.exe's campaign.def parse and progress walk (runtime/mission/campaign.h).
+add_executable(campaign_test mission/campaign_test.cpp)
+target_link_libraries(campaign_test PRIVATE opennova_runtime)
+target_include_directories(campaign_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(campaign_test PRIVATE cxx_std_17)
+add_test(NAME campaign COMMAND campaign_test)
+
 add_executable(mission_catalog_test mission/mission_catalog_test.cpp)
 target_link_libraries(mission_catalog_test PRIVATE opennova_runtime)
 target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

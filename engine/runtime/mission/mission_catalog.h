@@ -35,6 +35,19 @@ struct PffArchive;
 
 namespace opennova::mission_catalog {
 
+// A table entry's campaign words: the campaign it belongs to (-1 none), its place in that
+// campaign, and its flags. The scan stores -1 and 0 [orig: MissionList_ScanAndBuildFromFiles
+// @0x563170 (+0x10C = 0 @0x56336b, +0x104 = -1 @0x563430); Mission_BuildMapListFromPFF @0x562910
+// (@0x562b2f, @0x562bf4)]; only dfx2.exe's campaign reader writes them (runtime/mission/campaign.h),
+// and the round end reads them under both (PlayerProfile_SaveRoundEndProgress @0x54d6a0).
+inline constexpr uint32_t kRowInCampaign = 2u; // a campaign names it [orig: |= 2 @0x560019 (dfx2.exe)]
+inline constexpr uint32_t kRowComplete = 4u;   // won, or the profile says so [orig: @0x54d6e7; @0x56020e (dfx2.exe)]
+struct CampaignWords {
+	int32_t campaign = -1;        // [orig: entry+0x104]
+	int32_t campaign_mission = 0; // [orig: entry+0x108]
+	uint32_t flags = 0;           // [orig: entry+0x10C]
+};
+
 struct Row {
 	std::string file;     // archive/loose entry name [orig: entry+0]
 	std::string title;    // display title [orig: entry+1044]
@@ -45,6 +58,7 @@ struct Row {
 	// game_type_of derives it.
 	uint32_t game_mode = 0;
 	bool loose = false; // loose-scanned, not archived [orig: entry+4380]
+	CampaignWords campaign;
 };
 
 // Build the catalog from the mounted install, in retail's walk: the loose

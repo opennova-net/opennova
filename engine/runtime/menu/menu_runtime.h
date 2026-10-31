@@ -475,7 +475,10 @@ public:
 	// A spin list's row enabled or disabled [orig: CSpinListWnd_SetItemEnabled @ 0x64bbd0]: a row
 	// out of range changes nothing (@ 0x64bbde). The spin steps past a disabled row (spin_cycle), and
 	// as the current row it draws nothing; fresh rows (set_widget_items) are all enabled, as
-	// CSpinListWnd_InsertItem writes each one's flags anew (@ 0x64b84c).
+	// CSpinListWnd_InsertItem writes each one's flags anew (@ 0x64b84c). A list's row disabled is
+	// locked [orig: CListWnd_SetRowAvailable @ 0x644aa0 — state 1, cleared only from 1]: a press on
+	// it takes nothing (list_press_) and it draws in the disabled state, its state index
+	// [orig: CListWnd_DrawItems @ 0x64419c].
 	void set_item_enabled(int id, int row, bool enabled);
 	bool is_item_enabled(int id, int row) const;
 	int selected_row(int id) const;

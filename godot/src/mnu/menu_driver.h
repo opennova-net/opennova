@@ -100,6 +100,7 @@ class MenuDriver : public RefCounted {
 	Ref<MnsStyleSheet> style_;
 	// The expansion's string table every menu lookup tries first.
 	Ref<RtxtStringFile> override_text_;
+	Ref<RtxtStringFile> sp_menu_text_; // the campaign reader's menu table (set_single_player_source)
 	// The pointer the driver last made the OS cursor (the claim's CURSOR, or the
 	// transparent no-pointer image), by id: the frame's texture stays the frame's
 	// to release; and that image (D-MNU-26).
@@ -164,7 +165,20 @@ public:
 	void select_mission(int p_id, int p_row, const String &p_fallback);
 	void activate_mission(int p_id, int p_row) { flow_.activate_mission(p_id, p_row); }
 	String get_selected_mission() const;
+	// The picked mission's campaign words, (campaign, its place): (-1, 0) for none
+	// (engine MenuFlow::selected_campaign).
+	Vector2i get_selected_campaign() const;
 	void clear_selected_mission() { flow_.clear_selected_mission(); }
+	// The single-player screen's inputs ahead of its populate: the bound root's title, and under
+	// one with the campaign tabs the mount's campaign.def, `p_menu_text` (menutxt.bin, kept while
+	// the flow reads it) and the current profile's completion bytes (engine MenuFlow::set_title,
+	// set_campaign_source).
+	void set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
+			const Ref<RtxtStringFile> &p_menu_text);
+	// A CA_LIST pick, true when the campaign tabs took it (engine MenuFlow::select_campaign).
+	bool select_campaign(int p_id, int p_row) { return flow_.select_campaign(runtime_, p_id, p_row); }
+	// A control's activation, true when it was a campaign-tab radio (engine MenuFlow::activate_tab).
+	bool activate_single_player_tab(const String &p_name);
 	// The Mods list (engine menu::ModList): the descriptions a pick fills (the shell's
 	// ModDescriptions names); the list filled with the base game's row and the expansion records of
 	// the bound root's folder (scanned once per folder, as the game scans once at boot), the one

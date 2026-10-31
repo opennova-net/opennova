@@ -159,6 +159,15 @@ struct Title {
 	// TEAMRED, and its STATIC_TEAM line (world::deploy_team_lists). False (Jointops.exe): the call
 	// there is an empty stub [orig: nullsub_177 @0x553140].
 	bool death_screen_team_lists = false;
+	// DFX2-60: the SINGLE_PLAYER screen's two tabs. Its populate first reads campaign.def into
+	// CA_LIST (each campaign whose depends are not all complete locked), the shown campaign's
+	// missions into CA_MISSION_LIST and its briefing into BRIEFING, then lists in IA_LIST the plain
+	// Co-op missions no campaign holds or the profile has completed, an IA_LIST pick writing
+	// IA_BRIEFING; the tab radios refresh ACCEPT from their list's selection; the round end's
+	// completion byte then has campaign missions to write (runtime/menu/menu_flow.h,
+	// runtime/mission/campaign.h). False (Jointops.exe): IA_LIST alone, every waypoint-family
+	// mission, its pick writing BRIEFING.
+	bool sp_campaign_tabs = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

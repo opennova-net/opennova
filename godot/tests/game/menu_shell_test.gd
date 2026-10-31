@@ -621,7 +621,7 @@ func test_start_emits_selected_mission() -> void:
 	assert_eq(shell.get_selected_mission(), "test.bms", "selection tracked from the list relay")
 	shell.get_driver().widget_activated.emit(
 			shell.get_driver().widget_id("ACCEPT"), "ACCEPT")
-	assert_signal_emitted_with_parameters(shell, "start_requested", ["test.bms"])
+	assert_signal_emitted_with_parameters(shell, "start_requested", ["test.bms", -1, 0])
 	_cleanup(dir)
 
 
@@ -1756,7 +1756,7 @@ func test_play_screen_accept_still_launches() -> void:
 	driver.widget_value_changed.emit("IA_LIST", "list", 0, driver.item_text(list_id, 0))
 	driver.widget_activated.emit(accept, "ACCEPT")
 	# ACCEPT on a mission-list screen launches the selected entry.
-	assert_signal_emitted_with_parameters(shell, "start_requested", ["alpha.bms"])
+	assert_signal_emitted_with_parameters(shell, "start_requested", ["alpha.bms", -1, 0])
 	DirAccess.remove_absolute(dir.path_join("main.mnu"))
 	DirAccess.remove_absolute(dir.path_join("alpha.bms"))
 	DirAccess.remove_absolute(dir)

@@ -1782,7 +1782,12 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 			}
 		}
 		int style = -1;
-		if (i == selected || multi_selected) {
+		if (ws != nullptr && static_cast<size_t>(i) < ws->disabled_items.size() &&
+				ws->disabled_items[static_cast<size_t>(i)] != 0) {
+			// A locked row's state is 1, the disabled index, whatever the pointer
+			// [orig: CListWnd_SetRowAvailable @ 0x644aa0; the state as the style index @ 0x64419c].
+			style = kStateDisabled;
+		} else if (i == selected || multi_selected) {
 			style = kStateSelected;
 		} else if (i == hovered) {
 			style = kStateMouseover;

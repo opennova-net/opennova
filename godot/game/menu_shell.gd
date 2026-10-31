@@ -114,7 +114,9 @@ var covered := Callable()  # () -> bool
 
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
-signal start_requested(bms_name: String)
+# `campaign` / `campaign_mission`: the picked mission's campaign words (-1, 0 none), which the
+# mission start records in the profile and its round end reads (engine MenuFlow::selected_campaign).
+signal start_requested(bms_name: String, campaign: int, campaign_mission: int)
 # `reason` names what ends the process, for the exit's log line.
 signal exit_to_desktop_requested(reason: String)
 signal return_to_menu_requested()
@@ -607,6 +609,9 @@ func _wire_named_controls() -> void:
 	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
 			sp_accept_control_names)
 	_driver.set_mod_descriptions(mod_desc_names)
+	# The single-player screen's inputs: the title's screen, and under dfx2.exe's campaign tabs
+	# the campaign reader's file, menu table and the profile's progress (engine MenuFlow).
+	_driver.set_single_player_source(PlayerProfile.store(), _text)
 
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
@@ -666,6 +671,9 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 	# controls (engine menu_commands.h MenuCommand::Update).
 	if _driver.screen_command(_driver.widget_screen_of(id), widget_name, _in_game) == "update":
 		_launch_update()
+		return
+	# The campaign tabs' radios refresh ACCEPT (engine MenuFlow::activate_tab).
+	if _driver.activate_single_player_tab(widget_name):
 		return
 	var handler: Callable = _named_handlers.get(widget_name.to_upper(), Callable())
 	if handler.is_valid():
@@ -856,6 +864,9 @@ func _on_quit_requested() -> void:
 
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
+	# The campaign list's pick is the engine's (MenuFlow::select_campaign).
+	if kind == "list" and _driver.select_campaign(_driver.widget_id(widget_name), index):
+		return
 	if kind == "list" and _is_mission_list(widget_name):
 		_driver.select_mission(_driver.widget_id(widget_name), index, value)
 	elif kind == "list" and _is_mod_list(widget_name):
@@ -889,7 +900,8 @@ func _on_start_control() -> void:
 	if mission.is_empty():
 		push_warning("MenuShell: start pressed with no mission selected")
 		return
-	start_requested.emit(mission)
+	var campaign := _driver.get_selected_campaign()
+	start_requested.emit(mission, campaign.x, campaign.y)
 
 
 func _on_exit_control() -> void:

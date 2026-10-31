@@ -19,6 +19,8 @@
 #include <runtime/menu/options_screen.h>
 #include <runtime/profile/player_profiles.h>
 #include <base/gameprofile/game_type.h>
+#include <base/title/title.h>
+#include <formats/rtxt/rtxt.h>
 
 #include <cstdio>
 #include <map>
@@ -1097,6 +1099,15 @@ void test_mouse() {
 	rt.process_mouse(5, 5, true);
 	rt.process_mouse(5, 5, false);
 	CHECK(rec.count(MenuEvent::Kind::ListActivated) == 1);
+	// A locked row takes nothing, no pick and no event [orig: CListWnd_OnCommand @ 0x643df4;
+	// CListWnd_SetRowAvailable @ 0x644aa0].
+	rt.set_widget_items(13, {"a", "b", "c"});
+	rt.set_item_enabled(13, 2, false);
+	rec.events.clear();
+	rt.process_mouse(5, 5, true, /*double_click=*/true);
+	rt.process_mouse(5, 5, false);
+	CHECK(rec.count(MenuEvent::Kind::ValueChanged) == 0 && rec.count(MenuEvent::Kind::ListActivated) == 0);
+	rt.set_item_enabled(13, 2, true);
 	// A press a scrollbar part took never reaches the list.
 	rec.events.clear();
 	frame.scroll_owned = true;
@@ -1544,6 +1555,114 @@ void test_shell_flow() {
 	flow.request_expansion("first", "", true);
 	flow.request_expansion("last", "", true);
 	CHECK(flow.take_expansion_reload() == "last");
+}
+
+// DFX2-60: dfx2.exe's SINGLE_PLAYER tabs. The populate reads the campaigns into CA_LIST (a
+// campaign whose depends are incomplete locked), shows the picked campaign (campaign 0 with none
+// picked) in BRIEFING and CA_MISSION_LIST, and lists in IA_LIST the plain Co-op missions no
+// campaign holds or that are complete; the radios refresh ACCEPT from their tab's list; a pick on
+// either list names the mission and its campaign words. [orig: sub_560510 @0x560510, sub_560190
+// @0x560190, sub_55FAD0 @0x55fad0, sub_560BC0 @0x560bc0, SinglePlayer_RefreshAcceptOnActivate
+// @0x560710 (dfx2.exe)]
+void test_campaign_tabs() {
+	mnu::Document doc;
+	mnu::Screen screen;
+	screen.name = "SINGLE_PLAYER";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	root.children = {
+		widget("CA_LIST", mnu::WindowType::List),
+		widget("CA_MISSION_LIST", mnu::WindowType::List),
+		widget("BRIEFING", mnu::WindowType::Static),
+		widget("CAMPAIGN_IMAGE_OVERLAY", mnu::WindowType::Static),
+		widget("IA_LIST", mnu::WindowType::List),
+		widget("IA_BRIEFING", mnu::WindowType::Static),
+		widget("ACCEPT", mnu::WindowType::Button),
+		widget("RADIO_TAB_CAMPAIGN", mnu::WindowType::Radio),
+		widget("RADIO_TAB_INSTANTACTION", mnu::WindowType::Radio)};
+	screen.roots.push_back(root);
+	doc.screens.push_back(screen);
+	MenuRuntime menu;
+	menu.open_document(&doc, "sp.mnu", "");
+	rtxt::File text;
+	text.sections.push_back({"Campaign", 2});
+	text.entries.push_back({"ID_A", "Alpha", {}, 0});
+	text.entries.push_back({"ID_A_BRIEF", "Alpha briefing", {}, 0});
+	const std::string def =
+			"complete_overlay done.tga\r\n"
+			"begin a\r\ntitle ID_A\r\nbriefing ID_A_BRIEF\r\nimage a.tga\r\n"
+			"mission c1.bms\r\nmission c2.bms c1.bms\r\nend\r\n"
+			"begin b\r\ntitle ID_B\r\ndepend a\r\nmission c3.bms\r\nend\r\n"
+			"begin untitled\r\nend\r\n";
+	campaign::CompletionTable progress{};
+	MenuFlow flow;
+	Title dfx2;
+	dfx2.sp_campaign_tabs = true;
+	flow.set_title(&dfx2);
+	flow.set_mission_controls({"IA_LIST", "CA_MISSION_LIST"}, {"BRIEFING"}, {"ACCEPT"});
+	flow.set_campaign_source(def, &text, progress);
+	const std::vector<MissionChoice> rows = {
+		{"c1.bms", "C1", "c1 briefing", game_type::kCoop, {}, "C1"},
+		{"c2.bms", "C2", "c2 briefing", game_type::kCoop, {}, ""},
+		{"c3.bms", "C3", "", game_type::kCoop, {}, "C3"},
+		{"free.bms", "*Free", "free briefing", game_type::kCoop, {}, "Free"},
+		{"obj.bms", "Objective", "", game_type::kObjectiveCoop, {}, "Objective"},
+		{"dm.bms", "DM", "", game_type::kDeathmatch, {}, "DM"}};
+	const int ca = menu.widget_id("CA_LIST"), missions = menu.widget_id("CA_MISSION_LIST");
+	const int ia = menu.widget_id("IA_LIST"), accept = menu.widget_id("ACCEPT");
+	const int briefing = menu.widget_id("BRIEFING"), ia_briefing = menu.widget_id("IA_BRIEFING");
+	const int overlay = menu.widget_id("CAMPAIGN_IMAGE_OVERLAY");
+	// CA_MISSION_LIST's own seed is the reader's: it fills nothing.
+	flow.seed_missions(menu, missions, rows);
+	CHECK(menu.item_count(missions) == 0 && menu.item_count(ca) == 0);
+	flow.seed_missions(menu, ia, rows);
+	// The titled campaigns, b locked (a incomplete); none picked, campaign 0 shown.
+	CHECK(menu.get_widget_items(ca) == (std::vector<std::string>{"Alpha", "??ID_B??"}));
+	CHECK(menu.is_item_enabled(ca, 0) && !menu.is_item_enabled(ca, 1) && menu.selected_row(ca) == -1);
+	CHECK(menu.get_widget_text(briefing) == "Alpha briefing");
+	// c2 waits on c1; a title-less row shows its file name.
+	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C1"}));
+	CHECK(!menu.is_widget_shown(overlay) && flow.campaign_image() == "a.tga");
+	// IA_LIST: free.bms alone (the campaign ones incomplete, objective Co-op out, DM out).
+	CHECK(menu.get_widget_items(ia) == (std::vector<std::string>{"*Free"}));
+	CHECK(menu.is_widget_disabled(accept) && menu.get_widget_text(ia_briefing).empty());
+	// The campaign tab's radio: no mission picked, ACCEPT stays off.
+	CHECK(flow.activate_tab(menu, "RADIO_TAB_CAMPAIGN") && menu.is_widget_disabled(accept));
+	CHECK(!flow.activate_tab(menu, "ACCEPT"));
+	// A campaign mission's pick: its briefing in BRIEFING, its image, ACCEPT on, its words.
+	// (A press picks the row in the list, then the pick reaches the flow.)
+	menu.select_row(missions, 0, false);
+	flow.select_mission(menu, missions, 0, "");
+	CHECK(flow.selected_mission() == "c1.bms" && !menu.is_widget_disabled(accept));
+	CHECK(menu.get_widget_text(briefing) == "c1 briefing" && flow.campaign_image() == "c1.tga");
+	CHECK(flow.selected_campaign().campaign == 0 && flow.selected_campaign().campaign_mission == 0);
+	CHECK(menu.get_widget_text(ia_briefing).empty());
+	// The instant-action radio: IA_LIST has none picked, ACCEPT off; its pick writes IA_BRIEFING.
+	CHECK(flow.activate_tab(menu, "RADIO_TAB_INSTANTACTION") && menu.is_widget_disabled(accept));
+	menu.select_row(ia, 0, false);
+	flow.select_mission(menu, ia, 0, "");
+	CHECK(flow.selected_mission() == "free.bms" && flow.selected_campaign().campaign == -1);
+	CHECK(menu.get_widget_text(ia_briefing) == "free briefing" && menu.get_widget_text(briefing) == "c1 briefing");
+	CHECK(flow.activate_tab(menu, "RADIO_TAB_INSTANTACTION") && !menu.is_widget_disabled(accept));
+	// The campaign list's pick shows campaign a again, ACCEPT off.
+	CHECK(flow.select_campaign(menu, ca, 0) && menu.is_widget_disabled(accept));
+	CHECK(!flow.select_campaign(menu, ia, 0));
+	// Campaign a complete: b unlocked, the overlay shown, c1/c2 into IA_LIST; the pick stays.
+	progress[0][0] = progress[0][1] = 1;
+	flow.set_campaign_source(def, &text, progress);
+	flow.seed_missions(menu, ia, rows);
+	CHECK(menu.is_item_enabled(ca, 1) && menu.selected_row(ca) == 0 && menu.is_widget_shown(overlay));
+	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C1", "c2.bms"}));
+	CHECK(menu.get_widget_items(ia) == (std::vector<std::string>{"C1", "C2", "*Free"}));
+	CHECK(flow.select_campaign(menu, ca, 1));
+	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C3"}) && !menu.is_widget_shown(overlay));
+	CHECK(menu.get_widget_text(briefing).empty());
+
+	// Jointops.exe's screen: no tabs, every waypoint-family mission in IA_LIST, BRIEFING its pane.
+	MenuFlow jo;
+	jo.set_mission_controls({"IA_LIST", "CA_MISSION_LIST"}, {"BRIEFING"}, {"ACCEPT"});
+	jo.seed_missions(menu, ia, rows);
+	CHECK(menu.item_count(ia) == 5);
+	CHECK(!jo.select_campaign(menu, ca, 0) && !jo.activate_tab(menu, "RADIO_TAB_CAMPAIGN"));
 }
 
 void test_host_dialog() {
@@ -2551,6 +2670,7 @@ int main() {
 	test_duplicate_screens();
 	test_mission_choice();
 	test_shell_flow();
+	test_campaign_tabs();
 	test_host_dialog();
 	test_host_dialog_multiselect();
 	test_spin_rows_enabled_and_parts();

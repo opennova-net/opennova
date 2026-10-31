@@ -1938,6 +1938,9 @@ void MenuRuntime::arrow_click_(int id, int arrow) {
 // then the selection event, 0x5000001 on a press and 0x5000002 on a double click (@0x643eb8,
 // @0x643ec9 / @0x643edc)]
 void MenuRuntime::list_press_(int id, int row, bool is_double) {
+	// A locked row (set_item_enabled false: CListWnd_SetRowAvailable's state 1) takes nothing, no
+	// event either [orig: CListWnd_OnCommand @ 0x643df4 — the `!= 1` row-state test].
+	if (!is_item_enabled(id, row)) return;
 	const mnu::Window *w = index_.window(id);
 	int pick = row;
 	if (w != nullptr && w->items.multiselect) {

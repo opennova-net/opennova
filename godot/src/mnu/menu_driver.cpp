@@ -20,6 +20,7 @@
 #include "util/string_convert.h"
 
 #include <runtime/inmatch/role_feeds.h> // deploy_table_zones
+#include <base/title/title.h>
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/inmatch/vehicle_menu.h> // the ITEM_DISPLAY preview's view
 #include <runtime/world/occlusion.h>      // render_matrix_from_pose
@@ -46,7 +47,8 @@ std::vector<opennova::menu::MissionChoice> mission_choices(const TypedArray<Miss
 	for (int i = 0; i < rows.size(); ++i) {
 		const Ref<MissionCatalogRow> row = rows[i];
 		if (row.is_valid()) choices.push_back({to_std(row->get_file()), to_std(row->display_text()),
-				to_std(row->get_briefing()), static_cast<uint32_t>(row->get_game_type())});
+				to_std(row->get_briefing()), static_cast<uint32_t>(row->get_game_type()), {},
+				to_std(row->get_title())});
 	}
 	return choices;
 }
@@ -902,6 +904,37 @@ void MenuDriver::select_mission(int p_id, int p_row, const String &p_fallback) {
 
 String MenuDriver::get_selected_mission() const { return to_gd(flow_.selected_mission()); }
 
+Vector2i MenuDriver::get_selected_campaign() const {
+	const opennova::mission_catalog::CampaignWords &words = flow_.selected_campaign();
+	return Vector2i(words.campaign, words.campaign_mission);
+}
+
+bool MenuDriver::activate_single_player_tab(const String &p_name) {
+	return flow_.activate_tab(runtime_, to_std(p_name));
+}
+
+void MenuDriver::set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
+		const Ref<RtxtStringFile> &p_menu_text) {
+	const opennova::Title &title = ResourceRoot::session_title(root_);
+	flow_.set_title(&title);
+	if (!title.sp_campaign_tabs) return;
+	sp_menu_text_ = p_menu_text;
+	std::string def;
+	if (root_.is_valid()) {
+		const PackedByteArray bytes = root_->read_file(to_gd(opennova::campaign::kCampaignFile));
+		def.assign(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+	}
+	opennova::campaign::CompletionTable progress{};
+	if (p_profiles.is_valid()) {
+		const auto &table = p_profiles->native().current().campaign_complete;
+		for (size_t c = 0; c < progress.size() && c < table.size(); ++c)
+			for (size_t m = 0; m < progress[c].size() && m < table[c].size(); ++m)
+				progress[c][m] = table[c][m];
+	}
+	flow_.set_campaign_source(std::move(def),
+			sp_menu_text_.is_valid() ? &sp_menu_text_->get_native() : nullptr, progress);
+}
+
 void MenuDriver::set_mod_descriptions(const PackedStringArray &p_names) {
 	mods_.set_descriptions(to_std_strings(p_names));
 }
@@ -1125,6 +1158,12 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_mission", "id", "row", "fallback"), &MenuDriver::select_mission);
 	ClassDB::bind_method(D_METHOD("activate_mission", "id", "row"), &MenuDriver::activate_mission);
 	ClassDB::bind_method(D_METHOD("get_selected_mission"), &MenuDriver::get_selected_mission);
+	ClassDB::bind_method(D_METHOD("get_selected_campaign"), &MenuDriver::get_selected_campaign);
+	ClassDB::bind_method(D_METHOD("set_single_player_source", "profiles", "menu_text"),
+			&MenuDriver::set_single_player_source);
+	ClassDB::bind_method(D_METHOD("select_campaign", "id", "row"), &MenuDriver::select_campaign);
+	ClassDB::bind_method(D_METHOD("activate_single_player_tab", "name"),
+			&MenuDriver::activate_single_player_tab);
 	ClassDB::bind_method(D_METHOD("clear_selected_mission"), &MenuDriver::clear_selected_mission);
 	ClassDB::bind_method(D_METHOD("set_mod_descriptions", "names"), &MenuDriver::set_mod_descriptions);
 	ClassDB::bind_method(D_METHOD("seed_mod_list", "id"), &MenuDriver::seed_mod_list);
