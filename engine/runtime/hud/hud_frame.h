@@ -520,11 +520,10 @@ struct HudLayout {
 	uint32_t weapon_text = 0xFFFAD605u;
 	uint32_t stance_tint = 0xFFFFFFFFu;
 	uint32_t heat_border = 0xFFFFFFFFu;
-	// The stance colour TRIPLE. Only `bad` was pulled into the layout before,
-	// because the stance bar is the only element that needed it; the vehicle
-	// panel bands its seats with the same three [orig: the good/middle/bad arms
-	//  of the seat loop @0x5A4FD0], so all three are carried now. The def has
-	// parsed all three all along.
+	// The stance colour TRIPLE (hudpos stancecolor_good / _middle / _bad): the health
+	// bar's fill bands with it [orig: HUD_DrawHealthBar @0x5a2f88 / @0x5a2f90 / @0x5a2f34],
+	// the vehicle panel its seats [orig: the good/middle/bad arms of the seat loop
+	// @0x5A4FD0], the heat bar fills with `bad` [orig: HUD_DrawWeaponHeatBar @0x59976d].
 	uint32_t stance_good = 0xFF05FA0Du;
 	uint32_t stance_middle = 0xFFFAA608u;
 	uint32_t stance_bad = 0xFFB00A0Au;

@@ -1277,9 +1277,14 @@ void HudFrameCompiler::element_health(const HudFrameState &state, float w,
 	if (state.combat.death_screen && !state.session.spectating) return;
 	const int32_t ratio_fp16 = hud_info_health_ratio_fp16(state);
 	const int band = health_color_band_fp16(ratio_fp16);
-	const uint32_t fill = band == 0 ? layout_.tag_good
-			: band == 1              ? layout_.tag_middle
-									 : layout_.tag_bad;
+	// The fill takes the stance colour triple, the hudpos stancecolor_good / _middle / _bad
+	// words, never the tag colours (D-HUD-75) [orig: HUD_DrawHealthBar @0x5a2e50 -
+	// g_StanceColorGood @0x5a2f88, g_StanceColorMiddle @0x5a2f90, g_StanceColorBad @0x5a2f34;
+	// HUD_ParseHudposToken @0x5a0d5f..0x5a0dc6 the stancecolor_good word] [orig: HUD_DrawHealthBar
+	// @0x5a1880 (@0x5a19b8, @0x5a19c0, @0x5a1964) (dfx2.exe)].
+	const uint32_t fill = band == 0 ? layout_.stance_good
+			: band == 1              ? layout_.stance_middle
+									 : layout_.stance_bad;
 	// The fill's width is a whole pixel count, the scaled bar width times the
 	// 16.16 ratio rounded, and its clear runs from x0 + 1 to x0 + width
 	// [orig: HUD_DrawHealthBar @0x5A2EC3..0x5A2EE3 the width, Render_FillViewportRect

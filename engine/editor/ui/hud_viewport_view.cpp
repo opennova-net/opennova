@@ -162,7 +162,7 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 		ImGui::SetNextItemWidth(width);
 		int health = options.health;
 		if (ImGui::SliderInt("Health", &health, 0, 100, "%d%%")) options.health = health;
-		ui_kit::tooltip("The player's health: the health bar's fill and its colour band (tagcolor_good, _middle, _bad).");
+		ui_kit::tooltip("The player's health: the health bar's fill and its colour band (stancecolor_good, _middle, _bad).");
 		bool hit = options.damage > 0;
 		if (ui_kit::check(row, "Hit", &hit,
 		                  "The red damage vignette (vignette.tga) at its strongest, as a hit leaves it."))

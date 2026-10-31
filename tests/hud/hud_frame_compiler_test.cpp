@@ -376,7 +376,7 @@ void test_declutter_element_gates(const fnt_font_t *font) {
 		const HudDrawList &bar_off = compiler.compile(state, 1024.0f, 768.0f);
 		bool saw_health_fill = false;
 		for (const HudQuad &q : bar_off.quads) {
-			if (q.filled && q.color == layout.tag_middle) saw_health_fill = true;
+			if (q.filled && q.color == layout.stance_middle) saw_health_fill = true;
 		}
 		CHECK(!saw_health_fill && !bar_off.tris.empty(),
 				"a level-2-masked DMGBAR hides the bar and nothing else");
@@ -448,7 +448,7 @@ void test_compiler_health_and_order(const fnt_font_t *font) {
 	CHECK(list.quads.size() == 2, "health emits fill + border");
 	CHECK(list.quads[0].filled && !list.quads[1].filled,
 			"fill first, border on top");
-	CHECK(list.quads[0].color == layout.tag_middle,
+	CHECK(list.quads[0].color == layout.stance_middle,
 			"0.5 health takes the middle band color");
 
 	// Heat with an armed weapon.

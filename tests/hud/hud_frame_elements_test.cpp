@@ -250,9 +250,9 @@ void test_team_id_line(const fnt_font_t *font) {
 void test_health_bar_death_arm(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.health_rect = {2.0f, 739.0f, 140.0f, 18.0f, true};
-	layout.tag_good = 0xFF00FF00u;
-	layout.tag_middle = 0xFFFFFF00u;
-	layout.tag_bad = 0xFFFF0000u;
+	layout.stance_good = 0xFF00FF00u;
+	layout.stance_middle = 0xFFFFFF00u;
+	layout.stance_bad = 0xFFFF0000u;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
@@ -260,8 +260,8 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 	const auto fill_width = [&]() -> float {
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		for (const HudQuad &q : list.quads)
-			if (q.color == layout.tag_good || q.color == layout.tag_middle ||
-					q.color == layout.tag_bad)
+			if (q.color == layout.stance_good || q.color == layout.stance_middle ||
+					q.color == layout.stance_bad)
 				return q.x1 - q.x0;
 		return -1.0f;
 	};
@@ -282,9 +282,9 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 void test_health_bar_fill_rounds(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.health_rect = {2.0f, 739.0f, 100.0f, 18.0f, true};
-	layout.tag_good = 0xFF00FF00u;
-	layout.tag_middle = 0xFFFFFF00u;
-	layout.tag_bad = 0xFFFF0000u;
+	layout.stance_good = 0xFF00FF00u;
+	layout.stance_middle = 0xFFFFFF00u;
+	layout.stance_bad = 0xFFFF0000u;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
@@ -292,7 +292,7 @@ void test_health_bar_fill_rounds(const fnt_font_t *font) {
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 	bool seen = false;
 	for (const HudQuad &q : list.quads) {
-		if (q.color != layout.tag_good && q.color != layout.tag_middle && q.color != layout.tag_bad)
+		if (q.color != layout.stance_good && q.color != layout.stance_middle && q.color != layout.stance_bad)
 			continue;
 		seen = true;
 		CHECK(q.x0 == 3.0f && q.x1 == 52.0f);
@@ -303,8 +303,35 @@ void test_health_bar_fill_rounds(const fnt_font_t *font) {
 	state.health_fraction = -0.25f;
 	bool full_good = false;
 	for (const HudQuad &q : compiler.compile(state, 1024.0f, 768.0f).quads)
-		if (q.color == layout.tag_good && q.x0 == 3.0f && q.x1 == 102.0f) full_good = true;
+		if (q.color == layout.stance_good && q.x0 == 3.0f && q.x1 == 102.0f) full_good = true;
 	CHECK(full_good);
+}
+
+// THE DMGBAR FILL'S COLOUR (D-HUD-75): the hudpos stancecolor_good / _middle / _bad words by
+// the 0.75 / 0x6FFF bands, never the tagcolor_* words the friendly tags take; both titles
+// [orig: HUD_DrawHealthBar @0x5a2e50 - g_StanceColorGood @0x5a2f88, g_StanceColorMiddle
+// @0x5a2f90, g_StanceColorBad @0x5a2f34] [orig: HUD_DrawHealthBar @0x5a1880 (@0x5a19b8) (dfx2.exe)].
+void test_health_bar_stance_colours(const fnt_font_t *font) {
+	HudLayout layout;
+	layout.health_rect = {2.0f, 739.0f, 100.0f, 18.0f, true};
+	layout.stance_good = 0xFF102030u;
+	layout.stance_middle = 0xFF405060u;
+	layout.stance_bad = 0xFF708090u;
+	layout.tag_good = 0xFF00FF00u;
+	layout.tag_middle = 0xFFFFFF00u;
+	layout.tag_bad = 0xFFFF0000u;
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	const auto fill_colour = [&](float fraction) -> uint32_t {
+		state.health_fraction = fraction;
+		for (const HudQuad &q : compiler.compile(state, 1024.0f, 768.0f).quads)
+			if (q.filled) return q.color;
+		return 0u;
+	};
+	CHECK(fill_colour(0.9f) == layout.stance_good);
+	CHECK(fill_colour(0.5f) == layout.stance_middle);
+	CHECK(fill_colour(0.2f) == layout.stance_bad);
 }
 
 // THE HUDLS SLOT BAR: the HUDLS_SYSTEM gate, the 6,7,8,9,0 visit packing
@@ -736,6 +763,7 @@ int main() {
 	test_team_id_line(&font);
 	test_health_bar_death_arm(&font);
 	test_health_bar_fill_rounds(&font);
+	test_health_bar_stance_colours(&font);
 	test_slot_bar(&font);
 	test_objectives_panel(&font);
 	test_no_hud(&font);
