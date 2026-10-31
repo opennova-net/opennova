@@ -232,6 +232,7 @@ func _open_stat_screen(sim: Simulation) -> void:
 func _populate(sim: Simulation) -> void:
 	var list_id := _driver.widget_id(RESULT_LIST)
 	if list_id < 0:
+		_driver.hide_stat_done(sim)
 		return
 	for tab in TAB_WIDGETS:
 		var id := _driver.widget_id(tab)
