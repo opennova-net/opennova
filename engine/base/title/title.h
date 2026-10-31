@@ -62,6 +62,15 @@ struct TitleHudMapLegend {
 	int row_step = 0;
 };
 
+// A rect in the HUD's 1024 x 768 design space by its corners, as the executable's draws push
+// them: (x0, y0) the top left, (x1, y1) the bottom right.
+struct TitleRect {
+	int32_t x0 = 0;
+	int32_t y0 = 0;
+	int32_t x1 = 0;
+	int32_t y1 = 0;
+};
+
 // A title (CONTEXT.md "Title"): the retail game a game runs as, by its short code (the `/game
 // <code>` launch flag, a project's target game). Its rows live in games/<code>/<code>_title.cpp,
 // which games::install() hands to install_titles; engine/ holds the type and the lookups alone.
@@ -296,6 +305,10 @@ struct Title {
 	// stands at least (Q16 world units; runtime/renderer/environment_cube.h
 	// environment_cube_eye_height): Jointops.exe's 10 units, dfx2.exe's 5. 0 unwitnessed.
 	int32_t env_cube_terrain_clearance = 0;
+	// DFX2-44: the NVG gain scale indicator's rect over the NVG mask (runtime/hud/view_effects.h
+	// nvg_scale_rect): Jointops.exe's (960, 32)..(1008, 64) at the top right, dfx2.exe's
+	// (480, 682)..(544, 702) at the bottom centre. Zero unwitnessed.
+	TitleRect nvg_gain_rect;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

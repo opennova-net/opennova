@@ -56,6 +56,7 @@ Title make() {
 	t.hud_map_no_bank_names = jo_title().hud_map_no_bank_names;
 	// Its renderer is Joint Operations', as its code is.
 	t.env_cube_terrain_clearance = jo_title().env_cube_terrain_clearance;
+	t.nvg_gain_rect = jo_title().nvg_gain_rect;
 	return t;
 }
 

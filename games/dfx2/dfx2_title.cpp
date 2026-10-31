@@ -233,6 +233,9 @@ Title make() {
 	// DFX2-43: the cube's eye at least 5 units over the terrain [orig: EnvCube_Update @0x60F5F0 -
 	//  `add eax, 50000h` @0x60F67B, the raise @0x60F689..0x60F68B (dfx2.exe)].
 	t.env_cube_terrain_clearance = 0x50000;
+	// DFX2-44: the NVG gain scale at the bottom centre [orig: the twin of NVG_DrawMaskAndGain
+	//  @0x5CEEE0 - 0x1E0 @0x5CEF75, 0x2AA @0x5CEF7D, 0x220 @0x5CEF85, 0x2BE @0x5CEF8D (dfx2.exe)].
+	t.nvg_gain_rect = TitleRect{ 480, 682, 544, 702 };
 	return t;
 }
 

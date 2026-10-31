@@ -142,6 +142,10 @@ Title make() {
 	// DFX2-43: the cube's eye at least 10 units over the terrain [orig: EnvCube_Update @0x6106A0 -
 	//  `add eax, 0A0000h` @0x61072B over Terrain_GetHeightAtPosition, the raise @0x610739..0x61073B].
 	t.env_cube_terrain_clearance = 0xA0000;
+	// DFX2-44: the NVG gain scale's corners [orig: NVG_DrawMaskAndGain @0x5CFF70 - 0x3C0 @0x5D0005,
+	//  0x20 @0x5D000D, 0x3F0 @0x5D0015, 0x40 @0x5D001D, each pair through
+	//  Viewport_ScaleToVirtualCoords @0x5D0025 / @0x5D0039].
+	t.nvg_gain_rect = TitleRect{ 960, 32, 1008, 64 };
 	return t;
 }
 

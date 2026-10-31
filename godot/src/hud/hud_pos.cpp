@@ -510,8 +510,10 @@ Vector2 HudPos::binocular_digit_pos() {
 }
 
 Rect2 HudPos::nvg_scale_rect() {
-	return Rect2(opennova::hud::kNvgScaleX, opennova::hud::kNvgScaleY,
-			opennova::hud::kNvgScaleW, opennova::hud::kNvgScaleH);
+	// The session's title's rect (DFX2-44).
+	const opennova::hud::NvgScaleRect r =
+			opennova::hud::nvg_scale_rect(ResourceRoot::session_title(Ref<ResourceRoot>()));
+	return Rect2(r.x, r.y, r.w, r.h);
 }
 
 Color HudPos::nvg_scale_modulate() {

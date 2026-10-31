@@ -188,7 +188,8 @@ public:
 
 	// The first-person view-effect spec (hud/view_effects.h carries the
 	// values and witnesses): binocular/NVG overlay rects in the 1024x768
-	// design space, the NVG scale modulate, and the rangefinder easing step.
+	// design space (the NVG scale rect the session's title's, DFX2-44), the NVG
+	// scale modulate, and the rangefinder easing step.
 	static Rect2 binocular_crosshair_rect();
 	static Vector2 binocular_digit_pos();
 	static Rect2 nvg_scale_rect();
