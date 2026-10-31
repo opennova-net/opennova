@@ -707,6 +707,22 @@ struct RecordingCanvas : menu::MenuTableCellCanvas {
 	}
 };
 
+// The label's text: the SpawnZoneList zone at the row's column-1 value less one, its uiname
+// [orig: sub_550CF0 @0x550d55..0x550d86 (dfx2.exe)].
+void test_spawn_table_zone_name() {
+	World w;
+	w.registry.configure_pool(1, 2);
+	Entity heli;
+	heli.has_item_def = true;
+	heli.item_ui_name = "Ka-52";
+	SpawnZoneRegistry reg;
+	reg.entries.push_back(w.registry.spawn(1, heli));
+	CHECK(deploy_table_zone_name(w, reg, 1) == "Ka-52");
+	CHECK(deploy_table_zone_name(w, reg, 0).empty() && deploy_table_zone_name(w, reg, 2).empty());
+	w.registry.get(reg.entries[0])->has_item_def = false;
+	CHECK(deploy_table_zone_name(w, reg, 1).empty());
+}
+
 void test_spawn_table_paint() {
 	menu::MenuTableCellEvent cell;
 	cell.row = 2;
@@ -742,6 +758,7 @@ void test_spawn_table_paint() {
 }
 
 int main() {
+	test_spawn_table_zone_name();
 	test_spawn_table_paint();
 	test_deploy_activation();
 	test_penalty_line_instruction();

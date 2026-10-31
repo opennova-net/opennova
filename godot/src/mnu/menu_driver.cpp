@@ -784,14 +784,28 @@ void MenuDriver::apply_deploy_activation(const Ref<Simulation> &p_sim,
 			p_sim->role_view(), game_text_lookup(p_gametext)));
 }
 
-bool MenuDriver::install_deploy_table_painter() {
+bool MenuDriver::install_deploy_table_painter(const Ref<Simulation> &p_sim) {
 	MenuFrame *frame = frame_();
-	const int index = frame_index(runtime_.find_screen_control("DEATH", "SPAWNPOINTS_TABLE"));
+	const int table = runtime_.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
+	const int index = frame_index(table);
 	if (frame == nullptr || index < 0) return false;
+	const ObjectID driver_id(get_instance_id());
+	const ObjectID sim_id = p_sim.is_valid() ? ObjectID(p_sim->get_instance_id()) : ObjectID();
 	frame->set_table_cell_painter(index,
-			[](const opennova::menu::MenuTableCellEvent &event,
+			[driver_id, sim_id, table](const opennova::menu::MenuTableCellEvent &event,
 					opennova::menu::MenuTableCellCanvas &canvas) {
-				opennova::world::deploy_table_paint(event, canvas, std::string());
+				std::string name;
+				MenuDriver *driver = Object::cast_to<MenuDriver>(ObjectDB::get_instance(driver_id));
+				Simulation *sim = Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id));
+				if (event.row >= 0 && event.column == 1 && driver != nullptr && sim != nullptr &&
+						sim->kernel_) {
+					const std::optional<int32_t> value =
+							driver->runtime().table_cell_record(table, event.row, 1);
+					if (value.has_value())
+						name = opennova::world::deploy_table_zone_name(sim->kernel_->world,
+								sim->deploy_zone_registry(), *value);
+				}
+				opennova::world::deploy_table_paint(event, canvas, name);
 			});
 	return true;
 }
@@ -1328,7 +1342,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("deploy_table_click", "id", "row", "state", "double_click"),
 			&MenuDriver::deploy_table_click);
 	ClassDB::bind_method(D_METHOD("deploy_map_moved"), &MenuDriver::deploy_map_moved);
-	ClassDB::bind_method(D_METHOD("install_deploy_table_painter"),
+	ClassDB::bind_method(D_METHOD("install_deploy_table_painter", "sim"),
 			&MenuDriver::install_deploy_table_painter);
 	ClassDB::bind_method(D_METHOD("apply_deploy_activation", "sim", "gametext"),
 			&MenuDriver::apply_deploy_activation);

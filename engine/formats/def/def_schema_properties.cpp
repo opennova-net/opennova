@@ -68,6 +68,7 @@ const std::vector<DefProperty> kItemProperties = {
 	{"kz", {"kz"}},
 	{"debris_scale", {"debris_scale"}},
 	{"sid", {"sid"}, DefEncoding::Plain, 1.0, ""},
+	{"uiname", {"ui_name"}, DefEncoding::Plain, 1.0, ""},
 	{"graphic", {"graphic"}, DefEncoding::Plain, 1.0, ""},
 	{"anim_def", {"anim_def"}, DefEncoding::Plain, 1.0, ""},
 	{"husk", {"husk"}, DefEncoding::Plain, 1.0, ""},

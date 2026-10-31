@@ -747,6 +747,7 @@ struct Entity {
     // [orig: WeaponSlotTable_LoadAllFromDefs @0x541503..0x5415ba]
     uint32_t carry_flags = 0;
 	std::string hud_image; // item definition sprite, read by the HUD
+	std::string item_ui_name; // the definition's uiname (+0x40): dfx2.exe's DEATH table label
 	// The shooter's hit-feedback latch, modelled as a serial each connection
 	// consumes once. [orig: entity+0x2C |= 0x1000 @0x4E9962; test/clear
 	//  @0x4FF7C5..0x4FF7D9]

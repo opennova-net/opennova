@@ -647,7 +647,7 @@ func _ensure_menu() -> bool:
 	# A title whose DEATH screen has the spawn table draws its custom cells (engine
 	# world::deploy_table_paint carries the witness).
 	if _picks_loadout():
-		_driver.install_deploy_table_painter()
+		_driver.install_deploy_table_painter(_view.sim())
 	_mount_map_window()
 	return true
 

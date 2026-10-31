@@ -1120,6 +1120,13 @@ typedef struct DefItemDef {
        model load loads as its husk-shadow model [orig: ItemDef_ParseProperty @0x49f45e..0x49f491 (the copy to
        +0xB0); EntityDef_LoadModelsAndCallbacks @0x43a361..0x43a38a]. Appended (layout stability). */
     char huskshadow[16];
+    /* 'uiname <text>' -> the 16-byte name at +0x40: a token of 15 characters or fewer copied
+       whole, a longer one storing nothing (the line is still the key's) [orig: ItemDef_ParseProperty
+       @0x49eca4..0x49ecfc, the length test `cmp eax, 0Fh; ja` @0x49eccc] [orig: @0x49ed14..0x49ed6c
+       (dfx2.exe)]. dfx2.exe's DEATH table draws it under a zone's icon [orig: sub_550CF0
+       @0x550d75..0x550dc8 (dfx2.exe)]; Jointops.exe's catalogs author none. Appended (layout
+       stability). */
+    char ui_name[16];
 } DefItemDef;
 
 /* The file-wide vehicle spawn registry's slots: 'pcvehicle_spawnlist' ids take them in

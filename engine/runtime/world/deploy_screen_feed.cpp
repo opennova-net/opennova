@@ -545,6 +545,15 @@ void deploy_table_paint(const menu::MenuTableCellEvent &event, menu::MenuTableCe
 	}
 }
 
+std::string deploy_table_zone_name(const World &world, const SpawnZoneRegistry &zones,
+		int32_t cell1_value) {
+	const int index = cell1_value - 1;
+	if (index < 0 || index >= static_cast<int>(zones.entries.size())) return std::string();
+	const Entity *zone = world.registry.get(zones.entries[static_cast<size_t>(index)]);
+	if (zone == nullptr || !zone->has_item_def) return std::string();
+	return zone->item_ui_name;
+}
+
 bool deploy_map_moved(menu::MenuRuntime &menu) {
 	const int table = menu.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
 	if (table < 0) return false;

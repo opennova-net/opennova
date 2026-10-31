@@ -400,6 +400,13 @@ void apply_deploy_activation(menu::MenuRuntime &menu, const DeployActivation &ac
 //  CGfxDevice_SetQuadDiffuse @0x550dfb, sub_6B5410 (Line2D_Draw) @0x550e0d..0x550e37 (dfx2.exe)]
 void deploy_table_paint(const menu::MenuTableCellEvent &event, menu::MenuTableCellCanvas &canvas,
 		const std::string &zone_name);
+// That label's text for a row whose column-1 value is `cell1_value`: the SpawnZoneList zone at
+// value - 1, its definition's uiname; "" for value 0, past the list, without the zone or its
+// definition [orig: sub_550CF0 @0x550d55..0x550d86 (dfx2.exe)].
+class World;
+struct SpawnZoneRegistry;
+std::string deploy_table_zone_name(const World &world, const SpawnZoneRegistry &zones,
+		int32_t cell1_value);
 
 class World;
 struct SpawnZoneRegistry;
