@@ -232,6 +232,17 @@ struct Title {
 	// fresh record init_defaults gives no page.
 	const char *const *profile_single_player_kit = nullptr;
 	const char *const *const *profile_class_kits = nullptr;
+	// DFX2-12, the mission start's half: a session peer's mission start writes a fixed class into
+	// the profile's side block the team names ahead of its page pick, 8 (rifleman), or 7 (gunner)
+	// in a mission of type 2 (the BMS header's +0x22A), so the kit, a self S2C 0x50's re-copy of
+	// that side and a fresh profile's C2S 0x2F read that class's page
+	// (inmatch::loadout_fixed_class). False (Jointops.exe): the block keeps the profile's own
+	// class. The 0x2F's class byte is the wire's (ProtocolInMatch::c2s_2f.loadout_class_fixed).
+	// [orig: Game_StartMission @0x524360 - the side block @0x525793..0x5257C0, its class read
+	//  @0x5257C6 with no store] [orig: Game_StartMission @0x521530 - the mission type
+	//  @0x52299E, the stores @0x5229AA / @0x5229AF, the page switch @0x5229B2..0x5229BD
+	//  (dfx2.exe)]
+	bool session_loadout_class_fixed = false;
 	// DFX2-58: the map views' zoom ceiling, the CMAP window's (its right drag and its ZOOMIN /
 	// ZOOMOUT step clamp to it) and the DEATH screen's map pane's (the show's fit, the right drag
 	// and the wheel clamp to it, and a fit landing on it resets the pan, the target and the zoom

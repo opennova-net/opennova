@@ -145,7 +145,8 @@ ServeOnlyStart run_serve_only_start(inmatch::ClientProcessState &process,
 		profile.blue.pages[3].entries.push_back(playersav::KitEntry{shell_page, 1, 0, -1});
 		int seeded_side = -1;
 		const size_t before = process.spawn_loadout_buffer.entries.size();
-		CHECK(!inmatch::seed_session_kit_from_profile(kernel.world, profile, &kJo,
+		CHECK(!inmatch::seed_session_kit_from_profile(kernel.world, profile,
+				*opennova::title_by_code("jo"),
 				opennova::bms::MissionType::NormalMission, /*assigned_team=*/1,
 				kernel.local.loadout, seeded_side));
 		CHECK(seeded_side == -1);

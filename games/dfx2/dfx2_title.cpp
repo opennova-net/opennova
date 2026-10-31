@@ -339,6 +339,9 @@ Title make() {
 	// spawn kit's too (DFX2-33, dfx2_single_player_kit).
 	t.profile_single_player_kit = kSinglePlayerKit;
 	t.profile_class_kits = kProfileClassKits;
+	// DFX2-12: the mission start's fixed class in the side block, 8 or 7 in a mission of type 2
+	// [orig: Game_StartMission @0x521530 - @0x52299E..0x5229BD (dfx2.exe)].
+	t.session_loadout_class_fixed = true;
 	// DFX2-58: the map views' ceiling 6.0 (flt_7CC0C8): the CMAP window's [orig:
 	// CMapWindow_HandleEvent @0x546a60 - @0x5454e6, @0x546fcc (dfx2.exe)] and the DEATH map
 	// pane's [orig: sub_550690 @0x550922 / @0x550967 (the reset @0x550974);

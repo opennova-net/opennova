@@ -30,13 +30,16 @@ struct NapiNPConnection;
 // team when L already exists.
 uint8_t loadout_side_team(const world::World &world, uint8_t assigned_team);
 
-// The class a protocol that fixes the loadout class (ProtocolInMatch::c2s_2f.loadout_class_fixed)
-// gives a mission of `mission_type`: 7 (gunner) in a mission of type 2, else 8 (rifleman); 0 for
-// a protocol that keeps the profile's own.
+// The class a title whose mission start fixes the loadout class (Title::session_loadout_class_fixed)
+// writes into the side block for a mission of `mission_type`: 7 (gunner) in a mission of type 2,
+// else 8 (rifleman); 0 for a title that keeps the profile's own, and with no title (a fresh
+// record with no page, whose class picks nothing). The mission start's write, not the wire's:
+// the C2S 0x2F's class byte is its protocol's (ProtocolInMatch::c2s_2f.loadout_class_fixed),
+// which the sender derives from the same header byte.
 // [orig: Game_StartMission @0x52299e..0x5229af (dfx2.exe): `movzx eax, byte_A6FB3A; sub eax, 2`,
 //  then `mov byte [esi], 8` / `mov byte [esi], 7`; NetPacket_SendLoadoutSubmit @0x42ec15..0x42ec26
-//  (dfx2.exe), the same byte]
-uint8_t loadout_fixed_class(const Protocol *protocol, bms::MissionType mission_type);
+//  (dfx2.exe), the sender's read of the byte]
+uint8_t loadout_fixed_class(const Title *title, bms::MissionType mission_type);
 
 // The Game_StartMission copy: in a live session the assigned side's profile
 // page becomes the spawn buffer [orig: @0x525813
@@ -56,14 +59,14 @@ uint8_t loadout_fixed_class(const Protocol *protocol, bms::MissionType mission_t
 // selector is the S2C 0x04 tail byte [orig: g_LocalTeam @0x425499];
 // anything-not-1-or-3 selects the RED block @0x525798, so seeding at team 0
 // would commit the wrong side's page and then have to flip it).
-// A protocol that fixes the class first writes it into the side block the team names
+// A title that fixes the class first writes it into the side block the team names
 // (loadout_fixed_class: dfx2.exe's 8, or 7 in a mission of type 2), then picks that class's page,
 // so every later read of the block (a self S2C 0x50's re-copy of the same side, the 0x2F's
 // side kits) reads the class the mission start wrote; the other side's block keeps its own.
 // [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe) - the class store into the side block
 //  @0x5229aa / @0x5229af, the page switch over it @0x5229b2..0x5229bd, the copy @0x522a04]
 bool seed_session_kit_from_profile(world::World &world, playersav::Record &profile,
-		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
+		const Title &title, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side);
 
 // The single player's fill of the spawn buffer (g_SpawnLoadoutBuffer) at its mission start and
@@ -96,7 +99,7 @@ bool seed_single_player_kit_from_profile(world::World &world,
 // [orig: Game_StartMission @0x524360 - the side pick @0x525798, Buffer_CopyUntilDoubleNull
 //  (the call @0x525818)]
 bool reseed_session_kit_on_side_change(world::World &world, playersav::Record &profile,
-		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
+		const Title &title, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side);
 
 // A self S2C 0x50's local arm: the page of the side `team` names (teams 1 and 3 the blue
@@ -133,9 +136,9 @@ struct SessionWeaponProfile {
 	// joiner) copies its side's page (seed_session_kit_from_profile), single player its
 	// page arm over the record once one is installed (seed_single_player_kit_from_profile).
 	// Returns true when it wrote (the caller rebuilds the slot pool).
-	// `protocol` and `mission_type` are the session's (the class a protocol fixes,
+	// `title` and `mission_type` are the session's (the class a title's mission start fixes,
 	// seed_session_kit_from_profile); the single-player arm reads neither.
-	bool seed_kit(world::World &world, bool session_peer, const Protocol *protocol,
+	bool seed_kit(world::World &world, bool session_peer, const Title &title,
 			bms::MissionType mission_type, uint8_t assigned_team,
 			world::LocalPlayerLoadout &loadout);
 };

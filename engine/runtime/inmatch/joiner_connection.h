@@ -14,6 +14,8 @@
 #include <net/npwire/session_hello.h>     // DisconnectEvent
 #include <net/npwire/session_vars.h>      // SessionVars (the 0x60 server-info list)
 
+#include <formats/mission/bms.h> // bms::MissionType (the host header's mission type)
+
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -100,9 +102,9 @@ std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32
 //  NetPacket_SendLoadoutSubmit @0x42cdc0 - the name gate @0x42cf0b, the index @0x42cf21,
 //  atol @0x42cf7c / @0x42cfbc / @0x42cff7; Player_InitPlayer @0x4e15f0 - 195 @0x4e17ff,
 //  a failed select keeps it]
-// `fixed_class` is the class a protocol that fixes it writes into the side block ahead of the
-// page pick (ProtocolInMatch::c2s_2f, loadout_fixed_class), 0 for the profile's own: the page
-// is that class's. [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe)]
+// `fixed_class` is the class a title whose mission start fixes it writes into the side block
+// ahead of the page pick (Title::session_loadout_class_fixed, loadout_fixed_class), 0 for the
+// profile's own: the page is that class's. [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe)]
 // dfx2.exe's start and its S2C 0x50 read the same record, g_CharSelClass's slot, as
 // Jointops.exe's do, its fresh pages its own (DFX2-29).
 // [orig: Game_StartMission @0x521530 - the side block @0x52296b..0x52299e, the page copy
@@ -267,9 +269,13 @@ public:
 	const Protocol *protocol() const { return protocol_; }
 	// The title the session runs as (CONTEXT.md "Title"), set beside the protocol by the embedder,
 	// never read off it: a submission with no kit seam sends its fresh profile's kit
-	// (fresh_profile_loadout_submit over profile::fresh_weapon_record). Unset, that record has no
+	// (fresh_profile_loadout_submit over profile::fresh_weapon_record), its page the class the
+	// title's mission start fixes (Title::session_loadout_class_fixed). Unset, that record has no
 	// page.
-	void set_title(const Title *title) { fresh_weapons_ = profile::fresh_weapon_record(title); }
+	void set_title(const Title *title) {
+		title_ = title;
+		fresh_weapons_ = profile::fresh_weapon_record(title);
+	}
 
 	// Begin the join. From a discovered session: nothing (Idle -> Auth; the first pump past the
 	// start sends the ClientAuth, D-NET-850). Without
@@ -1304,11 +1310,13 @@ private:
 	// [orig: Game_StartMission @0x525767 / NapiNPClientMsg_TeamAssign @0x431a35 ->
 	//  NetPacket_SendLoadoutSubmit @0x42cdc0]
 	LoadoutSubmit build_profile_loadout_submit(uint8_t team, bool alternate) const;
-	// The 0x2F class byte for a kit of `profile_class`: the class itself, or, for a title whose
+	// The 0x2F class byte for a kit of `profile_class`: the class itself, or, for a protocol whose
 	// submit ignores it (DFX2-12), 8, or 7 when the host's BMS header (S2C 0x0B) names a mission
 	// of type 2. [orig: NetPacket_SendLoadoutSubmit @0x42ceae] [orig: @0x42ec1f..0x42ec3e
 	//  (dfx2.exe), byte_A6FB3A = the header's +0x22A]
 	uint8_t loadout_wire_class(uint8_t profile_class) const;
+	// The mission type the host's BMS header (S2C 0x0B) names at its +0x22A, 0 before one.
+	bms::MissionType header_mission_type() const;
 
 	std::vector<uint8_t> build_client_hello();
 	std::vector<uint8_t> build_client_auth();
@@ -1510,6 +1518,7 @@ private:
 	LoadoutKit loadout_kit_;      // binding-injected submission content (see set_loadout_kit)
 	bool loadout_kit_set_ = false;
 	const world::WeaponTable *weapons_ = nullptr; // set_weapon_table
+	const Title *title_ = nullptr; // set_title
 	playersav::Record fresh_weapons_ = profile::fresh_weapon_record(nullptr); // set_title
 	bool mission_start_first_loadout_taken_ = false; // take_mission_start_first_loadout
 	bool sync_tail_loading_ = false;              // set_sync_tail_loading

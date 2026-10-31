@@ -68,6 +68,10 @@ void retail_protocols_complete() {
 	// DFX2-22: each title's mission catalog order.
 	CHECK(games::jo_title().mission_list_order == MissionListOrder::FileName &&
 			games::dfx2_title().mission_list_order == MissionListOrder::Title);
+	// DFX2-12's mission-start half: dfx2.exe's start fixes the side block's class, Jointops.exe's
+	// keeps the profile's (the 0x2F byte is the protocol's c2s_2f.loadout_class_fixed).
+	CHECK(!games::jo_title().session_loadout_class_fixed &&
+			games::dfx2_title().session_loadout_class_fixed);
 	for (const Protocol *protocol : { jo, dfx2 }) {
 		CHECK(protocol != nullptr);
 		if (protocol == nullptr)
@@ -97,7 +101,7 @@ auto title_fields_past_identity(const Title &t) {
 			hud_objective_done_fill, hud_drops_armory_prompt, hud_end_game_footer_corners,
 			death_screen_loadout, hud_fonts, mission_list_order, profile_magic, profile_first_name,
 			profile_word_1396, max_players_switch, profile_single_player_kit, profile_class_kits,
-			map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
+			session_loadout_class_fixed, map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
 			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
 			death_respawn_penalty_line, hud_map_cycle_skips_window, map_zoom_max_q16,
 			hud_kill_list_no_class, hud_scope_no_magnification, hud_crosshair_fixed,
@@ -123,8 +127,8 @@ auto title_fields_past_identity(const Title &t) {
 			hud_waypoint_active_tint, hud_objective_done_fill, hud_drops_armory_prompt,
 			hud_end_game_footer_corners, death_screen_loadout, hud_fonts, mission_list_order,
 			profile_magic, profile_first_name, profile_word_1396, max_players_switch,
-			profile_single_player_kit, profile_class_kits, map_view_zoom_max,
-			death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
+			profile_single_player_kit, profile_class_kits, session_loadout_class_fixed,
+			map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
 			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
 			death_respawn_penalty_line, hud_map_cycle_skips_window, map_zoom_max_q16,
 			hud_kill_list_no_class, hud_scope_no_magnification, hud_crosshair_fixed,

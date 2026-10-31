@@ -332,11 +332,11 @@ bool Simulation::seed_session_kit_from_profile() {
 	if (!kernel_) return false;
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
-	// The session's protocol and mission type: a protocol that fixes the loadout class writes
-	// it into the profile's side block ahead of the page pick (engine
+	// The session's title and mission type: a title whose mission start fixes the loadout class
+	// writes it into the profile's side block ahead of the page pick (engine
 	// seed_session_kit_from_profile).
 	return player_.weapon.seed_kit(kernel_->world, is_host_listening() || is_joiner(),
-			session_protocol(net_, assets_.root), kernel_->mission.header.mission_type, assigned,
+			session_title(net_, assets_.root), kernel_->mission.header.mission_type, assigned,
 			kernel_->local.loadout);
 }
 
@@ -365,7 +365,7 @@ bool Simulation::reseed_session_kit_on_side_change() {
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
 	if (!opennova::inmatch::reseed_session_kit_on_side_change(kernel_->world,
-			player_.weapon.record, session_protocol(net_, assets_.root),
+			player_.weapon.record, session_title(net_, assets_.root),
 			kernel_->mission.header.mission_type, assigned, kernel_->local.loadout,
 			player_.weapon.seeded_side))
 		return false;
