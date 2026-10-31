@@ -179,6 +179,9 @@ Title make() {
 	// DFX2-83: the Tab board's rows carry no class suffix [orig: sub_423890 @0x423890 - the team
 	//  arm's format @0x423BB1 (dfx2.exe)].
 	t.hud_kill_list_no_class = true;
+	// DFX2-86: no magnification readout [orig: sub_59CEE0 @0x59CEE0 - the zero readout @0x59D428
+	//  ends it (dfx2.exe)].
+	t.hud_scope_no_magnification = true;
 	return t;
 }
 

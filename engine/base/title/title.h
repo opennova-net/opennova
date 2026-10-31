@@ -223,6 +223,11 @@ struct Title {
 	// [orig: HUD_DrawKillList @0x423A30 (the stash @0x423D64..0x423DC3, " (%s)" @0x424104)]
 	// [orig: sub_423890 @0x423890 (dfx2.exe) - "%s<ch>%s<co> [%02ld]" @0x423BB1, no stash]
 	bool hud_kill_list_no_class = false;
+	// DFX2-86: a scoped weapon's overlay draws no magnification readout (Hud/hud_scope_mag at
+	// hudpos SCOPEMAG); its range and zero readouts are Jointops.exe's.
+	// [orig: HUD_DrawScopeOverlayDetails @0x59E420 (the readout @0x59E97C..0x59E9F6)]
+	// [orig: sub_59CEE0 @0x59CEE0 (dfx2.exe) - the zero readout @0x59D428 ends it]
+	bool hud_scope_no_magnification = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

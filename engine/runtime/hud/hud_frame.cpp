@@ -6,6 +6,8 @@
 
 #include <base/title/title.h> // Title::hud_waypoint_active_tint
 
+#include <base/title/title.h> // the HUD's title draws (HudFrameState::title)
+
 #include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_game_text.h>
 
@@ -863,7 +865,11 @@ void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w
             : hud_sprintf(scope.zero_format, scope.zero_step_metres * scope.zero_word);
         draw(text, layout_.scope_zero, color);
     }
-    if (scope.scoped)
+    // Jointops.exe's magnification readout; dfx2.exe's overlay ends at the zero readout
+    // (Title::hud_scope_no_magnification, DFX2-86) [orig: Player_IsEquippedWeaponScoped
+    // @0x59e97c, hud_scope_mag @0x59e9ac] [orig: sub_59CEE0 @0x59cee0 - @0x59d428 (dfx2.exe)].
+    const bool magnification = state.title == nullptr || !state.title->hud_scope_no_magnification;
+    if (scope.scoped && magnification)
         draw(hud_sprintf(scope.magnification_format, scope.magnification), layout_.scope_mag, color);
     ++draw_list_.elements_drawn;
 }

@@ -4,6 +4,7 @@
 //  CGameFont_DrawText @ 0x6752c0]
 
 #include <base/gameprofile/game_type.h>
+#include <base/title/title.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_config_tokens.h>
@@ -3081,6 +3082,17 @@ void test_scope_details(const fnt_font_t *font) {
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "whole HUD hide suppresses scope details");
     state.hud_detail_level = 0; scope.active = false;
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "lowered or unavailable optics show no readouts");
+    // dfx2.exe's overlay draws no magnification readout (DFX2-86) [orig: sub_59CEE0 @0x59CEE0
+    // (dfx2.exe)]; Jointops.exe's draws it [orig: @0x59E9AC].
+    const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+    const opennova::Title *jo = opennova::title_by_code("jo");
+    CHECK(dfx2 != nullptr && dfx2->hud_scope_no_magnification, "dfx2.exe drops the readout");
+    CHECK(jo != nullptr && !jo->hud_scope_no_magnification, "Jointops.exe draws it");
+    scope.active = true; scope.rangefinder = false; scope.zeroable = false; scope.scoped = true;
+    state.title = jo;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.size() == 3, "JO's scope draws 10x");
+    state.title = dfx2;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "dfx2's scope draws no 10x");
 }
 
 // The installed STROVER_DIST format uses a Win32 long conversion. Assert
