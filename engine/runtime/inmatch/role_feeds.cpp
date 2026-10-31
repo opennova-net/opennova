@@ -1763,28 +1763,18 @@ namespace {
 // briefing inputs. False on the bare local role.
 bool session_rules_sources(const RoleView &view, hud::SessionStatusView &sv,
 		hud::RulesBriefingInputs &inputs) {
-	if (view.runtime == nullptr || view.kernel == nullptr) return false;
-	const replication::ClientState &state = view.runtime->state();
-	world::World &w = view.kernel->world;
-	replication::ClientSessionStatus status;
 	inputs = hud::RulesBriefingInputs();
+	if (!rules_briefing_inputs(view, inputs)) return false;
+	const replication::ClientState &state = view.runtime->state();
+	replication::ClientSessionStatus status;
 	if (view.joiner) {
 		status = state.session_status;
-		inputs.config_first = replication::server_config_first_text(state.server_config_strings);
-		inputs.config_second = replication::server_config_second_text(state.server_config_strings);
-	} else if (view.host != nullptr) {
+	} else {
 		const std::vector<uint8_t> body = serialize_session_status(view.host->config,
-				session_uptime_ms(*view.host), view.host->is_in_session != 0, &w);
+				session_uptime_ms(*view.host), view.host->is_in_session != 0, &view.kernel->world);
 		SessionStatusBlock block;
 		(void)decode_session_status(body.data(), body.size(), block);
 		status = replication::fold_session_status(block, state.local_clock_ms);
-		inputs.authority = true;
-		// MissionText info/briefing3 and info/briefing2, else info/briefing
-		// [orig: HUD_BuildRulesAndBriefingText @0x5b92d0 — the authority arm].
-		inputs.briefing3 = view.host->mission_briefing3;
-		inputs.briefing2 = view.host->mission_briefing2;
-	} else {
-		return false;
 	}
 	sv.valid = status.valid;
 	sv.server_name = status.server_name;
@@ -1796,11 +1786,6 @@ bool session_rules_sources(const RoleView &view, hud::SessionStatusView &sv,
 	sv.stats = status.stats;
 	for (const replication::ClientSessionStatus::Option &o : status.options)
 		sv.options.emplace_back(o.key, o.value);
-	inputs.game_type = view.runtime->game_type();
-	// [orig: `g_LocalPlayerEntity ? ->Team (+0x162) : 0` @0x5b92de..0x5b92f1]
-	if (const world::Entity *local = w.registry.get(w.cached.local_player))
-		inputs.local_team = static_cast<int8_t>(local->team);
-	inputs.spawn_zones = w.zones.has_spawn_zone(); // SpawnZoneList_HasAny
 	return true;
 }
 
