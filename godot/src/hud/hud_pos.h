@@ -212,7 +212,7 @@ public:
 	// scale modulate, and the rangefinder easing step.
 	static Rect2 binocular_crosshair_rect();
 	static Vector2 binocular_digit_pos();
-	static Rect2 nvg_scale_rect();
+	static Rect2 nvg_scale_rect(const Ref<ResourceRoot> &p_root);
 	static Color nvg_scale_modulate();
 	static int binocular_range_step(int p_current, int p_target);
 	// The view effects' texture names, by VIEW_TEXTURE_* (hud/hud_texture_names.h carries

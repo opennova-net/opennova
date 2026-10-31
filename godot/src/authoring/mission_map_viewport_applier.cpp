@@ -19,6 +19,7 @@
 #include <base/vfs/file_stamps.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/project/project_document.h>
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/til/til.h>
@@ -115,9 +116,12 @@ void MissionMapViewportApplier::rebuild(const opennova::editor::ViewportModel &m
 	HudOverlay *hud = overlay();
 	if (!hud || !view.findings.assets) return;
 	const opennova::editor::MissionMapViewport &map = map_of(model);
-	// The project's files, the open documents standing in for theirs, each read noted with its stamp.
+	// The project's files, the open documents standing in for theirs, each read noted with its stamp,
+	// mounted as the project's target game so the map draws its title's HUD (ResourceRoot::session_title).
 	stamped_ = std::make_shared<opennova::StampedFiles>(view.findings.assets);
-	root_->mount_files(stamped_);
+	root_->mount_files(stamped_, view.project.document
+					? opennova::to_gd(view.project.document->target_game)
+					: String());
 	// The HUD's layout the map draws through (its fonts, its icon strip, its colours): the project's hudpos.def, else
 	// the unauthored layout the game carries on over.
 	Ref<HudPos> layout;

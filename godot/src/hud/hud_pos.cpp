@@ -150,7 +150,8 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader"), &HudPos::glyph_shader);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
-	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
+	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect", "resource_root"), &HudPos::nvg_scale_rect,
+			DEFVAL(Ref<ResourceRoot>()));
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_modulate"), &HudPos::nvg_scale_modulate);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_range_step", "current", "target"), &HudPos::binocular_range_step);
 	ClassDB::bind_static_method("HudPos", D_METHOD("view_effect_texture", "which"), &HudPos::view_effect_texture);
@@ -567,10 +568,9 @@ Vector2 HudPos::binocular_digit_pos() {
 			opennova::hud::kBinocularDigitY);
 }
 
-Rect2 HudPos::nvg_scale_rect() {
-	// The session's title's rect (DFX2-44).
-	const opennova::hud::NvgScaleRect r =
-			opennova::hud::nvg_scale_rect(ResourceRoot::session_title(Ref<ResourceRoot>()));
+Rect2 HudPos::nvg_scale_rect(const Ref<ResourceRoot> &p_root) {
+	// The root's title's rect (DFX2-44): the session's, or an editor preview's project game.
+	const opennova::hud::NvgScaleRect r = opennova::hud::nvg_scale_rect(ResourceRoot::session_title(p_root));
 	return Rect2(r.x, r.y, r.w, r.h);
 }
 

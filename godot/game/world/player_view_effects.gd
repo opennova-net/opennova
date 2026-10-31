@@ -115,7 +115,7 @@ func _draw_nvg(surface: Vector2) -> void:
 	var source := Rect2(0.0, float(gain * HudPos.VIEW_DIGIT_CELL),
 			float(HudPos.VIEW_DIGIT_CELL), float(HudPos.VIEW_DIGIT_CELL))
 	draw_texture_rect_region(_nvg_scale,
-			HudPos.scale_rect(HudPos.nvg_scale_rect(), surface), source,
+			HudPos.scale_rect(HudPos.nvg_scale_rect(_root), surface), source,
 			HudPos.nvg_scale_modulate())
 
 
