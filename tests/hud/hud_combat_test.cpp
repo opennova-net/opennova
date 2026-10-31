@@ -96,15 +96,54 @@ static void geometry_and_draw() {
 	const auto &hit = compiler.compile(s, 1024, 768);
 	CHECK(std::count_if(hit.lines.begin(), hit.lines.end(),
 				  [](auto &l) { return l.color == 0xFFFF5050u; }) == 4);
-	// DFX2-45: a title whose Inset reticle is the quad draws no arms, the ring the same
-	// [orig: Render_WeaponInsetScene @0x5C9E96..0x5C9F47; sub_591440 @0x5C8E40 (dfx2.exe)].
+	// DFX2-45: a title whose Inset reticle is the quad draws no arms, the ring the same; with
+	// scopexh.tga unloaded no quad either [orig: Render_WeaponInsetScene @0x5C9E96..0x5C9F47]
+	// [orig: sub_591440 @0x5C8E40, `test ecx, ecx; jz` @0x591460 (dfx2.exe)].
 	s.combat.inset_reticle_quad = true;
 	const auto &quad = compiler.compile(s, 1024, 768);
 	CHECK(quad.tris.size() == 570);
 	CHECK(std::none_of(quad.lines.begin(), quad.lines.end(), [](auto &l) {
 		return l.color == 0xFFFF5050u || l.color == 0xFF00FF00u;
 	}));
+	// Loaded, scopexh.tga spans the aperture's design rect (639, 223)..(961, 545) after the
+	// ring, in g_HUDColors.active halved at full alpha, 0xFF7F2828 under the hit flag; clipped
+	// to the design screen it takes auxiliaryColors[1] [orig: sub_591440 @0x591440..0x59148D;
+	// HUD_DrawTexturedQuadCentered @0x58EE20 (dfx2.exe)].
+	const auto scope_tris = [](const HudDrawList &d) {
+		std::vector<HudTri> out;
+		for (const HudTri &t : d.tris)
+			if (t.texture == kHudTexScopeCrosshair)
+				out.push_back(t);
+		return out;
+	};
+	const auto scope_color = [](const std::vector<HudTri> &tris, uint32_t argb) {
+		return std::all_of(tris.begin(), tris.end(), [&](const HudTri &t) {
+			return t.a.color == argb && t.b.color == argb && t.c.color == argb;
+		});
+	};
+	layout.combat.scope_crosshair = { 256, 256, true };
+	compiler.configure(layout, nullptr);
+	const auto &scoped_hit = compiler.compile(s, 1024, 768);
+	const auto hit_scope = scope_tris(scoped_hit);
+	CHECK(scoped_hit.tris.size() == 572 && hit_scope.size() == 2);
+	CHECK(scoped_hit.tris[570].texture == kHudTexScopeCrosshair);
+	CHECK(scope_color(hit_scope, 0xFF7F2828u));
+	CHECK(hit_scope.size() == 2 && near(hit_scope[0].a.x, 639) && near(hit_scope[0].a.y, 223) &&
+			near(hit_scope[0].c.x, 961) && near(hit_scope[0].c.y, 545));
+	s.combat.hit_feedback = false;
+	s.hud_color_index = 3; // light blue 0xFF80A0FF
+	const auto scope_blue = scope_tris(compiler.compile(s, 1024, 768));
+	CHECK(scope_blue.size() == 2 && scope_color(scope_blue, 0xFF40507Fu));
+	const auto scope_wide = scope_tris(compiler.compile(s, 2560, 1080));
+	CHECK(scope_wide.size() == 2 && scope_color(scope_wide, 0xFFFF8020u));
+	// Jointops.exe's Inset draws its four arms and never the loaded quad.
 	s.combat.inset_reticle_quad = false;
+	const auto &arms = compiler.compile(s, 1024, 768);
+	CHECK(scope_tris(arms).empty() && arms.tris.size() == 570);
+	CHECK(std::count_if(arms.lines.begin(), arms.lines.end(),
+				  [](auto &l) { return l.color == 0xFF00FF00u; }) == 4);
+	s.hud_color_index = 2;
+	s.combat.hit_feedback = true;
 	s.binoculars_view_active = true;
 	CHECK(compiler.compile(s, 1024, 768).tris.empty());
 	CHECK(sprites(compiler.last_draw_list(), kHudTexVehicleLag) == 0);

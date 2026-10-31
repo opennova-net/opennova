@@ -134,6 +134,12 @@ enum HudTexture : int32_t {
 	kHudTexLogoHelo,
 	kHudTexLogoHumm,
 	kHudTexLogoBoat,
+	// scopexh.tga (hud_texture_names.h kHudScopeCrosshairTexture), loaded in alpha mode into its
+	// record by both titles; dfx2.exe's weapon Inset draws it over the aperture (DFX2-45)
+	// [orig: HUD_LoadAllTextures @0x59E127..0x59E133 -> dword_2723AB0, the texture at +4]
+	// [orig: HUD_LoadAllTextures @0x59CBE7..0x59CBF3 -> dword_2724E28, the texture at +4
+	//  0x2724E2C (dfx2.exe)].
+	kHudTexScopeCrosshair,
 	// The HUDLS weapon slot bar: the bracket and the more-available marker
 	// (hudpos-named, loaded alpha mode 0) and one icon per weapon category
 	// 0..9 — the category's first def's hud_loadout_select texture
@@ -1838,11 +1844,12 @@ private:
 	// drawer's types 8/9 [orig: Render_CapturePointLabels @0x5a2840 ->
 	// HUD_DrawEntityMarker @0x593140, HUD_DrawProgressBar @0x59B340].
 	void element_capture_point_labels(const HudFrameState &state, float w, float h);
-	// HUD_DrawTexturedQuadCentered over an alpha-mode-0 shader: design centre
-	// and extent, two textured triangles (hud_optical_cues.cpp carries the
-	// witness) [orig: HUD_DrawTexturedQuadCentered @0x5909E0].
+	// HUD_DrawTexturedQuadCentered: design centre and extent, two textured
+	// triangles, clip_to_screen its last argument (hud_centered_rect);
+	// hud_optical_cues.cpp carries the witness [orig: HUD_DrawTexturedQuadCentered
+	// @0x5909E0].
 	void emit_textured_quad_centered(int32_t cx, int32_t cy, int32_t qw, int32_t qh,
-			int32_t texture, uint32_t diffuse, float w, float h);
+			int32_t texture, uint32_t diffuse, float w, float h, bool clip_to_screen);
 	// The connection indicators (hud_frame_net_quality.cpp): the HUD's call,
 	// last in the frame and only at hud_detail level 0 [orig:
 	// Render_ProcessMainSceneFrame @0x5cae4d..0x5cae5d]; the drawer is public

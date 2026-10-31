@@ -156,7 +156,7 @@ void HudFrameCompiler::element_capture_point_labels(const HudFrameState &s, floa
 			const int32_t vh = screen_to_design_y(2 * half, surface_h);
 			emit_textured_quad_centered(vx, vy - vh / 2, vw, vh,
 					own ? kHudTexLfpTileOwn : kHudTexLfpTileOther,
-					((color >> 1) & 0x7F7F7Fu) | 0xFF000000u, w, h);
+					((color >> 1) & 0x7F7F7Fu) | 0xFF000000u, w, h, false);
 		}
 		// The labels two pixels left, centred and half-bright in the HUD slot:
 		// the letter at trunc(y - half * 2.3f) (the types 8/9 arm replaces the

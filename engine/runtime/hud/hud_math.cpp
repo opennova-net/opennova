@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace opennova::hud {
@@ -38,6 +39,34 @@ int32_t design_to_screen_x(int32_t x, int32_t surface_w) {
 
 int32_t design_to_screen_y(int32_t y, int32_t surface_h) {
 	return static_cast<int32_t>((static_cast<int64_t>(y) * surface_h + 384) / 768);
+}
+
+HudCenteredRect hud_centered_rect(int32_t cx, int32_t cy, int32_t width, int32_t height,
+		uint32_t color, bool clip_to_screen) {
+	constexpr uint32_t edge_color = uint32_t(-32736);
+	HudCenteredRect r{ cx - width / 2, cy - height / 2, width / 2 + cx, cy + height / 2, color };
+	if (!clip_to_screen) return r;
+	if (r.left < 0) {
+		r.right += std::abs(r.left) + 1;
+		r.left = 1;
+		r.color = edge_color;
+	}
+	if (r.right > 1024) {
+		r.left = 1023 - r.right + r.left;
+		r.right = 1023;
+		r.color = edge_color;
+	}
+	if (r.top < 0) {
+		r.bottom += std::abs(r.top) + 1;
+		r.top = 1;
+		r.color = edge_color;
+	}
+	if (r.bottom > 768) {
+		r.top = 767 - r.bottom + r.top;
+		r.bottom = 767;
+		r.color = edge_color;
+	}
+	return r;
 }
 
 BorderedQuadUv bordered_quad_uv(int tex_w, int tex_h, double left, double top, double right,

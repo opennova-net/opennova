@@ -48,6 +48,20 @@ int32_t screen_to_design_y(int32_t y, int32_t surface_h);
 int32_t design_to_screen_x(int32_t x, int32_t surface_w);
 int32_t design_to_screen_y(int32_t y, int32_t surface_h);
 
+// HUD_DrawTexturedQuadCentered's design rect: the centre +- the extent / 2 (C division). With
+// clipToScreen a rect crossing a design edge slides fully back on, left, right, top then bottom,
+// each test reading the edges the one before moved, and draws in auxiliaryColors[1] (0xFFFF8020)
+// in place of the caller's colour.
+// [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- the corners @0x590A14..0x590A33, the gate
+//  @0x590A37, left @0x590A45..0x590A5F, right @0x590A70..0x590A87, top @0x590A8B..0x590AA9,
+//  bottom @0x590AB4..0x590ACB; auxiliaryColors[1] HUD_InitTeamColorTable @0x51F28B]
+struct HudCenteredRect {
+	int32_t left = 0, top = 0, right = 0, bottom = 0;
+	uint32_t color = 0;
+};
+HudCenteredRect hud_centered_rect(int32_t cx, int32_t cy, int32_t width, int32_t height,
+		uint32_t color, bool clip_to_screen);
+
 // The bordered textured quad's texture window: u0 = 0.05 / tex_w inside the
 // left edge, u1 = 1 - u0 + 1 / (right - left) in on-screen pixels, and the
 // same on v; tex_w / tex_h are the caller's AUTHORED extents. The vertex

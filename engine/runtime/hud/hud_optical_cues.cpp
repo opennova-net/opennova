@@ -100,11 +100,33 @@ void HudFrameCompiler::element_inset_cues(const HudFrameState &s, float w, float
 			const uint32_t color = c.hit_feedback ? 0xFFFF5050u : 0xFF00FF00u;
 			const float x = g.center_x, y = g.center_y, dx = float(g.cross_dx),
 						dy = float(g.cross_dy);
-			// The four crosshair arms; a title whose reticle is the quad (DFX2-45) draws that
-			// instead, of a texture nothing loads, so nothing draws.
-			// [orig: Render_WeaponInsetScene @0x5C9E96..0x5C9F47] [orig: sub_591440 @0x5C8E40,
-			//  its texture's test @0x591460 (dfx2.exe)]
-			if (!c.inset_reticle_quad)
+			// The four crosshair arms [orig: Render_WeaponInsetScene @0x5C9E96..0x5C9F47]; a
+			// title whose reticle is the quad (DFX2-45) draws scopexh.tga instead: the aperture's
+			// corners into design space, the quad centred on that rect at its extent with
+			// clipToScreen, in g_HUDColors.active halved, 0x7F2828 under the hit flag, at full
+			// alpha; an unloaded texture draws none.
+			// [orig: the twin of Render_WeaponInsetScene @0x5C86B0 - Viewport_ScreenToVirtual
+			//  @0x5C8E0F / @0x5C8E23, the extent @0x5C8E28..0x5C8E3F, sub_591440 @0x5C8E40;
+			//  sub_591440 @0x591440..0x59148D - `sar 1; and 7F7F7Fh` @0x591440..0x591447,
+			//  dword_A7BA9C -> 0x7F2828 @0x59144C..0x591455, the texture 0x2724E2C read
+			//  @0x59145A, `test ecx, ecx; jz` @0x591460, `or FF000000h` @0x591464,
+			//  clipToScreen 1 @0x591469, the centre @0x59146C..0x591488,
+			//  HUD_DrawTexturedQuadCentered @0x58EE20 called @0x59148D; the texture
+			//  HUD_LoadAllTextures @0x59CBE7..0x59CBF3, HUD_LoadTextureWithInfo @0x58FC7A
+			//  (dfx2.exe)]
+			if (c.inset_reticle_quad) {
+				if (layout_.combat.scope_crosshair.valid) {
+					const int32_t surface_w = int32_t(w), surface_h = int32_t(h);
+					const int32_t left = screen_to_design_x(g.left, surface_w);
+					const int32_t top = screen_to_design_y(g.top, surface_h);
+					const int32_t qw = screen_to_design_x(g.right, surface_w) - left;
+					const int32_t qh = screen_to_design_y(g.bottom, surface_h) - top;
+					const uint32_t rgb =
+							c.hit_feedback ? 0x7F2828u : (hud_colors_active_ >> 1) & 0x7F7F7Fu;
+					emit_textured_quad_centered(left + qw / 2, top + qh / 2, qw, qh,
+							kHudTexScopeCrosshair, rgb | 0xFF000000u, w, h, true);
+				}
+			} else
 				for (int sign : { -1, 1 }) {
 					draw_list_.lines.push_back({ x + sign * dx, y, x + sign * 2 * dx, y, 1, color });
 					draw_list_.lines.push_back({ x, y + sign * dy, x, y + sign * 2 * dy, 1, color });
@@ -163,25 +185,29 @@ void HudFrameCompiler::element_optical_cues(const HudFrameState &s, float w, flo
 				float(layout_.combat.impact_y), w, h, half_bright_argb(active_color(s)), 0);
 	}
 }
-// HUD_DrawTexturedQuadCentered: the caller's diffuse on every corner, raw. The
-// texture's material decides the colour (a colour-mode texture's 0x651 doubles it
-// on the device, renderer::hud_color_material_argb; D-HUD-49), so nothing is folded
-// here. The corners are the design centre +- the extent / 2 (C division) scaled
-// onto the surface by the integer Viewport_ScaleToVirtualCoords; the UVs inset half
-// a texel of the DESIGN extent and widen by one output pixel. Two textured
-// triangles, so the quad keeps its place inside a kind-grouped run.
+// HUD_DrawTexturedQuadCentered: the caller's diffuse on every corner, raw, or with
+// clipToScreen auxiliaryColors[1] for a quad slid back on-screen. The texture's
+// material decides the colour (a colour-mode texture's 0x651 doubles it on the
+// device, renderer::hud_color_material_argb; D-HUD-49; an alpha-mode texture's 0xA51
+// renderer::hud_alpha_material_argb), so nothing is folded here. The corners are the
+// design rect (hud_centered_rect) scaled onto the surface by the integer
+// Viewport_ScaleToVirtualCoords; the UVs inset half a texel of the DESIGN extent and
+// widen by one output pixel. Two textured triangles, so the quad keeps its place
+// inside a kind-grouped run.
 // [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- the corners
-//  @0x590a14..0x590a33, Viewport_ScaleToVirtualCoords @0x590b04 / @0x590b18,
-//  the UVs @0x590ba6..0x590be4]
+//  @0x590a14..0x590a33, clipToScreen @0x590a37..0x590acb,
+//  Viewport_ScaleToVirtualCoords @0x590b04 / @0x590b18, the UVs @0x590ba6..0x590be4]
 void HudFrameCompiler::emit_textured_quad_centered(int32_t cx, int32_t cy, int32_t qw,
-		int32_t qh, int32_t texture, uint32_t diffuse, float w, float h) {
+		int32_t qh, int32_t texture, uint32_t diffuse, float w, float h, bool clip_to_screen) {
 	if (qw <= 0 || qh <= 0)
 		return;
+	const HudCenteredRect r = hud_centered_rect(cx, cy, qw, qh, diffuse, clip_to_screen);
+	diffuse = r.color;
 	const int32_t surface_w = int32_t(w), surface_h = int32_t(h);
-	const float x0 = float(design_to_screen_x(cx - qw / 2, surface_w));
-	const float x1 = float(design_to_screen_x(qw / 2 + cx, surface_w));
-	const float y0 = float(design_to_screen_y(cy - qh / 2, surface_h));
-	const float y1 = float(design_to_screen_y(cy + qh / 2, surface_h));
+	const float x0 = float(design_to_screen_x(r.left, surface_w));
+	const float x1 = float(design_to_screen_x(r.right, surface_w));
+	const float y0 = float(design_to_screen_y(r.top, surface_h));
+	const float y1 = float(design_to_screen_y(r.bottom, surface_h));
 	// The far edges sum the UNROUNDED insets (the x87 keeps them on the stack).
 	const double du = 0.5 / double(qw), dv = 0.5 / double(qh);
 	const float u0 = float(du), v0 = float(dv);
@@ -268,7 +294,7 @@ void HudFrameCompiler::element_vehicle_bay_logos(const HudFrameState &s, float w
 				: logo.type == kMarkerTypeLogoHumm               ? kHudTexLogoHumm
 																  : kHudTexLogoBoat;
 		emit_textured_quad_centered(vx, vy, qw, qh, texture,
-				((color >> 1) & 0x7F7F7Fu) | 0xFF000000u, w, h);
+				((color >> 1) & 0x7F7F7Fu) | 0xFF000000u, w, h, false);
 	}
 	mark_order_break();
 }

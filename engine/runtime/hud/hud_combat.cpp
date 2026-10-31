@@ -37,11 +37,8 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 	// [orig: palette[5], palette[3], auxiliaryColors[2] initialized @0x51F240]
 	constexpr uint32_t warning = uint32_t(-44976), aim_color = uint32_t(-8347393);
 	// Every cue here draws with clipToScreen: a quad that would cross a design
-	// edge is slid fully back on-screen and recoloured auxiliaryColors[1].
-	// [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- gate @0x590A37, left
-	//  @0x590A45..0x590A5F, right @0x590A70..0x590A87, top @0x590A8B..0x590AA9,
-	//  bottom @0x590AB4..0x590ACB]
-	constexpr uint32_t edge_color = uint32_t(-32736);
+	// edge is slid fully back on-screen and recoloured auxiliaryColors[1]
+	// (hud_centered_rect carries the witness).
 	// The projected cue's integer screen pixel (the projection's `>> 16` floors
 	// it) mapped into design units [orig: Viewport_ScreenToVirtual @0x5D2C70,
 	// called ahead of each cue, e.g. @0x592852 / @0x59E77E].
@@ -51,30 +48,10 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 	auto centered_design = [&](int cx, int cy, const HudSprite &sprite, int tex, uint32_t color) {
 		if (!sprite.valid)
 			return;
-		int left = cx - sprite.width / 2, right = sprite.width / 2 + cx;
-		int top = cy - sprite.height / 2, bottom = cy + sprite.height / 2;
-		if (left < 0) {
-			right += std::abs(left) + 1;
-			left = 1;
-			color = edge_color;
-		}
-		if (right > 1024) {
-			left = 1023 - right + left;
-			right = 1023;
-			color = edge_color;
-		}
-		if (top < 0) {
-			bottom += std::abs(top) + 1;
-			top = 1;
-			color = edge_color;
-		}
-		if (bottom > 768) {
-			top = 767 - bottom + top;
-			bottom = 767;
-			color = edge_color;
-		}
-		emit_rect(sx(float(left), w), sy(float(top), h), sx(float(right), w),
-				sy(float(bottom), h), color, true, tex);
+		const HudCenteredRect r =
+				hud_centered_rect(cx, cy, sprite.width, sprite.height, color, true);
+		emit_rect(sx(float(r.left), w), sy(float(r.top), h), sx(float(r.right), w),
+				sy(float(r.bottom), h), r.color, true, tex);
 	};
 	auto centered = [&](const HudProjectedPoint &p, const HudSprite &sprite, int tex,
 							uint32_t color) {
