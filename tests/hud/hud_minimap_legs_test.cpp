@@ -11,6 +11,7 @@
 #include <cstring>
 #include <string>
 
+#include <base/title/title.h>
 #include <runtime/hud/hud_minimap.h>
 
 using namespace opennova::hud;
@@ -692,6 +693,18 @@ void test_entity_labels_and_markers() {
 	full.markers = {person};
 	const HudMapLabel *label = find_label(compiler.compile(full), "^SGT  Brown");
 	CHECK(label != nullptr && label->font == 2, "loop 2 names the person in the regular face");
+	// dfx2.exe's walk names nobody (DFX2-81) [orig: sub_5A3850 @0x5A3850 - @0x5A3D53..0x5A3DD4
+	// (dfx2.exe)].
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	CHECK(dfx2 != nullptr && dfx2->hud_map_no_bank_names && jo != nullptr &&
+					!jo->hud_map_no_bank_names,
+			"the empty walk is dfx2.exe's");
+	full.markers[0].team = 1;
+	full.bank_names = false;
+	CHECK(find_label(compiler.compile(full), "^SGT  Brown") == nullptr,
+			"dfx2's second walk draws no name");
+	full.bank_names = true;
 	full.markers[0].team = 2;
 	CHECK(find_label(compiler.compile(full), "^SGT  Brown") == nullptr,
 			"another team's person is not named");

@@ -975,6 +975,7 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	input.farp_y = record_map_.farp_y;
 	input.hudpos_text_color = layout_.hud_text;
 	input.overlays = &state.map_overlays;
+	input.bank_names = state.title == nullptr || !state.title->hud_map_no_bank_names; // DFX2-81
 	input.map_coords_x = layout_.map_coords_x;
 	input.map_coords_y = layout_.map_coords_y;
 	input.map_coords_off = layout_.map_coords_off;
@@ -1083,6 +1084,7 @@ void map_window_input(const HudFrameState &state, const HudItemFlash &item_flash
 	// FARP target (the record's, set by the caller) and colours.
 	input.item_flash = item_flash.timers();
 	input.overlays = &state.map_overlays;
+	input.bank_names = state.title == nullptr || !state.title->hud_map_no_bank_names; // DFX2-81
 }
 
 } // namespace

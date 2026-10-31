@@ -225,6 +225,9 @@ Title make() {
 	// DFX2-87: the tags' modes reach by range [orig: sub_5A27F0 @0x5A27F0 - @0x5A288C..0x5A28C1,
 	//  @0x5A2E1F..0x5A309A (dfx2.exe)].
 	t.hud_tag_ranges = true;
+	// DFX2-81: the map's second name walk draws nothing [orig: sub_5A3850 @0x5A3850 -
+	//  @0x5A3D53..0x5A3DD4 (dfx2.exe)].
+	t.hud_map_no_bank_names = true;
 	return t;
 }
 

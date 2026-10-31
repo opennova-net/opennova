@@ -282,6 +282,12 @@ struct Title {
 	// [orig: sub_5A27F0 @0x5A27F0 (dfx2.exe) - the reach @0x5A288C..0x5A28C1, the mode switch
 	//  @0x5A2E1F..0x5A309A]
 	bool hud_tag_ranges = false;
+	// DFX2-81: the map's second name walk draws nothing: dfx2.exe still finds each same-team
+	// transient-bank person's position and display name, and draws no label; Jointops.exe's names
+	// them in the regular label face (hud::HudMinimapInput::bank_names).
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A49E0 (@0x5A4EDE..0x5A4FA3, the draw @0x5A4F95)]
+	// [orig: sub_5A3850 @0x5A3850 (dfx2.exe) - @0x5A3D53..0x5A3DD4]
+	bool hud_map_no_bank_names = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

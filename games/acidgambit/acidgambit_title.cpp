@@ -53,6 +53,7 @@ Title make() {
 	t.hud_message_tags = jo_title().hud_message_tags;
 	t.hud_map_legend = jo_title().hud_map_legend;
 	t.hud_tag_ranges = jo_title().hud_tag_ranges;
+	t.hud_map_no_bank_names = jo_title().hud_map_no_bank_names;
 	return t;
 }
 

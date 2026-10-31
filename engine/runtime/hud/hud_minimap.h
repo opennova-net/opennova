@@ -437,6 +437,12 @@ struct HudMinimapInput {
 	HudBigMapParams big_map_params;
 	// The non-bank legs' feed (borrowed; null = none of them draw).
 	const HudMinimapOverlays *overlays = nullptr;
+	// The bit5 names' second walk, the transient bank's same-team persons, draws (Jointops.exe's);
+	// dfx2.exe's walk finds each one's position and name and draws nothing
+	// (Title::hud_map_no_bank_names, DFX2-81).
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A49E0 - the draw @0x5A4F95]
+	// [orig: sub_5A3850 @0x5A3850 - @0x5A3D53..0x5A3DD4, no draw (dfx2.exe)]
+	bool bank_names = true;
 	// The ring-edge distance label draws while this is ZERO — the retail
 	// global is BSS (uninitialized .data -> 0 = LIVE by default) and an
 	// authored NONZERO SPINMAPWPDISTOFF suppresses it (re-adjudicated
