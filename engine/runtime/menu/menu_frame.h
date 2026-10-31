@@ -142,7 +142,10 @@ struct MenuQuad {
 // (rounded up to a power of two, clamped to the device's maximum texture side, the
 // image split into tiles past that); each tile created with its FLAGS word | 1, CLAMP
 // @ 0x67aa30]. No menu image reaches the maximum on any device this runs on, so the
-// split is not ported.
+// split is not ported. dfx2.exe's builder is the same code, so the rule serves every title
+// [orig: GImage_CreateTiledTextures_0 @0x6b73f0 - the image's sides into the fit sub_6B69B0
+// @0x6b742f..0x6b7479, the zeroed tile @0x6b752d, the tile created at the fitted sides
+// @0x6b75e5..0x6b7603 (dfx2.exe)].
 inline int menu_image_texture_side(int side) {
 	int pot = 1;
 	while (pot < side) pot *= 2;
