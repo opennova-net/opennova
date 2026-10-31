@@ -111,6 +111,12 @@ struct Title {
 	// [orig: @0x5B9100 (no function, no xref)] [orig: sub_5BEEA0 @0x5BEFBA..0x5BEFEC, sub_5B8050
 	//  @0x5B8050 (dfx2.exe)]
 	bool hud_lone_gunner_panel = false;
+	// DFX2-92: the executable's waypoint step tints the waypoint pointer and its altitude nub with
+	// g_HUDColors.active halved, alpha and all, at the level band (2), whatever the waypoint's
+	// height. False (Jointops.exe): three colours and bands by the waypoint's height against the
+	// local player's, +-2.0 apart. On the Title: the executable's own HUD.
+	// [orig: HUD_UpdateWaypointAltitudeColor @0x590970] [orig: sub_58EDF0 @0x58EDF0 (dfx2.exe)]
+	bool hud_waypoint_active_tint = false;
 	// DFX2-41: the deploy screen picks the loadout. death.mnu's DEATH screen carries PRIMARY /
 	// SECONDARY / ACCESSORY lists its activation fills for the player's class, and the screen's
 	// close on its triggers' clear submits them (the loadout apply, a C2S 0x2F in session); its

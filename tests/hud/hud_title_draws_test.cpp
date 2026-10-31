@@ -106,12 +106,52 @@ void test_the_lone_gunner_panel(const fnt_font_t *font) {
 	CHECK(!element_span(compiler.compile(state, 1024, 768), HudElement::LoneGunnerPanel).found);
 }
 
+// DFX2-92: with the waypoint active, dfx2.exe's step sets the colour to g_HUDColors.active halved
+// alpha and all and the band to 2 whatever the height; Jointops.exe's (and a null title's) picks
+// by the height against the local player's, +-2.0 apart: below blue band 1, above orange band 0,
+// level green band 2. Both keep the words while no waypoint is active.
+// [orig: HUD_UpdateWaypointAltitudeColor @0x590970] [orig: sub_58EDF0 @0x58EDF0 (dfx2.exe)]
+void test_the_waypoint_tint(const fnt_font_t *font) {
+	CHECK(title("dfx2").hud_waypoint_active_tint);
+	CHECK(!title("jo").hud_waypoint_active_tint);
+	CHECK(!title("acidgambit").hud_waypoint_active_tint);
+	HudLayout layout;
+	HudFrameState state;
+	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
+	state.waypoint.present = true;
+	state.waypoint.world_z = 10 * 65536;
+	state.minimap.player_z = 0;
+	const auto words = [&](const opennova::Title *t) {
+		HudFrameCompiler compiler;
+		compiler.configure(layout, font);
+		state.title = t;
+		compiler.compile(state, 1024, 768);
+		return compiler.process_words();
+	};
+	HudProcessWords w = words(&title("dfx2"));
+	CHECK(w.waypoint_altitude_color == 0x7F7F7F7Fu && w.waypoint_altitude_band == 2);
+	w = words(&title("jo"));
+	CHECK(w.waypoint_altitude_color == 0xFF7F5000u && w.waypoint_altitude_band == 0);
+	w = words(nullptr);
+	CHECK(w.waypoint_altitude_color == 0xFF7F5000u && w.waypoint_altitude_band == 0);
+	state.waypoint.world_z = -10 * 65536;
+	w = words(&title("jo"));
+	CHECK(w.waypoint_altitude_color == 0xFF20407Fu && w.waypoint_altitude_band == 1);
+	w = words(&title("dfx2"));
+	CHECK(w.waypoint_altitude_color == 0x7F7F7F7Fu && w.waypoint_altitude_band == 2);
+	// No active waypoint: the words stand (a fresh HUD's zero).
+	state.waypoint.present = false;
+	w = words(&title("dfx2"));
+	CHECK(w.waypoint_altitude_color == 0u && w.waypoint_altitude_band == 0);
+}
+
 } // namespace
 
 int main() {
 	test_the_lone_gunner_panel_is_dfx2s();
 	fnt_font_t font = test_font::uniform_test_font();
 	test_the_lone_gunner_panel(&font);
+	test_the_waypoint_tint(&font);
 	opennova::fnt::fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

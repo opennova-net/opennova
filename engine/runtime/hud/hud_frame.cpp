@@ -4,6 +4,8 @@
 
 #include <runtime/hud/hud_frame.h>
 
+#include <base/title/title.h> // Title::hud_waypoint_active_tint
+
 #include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_game_text.h>
 
@@ -612,7 +614,16 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// compares are signed [orig: HUD_RenderAllOverlays - the HUD_UpdateWaypointAltitudeColor call
 	//  @0x5A815F; HUD_UpdateWaypointAltitudeColor @0x590970 - g_WaypointActiveByte @0x590970, the
 	//  delta @0x590984, `jge` @0x59098C, `jle` @0x5909A8, the stores @0x59098E..0x5909C9].
-	if (record_map_.waypoint_present) {
+	// dfx2.exe's step reads no altitude: the colour is g_HUDColors.active as it stands (ahead of
+	// the frame's GAMEINFO restamp) halved alpha and all, the band 2 (DFX2-92)
+	// [orig: sub_5A71E0 - the call @0x5A72CF; sub_58EDF0 @0x58EDF0 - g_WaypointActiveByte
+	//  @0x58EDF0, `sar eax, 1; and eax, 7F7F7F7Fh` @0x58EDFE..0x58EE00, the stores
+	//  @0x58EE05 / @0x58EE0A (dfx2.exe)].
+	if (record_map_.waypoint_present && state.title != nullptr &&
+			state.title->hud_waypoint_active_tint) {
+		waypoint_altitude_color_ = (hud_colors_active_ >> 1) & 0x7F7F7F7Fu;
+		waypoint_altitude_band_ = 2;
+	} else if (record_map_.waypoint_present) {
 		const int32_t dz = static_cast<int32_t>(static_cast<uint32_t>(record_map_.waypoint_z) -
 				static_cast<uint32_t>(state.minimap.player_z));
 		if (dz < -0x20000) {
