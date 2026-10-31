@@ -138,12 +138,8 @@ auto title_fields_past_identity(const Title &t) {
 			menu_font_scale, host_vehicle_missions, host_switch_starts_off, host_armory_word,
 			armory_lists_none_row, death_map_no_names, player_avatar_by_viewer_side,
 			hud_game_info_board, hud_vehicle_panel_riders, epilog_debriefing_screens,
-			player_info_combo_names, player_info_combo_spins, player_info_preview_hover);
-			menu_font_scale, host_vehicle_missions, host_switch_starts_off, armory_lists_none_row,
-			death_map_no_names, player_avatar_by_viewer_side, hud_game_info_board,
-			hud_vehicle_panel_riders, epilog_debriefing_screens, player_info_combo_names,
-			player_info_combo_spins, player_info_preview_hover, spinmap_spawn_zoom_q16, hud_tips,
-			end_round_team_fallbacks);
+			player_info_combo_names, player_info_combo_spins, player_info_preview_hover,
+			spinmap_spawn_zoom_q16, hud_tips, end_round_team_fallbacks);
 }
 
 // Each of two titles' fields past the identity equal, a failure naming the field by its index in

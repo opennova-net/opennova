@@ -329,6 +329,7 @@ static void serve_only_end_round_cases() {
 	ctx->is_in_session = 1;
 	RoleView serve_only;
 	serve_only.host = ctx.get();
+	serve_only.title = &kJo;
 	serve_only.kernel = &kernel;
 	CHECK(!end_round_session_state(serve_only).header_known);
 	CHECK(end_round_overlay_input(serve_only).player_names[0].empty());
@@ -877,6 +878,7 @@ int main(int argc, char **argv) {
 		kernel.world.cached.local_player = kernel.world.registry.spawn(0, seed);
 		RoleView host;
 		host.runtime = &host_runtime;
+		host.title = &kJo;
 		host.kernel = &kernel;
 		CHECK(host_runtime.assigned_team() == 0);
 		CHECK(end_round_session_state(host).local_team == 2);
