@@ -153,12 +153,6 @@ void Simulation::install_join_glsvss_request() {
 	runtime_->set_glsvss_request(net_.join_glsvss_request);
 }
 
-void Simulation::install_join_cd_key_ids() {
-	if (!runtime_)
-		return;
-	runtime_->set_cd_key_ids(net_.join_cd_key_ids);
-}
-
 void Simulation::install_join_mission_start() {
 	if (!runtime_) return;
 	runtime_->set_sync_tail_loading(net_.join_sync_tail_loading);

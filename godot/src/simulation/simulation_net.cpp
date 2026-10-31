@@ -882,7 +882,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	// No activation, no CDKIID: such a join is refused 10, as a stock DFX2 without one is
 	// (engine JoinerConnection::set_cd_key_ids carries the witness).
 	net_.join_cd_key_ids = machine_activation_cd_keys(protocol);
-	install_join_cd_key_ids();
+	runtime_->set_cd_key_ids(net_.join_cd_key_ids);
 	install_join_mission_start();
 	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
 	install_item_catalog();
