@@ -1258,7 +1258,9 @@ opennova::inmatch::SpecialKeyOutcome Simulation::special_key_chain(
 }
 
 bool Simulation::ingame_restart() {
-	return kernel_ != nullptr && kernel_->world.ingame_restart_command();
+	// The in-game RESTART's engine leg, dfx2.exe's RESTART_LEVEL's too (engine
+	// inmatch::ingame_restart carries the witness).
+	return kernel_ != nullptr && opennova::inmatch::ingame_restart(kernel_->world, runtime_);
 }
 
 

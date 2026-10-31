@@ -1594,10 +1594,11 @@ struct ClientState {
 	bool deploy_overlay_active = false;
 	// The death.mnu DEATH screen's open latch (retail g_DeathMenuOpenLatch
 	// @0x24C1894): the frame loop opens the screen once per arming and stamps
-	// the latch result-blind; only the triggers falling clear it (the
-	// close-on-clear leg -> Game_CloseInGameScreens), never the player's own
-	// dismiss, so a trigger held all session shows the screen once and one
-	// that clears and re-arms shows it again. The triggers are the deploy-map
+	// the latch result-blind; the triggers falling clear it (the
+	// close-on-clear leg -> Game_CloseInGameScreens), and a site that closes the
+	// in-game screens drops it with no close leg (close_in_game_screens), never
+	// the screen's own dismiss, so a trigger held all session shows the screen
+	// once and one that clears and re-arms shows it again. The triggers are the deploy-map
 	// overlay above and the in-session local death (inmatch::death_menu_triggered).
 	// The spawn-success gate stays unmodeled. [orig: Render_ProcessMainSceneFrame
 	// @0x5cab5e..0x5cab8b (gate, latch test @0x5cab70, stamp @0x5cab8b);
@@ -1656,6 +1657,24 @@ struct ClientState {
 		death_menu_closed_on_clear = false;
 		return ran;
 	}
+	// Game_CloseInGameScreens' store into the latch: a site that closes the in-game screens drops
+	// it with no close leg, so a screen latched open runs no title's close call at its triggers'
+	// clear (a DEATH-screen loadout's picks are dropped) and the frame may open it again. The
+	// sites whose close can find it up are the death screen's own buttons (the exit
+	// confirmation's YES, dfx2.exe's RESTART_LEVEL), the in-game menu's restart and exit, and the
+	// admin's GOTO (inmatch::input_action_exit, inmatch::ingame_restart); the scene frame's
+	// HUD-pass sites (the end-round transition, the out-of-session round over) never find it up,
+	// as the pass runs only when no trigger holds and no close leg is left. The function's gate,
+	// an options modal up, has no site among those.
+	// [orig: Game_CloseInGameScreens @0x54B940 - g_OptionsModalState @0x54B942, the zero
+	//  @0x54B954; DeathScreen_OnConfirmYes @0x55353A; UI_IngameRestartCommand @0x555419;
+	//  UI_IngameConfirmExitCommand @0x55546A; CAdminServer_HandleGotoCommand @0x404A4E;
+	//  HUD_DrawOverlayPanels @0x5C0079; UI_ProcessEndRoundScreenTransition @0x5B8625 / @0x5B8654]
+	// [orig: Game_CloseInGameScreens @0x548BB0 - the gate @0x548BB8, the zero @0x548BC4;
+	//  DeathScreen_OnConfirmYes @0x550BCA; DeathScreen_OnRestartLevel @0x550C20;
+	//  UI_IngameRestartCommand @0x553479; UI_IngameConfirmExitCommand @0x5534CA;
+	//  CAdminServer_HandleGotoCommand @0x404A2E (dfx2.exe)]
+	void close_in_game_screens() { death_menu_open_latch = false; }
 	std::uint8_t respawn_penalty_seconds = 0;
 	std::uint8_t local_revive_seconds = 0;
 	std::uint8_t spawn_hold_seconds = 0;

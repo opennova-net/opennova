@@ -105,6 +105,13 @@ std::optional<AdminScene> remote_admin_idle_scene(const RemoteAdminIdleFrame &fr
 }
 
 void input_action_exit(const RemoteAdminBinding &binding, ExitSite site) {
+	// A menu screen's confirmation and the admin's GOTO close the in-game screens ahead of the
+	// action, dropping the DEATH screen's open latch with no close leg (ClientState::
+	// close_in_game_screens); the input pass's own action 3 closes none.
+	// [orig: DeathScreen_OnConfirmYes @0x55353A, UI_IngameConfirmExitCommand @0x55546A,
+	//  CAdminServer_HandleGotoCommand @0x404A4E, each ahead of its action 3]
+	if (site != ExitSite::Input && binding.client != nullptr)
+		binding.client->view().state().close_in_game_screens();
 	if (binding.host != nullptr) {
 		binding.host->mission_exit_reason = kMissionExitQuit;
 		// [orig: CNapiNetwork_DisconnectActiveConnection(&g_NapiNPCtx, "I.C:CIDEMIS") @0x49AF42
@@ -120,6 +127,13 @@ void input_action_exit(const RemoteAdminBinding &binding, ExitSite site) {
 		binding.joiner->quit_to_menu();
 	else if (binding.world != nullptr)
 		binding.world->mission_exit_reason = world::kWorldMissionExitQuit;
+}
+
+bool ingame_restart(world::World &world, ClientRuntime *client) {
+	// [orig: UI_IngameRestartCommand @0x555410; the declaration carries the legs]
+	if (world.rules.mp_session) return false;
+	if (client != nullptr) client->view().state().close_in_game_screens();
+	return world.ingame_restart_command();
 }
 
 bool remote_admin_idle_frame_exits(const RemoteAdminIdleFrame &frame) {
