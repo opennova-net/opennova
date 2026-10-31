@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <base/title/title.h>
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/world/deploy_screen_feed.h>
@@ -289,13 +290,18 @@ void test_instruction_branches() {
 }
 
 // The DEATH_SHROUD reveal: at once under the deploy overlay, else only past
-// 240 ticks since the death stamp (a signed difference); the refresh runs on
-// each tick whose low four bits are zero.
+// the title's ticks since the death stamp (a signed difference): Jointops.exe's
+// 240, dfx2.exe's 360; the refresh runs on each tick whose low four bits are
+// zero. [orig: DeathScreen_UpdateShroudReveal @0x554752] [orig: sub_552770
+// @0x552792 (dfx2.exe)]
 void test_shroud_reveal_and_refresh() {
-	CHECK(death_shroud_revealed(true, 0));
-	CHECK(!death_shroud_revealed(false, 240));
-	CHECK(death_shroud_revealed(false, 241));
-	CHECK(!death_shroud_revealed(false, -5));
+	const int32_t jo = opennova::Title().death_shroud_reveal_ticks;
+	CHECK(jo == 240);
+	CHECK(death_shroud_revealed(true, 0, jo));
+	CHECK(!death_shroud_revealed(false, 240, jo));
+	CHECK(death_shroud_revealed(false, 241, jo));
+	CHECK(!death_shroud_revealed(false, -5, jo));
+	CHECK(!death_shroud_revealed(false, 360, 360) && death_shroud_revealed(false, 361, 360));
 	CHECK(deploy_refresh_due(15, 16));
 	CHECK(!deploy_refresh_due(16, 16));
 	CHECK(!deploy_refresh_due(16, 31));

@@ -44,6 +44,8 @@ const SPAWN_TABLE := "SPAWNPOINTS_TABLE"
 # show-time zoom fit reads (hud/hud_map_view.h DeathMapView::fit).
 const MAP_WIDGET := "MAP"
 const SHROUD_WIDGET := "DEATH_SHROUD"
+# The screen's root window a title hides and shows with the shroud (DeployStatus.shroud_main).
+const MAIN_WIDGET := "MAIN"
 # The team-service pair, shown together; only SWAP_TEAMS has a DEATH callback.
 const SWAP_TEAMS := "SWAP_TEAMS"
 const TEAM_LIST := "BUTTON_TEAMLIST"
@@ -111,6 +113,8 @@ var _map_view_state := MapViewState.new()
 # again; the close leaves it as it stands (engine world::pass_through_close_axis
 # carries the witness).
 var _input_pass_through := false
+# Whether MAIN hides and shows with the shroud (the title's, read at the open).
+var _shroud_main := false
 
 
 func setup(view: WorldView, ui_parent: Node) -> void:
@@ -237,8 +241,9 @@ func open() -> bool:
 			ControlsBindings.model().display_text_for_token("MedicReq"))
 	_apply_team_service_buttons(status.show_team_buttons)
 	_activate_loadout(status)
-	# The show hides the shroud; the per-frame reveal shows it and runs the
-	# content refresh (_process).
+	# The show hides the shroud (and, for a title that hides it with the shroud, MAIN); the
+	# per-frame reveal shows them and runs the content refresh (_process).
+	_shroud_main = status.shroud_main
 	_set_shroud_shown(false)
 	_input_pass_through = true
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
@@ -481,6 +486,10 @@ func _populate_spawn_list(sim: Simulation) -> void:
 
 
 func _set_shroud_shown(shown: bool) -> void:
+	if _shroud_main and _driver != null:
+		var main_id := _driver.widget_id(MAIN_WIDGET)
+		if main_id >= 0:
+			_driver.set_widget_shown(main_id, shown)
 	var id := _driver.widget_id(SHROUD_WIDGET) if _driver != null else -1
 	if id < 0:
 		return

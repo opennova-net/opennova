@@ -755,6 +755,7 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 			world::deploy_loadout_shown(buttons.team, buttons.permanent_death, buttons.dead);
 	v.restart_level = world::deploy_restart_level_allowed(
 			buttons.game_type, buttons.in_session, buttons.dead);
+	v.shroud_main = view.title != nullptr && view.title->death_shroud_main;
 	return v;
 }
 
@@ -1044,7 +1045,9 @@ bool death_shroud_revealed(const RoleView &view) {
 	const uint32_t now = view.kernel->world.logic_tick;
 	const int32_t since_death =
 			static_cast<int32_t>(now - view.kernel->local.view.death_cam.start_tick);
-	return world::death_shroud_revealed(deploy_active, since_death);
+	const int32_t reveal_ticks = view.title != nullptr ? view.title->death_shroud_reveal_ticks
+			: Title().death_shroud_reveal_ticks;
+	return world::death_shroud_revealed(deploy_active, since_death, reveal_ticks);
 }
 
 hud::HudMapGridOrigin hud_map_grid_origin(const RoleView &view) {

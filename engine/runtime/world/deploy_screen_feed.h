@@ -32,18 +32,22 @@ inline constexpr int32_t kDeployRefreshTicks = 16;
 // THE DEATH_SHROUD REVEAL. The screen's show event hides DEATH_SHROUD (the
 // window that holds the MAP, the spawn list and every static); then, every
 // main frame while the screen is loaded, the shroud shows once the deploy
-// overlay is up or more than 240 ticks have passed since the local death
-// stamp (a signed difference), and only inside that branch does the content
-// refresh run, on each tick whose low four bits are zero.
+// overlay is up or more than the title's reveal ticks (Title::
+// death_shroud_reveal_ticks: Jointops.exe's 240, dfx2.exe's 360) have passed
+// since the local death stamp (a signed difference), and only inside that
+// branch does the content refresh run, on each tick whose low four bits are
+// zero.
 // [orig: DeathScreen_UpdateUI @0x553150 — CWnd_SetShown(DEATH_SHROUD, 0)
 //  @0x55325f; DeathScreen_UpdateShroudReveal @0x554730 — `dword_25A39BC &&
 //  (g_DeployScreenActive || (int)(g_CurrentTick - g_CameraLerpStartTick) >
 //  240)` @0x554737..0x554752, CWnd_SetShown(DEATH_SHROUD, 1) @0x554771,
 //  `(g_CurrentTick & 0xF) == 0` -> UI_UpdateDeathScreenContent @0x55477d;
-//  run from UI_ProcessMenuScreenFrame @0x54e67c]
-inline constexpr int32_t kDeathShroudRevealTicks = 240;
-inline bool death_shroud_revealed(bool deploy_screen_active, int32_t ticks_since_death) {
-	return deploy_screen_active || ticks_since_death > kDeathShroudRevealTicks;
+//  run from UI_ProcessMenuScreenFrame @0x54e67c] [orig: sub_552770 @0x552770 -
+//  @0x552777..0x552792, the MAIN and DEATH_SHROUD shows @0x5527a4..0x5527d3,
+//  sub_551E10 and sub_5503A0 @0x5527e1 / @0x5527e6 (dfx2.exe)]
+inline bool death_shroud_revealed(bool deploy_screen_active, int32_t ticks_since_death,
+		int32_t reveal_ticks) {
+	return deploy_screen_active || ticks_since_death > reveal_ticks;
 }
 // Whether a refresh tick (low four bits zero) lies in (prev_tick, tick]: the
 // device samples once per display frame, so it asks whether the main frames
@@ -416,6 +420,7 @@ struct DeployScreenStatus {
     bool team_buttons_shown = false; // deploy_team_buttons_shown
     bool loadout_shown = false;      // deploy_loadout_shown
     bool restart_level = false;      // deploy_restart_level_allowed
+    bool shroud_main = false;        // Title::death_shroud_main
 };
 
 } // namespace opennova::world

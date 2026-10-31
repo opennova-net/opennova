@@ -436,8 +436,9 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 
 // Whether the DEATH screen's shroud shows this main frame (world/
 // deploy_screen_feed.h death_shroud_revealed): the role's deploy-overlay
-// latch, or more than 240 logic ticks since the local player view's death
-// stamp. False without a kernel.
+// latch, or more than the session title's reveal ticks (Jointops.exe's 240
+// without one) since the local player view's death stamp. False without a
+// kernel.
 // [orig: DeathScreen_UpdateShroudReveal @0x554737..0x554752 —
 //  g_DeployScreenActive, g_CurrentTick - g_CameraLerpStartTick]
 bool death_shroud_revealed(const RoleView &view);

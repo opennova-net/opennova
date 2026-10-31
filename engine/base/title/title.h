@@ -148,6 +148,13 @@ struct Title {
 	// DeathScreen_ZoomStep @0x5535d0].
 	float death_map_zoom_max = 10.0f;
 	uint32_t death_map_frame_color = 0;
+	// DFX2-41: the DEATH screen's reveal: the ticks past the local death after which its
+	// DEATH_SHROUD shows (at once under the deploy overlay), and whether its MAIN window hides
+	// with the shroud at the activation and shows with it. Jointops.exe's: 240, MAIN untouched
+	// [orig: DeathScreen_UpdateShroudReveal @0x554730 - the compare @0x554752; DeathScreen_UpdateUI
+	//  @0x553150 - the shroud's hide @0x55325f].
+	int32_t death_shroud_reveal_ticks = 240;
+	bool death_shroud_main = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

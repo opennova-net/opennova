@@ -135,6 +135,11 @@ Title make() {
 	// @0x550ca6 (the wheel) (dfx2.exe)].
 	t.death_map_zoom_max = 6.0f;
 	t.death_map_frame_color = 0xFFE1DF4Bu;
+	// DFX2-41: the reveal 360 ticks past the death, MAIN shown before the shroud; the activation
+	// hides MAIN with it [orig: sub_552770 @0x552792 (360), CWnd_SetShown(MAIN, 1) @0x5527b1;
+	// sub_550690 - CWnd_SetShown(MAIN, 0) @0x5507b8 (dfx2.exe)].
+	t.death_shroud_reveal_ticks = 360;
+	t.death_shroud_main = true;
 	return t;
 }
 
