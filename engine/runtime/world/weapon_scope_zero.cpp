@@ -93,7 +93,7 @@ ScopeZeroSlotSeed weapon_scope_zero_slot_seed(const WeaponScopeZero &zero, int32
     if ((def_flags & 3) != 0) out.pitch = weapon_scope_zero_pitch(zero, out.step);
     out.yaw = weapon_scope_zero_yaw(zero, out.step);
     if (seed == ScopeZeroSeed::Rangefinder) {
-        // [orig: WeaponSlot_InitFromDef @0x53C0C0 - `and eax, 400h` @0x53C1E8, +4 = 0
+        // [orig: WeaponSlot_InitFromDef @0x53C0C0 - `and edi, 400h` @0x53C1E0, +4 = 0
         //  @0x53C1EA, +0x60 = 0 @0x53C1F1 / -1 @0x53C1F9 (dfx2.exe)]
         out.pitch = 0;
         out.step = (static_cast<uint32_t>(def_flags2) & def::DEF_WEAPON_FLAG2_NOAUTOZERO) != 0 ? 0 : -1;

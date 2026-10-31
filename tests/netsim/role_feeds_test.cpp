@@ -828,6 +828,8 @@ int main(int argc, char **argv) {
 	const hud::EndRoundOverlayInput in = end_round_overlay_input(joiner);
 	CHECK(in.winner_team == 2 && in.team_scores[1] == 9 && in.player_names[0] == "Alice" &&
 			in.player_scores[0] == 12 && in.death_screen && in.round_time_remaining_ticks == 620);
+	// The team score lines' fallbacks are the session title's (Title::end_round_team_fallbacks).
+	CHECK(in.team_fallbacks[0] == "!Joint Ops Team" && in.team_fallbacks[1] == "!Rebel Team");
 	// A negative round clock reads as 0 (the untimed arm).
 	cs.round_time_remaining_ticks = -1;
 	CHECK(end_round_session_state(joiner).round_ticks == 0);

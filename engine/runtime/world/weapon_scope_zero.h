@@ -43,8 +43,8 @@ enum class ScopeZeroSeed : uint8_t {
 	// zero (weapon_scope_zoom_step), or 0 for a NoAutoZero def (Flags2 0x400); the zero yaw
 	// (MountSlot+8) stays the default step's. A ForceScoped mount's rangefinder word -1. dfx2.exe
 	// has no zero keys (DFX2-110), so its sights stay on the rangefinder.
-	// [orig: WeaponSlot_InitFromDef @0x53C0C0 - the yaw @0x53C196..0x53C1DA, `and eax, 400h`
-	//  @0x53C1E8, the pitch 0 @0x53C1EA, the step 0 @0x53C1F1 / -1 @0x53C1F9;
+	// [orig: WeaponSlot_InitFromDef @0x53C0C0 - the yaw @0x53C196..0x53C1DA, `and edi, 400h`
+	//  @0x53C1E0, the pitch 0 @0x53C1EA, the step 0 @0x53C1F1 / -1 @0x53C1F9;
 	//  Player_MountWeaponSlot @0x4DCAE0 - `mov dword_B6FDB8, 0FFFFFFFFh` @0x4DCBDB (dfx2.exe)]
 	Rangefinder,
 };
