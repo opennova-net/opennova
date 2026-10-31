@@ -1,6 +1,9 @@
 #include <cstdio>
 #include <cstring>
 #include <runtime/audio/ambient_mixer.h>
+#include <runtime/audio/mixer.h>
+#include <runtime/audio/script_voice_player.h>
+#include <runtime/audio/sound_listener.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
@@ -93,6 +96,37 @@ static void test_the_dialogue_option_scales_and_clamps_the_voice() {
     dialogue = 64;                                       // the option moves mid-line: the clamp follows
     frame = f.world.script.voice.frame(f.world, {});
     CHECK(frame.state.volume == 105 && frame.volume == 64);
+}
+
+// The game's own buffer, AUD1, which its wave loader takes unchecked, reaches channel zero at its
+// header's pitch word: 32768, half the 44100 Hz device rate. The start's play factor stays unity,
+// so the channel steps 256 of a sample's 512 a device frame [orig: Audio_LoadWavFileFromArchive
+// @0x766603..0x76663C; Audio_Play3DPositionalSound @0x4ECD79 -> AudioChannel_PlaySound(0, ...);
+// the step @0x7BD5F6..0x7BD622].
+static void test_aud1_voice_reaches_channel_zero_at_its_header_pitch() {
+    Fixture f;
+    f.world.script.voice.set_file_reader([](const std::string &name, std::vector<uint8_t> &out) {
+        if (name != "tone.wav") return false;
+        out.assign(16 + 22050, 0); // signed PCM8; the zero-filled payload is silence
+        std::memcpy(out.data(), "AUD1", 4);
+        const uint32_t count = 22050, pitch = 32768;
+        for (int i = 0; i < 4; ++i) {
+            out[size_t(4 + i)] = uint8_t(count >> (8 * i));
+            out[size_t(8 + i)] = uint8_t(pitch >> (8 * i));
+        }
+        out[12] = 1;
+        return true;
+    });
+    f.script("wave(\"tone.wav\")\n");
+    const auto frame = f.world.script.voice.frame(f.world, {});
+    CHECK(frame.state.clip && frame.state.clip->loader_pitch_q16 == 32768);
+    opennova::audio::Mixer mixer;
+    opennova::audio::SoundListener listener;
+    opennova::audio::ScriptVoicePlayer voice;
+    voice.follow(mixer, listener, frame);
+    const opennova::audio::ChannelParams &channel = mixer.channel(opennova::audio::kVoiceChannel);
+    CHECK(voice.handle() != 0 && channel.wave && channel.wave->pitch_q16 == 32768);
+    CHECK(channel.play_q16 == 0x10000u && mixer.step(opennova::audio::kVoiceChannel) == 256);
 }
 
 static void test_failed_replacement_invalidates_before_loading() {
@@ -335,6 +369,7 @@ int main() {
     test_entity_voice_anchors_at_the_speaker_or_falls_back_to_a_oneshot();
     test_radio_sets_share_channel_zero_and_keep_unity_pitch();
     test_the_dialogue_option_scales_and_clamps_the_voice();
+    test_aud1_voice_reaches_channel_zero_at_its_header_pitch();
     test_failed_replacement_invalidates_before_loading();
     test_spatial_speaker_and_radio_anchor();
     test_invalid_speaker_does_not_interrupt_and_dead_anchor_stops();

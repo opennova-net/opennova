@@ -7,7 +7,10 @@ extends GutTest
 ## naming a wave per line, and the shared IMA-ADPCM wave as dlg001's line.
 ## Replaces the retail 00TRg witness (its .DBF/.LWF and z00gr100.wav, an
 ## IMA-ADPCM dialog wave): every dialog id resolves to a wave of the dialog
-## bank, and the ADPCM wave decodes and plays on the dialog channel.
+## bank, dlg001's to the ADPCM wave the root serves. That wave decoding and
+## playing on the dialog channel is the engine's (ctest `audio_mixer`,
+## dialog_adpcm_line); a line's play through the dialog queue needs a booted
+## world (mission_audio_test).
 
 const MISSION := "synthdlg.bms"
 const DIALOG_BANK := "res://../fixtures/dbf/synth_bank.dbf"
@@ -82,15 +85,11 @@ func test_minted_mission_dialog_resolves() -> void:
 	assert_eq(resolved, dialog_count, "every dialog id resolves to a wave of the dialog bank")
 	assert_eq(audio.resolve_dialog_wave(1), ADPCM_NAME, "dlg001's line plays the ADPCM wave")
 
-	# Dialog/zone waves are IMA-ADPCM (audioFormat 0x11): dlg001's decodes and plays on the
-	# dialog channel (a wave that failed to decode once left it silent; the decode's samples
-	# are the ctest `wav_pcm`).
+	# Dialog/zone waves are IMA-ADPCM (audioFormat 0x11): the root serves dlg001's (its decode
+	# and its play on the dialog channel are the ctest `audio_mixer`'s, its samples `wav_pcm`'s).
 	var wbytes := root.read_file(ADPCM_NAME)
 	assert_false(wbytes.is_empty(), "the ADPCM wave is served from the root")
 	assert_eq(_wave_format(wbytes), 0x11, "the staged wave is IMA-ADPCM")
-	assert_true(audio.play_dialog(1))
-	audio.advance_dialog_tick()
-	assert_true(audio.is_dialog_voice_playing(), "IMA-ADPCM dialog wav decodes and plays")
 	audio.teardown()
 
 

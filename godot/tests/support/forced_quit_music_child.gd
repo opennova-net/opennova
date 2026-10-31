@@ -3,7 +3,7 @@ extends SceneTree
 ## The child launch of forced_quit_music_test.gd: the MusicService autoload streams
 ## the synthetic fixture bank (fixtures/, which every test job pulls) through its
 ## MusicDirector, then the child quits from code with the stream still playing,
-## bypassing the shell's orderly drain (MainGame.request_quit) as a forced quit
+## bypassing the shell's orderly shutdown (MainGame.request_quit) as a forced quit
 ## does. Before the SBF stream handed the AudioServer a built-in playback, that
 ## exit crashed in the server's teardown (docs/audio/mus-sbf-re.md "Godot
 ## playback shutdown").

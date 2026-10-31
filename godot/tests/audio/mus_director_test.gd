@@ -55,32 +55,20 @@ func test_exit_tree_stops_the_music_vm() -> void:
 	assert_eq(dir.vm_state(), 0, "tree exit stops the VM")
 
 
-func test_service_playback_drain_is_bounded_and_reports_the_timeout() -> void:
-	# The quit path's drain (MusicService.await_playback_stopped) must give up
-	# after its bound instead of waiting on a mixer that never advances.
-	var bank := SbfBank.new()
-	bank.load_from_path(BANK_FIXTURE)
-	var script := MusicScript.new()
-	script.load_from_path(SCRIPT_FIXTURE)
-	var dir: MusicDirector = MusicService.director()
-	assert_not_null(dir, "the autoload owns the one director")
-	if dir == null:
-		return
-	dir.bank = bank
-	dir.load_mus_script(script)
-	dir.start()
-	await wait_until(dir.has_pending_playback, 2.0)
-	assert_true(dir.has_pending_playback(), "the fixture reached real streaming playback")
-	var drained: bool = await MusicService.await_playback_stopped(0)
-	assert_false(drained, "an exhausted bound reports the timeout while playback is pending")
-	assert_true(dir.has_pending_playback(), "the timeout leaves the track streaming")
-	MusicService.stop_context()
-	drained = await MusicService.await_playback_stopped()
-	assert_true(drained, "the stop ends the stream inside the bound")
-	assert_false(dir.has_pending_playback(), "the shutdown barrier clears after the drain")
+# Whether `dir` streams a track at some frame boundary within `frames` frames. The director's pump
+# runs seven updates a frame in its _process, which the tree's process_frame signal precedes, so
+# each check reads the stream as the previous frame's service left it. The fixture's one-block
+# tracks stream out inside a frame: only some frames end with a track selected (the first service's,
+# at Multiplayerstart's third play), which a poll on the physics tick can miss.
+func _await_streaming(dir: MusicDirector, frames: int = 120) -> bool:
+	for _frame in range(frames):
+		if dir.has_pending_playback():
+			return true
+		await get_tree().process_frame
+	return dir.has_pending_playback()
 
 
-func test_stopped_playback_releases_its_bank_after_the_mixer_drains() -> void:
+func test_stopped_playback_releases_its_bank() -> void:
 	var bank := SbfBank.new()
 	bank.load_from_path(BANK_FIXTURE)
 	var script := MusicScript.new()
@@ -91,19 +79,18 @@ func test_stopped_playback_releases_its_bank_after_the_mixer_drains() -> void:
 	dir.bank = bank
 	dir.load_mus_script(script)
 	dir.start()
-	await wait_until(dir.has_pending_playback, 2.0)
-	assert_true(dir.has_pending_playback(), "the fixture reached real streaming playback")
+	assert_true(await _await_streaming(dir), "the fixture reached real streaming playback")
 	var bank_ref: WeakRef = weakref(bank)
 	dir.stop()
 	dir.bank = null
 	dir.load_mus_script(null)
 	bank = null
-	# The stop closes the music stream over the engine mixer: the channels flushed and the bank
-	# unbound, its queued buffers holding only their decoded samples.
+	# The stop closes the music stream over the engine mixer at once (engine
+	# audio::MusicStream::close): the channels flushed and the bank unbound, its queued buffers
+	# holding only their decoded samples.
+	assert_false(dir.has_pending_playback(), "the stop ends the stream at once")
 	await wait_until(func(): return bank_ref.get_ref() == null, 2.0)
 	assert_null(bank_ref.get_ref(), "a stopped stream releases the bank")
-	await wait_until(func(): return not dir.has_pending_playback(), 2.0)
-	assert_false(dir.has_pending_playback(), "the stopped stream streams nothing")
 
 
 # The SP round-end tail's end track reaches the loaded script through the

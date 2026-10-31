@@ -120,7 +120,6 @@ var _join_choice_committed := Callable()
 var _shutdown_prepared := false
 var _shutdown_resources_released := false
 var _quit_requested := false
-var _quit_drain_pending := false
 var _quit_policy_installed := false
 var _process_exit_pending := false  # exit_process ran: the process ends without a save
 ## How the process ends with an exit code: empty quits the SceneTree with it.
@@ -1081,14 +1080,10 @@ func _mission_start_gate() -> Error:
 
 
 ## Graceful runtime stop seam used by the shell and optional control service.
-## The shutdown itself runs once; a repeat close request while the music
-## drain is still pending ends the drain and quits right away, so a mixer
-## that stopped advancing can never swallow the window's close.
+## The shutdown runs once. The music context's stop flushes its channels at once
+## (engine audio::MusicStream::close), so the quit waits on no music drain.
 func request_quit() -> void:
 	if _quit_requested:
-		if _quit_drain_pending:
-			_quit_drain_pending = false
-			_finish_quit()
 		return
 	_quit_requested = true
 	# The main loop's exit saves game.cfg before the shutdown
@@ -1152,21 +1147,10 @@ func _quit_failed_boot() -> void:
 	get_tree().quit(1)
 
 
-## True while request_quit() is waiting for the music playbacks to drain
-## (ADR 0018 read seam for the lifecycle tests).
-func is_quit_drain_pending() -> bool:
-	return _quit_drain_pending
-
-
 func _complete_runtime_shutdown(load_operation: WorldLoadOperation) -> void:
 	if load_operation != null and not load_operation.is_settled():
 		await load_operation.settled
 	finish_runtime_shutdown()
-	_quit_drain_pending = true
-	await MusicService.await_playback_stopped()
-	if not _quit_drain_pending:
-		return # a repeat close request already finished the quit
-	_quit_drain_pending = false
 	_finish_quit()
 
 

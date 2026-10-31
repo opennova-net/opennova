@@ -24,7 +24,7 @@ func after_each() -> void:
 	staged_dirs.clear()
 
 
-func _boot_voice_world(aud: bool = false) -> GameWorld:
+func _boot_voice_world() -> GameWorld:
 	var script := (
 		"if never() then wave(\"tone.wav\") endif\n" +
 		"if eq(v1,1) then wave(\"tone.wav\") set(v1,0) endif\n" +
@@ -33,16 +33,6 @@ func _boot_voice_world(aud: bool = false) -> GameWorld:
 		{"mnml.wac": script})
 	staged_dirs.append(root_dir)
 	WorldFixture.stage_sound_bank(root_dir, PackedStringArray())
-	if aud:
-		# The game's own buffer, AUD1, which its wave loader takes unchecked.
-		var bytes := "AUD1".to_ascii_buffer()
-		bytes.resize(16 + 22050)
-		bytes.encode_u32(4, 22050)
-		bytes.encode_u32(8, 32768) # half the retail 44100 Hz device rate
-		bytes[12] = 1 # signed PCM8; zero-filled payload is silence
-		var stream := FileAccess.open(root_dir.path_join("tone.wav"), FileAccess.WRITE)
-		stream.store_buffer(bytes)
-		stream.close()
 	# The minimal pack intentionally omits the listen-player template 105305.
 	# Voice validation requires its real ItemDef, independently of its model.
 	var items := FileAccess.get_file_as_string(root_dir.path_join("items.def"))
@@ -97,16 +87,6 @@ func test_wac_voice_completion_and_interrupt_use_the_real_channel() -> void:
 	_script_pass(sim)
 	assert_eq(sim.get_mission_variable(3), 1, "the scene frame's validation releases waveready")
 	assert_eq(audio.script_voice_handle(), 0)
-	world.unload()
-
-
-# The game's AUD1 buffer reaches the channel at its header's play word: 32768, half the 44100 Hz
-# device rate.
-func test_aud1_script_voice_reaches_the_channel() -> void:
-	var world := _boot_voice_world(true)
-	var audio := world.get_mission_audio()
-	assert_true(audio.channel_sounding(VOICE_CHANNEL))
-	assert_eq(audio.channel_play(VOICE_CHANNEL), 32768)
 	world.unload()
 
 

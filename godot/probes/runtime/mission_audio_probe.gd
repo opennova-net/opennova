@@ -4,8 +4,8 @@ extends GameProbe
 ## more missions on the launch's mounted root. Per mission: how many "snd:"
 ## markers resolved to candidates, which banks loaded, how many dialogs the
 ## .DBF carries; then the current top-eight candidates are materialized and
-## the physical pool's loop regions checked (a loop_end <= loop_begin wraps
-## at sample 0 forever: a silent voice). With `missions` empty, every .bms
+## each bound emitter channel checked for a sounding wave (the mixer's
+## channels 4..11; one playing nothing is a silent emitter). With `missions` empty, every .bms
 ## the mount's index lists (cap 12). Used to compare stock vs mod missions
 ## when in-game ambience is reported silent.
 
@@ -75,8 +75,8 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		reports.append({
 			"mission": m,
 			"stats": stats.to_json_value(),
-			"loop_voices": loop_voices,
-			"loop_empty": loop_empty,
+			"bound_channels": bound,
+			"silent_channels": silent,
 		})
 		await ctx.tree.process_frame
 	var data := {"missions": reports, "failures": Array(failures)}
@@ -84,4 +84,4 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		return ProbeVerdict.failed("cancelled", data)
 	if not failures.is_empty():
 		return ProbeVerdict.failed("%d problem(s): %s" % [failures.size(), "; ".join(failures)], data)
-	return ProbeVerdict.passed("%d mission(s) set up, every loop region non-empty" % reports.size(), data)
+	return ProbeVerdict.passed("%d mission(s) set up, every bound emitter channel sounding" % reports.size(), data)
