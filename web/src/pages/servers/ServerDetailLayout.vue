@@ -84,7 +84,7 @@ const props = defineProps<{
 
 const route = useRoute();
 const router = useRouter();
-const { refresh: refreshSession } = useSession();
+const { refresh: refreshSession, isAdmin } = useSession();
 provideConsoleQueue();
 
 const server = ref<HostedServer | null>(null);
@@ -108,14 +108,15 @@ const titleText = computed(() => serverName(server.value?.listing?.server_name |
 const plainTitle = computed(() => (server.value ? stripGameText(titleText.value) : `Server ${route.params.id ?? ''}`));
 const gameType = computed(() => gameTypeName(server.value?.listing?.game_type));
 
-// The owner's tabs; the admin's add Logs (an owner never sees raw logs).
+// The owner's tabs; an admin's add Logs, on the owner's page too (an owner
+// who is no admin never sees raw logs: GET /api/admin/logs).
 const tabs = computed<Tab[]>(() => {
   const common = [
     { label: 'Overview', to: base.value },
     { label: 'Stats', to: `${base.value}/stats` },
     { label: 'Console', to: `${base.value}/console` },
   ];
-  return props.scope === 'admin' ? [...common, { label: 'Logs', to: `${base.value}/logs` }] : common;
+  return props.scope === 'admin' || isAdmin.value ? [...common, { label: 'Logs', to: `${base.value}/logs` }] : common;
 });
 
 async function onSessionEnded() {

@@ -45,11 +45,12 @@ namespace hosted {
 // /api/me/servers/<id>, the start, stop and update replies, an admin's user
 // page) or, with `admin`, for the fleet view (fleet_routes.h): its owner (with
 // its support tier), its service account, its container and machine address,
-// its place in the fleet (machine_ref, slot, game_port, generation,
-// serve_image), its pins and whether it is outdated, its last minute of ticks
-// (`tick`: {p99_ms, late} from its slot's report, null with none) and its
-// listing's players besides. Never its admin password. Without its events. The owner's
-// views carry its phase and why its last run ended besides (phase_json).
+// its place in the fleet (machine_ref, slot, game_port, serve_image), its pins
+// and whether it is outdated, its last minute of ticks (`tick`: {p99_ms, late}
+// from its slot's report, null with none) and its listing's players besides.
+// Never its admin password. Without its events. Either view carries its starts so
+// far (`generation`); the owner's views carry its phase and why its last run
+// ended besides (phase_json).
 // With `zone` (the play zone, "" for none), its address's hostname too. Every
 // view carries its listing on NovaLogic's NovaWorld (`novalogic`: {state, try and
 // tries while trying or retrying, next_try_at (ISO 8601) while retrying, reason

@@ -175,7 +175,6 @@ export function fleetServer(id: number, overrides: Partial<FleetServer> & Partia
     base_tree_id: 10,
     expansion_tree_id: null,
     outdated: false,
-    generation: 1,
     tick: { p99_ms: 14.2, late: 0 },
     ...overrides,
   };

@@ -378,6 +378,7 @@ export function parseHostedServer(value: unknown): HostedServer | null {
     build: parseBuild(v.build),
     build_available: parseBuild(v.build_available),
     update_requested: v.update_requested === true,
+    generation: isCount(v.generation) ? v.generation : 0,
     novalogic: parseNovaLogic(v.novalogic),
     phase: parsePhase(v.phase),
     stopped_because: parseStoppedBecause(v.stopped_because),

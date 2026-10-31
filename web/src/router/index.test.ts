@@ -54,6 +54,7 @@ describe('router', () => {
     ['/me/billing', BillingPage],
     ['/me/servers/stats', MyServerStatsPage],
     ['/me/servers/hosts/167772161', HostedGamePage],
+    ['/me/servers/12/logs', ServerLogsTab],
     ['/lobby/167772175', PublicServerPage],
     ['/lobby/novalogic/167782351', PublicServerPage],
     ['/admin', OverviewPage],
