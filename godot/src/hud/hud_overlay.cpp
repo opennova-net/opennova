@@ -1696,6 +1696,10 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	opennova::hud::hud_exp_points_text(game_text_lookup(p_gametext), state_.exp_points.text);
 	state_.title = facts.title;
 	state_.lone_gunner = facts.lone_gunner;
+	// The vehicle panel's rider lines and their weapon texts (engine hud/hud_frame.h
+	// HudVehicleRider carries the witness).
+	state_.vehicle_riders = facts.vehicle_riders;
+	opennova::hud::hud_vehicle_rider_text(game_text_lookup(p_gametext), state_.vehicle_riders);
 	inset_target_name_ = facts.inset_target_name;
 	inset_reticle_quad_ = facts.inset_reticle_quad;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.game_type,

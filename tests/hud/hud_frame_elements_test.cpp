@@ -314,6 +314,71 @@ void test_game_info_leader_lines() {
 	CHECK(lines.size() == 2 && lines[0] == "19:50 B" && lines[1] == "19:57 C");
 }
 
+// DFX2-82, dfx2.exe's rider lines under the vehicle panel: left-aligned in the bold slot from
+// the silhouette's bottom-left corner, one bold 'W' height a line, half-bright tagcolor_good,
+// the driver's then at most two gunners'; none for Jointops.exe.
+// [orig: sub_5A3DF0 @0x5A3F1B..0x5A3F23, @0x5A4700, @0x5A4711..0x5A4871 (dfx2.exe)]
+void test_vehicle_panel_riders(const fnt_font_t *font) {
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *ag = opennova::title_by_code("acidgambit");
+	CHECK(dfx2 != nullptr && dfx2->hud_vehicle_panel_riders && jo != nullptr &&
+			!jo->hud_vehicle_panel_riders && ag != nullptr && !ag->hud_vehicle_panel_riders);
+	if (dfx2 == nullptr) return;
+	HudLayout layout;
+	layout.veh_stance_pos = {100, 500, 0, 0, true};
+	layout.tag_good = 0xFF20C040u;
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	state.mount_slot = 1; // a passenger: the panel's stance arm
+	state.vehicle_panel.shown = true;
+	state.vehicle_panel.silhouette_valid = true;
+	state.vehicle_panel.silhouette_w = 64;
+	state.vehicle_panel.silhouette_h = 40;
+	state.vehicle_panel.anchor_x = 100;
+	state.vehicle_panel.anchor_y = 500;
+	HudVehicleRider driver;
+	driver.name = "Ace";
+	HudVehicleRider gunner;
+	gunner.name = "Bo";
+	gunner.gunner = true;
+	gunner.has_weapon = true;
+	gunner.weapon_text = "MG";
+	HudVehicleRider plain = gunner;
+	plain.name = "Cy";
+	plain.has_weapon = false;
+	HudVehicleRider third = plain;
+	third.name = "Di";
+	state.vehicle_riders = {driver, gunner, plain, third};
+	const auto bold = [&]() {
+		return glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold);
+	};
+	// Jointops.exe's panel draws no line.
+	state.title = jo;
+	CHECK(bold().empty());
+	state.title = dfx2;
+	{
+		// "Ace  (Driver)", "Bo  (MG)", "Cy  (Gunner)": the tags draw no glyph; the fourth rider,
+		// a third gunner, none.
+		const std::vector<GameFontQuad> g = bold();
+		CHECK(g.size() == 13 + 8 + 12);
+		// The corner (100, 500 + 40) on a 1024 x 768 surface, less the half-pixel the glyph
+		// quads take.
+		CHECK(g.size() == 33 && g[0].y_top == 539.5f && g[13].y_top - g[0].y_top == 16.0f &&
+				g[21].y_top - g[13].y_top == 16.0f);
+		CHECK(g.size() == 33 && g[0].x_top_left == 99.5f && g[13].x_top_left == 99.5f &&
+				g[21].x_top_left == 99.5f);
+		bool colors = !g.empty();
+		for (const GameFontQuad &q : g)
+			colors = colors && q.color == half_bright_argb(layout.tag_good);
+		CHECK(colors);
+	}
+	// No silhouette, no panel: no line.
+	state.vehicle_panel.silhouette_valid = false;
+	CHECK(bold().empty());
+}
+
 // THE TEAMID LINE: team-mode session gate, the per-team colours, the A&D
 // suffix, and the death screen's spectate arm.
 void test_team_id_line(const fnt_font_t *font) {
@@ -898,6 +963,7 @@ int main() {
 	test_game_info(&font);
 	test_game_info_board(&font);
 	test_game_info_leader_lines();
+	test_vehicle_panel_riders(&font);
 	test_clock(&font);
 	test_team_id_line(&font);
 	test_health_bar_death_arm(&font);

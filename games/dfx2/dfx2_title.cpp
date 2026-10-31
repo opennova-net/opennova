@@ -464,6 +464,9 @@ Title make() {
 	// DFX2-114: the GAMEINFO session board [orig: sub_59ABF0 @0x59ABF0, called from sub_5A71E0
 	//  @0x5A7609 (dfx2.exe)].
 	t.hud_game_info_board = true;
+	// DFX2-82: the vehicle panel's rider lines [orig: sub_5A3DF0 @0x5A3DF0 - @0x5A4700..0x5A4871
+	//  (dfx2.exe)].
+	t.hud_vehicle_panel_riders = true;
 	return t;
 }
 

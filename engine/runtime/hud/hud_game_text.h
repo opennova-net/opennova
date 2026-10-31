@@ -111,6 +111,13 @@ std::string waypoint_label_text(const std::string &name, const WaypointNameKey &
 struct HudSessionText;
 void hud_session_text(const GameTextLookup &gametext, uint32_t game_type, HudSessionText &out);
 
+// DFX2-82's rider lines' weapon texts: a gunner's attachtextid through Overlays, a miss ""
+// (the weapon parse stores GameText_GetString's result at def+0x3A0, which the line prints);
+// a rider without a key keeps none [orig: WeaponDefs_ParseLineCallback @0x544D6C; sub_5A3DF0
+// @0x5A4786 (dfx2.exe)].
+struct HudVehicleRider;
+void hud_vehicle_rider_text(const GameTextLookup &gametext, std::vector<HudVehicleRider> &riders);
+
 // A resolved subgoal's chat-feed announcement: the mission table's
 // WinConditions/STRWINMSG%03d or LoseConditions/STRLOSEMSG%03d line for the
 // header text id, "" when the table lacks it (nothing posts). The LOST line

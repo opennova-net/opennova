@@ -49,6 +49,9 @@ struct CommandMapLocations;
 namespace opennova::replication {
 class ClientWorldMaterializer;
 }
+namespace opennova::world {
+class VehicleOccupancySource; // world/vehicle_attach.h
+}
 
 namespace opennova::inmatch {
 
@@ -82,6 +85,8 @@ struct RoleView {
 	// The title the session runs as: its HUD's own elements (Title::hud_exp_points). Null draws
 	// none of them.
 	const Title *title = nullptr;
+	// The joiner's seat occupancy (its decoded riders, JoinerRole); null on every other role.
+	const world::VehicleOccupancySource *occupancy = nullptr;
 };
 
 // The session rules word the role's HUD gates test (g_RulesFlags, the
@@ -294,11 +299,22 @@ struct HudRoleFacts {
 	// gunner (world::local_rides_solo_turret; DFX2-91); false with no kernel.
 	const Title *title = nullptr;
 	bool lone_gunner = false;
+	// DFX2-82's rider lines (fill_vehicle_panel_riders), under Title::hud_vehicle_panel_riders
+	// alone; their weapon texts the embedder's (hud::hud_vehicle_rider_text).
+	std::vector<hud::HudVehicleRider> vehicle_riders;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;
 inline constexpr uint32_t kHudVoiceMenuRadio = 2u;
 HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus = 0);
+
+// DFX2-82's rider lines for the vehicle the local player rides (world::vehicle_panel_root): the
+// riders world::vehicle_panel_riders walks over the role's occupancy, each named by
+// HUD_GetEntityDisplayName (a rider whose definition this client lacks drops out, as retail's
+// def tests skip it) with its gun weapon's attachtextid. Empty on foot, without a kernel or a
+// replica. [orig: sub_5A3DF0 @0x5A3DF0 - HUD_GetEntityDisplayName @0x5A4714 / @0x5A4765 /
+// @0x5A47F7 (dfx2.exe)]
+void fill_vehicle_panel_riders(const RoleView &view, std::vector<hud::HudVehicleRider> &out);
 
 // Every stat.mnu RESULTLIST row (the tabs hide filled rows: stat_screen_filter_rows):
 // the roster joined to the frozen board; the fill selects the local row by

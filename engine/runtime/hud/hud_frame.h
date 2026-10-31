@@ -863,6 +863,23 @@ struct HudVehiclePanelState {
 	std::vector<HudVehicleSeat> seats;
 };
 
+// DFX2-82, dfx2.exe's rider lines under the vehicle panel (Title::hud_vehicle_panel_riders):
+// the driver's "<name>  <i>(Driver)<-i>", then up to two gunners' "<name>  <i>(<weapon>)<-i>",
+// "(Gunner)" without a weapon text, left-aligned in the bold slot from the silhouette's
+// bottom-left corner one bold 'W' height apart, half-bright tagcolor_good, tags on. The role
+// feed names each (inmatch::fill_vehicle_panel_riders, HUD_GetEntityDisplayName) and gives the
+// gun weapon's attachtextid; the embedder resolves it through Overlays (hud_vehicle_rider_text).
+// [orig: sub_5A3DF0 @0x5A3DF0 - the anchor @0x5A3F1B..0x5A3F23, the pitch
+//  GameFont_MeasureCharHeight('W') @0x5A4700, the lines @0x5A4711..0x5A4871, dword_2724E48
+//  (tagcolor_good, HUD_ParseHudposToken @0x59FB0B) (dfx2.exe)]
+struct HudVehicleRider {
+	std::string name;
+	bool gunner = false;
+	bool has_weapon = false;
+	std::string weapon_key;
+	std::string weapon_text;
+};
+
 // The panel's anchor from the layout: the HUDVEHSTANCEPOS pair and the HUDSTANCE
 // offset of the rider's stance, the same tables the stance icon reads (the producer
 // yields stance 0..5; the index is clamped to the tables' six rows)
@@ -1179,6 +1196,8 @@ struct HudFrameState {
 	// the item's VEHICLE_HUD block and the live seat occupancy, because both
 	// need tables the compiler does not own.
 	HudVehiclePanelState vehicle_panel;
+	// dfx2.exe's rider lines under it (HudVehicleRider; the role facts' each frame).
+	std::vector<HudVehicleRider> vehicle_riders;
 	// The Tab board (hud/hud_scoreboard.h owns its policy).
 	HudScoreboardState scoreboard;
 	// The open chat capture's input line.

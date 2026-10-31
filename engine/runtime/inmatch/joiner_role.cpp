@@ -399,7 +399,8 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 	const world::Entity *local = kernel_->local.player();
 	if (local != nullptr && local->mounted && local->mount_target == carrier.handle &&
 			local->mount_bone == seat.bone_index) {
-		return {true, local->handle == requester, local->health, local->health_max, true, true};
+		return {true, local->handle == requester, local->health, local->health_max, true, true,
+				local->handle};
 	}
 	const auto &state = runtime->state();
 	const replication::ClientEntityState *rider = nullptr;
@@ -428,11 +429,13 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 		// reconciles it to L; retail reads the one local entity either way.
 		if (local != nullptr && runtime->has_self_handle() &&
 				rider->handle == runtime->self_handle())
-			return {true, local->handle == requester, local->health, local->health_max, true, true};
+			return {true, local->handle == requester, local->health, local->health_max, true, true,
+					local->handle};
 	}
 	if (rider == nullptr) return {};
 
-	world::VehicleSeatOccupancy result{true, false, 1, 1, true, rider->cls == EntityClass::Player};
+	world::VehicleSeatOccupancy result{true, false, 1, 1, true, rider->cls == EntityClass::Player,
+			world::EntityHandle{rider->handle}};
 	const def::DefItemsFile *items = kernel_->items_table();
 	const def::DefItemDef *item = items != nullptr
 			? mission::find_item_def(*items,

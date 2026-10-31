@@ -28,6 +28,7 @@
 #include <runtime/world/radar_contacts.h> // radar_hud_frame
 #include <runtime/world/radio_call.h> // capture_zone_max_coverage, voice_macro_text
 #include <runtime/world/user_waypoints.h>
+#include <runtime/world/vehicle_panel_feed.h> // vehicle_panel_root, vehicle_panel_riders
 
 #include <algorithm>
 #include <cstdio>
@@ -352,6 +353,8 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	out.lone_gunner = view.kernel != nullptr && world::local_rides_solo_turret(view.kernel->world);
 	// The Inset's reticle (DFX2-45).
 	out.inset_reticle_quad = view.title != nullptr && view.title->inset_reticle_quad;
+	if (view.title != nullptr && view.title->hud_vehicle_panel_riders)
+		fill_vehicle_panel_riders(view, out.vehicle_riders); // DFX2-82
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
 		out.exp_points.score = cs.score_feedback.score;
@@ -1214,6 +1217,24 @@ const world::Seat *seat_at_retail_slot(const world::Entity &e, int retail_slot) 
 }
 
 } // namespace
+
+void fill_vehicle_panel_riders(const RoleView &view, std::vector<hud::HudVehicleRider> &out) {
+	out.clear();
+	if (view.kernel == nullptr || view.runtime == nullptr) return;
+	const world::World &w = view.kernel->world;
+	const world::Entity *local = w.registry.get(w.cached.local_player);
+	if (local == nullptr) return;
+	std::vector<world::VehiclePanelRider> riders;
+	world::vehicle_panel_riders(w, world::vehicle_panel_root(w, *local), view.occupancy, riders);
+	for (const world::VehiclePanelRider &r : riders) {
+		hud::HudVehicleRider line;
+		if (!hud_entity_display_name(view, r.rider, line.name)) continue;
+		line.gunner = r.gunner;
+		line.has_weapon = r.has_weapon;
+		line.weapon_key = r.weapon_key;
+		out.push_back(std::move(line));
+	}
+}
 
 uint8_t deploy_list_team(const RoleView &view) {
 	if (view.joiner) return view.runtime != nullptr ? view.runtime->assigned_team() : 0;

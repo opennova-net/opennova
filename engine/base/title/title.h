@@ -465,6 +465,13 @@ struct Title {
 	// [orig: sub_59ABF0 @0x59ABF0 (dfx2.exe) - the mission line @0x59ADF7..0x59AEAB, the lists
 	//  @0x59AEB7..0x59B70F]
 	bool hud_game_info_board = false;
+	// DFX2-82: the vehicle panel lists its riders below the silhouette, the driver's
+	// "<name>  <i>(Driver)<-i>" then up to two gunners' "<name>  <i>(<gun weapon's attach
+	// text>)<-i>" ("(Gunner)" without one) (hud::HudVehicleRider). Jointops.exe's panel draws
+	// the markers and their digits alone.
+	// [orig: HUD_DrawVehicleHealthBars @0x5A4FD0 (the "X" @0x5A586B ends it)]
+	// [orig: sub_5A3DF0 @0x5A3DF0 (dfx2.exe) - the lines @0x5A4700..0x5A4871]
+	bool hud_vehicle_panel_riders = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

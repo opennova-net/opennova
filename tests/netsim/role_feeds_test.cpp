@@ -607,8 +607,98 @@ void deploy_table_zone_cases() {
 	CHECK(deploy_team_list_players(view, players) && players.size() == 3 && players[0].local);
 }
 
+// DFX2-82's rider lines: the driver and each gunner named as HUD_GetEntityDisplayName names
+// them (the roster slot's name and clan, else the entity's own), a rider without a definition
+// dropped, and nothing on foot or for a title without the lines.
+// [orig: sub_5A3DF0 @0x5A4711..0x5A4871 (dfx2.exe); HUD_GetEntityDisplayName @0x58DD40
+//  (dfx2.exe)]
+void vehicle_panel_rider_cases() {
+	mission::MissionKernel kernel;
+	world::World &w = kernel.world;
+	w.registry.configure_pool(0, 8);
+	w.registry.configure_pool(1, 8);
+	world::Entity person;
+	person.kind = world::EntityKind::Organic;
+	person.has_item_def = true;
+	person.alive = true;
+	person.display_name = "Pilot";
+	const world::EntityHandle pilot = w.registry.spawn(0, person);
+	person.display_name = "Shooter";
+	const world::EntityHandle shooter = w.registry.spawn(0, person);
+	person.display_name = "Rider";
+	person.mounted = true;
+	const world::EntityHandle rider = w.registry.spawn(0, person);
+	w.cached.local_player = rider;
+	world::Entity jeep;
+	jeep.kind = world::EntityKind::Item;
+	jeep.has_item_def = true;
+	jeep.alive = true;
+	jeep.item_attrib = 0x40u;
+	jeep.def_slot_userpoints = {3, 0, 0, 0};
+	world::Seat seat;
+	seat.type = world::SeatType::Driver;
+	seat.retail_slot = 8;
+	seat.occupant = pilot;
+	jeep.seats.push_back(seat);
+	seat.type = world::SeatType::Passenger;
+	seat.retail_slot = 0;
+	seat.occupant = rider;
+	jeep.seats.push_back(seat);
+	const world::EntityHandle jeep_h = w.registry.spawn(1, jeep);
+	w.registry.get(rider)->mount_target = jeep_h;
+	world::WeaponTableEntry fifty;
+	fifty.valid = true;
+	fifty.attach_text_id = "attach_50cal";
+	w.tables.weapons.entries.push_back(fifty);
+	world::Entity gun;
+	gun.kind = world::EntityKind::Item;
+	gun.has_item_def = true;
+	gun.alive = true;
+	gun.item_attrib = 0x20u;
+	gun.emplacement_parent = jeep_h;
+	gun.emplacement_slot = 0;
+	gun.primary_weapon_slot_adm = 0;
+	seat.type = world::SeatType::Gunner;
+	seat.retail_slot = 9;
+	seat.occupant = shooter;
+	gun.seats.push_back(seat);
+	w.registry.spawn(1, gun);
+	replication::LoopbackChannel loop;
+	ClientRuntime host_view(loop);
+	replication::ClientRosterSlot ace;
+	ace.bound = true;
+	ace.entity_slot = static_cast<int16_t>(pilot.slot());
+	ace.name = "Ace";
+	ace.registry_clan = "CL";
+	host_view.state().roster[0] = ace;
+	RoleView view;
+	view.kernel = &kernel;
+	view.runtime = &host_view;
+	std::vector<hud::HudVehicleRider> riders;
+	fill_vehicle_panel_riders(view, riders);
+	CHECK(riders.size() == 2);
+	CHECK(riders.size() == 2 && riders[0].name == "Ace<ch>CL<co>" && !riders[0].gunner);
+	CHECK(riders.size() == 2 && riders[1].name == "Shooter" && riders[1].gunner &&
+			riders[1].has_weapon && riders[1].weapon_key == "attach_50cal");
+	// The role facts carry them under the title's knob alone.
+	CHECK(hud_role_facts(view).vehicle_riders.empty());
+	opennova::Title dfx2;
+	dfx2.hud_vehicle_panel_riders = true;
+	view.title = &dfx2;
+	CHECK(hud_role_facts(view).vehicle_riders.size() == 2);
+	// A rider without a definition drops out.
+	w.registry.get(shooter)->has_item_def = false;
+	fill_vehicle_panel_riders(view, riders);
+	CHECK(riders.size() == 1 && !riders[0].gunner);
+	// On foot: none.
+	w.registry.get(rider)->mounted = false;
+	fill_vehicle_panel_riders(view, riders);
+	CHECK(riders.empty());
+}
+
 int main() {
 	deploy_table_zone_cases();
+	vehicle_panel_rider_cases();
 	hud_pass_call_site_cases();
 	voice_macro_override_cases();
 	lighting_walk_keeps_the_row_at_l_cases();

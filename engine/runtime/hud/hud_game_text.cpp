@@ -101,6 +101,12 @@ void hud_session_text(const GameTextLookup &gametext, uint32_t game_type, HudSes
 	out.of_team_b = game_text(gametext, "Client", "STRCLI08", ""); // @0x59B467 (dfx2.exe)
 }
 
+void hud_vehicle_rider_text(const GameTextLookup &gametext, std::vector<HudVehicleRider> &riders) {
+	for (HudVehicleRider &r : riders)
+		r.weapon_text = r.has_weapon ? game_text(gametext, "Overlays", r.weapon_key.c_str(), "")
+									 : std::string();
+}
+
 std::string subgoal_message(bool lost, int header_id, const GameTextLookup &mission) {
 	return game_text(mission, lost ? kLoseMessageKey : kWinMessageKey, header_id, "");
 }

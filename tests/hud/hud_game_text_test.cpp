@@ -226,6 +226,21 @@ int main() {
 		CHECK(t.game_type_label.empty());
 	}
 
+	// DFX2-82's rider weapon texts: a key through Overlays ("" on a miss), none without a key
+	// [orig: sub_5A3DF0 @0x5A4786 (dfx2.exe)].
+	{
+		const GameTextLookup overlays = table_of({ { "Overlays/attach_50cal", "50 Cal" } });
+		std::vector<HudVehicleRider> riders(3);
+		riders[0].has_weapon = true;
+		riders[0].weapon_key = "attach_50cal";
+		riders[1].has_weapon = true;
+		riders[1].weapon_key = "attach_none";
+		riders[2].weapon_text = "stale";
+		hud_vehicle_rider_text(overlays, riders);
+		CHECK(riders[0].weapon_text == "50 Cal" && riders[1].weapon_text.empty() &&
+				riders[2].weapon_text.empty());
+	}
+
 	// The subgoal announcements by section; a miss posts nothing.
 	CHECK(subgoal_message(false, 7, mission) == "Objective secured");
 	CHECK(subgoal_message(true, 7, mission) == "Objective lost");
