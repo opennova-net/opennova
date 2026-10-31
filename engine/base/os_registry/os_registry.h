@@ -35,7 +35,7 @@ namespace opennova {
 // `out` (to its first NUL). False where the key or the value is absent, the value is no string or
 // is longer, or the stand-in cannot be read; `out` is then left alone.
 // [orig: NapiRegistry_ReadStringAtPath @0x61a1c0 (the read) - NapiRegistry_OpenKeyPath with no
-//  create @0x61a1ca; CScrollWnd_SetRange (a misnomer: the value's read) @0x619d70 -
+//  create @0x61a1ca; NapiRegistry_QueryStringValue (the value's read) @0x619d70 -
 //  RegQueryValueExA @0x619da1, a type other than REG_SZ refused @0x619dac..0x619db5]
 bool os_registry_read_string(const std::string &key, const std::string &value, std::size_t capacity,
 		const std::string &stand_in, std::string &out);

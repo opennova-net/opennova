@@ -197,7 +197,7 @@ void taps4(out vec2 uv[4], out float fan_alpha) {
 	vec2 direction = pc.base_direction.zw * reduced;
 	vec2 perpendicular = vec2(pc.base_direction.w, -pc.base_direction.z) * reduced;
 	if (taps == 7) {
-		// FrameFX_BuildScarDecalVertices: the strip's inner corners carry no offset, its outer
+		// FrameFX_BuildRingTapStrip: the strip's inner corners carry no offset, its outer
 		// ones the Rotated taps, the weight linear across each band (the bands split on the
 		// corner diagonals, so the largest of the four is this pixel's); the inner rect is the
 		// strip's hole (fan_alpha <= 0: main discards it).

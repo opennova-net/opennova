@@ -733,7 +733,7 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	//  call @0x51E3E4 -> Server_SendPlayerSlotStateFrame @0x51BBA0 (its state-6 call @0x51BBDC)
 	//  -> Server_SendEntityStateToPlayer @0x517BA0; NetPacket_WritePlayerState @0x4FF7B8..0x4FF7BC]
 	// [orig: Server_TickUpdate @0x51a810 - the walk's call @0x51b324 ->
-	//  Server_SendInitialGameStateToPlayer @0x518bd0 (its state-6 call @0x518c0c) ->
+	//  Server_SendPlayerSlotStateFrame @0x518bd0 (its state-6 call @0x518c0c) ->
 	//  Server_SendEntityStateToPlayer @0x514de0 (dfx2.exe)]
 	conn.link.respawn_pending =
 			world.zones.has_spawn_zone() || in_match.slot_state.join_state_fixed;

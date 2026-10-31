@@ -487,9 +487,9 @@ struct Title {
 	// [orig: Terrain_RenderSectorEntitiesBySide @0x5C7D50 - the blip read @0x5C7FD6;
 	//  NapiNPClientMsg_0x00C @0x42E730 - the pick @0x42EAC5..0x42EB1D; Entity_GetProfileSlotSound
 	//  @0x528300 - the blip's sex byte @0x52830F..0x52831C] [orig: Terrain_RenderSectorEntitiesBySide
-	//  @0x5C6C20 - Flags & 0x100 @0x5C6EA6, EntitySlot_LookupAndPackEntry(team != the local
-	//  player's) @0x5C6EE1..0x5C6F25, MinimapSlot_FindOrAllocByEntityId into +0x3C @0x5C6F3D, read
-	//  @0x5C6F45; Entity_GetProfileSlotSound @0x525490 (dfx2.exe)]
+	//  @0x5C6C20 - Flags & 0x100 @0x5C6EA6, CAvatarDefs_PackFirstComboOfAlignment(team != the local
+	//  player's) @0x5C6EE1..0x5C6F25, CAvatarDefs_FindOrAllocCharacterBlip into +0x3C @0x5C6F3D,
+	//  read @0x5C6F45; Entity_GetProfileSlotSound @0x525490 (dfx2.exe)]
 	bool player_avatar_by_viewer_side = false;
 	// DFX2-114: the GAMEINFO overlay is dfx2.exe's session board. Under the MSNTITLE slot, the
 	// game type's Overlays label (in a session) and "<mission> (<expansion>)" at GAMEINFO; then,

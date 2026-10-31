@@ -175,7 +175,7 @@ int test_merge_bindings() {
 // is FragGrenade's code under Jointops.exe and keeps nothing there, and its Powerup0 (200) has
 // no row at all, while under dfx2.exe both take the saved keys.
 // [orig: KeyBinding_BuildFilteredTable @0x549530 over the table @0x8148A0;
-//  KeyBinding_MergeWeaponSlotParams @0x549670, the KeyBinding_MergeSavedBindings twin (dfx2.exe)]
+//  KeyBinding_MergeSavedBindings @0x549670 (dfx2.exe)]
 int test_title_binding_tables() {
     const controls::Catalog &jo = controls::title_catalog(kJo);
     const controls::Catalog &dfx2 = controls::title_catalog(games::dfx2_title());

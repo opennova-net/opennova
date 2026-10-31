@@ -492,7 +492,7 @@ Title make() {
 	// DFX2-74: the PLAYER_INFO combo list's rows carry no text: the populate still reads both
 	// parts' names, then formats the empty string at 0x7BF886 with no argument and inserts that
 	// [orig: PlayerInfo_PopulateAvatarComboList @0x55e4d0 - the two lookups @0x55e59c / @0x55e5ae,
-	//  `push offset font_name` @0x55e5b7, sprintf @0x55e5bd, CSpinListWnd_InsertItem @0x55e5d6
+	//  `push offset g_EmptyStr` @0x55e5b7, sprintf @0x55e5bd, CSpinListWnd_InsertItem @0x55e5d6
 	//  (dfx2.exe)].
 	t.player_info_combo_names = false;
 	// DFX2-75: COMBO_LIST's callback heard on a spin list's step alone, its player.mnu's control a
