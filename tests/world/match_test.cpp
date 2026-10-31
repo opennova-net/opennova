@@ -1447,6 +1447,44 @@ void test_takeable_contact_carries_any_def() {
     }
 }
 
+// A Player carrying an object still saves its own displaced flag: the own-flag
+// arms make no carried-object test, only the pickup leg does.
+// [orig: Entity_ProcessWaypointInteraction - 4091 @0x4AD8E9..0x4AD908 ->
+//  Entity_SyncPositionFromDefinition, the pickup's +0x268 test @0x4AD936]
+void test_a_carrier_still_saves_its_own_flag() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 8);
+    WaypointContactHarness contacts(*world);
+
+    MatchRules ctf;
+    ctf.game_type = gt::kCaptureTheFlag;
+    ctf.game_time_minutes = 1;
+    ctf.flag_return_ticks = 210;
+    ctf.score_values.emplace();
+    (*ctf.score_values)[9] = 3; // FLAGSAVE
+    world->match.configure(ctf);
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    Entity *blue_entity = world->registry.get(blue);
+    blue_entity->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle red_flag = objective(*world, 4093, 2, {0.0f, 0.0f, 0.0f});
+    const EntityHandle blue_flag = objective(*world, 4091, 1, {80.0f, 0.0f, 0.0f});
+    contacts.bind(red_flag);
+    contacts.bind(blue_flag);
+
+    contacts.touch(*world, blue, red_flag);
+    run_match_frame(*world);
+    CHECK(blue_entity->mounted_child == red_flag);
+
+    // The blue flag lies 40 u off its authored pose.
+    world->registry.get(blue_flag)->position = {40.0f, 0.0f, 0.0f};
+    contacts.touch(*world, blue, blue_flag);
+    run_match_frame(*world);
+    CHECK(world->registry.get(blue_flag)->position.x == 80.0f);
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 1);
+    CHECK(blue_entity->mounted_child == red_flag);
+}
+
 // The entity update's own tail consumes the flag and bay touches its bodies'
 // movement resolves recorded, so the pickup lands in the frame that touched,
 // ahead of the next server tick. The handler returns at once off the
@@ -2012,6 +2050,7 @@ int main() {
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();
     test_takeable_contact_carries_any_def();
+    test_a_carrier_still_saves_its_own_flag();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();

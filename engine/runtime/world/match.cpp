@@ -1834,6 +1834,45 @@ void Match::update_flag_objectives(World &world) {
         if (match_player == nullptr || !player_class)
             continue;
 
+        // The own-flag arms (4091 for team 1, 4093 for team 2) test no carried
+        // object, so a Player carrying anything still saves its own flag.
+        // [orig: Entity_ProcessWaypointInteraction - 4091 @0x4AD8E9..0x4AD908
+        //  and 4093 @0x4AD8A1..0x4AD8C3 reach Entity_SyncPositionFromDefinition
+        //  with no +0x268 test, which only the pickup leg @0x4AD936 makes;
+        //  @0x4AD94B..0x4AD968 / @0x4AD903..0x4AD923 (dfx2.exe)]
+        const bool own_flag =
+            (carrier->team == 1 && target->item_id == kBlueFlag) ||
+            (carrier->team == 2 && target->item_id == kRedFlag);
+        if (own_flag) {
+            if (target->primary_occupant.valid())
+                continue;
+            CarryObjectiveState *state = carry_state(world, contact.target);
+            // An own flag is SAVED only when Entity_SyncPositionFromDefinition
+            // reports it displaced from its authored pose — a 2D distance or a
+            // height delta of at least 0x20000 (2 u); the return timer is not
+            // consulted, and an own flag at home does nothing (no pickup arm
+            // exists for it in any game type).
+            // [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD912
+            // / 4093 @0x4AD8A3..0x4AD8CD -> Entity_SyncPositionFromDefinition
+            // @0x43A9B0 (the 0x20000 tests @0x43AA3B/@0x43AA4D, return 1
+            // @0x43A9BE) -> Server_BroadcastFlagSaveEvent @0x4AD8D3]
+            if (state == nullptr)
+                continue;
+            const int64_t dx = int64_t{target->position.x.q16} -
+                               state->home.x.q16;
+            const int64_t dy = int64_t{target->position.y.q16} -
+                               state->home.y.q16;
+            const int64_t dz = int64_t{target->position.z.q16} -
+                               state->home.z.q16;
+            const bool displaced =
+                static_cast<int64_t>(std::sqrt(static_cast<long double>(
+                    dx * dx + dy * dy))) >= 0x20000 ||
+                (dz < 0 ? -dz : dz) >= 0x20000;
+            if (displaced)
+                record_flag_save(world, contact.source, contact.target);
+            continue;
+        }
+
         // Preserve resolver/candidate order. If one movement pass touches a
         // flag and its bay, retail mutates the carried link inline before the
         // later callback. [orig: sole caller @0x4B2FF5; handler @0x4AD820]
@@ -1869,36 +1908,6 @@ void Match::update_flag_objectives(World &world) {
 
         if (!is_flag(target->item_id) || target->primary_occupant.valid())
             continue;
-        CarryObjectiveState *state = carry_state(world, contact.target);
-        const bool own_flag =
-            (carrier->team == 1 && target->item_id == kBlueFlag) ||
-            (carrier->team == 2 && target->item_id == kRedFlag);
-        if (own_flag) {
-            // An own flag is SAVED only when Entity_SyncPositionFromDefinition
-            // reports it displaced from its authored pose — a 2D distance or a
-            // height delta of at least 0x20000 (2 u); the return timer is not
-            // consulted, and an own flag at home does nothing (no pickup arm
-            // exists for it in any game type).
-            // [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD912
-            // / 4093 @0x4AD8A3..0x4AD8CD -> Entity_SyncPositionFromDefinition
-            // @0x43A9B0 (the 0x20000 tests @0x43AA3B/@0x43AA4D, return 1
-            // @0x43A9BE) -> Server_BroadcastFlagSaveEvent @0x4AD8D3]
-            if (state == nullptr)
-                continue;
-            const int64_t dx = int64_t{target->position.x.q16} -
-                               state->home.x.q16;
-            const int64_t dy = int64_t{target->position.y.q16} -
-                               state->home.y.q16;
-            const int64_t dz = int64_t{target->position.z.q16} -
-                               state->home.z.q16;
-            const bool displaced =
-                static_cast<int64_t>(std::sqrt(static_cast<long double>(
-                    dx * dx + dy * dy))) >= 0x20000 ||
-                (dz < 0 ? -dz : dz) >= 0x20000;
-            if (displaced)
-                record_flag_save(world, contact.source, contact.target);
-            continue;
-        }
         // An enemy or neutral flag is picked up when the toucher carries
         // nothing. [orig: Entity_ProcessWaypointInteraction @0x4AD820 — the
         // carried-object test @0x4AD936, the Entity_TryAttachCarriedObject call
