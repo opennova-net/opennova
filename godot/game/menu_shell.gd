@@ -156,8 +156,12 @@ func _process(delta: float) -> void:
 ## advance, and -- at the tail, the way the original orders it -- the deferred
 ## expansion remount. Public so a caller (and the GUT suite) can step the menu
 ## tick the way the mode loop does.
-## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
+## retail: Menu_UpdateFrame @ 0x5528a0 (the MainMenu mode descriptor @ 0x83b400, its
+## update slot @ 0x83b424).
 func update_menu_frame(_delta: float = 0.0) -> void:
+	# Covered by a screen that is its own mode (the join screen), the menu's frame
+	# does not run: its pump, its clock and the deferred remount wait for it.
+	var menu_runs := not _is_covered()
 	# The pump, once a frame after the input events (each taken as its message
 	# in _gui_input): hover, the click and the window sounds of the mouse as the
 	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse). Over a
@@ -172,7 +176,8 @@ func update_menu_frame(_delta: float = 0.0) -> void:
 	# (avatar previews) are ObjectModels, which no longer self-clock. The static
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
 	ObjectModel.advance_awake_frame(GameWorld.current_frame_clock_ms())
-	_consume_expansion_reload_request()
+	if menu_runs:
+		_consume_expansion_reload_request()
 
 
 ## The screen pass's mouse pump: hover, the click and the window sounds of the
@@ -554,14 +559,19 @@ func _wire_named_controls() -> void:
 	_driver.wire_commands(_in_game)
 	_apply_update_gate()
 	_driver.clear_mission_rows()
+	# The single-player screen's inputs: the title's screen, and under dfx2.exe's campaign tabs
+	# the campaign reader's file, its menu table (the gameui table, Game.bin, not menutxt: engine
+	# MenuFlow::set_campaign_source) and the profile's progress (engine MenuFlow).
+	_driver.set_single_player_source(PlayerProfile.store(),
+			Strings.get_table(Strings.TABLE_GAMEUI))
 
-	# A delegate (the multiplayer menu, the PLAYER_INFO character screen) owns a
-	# whole document by the controls it holds (the engine's command_owner): the
-	# companion of that name gets the named-control wiring, and the shell's
-	# generic launch/mission wiring stays out. The previously wired companion is
-	# RELEASED when it loses the document: mounts it parked on the persistent
-	# frame (the PLAYER_INFO avatar preview) would otherwise outlive their screen,
-	# since no later on_menu_built reaches it.
+	# A delegate owns a whole document (the engine's command_owner: the multiplayer
+	# menu by the controls it holds, the PLAYER_INFO character screen by its
+	# screen's name): the companion of that name gets the named-control wiring,
+	# and the shell's generic launch/mission wiring stays out. The previously
+	# wired companion is RELEASED when it loses the document: mounts it parked on
+	# the persistent frame (the PLAYER_INFO avatar preview) would otherwise outlive
+	# their screen, since no later on_menu_built reaches it.
 	var owner := _driver.command_owner()
 	var claimant: MenuCompanion = null
 	if not owner.is_empty():
@@ -587,7 +597,10 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 	# (engine menu_commands.h): the updater's buttons whatever file holds them
 	# and whoever owns the document's other controls, the shell's launch/quit
 	# controls on a document no delegate owns. A delegate's own commands are its
-	# companion's to run.
+	# companion's to run. The campaign tabs' radios (no command's controls)
+	# refresh ACCEPT instead (engine MenuFlow::activate_tab).
+	if _driver.activate_single_player_tab(widget_name):
+		return
 	match _driver.screen_command(_driver.widget_screen_of(id), widget_name):
 		"update":
 			_launch_update()
@@ -796,6 +809,9 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 	if kind != "list":
 		return
 	var id := _driver.widget_id(widget_name)
+	# The campaign list's pick is the engine's (MenuFlow::select_campaign).
+	if _driver.select_campaign(id, index):
+		return
 	if _driver.command_mission_lists().has(id):
 		_driver.select_mission(id, index, value)
 	elif _driver.command_mod_lists().has(id):

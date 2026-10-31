@@ -389,7 +389,7 @@ func test_teardown_releases_the_death_screen_icon_mounts() -> void:
 	add_child_autofree(frame)
 	var driver := MenuDriver.new()
 	driver.attach(frame, null)
-	assert_true(driver.open_document(doc, null, null, null, "weapon.mnu", "WEAPON"),
+	assert_true(driver.open_document(doc, null, null, "weapon.mnu", "WEAPON"),
 			"the framed screen opens on its own driver")
 	presenter.populate_death_screen(driver)
 	var icon := frame.find_child("PRIMARYDeathIcon", true, false)

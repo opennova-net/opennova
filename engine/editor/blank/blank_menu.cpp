@@ -42,7 +42,7 @@ std::string main_cursor() {
 // band the way the shipped screens do; labels take their font and colors from the
 // stylesheet variables so the blank menu_style.mns styles it. The Exit button carries
 // no action: exit buttons are shell Commands bound by Window name
-// (docs/mnu/menu-re.md, ADR 0001; the shell's exit_control_names).
+// (docs/mnu/menu-re.md, ADR 0001; the engine's MenuNameSet::Exit, menu_commands.h).
 //
 // The screen depends only on files the required files' Create fixes make (the pointer made with
 // it). Its labels are literal
