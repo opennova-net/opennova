@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,14 @@ struct Row {
 	std::string file;     // archive/loose entry name [orig: entry+0]
 	std::string title;    // display title [orig: entry+1044]
 	std::string briefing; // [Info] BRIEFING text [orig: entry+1300]
+	// The [Info] WIN_DEBRIEFING and LOSE_DEBRIEFING dfx2.exe's end screens read through the
+	// entry's table (+1040), each present when the table holds the key, its text empty or not.
+	// The table is the one the scan loads (none for an untitled row), and the lookup searches the
+	// override table first, with no table too (world::EpilogMission).
+	// [orig: TextResource_FindEntryBySectionAndKey(entry+1040, "Info", ..) @0x575c9e (lose),
+	//  @0x574771 (win); the table +1040 @0x5623db; the override arm @0x7269db (dfx2.exe)]
+	std::optional<std::string> win_debriefing;
+	std::optional<std::string> lose_debriefing;
 	// The header's single-select game-mode attrib bit (0 = none/SP). The
 	// retail table stores the derived session code word instead
 	// [orig: entry+4392 = the AI_GetTaskTypeFromFlags switch @ 0x5631f0..];
@@ -139,6 +148,10 @@ std::string text_table_name(const std::string &file);
 inline constexpr const char *kTextInfoSection = "Info";
 inline constexpr const char *kTextTitleKey = "TITLE";
 inline constexpr const char *kTextBriefingKey = "BRIEFING";
+// The two [Info] keys dfx2.exe's end screens read of the same table [orig: sub_575990 @0x575c93,
+// sub_5740E0 @0x574766 (dfx2.exe)].
+inline constexpr const char *kTextWinDebriefingKey = "WIN_DEBRIEFING";
+inline constexpr const char *kTextLoseDebriefingKey = "LOSE_DEBRIEFING";
 // Whether the archive walk lists an entry as a mission: its name from the FIRST '.' on is ".bms",
 // ".npj" or ".npz" without case, so "a.b.bms" is none and a name with no '.' none. build() lists
 // the `.bms` alone (D-MNU-25: OpenNova cannot load a map project).

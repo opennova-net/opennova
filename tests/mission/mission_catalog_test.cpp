@@ -428,6 +428,49 @@ int main() {
 		TEST_EXPECT(over.briefing == "Read beside it."); // the override has no BRIEFING
 		const catalog::Row bare = catalog::loose_row("Bravo.bms", bravo, nullptr, &override_table);
 		TEST_EXPECT(bare.title == "Bravo Header Name");
+
+		// DFX2-64, DFX2-65: the [Info] WIN_DEBRIEFING and LOSE_DEBRIEFING dfx2.exe's end screens
+		// read of the row's table, each present when the table holds the key, its text empty or
+		// not; the override's first, which is searched with no table too [orig: sub_575990
+		// @0x575c9e..0x575cac, sub_5740E0 @0x574771..0x574782; TextResource_FindEntryBySectionAndKey
+		// @0x7269b0 (dfx2.exe)].
+		bool tables_ok = true;
+		const auto info_table = [&](const std::vector<std::pair<const char *, const char *>> &keys) {
+			opennova::rtxt::File file;
+			opennova::rtxt::Section info;
+			info.name = catalog::kTextInfoSection;
+			file.sections.push_back(info);
+			for (const auto &[key, text] : keys) {
+				opennova::rtxt::Entry entry;
+				entry.key = key;
+				entry.text = text;
+				file.entries.push_back(entry);
+			}
+			file.normalize_grouping();
+			std::vector<uint8_t> bytes;
+			std::string error;
+			opennova::rtxt::File parsed;
+			tables_ok = tables_ok && opennova::rtxt::write(file, bytes, error) &&
+					opennova::rtxt::parse(bytes.data(), bytes.size(), parsed, error);
+			return parsed;
+		};
+		const opennova::rtxt::File debriefed = info_table({{catalog::kTextTitleKey, "Bravo"},
+				{catalog::kTextWinDebriefingKey, "Won."}, {catalog::kTextLoseDebriefingKey, ""}});
+		const opennova::rtxt::File debrief_override =
+				info_table({{catalog::kTextWinDebriefingKey, "Override won."}});
+		TEST_EXPECT(tables_ok);
+		const catalog::Row told = catalog::loose_row("Bravo.bms", bravo, &debriefed, nullptr);
+		TEST_EXPECT(told.win_debriefing.has_value() && *told.win_debriefing == "Won.");
+		TEST_EXPECT(told.lose_debriefing.has_value() && told.lose_debriefing->empty());
+		TEST_EXPECT(!over.win_debriefing.has_value() && !over.lose_debriefing.has_value());
+		const catalog::Row overridden =
+				catalog::loose_row("Bravo.bms", bravo, &debriefed, &debrief_override);
+		TEST_EXPECT(overridden.win_debriefing == std::optional<std::string>("Override won."));
+		TEST_EXPECT(overridden.lose_debriefing == std::optional<std::string>(""));
+		const catalog::Row untabled = catalog::loose_row("Bravo.bms", bravo, nullptr, &debrief_override);
+		TEST_EXPECT(untabled.win_debriefing == std::optional<std::string>("Override won."));
+		TEST_EXPECT(!untabled.lose_debriefing.has_value());
+		TEST_EXPECT(!bare.win_debriefing.has_value());
 	}
 
 	// The order's stricmp folds through the ".ACP" locale over the names' cp1252

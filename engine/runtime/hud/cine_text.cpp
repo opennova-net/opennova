@@ -1,6 +1,7 @@
 #include <runtime/hud/cine_text.h>
 
 #include <runtime/hud/end_round_statistics.h> // epilog_counter_value_text
+#include <runtime/hud/feed_format.h> // sprintf_first_s
 #include <runtime/hud/hud_frame.h> // wrapped_text_layout
 #include <runtime/hud/hud_math.h>
 
@@ -90,19 +91,59 @@ std::string cine_epilog_count_text(int32_t points_target, int32_t points_rate, i
 	return std::to_string(points);
 }
 
-GameFontRun cine_event_text_run(const world::CineEvent &e, const std::string &text,
-		const GameFont &font, float scale, const CineViewport &view) {
+std::string cine_event_line(const world::CineEvent &e, const std::string &game_text,
+		const std::string &banner) {
+	switch (e.text_source) {
+	case world::CineTextSource::Banner:
+		return banner;
+	case world::CineTextSource::GameTextFormat:
+		return sprintf_first_s(game_text, e.text);
+	case world::CineTextSource::Text:
+		return e.text;
+	case world::CineTextSource::GameText:
+	default:
+		return game_text;
+	}
+}
+
+GameFontRun cine_event_text_run(const world::CineEvent &e, const std::string &game_text,
+		const std::string &banner, const GameFont &font, float scale, const CineViewport &view) {
 	switch (e.kind) {
-	case world::CineEventKind::TextFade:
-		return cine_text_fade_run(font, scale, text, e.x, e.y, e.box_width, e.box_height,
-				world::cine_text_fade_argb(e), view);
+	case world::CineEventKind::TextFade: {
+		// The y the build's cursor gave, moved by a stored banner (world::CineEvent::banner_y).
+		const int32_t y = e.banner_y >= 0 && !banner.empty() ? e.banner_y : e.y;
+		return cine_text_fade_run(font, scale, cine_event_line(e, game_text, banner), e.x, y,
+				e.box_width, e.box_height, world::cine_text_fade_argb(e), view);
+	}
 	case world::CineEventKind::EpilogCounter:
-		return cine_epilog_counter_run(font, scale, text, epilog_counter_value_text(e.value, e.max),
+		return cine_epilog_counter_run(font, scale, game_text,
+				epilog_counter_value_text(e.value, e.max),
 				cine_epilog_count_text(e.points_target, e.points_rate, e.points), e.label_x,
 				e.value_x, e.count_x, e.row_y, view);
 	default:
 		return GameFontRun{};
 	}
+}
+
+int32_t cine_event_font(const world::CineEvent &e) {
+	return e.kind == world::CineEventKind::TextFade ? e.font : -2;
+}
+
+const char *cine_font_file(const HudLabelFontChoice &choice, int32_t font) {
+	switch (font) {
+	case -3:
+		return choice.impact38_fnt;
+	case -2:
+		return choice.large_fnt;
+	case -1:
+		return choice.bold_fnt;
+	default:
+		return "";
+	}
+}
+
+float cine_font_scale(const HudLabelFontChoice &choice, int32_t font) {
+	return font == -1 ? choice.scale : choice.large_scale;
 }
 
 } // namespace opennova::hud

@@ -141,8 +141,11 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_font"), &HudPos::loading_splash_continue_font);
 	ClassDB::bind_static_method("HudPos", D_METHOD("draw_splash_continue", "item", "font", "pages", "text", "size", "phase_on"), &HudPos::draw_splash_continue);
 	ClassDB::bind_static_method("HudPos",
-			D_METHOD("draw_cine_text", "item", "font", "pages", "event", "text", "size"),
+			D_METHOD("draw_cine_text", "item", "font", "pages", "event", "game_text", "banner",
+					"size"),
 			&HudPos::draw_cine_text);
+	ClassDB::bind_static_method("HudPos", D_METHOD("cine_font_file", "event", "width"),
+			&HudPos::cine_font_file);
 	ClassDB::bind_static_method("HudPos", D_METHOD("font_page_textures", "font"), &HudPos::font_page_textures);
 	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader"), &HudPos::glyph_shader);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
@@ -515,19 +518,27 @@ Array HudPos::draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p
 }
 
 Array HudPos::draw_cine_text(CanvasItem *p_item, const Ref<FntResource> &p_font,
-		const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_text,
-		const Vector2i &p_size) {
+		const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_game_text,
+		const String &p_banner, const Vector2i &p_size) {
 	const opennova::fnt::fnt_font_t *parsed = p_font.is_valid() ? p_font->parsed_font() : nullptr;
 	if (parsed == nullptr || p_event.is_null() || p_size.x <= 0 || p_size.y <= 0) return Array();
 	opennova::hud::GameFont font;
 	font.set_font(parsed);
-	// The large label slot at its scale for this width; the viewport the whole screen.
-	const float scale = opennova::hud::hud_label_font_choice(
-			p_size.x, ResourceRoot::session_title(Ref<ResourceRoot>())).large_scale;
+	// The node's label slot at its scale for this width; the viewport the whole screen.
+	const float scale = opennova::hud::cine_font_scale(
+			opennova::hud::hud_label_font_choice(p_size.x, ResourceRoot::session_title(Ref<ResourceRoot>())),
+			opennova::hud::cine_event_font(p_event->value()));
 	const opennova::hud::CineViewport view{0, 0, p_size.x, p_size.y};
 	const opennova::hud::GameFontRun run = opennova::hud::cine_event_text_run(p_event->value(),
-			code_page_text(p_text), font, scale, view);
+			code_page_text(p_game_text), code_page_text(p_banner), font, scale, view);
 	return draw_glyph_runs(p_item, run, p_pages);
+}
+
+String HudPos::cine_font_file(const Ref<CineEventRecord> &p_event, int p_width) {
+	if (p_event.is_null()) return String();
+	return String(opennova::hud::cine_font_file(
+			opennova::hud::hud_label_font_choice(p_width, ResourceRoot::session_title(Ref<ResourceRoot>())),
+			opennova::hud::cine_event_font(p_event->value())));
 }
 
 Array HudPos::font_page_textures(const Ref<FntResource> &p_font) {

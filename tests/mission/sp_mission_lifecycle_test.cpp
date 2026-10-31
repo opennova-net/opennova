@@ -195,6 +195,109 @@ void test_counter_step_plays_text_end_on_arrival() {
 	CHECK(std::string(w::kEpilogCounterEndSoundset) == "TEXT_END");
 }
 
+// The mission dfx2.exe's end screens read (world::EpilogMission), as the embedder stamps it.
+w::EpilogMission dfx2_mission(bool with_debriefings) {
+	w::EpilogMission mission;
+	mission.debriefing_screens = true;
+	mission.entry = true;
+	mission.file = "synth.bms";
+	mission.title = "Op Red";
+	if (with_debriefings) {
+		mission.win_debriefing = std::string("Won.");
+		mission.lose_debriefing = std::string("Lost.");
+	}
+	mission.server_mission_name = "Header Name";
+	return mission;
+}
+
+// DFX2-64: dfx2.exe's lose screen. The same states as Jointops.exe's and the build 249
+// frames past its frame; black fades, a one-frame letterbox at the fade-out's start, the
+// image a frame later, MISSION FAILED sprintf'd over the entry's title in Impact38 yellow 48
+// frames on, then 62 frames on the banner and the entry's LOSE_DEBRIEFING (x 192, 640 wide,
+// y 230, 262 past a banner) and the key help 124 frames past those (32 more past a debriefing).
+// [orig: sub_575990 @0x575a38..0x575dac (dfx2.exe)]
+void test_dfx2_lose_screen() {
+	const std::map<std::string, std::string> files;
+	for (const bool debriefed : {true, false}) {
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		w::EpilogCine &cine = world.epilog;
+		cine.mission = dfx2_mission(debriefed);
+		world.process_round_end(2);
+		(void)m.frame();
+		(void)m.frame();
+		CHECK(cine.screen_active && cine.lose_state == 2 && cine.frame == 2);
+		CHECK(world.out.audio_channels_shutdown);
+		// The build ran at frame 1; the update's tail dispatched once more (frame 2).
+		const int t = 1 + 249;
+		const w::CineEvent *fade1 = find_event(cine, w::CineEventKind::ImageFade, 0);
+		const w::CineEvent *fade2 = find_event(cine, w::CineEventKind::ImageFade, 1);
+		const w::CineEvent *backdrop = find_event(cine, w::CineEventKind::ImageFade, 2);
+		CHECK(fade1 != nullptr && fade1->start == t && fade1->duration == 48 &&
+				fade1->fade_mode == w::CineFadeMode::In &&
+				fade1->fade_source == w::CineFadeSource::SolidColor && fade1->solid_color == 0u);
+		CHECK(fade2 != nullptr && fade2->start == t + 48 && fade2->solid_color == 0u &&
+				fade2->fade_mode == w::CineFadeMode::Out);
+		CHECK(backdrop != nullptr && backdrop->start == t + 49 && backdrop->image == "jo_Epil2.tga" &&
+				backdrop->duration == 223200);
+		const w::CineEvent *bars = find_event(cine, w::CineEventKind::Letterbox, 1);
+		CHECK(bars != nullptr && bars->start == t + 48 && bars->duration == 1 &&
+				bars->letterbox_mode == 2);
+		const w::CineEvent *failed = find_event(cine, w::CineEventKind::TextFade, 0);
+		CHECK(failed != nullptr && failed->start == t + 97 &&
+				failed->text_source == w::CineTextSource::GameTextFormat &&
+				failed->text_key == "STROVER_MISSION_FAILED" && failed->text == "Op Red" &&
+				failed->y == 120 && failed->font == -3 && failed->box_height == 0 &&
+				failed->color_mask == 0xFFFF00u && failed->fade_in == 100);
+		const int lines = t + 97 + 62;
+		const w::CineEvent *banner = find_event(cine, w::CineEventKind::TextFade, 1);
+		CHECK(banner != nullptr && banner->text_source == w::CineTextSource::Banner &&
+				banner->start == lines && banner->y == 230 && banner->font == -2);
+		const w::CineEvent *debriefing = find_event(cine, w::CineEventKind::TextFade, 2);
+		const w::CineEvent *help = find_event(cine, w::CineEventKind::TextFade, debriefed ? 3 : 2);
+		if (debriefed) {
+			CHECK(debriefing != nullptr && debriefing->text_source == w::CineTextSource::Text &&
+					debriefing->text == "Lost." && debriefing->start == lines &&
+					debriefing->x == 192 && debriefing->y == 230 && debriefing->banner_y == 262 &&
+					debriefing->box_width == 640 && debriefing->box_height == 0);
+		}
+		CHECK(help != nullptr && help->text_key == "STREPILOG_KEYINFO" && help->y == 600 &&
+				help->start == lines + (debriefed ? 32 : 0) + 124);
+		CHECK(find_event(cine, w::CineEventKind::TextFade, debriefed ? 4 : 3) == nullptr);
+		// The heading names the session status's mission when the entry has no title, or
+		// there is no entry [orig: @0x575b0a..0x575b2b, g_ServerMissionName @0x575b48].
+		cine.mission.title.clear();
+		cine.events.clear();
+		cine.frame = 0;
+		cine.lose_state = 1;
+		cine.update(world);
+		const w::CineEvent *named = find_event(cine, w::CineEventKind::TextFade, 0);
+		CHECK(named != nullptr && named->text == "Header Name");
+		// A rewind keeps the embedder's mission.
+		const w::World::Snapshot snap = world.snapshot();
+		cine.mission.high_score = 77;
+		world.restore(snap);
+		CHECK(world.epilog.mission.high_score == 77 && world.epilog.mission.debriefing_screens);
+	}
+	// No entry: no debriefing (retail dereferences its entry).
+	{
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		world.epilog.mission = dfx2_mission(true);
+		world.epilog.mission.entry = false;
+		world.process_round_end(2);
+		m.frames(2);
+		const w::CineEvent *named = find_event(world.epilog, w::CineEventKind::TextFade, 0);
+		CHECK(named != nullptr && named->text == "Header Name");
+		const w::CineEvent *help = find_event(world.epilog, w::CineEventKind::TextFade, 2);
+		CHECK(help != nullptr && help->text_key == "STREPILOG_KEYINFO");
+	}
+}
+
 // D-NET-1233: the single player's session create adds its own slot with no body (the own
 // arm stores g_LocalPlayerEntity, which every teardown zeroes), and its mission start's round
 // init spawns the body, hidden, past the PreMission pass; Player_InitPlayer and the start's
@@ -799,6 +902,7 @@ int main() {
 
 	test_counter_step_plays_text_end_on_arrival();
 	test_the_local_body_is_born_at_the_round_init();
+	test_dfx2_lose_screen();
 	if (failures == 0) std::printf("sp_mission_lifecycle: OK\n");
 	return failures == 0 ? 0 : 1;
 }

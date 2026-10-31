@@ -475,6 +475,17 @@ struct Title {
 	// [orig: HUD_DrawVehicleHealthBars @0x5A4FD0 (the "X" @0x5A586B ends it)]
 	// [orig: sub_5A3DF0 @0x5A3DF0 (dfx2.exe) - the lines @0x5A4700..0x5A4871]
 	bool hud_vehicle_panel_riders = false;
+	// DFX2-64, DFX2-65: the single-player end screens name the mission and debrief it
+	// (runtime/world/epilog_cine.h, EpilogMission): black fades, a one-frame letterbox, the
+	// image a frame later, the heading sprintf'd over the mission's catalog title in Impact38
+	// yellow, and the mission table's [Info] LOSE_DEBRIEFING / WIN_DEBRIEFING; the win screen's
+	// counters at x 832, 32 apart, with no FRIENDLYUNITS line. False (Jointops.exe): the
+	// gametext heading in the large white face and no debriefing. On the Title: the
+	// executable's own end screens.
+	// [orig: Cinematic_EpilogUpdate @0x577950 (the mode-2 leg @0x574491..0x5747EB);
+	//  Cine_EpilogStateMachineUpdate @0x576240] [orig: sub_575E10 @0x575E10 -> sub_575990
+	//  @0x575990, sub_5740E0 @0x5740E0 (dfx2.exe)]
+	bool epilog_debriefing_screens = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

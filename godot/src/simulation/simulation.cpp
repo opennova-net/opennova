@@ -11,6 +11,7 @@
 #include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
 
 #include "env/weather.h"
+#include "mission/mission_catalog.h" // the process mission table (the end screens' entry)
 #include "network/novaworld_identity.h" // primary_desktop_size (the HUD fonts' display width)
 #include "resource_index/resource_root.h" // session_title (a listen host's caps)
 #include "util/string_convert.h"
@@ -22,6 +23,7 @@
 
 #include <runtime/inmatch/host_settings.h> // host_player_slot_limit (the BMS admission limit)
 #include <runtime/inmatch/slot_staging.h> // stage_slot_position (the parity runner's slot staging)
+#include <runtime/mission/mission_catalog.h> // Row (the end screens' entry)
 #include <runtime/mission/mission_sidecars.h> // mission_base_name
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
@@ -79,6 +81,30 @@ bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::stri
 		return false;
 	r_error = "mpreset is set: the session create ends the process (exit code 0)";
 	return true;
+}
+
+// The end screens' mission (engine world::EpilogMission carries the witnesses), stamped at each
+// boot: the title's screens; the menu's current entry, the process mission table's row for the
+// mission's file (none for an in-memory or unlisted mission), with its high score; and the
+// session status's mission name, the header's, cut to its field.
+void stamp_epilog_mission(opennova::world::EpilogCine &r_epilog, const opennova::Title &p_title,
+		const std::string &p_mission_file, const opennova::bms::File &p_mission) {
+	opennova::world::EpilogMission mission;
+	mission.debriefing_screens = p_title.epilog_debriefing_screens;
+	// The table lists a mission by its file name, without its folder.
+	const std::string file = p_mission_file.substr(p_mission_file.find_last_of("/\\") + 1);
+	if (const opennova::mission_catalog::Row *row =
+					file.empty() ? nullptr : godot::MissionCatalog::process_row(file)) {
+		mission.entry = true;
+		mission.file = row->file;
+		mission.title = row->title;
+		mission.win_debriefing = row->win_debriefing;
+		mission.lose_debriefing = row->lose_debriefing;
+		mission.high_score = godot::MissionCatalog::process_high_score(row->file);
+	}
+	mission.server_mission_name =
+			p_mission.get_mission_name().substr(0, opennova::world::kServerMissionNameChars);
+	r_epilog.mission = std::move(mission);
 }
 
 } // namespace
@@ -671,6 +697,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		fail_session_load(boot_error.c_str());
 		return ERR_CANT_OPEN;
 	}
+	stamp_epilog_mission(kernel_->world.epilog, session_title(net_, p_resource_root), mission_file,
+			kernel_->mission);
 	// What the boot read, retained for the binding's own reads and the next
 	// fresh kernel: the mission text (the HUD's people names), the .til, the
 	// water plane (apply_sound_state_to_world re-stamps it) and, on a host,
@@ -764,6 +792,8 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		return false;
 	}
 	finish_kernel_boot();
+	stamp_epilog_mission(kernel_->world.epilog, session_title(net_, assets_.root), std::string(),
+			kernel_->mission);
 	if (pending_item_db.is_valid()) resolve_item_traits(pending_item_db);
 	complete_session_load();
 	return true;

@@ -1,6 +1,7 @@
 #include "mission/mission_catalog.h"
 
 #include <base/io/file_io.h>
+#include <base/io/strutil.h>
 #include <runtime/mission/mission_catalog.h>
 
 #include "resource_index/resource_root.h"
@@ -99,6 +100,12 @@ bool &high_scores_loaded() {
 	return loaded;
 }
 
+// The rows the high-score table was last reset over: the process's mission table.
+std::vector<opennova::mission_catalog::Row> &process_rows() {
+	static std::vector<opennova::mission_catalog::Row> rows;
+	return rows;
+}
+
 } // namespace
 
 void MissionCatalog::load_high_scores(const Ref<ResourceRoot> &p_root, const String &p_dir) {
@@ -112,6 +119,7 @@ void MissionCatalog::load_high_scores(const Ref<ResourceRoot> &p_root, const Str
 	}
 	table.reset(rows);
 	high_scores_loaded() = true;
+	process_rows() = std::move(rows);
 	if (p_dir.is_empty()) return;
 	std::string text;
 	std::string error;
@@ -140,6 +148,16 @@ int64_t MissionCatalog::high_score(const String &p_file) {
 
 void MissionCatalog::set_high_score(const String &p_file, int64_t p_score) {
 	high_score_table().set_score(opennova::to_std(p_file), static_cast<int32_t>(p_score));
+}
+
+const opennova::mission_catalog::Row *MissionCatalog::process_row(const std::string &p_file) {
+	for (const opennova::mission_catalog::Row &row : process_rows())
+		if (opennova::strutil::iequals(row.file, p_file)) return &row;
+	return nullptr;
+}
+
+int32_t MissionCatalog::process_high_score(const std::string &p_file) {
+	return high_score_table().score(p_file);
 }
 
 PackedStringArray MissionCatalog::mission_names(const Ref<ResourceRoot> &p_root) {

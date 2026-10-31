@@ -186,14 +186,19 @@ public:
 	// each run as drawn ({page, uvs, colors}); none where the font holds no glyphs.
 	static Array draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p_font, const Array &p_pages,
 			const String &p_text, const Vector2i &p_size, bool p_phase_on);
-	// The epilog cine's text node through the large label slot's glyph runs (engine
-	// hud/cine_text.h cine_event_text_run carries the witness): a TextFade's lines over
-	// `p_text`, an EpilogCounter's row with `p_text` its label, over a `p_size` screen, a
-	// triangle array per page run into `p_item` (none for a null item) over `p_pages`. Returns
-	// each run as drawn ({page, uvs, colors}).
+	// The epilog cine's text node through its label slot's glyph runs (engine hud/cine_text.h
+	// cine_event_text_run carries the witness): a TextFade's line by its source over
+	// `p_game_text` (the gametext string its section and key name) and `p_banner` (the stored
+	// banner), an EpilogCounter's row with `p_game_text` its label, over a `p_size` screen at the
+	// slot's scale (`p_font` the slot's, cine_font_file), a triangle array per page run into
+	// `p_item` (none for a null item) over `p_pages`. Returns each run as drawn ({page, uvs,
+	// colors}).
 	static Array draw_cine_text(CanvasItem *p_item, const Ref<FntResource> &p_font,
-			const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_text,
-			const Vector2i &p_size);
+			const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_game_text,
+			const String &p_banner, const Vector2i &p_size);
+	// The label slot's font file a cine node draws in over a `p_width` screen, the session's
+	// title's (hud::cine_event_font / cine_font_file); "" for none.
+	static String cine_font_file(const Ref<CineEventRecord> &p_event, int p_width);
 	// A font's pages as the textures its glyph runs draw from (font_page_glyphs), by page.
 	static Array font_page_textures(const Ref<FntResource> &p_font);
 	// The canvas_item shader an item whose glyph runs draw through their page's material carries,

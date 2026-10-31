@@ -8,6 +8,11 @@
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include <cstdint>
+#include <string>
+
+namespace opennova::mission_catalog {
+struct Row; // runtime/mission/mission_catalog.h
+} // namespace opennova::mission_catalog
 
 namespace godot {
 
@@ -68,6 +73,11 @@ public:
 	static Error save_high_scores(const String &p_dir);
 	static int64_t high_score(const String &p_file);
 	static void set_high_score(const String &p_file, int64_t p_score);
+	// The process's mission table as load_high_scores last built it (retail's g_MissionList, which
+	// the current entry points into): the first row whose file is `p_file`, without case, or null;
+	// and its high score (0 for none). C++ only (the end screens' entry, simulation.cpp).
+	static const opennova::mission_catalog::Row *process_row(const std::string &p_file);
+	static int32_t process_high_score(const std::string &p_file);
 };
 
 } // namespace godot

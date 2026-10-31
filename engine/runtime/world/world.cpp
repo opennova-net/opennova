@@ -1060,8 +1060,12 @@ void World::restore(const Snapshot &s) {
     // writes it), so the rewind keeps it. [orig: dword_26970F4 — Cine_RenderOverlays
     //  @0x570C66]
     const bool cine_frame_drawn = epilog.frame_drawn;
+    // The end screens' mission is the embedder's (the menu's table outlives the
+    // rewind, its high score with it).
+    EpilogMission cine_mission = std::move(epilog.mission);
     epilog = s.epilog;
     epilog.frame_drawn = cine_frame_drawn;
+    epilog.mission = std::move(cine_mission);
     mission_exit_reason = s.mission_exit_reason;
     mission_exit_map = s.mission_exit_map;
     zones.spawn_waves = s.spawn_waves;

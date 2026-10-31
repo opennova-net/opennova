@@ -254,7 +254,7 @@ int main() {
 		      "the alpha byte over the colour");
 		check(opennova::world::cine_event_draw_argb(line) == 0x7F7F7F7Fu, "halved, the alpha kept");
 		const CineViewport screen{0, 0, 1024, 768};
-		const GameFontRun run = cine_event_text_run(line, "GO", font, 1.0f, screen);
+		const GameFontRun run = cine_event_text_run(line, "GO", "", font, 1.0f, screen);
 		check(run.quads.size() == 2, "the line's two glyphs");
 		if (run.quads.size() == 2) {
 			const float left = run.quads[0].x_top_left + 0.5f;
@@ -266,12 +266,12 @@ int main() {
 		}
 		// Over a 1280 x 720 viewport the box lands at y = 120 / 768 * 720, truncated.
 		const CineViewport hd{0, 0, 1280, 720};
-		const GameFontRun wide = cine_event_text_run(line, "GO", font, 1.0f, hd);
+		const GameFontRun wide = cine_event_text_run(line, "GO", "", font, 1.0f, hd);
 		check(!wide.quads.empty() && wide.quads[0].y_top == 112.0f - 0.5f,
 		      "the box's top truncated");
 		// A box too narrow for both words wraps them onto two lines, one line height apart.
 		line.box_width = 30;
-		const GameFontRun wrapped = cine_event_text_run(line, "GO ON", font, 1.0f, screen);
+		const GameFontRun wrapped = cine_event_text_run(line, "GO ON", "", font, 1.0f, screen);
 		check(wrapped.quads.size() == 4 && wrapped.quads[2].y_top > wrapped.quads[0].y_top,
 		      "two lines");
 
@@ -283,7 +283,7 @@ int main() {
 		counter.row_y = 300;
 		counter.value = 3;
 		counter.max = 5;
-		const GameFontRun row = cine_event_text_run(counter, "AB", font, 1.0f, hd);
+		const GameFontRun row = cine_event_text_run(counter, "AB", "", font, 1.0f, hd);
 		// "AB" plus "3/5", no count-up column (its target and rate both -1).
 		check(row.quads.size() == 5, "the label and the value, no count");
 		if (row.quads.size() == 5) {
@@ -298,8 +298,66 @@ int main() {
 		      "the count-up column runs on a target or a rate");
 		opennova::world::CineEvent image;
 		image.kind = opennova::world::CineEventKind::ImageFade;
-		check(cine_event_text_run(image, "X", font, 1.0f, screen).quads.empty(),
+		check(cine_event_text_run(image, "X", "", font, 1.0f, screen).quads.empty(),
 		      "an image draws no text");
+
+		// DFX2-64: a line's text by its source: the gametext string, the stored banner, the
+		// gametext as sprintf's format over the node's text (dfx2.exe's headings), the node's
+		// own text (the text-pointer TextFade's debriefing).
+		// [orig: sub_575990 @0x575b65, sub_570FD0 @0x570fd0 (dfx2.exe)]
+		opennova::world::CineEvent heading = line;
+		heading.box_width = 1024;
+		heading.text = "Op";
+		check(cine_event_line(heading, "FAILED %s", "B") == "FAILED %s", "a gametext line as is");
+		heading.text_source = opennova::world::CineTextSource::GameTextFormat;
+		check(cine_event_line(heading, "FAILED %s", "B") == "FAILED Op", "the heading's sprintf");
+		check(cine_event_line(heading, "FAILED", "B") == "FAILED", "a format with no %s");
+		heading.text_source = opennova::world::CineTextSource::Text;
+		check(cine_event_line(heading, "FAILED %s", "B") == "Op", "the node's own text");
+		heading.text_source = opennova::world::CineTextSource::Banner;
+		check(cine_event_line(heading, "FAILED %s", "B") == "B", "the stored banner");
+		// The debriefing's y follows the stored banner: 230 without one, 262 with one
+		// [orig: sub_575990 @0x5759ad / @0x575c01 (dfx2.exe)].
+		opennova::world::CineEvent debriefing = line;
+		debriefing.text_source = opennova::world::CineTextSource::Text;
+		debriefing.text = "GO";
+		debriefing.box_width = 1024;
+		debriefing.y = 230;
+		debriefing.banner_y = 262;
+		const GameFontRun bare = cine_event_text_run(debriefing, "", "", font, 1.0f, screen);
+		const GameFontRun past = cine_event_text_run(debriefing, "", "B", font, 1.0f, screen);
+		check(!bare.quads.empty() && bare.quads[0].y_top == 230.0f - 0.5f, "y 230 with no banner");
+		check(!past.quads.empty() && past.quads[0].y_top == 262.0f - 0.5f, "y 262 past a banner");
+		debriefing.banner_y = -1;
+		const GameFontRun fixed = cine_event_text_run(debriefing, "", "B", font, 1.0f, screen);
+		check(!fixed.quads.empty() && fixed.quads[0].y_top == 230.0f - 0.5f,
+		      "a line with no banner_y keeps its y");
+		// An empty line draws nothing (an empty banner, an empty gametext).
+		heading.text_source = opennova::world::CineTextSource::Banner;
+		check(cine_event_text_run(heading, "X", "", font, 1.0f, screen).quads.empty(),
+		      "no banner, no line");
+
+		// The label slots: a TextFade's word, -3 Impact38 and -2 Large at the large scale, -1
+		// Bold at the tier's, any other none; a counter's Large.
+		// [orig: CCineEventTextFade_Draw @0x57311d; sub_5711C0 @0x5712bd (dfx2.exe)]
+		HudLabelFontChoice choice;
+		choice.normal_fnt = "n.fnt";
+		choice.bold_fnt = "b.fnt";
+		choice.large_fnt = "l.fnt";
+		choice.impact38_fnt = "i.fnt";
+		choice.scale = 2.0f;
+		choice.large_scale = 3.0f;
+		check(std::string(cine_font_file(choice, -3)) == "i.fnt" &&
+		              std::string(cine_font_file(choice, -2)) == "l.fnt" &&
+		              std::string(cine_font_file(choice, -1)) == "b.fnt" &&
+		              std::string(cine_font_file(choice, 0)).empty(),
+		      "the slot's file");
+		check(cine_font_scale(choice, -3) == 3.0f && cine_font_scale(choice, -2) == 3.0f &&
+		              cine_font_scale(choice, -1) == 2.0f,
+		      "Impact38 at the large slot's scale");
+		heading.font = -3;
+		check(cine_event_font(heading) == -3 && cine_event_font(counter) == -2,
+		      "a line's slot is its word, a counter's the large");
 	}
 
 	// The progress bar's rects: at the design size the placement is the

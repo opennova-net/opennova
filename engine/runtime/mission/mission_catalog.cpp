@@ -143,6 +143,20 @@ void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::F
 	} else {
 		row.title = header_cstr(header.mission_name, sizeof(header.mission_name));
 	}
+	// The debriefings dfx2.exe's end screens read through the same table, the override's first
+	// even with no table [orig: TextResource_FindEntryBySectionAndKey @0x7269b0 - the override
+	// @0x7269bd..0x7269db, a null table none @0x7269df (dfx2.exe)].
+	const auto debriefing = [&](const char *key) -> std::optional<std::string> {
+		const rtxt::Entry *entry = nullptr;
+		if (text != nullptr)
+			entry = rtxt::find_with_override(text_override, *text, kTextInfoSection, key);
+		else if (text_override != nullptr)
+			entry = text_override->find_in_section(kTextInfoSection, key);
+		if (entry == nullptr) return std::nullopt;
+		return entry->text;
+	};
+	row.win_debriefing = debriefing(kTextWinDebriefingKey);
+	row.lose_debriefing = debriefing(kTextLoseDebriefingKey);
 }
 
 // The text table by name through the front door, the session's lookup order

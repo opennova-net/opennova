@@ -467,6 +467,10 @@ Title make() {
 	// DFX2-82: the vehicle panel's rider lines [orig: sub_5A3DF0 @0x5A3DF0 - @0x5A4700..0x5A4871
 	//  (dfx2.exe)].
 	t.hud_vehicle_panel_riders = true;
+	// DFX2-64, DFX2-65: the end screens name the mission and debrief it.
+	// [orig: sub_575990 @0x575990 (the lose screen), sub_5740E0 @0x5740E0 case 4 (the win
+	//  screen), both from sub_575E10 @0x575E10 by g_CineMode (dfx2.exe)]
+	t.epilog_debriefing_screens = true;
 	return t;
 }
 

@@ -18,7 +18,9 @@
 
 #include <runtime/world/geom.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -50,9 +52,11 @@ enum class CineEventKind : uint8_t {
 };
 
 // Where a TextFade line's text comes from: a gametext string fetched at the
-// build, or the round's stored banner (the WAC Lose cause, g_BannerText @0x28E3DA0),
-// which the embedder holds.
-enum class CineTextSource : uint8_t { GameText = 0, Banner };
+// build; the round's stored banner (the WAC Lose cause, g_BannerText @0x28E3DA0),
+// which the embedder holds; the gametext string as sprintf's format over the
+// node's `text` (dfx2.exe's headings, over the mission's title); or the node's
+// `text` itself (the text-pointer TextFade over a mission's debriefing).
+enum class CineTextSource : uint8_t { GameText = 0, Banner, GameTextFormat, Text };
 
 // The ImageFade +0x124 fade modes [orig: CCineEventImageFade_InitFadeState
 // @0x570FE0; its update CCineEventImageFade_Step @0x571020].
@@ -100,8 +104,18 @@ struct CineEvent {
 	CineTextSource text_source = CineTextSource::GameText;
 	std::string text_section;
 	std::string text_key;
+	// The GameTextFormat argument or the Text line, in the game's code page.
+	std::string text;
 	int32_t x = 0;           // +0xA8 (float)
 	int32_t y = 0;           // +0xAC (float)
+	// The y the line takes while a banner is stored (-1: `y` alone): dfx2.exe's
+	// lose screen sets its debriefing's y from a cursor at 230 that a stored banner
+	// moves to 262 [orig: sub_575990 - 230 @0x5759ad, 262 @0x575c01 (dfx2.exe)].
+	// The banner is the embedder's (CineTextSource::Banner), so the draw applies
+	// it; no write moves it past the build (the screen holds the script tick).
+	int32_t banner_y = -1;
+	// The HUD label slot: -3 Impact38, -2 Large, -1 Bold (a TextFade's +0xA4, an
+	// EpilogCounterFont's +0x450).
 	int32_t font = 0;        // +0xA4
 	int32_t fade_in = 0;     // +0xB8
 	int32_t fade_out = 0;    // +0xBC
@@ -175,6 +189,14 @@ inline constexpr int32_t kEpilogHoldFrames = 223200;
 //  @0x5765CB — CCineEventLetterbox_Construct(start, 100, 2, 0)].
 inline constexpr int32_t kEpilogScreenLetterboxFrames = 100;
 inline constexpr int32_t kEpilogScreenLetterboxMode = 2;
+// dfx2.exe's screens (EpilogMission::debriefing_screens): the letterbox fades
+// out over one frame from the fade-out's start, the image starts a frame later,
+// and the lines below the heading start 62 frames past it
+// [orig: sub_575990 - CCineEventLetterbox_Construct(t + 48, 1, 2, 0) @0x575ac5,
+//  the image @0x575acf, the lines @0x575bb2; sub_5740E0 @0x574426 / @0x574430 /
+//  @0x574524 (dfx2.exe)].
+inline constexpr int32_t kEpilogDebriefingLetterboxFrames = 1;
+inline constexpr int32_t kEpilogDebriefingLineDelay = 62;
 // The exit timeout: 18600 frames past the end screen's fade state
 // [orig: Cinematic_EpilogUpdate @0x5744EA; Cine_EpilogStateMachineUpdate
 //  @0x576822].
@@ -236,6 +258,39 @@ inline int32_t epilog_bar_height(int32_t width, int32_t height) {
 //  and the intro-cine load Cine_StartScriptPlayback @0x5782B8 (0)].
 enum class EpilogCineMode : int32_t { None = 0, Win = 1, Lose = 2 };
 
+// What the end screens read of the mission the round plays, which the embedder
+// sets at each mission boot. Jointops.exe's screens read none of it.
+// `debriefing_screens` is the title's (Title::epilog_debriefing_screens): dfx2.exe's
+// screens. The entry is the menu's current mission-table entry (dword_2527358 in
+// dfx2.exe, the single-player list's pick, which Game_StartMission re-reads from
+// the rotation's row): its title (+1044), its table's (+1040) [Info]
+// WIN_DEBRIEFING and LOSE_DEBRIEFING, and its high score (+0x11E4, the
+// hiscore.txt word); `entry` false for a mission the catalog does not list. The
+// session status's mission name (g_ServerMissionName, g_SessionStatus + 0x24)
+// is the mission header's name, at most 63 characters, which a single player's
+// authority copies at each start.
+// [orig: Game_StartMission @0x521530 - MissionList_GetEntryByIndex @0x5216bf, the
+//  store @0x5216c9; SinglePlayer_MissionListEventHandler @0x560dac,
+//  SinglePlayer_HandleStartEvent @0x560eb4; MissionList_ScanAndBuildFromFiles
+//  @0x5620d0 - the table +1040 @0x5623db (dfx2.exe)] [orig: Game_StartMission
+//  @0x525b95 -> Server_BuildStatusReport @0x530a60 - Napi_CopyString(+36,
+//  dword_A761D4, 64) @0x530aa1 under is_authority]
+// A debriefing is present when the table holds its key, its text empty or not
+// (the screens test the entry's text pointer, not its first byte).
+struct EpilogMission {
+	bool debriefing_screens = false;
+	bool entry = false;
+	std::string file;                           // entry+0, the hiscore.txt key
+	std::string title;                          // entry+1044
+	std::optional<std::string> win_debriefing;  // [Info] WIN_DEBRIEFING
+	std::optional<std::string> lose_debriefing; // [Info] LOSE_DEBRIEFING
+	int32_t high_score = 0;                     // entry+0x11E4
+	std::string server_mission_name;
+};
+// The session status's mission-name field holds 63 characters and its NUL
+// [orig: Server_BuildStatusReport @0x530aa1 - Napi_CopyString(.., 64)].
+inline constexpr size_t kServerMissionNameChars = 63;
+
 struct EpilogCine {
 	// The cine runs: the entity update steps it while set, the render pass
 	// clears it once the timeline passes its last event [orig: g_CinePlaying].
@@ -292,6 +347,9 @@ struct EpilogCine {
 	// its start word is stored, so its list order is unspecified; the port
 	// keeps the build order).
 	std::vector<CineEvent> events;
+	// The mission the end screens read (EpilogMission), the embedder's: a
+	// World::restore keeps it, as the menu's table outlives a rewind.
+	EpilogMission mission;
 
 	// The mission start's cine legs [orig: Game_StartMission — Cine_ReleaseAll
 	// @0x525DA8 (destroy every node, mode 0); on a first start out of a
@@ -337,6 +395,11 @@ private:
 	void update_win(World &world);
 	void build_lose_screen();
 	void build_win_screen(const World &world);
+	// dfx2.exe's lose screen (EpilogMission::debriefing_screens).
+	void build_lose_debriefing_screen();
+	// The heading's sprintf argument: the entry's title, or with no entry or an
+	// empty title the session status's mission name.
+	const std::string &heading_title() const;
 };
 
 } // namespace opennova::world

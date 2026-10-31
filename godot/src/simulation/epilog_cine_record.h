@@ -40,6 +40,8 @@ public:
 	enum TextSource {
 		TEXT_SOURCE_GAME_TEXT = static_cast<int>(opennova::world::CineTextSource::GameText),
 		TEXT_SOURCE_BANNER = static_cast<int>(opennova::world::CineTextSource::Banner),
+		TEXT_SOURCE_GAME_TEXT_FORMAT = static_cast<int>(opennova::world::CineTextSource::GameTextFormat),
+		TEXT_SOURCE_TEXT = static_cast<int>(opennova::world::CineTextSource::Text),
 	};
 
 	void assign(const opennova::world::CineEvent &p_value) { value_ = p_value; }

@@ -401,9 +401,13 @@ void EpilogCine::update_lose(World &world) {
 		break;
 	case 1:
 		// The screen builds on the first dispatch after a cine frame has
-		// rendered [orig: `cmp dword_26970F4, 0` @0x5744FD].
+		// rendered [orig: `cmp dword_26970F4, 0` @0x5744FD]
+		// [orig: sub_575990 - `cmp dword_269846C, 0` @0x575a23 (dfx2.exe)].
 		if (!frame_drawn) break;
-		build_lose_screen();
+		if (mission.debriefing_screens)
+			build_lose_debriefing_screen();
+		else
+			build_lose_screen();
 		++lose_state; // [orig: @0x5747D4]
 		// Then the dialog reset (the world's dialog table, its waiting lines
 		// with it) and the audio channel shutdown, which the embedder's audio
@@ -457,6 +461,76 @@ void EpilogCine::build_lose_screen() {
 	//  @0x5747B6) builds only over a saved game (D-SAVE-1).
 	events.push_back(text_fade(line_start + 124, CineTextSource::GameText, hud::kGameTextEpilogKeyInfo.section,
 			hud::kGameTextEpilogKeyInfo.key, 0, 600, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
+}
+
+const std::string &EpilogCine::heading_title() const {
+	// [orig: sub_575990 @0x575b0a..0x575b2b - the entry test and the strlen;
+	//  sub_5740E0 @0x57446c..0x57448b (dfx2.exe)]
+	return mission.entry && !mission.title.empty() ? mission.title : mission.server_mission_name;
+}
+
+void EpilogCine::build_lose_debriefing_screen() {
+	// The same states and build delay as Jointops.exe's; the fades are black,
+	// the letterbox fades out over one frame, the image starts a frame later, the
+	// heading names the mission in Impact38 yellow, and the lines below it start
+	// 62 frames past it, the mission's debriefing among them.
+	// [orig: sub_575990 - the screen flag @0x575a32 (dfx2.exe)]
+	screen_active = true;
+	const int32_t t = frame + kEpilogLoseScreenDelay; // [orig: @0x575a38]
+	// The fade pair, solid colour 0 [orig: @0x575a5c / @0x575a99].
+	events.push_back(image_fade(t, kEpilogFadeFrames, "", CineFadeMode::In, 0,
+			CineFadeSource::SolidColor, 0u, 0));
+	const int32_t fade_out = t + kEpilogFadeFrames; // [orig: @0x575a77]
+	events.push_back(image_fade(fade_out, kEpilogFadeFrames, "", CineFadeMode::Out, 0,
+			CineFadeSource::SolidColor, 0u, 0));
+	events.push_back(letterbox(fade_out, kEpilogDebriefingLetterboxFrames,
+			kEpilogScreenLetterboxMode, 0)); // [orig: @0x575ac5]
+	const int32_t image_start = fade_out + 1; // [orig: @0x575acf]
+	events.push_back(image_fade(image_start, kEpilogHoldFrames, "jo_Epil2.tga",
+			CineFadeMode::Hold, 0, CineFadeSource::Image, 0u, 0)); // [orig: @0x575af4]
+	// MISSION FAILED sprintf'd over the mission's title [orig: @0x575b40 / @0x575b5f, the
+	//  sprintf @0x575b65; CCineEventTextFade_Construct @0x575bad - (heading, 223200,
+	//  "CineText", buffer, 0, 120, -3, 100, 140, 1024, 0, 1, 0xFFFF00)].
+	const int32_t heading = image_start + kEpilogFadeFrames; // [orig: @0x575b72]
+	CineEvent failed = text_fade(heading, CineTextSource::GameTextFormat,
+			hud::kGameTextMissionFailed.section, hud::kGameTextMissionFailed.key, 0, 120, -3, 100,
+			140, 1024, 0, 1, 0xFFFF00);
+	failed.text = heading_title();
+	events.push_back(failed);
+	int32_t start = heading + kEpilogDebriefingLineDelay; // [orig: @0x575bb2]
+	// The banner line through the text-pointer TextFade, built only over a stored
+	// banner, which also moves the y cursor from 230 to 262; the embedder holds the
+	// banner and draws nothing for an empty one, so the node rides every build and
+	// the debriefing's y follows the banner at the draw (CineEvent::banner_y)
+	// [orig: `cmp g_BannerText, 0` @0x575bb5; sub_570FD0 @0x575bfc - (start, 223200,
+	//  &g_BannerText, 0, 230, -2, 140, 140, 1024, 100, 1, 0xFFFFFF); the cursor
+	//  @0x5759ad / @0x575c01].
+	events.push_back(text_fade(start, CineTextSource::Banner, "", "", 0, 230, -2, 140, 140, 1024,
+			100, 1, 0xFFFFFF));
+	// The saved-game list it would add below (sub_5B6230 @0x575c0d, the rows
+	// @0x575c1c..0x575c81, each 32 further on and 32 lower) is the unported
+	// savegame record (D-SAVE-1).
+	// The mission's LOSE_DEBRIEFING, from the entry's table, when it holds the key,
+	// at x 192 in a box 640 wide and unbounded below, on the y cursor; the key help
+	// moves 32 frames on. A mission the catalog does not list has no entry to read
+	// (retail's dereferences its entry).
+	// [orig: TextResource_FindEntryBySectionAndKey(entry+1040, "Info", "LOSE_DEBRIEFING")
+	//  @0x575c9e, the entry and its text pointer @0x575ca3..0x575cac; sub_570FD0 @0x575cec -
+	//  (start, 223200, text, 192, cursor, -2, 140, 140, 640, 0, flags, 0xFFFFFF), the flags the
+	//  saved-game walk's counter, 1 with none @0x5759b9 / @0x575cc9; @0x575cf1]
+	if (mission.entry && mission.lose_debriefing.has_value()) {
+		CineEvent debriefing = text_fade(start, CineTextSource::Text, "", "", 192, 230, -2, 140,
+				140, 640, 0, 1, 0xFFFFFF);
+		debriefing.text = *mission.lose_debriefing;
+		debriefing.banner_y = 262;
+		events.push_back(debriefing);
+		start += 32;
+	}
+	// The key help 124 frames on, y 600 [orig: @0x575cf9 / @0x575d4a]; its second
+	// line (y 632, @0x575dac) builds only over a saved game (D-SAVE-1).
+	events.push_back(text_fade(start + 124, CineTextSource::GameText,
+			hud::kGameTextEpilogKeyInfo.section, hud::kGameTextEpilogKeyInfo.key, 0, 600, -2, 140,
+			140, 1024, 100, 1, 0xFFFFFF));
 }
 
 void EpilogCine::update_win(World &world) {
