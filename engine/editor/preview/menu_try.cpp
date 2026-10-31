@@ -207,12 +207,15 @@ void MenuTry::prepare_() {
 	if (source_ != nullptr && source_->title != nullptr && source_->title->sp_campaign_tabs && source_->files) {
 		std::vector<uint8_t> def;
 		source_->files->read(campaign::kCampaignFile, def);
-		// The game shell's menu table (menu_shell.gd menu_text_file).
+		// The menu table the reader reads, g_TextMenuUi: Game.bin, the game shell's gameui table
+		// (menu_shell.gd menu_ui_text_file), not menutxt.bin [orig: Menu_InitShellResources
+		// @0x54f76c..0x54f779; sub_55FD20's TextResource_FindEntryBySectionAndKey(g_TextMenuUi,
+		// "Campaign", ..) @0x55ff0b (dfx2.exe)].
 		std::vector<uint8_t> text;
 		auto table = std::make_unique<rtxt::File>();
 		std::string error;
 		menu_text_.reset();
-		if (source_->files->read("menutxt.BIN", text) && rtxt::parse(text.data(), text.size(), *table, error))
+		if (source_->files->read("Game.bin", text) && rtxt::parse(text.data(), text.size(), *table, error))
 			menu_text_ = std::move(table);
 		campaign::CompletionTable progress{};
 		for (size_t c = 0; c < progress.size() && c < profile_.campaign_complete.size(); ++c)

@@ -49,8 +49,10 @@ public:
 	// Title::sp_campaign_tabs selects dfx2.exe's campaign and instant-action tabs.
 	void set_title(const Title *title) { title_ = title; }
 	// The campaign reader's inputs (DFX2-60): campaign.def's bytes (empty: the mount has none),
-	// the menu text table (menutxt.bin, g_TextMenuUi; borrowed, null none) and the current
-	// profile's completion bytes. Read at each populate.
+	// the menu text table (g_TextMenuUi, Game.bin, not menutxt.bin; borrowed, null none) and the
+	// current profile's completion bytes. Read at each populate.
+	// [orig: Menu_InitShellResources @0x54f76c..0x54f779 loads game.bin into g_TextMenuUi
+	//  (dfx2.exe)]
 	void set_campaign_source(std::string def_text, const rtxt::File *menu_text,
 			const campaign::CompletionTable &progress);
 	// A CA_LIST pick under the campaign tabs, `row` the list's row: the campaign's briefing,

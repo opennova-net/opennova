@@ -616,8 +616,10 @@ func _wire_named_controls() -> void:
 			sp_accept_control_names)
 	_driver.set_mod_descriptions(mod_desc_names)
 	# The single-player screen's inputs: the title's screen, and under dfx2.exe's campaign tabs
-	# the campaign reader's file, menu table and the profile's progress (engine MenuFlow).
-	_driver.set_single_player_source(PlayerProfile.store(), _text)
+	# the campaign reader's file, its menu table (the gameui table, Game.bin, not menutxt: engine
+	# MenuFlow::set_campaign_source) and the profile's progress (engine MenuFlow).
+	_driver.set_single_player_source(PlayerProfile.store(),
+			Strings.get_table(Strings.TABLE_GAMEUI))
 
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and

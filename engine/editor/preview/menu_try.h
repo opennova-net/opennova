@@ -193,8 +193,8 @@ private:
 	menu::OptionsScreen options_;
 	// The binding catalog of the game the last start ran as (MenuTrySource::title).
 	const controls::Catalog *catalog_ = &controls::default_catalog();
-	// The campaign reader's menu table (the project's menutxt.BIN), which flow_ borrows; null for
-	// none read.
+	// The campaign reader's menu table (the project's Game.bin, g_TextMenuUi), which flow_
+	// borrows; null for none read.
 	std::unique_ptr<rtxt::File> menu_text_;
 	// The sandbox's player profile record (a fresh one's words and binding
 	// table), which the Options screens seed from and their Accepts write.

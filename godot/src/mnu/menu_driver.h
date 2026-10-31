@@ -170,9 +170,9 @@ public:
 	Vector2i get_selected_campaign() const;
 	void clear_selected_mission() { flow_.clear_selected_mission(); }
 	// The single-player screen's inputs ahead of its populate: the bound root's title, and under
-	// one with the campaign tabs the mount's campaign.def, `p_menu_text` (menutxt.bin, kept while
-	// the flow reads it) and the current profile's completion bytes (engine MenuFlow::set_title,
-	// set_campaign_source).
+	// one with the campaign tabs the mount's campaign.def, `p_menu_text` (the shell's gameui
+	// table, Game.bin, not menutxt.bin; kept while the flow reads it) and the current profile's
+	// completion bytes (engine MenuFlow::set_title, set_campaign_source).
 	void set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
 			const Ref<RtxtStringFile> &p_menu_text);
 	// A CA_LIST pick, true when the campaign tabs took it (engine MenuFlow::select_campaign).

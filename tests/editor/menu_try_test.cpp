@@ -120,6 +120,17 @@ std::vector<uint8_t> mission_text() {
 	return out;
 }
 
+// A menu table holding a Campaign section whose ID_A titles campaign a `title`.
+std::vector<uint8_t> campaign_text(const char *title) {
+	rtxt::File text;
+	text.sections.push_back({ "Campaign", 1 });
+	text.entries.push_back({ "ID_A", title, {}, 0 });
+	std::vector<uint8_t> out;
+	std::string error;
+	rtxt::write(text, out, error);
+	return out;
+}
+
 struct TryProject {
 	test_temp::TempDir dir{"opennova_editor_menu_try"};
 	editor_test::NoProcess platform;
@@ -422,9 +433,13 @@ int test_try_lists_the_mods() {
 // screen as the game's shell hands it (MenuFlow over the project's game, campaign.def and the sandbox profile),
 // and CAMPAIGN_IMAGE's run-time image, the shown campaign's, loads through the screen's own assets at once
 // (MenuFrameAssets::load_added_textures), as the game's frame loads it, so its slot holds the texture and its
-// size; a campaign mission's pick sets its own image, loaded the same way.
+// size; a campaign mission's pick sets its own image, loaded the same way. The campaign titles are
+// Game.bin's (g_TextMenuUi), never menutxt.bin's [orig: Menu_InitShellResources @0x54f76c..0x54f779;
+// sub_55FD20's TextResource_GetStringWithFallback(g_TextMenuUi, "Campaign", ..) @0x55ff5b (dfx2.exe)].
 int test_try_loads_a_campaign_image() {
 	FakeFileSource files;
+	files.put("Game.bin", campaign_text("Alpha"), 1);
+	files.put("menutxt.BIN", campaign_text("Not the campaign table"), 1);
 	files.put_text("campaign.def", "begin a\r\ntitle ID_A\r\nimage a.tga\r\nmission c1.bms\r\nend\r\n", 1);
 	files.put("a.tga", texture_forms::tga_true_colour(16, 8, 32, 8, false), 1);
 	files.put("c1.tga", texture_forms::tga_true_colour(4, 4, 32, 8, false), 1);
@@ -460,6 +475,10 @@ int test_try_loads_a_campaign_image() {
 			if (strutil::iequals(names[i], name)) return int(i);
 		return -1;
 	};
+	// The campaign's title from Game.bin's Campaign section; menutxt.bin never read.
+	TEST_EXPECT(tried.runtime().get_widget_items(tried.runtime().widget_id("CA_LIST")) ==
+	            std::vector<std::string>{"Alpha"});
+	TEST_EXPECT(files.reads["game.bin"] >= 1 && files.reads.count("menutxt.bin") == 0);
 	const int image = slot_of("a.tga");
 	TEST_EXPECT(image >= 0 && size_t(image) < tried.assets().slot_keys().size() &&
 	            !tried.assets().slot_keys()[size_t(image)].empty());
