@@ -303,6 +303,24 @@ Rgba8Image normalize_detail_blend_map(const Rgba8Image &blendmap) {
 	return result;
 }
 
+TerrainSurfaceLevels build_second_detail_levels(
+		const Rgba8Image &base,
+		const Rgba8Image *far_detail) {
+	TerrainSurfaceLevels out;
+	if (!base.is_valid()) {
+		return out;
+	}
+	if (far_detail != nullptr) {
+		out.levels = build_paired_detail_mip_chain(base, *far_detail);
+		if (!out.levels.empty()) {
+			return out;
+		}
+	}
+	out.levels.push_back(base);
+	out.device_chain = true;
+	return out;
+}
+
 std::vector<Rgba8Image> build_paired_detail_mip_chain(
 		const Rgba8Image &base,
 		const Rgba8Image &far_detail) {

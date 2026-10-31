@@ -138,7 +138,16 @@ ResourceIndex::InstallScan ResourceIndex::scan_install(const std::string &root_d
 	if (!mount_install(impl_->vfs, root_dir, flags)) {
 		impl_->last_error = impl_->vfs.last_error();
 		// The Vfs keeps the root it mounted: none means the root itself did not mount.
-		return impl_->vfs.game_root().empty() ? InstallScan::Unmounted : InstallScan::NoArchive;
+		if (impl_->vfs.game_root().empty()) {
+			return InstallScan::Unmounted;
+		}
+		// The boot aborts its subsystem initialization when the fixed table opens no
+		// archive (a corrupt sole archive included), and the partial loose mount goes
+		// with it [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
+		const std::string error = impl_->last_error;
+		clear();
+		impl_->last_error = error;
+		return InstallScan::NoArchive;
 	}
 	index_mounted();
 	return InstallScan::Mounted;

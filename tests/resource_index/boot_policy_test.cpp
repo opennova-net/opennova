@@ -627,6 +627,8 @@ void test_mount_install() {
     std::ofstream((corrupt / "note.txt").string(), std::ios::binary) << "loose";
     CHECK(index.scan_install(corrupt.string(), parse_launch_flags({"game.exe", "/d"})) == InstallScan::NoArchive &&
           index.last_error().find("resource.pff") != std::string::npos && !index.has_mounted_archive());
+    // The refusal drops the partial loose mount with it.
+    CHECK(!index.has_file("note.txt") && !index.read_file("note.txt", bytes));
     CHECK(index.scan_install((root / "absent").string(), parse_launch_flags({})) == InstallScan::Unmounted &&
           !index.last_error().empty());
 }

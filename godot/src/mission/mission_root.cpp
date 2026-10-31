@@ -117,10 +117,10 @@ int MissionRoot::stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData>
 		r_sim->set_capture_pcap_path(LaunchFlags::capture_pcap());
 	}
 	// The listen host stamps its own type-2 connection during role bring-up, so
-	// its two per-side character selections must already be present here. The
-	// same profile is what a joiner uploads through ClientAuth.
-	// [orig: Game_ApplySessionSettingsToGlobals @0x551500;
-	//  Server_PlayerAdd @0x51CBC0 -> packed id @0x51D0B1]
+	// its two per-side character selections must already be present here (the
+	// engine's session apply, inmatch/join_character_profile.h, and the host's
+	// own add, inmatch/server_spawn, carry the witnesses). The same profile is
+	// what a joiner uploads through ClientAuth.
 	if (p_options->get_local_character_profile().is_valid()) {
 		r_sim->set_local_character_profile(p_options->get_local_character_profile());
 	}

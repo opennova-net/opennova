@@ -39,6 +39,8 @@
 #pragma once
 
 #include <runtime/environment/environment_state.h>
+#include <runtime/renderer/q3_frame.h>
+#include <runtime/renderer/render_order.h>
 #include <base/io/fixed.h>
 
 #include <formats/env/env_celestial.h>
@@ -79,6 +81,33 @@ constexpr bool builds_celestial_draws(bool dedicated_host) noexcept {
 //  Game_StartMission(0) (the call @0x526377); Game_StartMission - EffectWorld_DestroyAllAndInitDeviceCaps
 //  @0x5B5710 (the call @0x524A6F, on a start that is not a restart)]
 inline constexpr const char *kCelestialUplModel = "upl.3di";
+
+// The bodies the applier builds from the environment's models, in order: each
+// one's model, frame rung, Q3 source and whether the bloom pass redraws it. The
+// sky bracket draws the discs BEFORE all world alpha; the glare is the frame's
+// final draw; the glow and the glint draw in the post-particle overlay stage
+// (their meshes leave every camera), so they keep the default rung. The bloom
+// pass redraws the discs and the glow, never the glint [orig:
+// FrameFX_RenderGlowSource @ 0x582a77 / @ 0x582a80]. The water-reflected sun
+// glint reuses the glare model, mirrored below the eye [orig:
+// Environment_UpdateSunGlare @ 0x5ad130 submits g_CelestialGlareModel at
+// camera + sun * 128 with the height term negated, flags 0x110].
+enum class CelestialModel : uint8_t { Sun, Moon, Glare };
+struct CelestialBodySpec {
+	const char *key;
+	CelestialModel model;
+	int rung;
+	renderer::Q3Source q3_source;
+	bool q3_drawn;
+};
+inline constexpr CelestialBodySpec kCelestialBodies[] = {
+	{"sun", CelestialModel::Sun, renderer::kRungSkyBody, renderer::Q3Source::CelestialBody, true},
+	{"moon", CelestialModel::Moon, renderer::kRungSkyBody, renderer::Q3Source::CelestialBody, true},
+	{"glare", CelestialModel::Glare, renderer::kRungAlphaCameraSide, renderer::Q3Source::SunGlow,
+			true},
+	{"glint", CelestialModel::Glare, renderer::kRungAlphaCameraSide, renderer::Q3Source::SunGlow,
+			false},
+};
 
 // The rotation the embedder gives a view-aligned body (the header's note: the
 // parts' collect copies the pass's inverse view rotation [orig:

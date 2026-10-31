@@ -58,6 +58,11 @@ public:
 	bool load_from_adm(const RigFiles *files, const std::string &adm_name,
 	                   const std::vector<anim::Vec3> &model_bone_origins,
 	                   const std::vector<int> &model_bone_parents, bool body_builder = false);
+	// From EXPLICIT raw .bad files (no .adm), as the PLAYER_INFO preview does:
+	// `skeleton_bad` the rest/bind source, each clip sampled against it, both
+	// raw .bad files wrapped as one shared skeletal set
+	// [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 -> BoneFile_Load("PI_Idle.BAD"/"Dt1rst.bad")
+	//  + AnimChannel_InitFromData].
 	bool load_from_files(const RigFiles *files, const std::string &skeleton_bad,
 						 const std::vector<std::pair<std::string, std::string>> &clips,
 						 const std::vector<anim::Vec3> &model_bone_origins = {},

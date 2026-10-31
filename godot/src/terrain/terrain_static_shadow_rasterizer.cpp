@@ -42,10 +42,8 @@ uint64_t hash_string(uint64_t p_hash, const String &p_value) noexcept {
 
 opennova::terrain::TerrainStaticShadowLightDirection world_light(
 		const Vector3 &p_environment_tuple) noexcept {
-	// Static projection consumes Environment_GetLightDirectionFloat directly;
-	// the later DOT3 bake alone truncates that tuple to D3DCOLOR bytes.
-	// [orig: collector getters @0x60D2F5/0x60D2FF and projector setup
-	// @0x60D800; see docs/terrain/terrain-re.md].
+	// The environment getter's raw tuple, reduced by the engine's projector
+	// law (its definition carries the witness).
 	return opennova::terrain::
 			terrain_static_shadow_world_light_from_environment_tuple(
 					static_cast<float>(p_environment_tuple.x),

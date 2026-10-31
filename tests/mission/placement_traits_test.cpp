@@ -25,6 +25,10 @@ static void test_dynamic_shadow_admission() {
     CHECK(item_casts_dynamic_shadow(kItemTypeVehicle, kItemAttrib2DynamicShadow));
     CHECK(!item_casts_dynamic_shadow(kItemTypeVehicle, 0));
     CHECK(!item_casts_dynamic_shadow(kItemTypeBuilding, kItemAttrib2StaticShadow));
+    // The slot's person class is the itemdef type 3 alone.
+    CHECK(item_slot_shadow_person(kItemTypePerson));
+    CHECK(!item_slot_shadow_person(kItemTypeVehicle));
+    CHECK(!item_slot_shadow_person(kItemTypeBuilding));
 }
 
 static void test_static_shadow_admission() {

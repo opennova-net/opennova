@@ -70,6 +70,14 @@ namespace opennova::renderer {
 // (retail stores the clamped-negated tuple raw).
 std::array<float, 3> slot_projection_direction(
 		const std::array<float, 3> &sun_surface_to_light);
+// The same from the environment getter's raw render tuple g: the
+// surface->light vector in presentation axes is (g2, g1, g0)
+// [orig: Environment_GetLightDirectionFloat @0x57d870 into
+// Render_ShadowPass @0x5d7b70].
+inline std::array<float, 3> slot_projection_direction_from_environment_tuple(
+		float g0, float g1, float g2) {
+	return slot_projection_direction({g2, g1, g0});
+}
 
 // Slot LOD at registration: dynamic silhouette slots take
 // bound_radius(16.16) >> 15 + 1 = 2*radius + 1 world units, clamped [6, 20]
@@ -394,6 +402,31 @@ void slot_patch_vertices(const SlotPatch &patch, int lod,
 		const std::function<float(float, float)> &terrain_height,
 		std::vector<std::array<float, 3>> &out);
 
+// The patch a slot's drape mesh was last built over, and the rebuild gate
+// over it [orig: RenderSlot_DrawSilhouetteDrape @0x5d5ca0 ->
+// RenderSlot_RebuildPatchVertexBuffer @0x5d5130, the rebuild gate
+// @0x5d51a3..0x5d51bc]: origin, lod and resolution unchanged keep the
+// vertices. `heights_serial` is the embedder's mark of the heights the
+// vertices sampled (an editor's sculpt patches them in place; a match's never
+// change), so patched heights drape again too.
+struct SlotPatchBuild {
+	bool built = false;
+	float origin_x = 0.0f;
+	float origin_north = 0.0f;
+	int lod = 0;
+	uint64_t heights_serial = 0;
+};
+inline bool slot_patch_needs_rebuild(const SlotPatchBuild &build, const SlotPatch &patch,
+		int lod, uint64_t heights_serial) {
+	return !build.built || build.origin_x != patch.min_x ||
+			build.origin_north != patch.max_north || build.lod != lod ||
+			build.heights_serial != heights_serial;
+}
+inline SlotPatchBuild slot_patch_built(const SlotPatch &patch, int lod,
+		uint64_t heights_serial) {
+	return SlotPatchBuild{true, patch.min_x, patch.max_north, lod, heights_serial};
+}
+
 // The patch's triangle list for one lod, the level's run of the shared
 // index buffer [orig: RenderSlot_InitPatchIndexBuffers @ 0x5d53d0 — per cell
 // (i, j) with a = (i, j), b = (i, j + 1), c = (i + 1, j), d = (i + 1, j + 1):
@@ -410,7 +443,8 @@ void slot_patch_indices(int lod, std::vector<uint16_t> &out);
 // "shadowztex": the 32x4 ARGB texture the drape's second stage ADDs to the
 // silhouette term — rows 0..2 are white below column 16, one gray texel
 // at column 16 and black beyond; row 3 is all white. Sampled CLAMP +
-// bilinear [orig: @ 0x5d6260..0x5d62a7 the fill; flags 1 -> clamp
+// bilinear [orig: Shadow_SystemInitResources @ 0x5d6260..0x5d62d7 — the fill
+//  @ 0x5d6260..0x5d62a7; flags 1 -> clamp
 //  (CGfxShader_ApplyTextureStages @ 0x680870), linear min/mag]. Because the stage
 // ADDs and saturates, WHITE suppresses the shadow and BLACK keeps it:
 // u2 > 0.5 (ground beyond the plane through the caster, away from the
@@ -439,6 +473,25 @@ struct SlotDepthClip {
 };
 SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
 		float half_size, bool person, const std::array<float, 3> &entity_pos);
+
+// The drape's stage-0 texgen: world -> the capture's (u, v), the drape
+// sampling the capture along the same slot direction it was rendered from
+// [orig: the shared unscaled direction of the capture and drape matrices,
+// RenderSlot_SetupShadowCascadeMatrices @0x58d300 /
+// RenderSlot_BuildShadowCascadeUVMatrices @0x58cf10 lookat_dir1; the person
+// 4x belongs to the separate depth-clip stage above]: over the capture view's
+// axes (slot_capture_view_axes) about its center, u = 0.5 + x·(p − c) / 2h,
+// v = 0.5 − y·(p − c) / 2h (image y down). No depth bound: the capture's own
+// near/far band never clips the drape (the clamped sampler covers the rest of
+// the patch). u = u_axis·p + u_offset, v = v_axis·p + v_offset.
+struct SlotDrapeTexgen {
+	std::array<float, 3> u_axis{};
+	float u_offset = 0.5f;
+	std::array<float, 3> v_axis{};
+	float v_offset = 0.5f;
+};
+SlotDrapeTexgen slot_drape_texgen(const SlotCaptureViewAxes &axes,
+		const std::array<float, 3> &center, float half_extent);
 
 // ---------------------------------------------------------------------------
 // Slot assignment [orig: RenderSlot_SortAndAssign @ 0x5d6530]

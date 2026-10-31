@@ -197,28 +197,24 @@ void Celestial::_rebuild_if_needed() {
 		opennova::renderer::Q3Source q3_source;
 		bool q3_drawn;
 	};
-	// The witnessed load policy (celestial_frame.h carries the cites): the
-	// sky bracket draws the discs BEFORE all world alpha; the glare is the
-	// frame's final draw. Rungs are single-sourced from
-	// engine/runtime/renderer/render_order (REN-3); the glow and the glint
-	// draw in the post-particle overlay stage (their meshes leave every
-	// camera), so they keep the default rung. The bloom pass redraws
-	// the discs and the glow, never the glint (FrameFX_RenderGlowSource
-	// @ 0x582a77 / @ 0x582a80).
-	const Spec wanted[] = {
-		{ "sun", env_data->get_sun_3di(), opennova::renderer::kRungSkyBody,
-				opennova::renderer::Q3Source::CelestialBody, true },
-		{ "moon", env_data->get_moon_3di(), opennova::renderer::kRungSkyBody,
-				opennova::renderer::Q3Source::CelestialBody, true },
-		{ "glare", env_data->get_glare_3di(), opennova::renderer::kRungAlphaCameraSide,
-				opennova::renderer::Q3Source::SunGlow, true },
-		// The water-reflected sun glint reuses the glare 3DI, mirrored below
-		// the eye [orig: Environment_UpdateSunGlare @ 0x5ad130 submits
-		// g_CelestialGlareModel at camera + sun * 128 with the height term
-		// negated, flags 0x110, see docs/env/env-tod-re.md].
-		{ "glint", env_data->get_glare_3di(), opennova::renderer::kRungAlphaCameraSide,
-				opennova::renderer::Q3Source::SunGlow, false },
+	// The engine's body table (celestial_frame.h kCelestialBodies carries the
+	// witnesses), each body's model named by the environment.
+	const auto model_name = [&env_data](opennova::env::CelestialModel p_model) {
+		switch (p_model) {
+			case opennova::env::CelestialModel::Sun:
+				return env_data->get_sun_3di();
+			case opennova::env::CelestialModel::Moon:
+				return env_data->get_moon_3di();
+			case opennova::env::CelestialModel::Glare:
+				return env_data->get_glare_3di();
+		}
+		return String();
 	};
+	std::vector<Spec> wanted;
+	for (const opennova::env::CelestialBodySpec &body : opennova::env::kCelestialBodies) {
+		wanted.push_back({ String(body.key), model_name(body.model), body.rung,
+				body.q3_source, body.q3_drawn });
+	}
 	// Rebuild only when the set of names actually changed (undo/scrub safe).
 	HashMap<String, String> signature;
 	for (const Spec &spec : wanted) {
@@ -425,9 +421,8 @@ Camera3D *Celestial::_resolve_camera() {
 }
 
 void Celestial::_publish_idle_veil() {
-	// The retail veil writer is gated on the sun model
-	// [orig: Environment_ApplySunVeilAndExposureStopdown @0x5ad8ba, see
-	// docs/env/env-tod-re.md]: no bodies, no veil. Clear the pair and push a
+	// The veil is gated on the sun model (the engine's sun_veil_frame carries
+	// the witness): no bodies, no veil. Clear the pair and push a
 	// zero alpha so a reload never inherits the last mission's veil. The
 	// global is process-wide (another Celestial may have written it), so
 	// there is no per-instance latch — one RS call per idle frame.
@@ -548,8 +543,7 @@ void Celestial::advance_frame(double p_delta) {
 	}
 	if (Body *glint = bodies_.getptr("glint")) {
 		// The water-reflected sun glint runs its own leg (accumulator,
-		// mirrored placement, CPU alpha) [orig: Environment_UpdateSunGlare @ 0x5ad130,
-		// see docs/env/env-tod-re.md].
+		// mirrored placement, CPU alpha: the engine's advance_water_glint).
 		_advance_water_glint(state, cam_pos, sun_dir, forward, *glint);
 		// The weapon Inset pass calls it again at its own camera, before the
 		// frame's veil below reads the accumulator (env::WaterGlintState).

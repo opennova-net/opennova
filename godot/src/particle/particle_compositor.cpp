@@ -173,8 +173,8 @@ void main() {
 		// MODULATE(TEXTURE, DIFFUSE) on color AND alpha [orig: the case 0/1/2
 		// channel descs in CParticleTexture_InitTextureAndChannels @ 0x5e8347/
 		// @ 0x5e8380]. Only the blend factors differ (SRCALPHA/INVSRCALPHA vs
-		// ONE/INVSRCALPHA). Type-1 pages ship alpha cleared to 0
-		// [orig: BuildTextureAtlases @ 0x5e9116, see docs/particles/ptl-format-re.md], so an additive layer adds at
+		// ONE/INVSRCALPHA). Type-1 pages ship alpha cleared to 0 (the
+		// engine's atlas build carries the witness), so an additive layer adds at
 		// full strength and DIFFUSE alpha (the alpha curve) never affects it.
 		frag_color = texel * v_primary;
 	} else if (particle_mode() == 3u || particle_mode() == 6u) {

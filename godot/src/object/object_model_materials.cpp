@@ -281,19 +281,15 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 	material->set_shader_parameter("u_normal_map", bound_normal);
 	material->set_shader_parameter("u_normal_max_lod",
 			opennova::texture_max_lod(bound_normal));
-	if ((material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) != 0) {
-		// The ref byte feeds the compare exactly; the shader keeps a > ref
-		// (invert: a <= ref) [orig: CGfxDevice_SetAlphaTestRef @ 0x6770a0].
-		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold",
-				float(alpha_test_byte) / 255.0f);
-		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert",
-				(material_flags & THREEDI_MATERIAL_FLAG_ALPHA_INVERT) != 0
-						? 1.0f
-						: 0.0f);
-	} else {
-		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold", 0.0f);
-		set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert", 0.0f);
-	}
+	// The engine's alpha-test state (renderer::material_alpha_test); the
+	// shader keeps a > ref (invert: a <= ref), renderer::alpha_test_passes.
+	const opennova::renderer::MaterialAlphaTest alpha_test =
+			opennova::renderer::material_alpha_test(static_cast<uint32_t>(material_flags),
+					alpha_test_byte);
+	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_threshold",
+			alpha_test.reference);
+	set_material_and_auxiliary_parameter(material, r_postmultiply, "u_alpha_test_invert",
+			alpha_test.inverted ? 1.0f : 0.0f);
 	// The draw-invariant effect parameters: routed static colours (ReflectColor
 	// W = 1) and constant generators over the effect defaults. Dynamic
 	// generators overwrite theirs every runtime frame.
@@ -328,12 +324,11 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 		q3_values.detail_max_lod = opennova::texture_max_lod(detail);
 	}
 	FrameFx::register_q3_object_material(material, q3_classification, q3_values);
-	// No shadow-receiver next pass on world models: retail's render-slot
-	// entity ground shadows drape TERRAIN-FOLLOWING patches only — a live
-	// silhouette never lands on another model [orig:
-	// RenderSlot_DrawAllDrapes @0x5d6e20 draws the slot's terrain patch via
-	// RenderSlot_DrawSilhouetteDrape @0x5d5ca0; see docs/render/render-lighting-re.md].
-	// SlotShadow draws each drape as its own patch mesh over the terrain.
+	// No shadow-receiver next pass on world models: the render-slot entity
+	// ground shadows drape TERRAIN-FOLLOWING patches only — a live silhouette
+	// never lands on another model (the engine's render_slot_shadow.h carries
+	// the witness). SlotShadow draws each drape as its own patch mesh over the
+	// terrain.
 	return material;
 }
 

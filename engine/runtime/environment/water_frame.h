@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 #include <runtime/environment/environment_state.h>
 
@@ -234,5 +235,15 @@ private:
 constexpr bool water_pass_latch(bool latch, bool water_pass_runs, bool blink_water_visible) {
 	return water_pass_runs ? blink_water_visible : latch;
 }
+
+// The water strip's batches (formats/env water_strip_batches over
+// kWaterStripIndexTable) as one triangle list over the strip's 3 vertices a
+// row: each <= 5-row window draws a TRIANGLESTRIP through the first 8n-10
+// table entries, global vertex = 3 * first_row + entry; the strip -> list
+// unroll keeps D3D strip parity per triangle and drops the {2,6}-style
+// degenerate stitches (they only join row pairs inside one strip call)
+// (renderer::triangle_strip_to_list). The water passes draw two-sided, cull
+// NONE [orig: pass flags 0x400000 @ 0x5c340d], so the list's winding is free.
+std::vector<uint32_t> water_strip_triangle_list(int row_count);
 
 } // namespace opennova::env

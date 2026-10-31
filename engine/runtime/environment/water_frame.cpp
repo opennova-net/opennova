@@ -1,6 +1,11 @@
 #include <runtime/environment/water_frame.h>
 
+#include <formats/env/env_water_render.h>
 #include <formats/env/env_weather.h>
+#include <runtime/renderer/triangle_strip.h>
+
+#include <algorithm>
+#include <iterator>
 
 namespace opennova::env {
 
@@ -115,6 +120,17 @@ uint8_t underwater_murk_overlay_alpha_byte(float murk) {
 	// Do not add a lower clamp: the retail parser constrains only the upper
 	// bound, and the packed ARGB destination takes the resulting low byte.
 	return static_cast<uint8_t>(128 + static_cast<int>(murk * 96.0f));
+}
+
+std::vector<uint32_t> water_strip_triangle_list(int row_count) {
+	std::vector<uint32_t> list;
+	for (const WaterStripBatch &batch : water_strip_batches(row_count)) {
+		renderer::triangle_strip_to_list(kWaterStripIndexTable,
+				std::min(static_cast<std::size_t>(std::max(batch.vertex_count, 0)),
+						std::size(kWaterStripIndexTable)),
+				static_cast<uint32_t>(batch.first_row * 3), list);
+	}
+	return list;
 }
 
 } // namespace opennova::env

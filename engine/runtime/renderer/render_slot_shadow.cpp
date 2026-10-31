@@ -485,6 +485,23 @@ std::array<uint32_t, kShadowZTexWidth * kShadowZTexHeight> shadowztex_pixels() {
 	return px;
 }
 
+SlotDrapeTexgen slot_drape_texgen(const SlotCaptureViewAxes &axes,
+		const std::array<float, 3> &center, float half_extent) {
+	const float inv = 1.0f / (2.0f * std::max(half_extent, 0.001f));
+	SlotDrapeTexgen texgen;
+	float x_dot_c = 0.0f;
+	float y_dot_c = 0.0f;
+	for (int i = 0; i < 3; ++i) {
+		texgen.u_axis[i] = axes.x[i] * inv;
+		texgen.v_axis[i] = -axes.y[i] * inv;
+		x_dot_c += axes.x[i] * center[i];
+		y_dot_c += axes.y[i] * center[i];
+	}
+	texgen.u_offset = 0.5f - x_dot_c * inv;
+	texgen.v_offset = 0.5f + y_dot_c * inv;
+	return texgen;
+}
+
 SlotDepthClip slot_depth_clip(const std::array<float, 3> &slot_direction,
 		float half_size, bool person, const std::array<float, 3> &entity_pos) {
 	// [orig: RenderSlot_DrawSilhouetteDrape @ 0x5d5d66..0x5d5de1 — two copies

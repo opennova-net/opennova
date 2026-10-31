@@ -8,7 +8,7 @@
 #include <iterator>
 #include <vector>
 #include <base/io/fixed.h>
-#include <runtime/renderer/triangle_strip.h>
+#include <runtime/environment/water_frame.h>
 
 using namespace godot;
 
@@ -204,12 +204,9 @@ PackedFloat32Array WaterCore::strip_custom0() const {
 
 PackedFloat32Array WaterCore::strip_custom2() const {
 	// 4 floats per vertex: [t1.x, t1.y, t2.x, t2.y] — the texm3x2
-	// perturbation basis, t1 = (right.x, right.z) * (-min(rhw, 0.05)/2),
-	// t2 = (fwd.x, fwd.z) * (-5*min(rhw, 0.05))
-	// [orig: rows @ 0x5c2f83..0x5c3067; consumed by texm3x2pad t1, t0_bx2 /
-	// texm3x2tex t2, t0_bx2 — Water_InitSurfaceShaders @ 0x5c19b0, see docs/env/env-tod-re.md]. The 3rd
-	// components (screen U/V) ride strip_custom0's zw; the env #30 shader
-	// reassembles the full rows from both attributes.
+	// perturbation basis (the engine's env::WaterStripRows t1/t2 carry the
+	// witness). The 3rd components (screen U/V) ride strip_custom0's zw; the
+	// env #30 shader reassembles the full rows from both attributes.
 	PackedFloat32Array out;
 	const int count = strip_row_count * 3;
 	out.resize(count * 4);
@@ -224,24 +221,9 @@ PackedFloat32Array WaterCore::strip_custom2() const {
 }
 
 PackedInt32Array WaterCore::strip_indices() const {
-	// The witnessed batch submits unrolled to PRIMITIVE_TRIANGLES: each
-	// <=5-row window locks 8n-10 vertices and draws a TRIANGLESTRIP through
-	// the first 8n-10 entries of the static index table; global vertex =
-	// 3*first_row + entry (engine: formats/env/env_water_render.h). The
-	// strip->list unroll is the engine's renderer::triangle_strip_to_list: D3D
-	// strip parity per triangle, the {2,6}-style degenerate stitches (they
-	// only join row pairs inside one strip call) dropped. The water passes are
-	// two-sided anyway — cull NONE [orig: pass flags 0x400000 @ 0x5c340d, see
-	// docs/env/env-tod-re.md].
-	std::vector<uint32_t> list;
-	const std::vector<opennova::env::WaterStripBatch> batches =
-			opennova::env::water_strip_batches(strip_row_count);
-	for (const opennova::env::WaterStripBatch &batch : batches) {
-		opennova::renderer::triangle_strip_to_list(opennova::env::kWaterStripIndexTable,
-				std::min(static_cast<std::size_t>(std::max(batch.vertex_count, 0)),
-						std::size(opennova::env::kWaterStripIndexTable)),
-				static_cast<uint32_t>(batch.first_row * 3), list);
-	}
+	// The witnessed batch submits unrolled to PRIMITIVE_TRIANGLES (the
+	// engine's env::water_strip_triangle_list carries the witnesses).
+	const std::vector<uint32_t> list = opennova::env::water_strip_triangle_list(strip_row_count);
 	PackedInt32Array out;
 	out.resize(static_cast<int64_t>(list.size()));
 	for (size_t i = 0; i < list.size(); ++i) {

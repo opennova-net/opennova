@@ -28,7 +28,7 @@ class ResourceRoot;
 // table by the sets' layer counts, so one set names each layer.
 //
 // Dictionary shapes (views; field semantics grilled vs Jointops.exe -- see
-// engine/formats/lwf/lwf.h for the [orig:, see docs/audio/lwf-dbf-sound-re.md] anchors):
+// engine/formats/lwf/lwf.h for the witness anchors, docs/audio/lwf-dbf-sound-re.md):
 //   set:    { name:String, target_id:int, pitch_base:int, pitch_random_range:int,
 //             set_flags:int, layers:Array[layer] }
 //   layer:  { selection_mode:int, falloff_radius:int, min_distance:int,

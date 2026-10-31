@@ -8,7 +8,9 @@ namespace opennova::world {
 // The ONE engine tick cadence: 62.5 Hz — every fourth 4 ms drain quantum of
 // Game_MainLoop runs the logic update, advancing the logic tick counter once
 // per 16 ms [orig: current_tick @ 0x24c1968, incremented per drained 16 ms
-// quantum in Game_MainLoop @ 0x52b630].
+// quantum in Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0]: the
+// logic dispatches independently of the variable render rate, several ticks on
+// a long frame and none on a short one.
 
 // Wall-clock milliseconds -> whole logic ticks (the original's ms/16 quantum
 // count; fractional remainders truncate exactly like the drain).

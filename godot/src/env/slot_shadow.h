@@ -222,8 +222,6 @@ private:
 	void _flush_deferred_frees(bool p_all);
 	void _clear_all_terms();
 	void _invalidate_uniform_stamps();
-	Projection _drape_projection(const Transform3D &p_pose, float p_half_u,
-			float p_half_v) const;
 
 	opennova::renderer::RenderSlotPlan plan_;
 	Ref<SlotCaptureCompositorEffect> effect_;
@@ -295,13 +293,9 @@ private:
 	struct PatchMesh {
 		RID mesh;
 		RID instance;
-		bool built = false;
-		float origin_x = 0.0f;
-		float origin_north = 0.0f;
-		int lod = 0;
-		// The terrain's heights its vertices were draped over (TerrainData::get_heights_serial: an editor's
-		// sculpt patches them in place).
-		uint64_t heights_serial = 0;
+		// The patch its vertices were draped over (the engine's rebuild gate; the heights serial is
+		// TerrainData::get_heights_serial: an editor's sculpt patches them in place).
+		opennova::renderer::SlotPatchBuild build;
 		bool visible = false;
 		std::vector<std::array<float, 3>> vertices;
 	};

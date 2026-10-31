@@ -5,7 +5,8 @@
 // slot | 0x8000]. Placed-model lights enter it at mission start — a walk over
 // entity pools 1..2 spawning one instance per model light record
 // [orig: Game_StartMission @ 0x525d19 -> Game_SpawnAllEntityGlowEffects @0x5227b0 -> Entity_SpawnGlowEffects
-// @ 0x56c7c0: world position via the entity matrix, radius = atten_end * 65536
+// @ 0x56c7c0: world position the record's offset through the entity matrix alone
+// @ 0x56c836..0x56c84e (the subobject byte only its owner group), radius = atten_end * 65536
 // (flt_7C32BC), packed color -1 (white), lifetime 1, fade -1, the record's
 // RGB-gen block attached, subobject/blink-box attach, and the three authored
 // disable flags folded to render flags 512/1024/2048 @ 0x56c8e7..0x56c91d].

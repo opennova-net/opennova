@@ -160,6 +160,8 @@ struct TerrainViewInput {
 	int polygon_detail = kTerrainMaxPolygonDetail;
 	// Live water height in world units; 0 = no water this mission (the retail
 	// g_EnvWaterHeightFixed == 0 sentinel). Feeds the below-water terrain flag.
+	// The authored height whatever the water's own render state: the compare
+	// (TerrainFrameCompiler::compile) reads the global with no render gate.
 	float water_height = 0.0f;
 	// Retail view +100: the ordinary main view includes the flat fallback.
 	// [orig: PolyTrn_RenderFrame @ 0x60EAC0, gate @ 0x60ECB0]

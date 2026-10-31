@@ -85,9 +85,8 @@ public:
 	// p_key_to_bad maps each clip key (e.g. "anim_idle") to a clip .bad basename (e.g.
 	// "PI_Idle.BAD"); all resolved through the resource root. The skeleton .bad provides the
 	// shared bone offsets + bind pose; each clip is sampled against it. Missing clip .bads are
-	// skipped (a missing skeleton .bad fails).
-	// [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 -> BoneFile_Load("PI_Idle.BAD"/"Dt1rst.bad")
-	//  + AnimChannel_InitFromData; reimpl wraps both raw .bad files as one shared skeletal set.]
+	// skipped (a missing skeleton .bad fails). The engine's
+	// anim::SkeletalClips::load_from_files carries the witness.
 	bool load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
 			const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),

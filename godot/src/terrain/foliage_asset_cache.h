@@ -48,11 +48,10 @@ public:
                                  const Array &p_defs);
   // The ":fd" texture for one graphic: retail's alpha-filtered, progressively
   // gray mip chain of the model's OWN texture that BOTH foliage tiers bind
-  // [orig: Foliage_LoadDefAssets @ 0x601260 tail; bound by
-  // Foliage_DrawModelTileSlot @ 0x601d90 and the expanded detail tier alike]
   // -- the texture the first row of the model's first material names (engine
-  // runtime/assets/foliage_assets.h FoliageModelAsset) through the witnessed
-  // custom mip pipeline (bake_fd_image), cached per root+model.
+  // runtime/assets/foliage_assets.h FoliageModelAsset) through the engine's
+  // chain (foliage::Runtime::build_fd_rgba_mip_chain, via bake_fd_image; both
+  // carry the witnesses), cached per root+model.
   Ref<Texture2D> load_fd_texture(const Ref<ResourceRoot> &p_resource_root,
                                  const String &p_graphic);
   // Replace a >=4x4 power-of-two RGBA8 Image with retail's complete :fd mip
