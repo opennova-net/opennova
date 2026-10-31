@@ -17,6 +17,8 @@
 #include "simulation/player_weapon_event.h"
 #include "simulation/player_weapon_view.h"
 
+#include <runtime/world/player_present.h>
+
 namespace godot {
 
 class EffectWorld;
@@ -83,9 +85,8 @@ public:
 
 	// The live pose of a held weapon-effect group: the spawning action's
 	// userpoint through the CURRENT viewmodel pose, or null once the viewmodel
-	// is gone (the group then detaches at its last pose) [orig: the
-	// actionEffectHandle tracker @ 0x540edf re-reads actionTable[slot+0x28]'s
-	// bone until the emitter dies].
+	// is gone (the group then detaches at its last pose; the engine's
+	// kActionEffectSpawnPolicy carries the tracker's witness).
 	Variant resolve_anchor(const String &p_userpoint);
 
 protected:
@@ -119,8 +120,15 @@ private:
 	void fire_action_effects(const Ref<PlayerWeaponEvent> &p_event);
 	void fire_direct_action_effect(const Ref<PlayerWeaponEvent> &p_event);
 	static Transform3D action_particle_model_to_world(ObjectModel *p_part, const Ref<ModelUserPoint> &p_info);
+	// Where the userpoint resolves, in order (world::action_anchor_plan), and
+	// the resolvers of its sources.
+	opennova::world::ActionAnchorPlan anchor_plan(const String &p_userpoint) const;
 	ActionPoint mounted_action_particle(const String &p_userpoint) const;
 	ActionPoint third_person_action_particle(const String &p_userpoint) const;
+	// The first first-person part carrying the named point (case aside),
+	// through its live pose: its position, or its first non-zero direction.
+	bool first_person_particle_position(const String &p_userpoint, Vector3 &r_pos) const;
+	bool first_person_particle_forward(const String &p_userpoint, Vector3 &r_dir) const;
 	Vector3 action_particle_world_position(const String &p_userpoint) const;
 	Vector3 action_particle_world_forward(const String &p_userpoint) const;
 	void fire_action_end_sound(const Ref<PlayerWeaponEvent> &p_event);

@@ -277,7 +277,6 @@ add_library(opennova_bindings OBJECT
     world/resource_root_resolver.cpp
     world/scar_draw_list.cpp
     world/scar_presenter.cpp
-    world/tick_accumulator.cpp
     wac/wac_program.cpp
     lwf/lwf_data.cpp
     audio/sound_bank.cpp
@@ -328,6 +327,7 @@ add_library(opennova_bindings OBJECT
     player/player_move_intent.cpp
     player/player_info_kit_restore.cpp
     player/player_info_character_state.cpp
+    player/player_info_preview.cpp
     player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp

@@ -15,15 +15,15 @@ namespace godot {
 
 // The weapon.def slice the HUD's weapon-coupled elements read (the former
 // player_hud_weapon_def.gd, ADR 0043 slice G10), decoded from the WeaponDef
-// record `WeaponDatabase.get_weapon()` returns. Mirrors the original's
-// per-frame HUD info struct holding the equipped weapon-def pointer
-// [orig: HUD_BuildEntityInfo @0x4b8561 -> hudInfo+552].
+// record `WeaponDatabase.get_weapon()` returns: the equipped def pointer the
+// per-frame HUD info holds (engine hud/hud_entity_info.h carries the witness).
 //
 // `error_deg` is the 6-row dispersion table in DEGREES -- rows hip
 // prone/crouch/stand then scoped prone/crouch/stand; the crosshair spread
-// reads row stance + 3*scoped [orig: parse @0x543b21 (16.16); HUD_DrawCrosshair
-// @0x592b84]. The clip graphic (HUDCLIPGFX (engine: formats/def/def_weapons.cpp)) and the
-// per-round row (HUDRNDGFX (engine: formats/def/def_weapons.cpp)) drive the clip indicator.
+// reads row stance + 3*scoped (engine formats/def/def.h and hud/hud_math.h
+// carry the parse's and the draw's witnesses). The clip graphic (HUDCLIPGFX)
+// and the per-round row (HUDRNDGFX) drive the clip indicator (engine:
+// formats/def/def_weapons.cpp).
 class PlayerHudWeaponDef : public RefCounted {
 	GDCLASS(PlayerHudWeaponDef, RefCounted)
 
@@ -31,9 +31,8 @@ public:
 	// Decode one WeaponDef; null for no weapon (the HUD then draws no weapon
 	// cluster).
 	static Ref<PlayerHudWeaponDef> from_weapon_def(const Ref<WeaponDef> &p_def);
-	// The HUDRNDGFX divisor as the original reads it: stored as a byte
-	// (weapon+727), so an out-of-range file value wraps mod 256.
-	// [orig: HUDRNDGFX parse @0x5442fc; read @0x599bb1]
+	// The HUDRNDGFX divisor as the original reads it (the engine's
+	// hud::rounds_per_icon_from_layout carries the witness).
 	static int rounds_per_icon_from_layout(const Vector3i &p_layout);
 
 	// The dispersion row in degrees; 0.0 outside the parsed table.

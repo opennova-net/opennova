@@ -665,6 +665,12 @@ void test_view_projection_retail_stretch() {
     CHECK(std::fabs(viewmodel_focal_ratio(80.0f, 60.0f) - 1.45330f) < 1e-4f);
     CHECK(std::fabs(viewmodel_focal_ratio(20.0f, 80.0f) - 0.21014f) < 1e-4f);
     CHECK(viewmodel_focal_ratio(80.0f, 0.0f) == 1.0f);
+    // The pass's feed: that ratio, the swapped 0.05 near plane [orig: @0x4dee29],
+    // the world's far plane.
+    const ViewmodelProjectionFeed feed = viewmodel_projection_feed(80.0f, 60.0f, 500.0f);
+    CHECK(feed.focal_ratio == viewmodel_focal_ratio(80.0f, 60.0f));
+    CHECK(feed.near_z == 0.05f);
+    CHECK(feed.far_z == 500.0f);
 }
 
 // The NVG scene's pass [orig: NVG_RenderScene @0x5d2954..0x5d296d; NVG_RenderScopedScene

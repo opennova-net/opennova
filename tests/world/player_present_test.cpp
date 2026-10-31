@@ -365,6 +365,65 @@ void test_fire_effect_plan() {
 	CHECK(!plan.glow && plan.spawn && plan.effect == "muzzle_rifle");
 }
 
+// The action userpoint's sources, in order, the entity origin last
+// [orig: Entity_ComputeActionTransform @0x401310 - the fallback @0x401867..0x401887].
+void test_action_anchor_plan() {
+	using S = w::ActionAnchorSource;
+	// An empty userpoint names no part: the origin alone.
+	w::ActionAnchorPlan plan = w::action_anchor_plan(false, true, true, true, false);
+	CHECK(plan.count == 1 && plan.sources[0] == S::kEntityOrigin);
+	// First person, no borrow: the FP parts, then the origin.
+	plan = w::action_anchor_plan(true, true, false, false, true);
+	CHECK(plan.count == 2 && plan.sources[0] == S::kFirstPersonParts && plan.sources[1] == S::kEntityOrigin);
+	// Third person: the world gun ahead of the FP parts.
+	plan = w::action_anchor_plan(true, false, false, true, true);
+	CHECK(plan.count == 3 && plan.sources[0] == S::kThirdPersonGun &&
+			plan.sources[1] == S::kFirstPersonParts && plan.sources[2] == S::kEntityOrigin);
+	// A borrowed UseGun with no FP action model anchors to its carrier first.
+	plan = w::action_anchor_plan(true, true, true, false, false);
+	CHECK(plan.count == 3 && plan.sources[0] == S::kMountedGun && plan.sources[1] == S::kFirstPersonParts);
+	// ... but never without a weapon view.
+	plan = w::action_anchor_plan(true, false, true, false, false);
+	CHECK(plan.count == 2 && plan.sources[0] == S::kFirstPersonParts);
+}
+
+// A committed switch's presentation [orig: @0x4dc9e0].
+void test_weapon_switch_present() {
+	using P = w::WeaponSwitchPresent;
+	CHECK(w::weapon_switch_present("WPN_M4AUTO", "wpn_m4auto", true, false) == P::kKeep);
+	CHECK(w::weapon_switch_present("WPN_M4AUTO", "WPN_M4AUTO", true, true) == P::kKeep);
+	// No viewmodel yet: the switch presents even to the same def.
+	CHECK(w::weapon_switch_present("WPN_M4AUTO", "WPN_M4AUTO", false, true) == P::kPresentInstalled);
+	CHECK(w::weapon_switch_present("WPN_M4AUTO", "WPN_AK47AUTO", true, true) == P::kPresentInstalled);
+	CHECK(w::weapon_switch_present("", "WPN_AK47AUTO", false, false) == P::kMount);
+}
+
+// Retail's draw 5 for the local soldier [orig: @0x4e3c87..0x4e3d99; @0x4e3ce1..0x4e3cf2].
+void test_local_held_weapon_present() {
+	w::LocalHeldWeaponPresent p = w::local_held_weapon_present(true, true, true, true, true);
+	CHECK(p.shown && p.camera_visible && p.lod_owner_head);
+	// First person: shown (a shadow source), not to the camera; no head part: the body.
+	p = w::local_held_weapon_present(true, true, true, false, false);
+	CHECK(p.shown && !p.camera_visible && !p.lod_owner_head);
+	CHECK(!w::local_held_weapon_present(false, true, true, true, true).shown);
+	CHECK(!w::local_held_weapon_present(true, false, true, true, true).shown);
+	// A body no view collected and no slot captured draws no gun.
+	CHECK(!w::local_held_weapon_present(true, true, false, true, true).shown);
+}
+
+// The crosshair's anchor: 1P pins the centre, 3P projects the aim ray's far
+// point [orig: HUD_DrawCrosshair @0x5928a0; the projected branch @0x592910].
+void test_crosshair_aim_target() {
+	const float eye[3] = {10.0f, 2.0f, -5.0f};
+	CHECK(!w::crosshair_aim_target(false, eye, 30.0f, 10.0f, false, 0.0f, 0.0f).project);
+	const w::CrosshairAimTarget tp = w::crosshair_aim_target(true, eye, 0.0f, 0.0f, false, 90.0f, 0.0f);
+	// Yaw 0, pitch 0: straight down the presentation -z, 1000 units out.
+	CHECK(tp.project && tp.point[0] == 10.0f && tp.point[1] == 2.0f && tp.point[2] == -1005.0f);
+	// The binocular offsets turn the ray only while the binoculars are up.
+	const w::CrosshairAimTarget binoc = w::crosshair_aim_target(true, eye, 0.0f, 0.0f, true, 90.0f, 0.0f);
+	CHECK(binoc.project && binoc.point[0] > 1009.0f && binoc.point[0] < 1011.0f);
+}
+
 } // namespace
 
 int main() {
@@ -382,6 +441,10 @@ int main() {
 	test_raw_key_latch_updates_regardless_of_the_gate();
 	test_def_precedence_and_memo();
 	test_spawn_loadout_projection();
+	test_action_anchor_plan();
+	test_weapon_switch_present();
+	test_local_held_weapon_present();
+	test_crosshair_aim_target();
 	if (failures != 0) {
 		std::printf("player_present_test: %d failure(s)\n", failures);
 		return 1;

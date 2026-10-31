@@ -3,16 +3,14 @@ extends Control
 
 
 
-# Runtime PLAYER_INFO portrait for an Avatars.def character combo. It composes
-# the resolved third-person head + body .3di models under a shared environment
-# and holds a front-facing camera pose across combo changes. Retail combo arms
-# graphics use a larger rig than this portrait skeleton and must never be overlaid.
-#
-# Each composed third-person part shares one skeletal idle (Dt1rst.bad rest + PI_Idle.BAD clip),
-# matching the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0].
-# When those .bad assets aren't resolvable (e.g. a loose-data mount that lacks them) the parts
-# render static at rest — a valid degraded state. The remaining unwitnessed piece of
-# D-PLAYERINFO-1 is the in-world (spawned-player) combo binding, not this preview idle.
+# Runtime PLAYER_INFO portrait for an Avatars.def character combo: the device that
+# draws the engine's portrait model (PlayerInfoPreview over menu::PlayerInfoPreview,
+# which carries the witnesses: the parts it composes, their idle, its motion and
+# hover). It composes the parts under a shared environment and holds a
+# front-facing camera pose across combo changes. Without the idle's .bad pair
+# (a loose-data mount that lacks them) the parts render static at rest, a valid
+# degraded state. The remaining unwitnessed piece of D-PLAYERINFO-1 is the
+# in-world (spawned-player) combo binding, not this preview idle.
 
 const FlyCameraScript = preload("res://game/fly_camera.gd")
 
@@ -22,8 +20,6 @@ const FlyCameraScript = preload("res://game/fly_camera.gd")
 ## inmatch::RemoteAdminConsoles::player_preview_drawn).
 signal drawn
 
-# The standing character uses only the compatible third-person slots. A combo row
-# also carries `arms`, but retail arm graphics reference bones outside this preview rig.
 # Portrait tuning: a front portrait of a standing soldier for
 # the player.mnu PLAYER_PREVIEW pane. Camera yaw 0 puts the orbit camera on +Z and the
 # .3di parts import +Z-forward (see MissionObjectPlacer.bms_to_godot_basis), so the
@@ -38,11 +34,6 @@ const MENU_PITCH := -0.06
 # (design size x this scale) so the menu's upscale no longer blurs a low-res texture.
 const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
 
-# The witnessed preview animation + skeletal-idle values live at engine
-# avatars/preview_animation.h, re-exported through AvatarDatabase statics.
-# The idle clip registers under the canonical idle key so
-# play_body_clip / slot_to_key resolve it.
-const PREVIEW_IDLE_KEY := "anim_idle"
 # A BAM word as radians: 2^32 to a turn.
 const BAM_TO_RADIANS := TAU / 4294967296.0
 
@@ -55,25 +46,23 @@ var _root: Node3D
 var _environment: MissionEnvironment
 var _camera: FlyCamera
 var _menu_pose_set := false
-# Menu-portrait animation state (see _process). The part models hang off a spin node so the
-# model rotates without moving the camera; the camera only zooms.
+# The part models hang off a spin node so the model rotates without moving the camera; the
+# camera only zooms.
 var _model_root: Node3D
-var _hovered := false
 ## Whether the pointer hovers the portrait at all (the title's: MenuDriver.
 ## player_info_preview_hovers, engine Title::player_info_preview_hover); false, it is
 ## never hovered, so it spins at rest and never zooms or sways.
 var hovers := true
-var _zoom_blend := 0.0      # 0 at rest, damped toward 1 while hovered
-var _yaw_bam := 0           # the model's yaw, a signed 32-bit BAM word
+# The engine's portrait model: the facing, the zoom blend, the hover and the update bank.
+var _model := PlayerInfoPreview.new()
 var _menu_center := Vector3.ZERO
 var _menu_radius := 1.0
-var _menu_framed := false
 
-# Loaded part models keyed by slot ("head"/"body"/"arms") -> ObjectModel.
+# Loaded part models keyed by slot ("head"/"body") -> ObjectModel.
 var _part_models: Dictionary = {}
-# Shared skeletal idle (Dt1rst.bad + PI_Idle.BAD), built lazily once and bound onto every
-# skinned part so the composed character plays the idle. Null when the .bad assets aren't
-# resolvable; _skeletal_tried gates the one-time build so a missing-asset mount reads once.
+# The shared skeletal idle (PlayerInfoPreview.load_idle), built lazily once and bound onto
+# every skinned part. Null when the .bad assets aren't resolvable; _skeletal_tried gates the
+# one-time build so a missing-asset mount reads once.
 var _skeletal: SkeletalAnim = null
 var _skeletal_tried := false
 var _missing_parts := PackedStringArray()
@@ -118,7 +107,7 @@ func menu_center() -> Vector3:
 
 
 func zoom_blend() -> float:
-	return _zoom_blend
+	return _model.zoom_blend()
 
 
 ## Frame the portrait on `bounds` and hold that pose across selection refreshes.
@@ -235,38 +224,25 @@ func _build_viewport() -> void:
 
 # --- Combo composition --------------------------------------------------------
 
-# Compose the resolved combo's third-person head/body parts into the scene (the
-# arms row is first-person only). A missing/unknown graphic simply skips that
+# Compose the parts the engine's portrait composes from the resolved combo
+# (PlayerInfoPreview.composed_parts). A missing/unknown graphic simply skips that
 # slot (no error). Re-frames the camera on the composed bounds.
 func load_combo(combo: AvatarComboRow) -> void:
 	clear()
 	_missing_parts = PackedStringArray()
-	if combo != null:
-		_load_part("head", combo.get_head().graphic.strip_edges(), combo.get_head().camo)
-		_load_part("body", combo.get_body().graphic.strip_edges(), combo.get_body().camo)
+	for part: AvatarPartRow in PlayerInfoPreview.composed_parts(combo):
+		var slot := "head" if part.get_kind() == AvatarDatabase.PART_HEAD else "body"
+		_load_part(slot, part.graphic.strip_edges(), part.camo)
 	_refresh_status_label()
 	_refresh_portrait()
 
 
-# Build the shared skeletal idle once from the two raw .bad files the original binds
-# [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 BoneFile_Load + AnimChannel_InitFromData].
-# Returns null (parts stay static) when there's no resource root, the .bad assets aren't
-# present (a loose mount that lacks them), the native raw-.bad method is missing (stale DLL),
-# or the load fails — all non-fatal degraded states. Cached; _skeletal_tried reads once.
+# The shared skeletal idle, built once over the mount (PlayerInfoPreview.load_idle);
+# null (parts stay static) without a root, without the .bad pair or on a failed load.
 func preview_skeletal() -> SkeletalAnim:
-	if _skeletal_tried:
-		return _skeletal
-	_skeletal_tried = true
-	if _resource_root == null:
-		return null
-	if not _resource_root.has_file(AvatarDatabase.preview_skeleton_bad()) \
-			or not _resource_root.has_file(AvatarDatabase.preview_idle_bad()):
-		return null
-	var sk := SkeletalAnim.new()
-	if not sk.load_from_bad_files(_resource_root, AvatarDatabase.preview_skeleton_bad(),
-			{PREVIEW_IDLE_KEY: AvatarDatabase.preview_idle_bad()}):
-		return null
-	_skeletal = sk
+	if not _skeletal_tried:
+		_skeletal_tried = true
+		_skeletal = PlayerInfoPreview.load_idle(_resource_root)
 	return _skeletal
 
 
@@ -287,21 +263,12 @@ func _load_part(slot: String, graphic: String, camo: Vector3i) -> void:
 	model.name = "AvatarPart_%s" % slot
 	_model_root.add_child(model)
 	model.set_object_data(data)
-	# Each part carries its own authored camo triplet, stored immediately before
-	# that part's preview submit [orig: Avatar_SetHeadCamoCtrl @0x57a370 /
-	# Avatar_SetBodyCamoCtrl @0x57a390 at PlayerInfo_RenderPlayerPreview3D
-	# @0x56113c/@0x56110b].
+	# Each part's own authored camo triplet, stored ahead of its submit (the engine's
+	# kPlayerInfoPreviewParts carries the witness).
 	AvatarDatabase.apply_part_camo(model, camo, "avatar_preview:camo")
 	model.set_active_lod(0)  # always the finest LOD in the portrait (defensive; 0 is the default)
-	# Bind the shared skeletal idle so the skinned part plays PI_Idle.BAD on the Dt1rst skeleton,
-	# like the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 ->
-	# BoneFile_Load + AnimChannel_InitFromData("PI_Idle.BAD")]. Only skinned parts pose; an absent
-	# .bad set or a static part leaves the slot at rest. The transform animation (idle spin +
-	# hover zoom/sway) is driven separately in _process.
-	var sk := preview_skeletal()
-	if sk != null and data.is_skinned(0):
-		model.set_skeletal_anim(sk)
-		model.play_body_clip(PREVIEW_IDLE_KEY)
+	# A skinned part plays the shared idle; an absent .bad set or a static part stands at rest.
+	PlayerInfoPreview.pose_part(model, preview_skeletal())
 	_part_models[slot] = model
 
 
@@ -366,34 +333,31 @@ func _frame_menu_pose(bounds: AABB) -> void:
 	_menu_radius = maxf(bounds.size.length() * 0.5, 1.0)
 	_camera.near = clampf(_menu_radius * 0.001, 0.02, 5.0)
 	_camera.far = maxf(_menu_radius * 12.0, 50.0)
-	# The initial yaw is the engine's CRT draw, whole degrees in [0, 180) as
-	# BAM (runtime/menu/player_info_avatars.h carries the witness); the motion
-	# in _process steps from this starting facing.
-	_yaw_bam = AvatarDatabase.preview_initial_yaw_bam()
+	# A fresh model: the engine's initial facing and its update bank afresh.
+	_model.frame()
 	_apply_yaw()
-	_menu_framed = true
 	_apply_menu_camera()  # initial pose; _process re-poses each frame with the zoom blend
 
 
 # Position the menu camera front-on at the current zoom. The model's rotation lives on
 # _model_root (see _process), so the camera stays put and only its distance changes.
 func _apply_menu_camera() -> void:
-	if _camera == null or not _menu_framed:
+	if _camera == null or not _model.is_framed():
 		return
-	var dist_scale: float = MENU_DISTANCE_SCALE * lerpf(1.0, AvatarDatabase.preview_zoom_in_scale(), _zoom_blend)
+	var dist_scale: float = _model.camera_distance_scale(MENU_DISTANCE_SCALE)
 	_camera.frame_bounds_custom(_menu_center, _menu_radius, dist_scale,
 		maxf(_menu_radius * 8.0, 6.0), 0.0, MENU_PITCH)
 
 
 func _apply_yaw() -> void:
 	if _model_root != null:
-		_model_root.rotation.y = _yaw_bam * BAM_TO_RADIANS
+		_model_root.rotation.y = _model.yaw_bam() * BAM_TO_RADIANS
 
 
-# Hover toggles the zoom + sway, matching the original's "active when over the preview"
-# test [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0].
+# The PLAYER_PREVIEW window's mouse-over edge (the menu pump's claim, which the
+# companion relays), under the title's hover rule.
 func set_hovered(value: bool) -> void:
-	_hovered = value and hovers
+	_model.set_hovered(value, hovers)
 
 
 # The PLAYER_INFO portrait animation [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0]:
@@ -406,28 +370,10 @@ func _process(_delta: float) -> void:
 
 
 ## `updates` menu updates of the portrait's motion (the _process body; tests drive it
-## directly), each one step of the blend and the yaw (engine
-## menu::player_info_preview_yaw_step).
+## directly): the engine model steps once a drained menu update.
 func advance(updates: int) -> void:
-	if not _menu_framed:
+	if not _model.is_framed():
 		return
-	# Hover by mouse-position-over-this-pane, not the PLAYER_PREVIEW widget's mouse_entered
-	# signal: the menu's anamorphic scaling + the IGNORE mouse filters (which let the button
-	# keep its clicks) stop that signal from firing. This matches the original's cursor-over-
-	# widget position test [orig: CWnd_IsMouseOver @ 0x6467d0].
-	# Only when this pane has a real laid-out rect (true in the live menu; a bare unit-test
-	# preview has a zero rect, where an explicit set_hovered() drives the zoom instead).
-	if is_inside_tree():
-		var r := get_global_rect()
-		if r.has_area():
-			var hov: bool = hovers and r.has_point(get_global_mouse_position())
-			if hov != _hovered:
-				_hovered = hov
-	# The zoom blend toward the hover, the yaw's rest spin or hovered sway, one
-	# step a drained update (engine menu::player_info_preview_blend_step /
-	# _yaw_step, D-PLAYERINFO-37).
-	for _update in updates:
-		_zoom_blend = AvatarDatabase.preview_blend_step(_zoom_blend, _hovered)
-		_yaw_bam = AvatarDatabase.preview_yaw_step(_yaw_bam, _hovered, Time.get_ticks_msec())
+	_model.advance(updates)
 	_apply_yaw()
 	_apply_menu_camera()

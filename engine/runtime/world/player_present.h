@@ -188,6 +188,94 @@ bool action_particle_uses_third_person_gun(bool third_person);
 bool action_particle_uses_mounted_gun(bool borrowed_usegun_slot,
                                      bool third_person, bool first_person_action_model);
 
+// Where a local action userpoint resolves, in the order the presenter tries
+// them: the borrowed UseGun carrier's part (action_particle_uses_mounted_gun,
+// which needs a live weapon view), the third-person world gun
+// (action_particle_uses_third_person_gun), the first-person parts by name, and
+// last, for the POSITION, the ENTITY ORIGIN: an unresolved userpoint has no
+// model-origin leg, so past the parent userpoint and the vehicle occupant legs
+// retail copies entity+4/+8/+0xC, and neither a viewmodel part's origin nor the
+// eye stands in [orig: Entity_ComputeActionTransform @0x401310, the unresolved
+// path @0x4016C0..0x401887, whose fallback site @0x401867..0x401887 copies
+// entity+4/+8/+0xC]. An empty userpoint names no part: the origin alone. (The
+// direction's last resort is the view forward, the presentation's own.)
+enum class ActionAnchorSource : uint8_t {
+    kMountedGun,
+    kThirdPersonGun,
+    kFirstPersonParts,
+    kEntityOrigin,
+};
+struct ActionAnchorPlan {
+    ActionAnchorSource sources[4] = {};
+    int count = 0;
+};
+ActionAnchorPlan action_anchor_plan(bool has_userpoint, bool has_weapon_view,
+                                    bool borrowed_usegun_slot, bool third_person,
+                                    bool first_person_action_model);
+
+// A committed weapon switch's presentation: the FP render model follows the
+// equipped slot [orig: the mount's model re-resolve,
+// Player_CountWeaponEffectsAndUpdateViewModel @0x4dc9e0]. A switch to the def
+// already presented (the name, case aside) whose viewmodel is built keeps it,
+// so the queued SWITCHTO draw-in survives; a switch the sim's commit already
+// mounted (WeaponPresentationEvent::installed) presents its def alone; any
+// other mounts it (the debug/embedder path). The viewmodel rebuilds after
+// either of the last two.
+enum class WeaponSwitchPresent : uint8_t {
+    kKeep,
+    kPresentInstalled,
+    kMount,
+};
+WeaponSwitchPresent weapon_switch_present(const std::string &presented_weapon,
+                                          const std::string &target_weapon,
+                                          bool viewmodel_built, bool installed);
+
+// --- the local soldier's third-person gun ---------------------------------------
+
+// Retail's draw 5: the equipped def's gfx3, drawn RIGID -- one matrix into
+// every bone slot, no clip and no skeleton of its own -- at the attach transform
+// (bone 16's pivot, nudged, through its posed matrix; the weapon's own attach
+// basis) [orig: draw @0x4e3c87..0x4e3d99; matrix build @0x4b2180..0x4b22f8;
+// gate Entity_CanFireWeapon @0x4dcb10]. A def with no gfx3 draws nothing (27 of
+// the 94 shipped rows author none). It is drawn inside the avatar's HEAD
+// submit, at that part's RLOD level clamped to its own count (the body's when
+// the avatar is not composed), never through a threshold walk of its own
+// [orig: BoneCallback_org0_World @0x4e3ce1..0x4e3cf2; the head submit
+// Terrain_RenderSectorEntitiesBySide @0x5c7ffc]. It shows while the overlay
+// asks for it, an attach pose exists and the body is drawn (a view collected
+// it or a render slot captured it), and takes the body's camera rule:
+// `presents_body` (the third-person split, or the debug body-in-first-person
+// experiment) draws it to the camera, else it stays a shadow source only.
+struct LocalHeldWeaponPresent {
+    bool shown = false;           // the node draws at all this frame
+    bool camera_visible = false;  // the camera's picture takes it
+    bool lod_owner_head = false;  // its RLOD owner is the head part (else the body)
+};
+LocalHeldWeaponPresent local_held_weapon_present(bool overlay_weapon_visible, bool attach_valid,
+                                                 bool body_drawn, bool presents_body,
+                                                 bool head_part_composed);
+
+// --- the crosshair's anchor -----------------------------------------------------
+
+// What the crosshair anchors on: first person pins the surface centre, the
+// original never projects there [orig: HUD_DrawCrosshair @0x592640 -- 1P local
+// takes screen_w/2, screen_h/2 @0x5928a0/@0x5928ae]; third person / spectate
+// projects the aim ray's far point -- the eye plus kAimProjectRange along the
+// view angles, the binocular offsets added while the binoculars are up --
+// through the live camera [orig: the else branch @0x592910 --
+// Entity_BuildCameraView(entity, 1, 1, 65536000 = 1000.0 q16) transformed +
+// frustum-clipped @0x592932..0x59293c; Viewport_ScreenToVirtual @0x5d2c70].
+// `project` false: no projection (the HUD keeps the centre). Presentation
+// frame (presentation_frame.h).
+struct CrosshairAimTarget {
+    bool project = false;
+    float point[3] = {0.0f, 0.0f, 0.0f};
+};
+CrosshairAimTarget crosshair_aim_target(bool third_person, const float eye[3], float yaw_deg,
+                                        float pitch_deg, bool binoculars_view,
+                                        float binocular_yaw_offset_deg,
+                                        float binocular_pitch_offset_deg);
+
 // The owner-bound action effect's binding policy. Weapon particles always
 // enter the global effect world and render in the later world particle
 // brackets, even when their position came from the first-person gun: retail

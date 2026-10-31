@@ -50,43 +50,17 @@ class Simulation;
 // world keeps (the equipped def, the spawn loadout, the model builders) is
 // LocalPlayerVisuals, reached through the world's public surface.
 //
-// Faithful first-person camera. The on-foot eye is Position + CameraOffset,
-// where the local player's CameraOffset is the POSED HEAD BONE minus
-// Position -- the eye follows the animation (stand/crouch/prone/jump all
-// move it) [orig: the local bone path @0x4b6bb3 stores head-Position into
-// CameraOffset(+0x6C); the on-foot person camera leg adds it @0x437f9c].
-// +1.0 is the witnessed NON-person fallback bump (engine: runtime/world/player_view.cpp), kept for
-// the no-skeleton case. F4 swaps to the mode-1 chase camera (engine: runtime/world/player_view.cpp). Mouse look is SIM-owned: the
-// cursor offset rides the frame input to the session's mouse pump, whose axis
-// words feed the witnessed integer pipeline (sensitivity<<11, scoped zoom
-// reduction, +-80 deg pitch clamp
-// with the +40 deg up-limit while prone) (engine: runtime/world/local_player.cpp). Calibration values live at engine world/player_view.h
-// (Simulation re-exports).
-//
-// The head is bone INDEX 14 (.bad row "BN15 Head") -- the rig is index-driven
-// and the model bone order IS the BN order [world-wac-ai-re §14.2]; the
-// original reads the head row of its bone-matrix array, never a name (engine: runtime/world/infantry.cpp).
-//
-// The FP eye pull-back (-0x3000 along the view forward), the eye floor, and
-// the non-person bump compose in the SIM's camera pose now
-// (world/player_view.h kFpEyePullback/kEyeMinAbovePosition/kNonPersonEyeBump);
-// the constants remain for this presenter's OWN eye sampler (eye_position --
-// the aim-ray and 3P-anchor legs read the raw head anchor, not the composed
-// camera). The chase-camera composition -- the reset distance/orbit, the
-// pivot nudge, and the collision march's no-collision landing -- runs in the
-// SIM per drain (world/player_view.h, S8: player_view_compose_camera +
-// player_view_tp_effective_distance); this presenter stamps the composed
-// pose. Orbit keys (view bits 0x10/0x40 -> orbit_yaw +-0x1000000/tick
-// @0x437c1b), the zoom keys (view actions 409/410 @0x49c1c5..0x49c23f), the
-// march's bone-collision FORCES (@0x4382d9), and the dead-target 10.0 -> 3.0
-// distance ease @0x437cc0 are tracked deferrals (net-re section 5.39).
-//
-// The equipped-weapon FSM view + the sim-owned view state (net-re
-// §5.62/§5.41): the FSM and the VIEW STATE both tick in the sim at 62.5 Hz
-// (engine/runtime/world weapon_fsm + player_view; ADR 0016 -- policy, state,
-// and cadence live in the engine): the ADS engaged bit + 15-step ease, the
-// fov policy, and the 3P anchor chase arrive as a PlayerLocalView snapshot
-// each frame.
+// The camera is the SIM's: the eye (Position + the posed head bone's
+// CameraOffset), the FP pull-back, the chase composition and its deferrals,
+// the mouse look's integer pipeline and the view state (the ADS ease, the fov
+// policy, the 3P anchor chase) tick in the engine at 62.5 Hz
+// (world/player_view.h player_view_compose_camera, world/local_player_view.h,
+// world/local_player.cpp; ADR 0016) and arrive as a PlayerLocalView snapshot
+// each frame, which this presenter converts to the Godot frame and stamps.
+// The head is bone INDEX 14 (.bad row "BN15 Head"), read by index, never by
+// name (engine: runtime/world/infantry.cpp). The equipped-weapon FSM view
+// rides the same snapshot edge (engine/runtime/world weapon_fsm; net-re
+// §5.62/§5.41).
 class LocalPlayerPresenter : public Node3D {
 	GDCLASS(LocalPlayerPresenter, Node3D)
 
@@ -108,9 +82,7 @@ public:
 	void prepare_view_projection(int p_aspect_mode);
 
 	// Drop the built FP viewmodel so the next update pass rebuilds
-	// gun/arms/FSM from the (changed) equipped weapon -- the armory ACCEPT
-	// re-mount [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 tail ->
-	// Player_MountWeaponSlot @0x4dfa40].
+	// gun/arms/FSM from the (changed) equipped weapon (PlayerViewmodelRig).
 	void refresh_viewmodel();
 	// How many times the FP viewmodel was dropped for a rebuild (read seam).
 	int viewmodel_generation() const;
@@ -328,15 +300,10 @@ public:
 	void release_avatar();
 	void set_fly_camera_locked(bool p_locked);
 
-	// The crosshair's witnessed anchor. First person PINS the exact screen
-	// center -- the original never projects there [orig: HUD_DrawCrosshair
-	// @0x592640 -- 1P local takes screen_w/2, screen_h/2 @0x5928a0/@0x5928ae];
-	// third person / spectate projects the aim ray's far point through the live
-	// camera [orig: the else branch @0x592910 -- Entity_BuildCameraView(entity,
-	// 1, 1, 65536000 = 1000.0 q16) transformed + frustum-clipped
-	// @0x592932..3c; Viewport_ScreenToVirtual @0x5d2c70]. Vector2.INF = "no
-	// projection" (1P pin, no camera/player, or the far point behind the
-	// camera) -- the HUD falls back to the design center.
+	// The crosshair's anchor: the engine's world::crosshair_aim_target (which
+	// carries the witness) projected through the frame's screen projection.
+	// Vector2.INF = "no projection" (1P pin, no camera/player, or the far point
+	// behind the camera) -- the HUD falls back to the design center.
 	Vector2 aim_screen_point() const;
     // Read-only render-pose diagnostics (Vector3.INF when no skeleton exists).
     // Gameplay eyes come from the current simulation CameraOffset.
@@ -357,7 +324,6 @@ private:
 	void set_avatar_transform(ObjectModel *p_avatar, const Transform3D &p_next);
 	void reset_state();
 	void set_world_nvg_view(bool p_active, int p_gain);
-	Vector2 aim_angles_deg() const;
 	Vector3 eye_position(const Vector3 &p_pos) const;
 	void update_held_weapon(const Ref<PlayerAimOverlay> &p_overlay);
 	void update_person_overlays();

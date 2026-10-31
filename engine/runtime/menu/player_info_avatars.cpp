@@ -202,4 +202,27 @@ int32_t player_info_preview_initial_yaw_bam(uint32_t seed) {
 	return io::bam_mul(degrees, io::kBamPerWholeDegree);
 }
 
+void PlayerInfoPreview::frame(uint32_t seed) {
+	yaw_bam = player_info_preview_initial_yaw_bam(seed);
+	framed = true;
+}
+
+void PlayerInfoPreview::set_hovered(bool widget_hovered, bool title_hovers) {
+	// [orig: CWnd_IsMouseOver @0x6467d0]
+	hovered = widget_hovered && title_hovers;
+}
+
+int PlayerInfoPreview::advance(int updates, uint32_t tick_ms) {
+	if (!framed || updates <= 0) return 0;
+	for (int i = 0; i < updates; ++i) {
+		zoom_blend = player_info_preview_blend_step(zoom_blend, hovered);
+		yaw_bam = player_info_preview_yaw_step(yaw_bam, hovered, tick_ms);
+	}
+	return updates;
+}
+
+float PlayerInfoPreview::camera_distance_scale(float rest_scale) const {
+	return rest_scale * (1.0f + (avatars::kPreviewZoomInScale - 1.0f) * zoom_blend);
+}
+
 } // namespace opennova::menu
