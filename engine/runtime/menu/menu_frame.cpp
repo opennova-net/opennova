@@ -89,7 +89,12 @@ void MenuFrameCompiler::set_text_tables(const MenuTextTables *tables) {
 void MenuFrameCompiler::register_font(const std::string &name,
 		const fnt_font_t *font) {
 	if (font != nullptr) {
-		registered_fonts_[opennova::strutil::to_lower(name)] = font;
+		const std::string key = opennova::strutil::to_lower(name);
+		registered_fonts_[key] = font;
+		// A name the compile interned already draws with the font registered now (the HUD
+		// label face a resolution change reloads between configures).
+		for (size_t i = 1; i < font_names_.size(); ++i)
+			if (opennova::strutil::to_lower(font_names_[i]) == key) fonts_[i] = font;
 	}
 }
 

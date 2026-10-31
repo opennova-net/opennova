@@ -220,6 +220,9 @@ public:
 	// leaves it (column 0's value 0, state 0, no flags).
 	void set_widget_table_cells(int p_index, const Array &p_rows);
 	void set_table_cell_painter(int p_index, opennova::menu::MenuTableCellPainter p_painter);
+	// Whether a painter's HUD labels draw: each draw then holds the HUD label face the session's
+	// title loads for this frame's width (engine MenuFrameAssets::set_hud_label_face), C++ only.
+	void set_hud_label_face(bool p_on);
 	// CWnd_SetClipRect (absolute design units); `p_enabled` false removes it.
 	void set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect);
 	// The runtime's installed table columns and a marquee's credits (C++ only: the
@@ -466,6 +469,7 @@ private:
 	RID slot_canvas_item_;
 	RID overlay_upper_canvas_item_;
 	bool custom_slot_drawn_ = false;
+	bool hud_label_face_ = false; // set_hud_label_face
 	// The material this Control's item and both overlay items draw under: a
 	// glyph run's font page runs its MODULATE2X stage (glyph_shader_code),
 	// through the one process-wide glyph program (hud/font_page_glyphs

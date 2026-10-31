@@ -347,8 +347,43 @@ static int test_runtime_texture_loads() {
 	return 0;
 }
 
+// DFX2-41: the HUD label face a DEATH table painter draws with loads the title's g_HUDLabelFont
+// for the width (the tier's normal .fnt), registered under kMenuHudLabelFontName and again at
+// each configure without a read; a width in the same tier reads nothing, another tier its own
+// file; a file the source lacks leaves no face.
+// [orig: HUD_InitAllFonts @0x51bd70 - @0x51bdce..0x51beee (dfx2.exe)]
+static int test_hud_label_face() {
+	opennova::mnu::Document bare;
+	TEST_EXPECT(parse(kNoTextures, bare));
+	const opennova::TitleHudFontTier tiers[] = {{800, "small.fnt", "smallb.fnt", 800},
+	                                            {1024, "label.fnt", "labelb.fnt", 1024},
+	                                            {0, "big.fnt", "bigb.fnt", 1600}};
+	opennova::TitleHudFonts fonts;
+	fonts.tiers = tiers;
+	opennova::Title title;
+	title.hud_fonts = &fonts;
+	FakeFileSource files;
+	files.put("label.fnt", font_bytes(), 1);
+	files.put("big.fnt", font_bytes(), 1);
+	SizeDecoder decoder;
+	MenuFrameCompiler compiler;
+	MenuFrameAssets assets;
+	assets.configure(compiler, &bare, &bare.screens[0], files, decoder, {});
+	TEST_EXPECT(assets.set_hud_label_face(compiler, title, 1024, files));
+	TEST_EXPECT(files.reads["label.fnt"] == 1);
+	TEST_EXPECT(assets.set_hud_label_face(compiler, title, 900, files) && files.reads["label.fnt"] == 1);
+	assets.configure(compiler, &bare, &bare.screens[0], files, decoder, {});
+	TEST_EXPECT(assets.set_hud_label_face(compiler, title, 1024, files) && files.reads["label.fnt"] == 1);
+	TEST_EXPECT(assets.set_hud_label_face(compiler, title, 1920, files) && files.reads["big.fnt"] == 1);
+	TEST_EXPECT(!assets.set_hud_label_face(compiler, title, 640, files));
+	TEST_EXPECT(files.reads.count("small.fnt") == 0 || files.reads["small.fnt"] == 0);
+	std::printf("test_hud_label_face passed\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_hud_label_face();
 	failures += test_loads_and_no_default_font();
 	failures += test_kept_by_stamp_and_swept();
 	failures += test_absent_or_unreadable();

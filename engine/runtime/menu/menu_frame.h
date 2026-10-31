@@ -384,7 +384,8 @@ public:
 	virtual void line(uint32_t argb, float x0, float y0, float x1, float y1) = 0;
 	// HUD_DrawTextCentered_HalfBright(g_HUDLabelFont, x, foot - the font's 'W' height, text,
 	// argb): the HUD label face, centred on `center_x`, its top the 'W' extent above `foot`, at
-	// half brightness. A canvas with no HUD label face draws nothing (the menu frame's has none).
+	// half brightness. The menu frame's canvas draws it with the font registered under
+	// kMenuHudLabelFontName (MenuFrameAssets::set_hud_label_face), nothing without one.
 	// [orig: CGameFont_GetCharExtent @0x6b1980 (g_HUDLabelFont, 'W'), HUD_DrawTextCentered_HalfBright
 	//  @0x57eb00 (dfx2.exe)]
 	virtual void hud_label(const std::string &text, float center_x, float foot, uint32_t argb) {
@@ -394,6 +395,11 @@ public:
 		(void)argb;
 	}
 };
+
+// The name the HUD label face registers under in a menu compiler (MenuFrameAssets::
+// set_hud_label_face): the HUD's g_HUDLabelFont, which a table painter draws with through
+// MenuTableCellCanvas::hud_label. No .mnu FONT NAME can spell it (an XML text holds no raw '<').
+inline constexpr const char *kMenuHudLabelFontName = "<hud label>";
 
 // A table's registered custom-draw handler (the control callback bound on the
 // 0x08 event class) [orig: CUIScene_RegisterControlCallback @0x63c060].
@@ -704,6 +710,11 @@ public:
 	// Bind (or clear, with an empty function) the custom-draw handler of the
 	// table at `index`; kept across configure() while the index stays a table.
 	void set_table_cell_painter(int index, MenuTableCellPainter painter);
+	// The HUD label face's slot scale, the float pair HUD_LoadFontIntoSlot stores
+	// ((width << 16) / divisor, hud::hud_label_font_choice), which a painter's
+	// hud_label draws at; the face is the font registered under kMenuHudLabelFontName.
+	// [orig: HUD_LoadFontIntoSlot @0x57e880 - fontSlot +4 / +8 @0x57e8e5 (dfx2.exe)]
+	void set_hud_label_scale(float scale) { hud_label_scale_ = scale; }
 	// The editor's pick: the front-most shown window under the point by its rect
 	// alone, a disabled one or GLB_TABLE included, a spin arrow its list's, a
 	// scrollbar its owner's (hit_walk with `pump` false; no state written).
@@ -1179,6 +1190,8 @@ private:
 			int caret);
 	void emit_caret(hud::GameFont &gf, const std::string &text, int design_x,
 			int design_y, const WalkScale &s, uint32_t color, int caret);
+	// A table painter's HUD label (MenuTableCellCanvas::hud_label), in device pixels.
+	void emit_hud_label_(const std::string &text, float center_x, float foot, uint32_t argb);
 	// A label's draw, its {hot} marker's offset the cursor.
 	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws,
@@ -1319,6 +1332,7 @@ private:
 	std::map<int, EditScroll> edit_scroll_;
 	std::map<int, MarqueeScroll> marquee_scroll_;
 	std::map<int, MenuTableCellPainter> table_painters_;
+	float hud_label_scale_ = 1.0f;
 	MenuDrawList draw_list_;
 	// The node configure() is building (the owner of a note_), and what it noted: the
 	// log is the one thing the const note hooks write.

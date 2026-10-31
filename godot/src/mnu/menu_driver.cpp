@@ -813,6 +813,8 @@ bool MenuDriver::install_deploy_table_painter(const Ref<Simulation> &p_sim) {
 	if (frame == nullptr || index < 0) return false;
 	const ObjectID driver_id(get_instance_id());
 	const ObjectID sim_id = p_sim.is_valid() ? ObjectID(p_sim->get_instance_id()) : ObjectID();
+	// The zone labels draw in the HUD label face (world::deploy_table_paint).
+	frame->set_hud_label_face(true);
 	frame->set_table_cell_painter(index,
 			[driver_id, sim_id, table](const opennova::menu::MenuTableCellEvent &event,
 					opennova::menu::MenuTableCellCanvas &canvas) {

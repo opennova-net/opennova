@@ -706,6 +706,11 @@ void MenuFrame::set_table_cell_painter(int p_index,
 	queue_redraw();
 }
 
+void MenuFrame::set_hud_label_face(bool p_on) {
+	hud_label_face_ = p_on;
+	queue_redraw();
+}
+
 void MenuFrame::set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect) {
 	opennova::menu::frame_set_clip_rect(state_, p_index, p_enabled, p_rect.position.x, p_rect.position.y,
 			p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y);
@@ -1127,6 +1132,10 @@ void MenuFrame::_draw() {
 		return;
 	}
 	const auto draw_start = std::chrono::steady_clock::now();
+	if (hud_label_face_ && files_ != nullptr && root_files_.root().is_valid()) {
+		assets_.set_hud_label_face(compiler_, ResourceRoot::session_title(root_files_.root()),
+				static_cast<int>(get_size().x), *files_);
+	}
 	const Vector2 scale = design_scale_();
 	const opennova::menu::MenuDrawList &list =
 			compiler_.compile(state_, scale.x, scale.y);

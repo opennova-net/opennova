@@ -4,6 +4,7 @@
 #include <runtime/menu/menu_frame_assets.h>
 
 #include <base/io/strutil.h>
+#include <runtime/hud/hud_math.h> // hud_label_font_choice (HUD_InitAllFonts)
 
 #include <iterator>
 #include <utility>
@@ -108,15 +109,14 @@ bool MenuFrameAssets::note_unresolved_(const std::string &name, LoadResult resul
 // (stricmp) is found again; on a miss the path is the name with its extension replaced by
 // "fnt" (String_ReplaceOrAppendExtension), and a load that fails leaves the handle 0].
 MenuFrameAssets::LoadResult MenuFrameAssets::load_font_(MenuFrameCompiler &compiler, const std::string &name,
-                                                        const FileSource &files) {
-	if (name.empty()) return LoadResult::Absent;
+                                                        const std::string &file, const FileSource &files) {
+	if (name.empty() || file.empty()) return LoadResult::Absent;
 	const std::string registered_key = strutil::to_lower(name);
 	const auto registered = registered_.find(registered_key);
 	if (registered != registered_.end()) {
 		registered->second->used = generation_;
 		return LoadResult::Loaded;
 	}
-	const std::string file = menu_font_file(name);
 	const uint64_t stamp = files.stamp(file);
 	dependencies_.push_back({file, stamp});
 	if (stamp == 0) return LoadResult::Absent;
@@ -208,10 +208,12 @@ int MenuFrameAssets::configure(MenuFrameCompiler &compiler, const mnu::Document 
 	std::vector<std::pair<std::string, LoadResult>> fonts_not_loaded;
 	for (const std::string &raw : names) {
 		const std::string resolved = compiler.resolve_style_var(raw);
-		const LoadResult result = load_font_(compiler, resolved, files);
+		const LoadResult result = load_font_(compiler, resolved, menu_font_file(resolved), files);
 		if (result != LoadResult::Loaded && note_unresolved_(resolved, result) && !resolved.empty())
 			fonts_not_loaded.emplace_back(resolved, result);
 	}
+	// The HUD label face the embedder named, not one of the screen's FONTs (no note).
+	if (!hud_label_file_.empty()) load_font_(compiler, kMenuHudLabelFontName, hud_label_file_, files);
 	compiler.configure(screen);
 	// What did not load, noted on the windows naming it (configure started the notes over).
 	for (const std::string &name : missing_tables_) compiler.add_load_note(MenuFrameNoteCode::TextTableMissing, name);
@@ -244,7 +246,23 @@ int MenuFrameAssets::configure(MenuFrameCompiler &compiler, const mnu::Document 
 }
 
 bool MenuFrameAssets::add_font(MenuFrameCompiler &compiler, const std::string &name, const FileSource &files) {
-	return load_font_(compiler, name, files) == LoadResult::Loaded;
+	return load_font_(compiler, name, menu_font_file(name), files) == LoadResult::Loaded;
+}
+
+bool MenuFrameAssets::set_hud_label_face(MenuFrameCompiler &compiler, const Title &title, int surface_w,
+                                         const FileSource &files) {
+	const hud::HudLabelFontChoice choice = hud::hud_label_font_choice(surface_w, title);
+	compiler.set_hud_label_scale(choice.scale);
+	const std::string key = strutil::to_lower(kMenuHudLabelFontName);
+	const std::string file = choice.normal_fnt;
+	// The slot loads again only when the width picks another file, as retail reloads its HUD
+	// fonts at a resolution change; a configure registers the face again itself.
+	if (!strutil::iequals(file, hud_label_file_)) {
+		hud_label_file_ = file;
+		registered_.erase(key);
+		load_font_(compiler, kMenuHudLabelFontName, hud_label_file_, files);
+	}
+	return registered_.count(key) != 0;
 }
 
 int MenuFrameAssets::load_added_textures(MenuFrameCompiler &compiler, const FileSource &files,
