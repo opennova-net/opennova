@@ -273,6 +273,15 @@ struct Title {
 	// row, dfx2.exe's 20 (no medic, personmedicable, lfp, farp or armoury entry, a pwrweap one) 52
 	// a row. Null where no binary of the title was read for it: the legend draws its box alone.
 	const TitleHudMapLegend *hud_map_legend = nullptr;
+	// DFX2-87: the friendly tags' modes reach by range: FAR/BRIEF (1) draws every tag's name, FULL
+	// (2) the name within the tag's reach (50 u for an AI organic, 1000 u for a player whose slot
+	// +0x3C word is the local player's slot's, else 300 u) or for the HUD target cursor's entity
+	// and the brief tick beyond, BRIEF (3) the tick. Jointops.exe's FULL draws every name, its mode
+	// 1 the name within 300 u and nothing beyond.
+	// [orig: HUD_DrawEntityLabel @0x5A39B0 (the mode tests @0x5A3FC3..0x5A40D4)]
+	// [orig: sub_5A27F0 @0x5A27F0 (dfx2.exe) - the reach @0x5A288C..0x5A28C1, the mode switch
+	//  @0x5A2E1F..0x5A309A]
+	bool hud_tag_ranges = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

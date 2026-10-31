@@ -4,6 +4,7 @@
 // anchors the presenter projects. Split off hud_frame.cpp (one responsibility per TU).
 // [orig: HUD_DrawFriendlyTagsPass @0x5A4480 -> HUD_DrawEntityLabel @0x5A39B0]
 
+#include <base/title/title.h> // Title::hud_tag_ranges
 #include <runtime/hud/hud_frame.h>
 
 #include <runtime/hud/hud_medic_cross.h>
@@ -200,7 +201,27 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float s
 			resolved = friendly_tag_fallback_name(tag.entity_id);
 		}
 
-		if (friendly_tag_text_visible(state.friendly_tag_mode, tag.dist_q16)) {
+		// The text form and the BRIEF tick by mode: Jointops.exe's FULL names every tag, its
+		// FAR/BRIEF within 300 u (friendly_tag_text_visible), its BRIEF ticks. dfx2.exe's
+		// FAR/BRIEF names every tag, its FULL names a tag within its reach or the HUD target
+		// cursor's and ticks the rest, its BRIEF ticks (Title::hud_tag_ranges, DFX2-87)
+		// [orig: sub_5A27F0 @0x5a27f0 - the switch's case 1 @0x5a2f04, case 2's `v76 >= v77 &&
+		//  a1 != g_HUDTargetCursorEntity` @0x5a2e47 into the tick @0x5a30a0, case 3 @0x5a309a
+		//  (dfx2.exe)].
+		bool text_form = false;
+		bool tick_form = false;
+		if (state.title != nullptr && state.title->hud_tag_ranges) {
+			const bool in_reach = tag.dist_q16 < friendly_tag_reach_q16(tag.player, tag.same_account);
+			text_form = state.friendly_tag_mode == kFriendlyTagModeFarBrief ||
+					(state.friendly_tag_mode == kFriendlyTagModeFull &&
+							(in_reach || tag.cursor_target));
+			tick_form = !text_form && (state.friendly_tag_mode == kFriendlyTagModeFull ||
+										state.friendly_tag_mode == kFriendlyTagModeBrief);
+		} else {
+			text_form = friendly_tag_text_visible(state.friendly_tag_mode, tag.dist_q16);
+			tick_form = !text_form && state.friendly_tag_mode == kFriendlyTagModeBrief;
+		}
+		if (text_form) {
 			// The text form appends the count to the name
 			// [orig: sprintf("%s: %ld", name, slot+0x10) @0x5a400e, else
 			//  sprintf("%s", name) @0x5a422e].
@@ -247,7 +268,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state, float s
 							 static_cast<int>(argb >> 24)))
 					emit_rect(q.x0, q.y0, q.x1, q.y1, q.color, true);
 			}
-		} else if (state.friendly_tag_mode == kFriendlyTagModeBrief) {
+		} else if (tick_form) {
 			// The BRIEF tick: three 1-px vertical lines at x-1/x/x+1 spanning
 			// +-fontH/4 around the projected point [orig: @ 0x5a40eb..0x5a4160].
 			const float half = font_h * 0.25f;

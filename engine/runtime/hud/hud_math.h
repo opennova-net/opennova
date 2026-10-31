@@ -265,6 +265,12 @@ int friendly_tag_alpha(int32_t dist_q16);
 
 // Whether the text form draws for this mode/distance [orig: @0x5a3fc3..0x5a3fcf].
 bool friendly_tag_text_visible(int mode, int32_t dist_q16);
+// dfx2.exe's FULL-mode reach (DFX2-87), 16.16: 300 u, 50 u for an entity without the Player
+// class bit (an AI organic), 1000 u for a player whose slot +0x3C word is the local player's
+// slot's. [orig: sub_5A27F0 @0x5A27F0 - 0x12C0000 @0x5A288C, `test [ebx+24h], 100h` @0x5A287F
+// -> 0x320000 @0x5A2896, the slot word compare @0x5A28B9..0x5A28BF -> 0x3E80000 @0x5A28C1
+// (dfx2.exe)]
+int32_t friendly_tag_reach_q16(bool player, bool same_account);
 
 // The speaking-entity pulse over the mixer meter's first stage `level`
 // (g_AudioOutLevelStage1, 0..0x3FF): each 16-bit lane is the channel byte

@@ -1600,6 +1600,45 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 				"the tick spans +-fontH/4 around the projected point");
 	}
 
+	// dfx2.exe's modes reach by range (DFX2-87): FAR/BRIEF names every tag; FULL names a tag
+	// within its reach (50 u an AI organic, 300 u a player, 1000 u a player of the local slot's
+	// +0x3C word) or the cursor's, and ticks beyond; BRIEF ticks [orig: sub_5A27F0 @0x5A27F0 -
+	// @0x5A288C..0x5A28C1, @0x5A2E47, @0x5A2F04, @0x5A309A (dfx2.exe)].
+	{
+		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+		const opennova::Title *jo = opennova::title_by_code("jo");
+		CHECK(dfx2 != nullptr && dfx2->hud_tag_ranges && jo != nullptr && !jo->hud_tag_ranges,
+				"the reach is dfx2.exe's");
+		CHECK(opennova::hud::friendly_tag_reach_q16(false, true) == 0x320000 &&
+						opennova::hud::friendly_tag_reach_q16(true, false) == 0x12C0000 &&
+						opennova::hud::friendly_tag_reach_q16(true, true) == 0x3E80000,
+				"50 / 300 / 1000 u");
+		HudFrameState ranged = state;
+		ranged.title = dfx2;
+		opennova::hud::HudFriendlyTag &t = ranged.friendly_tags[0];
+		t.name = "Joe";
+		const auto form = [&](int mode, int32_t dist_u, bool player, bool same, bool cursor) {
+			ranged.friendly_tag_mode = mode;
+			t.dist_q16 = dist_u << 16;
+			t.player = player;
+			t.same_account = same;
+			t.cursor_target = cursor;
+			const HudDrawList &l = compiler.compile(ranged, 1024.0f, 768.0f);
+			return l.glyphs.empty() ? (l.lines.size() == 3 ? 't' : '-') : 'n';
+		};
+		CHECK(form(1, 400, false, false, false) == 'n', "dfx2's FAR/BRIEF names past 300 u");
+		CHECK(form(2, 40, false, false, false) == 'n', "an organic within 50 u is named");
+		CHECK(form(2, 60, false, false, false) == 't', "an organic past 50 u ticks");
+		CHECK(form(2, 60, false, false, true) == 'n', "the cursor's tag is named");
+		CHECK(form(2, 299, true, false, false) == 'n', "a player within 300 u is named");
+		CHECK(form(2, 300, true, false, false) == 't', "a player at 300 u ticks");
+		CHECK(form(2, 999, true, true, false) == 'n', "a same-word player within 1000 u is named");
+		CHECK(form(3, 10, true, true, true) == 't', "BRIEF ticks");
+		ranged.title = jo;
+		CHECK(form(2, 999, false, false, false) == 'n', "JO's FULL names every tag");
+		CHECK(form(1, 400, true, true, true) == '-', "JO's FAR/BRIEF draws nothing past 300 u");
+	}
+
 	// A slot entry with an empty callsign draws the single bar.
 	state.friendly_tag_mode = 2;
 	state.friendly_tags[0].player = true;

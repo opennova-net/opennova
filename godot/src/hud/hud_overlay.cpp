@@ -1535,6 +1535,8 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			// witness); the viewer gate is set_radio_request_icon_viewer's.
 			tag.radio_request = t.radio_request;
 			tag.squad_color_index = t.squad_color_index;
+			tag.cursor_target = t.cursor_target;
+			tag.same_account = t.same_account;
 			state_.friendly_tags.push_back(tag);
 		}
 	}

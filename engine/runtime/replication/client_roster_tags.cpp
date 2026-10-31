@@ -76,6 +76,7 @@ void collect_roster_tags(const ClientState &state, uint16_t self_handle,
 		// [orig: @0x5a3f29..0x5a3f86].
 		src.name = roster_tag_label(slot);
 		src.squad_color_index = slot.squad_color; // slot+0x33
+		src.account_id = slot.account_id;         // slot+0x3C
 		src.player = true;
 		// health<<16 / max — the def hp (or 1 with no def) [orig: @0x5a3b91..
 		// 0x5a3bb8], clamped like the pool-0 gather.

@@ -252,6 +252,11 @@ int friendly_tag_alpha(int32_t dist_q16) {
 
 // [orig: @0x5a3fc3 mode 2 always; @0x5a3fcf mode 1 iff dist < 0x12C0000;
 // modes 0/3 never draw the text form]
+int32_t friendly_tag_reach_q16(bool player, bool same_account) {
+	if (!player) return 0x320000;
+	return same_account ? 0x3E80000 : 0x12C0000;
+}
+
 bool friendly_tag_text_visible(int mode, int32_t dist_q16) {
 	if (mode == kFriendlyTagModeFull) return true;
 	return mode == kFriendlyTagModeFarBrief && dist_q16 < kFriendlyTagTextCutQ16;

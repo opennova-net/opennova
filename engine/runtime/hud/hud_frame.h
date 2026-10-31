@@ -695,6 +695,11 @@ struct HudFriendlyTag {
 	// Map-column click [orig: CMap_EntityWidgetHandler @0x5485E4 — (idx + 1) % 14],
 	// ported as menu::command_map_team_list_click (D-HUD-19).
 	uint8_t squad_color_index = 0;
+	// dfx2.exe's FULL-mode reach (Title::hud_tag_ranges, DFX2-87): the tag is the HUD target
+	// cursor's entity, and a player's slot +0x3C word equals the local player's slot's
+	// (world::FriendlyTagSource carries the witness).
+	bool cursor_target = false;
+	bool same_account = false;
 };
 
 // THE SQUAD COLOUR TABLE [orig: g_SquadColors @0x83B450, 14 dwords]: entry 0

@@ -222,6 +222,9 @@ Title make() {
 	//  @0x5B9036, sub_5B8E80 @0x5B8FAD (dfx2.exe)].
 	t.hud_message_tags = true;
 	t.hud_map_legend = &kHudMapLegend; // DFX2-89
+	// DFX2-87: the tags' modes reach by range [orig: sub_5A27F0 @0x5A27F0 - @0x5A288C..0x5A28C1,
+	//  @0x5A2E1F..0x5A309A (dfx2.exe)].
+	t.hud_tag_ranges = true;
 	return t;
 }
 

@@ -607,6 +607,7 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 					facts.medic_request = slot.medic_request_active;
 					facts.label = replication::roster_tag_label(slot);
 					facts.squad_color = slot.squad_color;
+					facts.account_id = slot.account_id;
 					return true;
 				}
 				return false;
@@ -629,6 +630,36 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 	// speaker by its row's handle) [orig: HUD_DrawEntityLabel @0x5a3e89].
 	const world::EntityHandle speaker = w.script.voice.speaker();
 	for (world::FriendlyTagSource &tag : out) tag.speaking = speaker.valid() && tag.entity == speaker;
+	// dfx2.exe's FULL-mode reach reads two more facts (DFX2-87): the HUD target cursor's entity
+	// (a joiner's decoded remote person by its row's handle), as the scene frame's tags pass finds
+	// it ahead of the HUD pass's rebuild; and the local player's own slot, found by its entity as
+	// PlayerSlot_FindByEntityPtr walks the table, whose +0x3C word a player's slot matches.
+	// [orig: sub_5A27F0 @0x5A27F0 - PlayerSlot_FindByEntityPtr(g_PlayerSlotTable,
+	//  g_LocalPlayerEntity) @0x5A28AD, `mov edx, [esi+3Ch]; cmp edx, [eax+3Ch]` @0x5A28B9, the
+	//  cursor test @0x5A2E47 (dfx2.exe)]
+	const world::HudTargetCursor &cursor = view.kernel->local.hud_target_cursor_at_scene();
+	const world::Entity *cursor_entity = world::hud_target_cursor_entity(w, cursor);
+	bool local_slot = false;
+	uint32_t local_account = 0;
+	if (client != nullptr) {
+		const uint16_t local_wire = view.joiner
+				? (view.runtime->has_self_handle() ? view.runtime->self_handle() : 0xFFFFu)
+				: player->handle.packed;
+		for (const replication::ClientRosterSlot &slot : client->roster) {
+			if (!slot.bound || slot.entity_slot < 0 || (local_wire >> 12) != 0 ||
+					slot.entity_slot != (local_wire & 0xFFF))
+				continue;
+			local_slot = true;
+			local_account = slot.account_id;
+			break;
+		}
+	}
+	for (world::FriendlyTagSource &tag : out) {
+		tag.cursor_target = cursor_entity != nullptr ? tag.entity == cursor_entity->handle
+													 : cursor.wire_person != 0xFFFF &&
+						tag.entity.packed == cursor.wire_person;
+		tag.same_account = tag.has_slot && local_slot && tag.account_id == local_account;
+	}
 	return true;
 }
 
