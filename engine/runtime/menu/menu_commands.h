@@ -102,9 +102,10 @@ MenuCommand app_message_command(const std::string &message);
 // controls it holds, each fill then finding its controls by name and skipping one the screen lacks
 // [orig: UI_DispatchScreenEvent @ 0x54e6a0 - _stricmp(.., "PLAYER_INFO") @ 0x54e9d4 ->
 // UI_InitPlayerInfoOnce @ 0x54e9e0 (PlayerInfo_RegisterAllControls @ 0x561470), @ 0x54eec1 ->
-// PlayerInfo_InitProfileSelector @ 0x54eecd] [orig: UI_DispatchScreenEvent @ 0x54b920 - @ 0x54bc2d ->
-// sub_55FAB0 @ 0x54bc39 (sub_55F720 @ 0x55f720), @ 0x54c11a -> PlayerInfo_InitProfileSelector
-// @ 0x54c126 (dfx2.exe)]. dfx2.exe's player.mnu holds no NATIONALITY or DIVISION.
+// PlayerInfo_InitProfileSelector @ 0x5611b0 (called @ 0x54eecd)] [orig: UI_DispatchScreenEvent
+// @ 0x54b920 - @ 0x54bc2d -> sub_55FAB0 @ 0x54bc39 (sub_55F720 @ 0x55f720), @ 0x54c11a ->
+// PlayerInfo_InitProfileSelector @ 0x54c126 (dfx2.exe)]. dfx2.exe's player.mnu holds no NATIONALITY
+// or DIVISION.
 bool is_player_info_document(const MenuRuntime &menu);
 
 // The commands the game binds on a document as the runtime holds it now (after each open), by
