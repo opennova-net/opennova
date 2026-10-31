@@ -846,7 +846,9 @@ struct SessionRules {
     // entity_spawn.h). A fresh SP start's bring-up seeds it from the profile's
     // +0x564, which the player's spawn raise reads (spawn_player); every
     // mission start out of a session then leaves it
-    // at mission_start_difficulty's word (MissionKernel::complete_mission_start);
+    // at mission_start_difficulty's word (MissionKernel::complete_mission_start),
+    // where the title's rules set it (TitleRules::mission_start_sets_difficulty;
+    // dfx2.exe's keep the profile's);
     // a session's is the config's byte, which no in-session reader of this
     // word needs. [orig: g_SessionDifficulty; Game_ApplySessionSettingsToGlobals
     //  @0x551F75; Game_StartMission @0x525CDD / @0x525CFA;

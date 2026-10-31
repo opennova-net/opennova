@@ -2086,6 +2086,52 @@ int main() {
 		}
 	}
 
+	// --- dfx2.exe's mission start sets no difficulty (DFX2-28) ---------------
+	// dfx2.exe's start runs no difficulty block: the word stays the profile's
+	// copy, on a restart too, so an objective Co-op mission takes neither the -1
+	// nor the single-player respawn attribute nor the doubled health, and the SP
+	// config's byte is the profile's word.
+	// [orig: Game_StartMission @0x521530 - nothing between @0x522EA9 and
+	//  @0x522EAE; Game_ApplySessionSettingsToGlobals @0x54F1BF..0x54F1C5 (dfx2.exe)]
+	for (const int32_t profile_word : {0, 1}) {
+		for (const bool restart : {false, true}) {
+			auto kernel_storage = std::make_unique<ms::MissionKernel>();
+			ms::MissionKernel &kernel = *kernel_storage;
+			auto role_storage = std::make_unique<inmatch::HostRole>();
+			inmatch::HostRole &role = *role_storage;
+			role.bind(kernel);
+			bms::File mission = two_entity_mission();
+			mission.header.attrib_flags = bms::AttribFlags::Coop;
+			kernel.open_document(std::move(mission), "dfx2_coop_start", source_over(&files));
+			ms::KernelBootOptions options;
+			options.title_rules = &w::title_rules("dfx2");
+			options.game_type = mission_game_type(kernel.mission);
+			CHECK(options.game_type == game_type::kObjectiveCoop);
+			options.restart = restart;
+			playersav::ProfileRecord profile;
+			profile.sp_difficulty = profile_word;
+			int32_t spawn_word = -2;
+			options.bringup_net_session = [&] {
+				kernel.world.tables.player.item_hp = 100; // the Player def's hp
+				role.bring_up_singleplayer(*opennova::title_by_code("dfx2"), &profile);
+				spawn_word = kernel.world.rules.difficulty;
+			};
+			std::string error;
+			CHECK(kernel.boot(options, error));
+			const w::Entity *local = kernel.world.registry.get(kernel.world.cached.local_player);
+			CHECK(local != nullptr);
+			if (local == nullptr) continue;
+			CHECK(spawn_word == profile_word);
+			CHECK(kernel.world.rules.difficulty == profile_word);
+			CHECK((kernel.world.tables.mission_attrib_flags &
+			       w::MissionTables::kMissionAttribSinglePlayerRespawn) == 0);
+			CHECK(local->health == (profile_word == 1 ? 50 : 100));
+			CHECK(w::local_player_max_health(kernel.world) == (profile_word == 1 ? 50 : 100));
+			CHECK(role.state.host_owner.ctx.config.config_bytes[6] ==
+			      static_cast<uint8_t>(profile_word));
+		}
+	}
+
 	// --- the listen host's own 0x4C quality report reaches its own slot ------
 	// The host's client queues the report on its local connection on its 311th
 	// client frame; the next frame's head drain hands it to the server's

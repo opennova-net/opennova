@@ -232,6 +232,21 @@ struct TitleRules {
 	//  stride @0x40F610..0x40F65D (dfx2.exe)]
 	bool bms_loadout_sanitized = true;
 
+	// --- DFX2-28: the single player's mission-start difficulty. ----------------------------------
+	// Out of a session Jointops.exe's mission start sets the difficulty word (SessionRules::
+	// difficulty) to 0, and under the objective Co-op game type to -1 with the single-player
+	// respawn attribute (0x40) and the local player's health at its doubled ceiling
+	// (world::mission_start_difficulty). dfx2.exe has no such block: the word stays the one the
+	// fresh start's session settings copied from the profile (+0x564), on a restart too, and an
+	// objective Co-op mission takes neither the 0x40 nor the health.
+	// [orig: Game_StartMission @0x524360 - @0x525CC2..0x525D12, the 0 @0x525CDD, the -1
+	//  @0x525CFA, the 0x40 OR @0x525CF2]
+	// [orig: Game_StartMission @0x521530 - Environment_MissionStartInit @0x522EA4, then the
+	//  terrain call @0x522EA9 and Game_SpawnAllEntityGlowEffects @0x522EAE, nothing between; the
+	//  word's other writers Game_ApplySessionSettingsToGlobals @0x54F158 / @0x54F1C5 and the net
+	//  handlers (dfx2.exe)]
+	bool mission_start_sets_difficulty = true;
+
 	// --- DFX2-25: the emplaced gun's counter-rotation. -------------------------------------------
 	// joiner-side: the World's gun channel and the joiner's replica gun channel
 	// (inmatch client_replica_emplaced.cpp) both run it.

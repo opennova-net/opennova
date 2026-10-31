@@ -196,9 +196,11 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	//  restart's start (Game_RestartRoundSP pushes 1 @0x5263D9)].
 	// The restart's spawn raises read the word the previous start left: the same mission's
 	// mission-start word (D-PWR-8) [orig: Game_StartMission - the 0 @0x525CDD, the objective
-	//  Co-op's -1 @0x525CFA].
+	//  Co-op's -1 @0x525CFA]; dfx2.exe's start leaves the profile's (DFX2-28) [orig:
+	//  Game_StartMission @0x521530 - nothing between @0x522EA9 and @0x522EAE (dfx2.exe)].
 	if (!kernel.world.rules.mp_session)
-		kernel.world.rules.difficulty = kernel.restart_boot()
+		kernel.world.rules.difficulty =
+				kernel.restart_boot() && config.title_rules().mission_start_sets_difficulty
 				? world::mission_start_difficulty(config.game_type)
 				: config.profile_difficulty;
 }
@@ -299,8 +301,10 @@ GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 	// mp_difficulty, host_config.cpp). Our SP stream queues at the bring-up,
 	// ahead of the mission start [orig: Game_StartMission @0x525CDD / @0x525CFA;
 	// ServerConfig_SerializeToPacket's live read @0x505D1C, from
-	// Server_SendPlayerSlotStateFrame @0x51BF95 in Server_TickUpdate].
-	config.config_bytes[6] = static_cast<uint8_t>(world::mission_start_difficulty(game_type));
+	// Server_SendPlayerSlotStateFrame @0x51BF95 in Server_TickUpdate]. dfx2.exe's start leaves
+	// the profile's word, so its byte is that (DFX2-28) [orig: Game_StartMission @0x521530 -
+	// nothing between @0x522EA9 and @0x522EAE; ServerConfig_SerializeToPacket @0x502E4C
+	// (dfx2.exe)].
 	if (profile != nullptr) {
 		// Outside a session the restriction words come from the current
 		// profile record: +0x548 -> g_SessionNoCharAbilities, +0x54C ->
@@ -319,6 +323,9 @@ GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 		config.no_scope_drift = profile->sp_no_scope_drift;
 		config.profile_difficulty = profile->sp_difficulty;
 	}
+	config.config_bytes[6] = static_cast<uint8_t>(config.title_rules().mission_start_sets_difficulty
+			? world::mission_start_difficulty(game_type)
+			: config.profile_difficulty);
 	return config;
 }
 

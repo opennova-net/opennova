@@ -1079,13 +1079,15 @@ bool MissionKernel::complete_mission_start() {
 	// attribute, the word -1 and the local player's health at its ceiling, a
 	// 16-bit store (twice its def hp). The word a fresh start's bring-up copied
 	// from the profile (+0x564) does not survive this; the player's spawn raise
-	// read it first (D-PWR-6).
+	// read it first (D-PWR-6). dfx2.exe runs none of it, and the profile's word
+	// stands (TitleRules::mission_start_sets_difficulty, DFX2-28).
 	// [orig: Game_StartMission @0x525CC2..0x525D12, after the WacScript_InitAndLoad
 	//  and Environment_MissionStartInit calls @0x525CB3 / @0x525CB8 and ahead of
 	//  Score_CountMissionSubgoalsAndUnits @0x525D5D; the 0x40 OR @0x525CF2, the
 	//  Entity_GetMaxHealthWithDifficulty call @0x525D04, the store @0x525D12;
 	//  Game_ApplySessionSettingsToGlobals @0x551F6F..0x551F75]
-	if (!world.rules.mp_session) {
+	// [orig: Game_StartMission @0x521530 - nothing between @0x522EA9 and @0x522EAE (dfx2.exe)]
+	if (!world.rules.mp_session && world.rules.title().mission_start_sets_difficulty) {
 		world.rules.difficulty = w::mission_start_difficulty(world.match.rules().game_type);
 		if (world.rules.difficulty == -1) {
 			world.tables.mission_attrib_flags |= w::MissionTables::kMissionAttribSinglePlayerRespawn;
