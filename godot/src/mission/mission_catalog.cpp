@@ -92,6 +92,13 @@ opennova::mission_catalog::HighScoreTable &high_score_table() {
 	return table;
 }
 
+// Retail loads the table at every boot ahead of any save; a launch that never reached the load
+// (no menu shell) leaves hiscore.txt as it stands instead of writing it empty.
+bool &high_scores_loaded() {
+	static bool loaded = false;
+	return loaded;
+}
+
 } // namespace
 
 void MissionCatalog::load_high_scores(const Ref<ResourceRoot> &p_root, const String &p_dir) {
@@ -104,6 +111,7 @@ void MissionCatalog::load_high_scores(const Ref<ResourceRoot> &p_root, const Str
 				ResourceRoot::session_title(p_root).mission_list_order);
 	}
 	table.reset(rows);
+	high_scores_loaded() = true;
 	if (p_dir.is_empty()) return;
 	std::string text;
 	std::string error;
@@ -115,6 +123,7 @@ void MissionCatalog::load_high_scores(const Ref<ResourceRoot> &p_root, const Str
 
 Error MissionCatalog::save_high_scores(const String &p_dir) {
 	if (p_dir.is_empty()) return ERR_FILE_BAD_PATH;
+	if (!high_scores_loaded()) return OK;
 	const std::string text = high_score_table().text();
 	std::string error;
 	if (!opennova::io::write_file_atomic(
