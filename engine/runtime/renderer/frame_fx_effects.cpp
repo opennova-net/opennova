@@ -172,6 +172,8 @@ void append_death_blur(std::vector<FrameFxStep> &steps, std::int32_t elapsed_tic
 //  @0x583BB8..0x583BEC, source [fx+4] @0x583BB1, the viewport rect and the
 //  reduced byte @0x583BE0 / @0x583BE8, stage [fx+14h] @0x583BAE, taps 5
 //  @0x583C03, count 1 @0x583BE4, c0 = (0, 0, 0, f) @0x583BF7..0x583C17]
+// [orig: sub_581FE0 @0x581fe0, dispatched by FrameFX_ApplyScreenEffect @0x5828c0 case 5
+//  @0x58293a; FrameFX_BuildScarDecalVertices @0x582ab0 (dfx2.exe)]
 void append_low_health_ring(std::vector<FrameFxStep> &steps, float strength) {
 	append_capture_and_downsample(steps);
 	double f = strength;
