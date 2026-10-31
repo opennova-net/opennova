@@ -95,15 +95,19 @@ bool measure_file(const std::string &path, uint64_t &size, std::string &error) {
 // The multiplayer missions of a tree's files at `dir` (`files`: the canonical name of each
 // tree file to the path it lies at): a base tree mounted as opennova-serve mounts an install
 // (the retail boot table, mission_catalog::build), an expansion tree its pair alone
-// (mission_catalog::archive_rows over the archives, then the catalog's order).
-bool scan_missions(const ProductRow &product, const std::string &dir,
-		const std::map<std::string, std::string> &files, std::vector<TreeMission> &out,
-        gamecfg::WeaponRoster &weapons, std::string &why) {
+// (mission_catalog::archive_rows over the archives, then the catalog's order). `game_title` is
+// the title the tree's game runs as: a game's own, an expansion's base game's.
+bool scan_missions(const ProductRow &product, const std::string &game_title,
+		const std::string &dir, const std::map<std::string, std::string> &files,
+		std::vector<TreeMission> &out, gamecfg::WeaponRoster &weapons, std::string &why) {
 	std::vector<mission_catalog::Row> rows;
-	// The catalog's order is the title's (Title::mission_list_order carries the witness); an
-	// expansion builds on Joint Operations' install, the one title that mounts one.
-	const Title *title = title_by_code(product.title);
-	const MissionListOrder order = (title != nullptr ? *title : default_title()).mission_list_order;
+	// The catalog's order is the title's (Title::mission_list_order carries the witness).
+	const Title *title = title_by_code(game_title);
+	if (title == nullptr) {
+		why = "the tree's game runs as no installed title (\"" + game_title + "\")";
+		return false;
+	}
+	const MissionListOrder order = title->mission_list_order;
 	if (product.kind == ProductKind::Game) {
 		ResourceIndex index;
 		if (!index.scan(
@@ -518,8 +522,8 @@ jobs::JobResult validate(
 // archive from nothing, ADR 0008), the files the tree takes (tree_files.h) checked, read for
 // the missions, sized and uploaded, and the manifest written.
 Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
-		const ProductRow &product, const ReleaseSection &section, const std::string &sha256,
-		int64_t tree_id, TreeReady &ready, std::string &why) {
+		const ProductRow &product, const std::string &game_title, const ReleaseSection &section,
+		const std::string &sha256, int64_t tree_id, TreeReady &ready, std::string &why) {
 	const std::string to = tree_prefix(tree_id);
 	if (!store.remove_prefix(to, why))
 		return Outcome::Transient;
@@ -576,7 +580,7 @@ Outcome build_release_tree(ObjectStore &store, const std::string &scratch_root,
 	// The release's version, its command file's VERSION (ADR 0067: no version file is read for a
 	// release).
 	ready.version_text = section.version;
-	if (!scan_missions(product, dir, local, ready.missions, ready.weapons, why))
+	if (!scan_missions(product, game_title, dir, local, ready.missions, ready.weapons, why))
 		return Outcome::Refused;
 	for (const auto &[name, path] : local) {
 		TreeFile file;
@@ -600,6 +604,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 	const int64_t product_id = jobs::member_int(ctx.job.payload, "product_id");
 	std::optional<ReleaseSection> section;
 	std::optional<ProductRow> product;
+	std::string game_title; // the title its game runs as: its own, an expansion's base game's
 	std::optional<ProductTree> building; // a run again's tree
 	std::string sha256;
 	{
@@ -614,6 +619,10 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 		if (!product || product->kind == ProductKind::App ||
 				product->published_release_id != release_id)
 			return jobs::JobResult::done();
+		game_title = product->title;
+		if (product->kind == ProductKind::Expansion && product->parent_id)
+			if (const std::optional<ProductRow> base = find_product(db, *product->parent_id))
+				game_title = base->title;
 		for (const ReleaseSection &s : list_sections(db, release_id))
 			if (s.product_id == product_id)
 				section = s;
@@ -642,7 +651,7 @@ jobs::JobResult apply(jobs::JobContext &ctx, ObjectStore &store, const std::stri
 	TreeReady ready;
 	std::string why;
 	const Outcome outcome = build_release_tree(
-			store, scratch_root, *product, *section, sha256, tree_id, ready, why);
+			store, scratch_root, *product, game_title, *section, sha256, tree_id, ready, why);
 	return settle_tree(ctx, tree_id, outcome, ready, why);
 }
 

@@ -565,9 +565,9 @@ int test_products() {
 	TEST_EXPECT(jo.max_players.min == 1 && jo.max_players.max == 64 && jo.time_limit.max == INT32_MAX &&
 			jo.kill_limit.max == INT32_MAX && jo.max_score.max == INT32_MAX && jo.respawn.min == 0 && jo.start_delay.max == INT32_MAX);
 	TEST_EXPECT(dfx2.max_players.max == 100 && dfx2.time_limit.max == INT32_MAX && dfx2.kill_limit.max == INT32_MAX);
-	// An unknown code's limits are the default title's (OpenNova's own game, whose caps are JO's).
-	TEST_EXPECT(hosted::host_limits_for_title("opennova").max_players.max == jo.max_players.max &&
-			hosted::host_limits_for_title("").max_players.max == jo.max_players.max);
+	// OP: Acid Gambit's are its own Title row's, which is JO's (no default title stands in for a
+	// code: one no installed title has aborts, named).
+	TEST_EXPECT(hosted::host_limits_for_title("acidgambit").max_players.max == jo.max_players.max);
 
 	Rig rig("hosted_products");
 	const std::vector<hosted::OfferedProduct> offered = rig.offered();
