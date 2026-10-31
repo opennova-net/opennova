@@ -362,6 +362,8 @@ bool run_team_assign_default_kit_stays_byte_identical() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("DefaultKitJoiner", [] { return uint64_t(0); });
 	joiner.set_protocol(title_protocol("jo"));
+	// The title the session runs as, whose fresh profile the kitless submit sends.
+	joiner.set_title(title_by_code("jo"));
 	// deliberately NO set_loadout_kit; a synthetic weapon table holding the fresh red
 	// page's names behind an unrelated entry
 	const opennova::playersav::KitPage red =

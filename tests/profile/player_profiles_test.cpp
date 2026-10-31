@@ -803,6 +803,26 @@ int test_title_kit_pages() {
     profile::init_defaults(record, weapons, defaults(), kJo);
     TEST_EXPECT(weapons.red.pages[4].entries[0].name == "WPN_AK74AUTO");
     TEST_EXPECT(weapons.single_player.entries[2].name == "WPN_colt45");
+    // A fresh weapon record (the session start's and the 0x2F's with no weapon.sav) is the same
+    // weapon half over a cleared record: JO's the format's defaults, dfx2.exe's its own pages, no
+    // title's no page, each with both class bytes 8 and the avatar bytes 0.
+    // [orig: PlayerProfile_InitDefaults @0x54bb40; @0x548db0 (dfx2.exe)]
+    const playersav::Record jo = profile::fresh_weapon_record(&kJo);
+    const playersav::Record shipped = playersav::make_defaults().slots[0];
+    TEST_EXPECT(names(jo.single_player) == names(shipped.single_player));
+    for (size_t i = 0; i < playersav::kKitPagesPerSide; ++i) {
+        TEST_EXPECT(names(jo.blue.pages[i]) == names(shipped.blue.pages[i]));
+        TEST_EXPECT(names(jo.red.pages[i]) == names(shipped.red.pages[i]));
+    }
+    const playersav::Record dfx2 = profile::fresh_weapon_record(&games::dfx2_title());
+    TEST_EXPECT(names(dfx2.red.pages[3]) == m4 && names(dfx2.blue.pages[2]) == xm4 &&
+            dfx2.red.pages[4].entries.empty());
+    const playersav::Record untitled = profile::fresh_weapon_record(nullptr);
+    TEST_EXPECT(untitled.single_player.entries.empty() && untitled.red.pages[3].entries.empty());
+    for (const playersav::Record *r : {&jo, &dfx2, &untitled}) {
+        TEST_EXPECT(r->blue.player_class == 8 && r->red.player_class == 8);
+        TEST_EXPECT(r->blue.avatar_a == 0 && r->red.avatar_packed == 0);
+    }
     return 0;
 }
 

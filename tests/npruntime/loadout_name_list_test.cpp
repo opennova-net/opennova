@@ -292,7 +292,8 @@ void test_the_single_players_page_fills_the_spawn_buffer() {
 }
 
 // The player's weapon profile record the mission starts seed from (SessionWeaponProfile):
-// the shipped defaults' record until a profile's is installed, each side's class byte
+// a fresh profile's record, the session title's (DFX2-29: dfx2.exe's own pages), until a
+// profile's is installed, which a later fresh seed leaves standing, each side's class byte
 // clamped into 5..9 at the install, the seed's single-player arm out of a session (the
 // static page with no record installed, the record's page after) and its session arm on a
 // session peer (the side's page at its class, the cursor set).
@@ -301,6 +302,14 @@ void test_the_single_players_page_fills_the_spawn_buffer() {
 void test_the_session_weapon_profile_clamps_and_routes_its_seed() {
 	inmatch::SessionWeaponProfile profile;
 	CHECK(!profile.loaded && profile.seeded_side == -1);
+	CHECK(profile.record.red.pages[3].entries.empty()); // no title named yet: no page
+	profile.use_fresh(*opennova::title_by_code("dfx2"));
+	CHECK(!profile.loaded && profile.record.red.pages[3].entries.size() == 7 &&
+			profile.record.red.pages[3].entries[2].name == "WPN_SATCHEL_CHARGE");
+	profile.use_fresh(*opennova::title_by_code("jo"));
+	const playersav::KitPage jo_page = playersav::default_kit_page(playersav::SideId::Red, 8);
+	CHECK(profile.record.red.pages[3].entries.size() == jo_page.entries.size() &&
+			profile.record.red.pages[3].entries[0].name == jo_page.entries[0].name);
 	Rig r(inmatch::ConnectionMode::HostOnly);
 	r.world.rules.mp_session = false;
 	w::LocalPlayerLoadout loadout;
@@ -314,6 +323,8 @@ void test_the_session_weapon_profile_clamps_and_routes_its_seed() {
 	current.single_player.entries = {playersav::KitEntry{"WPN_AK47AUTO", 4, -1, -1}};
 	profile.use(current);
 	CHECK(profile.loaded);
+	profile.use_fresh(*opennova::title_by_code("dfx2")); // the installed record stands
+	CHECK(profile.record.single_player.entries.size() == 1);
 	CHECK(profile.record.side(playersav::SideId::Blue).player_class == 9);
 	CHECK(profile.record.side(playersav::SideId::Red).player_class == 5);
 	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, nullptr,

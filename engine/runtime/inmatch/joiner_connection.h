@@ -6,6 +6,7 @@
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/join_role.h>
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/profile/player_profiles.h> // fresh_weapon_record (the fresh profile's kit)
 
 #include <net/npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
 #include <net/npwire/nw_session_framing.h> // NapiPrng (the key material's PRNG)
@@ -88,12 +89,13 @@ namespace opennova::inmatch {
 // [orig: g_GameVersionPacked @0x828e30 (dfx2.exe); the dword 0x01070507 @0x4a7db6 (dfx2.exe)]
 std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32_t version_packed);
 // The C2S 0x2F a joiner with no kit seam submits: the fresh profile's, as retail's builder
-// makes it for a profile weapon.sav never wrote. The side block `team` names (class 8 on both
+// makes it for a profile weapon.sav never wrote, `fresh` that profile's weapon record (its
+// title's, profile::fresh_weapon_record). The side block `team` names (class 8 on both
 // sides of a fresh record) picks the class and its default page; each row's name resolves
 // through `weapons` to its ADM index (a name the table lacks drops, as do all with no table),
 // and the three values are the page's "-1" strings' atol low bytes. The slot is the fixed 195:
 // the first submission's, and the second's spawn-fill slot while no local slot table exists.
-// [orig: PlayerProfile_InitDefaults @0x54bb40 (playersav::make_defaults); Game_StartMission
+// [orig: PlayerProfile_InitDefaults @0x54bb40 (profile::fresh_weapon_record); Game_StartMission
 //  @0x525793..0x525836 (the side block, its class byte, the page copy) and @0x525c2e;
 //  NetPacket_SendLoadoutSubmit @0x42cdc0 - the name gate @0x42cf0b, the index @0x42cf21,
 //  atol @0x42cf7c / @0x42cfbc / @0x42cff7; Player_InitPlayer @0x4e15f0 - 195 @0x4e17ff,
@@ -101,7 +103,11 @@ std::vector<uint8_t> build_mission_status(std::string_view side_password, uint32
 // `fixed_class` is the class a protocol that fixes it writes into the side block ahead of the
 // page pick (ProtocolInMatch::c2s_2f, loadout_fixed_class), 0 for the profile's own: the page
 // is that class's. [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe)]
-LoadoutSubmit fresh_profile_loadout_submit(
+// dfx2.exe's start and its S2C 0x50 read the same record, g_CharSelClass's slot, as
+// Jointops.exe's do, its fresh pages its own (DFX2-29).
+// [orig: Game_StartMission @0x521530 - the side block @0x52296b..0x52299e, the page copy
+//  @0x5229bd..0x522a04; NapiNPClientMsg_TeamAssign - g_CharSelClass @0x432d94 (dfx2.exe)]
+LoadoutSubmit fresh_profile_loadout_submit(const playersav::Record &fresh,
 		const world::WeaponTable *weapons, uint8_t team, uint8_t fixed_class);
 
 // The OS time-zone bias in minutes, UTC = local + bias, of standard (not
@@ -259,6 +265,11 @@ public:
 	// Configure before start(); a connection with none refuses to start.
 	void set_protocol(const Protocol *protocol) { protocol_ = protocol; }
 	const Protocol *protocol() const { return protocol_; }
+	// The title the session runs as (CONTEXT.md "Title"), set beside the protocol by the embedder,
+	// never read off it: a submission with no kit seam sends its fresh profile's kit
+	// (fresh_profile_loadout_submit over profile::fresh_weapon_record). Unset, that record has no
+	// page.
+	void set_title(const Title *title) { fresh_weapons_ = profile::fresh_weapon_record(title); }
 
 	// Begin the join. From a discovered session: nothing (Idle -> Auth; the first pump past the
 	// start sends the ClientAuth, D-NET-850). Without
@@ -1499,6 +1510,7 @@ private:
 	LoadoutKit loadout_kit_;      // binding-injected submission content (see set_loadout_kit)
 	bool loadout_kit_set_ = false;
 	const world::WeaponTable *weapons_ = nullptr; // set_weapon_table
+	playersav::Record fresh_weapons_ = profile::fresh_weapon_record(nullptr); // set_title
 	bool mission_start_first_loadout_taken_ = false; // take_mission_start_first_loadout
 	bool sync_tail_loading_ = false;              // set_sync_tail_loading
 	bool mission_data_loading_ = false;           // set_mission_data_loading

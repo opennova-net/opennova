@@ -7,6 +7,7 @@
 // cells is 00 x9 07 05 07 01).
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/world/weapon_table.h>
+#include <runtime/profile/player_profiles.h>
 
 #include <base/version/one_build.h>
 #include <formats/playersav/weapon_sav.h>
@@ -89,8 +90,9 @@ void test_fresh_profile_kit_resolves_by_name() {
 	names.push_back(blue.entries[0].name);
 	const world::WeaponTable table = table_of(names);
 
-	const LoadoutSubmit first = inmatch::fresh_profile_loadout_submit(&table, 2, 0);
-	const LoadoutSubmit second = inmatch::fresh_profile_loadout_submit(&table, 2, 0);
+	const playersav::Record fresh = profile::fresh_weapon_record(title_by_code("jo"));
+	const LoadoutSubmit first = inmatch::fresh_profile_loadout_submit(fresh, &table, 2, 0);
+	const LoadoutSubmit second = inmatch::fresh_profile_loadout_submit(fresh, &table, 2, 0);
 	CHECK(first.team == 2 && first.player_class == 8 && first.weapon_slot_index == 195u);
 	CHECK(second.weapon_slot_index == 195u);
 	CHECK(first.entries.size() == red.entries.size() - 1);
@@ -101,14 +103,14 @@ void test_fresh_profile_kit_resolves_by_name() {
 				first.entries[row].variant == 0xFF);
 	}
 	// Team 1 reads the blue block.
-	const LoadoutSubmit blue_submit = inmatch::fresh_profile_loadout_submit(&table, 1, 0);
+	const LoadoutSubmit blue_submit = inmatch::fresh_profile_loadout_submit(fresh, &table, 1, 0);
 	CHECK(blue_submit.team == 1 && blue_submit.player_class == 8);
 	CHECK(!blue_submit.entries.empty() &&
 			blue_submit.entries[0].adm_index ==
 					static_cast<uint8_t>(table.index_of(blue.entries[0].name.c_str())));
 
 	// No table: every row drops.
-	const LoadoutSubmit none = inmatch::fresh_profile_loadout_submit(nullptr, 2, 0);
+	const LoadoutSubmit none = inmatch::fresh_profile_loadout_submit(fresh, nullptr, 2, 0);
 	CHECK(none.entries.empty() && none.player_class == 8 && none.weapon_slot_index == 195u);
 
 	// A protocol that fixes the class (DFX2-12) picks that class's page, as its mission start
@@ -119,8 +121,39 @@ void test_fresh_profile_kit_resolves_by_name() {
 	std::vector<std::string> gunner_names = {"null"};
 	for (const playersav::KitEntry &entry : gunner.entries) gunner_names.push_back(entry.name);
 	const world::WeaponTable gunner_table = table_of(gunner_names);
-	const LoadoutSubmit fixed = inmatch::fresh_profile_loadout_submit(&gunner_table, 2, 7);
+	const LoadoutSubmit fixed = inmatch::fresh_profile_loadout_submit(fresh, &gunner_table, 2, 7);
 	CHECK(fixed.player_class == 7 && fixed.entries.size() == gunner.entries.size());
+}
+
+// DFX2-29: a fresh DFX2 profile's kit is dfx2.exe's own pages, its title's, as the session start
+// and the S2C 0x50 read the same slot record Jointops.exe's read: class 8 the M4AUTO page, the
+// class 7 a gunner mission fixes the XM4AUTO page, both sides alike.
+// [orig: PlayerProfile_InitDefaults @0x548db0 - @0x548f94..0x549051; Game_StartMission
+//  @0x521530 - @0x52296b..0x522a04 (dfx2.exe)]
+void test_a_fresh_dfx2_profile_sends_its_own_pages() {
+	const playersav::Record fresh = profile::fresh_weapon_record(title_by_code("dfx2"));
+	const world::WeaponTable table = table_of({"null", "WPN_M4AUTO", "WPN_MK23",
+			"WPN_SATCHEL_CHARGE", "WPN_XM4AUTO", "WPN_KNIFE", "WPN_AK74AUTO"});
+	const auto names = [&](const LoadoutSubmit &submit) {
+		std::vector<std::string> out;
+		for (const LoadoutSubmitEntry &e : submit.entries)
+			out.push_back(table.entries[e.adm_index].name);
+		return out;
+	};
+	for (const uint8_t team : {uint8_t{1}, uint8_t{2}}) {
+		const LoadoutSubmit rifleman =
+				inmatch::fresh_profile_loadout_submit(fresh, &table, team, 8);
+		CHECK(rifleman.player_class == 8 &&
+				names(rifleman) == (std::vector<std::string>{"WPN_M4AUTO", "WPN_MK23",
+						"WPN_SATCHEL_CHARGE", "WPN_KNIFE"}));
+		const LoadoutSubmit gunner = inmatch::fresh_profile_loadout_submit(fresh, &table, team, 7);
+		CHECK(gunner.player_class == 7 &&
+				names(gunner) == (std::vector<std::string>{"WPN_XM4AUTO", "WPN_KNIFE"}));
+	}
+	// Jointops.exe's fresh class 8 page carries none of dfx2.exe's rifleman rows but its own.
+	const LoadoutSubmit jo = inmatch::fresh_profile_loadout_submit(
+			profile::fresh_weapon_record(title_by_code("jo")), &table, 2, 8);
+	CHECK(names(jo) != names(inmatch::fresh_profile_loadout_submit(fresh, &table, 2, 8)));
 }
 
 } // namespace
@@ -129,6 +162,7 @@ int main() {
 	test_mission_status_version_is_one_build();
 	test_mission_status_body();
 	test_fresh_profile_kit_resolves_by_name();
+	test_a_fresh_dfx2_profile_sends_its_own_pages();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

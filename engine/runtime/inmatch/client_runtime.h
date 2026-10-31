@@ -955,6 +955,11 @@ public:
 	// The rules the title runs, whose joiner-side knobs its view's folds follow
 	// (ClientReplicaPipeline::set_rules).
 	void set_rules(const world::TitleRules *rules) { view_.set_rules(rules); }
+	// The title the session runs as, whose fresh profile the joiner's kitless 0x2F sends
+	// (JoinerConnection::set_title).
+	void set_title(const Title *title) {
+		if (joiner_) joiner_->set_title(title);
+	}
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));

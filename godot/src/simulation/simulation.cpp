@@ -148,6 +148,9 @@ void Simulation::reset_world() {
 	// Game_StartMission], as the spawn buffer is process-scoped (the role binds the
 	// ClientProcessState's); every peer's mission start re-copies its side's page.
 	player_.weapon.seeded_side = -1;
+	// With no profile installed it is a fresh profile's, the mounted game's (engine
+	// inmatch::SessionWeaponProfile::use_fresh).
+	player_.weapon.use_fresh(session_title(net_, assets_.root));
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
 	// Player_InitPlayer lifecycle).

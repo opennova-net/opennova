@@ -14,7 +14,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 #include <net/protocol/protocol.h> // protocol_in_match (the 0x2F class byte, DFX2-12)
-#include <formats/playersav/weapon_sav.h> // make_defaults (the fresh profile's kit)
+#include <formats/playersav/weapon_sav.h> // side_for_team, the record's pages
 #include <runtime/world/weapon_table.h>   // index_of (the fresh kit's ADM lookups)
 #include <base/io/le.h>                   // append_u32_le (the 0x0B body)
 #include <base/version/one_build.h> // the 0x0B's version dword
@@ -59,9 +59,8 @@ constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 
 } // namespace
 
-LoadoutSubmit fresh_profile_loadout_submit(
+LoadoutSubmit fresh_profile_loadout_submit(const playersav::Record &fresh,
 		const world::WeaponTable *weapons, uint8_t team, uint8_t fixed_class) {
-	static const playersav::Record fresh = playersav::make_defaults().slots[0];
 	const playersav::Side &side = fresh.side(playersav::side_for_team(team));
 	uint8_t player_class = fixed_class != 0 ? fixed_class : side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
@@ -457,7 +456,8 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 	if (!loadout_kit_set_) {
 		// A protocol that fixes the class picks that class's page, as its mission start wrote
 		// it into the side block (loadout_wire_class gives 0 for the profile's own).
-		LoadoutSubmit submit = fresh_profile_loadout_submit(weapons_, team, loadout_wire_class(0));
+		LoadoutSubmit submit =
+				fresh_profile_loadout_submit(fresh_weapons_, weapons_, team, loadout_wire_class(0));
 		submit.player_class = loadout_wire_class(submit.player_class);
 		return submit;
 	}

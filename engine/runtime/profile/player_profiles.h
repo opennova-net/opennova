@@ -79,6 +79,16 @@ std::array<std::string, playersav::kMacroCount> default_macros(
 void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
 		const ProfileDefaults &defaults, const Title &title);
 
+// A fresh profile's weapon record under `title`: init_defaults' weapon half over a cleared
+// record, with no character table to read (the avatar bytes 0): both class bytes 8 and the
+// title's kit pages. A null title (none named) writes no page, as an unwitnessed title's. The
+// session start's copy and the C2S 0x2F read it for a profile weapon.sav never wrote.
+// [orig: PlayerProfile_InitDefaults @0x54bb40 - 8 @0x54bbe0 / @0x54bbe3, the single-player page
+//  @0x54bced, the class pages @0x54bcf7..0x54bde4]
+// [orig: PlayerProfile_InitDefaults @0x548db0 - 8 @0x548e50 / @0x548e53, the single-player page
+//  @0x548f6d, the class pages @0x548f94..0x549051 (dfx2.exe)]
+playersav::Record fresh_weapon_record(const Title *title);
+
 // The table a loaded record keeps: the defaults, each entry whose action code
 // and token (without case) a saved entry matches taking that entry's eight
 // binding fields; saved entries no default carries are dropped

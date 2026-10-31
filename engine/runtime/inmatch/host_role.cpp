@@ -846,10 +846,13 @@ void HostRole::send_own_mission_status() {
 				team = conn.assigned_team;
 		const JoinerConnection::LoadoutKit *kit = state.client_runtime->host_loadout_kit();
 		const world::WeaponTable &weapons = kernel.world.tables.weapons;
+		// The fresh profile of the title the session runs as (DFX2-29: dfx2.exe's pages).
+		const playersav::Record fresh =
+				profile::fresh_weapon_record(state.host_owner.ctx.config.title);
 		auto submit_for = [&](bool alternate) {
 			LoadoutSubmit submit = kit != nullptr
 					? profile_loadout_submit(*kit, team, false)
-					: fresh_profile_loadout_submit(&weapons, team,
+					: fresh_profile_loadout_submit(fresh, &weapons, team,
 							  loadout_fixed_class(protocol, kernel.mission.header.mission_type));
 			if (alternate && kernel.local.inventory_valid)
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(

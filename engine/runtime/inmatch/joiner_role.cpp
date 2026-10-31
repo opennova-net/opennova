@@ -88,6 +88,7 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	runtime->set_host_address(host_addr_);
 	runtime->set_protocol(protocol_);
 	runtime->set_rules(rules_);
+	runtime->set_title(title_);
 	runtime->use_process_state(client_process_);
 	return *runtime;
 }

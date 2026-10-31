@@ -779,8 +779,10 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
 	joiner_role_->set_protocol(protocol);
-	// The rules the joiner's World and its replica run, the mounted game's (session_title).
+	// The rules the joiner's World and its replica run, and the title whose fresh profile its
+	// kitless 0x2F sends: the mounted game's (session_title).
 	joiner_role_->set_rules(opennova::world::title_rules(session_title(net_, assets_.root).code));
+	joiner_role_->set_title(session_title(net_, assets_.root));
 	// The process's 0x4C report count runs on across joins (ClientProcessState).
 	joiner_role_->use_process_state(net_.client_process);
 	// The process's log devices: a session destroy's stop of a held server writes its

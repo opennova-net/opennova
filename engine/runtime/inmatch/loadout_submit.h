@@ -112,16 +112,21 @@ bool reseed_session_kit_on_team_assign(const playersav::Record &profile, uint8_t
 // The player's weapon profile record the mission starts copy their kit from (retail's
 // g_CharSelClass slot), with the side the resident buffer was last copied from. It is
 // player-scoped: it outlives every mission's kernel and is installed before the first, so
-// its embedder holds it. It starts as the shipped defaults' record, never empty with no
-// weapon.sav.
+// its embedder holds it. Until a profile's is installed it is a fresh profile's: the session
+// title's once the embedder names it (use_fresh), a pageless one before.
 struct SessionWeaponProfile {
-	playersav::Record record = playersav::make_defaults().slots[0];
+	playersav::Record record = profile::fresh_weapon_record(nullptr);
 	bool loaded = false;  // a profile's record was installed (use)
 	int seeded_side = -1; // -1: the buffer not yet copied from a side
 
 	// A profile's current weapon record, with the session start's class clamp
 	// (playersav::clamp_classes carries the witness).
 	void use(const playersav::Record &current);
+	// With no profile's installed, the fresh profile `title` gives (profile::fresh_weapon_record:
+	// DFX2-29's pages under dfx2.exe); an installed record stands.
+	void use_fresh(const Title &title) {
+		if (!loaded) record = profile::fresh_weapon_record(&title);
+	}
 	// The mission start's kit from the record: a session peer (a listen host or a
 	// joiner) copies its side's page (seed_session_kit_from_profile), single player its
 	// page arm over the record once one is installed (seed_single_player_kit_from_profile).
