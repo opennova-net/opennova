@@ -152,6 +152,9 @@ struct ServeOptions {
 // for.
 int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error,
 		const std::string &command_line = "");
+// The cap the host file's MaxPlayers line yields to under `title`: the walk's `/maxplayers N`
+// where the title's command line takes the switch (Title::max_players_switch), else none (0).
+int32_t host_file_max_player_arg(const Title &title, int32_t max_player_arg);
 const char *serve_usage();
 
 class ServeListing;

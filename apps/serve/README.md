@@ -36,7 +36,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 | `--resource-dir <dir>` | The install to serve from (its `.pff` set), as `opennova.exe` takes it. Required. |
 | `/HOST <file>` | The host file (below). Required. |
 | `--rotation-first` | Start at the first `Mission` entry. Hosted servers use this to play their saved rotation in order; without it, retail's last-entry starting behavior applies. |
-| `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as retail's switch does (a host file with no `MaxPlayers` line leaves it unread). |
+| `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as Joint Operations' switch does (a host file with no `MaxPlayers` line leaves it unread). `dfx2.exe` has no such switch, so a `/game dfx2` server reads none. |
 | `/exp <name>`, `/mod <name>` | Mount that expansion (for example `revx02`); `/mod` is the same switch, as in the game (the last one given wins). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
 | `/game <code>` | The data's game code, as the game's `/game`: the title the server runs as (below). Default: the game the folder's `UPDATE.WIZ` names, else `acidgambit`. |

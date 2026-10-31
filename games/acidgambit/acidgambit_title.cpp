@@ -35,6 +35,8 @@ Title make() {
 	t.mission_list_order = jo_title().mission_list_order;
 	// Its profile files are Joint Operations', as its code is.
 	t.profile_magic = jo_title().profile_magic;
+	// Its command line is Joint Operations', /maxplayers with it.
+	t.max_players_switch = jo_title().max_players_switch;
 	return t;
 }
 

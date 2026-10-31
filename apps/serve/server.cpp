@@ -69,7 +69,8 @@ const char kUsage[] =
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
 		"                   line per rotation entry; the last Mission line is the starting map\n"
 		"  --rotation-first start at the first Mission entry instead (hosted play order)\n"
-		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
+		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (JO's switch;\n"
+		"                   dfx2.exe has none)\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code: its keying and the title the server speaks\n"
 		"                   (default: the game the folder's UPDATE.WIZ names, else acidgambit)\n"
@@ -668,6 +669,10 @@ bool Server::read_config_over_weapons(std::string &error) {
 	return true;
 }
 
+int32_t host_file_max_player_arg(const Title &title, int32_t max_player_arg) {
+	return title.max_players_switch ? max_player_arg : 0;
+}
+
 // The dead /HOST path [orig: Game_HostMultiplayerSession @0x4A65A0]: the host
 // file over the cfg block (a file that does not open ends the attempt,
 // @0x4A65AA..0x4A65C0), the directory lock (@0x4A65C1..0x4A65F1), Serve Only
@@ -689,7 +694,7 @@ bool Server::read_host_file(std::string &error) {
 		return false;
 	}
 	report_ = inmatch::read_host_file(text.data(), text.size(), config_.cfg(), rotation_, catalog_,
-			options_.max_player_arg);
+			host_file_max_player_arg(*title_by_code(game_code_), options_.max_player_arg));
 	if (options_.rotation_first && rotation_.list.count > 0) {
 		// The service writes rotations in play order, including duplicates. Retail's
 		// host-file selection finds the last named map's first occurrence instead.

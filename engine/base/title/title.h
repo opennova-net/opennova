@@ -126,6 +126,11 @@ struct Title {
 	// (runtime/profile/player_profiles.h): dfx2.exe's literal "Bravo 1"; null, the process's
 	// account name, as Jointops.exe reads it through GetUserNameA.
 	const char *profile_first_name = nullptr;
+	// Whether the executable's command line takes `/maxplayers N`, the cap a host file's
+	// MaxPlayers line yields to (inmatch::read_host_file's max_player_arg): Jointops.exe's does;
+	// dfx2.exe's walk knows no such switch, and its host file's MaxPlayers line stores its own
+	// value alone. False unwitnessed.
+	bool max_players_switch = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

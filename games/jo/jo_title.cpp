@@ -88,6 +88,11 @@ Title make() {
 	//  @ 0x54be2e; PlayerProfile_LoadAllFromDisk @ 0x54f4d0 - edi = 0x43425046 @ 0x54f590, the
 	//  player.sav gate @ 0x54f5b4, the weapon.sav gate @ 0x54f6ef].
 	t.profile_magic = 0x43425046u;
+	// The `/maxplayers N` switch [orig: Game_ParseCommandLineAndInit @ 0x4a7310 - "/maxplayers"
+	//  @ 0x4a76ef..0x4a76ff, j__atol into g_MaxPlayerCommandLineArg @ 0x4a7710;
+	//  ServerConfig_ApplyHostSetting @ 0x4a6000 - the MaxPlayers line's override
+	//  @ 0x4a6233..0x4a6243].
+	t.max_players_switch = true;
 	return t;
 }
 
