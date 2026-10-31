@@ -756,7 +756,6 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 	// folder lacks it; the expansion running is the project's own, which its Play runs with /exp.
 	const std::string own_expansion = view.project.document ? view.project.document->expansion.name : std::string();
 	source.expansion = own_expansion;
-	source.title = view.project.document ? title_by_code(view.project.document->target_game) : nullptr;
 	std::vector<ExpansionRecord> folder;
 	for (const ProjectView::InstallExpansion &record : view.project.mods_list)
 		folder.push_back({ record.name, { record.title, record.description } });

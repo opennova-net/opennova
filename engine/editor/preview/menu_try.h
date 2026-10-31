@@ -53,12 +53,11 @@ struct MenuTrySource {
 	// the game runs in), and the expansion running ("" the base game).
 	std::function<std::vector<ExpansionRecord>()> expansions;
 	std::string expansion;
-	// The project's target title (its Mods list's base row: Title::mod_list_base); null: none.
-	const Title *title = nullptr;
 	// The line the STARTUP screen's VERSION label shows (UTF-8, the editor's: editor_version_line).
 	std::string version_line;
-	// The project's game, whose binding catalog the sandbox profile's table and the Options
-	// screens' records follow (controls::title_catalog); null: the default title.
+	// The project's game (its target title): its Mods list's base row (Title::mod_list_base) and the
+	// binding catalog the sandbox profile's table and the Options screens' records follow
+	// (controls::title_catalog); null: none, the default title's catalog.
 	const Title *title = nullptr;
 };
 
