@@ -223,7 +223,7 @@ struct TitleRules {
 	// [orig: Mission_LoadBMSFile @0x40F330 - `jle` @0x40F40A, Game_ShowWarningDialog @0x40F431,
 	//  @0x40F46A, @0x40F4A3, @0x40F4DC; BMS_LoadAndValidateHeader @0x40E0A0 - `jle` @0x40E16A,
 	//  @0x40E19D, @0x40E1D0, @0x40E203; Game_ShowWarningDialog @0x4A5D60 - MessageBoxA(.., 0x31)
-	//  @0x4A5D94, Game_ShutdownAndExit on Cancel @0x4A5D96 (dfx2.exe)]
+	//  @0x4A5D8B (the push 31h @0x4A5D81), Game_ShutdownAndExit on Cancel @0x4A5D96 (dfx2.exe)]
 	bool bms_table_warnings = false;
 
 	// --- DFX2-27: the BMS loadout chunk's repair. ------------------------------------------------
@@ -349,8 +349,8 @@ struct TitleRules {
 	// (world::ScriptVoiceChannel); a joiner's world plays its host's SSNwave remote command with it.
 	// [orig: Wac_PlayScriptedVoiceWave @0x4ED688, WacCmd_SsnWave @0x4F7989, WacCmd_SsnRadio @0x4F7A63 -
 	//  `imul 0D2h`]
-	// [orig: WacCmd_SsnWave @0x4F4A40; the twins of WacCmd_SsnRadio @0x4F4B20 and of
-	//  Wac_PlayScriptedVoiceWave @0x4EA745, undefined in the IDB - `imul 0F0h` (dfx2.exe)]
+	// [orig: WacCmd_SsnWave @0x4F4A40; WacCmd_SsnRadio @0x4F4A90 (imul @0x4F4B20);
+	//  Wac_PlayScriptedVoiceWave @0x4EA6F0 (imul @0x4EA745) - `imul 0F0h` (dfx2.exe)]
 	int32_t script_voice_volume = 210;
 
 	// --- DFX2-46: a vehicle trail's alternate effect on snow. ------------------------------------

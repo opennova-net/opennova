@@ -210,8 +210,8 @@ world::TitleRules make() {
 	// @0x47CCC7..0x47CCD1 (dfx2.exe)].
 	r.tracked_impact_speed_xz_first = true;
 	// DFX2-42: the voice waves' gain 240 [orig: WacCmd_SsnWave @0x4F49B0 (`imul 0F0h` @0x4F4A40);
-	//  @0x4F4B20 and @0x4EA745 in the twins of WacCmd_SsnRadio and Wac_PlayScriptedVoiceWave
-	//  (dfx2.exe)].
+	//  WacCmd_SsnRadio @0x4F4A90 (imul @0x4F4B20); Wac_PlayScriptedVoiceWave @0x4EA6F0 (imul
+	//  @0x4EA745) (dfx2.exe)].
 	r.script_voice_volume = 240;
 	// DFX2-46: the trail lanes follow the ground, the alternate effect on snow
 	//  [orig: Entity_UpdateBoneTrailEffects @0x4589A0 - @0x458AAA..0x458AB3 (dfx2.exe)].
