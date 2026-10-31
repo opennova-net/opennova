@@ -1698,12 +1698,14 @@ CollisionModel deck_model() {
 //  Physics_RaycastNearestEntity @0x43AB1C, the +0x28 store @0x43AB22]
 void test_definition_pose_sync_rays_its_ground() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
     world->registry.configure_pool(2, 4);
     CollisionWorld collision;
     world->collision = &collision;
     MatchRules flag_ball;
+    test_titles::jo_match(flag_ball);
     flag_ball.game_type = gt::kFlagBall;
     world->match.configure(flag_ball);
     Entity deck;
@@ -1868,9 +1870,11 @@ void test_flag_attach_in_session_sends_a_second_state() {
 //  @0x408531..0x40853B, the expiry @0x40854C]
 void test_a_drop_leaves_the_flags_return_window() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
     MatchRules flag_ball;
+    test_titles::jo_match(flag_ball);
     flag_ball.game_type = gt::kFlagBall;
     flag_ball.flag_return_ticks = 5;
     world->match.configure(flag_ball);
@@ -2069,10 +2073,12 @@ void test_flagball_four_team_bays_consume_exact_contacts() {
 // [orig: the twin's @0x513CA5 / @0x513CAB (dfx2.exe)]
 void test_non_ctf_capture_drops_the_flag_then_syncs_it_home() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 8);
     WaypointContactHarness contacts(*world);
     MatchRules flag_ball;
+    test_titles::jo_match(flag_ball);
     flag_ball.game_type = gt::kFlagBall;
     flag_ball.max_score = 99;
     world->match.configure(flag_ball);

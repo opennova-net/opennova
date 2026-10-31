@@ -791,10 +791,12 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 bool check_flag_capture_fans_its_feed_then_the_drop_and_the_sync(uint32_t game_type_value) {
 	const bool ctf = game_type_value == game_type::kCaptureTheFlag;
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type_value;
 	world.match.configure(rules);
 	const w::Vec3 carrier_position{30.0f, 40.0f, 2.0f};
@@ -814,6 +816,7 @@ bool check_flag_capture_fans_its_feed_then_the_drop_and_the_sync(uint32_t game_t
 	world.registry.get(carrier)->mounted_child = flag;
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
