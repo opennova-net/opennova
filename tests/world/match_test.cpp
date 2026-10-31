@@ -1357,17 +1357,16 @@ void test_takeable_contact_carries_any_def() {
         CHECK(!world.commands.group_holding_group(1, 3));
 
         // The death drop lets it go as retail's drop does any carried object:
-        // the link and the carried bit cleared, the 0x2F lane raised.
-        // [orig: Entity_DropCarriedObject @0x439df0 - the clears
-        //  @0x439e01..0x439e17, Server_SendDestructibleDeathPacket @0x439f34]
+        // the link and the carried bit cleared, but no 0x2F lane, which only a
+        // flag id sends. [orig: Entity_DropCarriedObject @0x439df0 - the clears
+        //  @0x439e01..0x439e17, the call @0x439f34; Server_SendDestructibleDeathPacket
+        //  @0x50D90A..0x50D920]
         world.match.record_death(world, rig.carrier);
         CHECK(!rig.carrier_entity().mounted_child.valid());
         CHECK(!rig.object_entity().primary_occupant.valid());
         CHECK((rig.object_entity().flags & kEntityFlagCarried) == 0);
         CHECK(!world.commands.group_holding_group(1, 4));
-        const std::vector<MatchGameplayEvent> drop = world.match.drain_gameplay_events();
-        CHECK(drop.size() == 1 && drop[0].kind == MatchGameplayEventKind::FlagDrop &&
-              drop[0].objective == rig.object);
+        CHECK(world.match.drain_gameplay_events().empty());
     }
     {
         // A Player body with no match row carries too: the branch has no slot test.
@@ -1447,6 +1446,21 @@ void test_takeable_contact_carries_any_def() {
         const std::vector<MatchGameplayEvent> events = rig.world->match.drain_gameplay_events();
         CHECK(events.size() == 1 && events[0].kind == MatchGameplayEventKind::FlagPickup);
         CHECK(rig.sounds_named("SPGOAL_PU") == 0);
+        // The flag's drop raises its 0x2F lane on the authority alone.
+        // [orig: Entity_DropCarriedObject - is_authority @0x439F29]
+        rig.world->rules.logic_authority = false;
+        rig.world->match.drop_carried_object(*rig.world, rig.carrier);
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(rig.world->match.drain_gameplay_events().empty());
+    }
+    {
+        TakeableRig rig(4095);
+        rig.touch_and_run();
+        (void)rig.world->match.drain_gameplay_events();
+        rig.world->match.drop_carried_object(*rig.world, rig.carrier);
+        const std::vector<MatchGameplayEvent> drop = rig.world->match.drain_gameplay_events();
+        CHECK(drop.size() == 1 && drop[0].kind == MatchGameplayEventKind::FlagDrop &&
+              drop[0].objective == rig.object);
     }
     {
         // The same 4095 row without Takeable keeps the switch's scored pickup.
