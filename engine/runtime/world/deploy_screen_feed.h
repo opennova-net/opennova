@@ -228,6 +228,17 @@ bool deploy_team_buttons_shown(const DeployTeamButtonsInput &in);
 inline bool deploy_loadout_shown(uint8_t team, bool permanent_death, bool dead) {
 	return team != 0 && !(permanent_death && dead);
 }
+// DFX2-41, the DEATH screen's RESTART_LEVEL (death.mnu authors it off screen, its R hotkey; the
+// registration names no screen): its click restarts the mission, the in-game RESTART's exit
+// (World::ingame_restart_command), out of a session in an assault game (0x10020, the 0x20000 bit
+// aside) with the local player dead, after the in-game screens' close and a queued deploy pick
+// 0 (input 12); otherwise nothing.
+// [orig: sub_550BF0 @0x550bf0 - the click @0x550bf8, the gates @0x550bff..0x550c1e,
+//  Game_CloseInGameScreens @0x550c20, Input_QueueEvent(12, 0) @0x550c2d, g_MissionExitReason = 4
+//  @0x550c35; registered by sub_5512A0 @0x551310 (dfx2.exe)]
+inline bool deploy_restart_level_allowed(uint32_t game_type, bool in_session, bool dead) {
+	return (game_type & 0xFFFDFFFFu) == 0x10020u && !in_session && dead;
+}
 inline constexpr const char *kDeployLoadoutCaptions[3] = { "STATIC_PRIMARY", "STATIC_SECONDARY",
 	"STATIC_ACCESSORY" };
 inline constexpr const char *kDeployLoadoutOutlines[3] = { "PRIMARY_OUTLINE", "SECONDARY_OUTLINE",
@@ -399,6 +410,7 @@ struct DeployScreenStatus {
     int medic_request_serial = 0;
     bool team_buttons_shown = false; // deploy_team_buttons_shown
     bool loadout_shown = false;      // deploy_loadout_shown
+    bool restart_level = false;      // deploy_restart_level_allowed
 };
 
 } // namespace opennova::world

@@ -248,4 +248,5 @@ void DeployStatus::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::INT, medic_request_serial)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_team_buttons)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_loadout)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, restart_level)
 }

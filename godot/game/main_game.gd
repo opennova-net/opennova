@@ -376,6 +376,8 @@ func _ready() -> void:
 			_leave_screen.bind(State.DEPLOY))
 	# DEATH's exit confirmation YES runs input action 3, a menu screen's confirmation.
 	_deploy_presenter.exit_confirmed.connect(_on_screen_exit_confirmed)
+	# A DEATH screen's RESTART_LEVEL restarts the mission as the in-game RESTART does.
+	_deploy_presenter.restart_requested.connect(_on_restart_requested)
 	# A title whose DEATH screen picks the loadout fills and applies the armory's class pages.
 	_deploy_presenter.set_armory(_armory_presenter)
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)

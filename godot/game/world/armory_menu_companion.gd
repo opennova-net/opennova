@@ -46,6 +46,8 @@ var _class_selection_enabled := false
 # on-show stage's sources: the profile store whose current weapon.sav record the
 # pages come from (null: an empty record) and the spawn buffer (the sim's kit).
 var _loadout := ArmoryLoadout.new()
+# The DEATH screen's weapon icons (populate_screen / pick_screen), mounted over its own frame.
+var _screen_icon_mounts: Dictionary = {}
 var _profiles: PlayerProfiles = null
 var _spawn_kit: Array[WeaponKitEntry] = []
 # Availability lookup (name -> value); banned (0) weapons drop from the lists
@@ -254,15 +256,46 @@ func _populate_slots() -> void:
 
 ## The DEATH screen's three category lists over its driver (the title's death_screen_loadout,
 ## DFX2-41): the class resolve, then this screen's populate over that one, its class pages,
-## counts and grenade positions the shared ones (engine world::deploy_loadout_shown and
-## menu::ArmoryLoadout::populate carry the witness).
-func populate_screen(driver: MenuDriver) -> void:
+## counts and grenade positions the shared ones, then its weight line and icons as the populate
+## leaves them (engine world::deploy_loadout_shown and menu::ArmoryLoadout::populate carry the
+## witness). `root` is the screen's resource root, the icons' source.
+func populate_screen(driver: MenuDriver, root: ResourceRoot) -> void:
 	if driver == null or _weapons == null:
 		return
 	_selected_class_value = _resolve_selected_class()
+	_populating = true
 	_loadout.populate(driver, _weapons, _entity_team, _selected_class_value,
 			_availability_lookup, Strings.menu_text("NONE", "None"),
 			Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
+	refresh_screen(driver, root)
+
+
+## A pick in that screen's PRIMARY / SECONDARY / ACCESSORY: the slot's pick over its driver, as
+## this screen's handlers take one, then its weight line and icons (engine
+## menu::ArmoryLoadout::pick_weapon carries the witness).
+func pick_screen(driver: MenuDriver, control: String, root: ResourceRoot) -> void:
+	if _populating or driver == null or _weapons == null:
+		return
+	_populating = true
+	_loadout.pick_weapon(driver, _weapons, control, Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
+	refresh_screen(driver, root)
+
+
+## That screen's weight line (where it authors one) and its weapon icons, mounted over its own
+## frame and hidden while their windows do not draw.
+func refresh_screen(driver: MenuDriver, root: ResourceRoot) -> void:
+	if driver == null:
+		return
+	var label := driver.widget_id("STATIC_TOTAL_WEIGHT")
+	if label >= 0 and _weapons != null:
+		driver.set_widget_text(label, WeaponDatabase.loadout_weight_line(
+				_loadout.weight(driver, _weapons), Strings.get_table(Strings.TABLE_MENUTXT),
+				Strings.get_table(Strings.TABLE_GAMEUI)))
+	var selected_for := func(control: String) -> WeaponDef:
+		return _selected_weapon_on(driver, control)
+	_mount_weapon_icons(driver, root, _screen_icon_mounts, "DeathIcon", selected_for, true)
 
 
 ## That screen's picks serialized into the class's page: the kit its close applies (engine
@@ -282,9 +315,13 @@ func get_selected_class() -> int:
 # The slot's selected weapon.def row (null = NONE). Public read seam (ADR
 # 0018): tests and diagnostics read the selection here.
 func selected_weapon(control: String) -> WeaponDef:
-	if _weapons == null or _driver == null:
+	return _selected_weapon_on(_driver, control)
+
+
+func _selected_weapon_on(driver: MenuDriver, control: String) -> WeaponDef:
+	if _weapons == null or driver == null:
 		return null
-	return _weapons.get_weapon(_loadout.selected_weapon(_driver, control))
+	return _weapons.get_weapon(_loadout.selected_weapon(driver, control))
 
 
 func _on_slot_selected(control: String) -> void:

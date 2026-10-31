@@ -753,6 +753,8 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 	v.team_buttons_shown = world::deploy_team_buttons_shown(buttons);
 	v.loadout_shown =
 			world::deploy_loadout_shown(buttons.team, buttons.permanent_death, buttons.dead);
+	v.restart_level = world::deploy_restart_level_allowed(
+			buttons.game_type, buttons.in_session, buttons.dead);
 	return v;
 }
 

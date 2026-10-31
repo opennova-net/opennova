@@ -380,6 +380,13 @@ void test_loadout_picker_gate() {
 	CHECK(deploy_loadout_shown(2, true, false));
 	CHECK(!deploy_loadout_shown(0, false, false));
 	CHECK(!deploy_loadout_shown(2, true, true));
+	// RESTART_LEVEL: an assault game (the 0x20000 bit aside), out of a session, the local
+	// player dead [orig: sub_550BF0 @0x550bff..0x550c1e (dfx2.exe)].
+	CHECK(deploy_restart_level_allowed(0x10020u, false, true));
+	CHECK(deploy_restart_level_allowed(0x30020u, false, true));
+	CHECK(!deploy_restart_level_allowed(0x10020u, true, true));
+	CHECK(!deploy_restart_level_allowed(0x10020u, false, false));
+	CHECK(!deploy_restart_level_allowed(0x10010u, false, true));
 }
 
 // DFX2-41: the SPAWNPOINTS_TABLE rows: the Default row (its team colour overwritten by

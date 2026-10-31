@@ -52,6 +52,10 @@ const TEAM_LIST := "BUTTON_TEAMLIST"
 const HIDDEN_BACK := "HIDDEN_BACK"
 const CONFIRM_NO := "CONFIRM_NO"
 const CONFIRM_YES := "CONFIRM_YES"
+# A title whose DEATH screen picks the loadout: its off-screen R-hotkeyed restart and the three
+# lists whose picks the armory's handlers take.
+const RESTART_LEVEL := "RESTART_LEVEL"
+const LOADOUT_LISTS: Array[String] = ["PRIMARY", "SECONDARY", "ACCESSORY"]
 
 signal opened
 signal closed
@@ -59,6 +63,10 @@ signal closed
 ## action 3 (the Exit Mission tone, then the exit; engine
 ## world::pass_through_close_axis carries the key witness).
 signal exit_confirmed
+## RESTART_LEVEL's click past its gate, after the screen closed and the pick 0 went: the shell
+## runs the in-game RESTART's exit (engine world::deploy_restart_level_allowed carries the
+## witness).
+signal restart_requested
 
 var _view: WorldView = null
 var _ui_parent: Node = null
@@ -372,6 +380,9 @@ func _process(_delta: float) -> void:
 #  node) @ 0x55364d, guarded only on node != -1]
 func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 		_value: String) -> void:
+	if kind == "combo" and LOADOUT_LISTS.has(widget_name.to_upper()) and _picks_loadout():
+		_armory.pick_death_screen(_driver, widget_name.to_upper())
+		return
 	if kind != "list" or widget_name.nocasecmp_to(SPAWN_LIST) != 0:
 		return
 	if index < 0 or index >= _spawn_rows.size():
@@ -471,8 +482,13 @@ func _populate_spawn_list(sim: Simulation) -> void:
 
 func _set_shroud_shown(shown: bool) -> void:
 	var id := _driver.widget_id(SHROUD_WIDGET) if _driver != null else -1
-	if id >= 0:
-		_driver.set_widget_shown(id, shown)
+	if id < 0:
+		return
+	var was_shown := _driver.is_widget_shown(id)
+	_driver.set_widget_shown(id, shown)
+	# The loadout icons follow the windows they sit in.
+	if was_shown != shown and _picks_loadout():
+		_armory.refresh_death_screen(_driver)
 
 
 # The swap/team pair's show rule is the engine's (world/deploy_screen_feed.h
@@ -501,11 +517,29 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 		close()
 		exit_confirmed.emit()
 		return
+	if widget_name.nocasecmp_to(RESTART_LEVEL) == 0:
+		_restart_level()
+		return
 	if widget_name.nocasecmp_to(SWAP_TEAMS) != 0:
 		return
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim != null:
 		sim.send_team_change_request()
+
+
+# RESTART_LEVEL, for a title whose DEATH screen picks the loadout: past the engine's gate the
+# screen closes, the pick 0 goes and the shell restarts the mission.
+func _restart_level() -> void:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim == null or not _picks_loadout():
+		return
+	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model().display_text_for_token("MedicReq"))
+	if not status.restart_level:
+		return
+	close()
+	sim.send_deployment_pick(0)
+	restart_requested.emit()
 
 
 # The witnessed STATIC show/text rules, refreshed with the list
@@ -678,3 +712,5 @@ func _recompute_fit() -> void:
 	# MenuFrameSurface.fit_frame (shared with the other presenters).
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)
 	_place_map_window()
+	if _driver != null and _picks_loadout():
+		_armory.refresh_death_screen(_driver)

@@ -124,7 +124,20 @@ func populate_death_screen(driver: MenuDriver) -> void:
 			func(weapon_name: String) -> int:
 				return int(sim.get_weapon_availability(weapon_name)))
 	_armory.set_weapon_database(_view.weapon_database())
-	_armory.populate_screen(driver)
+	_armory.populate_screen(driver, _view.resource_root())
+
+
+## A pick in the DEATH screen's PRIMARY / SECONDARY / ACCESSORY (the handlers its title
+## registers on every screen, DFX2-41): the slot's pick, the weight line and the icons.
+func pick_death_screen(driver: MenuDriver, control: String) -> void:
+	if _view != null:
+		_armory.pick_screen(driver, control, _view.resource_root())
+
+
+## The DEATH screen's icons placed again over its frame (a resize, the shroud's reveal).
+func refresh_death_screen(driver: MenuDriver) -> void:
+	if _view != null:
+		_armory.refresh_screen(driver, _view.resource_root())
 
 
 ## The DEATH screen's close on its triggers' clear (DFX2-41): its picks serialized into the
