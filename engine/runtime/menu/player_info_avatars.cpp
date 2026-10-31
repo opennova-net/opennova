@@ -2,6 +2,7 @@
 
 #include <base/crt/crt_rng.h>
 #include <base/io/bam.h>
+#include <base/title/title.h>
 #include <formats/avatars/preview_animation.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/player_info_kit.h>
@@ -29,6 +30,7 @@ struct Fill {
 	int voice;
 	const hud::GameTextLookup &gameui;
 	const hud::GameTextLookup &menutxt;
+	const Title &title;
 
 	// Preserve the existing gameui/Avatars lookup and its raw-key fallback.
 	// [orig: GameText_GetStringWithFallback @0x51eb90 / g_TextGameText @0xB4C2AC;
@@ -82,7 +84,8 @@ struct Fill {
 		combos();
 	}
 
-	// [orig: PlayerInfo_PopulateAvatarComboList @0x560210] Head display precedes body.
+	// [orig: PlayerInfo_PopulateAvatarComboList @0x560210] Head display precedes body; a row
+	// per combo, its text empty where the title formats none (Title::player_info_combo_names).
 	void combos() {
 		const int id = menu.widget_id("COMBO_LIST");
 		if (id < 0) return;
@@ -90,7 +93,9 @@ struct Fill {
 		if (const auto *div = division_at(file, state.nationality, state.division)) {
 			for (size_t i = 0; i < div->combos_count; ++i) {
 				const auto &combo = div->combos[i];
-				rows.push_back(name(combo.head.display_name) + " - " + name(combo.body.display_name));
+				rows.push_back(title.player_info_combo_names
+								? name(combo.head.display_name) + " - " + name(combo.body.display_name)
+								: std::string());
 			}
 		}
 		items(id, rows);
@@ -128,9 +133,9 @@ const avatars::AvatarCombo *PlayerInfoAvatars::selected_combo(const MenuRuntime 
 
 int PlayerInfoAvatars::update(MenuRuntime &menu, const avatars::AvatarsFile &file,
 		Change change, int value, int team, int saved_voice,
-		const hud::GameTextLookup &gameui, const hud::GameTextLookup &menutxt) {
+		const hud::GameTextLookup &gameui, const hud::GameTextLookup &menutxt, const Title &title) {
 	preview_changed = false;
-	Fill fill{*this, menu, file, team, saved_voice, gameui, menutxt};
+	Fill fill{*this, menu, file, team, saved_voice, gameui, menutxt, title};
 	switch (change) {
 		case Change::Team:
 			// [orig: PlayerInfo_SaveAndRepopulate @0x5608f0 -> PopulateAllControls(team)]

@@ -7,6 +7,10 @@
 #include <string>
 #include <vector>
 
+namespace opennova {
+struct Title; // base/title/title.h
+}
+
 namespace opennova::menu {
 class MenuRuntime;
 
@@ -40,9 +44,10 @@ struct PlayerInfoAvatars {
 		nationality = record_nationality;
 		division = record_division;
 	}
+	// `title` the executable whose screen it is (Title::player_info_combo_names).
 	int update(MenuRuntime &menu, const avatars::AvatarsFile &file, Change change,
 			int value, int team, int saved_voice, const hud::GameTextLookup &gameui,
-			const hud::GameTextLookup &menutxt);
+			const hud::GameTextLookup &menutxt, const Title &title);
 	const avatars::AvatarCombo *selected_combo(const MenuRuntime &menu,
 			const avatars::AvatarsFile &file, bool default_first = false) const;
 	std::string voice_preview_trigger(const MenuRuntime &menu,

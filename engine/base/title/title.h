@@ -487,6 +487,11 @@ struct Title {
 	//  Cine_EpilogStateMachineUpdate @0x576240] [orig: sub_575E10 @0x575E10 -> sub_575990
 	//  @0x575990, sub_5740E0 @0x5740E0 (dfx2.exe)]
 	bool epilog_debriefing_screens = false;
+	// DFX2-74: the PLAYER_INFO combo list's row text (menu::PlayerInfoAvatars): true, each row
+	// "<head> - <body>", the two parts' display names; false, every row's text empty, its value
+	// the combo's all the same. Jointops.exe's names them (jo_title.cpp), dfx2.exe's formats an
+	// empty string (dfx2_title.cpp).
+	bool player_info_combo_names = true;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

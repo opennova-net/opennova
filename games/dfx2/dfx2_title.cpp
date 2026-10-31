@@ -471,6 +471,12 @@ Title make() {
 	// [orig: sub_575990 @0x575990 (the lose screen), sub_5740E0 @0x5740E0 case 4 (the win
 	//  screen), both from sub_575E10 @0x575E10 by g_CineMode (dfx2.exe)]
 	t.epilog_debriefing_screens = true;
+	// DFX2-74: the PLAYER_INFO combo list's rows carry no text: the populate still reads both
+	// parts' names, then formats the empty string at 0x7BF886 with no argument and inserts that
+	// [orig: PlayerInfo_PopulateAvatarComboList @0x55e4d0 - the two lookups @0x55e59c / @0x55e5ae,
+	//  `push offset font_name` @0x55e5b7, sprintf @0x55e5bd, CSpinListWnd_InsertItem @0x55e5d6
+	//  (dfx2.exe)].
+	t.player_info_combo_names = false;
 	return t;
 }
 

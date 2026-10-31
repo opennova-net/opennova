@@ -65,6 +65,8 @@ Title make() {
 	t.player_avatar_by_viewer_side = jo_title().player_avatar_by_viewer_side;
 	t.hud_game_info_board = jo_title().hud_game_info_board;
 	t.hud_vehicle_panel_riders = jo_title().hud_vehicle_panel_riders;
+	// Its PLAYER_INFO screen is Joint Operations', as its code is.
+	t.player_info_combo_names = jo_title().player_info_combo_names;
 	return t;
 }
 

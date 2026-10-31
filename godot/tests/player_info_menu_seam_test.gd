@@ -61,7 +61,9 @@ func _load_db() -> AvatarDatabase:
 # table under the name the engine binds [orig: CAvatarDefs_Init @ 0x57b180], so the
 # fixture is staged under that name in the cache dir (ResourceRoot.set_root_dir
 # rejects user://). Null when the fixture cannot be staged.
-func _staged_avatars_root() -> ResourceRoot:
+# `game_code` names the title a session over the root runs as (dfx2's for dfx2.exe's
+# screen; empty, the launch's).
+func _staged_avatars_root(game_code := "") -> ResourceRoot:
 	var bytes := FileAccess.get_file_as_bytes(AVATARS_FIXTURE)
 	if bytes.is_empty():
 		return null
@@ -73,7 +75,20 @@ func _staged_avatars_root() -> ResourceRoot:
 	f.store_buffer(bytes)
 	f.close()
 	var root := ResourceRoot.new()
-	return root if root.set_root_dir(dir) == OK else null
+	return root if root.set_root_dir(dir, game_code) == OK else null
+
+
+# dfx2.exe's screen shape opened over a root mounted as dfx2, the companion built on it.
+func _built_dfx2_spin_screen(companion: PlayerInfoMenuCompanion) -> MenuDriver:
+	var root := _staged_avatars_root("dfx2")
+	assert_not_null(root, "the minted table stages under a dfx2 root")
+	if root == null:
+		return null
+	var driver := MenuDriver.new()
+	assert_true(driver.open_document(_spin_screen_doc(), root, null, null, "player.mnu"),
+			"the document opens over the dfx2 root")
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
+	return driver
 
 
 # --- Driver harness (the compiled-menu seam) ----------------------------------
@@ -585,6 +600,19 @@ func test_a_screen_without_nationality_lists_fills_the_records_combos() -> void:
 	assert_eq(int(snap.get("nationality", -1)), blue.nationality_index, "the record's nationality kept")
 	assert_eq(int(snap.get("division", -1)), blue.division_index, "the record's division kept")
 	assert_eq(int(snap.get("combo", -1)), blue.combo_index)
+
+
+# DFX2-74: dfx2.exe's combo rows carry no text, one row per combo all the same (engine
+# Title::player_info_combo_names).
+func test_dfx2_combo_rows_carry_no_text() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	var driver := _built_dfx2_spin_screen(companion)
+	if driver == null:
+		return
+	var combos := driver.widget_id("COMBO_LIST")
+	assert_gt(driver.item_count(combos), 0, "the record's combos are listed")
+	for row in driver.item_count(combos):
+		assert_eq(driver.item_text(combos, row), "", "row %d has no text" % row)
 
 
 func test_accept_emits_avatar_chosen() -> void:

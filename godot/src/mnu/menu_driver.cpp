@@ -1127,7 +1127,7 @@ int MenuDriver::update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int 
 	const opennova::avatars::AvatarsFile empty{};
 	return avatars_.update(runtime_, p_db.is_valid() ? p_db->native_file() : empty,
 			static_cast<opennova::menu::PlayerInfoAvatars::Change>(p_change), p_value, p_team, p_voice,
-			game_text_lookup(p_gameui), game_text_lookup(p_menutxt));
+			game_text_lookup(p_gameui), game_text_lookup(p_menutxt), ResourceRoot::session_title(root_));
 }
 
 PackedInt32Array MenuDriver::player_info_nationality_rows() const {

@@ -160,6 +160,11 @@ Title make() {
 	//  targets take @0x583D36 / @0x583D85 and FrameFX_DrawPass's work rect @0x582B32..0x582B49].
 	t.frame_fx_work_side = 256;
 	t.loading_screen = &kLoadingScreen;
+	// DFX2-74: the PLAYER_INFO combo list's rows read "<head> - <body>" [orig:
+	//  PlayerInfo_PopulateAvatarComboList @0x560210 - the head and body keys @0x5602cc / @0x5602ea,
+	//  their "Avatars" strings @0x5602f7 / @0x560300, sprintf("%s - %s") @0x560313, UIList_AddRow
+	//  @0x56032c].
+	t.player_info_combo_names = true;
 	return t;
 }
 
