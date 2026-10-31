@@ -1257,9 +1257,8 @@ public:
 	bool local_player_position_q16(int32_t (&r_pos)[3]) const;
 	// Raw engine heading (BAM32) for the heading-up spinmap.
 	int64_t get_local_player_heading_bam() const;
-	// Radar zoom: positive = radarout (x1.15 toward 0x100000), negative =
-	// radarin (x0.85 toward 4096), zero = the spawn reset (the witnessed step
-	// lives in hud::spinmap_zoom_step).
+	// Radar zoom: positive = radarout (x1.15 toward the title's map_zoom_max_q16), negative =
+	// radarin (x0.85 toward 4096), zero = the spawn reset (hud::spinmap_zoom_step's step).
 	int request_hud_radar_zoom(int p_direction);
 	int get_hud_radar_zoom_q16() const;
 	// map_toggle's 0->2->3->0 cycle (witness at HudMinimapInput::map_mode).
