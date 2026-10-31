@@ -258,6 +258,9 @@ public:
 	void seed_player_info_avatars(int p_nationality, int p_division) {
 		avatars_.seed_record(p_nationality, p_division);
 	}
+	// The value change kind the COMBO_LIST callback hears under the session's title (engine
+	// player_info_combo_list_event): "combo" or "spinlist".
+	String player_info_combo_list_event() const;
 	PackedInt32Array player_info_nationality_rows() const;
 	int player_info_avatar_nationality() const { return avatars_.nationality; }
 	int player_info_avatar_division() const { return avatars_.division; }

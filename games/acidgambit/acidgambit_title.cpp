@@ -67,6 +67,7 @@ Title make() {
 	t.hud_vehicle_panel_riders = jo_title().hud_vehicle_panel_riders;
 	// Its PLAYER_INFO screen is Joint Operations', as its code is.
 	t.player_info_combo_names = jo_title().player_info_combo_names;
+	t.player_info_combo_spins = jo_title().player_info_combo_spins;
 	return t;
 }
 

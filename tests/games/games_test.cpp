@@ -112,9 +112,12 @@ void acidgambit_speaks_jo() {
 		CHECK(title_by_code(code) == nullptr || (title_by_code(code)->profile_single_player_kit == nullptr &&
 				title_by_code(code)->profile_class_kits == nullptr));
 	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == title_protocol("dfx2"));
-	// The PLAYER_INFO screen's knobs: JO's, Acid Gambit's JO's, dfx2.exe's its own (DFX2-74).
+	// The PLAYER_INFO screen's knobs: JO's, Acid Gambit's JO's, dfx2.exe's its own (DFX2-74,
+	// DFX2-75).
 	CHECK(games::jo_title().player_info_combo_names && ag.player_info_combo_names &&
 			!games::dfx2_title().player_info_combo_names);
+	CHECK(!games::jo_title().player_info_combo_spins && !ag.player_info_combo_spins &&
+			games::dfx2_title().player_info_combo_spins);
 	// The updater login the service serves OpenNova's own content under is its title's; a retail
 	// title's folder names its own (Title::updater_login).
 	CHECK(title_by_code("acidgambit")->updater_login != nullptr &&

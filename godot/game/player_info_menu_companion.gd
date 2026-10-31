@@ -48,8 +48,10 @@ var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE
 var _loadout := PlayerInfoLoadout.new()
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
 var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
-# NAME (upper) -> Callable(row, value), dispatched by combo value changes.
+# NAME (upper) -> Callable(row, value), dispatched by its control's value changes.
 var _combo_handlers: Dictionary = {}
+# NAME (upper) -> the value change kind its handler hears ("combo" unless registered otherwise).
+var _combo_kinds: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
 # While a build or a side switch restores the shown side, the cascade's voice
 # results are held here and only the last, the fill against the restored
@@ -86,6 +88,7 @@ func on_menu_released() -> void:
 # Wire and populate from scratch for each document build.
 func _wire(_file: String, _screen: String) -> void:
 	_combo_handlers.clear()
+	_combo_kinds.clear()
 	_clear_mounts()
 	_ensure_db()
 	_character_state.set_database(_db)
@@ -105,7 +108,9 @@ func _wire(_file: String, _screen: String) -> void:
 	_wire_team_radios()
 	_connect_combo("NATIONALITY", _on_nat_selected)
 	_connect_combo("DIVISION", _on_div_selected)
-	_connect_combo("COMBO_LIST", _on_combo_selected)
+	# The combo list's handler hears the value change of the control the title registers it
+	# for: a combo box's select, or a spin list's step (engine player_info_combo_list_event).
+	_connect_combo("COMBO_LIST", _on_combo_selected, _driver.player_info_combo_list_event())
 	_connect_combo("PLAYERVOICE", _on_voice_selected)
 	_connect_pressed(VOICE_PREVIEW_CONTROL, _preview_voice)
 	# Prefer persisted team; otherwise retain player.mnu's authored SIDE_BLUE default.
@@ -730,13 +735,14 @@ func _save_from_dialog() -> Dictionary:
 
 # --- Helpers ------------------------------------------------------------------
 
-# Register a combo-select handler (row, value) for a named control, dispatched off
-# the driver's aggregate widget_value_changed (kind == "combo") — the item_selected
-# successor. `value` is the row's display text; handlers needing the authored
-# value= attr resolve it through item_value.
-func _connect_combo(name: String, handler: Callable) -> void:
+# Register a value-change handler (row, value) for a named control, dispatched off
+# the driver's aggregate widget_value_changed for the `kind` it hears ("combo", a
+# combo box's select) — the item_selected successor. `value` is the row's display
+# text; handlers needing the authored value= attr resolve it through item_value.
+func _connect_combo(name: String, handler: Callable, kind := "combo") -> void:
 	if _driver.has_widget(name):
 		_combo_handlers[name.to_upper()] = handler
+		_combo_kinds[name.to_upper()] = kind
 
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
@@ -747,9 +753,10 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 	if kind == "edit" and widget_name.to_upper() == "PLAYERNAME":
 		_on_player_name_changed(value)
 		return
-	if kind != "combo":
+	var upper := widget_name.to_upper()
+	if kind != _combo_kinds.get(upper, ""):
 		return
-	var handler: Callable = _combo_handlers.get(widget_name.to_upper(), Callable())
+	var handler: Callable = _combo_handlers.get(upper, Callable())
 	if handler.is_valid():
 		handler.call(index, value)
 

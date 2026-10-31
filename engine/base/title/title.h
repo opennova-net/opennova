@@ -492,6 +492,11 @@ struct Title {
 	// the combo's all the same. Jointops.exe's names them (jo_title.cpp), dfx2.exe's formats an
 	// empty string (dfx2_title.cpp).
 	bool player_info_combo_names = true;
+	// DFX2-75: the value change the PLAYER_INFO COMBO_LIST callback hears (menu::
+	// player_info_combo_list_event): false, a combo box's select; true, a spin list's step. Each
+	// executable registers the one callback for the event class its own player.mnu's control
+	// sends (jo_title.cpp, dfx2_title.cpp).
+	bool player_info_combo_spins = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

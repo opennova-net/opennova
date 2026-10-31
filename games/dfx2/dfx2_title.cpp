@@ -477,6 +477,10 @@ Title make() {
 	//  `push offset font_name` @0x55e5b7, sprintf @0x55e5bd, CSpinListWnd_InsertItem @0x55e5d6
 	//  (dfx2.exe)].
 	t.player_info_combo_names = false;
+	// DFX2-75: COMBO_LIST's callback heard on a spin list's step alone, its player.mnu's control a
+	// spin list [orig: sub_55F720 @0x55f720 - the mask 0x40 @0x55f847, sub_55E0C0 registered
+	//  @0x55f853 (dfx2.exe)].
+	t.player_info_combo_spins = true;
 	return t;
 }
 

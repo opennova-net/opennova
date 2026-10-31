@@ -68,6 +68,7 @@ const Title kJo{};
 const Title kDfx2 = [] {
 	Title t;
 	t.player_info_combo_names = false;
+	t.player_info_combo_spins = true;
 	return t;
 }();
 const hud::GameTextLookup menutxt = [](const char *section, const char *key, const char *fallback) {
@@ -198,6 +199,26 @@ void test_record_fills_a_lone_combo_spin_list() {
 	fresh.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt, kJo);
 	CHECK(menu.item_count(combo) == 0 && fresh.selected_combo(menu, data.file) == nullptr);
 }
+// The COMBO_LIST callback hears its own control's value change: a combo box's select under
+// Jointops.exe, a spin list's step under dfx2.exe [orig: PlayerInfo_RegisterAllControls
+// @0x561597 (0x220); sub_55F720 @0x55f847 (0x40) (dfx2.exe)], as the runtime names each.
+void test_combo_list_event() {
+	CHECK(std::string(player_info_combo_list_event(kJo)) == "combo");
+	CHECK(std::string(player_info_combo_list_event(kDfx2)) == "spinlist");
+	Avatars data;
+	mnu::Document doc = document({"COMBO_LIST"});
+	doc.screens[0].roots[0].children[0].type = mnu::WindowType::SpinList;
+	MenuRuntime menu; menu.open_document(&doc, "player.mnu", "PLAYER_INFO");
+	std::vector<std::string> kinds;
+	menu.set_sink([&](const MenuEvent &event) {
+		if (event.kind == MenuEvent::Kind::ValueChanged) kinds.push_back(event.text2);
+	});
+	PlayerInfoAvatars state;
+	state.seed_record(1, 0);
+	state.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt, kDfx2);
+	menu.spin_cycle(menu.widget_id("COMBO_LIST"), 1);
+	CHECK(kinds == (std::vector<std::string>{player_info_combo_list_event(kDfx2)}));
+}
 // The preview's initial facing: the reseed, then rand() % 180 whole degrees at
 // 0xB60B60 BAM a degree, the draw stepping the CRT stream once
 // [orig: PlayerInfo_InitPreviewModel @0x560128, @0x5601a2..0x5601b7].
@@ -244,6 +265,7 @@ int main() {
 	test_cascade_and_voice();
 	test_missing_stages_and_invalid_selections();
 	test_record_fills_a_lone_combo_spin_list();
+	test_combo_list_event();
 	test_preview_initial_yaw();
 	test_preview_motion_steps_per_update();
 	std::cout << "player_info_avatars: " << failures << " failures\n";

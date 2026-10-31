@@ -165,6 +165,10 @@ Title make() {
 	//  their "Avatars" strings @0x5602f7 / @0x560300, sprintf("%s - %s") @0x560313, UIList_AddRow
 	//  @0x56032c].
 	t.player_info_combo_names = true;
+	// DFX2-75: COMBO_LIST's callback heard on a list's select, its player.mnu's control a combo
+	// box [orig: PlayerInfo_RegisterAllControls @0x561470 - the mask 0x220 @0x561597,
+	//  PlayerInfo_HandleComboListSelect registered @0x5615a6].
+	t.player_info_combo_spins = false;
 	return t;
 }
 

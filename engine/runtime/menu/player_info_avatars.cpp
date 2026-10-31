@@ -174,6 +174,10 @@ std::string PlayerInfoAvatars::voice_preview_trigger(const MenuRuntime &menu,
 	}
 	return saved_voice < 0 ? std::string() : "VOICE_" + std::to_string(saved_voice);
 }
+const char *player_info_combo_list_event(const Title &title) {
+	return title.player_info_combo_spins ? "spinlist" : "combo";
+}
+
 float player_info_preview_blend_step(float blend, bool hovered) {
 	// [orig: @0x55dc43..0x55dc61, the x87 at single precision]
 	const float target = hovered ? 1.0f : 0.0f;

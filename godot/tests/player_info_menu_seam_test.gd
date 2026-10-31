@@ -79,13 +79,13 @@ func _staged_avatars_root(game_code := "") -> ResourceRoot:
 
 
 # dfx2.exe's screen shape opened over a root mounted as dfx2, the companion built on it.
-func _built_dfx2_spin_screen(companion: PlayerInfoMenuCompanion) -> MenuDriver:
+func _built_dfx2_spin_screen(companion: PlayerInfoMenuCompanion, voice := false) -> MenuDriver:
 	var root := _staged_avatars_root("dfx2")
 	assert_not_null(root, "the minted table stages under a dfx2 root")
 	if root == null:
 		return null
 	var driver := MenuDriver.new()
-	assert_true(driver.open_document(_spin_screen_doc(), root, null, null, "player.mnu"),
+	assert_true(driver.open_document(_spin_screen_doc(voice), root, null, null, "player.mnu"),
 			"the document opens over the dfx2 root")
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
 	return driver
@@ -563,11 +563,14 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 # NATIONALITY or DIVISION. The combos are the record's nationality and division's, the
 # record's combo selected, and the save keeps the record's nationality and division
 # (engine PlayerInfoAvatars::seed_record).
-func _spin_screen_doc() -> MnuDocument:
+# `voice` adds a PLAYERVOICE combo box, which dfx2.exe's screen lacks, so a combo handler's
+# voice refill shows.
+func _spin_screen_doc(voice := false) -> MnuDocument:
 	return MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAYER_INFO",
 			MenuDriverFixture.wnd("spinlist", "COMBO_LIST", 10)
 			+ MenuDriverFixture.wnd("edit", "PLAYERNAME", 40)
-			+ MenuDriverFixture.wnd("button", "ACCEPT", 70)))
+			+ MenuDriverFixture.wnd("button", "ACCEPT", 70)
+			+ (MenuDriverFixture.wnd("combobox", "PLAYERVOICE", 100) if voice else "")))
 
 
 func test_a_screen_without_nationality_lists_fills_the_records_combos() -> void:
@@ -613,6 +616,32 @@ func test_dfx2_combo_rows_carry_no_text() -> void:
 	assert_gt(driver.item_count(combos), 0, "the record's combos are listed")
 	for row in driver.item_count(combos):
 		assert_eq(driver.item_text(combos, row), "", "row %d has no text" % row)
+
+
+# DFX2-75: dfx2.exe's COMBO_LIST callback hears its spin list's step and not a combo box's
+# select; Jointops.exe's the other way round (engine player_info_combo_list_event). The
+# handler's voice refill drops a voice the combo cannot offer.
+func test_combo_list_handler_hears_its_titles_control() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	var driver := _built_dfx2_spin_screen(companion, true)
+	if driver == null:
+		return
+	assert_eq(driver.player_info_combo_list_event(), "spinlist")
+	PlayerProfile.store().set_voice(0, 99)
+	driver.widget_value_changed.emit("COMBO_LIST", "combo", 0, "")
+	assert_eq(PlayerProfile.store().get_voice(0), 99, "a combo box's select is not dfx2.exe's event")
+	driver.spin_cycle(driver.widget_id("COMBO_LIST"), 1)
+	assert_eq(PlayerProfile.store().get_voice(0), 0, "the spin's step runs the handler")
+	var jo := PlayerInfoMenuCompanion.new()
+	jo.set_database(_load_db())
+	var jo_driver := _make_avatar_driver()
+	jo.on_menu_built(jo_driver, "player.mnu", "PLAYER_INFO", null)
+	assert_eq(jo_driver.player_info_combo_list_event(), "combo")
+	PlayerProfile.store().set_voice(0, 99)
+	jo_driver.widget_value_changed.emit("COMBO_LIST", "spinlist", 0, "")
+	assert_eq(PlayerProfile.store().get_voice(0), 99, "a spin list's step is not Jointops.exe's event")
+	jo_driver.widget_value_changed.emit("COMBO_LIST", "combo", 0, "")
+	assert_eq(PlayerProfile.store().get_voice(0), 0, "its combo box's select runs the handler")
 
 
 func test_accept_emits_avatar_chosen() -> void:

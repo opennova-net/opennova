@@ -1130,6 +1130,10 @@ int MenuDriver::update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int 
 			game_text_lookup(p_gameui), game_text_lookup(p_menutxt), ResourceRoot::session_title(root_));
 }
 
+String MenuDriver::player_info_combo_list_event() const {
+	return String(opennova::menu::player_info_combo_list_event(ResourceRoot::session_title(root_)));
+}
+
 PackedInt32Array MenuDriver::player_info_nationality_rows() const {
 	PackedInt32Array rows;
 	for (int index : avatars_.nationalities) rows.push_back(index);
@@ -1207,6 +1211,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("update_player_info_avatars", "db", "change", "value", "team", "voice", "gameui", "menutxt"), &MenuDriver::update_player_info_avatars);
 	ClassDB::bind_method(D_METHOD("seed_player_info_avatars", "nationality", "division"),
 			&MenuDriver::seed_player_info_avatars);
+	ClassDB::bind_method(D_METHOD("player_info_combo_list_event"), &MenuDriver::player_info_combo_list_event);
 	ClassDB::bind_method(D_METHOD("player_info_nationality_rows"), &MenuDriver::player_info_nationality_rows);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_nationality"), &MenuDriver::player_info_avatar_nationality);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_division"), &MenuDriver::player_info_avatar_division);

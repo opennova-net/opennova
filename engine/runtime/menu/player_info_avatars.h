@@ -55,6 +55,20 @@ struct PlayerInfoAvatars {
 };
 inline constexpr const char *kPlayerInfoVoiceBank = "menu.lwf";
 
+// The value change the COMBO_LIST callback hears, as the runtime's ValueChanged kind
+// (MenuEvent::text2): "combo", a combo box's select, or "spinlist", a spin list's step
+// (Title::player_info_combo_spins). A registration's mask names the event classes its callback
+// runs for, bit n class n (the event's top byte); a list's select is class 5, a spin list's step
+// class 6 [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - `1 << (event >> 24)`
+// @0x6469b8 against the mask @0x6469c2; CListWnd_OnCommand @0x643cb0 (0x5000001 @0x643ec4);
+// CSpinListWnd_SelectNext @0x64b910 (0x6000001 @0x64b993)]. Jointops.exe registers it for 5 and 9
+// [orig: PlayerInfo_RegisterAllControls @0x561470 - 0x220 @0x561597], dfx2.exe for 6 alone
+// [orig: sub_55F720 @0x55f720 - 0x40 @0x55f847 (dfx2.exe)]; the one body runs either way, the
+// value it stores the picked row's (the list event's +0x10, the step's +8) [orig:
+// PlayerInfo_HandleComboListSelect @0x55fe00 (@0x55fe12..0x55fe1e, @0x55fe3f); sub_55E0C0
+// @0x55e0c0 (@0x55e0d2..0x55e0de, @0x55e0ff) (dfx2.exe)].
+const char *player_info_combo_list_event(const Title &title);
+
 // The preview model's initial facing, a BAM word: the preview init reseeds the
 // CRT stream from the clock word `seed`, then draws rand() % 180 whole degrees
 // at 0xB60B60 BAM a degree (formats/avatars/preview_animation.h
