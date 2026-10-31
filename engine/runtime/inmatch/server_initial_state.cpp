@@ -723,13 +723,18 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// Bit 1, the pre-round loadout latch: set while the pre-round timer runs, always for DFX2.
 	conn.link.preround_loadout_latch =
 			world.preround_delay_seconds != 0 || in_match.slot_state.join_state_fixed;
-	// Bit 0x10, undeployed: with deploy-selectable spawn zones (always for DFX2). Out of a
-	// session the hold shows nothing (its hidden bit and overlay bit both ride the per-frame
-	// 0x0A writer, which only a session runs), so the single player is never held.
-	const bool is_host_own = conn.type == NapiNPConnection::kTypeClientSide;
+	// Bit 0x10, undeployed: with deploy-selectable spawn zones (always for DFX2), every slot's,
+	// the single player's own included. Its hidden bit and overlay bit ride the per-frame 0x0A
+	// writer, which the tick's tail slot walk runs out of a session too: the walk stands outside
+	// both of the tick's session blocks, so a single player's own 0x0A holds its DEATH screen up
+	// until its pick deploys it.
+	// [orig: Server_TickUpdate @0x51D7E0 - the session blocks @0x51D9A5 and @0x51E211..0x51E383
+	//  (its `jz` @0x51E217 lands on the walk), the tail walk @0x51E385..0x51E46D, its
+	//  Server_SendPlayerSlotStateFrame call @0x51E3E4 ->
+	//  Server_SendEntityStateToPlayer @0x51BBDC; NetPacket_WritePlayerState @0x4FF7B8..0x4FF7BC;
+	//  Server_TickUpdate @0x51a810 - the walk's call @0x51b324 (dfx2.exe)]
 	conn.link.respawn_pending =
-			(world.zones.has_spawn_zone() || in_match.slot_state.join_state_fixed) &&
-			(!is_host_own || world.rules.mp_session);
+			world.zones.has_spawn_zone() || in_match.slot_state.join_state_fixed;
 	// The roster row mirrors the undeployed bit, which event 25 reads [orig:
 	//  Server_UpdateCaptureZoneProximity @0x5087A2].
 	world.match.set_player_respawn_pending(conn.link.owned_entity, conn.link.respawn_pending);
