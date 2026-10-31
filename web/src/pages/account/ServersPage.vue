@@ -89,6 +89,11 @@
                 <span v-if="r.server.state === 'failed' && r.server.failure_reason" class="block max-w-xs break-words text-xs text-danger">
                   {{ r.server.failure_reason }}
                 </span>
+                <span v-if="r.server.live && r.server.update_requested" class="server-update mt-1 flex"><Badge tone="info">Update requested</Badge></span>
+                <span v-else-if="r.server.update_available" class="server-update mt-1 flex flex-wrap gap-1">
+                  <Badge v-if="contentUpdate(r.server)" tone="info">Update available</Badge>
+                  <Badge v-if="buildUpdate(r.server)" tone="info" class="server-build-update">{{ buildUpdateText(r.server) }}</Badge>
+                </span>
               </template>
               <Badge v-else tone="ok">Listed</Badge>
             </td>
@@ -97,6 +102,9 @@
               <RouterLink v-if="r.server?.state === 'running'" :to="`/me/servers/${r.server.id}/console`" class="btn-ghost btn-sm">
                 Console<span class="sr-only"> of {{ plainName(r) }}</span>
               </RouterLink>
+              <button v-if="canUpdate(r)" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="updateRow(r)">
+                Update<span class="sr-only">{{ ` ${plainName(r)}` }}</span>
+              </button>
               <button v-if="canStop(r)" type="button" class="btn-ghost btn-sm" :disabled="busy" @click="stopRow(r)">
                 Stop<span class="sr-only">{{ ` ${plainName(r)}` }}</span>
               </button>
@@ -120,9 +128,9 @@
 // servers (GET /api/me/servers) and the games it hosts itself (GET
 // /api/me/hosts; a hosted server's own listing joins its row), filtered by the
 // URL's state; its allowance in the header with the start while either pool
-// has room, else why not. Stops a server, opens its console, starts an ended
-// one again. The hosted servers poll on hostedCadence, the listings every
-// LIST_POLL_MS.
+// has room, else why not. Says what a waiting update brings and updates the
+// server, stops a server, opens its console, starts an ended one again. The
+// hosted servers poll on hostedCadence, the listings every LIST_POLL_MS.
 import { computed, nextTick, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import GameText from '../../components/GameText.vue';
@@ -135,7 +143,7 @@ import LiveNotices from '../../components/ui/LiveNotices.vue';
 import Notice from '../../components/ui/Notice.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import TableState from '../../components/ui/TableState.vue';
-import { fetchMyServers, stopHostedServer } from '../../api/hostedServer';
+import { fetchMyServers, stopHostedServer, updateHostedServer } from '../../api/hostedServer';
 import { fetchListingGames, listMyServers, stopHosting } from '../../api/myServers';
 import { confirmAction } from '../../composables/useConfirm';
 import { hostedCadence, usePolling } from '../../composables/usePolling';
@@ -159,6 +167,7 @@ import {
   stateOf,
   type MyServerRow,
 } from '../../utils/myServersView';
+import { buildUpdate, buildUpdateText, contentUpdate } from '../../utils/serverUpdate';
 import { serverStateTone } from '../../utils/tone';
 
 // The listings refresh themselves on this period, and on demand.
@@ -230,6 +239,11 @@ function plainName(r: MyServerRow): string {
 
 function canStop(r: MyServerRow): boolean {
   return r.server ? r.server.live && r.server.state !== 'stopping' : true;
+}
+
+function canUpdate(r: MyServerRow): boolean {
+  const s = r.server;
+  return !!s && s.live && s.state !== 'stopping' && s.update_available && !s.update_requested;
 }
 
 async function onSessionEnded() {
@@ -343,6 +357,30 @@ function listSoon() {
 onUnmounted(() => {
   if (listSoonTimer) clearTimeout(listSoonTimer);
 });
+
+// ---------------------------------------------------------------------------
+// Update: the service restarts the server on its game's current data and
+// server build (its players drop), as its page's update does.
+
+async function updateRow(r: MyServerRow) {
+  const server = r.server;
+  if (busy.value || !server) return;
+  const name = plainName(r);
+  if (!(await confirmAction(`Update ${name}? It restarts and its players drop.`))) return;
+  busy.value = true;
+  pageStatus.value = '';
+  actionError.value = '';
+  const result = await updateHostedServer(server.id);
+  busy.value = false;
+  if (!result.ok) {
+    actionError.value = result.error.message;
+    if (result.error.code === 'unauthorized') await onSessionEnded();
+    else if (result.error.code === 'not_found' || result.error.code === 'not_live' || result.error.code === 'up_to_date') void hostedPoll.readAgain();
+    return;
+  }
+  pageStatus.value = `${name} is updating.`;
+  void hostedPoll.readAgain();
+}
 
 // ---------------------------------------------------------------------------
 // Stop.

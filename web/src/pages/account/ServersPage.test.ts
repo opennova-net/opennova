@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
 import ServersPage from './ServersPage.vue';
-import { fetchMyServers, stopHostedServer } from '../../api/hostedServer';
+import { fetchMyServers, stopHostedServer, updateHostedServer } from '../../api/hostedServer';
 import { fetchAccountStats } from '../../api/hostedStats';
 import { fetchListingGames, listMyServers, stopHosting } from '../../api/myServers';
 import { confirmAction } from '../../composables/useConfirm';
@@ -14,6 +14,7 @@ vi.mock('../../api/hostedServer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/hostedServer')>()),
   fetchMyServers: vi.fn(),
   stopHostedServer: vi.fn(),
+  updateHostedServer: vi.fn(),
 }));
 vi.mock('../../api/myServers', () => ({ listMyServers: vi.fn(), stopHosting: vi.fn(), fetchListingGames: vi.fn() }));
 vi.mock('../../api/hostedStats', () => ({ fetchAccountStats: vi.fn() }));
@@ -168,6 +169,35 @@ describe('ServersPage', () => {
     expect(confirmAction).toHaveBeenCalledWith('Stop Server 1? Its match ends for everyone.');
     expect(stopHostedServer).toHaveBeenCalledWith(1);
     expect(wrapper!.get('[role="status"]').text()).toBe('Server 1 is stopping.');
+  });
+
+  it('says what a waiting update brings under the state, and updates the server after a confirmation', async () => {
+    vi.mocked(updateHostedServer).mockResolvedValue({ ok: true, value: hostedServer(1, { update_requested: true }) });
+    await mountPage(
+      serversResponse([
+        hostedServer(1, {
+          update_available: true,
+          update_kinds: ['content', 'server_build'],
+          build: { version: '0.0.23.6053', commit: '9eabb5d' },
+          build_available: { version: '0.0.23.6055', commit: 'ebc5aeb' },
+        }),
+        hostedServer(2, { update_available: true, update_kinds: ['content'], update_requested: true }),
+        hostedServer(3),
+      ]),
+    );
+    const update = (name: string) => rows().find((r) => r.get('th a').text() === name)!.find('.server-update');
+    expect(update('Server 1').text()).toContain('Update available');
+    expect(update('Server 1').get('.server-build-update').text()).toBe('New server build: ONE 0.0.23.6053 → ONE 0.0.23.6055');
+    expect(update('Server 2').text()).toBe('Update requested');
+    expect(update('Server 3').exists()).toBe(false);
+    expect(button('Update Server 2')).toBeUndefined();
+    expect(button('Update Server 3')).toBeUndefined();
+
+    await button('Update Server 1')!.trigger('click');
+    await flushPromises();
+    expect(confirmAction).toHaveBeenCalledWith('Update Server 1? It restarts and its players drop.');
+    expect(updateHostedServer).toHaveBeenCalledWith(1);
+    expect(wrapper!.get('[role="status"]').text()).toBe('Server 1 is updating.');
   });
 
   it('stops hosting a game hosted yourself after a confirmation, and drops its row', async () => {

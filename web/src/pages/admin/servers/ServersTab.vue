@@ -145,8 +145,12 @@
                 <span v-if="r.server.expansion_tree_id !== null" class="block text-ink-muted">
                   {{ r.server.expansion?.display_name || 'Expansion' }} {{ r.server.data.expansion?.version || '' }}
                 </span>
-                <Badge v-if="r.server.update_requested" tone="info">Update requested</Badge>
-                <Badge v-else-if="r.server.outdated" tone="warn">Outdated</Badge>
+                <span v-if="r.server.build" class="server-build block text-ink-muted"><BuildText :build="r.server.build" /></span>
+                <span v-if="r.server.live && r.server.update_requested" class="server-update mt-1 flex"><Badge tone="info">Update requested</Badge></span>
+                <span v-else-if="r.server.update_available" class="server-update mt-1 flex flex-col items-start gap-1">
+                  <Badge v-if="contentUpdate(r.server)" tone="warn">Outdated</Badge>
+                  <Badge v-if="buildUpdate(r.server)" tone="warn" class="server-build-update">{{ buildUpdateText(r.server) }}</Badge>
+                </span>
               </template>
               <span v-else class="text-ink-muted">—</span>
             </td>
@@ -171,11 +175,13 @@
 // /admin/servers: every server on our NovaWorld in one table, the fleet's
 // hosted servers (GET /api/admin/hosted) and the ones players host (GET
 // /api/admin/hosts), each with its game, map, players, owner, where it runs,
-// state, release and what it uses (GET /api/admin/hosted/usage); filtered by
+// state, release and server build with any update waiting, and what it uses
+// (GET /api/admin/hosted/usage); filtered by
 // the URL's state, kind, product and owner. Updates the outdated servers and
 // stops one or all. Polls, faster while a server changes state.
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter, type LocationQueryRaw } from 'vue-router';
+import BuildText from '../../../components/BuildText.vue';
 import GameText from '../../../components/GameText.vue';
 import HistoryToggle from '../../../components/HistoryToggle.vue';
 import RelativeTime from '../../../components/RelativeTime.vue';
@@ -205,6 +211,7 @@ import { serverName } from '../../../utils/games';
 import { stripGameText } from '../../../utils/gameText';
 import { replacedServers } from '../../../utils/history';
 import { isTransitioning, stateLabel } from '../../../utils/hostedState';
+import { buildUpdate, buildUpdateText, contentUpdate } from '../../../utils/serverUpdate';
 import { filterOf, runsProduct, serverRows, type ServerRow, type ServersFilter } from '../../../utils/serversView';
 import { serverStateTone } from '../../../utils/tone';
 
@@ -286,7 +293,7 @@ const machineBreakdown = computed(() => {
 const outdatedCount = computed(
   () =>
     (fleet.value?.servers ?? []).filter(
-      (s) => s.live && s.outdated && !s.update_requested && (filter.value.product === null || runsProduct(s, filter.value.product)),
+      (s) => s.live && s.update_available && !s.update_requested && (filter.value.product === null || runsProduct(s, filter.value.product)),
     ).length,
 );
 
@@ -393,8 +400,8 @@ async function stopRow(r: ServerRow) {
   await poll.readAgain();
 }
 
-// Every live server on an older release restarts on its game's newest (of the
-// filter's game alone when it names one).
+// Every live server on an older release or server build restarts on its game's
+// newest and the fleet's build (of the filter's game alone when it names one).
 async function updateOutdated() {
   if (busy.value || filter.value.owner) return;
   const n = outdatedCount.value;

@@ -668,9 +668,9 @@ int test_pins() {
 	// A new base tree: both are behind; update-all of the product marks both, the stopped one never.
 	const int64_t t_jo2 = create_tree(db, jo, std::nullopt, "a");
 	TEST_EXPECT(finish_tree(db, t_jo2, ready_with("2", {})));
-	TEST_EXPECT(request_update_all(db, dfx2) == 0);
-	TEST_EXPECT(request_update_all(db, jo) == 2);
-	TEST_EXPECT(request_update_all(db, std::nullopt) == 0);
+	TEST_EXPECT(request_update_all(db, dfx2, {}) == 0);
+	TEST_EXPECT(request_update_all(db, jo, {}) == 2);
+	TEST_EXPECT(request_update_all(db, std::nullopt, {}) == 0);
 	TEST_EXPECT(db.query("SELECT count(*) FROM hosted_servers WHERE update_requested;").front().as_int(0) == 2);
 	return 0;
 }

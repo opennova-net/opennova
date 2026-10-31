@@ -636,6 +636,13 @@ int test_server_build_update() {
 		TEST_EXPECT(c && c->desired.image == kServeImage);
 	}
 	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::UpToDate);
+	// The admin's update-all takes a server build update too, once, and none without the
+	// fleet's image.
+	hosted::set_serve_image(db, id, older);
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt, "") == 0);
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt, kServeImage) == 1);
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt, kServeImage) == 0);
+	TEST_EXPECT(rig.server(id)->update_requested);
 	return 0;
 }
 
@@ -724,7 +731,7 @@ int test_pins_and_updates() {
 	TEST_EXPECT(other > 0 && !rig.to_running(other, 9305).empty());
 	const int64_t jox_tree2 = seed_tree(db, rig.data.jox, "1.1", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
 	TEST_EXPECT(jox_tree2 != 0 && hosted::server_outdated(db, id) && !hosted::server_outdated(db, other));
-	TEST_EXPECT(hosted::request_update_all(db, std::nullopt) == 1);
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt, kServeImage) == 1);
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.state(other) == State::Running);
 	TEST_EXPECT(!rig.to_running(id, 9306).empty());

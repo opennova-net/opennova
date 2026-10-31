@@ -184,7 +184,7 @@ import {
   stoppedBecauseText,
 } from '../../utils/hostedState';
 import { stripGameText } from '../../utils/gameText';
-import { versionText as buildVersionText, type Build } from '../../utils/buildView';
+import { buildUpdate as hasBuildUpdate, buildUpdateText as serverBuildUpdateText, contentUpdate as hasContentUpdate } from '../../utils/serverUpdate';
 
 const props = defineProps<{
   server: HostedServer;
@@ -261,29 +261,11 @@ const current = computed(() => {
   return versions ? { base: versions.get(productId ?? -1) ?? '', expansion: versions.get(expansionId ?? -1) ?? '' } : null;
 });
 
-// What the waiting update brings: newer data, a newer server build, or both (a
-// reply that names neither reads as data, the update's first kind).
-const contentUpdate = computed(() => props.server.update_kinds.includes('content') || props.server.update_kinds.length === 0);
-const buildUpdate = computed(() => props.server.update_kinds.includes('server_build'));
-
-// A build in a few words: ONE's version, else the commit.
-function buildWords(build: Build): string {
-  return buildVersionText(build) ?? build.commit ?? '';
-}
-
-// "New server build: ONE 0.0.22.5 → ONE 0.0.22.9" when both builds are known
-// (the commits where the versions read alike), "New server build: ONE 0.0.22.9"
-// with only the new one, else "New server build available".
-const buildUpdateText = computed(() => {
-  const to = props.server.build_available;
-  if (!to || !buildWords(to)) return 'New server build available';
-  const from = props.server.build;
-  if (!from || !buildWords(from)) return `New server build: ${buildWords(to)}`;
-  const alike = buildWords(from) === buildWords(to) && from.commit && to.commit;
-  return alike
-    ? `New server build: ${buildWords(from)} ${from.commit} → ${buildWords(to)} ${to.commit}`
-    : `New server build: ${buildWords(from)} → ${buildWords(to)}`;
-});
+// What the waiting update brings: newer data, a newer server build, or both
+// (utils/serverUpdate.ts).
+const contentUpdate = computed(() => hasContentUpdate(props.server));
+const buildUpdate = computed(() => hasBuildUpdate(props.server));
+const buildUpdateText = computed(() => serverBuildUpdateText(props.server));
 
 // "Joint Operations 1.0.9 available" (and the expansion's, when it is the
 // newer one); without the versions, "Update available".
