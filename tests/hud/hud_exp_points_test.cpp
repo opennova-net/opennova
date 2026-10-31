@@ -35,7 +35,8 @@ void test_the_title_draws_it() {
 }
 
 // The start: hidden or a 0 duration starts nothing; else intensity 1, the per-channel distance in
-// 16 bits, the rate 1 / duration and the pulse percent * 0.01 - 1 [orig: sub_59B730 @0x59B730].
+// 16 bits, the rate 1 / duration and the pulse percent * 0.01 - 1
+// [orig: HUD_StartExpPointsFade @0x59B730 (dfx2.exe)].
 void test_the_fade_start() {
 	HudExpPointsFade fade;
 	hud_exp_points_fade_start(fade, /*hidden=*/true, 62, 0xFFF0F000u, 0xFFFFFFFFu, 200);
@@ -52,7 +53,7 @@ void test_the_fade_start() {
 
 // A step: the intensity less the rate; above 0 the scale is pulse * it + 1 and each channel byte
 // takes its distance times it, chopped, in 8 bits; at 0 or below the fade clears and the number
-// draws at scale 1 in the active colour [orig: sub_59B7E0 @0x59B805..0x59B91B].
+// draws at scale 1 in the active colour [orig: HUD_DrawExpPoints @0x59B805..0x59B91B (dfx2.exe)].
 void test_the_fade_step() {
 	HudExpPointsFade fade;
 	HudExpPointsPulse idle = hud_exp_points_fade_step(fade, 0xFFFFFFFFu);

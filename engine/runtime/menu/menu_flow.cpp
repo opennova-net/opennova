@@ -220,7 +220,8 @@ void MenuFlow::show_campaign(MenuRuntime &menu, size_t index) {
 	}
 	menu.set_widget_items(list, texts);
 	menu.select_row(list, -1, false);
-	// [orig: CAMPAIGN_IMAGE's image sub_6D3760(+0x144) @0x560464; the overlay @0x560479..0x5604ad]
+	// [orig: CAMPAIGN_IMAGE's image CWnd_SetAppearanceTexture(+0x144) @0x560464; the overlay
+	//  @0x560479..0x5604ad (dfx2.exe)]
 	campaign_image_ = shown.image;
 	set_campaign_image(menu);
 	show_overlay(menu, shown.complete);

@@ -540,9 +540,9 @@ void EpilogCine::build_lose_debriefing_screen() {
 	// banner, which also moves the y cursor from 230 to 262; the embedder holds the
 	// banner and draws nothing for an empty one, so the node rides every build and
 	// the debriefing's y follows the banner at the draw (CineEvent::banner_y)
-	// [orig: `cmp g_BannerText, 0` @0x575bb5; sub_570FD0 @0x575bfc - (start, 223200,
-	//  &g_BannerText, 0, 230, -2, 140, 140, 1024, 100, 1, 0xFFFFFF); the cursor
-	//  @0x5759ad / @0x575c01].
+	// [orig: `cmp g_BannerText, 0` @0x575bb5; CineEventTextFade_Construct @0x575bfc - (start,
+	//  223200, &g_BannerText, 0, 230, -2, 140, 140, 1024, 100, 1, 0xFFFFFF); the cursor
+	//  @0x5759ad / @0x575c01 (dfx2.exe)].
 	events.push_back(text_fade(start, CineTextSource::Banner, "", "", 0, 230, -2, 140, 140, 1024,
 			100, 1, 0xFFFFFF));
 	// The saved-game list it would add below (sub_5B6230 @0x575c0d, the rows
@@ -553,9 +553,10 @@ void EpilogCine::build_lose_debriefing_screen() {
 	// moves 32 frames on. A mission the catalog does not list has no entry to read
 	// (retail's dereferences its entry).
 	// [orig: TextResource_FindEntryBySectionAndKey(entry+1040, "Info", "LOSE_DEBRIEFING")
-	//  @0x575c9e, the entry and its text pointer @0x575ca3..0x575cac; sub_570FD0 @0x575cec -
-	//  (start, 223200, text, 192, cursor, -2, 140, 140, 640, 0, flags, 0xFFFFFF), the flags the
-	//  saved-game walk's counter, 1 with none @0x5759b9 / @0x575cc9; @0x575cf1]
+	//  @0x575c9e, the entry and its text pointer @0x575ca3..0x575cac; CineEventTextFade_Construct
+	//  @0x575cec - (start, 223200, text, 192, cursor, -2, 140, 140, 640, 0, flags, 0xFFFFFF), the
+	//  flags the saved-game walk's counter, 1 with none @0x5759b9 / @0x575cc9; @0x575cf1
+	//  (dfx2.exe)]
 	if (mission.entry && mission.lose_debriefing.has_value()) {
 		CineEvent debriefing = text_fade(start, CineTextSource::Text, "", "", 192, 230, -2, 140,
 				140, 640, 0, 1, 0xFFFFFF);
@@ -723,8 +724,8 @@ void EpilogCine::build_win_debriefing_screen(World &world) {
 	// A mission the catalog does not list has no entry to read (retail's
 	// dereferences its entry).
 	// [orig: TextResource_FindEntryBySectionAndKey(entry+1040, "Info", "WIN_DEBRIEFING")
-	//  @0x574771, the entry and its text pointer @0x574776..0x574782; sub_570FD0 @0x5747c1 -
-	//  (cursor, 223200, text, 47, 475, -2, 140, 140, 930, 0, 1, 0xFFFFFF)]
+	//  @0x574771, the entry and its text pointer @0x574776..0x574782; CineEventTextFade_Construct
+	//  @0x5747c1 - (cursor, 223200, text, 47, 475, -2, 140, 140, 930, 0, 1, 0xFFFFFF) (dfx2.exe)]
 	if (mission.entry && mission.win_debriefing.has_value()) {
 		CineEvent debriefing = text_fade(cursor, CineTextSource::Text, "", "", 47, 475, -2, 140,
 				140, 930, 0, 1, 0xFFFFFF);
