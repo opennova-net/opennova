@@ -2049,6 +2049,10 @@ add_test(NAME player_info_character COMMAND player_info_character_test)
 add_executable(role_feeds_test netsim/role_feeds_test.cpp)
 target_link_libraries(role_feeds_test PRIVATE opennova_runtime opennova_net)
 target_compile_features(role_feeds_test PRIVATE cxx_std_17)
+# main's frame holds several MissionKernels and ClientRuntimes (the cases' own block scopes).
+if(MSVC)
+    target_link_options(role_feeds_test PRIVATE "/STACK:4194304")
+endif()
 add_test(NAME role_feeds COMMAND role_feeds_test)
 
 # The server config flag word a joiner reads and the join entry's step

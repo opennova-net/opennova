@@ -421,7 +421,9 @@ static void hud_pass_call_site_cases() {
 //  members @0x551b96..0x551c86; HUD_GetEntityDisplayName @0x58dd40;
 //  Entity_GetMountSlotBoneIndex @0x5438f0 (dfx2.exe)]
 void deploy_table_zone_cases() {
-	mission::MissionKernel kernel;
+	// The kernel and the view on the heap: main's frame already holds several (1 MB stack).
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
 	world::World &w = kernel.world;
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(1, 8);
@@ -507,7 +509,8 @@ void deploy_table_zone_cases() {
 	world::SpawnZoneRegistry reg;
 	reg.entries = { truck_h, heli_h, psp_h };
 	replication::LoopbackChannel loop;
-	ClientRuntime host_view(loop);
+	auto host_view_heap = std::make_unique<ClientRuntime>(loop);
+	ClientRuntime &host_view = *host_view_heap;
 	replication::ClientState &cs = host_view.state();
 	auto bank = [](replication::ClientMinimapOverlaySlot &slot, world::EntityHandle h) {
 		slot.active = true;
@@ -613,7 +616,9 @@ void deploy_table_zone_cases() {
 // [orig: sub_5A3DF0 @0x5A4711..0x5A4871 (dfx2.exe); HUD_GetEntityDisplayName @0x58DD40
 //  (dfx2.exe)]
 void vehicle_panel_rider_cases() {
-	mission::MissionKernel kernel;
+	// The kernel and the view on the heap: main's frame already holds several (1 MB stack).
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
 	world::World &w = kernel.world;
 	w.registry.configure_pool(0, 8);
 	w.registry.configure_pool(1, 8);
@@ -664,7 +669,8 @@ void vehicle_panel_rider_cases() {
 	gun.seats.push_back(seat);
 	w.registry.spawn(1, gun);
 	replication::LoopbackChannel loop;
-	ClientRuntime host_view(loop);
+	auto host_view_heap = std::make_unique<ClientRuntime>(loop);
+	ClientRuntime &host_view = *host_view_heap;
 	replication::ClientRosterSlot ace;
 	ace.bound = true;
 	ace.entity_slot = static_cast<int16_t>(pilot.slot());
