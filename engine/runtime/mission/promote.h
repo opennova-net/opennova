@@ -97,6 +97,32 @@ struct ItemSeatSpec {
     bool turret_limits_valid = false;
 };
 
+// The answer to a mission load's warning box (LoadWarningBox).
+enum class LoadWarningAnswer : uint8_t { Continue, Quit };
+
+// The box a mission load shows a warning in, as dfx2.exe's Game_ShowWarningDialog does: its
+// caption and its text; OK (Continue) carries the load on, Cancel (Quit) ends the process, which
+// the embedder does, and ours' load stops there. Unset, the load carries on, the warning in the
+// log alone (opennova-serve, the tools, the tests).
+// [orig: Game_ShowWarningDialog @0x4A5D60 - MessageBoxA(hwnd, text, caption, 0x31) @0x4A5D8B,
+//  IDOK @0x4A5D91, Game_ShutdownAndExit @0x4A5D96 (dfx2.exe)]
+using LoadWarningBox =
+        std::function<LoadWarningAnswer(const std::string &caption, const std::string &text)>;
+
+// The four table checks dfx2.exe's two BMS loaders run over a mission header: a table whose count
+// passes its pool, a signed compare, logs and boxes "Too many <table> %i (max is %i)" under the
+// caption "Error", in the loaders' order (items, decorations, markers, organics). The max is the
+// pool's (`capacities`): retail's literal is its g_PoolList capacity. False when the box was
+// answered Quit; the checks after it do not run. Jointops.exe jumps over every test.
+// [orig: BMS_LoadAndValidateHeader @0x40E0A0 - the tests @0x40E16A, @0x40E19D, @0x40E1D0,
+//  @0x40E203, Game_ShowWarningDialog("Error", ..) @0x40E18B, @0x40E1BE, @0x40E1F1, @0x40E224;
+//  Mission_LoadBMSFile @0x40F330 - @0x40F40A, @0x40F443, @0x40F47C, @0x40F4B5, the boxes
+//  @0x40F431, @0x40F46A, @0x40F4A3, @0x40F4DC (dfx2.exe)]
+// [orig: BMS_LoadAndValidateHeader @0x40E250 - @0x40E31A, @0x40E34D, @0x40E380, @0x40E3B3;
+//  Mission_LoadBMSFile @0x40F4E0 - `jmp short` @0x40F5BA and the three after]
+bool warn_tables_past_pools(const bms::Header &header, const world::PoolCapacities &capacities,
+        const LoadWarningBox &box);
+
 struct PromoteOptions {
     // Load-time admission uses the configured player limit, not live occupants.
     // [orig: Entity_SpawnFromBMSRecord @0x40ea86; Server_InitNewRoundState @0x51c976]
@@ -161,6 +187,10 @@ struct PromoteOptions {
     // sizes (world::pool_capacities: the mounted expansion's)
     // [orig: EntityPool_Allocate @0x442168].
     world::PoolCapacities pool_capacities = world::pool_capacities();
+
+    // The load's warning box (LoadWarningBox): the table checks of a title that runs them
+    // (TitleRules::bms_table_warnings) ask it; unset, they log alone.
+    LoadWarningBox load_warning;
 };
 
 // The profile a placed vehicle naming none loads last [orig: Entity_InitHelicopterAIFromDef @0x4683C0,
@@ -240,6 +270,8 @@ struct PromoteResult {
     int nav_channels = 0; // waypoint channels built
     int nav_nodes = 0;    // pool-3 marker nodes built
     int dropped = 0;      // spawn failures (pool full)
+    // The load's warning box was answered Quit: the load stopped there, nothing promoted.
+    bool quit = false;
 };
 
 // Promote a parsed mission into a live world. Populates `world.registry` (entity pools),

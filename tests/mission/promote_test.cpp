@@ -1118,9 +1118,13 @@ static void test_pool_capacities_size_the_load() {
 
 // DFX2-24: a header counting more of a table than its pool holds warns at the load under
 // dfx2.exe's rules, "Too many <table> %i (max is %i)" in the load's order with the pool's capacity
-// as the max, where Jointops.exe's says nothing; the load carries on either way.
+// as the max, in the log and in the embedder's box under the caption "Error", where Jointops.exe's
+// says nothing. OK carries the load on; Cancel stops it at that box, the later checks unrun and
+// nothing promoted. A joiner's load, which retail's start never runs, checks nothing.
 // [orig: Mission_LoadBMSFile @0x40F4E0 - the jumps @0x40F5BA..; Mission_LoadBMSFile @0x40F330 -
-//  `jle` @0x40F40A, @0x40F443, @0x40F47C, @0x40F4B5, Game_ShowWarningDialog @0x40F431 (dfx2.exe)]
+//  `jle` @0x40F40A, @0x40F443, @0x40F47C, @0x40F4B5, Game_ShowWarningDialog("Error", ..)
+//  @0x40F431 (dfx2.exe); Game_ShowWarningDialog @0x4A5D60 - IDOK @0x4A5D91,
+//  Game_ShutdownAndExit @0x4A5D96 (dfx2.exe)]
 static std::vector<std::string> g_warnings;
 static void test_dfx2_warns_of_a_table_past_its_pool() {
     io::set_log_sink([](io::LogLevel level, const char *message) {
@@ -1132,17 +1136,43 @@ static void test_dfx2_warns_of_a_table_past_its_pool() {
     file.header.num_buildings = 1200; // at the limit: no warning
     file.header.num_markers = 769;
     file.header.num_people = 257;
-    for (const char *code : { "jo", "dfx2" }) {
+    file.items.push_back(bms::Entity{});
+    file.items[0].type_id = 0x50;
+    const std::vector<std::string> all = { "Too many items 1201 (max is 1200)",
+        "Too many markers 769 (max is 768)", "Too many organics 257 (max is 256)" };
+    std::vector<std::string> boxed;
+    mission::LoadWarningAnswer answer = mission::LoadWarningAnswer::Continue;
+    size_t quit_at = 0; // the box (1-based) answered Quit, 0 = none
+    mission::PromoteOptions opts;
+    opts.load_warning = [&](const std::string &caption, const std::string &text) {
+        CHECK(caption == "Error");
+        boxed.push_back(text);
+        return boxed.size() == quit_at ? mission::LoadWarningAnswer::Quit : answer;
+    };
+    struct Case {
+        const char *code;
+        bool authority;
+        size_t quit_at;
+    };
+    for (const Case c : { Case{ "jo", true, 0 }, Case{ "dfx2", true, 0 }, Case{ "dfx2", true, 2 },
+                 Case{ "dfx2", false, 0 } }) {
         g_warnings.clear();
+        boxed.clear();
+        quit_at = c.quit_at;
         auto w = std::make_unique<World>();
-        w->rules.title_rules = &title_rules(code);
-        mission::promote_mission(file, *w);
-        if (std::strcmp(code, "jo") == 0) {
-            CHECK(g_warnings.empty());
+        w->rules.title_rules = &title_rules(c.code);
+        w->rules.projectile_authority = c.authority;
+        const mission::PromoteResult r = mission::promote_mission(file, *w, opts);
+        if (std::strcmp(c.code, "jo") == 0 || !c.authority) {
+            CHECK(g_warnings.empty() && boxed.empty());
+            CHECK(!r.quit && r.spawned == 1);
+        } else if (c.quit_at == 0) {
+            CHECK(g_warnings == all && boxed == all);
+            CHECK(!r.quit && r.spawned == 1);
         } else {
-            CHECK(g_warnings == (std::vector<std::string>{ "Too many items 1201 (max is 1200)",
-                                       "Too many markers 769 (max is 768)",
-                                       "Too many organics 257 (max is 256)" }));
+            const std::vector<std::string> two(all.begin(), all.begin() + 2);
+            CHECK(g_warnings == two && boxed == two);
+            CHECK(r.quit && r.spawned == 0 && w->registry.get(EntityHandle::make(1, 0)) == nullptr);
         }
     }
     io::set_log_sink(nullptr);

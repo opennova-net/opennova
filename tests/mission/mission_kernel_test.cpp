@@ -712,8 +712,55 @@ static void test_kernel_answers_an_anchor_off_the_def_graphic() {
 	fs::remove_all(root, ec);
 }
 
+// DFX2-24: the boot asks the load's warning box at its start's header checks and at the load's
+// own: a single player's start twice for a table past its pool, a session authority's three times
+// (the in-session check, the start's, the load's), a joiner's never, Jointops.exe's never. A Quit
+// fails the boot at that box, the box's caption "Error" and its text the log's.
+// [orig: Game_StartMission @0x521530 - BMS_LoadAndValidateHeader called @0x521945, @0x521CAC,
+//  @0x522137, Mission_LoadBMSFile called @0x521D2E, @0x5221CB, LABEL_40's abort @0x521951;
+//  Game_ShowWarningDialog @0x4A5D60 - Game_ShutdownAndExit @0x4A5D96 (dfx2.exe)]
+static void test_the_load_warning_box_at_each_check() {
+	struct Case {
+		const char *code;
+		bool mp_session;
+		bool joiner;
+		size_t quit_at; // the box (1-based) answered Quit, 0 = none
+		size_t boxes;
+	};
+	const size_t cap = w::pool_capacities()[0];
+	char expected[128];
+	std::snprintf(expected, sizeof expected, "Too many organics %i (max is %i)",
+			static_cast<int>(cap + 1), static_cast<int>(cap));
+	for (const Case c : { Case{ "jo", false, false, 0, 0 }, Case{ "dfx2", false, false, 0, 2 },
+				 Case{ "dfx2", true, false, 0, 3 }, Case{ "dfx2", true, true, 0, 0 },
+				 Case{ "dfx2", false, false, 1, 1 }, Case{ "dfx2", false, false, 2, 2 },
+				 Case{ "dfx2", true, false, 2, 2 } }) {
+		bms::File mission{};
+		mission.header.num_people = static_cast<uint32_t>(cap + 1);
+		ms::MissionKernel kernel;
+		kernel.open_document(mission, "load-warning", {});
+		ms::KernelBootOptions options;
+		options.playable = false;
+		options.title_rules = &w::title_rules(c.code);
+		options.mp_session = c.mp_session;
+		options.joiner = c.joiner;
+		size_t boxes = 0;
+		options.load_warning = [&](const std::string &caption, const std::string &text) {
+			++boxes;
+			CHECK(caption == "Error" && text == expected);
+			return boxes == c.quit_at ? ms::LoadWarningAnswer::Quit : ms::LoadWarningAnswer::Continue;
+		};
+		std::string error;
+		const bool booted = kernel.boot(options, error);
+		CHECK(booted == (c.quit_at == 0));
+		CHECK(boxes == c.boxes);
+		CHECK(kernel.load_warning_quit() == (c.quit_at != 0));
+	}
+}
+
 int main() {
     test_first_frame_tick_matches_on_host_and_joiner();
+	test_the_load_warning_box_at_each_check();
     test_joiner_installs_only_the_wac_terminator();
     test_initial_wac_binds_the_preopened_music_context();
     test_empty_wac_clock_and_baseline_gate();

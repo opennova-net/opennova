@@ -696,7 +696,7 @@ public:
 	// none: the rotation seeded from the mount (a listening host's), then the engine's
 	// inmatch::create_host_session over the session record. OK when created or when there is
 	// nothing to create (no host role, a map change); ERR_CANT_CREATE when the `mpreset` word
-	// ended the process (session_create_ended_process).
+	// ended the process (load_ended_process).
 	int64_t create_host_session(const Ref<MissionData> &p_mission,
 			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
 	bool is_loaded() const;
@@ -1632,9 +1632,9 @@ public:
 	void use_client_process(opennova::inmatch::ClientProcessState *p_state) { net_.client_process = p_state; }
 	// The next boot is the single player's restart (KernelBootOptions::restart).
 	void set_restart_boot(bool p_restart) { restart_boot_ = p_restart; }
-	// The last load's session create ended the process on a nonzero mpreset (inmatch
-	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.
-	bool session_create_ended_process() const;
+	// The last load ended the process, the embedder exiting with `r_code` and saving nothing:
+	// its session create on a nonzero mpreset (0), or a load warning box's Cancel (-1).
+	bool load_ended_process(int32_t &r_code) const;
 	// The in-game options Accept over the record it wrote
 	// (profile::ingame_accept_input: the look's two words at once).
 	Error apply_ingame_options(const Ref<PlayerProfiles> &p_profiles);

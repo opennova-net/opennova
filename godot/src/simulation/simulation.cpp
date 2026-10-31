@@ -7,6 +7,7 @@
 #include <godot_cpp/core/object.hpp>
 #include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
 #include "simulation/hud_view_records.h" // RoundOutcome
+#include "simulation/load_warning_box.h"
 #include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
 
 #include "env/weather.h"
@@ -70,7 +71,7 @@ void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 // The bring-up's session create refused on the mpreset word
 // (inmatch::HostRole::session_create): the in-memory loads fail as the file
 // boot's phase A does (inmatch::HostBoot::session_create), and
-// session_create_ended_process() tells the embedder, which ends the process
+// load_ended_process() tells the embedder, which ends the process
 // with exit code 0 (the game shell's GameWorld.process_exit_requested).
 bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::string &r_error) {
 	if (p_role == nullptr ||
@@ -82,9 +83,18 @@ bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::stri
 
 } // namespace
 
-bool Simulation::session_create_ended_process() const {
-	return host_role_ != nullptr &&
-			host_role_->session_create() == opennova::inmatch::CreateSessionResult::ProcessExit;
+bool Simulation::load_ended_process(int32_t &r_code) const {
+	if (host_role_ != nullptr &&
+			host_role_->session_create() == opennova::inmatch::CreateSessionResult::ProcessExit) {
+		r_code = 0;
+		return true;
+	}
+	// The engine's MissionKernel::load_warning_quit carries the exit code's witness.
+	if (kernel_ != nullptr && kernel_->load_warning_quit()) {
+		r_code = -1;
+		return true;
+	}
+	return false;
 }
 
 Simulation::Simulation() {
@@ -622,6 +632,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// profile word and intro cine and keeps the first start's UP-TIME stamp (D-PWR-8; the
 	// engine's KernelBootOptions::restart carries the witness).
 	options.restart = restart_boot_ && !options.mp_session;
+	// The load's warning box, over the game's window (engine KernelBootOptions::load_warning).
+	options.load_warning = load_warning_box;
 	// The shell owns the terrain field's parsed-document entry (the store the
 	// seam below builds, or none): the kernel never loads one from files here.
 	options.terrain = false;

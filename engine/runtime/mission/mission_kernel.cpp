@@ -413,7 +413,12 @@ bool MissionKernel::load_mission_into_world(const KernelBootOptions &options) {
 	// Authored display names from the embedder's [PeopleNames] table (D-HUD-20);
 	// promote applies the retail 15-char copy at its cited port site.
 	opts.people_name_resolver = people_name_resolver_;
+	opts.load_warning = options.load_warning;
 	promo = promote_mission(mission, world, opts);
+	if (promo.quit) {
+		load_warning_quit_ = true;
+		return false;
+	}
 	// DEF initialization precedes PreMission actions in retail. Marker/health
 	// predicates and dynamically spawned helpers must see those traits now.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitFromModel]
@@ -684,6 +689,25 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// Game_StartMission @0x524360 and Mission_LoadBMSFile @0x40f4e0]
 	world.rules.mp_session = options.mp_session || options.joiner;
 	world.rules.projectile_authority = !options.joiner;
+	// DFX2-24: the start's header checks ahead of its terrain and the load's own (promote): once
+	// on a single player's start, fresh or restarted, twice on a session's authority (the
+	// in-session check, then the start's), none on a joiner, whose start reads no mission file.
+	// A Quit fails the boot; the embedder ends the process.
+	// [orig: Game_StartMission @0x521530 - BMS_LoadAndValidateHeader called @0x521945 (in a
+	//  session, on the authority), @0x521CAC (the restart), @0x522137 (the authority's start,
+	//  a single player's too), each ahead of Game_LoadTerrainDuringConnect; LABEL_40's abort
+	//  @0x521951 on its failure (dfx2.exe)] (TitleRules::bms_table_warnings)
+	load_warning_quit_ = false;
+	if (world.rules.title().bms_table_warnings && !options.joiner) {
+		const int checks = options.mp_session ? 2 : 1;
+		for (int i = 0; i < checks; ++i) {
+			if (!warn_tables_past_pools(mission.header, w::pool_capacities(), options.load_warning)) {
+				load_warning_quit_ = true;
+				error = "mission boot ended at a load warning (Cancel)";
+				return false;
+			}
+		}
+	}
 	world.facials.set_shadow_quality(options.shadow_quality);
 	// The shared model source, wired before the seat step runs (S16).
 	collision_pose.set_assets(&assets());
@@ -763,7 +787,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// boot — the load reset cleared it; an order-free scalar, not a boot step.)
 	step("load_mission");
 	if (!load_mission_into_world(options)) {
-		error = "mission boot aborted (load failed)";
+		error = load_warning_quit_ ? "mission boot ended at a load warning (Cancel)"
+		                           : "mission boot aborted (load failed)";
 		return false;
 	}
 	// Ground the AI on the terrain field.

@@ -1094,7 +1094,8 @@ func request_quit() -> void:
 ## The process exit on the cfg block's mpreset word: a read of game.cfg that
 ## sets it (a mount's; the start's is GameRuntimeRoot.begin_game's) or a session
 ## create that reads it
-## (GameWorld.process_exit_requested). The process ends with `code` 0 there:
+## (GameWorld.process_exit_requested), and on a mission load's warning box
+## answered Cancel (the same signal, `code` -1). The process ends with `code` there:
 ## nothing is saved (neither game.cfg nor the profile), the NovaWorld session
 ## the shell holds sends its goodbye burst alone, and the runtime comes down
 ## (docs/net/novaworld-net-re.md D-NET-385). Out of the tree only the latch
@@ -1102,7 +1103,7 @@ func request_quit() -> void:
 func exit_process(code := 0) -> void:
 	if _process_exit_pending:
 		return
-	push_warning("MainGame: game.cfg's mpreset ends the process (exit code %d)" % code)
+	push_warning("MainGame: the process ends (exit code %d)" % code)
 	_process_exit_pending = true
 	_quit_requested = true
 	var client: NovaWorldClient = null

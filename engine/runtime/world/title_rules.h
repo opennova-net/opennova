@@ -208,9 +208,11 @@ struct TitleRules {
 
 	// --- DFX2-24: the BMS load's table warnings. -------------------------------------------------
 	// A mission whose header counts more items, decorations, markers or organics than their pool
-	// holds warns at its load (mission::promote_mission). Jointops.exe jumps over every test;
+	// holds warns at its start's header checks and its load's (mission::warn_tables_past_pools,
+	// from MissionKernel::boot and mission::promote_mission). Jointops.exe jumps over every test;
 	// dfx2.exe shows "Too many <table> %i (max is %i)" in its warning box (OK carries on, Cancel
-	// ends the process), which ours writes to the log, and carries on.
+	// ends the process), which ours logs and asks the embedder's box
+	// (KernelBootOptions::load_warning).
 	// [orig: Mission_LoadBMSFile @0x40F4E0 - `cmp eax, 4B0h; jmp` @0x40F5B5 / @0x40F5BA and the
 	//  same unconditional jumps for the other three; BMS_LoadAndValidateHeader @0x40E250 -
 	//  @0x40E31A, @0x40E34D, @0x40E380, @0x40E3B3]
