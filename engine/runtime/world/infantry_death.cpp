@@ -187,7 +187,15 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
     ent->engine_flags &= ~(kEntityFlagMounted | kEntityFlagAiClimb);
     ent->death_tick = logic_tick;
     if (!org1) {
+        const EntityHandle body = ent->handle;
         raise_player_body_death(ai, world, *ent);
+        // Then, on every peer and whatever the round's state, the body lets go
+        // of what it carries; the authority's death transaction has dropped it
+        // already unless it stopped short of its drop (Match::record_death's
+        // round-over return).
+        // [orig: Entity_UpdateInfantryPlayerBody - Entity_DropCarriedObject
+        //  @0x4B4D0D, no gate; @0x4B4D6D (dfx2.exe)]
+        world.match.drop_carried_object(world, body);
         return;
     }
     // The authority raises the body's death transaction from here: the host's

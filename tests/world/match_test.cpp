@@ -8,6 +8,7 @@
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/infantry_internal.h> // infantry_death_edge
 
 #include <algorithm>
 #include <array>
@@ -1687,6 +1688,29 @@ void test_flag_attach_in_session_sends_a_second_state() {
     CHECK(notebook.world->match.drain_gameplay_events().empty());
 }
 
+// A Player body's death edge lets go of what it carries on every peer, past the
+// round's end too: the drop at the edge has no gate.
+// [orig: Entity_UpdateInfantryPlayerBody - Entity_DropCarriedObject @0x4B4D0D;
+//  @0x4B4D6D (dfx2.exe)]
+void test_player_body_death_edge_drops_what_it_carries() {
+    for (const bool authority : {true, false}) {
+        TakeableRig rig;
+        World &world = *rig.world;
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        CHECK(world.match.finish(1, world));
+        AiEntity &body = *world.ai.at(world.ai.attach(rig.carrier));
+        body.inf.active = true;
+        world.ai.is_authority = authority;
+        world.rules.logic_authority = authority;
+        rig.carrier_entity().health = 0;
+        infantry_death_edge(world.ai, body, world, &rig.carrier_entity(), /*org1=*/false, 4);
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+        CHECK((rig.object_entity().flags & kEntityFlagCarried) == 0);
+    }
+}
+
 // The entity update's own tail consumes the flag and bay touches its bodies'
 // movement resolves recorded, so the pickup lands in the frame that touched,
 // ahead of the next server tick. The handler returns at once off the
@@ -2258,6 +2282,7 @@ int main() {
     test_pickup_leg_scores_even_when_the_attach_refuses();
     test_bay_arm_alone_clears_a_defless_carried_link();
     test_flag_attach_in_session_sends_a_second_state();
+    test_player_body_death_edge_drops_what_it_carries();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();
