@@ -183,6 +183,9 @@ void HudFrameCompiler::reset_runtime_state() {
 	// The HUD init zeroes the EXPPOINTS fade (DFX2-36) [orig: HUD_InitOverlaySystem @0x5A3490
 	//  (dfx2.exe) - @0x5A372C..0x5A3764].
 	exp_fade_ = HudExpPointsFade{};
+	// A reloaded mission's replica counts its fanfare arms from 0 again: the next draw adopts the
+	// count anew, so every arm of the new mission starts its fade.
+	exp_fade_primed_ = false;
 	clear_message_rings();
 	draw_list_ = HudDrawList{};
 }

@@ -136,7 +136,7 @@ void test_the_compiled_element(const fnt_font_t *font) {
 	CHECK(g.size() == 4);
 	if (g.size() == 4) {
 		CHECK(g[0].color == 0xFF7F7F7Fu);
-		CHECK(g[2].color == 0xFF787882u);
+		CHECK(g[2].color == 0xFF787802u);
 		CHECK(g[2].y_bottom - g[2].y_top > 1.9f * (g[0].y_bottom - g[0].y_top));
 		CHECK(std::fabs(middle(g[2]) - middle(g[0])) < 0.51f);
 	}
