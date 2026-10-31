@@ -349,7 +349,7 @@ struct TitleRules {
 	// (world::ScriptVoiceChannel); a joiner's world plays its host's SSNwave remote command with it.
 	// [orig: Wac_PlayScriptedVoiceWave @0x4ED688, WacCmd_SsnWave @0x4F7989, WacCmd_SsnRadio @0x4F7A63 -
 	//  `imul 0D2h`]
-	// [orig: WacCmd_SsnWave @0x4F4A40; WacCmd_SsnRadio @0x4F4A90 (imul @0x4F4B20);
+	// [orig: WacCmd_SsnWave @0x4F49B0 (imul @0x4F4A40); WacCmd_SsnRadio @0x4F4A90 (imul @0x4F4B20);
 	//  Wac_PlayScriptedVoiceWave @0x4EA6F0 (imul @0x4EA745) - `imul 0F0h` (dfx2.exe)]
 	int32_t script_voice_volume = 210;
 
