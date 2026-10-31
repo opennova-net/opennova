@@ -614,7 +614,7 @@ opennova::inmatch::AdminConsole::Seams GameWorld::remote_admin_seams(const Ref<S
 	// GOTO MENUSTATE's close over the shell's in-game menu screen (engine inmatch/remote_admin.h
 	// ExitSite::AdminOverMenuScreen carries the witness).
 	seams.menu_screen_open = [this]() {
-		return menu_screen_probe_.is_valid() && bool(menu_screen_probe_.call());
+		return frontend_.is_valid() && frontend_->is_screen_open();
 	};
 	// The process's own client's HUD (a listen host, a joiner): CHAT GET reads its CHAT
 	// window and a refused CHAT SEND echoes into it (the HUD device, by its group).
@@ -1227,7 +1227,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_player_profiles", "profiles"), &GameWorld::set_player_profiles);
 	ClassDB::bind_method(D_METHOD("set_game_config", "block"), &GameWorld::set_game_config);
 	ClassDB::bind_method(D_METHOD("set_controls_model", "model"), &GameWorld::set_controls_model);
-	ClassDB::bind_method(D_METHOD("set_menu_screen_probe", "probe"), &GameWorld::set_menu_screen_probe);
+	ClassDB::bind_method(D_METHOD("set_frontend", "frontend"), &GameWorld::set_frontend);
 	ClassDB::bind_method(D_METHOD("set_restart_boot", "restart"), &GameWorld::set_restart_boot);
 	ClassDB::bind_method(D_METHOD("get_game_config"), &GameWorld::get_game_config);
 	ClassDB::bind_method(D_METHOD("on_nw_host_server_command", "verb", "target", "args"),

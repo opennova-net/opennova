@@ -113,7 +113,7 @@ struct RemoteAdminIdleFrame {
 // pump). GET GAMESTATE's "Unknown" reply is therefore never sent.
 // [orig: the two callers of CAdminServer_ProcessFrame, Game_ProcessMainFrame @0x5268F1 and
 //  Menu_UpdateFrame @0x552901 (no early return ahead of it); the PreMenu mode's update
-//  MultiPlayer_JoinSessionStateMachine @0x56A320 (its mode descriptor stru_83C9D0, pushed by
+//  MultiPlayer_JoinSessionStateMachine @0x56A320 (its mode descriptor g_GameModePreMenu, pushed by
 //  UI_HandleLANGameListEvent @0x556C35 and UI_HandleHostSessionStart @0x556EDC) and the Post
 //  Menu's PostMenu_RouteMissionExit @0x568460 call neither; GameLoop_Init's Game_StartMission(0)
 //  @0x526377; game.mnu opened by Input_HandleActionBinding @0x49B3B6; CAdminServer_HandleGet

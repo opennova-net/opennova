@@ -65,8 +65,6 @@ var _hovered := false
 var hovers := true
 var _zoom_blend := 0.0      # 0 at rest, damped toward 1 while hovered
 var _yaw_bam := 0           # the model's yaw, a signed 32-bit BAM word
-# The menu updates' frame-time bank (the engine's world::TickAccumulator).
-var _update_bank := TickAccumulator.new()
 var _menu_center := Vector3.ZERO
 var _menu_radius := 1.0
 var _menu_framed := false
@@ -372,7 +370,6 @@ func _frame_menu_pose(bounds: AABB) -> void:
 	# BAM (runtime/menu/player_info_avatars.h carries the witness); the motion
 	# in _process steps from this starting facing.
 	_yaw_bam = AvatarDatabase.preview_initial_yaw_bam()
-	_update_bank.reset()
 	_apply_yaw()
 	_menu_framed = true
 	_apply_menu_camera()  # initial pose; _process re-poses each frame with the zoom blend
@@ -401,17 +398,17 @@ func set_hovered(value: bool) -> void:
 
 # The PLAYER_INFO portrait animation [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0]:
 # the zoom blend toward the hover target, the yaw's rest spin or its hovered sway, once a
-# menu update.
-func _process(delta: float) -> void:
-	advance(delta)
+# menu update: the updates the game loop's one bank drained this frame (the engine
+# frontend's menu bank, GameFrontend.last_menu_updates).
+func _process(_delta: float) -> void:
+	advance(GameFrontend.last_menu_updates())
 	drawn.emit()
 
 
-## `delta` seconds of the portrait's motion (the _process body; tests drive it
-## directly): banked into the menu's fixed 62.5 Hz updates, each one step of the
-## blend and the yaw, as the game's loop runs its menu update on its drained
-## ticks (engine menu::player_info_preview_yaw_step).
-func advance(delta: float) -> void:
+## `updates` menu updates of the portrait's motion (the _process body; tests drive it
+## directly), each one step of the blend and the yaw (engine
+## menu::player_info_preview_yaw_step).
+func advance(updates: int) -> void:
 	if not _menu_framed:
 		return
 	# Hover by mouse-position-over-this-pane, not the PLAYER_PREVIEW widget's mouse_entered
@@ -428,9 +425,8 @@ func advance(delta: float) -> void:
 				_hovered = hov
 	# The zoom blend toward the hover, the yaw's rest spin or hovered sway, one
 	# step a drained update (engine menu::player_info_preview_blend_step /
-	# _yaw_step, D-PLAYERINFO-37), the updates the game loop's bank drains
-	# (engine world::TickAccumulator: its clamp, smoothing and 4 ms drain).
-	for _update in _update_bank.bank(delta):
+	# _yaw_step, D-PLAYERINFO-37).
+	for _update in updates:
 		_zoom_blend = AvatarDatabase.preview_blend_step(_zoom_blend, _hovered)
 		_yaw_bam = AvatarDatabase.preview_yaw_step(_yaw_bam, _hovered, Time.get_ticks_msec())
 	_apply_yaw()

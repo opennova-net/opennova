@@ -244,7 +244,7 @@ public:
 	// [orig: UI_ProcessLANSessionStateMachine @0x558de0 -
 	//  CNapiNetwork_DrainPendingDataTransfers @0x4C6E50 (the call @0x559341) stops the
 	//  enumerator alone; UI_HandleLANGameListEvent @0x556C70 - the PreMenu mode pushed @0x556C4E
-	//  (stru_83C9D0, whose frame is MultiPlayer_JoinSessionStateMachine @0x56A320);
+	//  (g_GameModePreMenu, whose frame is MultiPlayer_JoinSessionStateMachine @0x56A320);
 	//  Menu_UpdateFrame @0x5528A0 - UI_ProcessLANSessionStateMachine's one call @0x5528ED;
 	//  UI_EnumerateAndJoinSession @0x569F50 - off NovaWorld no pump ahead of the node walk
 	//  @0x56A118, the refusal's error arm @0x56A03B]

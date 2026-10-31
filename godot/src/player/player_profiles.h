@@ -114,16 +114,8 @@ public:
 	// avatar_b, avatar_packed} when non-empty, and a `kit` array to the page of
 	// `kit_class`. ERR_INVALID_PARAMETER for a snapshot the record cannot take.
 	Error apply_character_selection(const Dictionary &p_profile);
-
-	void record_mission_start(int p_campaign) { store_.record_mission_start(p_campaign); }
-	void begin_session() { store_.begin_session(); }
-	void clamp_session_classes() { store_.clamp_session_classes(); }
-	bool record_round_end(bool p_in_session, bool p_round_over, int p_campaign,
-			int p_campaign_mission, bool p_won) {
-		return store_.record_round_end(p_in_session, p_round_over, p_campaign,
-				p_campaign_mission, p_won);
-	}
-	void clear_intro_pending() { store_.clear_intro_pending(); }
+	// The mission start's and the round end's profile steps are the engine frontend's
+	// (frontend::Frontend, over native()).
 };
 
 } // namespace godot
