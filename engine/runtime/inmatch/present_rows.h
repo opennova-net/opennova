@@ -62,7 +62,9 @@ struct PresentRowsContext {
 	uint64_t *body_us = nullptr;
 	// The session's title and its Avatars.def registry (g_AvatarDefs): a player row's
 	// PF_CHARACTER_ID is the character its avatar blip names as the title's sector render draws
-	// it (drawn_player_character, DFX2-53). No title or no registry: the spawn's pick.
+	// it (drawn_player_character, DFX2-53). The embedder sets the title: a player row reads it
+	// through require_title, so a context with none aborts there, named. No registry: the spawn's
+	// pick.
 	const Title *title = nullptr;
 	const CharacterRegistry *characters = nullptr;
 };

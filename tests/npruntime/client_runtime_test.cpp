@@ -9088,7 +9088,7 @@ bool run_remote_slot_sound_sex_follows_the_drawn_character() {
                     for (const inmatch::CharacterEntry &entry : registry.entries())
                         world.tables.character_traits.set(entry.packed_id, entry.head_female);
                     inmatch::install_viewer_side_pick(world.tables.character_traits,
-                            opennova::title_by_code(code), with_registry ? &registry : nullptr);
+                            *opennova::title_by_code(code), with_registry ? &registry : nullptr);
                     if (with_local) {
                         world.registry.configure_pool(0, 4);
                         w::Entity local;

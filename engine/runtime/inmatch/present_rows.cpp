@@ -400,7 +400,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 		// A player's character as the local player's view draws it (DFX2-53): the viewer is
 		// L, the local body, its Team kept by the team assign (JoinerRole::store_local_team).
 		if (es.cls == EntityClass::Player)
-			r[PF_CHARACTER_ID] = static_cast<float>(drawn_player_character(context.title,
+			r[PF_CHARACTER_ID] = static_cast<float>(drawn_player_character(
+					require_title(context.title, "build_client_replica_present_rows"),
 					context.characters, es.net_id, local_player != nullptr,
 					es.team_known ? es.team : uint8_t{0},
 					local_player != nullptr ? local_player->team : uint8_t{0}));
@@ -814,7 +815,8 @@ static void write_world_present_row(const PresentRowsContext &context,
 	if (cls == EntityClass::Player) {
 		// A player's wire net_id IS its packed character id (entity+0x15C), the spawn's pick;
 		// the row carries the one its avatar blip names as the local view draws it (DFX2-53).
-		r[PF_CHARACTER_ID] = static_cast<float>(drawn_player_character(context.title,
+		r[PF_CHARACTER_ID] = static_cast<float>(drawn_player_character(
+				require_title(context.title, "build_world_present_rows"),
 				context.characters, replication::player_wire_net_id(e), local_player != nullptr,
 				e.team, local_player != nullptr ? local_player->team : uint8_t{0}));
 	}

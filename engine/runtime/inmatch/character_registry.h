@@ -116,7 +116,7 @@ PlayerVisualSpec resolve_player_visual_spec(const opennova::avatars::AvatarsFile
 //  @0x5C6EEE..0x5C6F00, CAvatarDefs_PackFirstComboOfAlignment @0x5C6F0A (0 without a local
 //  player @0x5C6F25), CAvatarDefs_FindOrAllocCharacterBlip into +0x3C @0x5C6F3D;
 //  CAvatarDefs_PackFirstComboOfAlignment @0x5791C0 (dfx2.exe)]
-uint16_t drawn_player_character(const Title *title, const CharacterRegistry *registry,
+uint16_t drawn_player_character(const Title &title, const CharacterRegistry *registry,
 		uint16_t net_id, bool viewer, uint8_t team, uint8_t viewer_team);
 
 // DFX2-53, the local player: the character its own avatar blip names, which its body draws (third
@@ -131,7 +131,7 @@ uint16_t drawn_player_character(const Title *title, const CharacterRegistry *reg
 //  Player_RenderFirstPersonViewModel @0x4DBE00 - the arms from g_LocalPlayerEntity+0x3C +8
 //  @0x4DC08F..0x4DC0A8 / @0x4DC0FF..0x4DC110 (dfx2.exe)] [orig: Player_RenderFirstPersonViewModel
 //  @0x4DED60 - the same reads @0x4DEFEF / @0x4DF05F]
-uint16_t drawn_local_player_character(const Title *title, const CharacterRegistry *registry,
+uint16_t drawn_local_player_character(const Title &title, const CharacterRegistry *registry,
 		uint16_t net_id);
 
 // DFX2-53, the profile sounds: Entity_GetProfileSlotSound takes a player's female profile by the
@@ -142,7 +142,7 @@ uint16_t drawn_local_player_character(const Title *title, const CharacterRegistr
 // [orig: Entity_GetProfileSlotSound @0x525490 - the blip @0x52549F, its sex byte @0x5254AC;
 //  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - the blip stored @0x5C6F3D..0x5C6F42 (dfx2.exe)]
 //  [orig: Entity_GetProfileSlotSound @0x528300 - @0x52830F / @0x52831C]
-void install_viewer_side_pick(world::CharacterTraitsTable &traits, const Title *title,
+void install_viewer_side_pick(world::CharacterTraitsTable &traits, const Title &title,
 		const CharacterRegistry *registry);
 
 } // namespace opennova::inmatch

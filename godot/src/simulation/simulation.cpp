@@ -455,7 +455,7 @@ void Simulation::apply_character_traits_to_world() {
 	// The session title's avatar pick, whose sex the profile sounds take (engine
 	// inmatch::install_viewer_side_pick, DFX2-53).
 	opennova::inmatch::install_viewer_side_pick(kernel_->world.tables.character_traits,
-			&session_title(net_, assets_.root),
+			session_title(net_, assets_.root),
 			assets_.character_registry_mounted ? &assets_.character_registry : nullptr);
 }
 

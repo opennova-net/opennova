@@ -118,24 +118,23 @@ const CharacterEntry *CharacterRegistry::find_by_indices(int nationality_index,
 	return nullptr;
 }
 
-uint16_t drawn_player_character(const Title *title, const CharacterRegistry *registry,
+uint16_t drawn_player_character(const Title &title, const CharacterRegistry *registry,
 		uint16_t net_id, bool viewer, uint8_t team, uint8_t viewer_team) {
-	if (title == nullptr || !title->player_avatar_by_viewer_side || registry == nullptr)
+	if (!title.player_avatar_by_viewer_side || registry == nullptr)
 		return net_id;
 	return registry->first_character_id(
 			viewer && team != viewer_team ? AVATAR_ALIGN_EVIL : AVATAR_ALIGN_GOOD);
 }
 
-uint16_t drawn_local_player_character(const Title *title, const CharacterRegistry *registry,
+uint16_t drawn_local_player_character(const Title &title, const CharacterRegistry *registry,
 		uint16_t net_id) {
 	// Its Team is the viewer's own.
 	return drawn_player_character(title, registry, net_id, true, 0, 0);
 }
 
-void install_viewer_side_pick(world::CharacterTraitsTable &traits, const Title *title,
+void install_viewer_side_pick(world::CharacterTraitsTable &traits, const Title &title,
 		const CharacterRegistry *registry) {
-	traits.by_viewer_side =
-			title != nullptr && title->player_avatar_by_viewer_side && registry != nullptr;
+	traits.by_viewer_side = title.player_avatar_by_viewer_side && registry != nullptr;
 	traits.side_first[0] =
 			traits.by_viewer_side ? registry->first_character_id(AVATAR_ALIGN_GOOD) : uint16_t{0};
 	traits.side_first[1] =

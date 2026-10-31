@@ -358,7 +358,7 @@ int Simulation::get_local_player_character_id() const {
 			assets_.character_registry_mounted ? &assets_.character_registry : nullptr;
 	const auto drawn = [&](uint16_t net_id) {
 		return static_cast<int>(opennova::inmatch::drawn_local_player_character(
-				&session_title(net_, assets_.root), characters, net_id));
+				session_title(net_, assets_.root), characters, net_id));
 	};
 	if (kernel_ && kernel_->world.cached.local_player.valid()) {
 		const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);

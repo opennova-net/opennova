@@ -131,40 +131,38 @@ int main() {
 		check(jo != nullptr && dfx2 != nullptr && ag != nullptr && dfx2->player_avatar_by_viewer_side &&
 						!jo->player_avatar_by_viewer_side && !ag->player_avatar_by_viewer_side,
 				"the per-frame pick is dfx2.exe's");
-		check(drawn_player_character(jo, &registry, 0x0400, true, 2, 1) == 0x0400,
+		check(drawn_player_character(*jo, &registry, 0x0400, true, 2, 1) == 0x0400,
 				"Jointops.exe draws the spawn's id");
-		check(drawn_player_character(nullptr, &registry, 0x0400, true, 2, 1) == 0x0400,
-				"no title draws the spawn's id");
-		check(drawn_player_character(dfx2, &registry, 0x0400, true, 1, 1) == 0x0200,
+		check(drawn_player_character(*dfx2, &registry, 0x0400, true, 1, 1) == 0x0200,
 				"a teammate draws as the first good combo");
-		check(drawn_player_character(dfx2, &registry, 0x0400, true, 2, 1) == 0x8207,
+		check(drawn_player_character(*dfx2, &registry, 0x0400, true, 2, 1) == 0x8207,
 				"another team's player draws as the first evil combo");
-		check(drawn_player_character(dfx2, &registry, 0x8207, true, 2, 2) == 0x0200,
+		check(drawn_player_character(*dfx2, &registry, 0x8207, true, 2, 2) == 0x0200,
 				"the side is the viewer's, not the team's");
-		check(drawn_player_character(dfx2, &registry, 0x8207, false, 2, 1) == 0x0200,
+		check(drawn_player_character(*dfx2, &registry, 0x8207, false, 2, 1) == 0x0200,
 				"no viewer draws everyone good");
-		check(drawn_player_character(dfx2, nullptr, 0x8207, true, 2, 1) == 0x8207,
+		check(drawn_player_character(*dfx2, nullptr, 0x8207, true, 2, 1) == 0x8207,
 				"no registry passes the id through");
 		// The local player is its own viewer: its body and first-person arms draw as the good
 		// side's first combo, an evil (and female) spawn's id included; Jointops.exe's keep the id.
 		// [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EEE..0x5C6F00;
 		//  Player_RenderFirstPersonViewModel @0x4DBE00 - @0x4DC08F (dfx2.exe)]
-		check(drawn_local_player_character(dfx2, &registry, 0x8207) == 0x0200,
+		check(drawn_local_player_character(*dfx2, &registry, 0x8207) == 0x0200,
 				"an evil local player draws as the first good combo");
-		check(drawn_local_player_character(dfx2, &registry, 0x0400) == 0x0200,
+		check(drawn_local_player_character(*dfx2, &registry, 0x0400) == 0x0200,
 				"a good local player draws as the first good combo");
-		check(drawn_local_player_character(jo, &registry, 0x8207) == 0x8207,
+		check(drawn_local_player_character(*jo, &registry, 0x8207) == 0x8207,
 				"Jointops.exe's local player draws its spawn's id");
-		check(drawn_local_player_character(ag, &registry, 0x8207) == 0x8207,
+		check(drawn_local_player_character(*ag, &registry, 0x8207) == 0x8207,
 				"Acid Gambit's local player draws its spawn's id");
-		check(drawn_local_player_character(dfx2, nullptr, 0x8207) == 0x8207,
+		check(drawn_local_player_character(*dfx2, nullptr, 0x8207) == 0x8207,
 				"no registry passes the local id through");
 		// The profile sounds read the sex off the same blip: the world's traits carry the pick,
 		// each side's first combo under dfx2.exe's title alone, and pick as drawn_player_character.
 		// [orig: Entity_GetProfileSlotSound @0x525490 - the blip @0x52549F, its sex byte
 		//  @0x5254AC (dfx2.exe)]
 		opennova::world::CharacterTraitsTable traits;
-		install_viewer_side_pick(traits, dfx2, &registry);
+		install_viewer_side_pick(traits, *dfx2, &registry);
 		check(traits.by_viewer_side && traits.side_first[0] == 0x0200 &&
 						traits.side_first[1] == 0x8207,
 				"dfx2.exe's traits hold the first good and the first evil combo");
@@ -173,12 +171,12 @@ int main() {
 			for (const bool viewer : {false, true})
 				for (const uint8_t team : {uint8_t{1}, uint8_t{2}})
 					agree = agree && traits.drawn_character(id, viewer, team, 1) ==
-							drawn_player_character(dfx2, &registry, id, viewer, team, 1);
+							drawn_player_character(*dfx2, &registry, id, viewer, team, 1);
 		check(agree, "the traits' pick is drawn_player_character's");
-		install_viewer_side_pick(traits, jo, &registry);
+		install_viewer_side_pick(traits, *jo, &registry);
 		check(!traits.by_viewer_side && traits.drawn_character(0x0400, true, 2, 1) == 0x0400,
 				"Jointops.exe's traits keep the spawn's id");
-		install_viewer_side_pick(traits, dfx2, nullptr);
+		install_viewer_side_pick(traits, *dfx2, nullptr);
 		check(!traits.by_viewer_side && traits.drawn_character(0x8207, true, 1, 1) == 0x8207,
 				"no registry keeps the spawn's id");
 	}
