@@ -1293,9 +1293,9 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
 // no feed), so the mission's GroupHoldingGroup reads it at once.
 // [orig: Entity_ProcessWaypointInteraction @0x4AD85B..0x4AD883 ->
 //  Entity_TryAttachCarriedObject @0x43C1F0 -> Entity_AttachCarriedObject
-//  @0x43C130 (the SPGOAL_PU play @0x43C174..0x43C17E); @0x4AD8BB..0x4AD8D8 ->
-//  @0x43BFF0 -> @0x43BF30 (dfx2.exe); TriggerGroup_AnyMemberHoldingItemGroup
-//  @0x43c870]
+//  @0x43C130 (the SPGOAL_PU play @0x43C174..0x43C17E);
+//  TriggerGroup_AnyMemberHoldingItemGroup @0x43c870]
+// [orig: the twin's @0x4AD8BB..0x4AD8D8 -> @0x43BFF0 -> @0x43BF30 (dfx2.exe)]
 struct TakeableRig {
     static constexpr int32_t kTakeableId = 9001; // an authored non-flag def
     std::unique_ptr<World> world = std::make_unique<World>();
@@ -1690,8 +1690,8 @@ void test_flag_attach_in_session_sends_a_second_state() {
 
 // A Player body's death edge lets go of what it carries on every peer, past the
 // round's end too: the drop at the edge has no gate.
-// [orig: Entity_UpdateInfantryPlayerBody - Entity_DropCarriedObject @0x4B4D0D;
-//  @0x4B4D6D (dfx2.exe)]
+// [orig: Entity_UpdateInfantryPlayerBody - Entity_DropCarriedObject @0x4B4D0D]
+// [orig: the twin's @0x4B4D6D (dfx2.exe)]
 void test_player_body_death_edge_drops_what_it_carries() {
     for (const bool authority : {true, false}) {
         TakeableRig rig;

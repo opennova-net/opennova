@@ -591,8 +591,8 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     // [orig: Entity_ProcessWaypointInteraction - Entity_TryAttachCarriedObject
     //  @0x4AD944 (@0x43C1F0: the def @0x43C1F4, +0x170 @0x43C20C),
     //  Server_DispatchScoringEvent @0x4AD94B (@0x50C910: GameEvent_ProcessScoring
-    //  event 10 @0x50C938), `mov [esi+124h], 0` @0x4AD955; @0x4AD9A4..0x4AD9B5
-    //  (dfx2.exe)]
+    //  event 10 @0x50C938), `mov [esi+124h], 0` @0x4AD955]
+    // [orig: the twin's @0x4AD9A4..0x4AD9B5 (dfx2.exe)]
     if (flag->has_item_def && !flag->primary_occupant.valid())
         attach_carried_object(world, *carrier, *flag);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
@@ -611,8 +611,9 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
 //  non-flag Sound_PlayAtPosition(dword_24E098C, &carrier->Position)
 //  @0x43C174..0x43C17E; dword_24E098C is registry row 58 "SPGOAL_PU" @0x82FDB8
 //  (its pointer @0x82FDD8), resolved by DialogSystem_Init @0x5275E0 (the store
-//  @0x5276C0); Entity_AttachCarriedObject @0x43BF30, the sound
-//  @0x43BF74..0x43BF7E, row @0x82E510, DialogSystem_Init @0x524770 (dfx2.exe)]
+//  @0x5276C0)]
+// [orig: Entity_AttachCarriedObject @0x43BF30, the sound @0x43BF74..0x43BF7E,
+//  row @0x82E510, DialogSystem_Init @0x524770 (dfx2.exe)]
 void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried) {
     if (!carried.has_item_def)
         return;
@@ -650,7 +651,7 @@ void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried
     // [orig: Entity_AttachCarriedObject - the authority / session tests
     //  @0x43C19F / @0x43C1A8, g_FlagReturnTime2 against 5 @0x43C1B1..0x43C1B9,
     //  the +0x2A4 stores @0x43C1BC / @0x43C1CE, Server_SendDestructibleDeathPacket
-    //  @0x43C1C2; @0x43BF9F..0x43BFCE (dfx2.exe)]
+    //  @0x43C1C2] [orig: the twin's @0x43BF9F..0x43BFCE (dfx2.exe)]
     if (!world.rules.logic_authority || !world.rules.mp_session)
         return;
     if (CarryObjectiveState *state = carry_state(world, carried.handle))
@@ -920,8 +921,8 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
     // only a flag has a return window.
     // [orig: Entity_DropCarriedObject - the authority / session tests
     //  @0x439F29 / @0x439F31, the call @0x439F34; Server_SendDestructibleDeathPacket
-    //  @0x50D900 - the 4091/4093/4095 tests @0x50D90A..0x50D920; @0x50AABA..0x50AAD0
-    //  (dfx2.exe)]
+    //  @0x50D900 - the 4091/4093/4095 tests @0x50D90A..0x50D920]
+    // [orig: the sender's tests @0x50AABA..0x50AAD0 (dfx2.exe)]
     if (!flag_row)
         return;
     // The dropped-flag service re-arms the return window whenever the flag is
@@ -1860,8 +1861,8 @@ void Match::update_flag_objectives(World &world) {
         // The handler's head: the moving order, a target, a live toucher (the
         // authority test is the caller's, World::update_all_entities).
         // [orig: Entity_ProcessWaypointInteraction @0x4AD820 - MoveOrder & 8
-        //  @0x4AD834, the target @0x4AD846, Flags & 2 @0x4AD853; the same at
-        //  @0x4AD894..0x4AD8B5 (dfx2.exe)]
+        //  @0x4AD834, the target @0x4AD846, Flags & 2 @0x4AD853]
+        // [orig: the twin's @0x4AD894..0x4AD8B5 (dfx2.exe)]
         if (carrier == nullptr || !move_callback ||
             (carrier->flags & kEntityFlagDead) != 0 ||
             (carrier->net_move_input & Entity::kMoveOrderMoving) == 0)
@@ -1879,7 +1880,8 @@ void Match::update_flag_objectives(World &world) {
         //  Entity_TryAttachCarriedObject @0x4AD878 and the return @0x4AD883;
         //  Entity_TryAttachCarriedObject @0x43C1F0 - the def @0x43C1F4, the
         //  session/authority @0x43C1FA..0x43C20A, +0x170 @0x43C20C, the attach
-        //  @0x43C219; the same at @0x4AD8BB..0x4AD8D8 -> @0x43BFF0 (dfx2.exe)]
+        //  @0x43C219]
+        // [orig: the twin's @0x4AD8BB..0x4AD8D8 -> @0x43BFF0 (dfx2.exe)]
         if (player_class && !carrier->mounted_child.valid() &&
             (target->item_attrib & kItemAttribTakeable) != 0) {
             if (!target->primary_occupant.valid())
@@ -1901,14 +1903,17 @@ void Match::update_flag_objectives(World &world) {
         // 0x15 feed at the flag's words as the touch found them, scorer event 8
         // and a second 0x2F.
         // [orig: Entity_ProcessWaypointInteraction - 4091 @0x4AD8E9..0x4AD912,
-        //  4093 @0x4AD8A1..0x4AD8CD (the flag's +4/+8/+C read @0x4AD8B5..0x4AD8BB
-        //  ahead of the sync @0x4AD8C3), Server_BroadcastFlagSaveEvent
-        //  @0x4AD8DC; the pickup leg's +0x268 test @0x4AD936 is the only one;
-        //  @0x4AD949..0x4AD972 / @0x4AD903..0x4AD933 (dfx2.exe);
-        //  Entity_SyncPositionFromDefinition @0x43A9B0 - the pose @0x43A9F8,
-        //  the near 0x2F @0x43AA6B, the snap's @0x43AB40;
+        //  4093 @0x4AD8A1 (its team test @0x4AD8A3..0x4AD8CD; the flag's +4/+8/+C
+        //  read @0x4AD8B5..0x4AD8BB ahead of the sync @0x4AD8C3; the save's
+        //  arguments @0x4AD8D3), Server_BroadcastFlagSaveEvent @0x4AD8DC; the
+        //  pickup leg's +0x268 test @0x4AD936 is the only one;
+        //  Entity_SyncPositionFromDefinition @0x43A9B0 - the pose @0x43A9F8, the
+        //  0x20000 tests @0x43AA3B / @0x43AA4D, the near 0x2F @0x43AA6B, the
+        //  snap's @0x43AB40 and its return 1 @0x43A9BE;
         //  Server_BroadcastFlagSaveEvent @0x517A90 - 0x15 @0x517AED, event 8
         //  @0x517B03, 0x2F @0x517B09]
+        // [orig: the twin's arms @0x4AD949..0x4AD972 / @0x4AD903..0x4AD933
+        //  (dfx2.exe)]
         const bool own_flag =
             (carrier->team == 1 && target->item_id == kBlueFlag) ||
             (carrier->team == 2 && target->item_id == kRedFlag);
@@ -1931,8 +1936,8 @@ void Match::update_flag_objectives(World &world) {
         // [orig: Entity_ProcessWaypointInteraction — 4098 @0x4AD95E..0x4AD9A2
         // (the Flag Me OR @0x4AD966..0x4AD976), 4100 @0x4AD9A6..0x4AD9D2,
         // 4102 @0x4AD9E3, 4103 @0x4AD9D6; the def tests @0x4AD98F / @0x4AD9BF /
-        // @0x4AD9FD to the clears @0x4AD9FF / @0x4ADA07; capture @0x4ADA19;
-        // the same @0x4AD9D6..0x4ADA79 (dfx2.exe)]
+        // @0x4AD9FD to the clears @0x4AD9FF / @0x4ADA07; capture @0x4ADA19]
+        // [orig: the twin's arms @0x4AD9D6..0x4ADA79 (dfx2.exe)]
         if (carrier->mounted_child.valid()) {
             const int32_t bay = target->item_id;
             const bool bay_team =

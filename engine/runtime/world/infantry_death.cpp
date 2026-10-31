@@ -194,7 +194,7 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
         // already unless it stopped short of its drop (Match::record_death's
         // round-over return).
         // [orig: Entity_UpdateInfantryPlayerBody - Entity_DropCarriedObject
-        //  @0x4B4D0D, no gate; @0x4B4D6D (dfx2.exe)]
+        //  @0x4B4D0D, no gate] [orig: the twin's @0x4B4D6D (dfx2.exe)]
         world.match.drop_carried_object(world, body);
         return;
     }
