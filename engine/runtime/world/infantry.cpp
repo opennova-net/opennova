@@ -1754,6 +1754,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                         (flags & kEntityFlagParachute);
                 tick_entity->engine_flags = (tick_entity->engine_flags & ~kEntityFlagParachute) |
                         (flags & kEntityFlagParachute);
+                // An open canopy holds the body in "parachute" (47) every tick, in both titles
+                // whatever opened it (DFX2-111 changes only the trigger).
+                // [orig: Entity_UpdateInfantryPlayerBody `mov dword ptr [esi+2BCh], 2Fh`
+                //  @0x4B7BAA; g_AnimStateNameTable @0x8135F0 [47] "parachute"]
+                // [orig: the twin @0x4B4140 - @0x4B7C85; g_AnimStateNameTable @0x8125F0 [47]
+                //  "parachute" (dfx2.exe)]
                 if ((flags & kEntityFlagParachute) != 0 && inf.anim_state != anim_state::kParachute)
                     inf.request_body_animation(anim_state::kParachute);
                 if (events.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.self->position.words().data());

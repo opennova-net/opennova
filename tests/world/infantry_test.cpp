@@ -6585,6 +6585,10 @@ int main() {
             CHECK(deployed == (dfx2 ? !carried : carried));
             // Jointops.exe's open spends the carried bit; dfx2.exe's leaves it.
             if (carried) CHECK(((live.carry_flags & 0x10u) != 0) == dfx2);
+            // Either title's open canopy puts the body in "parachute" (47): both arms store it.
+            // [orig: Entity_UpdateInfantryPlayerBody @0x4B7BAA] [orig: the twin @0x4B4140 -
+            //  @0x4B7C85 (dfx2.exe)]
+            if (deployed) CHECK(e->inf.anim_state == anim_state::kParachute);
         }
     }
 
