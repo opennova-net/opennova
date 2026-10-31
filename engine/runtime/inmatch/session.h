@@ -378,7 +378,11 @@ struct FrameOutcome {
 	// still runs; its facial passes, its Inset pass and its HUD pass do not. The session
 	// stamps it into the local view (world::PlayerViewState::world_skipped)
 	// [orig: Render_ProcessMainSceneFrame @0x5CA171..0x5CA190 (ebx); the skips
-	//  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640 -> loc_5CAD2D].
+	//  @0x5CA4EA..0x5CA4EC and @0x5CA620..0x5CA640 -> loc_5CAD2D]. The world block's sector
+	// walk is where each drawn model's runtime constants evaluate (its PANM registers and
+	// material generators), after the frame's collect and ahead of the particle composite, so
+	// a skipped world submits no model and evaluates none [orig: Terrain_RenderSectorModels
+	// @ 0x5c5d30 computes model runtime constants during the render sector walk].
 	bool world_skipped = false;
 	// The drawn scene frame calls its HUD pass (Session::hud_pass_called, the call site's gates:
 	// not past the world skip, a death.mnu trigger or the latch, the F1 help, the dead bit, a
@@ -828,7 +832,11 @@ public:
 	// bank: retail's pause word gates the update's legs, never the main loop's bank
 	// (world::TickAccumulator); the pending one-shots drop, as nothing consumes a
 	// queued event under the menu and its close resets the queue. The pause row's
-	// own flip applies inside the update that reads it (run_updates).
+	// own flip applies inside the update that reads it (run_updates). Single player
+	// alone pauses: a network role's escape menu overlays a running match, which keeps
+	// ticking, as a silent peer is reaped past the transport's connection window
+	// [orig: the pause path has no MP leg; the reaping side is cs_dir0.timeout_ms =
+	// 120000, CNapiNetwork_Init @0x4ca4a0].
 	TransitionResult pause();
 	TransitionResult resume();
 	TransitionResult close();

@@ -1016,8 +1016,9 @@ void GameWorld::_bind_methods() {
 	// A pick-required join reached the player-paced deployment stage: the
 	// host granted the loadouts and holds this player respawn-pending until a
 	// deploy pick. The shell opens the DEATH deploy screen; the join watchdog
-	// has stopped (everything past this point is player-paced). [orig: 0x0A
-	// flags1 bit1 -> the DEATH screen; net-re 5.61]
+	// has stopped (everything past this point is player-paced). The 0x0A's flags1
+	// bit 1 raises it (engine replication ClientState::deploy_overlay_active carries
+	// the witness, net-re 5.61).
 	ADD_SIGNAL(MethodInfo(kSignalJoinDeployPickRequired));
 	// An ESTABLISHED in-match session went silent past the witnessed
 	// connection reap window (JO cs_dir0.timeout_ms = 120000 ms). Retail does

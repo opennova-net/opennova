@@ -25,7 +25,10 @@ struct LoadingBackground {
 // [orig: Render_LoadingScreen -- the sidecar name @0x521dab, the probe
 //  FileSystem_FileExists @0x521db5, g_LoadScreenHasCustomBg = 1 @0x521e92..0x521e94;
 //  the miss clears it @0x521dcc and takes "loadscrn.pcx" @0x521e20 (both arms of
-//  the g_MissionExitReason == 8 test end there)].
+//  the g_MissionExitReason == 8 test end there)]. An image that does not load
+// composites nothing: the screen returns with no background and no text, so its
+// presents show the clear alone [orig: Render_LoadingScreen @ 0x521eb0 - the miss
+// jz @0x521eb1 to the epilogue @0x522184].
 LoadingBackground loading_background(const std::string &mission_file,
 		const std::function<bool(const std::string &)> &file_exists);
 

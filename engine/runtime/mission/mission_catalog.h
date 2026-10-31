@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <base/title/title.h> // MissionListOrder (the title's catalog order)
+#include <base/vfs/vfs.h> // VfsLookupPolicy (bms_lookup)
 
 namespace opennova {
 class ResourceIndex;
@@ -73,6 +74,15 @@ struct Row {
 	uint8_t mission_type = 0;
 	CampaignWords campaign;
 };
+
+// The lookup a mission start reads its .bms through, by its row's source: a loose find from
+// disk, an archive row from the archives alone, past the /d loose override either way
+// [orig: Game_StartMission @0x524769..0x524774 passes g_MapFileName and g_MissionSourceIsLoose
+//  to the BMS load; Mission_LoadBMSFromPFF @ 0x40d43c (archive-only); Mission_LoadBMSFile
+//  @0x40F51A..0x40F527 fopens a loose one].
+inline VfsLookupPolicy bms_lookup(bool source_is_loose) {
+	return source_is_loose ? VfsLookupPolicy::ForceLooseFirst : VfsLookupPolicy::ForceArchiveOnly;
+}
 
 // Build the catalog from the mounted install, in retail's walk: the loose
 // `.bms` files first (flagged loose, titled only from a `.bin` loose in the

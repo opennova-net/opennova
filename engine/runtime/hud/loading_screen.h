@@ -342,6 +342,10 @@ inline SplashArrowSize splash_arrow_size(int art_w, int art_h, int surface_w, in
 // WindowProc's button bits, g_MouseState.rawWParam @ 0x3342e50) and the key queue @ 0x520a2d,
 // Input_DequeueKeyEvent @ 0x520a36, the loop's draw @ 0x520993-0x520a28,
 // the closing present @ 0x520a48-0x520a79; the caller's release @ 0x525d45].
+// The raise's device legs, the embedder's: the cursor callback detaches, as the
+// splash draws the arrow itself, the OS cursor back at the release [orig:
+// Mouse_SetCallback(0) @ 0x520862]; and the kSplashSoundSet one-shot plays once,
+// fire and forget [orig: Sound_PlayInterfaceTriggerSet @ 0x5208fd].
 class StartMissionSplash {
 public:
 	enum class State : uint8_t { kNone, kActive, kClosing };

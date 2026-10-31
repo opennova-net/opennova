@@ -155,6 +155,11 @@ int main() {
 	using opennova::bms::AttribFlags;
 	namespace catalog = opennova::mission_catalog;
 
+	// A mission start reads a loose row's .bms from disk and an archive row's from the
+	// archives alone, past the /d override [orig: Mission_LoadBMSFromPFF @ 0x40d43c].
+	TEST_EXPECT(catalog::bms_lookup(false) == opennova::VfsLookupPolicy::ForceArchiveOnly);
+	TEST_EXPECT(catalog::bms_lookup(true) == opennova::VfsLookupPolicy::ForceLooseFirst);
+
 	{
 		// The high-score table (entry+0x11E4): every row 0, then hiscore.txt's lines set every row
 		// whose file is the first token, without case, to the second read as an unsigned decimal

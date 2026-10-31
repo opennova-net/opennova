@@ -106,8 +106,8 @@ void GameWorld::route_round_impacts() {
 					static_cast<int64_t>(row.source_order), row.section_tagged);
 		}
 		// The light_impact flash rides the effect leg's own gate (the row only
-		// carries light fields when the ammo authors it and the effect presents)
-		// [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3].
+		// carries light fields when the ammo authors it and the effect presents;
+		// engine renderer/light_scene.h carries the impact flash's witness).
 		if (light_director_.is_valid() && row.has_light) {
 			light_director_->on_impact_light(pos, row.light_radius,
 					opennova::color_from_rgb24(row.light_color_rgb24), row.light_ticks);
@@ -196,9 +196,8 @@ void GameWorld::on_runtime_fixed_tick(int p_logic_tick) {
 	if (MissionAudio *audio = get_mission_audio()) {
 		audio->advance_dialog_tick();
 	}
-	// The light-pool lifecycle decay + the light_move round-glow follow, on
-	// the witnessed 62 Hz cadence [orig: EffectWorld_TickInstancesAndLightScale
-	// @ 0x5aa170 from Game_ProcessMainFrame; the round follow @ 0x4eaa9f].
+	// The light-pool lifecycle decay + the light_move round-glow follow, once a
+	// logic tick (engine renderer/light_scene.h carries both witnesses).
 	if (light_director_.is_valid()) {
 		light_director_->advance_fixed_tick();
 		Ref<Simulation> glow_sim = get_sim();

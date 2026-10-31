@@ -792,15 +792,12 @@ bool Server::read_host_file(std::string &error) {
 bool Server::boot_mission(bool next_mission, std::string &error) {
 	const inmatch::MissionRotation &list = rotation_.list;
 	// The map is the rotation's output, loaded from disk when its catalog row
-	// is a loose find and from the archives otherwise
-	// [orig: Game_StartMission @0x524769..0x524774 passes g_MapFileName and
-	//  g_MissionSourceIsLoose to the BMS load; Mission_LoadBMSFile
-	//  @0x40F51A..0x40F527 fopens a loose one].
+	// is a loose find and from the archives otherwise (mission_catalog::bms_lookup
+	// carries the witness).
 	const std::string map_file = list.map_file;
 	std::vector<uint8_t> bms_bytes;
 	if (!index_.read_file(map_file, bms_bytes,
-				list.map_source_is_loose ? VfsLookupPolicy::ForceLooseFirst
-										 : VfsLookupPolicy::ForceArchiveOnly)) {
+				mission_catalog::bms_lookup(list.map_source_is_loose))) {
 		error = "the mission '" + map_file + "' does not read";
 		return false;
 	}

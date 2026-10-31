@@ -258,6 +258,8 @@ public:
 	// The effect catalog's files in parse order, less the names the archives carry only
 	// stamped 0 (engine ResourceIndex::effect_files owns the witness, D-VFS-13).
 	PackedStringArray effect_files() const;
+	// The engine's per-call source policy as the root's (an engine rule's lookup).
+	static LookupPolicy from_vfs_lookup_policy(opennova::VfsLookupPolicy p_policy);
 	// Runtime roots honor the retail per-call source policy. Loose roots resolve
 	// only flat loose files for every policy value.
 	bool has_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;

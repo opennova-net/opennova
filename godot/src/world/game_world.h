@@ -373,9 +373,8 @@ public:
 	// in-game menu: the world tick is the only pump for the session socket,
 	// so freezing it silences the connection and a peer eventually drops us
 	// on its connection timeout. Retail multiplayer cannot pause at all -- the
-	// ESC menu overlays a running match [orig: the pause path has no MP leg;
-	// the reaping side is cs_dir0.timeout_ms = 120000, CNapiNetwork_Init
-	// @0x4ca4a0].
+	// ESC menu overlays a running match (engine inmatch::Session::pause carries
+	// the witness).
 	bool is_net_session() const;
 	// The shell's ESC-pause session leg: the engine session pauses and resumes
 	// WITH the shell's pause overlay, so the paused state is a session fact
@@ -674,8 +673,8 @@ public:
 	// The equipped weapon's HUD slice (error table, HUDCLIPGFX/HUDRNDGFX,
 	// clipsize, name), decoded from the resolved weapon.def row at this edge
 	// (ADR 0017) -- the HUD reads it per frame, mirroring the original HUD info
-	// struct's weapon-def pointer [orig: HUD_BuildEntityInfo @0x4b8561 ->
-	// hudInfo+552]. Null until a weapon resolves.
+	// struct's weapon-def pointer (engine hud/hud_entity_info.h carries the
+	// witness). Null until a weapon resolves.
 	Ref<PlayerHudWeaponDef> local_player_hud_weapon_def() const;
 	Ref<PlayerWeaponView> local_player_weapon_view() const;
 	TypedArray<PlayerWeaponEvent> drain_local_player_weapon_events();

@@ -30,6 +30,7 @@
 
 #include <runtime/environment/water_mirror.h>
 #include <runtime/renderer/scene_pass_gates.h>
+#include <runtime/world/occlusion_camera.h> // frame_blink_letters
 
 using namespace godot;
 
@@ -149,17 +150,16 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 	if (s == nullptr) {
 		return {};
 	}
-	// The mission force-indoors attribute ORs the indoors letter into the frame
-	// view for BOTH consumers, matching run_occlusion_frame's camera input
-	// [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8 -> accum |= 2].
-	const int flags = s->local_player_blink_flags() |
-			(p_forces_indoors ? static_cast<int>(Simulation::BLINK_INDOORS) : 0);
+	// The frame's letter view, the one the collect's camera reads too (engine
+	// world::frame_blink_letters carries the witness).
+	const uint32_t flags = opennova::world::frame_blink_letters(
+			static_cast<uint32_t>(s->local_player_blink_flags()), p_forces_indoors);
 	// The letters latch per sim tick; the pass gates combine them with the
 	// eye's waterline side every display frame (apply_scene_pass_gates).
 	const opennova::renderer::ScenePassGateEdges edges =
-			opennova::renderer::scene_pass_gate_edges(blink_letters_, static_cast<uint32_t>(flags));
-	blink_letters_ = static_cast<uint32_t>(flags);
-	blink_indoors_ = (flags & static_cast<int>(Simulation::BLINK_INDOORS)) != 0;
+			opennova::renderer::scene_pass_gate_edges(blink_letters_, flags);
+	blink_letters_ = flags;
+	blink_indoors_ = (flags & opennova::world::kBlinkIndoorsBit) != 0;
 	apply_scene_pass_gates();
 	// Accum bit 0x8 (the authored water letter): both water passes skipped.
 	// Letter bits only accumulate while inside a box, so the outdoors leg of
@@ -167,8 +167,7 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 	// (a camera building straddling the water plane, the window latch) ride
 	// the section-mask slice (engine: runtime/renderer/scene_pass_gates.h).
 	// The label reaches the strips alone (renderer::scene_water_visible).
-	const bool water_off =
-			!opennova::renderer::scene_water_visible(static_cast<uint32_t>(flags), false);
+	const bool water_off = !opennova::renderer::scene_water_visible(flags, false);
 	if (water_off != blink_water_suppressed_) {
 		blink_water_suppressed_ = water_off;
 		if (Water *w = water()) {
@@ -369,11 +368,10 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 		}
 	}
 
-	// The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
-	// authored water letter suppressing (accum bit 0x8), the water strip still draws
-	// when the frame latched the exterior or a camera building straddles the
-	// water plane. [orig: @ 0x5c93cb / @ 0x5c95d2 + g_BlinkWaterVisible
-	// @ 0x29ACE40]
+	// The g_BlinkWaterVisible override legs: with the authored water letter
+	// suppressing (accum bit 0x8), the water strip still draws when the frame
+	// latched the exterior or a camera building straddles the water plane
+	// (engine renderer::scene_water_visible / SceneWaterWord carry the witness).
 	const int64_t water_apply_start = timing ? ticks_usec() : 0;
 	// The collect wrote the word.
 	blink_water_word_.collect(s->occlusion_water_visible());

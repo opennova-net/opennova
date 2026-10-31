@@ -34,6 +34,14 @@ inline bool mission_forces_indoors(uint32_t bms_attrib_flags) {
 	return (bms_attrib_flags & kMissionAttribForceIndoors) != 0;
 }
 
+// The frame's letter view: the local player's blink letters with that attribute's
+// indoors letter ORed in, the one word both the collect's camera and the frame's
+// pass gates (renderer/scene_pass_gates.h) read [orig: g_BmsAttribFlags & 0x10
+// @ 0x5ca1c8 -> accum |= 2].
+inline uint32_t frame_blink_letters(uint32_t local_blink_flags, bool force_indoors) {
+	return local_blink_flags | (force_indoors ? kBlinkIndoorsBit : 0u);
+}
+
 // The fov word's radians per unit (Q16 degrees) as the game stores it: 2.663160705566406e-07, a
 // little under the exact pi / 180 / 65536 (2.663161090e-07) [orig: dbl_7C3620, the
 // Viewport_BuildProjectionMatrix half-angle's multiplier @ 0x410fdb].
@@ -198,8 +206,7 @@ inline void occlusion_camera_from_view(const OcclusionViewSpec &view,
 	cam.water_z = to_fixed(view.water_z_units);
 	// The mission-attribute force-indoors override ORs the indoors bit into
 	// the frame's accum view.
-	cam.local_blink_flags = view.local_blink_flags |
-			(view.force_indoors ? kBlinkIndoorsBit : 0u);
+	cam.local_blink_flags = frame_blink_letters(view.local_blink_flags, view.force_indoors);
 	cam.object_detail = view.object_detail;
 }
 
