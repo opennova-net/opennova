@@ -343,6 +343,18 @@ struct TitleRules {
 	// [orig: WacCmd_SsnWave @0x4F4A40; the twins of WacCmd_SsnRadio @0x4F4B20 and of
 	//  Wac_PlayScriptedVoiceWave @0x4EA745, undefined in the IDB - `imul 0F0h` (dfx2.exe)]
 	int32_t script_voice_volume = 210;
+
+	// --- DFX2-46: a vehicle trail's alternate effect on snow. ------------------------------------
+	// joiner-side: a trail lane with an alternate effect (particlefxw1 / particlefxw2's third token)
+	// runs in the surface type under the vehicle, spawns its points with the alternate on snow (3)
+	// and restarts them when the type changes (world vehicle_update_trail_lane); Jointops.exe's lane
+	// runs in state 1 and spawns the effect alone. A joiner's own vehicle mover samples the trails.
+	// [orig: Entity_UpdateBoneTrailEffects @0x4589C0 - the state 1 @0x458A2D / @0x458A5A, the test
+	//  @0x458ACE, the store @0x458DA8 / @0x458DC2]
+	// [orig: Entity_UpdateBoneTrailEffects @0x4589A0 - Terrain_GetSurfaceTypeAtPosition @0x458AAA,
+	//  `cmp ax, 3` @0x458AAE taking +0x300 @0x458AB3, the test @0x458AD2, the store
+	//  @0x458DB9 / @0x458DD2 (dfx2.exe)]
+	bool trail_surface_alternate = false;
 };
 
 // One registry row: a title's code and the rules it runs.

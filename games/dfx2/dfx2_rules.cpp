@@ -213,6 +213,9 @@ world::TitleRules make() {
 	//  @0x4F4B20 and @0x4EA745 in the twins of WacCmd_SsnRadio and Wac_PlayScriptedVoiceWave
 	//  (dfx2.exe)].
 	r.script_voice_volume = 240;
+	// DFX2-46: the trail lanes follow the ground, the alternate effect on snow
+	//  [orig: Entity_UpdateBoneTrailEffects @0x4589A0 - @0x458AAA..0x458AB3 (dfx2.exe)].
+	r.trail_surface_alternate = true;
 	return r;
 }
 

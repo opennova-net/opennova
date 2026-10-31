@@ -412,6 +412,9 @@ constexpr uint32_t bms_attributes_from_entity_flags(uint32_t flags) {
 // [orig: Entity_UpdateBoneTrailEffects @0x4589C0, entity+0x408..0x444]
 struct VehicleTrailPoint {
 	uint8_t definition = 0;
+	// The point spawned with its lane's alternate effect (TitleRules::trail_surface_alternate,
+	// DFX2-46): an emitter keeps the effect it spawned with.
+	bool alternate = false;
 	uint32_t magnitude_q16 = 0;
 	uint32_t source_tick = 0;
 	Vec3 position;

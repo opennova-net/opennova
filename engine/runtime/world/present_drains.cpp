@@ -176,7 +176,8 @@ void fill_vehicle_trail_visual_rows(const World &world, std::vector<VehicleTrail
 			row.source_tick = point.source_tick;
 			row.pos = point.position;
 			row.dir = point.direction;
-			row.effect = traits->trails[point.definition - 1].effect;
+			const VehicleTrailDefinition &lane = traits->trails[point.definition - 1];
+			row.effect = point.alternate ? lane.secondary_effect : lane.effect;
 			row.magnitude_q16 = point.magnitude_q16;
 			r_rows.push_back(std::move(row));
 		}

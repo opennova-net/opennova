@@ -288,7 +288,8 @@ std::string joiner_rules_row(const world::TitleRules &r) {
 			std::to_string(r.part_spin.ground_decay) + "/" +
 			std::to_string(r.part_spin.helo_decay) +
 			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit) +
-			" script_voice_volume=" + std::to_string(r.script_voice_volume);
+			" script_voice_volume=" + std::to_string(r.script_voice_volume) +
+			" trail_surface_alternate=" + std::to_string(r.trail_surface_alternate);
 }
 
 // The bump-rule sheets (ADR 0076 decision 6), one per protocol: what its joiner reads or writes as
@@ -348,7 +349,7 @@ void bump_rule_sheet_per_protocol() {
 			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
 			"narrow_still_player_radius=0 emplaced_solo_holds_fire=0 "
 			"part_spin=186413/163110/139809/186413/46603 spawn_kit=jo_single_player_page "
-			"script_voice_volume=210";
+			"script_voice_volume=210 trail_surface_alternate=0";
 	const std::string dfx2 =
 			"S 0x0A: s2c_0a.objective_checkpoint=1 slot_state.join_state_fixed=1\n"
 			"S 0x0F: s2c_0f.spawn_zone_flag_always=1 s2c_0f.deploy_screen_always=1\n"
@@ -370,7 +371,8 @@ void bump_rule_sheet_per_protocol() {
 			"narrow_still_player_radius=1 emplaced_solo_holds_fire=1 "
 			"part_spin=372827/326222/279619/372827/93206 "
 			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
-			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE script_voice_volume=240";
+			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE script_voice_volume=240 "
+			"trail_surface_alternate=1";
 	CHECK(sheet("jo") == jo);
 	CHECK(sheet("dfx2") == dfx2);
 	// Two protocols have an in-match part: JO's, which OP: Acid Gambit speaks (the one object, at
