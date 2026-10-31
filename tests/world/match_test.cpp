@@ -1659,6 +1659,34 @@ void test_bay_arm_alone_clears_a_defless_carried_link() {
     CHECK(!blue_entity->mounted_child.valid());
 }
 
+// A flag's attach on an in-session authority sends the flag's 0x2F a second
+// time after the pickup feed (and arms its return window); out of a session,
+// or for the Takeable notebook, it does not.
+// [orig: Entity_AttachCarriedObject @0x43C19F..0x43C1CE]
+void test_flag_attach_in_session_sends_a_second_state() {
+    for (const bool in_session : {false, true}) {
+        TakeableRig rig(4095);
+        rig.object_entity().item_attrib = kItemAttribMoveCallback;
+        rig.world->rules.mp_session = in_session;
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        const std::vector<MatchGameplayEvent> events = rig.world->match.drain_gameplay_events();
+        CHECK(events.size() == (in_session ? 2u : 1u));
+        if (!events.empty())
+            CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
+        if (events.size() == 2) {
+            CHECK(events[1].kind == MatchGameplayEventKind::FlagDrop);
+            CHECK(events[1].objective == rig.object && events[1].parent == rig.carrier);
+            CHECK((events[1].objective_flags & kEntityFlagCarried) != 0);
+        }
+    }
+    TakeableRig notebook;
+    notebook.world->rules.mp_session = true;
+    notebook.touch_and_run();
+    CHECK(notebook.carrier_entity().mounted_child == notebook.object);
+    CHECK(notebook.world->match.drain_gameplay_events().empty());
+}
+
 // The entity update's own tail consumes the flag and bay touches its bodies'
 // movement resolves recorded, so the pickup lands in the frame that touched,
 // ahead of the next server tick. The handler returns at once off the
@@ -2229,6 +2257,7 @@ int main() {
     test_own_flag_touch_syncs_its_definition_pose();
     test_pickup_leg_scores_even_when_the_attach_refuses();
     test_bay_arm_alone_clears_a_defless_carried_link();
+    test_flag_attach_in_session_sends_a_second_state();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();

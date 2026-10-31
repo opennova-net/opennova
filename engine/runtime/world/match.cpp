@@ -629,8 +629,6 @@ void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried
     // The attach puts back the def's own update callback, ending a drop's
     // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
     carried.drop_motion = def_update_drop_motion(carried);
-    if (CarryObjectiveState *state = carry_state(world, carried.handle))
-        state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
     // The 0x14 feed carries the flag's own words, read before the carry moves it: the
     // attach hands the sender the carrier and the flag, and the sender takes the x/y of
     // the second. [orig: Entity_AttachCarriedObject — push esi (the flag, its +0x1C4
@@ -638,6 +636,28 @@ void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried
     //  Server_BroadcastFlagPickupEvent @0x517460 — the flag's +4 / +8 @0x517481..0x517488, the
     //  carrier's pool index @0x517490]
     gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
+                                carrier.handle,
+                                carried.handle,
+                                carried.position,
+                                carried.position,
+                                static_cast<uint8_t>(carried.flags),
+                                carrier.handle,
+                                carried.ground_target,
+                                false,
+                                static_cast<uint16_t>(carried.item_id)});
+    // An in-session authority then arms the flag's return window (210 when the
+    // configured time is below 5) and sends the flag's 0x2F a second time.
+    // [orig: Entity_AttachCarriedObject - the authority / session tests
+    //  @0x43C19F / @0x43C1A8, g_FlagReturnTime2 against 5 @0x43C1B1..0x43C1B9,
+    //  the +0x2A4 stores @0x43C1BC / @0x43C1CE, Server_SendDestructibleDeathPacket
+    //  @0x43C1C2; @0x43BF9F..0x43BFCE (dfx2.exe)]
+    if (!world.rules.logic_authority || !world.rules.mp_session)
+        return;
+    if (CarryObjectiveState *state = carry_state(world, carried.handle))
+        state->return_ticks = rules_.flag_return_ticks < 5
+                                  ? 210
+                                  : static_cast<int32_t>(rules_.flag_return_ticks);
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
                                 carrier.handle,
                                 carried.handle,
                                 carried.position,
