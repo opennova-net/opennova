@@ -67,7 +67,9 @@ public:
 		//  HUD_LoadTextureWithInfo(name, 1, ...) @0x59eefc] (D-HUD-48).
 		ReloadCrosshairAlpha = 64,
 	};
-	void prepare(MenuRuntime &menu, const playersav::ProfileRecord *record);
+	// `catalog` is the title's (controls::title_catalog): the working records follow its rows.
+	void prepare(MenuRuntime &menu, const playersav::ProfileRecord *record,
+			const controls::Catalog &catalog);
 	bool is_surface() const { return is_surface_; }
 	// The retail Options policy (options_policy.h) on the surface prepare() found, before any
 	// settings owner seeds its values: every witnessed slider's range, its value at the minimum;
@@ -134,7 +136,8 @@ private:
 	// The controls words from the widgets into the record; the in-game Accept
 	// also reads the auto pair.
 	void accept_words(const MenuRuntime &menu, playersav::ProfileRecord &record, bool ingame) const;
-	controls::BindingSet bindings_;
+	// Jointops.exe's rows until the first prepare names the title's.
+	controls::BindingSet bindings_{controls::default_catalog()};
 	bool has_table_ = false, is_surface_ = false, ingame_ = false;
 	controls::Device device_ = controls::Device::Keyboard;
 	int table_ = -1, row_ = -1, action_ = -1;

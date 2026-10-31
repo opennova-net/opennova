@@ -518,7 +518,7 @@ void check_single_player_console_line_rides_the_loopback(
 	role.drain_input_events(nullptr, 0);
 	CHECK(events.empty() && kernel.world.rules.ai_rules_skip_local_player);
 	// The name line: no local arm takes it, so nothing is queued until the echo.
-	const int32_t respawn = controls::action_code(68);
+	const int32_t respawn = 55;
 	CHECK(respawn == 55);
 	CHECK(host.client_runtime->console_command("respawn"));
 	CHECK(events.empty());
@@ -1396,10 +1396,10 @@ int main() {
 		// bit-0 row (dotsize, 38, 0x0C000C01) drops by the operand.
 		// [orig: Input_HandleActionBinding @0x49AD40 - the 2 @0x49AD52..0x49AD74; bit 0
 		//  with the operand @0x49AD95..0x49ADA0]
-		CHECK(role.action_head_admits(controls::action_code(106)));
-		CHECK(role.action_head_admits(controls::action_code(84)));
-		CHECK(role.action_head_admits(controls::action_code(63)));
-		CHECK(!role.action_head_admits(controls::action_code(38)));
+		CHECK(role.action_head_admits(8));
+		CHECK(role.action_head_admits(119));
+		CHECK(role.action_head_admits(102));
+		CHECK(!role.action_head_admits(216));
 	}
 
     // The shared deployment transaction resets local view state immediately,

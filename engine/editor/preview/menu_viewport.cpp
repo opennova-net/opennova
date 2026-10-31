@@ -731,6 +731,7 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 	// document names a known game (project_document.cpp's check).
 	const Title *game = view.project.document ? title_by_code(view.project.document->target_game) : nullptr;
 	const MissionListOrder order = (game != nullptr ? *game : default_title()).mission_list_order;
+	source.title = game;
 	source.missions = [scan, &files, order]() {
 		std::vector<menu::MissionChoice> choices;
 		if (!scan) return choices;

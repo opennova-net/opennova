@@ -773,7 +773,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 			ControlsBindings.model())
 	# The HUDLS key labels by weapon category: the live binding of the row the
 	# start-up re-lay puts at record 200 + category (engine controls
-	# action_for_code carries the witness), formatted again only when a
+	# Catalog::for_code carries the witness), formatted again only when a
 	# binding changed or the HUD was rebuilt.
 	_apply_slot_bar_key_labels()
 	# The breath bar, the MP session lines, the HUDLS scan, the open menus and the

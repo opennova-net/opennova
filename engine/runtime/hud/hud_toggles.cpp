@@ -2,7 +2,6 @@
 // shell's HUD presenter and its panel lanes (ADR 0040 ladder E3), where each
 // row carried the same edge machine.
 #include <runtime/hud/hud_toggles.h>
-#include <runtime/controls/controls.h>
 #include <runtime/world/title_rules.h> // friendly_tag_toast (the title's literal lines)
 
 namespace opennova::hud {
@@ -79,27 +78,32 @@ uint32_t toggle_briefing(HudToggleState &s, bool in_session) {
 	return events | respawn_init_keeping(s, &s.briefing_mode, in_session);
 }
 
-// The rows' static catalog rows, in HudToggleRow order (each row's token is the
-// catalog row's, controls::catalog).
-constexpr int kRowCatalogRows[kHudToggleRowCount] = {
-	50, 76, 27, 38, 55, 107, 108, 109, 63, 56, 99, 100, 106, 73, 54, 75, 53, 70, 101, 102,
-	83, 79, 82, 84,
+// The rows' dispatch codes and config tokens, in HudToggleRow order: Jointops.exe's catalog
+// rows 50, 76, 27, 38, 55, 107..109, 63, 56, 99, 100, 106, 73, 54, 75, 53, 70, 101, 102, 83,
+// 79, 82, 84 (+0x00 / +0x4B). A title's catalog that carries no row of the code (dfx2.exe's
+// has no dotsize, no commander_menu) binds nothing to it.
+// [orig: word_8159A8 + 108 * row, the token @+0x4B]
+struct RowId {
+	int code;
+	const char *token;
+};
+constexpr RowId kRowIds[kHudToggleRowCount] = {
+	{19, "huddetail"}, {10, "hudcolor"}, {14, "showhud"}, {216, "dotsize"}, {31, "Goals"},
+	{400, "view1st"}, {401, "viewwithgun"}, {402, "viewchase"}, {102, "playerlist_alt"},
+	{29, "OldMessages"}, {422, "ShowScore"}, {30, "ShowFriendly"}, {8, "help"},
+	{234, "helpmap"}, {53, "Briefing"}, {37, "Verbose"}, {221, "commander_menu"},
+	{25, "pause"}, {33, "AudioEmote"}, {54, "RadioMacro"}, {11, "ToggleServer"},
+	{9, "flipmouse"}, {17, "mousescale"}, {119, "lockgame"},
 };
 
 } // namespace
 
 const char *hud_toggle_row_token(int row) {
-	const int id = hud_toggle_row_catalog_row(row);
-	if (id < 0) return "";
-	std::size_t count = 0;
-	const controls::ActionDef *defs = controls::catalog(&count);
-	for (std::size_t i = 0; i < count; ++i)
-		if (defs[i].id == id) return defs[i].token;
-	return "";
+	return row >= 0 && row < kHudToggleRowCount ? kRowIds[row].token : "";
 }
 
-int hud_toggle_row_catalog_row(int row) {
-	return row >= 0 && row < kHudToggleRowCount ? kRowCatalogRows[row] : -1;
+int hud_toggle_row_code(int row) {
+	return row >= 0 && row < kHudToggleRowCount ? kRowIds[row].code : -1;
 }
 
 void hud_key_poll_set_rows(HudKeyPoll &k, uint32_t rows) {

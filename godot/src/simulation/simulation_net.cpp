@@ -480,6 +480,8 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	// A host's command walk queues its binding records on the role's input event queue (engine
 	// inmatch/admin_console.h Seams::input_events carries the witness).
 	seams.input_events = host_role_ != nullptr ? &host_role_->input_events() : nullptr;
+	// Its walks read the session title's binding catalog (the role's).
+	seams.catalog = &opennova::controls::title_catalog(session_title(net_, assets_.root));
 	// The status report's gametext is the process's: GameWorld::remote_admin_seams sets it for
 	// every console (engine inmatch/remote_admin.h process_game_text).
 	// CMD VERSION's line: the launch's versions, as the STARTUP label shows them.
@@ -491,6 +493,8 @@ void Simulation::install_console_seams() {
 	namespace inmatch = opennova::inmatch;
 	if (runtime_ == nullptr) return;
 	inmatch::ClientLocalCommandSeams seams;
+	// The CRC arm walks the session title's binding catalog (engine inmatch/client_console.h).
+	seams.catalog = &opennova::controls::title_catalog(session_title(net_, assets_.root));
 	// VERSION's line: the launch's versions, as the STARTUP label shows them.
 	seams.versions = opennova::to_std(LaunchFlags::version_line());
 	// SAVENFO: debug.nfo in text mode, each '\n' a CR LF on the disk (engine

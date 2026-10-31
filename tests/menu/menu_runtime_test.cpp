@@ -1901,7 +1901,7 @@ void test_options_screen() {
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "");
 	OptionsScreen options;
-	options.prepare(menu, nullptr);  // no profile: the catalog defaults
+	options.prepare(menu, nullptr, opennova::controls::default_catalog());  // no profile: the catalog defaults
 	const int table = menu.widget_id("CONTROL_MAPPING");
 	CHECK(options.is_surface() && menu.table_row_count(table) > 40);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
@@ -2057,7 +2057,7 @@ void test_options_screen() {
 
 	auto non_options = flow_document();
 	menu.open_document(&non_options, "sp.mnu", "");
-	options.prepare(menu, nullptr);
+	options.prepare(menu, nullptr, opennova::controls::default_catalog());
 	CHECK(!options.is_surface());
 	CHECK(options.activate(menu, nullptr, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
 	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_CANCEL")) == OptionsScreen::None);
@@ -2084,14 +2084,14 @@ void test_options_profile() {
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "");
 	playersav::ProfileRecord record;
-	record.bindings = profile::default_binding_table();
+	record.bindings = profile::default_binding_table(opennova::controls::default_catalog());
 	record.invert_mouse = 1;
 	record.mouse_sensitivity = 300;
 	record.auto_medic_off = 1;
 	for (playersav::BindingEntry &e : record.bindings)
 		if (e.token == "move_forward") e.primary = 'K';
 	OptionsScreen options;
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	options.apply_policy(menu);
 	// DFX2-62: Jointops.exe's populate leaves the ADVANCED pair shown, dfx2.exe's hides it
 	// [orig: sub_55AB20 @0x55b829..0x55b862 (dfx2.exe)].
@@ -2158,7 +2158,7 @@ void test_options_profile() {
 	menu.open_document(&doc, "game.mnu", "");
 	record.auto_reload = 0;
 	record.auto_medic_off = 0;
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	options.apply_policy(menu);
 	options.seed_profile(menu, &record);
 	CHECK(!menu.is_widget_checked(menu.widget_id("OPTIONS_AUTORELOAD")));
@@ -2181,7 +2181,7 @@ void test_options_profile() {
 	// @0x5551ca, HUD_LoadCrosshairTextureAlpha @0x555201] (D-HUD-48); its Cancel does not.
 	root.children.push_back(widget("XHAIR_APPEARANCE", mnu::WindowType::SpinList));
 	menu.open_document(&doc, "game.mnu", "");
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	CHECK(options.activate(menu, &record, menu.widget_id("OPT_ACCEPT")) ==
 		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls |
 				OptionsScreen::ReloadCrosshairAlpha));
@@ -2280,10 +2280,10 @@ void test_options_front_back() {
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "OPTIONS");
 	playersav::ProfileRecord record;
-	record.bindings = profile::default_binding_table();
+	record.bindings = profile::default_binding_table(opennova::controls::default_catalog());
 	record.invert_mouse = 1;
 	OptionsScreen options;
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	options.apply_policy(menu);
 	options.seed_profile(menu, &record);
 	const int back = menu.find_control("OPTIONS", "BACK");
@@ -2309,7 +2309,7 @@ void test_options_front_back() {
 	for (const char *name : {"BACK", "OPT_ACCEPT"})
 		ingame.screens[0].roots[0].children.push_back(widget(name, mnu::WindowType::Button));
 	menu.open_document(&ingame, "game.mnu", "");
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	CHECK(options.is_surface());
 	CHECK(options.activate(menu, &record, menu.widget_id("BACK")) == OptionsScreen::None);
 }

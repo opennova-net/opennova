@@ -66,7 +66,7 @@ ScriptStep end(int64_t tick) {
 bool refuses(const std::vector<ScriptStep> &steps, const char *needle) {
 	ScriptedInput driver;
 	std::string error;
-	const bool loaded = driver.load(steps, error);
+	const bool loaded = driver.load(opennova::controls::default_catalog(), steps, error);
 	if (loaded) return false;
 	if (error.find(needle) == std::string::npos) {
 		std::printf("  refusal text was: %s\n", error.c_str());
@@ -101,12 +101,12 @@ void test_load_refuses_malformed_scripts() {
 	// A refusal leaves a loaded script in place.
 	ScriptedInput driver;
 	std::string error;
-	CHECK(driver.load({key(Kind::Press, 0, 152), end(4)}, error), "a well-formed script loads");
-	CHECK(!driver.load({key(Kind::Press, 0, 152)}, error), "the bad script is refused");
+	CHECK(driver.load(opennova::controls::default_catalog(), {key(Kind::Press, 0, 152), end(4)}, error), "a well-formed script loads");
+	CHECK(!driver.load(opennova::controls::default_catalog(), {key(Kind::Press, 0, 152)}, error), "the bad script is refused");
 	CHECK(driver.loaded() && driver.start(), "the earlier script stays loaded and starts");
 }
 
-// The codes are the catalog rows' dispatch codes (controls::action_for_code).
+// The codes are the catalog rows' dispatch codes (controls::Catalog::for_code).
 void test_codes_hold_their_catalog_tokens() {
 	const struct {
 		int code;
@@ -121,7 +121,7 @@ void test_codes_hold_their_catalog_tokens() {
 	for (const auto &row : rows) {
 		ScriptedInput driver;
 		std::string error;
-		CHECK(driver.load({key(Kind::Down, 0, row.code), end(2)}, error), row.token);
+		CHECK(driver.load(opennova::controls::default_catalog(), {key(Kind::Down, 0, row.code), end(2)}, error), row.token);
 		CHECK(driver.start(), row.token);
 		driver.advance(7);
 		CHECK(driver.token_held(row.token), row.token);
@@ -132,7 +132,7 @@ void test_codes_hold_their_catalog_tokens() {
 void test_steps_apply_on_the_logic_tick_they_are_keyed_to() {
 	ScriptedInput driver;
 	std::string error;
-	CHECK(driver.load({key(Kind::Down, 2, 152), key(Kind::Up, 5, 152), end(8)}, error),
+	CHECK(driver.load(opennova::controls::default_catalog(), {key(Kind::Down, 2, 152), key(Kind::Up, 5, 152), end(8)}, error),
 			"the walk script loads");
 	CHECK(driver.state() == State::Idle && driver.start_logic_tick() == -1, "loaded, not started");
 	CHECK(!driver.token_held("move_forward"), "nothing held before the start");
@@ -173,7 +173,7 @@ void test_steps_apply_on_the_logic_tick_they_are_keyed_to() {
 void test_a_press_survives_a_multi_tick_frame() {
 	ScriptedInput driver;
 	std::string error;
-	CHECK(driver.load({key(Kind::Press, 3, 149), key(Kind::Down, 4, 152), end(9)}, error),
+	CHECK(driver.load(opennova::controls::default_catalog(), {key(Kind::Press, 3, 149), key(Kind::Down, 4, 152), end(9)}, error),
 			"the press script loads");
 	driver.start();
 	driver.advance(200);
@@ -197,7 +197,7 @@ void test_a_press_survives_a_multi_tick_frame() {
 void test_press_is_down_then_up_one_tick_later() {
 	ScriptedInput driver;
 	std::string error;
-	CHECK(driver.load({key(Kind::Press, 0, 177), end(3)}, error), "a USE press loads");
+	CHECK(driver.load(opennova::controls::default_catalog(), {key(Kind::Press, 0, 177), end(3)}, error), "a USE press loads");
 	driver.start();
 	driver.advance(50);
 	CHECK(driver.token_held("useitem"), "tick 0 down at the start sample");
@@ -211,7 +211,7 @@ void test_press_is_down_then_up_one_tick_later() {
 void test_look_pixels_accumulate_until_taken() {
 	ScriptedInput driver;
 	std::string error;
-	CHECK(driver.load({look(0, 10.0, -4.0), look(1, 5.0, 2.0), look(3, 1.0, 1.0), end(4)}, error),
+	CHECK(driver.load(opennova::controls::default_catalog(), {look(0, 10.0, -4.0), look(1, 5.0, 2.0), look(3, 1.0, 1.0), end(4)}, error),
 			"the look script loads");
 	driver.start();
 	driver.advance(10);
@@ -238,7 +238,7 @@ void test_chars_type_in_order_at_their_sample() {
 			"so do backspace and return");
 	ScriptedInput driver;
 	std::string error;
-	CHECK(driver.load({typed(0, 'S'), typed(2, 'E'), typed(2, 'R'), key(Kind::Press, 2, 1),
+	CHECK(driver.load(opennova::controls::default_catalog(), {typed(0, 'S'), typed(2, 'E'), typed(2, 'R'), key(Kind::Press, 2, 1),
 						  typed(6, 0x0D), end(8)},
 				  error),
 			"the typing script loads");
@@ -260,7 +260,7 @@ void test_chars_type_in_order_at_their_sample() {
 			"each char step records its sample");
 
 	// A char behind a deferred release waits with it, in script order.
-	CHECK(driver.load({key(Kind::Press, 1, 149), typed(2, 'A'), end(5)}, error), "reloads");
+	CHECK(driver.load(opennova::controls::default_catalog(), {key(Kind::Press, 1, 149), typed(2, 'A'), end(5)}, error), "reloads");
 	driver.start();
 	driver.advance(100);
 	driver.advance(103); // the press, its release and the char due at once
@@ -271,7 +271,7 @@ void test_chars_type_in_order_at_their_sample() {
 	CHECK(driver.take_chars() == std::vector<uint8_t>{'A'}, "and the char after it");
 	CHECK(driver.records()[1].applied_logic_tick == 104, "recorded at its real sample");
 
-	CHECK(driver.load({typed(0, 'P'), end(9)}, error), "reloads");
+	CHECK(driver.load(opennova::controls::default_catalog(), {typed(0, 'P'), end(9)}, error), "reloads");
 	driver.start();
 	driver.advance(5);
 	driver.cancel();
@@ -281,7 +281,7 @@ void test_chars_type_in_order_at_their_sample() {
 void test_cancel_and_a_backwards_clock_release_everything() {
 	ScriptedInput driver;
 	std::string error;
-	CHECK(driver.load({key(Kind::Down, 0, 152), key(Kind::Down, 0, 149), end(100)}, error),
+	CHECK(driver.load(opennova::controls::default_catalog(), {key(Kind::Down, 0, 152), key(Kind::Down, 0, 149), end(100)}, error),
 			"two holds load");
 	driver.start();
 	driver.advance(5);
@@ -293,7 +293,7 @@ void test_cancel_and_a_backwards_clock_release_everything() {
 	driver.advance(6);
 	CHECK(!driver.token_held("move_forward"), "a cancelled script never resumes");
 
-	CHECK(driver.load({key(Kind::Down, 0, 152), end(100)}, error), "a reload replaces it");
+	CHECK(driver.load(opennova::controls::default_catalog(), {key(Kind::Down, 0, 152), end(100)}, error), "a reload replaces it");
 	driver.start();
 	driver.advance(500);
 	CHECK(driver.token_held("move_forward"), "held again");

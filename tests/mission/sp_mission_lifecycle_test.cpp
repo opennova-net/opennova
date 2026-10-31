@@ -643,7 +643,7 @@ int main() {
 		//  @0x49c910..0x49c95f, the status page @0x49c960..0x49c9c7, the deploy tail
 		//  @0x49c9c9..0x49ca97, the help and briefing pages @0x49ca9e..0x49cb53]
 		const w::SpawnZoneRegistry zones{};
-		controls::PlayerActions actions;
+		controls::PlayerActions actions(opennova::controls::default_catalog());
 		hud::HudToggleState toggles;
 		const auto key = [&](SpMission &mission, int vk) {
 			im::SpecialKeyInput in;

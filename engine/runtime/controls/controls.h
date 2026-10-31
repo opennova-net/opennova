@@ -5,13 +5,13 @@
 #include <string>
 #include <vector>
 
-// Joint Operations input-binding catalog and the Options -> Controls (CONTROL_MAPPING)
-// table model.
+// The input-binding catalog and the Options -> Controls (CONTROL_MAPPING) table model.
 //
 // A faithful port of the original engine's key-binding catalog and the per-device
-// table population. The static action catalog (display name, config token, category,
-// default keyboard binding) is the byte-witnessed table at
-// [orig: aAbsoluteTurnLe @ 0x8159cb] (108-byte stride). Class names come from
+// table population. The static action catalog (action code, display name, config token,
+// category, default bindings) is the byte-witnessed table at
+// [orig: aAbsoluteTurnLe @ 0x8159cb] (108-byte stride), each title's own: Jointops.exe's
+// is default_catalog, dfx2.exe's its title's (Title::controls, title_catalog). Class names come from
 // [orig: KeyBinding_BuildCategoryPages @ 0x4966c0]; VK key-name decoding from
 // [orig: KeyBinding_GetKeyNameAndDisplayName @ 0x494c60]; binding formatting from
 // [orig: KeyBinding_FormatBindingString @ 0x559a10]; the per-device row build from
@@ -22,6 +22,10 @@
 // catalog defaults (validated against the canonical JO scheme: Forward=W/Up,
 // Reload=R, Jump=Space, ...); see docs/mnu/menu-re.md D-CTRL-* for the documented
 // gaps (per-entry visibility flag and the mouse/joystick default arrays).
+
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
 
 namespace opennova::controls {
 
@@ -93,21 +97,58 @@ struct ActionDef {
   // binding table (entry +20) [orig: KeyBinding_BuildFilteredTable @0x54c2b0
   // @0x54c307].
   uint32_t help = 0;
+  // Static row +0x00: the action code the row's record dispatches, the case
+  // Input_HandleActionBinding switches on (e.g. MedicReq 217, escape 18, the
+  // weapon rows 200..210), and the slot the boot's re-lay puts the record in.
+  // [orig: word_8159A8 + 108 * row]
+  int code = 0;
 };
 
-// The full static catalog (pointer + element count).
-const ActionDef *catalog(std::size_t *out_count);
+// A title's static catalog: its executable's rows in their static order. Each
+// title's table omits its one unreachable row (code 36, flags 0, mode 3, class 0,
+// "!Null", an empty token and no key: no console name walk meets it, the CRC walks
+// meet an earlier zero record first and nothing queues 36 by constant, so its
+// case's exit reason 5 never runs). Every by-code reader resolves through
+// for_code: the boot's sort, run once at start-up, re-lays the 768-record binding
+// table so record i holds the static row whose code is i (a code no row carries
+// leaves the zero record there, whose display string is empty): the dispatcher's
+// flags word, the death screen's MedicReq record 217, the HUDLS key label's
+// record 200 + category.
+// [orig: row 66 @0x817580; Input_HandleActionBinding @0x49AD40 - case 36 @0x49B780,
+//  the flags read @0x49ad8d; KeyBinding_SortBySequentialId @0x498260
+//  (Game_InitSubsystems @0x4a6de7), its walk to aNull @0x829DA8 (768 rows);
+//  g_BindingRowMedicReq @0x81B534 = record 217; HUD_DrawWeaponSlotBar
+//  @0x599e8c..0x599e9f] [orig: row 64 @0x8163A0; KeyBinding_SortBySequentialId
+//  @0x498270, its walk to aNull @0x828CA0 (dfx2.exe)]
+struct Catalog {
+  const ActionDef *rows = nullptr;
+  std::size_t count = 0;
+  // The row whose code is `code`, nullptr for none (or past the 768 records).
+  const ActionDef *for_code(int code) const;
+  // The row whose config token is `token`, compared exactly; nullptr for none.
+  const ActionDef *for_token(const char *token) const;
+};
 
-// The manual weapon-switch rows 28..36 in category order — Knife / Secondary /
-// Primary / Flashbang / FragGrenade / SmokeGrenade / Accessory / Detonator /
-// medpack fire the category actions 201..209 (categories 1..9); rows 39/40
-// cycle prev/next. [orig: input cases 200-210 @0x4e1144 ->
+// Jointops.exe's catalog, the 119 static rows at word_8159A8 but row 66: the one a
+// title with no catalog of its own runs (Title::controls null).
+const Catalog &default_catalog();
+// The catalog `title`'s executable compiles in: Title::controls, else
+// default_catalog.
+const Catalog &title_catalog(const Title &title);
+
+// Every weapon row fires its category, the code - 200: Jointops.exe's Knife /
+// Secondary / Primary / Flashbang / FragGrenade / SmokeGrenade / Accessory /
+// Detonator / medpack 201..209; dfx2.exe's Powerup0 200, Knife / Secondary /
+// Primary 201..203, Grenades 204, Accessory 205, Powerup6..9 206..209 and
+// Detonator 210. Both executables' dispatchers carry the eleven cases;
+// cycleweaponP / N (212 / 214) cycle.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210 @0x4e1144 ->
 //  Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
-//  Player_CycleWeaponSlot @0x4dfe70]
-inline constexpr int kWeaponCategoryFirstRow = 28;
-inline constexpr int kWeaponCategoryCount = 9;
-// The nine categories by the action id they fire (action - 200), in the
-// catalog's row order [orig: the 200..210 cases @0x4e1144].
+//  Player_CycleWeaponSlot @0x4dfe70] [orig: sub_4DD4C0 @0x4DD4C0 - cases 200-210
+//  @0x4de239..0x4de24d (dfx2.exe)]
+inline constexpr int kWeaponCategoryCodeFirst = 200;
+inline constexpr int kWeaponCategoryCodeLast = 210;
+// Jointops.exe's nine categories by the code its rows fire (code - 200).
 enum class WeaponCategory : int {
   kKnife = 1,
   kSecondary = 2,
@@ -119,27 +160,6 @@ enum class WeaponCategory : int {
   kDetonator = 8,
   kMedpack = 9,
 };
-static_assert(static_cast<int>(WeaponCategory::kMedpack) == kWeaponCategoryCount,
-              "the category enum spans the catalog's nine rows");
-// The config token of weapon category `index` (0..8), nullptr out of range.
-const char *weapon_category_token(int index);
-
-// The action code a static catalog row dispatches: the record's +0x00 word,
-// the case Input_HandleActionBinding switches on (e.g. row 64 MedicReq 217,
-// row 67 escape 18, rows 28..36 the weapon categories 201..209); -1 past the
-// 119 static rows [orig: word_8159A8 + 108 * row].
-int action_code(int row);
-// The catalog action a binding record read BY ACTION CODE resolves to.
-// KeyBinding_SortBySequentialId, run once at start-up, re-lays the 768-record
-// binding table so record i holds the static row whose code is i (a code no
-// row carries leaves the zero record there, whose display string is empty),
-// and every by-code reader depends on it: the dispatcher's flags word, the
-// death screen's MedicReq record 217, the HUDLS key label's record
-// 200 + category. nullptr when no row carries `code`.
-// [orig: KeyBinding_SortBySequentialId @0x498260 (Game_InitSubsystems
-//  @0x4a6de7); Input_HandleActionBinding @0x49ad8d; g_BindingRowMedicReq
-//  @0x81B534 = record 217; HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f]
-const ActionDef *action_for_code(int code);
 // The HUDLS slot bar's key label reads binding record 200 + the weapon
 // category (0..11) [orig: HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f].
 inline constexpr int kSlotBarKeyRecordBase = 200;
@@ -186,10 +206,9 @@ struct ControlRow {
   std::string control;  // Control column (formatted binding, "" when unbound)
 };
 
-// Build the Class/Action/Control rows for a device, mirroring the engine's per-device
-// table population. Keyboard shows the byte-exact catalog defaults; mouse/joystick
-// share the action list but have no static default bindings (D-CTRL-2).
+// Build the Class/Action/Control rows of `catalog` for a device from its defaults,
+// mirroring the engine's per-device table population.
 // [orig: UI_PopulateControlMappingList @ 0x55c0c0]
-std::vector<ControlRow> build_rows(Device device);
+std::vector<ControlRow> build_rows(const Catalog &catalog, Device device);
 
 }  // namespace opennova::controls

@@ -1,6 +1,7 @@
 #include "dfx2.h"
 
 #include <formats/gamecfg/game_cfg.h>
+#include <runtime/controls/controls.h>
 
 namespace opennova::games {
 
@@ -101,6 +102,155 @@ constexpr TitleHudMapLegend kHudMapLegend{
 //  (dfx2.exe)]
 constexpr TitleLoadingScreen kLoadingScreen{"Arial20b.fnt", "Arial20b.fnt", 1280, "Arial40b.fnt",
 		"Arial40b.fnt", 0x6CBF00u, 139, 18, true, 20, 40};
+
+// DFX2-110: dfx2.exe's static binding catalog, every row as the boot reads it (controls::ActionDef:
+// row, token, marker-stripped name, class, keys, flags, slot-1 modifier, mouse, joystick, their
+// modifiers, modes, help id, code): Jointops.exe's rows but the weapon, Objectives, EmoteToggle,
+// view and cheat rows below, each row at 0x8148A0 + 108 * row.
+// [orig: the table @0x8148A0, sorted to aNull @0x828CA0 by KeyBinding_SortBySequentialId @0x498270;
+//  KeyBinding_BuildFilteredTable @0x549530 (dfx2.exe)]
+using controls::ActionClass;
+constexpr controls::ActionDef kControlRows[] = {
+	{0, "turn_left_abs", "Absolute Turn Left", ActionClass::Movement, 0x00, 0x00, 0x0C100425, 0, 0x0, 0x0, 0, 0, 3, 0, 166},
+	{1, "lookpitch", "Look Pitch", ActionClass::Movement, 0x00, 0x00, 0x0C200425, 0, 0x0, 0x0, 0, 0, 3, 0, 164},
+	{2, "move_forward", "Forward", ActionClass::Movement, 0x57, 0x26, 0x0C002C05, 0, 0x0, 0x0, 0, 0, 3, 1001, 152},
+	{3, "move_back", "Back", ActionClass::Movement, 0x53, 0x28, 0x0C000C05, 0, 0x0, 0x0, 0, 0, 3, 1003, 151},
+	{4, "strafe_left", "StrafeLeft", ActionClass::Movement, 0x41, 0x25, 0x0C001C05, 0, 0x0, 0x0, 0, 0, 3, 1005, 156},
+	{5, "strafe_right", "StrafeRight", ActionClass::Movement, 0x44, 0x27, 0x0C000C05, 0, 0x0, 0x0, 0, 0, 3, 1007, 157},
+	{6, "LeanRoll_left", "Lean/Roll Left", ActionClass::Movement, 0x51, 0x24, 0x0C004C05, 0, 0x0, 0x0, 0, 0, 3, 1009, 148},
+	{7, "LeanRoll_right", "Lean/Roll Right", ActionClass::Movement, 0x45, 0x21, 0x0C000C05, 0, 0x0, 0x0, 0, 0, 3, 1011, 147},
+	{8, "move_jump", "Jump", ActionClass::Movement, 0x20, 0x2D, 0x0C000C05, 0, 0x0, 0x0, 0, 0, 1, 1013, 153},
+	{9, "Prone", "Prone", ActionClass::Movement, 0x5A, 0x22, 0x0C000C01, 0, 0x10, 0x0, 0, 0, 3, 1015, 170},
+	{10, "Crouch", "Crouch", ActionClass::Movement, 0x58, 0x23, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 3, 1017, 169},
+	{11, "Stand", "Stand", ActionClass::Movement, 0x43, 0x2E, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 3, 1019, 172},
+	{12, "look_down", "LookDown", ActionClass::Movement, 0xBE, 0x00, 0x0C000C05, 0, 0x0, 0x82, 0, 0, 3, 1021, 154},
+	{13, "look_up", "LookUp", ActionClass::Movement, 0x50, 0x00, 0x0C000C05, 0, 0x0, 0x81, 0, 0, 3, 1022, 155},
+	{14, "turn_left", "TurnLeft", ActionClass::Movement, 0x4C, 0x00, 0x0C008C05, 0, 0x0, 0x83, 0, 0, 3, 1023, 158},
+	{15, "turn_right", "TurnRight", ActionClass::Movement, 0xBA, 0x00, 0x0C000C05, 0, 0x0, 0x84, 0, 0, 3, 1024, 159},
+	{16, "Last_move", "Last_move", ActionClass::Movement, 0x91, 0x00, 0x0C000405, 0, 0x0, 0x0, 0, 0, 3, 1025, 425},
+	{17, "seat1", "Seat1", ActionClass::Movement, 0x31, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2031, 182},
+	{18, "seat2", "Seat2", ActionClass::Movement, 0x32, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2032, 183},
+	{19, "seat3", "Seat3", ActionClass::Movement, 0x33, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2033, 184},
+	{20, "seat4", "Seat4", ActionClass::Movement, 0x34, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2034, 185},
+	{21, "seat5", "Seat5", ActionClass::Movement, 0x35, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2035, 186},
+	{22, "seat6", "Seat6", ActionClass::Movement, 0x36, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2036, 187},
+	{23, "seat7", "Seat7", ActionClass::Movement, 0x37, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2037, 188},
+	{24, "seat8", "Seat8", ActionClass::Movement, 0x38, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2038, 189},
+	{25, "seat9", "Seat9", ActionClass::Movement, 0x39, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2039, 190},
+	{26, "seat10", "Seat10", ActionClass::Movement, 0x30, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 2040, 191},
+	{27, "showhud", "Hide Gun", ActionClass::Weapons, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 1, 0, 14},
+	{28, "Knife", "Knife", ActionClass::Weapons, 0x31, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2001, 201},
+	{29, "Secondary", "Sidearm", ActionClass::Weapons, 0x32, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2002, 202},
+	{30, "Primary", "Primary", ActionClass::Weapons, 0x33, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2003, 203},
+	// The weapon rows, each firing its category (code - 200): Grenades 204 and Accessory 205
+	// where Jointops.exe's Flashbang / FragGrenade / SmokeGrenade (204..206) and Accessory (207)
+	// stand, the PowerUp rows 206..209 and 200 (key 0), and Detonator 210 (JO's 208) on Backspace;
+	// no medpack, ToSpecial, dotsize, ScopeZeroDec or ScopeZeroInc row.
+	// [orig: rows 31..38 @0x8155B4..0x8158A8 (dfx2.exe)]
+	{31, "Grenades", "Grenades", ActionClass::Weapons, 0x34, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2004, 204},
+	{32, "Accessory", "Accessory", ActionClass::Weapons, 0x35, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2005, 205},
+	{33, "Powerup6", "PowerUp6", ActionClass::Weapons, 0x36, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2006, 206},
+	{34, "Powerup7", "PowerUp7", ActionClass::Weapons, 0x37, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2007, 207},
+	{35, "Powerup8", "PowerUp8", ActionClass::Weapons, 0x38, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2008, 208},
+	{36, "Powerup9", "PowerUp9", ActionClass::Weapons, 0x39, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2009, 209},
+	{37, "Powerup0", "PowerUp0", ActionClass::Weapons, 0x30, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2010, 200},
+	{38, "Detonator", "Detonator", ActionClass::Weapons, 0x08, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2011, 210},
+	{39, "cycleweaponP", "Cycle Weapon Prev", ActionClass::Weapons, 0xDB, 0x00, 0x0C000C01, 0, 0x400, 0x0, 0, 0, 1, 2017, 212},
+	{40, "cycleweaponN", "Cycle Weapon Next", ActionClass::Weapons, 0xDD, 0x00, 0x0C000C01, 0, 0x800, 0x0, 0, 0, 1, 2016, 214},
+	{41, "attack_1", "Fire Weapon", ActionClass::Weapons, 0x00, 0x00, 0x8C400C01, 0, 0x1, 0x1, 0, 0, 1, 2013, 149},
+	{42, "useitem", "UseItem", ActionClass::Weapons, 0x10, 0x00, 0x0C000805, 0, 0x0, 0x0, 0, 0, 1, 2031, 177},
+	{43, "nvggainup", "Increase NVG Gain", ActionClass::Weapons, 0xBB, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 3, 5014, 56},
+	{44, "nvggaindown", "Decrease NVG Gain", ActionClass::Weapons, 0xBD, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 3, 5015, 57},
+	{45, "magazine", "Reload", ActionClass::Weapons, 0x52, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 2012, 211},
+	{46, "radarout", "Radar Zoom Out", ActionClass::Map, 0xBD, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3, 4003, 361},
+	{47, "radarin", "Radar Zoom In", ActionClass::Map, 0xBB, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3, 4002, 360},
+	{48, "huddetail", "Hud Detail", ActionClass::Map, 0x75, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3, 4004, 19},
+	{49, "NextWaypoint", "Next Waypoint", ActionClass::Map, 0x76, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 3, 4005, 23},
+	{50, "nextflag", "Next Flag", ActionClass::Map, 0x77, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 3, 4006, 32},
+	{51, "Briefing", "Briefing", ActionClass::Communications, 0x49, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 5000, 53},
+	{52, "Goals", "Goals", ActionClass::Communications, 0x47, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 5001, 31},
+	// Objectives (code 58, key O) where Jointops.exe's commander_menu row stands (none here).
+	// [orig: row 53 @0x815EFC (dfx2.exe)]
+	{53, "Objectives", "Objectives", ActionClass::Communications, 0x4F, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 5002, 58},
+	{54, "OldMessages", "Recent Messages", ActionClass::Communications, 0x4A, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 5003, 29},
+	{55, "talk", "Chat", ActionClass::Communications, 0x0D, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 5004, 112},
+	{56, "ltalk", "Local Chat", ActionClass::Communications, 0x54, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 5005, 111},
+	{57, "gtalk", "Global Chat", ActionClass::Communications, 0x54, 0x00, 0x05000800, 0x11, 0x0, 0x0, 0, 0, 3, 5006, 101},
+	{58, "stalk", "Team Chat", ActionClass::Communications, 0x59, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 5007, 100},
+	{59, "sqtalk", "SQChat", ActionClass::Communications, 0x59, 0x00, 0x05000800, 0x11, 0x0, 0x0, 0, 0, 3, 5008, 110},
+	{60, "ctalk", "Crew Chat", ActionClass::Communications, 0x55, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 1, 5009, 109},
+	{61, "playerlist_alt", "PlayerList", ActionClass::Communications, 0x09, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3, 5012, 102},
+	{62, "MedicReq", "MedicRequest", ActionClass::Communications, 0x39, 0x00, 0x04000040, 0, 0x0, 0x0, 0, 0, 1, 5010, 217},
+	{63, "null", "Null", ActionClass::Null, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3, 0, 0},
+	// Row 64 (code 36, the empty-token "!Null") is left out (controls::Catalog)
+	// [orig: row 64 @0x8163A0 (dfx2.exe)].
+	{65, "escape", "Escape", ActionClass::System, 0x1B, 0x00, 0x05000000, 0, 0x0, 0x0, 0, 0, 3, 10005, 18},
+	{66, "respawn", "Respawn", ActionClass::System, 0x52, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1, 5013, 55},
+	{67, "PrintScreen", "Screen Shot", ActionClass::System, 0x7A, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3, 10010, 2},
+	{68, "pause", "Pause Game", ActionClass::System, 0x13, 0x48, 0x05000800, 0, 0x0, 0x9, 0, 0, 3, 10000, 25},
+	{69, "command", "Command Promptx", ActionClass::System, 0xC0, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 10001, 1},
+	{70, "command2", "Command Promptx", ActionClass::System, 0xC0, 0x00, 0x05000800, 0x11, 0x0, 0x0, 0, 0, 3, 10002, 20},
+	{71, "helpmap", "Help Map Screen", ActionClass::System, 0x7B, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 10004, 234},
+	{72, "scopescale", "Scope Scale", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 10011, 49},
+	{73, "Verbose", "Verbose", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 10012, 37},
+	{74, "hudcolor", "Hud Color", ActionClass::System, 0x75, 0x00, 0x04000000, 0x11, 0x0, 0x0, 0, 0, 3, 10013, 10},
+	{75, "exit", "Exit Mission", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 10014, 3},
+	{76, "quit", "Exit Game", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 10007, 4},
+	{77, "flipmouse", "Flip Mouse", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 10015, 9},
+	{78, "restart", "Restart Mission", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 10006, 12},
+	{79, "lights", "Lights", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 10016, 16},
+	{80, "mousescale", "Mouse Scale", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 10017, 17},
+	{81, "ToggleServer", "Server Screen", ActionClass::System, 0xDC, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 0, 11},
+	{82, "lockgame", "Lock Game", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6012, 119},
+	{83, "PuntCRC", "Punt CRC", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6002, 47},
+	{84, "PuntLog", "Punt Log", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6003, 48},
+	{85, "Punt", "Punt", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6001, 34},
+	{86, "savescores", "Save Scores", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 1, 6006, 38},
+	{87, "netdelay", "Net Delay", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 1, 6007, 103},
+	{88, "talkred", "Indonesian Talk", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6008, 104},
+	{89, "talkblue", "Joint Ops Talk", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6009, 105},
+	{90, "resetgames", "Reset Game", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6010, 106},
+	{91, "Ban", "Ban", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6005, 107},
+	{92, "LastGame", "Last Game", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3, 6011, 108},
+	{93, "tod", "TimeOfDay", ActionClass::Server, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3, 6013, 438},
+	{94, "todrate", "TimeOfDayRate", ActionClass::Server, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3, 6014, 497},
+	{95, "FreeLook", "FreeLook", ActionClass::Camera, 0x00, 0x00, 0x2C000C05, 0, 0x2, 0x0, 0, 0, 1, 0, 176},
+	// Second keys F4 (Map), F5 (Friendly Tags, its first F), F2 (Binoculars) and F3 (Night
+	// Vision); Show Score, Toggle Scope (its mouse button kept), gun view and Chase View ship
+	// with no key, Help on '/'.
+	// [orig: rows 96..107 @0x817120..0x8175C4 (dfx2.exe)]
+	{96, "map_toggle", "Map", ActionClass::Map, 0x4D, 0x73, 0x05000801, 0, 0x0, 0x0, 0, 0, 3, 4001, 28},
+	{97, "ShowScore", "Show Score", ActionClass::System, 0x00, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3, 10009, 422},
+	{98, "ShowFriendly", "Friendly Tags", ActionClass::Communications, 0x46, 0x74, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 3, 5011, 30},
+	// EmoteToggle (code 59), the emotes / radio menus' cycle, on no key.
+	// [orig: row 99 @0x817264 (dfx2.exe)]
+	{99, "EmoteToggle", "EmoteToggle", ActionClass::Communications, 0x00, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 1, 5013, 59},
+	{100, "AudioEmote", "AudioEmote", ActionClass::Communications, 0x78, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 1, 5013, 33},
+	{101, "RadioMacro", "RadioMacro", ActionClass::Communications, 0x79, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 1, 5014, 54},
+	{102, "binoculars", "Binoculars", ActionClass::Weapons, 0x42, 0x71, 0x0C000801, 0, 0x0, 0x0, 0, 0, 3, 2019, 26},
+	{103, "NVG", "Night Vision", ActionClass::Weapons, 0x4E, 0x72, 0x0C000801, 0, 0x0, 0x0, 0, 0, 3, 2020, 41},
+	{104, "scope", "Toggle Scope", ActionClass::Weapons, 0x00, 0x00, 0x4C000C01, 0, 0x2, 0x0, 0, 0, 1, 2015, 6},
+	{105, "help", "Help Screen", ActionClass::System, 0xBF, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3, 10003, 8},
+	{106, "viewwithgun", "gun view", ActionClass::Camera, 0x00, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 3002, 401},
+	{107, "viewchase", "Chase View", ActionClass::Camera, 0x00, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 1, 3003, 402},
+	// "1st Person Toggle" (code 412) on F1, ahead of 1st Person View on Ctrl+F1.
+	// [orig: rows 108 @0x817630, 109 @0x81769C (dfx2.exe)]
+	{108, "viewtoggle", "1st Person Toggle", ActionClass::Camera, 0x70, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1, 3001, 412},
+	{109, "view1st", "1st Person View", ActionClass::Camera, 0x70, 0x00, 0x0C000801, 0x11, 0x0, 0x0, 0, 0, 1, 3001, 400},
+	{110, "CycleSpectatorMode", "Cycle Spectator Mode", ActionClass::Spectator, 0x20, 0x00, 0x04000800, 0, 0x10, 0x0, 0, 0, 2, 80001, 500},
+	{111, "IncSpectatorTarget", "Spectator Target +", ActionClass::Spectator, 0x00, 0x00, 0x04000800, 0, 0x1, 0x0, 0, 0, 2, 80002, 501},
+	{112, "DecSpectatorTarget", "Spectator Target -", ActionClass::Spectator, 0x00, 0x00, 0x04000800, 0, 0x2, 0x0, 0, 0, 2, 80003, 502},
+	// The cheat rows, Jointops.exe's codes and texts over their own command CRCs (the token
+	// field's first dword, little-endian).
+	// [orig: rows 113..117 @0x81784C..0x8179FC, the dwords @+0x4B (dfx2.exe)]
+	{113, "\x9F&\xEF\xAF", "FragGrenade", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0, 120},
+	{114, "\x04*=|", "SmokeGrenade", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0, 121},
+	{115, ".5\xDB\xDC", "Detonator", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0, 122},
+	{116, "!\xBD~\xBA", "Medpack", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0, 123},
+	{117, "\x8F\xB3\xA4\x16", "ToSpecial", ActionClass::Cheat, 0x00, 0x00, 0x00000010, 0, 0x0, 0x0, 0, 0, 1, 0, 40},
+	{118, "fps", "Framerate", ActionClass::Debug, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3, 0, 74},
+};
+constexpr controls::Catalog kControls{kControlRows, sizeof(kControlRows) / sizeof(kControlRows[0])};
 
 Title make() {
 	Title t;
@@ -271,6 +421,8 @@ Title make() {
 	//  @0x5A49C2..0x5A4A0D, @0x5A4A62..0x5A4ABA (dfx2.exe)].
 	t.death_map_zone_markers = true;
 	t.loading_screen = &kLoadingScreen;
+	// DFX2-110: its own binding catalog (above).
+	t.controls = &kControls;
 	return t;
 }
 

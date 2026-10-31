@@ -8,6 +8,10 @@ namespace opennova::gamecfg {
 enum class ConfigTable : uint8_t; // formats/gamecfg/game_cfg.h
 } // namespace opennova::gamecfg
 
+namespace opennova::controls {
+struct Catalog; // runtime/controls/controls.h
+} // namespace opennova::controls
+
 namespace opennova {
 
 // The container format a NEW archive of any title is written in, as a PffFormat value (0 =
@@ -385,6 +389,12 @@ struct Title {
 	// DFX2-63: the mission loading screen's text (TitleLoadingScreen); null where no binary of the
 	// title was read for it, which composites none.
 	const TitleLoadingScreen *loading_screen = nullptr;
+	// DFX2-110: the static binding catalog the executable compiles in (runtime/controls/
+	// controls.h Catalog): every row's action code, config token, class, flags and default
+	// bindings, which the default binding table player.sav's entries merge into, the live
+	// binding records, the key-config and help screens and every by-code reader take. Null:
+	// Jointops.exe's (controls::default_catalog).
+	const controls::Catalog *controls = nullptr;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

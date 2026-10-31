@@ -39,7 +39,7 @@ const Title &kJo = games::jo_title();
 
 ProfileDefaults defaults() {
     ProfileDefaults d;
-    d.bindings = profile::default_binding_table();
+    d.bindings = profile::default_binding_table(opennova::controls::default_catalog());
     d.macros = profile::default_macros(nullptr, nullptr);
     d.avatars[0] = {0, 0, 0x0200};
     d.avatars[1] = {7, 0, 0x8207};
@@ -62,7 +62,7 @@ rtxt::File macros_table(const std::vector<std::pair<std::string, std::string>> &
 // --- 1. the default binding table [orig: KeyBinding_BuildFilteredTable @0x54c2b0] ---
 
 int test_default_binding_table() {
-    const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
+    const std::vector<playersav::BindingEntry> table = profile::default_binding_table(opennova::controls::default_catalog());
     // Every catalog row with the 0x4000000 flag: 109 in JO:CA (the shipped
     // profiles' count).
     TEST_EXPECT(table.size() == 109);
@@ -136,7 +136,7 @@ int test_init_defaults() {
 // --- 4. the merge [orig: KeyBinding_MergeSavedBindings @0x54c3f0] -----------------------
 
 int test_merge_bindings() {
-    const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
+    const std::vector<playersav::BindingEntry> table = profile::default_binding_table(opennova::controls::default_catalog());
     std::vector<playersav::BindingEntry> saved;
     playersav::BindingEntry forward;
     for (const auto &e : table)
@@ -164,6 +164,72 @@ int test_merge_bindings() {
             TEST_EXPECT(merged[i].primary == table[i].primary);
         }
     }
+    return 0;
+}
+
+// DFX2-110: the default table and the merge follow the title's catalog. dfx2.exe's table carries
+// Powerup0 200, Grenades 204, Accessory 205, Powerup6..9 206..209, Detonator 210, Objectives
+// 58, EmoteToggle 59 and the 1st Person Toggle 412, and no JO-only row; a player.sav entry
+// merges where its code and token both name a default row, so dfx2.exe's Accessory (code 205)
+// is FragGrenade's code under Jointops.exe and keeps nothing there, and its Powerup0 (200) has
+// no row at all, while under dfx2.exe both take the saved keys.
+// [orig: KeyBinding_BuildFilteredTable @0x549530 over the table @0x8148A0;
+//  KeyBinding_MergeWeaponSlotParams @0x549670, the KeyBinding_MergeSavedBindings twin (dfx2.exe)]
+int test_title_binding_tables() {
+    const controls::Catalog &jo = controls::title_catalog(kJo);
+    const controls::Catalog &dfx2 = controls::title_catalog(games::dfx2_title());
+    const std::vector<playersav::BindingEntry> jo_table = profile::default_binding_table(jo);
+    const std::vector<playersav::BindingEntry> dfx2_table = profile::default_binding_table(dfx2);
+    const auto entry = [](const std::vector<playersav::BindingEntry> &table, int code) {
+        for (const playersav::BindingEntry &e : table)
+            if (e.index == code) return &e;
+        return static_cast<const playersav::BindingEntry *>(nullptr);
+    };
+    TEST_EXPECT(jo_table.size() == 109);
+    // dfx2.exe's 0x4000000 rows: Jointops.exe's 109 less its nine (Flashbang, FragGrenade,
+    // SmokeGrenade, medpack, ToSpecial, dotsize, ScopeZeroDec / Inc, commander_menu) plus
+    // its own nine (Grenades, Powerup6..9, Powerup0, Objectives, EmoteToggle, viewtoggle).
+    TEST_EXPECT(dfx2_table.size() == 109);
+    for (size_t i = 1; i < dfx2_table.size(); ++i) TEST_EXPECT(dfx2_table[i - 1].id < dfx2_table[i].id);
+    struct Want {
+        int code;
+        const char *token;
+        uint16_t primary;
+    };
+    for (const Want &w : {Want{200, "Powerup0", '0'}, Want{204, "Grenades", '4'},
+                          Want{205, "Accessory", '5'}, Want{206, "Powerup6", '6'},
+                          Want{209, "Powerup9", '9'}, Want{210, "Detonator", 0x08},
+                          Want{58, "Objectives", 'O'}, Want{59, "EmoteToggle", 0},
+                          Want{412, "viewtoggle", 0x70}}) {
+        const playersav::BindingEntry *e = entry(dfx2_table, w.code);
+        TEST_EXPECT(e != nullptr && e->token == w.token && e->primary == w.primary &&
+                    e->id == w.code);
+        TEST_EXPECT(w.code == 205 || entry(jo_table, w.code) == nullptr ||
+                    entry(jo_table, w.code)->token != w.token);
+    }
+    TEST_EXPECT(entry(dfx2_table, 400)->primary == 0x70 && entry(dfx2_table, 400)->primary_mod == 0x11);
+    for (const int code : {216, 220, 221, 222, 223}) TEST_EXPECT(entry(dfx2_table, code) == nullptr);
+    TEST_EXPECT(entry(jo_table, 205)->token == "FragGrenade" && entry(jo_table, 207)->token == "Accessory");
+
+    // A dfx2.exe player.sav table: Accessory on 'K', Powerup0 on 'L'.
+    std::vector<playersav::BindingEntry> saved;
+    for (playersav::BindingEntry e : dfx2_table) {
+        if (e.token == "Accessory") e.primary = 'K';
+        if (e.token == "Powerup0") e.primary = 'L';
+        if (e.token == "Accessory" || e.token == "Powerup0") saved.push_back(e);
+    }
+    const std::vector<playersav::BindingEntry> under_dfx2 = profile::merge_bindings(dfx2_table, saved);
+    TEST_EXPECT(entry(under_dfx2, 205)->primary == 'K' && entry(under_dfx2, 200)->primary == 'L');
+    const std::vector<playersav::BindingEntry> under_jo = profile::merge_bindings(jo_table, saved);
+    TEST_EXPECT(under_jo.size() == jo_table.size() && entry(under_jo, 200) == nullptr);
+    TEST_EXPECT(entry(under_jo, 205)->token == "FragGrenade" && entry(under_jo, 205)->primary == '5');
+    TEST_EXPECT(entry(under_jo, 207)->token == "Accessory" && entry(under_jo, 207)->primary == '7');
+    // The options records follow the catalog: dfx2.exe's Accessory record takes the 'K'.
+    playersav::ProfileRecord r;
+    r.bindings = under_dfx2;
+    const controls::BindingSet options = profile::options_bindings(r, dfx2);
+    TEST_EXPECT(options.record(options.index_of_token("Accessory"))->primary == 'K');
+    TEST_EXPECT(options.record(options.index_of_token("Powerup0"))->primary == 'L');
     return 0;
 }
 
@@ -204,7 +270,7 @@ int test_load_with_files() {
     playersav::PlayerSav file;
     file.flags = 1;
     file.extra = 0x03000000u;
-    for (playersav::ProfileRecord &r : file.slots) r.bindings = profile::default_binding_table();
+    for (playersav::ProfileRecord &r : file.slots) r.bindings = profile::default_binding_table(opennova::controls::default_catalog());
     file.slots[2].name = "Sandman";
     file.slots[2].flags = 0;
     file.slots[2].sp_no_weapon_recoil = 1;
@@ -447,8 +513,8 @@ int test_controls_words() {
     // A fresh record's table onto the live records changes nothing: the default
     // table is the catalog's own defaults, row for row.
     {
-        controls::BindingSet fresh;
-        const controls::BindingSet applied = profile::options_bindings(r);
+        controls::BindingSet fresh(opennova::controls::default_catalog());
+        const controls::BindingSet applied = profile::options_bindings(r, opennova::controls::default_catalog());
         for (int i = 0; i < static_cast<int>(fresh.size()); ++i) {
             const controls::BindingRecord *a = fresh.record(i);
             const controls::BindingRecord *b = applied.record(i);
@@ -460,7 +526,7 @@ int test_controls_words() {
     }
     // The table onto the live records [orig: KeyBinding_ApplyProfileBindings -> KeyBinding_ApplyProfileEntry]: a row
     // the table names takes the entry's fields, the joystick gate the word.
-    controls::BindingSet live;
+    controls::BindingSet live(opennova::controls::default_catalog());
     const int forward = live.index_of_token("move_forward");
     TEST_EXPECT(forward >= 0);
     for (playersav::BindingEntry &e : r.bindings) {
@@ -482,7 +548,7 @@ int test_controls_words() {
     // The Options screen's records [orig: UI_BuildKeyBindingLoadoutTable
     // @0x559e50] and their store back [orig: @0x559d50]: the count and the
     // identity fields stand, the eight binding fields follow the records.
-    controls::BindingSet options = profile::options_bindings(r);
+    controls::BindingSet options = profile::options_bindings(r, opennova::controls::default_catalog());
     TEST_EXPECT(options.record(forward)->primary == 'Y');
     TEST_EXPECT(options.assign_key(forward, 'K', false, false, false, false));
     const size_t count = r.bindings.size();
@@ -491,12 +557,13 @@ int test_controls_words() {
     for (const playersav::BindingEntry &e : r.bindings) {
         if (e.token != "move_forward") continue;
         TEST_EXPECT(e.primary == 'Y' && e.secondary == 'K' && e.mouse_mask == 0x10);  // the empty slot
-        TEST_EXPECT(e.index == controls::action_code(forward) && e.id == e.index);
+        TEST_EXPECT(e.index == options.catalog().rows[forward].code && e.id == e.index);
     }
     // A record that round-trips through the file keeps the stored table.
     std::vector<uint8_t> image(playersav::kPlayerRecordBytes, 0);
     playersav::write_record(r, image.data());
-    controls::BindingSet reread = profile::options_bindings(playersav::read_record(image.data()));
+    controls::BindingSet reread = profile::options_bindings(playersav::read_record(image.data()),
+            opennova::controls::default_catalog());
     TEST_EXPECT(reread.record(forward)->secondary == 'K');
 
     // The two checkboxes [orig: @0x554d36, @0x56074c; @0x55528c, @0x5552b5].
@@ -580,7 +647,7 @@ constexpr size_t kProgramBindingEntries = 109;
 constexpr uint64_t kProgramBindingTableDigest = UINT64_C(0xF822C6DB461D2A12);
 
 int test_program_binding_table() {
-    const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
+    const std::vector<playersav::BindingEntry> table = profile::default_binding_table(opennova::controls::default_catalog());
     TEST_EXPECT(table.size() == kProgramBindingEntries);
     TEST_EXPECT(binding_table_digest(table) == kProgramBindingTableDigest);
     return 0;
@@ -838,6 +905,7 @@ int main() {
         {"default_macros", test_default_macros},
         {"init_defaults", test_init_defaults},
         {"merge_bindings", test_merge_bindings},
+        {"title_binding_tables", test_title_binding_tables},
         {"load_without_files", test_load_without_files},
         {"load_with_files", test_load_with_files},
         {"name_rules", test_name_rules},

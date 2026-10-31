@@ -1,5 +1,6 @@
 #include "devtools/scripted_input.h"
 
+#include "resource_index/resource_root.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/variant/dictionary.hpp>
@@ -104,7 +105,9 @@ Error ScriptedInput::load_steps(const Array &p_steps) {
 		steps.push_back(step);
 	}
 	std::string error;
-	if (!driver_.load(steps, error)) {
+	// The codes resolve in the launch title's binding catalog.
+	if (!driver_.load(opennova::controls::title_catalog(ResourceRoot::session_title(Ref<ResourceRoot>())),
+				steps, error)) {
 		error_ = opennova::to_gd(error);
 		return ERR_INVALID_PARAMETER;
 	}
@@ -168,7 +171,9 @@ PackedInt32Array ScriptedInput::get_held_codes() const {
 }
 
 String ScriptedInput::token_for_action_code(int p_code) {
-	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
+	const opennova::controls::ActionDef *def =
+			opennova::controls::title_catalog(ResourceRoot::session_title(Ref<ResourceRoot>()))
+					.for_code(p_code);
 	return def != nullptr ? String::utf8(def->token) : String();
 }
 

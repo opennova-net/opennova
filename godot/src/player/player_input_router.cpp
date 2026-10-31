@@ -2,6 +2,7 @@
 
 #include "player/key_lock_device.h"
 #include "player/local_player_presenter.h"
+#include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
 #include "world/game_world.h"
 #include "world/game_world_access.h"
@@ -14,7 +15,7 @@
 #include <godot_cpp/classes/global_constants.hpp>
 
 #include <base/gameprofile/game_type.h>
-#include <runtime/controls/controls.h> // action_code (the HUD rows' dispatch codes)
+#include <runtime/controls/controls.h> // Catalog (the rows' dispatch codes)
 #include <runtime/world/player_look.h> // pass_through_close_axis, kCursorCentreX / Y
 
 #include <cmath>
@@ -35,24 +36,30 @@ bool scroll_lock_device_turn_off() {
 	return key_lock_device::set(opennova::controls::kVkScroll, false);
 }
 
-// The held USE row's catalog row (useitem; its dispatch code is the action head's key).
-constexpr int kUseItemRow = 44;
+// The held USE row's dispatch code (useitem), the action head's key.
+constexpr int kUseItemCode = 177;
+
+// The binding catalog the controls' live records follow (the launch title's).
+const opennova::controls::Catalog &catalog_of(const Ref<ControlsModel> &p_controls) {
+	return p_controls.is_valid() ? p_controls->native_bindings().catalog()
+	                             : opennova::controls::title_catalog(
+	                                       ResourceRoot::session_title(Ref<ResourceRoot>()));
+}
 
 // The records whose arms are the shell's (set_record_leg): the special-key chain's deploy
-// pick, input event 12, and the escape row's, catalog row 67 (code 18) (engine
-// controls::KeyRowEvent and PlayerAction::EmbedderRow carry the witness).
+// pick, input event 12, and the escape row's, code 18 (engine controls::KeyRowEvent and
+// PlayerAction::EmbedderRow carry the witness).
 constexpr int kDeployPickCode = 12;
-constexpr int kEscapeRow = 67;
+constexpr int kEscapeCode = 18;
 // The Screen Shot row (code 2): its case writes the frame to a file, the shell's device leg
 // (engine gameprofile/player_files.h screenshot_file_name carries the witness).
-constexpr int kScreenShotRow = 69;
-// The cheat row 117's code 40, past the role's gates (out of a session, a local player): the
+constexpr int kScreenShotCode = 2;
+// The cheat row's code 40, past the role's gates (out of a session, a local player): the
 // shell's weapon-screen toggle (engine inmatch::Role::dispatch_record carries the witness).
-constexpr int kWeaponScreenRow = 117;
+constexpr int kWeaponScreenCode = 40;
 bool shell_record(int p_code) {
-	return p_code == kDeployPickCode || p_code == opennova::controls::action_code(kEscapeRow) ||
-			p_code == opennova::controls::action_code(kScreenShotRow) ||
-			p_code == opennova::controls::action_code(kWeaponScreenRow);
+	return p_code == kDeployPickCode || p_code == kEscapeCode || p_code == kScreenShotCode ||
+			p_code == kWeaponScreenCode;
 }
 
 // The held USE row's arm through the sim's press latch (engine
@@ -157,8 +164,8 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 
 // The talk row and the HUD toggle row a dispatch code names (-1 for none): the rows whose
 // records the router's dispatch takes through the chat line and the HUD's toggles.
-int talk_row_of(int p_code) {
-	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
+int talk_row_of(const opennova::controls::Catalog &p_catalog, int p_code) {
+	const opennova::controls::ActionDef *def = p_catalog.for_code(p_code);
 	if (def == nullptr) return -1;
 	const std::string_view token(def->token);
 	for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
@@ -167,22 +174,16 @@ int talk_row_of(int p_code) {
 }
 
 int hud_row_of(int p_code) {
-	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
-	if (def == nullptr) return -1;
-	const std::string_view token(def->token);
 	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
-		if (token == opennova::hud::hud_toggle_row_token(row)) return row;
+		if (p_code == opennova::hud::hud_toggle_row_code(row)) return row;
 	return -1;
 }
 
 // A talk or HUD row's dispatch code by its token, as the key scan queues it (the catalog
 // row's code).
-int32_t row_token_code(std::string_view p_token) {
-	std::size_t count = 0;
-	const opennova::controls::ActionDef *rows = opennova::controls::catalog(&count);
-	for (std::size_t i = 0; i < count; ++i)
-		if (p_token == rows[i].token) return opennova::controls::action_code(rows[i].id);
-	return -1;
+int32_t row_token_code(const opennova::controls::Catalog &p_catalog, const char *p_token) {
+	const opennova::controls::ActionDef *def = p_catalog.for_token(p_token);
+	return def != nullptr ? def->code : -1;
 }
 
 } // namespace
@@ -192,6 +193,8 @@ void PlayerInputRouter::setup(Node *p_world, LocalPlayerPresenter *p_presenter,
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
 	presenter_id_ = p_presenter != nullptr ? ObjectID(p_presenter->get_instance_id()) : ObjectID();
 	controls_ = p_controls;
+	// The action table over the controls' catalog, the title's.
+	actions_ = opennova::controls::PlayerActions(catalog_of(controls_));
 }
 
 // The process's keyboard-lock legs (D-NET-563; engine controls::kVkNumLock carries the
@@ -343,7 +346,8 @@ opennova::inmatch::InputPacket PlayerInputRouter::sample_tick(uint32_t p_logic_t
 		// picks with their parameter, and a keylist binding on a row no arm of the poll owns;
 		// engine controls::player_actions_own_code carries the witness).
 		for (const opennova::controls::KeyRowEvent &event : action_events_)
-			if (!event.release && !opennova::controls::player_actions_own_code(event.code))
+			if (!event.release &&
+					!opennova::controls::player_actions_own_code(catalog_of(controls_), event.code))
 				sample_records_.push_back({event.code, event.param, 0, 0, event.sign});
 		action_events_.clear();
 	}
@@ -395,12 +399,12 @@ void PlayerInputRouter::run_update_rows(uint32_t p_logic_tick, bool p_new_sample
 		hud_held_ = sample.hud;
 		for (int row = 0; row < HudChatEntry::ROW_COUNT; ++row)
 			if ((talk_fired & (1 << row)) != 0)
-				row_records_.push_back({row_token_code(opennova::hud::chat_talk_row_token(row)), 0, 0,
-						0, false});
+				row_records_.push_back({row_token_code(catalog_of(controls_),
+								opennova::hud::chat_talk_row_token(row)), 0, 0, 0, false});
 		for (int row = 0; row < HudToggles::ROW_COUNT; ++row) {
 			if ((hud_fired & (1 << row)) == 0) continue;
 			const char *token = opennova::hud::hud_toggle_row_token(row);
-			row_records_.push_back({row_token_code(token), 0, 0, 0,
+			row_records_.push_back({row_token_code(catalog_of(controls_), token), 0, 0, 0,
 					controls_.is_valid() && controls_->is_token_fire_signed(String(token))});
 		}
 	}
@@ -438,7 +442,7 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 	// role's flip of the session's word (engine inmatch::Role::dispatch_record), whose case
 	// resets the key queue behind its flip (engine controls::KeyEventQueue::reset carries the
 	// witness; hud_toggles_dispatch and ChatEntry::dispatch_rows the rows').
-	const int talk_row = talk_row_of(p_record.code);
+	const int talk_row = talk_row_of(catalog_of(controls_), p_record.code);
 	if (talk_row >= 0) {
 		poll_talk_rows(record_sim, 1 << talk_row);
 		return;
@@ -463,7 +467,7 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 	// under a pass-through screen's input frame too): its Scroll Lock turn-off and the arm the
 	// sim's press latch decides (engine controls::PlayerActions::use_item_record carries the
 	// witness). A dropped record arms nothing, so the hold ends at the frame's tail.
-	if (p_record.code == opennova::controls::action_code(kUseItemRow)) {
+	if (p_record.code == kUseItemCode) {
 		if (!record_sim->action_head_admits(p_record.code)) return;
 		apply_immediate(actions_.use_item_record(use_item_arm(*record_sim.ptr())), record_sim);
 		return;
@@ -485,7 +489,8 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 		}
 		default: break;
 	}
-	if (const auto request = opennova::controls::player_action_request(p_record)) {
+	if (const auto request =
+					opennova::controls::player_action_request(catalog_of(controls_), p_record)) {
 		apply_player_action(*record_sim.ptr(), *request);
 		return;
 	}
@@ -674,8 +679,9 @@ void PlayerInputRouter::sample_input_frame(const Ref<MissionFrameInput> &p_input
 		const auto joystick = controls_->joystick_records(p_spectating, scroll_lock);
 		gate.key_events.insert(gate.key_events.end(), joystick.begin(), joystick.end());
 	}
-	gate.embedder_row = [](int p_code) {
-		return talk_row_of(p_code) >= 0 || hud_row_of(p_code) >= 0 || shell_record(p_code);
+	const opennova::controls::Catalog &catalog = catalog_of(controls_);
+	gate.embedder_row = [&catalog](int p_code) {
+		return talk_row_of(catalog, p_code) >= 0 || hud_row_of(p_code) >= 0 || shell_record(p_code);
 	};
 	gate.scroll_lock_on = scroll_lock;
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
@@ -745,8 +751,7 @@ bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_row
 	// hud::HudKeyPoll::head_drops carries the witness).
 	int head_drops = 0;
 	for (int row = 0; row < HudToggles::ROW_COUNT; ++row)
-		if (!p_sim->action_head_admits(opennova::controls::action_code(
-					opennova::hud::hud_toggle_row_catalog_row(row))))
+		if (!p_sim->action_head_admits(opennova::hud::hud_toggle_row_code(row)))
 			head_drops |= 1 << row;
 	// The connection mode's two bits: an authority is any role but a joiner, a
 	// session peer any role but a dedicated host. The mousescale row steps by

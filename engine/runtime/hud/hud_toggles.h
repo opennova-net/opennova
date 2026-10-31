@@ -286,8 +286,8 @@ inline constexpr uint32_t kPauseCleared = 0x1000000;
 } // namespace hud_toggle_event
 
 // The catalog rows the poll samples, one bit each: the embedder reads each
-// row's held state by its config token (controls catalog) and hands the
-// mask in.
+// row's held state by its config token (the title's controls catalog) and
+// hands the mask in.
 enum HudToggleRow : int {
 	kRowHudDetail,    // 50 huddetail
 	kRowHudColor,     // 76 hudcolor
@@ -315,11 +315,11 @@ enum HudToggleRow : int {
 	kRowLockGame,     // 84 lockgame
 	kHudToggleRowCount,
 };
-// The row's catalog config token.
+// The row's catalog config token ("" out of range).
 const char *hud_toggle_row_token(int row);
-// The row's static catalog row (controls::action_code reads the dispatch code
-// the head tests the row's flags by); -1 out of range.
-int hud_toggle_row_catalog_row(int row);
+// The row's dispatch code, by which the head tests its catalog row's flags; -1
+// out of range.
+int hud_toggle_row_code(int row);
 // Sets the poll's key bits from a mask of (1 << HudToggleRow).
 void hud_key_poll_set_rows(HudKeyPoll &keys, uint32_t rows_down);
 

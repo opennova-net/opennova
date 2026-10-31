@@ -1,7 +1,6 @@
 #include <runtime/inmatch/session.h>
 
 #include <base/io/perf_clock.h>
-#include <runtime/controls/controls.h> // action_code (the console's by-code dispatch)
 #include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/hud/hud_server_status.h> // main_frame_draws_scene (the scene gate)
 #include <runtime/hud/hud_toggles.h> // HudToggleState::server_status_view
@@ -120,28 +119,30 @@ void Role::apply_input(const TickInput &input) {
 	// keys (V-L2-s8 defect 2's 0x400 rows).
 	// [orig: Input_ProcessAnalogBindings @0x4995F0 - Input_QueueEvent(row code)
 	//  @0x499660; Input_HandleActionBinding @0x49AD40 - the head @0x49AD8D..0x49AE23]
-	const auto held = [this](bool down, int row) {
-		return down && action_head_admits(controls::action_code(row));
-	};
-	kernel.local.set_movement_keys(held(movement.forward, 2), held(movement.back, 3),
-			held(movement.left, 4), held(movement.right, 5), held(movement.lean_left, 6),
-			held(movement.lean_right, 7), held(movement.jump, 8));
-	kernel.local.set_view_keys(held(movement.free_look, 97), held(movement.look_up, 13),
-			held(movement.look_down, 12), held(movement.turn_left, 14),
-			held(movement.turn_right, 15));
+	// Each by its row's code: forward 152, back 151, strafe 156 / 157, lean 148 / 147, jump
+	// 153, FreeLook 176, look up / down 155 / 154, turn 158 / 159 [orig: word_8159A8 + 108 *
+	// rows 2..8, 97, 12..15].
+	const auto held = [this](bool down, int code) { return down && action_head_admits(code); };
+	kernel.local.set_movement_keys(held(movement.forward, 152), held(movement.back, 151),
+			held(movement.left, 156), held(movement.right, 157), held(movement.lean_left, 148),
+			held(movement.lean_right, 147), held(movement.jump, 153));
+	kernel.local.set_view_keys(held(movement.free_look, 176), held(movement.look_up, 155),
+			held(movement.look_down, 154), held(movement.turn_left, 158),
+			held(movement.turn_right, 159));
 	// The mouse look rows (flags 0x0C100425 / 0x0C200425) queue their axis as action
 	// events, which pass the dispatcher's head: a dead local player, the pre-round
 	// timer, the deploy overlay and the round-over gate drop the frame's look
 	// (V-LI-s1 FOUND 5). [orig: Input_TryTriggerMouseAxisBinding @0x499130 - the row's
 	//  0x100000 / 0x200000 tests @0x49913D / @0x499164, Input_QueueEvent @0x499156;
 	//  Input_HandleActionBinding @0x49AD40 - the head @0x49AD8A..0x49AE16]
-	// Each axis is its own row's event (row 0 the X, row 1 the Y).
-	constexpr int kLookXRow = 0;
-	constexpr int kLookYRow = 1;
+	// Each axis is its own row's event (turn_left_abs 166 the X, lookpitch 164 the Y)
+	// [orig: rows 0 @0x8159A8, 1 @0x815A14].
+	constexpr int kLookXCode = 166;
+	constexpr int kLookYCode = 164;
 	const float look_x = input.player.look_delta_x != 0.0f &&
-			action_head_admits(controls::action_code(kLookXRow)) ? input.player.look_delta_x : 0.0f;
+			action_head_admits(kLookXCode) ? input.player.look_delta_x : 0.0f;
 	const float look_y = input.player.look_delta_y != 0.0f &&
-			action_head_admits(controls::action_code(kLookYRow)) ? input.player.look_delta_y : 0.0f;
+			action_head_admits(kLookYCode) ? input.player.look_delta_y : 0.0f;
 	if (look_x != 0.0f || look_y != 0.0f) kernel.local.look(look_x, look_y);
 	// The trigger; the reload rides its record's arm (dispatch_record), PRESSED_RELOAD a
 	// sourceless frame's latch (PressedAction).
@@ -203,7 +204,7 @@ bool Role::action_head_admits(int32_t code) {
 	// is); a code no row carries reads the zero record (D-NET-710, V-L2-s8).
 	// [orig: Input_HandleActionBinding @0x49AD40 - dword_8159AC[code * 0x6C] @0x49AD8D;
 	//  KeyBinding_SortBySequentialId @0x498260]
-	const controls::ActionDef *row = controls::action_for_code(code);
+	const controls::ActionDef *row = controls_->for_code(code);
 	const uint32_t flags = row != nullptr ? row->flags : 0u;
 	// a6: on the authority the constant 2 on a dedicated host in a session, else the dead
 	// bit (LocalPlayer::action_dispatch_drops, D-NET-433); a joiner's replica dead bit.
@@ -245,8 +246,8 @@ bool Role::request_respawn() {
 	// [orig: Input_HandleActionBinding @0x49AD40 - DeathScreen_FilterInputAction
 	//  @0x49AE4C, Input_NullActionFilter @0x49AE68, Cine_FilterInputAction @0x49AE84, the
 	//  def+0x170 callback @0x49AEB6 (Input_HandleActionBinding_0's default @0x4E13F9)]
-	constexpr int kRespawnRow = 68;
-	if (!action_head_admits(controls::action_code(kRespawnRow))) return false;
+	constexpr int kRespawnCode = 55;
+	if (!action_head_admits(kRespawnCode)) return false;
 	// The input reset, then in a session on a peer the bodiless 0x41
 	// [orig: case 55 -- Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
 	//  is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A].
@@ -264,8 +265,8 @@ bool Role::request_stance(int stance) {
 	//  def+0x170 callback @0x49AEB6 -> Input_HandleActionBinding_0 @0x4E0420 - cases 169
 	//  @0x4E0D77, 170 @0x4E0DF3, 172 @0x4E0E3E; the catalog rows 9 / 10 / 11
 	//  @0x815D74 / @0x815DE0 / @0x815E4C]
-	constexpr int kStanceRows[3] = {11, 10, 9}; // stand 172, crouch 169, prone 170
-	if (!action_head_admits(controls::action_code(kStanceRows[stance]))) return false;
+	constexpr int kStanceCodes[3] = {172, 169, 170}; // stand, crouch, prone (rows 11, 10, 9)
+	if (!action_head_admits(kStanceCodes[stance])) return false;
 	return send_stance_request(stance);
 }
 
@@ -347,41 +348,41 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//  @0x4329C0 - the token walk @0x432A64..0x432A94 over all 768 records, the CRC walk
 	//  @0x432AA9..0x432B3E, Input_QueueEvent(record, ..) @0x432B4C / @0x432BA1;
 	//  Client_ProcessLocalCommand @0x520BF0 - Input_QueueEvent @0x520E5B]
-	constexpr int kRespawnRow = 68;
-	constexpr int kMedicRequestRow = 64;
+	constexpr int kRespawnCode = 55;
+	constexpr int kMedicRequestCode = 217;
 	// The "quit" row 78 (code 4, flags 0x04000000: no head gate) stores exit reason 2 and
 	// nothing else; the main frame's tail takes it to the Post Menu, whose reason-2 arm resets
 	// the session and ends the game (PostMissionRoute::exits_game).
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 4 @0x49AF4C; the catalog row 78
 	//  @0x817A90; Game_ProcessMainFrame @0x5263F0 - @0x526860..0x526867]
-	constexpr int kQuitRow = 78;
-	if (code == controls::action_code(kQuitRow)) {
+	constexpr int kQuitCode = 4;
+	if (code == kQuitCode) {
 		store_mission_exit(kMissionExitReset);
 		return;
 	}
-	if (code == controls::action_code(kRespawnRow)) {
+	if (code == kRespawnCode) {
 		(void)request_respawn();
 		return;
 	}
-	if (code == controls::action_code(kMedicRequestRow)) {
+	if (code == kMedicRequestCode) {
 		(void)request_medic();
 		return;
 	}
 	// The stance selects, catalog rows 9 (170 prone), 10 (169 crouch) and 11 (172 stand)
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 169 @0x4E0D77, 170 @0x4E0DF3,
 	//  172 @0x4E0E3E].
-	constexpr int kProneRow = 9;
-	constexpr int kCrouchRow = 10;
-	constexpr int kStandRow = 11;
-	if (code == controls::action_code(kCrouchRow)) {
+	constexpr int kProneCode = 170;
+	constexpr int kCrouchCode = 169;
+	constexpr int kStandCode = 172;
+	if (code == kCrouchCode) {
 		(void)request_stance(1);
 		return;
 	}
-	if (code == controls::action_code(kProneRow)) {
+	if (code == kProneCode) {
 		(void)request_stance(2);
 		return;
 	}
-	if (code == controls::action_code(kStandRow)) {
+	if (code == kStandCode) {
 		(void)request_stance(0);
 		return;
 	}
@@ -393,8 +394,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - case 0xD3 @0x4E1278..0x4E12F3 ->
 	//  WeaponSlot_RequestReload @0x53F110 (the next action's test @0x53F11E..0x53F12D, the
 	//  store @0x53F12F)]
-	constexpr int kReloadRow = 47;
-	if (code == controls::action_code(kReloadRow)) {
+	constexpr int kReloadCode = 211;
+	if (code == kReloadCode) {
 		if (action_head_admits(code)) (void)kernel_->local.request_reload();
 		return;
 	}
@@ -407,8 +408,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//  with g_RoundOver @0x49ADFD in a session, @0x49AE16 out of one);
 	//  Input_HandleActionBinding_0 @0x4E0420 - case 0xDC @0x4E1161..0x4E1181;
 	//  Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8)]
-	constexpr int kToSpecialRow = 37;
-	if (code == controls::action_code(kToSpecialRow)) {
+	constexpr int kToSpecialCode = 220;
+	if (code == kToSpecialCode) {
 		if (action_head_admits(code)) kernel_->local.dispatch_to_special(to_special_held_);
 		return;
 	}
@@ -430,8 +431,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//  test @0x4E090B)]
 	// An ordinary def's press leg runs its own gates there (world::local_weapon_press_fire:
 	// the WAC latch and BlockFire, OnlyFireScoped, OnlyFireLocked's dry click, the seats).
-	constexpr int kFireRow = 43;
-	if (code == controls::action_code(kFireRow)) {
+	constexpr int kFireCode = 149;
+	if (code == kFireCode) {
 		if (!action_head_admits(code) || kernel_->world.rules.cease_fire) return;
 		(void)kernel_->local.fire_record(fire_held_, fire_keys_held_);
 		return;
@@ -440,8 +441,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// the head, out of a session, the flip and the audio stop; the debug transport's step
 	// flips no word of the session's (pause_flips_). The embedder then takes the record (its
 	// HUD's copy of the word, the key-queue reset), a device's and a console's alike.
-	constexpr int kPauseRow = 70;
-	if (code == controls::action_code(kPauseRow)) {
+	constexpr int kPauseCode = 25;
+	if (code == kPauseCode) {
 		if (pause_flips_ && kind() == RoleKind::SinglePlayer && action_head_admits(code)) {
 			world::World &world = kernel_->world;
 			world.rules.pause_word = !world.rules.pause_word;
@@ -459,8 +460,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// [orig: Input_HandleActionBinding @0x49AD40 - the 0x10 test @0x49AE1C..0x49AE23, the
 	//  def+0x170 callback @0x49AEB6; Input_HandleActionBinding_0 @0x4E0420 - case 123
 	//  `xor g_DebugCheatFlags, 800h` @0x4E07A4]
-	constexpr int kAiIgnoresPlayerCheatRow = 116;
-	if (code == controls::action_code(kAiIgnoresPlayerCheatRow)) {
+	constexpr int kAiIgnoresPlayerCheatCode = 123;
+	if (code == kAiIgnoresPlayerCheatCode) {
 		if (action_head_admits(code)) {
 			world::World &world = kernel_->world;
 			world.rules.ai_rules_skip_local_player = !world.rules.ai_rules_skip_local_player;
@@ -481,14 +482,14 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//  @0x4E074B, GameText_GetString("Misc", "STRMISC_INFAMMO") @0x4E076C,
 	//  Chat_AddMessageChannel2(text, -1, 930) @0x4E0775; case 122 `mov word ptr [eax+11Eh],
 	//  4000h` @0x4E0784]
-	constexpr int kWeaponRefreshCheatRow = 113;
-	constexpr int kInfiniteAmmoCheatRow = 114;
-	constexpr int kHealthCheatRow = 115;
-	if (code == controls::action_code(kWeaponRefreshCheatRow)) {
+	constexpr int kWeaponRefreshCheatCode = 120;
+	constexpr int kInfiniteAmmoCheatCode = 121;
+	constexpr int kHealthCheatCode = 122;
+	if (code == kWeaponRefreshCheatCode) {
 		if (action_head_admits(code)) kernel_->local.refresh_weapon_overlay();
 		return;
 	}
-	if (code == controls::action_code(kInfiniteAmmoCheatRow)) {
+	if (code == kInfiniteAmmoCheatCode) {
 		if (action_head_admits(code)) {
 			world::World &world = kernel_->world;
 			world.rules.ignore_weapon_ammo_cost = !world.rules.ignore_weapon_ammo_cost;
@@ -498,7 +499,7 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 		}
 		return;
 	}
-	if (code == controls::action_code(kHealthCheatRow)) {
+	if (code == kHealthCheatCode) {
 		if (action_head_admits(code)) {
 			world::World &world = kernel_->world;
 			// The one health word, which the port keeps on the registry row and the AI
@@ -515,8 +516,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// flips the cheat word's 0x400 bit, the frame-rate overlay (World::rules.frame_rate_overlay).
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 74 `xor g_DebugCheatFlags, 400h`
 	//  @0x49B937]
-	constexpr int kFrameRateRow = 118;
-	if (code == controls::action_code(kFrameRateRow)) {
+	constexpr int kFrameRateCode = 74;
+	if (code == kFrameRateCode) {
 		if (action_head_admits(code)) {
 			world::World &world = kernel_->world;
 			world.rules.frame_rate_overlay = !world.rules.frame_rate_overlay;
@@ -528,8 +529,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	// joins this drain (D-NET-1319).
 	// [orig: Input_HandleActionBinding_0 @0x4E0420 - `cmp 425` @0x4E046F,
 	//  Input_QueueEvent(152, 0, 0, 1) called @0x4E13ED]
-	constexpr int kLastMoveRow = 16;
-	if (code == controls::action_code(kLastMoveRow)) {
+	constexpr int kLastMoveCode = 425;
+	if (code == kLastMoveCode) {
 		if (action_head_admits(code)) (void)input_events_.push({152, 0, 0, 1, false});
 		return;
 	}
@@ -559,8 +560,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//  Input_HandleActionBinding_0 @0x4E0420 - case 49 @0x4E056D, sprintf("%i") called @0x4E05BE,
 	//  GameText_GetString("Misc", "STRMISC_SCOPESCALE") called @0x4E05E0, Chat_FormatPlayerTokens
 	//  called @0x4E05E9, Chat_AddMessageChannel2(.., -1, 930) called @0x4E05F2]
-	constexpr int kScopeScaleRow = 74;
-	if (code == controls::action_code(kScopeScaleRow)) {
+	constexpr int kScopeScaleCode = 49;
+	if (code == kScopeScaleCode) {
 		if (action_head_admits(code)) {
 			const int32_t scale = world::player_look_scope_scale(kernel_->local.look_settings,
 					record.p1, record.sign);
@@ -579,8 +580,8 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 	//  @0x424390, the tail @0x4DDCE0 (g_LocalPlayerEntity), UI_IsMenuScreenOpen @0x4DDCE9,
 	//  UI_CloseMenuScreen @0x4DDCF2, UI_OpenMenuScreen("weapon.mnu", "WEAPON") @0x4DDD03,
 	//  g_WeaponScreenOpen = 1 @0x4DDD0B]
-	constexpr int kWeaponScreenCheatRow = 117;
-	if (code == controls::action_code(kWeaponScreenCheatRow) &&
+	constexpr int kWeaponScreenCheatCode = 40;
+	if (code == kWeaponScreenCheatCode &&
 			(!action_head_admits(code) || kernel_->world.rules.mp_session ||
 					!kernel_->world.cached.local_player.valid()))
 		return;
@@ -590,20 +591,20 @@ void Role::dispatch_record(const controls::InputEventRecord &record, TickInputSo
 }
 
 bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
-	constexpr int kNextFlagRow = 52;   // code 32, flags 0x0C000801
-	constexpr int kPuntCrcRow = 85;    // code 47, flags 0x04000000
-	constexpr int kSaveScoresRow = 88; // code 38, flags 0x04000000
-	constexpr int kNetDelayRow = 89;   // code 103, flags 0x04000000
-	constexpr int kResetGamesRow = 92; // code 106, flags 0x04000000
-	constexpr int kBanRow = 93;        // code 107, flags 0x04000000
-	constexpr int kLastGameRow = 94;   // code 108, flags 0x04000000
-	constexpr int kTodRow = 95;        // code 438, flags 0
-	constexpr int kTodRateRow = 96;    // code 497, flags 0
+	constexpr int kNextFlagCode = 32;   // code 32, flags 0x0C000801
+	constexpr int kPuntCrcCode = 47;    // code 47, flags 0x04000000
+	constexpr int kSaveScoresCode = 38; // code 38, flags 0x04000000
+	constexpr int kNetDelayCode = 103;   // code 103, flags 0x04000000
+	constexpr int kResetGamesCode = 106; // code 106, flags 0x04000000
+	constexpr int kBanCode = 107;        // code 107, flags 0x04000000
+	constexpr int kLastGameCode = 108;   // code 108, flags 0x04000000
+	constexpr int kTodCode = 438;        // code 438, flags 0
+	constexpr int kTodRateCode = 497;    // code 497, flags 0
 	const int32_t code = record.code;
-	const auto is = [code](int row) { return code == controls::action_code(row); };
-	if (!is(kNextFlagRow) && !is(kPuntCrcRow) && !is(kSaveScoresRow) && !is(kNetDelayRow) &&
-			!is(kResetGamesRow) && !is(kBanRow) && !is(kLastGameRow) && !is(kTodRow) &&
-			!is(kTodRateRow))
+	const auto is = [code](int row_code) { return code == row_code; };
+	if (!is(kNextFlagCode) && !is(kPuntCrcCode) && !is(kSaveScoresCode) && !is(kNetDelayCode) &&
+			!is(kResetGamesCode) && !is(kBanCode) && !is(kLastGameCode) && !is(kTodCode) &&
+			!is(kTodRateCode))
 		return false;
 	if (!action_head_admits(code)) return true;
 	world::World &world = kernel_->world;
@@ -616,7 +617,7 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	// joiner's game type is the session's, which its replica holds.
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 32 `test ebp, ebp` @0x49B6A7,
 	//  Spectator_CycleTargetByTeam(1) called @0x49B6AD, (-1) @0x49B6BC]
-	if (is(kNextFlagRow)) {
+	if (is(kNextFlagCode)) {
 		const world::Entity *local = kernel_->local.player();
 		if (local == nullptr) return true;
 		world::WaypointCycleContext cycle = world.waypoint_context();
@@ -630,7 +631,7 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 38 `xor g_SaveScores, 1` @0x49B7B3,
 	//  Chat_AddMessageChannel2("Save Scores: On", -1, 930) @0x49B7C8, ("Save Scores: Off")
 	//  @0x49B7DA]
-	if (is(kSaveScoresRow)) {
+	if (is(kSaveScoresCode)) {
 		ClientProcessState *process = process_state();
 		if (process == nullptr) return true;
 		process->save_scores = !process->save_scores;
@@ -646,7 +647,7 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 47, Debug_PrintScoreCounters called
 	//  @0x49B829; Debug_PrintScoreCounters @0x4FD6A0 - "1:%i 2:%i 3:%i 4:%i 5:%i 6:%i 7:%i 8:%i"
 	//  @0x4FD6F3, Chat_AddMessageChannel2(.., -1, 930) called @0x4FD704]
-	if (is(kPuntCrcRow)) {
+	if (is(kPuntCrcCode)) {
 		const ClientProcessState *process = process_state();
 		if (process == nullptr) return true;
 		const std::array<int32_t, 8> &n = process->punt_crc_counters;
@@ -663,21 +664,21 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	// netdelay: the record's first argument, gated inside (Server_SetNetworkDelay)
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 103, Server_SetNetworkDelay called
 	//  @0x49BB73].
-	if (is(kNetDelayRow)) {
+	if (is(kNetDelayCode)) {
 		if (ctx != nullptr) (void)Server_SetNetworkDelay(*ctx, record.p1);
 		return true;
 	}
 	// resetgames: in a session on the authority.
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 106, the gates @0x49BB80..0x49BB94,
 	//  Server_ForceRoundEndAndClearState called @0x49BB9A]
-	if (is(kResetGamesRow)) {
+	if (is(kResetGamesCode)) {
 		if (in_session && authority && ctx != nullptr) Server_ForceRoundEndAndClearState(*ctx, world);
 		return true;
 	}
 	// Ban: the record's first argument, the slot, gated inside (Server_BanPlayerSlot)
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 107, Server_BanPlayerSlot called
 	//  @0x49BBA5]
-	if (is(kBanRow)) {
+	if (is(kBanCode)) {
 		if (ctx != nullptr) (void)Server_BanPlayerSlot(*ctx, record.p1);
 		return true;
 	}
@@ -689,7 +690,7 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	//  pushed @0x49BC0E / @0x49BC15,
 	//  GameText_GetString("Misc", ..) @0x49BC57, Chat_AddMessageChannel2(.., -1, 930)
 	//  @0x49BC60]
-	if (is(kLastGameRow)) {
+	if (is(kLastGameCode)) {
 		if (!in_session || !authority || ctx == nullptr || ctx->rotation == nullptr) return true;
 		ctx->rotation->last_game = !ctx->rotation->last_game;
 		world.out.hud_chat_lines.push_back({"Misc",
@@ -704,7 +705,7 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 438, the gates @0x49BDAB..0x49BDBF, the
 	//  packing @0x49BDC5..0x49BE42, Environment_SetCurrentTime called @0x49BE43,
 	//  Terrain_ResetTileCache called @0x49BE4B, EnvCube_ForceFullRefresh called @0x49BE50]
-	if (is(kTodRow)) {
+	if (is(kTodCode)) {
 		if (!authority || peer) return true;
 		world.weather.set_current_time(environment_time_from_hhmm(record.p1));
 		world.weather.reset_time_caches();
@@ -716,7 +717,7 @@ bool Role::dispatch_server_record(const controls::InputEventRecord &record) {
 	// it stores nothing.
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 497, the gates @0x49BE5A..0x49BE76, the
 	//  product @0x49BE7C..0x49BE89, `idiv ecx` @0x49BE8B, the store @0x49BE8D]
-	if (is(kTodRateRow)) {
+	if (is(kTodRateCode)) {
 		if (!authority || peer || record.p1 == 0) return true;
 		const auto divisor = static_cast<int32_t>(static_cast<uint32_t>(record.p1) * 62u);
 		if (divisor == 0) return true;

@@ -2293,9 +2293,9 @@ void test_default_wheel_binding_zooms_in_away_from_the_player() {
     PlayerViewState view;
     ScopeZoomLimits limits;
     limits.scope_min_mag = 2;
-    BindingSet bindings;
-    std::size_t count = 0;
-    const auto *rows = catalog(&count);
+    BindingSet bindings(opennova::controls::default_catalog());
+    const std::size_t count = bindings.catalog().count;
+    const ActionDef *rows = bindings.catalog().rows;
     const auto step = [&](uint16_t wheel, int expected) {
         // The wheel's event (256 up, 512 down) takes its row by the binding walk; its record
         // names the row's request (BindingSet::mouse_click_action, player_action_request).
@@ -2303,8 +2303,8 @@ void test_default_wheel_binding_zooms_in_away_from_the_player() {
                 [](int) { return false; });
         CHECK(index >= 0 && static_cast<std::size_t>(index) < count);
         if (index < 0 || static_cast<std::size_t>(index) >= count) return;
-        const auto request = player_action_request(InputEventRecord{
-                action_code(rows[index].id), 0, 0, 0, false});
+        const auto request = player_action_request(opennova::controls::default_catalog(), InputEventRecord{
+                rows[index].code, 0, 0, 0, false});
         CHECK(request && request->action == PlayerAction::WeaponCycle);
         if (!request) return;
         CHECK(local_player_weapon_cycle_route(lw.w, weapon, view, limits, request->value) == WeaponCycleRoute::kZoomStep);

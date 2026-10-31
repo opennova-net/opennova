@@ -32,7 +32,7 @@ int non_empty_rows(const HelpScreen &hs) {
 
 void test_pages_from_defaults() {
 	clear_key_strings();
-	BindingSet bindings;
+	BindingSet bindings(opennova::controls::default_catalog());
 	HelpScreen hs;
 	hs.build(bindings);
 	CHECK(hs.page_count() > 0);
@@ -68,7 +68,7 @@ void test_pages_from_defaults() {
 
 void test_prune_follows_live_bindings() {
 	clear_key_strings();
-	BindingSet bindings;
+	BindingSet bindings(opennova::controls::default_catalog());
 	HelpScreen hs;
 	hs.build(bindings);
 	const int before = hs.page_count();

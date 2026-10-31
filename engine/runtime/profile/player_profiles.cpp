@@ -50,25 +50,22 @@ void overlay(std::vector<uint8_t> &image, size_t image_offset, const std::vector
 
 }  // namespace
 
-std::vector<playersav::BindingEntry> default_binding_table() {
-	size_t count = 0;
-	const controls::ActionDef *rows = controls::catalog(&count);
+std::vector<playersav::BindingEntry> default_binding_table(const controls::Catalog &catalog) {
 	std::vector<const controls::ActionDef *> filtered;
-	for (size_t i = 0; i < count; ++i) {
+	for (size_t i = 0; i < catalog.count; ++i) {
 		// [orig: `test edx, 4000000h` @0x54C2DF, its `jz` @0x54C2E5]
-		if ((rows[i].flags & kDefaultTableFlag) != 0 && controls::action_code(rows[i].id) >= 0)
-			filtered.push_back(&rows[i]);
+		if ((catalog.rows[i].flags & kDefaultTableFlag) != 0) filtered.push_back(&catalog.rows[i]);
 	}
 	// The walk runs over the table the boot's sort laid out by action code
 	// [orig: KeyBinding_SortBySequentialId @0x498260].
 	std::sort(filtered.begin(), filtered.end(),
 			[](const controls::ActionDef *a, const controls::ActionDef *b) {
-				return controls::action_code(a->id) < controls::action_code(b->id);
+				return a->code < b->code;
 			});
 	std::vector<playersav::BindingEntry> out;
 	for (const controls::ActionDef *row : filtered) {
 		if (out.size() == playersav::kBindingCapacity) break;  // [orig: @0x54c39b]
-		const int code = controls::action_code(row->id);
+		const int code = row->code;
 		playersav::BindingEntry e;
 		// [orig: @0x54c2eb..0x54c37a — entry +8 the flags (row +4), +12 the
 		//  modes (row +8), +16 the class (row +12), +20 the help (row +16),

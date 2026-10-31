@@ -11,6 +11,7 @@
 
 #include <base/title/title.h>
 #include <net/admin/admin_server.h>
+#include <runtime/controls/controls.h>
 #include <runtime/controls/input_event_queue.h> // InputEventQueue (the walk's binding records)
 #include <runtime/inmatch/client_console.h> // ClientConsoleState (the console walk's debug words)
 #include <runtime/inmatch/rotation_admin.h>
@@ -185,6 +186,8 @@ public:
 		//  @0x432BA1 (no authority test); Client_ProcessLocalCommand @0x520BF0 - Input_QueueEvent
 		//  called @0x520E5B]
 		controls::InputEventQueue *input_events = nullptr;
+		// The binding table those walks read: the title's catalog (the role's, Role::controls).
+		const controls::Catalog *catalog = &controls::default_catalog();
 		// The process's mission globals the status report prints and GET GAMESETTINGS' live
 		// words (RemoteAdminConsoles keeps them; SET writes the live words); null reads the
 		// context's own mission (a console whose session is the process's).

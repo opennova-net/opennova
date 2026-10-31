@@ -49,7 +49,7 @@ func test_the_profile_table_and_joystick_word_reach_the_live_rows() -> void:
 # The by-code binding read (the HUDLS key label's record 200 + category): the
 # row the start-up re-lay puts at record `code` formats exactly like its token,
 # and a code no row carries is the zero record's empty string (engine controls
-# action_for_code carries the witness).
+# Catalog::for_code carries the witness).
 func test_display_text_by_action_code() -> void:
 	var model := ControlsModel.new()
 	assert_eq(model.display_text_for_action_code(201), model.display_text_for_token("Knife"),

@@ -34,6 +34,7 @@
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the start's update)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/controls/controls.h> // title_catalog (the role's binding catalog)
 #include <runtime/world/entity.h> // set_pool_capacities (the mount's pools)
 #include <runtime/world/present_drains.h> // discard_entity_presentation (no presenter)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the NovaWorld session's clock)
@@ -807,6 +808,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// keeps them, and the socket with them.
 	if (!next_mission) {
 		role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
+		// The game's binding catalog, whose rows the dispatcher's head and the console's walks read.
+		role_->set_controls(controls::title_catalog(*title_by_code(game_code_)));
 		role_->set_socket(&demux_->game());
 		role_->set_rotation(&rotation_);
 		session_ = std::make_unique<inmatch::Session>(*role_);
@@ -1674,6 +1677,7 @@ void Server::bind_admin_console() {
 	// CMD's binding records (a typed `tod 1230`) join the role's input event queue, which every
 	// update's drain dispatches (engine inmatch/admin_console.h Seams::input_events).
 	seams.input_events = &role_->input_events();
+	seams.catalog = &role_->controls();
 	inmatch::RemoteAdminBinding binding;
 	binding.host = &role_->state.host_owner.ctx;
 	admin_consoles_.bind(binding, std::move(seams));

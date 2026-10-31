@@ -1039,7 +1039,11 @@ opennova::playersav::ProfileRecord *current_record(const Ref<PlayerProfiles> &p_
 } // namespace
 
 void MenuDriver::prepare_options(const Ref<PlayerProfiles> &p_profiles) {
-	options_.prepare(runtime_, current_record(p_profiles));
+	// The working records follow the profile's title's binding catalog (the launch's).
+	options_.prepare(runtime_, current_record(p_profiles),
+			opennova::controls::title_catalog(p_profiles.is_valid()
+							? p_profiles->native().title()
+							: ResourceRoot::session_title(Ref<ResourceRoot>())));
 }
 
 void MenuDriver::apply_options_policy(const Ref<PlayerProfiles> &p_profiles) {

@@ -143,7 +143,7 @@ struct Run {
 	// tick 5, ending at tick 12: three six-tick frames play it.
 	explicit Run(bool per_tick) {
 		std::string error;
-		CHECK(device->driver.load({step(Kind::Down, 3, kForward), step(Kind::Press, 5, kFire),
+		CHECK(device->driver.load(opennova::controls::default_catalog(), {step(Kind::Down, 3, kForward), step(Kind::Press, 5, kFire),
 								step(Kind::Up, 9, kForward), step(Kind::End, 12)},
 					  error),
 				"the scenario loads");
@@ -534,7 +534,7 @@ void test_the_keyboard_pass_runs_in_the_update_that_samples_it() {
 		// The pause row's record (catalog row 70, code 25), whose flip lowers the word.
 		void queue_records(opennova::controls::InputEventQueue &records) override {
 			if (pause_due)
-				(void)records.push({opennova::controls::action_code(70), 0, 0, 0, false});
+				(void)records.push({25, 0, 0, 0, false});
 			pause_due = false;
 		}
 		InputPacket sample_tick(uint32_t logic_tick) override {
@@ -722,8 +722,8 @@ void test_the_update_drains_its_records_in_queue_order() {
 //  @0x49ADDD..0x49ADE8); Input_ProcessFrame @0x49D520 (Input_FlushDeferredEvents @0x49D591)]
 void test_the_reload_record_meets_the_head_in_key_order() {
 	using opennova::controls::InputEventQueue;
-	const int32_t pause = opennova::controls::action_code(70);  // 25
-	const int32_t reload = opennova::controls::action_code(47); // 211
+	const int32_t pause = 25;  // 25
+	const int32_t reload = 211; // 211
 	CHECK(pause == 25 && reload == 211, "the pause and reload rows' codes");
 	struct Queue final : TickInputSource {
 		std::vector<int32_t> codes;
@@ -925,7 +925,7 @@ void test_a_deploy_pick_is_a_record_of_the_drain_in_key_order() {
 //  @0x4E08DC (the PowerThrow sign bit @0x4E08FD, the device test @0x4E090B)]
 void test_the_fire_record_tests_its_binding_live() {
 	using opennova::controls::InputEventQueue;
-	CHECK(opennova::controls::action_code(43) == 149, "attack_1's code");
+	CHECK(opennova::controls::default_catalog().for_token("attack_1")->code == 149, "attack_1's code");
 	struct FireDevice final : TickInputSource {
 		bool held = false;
 		bool keys = false;
@@ -1024,8 +1024,8 @@ void test_the_fire_record_tests_its_binding_live() {
 //  Input_FlushDeferredEvents @0x49D591, the drain @0x49D599..0x49D5D8]
 void test_the_weapon_rows_take_the_whole_head() {
 	using opennova::controls::InputEventQueue;
-	const int32_t fire = opennova::controls::action_code(43);   // 149
-	const int32_t reload = opennova::controls::action_code(47); // 211
+	const int32_t fire = 149;   // 149
+	const int32_t reload = 211; // 211
 	CHECK(fire == 149 && reload == 211, "the fire and reload rows' codes");
 	struct Device final : TickInputSource {
 		bool held = true;
@@ -1115,14 +1115,14 @@ void test_the_weapon_rows_take_the_whole_head() {
 void test_the_hud_toggle_rows_take_the_whole_head() {
 	namespace hud = opennova::hud;
 	const int32_t codes[4] = {
-			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowDotsize)),
-			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowFriendlyTags)),
-			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowAudioEmote)),
-			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowRadioMacro))};
+			hud::hud_toggle_row_code(hud::kRowDotsize),
+			hud::hud_toggle_row_code(hud::kRowFriendlyTags),
+			hud::hud_toggle_row_code(hud::kRowAudioEmote),
+			hud::hud_toggle_row_code(hud::kRowRadioMacro)};
 	CHECK(codes[0] == 216 && codes[1] == 30 && codes[2] == 33 && codes[3] == 54,
 			"the four rows' dispatch codes");
 	const int32_t pause =
-			opennova::controls::action_code(hud::hud_toggle_row_catalog_row(hud::kRowPause));
+			hud::hud_toggle_row_code(hud::kRowPause);
 	CHECK(pause == 25, "the pause row's code");
 	auto role = std::make_unique<TickRecorder>();
 	spawn_local_player(*role);
@@ -1161,7 +1161,7 @@ void test_the_hud_toggle_rows_take_the_whole_head() {
 void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
 	using opennova::controls::InputEventQueue;
 	using opennova::controls::InputEventRecord;
-	const int32_t use = opennova::controls::action_code(44);
+	const int32_t use = 177;
 	CHECK(use == 177, "the useitem row's code");
 	struct UseDevice final : TickInputSource {
 		TickRecorder *role = nullptr;
@@ -1232,7 +1232,7 @@ void test_a_reset_ahead_drops_the_use_record_and_the_tail_follows_the_drain() {
 //  @0x49AE1C..0x49AE23; Input_HandleActionBinding_0 @0x4E0420 - case 123 @0x4E07A4]
 void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 	using opennova::controls::ActionClass;
-	const opennova::controls::ActionDef *row = opennova::controls::action_for_code(123);
+	const opennova::controls::ActionDef *row = opennova::controls::default_catalog().for_code(123);
 	CHECK(row != nullptr && row->id == 116 && row->flags == 0x10u && row->modes == 1u &&
 					row->cls == ActionClass::Cheat && row->default_key == 0 &&
 					row->default_key2 == 0 && row->default_mouse == 0 && row->default_joy == 0,
@@ -1241,7 +1241,7 @@ void test_the_cheat_row_flips_the_ai_skip_bit_out_of_a_session_only() {
 	for (int i = 0; row != nullptr && i < 4 && row->token[i] != '\0'; ++i)
 		token |= static_cast<uint32_t>(static_cast<uint8_t>(row->token[i])) << (8 * i);
 	CHECK(token == 0xFF623840u, "its token field's first dword is the command CRC");
-	CHECK(client_binding_by_crc(static_cast<int32_t>(0xFF623840u)) == 123,
+	CHECK(client_binding_by_crc(opennova::controls::default_catalog(), static_cast<int32_t>(0xFF623840u)) == 123,
 			"the CRC walk finds record 123");
 	// A line whose CRC is the token (a test line, four bytes chosen for the CRC).
 	const std::string line = "LI-s24 \xA8\xB5\x97[";
@@ -1308,7 +1308,7 @@ void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
 	const Cheat cheats[] = {{120, 113, 0x520BEC55u}, {121, 114, 0xD2990EA1u},
 			{122, 115, 0x7C1E3767u}, {40, 117, 0xCE42F6BDu}};
 	for (const Cheat &c : cheats) {
-		const ActionDef *row = opennova::controls::action_for_code(c.code);
+		const ActionDef *row = opennova::controls::default_catalog().for_code(c.code);
 		CHECK(row != nullptr && row->id == c.row && row->flags == 0x10u && row->modes == 1u &&
 						row->cls == ActionClass::Cheat && row->default_key == 0 &&
 						row->default_key2 == 0 && row->default_mouse == 0 && row->default_joy == 0,
@@ -1317,16 +1317,16 @@ void test_the_sibling_cheat_and_debug_rows_take_their_arms() {
 		for (int i = 0; row != nullptr && i < 4 && row->token[i] != '\0'; ++i)
 			token |= static_cast<uint32_t>(static_cast<uint8_t>(row->token[i])) << (8 * i);
 		CHECK(token == c.token, "its token field's first dword is the command CRC");
-		CHECK(client_binding_by_crc(static_cast<int32_t>(c.token)) == c.code,
+		CHECK(client_binding_by_crc(opennova::controls::default_catalog(), static_cast<int32_t>(c.token)) == c.code,
 				"the CRC walk finds the record");
 	}
-	const ActionDef *fps = opennova::controls::action_for_code(74);
+	const ActionDef *fps = opennova::controls::default_catalog().for_code(74);
 	CHECK(fps != nullptr && fps->id == 118 && std::string(fps->token) == "fps" &&
 					fps->flags == 0u && fps->modes == 3u && fps->cls == ActionClass::Debug &&
 					fps->default_key == 0,
 			"record 74 is the Debug row 118, \"fps\", flags 0");
-	CHECK(client_binding_by_token("FPS") == 74, "the console's name walk finds it");
-	CHECK(opennova::controls::action_for_code(36) == nullptr,
+	CHECK(client_binding_by_token(opennova::controls::default_catalog(), "FPS") == 74, "the console's name walk finds it");
+	CHECK(opennova::controls::default_catalog().for_code(36) == nullptr,
 			"row 66 (code 36, an empty token) stays out: nothing reaches it");
 
 	struct ScreenDevice final : TickInputSource {

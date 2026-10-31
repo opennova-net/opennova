@@ -375,7 +375,7 @@ void test_options_policy() {
 	// Off the surface, nothing.
 	options.apply_policy(run.rt);
 	CHECK(!run.rt.is_widget_disabled(run.rt.widget_id("DIFFICULTY")));
-	options.prepare(run.rt, nullptr);
+	options.prepare(run.rt, nullptr, opennova::controls::default_catalog());
 	CHECK(options.is_surface());
 	options.apply_policy(run.rt);
 	MenuScrollRangeState range;

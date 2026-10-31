@@ -132,7 +132,12 @@ bool is_extended_vk(int vk);
 
 class BindingSet {
  public:
-  BindingSet();  // catalog defaults
+  // One record per row of `catalog` (the title's, controls::title_catalog), each
+  // its row's defaults. `catalog` outlives the set (the titles' catalogs do).
+  explicit BindingSet(const Catalog &catalog);
+
+  // The catalog the records follow, row for record.
+  const Catalog &catalog() const { return *catalog_; }
 
   // Re-copy every record's defaults and forget edits
   // [orig: the DEFAULTS handler's per-record copy loop @ 0x55bdda..0x55be69].
@@ -458,6 +463,15 @@ class BindingSet {
   int scan_first_row(int vk, bool modified,
                      const std::function<bool(int)> &key_down) const;
 
+  // The catalog's rows and their walk by action code (the boot's re-lay of the
+  // binding table: record i is the row whose code is i; the static rows'
+  // codes are unique) [orig: KeyBinding_SortBySequentialId @0x498260].
+  const ActionDef *catalog_rows(std::size_t *out_count) const {
+    *out_count = catalog_->count;
+    return catalog_->rows;
+  }
+  const Catalog *catalog_;
+  std::vector<int> scan_order_;
   std::vector<BindingRecord> records_;  // catalog order
   bool keyboard_captured_ = false;
   bool scan_death_screen_ = false;  // g_DeathScreenActive

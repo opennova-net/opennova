@@ -12,6 +12,7 @@
 //  NapiNPClientMsg_HandleConsoleEcho @0x432BC0 (the 0x06 copy, 1023 characters);
 //  Client_ProcessConsoleCommand @0x520E80 (the authority's call @0x520f70)]
 
+#include <runtime/controls/controls.h>
 #include <base/io/ascii_config.h>
 #include <net/npwire/protocol_message.h>
 #include <runtime/replication/client_state.h>
@@ -44,20 +45,23 @@ using ClientConsoleQueueAction =
 // [orig: KeyBinding_SortBySequentialId @0x498260; the token field aTurnLeftAbs
 //  @0x8159F3, the walks' end 0x829DF3]
 inline constexpr int kClientBindingRecords = 768;
-// The record whose token equals `name` case-insensitively; -1 for none.
+// The walks read `catalog`, the title's (controls::title_catalog): record i its row whose
+// code is i. The record whose token equals `name` case-insensitively; -1 for none.
 // [orig: NapiClientCmd_ParseAndExecute @0x432a64..0x432a94 (stricmp)]
-int client_binding_by_token(const std::string &name);
+int client_binding_by_token(const controls::Catalog &catalog, const std::string &name);
 // The record whose token's first four bytes, read as a little-endian dword (a zero
 // record's zeros), equal `crc`; -1 for none. Both console walks compare the line's
 // CRC against the token's text this way, which only a crafted line meets.
 // [orig: NapiClientCmd_ParseAndExecute @0x432aa9..0x432b3e;
 //  Client_ProcessLocalCommand @0x520BF0 (the walk @0x520E0D..0x520E30, `cmp eax, [ecx]`
 //  over aTurnLeftAbs)]
-int client_binding_by_crc(int32_t crc);
+int client_binding_by_crc(const controls::Catalog &catalog, int32_t crc);
 
 // Client_ProcessLocalCommand's seams: what its arms reach outside the line.
 struct ClientLocalCommandSeams {
 	bool in_session = false; // g_NapiNPCtx.is_in_session: the binding CRC arm runs out of one
+	// The binding table the CRC arm walks: the title's catalog (the role's, Role::controls).
+	const controls::Catalog *catalog = &controls::default_catalog();
 	// WacScript_ToggleCheatByName: true when a CHEAT the line names flipped (the authority's
 	// alone, wac::WacSystem::toggle_cheat); unset: no toggle takes a line.
 	std::function<bool(const std::string &line)> toggle_overlay;
@@ -88,6 +92,9 @@ bool client_process_local_command(const std::string &line, const ClientLocalComm
 // One run's inputs and sinks.
 struct ClientConsoleContext {
 	bool in_session = false; // g_NapiNPCtx.is_in_session
+	// The binding table the name and CRC walks read: the title's catalog (the role's,
+	// Role::controls).
+	const controls::Catalog *catalog = &controls::default_catalog();
 	bool novaworld = false;  // the transport mode is NovaWorld's
 	bool authority = false;  // g_NapiNPCtx.is_authority
 	// The server's command table (S2C 0x2A); null reads as empty.

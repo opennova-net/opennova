@@ -5,6 +5,7 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <runtime/menu/menu_sound.h>
 #include <runtime/profile/player_profiles.h>
 
@@ -140,7 +141,8 @@ bool MenuTry::start(const MenuTrySource &source, const std::string &file, const 
 	settings_.clear();
 	sounds_.clear();
 	profile_ = playersav::ProfileRecord{};
-	profile_.bindings = profile::default_binding_table();
+	catalog_ = &controls::title_catalog(source.title != nullptr ? *source.title : default_title());
+	profile_.bindings = profile::default_binding_table(*catalog_);
 	runtime_.screen_history().clear();
 	runtime_.set_version_line(source.version_line);
 	started_ = open_(file, screen);
@@ -183,7 +185,7 @@ bool MenuTry::open_(const std::string &file, const std::string &screen) {
 }
 
 void MenuTry::prepare_() {
-	options_.prepare(runtime_, &profile_);
+	options_.prepare(runtime_, &profile_, *catalog_);
 	options_.apply_policy(runtime_);
 	if (source_ != nullptr && source_->title != nullptr) options_.apply_title(runtime_, *source_->title);
 	options_.seed_profile(runtime_, &profile_);

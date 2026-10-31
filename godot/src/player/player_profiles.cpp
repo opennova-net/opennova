@@ -10,6 +10,7 @@
 #include "util/string_convert.h"
 
 #include <formats/playersav/player_sav.h>
+#include <runtime/controls/controls.h> // title_catalog (the default binding table's rows)
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/menu/player_info_kit.h>
 #include <runtime/profile/profile_controls.h>
@@ -127,14 +128,16 @@ std::string profile_text(const String &p_text) {
 
 // The launch's title, whose profile files these are (engine PlayerProfiles' title).
 PlayerProfiles::PlayerProfiles() : store_(ResourceRoot::session_title(Ref<ResourceRoot>())) {
-	defaults_.bindings = opennova::profile::default_binding_table();
+	defaults_.bindings = opennova::profile::default_binding_table(
+			opennova::controls::title_catalog(store_.title()));
 	defaults_.macros = opennova::profile::default_macros(nullptr, nullptr);
 }
 
 void PlayerProfiles::set_defaults(const Ref<AvatarDatabase> &p_avatars,
 		const Ref<RtxtStringFile> &p_override_table, const Ref<RtxtStringFile> &p_menu_table,
 		int p_joystick_caps) {
-	defaults_.bindings = opennova::profile::default_binding_table();
+	defaults_.bindings = opennova::profile::default_binding_table(
+			opennova::controls::title_catalog(store_.title()));
 	defaults_.macros = opennova::profile::default_macros(
 			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr,
 			p_menu_table.is_valid() ? &p_menu_table->get_native() : nullptr);

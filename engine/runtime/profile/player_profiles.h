@@ -28,12 +28,16 @@ namespace opennova::rtxt {
 struct File;
 }
 
+namespace opennova::controls {
+struct Catalog; // runtime/controls/controls.h
+}
+
 namespace opennova::profile {
 
 // What a fresh record takes from outside the profile
 // [orig: PlayerProfile_InitDefaults @0x54bb40].
 struct ProfileDefaults {
-	// The default key-binding table (default_binding_table()).
+	// The default key-binding table (default_binding_table of the title's catalog).
 	std::vector<playersav::BindingEntry> bindings;
 	// The ten chat macros (default_macros()).
 	std::array<std::string, playersav::kMacroCount> macros;
@@ -53,14 +57,16 @@ struct ProfileDefaults {
 	std::array<Avatar, 2> avatars{};
 };
 
-// The default key-binding table: every catalog row whose flag word carries
-// 0x4000000, in action-code order (the order the boot's sort leaves the rows
-// in), each entry the row's identity and its default bindings, at most
-// kBindingCapacity [orig: KeyBinding_BuildFilteredTable @0x54c2b0 — the walk
-// @0x54c2d6..0x54c3a5, the capacity stop @0x54c39b; KeyBinding_SortBySequentialId
-// @0x498260]. The original then parses a loose default.key over it when one
-// exists (@0x54c3b6); no shipped game carries one and it is not ported.
-std::vector<playersav::BindingEntry> default_binding_table();
+// The default key-binding table of `catalog` (the title's, controls::title_catalog):
+// every row whose flag word carries 0x4000000, in action-code order (the order the
+// boot's sort leaves the rows in), each entry the row's identity and its default
+// bindings, at most kBindingCapacity [orig: KeyBinding_BuildFilteredTable @0x54c2b0 —
+// the walk @0x54c2d6..0x54c3a5, the capacity stop @0x54c39b;
+// KeyBinding_SortBySequentialId @0x498260] [orig: KeyBinding_BuildFilteredTable
+// @0x549530 over the table @0x8148A0 (dfx2.exe)]. The original then parses a loose
+// default.key over it when one exists (@0x54c3b6); no shipped game carries one and it
+// is not ported.
+std::vector<playersav::BindingEntry> default_binding_table(const controls::Catalog &catalog);
 
 // The ten chat macros a fresh record takes: the menu table's "Macros" section,
 // MACRO_0 .. MACRO_9, the expansion's override table first, a miss the
@@ -133,6 +139,8 @@ public:
 	// the fresh record 0, and its kit pages seed every fresh weapon record
 	// (init_defaults). `title` outlives the profile (the registry's titles do).
 	explicit PlayerProfiles(const Title &title);
+	// The title the profile is (its files', its binding catalog's).
+	const Title &title() const { return *title_; }
 
 	// The files the load reads; a null pointer is a file that does not exist.
 	struct LoadInput {

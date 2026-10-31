@@ -76,8 +76,9 @@ void apply_controls(const playersav::ProfileRecord &record, controls::BindingSet
 // The Options screen's working records as its init builds them from the
 // record's table [orig: UI_BuildKeyBindingLoadoutTable @0x559e50, from
 // UI_OptionsScreenInit @0x554dc5 and UI_PopulateRenderAndAudioSettings
-// @0x55d503]: a fresh set (the catalog defaults) with the table applied.
-controls::BindingSet options_bindings(const playersav::ProfileRecord &record);
+// @0x55d503]: a fresh set of `catalog` (its defaults) with the table applied.
+controls::BindingSet options_bindings(const playersav::ProfileRecord &record,
+		const controls::Catalog &catalog);
 
 // The Options screen's records back into the record's table: each entry, in
 // the table's own order, takes the eight binding fields of its row's record;

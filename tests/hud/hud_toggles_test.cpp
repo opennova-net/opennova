@@ -516,15 +516,13 @@ void test_head_drops_at_the_event_edge() {
 	hud_toggles_poll(s, k);
 	k.dotsize = true;
 	CHECK(hud_toggles_poll(s, k) == kDotsizeCycled);
-	std::size_t count = 0;
-	const opennova::controls::ActionDef *defs = opennova::controls::catalog(&count);
+	// Every row's code is Jointops.exe's catalog row of its token.
 	for (int row = 0; row < kHudToggleRowCount; ++row) {
-		const char *token = nullptr;
-		for (std::size_t i = 0; i < count; ++i)
-			if (defs[i].id == hud_toggle_row_catalog_row(row)) token = defs[i].token;
-		CHECK(token != nullptr && std::strcmp(token, hud_toggle_row_token(row)) == 0);
+		const opennova::controls::ActionDef *def =
+				opennova::controls::default_catalog().for_code(hud_toggle_row_code(row));
+		CHECK(def != nullptr && std::strcmp(def->token, hud_toggle_row_token(row)) == 0);
 	}
-	CHECK(hud_toggle_row_catalog_row(kHudToggleRowCount) == -1);
+	CHECK(hud_toggle_row_code(kHudToggleRowCount) == -1);
 }
 
 } // namespace

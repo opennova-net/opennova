@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include <runtime/controls/controls.h>
 #include <runtime/controls/input_event_queue.h>
 #include <runtime/controls/key_event_queue.h>
 
@@ -148,9 +149,12 @@ struct PlayerActionRequest {
 
 // The request a drained record of an action row names: the row's request by its code,
 // NextWaypoint's direction from the record's sign. None for a code no action row carries.
+// The weapon rows are `catalog`'s (the title's): every row of code 200..210 requests its
+// category, the code - 200 (controls.h kWeaponCategoryCodeFirst).
 // [orig: Input_HandleActionBinding @0x49AD40 (the switch by the record's code; case 23
 //  @0x49B3DE..0x49B44D reads the sign); Input_HandleActionBinding_0 @0x4E0420]
-std::optional<PlayerActionRequest> player_action_request(const InputEventRecord &record);
+std::optional<PlayerActionRequest> player_action_request(const Catalog &catalog,
+		const InputEventRecord &record);
 
 // Whether the device poll owns a key event's code (PlayerActions::poll's arms: the fire,
 // ToSpecial, reload, medic and Respawn rows, the death screen's spectator rows, the action
@@ -160,7 +164,7 @@ std::optional<PlayerActionRequest> player_action_request(const InputEventRecord 
 // typed token does (D-NET-1321).
 // [orig: Input_ProcessKeyboardEvents @0x49D1F0 - Input_QueueEvent per scanned key-down, the
 //  modifier pass @0x49D42F and the fallback @0x49D488]
-bool player_actions_own_code(int code);
+bool player_actions_own_code(const Catalog &catalog, int code);
 
 struct PlayerActionPoll {
 	bool active = false;
@@ -375,12 +379,25 @@ struct ChainDigitTake {
 	std::optional<PlayerActionRequest> pick;
 };
 
+// One row of the action table: its config token (its code and mode word are the catalog
+// row's), the request it makes, whether the captured gate (gameplay input captured) admits it
+// (else the active gate), and its latch flags.
+struct PlayerActionRow {
+	const char *token = nullptr;
+	PlayerActionRequest request;
+	bool captured = false;
+	int flags = 0;
+};
+
 // Owns the action table's gates and latches across frames and mission rebuilds.
 // A host without a player (including spectator mode) does not poll this state.
 // Request refusal and all gameplay effects belong to the simulation.
 class PlayerActions {
 public:
-	PlayerActions();
+	// The rows are `catalog`'s (the title's, controls::title_catalog), which outlives the table:
+	// every row resolves its token's code and mode word there, and its weapon rows (codes
+	// 200..210) are the table's category rows.
+	explicit PlayerActions(const Catalog &catalog);
 	PlayerActionFrame poll(const PlayerActionSource &source, const PlayerActionPoll &gate);
 	// The presenter reset clears trigger, stance and scope-zero edges only;
 	// switch/HUD/medic/USE state survives it, just as it survives host teardown.
@@ -454,6 +471,13 @@ public:
 
 private:
 	struct RowLatch { bool down = false; };
+	// A row's dispatch code and mode word by its config token in the catalog (-1 / 0 for a
+	// token no row carries).
+	int row_code(const char *token) const;
+	uint32_t row_modes(const char *token) const;
+	const Catalog *catalog_;
+	// The action table: the fixed rows, the catalog's weapon rows among them (action_rows).
+	std::vector<PlayerActionRow> table_;
 	std::vector<RowLatch> rows_;
 	bool reload_was_down_ = false;
 	bool medic_was_down_ = false;

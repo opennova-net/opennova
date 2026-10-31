@@ -203,7 +203,7 @@ void test_expand_macros() {
 // The key display by token: case-insensitive, "???" on a miss
 // [orig: KeyBinding_GetDisplayStringByActionName @0x5b6a00].
 void test_display_string_for_token() {
-	const controls::BindingSet set;
+	const controls::BindingSet set(opennova::controls::default_catalog());
 	const std::string forward = controls::display_string_for_token(set, "move_forward");
 	CHECK(!forward.empty() && forward != "???");
 	CHECK(controls::display_string_for_token(set, "MOVE_FORWARD") == forward);

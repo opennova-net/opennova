@@ -64,8 +64,9 @@ std::string format_printf(const std::string &format, const std::string &arg) {
 } // namespace
 
 void HelpScreen::build(const BindingSet &bindings) {
-	std::size_t count = 0;
-	const ActionDef *cat = catalog(&count);
+	catalog_ = &bindings.catalog();
+	const std::size_t count = catalog_->count;
+	const ActionDef *cat = catalog_->rows;
 	// The prune: a record with no key, no second key and no mouse button, or
 	// of class Cheat (9) or Debug (11), leaves the table (its class byte
 	// zeroed, so it sorts ahead of every page) [orig: BMS_PruneEmptyEntities
@@ -144,8 +145,7 @@ void HelpScreen::build_page() {
 	std::snprintf(line, sizeof(line), key_help_string("Text", "PAGE", "!Page %i of %i").c_str(),
 			current_ + 1, page_count());
 	page_line_ = line;
-	std::size_t count = 0;
-	const ActionDef *cat = catalog(&count);
+	const ActionDef *cat = catalog_->rows;
 	for (int row = 0; row < kHelpScreenRowsPerPage; ++row) {
 		const int index = page.first + row;
 		if (index > page.last) break;

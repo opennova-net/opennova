@@ -220,8 +220,8 @@ bool client_handle_server_command(const std::string &line, ClientConsoleContext 
 namespace {
 
 // Record i's config token: the catalog row whose action code is i, "" for a zero record.
-const char *binding_token(int record) {
-	const controls::ActionDef *def = controls::action_for_code(record);
+const char *binding_token(const controls::Catalog &catalog, int record) {
+	const controls::ActionDef *def = catalog.for_code(record);
 	return def != nullptr && def->token != nullptr ? def->token : "";
 }
 
@@ -249,15 +249,15 @@ int32_t line_crc(const std::string &text) {
 
 } // namespace
 
-int client_binding_by_token(const std::string &name) {
+int client_binding_by_token(const controls::Catalog &catalog, const std::string &name) {
 	for (int record = 0; record < kClientBindingRecords; ++record)
-		if (strutil::iequals(name, binding_token(record))) return record;
+		if (strutil::iequals(name, binding_token(catalog, record))) return record;
 	return -1;
 }
 
-int client_binding_by_crc(int32_t crc) {
+int client_binding_by_crc(const controls::Catalog &catalog, int32_t crc) {
 	for (int record = 0; record < kClientBindingRecords; ++record)
-		if (token_dword(binding_token(record)) == crc) return record;
+		if (token_dword(binding_token(catalog, record)) == crc) return record;
 	return -1;
 }
 
@@ -298,10 +298,10 @@ bool client_process_local_command(const std::string &line, const ClientLocalComm
 		return true;
 	}
 	if (seams.in_session || line.empty()) return false;
-	const int record = client_binding_by_crc(line_crc(line));
+	const int record = client_binding_by_crc(*seams.catalog, line_crc(line));
 	if (record < 0) return false;
 	// The record's own code word: its index for a catalog row, 0 for a zero record.
-	const int code = controls::action_for_code(record) != nullptr ? record : 0;
+	const int code = seams.catalog->for_code(record) != nullptr ? record : 0;
 	if (seams.queue_action) seams.queue_action(code, 0, 0, 0);
 	return true;
 }
@@ -317,8 +317,8 @@ bool client_parse_and_execute(const std::string &line, ClientConsoleContext &ctx
 	if (tokens.count == 0) return false;
 	if (client_handle_server_command(line, ctx)) return true;
 	const std::string name = tokens.tokens[0] != nullptr ? tokens.tokens[0] : "";
-	int record = client_binding_by_token(name);
-	if (record < 0) record = client_binding_by_crc(line_crc(name));
+	int record = client_binding_by_token(*ctx.catalog, name);
+	if (record < 0) record = client_binding_by_crc(*ctx.catalog, line_crc(name));
 	if (record < 0) return false;
 	int32_t p1 = 0, p2 = 0, p3 = 0;
 	switch (tokens.count) {

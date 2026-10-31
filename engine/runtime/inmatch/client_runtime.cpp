@@ -2117,6 +2117,8 @@ void ClientRuntime::run_console_echo(const std::vector<uint8_t> &body) {
 	std::vector<std::string> lines;
 	ClientConsoleContext ctx;
 	ctx.authority = role_ == Role::HostClient;
+	// The local command seams' catalog, the embedder's title's.
+	ctx.catalog = local_command_seams_.catalog;
 	ctx.in_session = ctx.authority ? view_.mp_session() : joiner_ != nullptr && joiner_->in_session();
 	ctx.novaworld = novaworld_link_.novaworld;
 	ctx.server_commands = &view_.state().server_commands;

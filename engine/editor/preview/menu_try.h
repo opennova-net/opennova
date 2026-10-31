@@ -57,6 +57,9 @@ struct MenuTrySource {
 	const Title *title = nullptr;
 	// The line the STARTUP screen's VERSION label shows (UTF-8, the editor's: editor_version_line).
 	std::string version_line;
+	// The project's game, whose binding catalog the sandbox profile's table and the Options
+	// screens' records follow (controls::title_catalog); null: the default title.
+	const Title *title = nullptr;
 };
 
 // What the game would have done, which Try says instead: a command the code binds by name (its
@@ -187,6 +190,8 @@ private:
 	menu::ModList mods_;
 	std::string expansion_; // the game running, as the last open's source said ("" the base game)
 	menu::OptionsScreen options_;
+	// The binding catalog of the game the last start ran as (MenuTrySource::title).
+	const controls::Catalog *catalog_ = &controls::default_catalog();
 	// The sandbox's player profile record (a fresh one's words and binding
 	// table), which the Options screens seed from and their Accepts write.
 	playersav::ProfileRecord profile_;

@@ -11,10 +11,10 @@ namespace {
 // The live record of the row an entry names: the row whose action code is the
 // entry's row word, the slot the boot's re-lay put it in [orig:
 // KeyBinding_SortBySequentialId @0x498260; KeyBinding_ApplyProfileEntry @0x562df4 reads +4].
-int row_for_entry(const playersav::BindingEntry &entry) {
-	const controls::ActionDef *row = controls::action_for_code(entry.index);
+int row_for_entry(const playersav::BindingEntry &entry, const controls::Catalog &catalog) {
+	const controls::ActionDef *row = catalog.for_code(entry.index);
 	// The live set keeps one record per catalog entry, in the catalog's order.
-	return row != nullptr ? static_cast<int>(row - controls::catalog(nullptr)) : -1;
+	return row != nullptr ? static_cast<int>(row - catalog.rows) : -1;
 }
 
 }  // namespace
@@ -39,7 +39,7 @@ SessionInput ingame_accept_input(const playersav::ProfileRecord &record, const S
 
 void apply_bindings(const playersav::ProfileRecord &record, controls::BindingSet &live) {
 	for (const playersav::BindingEntry &entry : record.bindings) {
-		const int row = row_for_entry(entry);
+		const int row = row_for_entry(entry, live.catalog());
 		if (row < 0) continue;  // retail __debugbreak()s past 768 rows (@0x562dfe)
 		controls::BindingRecord rec;
 		// [orig: KeyBinding_ApplyProfileEntry @0x562e0f..0x562e59]
@@ -63,15 +63,16 @@ void apply_controls(const playersav::ProfileRecord &record, controls::BindingSet
 	apply_bindings(record, live);                              // [orig: @0x5636bf]
 }
 
-controls::BindingSet options_bindings(const playersav::ProfileRecord &record) {
-	controls::BindingSet out;
+controls::BindingSet options_bindings(const playersav::ProfileRecord &record,
+		const controls::Catalog &catalog) {
+	controls::BindingSet out(catalog);
 	apply_bindings(record, out);
 	return out;
 }
 
 void store_bindings(const controls::BindingSet &records, playersav::ProfileRecord &record) {
 	for (playersav::BindingEntry &entry : record.bindings) {
-		const controls::BindingRecord *rec = records.record(row_for_entry(entry));
+		const controls::BindingRecord *rec = records.record(row_for_entry(entry, records.catalog()));
 		if (rec == nullptr) continue;
 		// [orig: @0x559dd5..0x559e21]
 		entry.primary = rec->primary;
