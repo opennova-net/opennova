@@ -277,7 +277,8 @@ struct DeployTableZone {
 };
 // One row as the fill writes it: the column texts, the row value (the insert's column-0 cell
 // value), column 1's cell value, the row colour (CTableWnd_SetRowColor, the colour flag set)
-// and, for a zone's row alone, the state-1 colour bit (sub_6CD530's: set for a greyed row).
+// and, for a zone's row alone, the state-1 colour bit (CTableWnd_SetRowState1Color's: set for a
+// greyed row).
 struct DeployTableRow {
 	std::string cells[3];
 	int32_t value = 0;
@@ -318,10 +319,17 @@ std::string deploy_table_waiting_line(const std::string &name, bool self);
 // The rows in insert order: the Default row (value 0; "' '", "0", "\r\nDefault"; the local team's
 // colour, 0xFF00FF00 team 0 / 0xFFFF0000 team 2 / 0xFF00AFFF else, then 0xFFDDDDDD over it),
 // then a zone's ("'<A + index>'", its icon, "\r\n" and its lines; its health colour, or
-// 0xFF404040 and the state-1 colour bit when greyed).
+// 0xFF404040 and the state-1 colour bit when greyed). Column 0's text is retail's own, quotes and
+// all ("' '" the bytes 27 20 27), drawn as it stands: its CUSTOM_DRAW handler draws the cell's
+// content, and a custom cell with no image draws its text; the space sorts the Default row
+// ahead of the letters.
 // [orig: the Default row @0x5514de..0x551568; the zone row @0x551639..0x55168c, the letter
 //  @0x5516ce, CTableWnd_AddRow @0x551ca0, its column-1 value @0x551cad, the cells
-//  @0x551cbf..0x551ce0, sub_6CD420 @0x551cef, sub_6CD530 @0x551cfc (dfx2.exe)]
+//  @0x551cbf..0x551ce0, sub_6CD420 @0x551cef, CTableWnd_SetRowState1Color @0x551cfc (dfx2.exe)]
+// [orig: the string @0x7d3c80, set @0x551500..0x551508; sub_550CF0 @0x550dde ->
+//  CTableWnd_DrawCell @0x6cdef0 - the custom kind @0x6ce111..0x6ce13c, the text
+//  @0x6ce390 -> CTableWnd_CalculateAlignedTextRect @0x6cbf60 -> CFontCache_DrawTextWrapped
+//  @0x6cc0b6; CTableWnd_SortByColumn @0x551d35 (dfx2.exe)]
 std::vector<DeployTableRow> build_deploy_table_rows(
 		int local_team, const std::vector<DeployTableZone> &zones);
 // The table's refill over the menu: DEATH's SPAWNPOINTS_TABLE (none: nothing, false), its
@@ -335,7 +343,7 @@ std::vector<DeployTableRow> build_deploy_table_rows(
 //  @0x55149d, sub_6CC860 @0x5514aa, CTableWnd_RemoveRow @0x5514ae, CWnd_SetShown @0x5514b7 /
 //  @0x5514d9, CTableWnd_AddRow @0x5514f2 / @0x551ca6, the column-1 value @0x5514f9 /
 //  @0x551cad, CTableWnd_SetCellText @0x551508..0x551526 / @0x551cbf..0x551ce0, sub_6CD420
-//  @0x551568 / @0x551cef, sub_6CD530 @0x551cfc, sub_6CBF40(0, 1) @0x551d28,
+//  @0x551568 / @0x551cef, CTableWnd_SetRowState1Color @0x551cfc, sub_6CBF40(0, 1) @0x551d28,
 //  CTableWnd_SortByColumn @0x551d35, sub_6CC7B0 @0x551d41 (its bound @0x6cc7b0..0x6cc7c0),
 //  CTableWnd_SetRowSelected @0x551d53 (dfx2.exe)]
 bool fill_deploy_spawn_table(menu::MenuRuntime &menu, const std::vector<DeployTableRow> &rows);

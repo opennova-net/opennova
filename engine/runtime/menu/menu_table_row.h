@@ -135,8 +135,8 @@ bool table_set_row_visible(std::vector<MenuTableRow> &rows, int row, bool visibl
 // The row's state-1 colour bit (flag bit 0, kTableRowFlagState1Color): `on` sets it, false clears
 // it; true when the bit changed. A row out of range does nothing. dfx2.exe's DEATH table fill
 // calls it with the row's "live" word, so its 0 sets the bit and a nonzero one clears it.
-// [orig: sub_6CD530 @0x6cd530 - the bound @0x6cd53e, the compare @0x6cd560, the clear
-//  @0x6cd56c, the set @0x6cd57e (dfx2.exe)]
+// [orig: CTableWnd_SetRowState1Color @0x6cd530 - the bound @0x6cd53e, the compare @0x6cd560,
+//  the clear @0x6cd56c, the set @0x6cd57e (dfx2.exe)]
 bool table_set_row_state1_color(std::vector<MenuTableRow> &rows, int row, bool on);
 
 } // namespace opennova::menu
