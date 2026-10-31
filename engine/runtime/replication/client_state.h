@@ -1204,25 +1204,32 @@ struct ClientScoreFeedback {
 // elapsed out and marks the record valid. dfx2.exe's EXPPOINTS element draws `elapsed` and `time`
 // as its session and total lines while it is valid (DFX2-36). No stock host sends either message
 // (ingame_message_catalog.h). A nonzero S2C 0x05 game start clears the node, valid, start and
-// elapsed too (ClientReplicaPipeline::apply_game_start_signal).
+// elapsed too (ClientReplicaPipeline::apply_game_start_signal). The words are the session's: the
+// session's teardown clears them, no mission start does, so they outlive a reload (ClientRuntime::
+// begin_mission_reload carries them). The entries (the node's start, time and elapsed) are the
+// process's: nothing but the 0x82 writes them, so they outlive every session (the pipeline's
+// score-tracker store, inmatch::ClientProcessState).
 // [orig: NapiNPClientMsg_0x080 @0x42A070 - the node @0x42A08B, the clears @0x42A090..0x42A09C;
 //  NapiNPClientMsg_0x082 @0x42A0E0 -> CineTracker_RecordTimeEntry @0x422410 - the node test
 //  @0x422413..0x422418, the walk @0x422420..0x422443, a found entry's elapsed @0x4224E3..0x4224F4,
 //  the append @0x422445..0x4224BD, the time @0x4224C3, valid @0x4224C6, the copies
-//  @0x4224CF..0x4224DA; the twins @0x42BEC0, @0x42BF20, @0x422260 (dfx2.exe)]
+//  @0x4224CF..0x4224DA; Client_ResetGameSessionState @0x42C9F0 - +0..+0x18 cleared
+//  @0x42CA12..0x42CA36, the array not, called from Game_InitSubsystems @0x4A6D7B and
+//  CNapiGameSession_FullDestroy @0x4C9785; the array +0x1C / +0x20 (dword_A8231C / dword_A82320)
+//  written past its initializer by the record alone] [orig: the twins @0x42BEC0, @0x42BF20,
+//  @0x422260 (dfx2.exe)]
+struct ClientScoreTrackerEntry {
+	int32_t node = 0;
+	int32_t start = 0;
+	int32_t time = 0;
+	int32_t elapsed = 0;
+};
 struct ClientScoreTracker {
-	struct Entry {
-		int32_t node = 0;
-		int32_t start = 0;
-		int32_t time = 0;
-		int32_t elapsed = 0;
-	};
 	int32_t node = 0;     // +0x08
 	bool valid = false;   // +0x0C
 	int32_t start = 0;    // +0x10
 	int32_t time = 0;     // +0x14: the total line's
 	int32_t elapsed = 0;  // +0x18: the session line's
-	std::vector<Entry> entries; // +0x1C count, +0x20 array
 };
 
 // Latest requester-specific deploy-wave panel plus a valid-packet edge. The

@@ -218,7 +218,7 @@ void ClientReplicaPipeline::apply_game_start_signal(const std::vector<uint8_t> &
 	// elapsed (not its time, nor the entries), as the 0x80 does; a short body reads 0. The
 	// handler's other legs (the clan roster's walk kick, C2S 0x4E) are the joiner connection's.
 	// [orig: NapiNPClientMsg_HandleGameStart @0x42E180 - the flag @0x42E18E..0x42E198, its test
-	//  @0x42E1A4, the clears @0x42E1DE..0x42E1F0; the twin's @0x42FCCE..0x42FCE0 (dfx2.exe)]
+	//  @0x42E1A4, the clears @0x42E1DE..0x42E1F0] [orig: the twin's @0x42FCCE..0x42FCE0 (dfx2.exe)]
 	if (body.empty() || body[0] == 0) return;
 	ClientScoreTracker &tracker = state_.score_tracker;
 	tracker.node = 0;
@@ -234,8 +234,9 @@ void ClientReplicaPipeline::apply_score_tracker_time(const std::vector<uint8_t> 
 	ClientScoreTracker &tracker = state_.score_tracker;
 	if (tracker.node == 0) return;
 	const int32_t time = score_tracker_value(body);
-	ClientScoreTracker::Entry *entry = nullptr;
-	for (ClientScoreTracker::Entry &each : tracker.entries)
+	std::vector<ClientScoreTrackerEntry> &entries = score_tracker_entries();
+	ClientScoreTrackerEntry *entry = nullptr;
+	for (ClientScoreTrackerEntry &each : entries)
 		if (each.node == tracker.node) {
 			entry = &each;
 			break;
@@ -244,8 +245,8 @@ void ClientReplicaPipeline::apply_score_tracker_time(const std::vector<uint8_t> 
 		entry->elapsed = static_cast<int32_t>(
 				static_cast<uint32_t>(time) - static_cast<uint32_t>(entry->start));
 	} else {
-		tracker.entries.push_back({tracker.node, time, 0, 0});
-		entry = &tracker.entries.back();
+		entries.push_back({tracker.node, time, 0, 0});
+		entry = &entries.back();
 	}
 	entry->time = time;
 	tracker.valid = true;

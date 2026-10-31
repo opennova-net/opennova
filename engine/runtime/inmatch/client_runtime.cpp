@@ -580,12 +580,15 @@ bool ClientRuntime::begin_mission_reload() {
 	//  called from NapiNPClientMsg_DestroyEntityList @0x429794 and NapiNPClientMsg_PlayerSync
 	//  @0x431420; NapiNPClientMsg_PlayerList @0x42FAE0 - the re-request @0x42fc05..0x42fc3a]
 	auto roster = std::move(view_.state().roster);
-	// The S2C 0x70 table and its received flag are the process's
-	// (ClientProcessState), so the vehicle screen's poll reads the last reply
-	// across the reload.
+	// The S2C 0x80 / 0x82 score tracker's words are the session's: no mission start clears them
+	// (replication::ClientScoreTracker carries the witness). Its entries, like the S2C 0x70
+	// table and its received flag, are the process's (ClientProcessState), so the vehicle
+	// screen's poll reads the last reply across the reload.
+	const replication::ClientScoreTracker tracker = view_.state().score_tracker;
 	view_.state() = replication::ClientState{};
 	view_.state().local_clock_ms = clock;
 	view_.state().roster = std::move(roster);
+	view_.state().score_tracker = tracker;
 	view_.state().spawn_success_gate = true;
 	view_.reset_minimap_overlays();
 	view_.drain_round_events();

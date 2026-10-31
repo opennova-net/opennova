@@ -547,6 +547,18 @@ public:
 	void use_vehicle_spawn_store(ClientVehicleSpawnAvailability *store) {
 		vehicle_spawn_store_ = store;
 	}
+	// The S2C 0x82 score tracker's entries, the process's (ClientScoreTracker carries the
+	// witness): the embedder hands in its process-lived store (inmatch::ClientProcessState);
+	// null keeps this pipeline's own.
+	void use_score_tracker_store(std::vector<ClientScoreTrackerEntry> *store) {
+		score_tracker_store_ = store;
+	}
+	std::vector<ClientScoreTrackerEntry> &score_tracker_entries() {
+		return score_tracker_store_ != nullptr ? *score_tracker_store_ : own_score_tracker_;
+	}
+	const std::vector<ClientScoreTrackerEntry> &score_tracker_entries() const {
+		return score_tracker_store_ != nullptr ? *score_tracker_store_ : own_score_tracker_;
+	}
 	ClientVehicleSpawnAvailability &vehicle_spawn_availability() {
 		return vehicle_spawn_store_ != nullptr ? *vehicle_spawn_store_ : own_vehicle_spawn_;
 	}
@@ -1039,6 +1051,8 @@ private:
 	uint32_t frame_tick_ = 0; // g_CurrentTick's stand-in (frame_tick())
 	ClientVehicleSpawnAvailability own_vehicle_spawn_;             // use_vehicle_spawn_store
 	ClientVehicleSpawnAvailability *vehicle_spawn_store_ = nullptr;
+	std::vector<ClientScoreTrackerEntry> own_score_tracker_;         // use_score_tracker_store
+	std::vector<ClientScoreTrackerEntry> *score_tracker_store_ = nullptr;
 	bool remote_motion_mode_ = false;
 	ReplicaContactResolver replica_contact_resolver_;
 	// tick_remote_motion's per-tick replica-peer sphere table (reused capacity).
