@@ -185,6 +185,7 @@ bool MenuTry::open_(const std::string &file, const std::string &screen) {
 void MenuTry::prepare_() {
 	options_.prepare(runtime_, &profile_);
 	options_.apply_policy(runtime_);
+	if (source_ != nullptr && source_->title != nullptr) options_.apply_title(runtime_, *source_->title);
 	options_.seed_profile(runtime_, &profile_);
 	commands_.wire(runtime_, in_mission_);
 	flow_.clear_rows();

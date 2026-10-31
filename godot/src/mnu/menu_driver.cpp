@@ -1011,6 +1011,7 @@ void MenuDriver::prepare_options(const Ref<PlayerProfiles> &p_profiles) {
 
 void MenuDriver::apply_options_policy(const Ref<PlayerProfiles> &p_profiles) {
 	options_.apply_policy(runtime_);
+	options_.apply_title(runtime_, ResourceRoot::session_title(root_));
 	options_.seed_profile(runtime_, current_record(p_profiles));
 }
 

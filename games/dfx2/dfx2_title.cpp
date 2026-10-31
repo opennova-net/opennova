@@ -151,6 +151,11 @@ Title make() {
 	// DFX2-61: the Mods list's base row reads "NONE" [orig: Options_PopulateModList @0x5582a0 (the
 	//  literal @0x7CA4EC, read @0x5582d2) (dfx2.exe)].
 	t.mod_list_base = "NONE";
+	// DFX2-62: the render and audio populate hides OPTIONS' ADVANCED_OUTLINE and ADVANCED_TAB
+	// [orig: sub_55AB20 @0x55ab20 (@0x55b829..0x55b862: CWnd_SetShown(0) on each) (dfx2.exe)], the
+	// twin of UI_PopulateRenderAndAudioSettings @0x55c830, which ends at the Bink slots
+	// (@0x55d530).
+	t.options_hides_advanced = true;
 	return t;
 }
 

@@ -2079,6 +2079,8 @@ void test_options_profile() {
 	for (const char *name : {"INVERT_MOUSE", "ENABLE_JOYSTICK", "INVERT_JOYSTICK",
 			"ENABLE_FORCE_FEEDBACK", "OPTIONS_AUTORELOAD", "OPTIONS_AUTOMEDIC"})
 		root.children.push_back(widget(name, mnu::WindowType::CheckBox));
+	root.children.push_back(widget("ADVANCED_TAB", mnu::WindowType::Static));
+	root.children.push_back(widget("ADVANCED_OUTLINE", mnu::WindowType::Window));
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "");
 	playersav::ProfileRecord record;
@@ -2091,6 +2093,16 @@ void test_options_profile() {
 	OptionsScreen options;
 	options.prepare(menu, &record);
 	options.apply_policy(menu);
+	// DFX2-62: Jointops.exe's populate leaves the ADVANCED pair shown, dfx2.exe's hides it
+	// [orig: sub_55AB20 @0x55b829..0x55b862 (dfx2.exe)].
+	Title jo, dfx2;
+	dfx2.options_hides_advanced = true;
+	options.apply_title(menu, jo);
+	CHECK(menu.is_widget_shown(menu.widget_id("ADVANCED_TAB")) &&
+			menu.is_widget_shown(menu.widget_id("ADVANCED_OUTLINE")));
+	options.apply_title(menu, dfx2);
+	CHECK(!menu.is_widget_shown(menu.widget_id("ADVANCED_TAB")) &&
+			!menu.is_widget_shown(menu.widget_id("ADVANCED_OUTLINE")));
 	options.seed_profile(menu, &record);
 	const int table = menu.widget_id("CONTROL_MAPPING");
 	CHECK(menu.table_cell_text(table, 0, 2) == "K or Up");  // the record's table

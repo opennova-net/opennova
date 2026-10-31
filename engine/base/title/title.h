@@ -172,6 +172,10 @@ struct Title {
 	// (its text where the table holds none): the literal the executable carries. Null unwitnessed:
 	// the row is blank.
 	const char *mod_list_base = nullptr;
+	// DFX2-62: the OPTIONS screen's render and audio populate ends by hiding its ADVANCED_OUTLINE
+	// and ADVANCED_TAB controls (menu::OptionsScreen::apply_title). False (Jointops.exe): they show
+	// as authored.
+	bool options_hides_advanced = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

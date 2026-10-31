@@ -7,6 +7,10 @@
 #include <formats/playersav/player_sav.h>
 #include <runtime/controls/binding_set.h>
 
+namespace opennova {
+struct Title;
+}
+
 namespace opennova::menu {
 
 // Device events have already crossed the Godot/OS key and button translation. A joystick
@@ -72,6 +76,9 @@ public:
 	// controls not serviced yet locked, showing their forced checks (D-MNU-21). Nothing off the
 	// surface.
 	void apply_policy(MenuRuntime &menu) const;
+	// The title's own steps at the populate's end: under Title::options_hides_advanced (DFX2-62)
+	// the ADVANCED_OUTLINE and ADVANCED_TAB controls hidden. Nothing off the surface.
+	void apply_title(MenuRuntime &menu, const Title &title) const;
 	// The record's controls words into their widgets, after apply_policy installed the
 	// MOUSE_SENSITIVITY range the seed clamps into: INVERT_MOUSE, MOUSE_SENSITIVITY,
 	// ENABLE_JOYSTICK, INVERT_JOYSTICK and ENABLE_FORCE_FEEDBACK (those two interactive only

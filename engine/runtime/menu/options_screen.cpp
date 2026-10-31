@@ -1,6 +1,7 @@
 #include "options_screen.h"
 #include "options_policy.h"
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <runtime/profile/profile_controls.h>
 
 #include <cstdlib>
@@ -194,6 +195,16 @@ void OptionsScreen::apply_policy(MenuRuntime &menu) const {
 	for (const char *name : kOptionsUnsupportedControls) {
 		const int id = menu.widget_id(name);
 		if (id >= 0) menu.set_widget_disabled(id, true);
+	}
+}
+
+// [orig: sub_55AB20 @0x55ab20 (dfx2.exe) - UI_FindScreenControl("OPTIONS", "ADVANCED_OUTLINE")
+//  @0x55b833 and CWnd_SetShown(0) @0x55b840; "ADVANCED_TAB" @0x55b855, CWnd_SetShown(0) @0x55b862]
+void OptionsScreen::apply_title(MenuRuntime &menu, const Title &title) const {
+	if (!is_surface_ || !title.options_hides_advanced) return;
+	for (const char *name : { "ADVANCED_OUTLINE", "ADVANCED_TAB" }) {
+		const int id = menu.widget_id(name);
+		if (id >= 0) menu.set_widget_shown(id, false);
 	}
 }
 
