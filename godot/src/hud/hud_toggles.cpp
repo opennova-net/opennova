@@ -1,6 +1,9 @@
 #include "hud/hud_toggles.h"
 
+#include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
+
+#include <base/title/title.h>
 
 using namespace godot;
 
@@ -52,8 +55,7 @@ bool HudToggles::sim_death_screen(const Ref<Simulation> &p_sim) {
 }
 
 bool HudToggles::sim_friendly_tags_skip_mode_1(const Ref<Simulation> &p_sim) {
-	const opennova::world::TitleRules *rules = p_sim.is_valid() ? p_sim->session_title_rules() : nullptr;
-	return rules != nullptr && rules->friendly_tags_skip_mode_1_on_death_screen;
+	return p_sim.is_valid() && p_sim->game_title().friendly_tags_skip_mode_1_on_death_screen;
 }
 
 int HudToggles::escape(bool p_in_session, bool p_round_over, bool p_authority) {
@@ -96,11 +98,9 @@ String HudToggles::cycle_friendly_tags() {
 	return String(opennova::hud::hud_toggles_cycle_friendly_tags(state_));
 }
 String HudToggles::friendly_tag_toast(const Ref<RtxtStringFile> &p_gametext,
-		const Ref<Simulation> &p_sim) const {
-	const opennova::world::TitleRules *rules = p_sim.is_valid() ? p_sim->session_title_rules() : nullptr;
-	if (rules == nullptr) return String();
-	return opennova::cp1252_to_gd(opennova::hud::friendly_tag_toast(
-			game_text_lookup(p_gametext), state_.friendly_tag_mode, *rules));
+		const Ref<ResourceRoot> &p_root) const {
+	return opennova::cp1252_to_gd(opennova::hud::friendly_tag_toast(game_text_lookup(p_gametext),
+			state_.friendly_tag_mode, ResourceRoot::session_title(p_root)));
 }
 String HudToggles::verbose_toast_key() const {
 	return String(opennova::hud::verbose_toast_key(state_.mp_verbose));
@@ -202,7 +202,7 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("force_death_screen_hud_detail"),
 			&HudToggles::force_death_screen_hud_detail);
 	ClassDB::bind_method(D_METHOD("cycle_friendly_tags"), &HudToggles::cycle_friendly_tags);
-	ClassDB::bind_method(D_METHOD("friendly_tag_toast", "gametext", "sim"),
+	ClassDB::bind_method(D_METHOD("friendly_tag_toast", "gametext", "root"),
 			&HudToggles::friendly_tag_toast);
 	ClassDB::bind_method(D_METHOD("verbose_toast_key"), &HudToggles::verbose_toast_key);
 	ClassDB::bind_static_method("HudToggles", D_METHOD("mouse_scale_toast", "gametext", "scale"),

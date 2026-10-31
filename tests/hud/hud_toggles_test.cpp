@@ -9,7 +9,6 @@
 #include <base/title/title.h>
 #include <runtime/controls/controls.h>
 #include <runtime/hud/hud_toggles.h>
-#include <runtime/world/title_rules.h>
 
 #include <cstdio>
 #include <cstring>
@@ -236,12 +235,12 @@ void test_death_screen_and_friendly_tags() {
 	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFull);
 }
 
-// The friendly-tags cycle under the title's rules (world::TitleRules section 5.3 carries the
-// witness): dfx2.exe's steps past mode 1 to mode 2 while the death screen is up and posts its own
-// lines for modes 1 and 2; Jointops.exe's steps 0 -> 1 and posts every mode's Misc key.
-void test_friendly_tags_title_rules() {
-	const opennova::world::TitleRules &jo = opennova::world::title_rules("jo");
-	const opennova::world::TitleRules &dfx2 = opennova::world::title_rules("dfx2");
+// The friendly-tags cycle under the title (base/title/title.h section 5.3 carries the witness):
+// dfx2.exe's steps past mode 1 to mode 2 while the death screen is up and posts its own lines for
+// modes 1 and 2; Jointops.exe's steps 0 -> 1 and posts every mode's Misc key.
+void test_friendly_tags_title() {
+	const opennova::Title &jo = *opennova::title_by_code("jo");
+	const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
 	HudToggleState s;
 	s.friendly_tag_mode = FriendlyTagMode::kOff;
 	HudKeyPoll k = keys();
@@ -1102,7 +1101,7 @@ int main() {
 	test_showhud_goals_dotsize_and_view_actions();
 	test_overlay_windows();
 	test_death_screen_and_friendly_tags();
-	test_friendly_tags_title_rules();
+	test_friendly_tags_title();
 	test_row_mask_and_tokens();
 	test_friendly_tags_and_verbose_rows();
 	test_help_and_map_legend_windows();

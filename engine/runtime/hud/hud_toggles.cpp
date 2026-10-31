@@ -2,7 +2,7 @@
 // shell's HUD presenter and its panel lanes (ADR 0040 ladder E3), where each
 // row carried the same edge machine.
 #include <runtime/hud/hud_toggles.h>
-#include <runtime/world/title_rules.h> // friendly_tag_toast (the title's literal lines)
+#include <base/title/title.h> // friendly_tag_toast (the title's literal lines)
 
 namespace opennova::hud {
 
@@ -318,7 +318,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// The friendly-tags cycle [orig: case 30 @0x49b573; catalog row 100
 	// ShowFriendly, default K]; the embedder posts the toast. A title whose
 	// cycle steps past mode 1 under the death screen does so here
-	// (world::TitleRules::friendly_tags_skip_mode_1_on_death_screen carries the witness).
+	// (Title::friendly_tags_skip_mode_1_on_death_screen carries the witness).
 	if (s.friendly_tags.step(k.friendly_tags, bit0_active && bit0_operand_clear) &&
 			admitted(kRowFriendlyTags)) {
 		s.friendly_tag_mode = next_friendly_tag_mode(s.friendly_tag_mode);
@@ -683,11 +683,11 @@ const char *friendly_tag_toast_key(FriendlyTagMode mode) {
 }
 
 std::string friendly_tag_toast(const GameTextLookup &gametext, FriendlyTagMode mode,
-		const world::TitleRules &rules) {
+		const Title &title) {
 	const int index = static_cast<int>(mode);
-	if (index >= 0 && index < static_cast<int>(rules.friendly_tag_toast_literals.size()) &&
-			rules.friendly_tag_toast_literals[static_cast<size_t>(index)] != nullptr)
-		return rules.friendly_tag_toast_literals[static_cast<size_t>(index)];
+	if (index >= 0 && index < static_cast<int>(title.friendly_tag_toast_literals.size()) &&
+			title.friendly_tag_toast_literals[static_cast<size_t>(index)] != nullptr)
+		return title.friendly_tag_toast_literals[static_cast<size_t>(index)];
 	return game_text(gametext, kGameTextMisc, friendly_tag_toast_key(mode), "");
 }
 

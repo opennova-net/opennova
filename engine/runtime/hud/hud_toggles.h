@@ -27,9 +27,9 @@
 #include <cstdint>
 #include <string>
 
-namespace opennova::world {
-struct TitleRules; // runtime/world/title_rules.h
-} // namespace opennova::world
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
 
 namespace opennova::hud {
 
@@ -213,7 +213,7 @@ struct HudKeyPoll {
 	//  dword_8159AC[code * 0x6C] @0x49AD8D, the gates @0x49AD95..0x49AE23]
 	uint32_t head_drops = 0;
 	// The client death-screen latch [orig: g_DeathScreenActive @0xA860EC], and the
-	// title's rule over it (world::TitleRules::friendly_tags_skip_mode_1_on_death_screen):
+	// title's rule over it (Title::friendly_tags_skip_mode_1_on_death_screen):
 	// with both, the friendly-tags cycle steps on past mode 1 to mode 2, as dfx2.exe's does.
 	bool death_screen = false;
 	bool friendly_tags_skip_mode_1_on_death_screen = false;
@@ -607,12 +607,12 @@ std::string mouse_scale_toast(const GameTextLookup &gametext, int32_t scale);
 const char *hud_toggles_cycle_friendly_tags(HudToggleState &state);
 const char *friendly_tag_toast_key(FriendlyTagMode mode);
 
-// The friendly-tags toast line for `mode` under the title's rules: the title's literal
-// line where it posts one (world::TitleRules::friendly_tag_toast_literals, dfx2.exe's
-// modes 1 and 2), else gametext Misc/<friendly_tag_toast_key>; "" (which posts nothing)
-// when the string is missing. The embedder posts it to the system ring as the verbose
-// toast is posted (the witness rides TitleRules).
+// The friendly-tags toast line for `mode` under the title: the title's literal line where
+// it posts one (Title::friendly_tag_toast_literals, dfx2.exe's modes 1 and 2), else
+// gametext Misc/<friendly_tag_toast_key>; "" (which posts nothing) when the string is
+// missing. The embedder posts it to the system ring as the verbose toast is posted (the
+// witness rides the Title).
 std::string friendly_tag_toast(const GameTextLookup &gametext, FriendlyTagMode mode,
-		const world::TitleRules &rules);
+		const Title &title);
 
 } // namespace opennova::hud

@@ -109,8 +109,8 @@ bool Simulation::local_death_screen_active() const {
 	return opennova::inmatch::local_death_screen_active(role_view());
 }
 
-const opennova::world::TitleRules *Simulation::session_title_rules() const {
-	return kernel_->world.rules.title_rules;
+const opennova::Title &Simulation::game_title() const {
+	return session_title(net_, assets_.root);
 }
 
 Ref<PlayerLocalView> Simulation::get_local_player_view() const {

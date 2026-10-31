@@ -376,6 +376,10 @@ Title make() {
 	// DFX2-90: the map key steps off <-> fullscreen [orig: HUD_CycleMapMode @0x51DB80, called from
 	//  the dispatcher's case 28 @0x4DD702 (dfx2.exe)].
 	t.hud_map_cycle_skips_window = true;
+	// Section 7.12: the zoom-out cap, 0x80000 for the radar and the big map alike
+	// [orig: Input_HandleActionBinding @0x49ad50 - case 361, `cmp eax, 80000h` @0x49bf27 /
+	// @0x49bf57 (dfx2.exe)].
+	t.map_zoom_max_q16 = 0x80000;
 	// DFX2-83: the Tab board's rows carry no class suffix [orig: HUD_DrawKillList @0x423890 - the
 	//  team arm's format @0x423BB1 (dfx2.exe)].
 	t.hud_kill_list_no_class = true;
@@ -395,6 +399,11 @@ Title make() {
 	// DFX2-87: the tags' modes reach by range [orig: HUD_DrawEntityLabel @0x5A27F0 -
 	//  @0x5A288C..0x5A28C1, @0x5A2E1F..0x5A309A (dfx2.exe)].
 	t.hud_tag_ranges = true;
+	// Section 5.3: the friendly-tags toasts, modes 1 and 2 the literal lines, and the death screen's
+	// step past mode 1 [orig: Input_HandleActionBinding @0x49ad50 - case 30, @0x49b5ee / @0x49b60c,
+	// the step @0x49b59c..0x49b5b6 (dfx2.exe)].
+	t.friendly_tag_toast_literals = {nullptr, "Friendly Tags: On", "Friendly Tags: Smart", nullptr};
+	t.friendly_tags_skip_mode_1_on_death_screen = true;
 	// DFX2-81: the map's second name walk draws nothing [orig: HUD_DrawEntityLabelsAndMarkers
 	//  @0x5A3850 - @0x5A3D53..0x5A3DD4 (dfx2.exe)].
 	t.hud_map_no_bank_names = true;

@@ -815,8 +815,8 @@ public:
 	// The client-local death screen latch (retail g_DeathScreenActive): gates the
 	// friendly-tags walks + camera arbiter sub-mode; fed by simulation_player_view.cpp.
 	bool local_death_screen_active() const;
-	// C++ seam: the session world's title rules (SessionRules); null until a session sets them.
-	const opennova::world::TitleRules *session_title_rules() const;
+	// C++ seam: the title the session runs as (set_game_title's, else its root's: session_title).
+	const opennova::Title &game_title() const;
 	// True while a live net session owns this sim: the world tick is the ONLY pump for the
 	// session socket, so the Play/Step/Stop transport locks out (retail MP has no pause; a
 	// stopped listen host reaps every joiner at cs_dir0.timeout_ms (engine: net/novaworld/client_session.h)). The single home for the rule — F3 transport, MCP, and ESC pause read it.

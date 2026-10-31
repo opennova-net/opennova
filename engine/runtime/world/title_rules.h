@@ -19,6 +19,10 @@
 // - DFX2-7/8's game.cfg rows, defaults and ceilings stay in formats/gamecfg (config_var_rows, the
 //   Config_SetDefaults and post-load clamps), keyed by the Title's config_table: formats/ cannot
 //   see runtime/ either.
+// - §7.12's zoom-out cap and §5.3's friendly-tags toasts and death-screen step are the Title's
+//   (base/title/title.h map_zoom_max_q16, friendly_tag_toast_literals,
+//   friendly_tags_skip_mode_1_on_death_screen): read on the local player's input alone, they are
+//   the executable's own HUD and input, as its HUD variants are, and change no peer's world.
 // - The wire dialect (DFX2-1, 2, 10..14, 18) is the Protocol's (net/protocol/protocol.h
 //   ProtocolInMatch, by message). DFX2-1's 0x0A fifth u32 stays there; DFX2-9's checkpoint RULES
 //   are here.
@@ -338,33 +342,6 @@ struct TitleRules {
 	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47CCAD..0x47CCD5] [orig:
 	//  Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47CCAD..0x47CCD3 (dfx2.exe)]
 	bool tracked_impact_speed_xz_first = false;
-
-	// --- Section 7.12: the radar and big-map zoom cap (the local player's own view). -------------
-	// The zoom-out key's cap (Q16, a world-extent multiplier) over the corner radar's zoom and, while
-	// a map mode is up, the big map's (hud::HudMapControl::zoom_step); the x1.15 / x0.85 steps and
-	// the 0x1000 floor are the same in both. Read on the local player's input alone, it changes no
-	// peer's view of anything, so it is no joiner-side knob.
-	// [orig: Input_HandleActionBinding @0x49ad40 - case 361, `cmp eax, 100000h` @0x49beba (the
-	//  radar's) / @0x49beea (the big map's)] [orig: Input_HandleActionBinding @0x49ad50 - case
-	//  361, `cmp eax, 80000h` @0x49bf27 / @0x49bf57, the stores @0x49bf37 / @0x49bf67 (dfx2.exe)]
-	int32_t map_zoom_max_q16 = 0x100000;
-
-	// --- Section 5.3: the friendly-tags cycle's toasts (the local player's own feed). ------------
-	// The ShowFriendly action steps the mode 0 -> 1 -> 2 -> 3 -> 0 in both (hud/hud_toggles.h).
-	// Jointops.exe posts each mode's gametext Misc toast (hud::friendly_tag_toast_key:
-	// STRMISC_FRIENDLYTAGS_OFF / _FARBRIEF / _FULL / _BRIEF); dfx2.exe posts its own literal line
-	// for modes 1 and 2 (the entry here, null the key's), and while the death screen is up steps
-	// on past mode 1 to mode 2. Read on the local player's input alone: no joiner-side knob.
-	// [orig: Input_HandleActionBinding @0x49ad40 - case 30 @0x49b573..0x49b5df, every mode's key
-	//  through GameText_GetString("Misc") @0x49bc52] [orig: Input_HandleActionBinding @0x49ad50 -
-	//  case 30 @0x49b583: the wrap @0x49b58b..0x49b597, the death-screen step `cmp
-	//  g_DeathScreenActive, 0` @0x49b59c / `cmp eax, 1` @0x49b5a5 -> mode 2 and "Friendly Tags:
-	//  Smart" @0x49b5b1..0x49b5c0; mode 0's STRMISC_FRIENDLYTAGS_OFF @0x49b5d8, mode 1's "Friendly
-	//  Tags: On" @0x49b5ee, mode 2's "Friendly Tags: Smart" @0x49b60c, each straight to
-	//  Chat_AddMessageChannel2; mode 3's STRMISC_FRIENDLYTAGS_BRIEF @0x49b625; the keys' lookup
-	//  @0x49bcbf (dfx2.exe)]
-	std::array<const char *, 4> friendly_tag_toast_literals{};
-	bool friendly_tags_skip_mode_1_on_death_screen = false;
 
 	// --- DFX2-42: the scripted voice's gain. -----------------------------------------------------
 	// joiner-side: the gain byte a script's voice wave (wave, SSNwave, SSNradio) starts at, which the

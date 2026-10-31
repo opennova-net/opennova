@@ -4,7 +4,7 @@ extends GutTest
 # and a title rule that steps past mode 1 (dfx2.exe's) lands on mode 2; without the rule, or
 # without the latch, the cycle reaches mode 1 (Jointops.exe's). The no-router poll reads both
 # from its sim through HudToggles.sim_death_screen / sim_friendly_tags_skip_mode_1, which give
-# false with no sim. The witness rides the engine (runtime/world/title_rules.h section 5.3).
+# false with no sim. The witness rides the engine (base/title/title.h section 5.3).
 
 
 func _cycle_to_off(toggles: HudToggles) -> void:

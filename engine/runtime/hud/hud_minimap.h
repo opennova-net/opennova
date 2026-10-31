@@ -659,8 +659,8 @@ struct HudMapPass {
 };
 
 // One radar-zoom input step over the active zoom value. direction > 0 zooms
-// OUT (x1.15 toward `zoom_max`, the title's cap: world::TitleRules::
-// map_zoom_max_q16, Jointops.exe's kSpinmapZoomMax), direction < 0 zooms IN
+// OUT (x1.15 toward `zoom_max`, the title's cap: Title::map_zoom_max_q16,
+// Jointops.exe's kSpinmapZoomMax), direction < 0 zooms IN
 // (x0.85 toward 4096). The value is a world-extent multiplier: bigger shows
 // more world.
 // [orig: Input_HandleActionBinding @0x49AD40 — radarout row 48 = case 361
@@ -798,8 +798,8 @@ struct HudMapControl {
 		return mode;
 	}
 	// The radar keys step the big-map zoom while a mode is up, the corner
-	// spinmap's otherwise, a zoom-out to the title's `zoom_max` (world::
-	// TitleRules::map_zoom_max_q16). [orig: the mode-gated zoom-case reads
+	// spinmap's otherwise, a zoom-out to the title's `zoom_max`
+	// (Title::map_zoom_max_q16). [orig: the mode-gated zoom-case reads
 	//  @0x49bc98/@0x49be97]
 	int32_t zoom_step(int direction, int32_t zoom_max) {
 		if (mode != 0) {

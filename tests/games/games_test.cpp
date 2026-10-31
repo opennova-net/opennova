@@ -98,11 +98,12 @@ auto title_fields_past_identity(const Title &t) {
 			profile_word_1396, max_players_switch, profile_single_player_kit, profile_class_kits,
 			map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
 			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
-			death_respawn_penalty_line, hud_map_cycle_skips_window, hud_kill_list_no_class,
-			hud_scope_no_magnification, hud_crosshair_fixed, hud_stance_health_tint,
-			hud_message_tags, hud_map_legend, hud_tag_ranges, hud_map_no_bank_names,
-			death_screen_game_type_line, env_cube_terrain_clearance, nvg_gain_rect,
-			inset_reticle_quad, frame_fx_work_side, low_health_screen_effect,
+			death_respawn_penalty_line, hud_map_cycle_skips_window, map_zoom_max_q16,
+			hud_kill_list_no_class, hud_scope_no_magnification, hud_crosshair_fixed,
+			hud_stance_health_tint, hud_message_tags, hud_map_legend, hud_tag_ranges,
+			friendly_tag_toast_literals, friendly_tags_skip_mode_1_on_death_screen,
+			hud_map_no_bank_names, death_screen_game_type_line, env_cube_terrain_clearance,
+			nvg_gain_rect, inset_reticle_quad, frame_fx_work_side, low_health_screen_effect,
 			map_capture_rings_under_layers, death_map_zone_markers, loading_screen, controls,
 			hud_sp_how_to, stat_screen_done, menu_font_scale, host_vehicle_missions,
 			host_switch_starts_off, armory_lists_none_row, death_map_no_names,
@@ -123,10 +124,12 @@ auto title_fields_past_identity(const Title &t) {
 			profile_single_player_kit, profile_class_kits, map_view_zoom_max,
 			death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
 			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
-			death_respawn_penalty_line, hud_map_cycle_skips_window, hud_kill_list_no_class,
-			hud_scope_no_magnification, hud_crosshair_fixed, hud_stance_health_tint,
-			hud_message_tags, hud_map_legend, hud_tag_ranges, hud_map_no_bank_names,
-			death_screen_game_type_line, env_cube_terrain_clearance, nvg_gain_rect.x0,
+			death_respawn_penalty_line, hud_map_cycle_skips_window, map_zoom_max_q16,
+			hud_kill_list_no_class, hud_scope_no_magnification, hud_crosshair_fixed,
+			hud_stance_health_tint, hud_message_tags, hud_map_legend, hud_tag_ranges,
+			friendly_tag_toast_literals, friendly_tags_skip_mode_1_on_death_screen,
+			hud_map_no_bank_names, death_screen_game_type_line, env_cube_terrain_clearance,
+			nvg_gain_rect.x0,
 			nvg_gain_rect.y0, nvg_gain_rect.x1, nvg_gain_rect.y1, inset_reticle_quad,
 			frame_fx_work_side, low_health_screen_effect, map_capture_rings_under_layers,
 			death_map_zone_markers, loading_screen, controls, hud_sp_how_to, stat_screen_done,
@@ -246,12 +249,8 @@ void retail_rules_values() {
 	CHECK(!jo.bms_table_warnings && jo.bms_loadout_sanitized && jo.mission_start_sets_difficulty);
 	CHECK(jo.part_spin.full == 186413 && jo.part_spin.mid == 163110 && jo.part_spin.low == 139809 &&
 			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
-	CHECK(jo.map_zoom_max_q16 == 0x100000); // section 7.12
 	CHECK(!jo.parachute_opens_on_jump && !jo.airborne_steer_glide &&
 			!jo.tracked_impact_speed_xz_first);
-	// Section 5.3: every mode's toast the gametext key's, no death-screen step.
-	for (const char *literal : jo.friendly_tag_toast_literals) CHECK(literal == nullptr);
-	CHECK(!jo.friendly_tags_skip_mode_1_on_death_screen);
 
 	const world::TitleRules &dfx2 = world::title_rules("dfx2");
 	CHECK(dfx2.waypoint_completion == world::WaypointCompletion::CoopCheckpoint); // DFX2-9
@@ -280,6 +279,19 @@ void retail_rules_values() {
 	size_t kit = 0;
 	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
 	CHECK(kit == 8 && std::string(dfx2.spawn_kit[2]) == "WPN_MK23");
+}
+
+// The Title's knobs read on the local player's input alone (docs/titles/dfx2-vs-jo-re.md §8, the
+// three with no catalog id): JO's the defaults, DFX2's dfx2.exe's, OP: Acid Gambit's JO's (its
+// every field past the identity, acidgambit_speaks_jo).
+void retail_local_input_title_values() {
+	const Title &jo = games::jo_title();
+	CHECK(jo.map_zoom_max_q16 == 0x100000); // section 7.12
+	// Section 5.3: every mode's toast the gametext key's, no death-screen step.
+	for (const char *literal : jo.friendly_tag_toast_literals) CHECK(literal == nullptr);
+	CHECK(!jo.friendly_tags_skip_mode_1_on_death_screen);
+
+	const Title &dfx2 = games::dfx2_title();
 	CHECK(dfx2.map_zoom_max_q16 == 0x80000); // section 7.12
 	// Section 5.3: modes 1 and 2 the literal lines, the death screen's step past mode 1.
 	CHECK(dfx2.friendly_tag_toast_literals[0] == nullptr &&
@@ -534,6 +546,7 @@ int main() {
 	unwitnessed_titles_refused();
 	every_title_runs_rules();
 	retail_rules_values();
+	retail_local_input_title_values();
 	bump_rule_sheet_per_protocol();
 	config_table_fills_the_protocols_mission_word();
 	title_parts_of_the_version_line();

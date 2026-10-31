@@ -17,6 +17,7 @@
 
 namespace godot {
 
+class ResourceRoot;
 class Simulation;
 
 class HudToggles : public RefCounted {
@@ -126,7 +127,7 @@ public:
 			bool p_death_screen = false, bool p_friendly_tags_skip_mode_1 = false);
 	// The two friendly-tags inputs of a poll or a dispatch, from `sim`: the client death-screen
 	// latch, and the session title's rule over it (engine HudKeyPoll::death_screen); false with
-	// no sim or no session rules.
+	// no sim.
 	static bool sim_death_screen(const Ref<Simulation> &p_sim);
 	static bool sim_friendly_tags_skip_mode_1(const Ref<Simulation> &p_sim);
 	// The escape action's HUD-window close chain; returns the Event bits.
@@ -152,11 +153,12 @@ public:
 	void force_death_screen_hud_detail();
 	// The friendly-tags cycle; returns the gametext Misc toast key for the new mode.
 	String cycle_friendly_tags();
-	// The friendly-tags toast line for the current mode under the session title's
-	// rules (engine hud::friendly_tag_toast) over the gametext table; "" (which posts
-	// nothing) with no session rules.
+	// The friendly-tags toast line for the current mode under the title a session over
+	// `root` runs as (ResourceRoot::session_title: with no root the launch's; engine
+	// hud::friendly_tag_toast) over the gametext table; "" (which posts nothing) when the
+	// string is missing.
 	String friendly_tag_toast(const Ref<RtxtStringFile> &p_gametext,
-			const Ref<Simulation> &p_sim) const;
+			const Ref<ResourceRoot> &p_root) const;
 	// The Misc toast key for the current verbose flag.
 	String verbose_toast_key() const;
 	// The mousescale toast over the gametext table ("" posts nothing).

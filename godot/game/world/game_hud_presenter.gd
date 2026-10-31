@@ -1365,10 +1365,10 @@ func _apply_toggle_events(events: int) -> void:
 	if events & HudToggles.EVENT_FRIENDLY_TAGS_CYCLED:
 		if _game_hud != null:
 			_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
-		# The new mode's line under the session title's rules: a Misc key's text, or the
-		# title's own literal line (engine hud::friendly_tag_toast).
+		# The new mode's line under the session's title: a Misc key's text, or the title's
+		# own literal line (engine hud::friendly_tag_toast).
 		var tags_line := _toggles.friendly_tag_toast(Strings.get_table(Strings.TABLE_GAMETEXT),
-				_world.get_sim() if _world != null else null)
+				_world.get_resource_root() if _world != null else null)
 		if _game_hud != null and not tags_line.is_empty():
 			_game_hud.push_message(tags_line)
 	if events & HudToggles.EVENT_VERBOSE_TOGGLED:
