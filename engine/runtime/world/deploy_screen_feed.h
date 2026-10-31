@@ -357,6 +357,11 @@ DeployTableClick deploy_table_click(const menu::MenuRuntime &menu, int table, in
 //  @0x43b73a), the deltas @0x550e93..0x550eb1 (dfx2.exe)]
 bool deploy_table_pan_target(const World &world, const SpawnZoneRegistry &zones, int index,
 		int32_t &dx, int32_t &dy);
+// The DEATH map's move leg past its pan / zoom (hud::DeathMapView::on_event's true): DEATH's
+// SPAWNPOINTS_TABLE, where the screen has one, has every row deselected. False without it.
+// [orig: CMap_OverlayInputHandler @0x55452e..0x554541] [orig: sub_550F40 @0x5511c7..0x5511da
+//  (dfx2.exe)]
+bool deploy_map_moved(menu::MenuRuntime &menu);
 
 // Both instruction widgets and the permanent-death status pair. A secured
 // spawn leaves the first widget's prior text intact and hides the second;

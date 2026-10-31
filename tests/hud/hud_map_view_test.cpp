@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 
+#include <base/title/title.h>
 #include <runtime/hud/hud_map_view.h>
 
 using namespace opennova::hud;
@@ -374,6 +375,22 @@ void test_death_compile() {
         CHECK(out.over_lines[1].x0 == 295.0f);
         CHECK(out.over_lines[0].color == 0x704040FFu);
     }
+    // A pane with a frame (dfx2.exe's, its title's colour) draws it after the crosshair: top,
+    // right, bottom, left round the rect [orig: sub_550F40 @0x550ff9..0x551052 (dfx2.exe)].
+    {
+        DeathMapFrame framed = frame;
+        framed.frame_color = 0xFFE1DF4Bu;
+        HudMapWindowPass with_frame;
+        compiler.compile(in, framed, facts, with_frame);
+        CHECK(with_frame.over_lines.size() == 6);
+        if (with_frame.over_lines.size() == 6) {
+            const HudMapLine &top = with_frame.over_lines[2];
+            const HudMapLine &left = with_frame.over_lines[5];
+            CHECK(top.x0 == 30.0f && top.y0 == 30.0f && top.x1 == 560.0f && top.y1 == 30.0f);
+            CHECK(left.x0 == 30.0f && left.y0 == 490.0f && left.x1 == 30.0f && left.y1 == 30.0f);
+            CHECK(top.color == 0xFFE1DF4Bu && with_frame.over_lines[4].y0 == 490.0f);
+        }
+    }
     // The hold: own zones gain "%ld" a cell above; other zones stop
     // brightening.
     facts.hold_seconds = 9;
@@ -660,7 +677,42 @@ void test_death_zoom_ease() {
     CHECK(!v.zoom_ease);
 }
 
+// The title's pane: dfx2.exe's ceiling 6.0 for the right drag, the wheel and the fit (a fit
+// landing on it resets the pan and the target), and its frame colour on the render.
+// [orig: sub_550F40 @0x551178; sub_550C60 @0x550ca6; sub_550690 @0x550922 / @0x550974
+//  (dfx2.exe)]
+void test_death_title_pane() {
+    opennova::Title dfx2;
+    dfx2.death_map_zoom_max = 6.0f;
+    dfx2.death_map_frame_color = 0xFFE1DF4Bu;
+    DeathMapView v;
+    v.apply_title(dfx2);
+    v.on_load();
+    CHECK(v.render(death_rect(), 800, 0, 0).frame_color == 0xFFE1DF4Bu);
+    v.on_event(MapViewEvent::kRightDown, 100, 100, 0, 0);
+    v.on_event(MapViewEvent::kMove, -2000, 100, kMapViewButtonRight, 0);
+    CHECK(v.view.zoom == 6.0f);
+    v.view.zoom = 5.5f;
+    v.on_event(MapViewEvent::kWheel, 0, 0, 0, -1);
+    CHECK(v.view.zoom == 6.0f);
+    DeathMapFitInput wide;
+    wide.shroud_present = true;
+    wide.shroud_w = 760;
+    wide.shroud_h = 525;
+    wide.bounds_min_x = -100 * kWu;
+    wide.bounds_max_x = 30000 * kWu;
+    v.target_x = 77;
+    v.fit(wide);
+    CHECK(v.view.zoom == 6.0f && v.view.pan_x == 0 && v.target_x == 0);
+    // Jointops.exe's: no frame, the 10.0 ceiling.
+    DeathMapView jo;
+    jo.apply_title(opennova::Title{});
+    jo.on_load();
+    CHECK(jo.render(death_rect(), 800, 0, 0).frame_color == 0u && jo.view.zoom_max == 10.0f);
+}
+
 int main() {
+    test_death_title_pane();
     test_death_zoom_ease();
     test_integer_pow();
     test_design_to_device();

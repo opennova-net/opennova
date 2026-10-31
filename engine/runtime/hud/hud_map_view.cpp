@@ -1,5 +1,7 @@
 #include <runtime/hud/hud_map_view.h>
 
+#include <base/title/title.h>
+
 #include <base/io/bam.h>
 #include <base/io/crt_ftol.h>
 #include <runtime/hud/hud_math.h>
@@ -23,9 +25,9 @@ float pc24(double value) {
 // already-stored product: below 0.1 stores 0.1, above 10 stores 10.
 // [orig: @0x5544ba..0x554504 (DEATH drag); @0x553385..0x5533b9 (the fit);
 //  @0x549d2f..0x549d72 (CMAP drag)]
-float clamp_zoom(float zoom) {
+float clamp_zoom(float zoom, float zoom_max) {
 	if (zoom < kMapViewZoomMin) return kMapViewZoomMin;
-	if (zoom > kMapViewZoomMax) return kMapViewZoomMax;
+	if (zoom > zoom_max) return zoom_max;
 	return zoom;
 }
 
@@ -266,7 +268,7 @@ void MapViewPan::drag_zoom(int32_t x, int32_t y) {
 	last_y = y;
 	// zoom x= 1.005^(-dx), stored, then clamped [orig: @0x55447d..0x5544b4].
 	zoom = pc24(map_view_integer_pow(kMapViewDragZoomBase, -dx) * static_cast<double>(zoom));
-	zoom = clamp_zoom(zoom);
+	zoom = clamp_zoom(zoom, zoom_max);
 }
 
 void MapViewPan::zoom_step(int direction) {
@@ -277,7 +279,7 @@ void MapViewPan::zoom_step(int direction) {
 		if (zoom < kMapViewZoomMin) zoom = kMapViewZoomMin;
 	} else if (direction < 0) {
 		zoom = pc24(static_cast<double>(zoom) * static_cast<double>(kMapViewZoomOutStep));
-		if (zoom > kMapViewZoomMax) zoom = kMapViewZoomMax;
+		if (zoom > zoom_max) zoom = zoom_max;
 	}
 }
 
@@ -294,11 +296,17 @@ void DeathMapView::on_load() {
 	initialized = true;
 }
 
+void DeathMapView::apply_title(const Title &title) {
+	view.zoom_max = title.death_map_zoom_max;
+	frame_color = title.death_map_frame_color;
+}
+
 void DeathMapView::fit(const DeathMapFitInput &in) {
 	const auto reset_on_max = [this](float zoom) {
 		// [orig: `10.0 == zoom` @0x5533e5..0x5533f2 -> the pan, the target and
-		//  dword_25A3988 zeroed @0x5533f4..0x55340c]
-		if (zoom == kMapViewZoomMax) {
+		//  dword_25A3988 zeroed @0x5533f4..0x55340c] [orig: `6.0 == zoom` @0x550974
+		//  -> @0x550976..0x55098e (dfx2.exe)]
+		if (zoom == view.zoom_max) {
 			view.pan_x = 0;
 			view.pan_y = 0;
 			target_x = 0;
@@ -349,7 +357,7 @@ void DeathMapView::fit(const DeathMapFitInput &in) {
 	const float ratio = pc24(static_cast<double>(extent) / static_cast<double>(divisor));
 	const float zoom = pc24(static_cast<double>(ratio) * (1.0 / 65536.0) *
 			static_cast<double>(1.5f));
-	view.zoom = clamp_zoom(zoom);
+	view.zoom = clamp_zoom(zoom, view.zoom_max);
 	// The pan centres the AABB [orig: @0x5533bb..0x5533cf].
 	view.pan_x = io::bam_sub(io::bam_add(min_x, max_x) >> 1, in.player_x);
 	view.pan_y = io::bam_sub(io::bam_add(min_y, max_y) >> 1, in.player_y);
@@ -384,6 +392,7 @@ DeathMapFrame DeathMapView::render(const MapViewRect &rect, int32_t scaled_800,
 	frame.center_x = io::bam_add(view.pan_x, player_x);
 	frame.center_y = io::bam_add(view.pan_y, player_y);
 	frame.scale = view.draw_scale();
+	frame.frame_color = frame_color;
 	return frame;
 }
 
@@ -806,6 +815,19 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 
 	// The player crosshair [orig: MapOverlay_DrawView @0x5a5d32..0x5a5ed6].
 	map_view_crosshair(input, frame.rect, facts, hud_frame, out.over_lines);
+	// The title's frame after the map: top, right, bottom, left, in the quad colour
+	// [orig: sub_550F40 - CGfxDevice_SetQuadDiffuse @0x550ff9, sub_6B5410 (Line2D_Draw)
+	//  @0x55100f / @0x551026 / @0x55103c / @0x551052 (dfx2.exe)].
+	if (frame.frame_color != 0) {
+		const float l = static_cast<float>(frame.rect.left);
+		const float t = static_cast<float>(frame.rect.top);
+		const float r = static_cast<float>(frame.rect.right);
+		const float b = static_cast<float>(frame.rect.bottom);
+		out.over_lines.push_back({l, t, r, t, frame.frame_color});
+		out.over_lines.push_back({r, t, r, b, frame.frame_color});
+		out.over_lines.push_back({r, b, l, b, frame.frame_color});
+		out.over_lines.push_back({l, b, l, t, frame.frame_color});
+	}
 }
 
 void map_view_crosshair(const HudMinimapInput &view, const MapViewRect &rect,

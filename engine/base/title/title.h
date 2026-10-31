@@ -140,6 +140,14 @@ struct Title {
 	// fresh record init_defaults gives no page.
 	const char *const *profile_single_player_kit = nullptr;
 	const char *const *const *profile_class_kits = nullptr;
+	// DFX2-41: the DEATH screen's map pane, the executable's values: its zoom ceiling (the show's
+	// fit, the right drag and the wheel clamp to it, and a fit landing on it resets the pan, the
+	// target and the zoom ease), and the colour of the frame it draws round the map after it (0:
+	// none). Jointops.exe's: 10.0 and no frame [orig: CMap_OverlayInputHandler @0x554310 -
+	// flt_7C44B4 @0x5544dd; DeathScreen_UpdateUI @0x553150 - @0x5533ad / @0x5533f2;
+	// DeathScreen_ZoomStep @0x5535d0].
+	float death_map_zoom_max = 10.0f;
+	uint32_t death_map_frame_color = 0;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

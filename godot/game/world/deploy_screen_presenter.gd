@@ -638,6 +638,10 @@ func _mount_map_window() -> void:
 	_map_window = MapViewWindow.new()
 	_map_window.name = "DeployMapWindow"
 	_map_window.set_view_state(_map_view_state)
+	# The map's move leg deselects the spawn table's rows (engine world::deploy_map_moved).
+	_map_window.death_map_moved.connect(func() -> void:
+		if _driver != null:
+			_driver.deploy_map_moved())
 	_frame.add_child(_map_window)
 	_place_map_window()
 

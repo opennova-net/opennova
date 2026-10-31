@@ -120,6 +120,11 @@ void MapViewWindow::screen_load() {
 		state_->command.on_load();
 		return;
 	}
+	// The session's title's pane (opennova::hud::DeathMapView::apply_title).
+	if (Simulation *sim = sim_()) {
+		const opennova::inmatch::RoleView view = sim->role_view();
+		if (view.title != nullptr) state_->death.apply_title(*view.title);
+	}
 	state_->death.on_load();
 }
 
@@ -164,10 +169,11 @@ void MapViewWindow::push_map_event(int p_event, const Vector2i &p_position, int 
 		queue_redraw();
 		return;
 	}
-	// The move leg's SPAWNPOINTS_TABLE deselect finds no such control on
-	// death.mnu (its list is SPAWNPOINTS_LIST), so the return is unused.
-	state_->death.on_event(static_cast<MapViewEvent>(p_event), p_position.x, p_position.y,
-			static_cast<uint32_t>(p_buttons), p_wheel);
+	// The move leg's SPAWNPOINTS_TABLE deselect is the menu's: the presenter takes the signal
+	// (opennova::world::deploy_map_moved).
+	if (state_->death.on_event(static_cast<MapViewEvent>(p_event), p_position.x, p_position.y,
+				static_cast<uint32_t>(p_buttons), p_wheel))
+		emit_signal("death_map_moved");
 	queue_redraw();
 }
 
@@ -463,6 +469,7 @@ void MapViewWindow::_bind_methods() {
 			&MapViewWindow::waypoint_dialog_rect);
 	ADD_SIGNAL(MethodInfo("waypoint_dialog_requested",
 			PropertyInfo(Variant::VECTOR2I, "design_point")));
+	ADD_SIGNAL(MethodInfo("death_map_moved"));
 	ClassDB::bind_method(D_METHOD("get_zoom"), &MapViewWindow::get_zoom);
 	ClassDB::bind_method(D_METHOD("get_pan"), &MapViewWindow::get_pan);
 	ClassDB::bind_method(D_METHOD("get_pan_target"), &MapViewWindow::get_pan_target);

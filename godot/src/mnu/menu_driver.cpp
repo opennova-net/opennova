@@ -764,6 +764,10 @@ Vector2i MenuDriver::deploy_table_click(int p_id, int p_row, int p_state,
 	return Vector2i(click.pan_zone_index, click.pick_value);
 }
 
+bool MenuDriver::deploy_map_moved() {
+	return opennova::world::deploy_map_moved(runtime_);
+}
+
 // ---- activation / actions --------------------------------------------------------
 
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
@@ -1252,6 +1256,7 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::fill_deploy_spawn_table);
 	ClassDB::bind_method(D_METHOD("deploy_table_click", "id", "row", "state", "double_click"),
 			&MenuDriver::deploy_table_click);
+	ClassDB::bind_method(D_METHOD("deploy_map_moved"), &MenuDriver::deploy_map_moved);
 	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),
 			&MenuDriver::table_cell_value);
 	ClassDB::bind_method(D_METHOD("table_selected_rows", "id"), &MenuDriver::table_selected_rows);

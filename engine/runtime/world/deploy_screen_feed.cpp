@@ -452,6 +452,13 @@ DeployTableClick deploy_table_click(const menu::MenuRuntime &menu, int table, in
 	return click;
 }
 
+bool deploy_map_moved(menu::MenuRuntime &menu) {
+	const int table = menu.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
+	if (table < 0) return false;
+	menu.table_set_row_selected(table, -1, false);
+	return true;
+}
+
 bool deploy_table_pan_target(const World &world, const SpawnZoneRegistry &zones, int index,
 		int32_t &dx, int32_t &dy) {
 	if (index < 0 || index >= static_cast<int>(zones.entries.size())) return false;

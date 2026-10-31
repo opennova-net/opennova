@@ -524,11 +524,15 @@ void test_spawn_table_fill() {
 	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
 	click = deploy_table_click(rt, table, 9, menu::kTableRowDefault, true);
 	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
+	// The map's move deselects every row [orig: sub_550F40 @0x5511c7..0x5511da (dfx2.exe)].
+	rt.table_set_row_selected(table, 2, true);
+	CHECK(!rt.table_selected_rows(table).empty() && deploy_map_moved(rt) &&
+			rt.table_selected_rows(table).empty());
 	mnu::Document none = death_document();
 	none.screens[0].roots[0].children.erase(none.screens[0].roots[0].children.begin());
 	menu::MenuRuntime other;
 	other.open_document(&none, "death.mnu", "");
-	CHECK(!fill_deploy_spawn_table(other, rows));
+	CHECK(!fill_deploy_spawn_table(other, rows) && !deploy_map_moved(other));
 }
 
 // The press's pan target: the zone entity's position less the local player's, x and y; none

@@ -129,6 +129,12 @@ Title make() {
 	// too (DFX2-33, dfx2_rules.cpp).
 	t.profile_single_player_kit = kSinglePlayerKit;
 	t.profile_class_kits = kProfileClassKits;
+	// DFX2-41: the DEATH map pane's ceiling 6.0 (flt_7CC0C8) and its frame, four lines round the
+	// pane's rect in 0xFFE1DF4B after the map [orig: sub_550690 @0x550922 / @0x550974; sub_550F40
+	// @0x551178 (the right drag), @0x550fe6..0x551052 (the map, then the frame); sub_550C60
+	// @0x550ca6 (the wheel) (dfx2.exe)].
+	t.death_map_zoom_max = 6.0f;
+	t.death_map_frame_color = 0xFFE1DF4Bu;
 	return t;
 }
 

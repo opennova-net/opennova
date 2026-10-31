@@ -361,6 +361,8 @@ public:
 	// index the map pans to, y the deploy pick to send, -1 each for none (engine
 	// world/deploy_screen_feed.h deploy_table_click carries the witness).
 	Vector2i deploy_table_click(int p_id, int p_row, int p_state, bool p_double_click) const;
+	// The DEATH map's move: that table's rows deselected (engine world::deploy_map_moved).
+	bool deploy_map_moved();
 	// The CTableWnd reads (engine menu_table_row.h).
 	int table_cell_value(int p_id, int p_row, int p_col) const;
 	PackedInt32Array table_selected_rows(int p_id) const;
