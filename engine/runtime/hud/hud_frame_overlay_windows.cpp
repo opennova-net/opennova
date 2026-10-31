@@ -522,7 +522,8 @@ void HudFrameCompiler::element_lone_gunner_panel(const HudFrameState &state, flo
 	//  Viewport_ScaleToVirtualCoords @0x57F00F, HUD_DrawTextCentered_HalfBright @0x57F032
 	//  (dfx2.exe)]
 	// [orig: @0x5B9100..0x5B9149 (no function, no xref), the string @0x7DB408]
-	if (state.title == nullptr || !state.title->hud_lone_gunner_panel || !state.lone_gunner) return;
+	if (state.title == nullptr || !state.title->hud_lone_gunner_panel || !state.lone_gunner)
+		return;
 	emit_label_box(320.0f, 500.0f, 704.0f, 600.0f, std::string(), 0xFFFFFFFFu, w, h);
 	const int32_t x = design_to_screen_x(512, static_cast<int32_t>(w));
 	const int32_t y = design_to_screen_y(528, static_cast<int32_t>(h));

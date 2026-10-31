@@ -757,10 +757,10 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 // `cmp g_DeathScreenActive` @0x5c00cf..0x5c00f9 (dword_24C18D4 @0x5c00d8, dword_24C18D8
 // @0x5c00ea), dword_A87050 @0x5c0120, the input line @0x5c014e, the kill banner @0x5c0184;
 // the caller Render_ProcessMainSceneFrame @0x5cae3b]. dfx2.exe draws its lone-gunner panel
-// between the input line and the kill banner (element_lone_gunner_panel, DFX2-91). The host's status page, which takes
-// the scene frame's place, orders its own: the message log, the console messages, then the
-// player list [orig: Server_DrawStatusScreen @0x50a2d0 - HUD_DrawMessageLog @0x50b21f,
-// HUD_DrawConsoleMessagesOverlay @0x50b23d, HUD_DrawPlayerScoreList @0x50b281].
+// between the input line and the kill banner (element_lone_gunner_panel, DFX2-91). The host's
+// status page, which takes the scene frame's place, orders its own: the message log, the console
+// messages, then the player list [orig: Server_DrawStatusScreen @0x50a2d0 - HUD_DrawMessageLog
+// @0x50b21f, HUD_DrawConsoleMessagesOverlay @0x50b23d, HUD_DrawPlayerScoreList @0x50b281].
 void HudFrameCompiler::compile_overlay_panels(const HudFrameState &state, float w, float h) {
 	draw_list_.panels_begin = {draw_list_.quads.size(), draw_list_.tris.size(),
 			draw_list_.lines.size(), draw_list_.glyphs.size(), draw_list_.underlines.size()};
