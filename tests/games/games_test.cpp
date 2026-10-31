@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <iterator>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -85,6 +86,75 @@ void retail_protocols_complete() {
 	CHECK(jo->cd_key == nullptr);
 }
 
+// A Title's every field past its identity (code, display_name, title_text, executable,
+// command_file, updater_login), in title.h's order. The Title is bound whole, as in_match_sheet
+// binds a protocol's groups, so a field added to Title stops this building until it is named here.
+auto title_fields_past_identity(const Title &t) {
+	const auto &[code, display_name, title_text, executable, command_file, updater_login,
+			config_table, max_players, max_players_host_screen, host_screen, absent_resource_roles,
+			expansions, read_defs, hud_exp_points, hud_lone_gunner_panel, hud_waypoint_active_tint,
+			hud_objective_done_fill, hud_drops_armory_prompt, hud_end_game_footer_corners,
+			death_screen_loadout, hud_fonts, mission_list_order, profile_magic, profile_first_name,
+			profile_word_1396, max_players_switch, profile_single_player_kit, profile_class_kits,
+			map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
+			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
+			death_respawn_penalty_line, hud_map_cycle_skips_window, hud_kill_list_no_class,
+			hud_scope_no_magnification, hud_crosshair_fixed, hud_stance_health_tint,
+			hud_message_tags, hud_map_legend, hud_tag_ranges, hud_map_no_bank_names,
+			death_screen_game_type_line, env_cube_terrain_clearance, nvg_gain_rect,
+			inset_reticle_quad, frame_fx_work_side, low_health_screen_effect,
+			map_capture_rings_under_layers, death_map_zone_markers, loading_screen, controls,
+			hud_sp_how_to, stat_screen_done, menu_font_scale, host_vehicle_missions,
+			host_switch_starts_off, armory_lists_none_row, death_map_no_names,
+			player_avatar_by_viewer_side, hud_game_info_board, hud_vehicle_panel_riders,
+			epilog_debriefing_screens, player_info_combo_names, player_info_combo_spins,
+			player_info_preview_hover] = t;
+	(void)code;
+	(void)display_name;
+	(void)title_text;
+	(void)executable;
+	(void)command_file;
+	(void)updater_login;
+	return std::tie(config_table, max_players, max_players_host_screen, host_screen,
+			absent_resource_roles, expansions, read_defs, hud_exp_points, hud_lone_gunner_panel,
+			hud_waypoint_active_tint, hud_objective_done_fill, hud_drops_armory_prompt,
+			hud_end_game_footer_corners, death_screen_loadout, hud_fonts, mission_list_order,
+			profile_magic, profile_first_name, profile_word_1396, max_players_switch,
+			profile_single_player_kit, profile_class_kits, map_view_zoom_max,
+			death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
+			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
+			death_respawn_penalty_line, hud_map_cycle_skips_window, hud_kill_list_no_class,
+			hud_scope_no_magnification, hud_crosshair_fixed, hud_stance_health_tint,
+			hud_message_tags, hud_map_legend, hud_tag_ranges, hud_map_no_bank_names,
+			death_screen_game_type_line, env_cube_terrain_clearance, nvg_gain_rect.x0,
+			nvg_gain_rect.y0, nvg_gain_rect.x1, nvg_gain_rect.y1, inset_reticle_quad,
+			frame_fx_work_side, low_health_screen_effect, map_capture_rings_under_layers,
+			death_map_zone_markers, loading_screen, controls, hud_sp_how_to, stat_screen_done,
+			menu_font_scale, host_vehicle_missions, host_switch_starts_off, armory_lists_none_row,
+			death_map_no_names, player_avatar_by_viewer_side, hud_game_info_board,
+			hud_vehicle_panel_riders, epilog_debriefing_screens, player_info_combo_names,
+			player_info_combo_spins, player_info_preview_hover);
+}
+
+// Each of two titles' fields past the identity equal, a failure naming the field by its index in
+// title_fields_past_identity's list (nvg_gain_rect's corners four entries).
+template <typename Fields, size_t... I>
+void check_fields_past_identity(const Fields &a, const Fields &b, std::index_sequence<I...>) {
+	const auto check = [](bool same, size_t index) {
+		if (same)
+			return;
+		std::printf("FAIL %s:%d: Title field %zu past the identity differs\n", __FILE__, __LINE__,
+				index);
+		++g_failures;
+	};
+	(check(std::get<I>(a) == std::get<I>(b), I), ...);
+}
+void check_fields_past_identity(const Title &a, const Title &b) {
+	using Fields = decltype(title_fields_past_identity(a));
+	check_fields_past_identity(title_fields_past_identity(a), title_fields_past_identity(b),
+			std::make_index_sequence<std::tuple_size<Fields>::value>{});
+}
+
 // OP: Acid Gambit speaks JO's protocol: the same object, no copied literals, so a
 // JOINTOPERATIONS peer resolves to the one protocol whichever title registered it.
 void acidgambit_speaks_jo() {
@@ -99,6 +169,9 @@ void acidgambit_speaks_jo() {
 	CHECK(std::string(ag.display_name) == "OP: Acid Gambit" &&
 			std::string(ag.title_text) == "OP: Acid Gambit");
 	CHECK(std::string(ag.command_file) == "ACIDGAMBIT.CMD" && ag.executable == nullptr);
+	// Past its identity its Title is Joint Operations' row (acidgambit_title.cpp starts from
+	// jo_title()), every field of it, so a value JO's row sets is OP: Acid Gambit's too.
+	check_fields_past_identity(ag, games::jo_title());
 	CHECK(ag.mission_list_order == games::jo_title().mission_list_order);
 	// DFX2-29: each witnessed title names its fresh profile's kit pages; JO's are the format's
 	// eleven, Acid Gambit's JO's; the unwitnessed name none.

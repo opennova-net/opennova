@@ -2,14 +2,16 @@
 
 #include <games/jo/jo.h>
 
-#include <formats/gamecfg/game_cfg.h>
-
 namespace opennova::games {
 
 namespace {
 
 Title make() {
-	Title t;
+	// Joint Operations' row, as its code is Joint Operations' (its rules and its protocol are JO's
+	// very objects: acidgambit_rules.cpp, acidgambit_protocol.cpp): every field past its identity
+	// is jo_title()'s, as dfx2_protocol.cpp's sheet starts from jo_protocol(), so a value JO's row
+	// sets is its value too (games_test compares every field past the identity).
+	Title t = jo_title();
 	t.code = "acidgambit";
 	t.display_name = "OP: Acid Gambit";
 	t.title_text = "OP: Acid Gambit";
@@ -20,55 +22,6 @@ Title make() {
 	t.command_file = "ACIDGAMBIT.CMD";
 	// The login its wizard names, the service's product for it (products.updater_login).
 	t.updater_login = "ACIDGAMBIT";
-	t.config_table = gamecfg::ConfigTable::Jo;
-	// Its player caps are Joint Operations', as its rules are (acidgambit_rules.cpp).
-	t.max_players = jo_title().max_players;
-	t.max_players_host_screen = jo_title().max_players_host_screen;
-	t.host_screen = jo_title().host_screen;
-	// Its expansions and the .def names it opens are Joint Operations', as its code is.
-	t.expansions = jo_title().expansions;
-	t.read_defs = jo_title().read_defs;
-	// Its HUD's elements and fonts are Joint Operations', as its HUD is.
-	t.hud_exp_points = jo_title().hud_exp_points;
-	t.hud_lone_gunner_panel = jo_title().hud_lone_gunner_panel;
-	t.hud_waypoint_active_tint = jo_title().hud_waypoint_active_tint;
-	t.hud_objective_done_fill = jo_title().hud_objective_done_fill;
-	t.hud_drops_armory_prompt = jo_title().hud_drops_armory_prompt;
-	t.hud_end_game_footer_corners = jo_title().hud_end_game_footer_corners;
-	t.hud_fonts = jo_title().hud_fonts;
-	// Its mission catalog's order is Joint Operations', as its code is.
-	t.mission_list_order = jo_title().mission_list_order;
-	// Its profile files are Joint Operations', as its code is.
-	t.profile_magic = jo_title().profile_magic;
-	// Its command line is Joint Operations', /maxplayers with it.
-	t.max_players_switch = jo_title().max_players_switch;
-	// Its fresh profile's kit pages are Joint Operations', as its code is.
-	t.profile_single_player_kit = jo_title().profile_single_player_kit;
-	t.profile_class_kits = jo_title().profile_class_kits;
-	t.mod_list_base = jo_title().mod_list_base;
-	t.hud_map_cycle_skips_window = jo_title().hud_map_cycle_skips_window;
-	t.hud_kill_list_no_class = jo_title().hud_kill_list_no_class;
-	t.hud_scope_no_magnification = jo_title().hud_scope_no_magnification;
-	t.hud_crosshair_fixed = jo_title().hud_crosshair_fixed;
-	t.hud_stance_health_tint = jo_title().hud_stance_health_tint;
-	t.hud_message_tags = jo_title().hud_message_tags;
-	t.hud_map_legend = jo_title().hud_map_legend;
-	t.hud_tag_ranges = jo_title().hud_tag_ranges;
-	t.hud_map_no_bank_names = jo_title().hud_map_no_bank_names;
-	// Its renderer is Joint Operations', as its code is.
-	t.env_cube_terrain_clearance = jo_title().env_cube_terrain_clearance;
-	t.nvg_gain_rect = jo_title().nvg_gain_rect;
-	t.frame_fx_work_side = jo_title().frame_fx_work_side;
-	// Its loading screen is Joint Operations', as its code is.
-	t.loading_screen = jo_title().loading_screen;
-	t.death_map_no_names = jo_title().death_map_no_names;
-	t.player_avatar_by_viewer_side = jo_title().player_avatar_by_viewer_side;
-	t.hud_game_info_board = jo_title().hud_game_info_board;
-	t.hud_vehicle_panel_riders = jo_title().hud_vehicle_panel_riders;
-	// Its PLAYER_INFO screen is Joint Operations', as its code is.
-	t.player_info_combo_names = jo_title().player_info_combo_names;
-	t.player_info_combo_spins = jo_title().player_info_combo_spins;
-	t.player_info_preview_hover = jo_title().player_info_preview_hover;
 	return t;
 }
 
