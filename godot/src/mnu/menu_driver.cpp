@@ -13,10 +13,13 @@
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
+#include "hud/hud_overlay.h"
 #include "simulation/deploy_rows.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/simulation.h"
 #include "util/string_convert.h"
 
+#include <runtime/inmatch/role_feeds.h> // deploy_table_zones
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/inmatch/vehicle_menu.h> // the ITEM_DISPLAY preview's view
 #include <runtime/world/occlusion.h>      // render_matrix_from_pose
@@ -737,6 +740,23 @@ void MenuDriver::set_deploy_list_items(int p_id, const TypedArray<DeployListRow>
 	runtime_.set_widget_items(p_id, opennova::world::deploy_list_items(rows));
 }
 
+bool MenuDriver::fill_deploy_spawn_table(const Ref<Simulation> &p_sim, Object *p_hud,
+		const Ref<RtxtStringFile> &p_gametext) {
+	const opennova::hud::HudLayout defaults;
+	const HudOverlay *hud = Object::cast_to<HudOverlay>(p_hud);
+	const opennova::hud::HudLayout &layout = hud != nullptr ? hud->layout() : defaults;
+	std::vector<opennova::world::DeployTableZone> zones;
+	int team = 0;
+	if (p_sim.is_valid() && p_sim->kernel_) {
+		const opennova::inmatch::RoleView view = p_sim->role_view();
+		opennova::inmatch::deploy_table_zones(view, p_sim->deploy_zone_registry(),
+				layout.stance_middle, layout.stance_bad, game_text_lookup(p_gametext), zones);
+		team = opennova::inmatch::deploy_list_team(view);
+	}
+	return opennova::world::fill_deploy_spawn_table(runtime_,
+			opennova::world::build_deploy_table_rows(team, zones));
+}
+
 // ---- activation / actions --------------------------------------------------------
 
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
@@ -1221,6 +1241,8 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::filter_stat_results);
 	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
 			&MenuDriver::set_deploy_list_items);
+	ClassDB::bind_method(D_METHOD("fill_deploy_spawn_table", "sim", "hud", "gametext"),
+			&MenuDriver::fill_deploy_spawn_table);
 	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),
 			&MenuDriver::table_cell_value);
 	ClassDB::bind_method(D_METHOD("table_selected_rows", "id"), &MenuDriver::table_selected_rows);

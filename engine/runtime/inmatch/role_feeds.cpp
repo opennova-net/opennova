@@ -23,6 +23,7 @@
 #include <runtime/replication/client_world_materializer.h> // replica_row_entity
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/radar_contacts.h> // radar_hud_frame
 #include <runtime/world/radio_call.h> // capture_zone_max_coverage, voice_macro_text
 #include <runtime/world/user_waypoints.h>
@@ -1077,6 +1078,79 @@ bool joiner_in_match_ready(const RoleView &view, bool auto_deploy) {
 			(!auto_deploy || !runtime.deployment_pick_pending());
 }
 
+namespace {
+
+// A 0x6E wave member's name as the death screens read it, the member entity's Name (+0xF4):
+// the roster slot driving that pool-0 slot (the player entity's name IS the roster name), else
+// the replica row's [orig: UI_UpdateDeathScreenContent @0x553d5a..0x553d7f; sub_551450
+// @0x551be8 / @0x551bfd (dfx2.exe)].
+std::string wave_member_name(const replication::ClientState &cs, uint16_t member) {
+	const world::EntityHandle mh{ member };
+	for (const replication::ClientRosterSlot &slot : cs.roster) {
+		if (slot.bound && slot.entity_slot == mh.slot() && mh.pool() == 0) return slot.name;
+	}
+	if (const replication::ClientEntityState *row_state = cs.find(member))
+		return row_state->display_name;
+	return std::string();
+}
+
+// The self handle the death screens compare a member with (g_LocalPlayerEntity): the
+// authority's own body, a joiner's bound self record [orig: `cmp eax, g_LocalPlayerEntity`
+// @0x553d64; sub_551450 @0x551bd3 (dfx2.exe)].
+uint16_t deploy_self_handle(const RoleView &view) {
+	const ClientRuntime &runtime = *view.runtime;
+	const world::EntityHandle local = view.kernel->world.cached.local_player;
+	return view.joiner ? (runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu)
+			: (local.valid() ? local.packed : 0xFFFFu);
+}
+
+// Whether the zone's shared timer-list entry lets it list: none, or its DWORD 9 (the value
+// target) at its DWORD 10 (the limit) or past it, a signed compare [orig:
+// CProximityList_FindEntryById, `EntryById[9] >= EntryById[10]` @0x553bd7..0x553bdd; sub_551450
+// @0x5515e9..0x551608 (dfx2.exe)].
+bool zone_timer_secured(const ClientRuntime &runtime, const world::Entity &zone) {
+	const auto live = runtime.zone_states().find(zone.handle.packed);
+	return live == runtime.zone_states().end() ||
+			!(live->second.entry.value_target < live->second.entry.value_limit);
+}
+
+// HUD_GetEntityDisplayName over one handle: the player slot driving it, its name (256 bytes)
+// and "<ch>" clan tag "<co>" for a non-empty tag; no slot, the entity's own name (+244). False
+// when the handle names no entity with a definition this client holds: a world entity's own,
+// else a joiner's decoded row.
+// [orig: HUD_GetEntityDisplayName @0x58dd40 - PlayerSlot_FindByEntityPtr @0x58dd4d, the name
+//  @0x58dd69, the tag @0x58dd78..0x58ddb0, the entity's name @0x58ddc0 (dfx2.exe); its twin
+//  @0x58f8c0]
+bool hud_entity_display_name(const RoleView &view, world::EntityHandle handle, std::string &out) {
+	const world::World &w = view.kernel->world;
+	const replication::ClientState &cs = view.runtime->state();
+	const world::Entity *e = w.registry.get(handle);
+	const replication::ClientEntityState *row = e == nullptr ? cs.find(handle.packed) : nullptr;
+	if (e != nullptr ? !e->has_item_def : row == nullptr) return false;
+	for (const replication::ClientRosterSlot &slot : cs.roster) {
+		if (!slot.bound || handle.pool() != 0 || slot.entity_slot != handle.slot()) continue;
+		out.clear();
+		replication::string_append_n(out, slot.name, 256);
+		if (!slot.registry_clan.empty()) {
+			replication::string_append_n(out, "<ch>", 256);
+			replication::string_append_n(out, slot.registry_clan, 256);
+			replication::string_append_n(out, "<co>", 256);
+		}
+		return true;
+	}
+	out = e != nullptr ? e->display_name : row->display_name;
+	return true;
+}
+
+// The seat whose fixed mountHandles slot is `retail_slot`, if the entity has one.
+const world::Seat *seat_at_retail_slot(const world::Entity &e, int retail_slot) {
+	for (const world::Seat &seat : e.seats)
+		if (seat.type != world::SeatType::None && seat.retail_slot == retail_slot) return &seat;
+	return nullptr;
+}
+
+} // namespace
+
 uint8_t deploy_list_team(const RoleView &view) {
 	if (view.joiner) return view.runtime != nullptr ? view.runtime->assigned_team() : 0;
 	const world::Entity *player = view.kernel != nullptr ? view.kernel->local.player() : nullptr;
@@ -1091,13 +1165,8 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 	const world::World &w = view.kernel->world;
 	const uint8_t team = deploy_list_team(view);
 	const replication::ClientState &cs = runtime.state();
-	// The self marker compares the member with the local player entity
-	// [orig: `cmp eax, g_LocalPlayerEntity` @0x553d64]: the
-	// authority's own body, a joiner's bound self record.
-	const world::EntityHandle local = w.cached.local_player;
-	const uint16_t self_handle = view.joiner
-			? (runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu)
-			: (local.valid() ? local.packed : 0xFFFFu);
+	// The self marker compares the member with the local player entity (deploy_self_handle).
+	const uint16_t self_handle = deploy_self_handle(view);
 	// The zone walk is the minimap banks' (banked_spawn_zones): a zone the
 	// server never sent is not listed, the rows follow first arrival, and a
 	// banked zone outside the SpawnZoneList lists as index -1.
@@ -1123,10 +1192,7 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		//  [eax+28h]; jl` @0x553bd7..0x553bdd; the entry creators
 		//  NapiNPClientMsg_ZoneTimerWindow @0x428bd4 and
 		//  NapiNPClientMsg_ZoneTimerValue @0x428e6b]
-		bool secured = true;
-		const auto live = runtime.zone_states().find(e->handle.packed);
-		if (live != runtime.zone_states().end())
-			secured = !(live->second.entry.value_target < live->second.entry.value_limit);
+		const bool secured = zone_timer_secured(runtime, *e);
 		if (zone_team != team) continue;
 		world::DeployZoneRow row;
 		// No -1 guard in the first loop: an unregistered zone lists as '@'
@@ -1151,25 +1217,107 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 				for (uint16_t member : g.members) {
 					world::DeployOccupant o;
 					o.handle = member;
-					std::string name;
-					const world::EntityHandle mh{ member };
-					for (const replication::ClientRosterSlot &slot : cs.roster) {
-						if (slot.bound && slot.entity_slot == mh.slot() && mh.pool() == 0) {
-							name = slot.name;
-							break;
-						}
-					}
-					if (name.empty()) {
-						if (const replication::ClientEntityState *row_state = cs.find(member))
-							name = row_state->display_name;
-					}
-					o.name = name;
+					o.name = wave_member_name(cs, member);
 					o.self = member == self_handle;
 					row.occupants.push_back(o);
 				}
 			}
 		}
 		out.push_back(row);
+	}
+	return true;
+}
+
+bool deploy_table_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		uint32_t stance_middle, uint32_t stance_bad, const hud::GameTextLookup &gametext,
+		std::vector<world::DeployTableZone> &out) {
+	out.clear();
+	if (view.kernel == nullptr || view.runtime == nullptr) return false;
+	const ClientRuntime &runtime = *view.runtime;
+	const world::World &w = view.kernel->world;
+	const replication::ClientState &cs = runtime.state();
+	const uint8_t team = deploy_list_team(view);
+	const uint16_t self_handle = deploy_self_handle(view);
+	std::vector<world::EntityHandle> banked;
+	banked_spawn_zones(view, banked);
+	for (const world::EntityHandle handle : banked) {
+		const world::Entity *e = w.registry.get(handle);
+		if (e == nullptr) continue;
+		// The team, the timer entry, the spawn-zone attribute (the bank walk's) and a
+		// SpawnZoneList index [orig: @0x5515dd, @0x5515e9..0x551608, @0x551618..0x551624].
+		if (zone_team_byte(view, *e) != team || !zone_timer_secured(runtime, *e)) continue;
+		const int index = world::spawn_zone_index_of(zones, handle);
+		if (index == -1) continue;
+		world::DeployTableZone zone;
+		zone.index = index;
+		zone.vehicle_category = static_cast<uint8_t>(e->item_unit_type);
+		zone.class_id = e->item_id;
+		zone.health_color = world::deploy_table_health_color(e->health,
+				world::max_health_with_difficulty(w, *e), stance_middle, stance_bad);
+		// [orig: @0x551645..0x551673]
+		zone.greyed = !e->primary_occupant.valid() && e->item_type == 1;
+		std::string name;
+		// The seats 8, 9, 0..7: a held one whose occupant has a definition
+		// [orig: (i + 8) % 10 @0x5518c0, the handle @0x5518c6, its def @0x5518f6,
+		//  HUD_GetEntityDisplayName @0x551901, the driver test @0x551928].
+		for (int i = 0; i < 10; ++i) {
+			const int slot = (i + 8) % 10;
+			const world::Seat *seat = seat_at_retail_slot(*e, slot);
+			if (seat == nullptr || !seat->occupant.valid()) continue;
+			if (!hud_entity_display_name(view, seat->occupant, name)) continue;
+			zone.lines.push_back(world::deploy_table_seat_line(name, slot,
+					seat->occupant == e->primary_occupant));
+		}
+		// The mounted gunners: the pool-1 walk [orig: @0x5519db..0x551a2a - live (+28), Flags
+		// bit 0 clear, a definition with attrib 0x20, groundEntity (+40) the zone; the driver
+		// (+368) and the UseGun handle (+418) @0x551a35..0x551a4b].
+		w.registry.for_each([&](const world::Entity &gun) {
+			if (gun.handle.pool() != 1 || !gun.alive || (gun.flags & 1u) != 0) return;
+			if (!gun.has_item_def || (gun.item_attrib & 0x20u) == 0) return;
+			if (gun.ground_target != handle || !gun.primary_occupant.valid()) return;
+			const world::Seat *use_gun = seat_at_retail_slot(gun, 9);
+			if (use_gun == nullptr || !use_gun->occupant.valid()) return;
+			// Entity_GetMountSlotBoneIndex: the vehicle zone's slot userpoint at the gun's slot
+			// byte, 0 under a zone that is no vehicle [orig: @0x5438f0 - @0x54390f..0x54391f
+			// (dfx2.exe)].
+			uint8_t bone = 0;
+			if ((e->item_attrib & 0x40u) != 0 && gun.emplacement_slot < e->def_slot_userpoints.size())
+				bone = e->def_slot_userpoints[gun.emplacement_slot];
+			// The slot weapon's attach text: the gun's own slot, or its groundEntity's under the
+			// route bit, its weapon's attachtextid resolved through Overlays; none without one
+			// [orig: Entity_GetWeaponSlots @0x543350 - @0x543364..0x543383; +32, +0x3A0
+			// @0x551aaa..0x551ac5 (dfx2.exe)].
+			const world::Entity *slot_owner = &gun;
+			if ((gun.item_attrib & 0x40u) == 0 && gun.primary_weapon_slot.redirect_to_parent_slot)
+				slot_owner = e;
+			const world::WeaponTableEntry *weapon =
+					w.tables.weapons.by_index(slot_owner->primary_weapon_slot_adm);
+			std::string attach_text;
+			const bool has_attach_text = weapon != nullptr && !weapon->attach_text_id.empty();
+			if (has_attach_text)
+				attach_text = hud::game_text(gametext, hud::kGameTextOverlays,
+						weapon->attach_text_id.c_str(), "");
+			// One line per gun slot of the zone's definition whose userpoint is the bone
+			// [orig: the k walk @0x551a4d..0x551b7f, the compare @0x551a62, the occupant's def
+			// @0x551a89, HUD_GetEntityDisplayName @0x551a94].
+			for (const uint8_t userpoint : e->def_slot_userpoints) {
+				if (userpoint != bone) continue;
+				if (!hud_entity_display_name(view, use_gun->occupant, name)) continue;
+				zone.lines.push_back(world::deploy_table_gunner_line(
+						name, has_attach_text ? &attach_text : nullptr));
+			}
+		});
+		// The zone's 0x6E wave members [orig: dword_A7F304[index], unk_A7F404 + 16 * index
+		// @0x551b96..0x551c86 (dfx2.exe)].
+		if (cs.spawn_waves.known) {
+			for (const SpawnWaveGroup &g : cs.spawn_waves.value.groups) {
+				if (g.zone_handle != e->handle.packed) continue;
+				for (const uint16_t member : g.members)
+					zone.lines.push_back(world::deploy_table_waiting_line(
+							wave_member_name(cs, member), member == self_handle));
+			}
+		}
+		out.push_back(std::move(zone));
 	}
 	return true;
 }

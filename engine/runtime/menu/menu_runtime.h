@@ -483,6 +483,9 @@ public:
 	std::vector<int> selected_set(int id) const;
 	void set_selected_set(int id, const std::vector<int> &rows);
 	void set_scroll_row(int id, int row);
+	// The first visible row a list or table holds (0 before any write): a table's scroll top
+	// [orig: sub_6CC7A0 @0x6cc7a0, the table's +201 (dfx2.exe)].
+	int scroll_row(int id) const;
 	void set_widget_scroll_range(int id, int minimum, int maximum, int page, int value);
 	bool get_widget_scroll_range(int id, MenuScrollRangeState &out) const;
 	// The engine pump's CScrollWnd interaction result (already applied to the
@@ -540,6 +543,9 @@ public:
 	void table_set_row_visible(int id, int row, bool visible);
 	// Whether the row draws: no hidden bit (kTableRowHiddenMask) set. False out of range.
 	bool table_row_visible(int id, int row) const;
+	// The row's state-1 colour bit (menu_table_row.h table_set_row_state1_color carries the
+	// witness).
+	void table_set_row_state1_color(int id, int row, bool on);
 	// The rows in state 3, ascending.
 	std::vector<int> table_selected_rows(int id) const;
 	// Select `row` alone (every other non-locked row cleared), or toggle it
@@ -553,12 +559,13 @@ public:
 	// over. A count that grows the table (the stat RESULTLIST's, which authors no
 	// COLUMN) leaves no authored column behind; an empty set changes nothing.
 	void table_set_columns(int id, const std::vector<MenuTableColumn> &columns);
-	// A column's sort direction [orig: sub_63EC30 writes the column's +120].
+	// A column's sort direction [orig: sub_63EC30 writes the column's +120]. A table whose
+	// records no code set up writes the authored record, as it stands (table_resize_records_).
 	void table_set_column_ascending(int id, int column, bool ascending);
 	// Sort the rows by `column` [orig: CTableWnd_SortByColumn @ 0x640900: the key
 	// pushed, the rows sorted by CTableWnd_CompareRows @ 0x63e9c0 with their
-	// selection and colours, the column's sort indicator set]; needs installed
-	// columns.
+	// selection and colours, the column's sort indicator set], over the installed
+	// columns or the authored ones as they stand.
 	void table_sort_by_column(int id, int column);
 	// The column whose header shows the sort indicator, -1 none.
 	int table_sort_column(int id) const;

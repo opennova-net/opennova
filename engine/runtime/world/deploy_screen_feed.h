@@ -18,6 +18,10 @@
 #include <string>
 #include <vector>
 
+namespace opennova::menu {
+class MenuRuntime; // runtime/menu/menu_runtime.h
+} // namespace opennova::menu
+
 namespace opennova::world {
 
 // The DEATH deploy screen re-reads its content every 16 ticks (0.256 s at the
@@ -247,7 +251,7 @@ struct DeployTableZone {
 	int index = 0; // SpawnZoneList index: the row's value is index + 1
 	uint8_t vehicle_category = 0; // the definition's +406 byte
 	int32_t class_id = 0; // the definition's +80 class id
-	uint32_t health_color = 0xFFDDDDDDu; // sub_5A19D0's colour over the zone's health
+	uint32_t health_color = 0xFFDDDDDDu; // deploy_table_health_color over the zone's health
 	bool greyed = false; // no driver (+368) and the definition's +92 word 1
 	// The text column's lines past its blank head, in the fill's order: the seat lines
 	// (deploy_table_seat_line), the mounted gunners' (deploy_table_gunner_line), the zone's
@@ -256,14 +260,26 @@ struct DeployTableZone {
 };
 // One row as the fill writes it: the column texts, the row value (the insert's column-0 cell
 // value), column 1's cell value, the row colour (CTableWnd_SetRowColor, the colour flag set)
-// and the state-1 colour bit (sub_6CD530's: set for a greyed row).
+// and, for a zone's row alone, the state-1 colour bit (sub_6CD530's: set for a greyed row).
 struct DeployTableRow {
 	std::string cells[3];
 	int32_t value = 0;
 	int32_t cell1_value = 0;
 	uint32_t color = 0;
+	bool zone = false; // a zone's row (the Default row is not)
 	bool state1_color = false;
 };
+// A zone's health colour: the zone's health (+286, a signed word) over its difficulty-scaled
+// ceiling (0 taken as 1) in 16.16, above 0xC000 unsigned the fill's own 0xFFDDDDDD, above
+// 0x6FFF signed the stance colour middle, else the stance colour bad (hudpos.def's
+// stancecolor_middle / stancecolor_bad): the band rule the vehicle panel's seats take
+// (hud::seat_health_band).
+// [orig: sub_5A19D0 @0x5a19d0 - Entity_GetMaxHealthWithDifficulty @0x5a19e1, the guard
+//  @0x5a19e7, the tests @0x5a1a12 / @0x5a1a20, g_StanceColorMiddle @0x5a1a3a,
+//  g_StanceColorBad @0x5a1a22, the argument @0x5a1a36; called with 0xFFDDDDDD @0x55164c
+//  (dfx2.exe)]
+uint32_t deploy_table_health_color(int32_t health, int32_t max_health, uint32_t stance_middle,
+		uint32_t stance_bad);
 // The column-1 icon of a zone: 1 (a PSP) unless the definition's vehicle category names a
 // vehicle (1 ground vehicle, 2 tank, 0xC motorcycle: 2; 3 helicopter, 4 plane: 4; 5..8 boat:
 // 3), then the class id's own for 0x210..0x229. The names the same two switches pick feed a
@@ -275,9 +291,10 @@ int deploy_table_icon(uint8_t vehicle_category, int32_t class_id);
 // the zone's driver, "  <i>(Gunner)<-i>" for the UseGun seat (slot 9); seats walk 8, 9, 0..7.
 // [orig: the seat walk @0x5518b3..0x5519c0, (i + 8) % 10 @0x5518c0 (dfx2.exe)]
 std::string deploy_table_seat_line(const std::string &name, int slot, bool is_driver);
-// A mounted gunner's line: the name and its seat weapon's name in "  <i>(%s)<-i>", or
-// "  <i>(Gunner)<-i>" with none [orig: @0x551a94..0x551b6b (dfx2.exe)].
-std::string deploy_table_gunner_line(const std::string &name, const std::string &seat_weapon);
+// A mounted gunner's line: the name and its seat weapon's attach text in "  <i>(%s)<-i>", or
+// "  <i>(Gunner)<-i>" with none (null: no slot, no weapon or no attachtextid; a key the gametext
+// lacks resolved to "", which shows "()") [orig: @0x551a94..0x551b6b (dfx2.exe)].
+std::string deploy_table_gunner_line(const std::string &name, const std::string *seat_weapon);
 // A waiting member's line: "<b><cC0FFFF>** %s **<-b> <i>waiting</i>" for the local player,
 // "<cC0F0F0>%s <i>waiting</i>" for another [orig: @0x551bd3..0x551c67 (dfx2.exe)].
 std::string deploy_table_waiting_line(const std::string &name, bool self);
@@ -290,6 +307,21 @@ std::string deploy_table_waiting_line(const std::string &name, bool self);
 //  @0x551cbf..0x551ce0, sub_6CD420 @0x551cef, sub_6CD530 @0x551cfc (dfx2.exe)]
 std::vector<DeployTableRow> build_deploy_table_rows(
 		int local_team, const std::vector<DeployTableZone> &zones);
+// The table's refill over the menu: DEATH's SPAWNPOINTS_TABLE (none: nothing, false), its
+// scroll top and its selected row (the first in state 3) kept, every row removed, the table and
+// STATIC_LIST_TITLE shown; each row inserted (its insert text "0" for the Default row, "" for a
+// zone's, its value), column 1's cell value, the three cells, the row colour, and a zone row's
+// state-1 colour bit; column 0 ascending and the rows sorted by it; the scroll top put back
+// while it is under the row count (the frame clamps it to the last page) and the kept row index
+// selected again, whatever row now stands there.
+// [orig: sub_551450 @0x551450 - UI_FindScreenControl @0x551481 / @0x5514cc, sub_6CC7A0
+//  @0x55149d, sub_6CC860 @0x5514aa, CTableWnd_RemoveRow @0x5514ae, CWnd_SetShown @0x5514b7 /
+//  @0x5514d9, CTableWnd_AddRow @0x5514f2 / @0x551ca6, the column-1 value @0x5514f9 /
+//  @0x551cad, CTableWnd_SetCellText @0x551508..0x551526 / @0x551cbf..0x551ce0, sub_6CD420
+//  @0x551568 / @0x551cef, sub_6CD530 @0x551cfc, sub_6CBF40(0, 1) @0x551d28,
+//  CTableWnd_SortByColumn @0x551d35, sub_6CC7B0 @0x551d41 (its bound @0x6cc7b0..0x6cc7c0),
+//  CTableWnd_SetRowSelected @0x551d53 (dfx2.exe)]
+bool fill_deploy_spawn_table(menu::MenuRuntime &menu, const std::vector<DeployTableRow> &rows);
 
 // Both instruction widgets and the permanent-death status pair. A secured
 // spawn leaves the first widget's prior text intact and hides the second;

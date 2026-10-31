@@ -43,6 +43,7 @@ class RtxtStringFile;
 class AvatarDatabase;
 class AvatarComboRow;
 class DeployListRow;
+class Simulation;
 class EndRoundColumn;
 class EndRoundRow;
 
@@ -349,6 +350,12 @@ public:
 	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
 	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
 	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);
+	// DFX2-41: the DEATH screen's SPAWNPOINTS_TABLE refilled from `sim`'s zones (engine
+	// inmatch/role_feeds.h deploy_table_zones, world/deploy_screen_feed.h build_deploy_table_rows
+	// and fill_deploy_spawn_table carry the witnesses), the health colours over `hud`'s stance
+	// colours (the defaults without a HudOverlay). False when the screen has no table.
+	bool fill_deploy_spawn_table(const Ref<Simulation> &p_sim, Object *p_hud,
+			const Ref<RtxtStringFile> &p_gametext);
 	// The CTableWnd reads (engine menu_table_row.h).
 	int table_cell_value(int p_id, int p_row, int p_col) const;
 	PackedInt32Array table_selected_rows(int p_id) const;

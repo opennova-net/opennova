@@ -385,6 +385,28 @@ uint8_t deploy_list_team(const RoleView &view);
 bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		std::vector<world::DeployZoneRow> &out);
 
+// DFX2-41: the DEATH screen's SPAWNPOINTS_TABLE zones for THIS client (world/deploy_screen_feed.h
+// DeployTableZone, which build_deploy_table_rows turns into the rows), on every role that opens
+// the screen, over the zone walk deploy_zone_rows takes (the minimap banks): a banked zone of
+// the deploy_list_team with no zone-timer entry or a secured one and a SpawnZoneList index. Each
+// carries its definition's vehicle category (+406) and class id (+80), its health colour
+// (world::deploy_table_health_color over the HUD layout's stance colours `stance_middle` /
+// `stance_bad`), the greyed state (no driver and a type-1 definition) and its text lines: its
+// seats 8, 9, 0..7 (a held seat whose occupant has a definition, named as the HUD names an
+// entity, the driver seat and the zone's driver marked), then each live, unheld attachable
+// pool-1 entity standing on the zone with a driver and a UseGun occupant, once per gun slot of
+// the zone's definition whose userpoint is the entity's mount bone (its occupant named, the
+// slot weapon's attach text), then the zone's 0x6E wave members ("** name **" for the local
+// player). The weapon text resolves through `gametext`. False without a kernel or a replica
+// runtime.
+// [orig: sub_551450 @0x551450 - the zone walk @0x55156d..0x551624, sub_5A19D0 @0x55164c,
+//  the greyed test @0x551645..0x551673, the category and class @0x55170a / @0x551771, the seat
+//  walk @0x5518b3..0x5519c0, the gunner walk @0x5519db..0x551b7f, the wave members
+//  @0x551b96..0x551c86 (dfx2.exe)]
+bool deploy_table_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		uint32_t stance_middle, uint32_t stance_bad, const hud::GameTextLookup &gametext,
+		std::vector<world::DeployTableZone> &out);
+
 // The AAS zone status panel's zone rows: the world's zone walk
 // (world/lfp_feed.h) with the role's zone-timer image — the client runtime's
 // 13-DWORD image of the retail shared timer list, present once a 0x6F value

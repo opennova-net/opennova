@@ -407,7 +407,167 @@ static void hud_pass_call_site_cases() {
 	CHECK(!hud_overlays_called(bare, false));
 }
 
+// DFX2-41: the SPAWNPOINTS_TABLE zones, over the zone walk the DEATH list takes: a zone of the
+// local team with a SpawnZoneList index, its category and class id, its health colour over the
+// stance pair, the greyed state, then its text lines: the seats 8, 9, 0..7 named as the HUD
+// names an entity (the roster's name and "<ch>" tag "<co>", else the entity's), the driver
+// marked; each gun standing on the zone, once per gun slot of the zone's definition whose
+// userpoint is the gun's mount bone, with its slot weapon's attach text (0 under a zone that is
+// no vehicle, which every unauthored slot matches); the wave members.
+// [orig: sub_551450 @0x551450 - the walk @0x55156d..0x551624, sub_5A19D0 @0x55164c, the greyed
+//  test @0x551645..0x551673, the seats @0x5518b3..0x5519c0, the guns @0x5519db..0x551b7f, the
+//  members @0x551b96..0x551c86; HUD_GetEntityDisplayName @0x58dd40;
+//  Entity_GetMountSlotBoneIndex @0x5438f0 (dfx2.exe)]
+void deploy_table_zone_cases() {
+	mission::MissionKernel kernel;
+	world::World &w = kernel.world;
+	w.registry.configure_pool(0, 8);
+	w.registry.configure_pool(1, 8);
+	w.registry.configure_pool(2, 8);
+	world::Entity person;
+	person.kind = world::EntityKind::Organic;
+	person.has_item_def = true;
+	person.alive = true;
+	person.team = 1;
+	person.display_name = "Pilot";
+	const world::EntityHandle pilot = w.registry.spawn(0, person);
+	person.display_name = "Shooter";
+	const world::EntityHandle shooter = w.registry.spawn(0, person);
+	person.display_name = "Rider";
+	const world::EntityHandle rider = w.registry.spawn(0, person);
+	w.cached.local_player = rider;
+	world::Entity heli;
+	heli.kind = world::EntityKind::Item;
+	heli.has_item_def = true;
+	heli.is_spawn_point = true;
+	heli.alive = true;
+	heli.team = 1;
+	heli.item_type = 1;
+	heli.item_attrib = 0x40u | 0x40000u;
+	heli.item_unit_type = 3;
+	heli.item_id = 0x219;
+	heli.health = 50;
+	heli.health_max = 100;
+	heli.def_slot_userpoints = { 7, 9, 0, 0 };
+	world::Seat seat;
+	seat.type = world::SeatType::Driver;
+	seat.retail_slot = 8;
+	seat.occupant = pilot;
+	heli.seats.push_back(seat);
+	seat.type = world::SeatType::Passenger;
+	seat.retail_slot = 0;
+	seat.occupant = rider;
+	heli.seats.push_back(seat);
+	heli.primary_occupant = pilot;
+	const world::EntityHandle heli_h = w.registry.spawn(1, heli);
+	// A greyed truck: a type-1 zone with no driver, full health.
+	world::Entity truck = heli;
+	truck.seats.clear();
+	truck.primary_occupant = world::EntityHandle{};
+	truck.item_unit_type = 1;
+	truck.item_id = 0x300;
+	truck.health = 100;
+	const world::EntityHandle truck_h = w.registry.spawn(1, truck);
+	// A PSP that is no vehicle, its gun slots unauthored.
+	world::Entity psp = truck;
+	psp.item_type = 5;
+	psp.item_attrib = 0x40000u;
+	psp.item_unit_type = 0;
+	psp.item_id = 0;
+	psp.health = 10;
+	psp.def_slot_userpoints = { 0, 0, 0, 0 };
+	const world::EntityHandle psp_h = w.registry.spawn(2, psp);
+	// The guns: the heli's in its slot 1 (userpoint 9), the PSP's.
+	world::WeaponTableEntry fifty;
+	fifty.valid = true;
+	fifty.name = "50cal";
+	fifty.attach_text_id = "attach_50cal";
+	w.tables.weapons.entries.push_back(fifty);
+	world::Entity gun;
+	gun.kind = world::EntityKind::Item;
+	gun.has_item_def = true;
+	gun.alive = true;
+	gun.team = 1;
+	gun.item_attrib = 0x20u;
+	gun.ground_target = heli_h;
+	gun.emplacement_slot = 1;
+	gun.primary_occupant = shooter;
+	gun.primary_weapon_slot_adm = 0;
+	seat.type = world::SeatType::Gunner;
+	seat.retail_slot = 9;
+	seat.occupant = shooter;
+	gun.seats.push_back(seat);
+	w.registry.spawn(1, gun);
+	gun.ground_target = psp_h;
+	gun.emplacement_slot = 0;
+	gun.primary_weapon_slot_adm = world::kAdmSlotNone;
+	w.registry.spawn(1, gun);
+	world::SpawnZoneRegistry reg;
+	reg.entries = { truck_h, heli_h, psp_h };
+	replication::LoopbackChannel loop;
+	ClientRuntime host_view(loop);
+	replication::ClientState &cs = host_view.state();
+	auto bank = [](replication::ClientMinimapOverlaySlot &slot, world::EntityHandle h) {
+		slot.active = true;
+		slot.handle = h.packed;
+		slot.flags = 0x10;
+	};
+	bank(cs.minimap.persistent[0], heli_h);
+	bank(cs.minimap.persistent[1], truck_h);
+	bank(cs.minimap.persistent[2], psp_h);
+	replication::ClientRosterSlot ace;
+	ace.bound = true;
+	ace.entity_slot = static_cast<int16_t>(pilot.slot());
+	ace.name = "Ace";
+	ace.registry_clan = "CL";
+	cs.roster[0] = ace;
+	replication::ClientRosterSlot rider_slot;
+	rider_slot.bound = true;
+	rider_slot.entity_slot = static_cast<int16_t>(rider.slot());
+	rider_slot.name = "Rider";
+	cs.roster[1] = rider_slot;
+	SpawnWaveGroup wave;
+	wave.zone_handle = truck_h.packed;
+	wave.members = { rider.packed };
+	cs.spawn_waves.known = true;
+	cs.spawn_waves.value.groups = { wave };
+	RoleView view;
+	view.kernel = &kernel;
+	view.runtime = &host_view;
+	const hud::GameTextLookup gametext = [](const char *, const char *key, const char *fallback) {
+		return std::string(key) == "attach_50cal" ? std::string("Fifty") : std::string(fallback);
+	};
+	std::vector<world::DeployTableZone> zones;
+	CHECK(deploy_table_zones(view, reg, 0xFF111111u, 0xFF222222u, gametext, zones));
+	CHECK(zones.size() == 3);
+	if (zones.size() != 3) return;
+	const world::DeployTableZone &h = zones[0];
+	CHECK(h.index == 1 && h.vehicle_category == 3 && h.class_id == 0x219 && !h.greyed);
+	CHECK(h.health_color == 0xFF111111u); // 0x8000: the middle band
+	CHECK(h.lines.size() == 3);
+	CHECK(h.lines.size() == 3 && h.lines[0] == "Ace<ch>CL<co>  <i>(Driver)<-i>\r\n");
+	CHECK(h.lines.size() == 3 && h.lines[1] == "Rider\r\n");
+	CHECK(h.lines.size() == 3 && h.lines[2] == "Shooter  <i>(Fifty)<-i>\r\n");
+	const world::DeployTableZone &t = zones[1];
+	CHECK(t.index == 0 && t.greyed && t.health_color == 0xFFDDDDDDu);
+	CHECK(t.lines.size() == 1 && t.lines[0] == "<b><cC0FFFF>** Rider **<-b> <i>waiting</i>\r\n");
+	const world::DeployTableZone &p = zones[2];
+	CHECK(p.index == 2 && !p.greyed && p.health_color == 0xFF222222u);
+	// Bone 0 under a zone that is no vehicle: every unauthored slot matches, a line each, and
+	// no slot weapon reads "Gunner".
+	CHECK(p.lines.size() == 4);
+	CHECK(p.lines.size() == 4 && p.lines[3] == "Shooter  <i>(Gunner)<-i>\r\n");
+	// A zone off the SpawnZoneList, or of the other team, is no row.
+	reg.entries = { heli_h };
+	CHECK(deploy_table_zones(view, reg, 0, 0, gametext, zones) && zones.size() == 1);
+	w.registry.get(heli_h)->team = 2;
+	CHECK(deploy_table_zones(view, reg, 0, 0, gametext, zones) && zones.empty());
+	RoleView bare;
+	CHECK(!deploy_table_zones(bare, reg, 0, 0, gametext, zones) && zones.empty());
+}
+
 int main() {
+	deploy_table_zone_cases();
 	hud_pass_call_site_cases();
 	voice_macro_override_cases();
 	lighting_walk_keeps_the_row_at_l_cases();

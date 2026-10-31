@@ -224,6 +224,7 @@ private:
 	friend class CorpseRagdollPresenter; // the ragdolls' world reads (ADR 0060)
 	friend class MapViewWindow; // the CMAP waypoint legs (inmatch/client_squad.cpp)
 	friend class CommandMapScreen; // the CMAP tables' roster and sends (menu/command_map_screen.h)
+	friend class MenuDriver; // the DEATH table's zones (mnu/menu_driver.h fill_deploy_spawn_table)
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
 	// The private state by owner, each plain data in its own header (ADR 0043
 	// d9; the class-body fragments are gone): the net-session shell inputs and

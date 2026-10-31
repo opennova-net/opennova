@@ -537,6 +537,8 @@ public:
 
 	void _draw() override;
 
+	// The layout hudpos.def gave the HUD (C++ only: the DEATH table's stance colours).
+	const opennova::hud::HudLayout &layout() const { return layout_; }
 	// The menu map windows' seam (hud/map_view_window.h, C++ only): compile
 	// the DEATH or the CMAP window pass over this overlay's frame state
 	// (terrain, markers, footprints, fonts) at the host's surface, and hand

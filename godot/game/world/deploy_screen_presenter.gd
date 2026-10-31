@@ -398,6 +398,14 @@ func _populate_spawn_list(sim: Simulation) -> void:
 	_apply_statics(status)
 	if status.permanent_death:
 		return
+	# A title whose DEATH screen picks the loadout lists its spawn points in SPAWNPOINTS_TABLE:
+	# the engine collects the zones, builds the rows and refills the table, its scroll top and
+	# selected row kept (world::fill_deploy_spawn_table carries the witness); the health colours
+	# take the HUD's stance colours.
+	if _picks_loadout():
+		var hud: HudOverlay = _hud_source.call() if _hud_source.is_valid() else null
+		_driver.fill_deploy_spawn_table(sim, hud, Strings.get_table(Strings.TABLE_GAMETEXT))
+		return
 	var list_id := _driver.widget_id(SPAWN_LIST)
 	if list_id < 0:
 		return

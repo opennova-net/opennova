@@ -9,10 +9,13 @@
 #include <string>
 #include <vector>
 
+#include <formats/mnu/mnu.h>
+#include <runtime/menu/menu_runtime.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
+using namespace opennova;
 using namespace opennova::world;
 
 static int failures = 0;
@@ -393,8 +396,11 @@ void test_spawn_table_rows() {
 	CHECK(deploy_table_seat_line("Ace", 8, false) == "Ace  <i>(Driver)<-i>\r\n");
 	CHECK(deploy_table_seat_line("Bo", 9, true) == "Bo  <i>(Driver)<-i>  <i>(Gunner)<-i>\r\n");
 	CHECK(deploy_table_seat_line("Cy", 0, false) == "Cy\r\n");
-	CHECK(deploy_table_gunner_line("Di", "M2") == "Di  <i>(M2)<-i>\r\n");
-	CHECK(deploy_table_gunner_line("Di", "") == "Di  <i>(Gunner)<-i>\r\n");
+	const std::string m2 = "M2";
+	const std::string missed;
+	CHECK(deploy_table_gunner_line("Di", &m2) == "Di  <i>(M2)<-i>\r\n");
+	CHECK(deploy_table_gunner_line("Di", nullptr) == "Di  <i>(Gunner)<-i>\r\n");
+	CHECK(deploy_table_gunner_line("Di", &missed) == "Di  <i>()<-i>\r\n");
 	CHECK(deploy_table_waiting_line("Me", true) == "<b><cC0FFFF>** Me **<-b> <i>waiting</i>\r\n");
 	CHECK(deploy_table_waiting_line("You", false) == "<cC0F0F0>You <i>waiting</i>\r\n");
 	DeployTableZone heli;
@@ -416,11 +422,95 @@ void test_spawn_table_rows() {
 	CHECK(rows[1].cells[2] == "\r\nAce  <i>(Driver)<-i>\r\n");
 	CHECK(rows[2].cells[0] == "'A'" && rows[2].cells[1] == "1" && rows[2].cells[2] == "\r\n");
 	CHECK(rows[2].color == 0xFF404040u && rows[2].state1_color);
+	CHECK(!rows[0].zone && rows[1].zone && rows[2].zone);
+	// The health colour: the band rule, the fill's own colour standing for the good band
+	// [orig: sub_5A19D0 @0x5a19d0 (dfx2.exe)].
+	CHECK(deploy_table_health_color(100, 100, 1, 2) == 0xFFDDDDDDu);
+	CHECK(deploy_table_health_color(50, 100, 1, 2) == 1u);
+	CHECK(deploy_table_health_color(10, 100, 1, 2) == 2u);
+	CHECK(deploy_table_health_color(-5, 100, 1, 2) == 0xFFDDDDDDu); // the unsigned first test
+	CHECK(deploy_table_health_color(50, 0, 1, 2) == 0xFFDDDDDDu); // a zero ceiling taken as 1
+}
+
+// DFX2-41: the table's refill over the menu: the rows sorted by column 0 (the Default row's
+// "' '" first), each with its value, column 1's value, its cells, its colour and a zone's state-1
+// bit; the table and STATIC_LIST_TITLE shown; the selected row kept BY INDEX, whatever row now
+// stands there, and the scroll top put back while it is under the row count. A screen without
+// the table is not filled.
+// [orig: sub_551450 @0x551450 - @0x55149d..0x5514d9, @0x551d28..0x551d53 (dfx2.exe)]
+mnu::Document death_document() {
+	mnu::Document doc;
+	mnu::Screen death;
+	death.name = "DEATH";
+	mnu::Window root;
+	root.name = "MAIN";
+	root.type = mnu::WindowType::Window;
+	mnu::Window table;
+	table.name = "SPAWNPOINTS_TABLE";
+	table.type = mnu::WindowType::Table;
+	table.hidden = true;
+	table.table_data.column.has_count = true;
+	table.table_data.column.count = 3;
+	mnu::Window title;
+	title.name = "STATIC_LIST_TITLE";
+	title.type = mnu::WindowType::Static;
+	title.hidden = true;
+	root.children.push_back(table);
+	root.children.push_back(title);
+	death.roots.push_back(root);
+	doc.screens.push_back(death);
+	return doc;
+}
+
+void test_spawn_table_fill() {
+	const mnu::Document doc = death_document();
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "death.mnu", "");
+	const int table = rt.widget_id("SPAWNPOINTS_TABLE");
+	const int title = rt.widget_id("STATIC_LIST_TITLE");
+	CHECK(table >= 0 && title >= 0);
+	DeployTableZone c;
+	c.index = 2;
+	c.health_color = 0xFF123456u;
+	DeployTableZone a;
+	a.index = 0;
+	a.greyed = true;
+	const std::vector<DeployTableRow> rows = build_deploy_table_rows(1, { c, a });
+	CHECK(fill_deploy_spawn_table(rt, rows));
+	CHECK(rt.is_widget_shown(table) && rt.is_widget_shown(title));
+	CHECK(rt.table_row_count(table) == 3);
+	CHECK(rt.table_cell_text(table, 0, 0) == "' '" && rt.table_cell_text(table, 1, 0) == "'A'" &&
+			rt.table_cell_text(table, 2, 0) == "'C'");
+	CHECK(rt.table_row_value(table, 0) == 0 && rt.table_row_value(table, 1) == 1 &&
+			rt.table_row_value(table, 2) == 3);
+	CHECK(rt.table_cell_value(table, 2, 1) == 3 && rt.table_cell_text(table, 2, 1) == "1");
+	uint32_t color = 0;
+	CHECK(rt.table_row_colored(table, 2, &color) && color == 0xFF123456u);
+	CHECK(rt.table_row_colored(table, 0, &color) && color == 0xFFDDDDDDu);
+	CHECK(rt.table_row_colored(table, 1, &color) && color == 0xFF404040u);
+	// The pick and the scroll ride the refill by index: the second row selected, the first
+	// visible row 1.
+	rt.table_set_row_selected(table, 1, true);
+	rt.set_scroll_row(table, 1);
+	DeployTableZone b;
+	b.index = 1;
+	CHECK(fill_deploy_spawn_table(rt, build_deploy_table_rows(1, { c, a, b })));
+	CHECK(rt.table_row_count(table) == 4 && rt.table_cell_text(table, 2, 0) == "'B'");
+	CHECK(rt.table_selected_rows(table) == std::vector<int>{ 1 } && rt.scroll_row(table) == 1);
+	// A scroll top past the new count is not put back (the clear left 0).
+	rt.set_scroll_row(table, 9);
+	CHECK(fill_deploy_spawn_table(rt, rows) && rt.scroll_row(table) == 0);
+	mnu::Document none = death_document();
+	none.screens[0].roots[0].children.erase(none.screens[0].roots[0].children.begin());
+	menu::MenuRuntime other;
+	other.open_document(&none, "death.mnu", "");
+	CHECK(!fill_deploy_spawn_table(other, rows));
 }
 
 int main() {
 	test_loadout_picker_gate();
 	test_spawn_table_rows();
+	test_spawn_table_fill();
 	test_list_items_are_the_page_bytes();
 	test_rows_are_the_page_bytes_past_z();
 	test_shroud_reveal_and_refresh();

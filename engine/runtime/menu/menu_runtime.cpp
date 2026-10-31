@@ -859,6 +859,11 @@ void MenuRuntime::set_scroll_row(int id, int row) {
 				-1, state.scroll_row);
 }
 
+int MenuRuntime::scroll_row(int id) const {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	return state != nullptr ? state->scroll_row : 0;
+}
+
 void MenuRuntime::on_frame_scroll_value(int index, int value) {
 	const int id = id_at_index(index);
 	if (id < 0) return;
@@ -1187,6 +1192,11 @@ bool MenuRuntime::table_row_visible(int id, int row) const {
 	return !state->table_rows[static_cast<size_t>(row)].hidden();
 }
 
+void MenuRuntime::table_set_row_state1_color(int id, int row, bool on) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (menu::table_set_row_state1_color(state.table_rows, row, on)) push_table_rows_(id);
+}
+
 std::vector<int> MenuRuntime::table_selected_rows(int id) const {
 	std::vector<int> out;
 	const MenuWidgetRuntimeState *state = saved_state_(id);
@@ -1225,7 +1235,11 @@ void MenuRuntime::table_set_columns(int id, const std::vector<MenuTableColumn> &
 }
 
 void MenuRuntime::table_set_column_ascending(int id, int column, bool ascending) {
+	if (widget_kind_of(id) != kKindTable) return;
 	MenuWidgetRuntimeState &state = state_of_(id);
+	// The authored records, as they stand, when no code set any up: the parse made them
+	// (table_resize_records_).
+	if (!state.has_table_columns) table_resize_records_(id, table_column_count_(id));
 	if (column < 0 || column >= static_cast<int>(state.table_columns.size())) return;
 	state.table_columns[static_cast<size_t>(column)].ascending = ascending;
 	const int index = frame_index(id);
@@ -1234,8 +1248,9 @@ void MenuRuntime::table_set_column_ascending(int id, int column, bool ascending)
 }
 
 void MenuRuntime::table_sort_by_column(int id, int column) {
+	if (widget_kind_of(id) != kKindTable) return;
 	MenuWidgetRuntimeState &state = state_of_(id);
-	if (!state.has_table_columns) return;
+	if (!state.has_table_columns) table_resize_records_(id, table_column_count_(id));
 	const int count = static_cast<int>(state.table_columns.size());
 	table_push_sort_key(state.table_sort_keys, column, count);
 	const std::vector<int> order =

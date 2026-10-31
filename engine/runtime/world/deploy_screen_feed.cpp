@@ -2,7 +2,9 @@
 
 #include <base/io/cp1252.h>
 #include <runtime/hud/feed_format.h>
+#include <runtime/hud/hud_vehicle_panel.h>
 #include <runtime/menu/list_sort.h>
+#include <runtime/menu/menu_runtime.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -355,11 +357,23 @@ std::string deploy_table_seat_line(const std::string &name, int slot, bool is_dr
 	return line + "\r\n";
 }
 
-std::string deploy_table_gunner_line(const std::string &name, const std::string &seat_weapon) {
+std::string deploy_table_gunner_line(const std::string &name, const std::string *seat_weapon) {
 	return name +
-			(seat_weapon.empty() ? std::string("  <i>(Gunner)<-i>")
-								 : "  <i>(" + seat_weapon + ")<-i>") +
+			(seat_weapon == nullptr ? std::string("  <i>(Gunner)<-i>")
+									: "  <i>(" + *seat_weapon + ")<-i>") +
 			"\r\n";
+}
+
+uint32_t deploy_table_health_color(int32_t health, int32_t max_health, uint32_t stance_middle,
+		uint32_t stance_bad) {
+	switch (hud::seat_health_band(health, max_health)) {
+		case hud::SeatHealthBand::Good:
+			return 0xFFDDDDDDu; // the argument stands for the good colour
+		case hud::SeatHealthBand::Middle:
+			return stance_middle;
+		default:
+			return stance_bad;
+	}
 }
 
 std::string deploy_table_waiting_line(const std::string &name, bool self) {
@@ -389,10 +403,37 @@ std::vector<DeployTableRow> build_deploy_table_rows(
 		for (const std::string &line : zone.lines)
 			row.cells[2] += line;
 		row.color = zone.greyed ? 0xFF404040u : zone.health_color;
+		row.zone = true;
 		row.state1_color = zone.greyed;
 		rows.push_back(std::move(row));
 	}
 	return rows;
+}
+
+bool fill_deploy_spawn_table(menu::MenuRuntime &menu, const std::vector<DeployTableRow> &rows) {
+	const int table = menu.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
+	if (table < 0) return false;
+	const int scroll_top = menu.scroll_row(table);
+	const std::vector<int> selected = menu.table_selected_rows(table);
+	const int selected_row = selected.empty() ? -1 : selected.front();
+	menu.table_clear_rows(table);
+	menu.set_widget_shown(table, true);
+	const int list_title = menu.find_screen_control("DEATH", "STATIC_LIST_TITLE");
+	if (list_title >= 0) menu.set_widget_shown(list_title, true);
+	for (const DeployTableRow &row : rows) {
+		const int at = menu.table_insert_row(table, row.zone ? "" : "0", row.value, 0, -1);
+		menu.table_set_cell_value(table, at, 1, row.cell1_value);
+		for (int column = 0; column < 3; ++column)
+			menu.table_set_cell_text(table, at, column, row.cells[column]);
+		menu.table_set_row_color(table, at, true, row.color);
+		if (row.zone) menu.table_set_row_state1_color(table, at, row.state1_color);
+	}
+	menu.table_set_column_ascending(table, 0, true);
+	menu.table_sort_by_column(table, 0);
+	if (scroll_top >= 0 && scroll_top < menu.table_row_count(table))
+		menu.set_scroll_row(table, scroll_top);
+	if (selected_row >= 0) menu.table_set_row_selected(table, selected_row, true);
+	return true;
 }
 
 } // namespace opennova::world
