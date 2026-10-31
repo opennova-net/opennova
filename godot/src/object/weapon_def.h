@@ -212,20 +212,4 @@ public:
 	void set_actions(const TypedArray<WeaponActionRow> &p_rows);
 };
 
-// One armory PLAYER_CLASS spin row (world/player_loadout.h kArmoryClassCatalog).
-class ArmoryClassRow : public RefCounted {
-	GDCLASS(ArmoryClassRow, RefCounted)
-
-	int value_ = 0;
-	String text_key_;
-
-protected:
-	static void _bind_methods();
-
-public:
-	void assign(int p_value, const char *p_text_key);
-	int get_value() const { return value_; }
-	String get_text_key() const { return text_key_; }
-};
-
 } // namespace godot

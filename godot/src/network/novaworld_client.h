@@ -155,10 +155,14 @@ public:
 	// nw_cdata.coo in `dir`, the game's working directory, under the current volume's key
 	// (engine: MenuBrowserState::create, cookie_jar_key).
 	static void create_cookie_jar(const String &dir);
-	// A save site of the shell (the menu's teardown on the way out or before a mods reload, the
-	// NovaWorld screen's close, an external browser's open): the process's jar written to its file
-	// (engine: MenuBrowserState::save; a failure is only reported, as retail drops it).
+	// A save site of the shell (the NovaWorld screen's close, an external browser's open): the
+	// process's jar written to its file (engine: MenuBrowserState::save; a failure is only
+	// reported, as retail drops it).
 	static void save_cookie_jar();
+	// The menu's teardown that destroys it (the way out, a mods reload ahead of the menu's
+	// re-creation): the jar saved, then the browser's name list and cache list freed (engine:
+	// browser_menu_destroyed).
+	static void destroy_menu_browser();
 	// The process's _connectlog.txt (the game world's log device, which `/CONNECTLOG` arms):
 	// the NovaWorld gate and connect lines go to it (null: none).
 	static void set_process_connect_log(opennova::inmatch::ConnectLog *log);

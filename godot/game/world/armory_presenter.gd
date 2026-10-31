@@ -1,32 +1,21 @@
 class_name ArmoryPresenter
 extends Node
 
-## The in-world armory surface mounted by the game shell. Kept as a standalone
-## presenter so every runtime entry uses one implementation.
-##
-## Owns a live compiled menu surface — a MenuFrame orchestrated by a MenuDriver —
-## over the gameplay view showing weapon.mnu's WEAPON screen, driven by the
-## ArmoryMenuCompanion companion, zone-gated on the type-6
-## armory volume contact flag the collision resolver maintains. The world keeps
-## ticking underneath — the witnessed armory has no world-stop leg (the screen is
-## a live overlay; in an MP session the team scoreboard even draws over it
-## [orig: Render_ProcessMainSceneFrame @0x5cae1c]).
-## [orig: the USE-ITEM key (action 177 "useitem", default SHIFT) ->
-##  UI_OpenMenuScreen("weapon.mnu", "WEAPON") — Input_HandleActionBinding_0 case
-##  0xB1 @0x4e0b3f, gated on entity Flags & 0x400000; ACCEPT applies
-##  WeaponLoadout_ApplyFromBuffer @0x565cd0 -> the WeaponSlot rebuild chain +
-##  Player_MountWeaponSlot @0x4dfa40]
+## The in-world armory surface mounted by the game shell: the device half of
+## weapon.mnu's WEAPON screen over live play (the world keeps ticking under it).
+## The screen's behavior, its on-show, picks, class pages and the ACCEPT / CANCEL
+## past the press latch, is the engine controller ArmoryScreen (engine
+## menu::ArmoryScreen, runtime/menu/armory_screen.h carries the witnesses), which
+## this presenter claims the opened document with; this mounts the frame, pumps it
+## each frame, forwards its input, and refreshes the FP view when a local ACCEPT
+## presents a weapon.
 
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
 
-# The ACCEPT hotkeys: the WEAPON screen's on-show registers the USE-ITEM binding
-# row's two runtime keys (retail default: the Shifts — the same row 177 the
-# shells' open key reads, so a rebound Use Item opens AND accepts) as ACCEPT
-# accelerators on the ACCEPT control, and the open debounce clears on either
-# key's release [orig: UI_InitTeamClassSelection @0x567370 finds control "ACCEPT"
-# (@0x7C7650) and adds g_UseItemBindingKey0/g_UseItemBindingKey1
-# @0x5674a8/@0x5674c0; Input_HandleMenuKeyRelease @0x4de2d0 tests the same two].
+# The ACCEPT hotkeys are the USE-ITEM binding row's runtime keys, the open key's
+# own row (engine ArmoryScreen's on-show carries the witness): a key of that row
+# is the ACCEPT accelerator while the screen is up.
 static func is_accept_hotkey(keycode: Key) -> bool:
 	return ControlsBindings.model().godot_keys_for_token("useitem").has(int(keycode))
 
@@ -47,14 +36,6 @@ var _ui_parent: Node = null
 # drives the fit from its own size/resized; a CanvasLayer parent (the game HUD)
 # has no size, so the fit follows the viewport instead.
 var _layout_control: Control = null
-# The profile store the screen's class pages stage from (its current weapon.sav
-# record); null stages empty pages (engine menu::ArmoryLoadoutBuffers).
-var _profiles: PlayerProfiles = null
-# The local player's class (5..9; 0 = unclassed SP spawn); the screen opens on it
-# [orig: entity playerClass feeds Armory_ResolveSelectedClass @0x5642f0]. Stamped
-# by the armory ACCEPT until the spawn path carries a class of its own.
-var _player_class := 0
-
 # The compiled menu surface: the frame draws + hit-tests, the audio node plays
 # widget SFX, and the RefCounted driver orchestrates both over the parsed
 # document (freed with the presenter; only the two nodes need queue_free).
@@ -66,8 +47,8 @@ var _armory := ArmoryMenuCompanion.new()
 
 
 func _init() -> void:
-	_armory.loadout_accepted.connect(_on_loadout_accepted)
-	_armory.armory_closed.connect(_on_cancel)
+	_armory.screen.close_requested.connect(close)
+	_armory.screen.viewmodel_changed.connect(_on_viewmodel_changed)
 
 
 ## Wire the presenter to its world view + player presenter and the node the menu
@@ -78,23 +59,18 @@ func setup(view: ArmoryWorldView, player_presenter_in: LocalPlayerPresenter,
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
+	_armory.screen.setup(view)
 	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
 
 
 func set_player_profiles(profiles: PlayerProfiles) -> void:
-	_profiles = profiles
+	_armory.screen.set_player_profiles(profiles)
 
 
-## The mission start's stage of the screen's class pages from the profile and the spawn
-## buffer, which every playing process runs (a dedicated host has no presenter); the
-## pages, counts and bytes otherwise outlive the mission (engine
-## menu::ArmoryLoadoutBuffers::stage carries the witness).
+## The mission start's stage of the screen's class pages (engine
+## ArmoryScreen::stage_mission_start).
 func on_mission_started() -> void:
-	var sim: Simulation = _view.sim() if _view != null else null
-	if sim == null:
-		return
-	_armory.get_loadout().stage(_profiles, int(sim.get_local_player_team()),
-			sim.get_local_player_loadout())
+	_armory.screen.stage_mission_start()
 
 
 func is_open() -> bool:
@@ -104,54 +80,37 @@ func is_open() -> bool:
 ## Whether the title `root` names picks the loadout on its DEATH screen (DFX2-41, engine
 ## Title::death_screen_loadout), whose serializer this presenter's class pages then run.
 func death_screen_loadout(root: ResourceRoot) -> bool:
-	var loadout := _armory.get_loadout()
-	loadout.set_title_root(root)
-	return loadout.death_screen_loadout()
+	_armory.screen.set_title_root(root)
+	return _armory.screen.death_screen_loadout()
 
 
-## The DEATH screen's activation fill over its driver: the spawned entity's team and class,
-## the host's class mask and the map's availability, as this screen's open reads them, over
-## this presenter's class pages (engine world::deploy_loadout_shown carries the witness).
+## The DEATH screen's activation fill over its driver, over this presenter's class pages
+## (engine ArmoryScreen::populate_screen), then its icons over its frame.
 func populate_death_screen(driver: MenuDriver) -> void:
-	var sim: Simulation = _view.sim() if _view != null else null
-	if sim == null or driver == null:
-		return
-	_player_class = int(sim.get_local_player_class())
-	_armory.set_entity_team(int(sim.get_local_player_team()))
-	_armory.set_class_allow_mask(int(sim.get_class_allow_mask()))
-	_armory.set_player_class(_player_class)
-	_armory.set_availability_lookup(
-			func(weapon_name: String) -> int:
-				return int(sim.get_weapon_availability(weapon_name)))
-	_armory.set_weapon_database(_view.weapon_database())
-	_armory.populate_screen(driver, _view.resource_root())
+	if _view != null and _armory.screen.populate_screen(driver):
+		_armory.refresh_screen_icons(driver, _view.resource_root())
 
 
 ## A pick in the DEATH screen's PRIMARY / SECONDARY / ACCESSORY (the handlers its title
-## registers on every screen, DFX2-41): the slot's pick, the weight line and the icons.
+## registers on every screen, DFX2-41): the slot's pick and the weight line (engine
+## ArmoryScreen::pick_screen), then the icons.
 func pick_death_screen(driver: MenuDriver, control: String) -> void:
-	if _view != null:
-		_armory.pick_screen(driver, control, _view.resource_root())
+	if _view != null and _armory.screen.pick_screen(driver, control):
+		_armory.refresh_screen_icons(driver, _view.resource_root())
 
 
-## The DEATH screen's icons placed again over its frame (a resize, the shroud's reveal).
+## The DEATH screen's weight line and icons placed again over its frame (a resize, the
+## shroud's reveal).
 func refresh_death_screen(driver: MenuDriver) -> void:
-	if _view != null:
-		_armory.refresh_screen(driver, _view.resource_root())
+	if _view != null and driver != null:
+		_armory.screen.refresh_screen(driver)
+		_armory.refresh_screen_icons(driver, _view.resource_root())
 
 
-## The DEATH screen's close on its triggers' clear (DFX2-41): its picks serialized into the
-## class's page and applied as this screen's ACCEPT applies a kit, one C2S 0x2F in a session,
-## gated as the ACCEPT is on the press latch, the input reset first (engine
-## ClientState::take_death_menu_close carries the witness).
+## The DEATH screen's close on its triggers' clear (DFX2-41): its picks applied as this
+## screen's ACCEPT applies a kit, past the press latch (engine ArmoryScreen::submit_screen).
 func submit_death_screen(driver: MenuDriver) -> void:
-	var sim: Simulation = _view.sim() if _view != null else null
-	if sim == null or driver == null or not can_dismiss():
-		return
-	_reset_all_input_state()
-	var kit := _armory.accept_screen(driver)
-	_player_class = _armory.get_selected_class()
-	sim.apply_local_player_loadout(kit, _player_class)
+	_armory.screen.submit_screen(driver)
 
 
 ## The live menu driver over the armory frame (ADR 0018 read seam for tests and
@@ -210,58 +169,35 @@ func menu_key(keycode: int, unicode: int = 0) -> bool:
 	ev.pressed = true
 	if not is_accept_hotkey(bound_key_of(ev)) or not can_dismiss():
 		return false
-	_armory.trigger_accept()
+	_armory.screen.trigger_accept()
 	return true
 
 
-## Whether the WEAPON screen's ACCEPT and CANCEL act: neither does while the
-## engine's armory press latch is held (Simulation.is_armory_press_latched;
-## engine LocalPlayer::armory_press_latched carries the witness).
+## Whether the WEAPON screen's ACCEPT and CANCEL act (the engine's press latch;
+## ArmoryScreen's ACCEPT reads the same).
 func can_dismiss() -> bool:
 	var sim: Simulation = _view.sim() if _view != null else null
 	return sim == null or not sim.is_armory_press_latched()
 
 
-## Build + populate the WEAPON screen over live play. The engine decides when
-## (the held USE row's armory arm, engine controls::PlayerActions and
+## Build the WEAPON screen over live play and claim it: the controller's on-show
+## runs the class resolve, the stage and the populate from the live sim. The engine
+## decides when (the held USE row's armory arm, engine controls::PlayerActions and
 ## world::LocalPlayer::take_use_item_press); the shell and the tests call this.
 func open() -> bool:
-	if is_open() or _view == null or _ui_parent == null:
+	if is_open() or _view == null or _ui_parent == null or _view.sim() == null:
 		return false
-	var sim: Simulation = _view.sim()
-	if sim == null:
-		return false
-	# MP is live: in a session the ACCEPT sends one C2S 0x2F and applies nothing
-	# locally, a joiner's and the listen host's own client's alike (the sim's
-	# apply_local_player_loadout session leg); the host's S2C 0x5A grant rebuilds
-	# the slots (D-NET-170).
-	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94]
 	if not _ensure_menu():
 		return false
-	# The on-show protocol: the screen re-resolves the class, stages its class pages
-	# under its team gate and repopulates from the selected class's page every open
-	# [orig: the WEAPON activate handler @0x567370 -> populate @0x566db0]. Re-read the
-	# spawned entity on every show: its team (1 / 3 blue, 2 / 4 red) is the stage's side
-	# and the lists' team filter.
-	_player_class = int(sim.get_local_player_class())
-	_armory.set_entity_team(int(sim.get_local_player_team()))
-	_armory.set_class_allow_mask(int(sim.get_class_allow_mask()))
-	_armory.set_player_class(_player_class)
-	# D-MNU-10 (deliberate divergence, user decision 2026-07-11): the class spin is
-	# LIVE in offline play. Retail enables it only in a network session
-	# [orig: UI_InitTeamClassSelection @0x567370 — the is_in_session branch;
-	# UI_OpenWeaponScreenSinglePlayer @0x424390 exists because SP has no session,
-	# and retail SP pins the class]. Our runtime is a listen session even offline
-	# (ADR 0009), and the SP loadout flow wants the choice.
-	_armory.set_class_selection_enabled(true)
-	_armory.set_stage_sources(_profiles, sim.get_local_player_loadout())
-	_armory.set_availability_lookup(
-			func(weapon_name: String) -> int:
-				return int(sim.get_weapon_availability(weapon_name)))
-	_armory.on_menu_built(_driver, MENU_FILE, MENU_SCREEN, _menu_root)
+	_armory.mount(_driver, _menu_root)
+	# The title the screen runs as (engine ArmoryScreen::set_title).
+	_armory.screen.set_title_root(_menu_root)
+	_armory.screen.set_text_tables(Strings.get_table(Strings.TABLE_GAMETEXT),
+			Strings.get_table(Strings.TABLE_MENUTXT), Strings.get_table(Strings.TABLE_GAMEUI))
+	if not _driver.claim_screen(_armory.screen):
+		return false
 	# The menu draws over every HUD element (the lazily built GameHud may have been
-	# added after us) [orig: the UI scene renders after HUD_DrawGameplayOverlays in
-	# Render_ProcessMainSceneFrame @0x5ca0f0].
+	# added after us).
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
 	set_process(true)
@@ -275,6 +211,7 @@ func close() -> void:
 	# A dropdown left open would come back mid-popup on the next open (the frame
 	# only hides; the driver's per-widget state persists across shows).
 	_driver.close_active_combo_popup()
+	_driver.release_screen()
 	_armory.on_menu_released()
 	_frame.visible = false
 	# The menu's pointer is the menu's alone (MenuFrameSurface.hide_frame).
@@ -295,9 +232,7 @@ func _process(_delta: float) -> void:
 
 
 # A useitem key's press while the screen is open is the ACCEPT accelerator,
-# unless the engine's armory press latch holds it: the press that opened the
-# screen latched it, and only a useitem release clears it (MainGame._input;
-# engine LocalPlayer::armory_press_latched carries the witness).
+# unless the engine's armory press latch holds it (MainGame._input).
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_open():
 		return
@@ -305,23 +240,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null or key.echo or not key.pressed or not is_accept_hotkey(bound_key_of(key)):
 		return
 	if can_dismiss():
-		_armory.trigger_accept()
+		_armory.screen.trigger_accept()
 		get_viewport().set_input_as_handled()
-
-
-# The screen's CANCEL: a close unless the press latch holds it open.
-func _on_cancel() -> void:
-	if can_dismiss():
-		_reset_all_input_state()
-		close()
-
-
-# The ACCEPT's and CANCEL's head past the press latch: the input reset (engine
-# inmatch/session.h Role::reset_all_input_state carries the witness).
-func _reset_all_input_state() -> void:
-	var sim: Simulation = _view.sim() if _view != null else null
-	if sim != null:
-		sim.reset_all_input_state()
 
 
 func teardown() -> void:
@@ -357,7 +277,6 @@ func _ensure_menu() -> bool:
 	_audio = surface.audio
 	_driver = surface.driver
 	_menu_root = root
-	_armory.set_weapon_database(_view.weapon_database())
 	return true
 
 
@@ -377,41 +296,10 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 			_frame.accept_event()
 
 
-# Armory ACCEPT: the class's page, the team's knife first (the companion's), rebuilds
-# the sim's slot pool and becomes the respawn kit; the sim's commit event then
-# reinstalls the FP viewmodel/FSM around the re-selected equipped weapon. SP-local
-# apply — the MP client path rides the 0x2F/0x5A loadout service.
-# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 -> the tuple parse + sub-weapon
-#  expansion + WeaponSlot rebuild chain + Player_SelectWeaponSlot @0x4dd680 /
-#  Player_MountWeaponSlot @0x4dfa40]
-func _on_loadout_accepted(kit: Array[WeaponKitEntry], player_class: int) -> void:
-	if not can_dismiss():
-		return
-	_reset_all_input_state()
-	_player_class = player_class
-	var sim: Simulation = _view.sim() if _view != null else null
-	if sim == null or not bool(sim.apply_local_player_loadout(kit, player_class)):
-		close()
-		return
-	# In a session the apply sent its 0x2F and selects nothing: the screen closes (the
-	# apply's tail) and the host's grant mounts the kit (engine
-	# inmatch/loadout_submit.h armory_accept_in_session carries the witness).
-	if sim.is_mp_session():
-		close()
-		return
-	# The apply's select committed and mounted the equipped slot in the sim, and its
-	# mount request queued SWITCHRANK on that slot (engine world/player_loadout.cpp
-	# select_current_slot carries the witness): present the viewmodel for it now, with
-	# no second sim mount over that switch (the commit event would also catch up next
-	# tick). A table the kit left bare equips nothing: no rendered/action weapon.
-	var equipped := String(sim.get_local_player_inventory().equipped_name)
-	if equipped.is_empty():
-		_view.clear_local_player_weapon()
-		if _player_presenter != null:
-			_player_presenter.refresh_viewmodel()
-	elif _view.present_local_player_weapon(equipped) and _player_presenter != null:
+# A local ACCEPT presented the equipped slot's viewmodel: the FP view rebuilds.
+func _on_viewmodel_changed() -> void:
+	if _player_presenter != null:
 		_player_presenter.refresh_viewmodel()
-	close()
 
 
 # The armory's text lookups (WepDes weapon names, CHARCLASS_* rows, TOTAL_WEIGHT)

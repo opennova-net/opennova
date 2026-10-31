@@ -310,14 +310,14 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	assert_ne(driver.get_widget_text(cancel), "WD_NOHOT_CANCEL", "raw RTXT IDs are never shown")
 	assert_eq(MusicService.get_var(2), 14, "WEAPON MUSICVAR drives retail menu Var2")
 
-	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	driver.activate(driver.widget_id("ACCEPT"))
 	assert_has(_loadout_names(sim), equipped,
 		"unchanged ACCEPT preserves the entity's equipped weapon")
 	assert_eq(world.present_weapon_calls, [equipped] as Array[String])
 
 	assert_true(presenter.open(), "the same armory can reopen after ACCEPT")
 	driver.select_row(primary, 0, false)  # the authored NONE row, silently
-	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	driver.activate(driver.widget_id("ACCEPT"))
 	assert_false(_loadout_names(sim).has(equipped),
 		"the authored NONE row reaches the simulation")
 	# Every shown grenade position still serializes, so the select's global walk takes
@@ -359,7 +359,7 @@ func test_mission_start_stages_the_class_pages() -> void:
 	var ammo := driver.widget_id("PRIMARY_AMMO1")
 	assert_eq(driver.selected_row(ammo), 1, "the first show stages the profile's two clips")
 	driver.select_row(ammo, 0)
-	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	driver.activate(driver.widget_id("ACCEPT"))
 	assert_false(presenter.is_open(), "the ACCEPT closes the screen")
 	assert_true(presenter.open(), "the armory reopens")
 	assert_eq(driver.selected_row(ammo), 0, "the reopen shows the accepted page")
@@ -463,7 +463,7 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	assert_eq(driver.selected_row(accessory_ammo), ACCESSORY_CLIPS - 1,
 		"first open converts the page's satchel clip count to its zero-based row")
 
-	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	driver.activate(driver.widget_id("ACCEPT"))
 	var accepted_by_name := {}
 	for row: WeaponKitEntry in simulation.get_local_player_loadout():
 		accepted_by_name[row.name] = row.ammo_primary
@@ -511,7 +511,7 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 		assert_eq(driver.selected_row(grenade_combo), i + 1,
 			"%s preselects the page's grenade count" % combo_name)
 
-	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	driver.activate(driver.widget_id("ACCEPT"))
 	var accepted_by_name := {}
 	for row: WeaponKitEntry in simulation.get_local_player_loadout():
 		accepted_by_name[row.name] = row.ammo_primary

@@ -152,10 +152,12 @@ func _install_frontend_legs() -> void:
 			func() -> bool: return GameCfgStore.reload_main_menu(_root))
 	f.set_leg(GameFrontend.LEG_LOAD_PROFILE, refresh_local_profile_for_mount.bind(true))
 	# The menu browser's cookie jar, nw_cdata.coo in the working directory, kept for the
-	# process (engine MenuBrowserState; NovaWorldClient.create_cookie_jar / save_cookie_jar).
+	# process (engine MenuBrowserState): the menu's creation loads it and frees the browser's
+	# name list, its teardown saves it and frees the name and cache lists
+	# (NovaWorldClient.create_cookie_jar / destroy_menu_browser).
 	f.set_leg(GameFrontend.LEG_LOAD_COOKIE_JAR,
 			func() -> void: NovaWorldClient.create_cookie_jar(LaunchFlags.working_dir()))
-	f.set_leg(GameFrontend.LEG_SAVE_COOKIE_JAR, func() -> void: NovaWorldClient.save_cookie_jar())
+	f.set_leg(GameFrontend.LEG_SAVE_COOKIE_JAR, func() -> void: NovaWorldClient.destroy_menu_browser())
 	# The mission table's high scores to hiscore.txt in the working directory (engine
 	# runtime/mission/mission_catalog.h HighScoreTable).
 	f.set_leg(GameFrontend.LEG_SAVE_HIGH_SCORES,

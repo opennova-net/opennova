@@ -1,26 +1,19 @@
 class_name PreGameMenuPresenter
 extends Node
 
-## The join screen: a join runs on its own screen (pre.mnu PRE_GAME_MENU) until
-## the host starts the game, not under the loading screen. The status line the
-## join stands at fills the MESSAGES box; a failure parks the screen with the
-## connection's reason text and only Cancel; the game start hands over to the
-## loading screen. A discovered session whose flag word offers a choice opens
-## the choice panels (GAME_PASSWORD, SPECTATE, the shared TEAM_PASSWORD) that
-## ACCEPT walks and BACK abandons. The panel table, the walk and the status
-## lines are the engine's (inmatch/pre_game_menu.h, read through
-## JoinScreenStatus); this presenter only renders them and reports Cancel and
-## the committed choice.
+## The join screen's device half: a join runs on its own screen (pre.mnu
+## PRE_GAME_MENU) until the host starts the game, not under the loading screen.
+## The screen is the engine's PreGameController (inmatch/pre_game_controller.h
+## over inmatch/pre_game_menu.h): the status line in MESSAGES, the failure's
+## reason with only Cancel, the choice panels (GAME_PASSWORD, SPECTATE, the
+## shared TEAM_PASSWORD) that ACCEPT walks and BACK abandons, and the game
+## start's handoff. This node mounts the frame on its own layer, pumps it, hands
+## the controller the followed join's status each frame, and reports Cancel, the
+## committed choice and the start.
 
 const MENU_FILE := "pre.mnu"
 const MENU_SCREEN := "PRE_GAME_MENU"
 const MESSAGES := "MESSAGES"
-const ABORT_CANCEL := "ABORT_CANCEL"
-const BACK := "BACK"
-const ACCEPT := "ACCEPT"
-const GAME_PASSWORD := "GAME_PASSWORD"
-const SPECTATE := "SPECTATE"
-const TEAM_PASSWORD := "TEAM_PASSWORD"
 
 ## The player pressed Cancel or BACK (or ESC): the join is abandoned.
 signal cancelled
@@ -34,12 +27,9 @@ var _layer: CanvasLayer = null
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
+# The join's status source while the controller follows it.
 var _world: GameWorld = null
-var _panel := JoinScreenStatus.PANEL_PROGRESS
-# The discovered flag word the choice walks.
-var _choice_flags := 0
-# The game start's status line shows for one frame before the handoff.
-var _starting_shown := false
+var _controller: PreGameController = null
 
 
 ## Open the screen over `owner` (its own CanvasLayer), reading pre.mnu from
@@ -54,16 +44,18 @@ func open(root: ResourceRoot, owner: Node) -> bool:
 		owner.add_child(_layer)
 	var surface := MenuFrameSurface.open_surface(root, _layer, null, MENU_FILE, MENU_SCREEN,
 			"PreGameMenu", "PreGameMenuPresenter", _on_frame_gui_input,
-			func(driver: MenuDriver) -> void:
-				_register_text_tables(root)
-				driver.widget_activated.connect(_on_widget_activated))
+			func(_built: MenuDriver) -> void: _register_text_tables(root))
 	if surface == null:
 		return false
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
-	_starting_shown = false
-	show_progress("")
+	_controller = PreGameController.new()
+	_controller.setup(_driver)
+	_controller.cancel_requested.connect(cancel)
+	_controller.choice_committed.connect(choice_committed.emit)
+	# The open: the progress panel, an empty status line.
+	_driver.claim_screen(_controller)
 	# The menu's pump runs every frame the screen is up (_process).
 	set_process(true)
 	return true
@@ -77,31 +69,30 @@ func is_open() -> bool:
 ## game start hands over (game_starting) after showing for one frame.
 func follow(world: GameWorld) -> void:
 	_world = world
+	if _controller != null:
+		_controller.follow(world != null)
 
 
 ## The join's progress: the status line with Cancel.
 func show_progress(text: String) -> void:
-	_set_panel(JoinScreenStatus.PANEL_PROGRESS)
-	_set_message(text)
+	if _controller != null:
+		_controller.show_progress(text)
 
 
 ## A failed join: the reason with Cancel only, until the player leaves.
 func show_failure(text: String) -> void:
 	_world = null
-	_set_panel(JoinScreenStatus.PANEL_ERROR)
-	_set_message(text)
+	if _controller != null:
+		_controller.show_failure(text)
 
 
 ## The join machine's choice: the first panel the session's flag word asks for
 ## (engine pre_game_entry_panel carries the witness). False when the word offers
 ## no choice.
 func show_choice(server_flags: int) -> bool:
-	var panel_state := JoinScreenStatus.entry_panel(server_flags, false)
-	if panel_state == JoinScreenStatus.PANEL_PROGRESS:
+	if _controller == null or not _controller.show_choice(server_flags):
 		return false
 	_world = null
-	_choice_flags = server_flags
-	_set_panel(panel_state)
 	return true
 
 
@@ -109,20 +100,8 @@ func show_choice(server_flags: int) -> bool:
 ## screen to its progress panel and reports the three controls (engine
 ## pre_game_accept carries the witness).
 func accept() -> void:
-	var step := JoinScreenStatus.accept_step(_panel, _choice_flags, _is_checked(SPECTATE), false)
-	if step == JoinScreenStatus.ACCEPT_NONE:
-		return
-	if step == JoinScreenStatus.ACCEPT_ABORT:
-		cancel()
-		return
-	if step != JoinScreenStatus.ACCEPT_COMMIT:
-		_set_panel(step)
-		return
-	var game_password := _widget_text(GAME_PASSWORD)
-	var spectate := _is_checked(SPECTATE)
-	var team_password := _widget_text(TEAM_PASSWORD)
-	_set_panel(JoinScreenStatus.PANEL_PROGRESS)
-	choice_committed.emit(game_password, spectate, team_password)
+	if _controller != null:
+		_controller.accept()
 
 
 ## The Cancel button's action (ESC included).
@@ -134,6 +113,8 @@ func cancel() -> void:
 func close() -> void:
 	set_process(false)
 	_world = null
+	if _driver != null:
+		_driver.release_screen()
 	if _frame != null and is_instance_valid(_frame):
 		# The menu's pointer is the menu's alone (MenuFrameSurface.hide_frame).
 		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
@@ -143,10 +124,12 @@ func close() -> void:
 	_frame = null
 	_audio = null
 	_driver = null
+	_controller = null
 
 
+## The panel showing (JoinScreenStatus.PANEL_*).
 func panel() -> int:
-	return _panel
+	return _controller.panel() if _controller != null else JoinScreenStatus.PANEL_PROGRESS
 
 
 ## The screen's menu driver (the tests drive its controls; null while closed).
@@ -181,59 +164,18 @@ func _process(_delta: float) -> void:
 	var driver := _driver
 	if driver != null:
 		driver.pump_mouse()
-	if _world == null or _panel != JoinScreenStatus.PANEL_PROGRESS:
-		return
-	if _starting_shown:
-		_world = null
-		game_starting.emit()
+	var controller := _controller
+	if _world == null or controller == null or not controller.is_following():
 		return
 	var status: JoinScreenStatus = _world.get_join_screen_status()
-	if status == null:
-		return
-	_set_message(status.message_text(Strings.get_table(Strings.TABLE_GAMEERR)))
-	_starting_shown = status.get_stage() == JoinScreenStatus.STAGE_STARTING
-
-
-func _set_panel(panel_state: int) -> void:
-	_panel = panel_state
-	if _driver == null:
-		return
-	for i in JoinScreenStatus.window_count():
-		var id := _driver.widget_id(JoinScreenStatus.window_name(i))
-		if id >= 0:
-			_driver.set_widget_shown(id, JoinScreenStatus.panel_shows_window(panel_state, i))
-
-
-# The status line replaces the box's text; it never appends.
-func _set_message(text: String) -> void:
-	if _driver == null:
-		return
-	var id := _driver.widget_id(MESSAGES)
-	if id >= 0:
-		_driver.set_widget_text(id, text)
-
-
-# ACCEPT walks the choice; BACK and ABORT_CANCEL both abandon the join (engine
-# inmatch/pre_game_menu.h pre_game_accept carries the witness).
-func _on_widget_activated(_id: int, widget_name: String) -> void:
-	if widget_name.nocasecmp_to(ABORT_CANCEL) == 0 or widget_name.nocasecmp_to(BACK) == 0:
-		cancel()
-	elif widget_name.nocasecmp_to(ACCEPT) == 0:
-		accept()
-
-
-func _widget_text(widget_name: String) -> String:
-	if _driver == null:
-		return ""
-	var id := _driver.widget_id(widget_name)
-	return String(_driver.get_widget_text(id)) if id >= 0 else ""
-
-
-func _is_checked(widget_name: String) -> bool:
-	if _driver == null:
-		return false
-	var id := _driver.widget_id(widget_name)
-	return id >= 0 and bool(_driver.is_widget_checked(id))
+	var text := ""
+	var stage: int = JoinScreenStatus.STAGE_JOINING
+	if status != null:
+		text = status.message_text(Strings.get_table(Strings.TABLE_GAMEERR))
+		stage = status.get_stage()
+	if controller.follow_frame(status != null, stage, text) == PreGameController.FOLLOW_HAND_OFF:
+		_world = null
+		game_starting.emit()
 
 
 func _on_frame_gui_input(event: InputEvent) -> void:

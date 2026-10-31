@@ -23,8 +23,6 @@
 #include <runtime/inmatch/role_feeds.h> // deploy_table_zones
 #include <base/title/title.h>
 #include <runtime/inmatch/stat_screen_feed.h>
-#include <runtime/inmatch/vehicle_menu.h> // the ITEM_DISPLAY preview's view
-#include <runtime/world/occlusion.h>      // render_matrix_from_pose
 #include <runtime/menu/menu_commands.h>
 #include <runtime/menu/menu_credits.h>
 #include <runtime/world/deploy_screen_feed.h>
@@ -320,7 +318,15 @@ public:
 
 MenuDriver::MenuDriver() : seam_(std::make_unique<FrameSeam>(this)) {
 	runtime_.set_sink([this](const opennova::menu::MenuEvent &p_event) {
+		// This device half relays every event (the shell's handling among its listeners); the
+		// screen controller holding the document hears it after, while it still holds it: an
+		// event answered with another open is not the new document's, and the open's own events
+		// are its controller's open() (its INIT).
+		opennova::menu::MenuScreenController *const holder = opening_ ? nullptr : wired_;
+		const uint64_t serial = open_serial_;
 		on_runtime_event_(p_event);
+		if (holder != nullptr && holder == wired_ && serial == open_serial_)
+			holder->on_event(runtime_, p_event);
 	});
 	// The single-player screen's controls and the Mods list's descriptions, the engine's name
 	// sets (menu_commands.h), as the editor's Try mode sets them (editor/preview/menu_try.cpp).
@@ -330,7 +336,38 @@ MenuDriver::MenuDriver() : seam_(std::make_unique<FrameSeam>(this)) {
 	mods_.set_descriptions(opennova::menu::menu_name_set(opennova::menu::MenuNameSet::ModDescriptions));
 }
 
-MenuDriver::~MenuDriver() = default;
+MenuDriver::~MenuDriver() {
+	runtime_.set_sink(nullptr);
+	release_wired_();
+}
+
+void MenuDriver::release_wired_() {
+	if (wired_ == nullptr) return;
+	opennova::menu::MenuScreenController *const released = wired_;
+	wired_ = nullptr;
+	released->close(runtime_);
+}
+
+bool MenuDriver::claim_screen(const Ref<MenuScreenBinding> &p_screen) {
+	opennova::menu::MenuScreenController *const controller =
+			p_screen.is_valid() ? p_screen->screen_controller() : nullptr;
+	if (controller == nullptr || runtime_.document() == nullptr) return false;
+	if (wired_ != controller) release_wired_();
+	released_ = claimed_;
+	claimed_ = p_screen;
+	wired_ = controller;
+	controller->open(runtime_, runtime_.menu_file(), runtime_.current_screen());
+	return true;
+}
+
+void MenuDriver::release_screen() {
+	// A controller may ask its own release from inside its event (a CANCEL that closes the
+	// screen): its binding stays alive until the next claim or release, past the dispatch on the
+	// stack.
+	released_ = claimed_;
+	claimed_.unref();
+	release_wired_();
+}
 
 MenuFrame *MenuDriver::frame_() const {
 	return frame_id_.is_null() ? nullptr
@@ -404,8 +441,16 @@ bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<Resource
 	// The STARTUP label's line (D-MNU-76): the launch's game and its installed release, ONE's
 	// build and the protocol it speaks (LaunchFlags::version_line).
 	runtime_.set_version_line(to_std(LaunchFlags::version_line()));
-	return runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
+	++open_serial_;
+	opening_ = true;
+	const bool shown = runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
 			to_std(p_menu_file), to_std(p_target_screen));
+	opening_ = false;
+	// The previous document's controller lets go: the embedder claims this one for its own.
+	released_ = claimed_;
+	claimed_.unref();
+	release_wired_();
+	return shown;
 }
 
 PackedStringArray MenuDriver::get_screen_names() const {
@@ -842,9 +887,6 @@ bool MenuDriver::deploy_map_moved() {
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
 void MenuDriver::spin_cycle(int p_id, int p_delta) { runtime_.spin_cycle(p_id, p_delta); }
 
-void MenuDriver::enable_class_rows(int p_id, int p_class_allow_mask) {
-	opennova::menu::enable_class_rows(runtime_, p_id, static_cast<uint32_t>(p_class_allow_mask));
-}
 String MenuDriver::spin_value_attr(int p_id) const { return item_value(p_id, selected_row(p_id)); }
 
 bool MenuDriver::dispatch_action_row(const Ref<MnuActionRow> &p_action) {
@@ -1006,24 +1048,6 @@ bool MenuDriver::request_expansion(const String &p_name, const String &p_current
 
 String MenuDriver::take_expansion_reload() { return to_gd(flow_.take_expansion_reload()); }
 
-void MenuDriver::seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows) {
-	host_dialog_.seed(runtime_, mission_choices(p_rows), ResourceRoot::session_title(root_));
-}
-
-void MenuDriver::add_host_missions(const Ref<RtxtStringFile> &p_text) {
-	host_dialog_.add_selected(runtime_, game_text_lookup(p_text));
-}
-
-PackedStringArray MenuDriver::selected_host_missions() const {
-	return to_gd_strings(host_dialog_.selected_missions());
-}
-
-PackedInt32Array MenuDriver::selected_host_launch_options() const {
-	PackedInt32Array out;
-	for (const int32_t option : host_dialog_.selected_launch_options()) out.push_back(option);
-	return out;
-}
-
 bool MenuDriver::is_front_options_screen(const String &p_screen) {
 	return opennova::menu::OptionsScreen::is_front_screen(to_std(p_screen));
 }
@@ -1138,51 +1162,6 @@ PackedInt32Array MenuDriver::player_info_nationality_rows() const {
 	return rows;
 }
 
-namespace {
-// A Godot length as 16.16, truncated (the engine's box words).
-int32_t preview_q16(real_t p_value) {
-	return static_cast<int32_t>(static_cast<double>(p_value) * 65536.0);
-}
-} // namespace
-
-Vector3 MenuDriver::vehicle_preview_eye(const AABB &p_bounds) {
-	const Vector3 lo = p_bounds.position;
-	const Vector3 hi = p_bounds.position + p_bounds.size;
-	const int32_t box_min[3] = {preview_q16(lo.x), preview_q16(lo.y), preview_q16(lo.z)};
-	const int32_t box_max[3] = {preview_q16(hi.x), preview_q16(hi.y), preview_q16(hi.z)};
-	const opennova::inmatch::VehiclePreviewView view =
-			opennova::inmatch::vehicle_preview_view(box_min, box_max, 0);
-	// Render float (x south, y up, z east) to Godot (x east, y up, z south).
-	return Vector3(view.eye[2], view.eye[1], view.eye[0]);
-}
-
-Basis MenuDriver::vehicle_preview_model_basis(int64_t p_tick_ms) {
-	const int32_t zero[3] = {0, 0, 0};
-	const opennova::inmatch::VehiclePreviewView view = opennova::inmatch::vehicle_preview_view(
-			zero, zero, static_cast<uint32_t>(p_tick_ms));
-	const opennova::world::RenderMatrix pose = opennova::world::render_matrix_from_pose(
-			zero, static_cast<int32_t>(view.yaw_bam), 0, 0);
-	// The pose is row-major for row vectors (v' = v M), so its column-vector basis is M's
-	// transpose; the render-to-Godot axis map swaps x and z on both sides.
-	const int swap[3] = {2, 1, 0};
-	Basis basis;
-	for (int i = 0; i < 3; ++i)
-		for (int j = 0; j < 3; ++j)
-			basis.rows[i][j] = pose.m[4 * swap[j] + swap[i]];
-	return basis;
-}
-
-float MenuDriver::vehicle_preview_fov() {
-	return opennova::inmatch::VehiclePreviewView().fov_deg;
-}
-
-Color MenuDriver::vehicle_preview_clear_color() {
-	const uint32_t argb = opennova::inmatch::kVehiclePreviewClear;
-	return Color(static_cast<float>((argb >> 16) & 0xFFu) / 255.0f,
-			static_cast<float>((argb >> 8) & 0xFFu) / 255.0f,
-			static_cast<float>(argb & 0xFFu) / 255.0f);
-}
-
 Ref<AvatarComboRow> MenuDriver::player_info_avatar_combo(const Ref<AvatarDatabase> &p_db) const {
 	if (p_db.is_null()) return {};
 	const auto *combo = avatars_.selected_combo(runtime_, p_db->native_file());
@@ -1216,14 +1195,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("player_info_avatar_division"), &MenuDriver::player_info_avatar_division);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_preview_changed"), &MenuDriver::player_info_avatar_preview_changed);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_combo", "db"), &MenuDriver::player_info_avatar_combo);
-	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_eye", "bounds"),
-			&MenuDriver::vehicle_preview_eye);
-	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_model_basis", "tick_ms"),
-			&MenuDriver::vehicle_preview_model_basis);
-	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_fov"),
-			&MenuDriver::vehicle_preview_fov);
-	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_clear_color"),
-			&MenuDriver::vehicle_preview_clear_color);
 	ClassDB::bind_method(D_METHOD("preview_player_info_voice", "db", "voice"), &MenuDriver::preview_player_info_voice);
 	ClassDB::bind_method(D_METHOD("clear_mission_rows"), &MenuDriver::clear_mission_rows);
 	ClassDB::bind_method(D_METHOD("seed_mission_list", "id", "rows"), &MenuDriver::seed_mission_list);
@@ -1243,20 +1214,12 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request_expansion", "name", "current", "packed"), &MenuDriver::request_expansion);
 	ClassDB::bind_method(D_METHOD("has_pending_expansion_reload"), &MenuDriver::has_pending_expansion_reload);
 	ClassDB::bind_method(D_METHOD("take_expansion_reload"), &MenuDriver::take_expansion_reload);
-	ClassDB::bind_method(D_METHOD("seed_host_pool", "rows"), &MenuDriver::seed_host_pool);
-	ClassDB::bind_method(D_METHOD("filter_host_missions"), &MenuDriver::filter_host_missions);
-	ClassDB::bind_method(D_METHOD("add_host_missions", "text"), &MenuDriver::add_host_missions);
-	ClassDB::bind_method(D_METHOD("remove_host_missions"), &MenuDriver::remove_host_missions);
-	ClassDB::bind_method(D_METHOD("can_start_host"), &MenuDriver::can_start_host);
-	ClassDB::bind_method(D_METHOD("selected_host_missions"), &MenuDriver::selected_host_missions);
-	ClassDB::bind_method(D_METHOD("toggle_host_mission_switch", "row"),
-			&MenuDriver::toggle_host_mission_switch);
-	ClassDB::bind_method(D_METHOD("selected_host_launch_options"),
-			&MenuDriver::selected_host_launch_options);
 	ClassDB::bind_method(D_METHOD("prepare_options", "profiles"), &MenuDriver::prepare_options);
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
 	ClassDB::bind_method(D_METHOD("apply_options_policy", "profiles"), &MenuDriver::apply_options_policy);
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
+	ClassDB::bind_method(D_METHOD("claim_screen", "screen"), &MenuDriver::claim_screen);
+	ClassDB::bind_method(D_METHOD("release_screen"), &MenuDriver::release_screen);
 	ClassDB::bind_method(D_METHOD("wire_commands", "in_mission"), &MenuDriver::wire_commands);
 	ClassDB::bind_method(D_METHOD("screen_command", "screen", "name"), &MenuDriver::screen_command);
 	ClassDB::bind_method(D_METHOD("command_owner"), &MenuDriver::command_owner);
@@ -1414,8 +1377,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("activate", "id"), &MenuDriver::activate);
 	ClassDB::bind_method(D_METHOD("spin_cycle", "id", "delta"), &MenuDriver::spin_cycle);
 	ClassDB::bind_method(D_METHOD("is_item_enabled", "id", "row"), &MenuDriver::is_item_enabled);
-	ClassDB::bind_method(D_METHOD("enable_class_rows", "id", "class_allow_mask"),
-			&MenuDriver::enable_class_rows);
 	ClassDB::bind_method(D_METHOD("spin_value_attr", "id"), &MenuDriver::spin_value_attr);
 	ClassDB::bind_method(D_METHOD("dispatch_action_row", "action"),
 			&MenuDriver::dispatch_action_row);

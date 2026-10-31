@@ -34,6 +34,15 @@ BrowserNames &process_browser_names() {
 	return *names;
 }
 
+void browser_menu_created(BrowserNames &names) {
+	names.clear();
+}
+
+void browser_menu_destroyed(BrowserNames &names, BrowserCache &cache) {
+	names.clear();
+	cache.clear();
+}
+
 // [orig: CNapiWinsock_ResolveHostAsync @0x667460 - inet_addr @0x66747E, the list @0x667495, the
 //  lookup's thread @0x667550; CNapiWinsock_ResolveHostThread @0x666C70 - the list's add @0x666C92]
 bool browser_resolve(const std::string &host, const BrowserLookup &lookup,

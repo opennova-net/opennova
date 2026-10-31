@@ -2386,6 +2386,18 @@ add_executable(loadout_screen_test menu/loadout_screen_test.cpp)
 target_link_libraries(loadout_screen_test PRIVATE opennova_runtime)
 add_test(NAME loadout_screen COMMAND loadout_screen_test)
 
+# The in-game armory's WEAPON screen (menu/armory_screen.h) driven headless over the runtime's store
+# and a faked host: the INIT's class spin, the on-show's order (the class resolve, the rows the mask
+# enables, the class pair, the stage under the team gate, the populate, the readout and the icons),
+# the class flip's page memory, the picks, a banned grenade, ACCEPT and CANCEL past the press latch,
+# the empty and missing tables, the authored fixtures/game/weapon.mnu's first-open weight, and a
+# DFX2 title's DEATH screen picker (DFX2-41) over another screen's runtime.
+add_executable(armory_screen_test menu/armory_screen_test.cpp)
+target_link_libraries(armory_screen_test PRIVATE opennova_runtime)
+target_include_directories(armory_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(armory_screen_test PRIVATE cxx_std_17)
+add_test(NAME armory_screen COMMAND armory_screen_test)
+
 # The loadout dialogs' list and state model (menu/loadout_screen.h's list fill,
 # reselects, clip count and accept pick; menu/player_info_loadout.h): the rows
 # under NONE, the restore's catalog rows, the handlers' picks, the kit page's
@@ -2416,6 +2428,13 @@ add_executable(command_map_screen_test menu/command_map_screen_test.cpp)
 target_link_libraries(command_map_screen_test PRIVATE opennova_runtime)
 target_compile_features(command_map_screen_test PRIVATE cxx_std_17)
 add_test(NAME command_map_screen COMMAND command_map_screen_test)
+# The CMAP screen's controller (menu/command_map_controller.h, D-HUD-19) over an authored cmap.mnu and a
+# fake host: the show's order, every registered control's callback, the tab radios' rebinding and gates,
+# the waypoint name dialog and the delete button.
+add_executable(command_map_controller_test menu/command_map_controller_test.cpp)
+target_link_libraries(command_map_controller_test PRIVATE opennova_runtime)
+target_compile_features(command_map_controller_test PRIVATE cxx_std_17)
+add_test(NAME command_map_controller COMMAND command_map_controller_test)
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4448,6 +4467,13 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# The LAN multiplayer screens' controller (inmatch/lan_multiplayer_menu.h, mp.mnu, the shell's "lan"
+# delegate) headless over the menu runtime and a fake host: the LAN screen's activation, the search
+# state, the list's keep-selection rule and the join, the host screen's pool, rotation, gate and START.
+add_executable(lan_multiplayer_menu_test npruntime/lan_multiplayer_menu_test.cpp)
+target_link_libraries(lan_multiplayer_menu_test PRIVATE opennova_runtime)
+target_include_directories(lan_multiplayer_menu_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME lan_multiplayer_menu COMMAND lan_multiplayer_menu_test)
 # The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7): the cfg table's
 # title, dfx2.exe's caps, score table seeds, linger, deploy protection and its want of a revive.
 add_executable(npruntime_title_host_rules_test npruntime/title_host_rules_test.cpp)
@@ -5686,7 +5712,8 @@ add_executable(netsim_client_replica_census_test netsim/client_replica_census_te
 target_link_libraries(netsim_client_replica_census_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME netsim_client_replica_census COMMAND netsim_client_replica_census_test)
 # The vehicle screen (D-NET-907): the first open's C2S 0x42, the poll's per-frame retry
-# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick.
+# and 64-frame cadence, the list over the bay mask and the S2C 0x70 rows, the C2S 0x40 pick,
+# and the screen's controller over the menu runtime (inmatch/vehicle_menu_controller.h).
 add_executable(npruntime_vehicle_menu_test npruntime/vehicle_menu_test.cpp)
 target_link_libraries(npruntime_vehicle_menu_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_vehicle_menu COMMAND npruntime_vehicle_menu_test)
