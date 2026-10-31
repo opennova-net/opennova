@@ -1132,8 +1132,10 @@ struct HudFrameState {
 	HudConnectStatus connect_status; // element_connect_status
 	HudStartTimer start_timer;       // element_start_timer
 	HudExpPointsState exp_points;    // element_exp_points (DFX2-36)
-	// The title the session runs as (inmatch::RoleView::title): the HUD's own variants by its
-	// hud_* fields (Title::hud_lone_gunner_panel, ...). Null draws Jointops.exe's HUD.
+	// The title the session runs as (inmatch::RoleView::title; before a session's role facts, and
+	// in the editor's HUD preview, its root's title): the HUD's own variants by its hud_* fields
+	// (Title::hud_lone_gunner_panel, ...). Null draws Jointops.exe's variants but none of a title's
+	// own tables: the map legend (Title::hud_map_legend) draws its box alone.
 	const Title *title = nullptr;
 	// The local player is a lone gunner (world::local_rides_solo_turret): the lone-gunner panel's
 	// fact (element_lone_gunner_panel, DFX2-91).

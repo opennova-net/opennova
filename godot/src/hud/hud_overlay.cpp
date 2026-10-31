@@ -562,6 +562,10 @@ void HudOverlay::load_crosshair_texture_() {
 void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root,
 		bool p_full_arm) {
 	root_ = p_root;
+	// The title a session over the root runs as (ResourceRoot::session_title: the game's launch
+	// title, the editor HUD preview's project's), whose HUD variants draw until set_role_facts
+	// hands the session's own each frame; none with no root.
+	state_.title = p_root.is_valid() ? &ResourceRoot::session_title(p_root) : nullptr;
 	layout_ = HudLayout{};
 	crosshair_alpha_mode_ = false; // the HUD init loads the crosshair in colour mode
 	textures_ = {};

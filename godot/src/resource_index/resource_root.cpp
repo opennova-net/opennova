@@ -454,8 +454,10 @@ Error ResourceRoot::mount_runtime_archives_(const String &path, const String &ex
 	return OK;
 }
 
-Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files) {
+Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files,
+		const String &game_code) {
 	expansion_ = String();
+	game_code_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
 	// This root's caches keyed to the old mount dropped; the global epoch stands, so another root's
@@ -471,6 +473,7 @@ Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> file
 		return ERR_INVALID_PARAMETER;
 	}
 	root_dir_ = String(opennova::ResourceIndex::kSourceRootDir);
+	game_code_ = game_code;
 	last_error_ = String();
 	mount_kind_ = MountKind::Source;
 	return OK;
