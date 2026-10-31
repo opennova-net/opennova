@@ -407,7 +407,9 @@ int main() {
 		lower.set("nwact", nwact);
 		check(consume_activation(lower, info, &chains, machine, store),
 				"the NWACT is found case-insensitively");
-		// No administrator: both writes refused, -1, the record's key as it was, the jar cleared.
+		// A store that takes neither write (the machine key and its VirtualStore copy both refuse
+		// it; a user whose token is not elevated has the copy take it, tests/novacrypto): -1, the
+		// record's key as it was, the jar cleared.
 		refuse = true;
 		writes = 0;
 		jar.set("NWACT", nwact);

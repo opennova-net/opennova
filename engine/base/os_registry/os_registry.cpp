@@ -33,6 +33,7 @@ struct KeyPath {
 
 constexpr const char *kRootNames[] = { "HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER",
 	"HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG", "HKEY_DYN_DATA" };
+constexpr int kLocalMachine = 2; // kRootNames' HKEY_LOCAL_MACHINE
 
 bool split_key_path(const std::string &key, KeyPath &out) {
 	const std::size_t slash = key.find('\\');
@@ -57,37 +58,105 @@ HKEY root_handle(int root) {
 		HKEY_USERS, HKEY_CURRENT_CONFIG, HKEY_DYN_DATA };
 	return kRoots[root];
 }
-#endif
 
-} // namespace
-
-bool os_registry_read_string(const std::string &key, const std::string &value, std::size_t capacity,
-		const std::string &stand_in, std::string &out) {
-	KeyPath path;
-	if (!split_key_path(key, path) || value.empty() || capacity == 0)
-		return false;
-#if defined(_WIN32)
-	(void)stand_in;
+// The REG_SZ `value` under `path`, opened in the registry view `view` (KEY_WOW64_32KEY, or 0 for
+// the path as named), into `out` to its first NUL: ERROR_SUCCESS; ERROR_FILE_NOT_FOUND where the
+// key or the value is absent; another error where the value is no string or is longer than
+// `capacity`. `out` is set only on ERROR_SUCCESS.
+LONG read_value(const KeyPath &path, REGSAM view, const std::string &value, std::size_t capacity,
+		std::string &out) {
 	HKEY handle = nullptr;
-	if (RegOpenKeyExA(root_handle(path.root), path.subkey.c_str(), 0,
-				KEY_QUERY_VALUE | KEY_WOW64_32KEY, &handle) != ERROR_SUCCESS)
-		return false;
+	LONG status = RegOpenKeyExA(
+			root_handle(path.root), path.subkey.c_str(), 0, KEY_QUERY_VALUE | view, &handle);
+	if (status != ERROR_SUCCESS)
+		return status;
 	std::vector<char> data(capacity, '\0');
 	DWORD type = 0;
 	DWORD size = static_cast<DWORD>(capacity);
-	const LONG queried = RegQueryValueExA(
+	status = RegQueryValueExA(
 			handle, value.c_str(), nullptr, &type, reinterpret_cast<BYTE *>(data.data()), &size);
 	RegCloseKey(handle);
-	if (queried != ERROR_SUCCESS || type != REG_SZ)
-		return false;
+	if (status != ERROR_SUCCESS)
+		return status;
+	if (type != REG_SZ)
+		return ERROR_INVALID_DATA;
 	// The stored text to its NUL (the value as retail's buffer holds it).
 	std::size_t length = 0;
 	while (length < size && data[length] != '\0')
 		++length;
 	out.assign(data.data(), length);
-	return true;
+	return ERROR_SUCCESS;
+}
+
+// `stored` and its NUL set as the REG_SZ `value` under `path` in the view `view`, the missing keys
+// created: ERROR_SUCCESS, or the create's or the set's error (ERROR_ACCESS_DENIED where the token
+// may not write there).
+LONG write_value(
+		const KeyPath &path, REGSAM view, const std::string &value, const std::string &stored) {
+	HKEY handle = nullptr;
+	DWORD disposition = 0;
+	LONG status = RegCreateKeyExA(root_handle(path.root), path.subkey.c_str(), 0, nullptr, 0,
+			KEY_ALL_ACCESS | view, nullptr, &handle, &disposition);
+	if (status != ERROR_SUCCESS)
+		return status;
+	status = RegSetValueExA(handle, value.c_str(), 0, REG_SZ,
+			reinterpret_cast<const BYTE *>(stored.c_str()), static_cast<DWORD>(stored.size() + 1));
+	RegCloseKey(handle);
+	return status;
+}
+#endif
+
+// True where this process's token is elevated (TokenElevation); false where it is not, where that
+// cannot be told, and off Windows.
+bool token_elevated() {
+#if defined(_WIN32)
+	HANDLE token = nullptr;
+	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+		return false;
+	TOKEN_ELEVATION elevation{};
+	DWORD size = 0;
+	const BOOL queried =
+			GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size);
+	CloseHandle(token);
+	return queried && elevation.TokenIsElevated != 0;
 #else
-	(void)path;
+	return false;
+#endif
+}
+
+} // namespace
+
+std::string os_registry_virtual_store_key(const std::string &key, bool elevated) {
+	static constexpr std::string_view kSoftware = "Software";
+	KeyPath path;
+	if (elevated || !split_key_path(key, path) || path.root != kLocalMachine ||
+			!strutil::starts_with_icase(path.subkey, kSoftware))
+		return {};
+	const std::string rest = path.subkey.substr(kSoftware.size());
+	if (!rest.empty() && rest.front() != '\\')
+		return {};
+	return "HKEY_CURRENT_USER\\Software\\Classes\\VirtualStore\\MACHINE\\SOFTWARE\\WOW6432Node" +
+			rest;
+}
+
+bool os_registry_read_string_virtualized(const std::string &key, const std::string &copy_key,
+		const std::string &value, std::size_t capacity, const std::string &stand_in,
+		std::string &out) {
+	KeyPath path;
+	if (!split_key_path(key, path) || value.empty() || capacity == 0)
+		return false;
+#if defined(_WIN32)
+	(void)stand_in;
+	// The copy's value first; the machine key's only where the copy holds none.
+	KeyPath copy;
+	if (split_key_path(copy_key, copy)) {
+		const LONG status = read_value(copy, 0, value, capacity, out);
+		if (status != ERROR_FILE_NOT_FOUND)
+			return status == ERROR_SUCCESS;
+	}
+	return read_value(path, KEY_WOW64_32KEY, value, capacity, out) == ERROR_SUCCESS;
+#else
+	(void)copy_key;
 	std::string text;
 	std::string error;
 	if (stand_in.empty() || !io::read_file_text(stand_in, text, error))
@@ -102,8 +171,8 @@ bool os_registry_read_string(const std::string &key, const std::string &value, s
 #endif
 }
 
-bool os_registry_write_string(const std::string &key, const std::string &value,
-		const std::string &text, const std::string &stand_in) {
+bool os_registry_write_string_virtualized(const std::string &key, const std::string &copy_key,
+		const std::string &value, const std::string &text, const std::string &stand_in) {
 	KeyPath path;
 	if (!split_key_path(key, path) || value.empty())
 		return false;
@@ -111,20 +180,29 @@ bool os_registry_write_string(const std::string &key, const std::string &value,
 	const std::string stored = text.substr(0, text.find('\0'));
 #if defined(_WIN32)
 	(void)stand_in;
-	HKEY handle = nullptr;
-	DWORD disposition = 0;
-	if (RegCreateKeyExA(root_handle(path.root), path.subkey.c_str(), 0, nullptr, 0,
-				KEY_ALL_ACCESS | KEY_WOW64_32KEY, nullptr, &handle, &disposition) != ERROR_SUCCESS)
-		return false;
-	const LONG set = RegSetValueExA(handle, value.c_str(), 0, REG_SZ,
-			reinterpret_cast<const BYTE *>(stored.c_str()), static_cast<DWORD>(stored.size() + 1));
-	RegCloseKey(handle);
-	return set == ERROR_SUCCESS;
+	LONG status = write_value(path, KEY_WOW64_32KEY, value, stored);
+	// A write the machine key refuses goes to the copy.
+	KeyPath copy;
+	if (status == ERROR_ACCESS_DENIED && split_key_path(copy_key, copy))
+		status = write_value(copy, 0, value, stored);
+	return status == ERROR_SUCCESS;
 #else
-	(void)path;
+	(void)copy_key;
 	std::string error;
 	return !stand_in.empty() && io::write_file_atomic(stand_in, stored.data(), stored.size(), error);
 #endif
+}
+
+bool os_registry_read_string(const std::string &key, const std::string &value, std::size_t capacity,
+		const std::string &stand_in, std::string &out) {
+	return os_registry_read_string_virtualized(key,
+			os_registry_virtual_store_key(key, token_elevated()), value, capacity, stand_in, out);
+}
+
+bool os_registry_write_string(const std::string &key, const std::string &value,
+		const std::string &text, const std::string &stand_in) {
+	return os_registry_write_string_virtualized(
+			key, os_registry_virtual_store_key(key, token_elevated()), value, text, stand_in);
 }
 
 } // namespace opennova

@@ -2,12 +2,15 @@
 // docs/titles/dfx2-vs-jo-re.md section 9.7 (the wire key of a serial, a
 // CDKIIDEXP1 under the empty chain, the nested NWACT for a sample NWPSSK and the
 // boot-only one), the hardware mix's direction and inverse, the client's
-// reading of an NWACT, and the LAN host's join codes 10 to 13.
+// reading of an NWACT (over the registry, on Windows, as a user whose token is
+// not elevated), and the LAN host's join codes 10 to 13.
 
+#include <base/os_registry/os_registry.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/protocol/protocol.h>
 #include <net/novacrypto/pubcrypto.h>
 
+#include "common/scratch_registry.h"
 #include "common/test_expect.h"
 
 #include <cstdint>
@@ -313,7 +316,9 @@ int registry_activation() {
 	TEST_EXPECT(cdkey::write_activation(
 						retried, dfx2_chains(), kNestedNwact, kFingerprint, once.store()) == 1);
 	TEST_EXPECT(once.writes == 2 && retried.keys.cdkiid == kWire);
-	// Both refused (no administrator): -1, the record's key and flag as they were.
+	// Both refused (a registry that takes the value nowhere: the machine key and, for a token that
+	// is not elevated, its VirtualStore copy too, registry_activation_virtualized): -1, the
+	// record's key and flag as they were.
 	MemoryStore refused;
 	refused.refuse_writes = 2;
 	cdkey::KeyInfo kept;
@@ -332,6 +337,42 @@ int registry_activation() {
 	TEST_EXPECT(before.status == -3 && before.keys.cdkiid == "BEFORE" && foreign.present);
 	return 0;
 }
+
+#if defined(_WIN32)
+// The activation of a user whose token is not elevated, over the registry (base/os_registry): the
+// machine key refuses the NWACT's write, its VirtualStore copy takes it, so the activation stands
+// (1) and the next boot read reads it back through the copy, as UAC's virtualization of stock
+// dfx2.exe's write and read does. Two keys under a scratch key stand for the machine key (readable,
+// not writable) and its copy; no NovaLogic key is touched.
+// [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe) - the write @0x411e88;
+//  CDKey_ReadRegistry @0x411b90 (dfx2.exe) - the read @0x411bfe]
+int registry_activation_virtualized() {
+	test_registry::ScratchKey scratch("cdkey");
+	TEST_EXPECT(scratch.deny_writes("machine"));
+	const std::string machine = scratch.path("machine");
+	const std::string copy = scratch.path("copy");
+	cdkey::KeyStore store;
+	store.read = [&machine, &copy](std::string &out) {
+		return opennova::os_registry_read_string_virtualized(
+				machine, copy, "CDKIID", 0x2000, "", out);
+	};
+	store.write = [&machine, &copy](const std::string &text) {
+		return opennova::os_registry_write_string_virtualized(machine, copy, "CDKIID", text, "");
+	};
+	cdkey::KeyInfo info;
+	TEST_EXPECT(
+			cdkey::write_activation(info, dfx2_chains(), kNestedNwact, kFingerprint, store) == 1);
+	TEST_EXPECT(info.keys.cdkiid == kWire);
+	std::string stored;
+	TEST_EXPECT(
+			opennova::os_registry_read_string_virtualized(copy, "", "CDKIID", 0x2000, "", stored) &&
+			stored == kNestedNwact);
+	cdkey::KeyInfo booted;
+	TEST_EXPECT(cdkey::read_registry(booted, dfx2_chains(), kFingerprint, store) == 1 &&
+			booted.keys.cdkiid == kWire);
+	return 0;
+}
+#endif
 
 int fingerprint_shape() {
 	TEST_EXPECT(cdkey::is_fingerprint(kFingerprint));
@@ -402,6 +443,9 @@ int main() {
 	rc |= activation_c_string();
 	rc |= registry_read();
 	rc |= registry_activation();
+#if defined(_WIN32)
+	rc |= registry_activation_virtualized();
+#endif
 	rc |= fingerprint_shape();
 	rc |= lan_join_codes();
 	if (rc == 0)

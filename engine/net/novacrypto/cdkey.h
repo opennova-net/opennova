@@ -143,8 +143,8 @@ struct KeyInfo {
 KeyInfo &process_key_info();
 
 // The registry value the record is kept in, as the two operations reach it: `read` gives the
-// stored text (false: none could be read), `write` stores one (false: refused, as an unprivileged
-// process's write to HKEY_LOCAL_MACHINE is).
+// stored text (false: none could be read), `write` stores one (false: refused, as a write the
+// machine key refuses is where no VirtualStore copy takes it, base/os_registry).
 struct KeyStore {
 	std::function<bool(std::string &)> read;
 	std::function<bool(const std::string &)> write;
