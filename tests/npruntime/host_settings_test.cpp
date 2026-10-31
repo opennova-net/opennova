@@ -458,6 +458,9 @@ int main(int argc, char** argv) {
     // (require_title_code), where the default title's words once stood in. The abort's handler
     // exits clean, so ctest reads the message (PASS_REGULAR_EXPRESSION).
     if (argc > 1 && std::string(argv[1]) == "--unknown-title") {
+#if defined(_MSC_VER)
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
         std::signal(SIGABRT, [](int) { std::_Exit(0); });
         (void)server_settings_title("nosuchgame");
         std::fputs("server_settings_title read a code no title has\n", stderr);

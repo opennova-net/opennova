@@ -717,6 +717,9 @@ int main(int argc, char **argv) {
 	// itself (require_title), where a default Title's 240 reveal ticks once stood in. The abort's
 	// handler exits clean, so ctest reads the message (PASS_REGULAR_EXPRESSION).
 	if (argc > 1 && std::string(argv[1]) == "--untitled-shroud") {
+#if defined(_MSC_VER)
+		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
 		std::signal(SIGABRT, [](int) { std::_Exit(0); });
 		mission::MissionKernel kernel;
 		RoleView untitled;
