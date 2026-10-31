@@ -768,7 +768,7 @@ void test_spinmap_projection_zoom_and_clip() {
 	map.big_zoom_q16 = 0x7A000;
 	CHECK(map.zoom_step(1, 0x80000) == 0x80000 && map.big_zoom_q16 == 0x7A000,
 			"the radar's zoom takes the title's cap with no map up");
-	map.cycle();
+	map.cycle(false);
 	CHECK(map.zoom_step(1, 0x80000) == 0x80000 && map.zoom_q16 == 0x80000,
 			"the big map's zoom takes it while a map mode is up");
 
