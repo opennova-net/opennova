@@ -979,7 +979,8 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data and server build",
+				StartCause::Update);
 		return;
 	}
 	if (machine->state != FleetMachineState::Ready) {
@@ -1017,7 +1018,8 @@ void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data and server build",
+				StartCause::Update);
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);
@@ -1051,9 +1053,11 @@ void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	// The owner's update: its slot let go and placed again at once (the next
-	// start takes the current trees), the machine's kind of move, no restart.
+	// start takes the current trees and the fleet's serve image), the machine's kind
+	// of move, no restart.
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data and server build",
+				StartCause::Update);
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);

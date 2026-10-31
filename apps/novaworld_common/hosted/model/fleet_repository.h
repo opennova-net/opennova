@@ -394,6 +394,10 @@ std::optional<SlotReport> slot_report_of(db::Database &db, int64_t server_id);
 // (`build`, the container the server's row names now, so a slot's earlier server never
 // answers for it). A server whose agent reported no build is not in it.
 std::map<int64_t, ServeBuild> running_builds_by_account(db::Database &db);
+// The ONE build a running server on serve image `image` says it runs (its own container's slot
+// row's, the newest report), the build a start on that image runs: an image is pinned by
+// digest, so every server on it runs the one build. nullopt while no such server reported one.
+std::optional<ServeBuild> reported_build_of_image(db::Database &db, const std::string &image);
 
 // --- the slots ---
 

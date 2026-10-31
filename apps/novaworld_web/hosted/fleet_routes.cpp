@@ -269,7 +269,7 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 		std::vector<crow::json::wvalue> servers;
 		if (!no_such_owner) {
 			for (const HostedServer &s : list_fleet_servers(*db_conn, owner, filter, kServersShown))
-				servers.push_back(server_json(*db_conn, s, true));
+				servers.push_back(server_json(*db_conn, s, true, release_.serve_image));
 		}
 		out["servers"] = std::move(servers);
 	} catch (const db::Error &e) {
@@ -294,7 +294,7 @@ crow::response FleetRoutes::server(const crow::request &req, uint64_t id) {
 		db::ReadSnapshot snapshot(*db_conn);
 		const auto s = find_server(*db_conn, path_id(id));
 		if (!s) return json_error(404, "not_found", "no hosted server has this id");
-		crow::json::wvalue e = server_json(*db_conn, *s, true);
+		crow::json::wvalue e = server_json(*db_conn, *s, true, release_.serve_image);
 		put_phase(e, *db_conn, *s, wall_now_s() * 1000, true);
 		std::vector<crow::json::wvalue> events;
 		for (const HostedEvent &ev : list_events(*db_conn, s->id, kEventsShown)) {

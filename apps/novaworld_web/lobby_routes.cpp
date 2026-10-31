@@ -1,6 +1,7 @@
 #include "lobby_routes.h"
 
 #include "hosted/console_commands.h"
+#include "hosted/hosted_routes.h" // serve_build_json
 #include "hosted/model/console_queue.h"
 #include "hosted/model/fleet_repository.h"
 #include "hosted/model/hosted_repository.h"
@@ -73,20 +74,10 @@ crow::json::wvalue card_of(const hostdb::HostRow &h, const ExpansionNames &names
 	card["expansion"]  = named != names.end() ? named->second : retail_text_to_utf8(h.exp);
 	card["locked"]     = h.locked == "Y";
 	const auto build = h.host_user_id ? builds.find(*h.host_user_id) : builds.end();
-	if (build != builds.end()) {
-		crow::json::wvalue b;
-		if (build->second.version.empty())
-			b["version"] = nullptr;
-		else
-			b["version"] = build->second.version;
-		if (build->second.commit.empty())
-			b["commit"] = nullptr;
-		else
-			b["commit"] = build->second.commit;
-		card["build"] = std::move(b);
-	} else {
+	if (build != builds.end())
+		card["build"] = hosted::serve_build_json(build->second);
+	else
 		card["build"] = nullptr;
-	}
 	return card;
 }
 

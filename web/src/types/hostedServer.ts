@@ -4,6 +4,7 @@
 import type { ServerAddress } from './addresses';
 import type { TierNumber } from './billing';
 import type { ServerOptions, ServerSetting, ServerWeapon } from '../utils/serverConfiguration';
+import type { Build } from '../utils/buildView';
 import type { Protocol } from './products';
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
@@ -295,9 +296,19 @@ export interface HostedServer {
   expansion: HostedServerExpansion | null;
   // The trees it runs on.
   data: HostedServerData;
-  // Its game (or expansion) has a newer release than the trees it runs on: the
-  // owner may update it (POST /api/me/servers/<id>/update), which restarts it.
+  // An update waits: its game (or expansion) has a newer release than the trees
+  // it runs on, or the fleet starts servers on a newer server build than its
+  // own (update_kinds says which). The owner may update it (POST
+  // /api/me/servers/<id>/update), which restarts it on both.
   update_available: boolean;
+  // What the update brings: 'content' (newer data), 'server_build' (a newer
+  // opennova-serve image); empty when none waits.
+  update_kinds: UpdateKind[];
+  // The ONE build the server says it runs (null before it reports one).
+  build: Build | null;
+  // The build a server_build update moves it to, as a server already on that
+  // image reports it; null when none does yet, or no such update waits.
+  build_available: Build | null;
   // An update was asked for: the supervisor restarts it on the current data
   // shortly.
   update_requested: boolean;
@@ -327,6 +338,8 @@ export interface HostedServer {
 // support tier (with or without a grant beside it), or an admin's comp grant
 // alone (every account gets one when it registers).
 export type EntitlementSource = 'none' | 'tier' | 'comp';
+
+export type UpdateKind = 'content' | 'server_build';
 
 // The account's hosting entitlement, as GET /api/me/servers counts it: its
 // servers on shared machines (its tier's and an admin's grant, added up) and

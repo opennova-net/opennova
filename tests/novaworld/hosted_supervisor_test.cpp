@@ -599,6 +599,46 @@ int test_products() {
 	return 0;
 }
 
+// The server build a server runs (the serve image every start pins, ADR 0053): one pinned to an
+// older image than the fleet's, its data current, has a server build update; the owner's update
+// takes it (where no data waits it is no up_to_date) and places the server again at once, no
+// restart counted, on the same trees and the fleet's image, a new generation; then nothing waits.
+// An image not known on either side is no update.
+int test_server_build_update() {
+	Rig rig("hosted_build_update");
+	Database &db = rig.db;
+	const int64_t id = rig.request("rebuild_owner", rig.settings());
+	TEST_EXPECT(id > 0 && !rig.to_running(id, 9401).empty());
+	auto row = rig.server(id);
+	TEST_EXPECT(row && row->serve_image == kServeImage &&
+			!hosted::server_build_outdated(*row, kServeImage));
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::UpToDate);
+	// A release since: the server runs the image its start pinned, older than the fleet's now.
+	const std::string older = "ghcr.io/opennova-net/opennova-serve:sha-older";
+	hosted::set_serve_image(db, id, older);
+	row = rig.server(id);
+	TEST_EXPECT(hosted::server_build_outdated(*row, kServeImage) && !hosted::server_outdated(db, id));
+	TEST_EXPECT(!hosted::server_build_outdated(*row, ""));
+	TEST_EXPECT(hosted::request_update(db, id, "") == hosted::UpdateOutcome::UpToDate);
+	const auto base = row->base_tree_id;
+	const int64_t generation = row->generation;
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::Requested);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Provisioning &&
+			contains(last_detail(db, id), "current data and server build"));
+	TEST_EXPECT(!rig.to_running(id, 9402).empty());
+	row = rig.server(id);
+	TEST_EXPECT(row->serve_image == kServeImage && row->generation == generation + 1 &&
+			row->base_tree_id == base && row->restarts == 0 && !row->update_requested &&
+			!hosted::server_build_outdated(*row, kServeImage));
+	{
+		const FakeAgent::Container *c = rig.running_container(id);
+		TEST_EXPECT(c && c->desired.image == kServeImage);
+	}
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::UpToDate);
+	return 0;
+}
+
 // The trees a server is pinned to (ADR 0064): its first start takes its products'
 // current trees; a crash restart and a fleet-caused replace keep them
 // while newer data arrives (the owner's view says an update waits); the
@@ -615,7 +655,7 @@ int test_pins_and_updates() {
 	auto row = rig.server(id);
 	TEST_EXPECT(row->base_tree_id == rig.data.jo_tree && row->expansion_tree_id == rig.data.jox_tree &&
 			row->generation == 1 && !hosted::server_outdated(db, id));
-	TEST_EXPECT(hosted::request_update(db, id) == hosted::UpdateOutcome::UpToDate);
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::UpToDate);
 
 	// Newer data for the base: the server is outdated, runs on, and a crash
 	// restart keeps its pins (its generation moves on, its restart counted).
@@ -648,7 +688,7 @@ int test_pins_and_updates() {
 
 	// The owner's update: placed again at once, no restart counted, the next
 	// start on the current trees with a new generation; the flag cleared.
-	TEST_EXPECT(hosted::request_update(db, id) == hosted::UpdateOutcome::Requested);
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::Requested);
 	TEST_EXPECT(rig.server(id)->update_requested);
 	rig.step();
 	row = rig.server(id);
@@ -3049,6 +3089,7 @@ int main(int argc, char **argv) {
 		{ "products", { test_products } },
 		{ "no_data", { test_no_data } },
 		{ "pins_and_updates", { test_pins_and_updates } },
+		{ "server_build_update", { test_server_build_update } },
 		{ "service_accounts", { test_service_accounts } },
 		{ "requests", { test_requests } },
 		{ "fleet_room", { test_fleet_room } },

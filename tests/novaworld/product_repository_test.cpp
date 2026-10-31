@@ -650,16 +650,16 @@ int test_pins() {
 	set_tree_pins(db, s2, t_jo, std::nullopt);
 	set_tree_pins(db, s3, t_jo, std::nullopt);
 	TEST_EXPECT(!server_outdated(db, s1) && !server_outdated(db, s2));
-	TEST_EXPECT(request_update(db, s1) == UpdateOutcome::UpToDate);
-	TEST_EXPECT(request_update(db, s3) == UpdateOutcome::NotLive);
-	TEST_EXPECT(request_update(db, 99999) == UpdateOutcome::NotFound);
+	TEST_EXPECT(request_update(db, s1, {}) == UpdateOutcome::UpToDate);
+	TEST_EXPECT(request_update(db, s3, {}) == UpdateOutcome::NotLive);
+	TEST_EXPECT(request_update(db, 99999, {}) == UpdateOutcome::NotFound);
 	// A new expansion tree: s1 is behind, s2 (no expansion) is not.
 	const int64_t t_jox2 = create_tree(db, jox, std::nullopt, "a");
 	TEST_EXPECT(finish_tree(db, t_jox2, ready_with("x2", {})));
 	TEST_EXPECT(server_outdated(db, s1) && !server_outdated(db, s2));
-	TEST_EXPECT(request_update(db, s2) == UpdateOutcome::UpToDate);
-	TEST_EXPECT(request_update(db, s1) == UpdateOutcome::Requested);
-	TEST_EXPECT(request_update(db, s1) == UpdateOutcome::Requested); // idempotent
+	TEST_EXPECT(request_update(db, s2, {}) == UpdateOutcome::UpToDate);
+	TEST_EXPECT(request_update(db, s1, {}) == UpdateOutcome::Requested);
+	TEST_EXPECT(request_update(db, s1, {}) == UpdateOutcome::Requested); // idempotent
 	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE id = $1 AND update_requested;", { BindValue(s1) }).size() == 1);
 	// The start that honours it re-pins and clears the flag.
 	set_tree_pins(db, s1, t_jo, t_jox2);

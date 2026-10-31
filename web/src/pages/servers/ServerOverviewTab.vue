@@ -53,10 +53,15 @@
             <dt class="text-ink-muted">{{ expansionName }}</dt>
             <dd>{{ versionText(server.data.expansion) }}</dd>
           </template>
+          <template v-if="server.build">
+            <dt class="text-ink-muted">Server build</dt>
+            <dd id="hosted-server-build"><BuildText :build="server.build" /></dd>
+          </template>
         </dl>
         <p v-if="server.update_requested"><Badge tone="info">Update requested</Badge></p>
         <p v-else-if="server.update_available" id="hosted-server-update" class="flex flex-wrap items-center gap-2 text-sm">
-          <Badge tone="info">{{ updateText }}</Badge>
+          <Badge v-if="contentUpdate" tone="info">{{ updateText }}</Badge>
+          <Badge v-if="buildUpdate" tone="info" class="hosted-server-build-update">{{ buildUpdateText }}</Badge>
           <button v-if="scope === 'owner' && server.live && server.state !== 'stopping'" type="button" class="btn-primary btn-sm" :disabled="busy" @click="update">
             {{ busy ? 'Updating…' : 'Update…' }}
           </button>
@@ -157,6 +162,7 @@
 // timeline. The live controls are the Console tab's; the stop is the page's.
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
+import BuildText from '../../components/BuildText.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import Badge from '../../components/ui/Badge.vue';
 import LiveNotices from '../../components/ui/LiveNotices.vue';
@@ -178,6 +184,7 @@ import {
   stoppedBecauseText,
 } from '../../utils/hostedState';
 import { stripGameText } from '../../utils/gameText';
+import { versionText as buildVersionText, type Build } from '../../utils/buildView';
 
 const props = defineProps<{
   server: HostedServer;
@@ -252,6 +259,30 @@ const current = computed(() => {
   }
   const versions = adminVersions.value;
   return versions ? { base: versions.get(productId ?? -1) ?? '', expansion: versions.get(expansionId ?? -1) ?? '' } : null;
+});
+
+// What the waiting update brings: newer data, a newer server build, or both (a
+// reply that names neither reads as data, the update's first kind).
+const contentUpdate = computed(() => props.server.update_kinds.includes('content') || props.server.update_kinds.length === 0);
+const buildUpdate = computed(() => props.server.update_kinds.includes('server_build'));
+
+// A build in a few words: ONE's version, else the commit.
+function buildWords(build: Build): string {
+  return buildVersionText(build) ?? build.commit ?? '';
+}
+
+// "New server build: ONE 0.0.22.5 → ONE 0.0.22.9" when both builds are known
+// (the commits where the versions read alike), "New server build: ONE 0.0.22.9"
+// with only the new one, else "New server build available".
+const buildUpdateText = computed(() => {
+  const to = props.server.build_available;
+  if (!to || !buildWords(to)) return 'New server build available';
+  const from = props.server.build;
+  if (!from || !buildWords(from)) return `New server build: ${buildWords(to)}`;
+  const alike = buildWords(from) === buildWords(to) && from.commit && to.commit;
+  return alike
+    ? `New server build: ${buildWords(from)} ${from.commit} → ${buildWords(to)} ${to.commit}`
+    : `New server build: ${buildWords(from)} → ${buildWords(to)}`;
 });
 
 // "Joint Operations 1.0.9 available" (and the expansion's, when it is the

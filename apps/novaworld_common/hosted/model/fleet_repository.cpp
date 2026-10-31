@@ -946,6 +946,22 @@ std::optional<SlotReport> slot_report_of(db::Database &db, int64_t server_id) {
 	return std::move(rows.front());
 }
 
+std::optional<ServeBuild> reported_build_of_image(db::Database &db, const std::string &image) {
+	if (image.empty())
+		return std::nullopt;
+	const auto rows = db.query("SELECT r.one_version, r.one_commit "
+							   "FROM hosted_servers s JOIN fleet_slot_reports r "
+							   "ON r.machine_id = s.machine_ref AND r.slot = s.slot "
+							   "AND r.container = s.machine_id "
+							   "WHERE s.serve_image = $1 AND r.state = 'running' "
+							   "AND (r.one_version <> '' OR r.one_commit <> '') "
+							   "ORDER BY r.reported_at DESC LIMIT 1;",
+			{ BindValue(image) });
+	if (rows.empty())
+		return std::nullopt;
+	return ServeBuild{ rows.front().as_text(0).value_or(""), rows.front().as_text(1).value_or("") };
+}
+
 std::map<int64_t, ServeBuild> running_builds_by_account(db::Database &db) {
 	std::map<int64_t, ServeBuild> out;
 	for (const db::Row &r :

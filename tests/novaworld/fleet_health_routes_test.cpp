@@ -281,8 +281,8 @@ int test_owner_view(Harness &h, ConnectionPool &pool) {
 	auto db = pool.acquire();
 	const auto server = hosted::find_server(*db, h.rows.server);
 	TEST_EXPECT(server.has_value());
-	const auto owner = crow::json::load(hosted::server_json(*db, *server, false).dump());
-	const auto admin = crow::json::load(hosted::server_json(*db, *server, true).dump());
+	const auto owner = crow::json::load(hosted::server_json(*db, *server, false, {}).dump());
+	const auto admin = crow::json::load(hosted::server_json(*db, *server, true, {}).dump());
 	TEST_EXPECT(owner && admin && !owner.has("tick") && admin.has("tick"));
 	// Not asked to list on NovaLogic's NovaWorld: no state of it, whatever its agent reports.
 	TEST_EXPECT(is_null(owner["novalogic"]) && is_null(admin["novalogic"]));
@@ -301,8 +301,8 @@ int test_owner_view(Harness &h, ConnectionPool &pool) {
 		running.second_listing = listing;
 		hosted::record_sync(*db, h.rows.reporting, "test-agent", { running }, kHostd);
 		const auto asked = hosted::find_server(*db, h.rows.server);
-		return std::make_pair(crow::json::load(hosted::server_json(*db, *asked, false).dump()),
-				crow::json::load(hosted::server_json(*db, *asked, true).dump()));
+		return std::make_pair(crow::json::load(hosted::server_json(*db, *asked, false, {}).dump()),
+				crow::json::load(hosted::server_json(*db, *asked, true, {}).dump()));
 	};
 	hosted::SecondListingStatus refused;
 	refused.state = hosted::SecondListingState::NotListed;
@@ -339,7 +339,7 @@ int test_owner_view(Harness &h, ConnectionPool &pool) {
 	hosted::record_sync(*db, h.rows.reporting, "test-agent", { running }, kHostd);
 	const auto before = hosted::find_server(*db, h.rows.server);
 	TEST_EXPECT(is_null(
-			crow::json::load(hosted::server_json(*db, *before, false).dump())["novalogic"]));
+			crow::json::load(hosted::server_json(*db, *before, false, {}).dump())["novalogic"]));
 	db->exec("UPDATE hosted_servers SET list_on_novalogic = false WHERE id = $1;",
 			{ BindValue(h.rows.server) });
 	return 0;

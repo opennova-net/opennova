@@ -219,6 +219,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.set_address_zone(address_zone_);
 	impl_->hosted_servers.set_novalogic_listing(novalogic_listing_);
+	impl_->hosted_servers.set_serve_image(fleet_release_.serve_image);
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->addresses.configure(addresses_on_, address_zone_, fleet_placement_.max_addresses);
 	impl_->addresses.register_routes(impl_->app);
@@ -682,6 +683,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	// The admin user routes (admin_user_routes.h).
 	impl_->users.set_fleet(fleet_placement_);
 	impl_->users.set_address_zone(address_zone_);
+	impl_->users.set_serve_image(fleet_release_.serve_image);
 	impl_->users.set_store(object_store_);
 	impl_->users.register_routes(
 			app, [this](db::Database &db, int64_t id) { forget_revoked_account(db, id); });

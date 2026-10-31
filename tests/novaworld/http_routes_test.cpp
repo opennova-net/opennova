@@ -147,6 +147,10 @@ constexpr const char *kCsrf = "X-OpenNova-Request: 1";
 constexpr const char *kMailSiteUrl = "https://site.example";
 // The task the harness's lobby runs as (its instance row's task_id).
 constexpr const char *kHarnessLobbyTask = "http-routes-lobby";
+// The serve image the first listener's release pins (ONNET_HOSTED_SERVE_IMAGE): a hosted server
+// pinned to another has a server build update (test_hosted_server_build_update). The cases'
+// servers written by hand pin none, so they have none.
+constexpr const char *kHarnessServeImage = "ghcr.io/opennova-net/opennova-serve:sha-release";
 
 struct Harness {
 	ConnectionPool &pool;
@@ -7205,6 +7209,151 @@ int test_lobby_hosted_build(Harness &h) {
 	return 0;
 }
 
+// A hosted server's server build update: one pinned to an older serve image than the release's
+// (kHarnessServeImage) has `update_available` with `update_kinds` ["server_build"] (its data
+// current), `build`, the ONE build it reports, and `build_available`, the one a server on the
+// release's image reports (null before one does); one on the release's image has none; the
+// admin's view says the same. The owner's update takes it, no data waiting.
+int test_hosted_server_build_update(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	using crow::json::type;
+	const int64_t owner = make_account(h, "rebuild_owner", "pw-rebuild-owner");
+	TEST_EXPECT(owner > 0 && nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 2, 0 }));
+	const std::string session = login_token(h, "10.57.0.1", "rebuild_owner", "pw-rebuild-owner");
+	TEST_EXPECT(!session.empty());
+	// A new server's id, 0 when the request is refused.
+	const auto request = [&h, owner](const char *name) -> int64_t {
+		hosted::HostedSettings settings;
+		settings.product_id = h.jo_id;
+		settings.game_name = name;
+		settings.missions = { "a.bms" };
+		const auto made = hosted::request_server(
+				*h.pool.acquire(), owner, settings, offered(h), 1000, nws::wall_now_s());
+		return made.outcome == hosted::RequestOutcome::Created ? made.id : 0;
+	};
+	const int64_t older = request("Rebuild Older");
+	const int64_t current = request("Rebuild Current");
+	TEST_EXPECT(older > 0 && current > 0);
+	const std::string old_image = "ghcr.io/opennova-net/opennova-serve:sha-older";
+	// Both running on a ready machine on the current data, the first pinned to an older image.
+	int64_t machine = 0;
+	{
+		auto db = h.pool.acquire();
+		machine = hosted::create_machine(
+				*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 })
+						  .id;
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = "local-rebuild-1";
+		launched.private_address = "10.57.0.40";
+		launched.public_address = "198.51.100.57";
+		launched.instance_type = "t3a.large";
+		TEST_EXPECT(hosted::mark_launched(*db, machine, launched));
+		int slot = 0;
+		for (const auto &[id, image] : { std::pair<int64_t, std::string>{ older, old_image },
+					 { current, std::string(kHarnessServeImage) } }) {
+			hosted::set_tree_pins(*db, id, h.jo_tree, std::nullopt);
+			db->exec("UPDATE hosted_servers SET state = 'running', machine_ref = $1, slot = $2, "
+					 "machine_id = $3, serve_image = $4 WHERE id = $5;",
+					{ opennova::db::BindValue(machine), opennova::db::BindValue(int64_t{ slot }),
+							opennova::db::BindValue(hosted::hosted_container_name(id, 1)),
+							opennova::db::BindValue(image), opennova::db::BindValue(id) });
+			++slot;
+		}
+	}
+	const auto report = [&h, machine, older, current](bool current_reports) {
+		std::vector<hosted::ContainerReport> running;
+		for (const int64_t id : { older, current }) {
+			if (id == current && !current_reports)
+				continue;
+			hosted::ContainerReport r;
+			r.name = hosted::hosted_container_name(id, 1);
+			r.slot = id == older ? 0 : 1;
+			r.state = hosted::ContainerState::Running;
+			r.build = id == older ? hosted::ServeBuild{ "0.0.22.5", "abc1234" }
+								  : hosted::ServeBuild{ "0.0.22.9", "def5678" };
+			running.push_back(std::move(r));
+		}
+		return hosted::record_sync(*h.pool.acquire(), machine, "test-agent", running).has_value();
+	};
+	const auto mine = [&h, &session](int64_t id) {
+		return crow::json::load(body_text(
+				h.send("GET", "/api/me/servers/" + std::to_string(id), { with_session(session) })));
+	};
+	const auto words = [](const crow::json::rvalue &b) -> std::string {
+		if (b.t() == type::Null)
+			return "null";
+		const auto part = [&b](const char *key) {
+			return b[key].t() == type::Null ? std::string("null") : str(b[key]);
+		};
+		return part("version") + " " + part("commit");
+	};
+	const auto kinds = [](const crow::json::rvalue &server) {
+		std::string out;
+		for (const auto &k : server["update_kinds"])
+			out += (out.empty() ? "" : ",") + str(k);
+		return out;
+	};
+
+	// The older server's agent reports its build; no server on the release's image has yet.
+	TEST_EXPECT(report(false));
+	auto json = mine(older);
+	TEST_EXPECT(json && json["server"]["update_available"].b() &&
+			kinds(json["server"]) == "server_build");
+	TEST_EXPECT(words(json["server"]["build"]) == "0.0.22.5 abc1234" &&
+			words(json["server"]["build_available"]) == "null");
+	// The release's server reports: its build is the one the update moves the older to.
+	TEST_EXPECT(report(true));
+	json = mine(older);
+	const std::string available = json ? words(json["server"]["build_available"]) : "";
+	if (available != "0.0.22.9 def5678")
+		std::fprintf(stderr, "  build_available: %s\n", available.c_str());
+	TEST_EXPECT(available == "0.0.22.9 def5678");
+	json = mine(current);
+	TEST_EXPECT(json && !json["server"]["update_available"].b() && kinds(json["server"]).empty());
+	TEST_EXPECT(words(json["server"]["build"]) == "0.0.22.9 def5678" &&
+			words(json["server"]["build_available"]) == "null");
+	// The list says the same, and the admin's view.
+	{
+		const auto list = crow::json::load(
+				body_text(h.send("GET", "/api/me/servers", { with_session(session) })));
+		int seen = 0;
+		for (const auto &s : list["servers"]) {
+			if (s["id"].i() == older && kinds(s) == "server_build")
+				++seen;
+			if (s["id"].i() == current && kinds(s).empty())
+				++seen;
+		}
+		TEST_EXPECT(seen == 2);
+		const auto admin = crow::json::load(body_text(
+				h.send("GET", "/api/admin/hosted/" + std::to_string(older), { kBearer })));
+		TEST_EXPECT(admin && admin["server"]["update_available"].b() &&
+				kinds(admin["server"]) == "server_build" &&
+				str(admin["server"]["serve_image"]) == old_image);
+	}
+
+	// The owner's update takes a build-only update (no data waits); the release's server has
+	// nothing to take.
+	const auto update = [&h, &session](int64_t id) {
+		return h.send("POST", "/api/me/servers/" + std::to_string(id) + "/update",
+				{ with_session(session), kCsrf });
+	};
+	auto reply = update(older);
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 202)
+		std::fprintf(stderr, "  update: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 202 && json && json["server"]["update_requested"].b() &&
+			kinds(json["server"]) == "server_build");
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), older)->update_requested);
+	reply = update(current);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "up_to_date");
+
+	// Both ended: no live server outlasts the case.
+	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'stopped', ended_at = now(), "
+						   "machine_ref = NULL, slot = NULL WHERE id IN ($1, $2);",
+			{ opennova::db::BindValue(older), opennova::db::BindValue(current) });
+	return 0;
+}
+
 // The admin's fleet routes (hosted/fleet_routes.h) over fleet rows made by hand
 // (no supervisor): the fleet view's machines (kind, state, type, slots and the
 // slots used, the public address, the month's egress; no credential of the
@@ -9849,6 +9998,7 @@ int run(Harness &h, const char *part) {
 		{ "hosted", "hosted_usage_route", test_hosted_usage_route },
 		{ "hosted", "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
 		{ "hosted", "lobby_hosted_build", test_lobby_hosted_build },
+		{ "hosted", "hosted_server_build_update", test_hosted_server_build_update },
 		{ "billing", "billing_routes", test_billing_routes },
 		{ "billing", "billing_checkout_guard", test_billing_checkout_guard },
 		{ "billing", "billing_capacity", test_billing_capacity },
@@ -10063,6 +10213,8 @@ int with_harness(const char *part) {
 		http.set_addresses(true, "play.test");
 		// The usage view's slot limits: 256 MiB and 2 CPUs a container.
 		http.set_fleet_slots(256, 2.0);
+		// The release's serve image (test_hosted_server_build_update).
+		http.set_fleet_release({ "", "", kHarnessServeImage });
 		// The games catalogue read again at every request (test_lobby_per_title's lobby added
 		// after the start).
 		http.set_games_refresh(std::chrono::milliseconds(0));

@@ -149,6 +149,24 @@ describe('fetchMyServers', () => {
     });
   });
 
+  it('reads what a waiting update brings and the builds, leaving out what does not read', async () => {
+    const server = {
+      ...hostedServer(3),
+      update_available: true,
+      update_kinds: ['content', 'server_build', 'other'],
+      build: { version: '0.0.22.5', commit: 'abc1234' },
+      build_available: { version: '0.0.22.9', commit: null },
+    };
+    get.mockResolvedValue(reply(serversResponse([server as never, { ...hostedServer(4), update_kinds: 'content', build: {}, build_available: 7 } as never])));
+    const result = await fetchMyServers();
+    expect(result.ok && result.value.servers[0]).toMatchObject({
+      update_kinds: ['content', 'server_build'],
+      build: { version: '0.0.22.5', commit: 'abc1234' },
+      build_available: { version: '0.0.22.9', commit: null },
+    });
+    expect(result.ok && result.value.servers[1]).toMatchObject({ update_kinds: [], build: null, build_available: null });
+  });
+
   it('reads the static address a server runs at', async () => {
     const at = { id: 5, name: 'smoke', hostname: 'smoke.play.opennova.net', public_ip: '203.0.113.9', state: 'ready' };
     const server = hostedServer(3, { own_machine: true, address: at });
