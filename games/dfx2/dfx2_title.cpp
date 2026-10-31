@@ -230,6 +230,9 @@ Title make() {
 	t.hud_map_no_bank_names = true;
 	// DFX2-41: STATIC_GAMETYPE [orig: sub_550690 @0x550b41..0x550b77 (dfx2.exe)].
 	t.death_screen_game_type_line = true;
+	// DFX2-43: the cube's eye at least 5 units over the terrain [orig: EnvCube_Update @0x60F5F0 -
+	//  `add eax, 50000h` @0x60F67B, the raise @0x60F689..0x60F68B (dfx2.exe)].
+	t.env_cube_terrain_clearance = 0x50000;
 	return t;
 }
 

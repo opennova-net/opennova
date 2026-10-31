@@ -139,6 +139,9 @@ Title make() {
 	//  @0x7C7114, read @ 0x559fe2)].
 	t.mod_list_base = "Joint Operations: Typhoon Rising";
 	t.hud_map_legend = &kHudMapLegend;
+	// DFX2-43: the cube's eye at least 10 units over the terrain [orig: EnvCube_Update @0x6106A0 -
+	//  `add eax, 0A0000h` @0x61072B over Terrain_GetHeightAtPosition, the raise @0x610739..0x61073B].
+	t.env_cube_terrain_clearance = 0xA0000;
 	return t;
 }
 

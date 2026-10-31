@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <base/title/title.h>
+
 namespace opennova::renderer {
 
 inline constexpr int kEnvironmentCubeFaceCount = 6;
@@ -38,7 +40,6 @@ constexpr int environment_cube_face_size(int word) noexcept {
 }
 inline constexpr std::int64_t kEnvironmentCubeRefreshFrames = 128;
 inline constexpr float kEnvironmentCubeEyeRaise = 1.0f;
-inline constexpr float kEnvironmentCubeTerrainClearance = 10.0f;
 inline constexpr float kEnvironmentCubeFaceFovDegrees = 90.0f;
 inline constexpr float kEnvironmentCubeFaceNear = 0.5f;
 inline constexpr float kEnvironmentCubeFaceFar = 1000.0f;
@@ -66,14 +67,18 @@ inline constexpr bool environment_cube_refresh_due(std::int64_t render_frame,
 			(render_frame % kEnvironmentCubeRefreshFrames) == 0;
 }
 
-// The capture eye height: the local player's origin + 1, raised to at least
-// terrain + 10 when a terrain height is known.
-inline constexpr float environment_cube_eye_height(float player_y,
+// The capture eye height: the local player's origin + 1, raised to at least the
+// terrain plus the title's clearance (Title::env_cube_terrain_clearance, Q16:
+// Jointops.exe's 10 units, dfx2.exe's 5, DFX2-43) when a terrain height is known.
+// [orig: EnvCube_Update @0x6106A0 - `+ 0x10000` @0x610721, `+ 0xA0000` @0x61072B,
+//  the raise @0x610739..0x61073B] [orig: EnvCube_Update @0x60F5F0 - `+ 0x50000`
+//  @0x60F67B (dfx2.exe)]
+inline float environment_cube_eye_height(const Title &title, float player_y,
 		bool has_terrain, float terrain_y) {
 	const float raised = player_y + kEnvironmentCubeEyeRaise;
-	return has_terrain ?
-			std::max(raised, terrain_y + kEnvironmentCubeTerrainClearance) :
-			raised;
+	const float clearance =
+			static_cast<float>(title.env_cube_terrain_clearance) / 65536.0f;
+	return has_terrain ? std::max(raised, terrain_y + clearance) : raised;
 }
 
 // One framebuffer byte after the dim quad: SRC=DESTCOLOR, DST=ZERO multiplies

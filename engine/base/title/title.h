@@ -292,6 +292,10 @@ struct Title {
 	// the game type's Overlays label (world::apply_deploy_activation). False (Jointops.exe): its
 	// show writes no such line [orig: DeathScreen_UpdateUI @0x553150].
 	bool death_screen_game_type_line = false;
+	// DFX2-43: how far over the terrain under the local player the environment cube's capture eye
+	// stands at least (Q16 world units; runtime/renderer/environment_cube.h
+	// environment_cube_eye_height): Jointops.exe's 10 units, dfx2.exe's 5. 0 unwitnessed.
+	int32_t env_cube_terrain_clearance = 0;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title
