@@ -241,7 +241,8 @@ inline bool deploy_loadout_shown(uint8_t team, bool permanent_death, bool dead) 
 // 0 (input 12); otherwise nothing.
 // [orig: DeathScreen_OnRestartLevel @0x550bf0 - the click @0x550bf8, the gates @0x550bff..0x550c1e,
 //  Game_CloseInGameScreens @0x550c20, Input_QueueEvent(12, 0) @0x550c2d, g_MissionExitReason = 4
-//  @0x550c35; registered by UI_RegisterDeathScreenCallbacks @0x551310 (dfx2.exe)]
+//  @0x550c35; registered by UI_RegisterDeathScreenCallbacks @0x5512a0 (the RESTART_LEVEL
+//  registration @0x551310) (dfx2.exe)]
 inline bool deploy_restart_level_allowed(uint32_t game_type, bool in_session, bool dead) {
 	return (game_type & 0xFFFDFFFFu) == 0x10020u && !in_session && dead;
 }
