@@ -743,7 +743,7 @@ void MenuDriver::set_deploy_list_items(int p_id, const TypedArray<DeployListRow>
 		const Ref<DeployListRow> row = p_rows[i];
 		if (row.is_valid()) rows.push_back(row->value());
 	}
-	runtime_.set_widget_items(p_id, opennova::world::deploy_list_items(rows));
+	opennova::world::fill_deploy_spawn_list(runtime_, p_id, rows);
 }
 
 bool MenuDriver::hide_stat_done(const Ref<Simulation> &p_sim) {

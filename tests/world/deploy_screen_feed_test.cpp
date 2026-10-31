@@ -685,6 +685,43 @@ void test_deploy_activation() {
 	CHECK(!rt.is_widget_shown(rt.widget_id("SPAWNPOINTS_TABLE")));
 }
 
+// Jointops.exe's list refill: every refresh past the content's permanent-death return shows
+// SPAWNPOINTS_LIST and STATIC_LIST_TITLE again, so the show's hides under permanent death do not
+// outlast it; then the rows' stripped texts [orig: UI_UpdateDeathScreenContent @0x5536a0 -
+// CWnd_SetShown(SPAWNPOINTS_LIST, 1) @0x553aa0, CWnd_SetShown(STATIC_LIST_TITLE, 1) @0x553ac2].
+void test_spawn_list_refill_shows_the_list() {
+	mnu::Document doc;
+	mnu::Screen death;
+	death.name = "DEATH";
+	mnu::Window root;
+	root.name = "MAIN";
+	root.type = mnu::WindowType::Window;
+	for (const char *name : { "STATIC_LIST_TITLE", "SPAWNPOINTS_LIST" }) {
+		mnu::Window w;
+		w.name = name;
+		w.type = std::string(name) == "SPAWNPOINTS_LIST" ? mnu::WindowType::List
+				: mnu::WindowType::Static;
+		root.children.push_back(w);
+	}
+	death.roots.push_back(root);
+	doc.screens.push_back(death);
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "death.mnu", "");
+	DeployActivation a;
+	a.permanent_dead = true;
+	apply_deploy_activation(rt, a);
+	const int list = rt.widget_id("SPAWNPOINTS_LIST");
+	const int title = rt.widget_id("STATIC_LIST_TITLE");
+	CHECK(!rt.is_widget_shown(list) && !rt.is_widget_shown(title));
+	fill_deploy_spawn_list(rt, list, { { "<cFF2020>'D' Default", 0 }, { "<cFF2020>'A' Hill", 1 } });
+	CHECK(rt.is_widget_shown(list) && rt.is_widget_shown(title));
+	CHECK(rt.get_widget_items(list) == (std::vector<std::string>{ "'D' Default", "'A' Hill" }));
+	// No list: nothing.
+	apply_deploy_activation(rt, a);
+	fill_deploy_spawn_list(rt, -1, {});
+	CHECK(!rt.is_widget_shown(title));
+}
+
 // The SPAWNPOINTS_TABLE's custom draw: a data cell's flags-1 pass, column 1's name in the HUD
 // label face at the cell's foot (0xFF404040 on a locked row), the content, a state-2 cell's
 // four-line frame; the header only its content [orig: sub_550CF0 @0x550d29..0x550e37
@@ -762,6 +799,7 @@ int main() {
 	test_spawn_table_zone_name();
 	test_spawn_table_paint();
 	test_deploy_activation();
+	test_spawn_list_refill_shows_the_list();
 	test_penalty_line_instruction();
 	test_team_lists();
 	test_loadout_picker_gate();

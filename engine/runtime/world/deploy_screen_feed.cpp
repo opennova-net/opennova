@@ -104,6 +104,14 @@ std::vector<std::string> deploy_list_items(const std::vector<DeployListRow> &row
     return items;
 }
 
+void fill_deploy_spawn_list(menu::MenuRuntime &menu, int list, const std::vector<DeployListRow> &rows) {
+    if (list < 0) return;
+    menu.set_widget_shown(list, true);
+    const int list_title = menu.find_screen_control("DEATH", "STATIC_LIST_TITLE");
+    if (list_title >= 0) menu.set_widget_shown(list_title, true);
+    menu.set_widget_items(list, deploy_list_items(rows));
+}
+
 DeployStatusLine build_deploy_status(const DeployStatusInput &in) {
     DeployStatusLine out;
     // The penalty timer wins [orig: dword_A85B5C @0x553928..0x553965].

@@ -107,6 +107,13 @@ struct DeployListRow {
 // of the member entity's name @0x553d8e, the UIList_AddRow call @0x553da5]
 // (D-MNU-46).
 std::vector<std::string> deploy_list_items(const std::vector<DeployListRow> &rows);
+// The list's refill over the menu: the SPAWNPOINTS_LIST `list` and DEATH's STATIC_LIST_TITLE
+// shown, every refresh past the content's permanent-death return (so the show's hides under
+// permanent death last only while it does), then its items (deploy_list_items).
+// [orig: UI_UpdateDeathScreenContent @0x5536a0 - the return @0x5536d7..0x5538c1,
+//  CWnd_SetShown(SPAWNPOINTS_LIST, 1) @0x553aa0, CWnd_SetShown(STATIC_LIST_TITLE, 1) @0x553ac2,
+//  CListWnd_RemoveRow(-1) @0x553ad6; the hides DeathScreen_UpdateUI @0x55318c..0x553234]
+void fill_deploy_spawn_list(menu::MenuRuntime &menu, int list, const std::vector<DeployListRow> &rows);
 
 // The zone-row text before the sort: "<color>'<letter>' <name>" [orig:
 // sprintf("%s'%c' %s") @0x553c1f, the letter index + 0x41 @0x553c16]; the

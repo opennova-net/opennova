@@ -383,8 +383,9 @@ public:
 	bool hide_stat_done(const Ref<Simulation> &p_sim);
 	bool show_stat_done(const Ref<Simulation> &p_sim);
 	bool stat_done_pressed(const Ref<Simulation> &p_sim);
-	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
-	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
+	// The death screen's SPAWNPOINTS_LIST refill from its compiled rows: the list and its
+	// title shown, then its items in the menu's code page (engine world
+	// fill_deploy_spawn_list).
 	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);
 	// DFX2-41: the DEATH screen's SPAWNPOINTS_TABLE refilled from `sim`'s zones (engine
 	// inmatch/role_feeds.h deploy_table_zones, world/deploy_screen_feed.h build_deploy_table_rows

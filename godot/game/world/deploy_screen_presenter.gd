@@ -476,9 +476,11 @@ func _populate_spawn_list(sim: Simulation) -> void:
 		# (the engine's hud::strip_inline_tags (engine: runtime/hud/feed_format.cpp)).
 		var label := Simulation.strip_inline_tags(row.text)
 		_spawn_rows.append(SpawnRow.new(label, row.value))
-	# The list takes the engine's items (MenuDriver.set_deploy_list_items: the same
-	# stripped texts in the menu's code page, a member's roster name as its bytes);
-	# the spawn rows' labels are the script's own view of them. The fill resets the
+	# The list takes the engine's items (MenuDriver.set_deploy_list_items: the list and
+	# STATIC_LIST_TITLE shown again, which the show hides under permanent death, then the
+	# same stripped texts in the menu's code page, a member's roster name as its bytes;
+	# engine world::fill_deploy_spawn_list carries the witness); the spawn rows' labels
+	# are the script's own view of them. The fill resets the
 	# selection to row 0; restore the previous pick by parameter without emitting
 	# (picks ride user clicks only, never the refill).
 	_driver.set_deploy_list_items(list_id, list_rows)
