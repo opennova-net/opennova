@@ -1158,7 +1158,8 @@ func test_a_joiners_death_opens_through_the_latch_and_its_release_runs_the_close
 	for _i in range(800):
 		pair.host.step()
 		joiner.step()
-		if not joiner.is_join_deploy_pick_pending() and not joiner.is_local_player_dead():
+		if not joiner.is_join_deploy_pick_pending() and not joiner.is_local_player_dead() \
+				and not joiner.is_deploy_overlay_active():
 			released = true
 			break
 		OS.delay_msec(2)
