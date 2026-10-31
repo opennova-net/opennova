@@ -56,8 +56,61 @@ int main() {
 
 	// The composited resource names.
 	check(std::strcmp(kLoadingFallbackImage, "loadscrn.pcx") == 0, "fallback image");
-	check(std::strcmp(kLoadingFontSmall, "Arials18.fnt") == 0, "small font");
-	check(std::strcmp(kLoadingFontLarge, "Arial22.fnt") == 0, "large font");
+	{
+		// The title's two fonts, band edge and progress lines (TitleLoadingScreen): Jointops.exe's
+		// Arials18 / Arial22 at every width, the band to 661 / 782, no lines; dfx2.exe's
+		// Arial20b under 1280 pixels of background and Arial40b from it in both slots, the band
+		// to the width less 139 / 18, and the stage's lines (DFX2-63)
+		// [orig: Render_LoadingScreen @0x521eec / @0x521f5a / @0x521fec..0x522006]
+		// [orig: sub_51EC60 @0x51ee41..0x51eecb, @0x51ef69..0x51ef73, @0x51f0e6..0x51f2ea
+		//  (dfx2.exe)].
+		const opennova::Title &jo = *opennova::title_by_code("jo");
+		const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
+		const LoadingFonts jo800 = loading_fonts(jo, 800);
+		const LoadingFonts jo1920 = loading_fonts(jo, 1920);
+		check(std::strcmp(jo800.small, "Arials18.fnt") == 0 && std::strcmp(jo800.large, "Arial22.fnt") == 0 &&
+				      std::strcmp(jo1920.small, "Arials18.fnt") == 0 &&
+				      std::strcmp(jo1920.large, "Arial22.fnt") == 0,
+		      "Joint Operations' fonts at every width");
+		const LoadingFonts d1279 = loading_fonts(dfx2, 1279);
+		const LoadingFonts d1280 = loading_fonts(dfx2, 1280);
+		check(std::strcmp(d1279.small, "Arial20b.fnt") == 0 && std::strcmp(d1279.large, "Arial20b.fnt") == 0,
+		      "DFX2's Arial20b under 1280");
+		check(std::strcmp(d1280.small, "Arial40b.fnt") == 0 && std::strcmp(d1280.large, "Arial40b.fnt") == 0,
+		      "DFX2's Arial40b from 1280");
+		check(loading_band_right(jo, true, 800) == 661 && loading_band_right(jo, false, 800) == 782 &&
+				      loading_band_right(jo, true, 1024) == 661,
+		      "Joint Operations' band to 661 / 782 at every width");
+		check(loading_band_right(dfx2, true, 800) == 661 && loading_band_right(dfx2, false, 800) == 782 &&
+				      loading_band_right(dfx2, true, 1024) == 885 &&
+				      loading_band_right(dfx2, false, 1024) == 1006,
+		      "DFX2's band to the width less 139 / 18");
+		check(loading_progress_line_count(jo, 7) == 0 && loading_progress_line_count(jo, 16) == 0,
+		      "Joint Operations draws no progress lines");
+		check(loading_progress_line_count(dfx2, 0) == 0 && loading_progress_line_count(dfx2, 3) == 3 &&
+				      loading_progress_line_count(dfx2, 15) == 15 &&
+				      loading_progress_line_count(dfx2, kLoadingRestartStage) == 15,
+		      "DFX2 draws the stage's lines, capped at 15");
+		check(loading_progress_line_key(0) == "STR_MISSION_LD_PROGRESS_00" &&
+				      loading_progress_line_key(6) == "STR_MISSION_LD_PROGRESS_06" &&
+				      loading_progress_line_key(7).empty(),
+		      "the lines' keys, none past the seventh");
+		check(loading_progress_line_fallback(0) == "??0" && loading_progress_line_fallback(6) == "??6" &&
+				      loading_progress_line_fallback(7).empty(),
+		      "the lines' fallbacks");
+		const LoadingTextBox line2 = loading_progress_line_box(dfx2, 2, 800);
+		check(line2.x == 20 && line2.y == 136 && line2.width == 641 && line2.bottom == 530 &&
+				      line2.align == TextBlockAlign::kLeft && line2.argb == 0xFFFFFFFFu,
+		      "line 2 at (20, 136) .. (661, 530), left, white");
+		check(loading_progress_line_box(dfx2, 2, 1280).y == 176, "the wide pitch 40");
+		// The stage the start had drawn when its bar first showed each checkpoint
+		// [orig: Game_StartMission @0x524880..0x525a84; @0x521a50..0x522c69 (dfx2.exe)].
+		const int stages[][2] = { { 0, 0 }, { 1, 0 }, { 2, 1 }, { 6, 2 }, { 10, 2 }, { 20, 2 },
+			{ 26, 3 }, { 30, 3 }, { 40, 4 }, { 50, 5 }, { 60, 5 }, { 70, 6 }, { 80, 6 }, { 90, 7 },
+			{ 100, 7 } };
+		for (const auto &row : stages)
+			check(loading_screen_stage(row[0]) == row[1], "the stage at a checkpoint");
+	}
 	check(std::strcmp(kLoadingServerMessageLabelKey, "LT_SERVERMSG") == 0, "label key");
 	check(std::strcmp(kLoadingServerMessageLabelFallback, "Message from Game Server") == 0,
 			"label fallback");
@@ -325,7 +378,7 @@ int main() {
 	}
 	{
 		// The session block over an 800 x 600 custom background (band right 661).
-		const LoadingSessionBoxes boxes = loading_session_boxes(800, 600, kLoadingBandRightCustom);
+		const LoadingSessionBoxes boxes = loading_session_boxes(800, 600, 661, 0x80E0FFu);
 		check(boxes.title.x == 21 && boxes.title.y == 29 && boxes.title.width == 640 &&
 				      boxes.title.bottom == 500 && boxes.title.align == TextBlockAlign::kLeft &&
 				      boxes.title.argb == 0xFFFFFFFFu,
@@ -340,6 +393,8 @@ int main() {
 		      "the message label at the image fractions, light blue");
 		check(boxes.message_body.y == 540 && boxes.message_body.argb == 0xFFFFFFFFu,
 		      "the message body under it, white");
+		check(loading_session_boxes(800, 600, 661, 0x6CBF00u).message_label.argb == 0xFF6CBF00u,
+		      "the label in the title's colour");
 		check(loading_message_label_text("Message from Game Server") ==
 				      "Message from Game Server:",
 		      "the label's colon");
@@ -442,7 +497,7 @@ int main() {
 			std::vector<uint8_t> image(800 * 600 * 4, 0);
 			LoadingSurface surface{ image.data(), 800, 600 };
 			composite_loading_session_text(surface, &font, &font, "HOST", "", "", "Message",
-					message, kLoadingBandRightCustom);
+					message, true, *opennova::title_by_code("jo"));
 			return image;
 		};
 		const auto lit = [](const std::vector<uint8_t> &image, int x0, int y0, int x1, int y1) {
@@ -456,6 +511,20 @@ int main() {
 		check(!lit(quiet, 0, 505, 800, 600), "no server message, nothing under the band");
 		const std::vector<uint8_t> told = composite("HI");
 		check(lit(told, 16, 522, 400, 600), "the server message under the band");
+		// The progress lines: DFX2's at (20, 96 + 20n), none under Joint Operations.
+		const auto progress = [&font](const char *code) {
+			std::vector<uint8_t> image(800 * 600 * 4, 0);
+			LoadingSurface surface{ image.data(), 800, 600 };
+			composite_loading_progress_lines(surface, &font, { "LOADING", "", "TERRAIN" },
+					*opennova::title_by_code(code));
+			return image;
+		};
+		const std::vector<uint8_t> dfx2_lines = progress("dfx2");
+		check(lit(dfx2_lines, 20, 96, 300, 116), "DFX2's first line at y 96");
+		check(!lit(dfx2_lines, 20, 116, 300, 136), "its empty second line draws nothing");
+		check(lit(dfx2_lines, 20, 136, 300, 156), "its third line at y 136");
+		const std::vector<uint8_t> jo_lines = progress("jo");
+		check(!lit(jo_lines, 0, 0, 800, 600), "Joint Operations composites no line");
 		opennova::fnt::fnt_free(&font);
 	}
 

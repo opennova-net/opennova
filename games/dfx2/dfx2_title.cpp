@@ -92,6 +92,16 @@ constexpr TitleHudMapLegend kHudMapLegend{
 		kHudMapLegendIcons, static_cast<int>(sizeof(kHudMapLegendIcons) / sizeof(kHudMapLegendIcons[0])),
 		52};
 
+// DFX2-63: dfx2.exe's loading screen: both fonts Arial20b.fnt under 1280 pixels of background and
+// Arial40b.fnt from it, the label in 6CBF00, the band to the width less 139 over a custom
+// background and less 18 over the stock one, and the stage's progress lines 20 (40) apart.
+// [orig: sub_51EC60 @0x51EC60 - the width tests @0x51EE41 / @0x51EEBD, "Arial40b.fnt" @0x51EE48 /
+//  @0x51EEC4, "Arial20b.fnt" @0x51EE4F / @0x51EECB, the label "<c6CBF00>%s:\r\n<cFFFFFF>"
+//  @0x51F008, the band @0x51EF69..0x51EF73, the lines' font and pitch @0x51F0E6..0x51F108
+//  (dfx2.exe)]
+constexpr TitleLoadingScreen kLoadingScreen{"Arial20b.fnt", "Arial20b.fnt", 1280, "Arial40b.fnt",
+		"Arial40b.fnt", 0x6CBF00u, 139, 18, true, 20, 40};
+
 Title make() {
 	Title t;
 	t.code = "dfx2";
@@ -257,6 +267,7 @@ Title make() {
 	// DFX2-50: the DEATH map's zone markers [orig: the twin of MapOverlay_DrawView @0x5A48A0 -
 	//  @0x5A49C2..0x5A4A0D, @0x5A4A62..0x5A4ABA (dfx2.exe)].
 	t.death_map_zone_markers = true;
+	t.loading_screen = &kLoadingScreen;
 	return t;
 }
 

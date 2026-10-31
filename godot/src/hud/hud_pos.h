@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
@@ -76,6 +77,8 @@ public:
 		// session block rides composite_loading_session_text, the bar the
 		// loading_bar_* statics.
 		LOADING_PRESENT_INTERVAL_MS = 100,
+		// The round-over RESTART key's recomposite stage (hud/loading_screen.h).
+		LOADING_RESTART_STAGE = 16,
 		// The first-person view effects (hud/view_effects.h; same pinning):
 		// the rangefinder digit advance and the 16px digit-strip cell.
 		BINOCULAR_DIGIT_STEP = 10,
@@ -136,8 +139,15 @@ public:
 	// Not bound: HudOverlay's weapon feed is its one caller.
 	static String weapon_display_name(const Ref<RtxtStringFile> &p_gametext,
 			const String &p_weapon_id);
-	static String loading_font_small();
-	static String loading_font_large();
+	// The running title's loading-screen fonts over a background `p_image_width` wide, "" for a
+	// title with none; its progress lines (hud/loading_screen.h loading_fonts,
+	// loading_progress_line_count / _key / _fallback, loading_screen_stage).
+	static String loading_font_small(int p_image_width);
+	static String loading_font_large(int p_image_width);
+	static int loading_progress_line_count(int p_stage);
+	static String loading_progress_line_key(int p_line);
+	static String loading_progress_line_fallback(int p_line);
+	static int loading_screen_stage(int p_percent);
 	static String loading_msg_label_key();
 	static String loading_msg_label_fallback();
 	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed);
@@ -145,11 +155,16 @@ public:
 	// game blends it into the image before the stretch (hud::composite_loading_session_text): the
 	// title, the mission and the game type in the large font, the server message's label
 	// (`p_label` and its colon) and body in the small one where `p_custom_text` is not empty, the
-	// band ending at `p_band_right`. A missing font draws nothing; no background, no image.
+	// band ending at the running title's edge over a custom or the stock background. A missing
+	// font draws nothing; no background, no image.
 	static Ref<Image> composite_loading_session_text(const Ref<Image> &p_background,
 			const Ref<FntResource> &p_large, const Ref<FntResource> &p_small, const String &p_title,
 			const String &p_mission, const String &p_game_type, const String &p_label,
-			const String &p_custom_text, int p_band_right);
+			const String &p_custom_text, bool p_custom_background);
+	// The progress lines `p_lines` composited into a copy of `p_background` in the small font
+	// (hud::composite_loading_progress_lines); no background, no image.
+	static Ref<Image> composite_loading_progress_lines(const Ref<Image> &p_background,
+			const Ref<FntResource> &p_small, const PackedStringArray &p_lines);
 	// The bar's [outer, gray, track, fill] rects on a surface of `p_surface`
 	// px at `p_displayed` percent (engine hud/loading_screen.h loading_bar_rects).
 	static TypedArray<Rect2i> loading_bar_rects(const Vector2 &p_surface, int p_displayed);

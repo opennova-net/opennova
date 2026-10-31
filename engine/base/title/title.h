@@ -34,6 +34,28 @@ struct TitleHudFonts {
 	int32_t large_divisor = 0;
 };
 
+// The mission loading screen's text as a title's executable composites it into the background
+// (runtime/hud/loading_screen.h reads it): the two fonts, the narrow pair under `wide_width` pixels
+// of background and the wide pair from it (0: the narrow pair at every width), the small one the
+// server message's and the large one the band's; the message label's colour; the band's right
+// edge over a custom background and over the stock one, from the image's left, or from its right
+// edge when `band_from_right`; and the progress lines' pitch under and from `wide_width` (0: the
+// executable draws none).
+// [orig: Render_LoadingScreen @0x521D10] [orig: the twin @0x51EC60 (dfx2.exe)]
+struct TitleLoadingScreen {
+	const char *small_fnt = nullptr;
+	const char *large_fnt = nullptr;
+	int32_t wide_width = 0;
+	const char *small_fnt_wide = nullptr;
+	const char *large_fnt_wide = nullptr;
+	uint32_t message_label_rgb = 0;
+	int32_t band_right_custom = 0;
+	int32_t band_right_stock = 0;
+	bool band_from_right = false;
+	int32_t progress_pitch = 0;
+	int32_t progress_pitch_wide = 0;
+};
+
 // The order a title's mission catalog takes (runtime/mission/mission_catalog.h sort_rows), the
 // comparator its boot scan's qsort is handed: by file name, Jointops.exe's; by the [Info] TITLE
 // (the row's display title), dfx2.exe's. Each case-insensitive.
@@ -352,6 +374,9 @@ struct Title {
 	//  @0x5A4A62..0x5A4ABA (Minimap_DrawKothZoneRing @0x5A4AA2, sub_595710 @0x5A4ABA) past the
 	//  laser leg @0x5A4A55 and its flush @0x5A4A5D (dfx2.exe)]
 	bool death_map_zone_markers = false;
+	// DFX2-63: the mission loading screen's text (TitleLoadingScreen); null where no binary of the
+	// title was read for it, which composites none.
+	const TitleLoadingScreen *loading_screen = nullptr;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

@@ -19,10 +19,6 @@ LoadingBackground loading_background(const std::string &mission_file,
 	return out;
 }
 
-int loading_band_right(bool custom_background) {
-	return custom_background ? kLoadingBandRightCustom : kLoadingBandRightStock;
-}
-
 bool start_mission_splash_due(bool in_session, bool custom_background) {
 	// [orig: Game_StartMission @0x525d38..0x525d48]
 	return custom_background && !in_session;

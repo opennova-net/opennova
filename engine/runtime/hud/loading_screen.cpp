@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <utility>
 
+#include <base/title/title.h>
 #include <runtime/hud/hud_math.h>
 
 namespace opennova::hud {
@@ -138,7 +139,73 @@ TextBlock layout_text_block(const TextExtent &extent, int line_height, const std
 	return out;
 }
 
-LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_right) {
+int loading_band_right(const Title &game, bool custom_background, int image_w) {
+	const TitleLoadingScreen *row = game.loading_screen;
+	if (row == nullptr) return 0;
+	const int edge = custom_background ? row->band_right_custom : row->band_right_stock;
+	return row->band_from_right ? image_w - edge : edge;
+}
+
+LoadingFonts loading_fonts(const Title &game, int image_w) {
+	const TitleLoadingScreen *row = game.loading_screen;
+	if (row == nullptr) return {};
+	if (row->wide_width > 0 && image_w >= row->wide_width)
+		return {row->small_fnt_wide, row->large_fnt_wide};
+	return {row->small_fnt, row->large_fnt};
+}
+
+int loading_progress_line_count(const Title &game, int stage) {
+	// [orig: sub_51EC60 - the cap `cmp 10h; jl` then 15 @0x51f16f..0x51f17b, the loop
+	//  @0x51f184 (dfx2.exe)]
+	if (game.loading_screen == nullptr || game.loading_screen->progress_pitch <= 0) return 0;
+	if (stage >= kLoadingProgressStageCap + 1) return kLoadingProgressStageCap;
+	return stage > 0 ? stage : 0;
+}
+
+std::string loading_progress_line_key(int line) {
+	if (line < 0 || line >= kLoadingProgressTextLines) return {};
+	return std::string("STR_MISSION_LD_PROGRESS_0") + static_cast<char>('0' + line);
+}
+
+std::string loading_progress_line_fallback(int line) {
+	if (line < 0 || line >= kLoadingProgressTextLines) return {};
+	return std::string("??") + static_cast<char>('0' + line);
+}
+
+int loading_screen_stage(int percent) {
+	// Each stage against the first bar value the mission start presents past its call
+	// (loading_screen.h carries the witness).
+	struct StagePresent {
+		int stage;
+		int first_percent;
+	};
+	static constexpr StagePresent kStagePresents[] = {
+		{0, 1}, {1, 2}, {2, 6}, {3, 26}, {4, 38}, {5, 41}, {6, 70}, {7, 90},
+	};
+	int stage = 0;
+	for (const StagePresent &row : kStagePresents)
+		if (row.first_percent <= percent) stage = row.stage;
+	return stage;
+}
+
+LoadingTextBox loading_progress_line_box(const Title &game, int line, int image_w) {
+	LoadingTextBox out;
+	const TitleLoadingScreen *row = game.loading_screen;
+	if (row == nullptr) return out;
+	const int pitch = row->wide_width > 0 && image_w >= row->wide_width ? row->progress_pitch_wide
+																		: row->progress_pitch;
+	// [orig: sub_51EC60 - (20, pitch * n + 96, 661, 530), alignment 3 @0x51f2c2..0x51f2df (dfx2.exe)]
+	out.x = kLoadingProgressX;
+	out.y = pitch * line + kLoadingProgressTop;
+	out.width = kLoadingProgressRight - kLoadingProgressX;
+	out.bottom = kLoadingProgressBottom;
+	out.align = TextBlockAlign::kLeft;
+	out.argb = 0xFFFFFFFFu;
+	return out;
+}
+
+LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_right,
+		uint32_t label_rgb) {
 	LoadingSessionBoxes out;
 	const LoadingTextBox band{kLoadingBandLeft, kLoadingBandTop, band_right - kLoadingBandLeft,
 			kLoadingBandBottom, TextBlockAlign::kLeft, 0xFFFFFFFFu};
@@ -150,7 +217,7 @@ LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_rig
 	const int x = static_cast<int>(kLoadingMsgXFrac * image_w);
 	const int width = static_cast<int>(kLoadingMsgRightFrac * image_w) - x;
 	out.message_label = {x, static_cast<int>(kLoadingMsgLabelYFrac * image_h), width, image_h,
-			TextBlockAlign::kLeft, 0xFF000000u | kLoadingMsgLabelRgb};
+			TextBlockAlign::kLeft, 0xFF000000u | (label_rgb & 0xFFFFFFu)};
 	out.message_body = {x, static_cast<int>(kLoadingMsgBodyYFrac * image_h), width, image_h,
 			TextBlockAlign::kLeft, 0xFFFFFFFFu};
 	return out;
@@ -327,10 +394,13 @@ void loading_draw_text_block(LoadingSurface &surface, const opennova::fnt::fnt_f
 void composite_loading_session_text(LoadingSurface &surface,
 		const opennova::fnt::fnt_font_t *large, const opennova::fnt::fnt_font_t *small,
 		const std::string &title, const std::string &mission, const std::string &game_type,
-		const std::string &label, const std::string &custom_text, int band_right) {
+		const std::string &label, const std::string &custom_text, bool custom_background,
+		const Title &game) {
 	if (surface.rgba == nullptr || surface.width <= 0 || surface.height <= 0) return;
-	const LoadingSessionBoxes boxes =
-			loading_session_boxes(surface.width, surface.height, band_right);
+	if (game.loading_screen == nullptr) return;
+	const LoadingSessionBoxes boxes = loading_session_boxes(surface.width, surface.height,
+			loading_band_right(game, custom_background, surface.width),
+			game.loading_screen->message_label_rgb);
 	if (large != nullptr) {
 		loading_draw_text_block(surface, *large, kLoadingFontLargeTabWidth, title, boxes.title);
 		loading_draw_text_block(surface, *large, kLoadingFontLargeTabWidth, mission, boxes.mission);
@@ -342,6 +412,17 @@ void composite_loading_session_text(LoadingSurface &surface,
 			loading_message_label_text(label), boxes.message_label);
 	loading_draw_text_block(surface, *small, kLoadingFontSmallTabWidth, custom_text,
 			boxes.message_body);
+}
+
+void composite_loading_progress_lines(LoadingSurface &surface,
+		const opennova::fnt::fnt_font_t *small, const std::vector<std::string> &lines,
+		const Title &game) {
+	if (surface.rgba == nullptr || surface.width <= 0 || surface.height <= 0 || small == nullptr)
+		return;
+	if (game.loading_screen == nullptr || game.loading_screen->progress_pitch <= 0) return;
+	for (size_t i = 0; i < lines.size(); ++i)
+		loading_draw_text_block(surface, *small, kLoadingFontSmallTabWidth, lines[i],
+				loading_progress_line_box(game, static_cast<int>(i), surface.width));
 }
 
 LoadingBarRects loading_bar_rects(int surface_w, int surface_h, int displayed) {

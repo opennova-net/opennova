@@ -82,6 +82,15 @@ constexpr TitleHudMapLegend kHudMapLegend{
 		kHudMapLegendIcons, static_cast<int>(sizeof(kHudMapLegendIcons) / sizeof(kHudMapLegendIcons[0])),
 		40};
 
+// Jointops.exe's loading screen: Arials18.fnt and Arial22.fnt at every width, the label in 80E0FF,
+// the band to 661 over a custom background and 782 over the stock one, no progress lines (the
+// stage argument is never read).
+// [orig: Render_LoadingScreen @0x521D10 - "Arials18.fnt" @0x521EEC, "Arial22.fnt" @0x521F5A, the
+//  label "<c80E0FF>%s:\r\n<cFFFFFF>" @0x522087 (0x7D01A8), the band `neg bl; sbb; and 0FFFFFF87h;
+//  add 30Eh` @0x521FEC..0x522006]
+constexpr TitleLoadingScreen kLoadingScreen{"Arials18.fnt", "Arial22.fnt", 0, nullptr, nullptr,
+		0x80E0FFu, 661, 782, false, 0, 0};
+
 Title make() {
 	Title t;
 	t.code = "jo";
@@ -150,6 +159,7 @@ Title make() {
 	//  `mov eax, 100h` @0x583CF7 into [fx+9Ch] / [fx+0A0h] @0x583CFE / @0x583D04, the sides both
 	//  targets take @0x583D36 / @0x583D85 and FrameFX_DrawPass's work rect @0x582B32..0x582B49].
 	t.frame_fx_work_side = 256;
+	t.loading_screen = &kLoadingScreen;
 	return t;
 }
 

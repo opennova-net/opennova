@@ -38,8 +38,9 @@ extends Control
 var _texture: Texture2D = null
 var _base_image: Image = null # the background before the session block composites into it
 var _has_custom_bg := false
-var _band_right := 0      # the session text band's right edge over this background
 var _in_session := false
+var _stage := 0           # the load's stage the composite draws (HudPos.loading_screen_stage)
+var _composite_texture: ImageTexture = null # the composite drawn, rewritten in place per stage
 var _title := ""          # server name [orig: g_SessionVarServerName -> title buf @ 0x51f533]
 var _mission_name := ""   # [orig: g_SessionVarMissionName -> mission buf @ 0x51f53a]
 var _game_type_text := "" # [orig: LoadingText LTGT_* lookup @ 0x51f3cf]
@@ -97,21 +98,23 @@ func setup(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 	# the stock image (engine: runtime/hud/loading_background.h).
 	var bg := LoadingBackground.resolve(root, info.mission_file)
 	_has_custom_bg = bg.custom
-	_band_right = bg.band_right
 	_texture = load_background_texture(root, bg.name)
 	_base_image = _texture.get_image() if _texture != null else null
 	_in_session = info.in_session
-	if not _in_session:
+	_stage = 0
+	_composite_texture = null
+	if not _in_session and not _draws_progress_lines():
 		queue_redraw()
 		return
-	# MP only: the text overlay and its fonts [orig: fonts loaded only on the
-	# in-session path @ 0x521eec/0x521f5a].
-	_title = info.server_name
-	_mission_name = info.mission_name
-	_custom_text = info.custom_text
-	_game_type_text = _lookup_loading_text(HudPos.loading_gametype_text_key(maxi(info.game_type, 0)), "")
-	_font_small = _load_font(root, HudPos.loading_font_small())
-	_font_large = _load_font(root, HudPos.loading_font_large())
+	# The text and its fonts: the session block's in a session, and the title's
+	# progress lines at every load (engine: runtime/hud/loading_screen.h).
+	if _in_session:
+		_title = info.server_name
+		_mission_name = info.mission_name
+		_custom_text = info.custom_text
+		_game_type_text = _lookup_loading_text(
+				HudPos.loading_gametype_text_key(maxi(info.game_type, 0)), "")
+	_load_fonts(root)
 	_composite_session_text()
 	queue_redraw()
 
@@ -131,9 +134,10 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 		var texture := load_background_texture(root, bg.name)
 		if texture != null:
 			_has_custom_bg = bg.custom
-			_band_right = bg.band_right
 			_texture = texture
 			_base_image = texture.get_image()
+			_composite_texture = null
+			_load_fonts(root)
 	if _in_session:
 		if not info.server_name.is_empty():
 			_title = info.server_name
@@ -152,6 +156,18 @@ func update_session_info(root: ResourceRoot, info: LoadingScreenInfo) -> void:
 func set_progress(percent: int) -> void:
 	_progress = clampi(percent, 0, 100)
 	_sync_bar_fill()
+	set_stage(HudPos.loading_screen_stage(_progress))
+
+
+## The load's stage the screen composites: the title's progress lines draw that
+## many (engine: runtime/hud/loading_screen.h); the RESTART key's recomposite
+## passes HudPos.LOADING_RESTART_STAGE.
+func set_stage(stage: int) -> void:
+	if stage == _stage:
+		return
+	_stage = stage
+	if _draws_progress_lines():
+		_composite_session_text()
 
 
 ## Redraw + present if due: on a real checkpoint change or every 100 ms for
@@ -582,16 +598,52 @@ func _draw_splash_overlay() -> void:
 # The MP text block composited into the background as the game blends it into
 # the image before the stretch: the engine's boxes, each block broken, placed
 # and blended glyph by glyph (HudPos.composite_loading_session_text;
-# hud/loading_screen.h carries the witness). The composite is what draws.
+# hud/loading_screen.h carries the witness), then the stage's progress lines
+# where the title draws them (HudPos.composite_loading_progress_lines). The
+# composite is what draws; a stage change during the blocking load rewrites the
+# drawn texture's pixels in place, as the load's presents draw only what the
+# canvas already holds.
 func _composite_session_text() -> void:
 	if _base_image == null:
 		return
-	var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
-			HudPos.loading_msg_label_fallback())
-	var composite := HudPos.composite_loading_session_text(_base_image, _font_large, _font_small,
-			_title, _mission_name, _game_type_text, label, _custom_text, _band_right)
-	if composite != null:
-		_texture = ImageTexture.create_from_image(composite)
+	var composite := _base_image
+	if _in_session:
+		var label := _lookup_loading_text(HudPos.loading_msg_label_key(),
+				HudPos.loading_msg_label_fallback())
+		composite = HudPos.composite_loading_session_text(composite, _font_large, _font_small,
+				_title, _mission_name, _game_type_text, label, _custom_text, _has_custom_bg)
+	var lines := PackedStringArray()
+	for line in HudPos.loading_progress_line_count(_stage):
+		var key := HudPos.loading_progress_line_key(line)
+		lines.append("" if key.is_empty() else _lookup_loading_text(key,
+				HudPos.loading_progress_line_fallback(line)))
+	# (Under a title with lines the composite is the RGBA8 copy at every stage, so each
+	# stage's rewrite keeps the drawn texture.)
+	if composite != null and _draws_progress_lines():
+		composite = HudPos.composite_loading_progress_lines(composite, _font_small, lines)
+	if composite == null:
+		return
+	if _composite_texture != null \
+			and _composite_texture.get_size() == Vector2(composite.get_size()) \
+			and _composite_texture.get_format() == composite.get_format():
+		_composite_texture.update(composite)
+	else:
+		_composite_texture = ImageTexture.create_from_image(composite)
+	_texture = _composite_texture
+
+
+# Whether the running title composites progress lines (the RESTART stage draws
+# its most).
+func _draws_progress_lines() -> bool:
+	return HudPos.loading_progress_line_count(HudPos.LOADING_RESTART_STAGE) > 0
+
+
+# The title's two fonts for this background's width (engine:
+# runtime/hud/loading_screen.h loading_fonts).
+func _load_fonts(root: ResourceRoot) -> void:
+	var width := _base_image.get_width() if _base_image != null else 0
+	_font_small = _load_font(root, HudPos.loading_font_small(width))
+	_font_large = _load_font(root, HudPos.loading_font_large(width))
 
 
 # The progress bar, scaled from the HudPos.DESIGN_* virtual overlay space onto
@@ -619,7 +671,7 @@ func _lookup_loading_text(key: String, fallback: String) -> String:
 
 
 func _load_font(root: ResourceRoot, name: String) -> FntResource:
-	if root == null:
+	if root == null or name.is_empty():
 		return null
 	return root.load_font(name) as FntResource
 

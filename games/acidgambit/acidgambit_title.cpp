@@ -58,6 +58,8 @@ Title make() {
 	t.env_cube_terrain_clearance = jo_title().env_cube_terrain_clearance;
 	t.nvg_gain_rect = jo_title().nvg_gain_rect;
 	t.frame_fx_work_side = jo_title().frame_fx_work_side;
+	// Its loading screen is Joint Operations', as its code is.
+	t.loading_screen = jo_title().loading_screen;
 	return t;
 }
 
