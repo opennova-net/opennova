@@ -172,6 +172,10 @@ Title make() {
 	// DFX2-41: the no-zone instruction's penalty line [orig: sub_551E10 @0x55266f..0x55274f
 	// (dfx2.exe)].
 	t.death_respawn_penalty_line = true;
+	// The HUD's own draws (DFX2-81..DFX2-90).
+	// DFX2-90: the map key steps off <-> fullscreen [orig: sub_51DB80 @0x51DB80, called from the
+	//  dispatcher's case 28 @0x4DD702 (dfx2.exe)].
+	t.hud_map_cycle_skips_window = true;
 	return t;
 }
 

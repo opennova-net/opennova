@@ -770,9 +770,16 @@ struct HudMapControl {
 		else if (command < 0 && mode == 2)
 			mode = 0;
 	}
-	// [orig: HUD_CycleMapMode @0x520bc0]
-	int cycle() {
-		mode = mode == 0 ? 2 : (mode == 2 ? 3 : 0);
+	// The map key's step, the title's (Title::hud_map_cycle_skips_window, DFX2-90): Jointops.exe's
+	// 0 -> 2 -> 3 -> 0, any other mode to 0; dfx2.exe's 0 -> 3, any other mode to 0.
+	// [orig: HUD_CycleMapMode @0x520BC0 - 0 -> 2 @0x520BC5..0x520BC9, `cmp eax, 2; setnz;
+	//  sub 1; and 3` @0x520BD4..0x520BE2] [orig: sub_51DB80 @0x51DB80 (dfx2.exe) - `neg; sbb;
+	//  and 0FFFFFFFDh; add 3` @0x51DB85..0x51DB8F]
+	int cycle(bool skips_window) {
+		if (skips_window)
+			mode = mode == 0 ? 3 : 0;
+		else
+			mode = mode == 0 ? 2 : (mode == 2 ? 3 : 0);
 		return mode;
 	}
 	// The radar keys step the big-map zoom while a mode is up, the corner

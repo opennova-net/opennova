@@ -183,9 +183,10 @@ int Simulation::get_hud_radar_zoom_q16() const {
 }
 
 int Simulation::request_hud_map_cycle() {
-	// The map_toggle action's three-state cycle (witness at
+	// The map_toggle action's cycle, the session title's (witness at
 	// hud::HudMapControl::cycle).
-	return kernel_->local.hud_map_control.cycle();
+	return kernel_->local.hud_map_control.cycle(
+			session_title(net_, assets_.root).hud_map_cycle_skips_window);
 }
 
 void Simulation::request_hud_map_close() {

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include <base/title/title.h>
 #include <formats/def/def.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/protocol/protocol.h>
@@ -314,6 +315,26 @@ static void mortar_map_callbacks() {
 		map.weapon_command(ev.map_command);
 		CHECK(map.mode == 3);
 	}
+}
+
+// The map key's cycle, the title's (DFX2-90): Jointops.exe's 0 -> 2 -> 3 -> 0 and any other mode
+// to 0; dfx2.exe's 0 -> 3 -> 0, never the window [orig: HUD_CycleMapMode @0x520BC0]
+// [orig: sub_51DB80 @0x51DB80 (dfx2.exe)].
+static void map_cycle_by_title() {
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	CHECK(jo != nullptr && !jo->hud_map_cycle_skips_window);
+	CHECK(dfx2 != nullptr && dfx2->hud_map_cycle_skips_window);
+	HudMapControl map;
+	CHECK(map.cycle(false) == 2);
+	CHECK(map.cycle(false) == 3);
+	CHECK(map.cycle(false) == 0);
+	map.mode = 1;
+	CHECK(map.cycle(false) == 0);
+	CHECK(map.cycle(true) == 3);
+	CHECK(map.cycle(true) == 0);
+	map.mode = 2; // a mortar scope's window
+	CHECK(map.cycle(true) == 0);
 }
 
 static void world_feeds() {
@@ -942,6 +963,7 @@ int main() {
 	vehicle_bay_logos();
 	geometry_and_draw();
 	mortar_map_callbacks();
+	map_cycle_by_title();
 	mortar_map_and_world_cues();
 	combat_text_font_slots();
 	world_feeds();

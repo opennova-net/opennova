@@ -210,6 +210,13 @@ struct Title {
 	// (Jointops.exe): RESPAWN3 outside assault, RESPAWN4 or, dead out of 0x20000, RESPAWN5
 	// [orig: UI_UpdateDeathScreenContent @0x5536a0 - @0x554271..0x5542ef].
 	bool death_respawn_penalty_line = false;
+	// The executable's own HUD where dfx2.exe's parts from Jointops.exe's (DFX2-81..DFX2-90), each
+	// false for Jointops.exe's draw. On the Title, not the title's rules nor its Protocol: each is
+	// the executable's own HUD, single player's too, and changes no wire byte and no world.
+	// DFX2-90: the map key steps off -> fullscreen -> off, never the north-up window (mode 2);
+	// Jointops.exe's steps off -> window -> fullscreen -> off (hud::HudMapControl::cycle).
+	// [orig: HUD_CycleMapMode @0x520BC0] [orig: sub_51DB80 @0x51DB80 (dfx2.exe)]
+	bool hud_map_cycle_skips_window = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title
