@@ -197,6 +197,32 @@ void test_the_objective_done_mark(const fnt_font_t *font) {
 	CHECK(fills.empty() && red == 0);
 }
 
+// DFX2-94: under dfx2.exe's title the pre-round armory line (prompt 1) draws nothing, menu open or
+// not; the bay and FARP lines (2, 3, 4) draw as under Jointops.exe's, which draws all four
+// [orig: sub_5BCD20 @0x5BCDAA..0x5BCE30 (dfx2.exe)] [orig: HUD_DrawGameplayOverlays
+// @0x5BDEE9..0x5BDF45].
+void test_the_armory_line(const fnt_font_t *font) {
+	CHECK(title("dfx2").hud_drops_armory_prompt);
+	CHECK(!title("jo").hud_drops_armory_prompt);
+	CHECK(!title("acidgambit").hud_drops_armory_prompt);
+	HudLayout layout;
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+	for (int service = 1; service <= 4; ++service) {
+		HudFrameState state;
+		state.combat.service_prompt = service;
+		state.combat.service_text = "Gear";
+		const auto line = [&](const char *code) {
+			state.title = &title(code);
+			return element_glyphs(compiler.compile(state, 1024, 768), HudElement::ServicePrompt)
+					.size();
+		};
+		CHECK(line("jo") == 4);
+		CHECK(line("dfx2") == (service == 1 ? 0u : 4u));
+	}
+}
+
 } // namespace
 
 int main() {
@@ -205,6 +231,7 @@ int main() {
 	test_the_lone_gunner_panel(&font);
 	test_the_waypoint_tint(&font);
 	test_the_objective_done_mark(&font);
+	test_the_armory_line(&font);
 	opennova::fnt::fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

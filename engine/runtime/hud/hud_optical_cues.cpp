@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <base/io/bam.h>
+#include <base/title/title.h> // Title::hud_drops_armory_prompt
 #include <cmath>
 #include <cstdio>
 #include <runtime/hud/hud_bay_logos.h>
@@ -73,6 +74,13 @@ void HudFrameCompiler::element_service_prompt(const HudFrameState &s, float w, f
 	// FARP lines never test it. [orig: HUD_DrawGameplayOverlays, `call
 	//  UI_IsMenuScreenOpen` @0x5BDF09, `jnz` past the draw @0x5BDF10]
 	if (c.service_prompt == 1 && s.menu_screen_open)
+		return;
+	// dfx2.exe's head legs carry no pre-round branch: a running pre-round timer draws no armory
+	// line, and its bay line waits on the same `!g_ClientPreRoundTimer` test Jointops.exe's does
+	// (DFX2-94) [orig: sub_5BCD20 @0x5BCD20 - `cmp g_ClientPreRoundTimer` then the 0x800 flag
+	//  @0x5BCDAA..0x5BCDBD ahead of STROVER_VEHICLEBAY_INFO @0x5BCDFE, no STROVER_ARMORY_*
+	//  (dfx2.exe)].
+	if (c.service_prompt == 1 && s.title != nullptr && s.title->hud_drops_armory_prompt)
 		return;
 	if (c.service_prompt && (s.hud_detail_level < 3 || c.service_above_declutter))
 		emit_slot_text(label_font_large_, label_large_scale_, c.service_text.c_str(),

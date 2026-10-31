@@ -123,6 +123,13 @@ struct Title {
 	// [orig: HUD_DrawWinConditions @0x5BA940 (@0x5BABA4..0x5BAC5B)] [orig: sub_5B9890 @0x5B9890
 	//  (@0x5B9AFA..0x5B9B12) (dfx2.exe)]
 	bool hud_objective_done_fill = false;
+	// DFX2-94: the executable's gameplay overlays carry no pre-round armory line
+	// (STROVER_ARMORY_INFO / _WAIT): a running pre-round timer draws no service line, as the
+	// vehicle bay's waits on its end in both. False (Jointops.exe): the armory line while it
+	// runs and no menu screen is open. On the Title: the executable's own HUD.
+	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 (@0x5BDEE9..0x5BDF45)] [orig: sub_5BCD20
+	//  @0x5BCD20 (@0x5BCDAA..0x5BCE30) (dfx2.exe)]
+	bool hud_drops_armory_prompt = false;
 	// DFX2-41: the deploy screen picks the loadout. death.mnu's DEATH screen carries PRIMARY /
 	// SECONDARY / ACCESSORY lists its activation fills for the player's class, and the screen's
 	// close on its triggers' clear submits them (the loadout apply, a C2S 0x2F in session); its
