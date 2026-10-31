@@ -534,9 +534,23 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play,
 
 uint32_t GameConfig::player_slot_limit() const {
     // A config no session titled (the host-equivalent defaults a joiner's or the single player's
-    // admission reads) has no title ceiling to apply: its cap plus the dedicated slot.
-    if (title == nullptr)
-        return static_cast<uint32_t>(max_players) + (dedicated_server ? 1u : 0u);
+    // admission reads, a pre-session server command's) has run no session apply, so no title
+    // ceiling: the round init's limit, its cap plus the dedicated slot held to 1..251 (both
+    // executables' one constant), which the session apply's own store replaces.
+    // [orig: Server_InitNewRoundState @0x51C8E0 - the sum @0x51C948..0x51C955 (a signed int),
+    //  `cmp eax, 1; jge` @0x51C958, `cmp eax, 0FBh; jle` @0x51C964, the store @0x51C976]
+    // [orig: Server_InitNewRoundState @0x519910 - @0x519978..0x51999B, the store @0x5199A6
+    //  (dfx2.exe)]
+    if (title == nullptr) {
+        constexpr int32_t kRoundInitSlotLimitMax = 0xFB;
+        int32_t total = static_cast<int32_t>(
+                static_cast<uint32_t>(max_players) + (dedicated_server ? 1u : 0u));
+        if (total < 1)
+            total = 1;
+        else if (total > kRoundInitSlotLimitMax)
+            total = kRoundInitSlotLimitMax;
+        return static_cast<uint32_t>(total);
+    }
     return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server,
                                   network_connect_type, *title);
 }

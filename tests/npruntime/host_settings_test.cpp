@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::inmatch;
 namespace gamecfg = opennova::gamecfg;
@@ -60,6 +61,29 @@ int title_caps() {
     config.max_players = 251;
     config.dedicated_server = true;
     TEST_EXPECT(config.player_slot_limit() == 252);
+    return 0;
+}
+
+// A config no session titled has run no session apply: its limit is the round init's, the cap
+// plus the dedicated slot held to 1..251, both executables' constant, with no title ceiling.
+// [orig: Server_InitNewRoundState @0x51C8E0 - @0x51C948..0x51C96B, the store @0x51C976]
+// [orig: Server_InitNewRoundState @0x519910 - @0x519978..0x51999B, the store @0x5199A6
+//  (dfx2.exe)]
+int untitled_round_init_limit() {
+    const auto limit = [](uint32_t max_players, bool dedicated) {
+        GameConfig config;
+        test_titles::jo_config(config);
+        config.max_players = max_players;
+        config.dedicated_server = dedicated;
+        return config.player_slot_limit();
+    };
+    TEST_EXPECT(limit(0, false) == 1 && limit(0, true) == 1);
+    TEST_EXPECT(limit(1, false) == 1 && limit(4, true) == 5);
+    // Past JO's 65 ceiling: the round init applies none of a title's.
+    TEST_EXPECT(limit(100, false) == 100 && limit(100, true) == 101);
+    TEST_EXPECT(limit(250, true) == 251 && limit(251, true) == 251 && limit(300, false) == 251);
+    // The sum is a signed int: a cap past INT_MAX reads negative and holds at 1.
+    TEST_EXPECT(limit(0x80000000u, false) == 1);
     return 0;
 }
 
@@ -467,6 +491,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (title_caps() != 0) return 1;
+    if (untitled_round_init_limit() != 0) return 1;
     if (untouched_dialog() != 0) return 1;
     if (max_players_recommendation() != 0) return 1;
     if (restriction_lists() != 0) return 1;
