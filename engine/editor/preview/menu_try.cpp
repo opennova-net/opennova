@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 #include <base/title/title.h>
 #include <runtime/menu/menu_sound.h>
+#include <runtime/mission/campaign.h>
 #include <runtime/profile/player_profiles.h>
 
 namespace opennova::editor {
@@ -94,6 +95,12 @@ MenuTry::MenuTry() {
 	// The frame's click and scroll reach the runtime as the game's frame signals them (MenuDriver).
 	frame_.set_clicked([this](int index, int part) { runtime_.on_widget_clicked(index, part); });
 	frame_.set_scrolled([this](int index, int value) { runtime_.on_frame_scroll_value(index, value); });
+	// A run-time image (a campaign's, MenuRuntime::set_widget_image) loads as the game's frame loads
+	// it, through the screen's assets.
+	frame_.set_textures_added([this](menu::MenuFrameCompiler &compiler) {
+		if (source_ != nullptr && source_->files != nullptr)
+			assets_.load_added_textures(compiler, *source_->files, decoder_);
+	});
 	runtime_.set_frame(&frame_);
 	runtime_.set_sink([this](const menu::MenuEvent &event) { on_event_(event); });
 	// The single-player screen's controls, the shell's (menu_commands.h).
@@ -193,6 +200,26 @@ void MenuTry::prepare_() {
 	options_.seed_profile(runtime_, &profile_);
 	commands_.wire(runtime_, in_mission_);
 	flow_.clear_rows();
+	// The single-player screen's inputs, as the game's shell hands them at each open
+	// (MenuDriver::set_single_player_source): the project's game, and under its campaign tabs
+	// campaign.def, the menu table and the sandbox profile's completion bytes.
+	flow_.set_title(source_ != nullptr ? source_->title : nullptr);
+	if (source_ != nullptr && source_->title != nullptr && source_->title->sp_campaign_tabs && source_->files) {
+		std::vector<uint8_t> def;
+		source_->files->read(campaign::kCampaignFile, def);
+		// The game shell's menu table (menu_shell.gd menu_text_file).
+		std::vector<uint8_t> text;
+		auto table = std::make_unique<rtxt::File>();
+		std::string error;
+		menu_text_.reset();
+		if (source_->files->read("menutxt.BIN", text) && rtxt::parse(text.data(), text.size(), *table, error))
+			menu_text_ = std::move(table);
+		campaign::CompletionTable progress{};
+		for (size_t c = 0; c < progress.size() && c < profile_.campaign_complete.size(); ++c)
+			for (size_t m = 0; m < progress[c].size() && m < profile_.campaign_complete[c].size(); ++m)
+				progress[c][m] = profile_.campaign_complete[c][m];
+		flow_.set_campaign_source(std::string(def.begin(), def.end()), menu_text_.get(), progress);
+	}
 	if (!commands_.mission_lists().empty() && source_ && source_->missions) {
 		const std::vector<menu::MissionChoice> rows = source_->missions();
 		for (const int id : commands_.mission_lists()) flow_.seed_missions(runtime_, id, rows);
@@ -418,9 +445,10 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 		else if (event.text2 == "scroll")
 			value = std::to_string(event.value);
 		setting_(event.text, event.text2, value);
-		// A pick of a mission list selects its mission, of a Mods list describes its game (menu_shell.gd
-		// _on_widget_value_changed).
+		// A pick of the campaign list shows its campaign, of a mission list selects its mission, of a Mods
+		// list describes its game (menu_shell.gd _on_widget_value_changed).
 		const int id = runtime_.widget_id(event.text);
+		if (event.text2 == "list" && flow_.select_campaign(runtime_, id, event.value)) return;
 		if (event.text2 == "list" &&
 				std::find(commands_.mission_lists().begin(), commands_.mission_lists().end(), id) !=
 						commands_.mission_lists().end())
@@ -437,6 +465,8 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 		const int kind = runtime_.widget_kind_of(event.id);
 		if (kind == kCheckBox) setting_(event.text, "checkbox", runtime_.is_widget_checked(event.id) ? "checked" : "unchecked");
 		else if (kind == kRadio || kind == kRadioEdit) setting_(event.text, "radio", "checked");
+		// The campaign tabs' radios refresh ACCEPT (menu_shell.gd _on_widget_activated).
+		if (flow_.activate_tab(runtime_, event.text)) return;
 		// The Options surface's own controls (the device radios, DEFAULTS, CLEAR_KEY, its ACCEPT), over the
 		// sandbox's profile record.
 		const std::string screen = runtime_.current_screen();

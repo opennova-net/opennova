@@ -72,8 +72,12 @@ public:
 	using Configure = std::function<bool(const std::string &screen, MenuFrameCompiler &compiler)>;
 	using Clicked = std::function<void(int index, int part)>;
 	using Scrolled = std::function<void(int index, int value)>;
+	// A widget's run-time image interned past the configure's textures: the embedder loads the
+	// slots it added, as the game's frame does at once (MenuFrameAssets::load_added_textures).
+	using TexturesAdded = std::function<void(MenuFrameCompiler &compiler)>;
 
 	void set_configure(Configure configure) { configure_ = std::move(configure); }
+	void set_textures_added(TexturesAdded added) { textures_added_ = std::move(added); }
 	void set_clicked(Clicked clicked) { clicked_ = std::move(clicked); }
 	void set_scrolled(Scrolled scrolled) { scrolled_ = std::move(scrolled); }
 
@@ -148,6 +152,7 @@ private:
 	MenuFrameState state_;
 	MenuClickLatch click_;
 	Configure configure_;
+	TexturesAdded textures_added_;
 	Clicked clicked_;
 	Scrolled scrolled_;
 	bool configured_ = false;

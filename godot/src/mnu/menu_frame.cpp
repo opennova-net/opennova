@@ -574,6 +574,8 @@ void MenuFrame::set_widget_shown_override(int p_index, bool p_shown) {
 
 void MenuFrame::set_native_state(const opennova::menu::MenuFrameState &p_state) {
 	state_ = p_state;
+	for (const opennova::menu::MenuWidgetState &row : state_.widgets)
+		if (row.has_image) load_runtime_image_(row.image);
 	queue_redraw();
 }
 
@@ -608,10 +610,14 @@ void MenuFrame::set_widget_text_bytes(int p_index, const std::string &p_text, in
 
 void MenuFrame::set_widget_image(int p_index, uint32_t p_states, const std::string &p_file) {
 	opennova::menu::frame_set_image(state_, p_index, p_states, p_file);
+	load_runtime_image_(p_file);
+	queue_redraw();
+}
+
+void MenuFrame::load_runtime_image_(const std::string &p_file) {
 	if (files_ != nullptr && compiler_.add_runtime_texture(p_file) >= 0 &&
 			assets_.load_added_textures(compiler_, *files_, texture_store_) > 0)
 		adopt_slots_();
-	queue_redraw();
 }
 
 void MenuFrame::set_widget_rect(int p_index, const Rect2i &p_rect) {

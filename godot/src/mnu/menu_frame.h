@@ -164,7 +164,8 @@ public:
 	const opennova::menu::MenuFrameState &native_state() const { return state_; }
 	const opennova::menu::MenuFrameAssets &native_assets() const { return assets_; }
 	// The editor viewport's frame state (it never pumps): what its options hold on the
-	// configured screen (editor/preview apply_menu_options), set after each configure.
+	// configured screen (editor/preview apply_menu_options), set after each configure, or the
+	// menu Try's, whose run-time images load here as set_widget_image loads them.
 	void set_native_state(const opennova::menu::MenuFrameState &p_state);
 
 	// Typed per-widget per-frame state, keyed by the widget's pre-order index
@@ -406,6 +407,9 @@ private:
 	// The uploaded pages of the font a compiler slot draws with (null: none).
 	const std::vector<Ref<Texture2D>> *font_pages_(int32_t p_slot);
 	void adopt_slots_();
+	// A run-time image's texture interned and loaded through the screen's file source, the slots
+	// adopted when one was added (set_widget_image, set_native_state).
+	void load_runtime_image_(const std::string &p_file);
 	Vector2 design_scale_() const;
 
 	Ref<MnuDocument> document_;

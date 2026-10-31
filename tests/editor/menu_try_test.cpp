@@ -32,6 +32,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <base/gameprofile/game_type.h>
 #include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
@@ -39,6 +40,8 @@
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/texture_forms.h"
+#include "menu/fake_file_source.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -415,6 +418,64 @@ int test_try_lists_the_mods() {
 	return 0;
 }
 
+// A project of a game with dfx2.exe's campaign tabs (DFX2-60) tried at its single-player screen: Try runs the
+// screen as the game's shell hands it (MenuFlow over the project's game, campaign.def and the sandbox profile),
+// and CAMPAIGN_IMAGE's run-time image, the shown campaign's, loads through the screen's own assets at once
+// (MenuFrameAssets::load_added_textures), as the game's frame loads it, so its slot holds the texture and its
+// size; a campaign mission's pick sets its own image, loaded the same way.
+int test_try_loads_a_campaign_image() {
+	FakeFileSource files;
+	files.put_text("campaign.def", "begin a\r\ntitle ID_A\r\nimage a.tga\r\nmission c1.bms\r\nend\r\n", 1);
+	files.put("a.tga", texture_forms::tga_true_colour(16, 8, 32, 8, false), 1);
+	files.put("c1.tga", texture_forms::tga_true_colour(4, 4, 32, 8, false), 1);
+	// The lists' rows are their font's height (the minted one-page font).
+	files.put("list.fnt", test_io::read_file(repo() + "/fixtures/fnt/synth_1page.fnt"), 1);
+	const std::string font = "<FONT><NAME>list.fnt</NAME></FONT>";
+	const std::string text = screen("SINGLE_PLAYER",
+			button("list", "CA_LIST", 100, 100, 300, 140, font) +
+			button("list", "CA_MISSION_LIST", 100, 150, 300, 190, font) +
+			button("static", "CAMPAIGN_IMAGE", 400, 100, 600, 200,
+					"<APPEARANCE type=\"image\" state=\"default\"></APPEARANCE>") +
+			button("list", "IA_LIST", 100, 300, 300, 340, font) +
+			button("button", "ACCEPT", 100, 400, 300, 440, ""));
+	auto doc = std::make_shared<mnu::Document>();
+	std::string error;
+	TEST_EXPECT(mnu::parse(text, *doc, error));
+	Title dfx2;
+	dfx2.sp_campaign_tabs = true;
+	MenuTrySource source;
+	source.files = &files;
+	source.menu = [&doc](const std::string &file) {
+		return strutil::iequals(file, "sp.mnu") ? std::shared_ptr<const mnu::Document>(doc) : nullptr;
+	};
+	source.missions = [] {
+		return std::vector<menu::MissionChoice>{{"c1.bms", "C1", "c1 briefing", game_type::kCoop, {}, "C1"}};
+	};
+	source.title = &dfx2;
+	MenuTry tried;
+	TEST_EXPECT(tried.start(source, "sp.mnu", "SINGLE_PLAYER", error));
+	const auto slot_of = [&tried](const char *name) {
+		const std::vector<std::string> &names = tried.compiler().texture_names();
+		for (size_t i = 0; i < names.size(); ++i)
+			if (strutil::iequals(names[i], name)) return int(i);
+		return -1;
+	};
+	const int image = slot_of("a.tga");
+	TEST_EXPECT(image >= 0 && size_t(image) < tried.assets().slot_keys().size() &&
+	            !tried.assets().slot_keys()[size_t(image)].empty());
+	TEST_EXPECT(files.reads["a.tga"] == 1);
+	// The campaign mission's pick: its own image, loaded at once.
+	TEST_EXPECT(tried.runtime().item_count(tried.runtime().widget_id("CA_MISSION_LIST")) == 1);
+	const uint64_t serial = tried.state_serial();
+	tried.click(source, 200, 153);
+	TEST_EXPECT(tried.runtime().widget_image(tried.runtime().widget_id("CAMPAIGN_IMAGE")) == "c1.tga");
+	const int mission = slot_of("c1.tga");
+	TEST_EXPECT(mission >= 0 && size_t(mission) < tried.assets().slot_keys().size() &&
+	            !tried.assets().slot_keys()[size_t(mission)].empty());
+	TEST_EXPECT(tried.state_serial() != serial);
+	return 0;
+}
+
 int test_key_names() {
 	menu::MenuKeyInput key;
 	TEST_EXPECT(menu_try_key_from_name("vk_return", false, key) && key.vk == 13 && key.unicode == 0);
@@ -433,6 +494,7 @@ int main() {
 	TEST_EXPECT(test_try_navigates() == 0);
 	TEST_EXPECT(test_try_lists_the_mods() == 0);
 	TEST_EXPECT(test_try_click_rule() == 0);
+	TEST_EXPECT(test_try_loads_a_campaign_image() == 0);
 	TEST_EXPECT(test_key_names() == 0);
 	std::printf("editor_menu_try OK\n");
 	return 0;
