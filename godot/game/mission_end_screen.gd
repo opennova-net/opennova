@@ -60,7 +60,7 @@ func _draw() -> void:
 					_draw_image_fade(e)
 				CineEventRecord.KIND_TEXT_FADE:
 					_draw_text_line(e)
-				CineEventRecord.KIND_EPILOG_COUNTER:
+				CineEventRecord.KIND_EPILOG_COUNTER, CineEventRecord.KIND_EPILOG_COUNTER_FONT:
 					_draw_counter(e)
 	if _cine.bars_fading or _cine.bars_held:
 		_draw_bars(_cine.bars_alpha if _cine.bars_fading else 1.0)

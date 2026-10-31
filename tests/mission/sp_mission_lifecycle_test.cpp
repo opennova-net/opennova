@@ -347,7 +347,27 @@ void test_dfx2_win_screen() {
 		CHECK(find_event(cine, w::CineEventKind::EpilogCounter, 3) == nullptr);
 		const w::CineEvent *objective = find_event(cine, w::CineEventKind::EpilogCounter, 0);
 		CHECK(objective != nullptr && objective->value == 1);
-		const int cursor = first + 180;
+		// DFX2-66: the local player's slot's points and the entry's high score, raised by
+		// the new best, in Impact38 at y 354 / 402 from the counters' end.
+		const w::MatchPlayer *slot = world.match.player(world.cached.local_player);
+		CHECK(slot != nullptr);
+		const int32_t points = slot != nullptr ? slot->stats[w::MatchStats::kPoints] : 0;
+		const w::CineEvent *total = find_event(cine, w::CineEventKind::EpilogCounterFont, 0);
+		const w::CineEvent *best = find_event(cine, w::CineEventKind::EpilogCounterFont, 1);
+		CHECK(total != nullptr && total->start == first + 180 &&
+				total->label_key == "STREPILOG_TOTALEXP" && total->row_y == 354 &&
+				total->label_x == 192 && total->value_x == 832 && total->count_x == 832 &&
+				total->value == points && total->max == -1 && total->font == -3 &&
+				total->label_color == 0xFFFFFF00u && total->value_color == 0xFFFFFF00u &&
+				total->points_target == -1 && total->points_rate == -1);
+		// The demo round scores 0 against the entry's 0: no new best, white.
+		CHECK(best != nullptr && best->start == first + 240 &&
+				best->label_key == "STREPILOG_HIGHSCORE" && best->row_y == 402 && best->value == 0 &&
+				best->label_color == 0xFFFFFFFFu && best->font == -3);
+		CHECK(points == 0 && cine.mission.high_score == 0 &&
+				world.out.effects.count(w::kEpilogHighScoreEffect) == 0);
+		CHECK(find_event(cine, w::CineEventKind::EpilogCounterFont, 2) == nullptr);
+		const int cursor = first + 300;
 		const w::CineEvent *debriefing = find_event(cine, w::CineEventKind::TextFade, 1);
 		const w::CineEvent *help = find_event(cine, w::CineEventKind::TextFade, debriefed ? 2 : 1);
 		if (debriefed) {
@@ -360,6 +380,121 @@ void test_dfx2_win_screen() {
 				help->start == cursor + 60);
 		CHECK(find_event(cine, w::CineEventKind::TextFade, debriefed ? 3 : 2) == nullptr);
 	}
+}
+
+// DFX2-66: the score rows' high score. A point total above the entry's (an unsigned compare)
+// replaces it, draws it yellow and posts the effect the embedder writes into the table; an
+// equal or lower one keeps it and draws it white; a negative total is a huge unsigned one, so it
+// raises; with no entry the cine's own 0 is raised and nothing is posted; with no local slot
+// neither row is built and the cursor stays.
+// [orig: sub_5740E0 @0x574666..0x574758 (dfx2.exe)]
+void test_dfx2_high_score() {
+	const std::map<std::string, std::string> files;
+	struct Case {
+		int32_t score, points;
+		bool entry, raised;
+	};
+	const Case cases[] = {
+			{100, 250, true, true},
+			{250, 250, true, false},
+			{300, 250, true, false},
+			{100, -5, true, true},
+			{0, 40, false, true},
+	};
+	for (const Case &c : cases) {
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		w::EpilogCine &cine = world.epilog;
+		cine.mission = dfx2_mission(false);
+		cine.mission.entry = c.entry;
+		cine.mission.high_score = c.score;
+		w::MatchPlayer *slot = world.match.player(world.cached.local_player);
+		CHECK(slot != nullptr);
+		if (slot == nullptr) continue;
+		world.process_round_end(1);
+		for (int i = 0; i < 200 && !cine.screen_active; ++i) {
+			slot->stats[w::MatchStats::kPoints] = c.points;
+			world.out.effects.clear();
+			(void)m.frame();
+		}
+		const w::CineEvent *best = find_event(cine, w::CineEventKind::EpilogCounterFont, 1);
+		const int32_t want = c.raised ? c.points : c.score;
+		CHECK(best != nullptr && best->value == want && cine.mission.high_score == want);
+		CHECK(best != nullptr &&
+				best->label_color == (c.raised ? 0xFFFFFF00u : 0xFFFFFFFFu) &&
+				best->value_color == best->label_color);
+		size_t posted = 0;
+		for (const w::Effect &e : world.out.effects.entries()) {
+			if (e.kind != w::kEpilogHighScoreEffect) continue;
+			++posted;
+			CHECK(e.a == c.points && e.str == "synth.bms");
+		}
+		CHECK(posted == (c.raised && c.entry ? 1u : 0u));
+	}
+	// No local slot: no score row, the debriefing and the key help at the counters' end.
+	{
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		w::EpilogCine &cine = world.epilog;
+		cine.mission = dfx2_mission(true);
+		world.match.remove_player(world, world.cached.local_player);
+		CHECK(world.match.player(world.cached.local_player) == nullptr);
+		world.process_round_end(1);
+		for (int i = 0; i < 200 && !cine.screen_active; ++i) (void)m.frame();
+		CHECK(cine.screen_active);
+		CHECK(find_event(cine, w::CineEventKind::EpilogCounterFont) == nullptr);
+		const w::CineEvent *counter = find_event(cine, w::CineEventKind::EpilogCounter, 0);
+		const w::CineEvent *debriefing = find_event(cine, w::CineEventKind::TextFade, 1);
+		const w::CineEvent *help = find_event(cine, w::CineEventKind::TextFade, 2);
+		CHECK(counter != nullptr && debriefing != nullptr && help != nullptr &&
+				debriefing->start == counter->start + 180 && help->start == counter->start + 240);
+	}
+}
+
+// DFX2-66: an EpilogCounterFont's step is the plain counter's and plays HEADSHOTTONE on each step
+// it takes off its target, ahead of the move; TEXT_END on the arrival. The live rows' -1 target
+// and rate step away, so the tone plays every fifth dispatch and TEXT_END never.
+// [orig: CineNode_ColorFadeUpdate @0x571860 - the tone @0x5718a5, TEXT_END @0x5718f7 (dfx2.exe)]
+void test_counter_font_step_plays_the_tone() {
+	struct Case {
+		int32_t target, rate;
+		int tones;         // over frames 0..100
+		int arrival_frame; // -1: never
+	};
+	const Case cases[] = {
+			{3, 1, 3, 14},    // three steps to the target, then none
+			{-3, 1, 3, 14},   // a negative target subtracts the rate
+			{0, 1, 0, -1},    // a zero target is the start's count: no step, no tone
+			{-1, -1, 20, -1}, // the live rows': a tone on frames 4, 9 .. 99
+	};
+	for (const Case &c : cases) {
+		auto world = std::make_unique<w::World>();
+		w::EpilogCine cine;
+		cine.active = true;
+		cine.frame = -1;
+		w::CineEvent line;
+		line.kind = w::CineEventKind::EpilogCounterFont;
+		line.start = 0;
+		line.duration = 200;
+		line.points_target = c.target;
+		line.points_rate = c.rate;
+		cine.events.push_back(line);
+		int arrival = -1;
+		for (int f = 0; f <= 100; ++f) {
+			const int before = count_sounds(*world, w::kEpilogCounterEndSoundset);
+			cine.update(*world);
+			if (count_sounds(*world, w::kEpilogCounterEndSoundset) != before) arrival = f;
+		}
+		CHECK(count_sounds(*world, w::kEpilogCounterToneSoundset) == c.tones);
+		CHECK(arrival == c.arrival_frame);
+		for (const w::ScriptSoundEvent &s : world->out.script_sounds)
+			CHECK(s.kind == w::ScriptSoundEvent::Kind::Interface);
+	}
+	CHECK(std::string(w::kEpilogCounterToneSoundset) == "HEADSHOTTONE");
 }
 
 // D-NET-1233: the single player's session create adds its own slot with no body (the own
@@ -968,6 +1103,8 @@ int main() {
 	test_the_local_body_is_born_at_the_round_init();
 	test_dfx2_lose_screen();
 	test_dfx2_win_screen();
+	test_dfx2_high_score();
+	test_counter_font_step_plays_the_tone();
 	if (failures == 0) std::printf("sp_mission_lifecycle: OK\n");
 	return failures == 0 ? 0 : 1;
 }

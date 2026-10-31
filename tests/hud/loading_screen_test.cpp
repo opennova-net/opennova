@@ -358,6 +358,21 @@ int main() {
 		heading.font = -3;
 		check(cine_event_font(heading) == -3 && cine_event_font(counter) == -2,
 		      "a line's slot is its word, a counter's the large");
+
+		// DFX2-66: an EpilogCounterFont draws in its own slot and colours: the label halved in
+		// +0x44C, the value in +0x448, the alpha forced [orig: Render_EpilogCounter @0x571ad3 /
+		// @0x571b14 / @0x571b73 (dfx2.exe)].
+		opennova::world::CineEvent font_row = counter;
+		font_row.kind = opennova::world::CineEventKind::EpilogCounterFont;
+		font_row.font = -3;
+		font_row.label_color = 0xFFFFFF00u;
+		font_row.value_color = 0xFF00FF00u;
+		const GameFontRun yellow = cine_event_text_run(font_row, "AB", "", font, 1.0f, hd);
+		check(yellow.quads.size() == 5 && yellow.quads[0].color == 0xFF7F7F00u &&
+		              yellow.quads[4].color == 0xFF007F00u,
+		      "the label and the value in their colours, halved");
+		check(cine_event_font(font_row) == -3, "its own slot");
+		check(opennova::world::cine_event_draw_argb(font_row) == 0xFF7F7F00u, "the label's colour");
 	}
 
 	// The progress bar's rects: at the design size the placement is the

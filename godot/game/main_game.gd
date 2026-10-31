@@ -729,7 +729,11 @@ func is_gameplay_input_active() -> bool:
 func _on_shell_mission_effects(effects: Array) -> void:
 	for e_v in effects:
 		var e := e_v as MissionEffect
-		if e != null and e.kind == "round_end":
+		if e != null and e.kind == "high_score":
+			# The win screen's new best into the mission table's row, which the menu's
+			# next teardown saves to hiscore.txt (engine EpilogCine carries the witness).
+			MissionCatalog.set_high_score(e.text, e.a)
+		elif e != null and e.kind == "round_end":
 			var sim: Simulation = _world.get_sim() if _world != null else null
 			var armed_before := _end_flow.is_round_ended()
 			_end_flow.begin(sim)

@@ -49,6 +49,15 @@ enum class CineEventKind : uint8_t {
 	// A score line: a label and its value [orig: CineEventEpilogCounter,
 	//  CineEventEpilogCounter_Construct @0x5732C0, _Draw @0x573440].
 	EpilogCounter,
+	// A score line in a label slot and colours of its own, whose count-up step
+	// plays HEADSHOTTONE on each step off its target: dfx2.exe's win screen
+	// builds two; Jointops.exe carries the class (vtable @0x7D6A1C, the step
+	// CineNode_ColorFadeUpdate @0x5736C0) and never constructs one (its
+	// constructor @0x5735D0 has no caller) [orig: CineEventEpilogCounterFont,
+	// vtable ??_7CineEventEpilogCounterFont@@6B@ @0x7D5AD4 - sub_571770 @0x571770,
+	// the start sub_571840 @0x571840, the step CineNode_ColorFadeUpdate @0x571860,
+	// the draw Render_EpilogCounter @0x571A40 (dfx2.exe)].
+	EpilogCounterFont,
 };
 
 // Where a TextFade line's text comes from: a gametext string fetched at the
@@ -138,6 +147,12 @@ struct CineEvent {
 	int32_t points_rate = -1;   // +0x424
 	int32_t value = 0;          // +0x428
 	int32_t max = -1;           // +0x42C
+	// An EpilogCounterFont's colours, each its constructor's colour with the
+	// alpha byte raised: the label's (+0x44C) and the value and count columns'
+	// (+0x448); its label slot is `font` (+0x450). A plain counter draws both in
+	// -1. [orig: sub_571770 @0x5717e0..0x5717ff, the font @0x57180f (dfx2.exe)]
+	uint32_t label_color = 0xFFFFFFFFu;
+	uint32_t value_color = 0xFFFFFFFFu;
 
 	// --- the live state ------------------------------------------------------
 	// The node's alpha: an ImageFade's (+0x13C), a Letterbox's (+0x28) and a
@@ -214,6 +229,19 @@ inline constexpr int32_t kEpilogCounterStepWait = 4;
 // target [orig: CineEventEpilogCounter_Step @0x573408 — Sound_PlayInterfaceTriggerSet
 // of g_SndTextEnd, the registry @0x82F590's TEXT_END row].
 inline constexpr const char *kEpilogCounterEndSoundset = "TEXT_END";
+// The interface set an EpilogCounterFont's step plays on each step it takes
+// off its target, ahead of the step [orig: CineNode_ColorFadeUpdate @0x571860 -
+// Sound_PlayInterfaceTriggerSet(g_SndHeadshotTone) @0x5718a5, the registry's
+// HEADSHOTTONE row @0x82E894; its arrival's TEXT_END @0x5718f7 (dfx2.exe)].
+// The round end's parked sound-effects volume plays both at 0 (both screens'
+// SP tail parks it [orig: Server_ProcessRoundEnd @0x513730 -> sub_525240
+// @0x513bae (dfx2.exe)]), as the embedder's device does.
+inline constexpr const char *kEpilogCounterToneSoundset = "HEADSHOTTONE";
+// The effect a raised high score posts for the embedder, which writes it into
+// the process mission table's row (a = the score, str = the entry's file), as
+// dfx2.exe's win screen writes the entry's +0x11E4 [orig: sub_5740E0 @0x57468f
+// (dfx2.exe)].
+inline constexpr const char *kEpilogHighScoreEffect = "high_score";
 
 // The two g_MissionExitReason values the world-side writers store
 // (World::mission_exit_reason): the quit to the Post Menu (the end screens'

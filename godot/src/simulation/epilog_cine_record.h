@@ -32,6 +32,7 @@ public:
 		KIND_IMAGE_FADE = static_cast<int>(opennova::world::CineEventKind::ImageFade),
 		KIND_TEXT_FADE = static_cast<int>(opennova::world::CineEventKind::TextFade),
 		KIND_EPILOG_COUNTER = static_cast<int>(opennova::world::CineEventKind::EpilogCounter),
+		KIND_EPILOG_COUNTER_FONT = static_cast<int>(opennova::world::CineEventKind::EpilogCounterFont),
 	};
 	enum FadeSource {
 		FADE_SOURCE_IMAGE = static_cast<int>(opennova::world::CineFadeSource::Image),

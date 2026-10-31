@@ -96,6 +96,22 @@ CineEvent epilog_counter(int32_t start, const char *label_key, int32_t value_x, 
 	return e;
 }
 
+// dfx2.exe's two score rows: Jointops.exe's counter columns, the count-up's
+// -1 target and rate, no max, in Impact38 (-3), the label and the columns in
+// `color` with the alpha byte raised.
+// [orig: sub_571770 @0x571770 (this, start, duration, +0x430, +0x434, +0x438, +0x43C, label,
+//  +0x420, +0x424, +0x428, +0x42C, +0x450, +0x448 / +0x44C (a14 | 0xFF000000), +0x14); the
+//  calls @0x5746f1 / @0x574753 (dfx2.exe)]
+CineEvent epilog_counter_font(int32_t start, const char *label_key, int32_t row_y, int32_t value,
+		uint32_t color) {
+	CineEvent e = epilog_counter(start, label_key, 832, row_y, value, -1);
+	e.kind = CineEventKind::EpilogCounterFont;
+	e.font = -3;
+	e.label_color = color | 0xFF000000u;
+	e.value_color = color | 0xFF000000u;
+	return e;
+}
+
 } // namespace
 
 uint32_t cine_event_draw_argb(const CineEvent &e) {
@@ -116,6 +132,9 @@ uint32_t cine_event_draw_argb(const CineEvent &e) {
 		return hud::half_bright_keep_alpha(cine_text_fade_argb(e));
 	case CineEventKind::EpilogCounter:
 		return hud::half_bright_argb(0xFFFFFFFFu);
+	case CineEventKind::EpilogCounterFont:
+		// [orig: Render_EpilogCounter @0x571b14 - the label in +0x44C (dfx2.exe)]
+		return hud::half_bright_argb(e.label_color);
 	default:
 		return 0;
 	}
@@ -181,9 +200,11 @@ void EpilogCine::activate_event(CineEvent &e, World &world) {
 		e.alpha = 0.0f;
 		break;
 	case CineEventKind::EpilogCounter:
+	case CineEventKind::EpilogCounterFont:
 		// The count-up column's start: the count at 0, the first step four
 		// frames away [orig: CineEventEpilogCounter's start @0x573370 —
-		//  +0x440 = 0, +0x444 = 4 @0x57337a].
+		//  +0x440 = 0, +0x444 = 4 @0x57337a] [orig: sub_571840 @0x571840 /
+		//  @0x57184a (dfx2.exe)].
 		e.points = 0;
 		e.points_cooldown = kEpilogCounterStepWait;
 		break;
@@ -247,7 +268,8 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 			e.alpha = static_cast<float>(static_cast<double>(e.duration - count + 1) / e.fade_out);
 		break;
 	}
-	case CineEventKind::EpilogCounter: {
+	case CineEventKind::EpilogCounter:
+	case CineEventKind::EpilogCounterFont: {
 		// The count-up step: after its wait the count moves toward the target
 		// by the rate (a negative target subtracts it), clamped past the target,
 		// and the step that lands on the target plays TEXT_END; every step
@@ -258,6 +280,13 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 		// [orig: CineEventEpilogCounter_Step @0x573390 — the wait @0x5733ab..0x5733b8;
 		//  the step @0x5733c0..0x5733fa; the arrival @0x573400..0x57340e ->
 		//  Sound_PlayInterfaceTriggerSet(g_SndTextEnd); the re-arm @0x573416]
+		// An EpilogCounterFont's step is the same and plays HEADSHOTTONE on each
+		// step off its target, before it moves (the live rows' -1 target and
+		// rate: every fifth dispatch), and its rand() colour pulse runs under
+		// flags bit 1, which no live row sets.
+		// [orig: CineNode_ColorFadeUpdate @0x571860 - the wait @0x57187b..0x571888, the
+		//  tone @0x57189c..0x5718a5, the step @0x5718aa..0x5718e9, TEXT_END @0x5718f7, the
+		//  re-arm @0x5718ff, the pulse @0x57190d (dfx2.exe)]
 		if (e.points_cooldown != 0) {
 			--e.points_cooldown;
 			break;
@@ -266,6 +295,12 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 		const uint32_t count = static_cast<uint32_t>(e.points);
 		const uint32_t rate = static_cast<uint32_t>(e.points_rate);
 		if (e.points != target) {
+			if (e.kind == CineEventKind::EpilogCounterFont) {
+				ScriptSoundEvent tone;
+				tone.name = kEpilogCounterToneSoundset;
+				tone.kind = ScriptSoundEvent::Kind::Interface;
+				world.out.script_sounds.push_back(std::move(tone));
+			}
 			if (target > 0) {
 				e.points = static_cast<int32_t>(count + rate); // @0x5733da
 				if (e.points > target) e.points = target;      // @0x5733fa
@@ -652,7 +687,37 @@ void EpilogCine::build_win_debriefing_screen(World &world) {
 			hud::end_round_enemy_units(in), in.enemy_unit_total));
 	events.push_back(epilog_counter(first + 120, hud::kGameTextEpilogTeamUnits.key, 832, 274,
 			in.team_unit_kills, -1));
-	const int32_t cursor = first + 180; // [orig: @0x574663]
+	int32_t cursor = first + 180; // [orig: @0x574663]
+	// With the local player's slot: its points (stats field 29) and the entry's
+	// high score, which a higher point total replaces (the unsigned compare),
+	// drawing the high score yellow then and white else, both rows in Impact38
+	// 60 apart from the cursor at y 354 / 402, 60 frames further each; with no
+	// slot neither row, the cursor kept. A mission the catalog does not list
+	// scores against its own 0 and writes no row (retail's dereferences its
+	// entry); a new best posts the effect the embedder writes into the table.
+	// [orig: Entity_ValidatePtr(g_LocalPlayerEntity) @0x574666 (the active slot whose
+	//  entity it is), CPlayerStats_GetFieldPlusOne(slot+0x48, 0x1C) @0x57467b, `cmp
+	//  [entry+0x11E4], points; jnb` @0x574687, the store @0x57468f, the colours
+	//  @0x574695 / @0x57469c; sub_571770 @0x5746f1 - (cursor, 223200, 192, 832, 832, 354,
+	//  STREPILOG_TOTALEXP, -1, -1, points, -1, -3, 0xFFFF00, 1), @0x574753 - (cursor + 60,
+	//  .., 402, STREPILOG_HIGHSCORE, -1, -1, entry+0x11E4, -1, -3, colour, 1); the cursor
+	//  @0x5746fb / @0x574758 (dfx2.exe)]
+	if (const MatchPlayer *slot = world.match.player(world.cached.local_player)) {
+		const int32_t points = slot->stats[MatchStats::kPoints];
+		uint32_t best_color = 0xFFFFFFFFu;
+		if (static_cast<uint32_t>(mission.high_score) < static_cast<uint32_t>(points)) {
+			mission.high_score = points;
+			best_color = 0xFFFF00u;
+			if (mission.entry)
+				world.out.effects.push({kEpilogHighScoreEffect, points, 0, 0, 0, mission.file});
+		}
+		events.push_back(epilog_counter_font(cursor, hud::kGameTextEpilogTotalExp.key, 354, points,
+				0xFFFF00u));
+		cursor += 60;
+		events.push_back(epilog_counter_font(cursor, hud::kGameTextEpilogHighScore.key, 402,
+				mission.high_score, best_color));
+		cursor += 60;
+	}
 	// The mission's WIN_DEBRIEFING, from the entry's table, when it holds the key,
 	// at (47, 475) in a box 930 wide and unbounded below; it moves nothing on.
 	// A mission the catalog does not list has no entry to read (retail's
