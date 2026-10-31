@@ -146,9 +146,6 @@ public:
 	// configure before the mission load. A joiner's World reads none before they are set
 	// (world::SessionRules::title_rules).
 	void set_rules(const world::TitleRules &rules);
-	// The title the session runs as (ClientRuntime::set_title): a runtime with no kit seam sends
-	// its fresh profile's kit. Configure before create_runtime, beside the protocol.
-	void set_title(const Title &title) { title_ = &title; }
 	// The process-lived client words every runtime this role creates steps
 	// (ClientRuntime::use_process_state; null: each runtime its own): the 0x4C report
 	// count runs free across joins and missions as retail's global does (D-NET-602).
@@ -575,8 +572,7 @@ private:
 	opennova::IDatagramSocket *socket_ = nullptr;
 	PeerAddr host_addr_{};
 	const Protocol *protocol_ = nullptr; // set_protocol
-	const world::TitleRules *rules_ = world::unset_title_rules(); // set_rules
-	const Title *title_ = nullptr; // set_title
+	const world::TitleRules *rules_ = nullptr; // set_rules
 	ClientProcessState *client_process_ = nullptr; // use_process_state
 	ServerLogs server_logs_{};                     // set_server_logs
 	PeerAddr local_address_{};                     // set_local_address

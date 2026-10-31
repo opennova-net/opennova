@@ -102,6 +102,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -597,6 +598,7 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 	uint64_t now_ms = 1000;
 	auto runtime = std::make_unique<inmatch::ClientRuntime>(
 			"R3L", [&now_ms]() { return now_ms; });
+	test_titles::jo_folds(*runtime);
 	runtime->set_protocol(protocol);
 	runtime->view().set_item_catalog(catalog);
 	runtime->set_integrity_sources(sources);
@@ -717,6 +719,7 @@ void run_client_leg(const std::string &fixture_root, const RunSpec &spec) {
 	// --- decode, per tag through a side reducer fed the same stream ---
 	{
 		auto side = std::make_unique<rep::ClientReplicaPipeline>();
+		test_titles::jo_folds(*side);
 		side->set_protocol(protocol);
 		side->set_item_catalog(catalog);
 		side->set_game_type(game_type);
@@ -1044,7 +1047,9 @@ std::string tags_text(const std::vector<uint8_t> &tags) {
 
 struct TwinHost {
 	std::unique_ptr<world::World> host_world = std::make_unique<world::World>();
+	bool host_world_jo = test_titles::jo_world(*host_world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	std::unique_ptr<bms::File> mission_file = std::make_unique<bms::File>();
 	replication::UdpSessionTransport transport{replication::UdpSessionTransport::Role::Host};
 
@@ -1111,6 +1116,7 @@ void run_host_twin(const std::string &dir) {
 	}
 	mission::make_default(*host->mission_file);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = static_cast<uint32_t>(session.fields[3]);
 	config.max_players = slot_msg->body[18]; // the capture's slot capacity
 	config.expansion = expansion;

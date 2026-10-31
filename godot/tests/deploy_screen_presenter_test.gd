@@ -652,6 +652,13 @@ func _shell_death_screen_keys(pair: Dictionary, shell: MainGame) -> void:
 	view.root = PresenterFixture.root_over(self, TMP_DIR)
 	view.sim_value = pair.joiner
 	deploy_host.setup(view, shell.get_node("HUD"))
+	# The owed pick's edge (GameWorld.join_deploy_pick_required) opens nothing: DEATH's one
+	# opener is the frame loop's latched leg, and an open here stood outside the latch, so
+	# the triggers' clear ran no close leg (engine ClientState::death_menu_open_latch
+	# carries the witness).
+	shell.get_world().join_deploy_pick_required.emit()
+	assert_false(deploy_host.is_open(), "the owed pick's edge opens no DEATH screen")
+	assert_eq(shell.shell_state_name(), "world", "the edge leaves the shell over live play")
 	assert_true(deploy_host.open(), "the shell's deploy screen opens over the owed pick")
 	await _await_refresh(pair)
 	await get_tree().process_frame
@@ -841,7 +848,9 @@ func _assert_deployment_released(pair: Dictionary) -> void:
 
 
 # An alive, admitted player may still be held on the authority's deploy map.
-# Initial map selection must send C2S 0x0E, not just dismiss the local screen.
+# Initial map selection must send C2S 0x0E and closes nothing: the screen stays up
+# until the host's deploy clears the overlay (engine ClientState::death_menu_open_latch
+# carries the case-12 witness).
 # [orig: Input_HandleActionBinding @0x49AD40, case 12 @0x49B0C5..0x49B17B; Server_OnPlayerJoin @0x51A680, hold @0x51A6F2]
 func test_initial_overlay_row_selection_releases_authority_deployment() -> void:
 	var pair := _join_pair_in_match()
@@ -873,9 +882,12 @@ func test_initial_overlay_row_selection_releases_authority_deployment() -> void:
 			break
 	assert_gte(row, 0, "the spawn list carries a selectable row")
 	presenter.select_spawn_row(row)
-	assert_false(presenter.is_open(), "the overlay row click closes the screen locally")
-	assert_signal_emitted(presenter, "closed")
+	assert_true(presenter.is_open(), "the overlay row click closes nothing")
+	assert_signal_emit_count(presenter, "closed", 0, "the pick alone closes nothing")
 	_assert_deployment_released(pair)
+	await get_tree().process_frame
+	assert_false(presenter.is_open(), "the overlay's fall after the deploy closes the screen")
+	assert_signal_emitted(presenter, "closed")
 
 
 # The initial overlay's default-spawn key must send the same request as a row
@@ -913,10 +925,12 @@ func test_initial_overlay_space_sends_default_spawn_selection() -> void:
 	_ring_key(overlay_presenter, KeyboardPass.new(),
 			DeployRingLegs.new(overlay_presenter, pair2.joiner), KEY_SPACE)
 	await get_tree().process_frame
-	assert_false(overlay_presenter.is_open(),
-			"SPACE selects the default spawn and closes the initial overlay")
-	assert_signal_emitted(overlay_presenter, "closed")
+	assert_true(overlay_presenter.is_open(),
+			"SPACE selects the default spawn and closes nothing ahead of the host's deploy")
 	_assert_deployment_released(pair2)
+	await get_tree().process_frame
+	assert_false(overlay_presenter.is_open(), "the overlay's fall closes the initial overlay")
+	assert_signal_emitted(overlay_presenter, "closed")
 
 
 # The active session keeps running under the death screen — per-frame S2C 0x0A
@@ -1120,6 +1134,44 @@ func test_instruction_widgets_follow_retained_death_text() -> void:
 				"the hidden instruction retains the expired kill message")
 
 
+# A joiner's death raises the frame loop's dead-bit trigger with its owed pick, so the
+# frame loop's latched leg (the shell's _maybe_open_death_menu: the open decision, then
+# the device open) is the screen's opener; the pick closes nothing, and the release, which
+# clears the triggers, finds the latch up and runs the close leg once (the title's
+# DEATH-screen loadout apply, a DFX2 joiner's C2S 0x2F) (engine
+# ClientState::death_menu_open_latch carries the witness).
+func test_a_joiners_death_opens_through_the_latch_and_its_release_runs_the_close_leg() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var joiner: Simulation = pair.joiner
+	assert_true(joiner.is_local_player_dead(), "the death latched the joiner's dead bit")
+	var presenter := _make_presenter(joiner)
+	watch_signals(presenter)
+	assert_false(joiner.take_death_menu_open(true), "another screen holds the open off")
+	assert_true(joiner.take_death_menu_open(false), "the dead bit opens the screen once")
+	assert_true(presenter.open(), "the frame loop's device open")
+	assert_false(joiner.take_death_menu_open(true), "the open latch holds")
+	assert_false(joiner.take_death_menu_close(), "no clear yet: no close leg")
+	assert_true(joiner.send_deployment_pick(0), "the joiner picks the Default Spawn")
+	await get_tree().process_frame
+	assert_true(presenter.is_open(), "the pick closes nothing")
+	var released := false
+	for _i in range(800):
+		pair.host.step()
+		joiner.step()
+		if not joiner.is_join_deploy_pick_pending() and not joiner.is_local_player_dead() \
+				and not joiner.is_deploy_overlay_active():
+			released = true
+			break
+		OS.delay_msec(2)
+	assert_true(released, "the host deploys the joiner")
+	assert_false(joiner.take_death_menu_open(true), "the cleared triggers re-arm nothing")
+	assert_true(joiner.take_death_menu_close(), "the clear found the latch up: the close leg runs")
+	assert_false(joiner.take_death_menu_close(), "once")
+	await get_tree().process_frame
+	assert_false(presenter.is_open(), "the triggers' fall closes the screen")
+	assert_signal_emit_count(presenter, "closed", 1)
+
+
 # The listen host's own player holds on the same deploy map as a joiner
 # (D-NET-339): its own client folds the per-frame overlay bit, the frame loop
 # opens DEATH once off it, and its SPACE pick rides its loopback as the C2S
@@ -1148,7 +1200,7 @@ func test_the_listen_host_deploys_its_own_player_through_the_deploy_map() -> voi
 	assert_true(presenter.open(), "the overlay opens the host's deploy screen")
 	_ring_key(presenter, KeyboardPass.new(), DeployRingLegs.new(presenter, host), KEY_SPACE)
 	await get_tree().process_frame
-	assert_false(presenter.is_open(), "SPACE sends the auto pick and closes the overlay")
+	assert_true(presenter.is_open(), "SPACE sends the auto pick and closes nothing")
 	var released := false
 	for _i in range(240):
 		host.step()
@@ -1158,7 +1210,10 @@ func test_the_listen_host_deploys_its_own_player_through_the_deploy_map() -> voi
 			break
 		OS.delay_msec(2)
 	assert_true(released, "the host's own looped-back 0x0E releases its hold")
+	await get_tree().process_frame
+	assert_false(presenter.is_open(), "the overlay's fall closes the screen")
 	assert_false(host.take_death_menu_open(false), "the cleared triggers re-arm nothing")
+	assert_true(host.take_death_menu_close(), "the clear found the latch up: the close leg runs")
 
 	# A death past the 620-tick spawn window: the pick penalty is the stock
 	# three-second floor.

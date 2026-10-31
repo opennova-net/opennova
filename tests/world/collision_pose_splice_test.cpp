@@ -40,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -102,6 +103,7 @@ struct Scene {
 	std::unique_ptr<assets::AssetStore> store;
 	assets::Model model;
 	std::unique_ptr<w::World> owner = std::make_unique<w::World>();
+	bool owner_jo = test_titles::jo_world(*owner);
 	w::World &world = *owner;
 	w::EntityPoseProvider pose;
 	w::CollisionModel sections;

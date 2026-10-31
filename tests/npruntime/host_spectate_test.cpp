@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -49,8 +50,10 @@ int failures = 0;
 // shell's own path (the cfg block's session-create words, then the session start).
 struct Rig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<bms::File> mission = std::make_unique<bms::File>();
 	std::unique_ptr<inmatch::HostOwner> owner = std::make_unique<inmatch::HostOwner>();
+	bool owner_jo = test_titles::jo_config(owner->ctx.config);
 	replication::LoopbackChannel loop;
 
 	explicit Rig(int32_t spectate, int32_t side_req = -1, const char *side_a_password = "",
@@ -60,6 +63,7 @@ struct Rig {
 		owner->ctx.mission = mission.get();
 		world->registry.configure_pool(0, 4);
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = opennova::title_protocol("jo");
 		cfg.config.server_name = "spectate";
 		cfg.config.max_players = 4;

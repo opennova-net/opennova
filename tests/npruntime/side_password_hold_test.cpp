@@ -49,6 +49,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -65,7 +66,9 @@ using Bytes = std::vector<uint8_t>;
 // carries 0x20 and the team-choose bits: 0x924, the word the server_hello's P2 advertises.
 struct HoldFixture {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	opennova::bms::File mission;
 	std::vector<std::unique_ptr<ns::UdpSessionTransport>> transports;
 	uint32_t tick = 1;
@@ -86,6 +89,7 @@ struct HoldFixture {
 		opennova::mission::make_default(mission);
 
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 8;
 		config.game_type = opennova::game_type::kTeamDeathmatch;
 		config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;

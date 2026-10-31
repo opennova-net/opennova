@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "../npruntime/conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -47,6 +48,7 @@ std::vector<uint8_t> line_body(const char *name, int16_t line) {
 // A non-authority surfaces the line; the authority's own client does not.
 void test_fold() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::DIALOG_LINE, line_body("dlg012", 2));
 	std::vector<ns::ClientEffectCommand> out = view.drain_effect_commands();
 	CHECK(out.size() == 1);
@@ -63,12 +65,14 @@ void test_fold() {
 // local player's class.
 void test_effect_pass() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	w::Entity local;
 	local.kind = w::EntityKind::Organic;
 	local.player_class = 3;
 	world->cached.local_player = world->registry.spawn(0, local);
 	inmatch::ClientRuntime runtime("DialogLine");
+	test_titles::jo_folds(runtime);
 	runtime.set_dialogue_volume(192); // the cfg defaults' DialogueLevel
 	runtime.view().apply(s2c::DIALOG_LINE, line_body("dlg007", 1));
 	runtime.apply_received_effects(*world);
@@ -88,6 +92,7 @@ void test_effect_pass() {
 //  @0x44E144..0x44E150; Chat_AddSystemMessageIfValid @0x5275B0]
 void test_chat_legs() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	w::Entity local;
 	local.kind = w::EntityKind::Organic;
@@ -127,6 +132,7 @@ void test_chat_legs() {
 	world->tables.mission_text = &text;
 
 	inmatch::ClientRuntime runtime("DialogText");
+	test_titles::jo_folds(runtime);
 	runtime.set_dialogue_volume(192);
 	const auto play = [&](const char *name, int16_t line) {
 		runtime.view().apply(s2c::DIALOG_LINE, line_body(name, line));
@@ -173,6 +179,7 @@ void test_chat_legs() {
 void test_host_fan() {
 	ns::LoopbackChannel remote_wire, local_wire, loading_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	auto &list = ctx.np_protocol.connection_list;
@@ -209,6 +216,7 @@ void test_host_fan() {
 //  @0x44DD74, @0x44DEC9]
 void test_authority_load() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	dbf::File bank;
 	dbf::Group group;
 	group.group_name = "dlg012";
@@ -230,6 +238,7 @@ void test_authority_load() {
 
 	ns::LoopbackChannel remote_wire, local_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostClient);
 	ctx.is_in_session = 1;
 	auto &list = ctx.np_protocol.connection_list;
@@ -238,6 +247,7 @@ void test_authority_load() {
 	list.push_back(conn_fixture::make_conn(2, 2, &local_wire, ns::TransportMode::Loopback,
 			w::EntityHandle{}, true));
 	inmatch::ClientRuntime own("ListenHost");
+	test_titles::jo_folds(own);
 	own.set_dialogue_volume(192);
 	audio::DialogLineRef ref;
 	ref.wave = "MISSING";

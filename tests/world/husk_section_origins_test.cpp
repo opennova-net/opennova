@@ -28,6 +28,7 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -86,6 +87,7 @@ struct Rig {
     OcclusionWorld occlusion;
     mission::CollisionResolveState state;
     World w;
+    bool w_jo = test_titles::jo_world(w);
     EntityHandle building;
 
     Rig(const TempRoot &root, const Items &items, int32_t item_id) {

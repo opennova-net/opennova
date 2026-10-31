@@ -47,6 +47,7 @@
 
 #include "conn_fixture.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -101,6 +102,7 @@ std::vector<std::vector<uint8_t>> bodies_of(
 
 int main() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.rules.mp_session = true;
 	// Class 8 carries the Medic charattr; class 7 does not.
@@ -144,6 +146,7 @@ int main() {
 
 	ns::LoopbackChannel victim_wire, medic_wire, rifleman_wire, enemy_wire, split_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;

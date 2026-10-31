@@ -20,6 +20,10 @@
 #include <string>
 #include <vector>
 
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
+
 using namespace opennova::hud;
 using opennova::fnt::fnt_font_t;
 
@@ -123,6 +127,7 @@ void test_windows_ride_the_top_layer(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	{
 		const HudDrawList &none = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(box_quads_from(none, 0) == 0);
@@ -198,10 +203,12 @@ void test_windows_ride_the_top_layer(const fnt_font_t *font) {
 	}
 	{
 		// A title with no legend draws the box alone.
+		opennova::Title no_legend = *jo;
+		no_legend.hud_map_legend = nullptr;
 		size_t icon_tris = 0, red = 0;
-		CHECK(legend_rows(nullptr, &icon_tris, &red).empty() && icon_tris == 0);
+		CHECK(legend_rows(&no_legend, &icon_tris, &red).empty() && icon_tris == 0);
 	}
-	state.title = nullptr;
+	state.title = jo;
 	state.map_legend.shown = false;
 	state.help_screen.shown = false;
 	// The briefing: a text taller than the panel overflows into page 1.
@@ -234,6 +241,7 @@ void test_briefing_markup_draws_plain(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.briefing.shown = true;
 	state.briefing.text = " <ucFC8932>Goals: <-uco>\r\n\r\n<cFC8932> 1.<-co> Move";
 	compiler.briefing_pages().reset();
@@ -258,6 +266,7 @@ void test_end_game_screen(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.end_game.shown = true;
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
@@ -356,6 +365,7 @@ void test_briefing_windows_order(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.objectives.push_back({"AB", false});
 	state.help_screen.shown = true;
 	state.help_screen.title = "Help - Movement";
@@ -434,6 +444,7 @@ void test_view_veil_layer(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 10;
 	state.weapon.active = true;
 	state.weapon.clip = 12;

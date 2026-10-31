@@ -22,6 +22,7 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -321,6 +322,7 @@ struct Rig {
 
     explicit Rig(uint16_t ground_raw16 = 0)
             : w_heap(std::make_unique<World>()), w(*w_heap), flat(ground_raw16) {
+        test_titles::jo_world(w);
         seed_ammo(w);
         seed_classes(w);
         // A water plane far below every case's motion: retail keeps no dry

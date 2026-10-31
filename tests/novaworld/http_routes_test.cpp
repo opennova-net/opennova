@@ -7356,6 +7356,105 @@ int test_hosted_server_build_update(Harness &h) {
 	return 0;
 }
 
+// A hosted server whose game is deleted once it stopped (delete_product refuses while it is
+// live; its row's product_id goes NULL, ON DELETE SET NULL): no title reads its settings, so
+// GET .../settings answers 409 game_gone, owner and admin, and an edit is refused before any
+// title is read: the owner's while it is stopped (not_live) and, with the row put back to running
+// by hand under an admin link (no supervisor), the web's settings edit (game_gone) and the fleet
+// drain's (refused, nothing sent). Each read the settings by an empty title code, which aborts
+// the process (inmatch::server_settings_title, require_title_code).
+int test_hosted_settings_game_gone(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	const int64_t owner = make_account(h, "gone_owner", "pw-gone-owner");
+	TEST_EXPECT(owner > 0 && nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 1, 0 }));
+	const std::string session = login_token(h, "10.58.0.1", "gone_owner", "pw-gone-owner");
+	TEST_EXPECT(!session.empty());
+	// A game of its own (Joint Operations' title) with a ready tree: the harness's stay.
+	hosted::NewProduct game;
+	game.display_name = "Gone Game";
+	game.kind = hosted::ProductKind::Game;
+	game.title = "jo";
+	game.lobby = "jop_2_consumer";
+	game.updater_login = "GONEus";
+	game.command_file = "GONEPTR.CMD";
+	game.key = "GONE";
+	game.visibility = "private";
+	game.created_by = "admin";
+	int64_t gone = 0;
+	TEST_EXPECT(hosted::create_product(*h.pool.acquire(), game, gone, { std::nullopt, true }) ==
+					hosted::ProductOutcome::Ok &&
+			gone > 0);
+	TEST_EXPECT(seed_tree(*h.pool.acquire(), gone, "1.0", { "gone.bms" }) > 0);
+	hosted::HostedSettings settings;
+	settings.product_id = gone;
+	settings.game_name = "Gone Game Server";
+	settings.missions = { "gone.bms" };
+	const auto request = hosted::request_server(
+			*h.pool.acquire(), owner, settings, offered(h), 10, nws::wall_now_s());
+	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
+	const int64_t id = request.id;
+	const std::string me = "/api/me/servers/" + std::to_string(id);
+	const std::string base = "/api/admin/hosted/" + std::to_string(id);
+	TEST_EXPECT(hosted::delete_product(*h.pool.acquire(), gone) == hosted::ProductOutcome::InUse);
+	TEST_EXPECT(hosted::request_stop(
+			*h.pool.acquire(), id, "stopped by the test", hosted::StartCause::OwnerStop));
+	end_stopping_servers(h);
+	TEST_EXPECT(hosted::delete_product(*h.pool.acquire(), gone) == hosted::ProductOutcome::Ok);
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), id)->settings.product_id == 0);
+
+	auto reply = h.send("GET", me + "/settings", { with_session(session) }, {}, 5000);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "game_gone");
+	reply = h.send("GET", base + "/settings", { kBearer }, {}, 5000);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "game_gone");
+	const int64_t revision = hosted::find_server(*h.pool.acquire(), id)->settings_revision;
+	const std::string edit = "{\"settings_revision\":" + std::to_string(revision) +
+			",\"patch\":{\"kill_limit\":50}}";
+	reply = h.send("PATCH", me + "/settings", { with_session(session), kCsrf, kJson }, edit, 5000);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+
+	// Running again by hand, its link up.
+	const std::string password = "GoneGameAdminPw0123456789abcdef";
+	FakeAdminConsole fake(password);
+	TEST_EXPECT(fake.start());
+	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'running' WHERE id = $1;",
+			{ opennova::db::BindValue(id) });
+	hosted::AdminLinkTarget target;
+	target.host = "127.0.0.1";
+	target.port = fake.port();
+	target.user = "svc";
+	target.password = password;
+	h.links->sync({ { id, target } });
+	TEST_EXPECT(wait_until(
+			[&] {
+				const auto link = h.links->find(id);
+				return link && link->status().state == hosted::AdminLinkState::Up;
+			},
+			10000));
+	reply = h.send("PATCH", base + "/settings", { kBearer, kJson }, edit, 5000);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "game_gone");
+	// The drain's edit, queued as the route queues one (a weapons patch reads the title's table).
+	const size_t sent_before = fake.lines().size();
+	hosted::AdminCommandOptions options;
+	options.expected_revision = revision;
+	options.settings_patch = "{\"weapons\":{}}";
+	const auto drained = hosted::run_console_command(
+			h.pool, id, "configuration edit", options, std::chrono::milliseconds(3000));
+	TEST_EXPECT(drained.outcome == hosted::AdminCommandOutcome::Refused &&
+			drained.replies == std::vector<std::string>{ "ERROR - This server's game is gone." });
+	// Nothing but the link's own status poll went out.
+	const auto sent = fake.lines();
+	TEST_EXPECT(std::all_of(sent.begin() + static_cast<std::ptrdiff_t>(sent_before), sent.end(),
+			[](const std::string &l) { return l == "GET GAMESTATE"; }));
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), id)->settings_revision == revision);
+
+	// No live server or link outlasts the case.
+	h.links->sync({});
+	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'stopped' WHERE id = $1;",
+			{ opennova::db::BindValue(id) });
+	fake.stop();
+	return 0;
+}
+
 // The admin's fleet routes (hosted/fleet_routes.h) over fleet rows made by hand
 // (no supervisor): the fleet view's machines (kind, state, type, slots and the
 // slots used, the public address, the month's egress; no credential of the
@@ -10001,6 +10100,7 @@ int run(Harness &h, const char *part) {
 		{ "hosted", "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
 		{ "hosted", "lobby_hosted_build", test_lobby_hosted_build },
 		{ "hosted", "hosted_server_build_update", test_hosted_server_build_update },
+		{ "hosted", "hosted_settings_game_gone", test_hosted_settings_game_gone },
 		{ "billing", "billing_routes", test_billing_routes },
 		{ "billing", "billing_checkout_guard", test_billing_checkout_guard },
 		{ "billing", "billing_capacity", test_billing_capacity },

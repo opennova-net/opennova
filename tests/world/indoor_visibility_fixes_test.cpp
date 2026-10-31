@@ -34,6 +34,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -113,6 +114,7 @@ CollisionModel doorway_model(bool with_solid) {
 
 struct Rig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &w = *wp;
     CollisionWorld cw;
     Field field;
@@ -269,6 +271,7 @@ CollisionModel deck_floor_model() {
 
 struct DropRig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &w = *wp;
     CollisionWorld cw;
     Field field;
@@ -645,6 +648,7 @@ void test_sync_restores_the_authored_heading() {
 // A vehicle carrier with a known quad and an ewep child hung on it.
 struct CarrierRig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &w = *wp;
     EntityHandle vehicle_h, gun_h;
     static constexpr uint32_t kQuad[4] = {0x02815000u, 0x02812000u, 0u, 0u};
@@ -727,6 +731,7 @@ void test_ewep_move_function_copies_a_vehicle_quad() {
 // DX-2, a seated rider: every seated tick copies the parent's quad.
 void test_seated_rider_rides_the_parent_quad() {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);

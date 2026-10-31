@@ -29,6 +29,7 @@
 #include <runtime/inmatch/server_message_dispatch.h> // build_tag7b_session_summary, host_session_vars
 #include <base/resource_index/resource_index.h>
 #include <formats/rtxt/rtxt.h>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -579,6 +580,7 @@ int main() {
 		TEST_EXPECT(rotation.list.advance(listed, /*replay_enabled=*/false) &&
 				rotation.list.map_file == "TDH_G11A.BMS");
 		opennova::inmatch::GameConfig cfg;
+		test_titles::jo_config(cfg);
 		cfg.mission_file = rotation.list.map_file;
 		cfg.game_type = rotation.list.map_game_type;
 		const opennova::inmatch::NapiNPConnection conn;

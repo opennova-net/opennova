@@ -61,6 +61,7 @@
 #include <utility>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -153,6 +154,7 @@ struct Harness {
 	uint64_t now_ms = 100000;
 	uint32_t tick = 1;
 	inmatch::ClientRuntime client{"LoadingPump", [this] { return now_ms; }};
+	bool client_jo = test_titles::jo_folds(client);
 	std::string server_scrk = "SERVER-LOADING-PUMP-SCRK";
 	ClientAuth auth;
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -848,7 +850,9 @@ struct RoleHarness {
 	uint64_t now_ms = 100000;
 	// The kernel lives on the heap: a World-carrying frame is megabytes.
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	inmatch::JoinerRole role;
+	bool role_jo = test_titles::jo_joiner(role);
 	KeepingSocket socket;
 	inmatch::TickInput input;
 	std::string server_scrk = "SERVER-LOADING-PUMP-SCRK";
@@ -872,6 +876,7 @@ struct RoleHarness {
 		// The role's runtime on the virtual clock, configured as create_runtime does.
 		role.runtime = std::make_unique<inmatch::ClientRuntime>(
 				"LoadingPump", [this] { return now_ms; });
+		test_titles::jo_folds(*role.runtime);
 		role.runtime->set_protocol(&kJo);
 		role.runtime->set_weapon_table(&kernel->world.tables.weapons);
 		return *role.runtime;

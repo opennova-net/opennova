@@ -44,6 +44,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -78,6 +79,7 @@ struct Rig {
 	net::Endpoint server_ep;
 	net::ScopedSocket joiner_sock;
 	inmatch::ClientRuntime client{"ServeJoiner"};
+	bool client_jo = test_titles::jo_folds(client);
 	uint32_t tick = 1;
 	bool ended = false;
 	std::vector<replication::ClientChatLine> chat;

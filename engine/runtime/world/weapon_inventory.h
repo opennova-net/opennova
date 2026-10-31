@@ -174,6 +174,10 @@ struct WeaponInventorySlot {
     int16_t adm_index = -1;
     int32_t clip = 0;
     int16_t scope_zero = 0;
+    // The zero pitch and yaw (MountSlot+4 / +8) the init seeds (weapon_scope_zero_slot_seed) and
+    // the local zero adjust writes; a mount takes them as they stand.
+    int32_t zero_pitch = 0;
+    int32_t zero_yaw = 0;
     // The slot's scope zoom (MountSlot+0xC). The personal slot IS this entry
     // in retail (EquippedSlot +0x118 points into the slot table), so a mount
     // reads back the zoom the slot was left at.
@@ -200,11 +204,12 @@ int32_t weapon_slot_initial_zoom(int32_t scope_max_mag, int32_t scope_initial_ma
                                  int32_t scope_min_mag, bool sniper_lock);
 
 // The slot init [orig: WeaponSlot_InitFromDef @ 0x53EE70]: the 100-byte slot
-// zeroed (clip 0) and bound to `adm_index`, its scope zero and zoom seeded with
+// zeroed (clip 0) and bound to `adm_index`, its scope zero words seeded under the
+// title's `zero_seed` (TitleRules::scope_zero_seed, DFX2-120) and its zoom with
 // `owner_class` as the owner (the sniper lock above).
 void weapon_slot_init_from_def(const WeaponTableEntry &def, int16_t adm_index,
                                WeaponInventorySlot &slot, int32_t owner_class,
-                               bool allow_sniper_scope_zoom);
+                               bool allow_sniper_scope_zoom, ScopeZeroSeed zero_seed);
 
 struct WeaponInventory {
     std::array<WeaponInventorySlot, weapon_combo::kSlotCount> slots;
@@ -332,7 +337,8 @@ struct WeaponFillResult {
 };
 WeaponFillResult weapon_inventory_load_from_display(
         const WeaponTable &table, const std::vector<std::string> &display,
-        WeaponInventory &inv, int32_t owner_class, bool allow_sniper_scope_zoom);
+        WeaponInventory &inv, int32_t owner_class, bool allow_sniper_scope_zoom,
+        ScopeZeroSeed zero_seed);
 
 // The spawn pool seeding [orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x541690, ex the
 // 'WeaponOverlay_BuildTypeLookup' misnomer]: every pool zeroed, then for every populated slot,
@@ -458,7 +464,7 @@ struct WeaponAvatarGrant {
 };
 WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table,
         WeaponInventory &inv, int32_t adm_index, int32_t owner_class,
-        bool allow_sniper_scope_zoom, const WeaponAmmoSeat &seat);
+        bool allow_sniper_scope_zoom, const WeaponAmmoSeat &seat, ScopeZeroSeed zero_seed);
 
 // The authority's pickup refusals [orig: WeaponSlot_RecalculateScore @ 0x542450;
 // it returns 0 (proceed) on a peer without authority]. The slot leg: the

@@ -42,6 +42,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -89,7 +90,9 @@ bool game_text(const ns::Datagram &d, opennova::FormattedGameText &out) {
 // a World and a server context overflow the 1 MB test-main stack under MSVC.
 struct SquadFixture {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	ns::UdpSessionTransport lan_transport{ns::UdpSessionTransport::Role::Host};
 	ns::UdpSessionTransport transports[3] = {
 			ns::UdpSessionTransport{ns::UdpSessionTransport::Role::Host},
@@ -107,6 +110,7 @@ struct SquadFixture {
 		start.has_item_def = true;
 		world->registry.spawn(3, start);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 5;
 		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Socketless, /*host_key=*/0, nullptr, config);
@@ -415,6 +419,7 @@ void run_an_orphaned_row_keeps_its_squad_key() {
 
 void run_session_create_clears_the_registry() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	ctx->squad_registry.push_back({3, "Old", "OLD"});
 	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
 			inmatch::SocketMode::Socketless);

@@ -26,6 +26,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -47,6 +48,7 @@ void test_the_spawner_binds_the_template() {
 	std::strcpy(rows[1].default_aip, "Deployable_Boat_Profile");
 	def::DefItemsFile items{rows.data(), rows.size()};
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	kernel->set_items_table(&items);
 	for (int pool = 0; pool < 3; ++pool) kernel->world.registry.configure_pool(pool, 8);
 	kernel->resolve_item_traits([](int32_t) { return uint8_t{0}; });
@@ -76,8 +78,10 @@ void test_the_spawner_binds_the_template() {
 
 struct BayRig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	std::vector<inmatch::NapiNPConnection> conns; // one, off the stack
 	w::EntityHandle bay, player, spawned;
 	int32_t got[6] = {};
@@ -212,6 +216,7 @@ void test_the_class_init_names_its_profile() {
 	rows[3].attrib = 0;
 	def::DefItemsFile items{rows.data(), rows.size()};
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	kernel->set_items_table(&items);
 	for (int pool = 0; pool < 3; ++pool) kernel->world.registry.configure_pool(pool, 8);
 	kernel->resolve_item_traits([](int32_t) { return uint8_t{0}; });

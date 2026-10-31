@@ -34,6 +34,7 @@
 
 #include "conn_fixture.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -91,6 +92,7 @@ bool pops_one_relayed_49(ns::ISessionTransport &t, bool udp_raw,
 
 int main() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 	const w::EntityHandle ha = w::spawn_player(world, player_spawn(0xFFF0));
@@ -105,6 +107,7 @@ int main() {
 	ns::UdpSessionTransport udp_d(ns::UdpSessionTransport::Role::Host);
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -120,7 +123,7 @@ int main() {
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(0x25, req_body));
 	std::vector<ProtocolMessage> replies =
-			inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[1], msgs, 100, roster, &world);
+			inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], msgs, 100, roster, &world);
 
 	// The broadcast rides the transports, never the requester's direct reply list.
 	for (const ProtocolMessage &m : replies)
@@ -137,7 +140,7 @@ int main() {
 	// Malformed (short) 0x25 -> dropped, no sends.
 	std::vector<ProtocolMessage> bad;
 	bad.push_back(make_protocol_message(0x25, {0x05, 0x10}));
-	replies = inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[1], bad, 101, roster, &world);
+	replies = inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], bad, 101, roster, &world);
 	{
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;
@@ -151,7 +154,7 @@ int main() {
 	stale.push_back(make_protocol_message(
 			0x25, encode_weapon_reload(WeaponReload{0x1005, 0x00C3})));
 	replies = inmatch::dispatch_session_replies(
-			inmatch::GameConfig{}, roster[1], stale, 102, roster, &world);
+			test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], stale, 102, roster, &world);
 	{
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;
@@ -165,7 +168,7 @@ int main() {
 	if (!expect(requester_entity != nullptr, "requester remains live in the registry")) return 1;
 	requester_entity->health = 0;
 	replies = inmatch::dispatch_session_replies(
-			inmatch::GameConfig{}, roster[1], msgs, 103, roster, &world);
+			test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], msgs, 103, roster, &world);
 	{
 		std::vector<uint8_t> raw;
 		ns::Datagram dg;

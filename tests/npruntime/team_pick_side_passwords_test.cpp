@@ -44,6 +44,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -56,6 +57,7 @@ using test_expect::expect;
 // passwords "blue1" / "red1".
 inmatch::GameConfig block_config(uint32_t type) {
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.game_type = type;
 	config.num_teams = 2;
@@ -67,6 +69,7 @@ inmatch::GameConfig block_config(uint32_t type) {
 // A LAN Serve Only host created on a mission of `type`.
 std::unique_ptr<inmatch::NapiNPServerCtx> host(uint32_t type) {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			/*host_key=*/0, nullptr, block_config(type));
 	return ctx;
@@ -136,6 +139,7 @@ bool run_an_admin_set_reaches_the_pick_at_the_next_start() {
 
 bool run_a_17_character_side_password_runs_on() {
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.country = "USA";
 	config.side_a_password = "abcdefghijklmnop"; // 16 characters: its NUL fits
 	config.side_b_password = "red";
@@ -177,7 +181,9 @@ bool run_a_17_character_side_password_runs_on() {
 //  @0x4FE588..0x4FE723; CAdminServer_HandleSetCommand @0x405A60 - the block's side A @0x406230]
 std::unique_ptr<inmatch::NapiNPServerCtx> four_team_host(int32_t block_game_type) {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	config.game_type = game_type::kTeamDeathmatch;
 	config.num_teams = 4;

@@ -8,6 +8,7 @@
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/infantry_internal.h> // infantry_death_edge
 
 #include <algorithm>
 #include <array>
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "item_pool_step.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using test_world::step_item_pool;
@@ -41,6 +43,7 @@ constexpr uint32_t kCoop = gt::kCoop;
 
 MatchRules rules(uint32_t game_type, uint32_t game_time_minutes, uint32_t score_limit) {
     MatchRules out;
+    test_titles::jo_match(out);
     out.game_type = game_type;
     out.game_time_minutes = game_time_minutes;
     out.score_limit = score_limit;
@@ -314,9 +317,11 @@ void test_every_retail_default_score_row() {
 
 void test_retail_default_score_values() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
 
     MatchRules tdm_rules;
+    test_titles::jo_match(tdm_rules);
     tdm_rules.game_type = kTdm;
     world->match.configure(tdm_rules);
     const EntityHandle tdm_blue = player(*world, 0, 1, "TdmBlue");
@@ -326,6 +331,7 @@ void test_retail_default_score_values() {
     CHECK(world->match.player(tdm_red)->stats[MatchStats::kPoints] == 0);
 
     MatchRules aas_rules;
+    test_titles::jo_match(aas_rules);
     aas_rules.game_type = kAas;
     world->match.configure(aas_rules);
     const EntityHandle aas_blue = player(*world, 0, 1, "AasBlue");
@@ -333,6 +339,7 @@ void test_retail_default_score_values() {
     CHECK(world->match.player(aas_blue)->stats[MatchStats::kPoints] == 15);
 
     MatchRules coop_rules;
+    test_titles::jo_match(coop_rules);
     coop_rules.game_type = kCoop;
     world->match.configure(coop_rules);
     const EntityHandle coop_blue = player(*world, 0, 1, "CoopBlue");
@@ -343,6 +350,7 @@ void test_retail_default_score_values() {
 
 void test_tdm_scoring_is_event_exact() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->match.configure(rules(kTdm, 10, 50));
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -374,6 +382,7 @@ void test_tdm_scoring_is_event_exact() {
 
 void test_live_entity_team_and_class_drive_scoring_and_board() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->match.configure(rules(kTdm, 10, 50));
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -407,6 +416,7 @@ void test_live_entity_team_and_class_drive_scoring_and_board() {
 
 void test_tdm_limit_and_clock_decisions() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->match.configure(rules(kTdm, 1, 2));
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -444,10 +454,12 @@ void test_tdm_limit_and_clock_decisions() {
 
 void test_deathmatch_and_hill_outcomes() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(3, 4);
 
     MatchRules dm;
+    test_titles::jo_match(dm);
     dm.game_type = gt::kDeathmatch;
     dm.game_time_minutes = 1;
     dm.score_limit = 2;
@@ -464,6 +476,7 @@ void test_deathmatch_and_hill_outcomes() {
     CHECK(dm_clock.has_value() && *dm_clock == 0);
 
     MatchRules koth;
+    test_titles::jo_match(koth);
     koth.game_type = gt::kKingOfTheHill;
     koth.game_time_minutes = 1;
     koth.hill_limit_minutes = 2;
@@ -526,6 +539,7 @@ void test_deathmatch_and_hill_outcomes() {
 void test_retail_objective_proximity_state_and_kill_bonuses() {
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 8);
         MatchRules tdm = rules(kTdm, 10, 99);
@@ -555,6 +569,7 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 8);
         MatchRules tdm = rules(kTdm, 10, 99);
@@ -586,10 +601,12 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         world->registry.configure_pool(3, 4);
         MatchRules koth;
+        test_titles::jo_match(koth);
         koth.game_type = gt::kKingOfTheHill;
         world->match.configure(koth);
         const EntityHandle solo = player(*world, 0, 1, "Solo");
@@ -605,10 +622,12 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         world->registry.configure_pool(3, 4);
         MatchRules koth;
+        test_titles::jo_match(koth);
         koth.game_type = gt::kKingOfTheHill;
         world->match.configure(koth);
         const EntityHandle solo = player(*world, 0, 1, "Solo");
@@ -659,9 +678,11 @@ void test_retail_objective_proximity_state_and_kill_bonuses() {
 void test_zone_time_split_reads_the_slot_team() {
     for (const uint8_t zone_team : {uint8_t{2}, uint8_t{1}}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         MatchRules aas;
+        test_titles::jo_match(aas);
         aas.game_type = gt::kAdvanceAndSecure;
         aas.score_values = default_match_score_values(aas.game_type, opennova::world::title_rules("jo"));
         (*aas.score_values)[32] = 3;
@@ -703,9 +724,11 @@ void test_zone_time_split_reads_the_slot_team() {
 void test_proximity_bits_shift_as_bytes() {
     auto pass = [](uint32_t game_type, int pool, uint8_t team) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(pool, 4);
         MatchRules match_rules;
+        test_titles::jo_match(match_rules);
         match_rules.game_type = game_type;
         world->match.configure(match_rules);
         const EntityHandle body = player(*world, 0, 1, "Body");
@@ -747,6 +770,7 @@ void test_proximity_bits_shift_as_bytes() {
 void test_proximity_tests_run_on_the_words() {
     auto objective_mask = [](int32_t dy) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 8);
         world->match.configure(rules(kTdm, 10, 99));
@@ -760,9 +784,11 @@ void test_proximity_tests_run_on_the_words() {
     CHECK(objective_mask(0xB500) == 0x00);
     auto zone_mask = [](int32_t dz) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         MatchRules aas;
+        test_titles::jo_match(aas);
         aas.game_type = gt::kAdvanceAndSecure;
         world->match.configure(aas);
         const EntityHandle body = player(*world, 0, 1, "Body");
@@ -797,6 +823,7 @@ void test_proximity_tests_run_on_the_words() {
 void test_kill_bonus_team_bits_shift_as_dwords() {
     for (const uint8_t killer_team : {uint8_t{33}, uint8_t{9}}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(3, 4);
         MatchRules tkoth = rules(gt::kTeamKingOfTheHill, 10, 99);
@@ -845,9 +872,11 @@ void test_kill_bonus_team_bits_shift_as_dwords() {
 void test_retail_objective_proximity_scoring_events() {
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(3, 4);
         MatchRules koth;
+        test_titles::jo_match(koth);
         koth.game_type = gt::kKingOfTheHill;
         world->match.configure(koth);
         const EntityHandle solo = player(*world, 0, 0, "Solo");
@@ -882,9 +911,11 @@ void test_retail_objective_proximity_scoring_events() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         MatchRules aas;
+        test_titles::jo_match(aas);
         aas.game_type = gt::kAdvanceAndSecure;
         aas.score_values = default_match_score_values(aas.game_type, opennova::world::title_rules("jo"));
         (*aas.score_values)[32] = 3;
@@ -931,6 +962,7 @@ void test_retail_objective_proximity_scoring_events() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         MatchRules tdm = rules(kTdm, 1, 99);
         (*tdm.score_values)[35] = 7;
@@ -961,8 +993,10 @@ void test_retail_objective_proximity_scoring_events() {
 void test_retail_zone_and_tkoth_win_quirks() {
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(1, 4);
         MatchRules aas;
+        test_titles::jo_match(aas);
         aas.game_type = gt::kAdvanceAndSecure;
         aas.game_time_minutes = 1;
         world->match.configure(aas);
@@ -980,9 +1014,11 @@ void test_retail_zone_and_tkoth_win_quirks() {
 
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(3, 4);
         MatchRules tkoth;
+        test_titles::jo_match(tkoth);
         tkoth.game_type = gt::kTeamKingOfTheHill;
         tkoth.game_time_minutes = 1;
         tkoth.hill_limit_minutes = 99;
@@ -1017,6 +1053,7 @@ void test_retail_zone_and_tkoth_win_quirks() {
 // CPlayerStats_RecordEvent @0x52caf8..0x52cbb3]
 void test_target_destroyed_shares_through_both_occupant_links() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 16);
     const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -1026,6 +1063,7 @@ void test_target_destroyed_shares_through_both_occupant_links() {
     world->registry.get(first)->primary_occupant = second;
 
     MatchRules demolition;
+    test_titles::jo_match(demolition);
     demolition.game_type = gt::kSearchAndDestroy;
     demolition.game_time_minutes = 1;
     world->match.configure(demolition);
@@ -1047,6 +1085,7 @@ void test_target_destroyed_shares_through_both_occupant_links() {
 
 void test_demolition_flag_and_flagball_gameplay() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 16);
     WaypointContactHarness contacts(*world);
@@ -1056,6 +1095,7 @@ void test_demolition_flag_and_flagball_gameplay() {
 
     for (const uint32_t game_type : {gt::kSearchAndDestroy, gt::kAttackDefend}) {
         MatchRules demolition;
+        test_titles::jo_match(demolition);
         demolition.game_type = game_type;
         demolition.game_time_minutes = 1;
         world->match.configure(demolition);
@@ -1075,6 +1115,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     }
 
     MatchRules ctf;
+    test_titles::jo_match(ctf);
     ctf.game_type = gt::kCaptureTheFlag;
     ctf.game_time_minutes = 1;
     ctf.flag_return_ticks = 210;
@@ -1131,6 +1172,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     // rearms its return counter; subsequent idle callbacks consume it.
     // [orig: flag update callback @0x408430; g_FlagReturnTime2 @0x24D2174]
     MatchRules timed_return;
+    test_titles::jo_match(timed_return);
     timed_return.game_type = gt::kFlagBall;
     timed_return.flag_return_ticks = 5;
     world->match.configure(timed_return);
@@ -1165,9 +1207,22 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->logic_tick = 5 * 62;
     step_item_pool(*world, 1);
     CHECK(world->registry.get(timed_flag)->position.x == 10.0f);
+    // The expiry's definition-pose sync raises its 0x2F lane, then the return's
+    // event record. [orig: Entity_UpdateIdleCheck @0x40857D / @0x408583]
+    const std::vector<MatchGameplayEvent> returned = world->match.drain_gameplay_events();
+    CHECK(returned.size() >= 2);
+    if (returned.size() >= 2) {
+        const MatchGameplayEvent &synced = returned[returned.size() - 2];
+        CHECK(synced.kind == MatchGameplayEventKind::FlagDrop && synced.objective == timed_flag &&
+              synced.objective_position.x == 10.0f);
+        CHECK(returned.back().kind == MatchGameplayEventKind::FlagReturn &&
+              returned.back().objective_item_id == 4095 &&
+              returned.back().objective_position.x == 10.0f);
+    }
     world->registry.despawn(timed_flag);
 
     MatchRules flag_ball;
+    test_titles::jo_match(flag_ball);
     flag_ball.game_type = gt::kFlagBall;
     flag_ball.game_time_minutes = 1;
     flag_ball.max_score = 2;
@@ -1188,6 +1243,7 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->registry.despawn(ball);
 
     MatchRules zero_flag_ball;
+    test_titles::jo_match(zero_flag_ball);
     zero_flag_ball.game_type = gt::kFlagBall;
     zero_flag_ball.max_score = 0;
     world->match.configure(zero_flag_ball);
@@ -1198,11 +1254,13 @@ void test_demolition_flag_and_flagball_gameplay() {
 
 void test_flag_me_keeps_retails_unreachable_score_arm() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
     WaypointContactHarness contacts(*world);
 
     MatchRules rules;
+    test_titles::jo_match(rules);
     rules.game_type = gt::kFlagMe;
     rules.max_score = 1;
     rules.score_values.emplace();
@@ -1239,12 +1297,18 @@ void test_flag_me_keeps_retails_unreachable_score_arm() {
     CHECK(world->match.player(victim)->stats[MatchStats::kDeaths] == 0);
     CHECK(!world->match.winner_if_finished(*world).has_value());
 
+    // The capture's feed record, then its drop's and its sync's 0x2F lanes.
+    // [orig: Server_ProcessScoringAndBroadcast @0x516A37 / @0x516A55 / @0x516A5B]
     const std::vector<MatchGameplayEvent> events =
         world->match.drain_gameplay_events();
-    CHECK(events.size() == 2);
-    CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
-    CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
-    CHECK(!events[1].remove_objective);
+    CHECK(events.size() == 4);
+    if (events.size() == 4) {
+        CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
+        CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
+        CHECK(!events[1].remove_objective);
+        CHECK(events[2].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(events[3].kind == MatchGameplayEventKind::FlagDrop);
+    }
 
     // The retail win check still reads raw capture field 12; the ordinary
     // scorer simply has no valid row capable of incrementing it.
@@ -1255,11 +1319,13 @@ void test_flag_me_keeps_retails_unreachable_score_arm() {
 
 void test_flag_contact_requires_the_retail_move_callback_gate() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 4);
     WaypointContactHarness contacts(*world);
 
     MatchRules rules;
+    test_titles::jo_match(rules);
     rules.game_type = gt::kFlagBall;
     world->match.configure(rules);
     const EntityHandle carrier = player(*world, 0, 1, "Carrier");
@@ -1284,6 +1350,586 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
     CHECK(carrier_entity->mounted_child == inert);
 }
 
+// A Takeable def (DFX2's "DF1 takeable notebook", `attrib: notarget takeable
+// Movecb`, is the Night Trap objective) touched by a moving Player with empty
+// hands is carried off ahead of the flag/bay id switch, whatever its id and
+// with no game-type gate: the link both ways, the carried bit, the scars
+// cleared and the SPGOAL_PU set at the carrier, nothing else (no pickup score,
+// no feed), so the mission's GroupHoldingGroup reads it at once.
+// [orig: Entity_ProcessWaypointInteraction @0x4AD85B..0x4AD883 ->
+//  Entity_TryAttachCarriedObject @0x43C1F0 -> Entity_AttachCarriedObject
+//  @0x43C130 (the SPGOAL_PU play @0x43C174..0x43C17E);
+//  TriggerGroup_AnyMemberHoldingItemGroup @0x43c870]
+// [orig: the twin's @0x4AD8BB..0x4AD8D8 -> @0x43BFF0 -> @0x43BF30 (dfx2.exe)]
+struct TakeableRig {
+    static constexpr int32_t kTakeableId = 9001; // an authored non-flag def
+    std::unique_ptr<World> world = std::make_unique<World>();
+    bool world_jo = test_titles::jo_world(*world);
+    WaypointContactHarness contacts{*world};
+    EntityHandle carrier;
+    EntityHandle object;
+
+    explicit TakeableRig(int32_t object_id = kTakeableId) {
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        MatchRules flag_ball;
+        test_titles::jo_match(flag_ball);
+        flag_ball.game_type = gt::kFlagBall;
+        flag_ball.score_values.emplace();
+        (*flag_ball.score_values)[11] = 7; // FLAGPICKUP: a pickup score would show
+        world->match.configure(flag_ball);
+        carrier = player(*world, 0, 1, "Carrier");
+        Entity *c = world->registry.get(carrier);
+        c->group_id = 1;
+        c->net_move_input = Entity::kMoveOrderMoving;
+        object = objective(*world, object_id, 0, {0.0f, 0.0f, 0.0f},
+                           kItemAttribMoveCallback | kItemAttribTakeable);
+        world->registry.get(object)->group_id = 4;
+        contacts.bind(object);
+        // A presenting peer: the positional plays ready only with a listener.
+        world->out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    }
+    int sounds_named(const char *set_name) {
+        int count = 0;
+        for (const ReadyFireSound &sound : world->out.fire_sounds.drain())
+            if (sound.set_name == set_name)
+                ++count;
+        return count;
+    }
+    Entity &carrier_entity() { return *world->registry.get(carrier); }
+    Entity &object_entity() { return *world->registry.get(object); }
+    void touch_and_run() {
+        contacts.touch(*world, carrier, object);
+        run_match_frame(*world);
+    }
+};
+
+void test_takeable_contact_carries_any_def() {
+    {
+        TakeableRig rig;
+        World &world = *rig.world;
+        const uint64_t lease = rig.object_entity().registry_spawn_id;
+        CHECK(world.out.scars.ring_for(rig.object, lease) != nullptr);
+        CHECK(!world.commands.group_holding_group(1, 4));
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        CHECK(rig.object_entity().primary_occupant == rig.carrier);
+        CHECK((rig.object_entity().flags & kEntityFlagCarried) != 0);
+        CHECK(world.out.scars.find(rig.object) == nullptr);
+        CHECK(world.match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 0);
+        CHECK(world.match.player(rig.carrier)->stats[MatchStats::kPoints] == 0);
+        CHECK(world.match.drain_gameplay_events().empty());
+        CHECK(rig.sounds_named("SPGOAL_PU") == 1);
+        // E10's GroupHoldingGroup(1, 4) reads the live link.
+        CHECK(world.commands.group_holding_group(1, 4));
+        CHECK(!world.commands.group_holding_group(1, 3));
+
+        // The death drop lets it go as retail's drop does any carried object:
+        // the link and the carried bit cleared, but no 0x2F lane, which only a
+        // flag id sends. [orig: Entity_DropCarriedObject @0x439df0 - the clears
+        //  @0x439e01..0x439e17, the call @0x439f34; Server_SendDestructibleDeathPacket
+        //  @0x50D90A..0x50D920]
+        world.match.record_death(world, rig.carrier);
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+        CHECK((rig.object_entity().flags & kEntityFlagCarried) == 0);
+        CHECK(!world.commands.group_holding_group(1, 4));
+        CHECK(world.match.drain_gameplay_events().empty());
+    }
+    {
+        // A Player body with no match row carries too: the branch has no slot test.
+        TakeableRig rig;
+        rig.world->match.remove_player(*rig.world, rig.carrier);
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+    }
+    {
+        // Not moving: the handler's MoveOrder & 8 head. [orig: @0x4AD834]
+        TakeableRig rig;
+        rig.carrier_entity().net_move_input = 0;
+        rig.touch_and_run();
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+    }
+    {
+        // A dead toucher. [orig: Flags & 2 @0x4AD853]
+        TakeableRig rig;
+        rig.carrier_entity().flags |= kEntityFlagDead;
+        rig.touch_and_run();
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+    }
+    {
+        // No Player bit. [orig: Flags & 0x100 @0x4AD85B]
+        TakeableRig rig;
+        rig.carrier_entity().flags &= ~kEntityFlagPlayer;
+        rig.touch_and_run();
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+    }
+    {
+        // Hands full: the branch needs an empty +0x268, and the id switch
+        // has no arm for the def. [orig: @0x4AD862; the switch @0x4AD89A]
+        TakeableRig rig;
+        const EntityHandle held = objective(*rig.world, TakeableRig::kTakeableId, 0,
+                                            {40.0f, 0.0f, 0.0f});
+        rig.carrier_entity().mounted_child = held;
+        rig.world->registry.get(held)->primary_occupant = rig.carrier;
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == held);
+        CHECK(!rig.object_entity().primary_occupant.valid());
+        CHECK((rig.object_entity().flags & kEntityFlagCarried) == 0);
+    }
+    {
+        // Someone already carries it: the attach's +0x170 test refuses, and
+        // the branch returns all the same. [orig: @0x43C20C; the return @0x4AD883]
+        TakeableRig rig;
+        const EntityHandle other = player(*rig.world, 1, 1, "Other");
+        rig.object_entity().primary_occupant = other;
+        rig.touch_and_run();
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(rig.object_entity().primary_occupant == other);
+    }
+    for (const bool authority : {false, true}) {
+        // Off the authority the handler returns at its head. [orig: @0x4AD823]
+        TakeableRig rig;
+        rig.contacts.touch(*rig.world, rig.carrier, rig.object);
+        TickContext ctx;
+        ctx.world = rig.world.get();
+        ctx.logic_tick = rig.world->logic_tick;
+        ctx.is_authority = authority;
+        rig.world->update_all_entities(ctx);
+        CHECK((rig.carrier_entity().mounted_child == rig.object) == authority);
+    }
+    {
+        // A flag row that also carries Takeable takes this branch first: the
+        // attach with its own flag leg (the 0x14 feed), but no scorer event 10.
+        // [orig: Entity_AttachCarriedObject's flag ids @0x43C15A..0x43C197;
+        //  Server_DispatchScoringEvent only in the switch arm @0x4AD94B]
+        TakeableRig rig(4095);
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 0);
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kPoints] == 0);
+        const std::vector<MatchGameplayEvent> events = rig.world->match.drain_gameplay_events();
+        CHECK(events.size() == 1 && events[0].kind == MatchGameplayEventKind::FlagPickup);
+        CHECK(rig.sounds_named("SPGOAL_PU") == 0);
+        // The flag's drop raises its 0x2F lane on the authority alone.
+        // [orig: Entity_DropCarriedObject - is_authority @0x439F29]
+        rig.world->rules.logic_authority = false;
+        rig.world->match.drop_carried_object(*rig.world, rig.carrier);
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(rig.world->match.drain_gameplay_events().empty());
+    }
+    {
+        TakeableRig rig(4095);
+        rig.touch_and_run();
+        (void)rig.world->match.drain_gameplay_events();
+        rig.world->match.drop_carried_object(*rig.world, rig.carrier);
+        const std::vector<MatchGameplayEvent> drop = rig.world->match.drain_gameplay_events();
+        CHECK(drop.size() == 1 && drop[0].kind == MatchGameplayEventKind::FlagDrop &&
+              drop[0].objective == rig.object);
+    }
+    {
+        // The same 4095 row without Takeable keeps the switch's scored pickup.
+        TakeableRig rig(4095);
+        rig.object_entity().item_attrib = kItemAttribMoveCallback;
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 1);
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kPoints] == 7);
+    }
+}
+
+// A solid neighbour does not shadow a MoveCB touch: the resolver asks every
+// candidate of the slice in turn against the same test points, so an object
+// lying on a table reaches the handler in the same pass whose push-out (and the
+// body trace's contact item) is the table's. [orig: Entity_MovementCollisionResolver
+//  @0x4B2F5A..0x4B2FF5 - each candidate's Entity_ComputeBoneCollisionForce call
+//  @0x4B2F9B, the MoveCB branch to Entity_ProcessWaypointInteraction @0x4B2FF5 and
+//  back to the candidate loop @0x4B30AF; the solid fold @0x4B3002..0x4B30AF]
+void test_a_solid_neighbour_does_not_shadow_a_takeable_touch() {
+    TakeableRig rig;
+    World &world = *rig.world;
+    constexpr int32_t kTableId = 1437;
+    const EntityHandle table =
+        objective(world, kTableId, 0, {0.0f, 0.0f, 0.0f}, /*item_attrib=*/0);
+    rig.contacts.bind(table);
+    rig.touch_and_run();
+    CHECK(rig.contacts.collision.dbg_last_contact_item == kTableId);
+    CHECK(rig.carrier_entity().mounted_child == rig.object);
+    CHECK(world.commands.group_holding_group(1, 4));
+}
+
+// A Player carrying an object still saves its own displaced flag: the own-flag
+// arms make no carried-object test, only the pickup leg does.
+// [orig: Entity_ProcessWaypointInteraction - 4091 @0x4AD8E9..0x4AD908 ->
+//  Entity_SyncPositionFromDefinition, the pickup's +0x268 test @0x4AD936]
+void test_a_carrier_still_saves_its_own_flag() {
+    auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 8);
+    WaypointContactHarness contacts(*world);
+
+    MatchRules ctf;
+    test_titles::jo_match(ctf);
+    ctf.game_type = gt::kCaptureTheFlag;
+    ctf.game_time_minutes = 1;
+    ctf.flag_return_ticks = 210;
+    ctf.score_values.emplace();
+    (*ctf.score_values)[9] = 3; // FLAGSAVE
+    world->match.configure(ctf);
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    Entity *blue_entity = world->registry.get(blue);
+    blue_entity->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle red_flag = objective(*world, 4093, 2, {0.0f, 0.0f, 0.0f});
+    const EntityHandle blue_flag = objective(*world, 4091, 1, {80.0f, 0.0f, 0.0f});
+    contacts.bind(red_flag);
+    contacts.bind(blue_flag);
+
+    contacts.touch(*world, blue, red_flag);
+    run_match_frame(*world);
+    CHECK(blue_entity->mounted_child == red_flag);
+
+    // The blue flag lies 40 u off its authored pose.
+    world->registry.get(blue_flag)->position = {40.0f, 0.0f, 0.0f};
+    contacts.touch(*world, blue, blue_flag);
+    run_match_frame(*world);
+    CHECK(world->registry.get(blue_flag)->position.x == 80.0f);
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 1);
+    CHECK(blue_entity->mounted_child == red_flag);
+}
+
+// The own-flag arm syncs the flag to its definition pose: at the pose it sends
+// nothing; near it (under 2 u) the 0x2F alone, the flag left where it lies; off
+// it the snap's 0x2F, then the save's 0x15 feed at the words the touch found and
+// its own 0x2F. An occupant does not stop the arm.
+// [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD921;
+//  Entity_SyncPositionFromDefinition @0x43A9B0 (@0x43A9F8, @0x43AA6B, @0x43AB40);
+//  Server_BroadcastFlagSaveEvent @0x517A90 (@0x517AED, @0x517B09)]
+void test_own_flag_touch_syncs_its_definition_pose() {
+    auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 4);
+    WaypointContactHarness contacts(*world);
+    MatchRules ctf;
+    test_titles::jo_match(ctf);
+    ctf.game_type = gt::kCaptureTheFlag;
+    ctf.score_values.emplace();
+    (*ctf.score_values)[9] = 3; // FLAGSAVE
+    world->match.configure(ctf);
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    world->registry.get(blue)->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle other = player(*world, 1, 2, "Other");
+    const EntityHandle flag = objective(*world, 4091, 1, {40.0f, 0.0f, 0.0f});
+    contacts.bind(flag);
+    auto touch = [&] {
+        contacts.touch(*world, blue, flag);
+        run_match_frame(*world);
+        return world->match.drain_gameplay_events();
+    };
+
+    // At the definition pose: nothing.
+    CHECK(touch().empty());
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 0);
+
+    // One unit off it: the 0x2F lane alone, the flag where it lies.
+    world->registry.get(flag)->position = {41.0f, 0.0f, 0.0f};
+    std::vector<MatchGameplayEvent> near_pose = touch();
+    CHECK(near_pose.size() == 1 && near_pose[0].kind == MatchGameplayEventKind::FlagDrop);
+    CHECK(world->registry.get(flag)->position.x == 41.0f);
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 0);
+
+    // Five units off it, an occupant named but the flag not hidden: the snap's
+    // 0x2F, then the save at the touched words.
+    world->registry.get(flag)->position = {45.0f, 0.0f, 0.0f};
+    world->registry.get(flag)->primary_occupant = other;
+    std::vector<MatchGameplayEvent> saved = touch();
+    CHECK(saved.size() == 2);
+    if (saved.size() == 2) {
+        CHECK(saved[0].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(saved[1].kind == MatchGameplayEventKind::FlagSave);
+        CHECK(saved[1].position.x == 45.0f);
+        CHECK(saved[1].objective_position.x == 40.0f);
+        // Both records name the flag's occupant as the serializer's parent.
+        CHECK(saved[0].parent == other && saved[1].parent == other);
+    }
+    CHECK(world->registry.get(flag)->position.x == 40.0f);
+    CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 1);
+}
+
+// A 2 x 2 u face quad, normal +z, one unit above its entity's origin, the
+// entity raycast's target (Physics_RaycastEntityPool walks CFAC faces).
+CollisionModel deck_model() {
+    CollisionModel m;
+    constexpr int32_t kOne = 65536;
+    m.face_vertices = {{-256, -256, 256}, {256, -256, 256}, {256, 256, 256}, {-256, 256, 256}};
+    const auto face = [&](int a, int b, int c) {
+        CollisionFace f;
+        f.v[0] = static_cast<int16_t>(a);
+        f.v[1] = static_cast<int16_t>(b);
+        f.v[2] = static_cast<int16_t>(c);
+        f.normal[2] = 16384;
+        f.axis = 1;
+        f.plane_dist = -kOne;
+        f.min[0] = f.min[1] = -kOne;
+        f.max[0] = f.max[1] = kOne;
+        f.min[2] = f.max[2] = kOne;
+        f.material = 5;
+        m.faces.push_back(f);
+    };
+    face(0, 1, 2);
+    face(0, 2, 3);
+    m.sections.assign(1, {});
+    m.sections[0].face_count = 2;
+    m.sections[0].face_vertex_count = 4;
+    return m;
+}
+
+// The definition-pose sync's snap takes as its ground the entity a ray from
+// half a unit above the pose to ten units below it meets (the flag itself
+// excluded), and both of its legs rebuild the flag's proximity list where it
+// then stands, so a drop's indoors bit does not outlive the sync; the 0x2F
+// record carries that ground.
+// [orig: Entity_SyncPositionFromDefinition @0x43A9B0 - Entity_BuildProximityList
+//  @0x43AA50 (near) / @0x43AB25 (snap), the ray @0x43AAE4..0x43AB18,
+//  Physics_RaycastNearestEntity @0x43AB1C, the +0x28 store @0x43AB22]
+void test_definition_pose_sync_rays_its_ground() {
+    auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 4);
+    world->registry.configure_pool(2, 4);
+    CollisionWorld collision;
+    world->collision = &collision;
+    MatchRules flag_ball;
+    test_titles::jo_match(flag_ball);
+    flag_ball.game_type = gt::kFlagBall;
+    world->match.configure(flag_ball);
+    Entity deck;
+    deck.kind = EntityKind::Item;
+    deck.item_id = 4302;
+    deck.item_type_index = 3;
+    deck.has_item_def = true;
+    deck.alive = true;
+    deck.bound_radius = 3.0f;
+    deck.position = {10.0f, 20.0f, 0.0f};
+    const EntityHandle deck_handle = world->registry.spawn(2, deck);
+    collision.assign_entity(deck_handle, collision.add_model(deck_model()));
+    // The flag's definition pose two units over the deck's face, off its diagonal.
+    const EntityHandle flag = objective(*world, 4095, 0, {10.25f, 20.5f, 3.0f});
+    CHECK(!world->match.sync_flag_to_authored_pose(*world, flag)); // at the pose
+    CHECK(world->match.drain_gameplay_events().empty());
+
+    // Near the pose (one unit off): the flag stays, its proximity list rebuilt.
+    Entity *row = world->registry.get(flag);
+    row->position = {11.25f, 20.5f, 3.0f};
+    row->flags |= kEntityFlagIndoors;
+    CHECK(!world->match.sync_flag_to_authored_pose(*world, flag));
+    CHECK(row->position.x == 11.25f);
+    CHECK((row->flags & kEntityFlagIndoors) == 0);
+    CHECK(world->match.drain_gameplay_events().size() == 1);
+
+    // Off the pose: the snap, the deck as its ground, the indoors bit re-derived.
+    row->position = {40.0f, 0.0f, 3.0f};
+    row->flags |= kEntityFlagIndoors;
+    row->ground_target = EntityHandle{};
+    CHECK(world->match.sync_flag_to_authored_pose(*world, flag));
+    CHECK(row->position.x == 10.25f && row->position.y == 20.5f && row->position.z == 3.0f);
+    CHECK(row->ground_target == deck_handle);
+    CHECK((row->flags & kEntityFlagIndoors) == 0);
+    const std::vector<MatchGameplayEvent> snap = world->match.drain_gameplay_events();
+    CHECK(snap.size() == 1);
+    if (snap.size() == 1) {
+        CHECK(snap[0].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(snap[0].ground == deck_handle);
+    }
+
+    // Twelve units over the deck the ray (ten units down) meets nothing.
+    world->registry.despawn(flag);
+    const EntityHandle high = objective(*world, 4095, 0, {10.25f, 20.5f, 13.0f});
+    world->match.sync_flag_to_authored_pose(*world, high);
+    Entity *high_row = world->registry.get(high);
+    high_row->position = {40.0f, 0.0f, 13.0f};
+    high_row->ground_target = deck_handle;
+    CHECK(world->match.sync_flag_to_authored_pose(*world, high));
+    CHECK(!high_row->ground_target.valid());
+}
+
+// The pickup leg scores and clears the toucher's damage-disabled word (+0x124)
+// whether or not the attach takes the flag: an occupied flag stays where it is.
+// [orig: Entity_ProcessWaypointInteraction @0x4AD936..0x4AD955;
+//  Entity_TryAttachCarriedObject @0x43C20C]
+void test_pickup_leg_scores_even_when_the_attach_refuses() {
+    for (const bool occupied : {false, true}) {
+        TakeableRig rig(4095);
+        rig.object_entity().item_attrib = kItemAttribMoveCallback;
+        rig.carrier_entity().damage_state = 620;
+        const EntityHandle other = player(*rig.world, 1, 2, "Other");
+        if (occupied)
+            rig.object_entity().primary_occupant = other;
+        rig.touch_and_run();
+        CHECK((rig.carrier_entity().mounted_child == rig.object) == !occupied);
+        CHECK(rig.object_entity().primary_occupant == (occupied ? other : rig.carrier));
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 1);
+        CHECK(rig.carrier_entity().damage_state == 0);
+    }
+}
+
+// A carried object with no def (or a link to a destroyed row) drops the link
+// only in a bay arm the toucher's team opens; any other touch leaves it.
+// [orig: Entity_ProcessWaypointInteraction - 4098's def test @0x4AD98F, the
+//  clears @0x4AD9FF / @0x4ADA07; the 4093 arm's +0x268 test @0x4AD936]
+void test_bay_arm_alone_clears_a_defless_carried_link() {
+    auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 8);
+    WaypointContactHarness contacts(*world);
+    MatchRules ctf;
+    test_titles::jo_match(ctf);
+    ctf.game_type = gt::kCaptureTheFlag;
+    world->match.configure(ctf);
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    Entity *blue_entity = world->registry.get(blue);
+    blue_entity->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle red_flag = objective(*world, 4093, 2, {0.0f, 0.0f, 0.0f});
+    const EntityHandle red_bay = objective(*world, 4100, 2, {20.0f, 0.0f, 0.0f});
+    const EntityHandle blue_bay = objective(*world, 4098, 1, {40.0f, 0.0f, 0.0f});
+    contacts.bind(red_flag);
+    contacts.bind(red_bay);
+    contacts.bind(blue_bay);
+    Entity defless;
+    defless.kind = EntityKind::Item;
+    defless.item_type_index = 7;
+    defless.alive = true;
+    defless.position = {60.0f, 0.0f, 0.0f};
+    const EntityHandle held = world->registry.spawn(1, defless);
+    blue_entity->mounted_child = held;
+    world->registry.get(held)->primary_occupant = blue;
+
+    contacts.touch(*world, blue, red_flag);
+    run_match_frame(*world);
+    CHECK(blue_entity->mounted_child == held);
+    CHECK(!world->registry.get(red_flag)->primary_occupant.valid());
+    contacts.touch(*world, blue, red_bay); // team 2's bay
+    run_match_frame(*world);
+    CHECK(blue_entity->mounted_child == held);
+    contacts.touch(*world, blue, blue_bay);
+    run_match_frame(*world);
+    CHECK(!blue_entity->mounted_child.valid());
+    CHECK(!world->registry.get(held)->primary_occupant.valid());
+
+    // A link to a destroyed row reads as no def, in the bay arm alone.
+    blue_entity->mounted_child = held;
+    world->registry.despawn(held);
+    contacts.touch(*world, blue, red_flag);
+    run_match_frame(*world);
+    CHECK(blue_entity->mounted_child == held);
+    contacts.touch(*world, blue, blue_bay);
+    run_match_frame(*world);
+    CHECK(!blue_entity->mounted_child.valid());
+}
+
+// A flag's attach on an in-session authority sends the flag's 0x2F a second
+// time after the pickup feed (and arms its return window); out of a session,
+// or for the Takeable notebook, it does not.
+// [orig: Entity_AttachCarriedObject @0x43C19F..0x43C1CE]
+void test_flag_attach_in_session_sends_a_second_state() {
+    for (const bool in_session : {false, true}) {
+        TakeableRig rig(4095);
+        rig.object_entity().item_attrib = kItemAttribMoveCallback;
+        rig.world->rules.mp_session = in_session;
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        const std::vector<MatchGameplayEvent> events = rig.world->match.drain_gameplay_events();
+        CHECK(events.size() == (in_session ? 2u : 1u));
+        if (!events.empty())
+            CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
+        if (events.size() == 2) {
+            CHECK(events[1].kind == MatchGameplayEventKind::FlagDrop);
+            CHECK(events[1].objective == rig.object && events[1].parent == rig.carrier);
+            CHECK((events[1].objective_flags & kEntityFlagCarried) != 0);
+        }
+    }
+    TakeableRig notebook;
+    notebook.world->rules.mp_session = true;
+    notebook.touch_and_run();
+    CHECK(notebook.carrier_entity().mounted_child == notebook.object);
+    CHECK(notebook.world->match.drain_gameplay_events().empty());
+}
+
+// A drop leaves the flag's return window as its last service left it: a window
+// a carry counted down (the carried flag displaced, its ground link a def-less
+// row) keeps counting after the drop, the return landing on the third service
+// after it; a re-arm at the drop would have added two more.
+// [orig: Entity_DropCarriedObject @0x439DF0..0x439F3D (no +0x2A4 store);
+//  Entity_UpdateIdleCheck - the ground arm @0x408504..0x408520, the re-arm
+//  @0x408531..0x40853B, the expiry @0x40854C]
+void test_a_drop_leaves_the_flags_return_window() {
+    auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 4);
+    MatchRules flag_ball;
+    test_titles::jo_match(flag_ball);
+    flag_ball.game_type = gt::kFlagBall;
+    flag_ball.flag_return_ticks = 5;
+    world->match.configure(flag_ball);
+    const EntityHandle carrier = player(*world, 0, 1, "Blue");
+    const EntityHandle flag = objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+    Entity defless;
+    defless.kind = EntityKind::Item;
+    defless.item_type_index = 7;
+    defless.alive = true;
+    defless.position = {40.0f, 0.0f, 0.0f};
+    const EntityHandle ground = world->registry.spawn(1, defless);
+    Entity *row = world->registry.get(flag);
+    world->match.tick_flag_event(*world, *row); // at home: the window armed at 5
+
+    Entity *body = world->registry.get(carrier);
+    body->position = {40.0f, 0.0f, 0.0f};
+    body->mounted_child = flag;
+    row->primary_occupant = carrier;
+    row->flags |= kEntityFlagCarried;
+    row->position = {40.0f, 0.0f, 0.0f};
+    row->ground_target = ground;
+    world->match.tick_flag_event(*world, *row); // 4
+    world->match.tick_flag_event(*world, *row); // 3
+    world->match.drop_carried_object(*world, carrier);
+    CHECK(!body->mounted_child.valid() && row->ground_target == ground);
+    world->match.tick_flag_event(*world, *row); // 2
+    world->match.tick_flag_event(*world, *row); // 1
+    CHECK(row->position.x == 40.0f);
+    world->match.tick_flag_event(*world, *row); // 0: the return
+    CHECK(row->position.x == 0.0f && row->position.y == 0.0f);
+}
+
+// A Player body's death edge lets go of what it carries on every peer, past the
+// round's end too: the drop at the edge has no gate.
+// [orig: Entity_UpdateInfantryPlayerBody - Entity_DropCarriedObject @0x4B4D0D]
+// [orig: the twin's @0x4B4D6D (dfx2.exe)]
+void test_player_body_death_edge_drops_what_it_carries() {
+    for (const bool authority : {true, false}) {
+        TakeableRig rig;
+        World &world = *rig.world;
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        CHECK(world.match.finish(1, world));
+        AiEntity &body = *world.ai.at(world.ai.attach(rig.carrier));
+        body.inf.active = true;
+        world.ai.is_authority = authority;
+        world.rules.logic_authority = authority;
+        rig.carrier_entity().health = 0;
+        infantry_death_edge(world.ai, body, world, &rig.carrier_entity(), /*org1=*/false, 4);
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+        CHECK((rig.object_entity().flags & kEntityFlagCarried) == 0);
+    }
+}
+
 // The entity update's own tail consumes the flag and bay touches its bodies'
 // movement resolves recorded, so the pickup lands in the frame that touched,
 // ahead of the next server tick. The handler returns at once off the
@@ -1295,11 +1941,13 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
 void test_entity_update_consumes_its_movement_contacts() {
     for (const bool authority : {false, true}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->registry.configure_pool(1, 4);
         WaypointContactHarness contacts(*world);
 
         MatchRules rules;
+        test_titles::jo_match(rules);
         rules.game_type = gt::kFlagBall;
         world->match.configure(rules);
         const EntityHandle carrier = player(*world, 0, 1, "Carrier");
@@ -1322,6 +1970,7 @@ void test_entity_update_consumes_its_movement_contacts() {
 
 void test_aas_capture_scoring_and_outcomes() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 8);
     world->match.configure(rules(kAas, 1, 0));
@@ -1355,11 +2004,13 @@ void test_aas_capture_scoring_and_outcomes() {
 
 void test_flagball_four_team_bays_consume_exact_contacts() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(1, 8);
     WaypointContactHarness contacts(*world);
 
     MatchRules flagball;
+    test_titles::jo_match(flagball);
     flagball.game_type = gt::kFlagBall;
     flagball.max_score = 99;
     world->match.configure(flagball);
@@ -1397,23 +2048,96 @@ void test_flagball_four_team_bays_consume_exact_contacts() {
 
     const std::vector<MatchGameplayEvent> events =
         world->match.drain_gameplay_events();
-    CHECK(events.size() == 4);
-    if (events.size() == 4) {
-        CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
-        CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
-        CHECK(events[2].kind == MatchGameplayEventKind::FlagPickup);
-        CHECK(events[3].kind == MatchGameplayEventKind::FlagCapture);
-        CHECK(!events[1].remove_objective && !events[3].remove_objective);
+    // Each capture: its feed record, then the drop's and the sync's 0x2F lanes.
+    CHECK(events.size() == 8);
+    if (events.size() == 8) {
+        for (const size_t side : {size_t{0}, size_t{4}}) {
+            CHECK(events[side].kind == MatchGameplayEventKind::FlagPickup);
+            CHECK(events[side + 1].kind == MatchGameplayEventKind::FlagCapture);
+            CHECK(!events[side + 1].remove_objective);
+            CHECK(events[side + 2].kind == MatchGameplayEventKind::FlagDrop);
+            CHECK(events[side + 3].kind == MatchGameplayEventKind::FlagDrop);
+        }
     }
+}
+
+// A non-CTF capture drops the flag at its carrier and syncs it to its
+// definition pose: after the capture's own feed record (the flag's words as
+// carried), the drop's 0x2F lane (the carrier's X/Y, its Z + 0x4000, no
+// parent, the carried bit clear) and the sync's (home, no parent); the flag
+// ends at home with its authored heading and the drop's fall installed.
+// [orig: Server_ProcessScoringAndBroadcast @0x5169C0 - the 0x13 @0x516A37,
+//  Entity_DropCarriedObject @0x516A55 (the pose @0x439E9F..0x439EC3, the fall
+//  @0x439E95), Entity_SyncPositionFromDefinition @0x516A5B (the snap
+//  @0x43AA7D..0x43AA96)]
+// [orig: the twin's @0x513CA5 / @0x513CAB (dfx2.exe)]
+void test_non_ctf_capture_drops_the_flag_then_syncs_it_home() {
+    auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 8);
+    WaypointContactHarness contacts(*world);
+    MatchRules flag_ball;
+    test_titles::jo_match(flag_ball);
+    flag_ball.game_type = gt::kFlagBall;
+    flag_ball.max_score = 99;
+    world->match.configure(flag_ball);
+    const EntityHandle carrier = player(*world, 0, 1, "Blue");
+    Entity *carrier_entity = world->registry.get(carrier);
+    carrier_entity->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle flag = objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+    const EntityHandle bay = objective(*world, 4098, 1, {20.0f, 0.0f, 0.0f});
+    contacts.bind(flag);
+    contacts.bind(bay);
+    const int32_t home_heading = world->registry.get(flag)->heading;
+
+    contacts.touch(*world, carrier, flag);
+    run_match_frame(*world);
+    CHECK(carrier_entity->mounted_child == flag);
+    (void)world->match.drain_gameplay_events();
+    const EntityPosition carried_at = world->registry.get(flag)->position;
+    contacts.touch(*world, carrier, bay);
+    run_match_frame(*world);
+    CHECK(!carrier_entity->mounted_child.valid());
+    const EntityPosition carrier_at = carrier_entity->position;
+    const std::vector<MatchGameplayEvent> events = world->match.drain_gameplay_events();
+    CHECK(events.size() == 3);
+    if (events.size() == 3) {
+        CHECK(events[0].kind == MatchGameplayEventKind::FlagCapture);
+        CHECK(!events[0].remove_objective);
+        CHECK(events[0].position.x.q16 == carried_at.x.q16 &&
+              events[0].position.y.q16 == carried_at.y.q16);
+        CHECK(events[1].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(events[1].objective_position.x.q16 == carrier_at.x.q16 &&
+              events[1].objective_position.y.q16 == carrier_at.y.q16 &&
+              events[1].objective_position.z.q16 == carrier_at.z.q16 + 0x4000);
+        CHECK(!events[1].parent.valid());
+        CHECK((events[1].objective_flags & kEntityFlagCarried) == 0);
+        CHECK(events[2].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(events[2].objective_position.x.q16 == 0 &&
+              events[2].objective_position.y.q16 == 0 &&
+              events[2].objective_position.z.q16 == 0);
+        CHECK(!events[2].parent.valid());
+    }
+    const Entity *home = world->registry.get(flag);
+    CHECK(home != nullptr);
+    if (home == nullptr)
+        return;
+    CHECK(home->position.x.q16 == 0 && home->position.y.q16 == 0 && home->position.z.q16 == 0);
+    CHECK(home->heading == home_heading && home->veh.yaw_bam == home_heading);
+    CHECK(home->drop_motion == DropMotion::Fall);
+    CHECK(!home->primary_occupant.valid() && (home->flags & kEntityFlagCarried) == 0);
 }
 
 void test_cac_combines_flag_and_zone_objectives() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 4);
     world->registry.configure_pool(1, 8);
     WaypointContactHarness contacts(*world);
 
     MatchRules cac;
+    test_titles::jo_match(cac);
     cac.game_type = gt::kConquerAndControl;
     cac.game_time_minutes = 1;
     world->match.configure(cac);
@@ -1448,15 +2172,18 @@ void test_cac_combines_flag_and_zone_objectives() {
 
     const std::vector<MatchGameplayEvent> events =
         world->match.drain_gameplay_events();
-    CHECK(events.size() == 2);
-    if (events.size() >= 2) {
+    CHECK(events.size() == 4);
+    if (events.size() == 4) {
         CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
         CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
+        CHECK(events[2].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(events[3].kind == MatchGameplayEventKind::FlagDrop);
     }
 }
 
 void test_end_result_is_frozen_in_retail_board_order() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->match.configure(rules(kTdm, 10, 5));
     const EntityHandle blue = player(*world, 2, 1, "Blue");
@@ -1485,6 +2212,7 @@ void test_end_result_is_frozen_in_retail_board_order() {
     CHECK(world->match.result().winner_team == 1);
 
     world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(1, 8);
     world->match.configure(rules(kAas, 10, 0));
     zone(*world, 1, 1);
@@ -1504,6 +2232,7 @@ void test_end_result_is_frozen_in_retail_board_order() {
 void test_end_round_team_row_count_rule() {
     auto expect_rows = [](uint32_t game_type, uint8_t team_count, uint8_t expected) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         MatchRules configured = rules(game_type, 10, 0);
         configured.team_count = team_count;
@@ -1547,9 +2276,11 @@ EntityHandle spawn_hill(World &world) {
 // @0x508DAD (the timer) / @0x508E0A (the fold)]
 void test_end_result_freezes_team_hold_timer() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(3, 4);
     MatchRules tkoth;
+    test_titles::jo_match(tkoth);
     tkoth.game_type = gt::kTeamKingOfTheHill;
     tkoth.game_time_minutes = 10;
     tkoth.hill_limit_minutes = 99;
@@ -1589,9 +2320,11 @@ void test_end_result_freezes_team_hold_timer() {
 //  Server_ProcessRoundEnd @0x51685E; Game_AccumulateTeamScores @0x508DB2..0x508DC2]
 void test_alive_readers_take_the_dead_bit_alone() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(3, 4);
     MatchRules tkoth;
+    test_titles::jo_match(tkoth);
     tkoth.game_type = gt::kTeamKingOfTheHill;
     tkoth.game_time_minutes = 10;
     tkoth.hill_limit_minutes = 99;
@@ -1635,9 +2368,11 @@ void test_alive_readers_take_the_dead_bit_alone() {
 //  @0x43C680]
 void test_alive_count_reads_the_slot_team() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 8);
     world->registry.configure_pool(3, 4);
     MatchRules tkoth;
+    test_titles::jo_match(tkoth);
     tkoth.game_type = gt::kTeamKingOfTheHill;
     tkoth.game_time_minutes = 10;
     tkoth.hill_limit_minutes = 99;
@@ -1687,6 +2422,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // GameEvent_ProcessScoring @0x52F657]
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
@@ -1715,6 +2451,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (b) Every row tied at zero: a draw, no marker.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         player(*world, 3, 1, "Ace");
@@ -1728,6 +2465,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (c) A lone row: a draw at zero, a win with any positive score.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         player(*world, 3, 1, "Solo");
@@ -1746,6 +2484,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (d) Two rows tied at the top over a third: not a draw, but no marker.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
@@ -1763,8 +2502,10 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (e) KOTH orders by the hill ticks the primary selects, not points.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         MatchRules koth;
+        test_titles::jo_match(koth);
         koth.game_type = gt::kKingOfTheHill;
         koth.game_time_minutes = 10;
         koth.hill_limit_minutes = 99;
@@ -1784,6 +2525,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
     // (f) A spectator-flagged top scorer receives no award.
     {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 8);
         world->match.configure(rules(gt::kDeathmatch, 10, 0));
         const EntityHandle ace = player(*world, 3, 1, "Ace");
@@ -1802,6 +2544,7 @@ void test_nonteam_board_order_draw_and_winner_marker() {
 void test_coop_remains_script_owned() {
     for (const uint32_t game_type : {gt::kCoop, gt::kObjectiveCoop}) {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         world->registry.configure_pool(0, 4);
         world->match.configure(rules(game_type, 1, 50));
         const EntityHandle blue = player(*world, 0, 1, "Blue");
@@ -1848,9 +2591,20 @@ int main() {
     test_target_destroyed_shares_through_both_occupant_links();
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();
+    test_takeable_contact_carries_any_def();
+    test_a_solid_neighbour_does_not_shadow_a_takeable_touch();
+    test_a_carrier_still_saves_its_own_flag();
+    test_own_flag_touch_syncs_its_definition_pose();
+    test_definition_pose_sync_rays_its_ground();
+    test_pickup_leg_scores_even_when_the_attach_refuses();
+    test_bay_arm_alone_clears_a_defless_carried_link();
+    test_flag_attach_in_session_sends_a_second_state();
+    test_a_drop_leaves_the_flags_return_window();
+    test_player_body_death_edge_drops_what_it_carries();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();
+    test_non_ctf_capture_drops_the_flag_then_syncs_it_home();
     test_cac_combines_flag_and_zone_objectives();
     test_end_result_is_frozen_in_retail_board_order();
     test_end_round_team_row_count_rule();

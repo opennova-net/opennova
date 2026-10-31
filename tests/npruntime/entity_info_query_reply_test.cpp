@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -107,7 +108,9 @@ world::Entity soldier() {
 
 struct Rig {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	std::unique_ptr<world::World> w = std::make_unique<world::World>();
+	bool w_jo = test_titles::jo_world(*w);
 	Rig() {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.np_protocol.connection_list.push_back(requester(inmatch::ConnectionPhase::InMatch));

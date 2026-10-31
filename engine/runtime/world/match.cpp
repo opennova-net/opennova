@@ -582,20 +582,54 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     MatchPlayer *scorer = player(player_handle);
     Entity *carrier = world.registry.get(player_handle);
     Entity *flag = world.registry.get(flag_handle);
-    CarryObjectiveState *state = carry_state(world, flag_handle);
-    if (scorer == nullptr || carrier == nullptr || flag == nullptr || state == nullptr ||
-        carrier->mounted_child.valid() || flag->primary_occupant.valid())
+    if (scorer == nullptr || carrier == nullptr || flag == nullptr ||
+        carrier->mounted_child.valid())
         return;
-
-    carrier->mounted_child = flag_handle;
-    flag->primary_occupant = player_handle;
-    flag->flags |= kEntityFlagCarried;
-    // The attach puts back the def's own update callback, ending a drop's
-    // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
-    flag->drop_motion = def_update_drop_motion(*flag);
-    state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
+    // The attach's own gate (a def, no occupant), then the pickup's scorer
+    // event 10 and the toucher's damage-disabled word cleared, whether or not
+    // the attach took the flag.
+    // [orig: Entity_ProcessWaypointInteraction - Entity_TryAttachCarriedObject
+    //  @0x4AD944 (@0x43C1F0: the def @0x43C1F4, +0x170 @0x43C20C),
+    //  Server_DispatchScoringEvent @0x4AD94B (@0x50C910: GameEvent_ProcessScoring
+    //  event 10 @0x50C938), `mov [esi+124h], ebx` @0x4AD955 (ebx 0)]
+    // [orig: the twin's @0x4AD9A4..0x4AD9B5 (dfx2.exe)]
+    if (flag->has_item_def && !flag->primary_occupant.valid())
+        attach_carried_object(world, *carrier, *flag);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
+    carrier->damage_state = 0;
+}
+
+// The carry attach of any def: the link both ways, the carried (hidden) bit and
+// the object's scars cleared. The three flags then put back the def's own
+// update and raise the pickup feed with the return window; any other def plays
+// the SPGOAL_PU set at the carrier, its sound-trigger registry row, and sends
+// nothing (the carrier's 0x0A tail carries the link).
+// [orig: Entity_AttachCarriedObject @0x43C130 - the def @0x43C135, +0x268
+//  @0x43C144, Flags |= 1 @0x43C14A, +0x170 @0x43C14F,
+//  Scar_ClearEntriesByEntity @0x43C155, the flag ids @0x43C15A..0x43C172, the
+//  non-flag Sound_PlayAtPosition(dword_24E098C, &carrier->Position)
+//  @0x43C174..0x43C17E; dword_24E098C is registry row 58 "SPGOAL_PU" @0x82FDB8
+//  (its pointer @0x82FDD8), resolved by DialogSystem_Init @0x5275E0 (the store
+//  @0x5276C0)]
+// [orig: Entity_AttachCarriedObject @0x43BF30, the sound @0x43BF74..0x43BF7E,
+//  row @0x82E510, DialogSystem_Init @0x524770 (dfx2.exe)]
+void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried) {
+    if (!carried.has_item_def)
+        return;
+    carrier.mounted_child = carried.handle;
+    carried.flags |= kEntityFlagCarried;
+    carried.primary_occupant = carrier.handle;
+    world.out.scars.clear_entity(carried.handle);
+    if (!is_flag(carried.item_id)) {
+        // Sound_PlayAtPosition is the full-volume positional play with no
+        // entity, as the NEW_GOAL action's. [orig: @0x527E60]
+        world.out.fire_sounds.play_immediate("SPGOAL_PU", carrier.position, 0);
+        return;
+    }
+    // The attach puts back the def's own update callback, ending a drop's
+    // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
+    carried.drop_motion = def_update_drop_motion(carried);
     // The 0x14 feed carries the flag's own words, read before the carry moves it: the
     // attach hands the sender the carrier and the flag, and the sender takes the x/y of
     // the second. [orig: Entity_AttachCarriedObject — push esi (the flag, its +0x1C4
@@ -603,59 +637,88 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     //  Server_BroadcastFlagPickupEvent @0x517460 — the flag's +4 / +8 @0x517481..0x517488, the
     //  carrier's pool index @0x517490]
     gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
-                                player_handle,
-                                flag_handle,
-                                flag->position,
-                                flag->position,
-                                static_cast<uint8_t>(flag->flags),
-                                player_handle,
-                                flag->ground_target,
+                                carrier.handle,
+                                carried.handle,
+                                carried.position,
+                                carried.position,
+                                static_cast<uint8_t>(carried.flags),
+                                carrier.handle,
+                                carried.ground_target,
                                 false,
-                                static_cast<uint16_t>(flag->item_id)});
+                                static_cast<uint16_t>(carried.item_id)});
+    // An in-session authority then arms the flag's return window (210 when the
+    // configured time is below 5) and sends the flag's 0x2F a second time.
+    // [orig: Entity_AttachCarriedObject - the authority / session tests
+    //  @0x43C19F / @0x43C1A8, g_FlagReturnTime2 against 5 @0x43C1B1..0x43C1B9,
+    //  the +0x2A4 stores @0x43C1BC / @0x43C1CE, Server_SendDestructibleDeathPacket
+    //  @0x43C1C2, the <5 arm's @0x43C1D8]
+    // [orig: the twin's @0x43BF9F..0x43BFCE, @0x43BFD8 (dfx2.exe)]
+    if (!world.rules.logic_authority || !world.rules.mp_session)
+        return;
+    if (CarryObjectiveState *state = carry_state(world, carried.handle))
+        state->return_ticks = rules_.flag_return_ticks < 5
+                                  ? 210
+                                  : static_cast<int32_t>(rules_.flag_return_ticks);
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
+                                carrier.handle,
+                                carried.handle,
+                                carried.position,
+                                carried.position,
+                                static_cast<uint8_t>(carried.flags),
+                                carrier.handle,
+                                carried.ground_target,
+                                false,
+                                static_cast<uint16_t>(carried.item_id)});
 }
 
-void Match::return_flag_home(World &world, EntityHandle flag_handle,
-                             MatchGameplayEventKind kind, EntityHandle actor) {
-    CarryObjectiveState *state = carry_state(world, flag_handle);
-    Entity *flag = world.registry.get(flag_handle);
-    if (state == nullptr || flag == nullptr)
+// The timeout return's broadcast, after its sync: the 0x1E return event by
+// the flag's id (35 / 36 / 37, no actor, zero words) and the flag's 0x2F as it
+// then stands, its parent the flag's +0x170 occupant as the serializer writes
+// it. Only the three flags send.
+// [orig: Server_BroadcastOverlayDeathEvent @0x50F5A0 - the def @0x50F5AE, the
+//  id switch @0x50F5B8, the 0x1E @0x50F613..0x50F618, the 0x2F @0x50F61E
+//  (Server_SendDestructibleDeathPacket @0x50D900); NetPacket_SerializeEntityWithParentAndTarget
+//  @0x505810 (entity[92] @0x5058AA)]
+// [orig: the twin's @0x50C670 (dfx2.exe)]
+void Match::record_flag_return(World &world, EntityHandle flag_handle) {
+    const Entity *flag = world.registry.get(flag_handle);
+    if (flag == nullptr || !flag->has_item_def || !is_flag(flag->item_id))
         return;
-    const EntityPosition event_position = flag->position;
-    if (Entity *carrier = world.registry.get(flag->primary_occupant);
-        carrier != nullptr && carrier->mounted_child == flag_handle)
-        carrier->mounted_child = EntityHandle{};
-    flag->primary_occupant = EntityHandle{};
-    flag->ground_target = EntityHandle{};
-    flag->flags &= ~kEntityFlagCarried;
-    flag->position = state->home;
-    // The retail returns are the definition-pose sync, whose snap writes the
-    // heading with the position. [orig: Entity_SyncPositionFromDefinition
-    // @0x43aa96, called from
-    //  Entity_UpdateIdleCheck @0x40857d, Entity_ProcessWaypointInteraction
-    //  @0x4ad8c3 / @0x4ad908, Server_ProcessScoringAndBroadcast @0x516a5b]
-    restore_authored_heading(*flag, state->home_heading);
-    flag->alive = true;
-    state->return_ticks = 0;
-    gameplay_events_.push_back({kind,
-                                actor,
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagReturn,
+                                EntityHandle{},
                                 flag_handle,
-                                event_position,
+                                flag->position,
                                 flag->position,
                                 static_cast<uint8_t>(flag->flags),
-                                EntityHandle{},
+                                flag->primary_occupant,
                                 flag->ground_target,
                                 false,
                                 static_cast<uint16_t>(flag->item_id)});
 }
 
 void Match::record_flag_save(World &world, EntityHandle player_handle,
-                             EntityHandle flag_handle) {
+                             EntityHandle flag_handle, const EntityPosition &touched_at) {
     MatchPlayer *scorer = player(player_handle);
     const Entity *entity = world.registry.get(player_handle);
-    if (outcome_.ended || scorer == nullptr || entity == nullptr)
+    const Entity *flag = world.registry.get(flag_handle);
+    if (outcome_.ended || scorer == nullptr || entity == nullptr || flag == nullptr)
         return;
-    return_flag_home(world, flag_handle, MatchGameplayEventKind::FlagSave,
-                     player_handle);
+    // The save's 0x15 feed carries the flag's words as the touch found them
+    // (the sync has already snapped it home), then its 0x2F the flag as it now
+    // stands, its parent the flag's +0x170 occupant as the serializer writes it.
+    // [orig: Server_BroadcastFlagSaveEvent @0x517A90 - the feed
+    //  @0x517AB0..0x517AED, the 0x2F @0x517B09; NetPacket_SerializeEntityWithParentAndTarget
+    //  @0x505810 (entity[92] @0x5058AA)]
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagSave,
+                                player_handle,
+                                flag_handle,
+                                touched_at,
+                                flag->position,
+                                static_cast<uint8_t>(flag->flags),
+                                flag->primary_occupant,
+                                flag->ground_target,
+                                false,
+                                static_cast<uint16_t>(flag->item_id)});
     // [orig: GameEvent_ProcessScoring @0x52F550 case 8 @0x52f8d1..0x52f992 —
     //  ++stats[11] (slot dword 29) @0x52f8d7, points += scoringTable[83]
     //  (score.ini FLAGSAVE, VAR slot 9) @0x52f8ec, the team mirror
@@ -693,37 +756,38 @@ void Match::record_flag_capture(World &world, EntityHandle player_handle,
         add_team_record_event(1, MatchStats::kFlagCaptures, score_value(10));
     else if (flag->item_id == kNeutralFlag)
         add_team_event(carrier->team, MatchStats::kFlagCaptures, score_value(10));
-    const EntityPosition capture_position = flag->position;
-    const uint8_t flags_before = static_cast<uint8_t>(flag->flags);
-    carrier->mounted_child = EntityHandle{};
-    flag->primary_occupant = EntityHandle{};
+    // The 0x13 feed at the flag's words as the capture finds them; then CTF
+    // retires the flag (its 0x12; the destroy clears the occupant's carried
+    // link), and every other type drops it at the carrier (the drop's 0x2F) and
+    // syncs it to its definition pose (the sync's 0x2F, the heading and the
+    // ground with it). The capture itself sends no 0x2F.
+    // [orig: Server_ProcessScoringAndBroadcast @0x5169C0 - GameEvent_ProcessScoring
+    //  event 9 @0x5169E3, the 0x13 at the flag's +4/+8 @0x5169F5..0x516A37, the CTF
+    //  test @0x516A3C, Server_RemoveEntityAndNotify @0x516A49,
+    //  Entity_DropCarriedObject @0x516A55, Entity_SyncPositionFromDefinition @0x516A5B;
+    //  Entity_Destroy @0x43E9F1..0x43EA03]
+    // [orig: the twin's @0x513C10 - the CTF test @0x513C8C, the drop @0x513CA5, the
+    //  sync @0x513CAB (dfx2.exe)]
     const bool remove = rules_.game_type == gt::kCaptureTheFlag;
-    MatchGameplayEvent event{MatchGameplayEventKind::FlagCapture,
-                             player_handle,
-                             flag_handle,
-                             capture_position,
-                             capture_position,
-                             flags_before,
-                             EntityHandle{},
-                             flag->ground_target,
-                             remove,
-                             static_cast<uint16_t>(flag->item_id)};
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagCapture,
+                                player_handle,
+                                flag_handle,
+                                flag->position,
+                                flag->position,
+                                static_cast<uint8_t>(flag->flags),
+                                EntityHandle{},
+                                flag->ground_target,
+                                remove,
+                                static_cast<uint16_t>(flag->item_id)});
     if (remove) {
+        if (Entity *occupant = world.registry.get(flag->primary_occupant);
+            occupant != nullptr && occupant->mounted_child == flag_handle)
+            occupant->mounted_child = EntityHandle{};
         world.registry.despawn(flag_handle);
-    } else {
-        CarryObjectiveState *state = carry_state(world, flag_handle);
-        if (state != nullptr) {
-            flag = world.registry.get(flag_handle);
-            flag->flags &= ~kEntityFlagCarried;
-            flag->position = state->home;
-            flag->ground_target = EntityHandle{};
-            state->return_ticks = 0;
-            event.objective_position = flag->position;
-            event.objective_flags = static_cast<uint8_t>(flag->flags);
-            event.ground = flag->ground_target;
-        }
+        return;
     }
-    gameplay_events_.push_back(event);
+    drop_carried_object(world, player_handle);
+    sync_flag_to_authored_pose(world, flag_handle);
 }
 
 void Match::record_target_destroyed(const World &world, EntityHandle target_handle,
@@ -837,19 +901,28 @@ void Match::drop_carried_object(World &world, EntityHandle player_handle) {
         return;
     const EntityHandle flag_handle = carrier->mounted_child;
     Entity *flag = world.registry.get(flag_handle);
-    CarryObjectiveState *state = carry_state(world, flag_handle);
+    // The flag's carry state (its definition pose) is read ahead of the drop's
+    // turn; any other def has none. The drop leaves the flag's return window
+    // as it stands: the flag's own service re-arms it, and so does an
+    // in-session attach. [orig: Entity_DropCarriedObject @0x439DF0..0x439F3D
+    //  stores no +0x2A4; its writers Entity_UpdateIdleCheck @0x408520 /
+    //  @0x408533 / @0x40853B and Entity_AttachCarriedObject @0x43C1BC / @0x43C1CE]
+    const bool flag_row = flag != nullptr && is_flag(flag->item_id);
+    CarryObjectiveState *state = flag_row ? carry_state(world, flag_handle) : nullptr;
     carrier->mounted_child = EntityHandle{};
-    if (flag == nullptr || state == nullptr)
+    if (flag == nullptr || (flag_row && state == nullptr))
         return;
     flag->primary_occupant = EntityHandle{};
     drop_object_from_carrier(world, *flag, drop_carrier_pose(world, *carrier));
     flag->alive = true;
-    // The dropped-flag service re-arms the return window whenever the flag is
-    // not idle: 210 when the configured time is below 5, else the configured
-    // seconds. [orig: Entity_UpdateIdleCheck @0x408531..0x40853B]
-    state->return_ticks = rules_.flag_return_ticks < 5
-                              ? 210
-                              : static_cast<int32_t>(rules_.flag_return_ticks);
+    // The drop's 0x2F (the authority's, in a session) sends only for the three
+    // flags: Server_SendDestructibleDeathPacket returns for any other def.
+    // [orig: Entity_DropCarriedObject - the authority / session tests
+    //  @0x439F29 / @0x439F31, the call @0x439F34; Server_SendDestructibleDeathPacket
+    //  @0x50D900 - the 4091/4093/4095 tests @0x50D90A..0x50D920]
+    // [orig: the sender's tests @0x50AABA..0x50AAD0 (dfx2.exe)]
+    if (!flag_row || !world.rules.logic_authority)
+        return;
     gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
                                 player_handle,
                                 flag_handle,
@@ -892,18 +965,32 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
         static_cast<int64_t>(std::sqrt(static_cast<long double>(dx * dx + dy * dy))) < 0x20000 &&
         (dz < 0 ? -dz : dz) < 0x20000; // [orig: @0x43aa3b / @0x43aa4d]
     if (!near_home) {
-        // The snap: position and heading back to the definition pose; the
-        // ground link is re-resolved by a downward raycast in retail
-        // (@0x43ab22) — this port clears it like the timeout return does, no
-        // raycast seam here.
-        flag->position = state->home;                 // [orig: @0x43aa7d..0x43aa96]
+        // The snap: position and heading back to the definition pose, then the
+        // ground link the nearest pool-2, then pool-1 entity a ray from half a
+        // unit above the pose to ten units below it meets, the flag itself
+        // excluded (a world with no collision world has none to meet).
+        // [orig: @0x43aa7d..0x43aa96 (the snap); the ray (x, y, z + 0x8000) ->
+        //  (x, y, z - 0xA0000) @0x43aae4..0x43ab18, Physics_RaycastNearestEntity
+        //  @0x5394B0 (the call @0x43ab1c), the +0x28 store @0x43ab22]
+        // [orig: the twin's ray @0x43a8e4..0x43a922 (dfx2.exe)]
+        flag->position = state->home;
         restore_authored_heading(*flag, state->home_heading);
-        flag->ground_target = EntityHandle{};
+        flag->ground_target = world.collision != nullptr
+            ? world.collision->raycast_nearest_entity(
+                  world, flag_handle, FixedVec3{home_x, home_y, io::bam_add(home_z, 0x8000)},
+                  FixedVec3{home_x, home_y, io::bam_sub(home_z, 0xA0000)})
+            : EntityHandle{};
     }
-    // Both paths publish the 19-B 0x2F state and nothing else (no 0x1E, no
-    // scoring): the FlagDrop-shaped record is the feed-less lane.
-    // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 (the
-    // Server_SendDestructibleDeathPacket calls @0x43AA6B / @0x43AB40)]
+    // Both legs re-run the flag's proximity list where it now stands (the
+    // indoors bit and the blink quad), then publish the 19-B 0x2F state and
+    // nothing else (no 0x1E, no scoring): the FlagDrop-shaped record is the
+    // feed-less lane.
+    // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 - Entity_BuildProximityList
+    //  @0x43AA50 / @0x43AB25, the Server_SendDestructibleDeathPacket calls
+    //  @0x43AA6B / @0x43AB40]
+    // [orig: the twin's @0x43A850 / @0x43A925, @0x43A86B / @0x43A940 (dfx2.exe)]
+    if (world.collision != nullptr)
+        world.collision->refresh_blink(world, *flag);
     gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
                                 EntityHandle{},
                                 flag_handle,
@@ -1614,12 +1701,21 @@ void Match::tick_flag_event(World &world, Entity &flag) {
     } else {
         state->return_ticks = rules_.flag_return_ticks < 5 ? 210 : int32_t(rules_.flag_return_ticks);
     }
+    // The expiry: every pool-0 carrier drops the flag (each drop its 0x2F),
+    // the definition-pose sync snaps it home (its 0x2F, the heading and the
+    // ground ray with it), then the return's event and its 0x2F.
+    // [orig: Entity_UpdateIdleCheck - the pool-0 walk @0x40854E..0x40857A
+    //  (Entity_DropCarriedObject @0x408572), Entity_SyncPositionFromDefinition
+    //  @0x40857D, Server_BroadcastOverlayDeathEvent @0x408583]
+    // [orig: the twin's @0x408552 / @0x40855D / @0x408563 (dfx2.exe)]
     if (state->return_ticks <= 0) {
         const EntityHandle handle = flag.handle;
         world.registry.for_each_in_pool(0, [&](const Entity &body) {
             if (body.mounted_child == handle) drop_carried_object(world, body.handle);
         });
-        return_flag_home(world, handle, MatchGameplayEventKind::FlagReturn);
+        flag.alive = true; // the port's liveness latch, as the drop's
+        sync_flag_to_authored_pose(world, handle);
+        record_flag_return(world, handle);
         state = carry_state(world, handle);
     }
     state->previous_x_q16 = flag.position.x.q16;
@@ -1775,77 +1871,115 @@ void Match::update_flag_objectives(World &world) {
         const bool move_callback = target != nullptr && target->has_item_def &&
             (target->item_attrib & kItemAttribMoveCallback) != 0 &&
             (target->item_attrib & kItemAttribPowerup) == 0;
-        if (match_player == nullptr || carrier == nullptr || !move_callback ||
-            (carrier->flags & (kEntityFlagDead | kEntityFlagPlayer)) !=
-                kEntityFlagPlayer ||
+        // The handler's head: the moving order, a target, a live toucher (the
+        // authority test is the caller's, World::update_all_entities).
+        // [orig: Entity_ProcessWaypointInteraction @0x4AD820 - MoveOrder & 8
+        //  @0x4AD834, the target @0x4AD846, Flags & 2 @0x4AD853]
+        // [orig: the twin's @0x4AD894..0x4AD8B5 (dfx2.exe)]
+        if (carrier == nullptr || !move_callback ||
+            (carrier->flags & kEntityFlagDead) != 0 ||
             (carrier->net_move_input & Entity::kMoveOrderMoving) == 0)
             continue;
+        const bool player_class = (carrier->flags & kEntityFlagPlayer) != 0;
+
+        // A Takeable def, touched by a Player with empty hands, is carried off
+        // ahead of the id switch, whatever its id: the attach alone (for a
+        // non-flag def, its SPGOAL_PU play at the carrier), so no pickup score
+        // and no 0x14 feed. The attach's own gate refuses an object someone
+        // already carries; its out-of-session-or-authority test always passes
+        // here.
+        // [orig: Entity_ProcessWaypointInteraction - Flags & 0x100 @0x4AD85B,
+        //  mountedChild @0x4AD862, def+0x54 & 0x2000 @0x4AD86D,
+        //  Entity_TryAttachCarriedObject @0x4AD878 and the return @0x4AD883;
+        //  Entity_TryAttachCarriedObject @0x43C1F0 - the def @0x43C1F4, the
+        //  session/authority @0x43C1FA..0x43C20A, +0x170 @0x43C20C, the attach
+        //  @0x43C219]
+        // [orig: the twin's @0x4AD8BB..0x4AD8D8 -> @0x43BFF0 (dfx2.exe)]
+        if (player_class && !carrier->mounted_child.valid() &&
+            (target->item_attrib & kItemAttribTakeable) != 0) {
+            if (!target->primary_occupant.valid())
+                attach_carried_object(world, *carrier, *target);
+            continue;
+        }
+        // Every arm of the id switch tests the Player bit first (the masked
+        // Flags in eax: 4093 @0x4AD8A1, 4091 @0x4AD8E9, 4095 @0x4AD92E); the
+        // flag and bay arms here score a Player's slot.
+        // [orig: Entity_ProcessWaypointInteraction - the switch @0x4AD89A]
+        if (match_player == nullptr || !player_class)
+            continue;
+
+        // The own-flag arms (4091 for team 1, 4093 for team 2) test no carried
+        // object and no occupant, so a Player carrying anything still saves its
+        // own flag. The arm syncs the flag to its definition pose: at the pose
+        // nothing; near it (a 2D distance and a height delta under 0x20000) the
+        // 0x2F alone; off it the snap home with its 0x2F, then the save: the
+        // 0x15 feed at the flag's words as the touch found them, scorer event 8
+        // and a second 0x2F.
+        // [orig: Entity_ProcessWaypointInteraction - 4091 @0x4AD8E9..0x4AD912,
+        //  4093 @0x4AD8A1 (its team test @0x4AD8A3..0x4AD8CD; the flag's +4/+8/+C
+        //  read @0x4AD8B5..0x4AD8BB ahead of the sync @0x4AD8C3; the save's
+        //  arguments @0x4AD8D3), Server_BroadcastFlagSaveEvent @0x4AD8DC; the
+        //  pickup leg's +0x268 test @0x4AD936 is the only one;
+        //  Entity_SyncPositionFromDefinition @0x43A9B0 - the pose @0x43A9F8, the
+        //  0x20000 tests @0x43AA3B / @0x43AA4D, the near 0x2F @0x43AA6B, the
+        //  snap's @0x43AB40 and its return 1 @0x43A9BE;
+        //  Server_BroadcastFlagSaveEvent @0x517A90 - 0x15 @0x517AED, event 8
+        //  @0x517B03, 0x2F @0x517B09]
+        // [orig: the twin's arms @0x4AD949..0x4AD972 / @0x4AD903..0x4AD933
+        //  (dfx2.exe)]
+        const bool own_flag =
+            (carrier->team == 1 && target->item_id == kBlueFlag) ||
+            (carrier->team == 2 && target->item_id == kRedFlag);
+        if (own_flag) {
+            const EntityPosition touched_at = target->position;
+            if (sync_flag_to_authored_pose(world, contact.target))
+                record_flag_save(world, contact.source, contact.target, touched_at);
+            continue;
+        }
 
         // Preserve resolver/candidate order. If one movement pass touches a
         // flag and its bay, retail mutates the carried link inline before the
         // later callback. [orig: sole caller @0x4B2FF5; handler @0x4AD820]
+        // A carrying Player's touch does something only in a bay arm: the
+        // blue bay (4098) for team 1, or ANY team when g_GameType == 8 (Flag
+        // Me); the red bay (4100) for team 2; 4102 for team 4 and 4103 for team
+        // 3. There a carried object with no def drops the link both ways;
+        // otherwise 4098 captures a red or neutral flag, 4100 a blue or neutral
+        // one, 4102 and 4103 only the neutral flag.
+        // [orig: Entity_ProcessWaypointInteraction — 4098 @0x4AD95E..0x4AD9A2
+        // (the Flag Me OR @0x4AD966..0x4AD976), 4100 @0x4AD9A6..0x4AD9D2,
+        // 4102 @0x4AD9E3, 4103 @0x4AD9D6; the def tests @0x4AD98F / @0x4AD9BF /
+        // @0x4AD9FD to the clears @0x4AD9FF / @0x4ADA07; capture @0x4ADA19]
+        // [orig: the twin's arms @0x4AD9BE..0x4ADA79 (dfx2.exe)]
         if (carrier->mounted_child.valid()) {
+            const int32_t bay = target->item_id;
+            const bool bay_team =
+                (bay == kBlueBay && (rules_.game_type == gt::kFlagMe || carrier->team == 1)) ||
+                (bay == kRedBay && carrier->team == 2) ||
+                (bay == kTeam4Bay && carrier->team == 4) ||
+                (bay == kTeam3Bay && carrier->team == 3);
+            if (!bay_team)
+                continue;
             Entity *flag = world.registry.get(carrier->mounted_child);
-            if (flag == nullptr) {
+            if (flag == nullptr || !flag->has_item_def) {
+                if (flag != nullptr)
+                    flag->primary_occupant = EntityHandle{};
                 carrier->mounted_child = EntityHandle{};
                 continue;
             }
-            if (!is_flag_bay(target->item_id))
-                continue;
-            // The bay matrix: the blue bay (4098) takes a carried red or
-            // neutral flag from team 1, or from ANY team when g_GameType == 8
-            // (Flag Me); the red bay (4100) takes blue/neutral from team 2;
-            // 4102 and 4103 take only the neutral flag from teams 4 and 3.
-            // [orig: Entity_ProcessWaypointInteraction — 4098 @0x4AD95E..0x4AD9A2
-            // (the Flag Me OR @0x4AD966..0x4AD976), 4100 @0x4AD9A6..0x4AD9D2,
-            // 4102 @0x4AD9E3, 4103 @0x4AD9D6; capture @0x4ADA19]
             const bool neutral = flag->item_id == kNeutralFlag;
             const bool accepted =
-                (target->item_id == kBlueBay &&
-                 (rules_.game_type == gt::kFlagMe || carrier->team == 1) &&
-                 (flag->item_id == kRedFlag || neutral)) ||
-                (target->item_id == kRedBay && carrier->team == 2 &&
-                 (flag->item_id == kBlueFlag || neutral)) ||
-                (target->item_id == kTeam3Bay && carrier->team == 3 && neutral) ||
-                (target->item_id == kTeam4Bay && carrier->team == 4 && neutral);
+                (bay == kBlueBay && (flag->item_id == kRedFlag || neutral)) ||
+                (bay == kRedBay && (flag->item_id == kBlueFlag || neutral)) ||
+                ((bay == kTeam3Bay || bay == kTeam4Bay) && neutral);
             if (accepted)
                 record_flag_capture(world, contact.source,
                                     carrier->mounted_child);
             continue;
         }
 
-        if (!is_flag(target->item_id) || target->primary_occupant.valid())
+        if (!is_flag(target->item_id))
             continue;
-        CarryObjectiveState *state = carry_state(world, contact.target);
-        const bool own_flag =
-            (carrier->team == 1 && target->item_id == kBlueFlag) ||
-            (carrier->team == 2 && target->item_id == kRedFlag);
-        if (own_flag) {
-            // An own flag is SAVED only when Entity_SyncPositionFromDefinition
-            // reports it displaced from its authored pose — a 2D distance or a
-            // height delta of at least 0x20000 (2 u); the return timer is not
-            // consulted, and an own flag at home does nothing (no pickup arm
-            // exists for it in any game type).
-            // [orig: Entity_ProcessWaypointInteraction 4091 @0x4AD8E9..0x4AD912
-            // / 4093 @0x4AD8A3..0x4AD8CD -> Entity_SyncPositionFromDefinition
-            // @0x43A9B0 (the 0x20000 tests @0x43AA3B/@0x43AA4D, return 1
-            // @0x43A9BE) -> Server_BroadcastFlagSaveEvent @0x4AD8D3]
-            if (state == nullptr)
-                continue;
-            const int64_t dx = int64_t{target->position.x.q16} -
-                               state->home.x.q16;
-            const int64_t dy = int64_t{target->position.y.q16} -
-                               state->home.y.q16;
-            const int64_t dz = int64_t{target->position.z.q16} -
-                               state->home.z.q16;
-            const bool displaced =
-                static_cast<int64_t>(std::sqrt(static_cast<long double>(
-                    dx * dx + dy * dy))) >= 0x20000 ||
-                (dz < 0 ? -dz : dz) >= 0x20000;
-            if (displaced)
-                record_flag_save(world, contact.source, contact.target);
-            continue;
-        }
         // An enemy or neutral flag is picked up when the toucher carries
         // nothing. [orig: Entity_ProcessWaypointInteraction @0x4AD820 — the
         // carried-object test @0x4AD936, the Entity_TryAttachCarriedObject call

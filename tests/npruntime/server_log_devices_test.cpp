@@ -145,6 +145,15 @@ void run_the_connect_log() {
 					jo.title == "Joint Operations: Typhoon Rising" && jo.ver1 == "3" &&
 					jo.ver2 == "2345",
 			"the header's VERSION is ONE's wire version, its TITLE the title's text");
+	// TITLE is the title's own and VER1 / VER2 the protocol's it speaks, neither read through the
+	// other: DFX2's both its own, and the unwitnessed DFX (no text, a protocol with no VER pair)
+	// heads with nothing of another title's, where the default title's once stood in.
+	const inmatch::ConnectLogHeader dfx2 = inmatch::connect_log_header("dfx2");
+	expect(dfx2.title == "DeltaForce: Xtreme 2" && dfx2.ver1 == "1" && dfx2.ver2 == "9013",
+			"DFX2's header is its title's text and its protocol's pair");
+	const inmatch::ConnectLogHeader dfx = inmatch::connect_log_header("dfx");
+	expect(dfx.title.empty() && dfx.ver1.empty() && dfx.ver2.empty(),
+			"an unwitnessed title's header carries no other title's TITLE or VER pair");
 	std::error_code ec;
 	fs::remove_all(dir, ec);
 }

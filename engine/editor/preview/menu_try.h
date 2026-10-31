@@ -59,7 +59,8 @@ struct MenuTrySource {
 	// The project's game (its target title): its Mods list's base row (Title::mod_list_base), the
 	// binding catalog the sandbox profile's table and the Options screens' records follow
 	// (controls::title_catalog) and its single-player screen (menu::MenuFlow::set_title, the
-	// campaign tabs); null: none, the default title's catalog and no campaign tabs.
+	// campaign tabs). The caller names it (the menu viewport: the open project's, past its NoProject
+	// stop); Try reads it through require_title, so a source with none aborts, named.
 	const Title *title = nullptr;
 };
 
@@ -191,8 +192,9 @@ private:
 	menu::ModList mods_;
 	std::string expansion_; // the game running, as the last open's source said ("" the base game)
 	menu::OptionsScreen options_;
-	// The binding catalog of the game the last start ran as (MenuTrySource::title).
-	const controls::Catalog *catalog_ = &controls::default_catalog();
+	// The binding catalog of the game the last start ran as (MenuTrySource::title): none before a
+	// start, which every read follows.
+	const controls::Catalog *catalog_ = nullptr;
 	// The campaign reader's menu table (the project's Game.bin, g_TextMenuUi), which flow_
 	// borrows; null for none read.
 	std::unique_ptr<rtxt::File> menu_text_;

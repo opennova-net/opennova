@@ -30,6 +30,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -51,7 +52,9 @@ int failures = 0;
 // and a server context overflow the 1 MB test-main stack under MSVC.
 struct AddFixture {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	opennova::bms::File mission;
 	ns::UdpSessionTransport joiner_transport{ns::UdpSessionTransport::Role::Host};
 
@@ -71,6 +74,7 @@ struct AddFixture {
 		opennova::mission::make_default(mission);
 
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 4;
 		inmatch::test::bring_up_host(*ctx, inmatch::ConnectionMode::HostOnly,
 				inmatch::SocketMode::Socketless, /*host_key=*/0, nullptr, config);

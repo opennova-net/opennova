@@ -6,6 +6,7 @@
 
 #include <runtime/world/sound_emitter_mailbox.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -24,6 +25,7 @@ static int failures = 0;
 // [orig: Pool_SetUsed @ 0x441F60; Entity_UpdateAllEntities @ 0x4C2100, used reads @ 0x4C2134 / @ 0x4C215E / @ 0x4C23A0]
 void test_entity_walk_used_window() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(1, 9600);
     Entity row;
     row.kind = EntityKind::Item;
@@ -92,6 +94,7 @@ void test_registry_walks_end_at_used() {
 //  the used loads @0x43C698 (pool 2), @0x43C6C8 (0), @0x43C6F6 (1)]
 void test_command_walks_end_at_used() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(1, 9600);
     Entity row;
     row.kind = EntityKind::Item;
@@ -110,6 +113,7 @@ void test_command_walks_end_at_used() {
 // @0x4F7F73; EventAction_SpawnParticleEffect @0x4540E0 - @0x4540F6]
 void test_marker_walks_end_at_used() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(3, 64);
     Entity marker;
     marker.kind = EntityKind::Marker;
@@ -129,6 +133,7 @@ int main() {
     test_command_walks_end_at_used();
     test_marker_walks_end_at_used();
     World w;
+    test_titles::jo_world(w);
     // The weather home starts unseeded, with retail's boot BSS: a 1024 m fog
     // reference/target, the 255.0 acceleration clamp, noon, clear weather.
     // Values stay in engine units until the 0x0A encoder narrows them.
@@ -255,6 +260,7 @@ int main() {
     //  g_ClientPreRoundTimer` @0x52672C]
     {
         World cw;
+        test_titles::jo_world(cw);
         CHECK(cw.entity_update_counter == 0);
         cw.run_logic_tick(true);
         CHECK(cw.logic_tick == 1 && cw.entity_update_counter == 1);
@@ -280,6 +286,7 @@ int main() {
     // [orig: Game_ProcessMainFrame @0x526703..0x526742]
     {
         World gw;
+        test_titles::jo_world(gw);
         gw.cached.wac_ticks = 5;
         gw.run_logic_tick(true);
         CHECK(gw.entity_update_counter == 0);
@@ -426,6 +433,7 @@ int main() {
     w.weather.generation = 9;
     w.weather.precipitation.slots[5].z = 0x12340000;
     MatchRules baseline_match_rules;
+    test_titles::jo_match(baseline_match_rules);
     baseline_match_rules.game_type = 0x10020u;
     baseline_match_rules.score_limit = 7;
     w.match.configure(baseline_match_rules);
@@ -522,6 +530,7 @@ int main() {
     // here field by field (ADR 0043 slice E5 pins the set world.cpp lists).
     {
         World sw;
+        test_titles::jo_world(sw);
         sw.registry.configure_pool(0, 4);
         Entity seed;
         seed.kind = EntityKind::Organic;
@@ -533,6 +542,7 @@ int main() {
         sw.env.water_z = 9 << 16;
         sw.weather.tod_fixed24 = 0x0ABCDEF0u;
         MatchRules snap_rules;
+        test_titles::jo_match(snap_rules);
         snap_rules.game_type = 0x10001u;
         snap_rules.score_limit = 3;
         sw.match.configure(snap_rules);
@@ -554,6 +564,7 @@ int main() {
         sw.env.water_z = 0;
         sw.weather.tod_fixed24 = 0;
         MatchRules other_rules;
+        test_titles::jo_match(other_rules);
         other_rules.game_type = 0x10020u;
         sw.match.configure(other_rules);
         sw.zones.capture.clear();
@@ -591,6 +602,7 @@ int main() {
     // consecutive slots with no killer. This pins both halves.
     {
         World kw;
+        test_titles::jo_world(kw);
         kw.registry.configure_pool(0, 8);
         // Organic rows: the edge that raises the death transaction is the
         // infantry motor's [orig: @0x4B9D4D / @0x4B4CEA].

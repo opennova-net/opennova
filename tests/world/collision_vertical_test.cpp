@@ -11,6 +11,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace {
@@ -55,6 +56,7 @@ Result resolve(int16_t nx, int16_t ny, int16_t nz, int32_t velocity,
                uint32_t flags, bool player = false, bool authority = true,
                bool replica = false, bool engine_flags_only = false) {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     CollisionWorld collision;
     world->registry.configure_pool(0, 1);
     // Two slots: the static prox table counts one short of pool 2's capacity, so a
@@ -179,6 +181,7 @@ struct MotorRig {
     FlatField flat;
     CapsuleSource root;
     std::unique_ptr<World> w = std::make_unique<World>();
+    bool w_jo = test_titles::jo_world(*w);
     CollisionWorld collision;
     EntityHandle body_h;
     AiEntity *body = nullptr;

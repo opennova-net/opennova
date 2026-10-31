@@ -192,11 +192,11 @@ world::TitleRules make() {
 	// AI_CheckVehicleStuckState @0x4652a0 (dfx2.exe)].
 	r.ai_vehicle_near_reach = 0x40000;
 	r.ai_vehicle_write_off_count = 1860;
-	// DFX2-33: the profile-less spawn page dfx2.exe compiles in, the single-player page a fresh
-	// profile takes too (dfx2_title.cpp's kSinglePlayerKit holds the names)
+	// DFX2-33: the profile-less spawn page dfx2.exe compiles in, the table a fresh profile's
+	// single-player page copies too (dfx2_single_player_kit; the rules read no Title row)
 	// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x832368, 2048) @0x52188f / @0x54ec2a
 	//  (dfx2.exe)].
-	r.spawn_kit = dfx2_title().profile_single_player_kit;
+	r.spawn_kit = dfx2_single_player_kit();
 	// DFX2-37: the lone gunner's fire [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0
 	// (dfx2.exe) - @0x4DD8FE..0x4DD92C, @0x4DDABB..0x4DDADB].
 	r.emplaced_solo_holds_fire = true;
@@ -216,6 +216,16 @@ world::TitleRules make() {
 	// DFX2-46: the trail lanes follow the ground, the alternate effect on snow
 	//  [orig: Entity_UpdateBoneTrailEffects @0x4589A0 - @0x458AAA..0x458AB3 (dfx2.exe)].
 	r.trail_surface_alternate = true;
+	// DFX2-120: the slot's zero on the rangefinder, -1 (0 for a NoAutoZero def), its pitch 0,
+	// and a ForceScoped mount's rangefinder word -1 [orig: WeaponSlot_InitFromDef @0x53C0C0 -
+	//  @0x53C1E8..0x53C1F9; Player_MountWeaponSlot @0x4DCAE0 - @0x4DCBDB (dfx2.exe)].
+	r.scope_zero_seed = world::ScopeZeroSeed::Rangefinder;
+	// DFX2-30: the spawn reset stores the def's health word [orig: Entity_ResetToSpawnState
+	//  @0x4B96F0 - `mov dx, [eax+17Ch]` @0x4B989B, `mov [esi+11Eh], dx` @0x4B98A2 (dfx2.exe)].
+	r.spawn_reset_stores_def_health = true;
+	// DFX2-123: the round init stores no look yaw [orig: Game_InitNewRound @0x422590 - the deploy
+	//  hold and +0x1E0 clears @0x42261E..0x422638, no g_LocalPlayerLookYaw store (dfx2.exe)].
+	r.round_init_look_yaw = false;
 	return r;
 }
 

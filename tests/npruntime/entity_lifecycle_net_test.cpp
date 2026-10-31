@@ -55,6 +55,7 @@
 #include <vector>
 #include "../common/test_expect.h"
 #include "joiner_receive.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -416,6 +417,7 @@ bool run_team_assign_folds_remote_row() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kRemote = 0x0009;
 	inmatch::ClientRuntime client("FoldJoiner", [] { return uint64_t(0); });
+	test_titles::jo_folds(client);
 	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, kSelf, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -543,6 +545,7 @@ bool run_deployed_item_lifecycle_surfaces_raw_gameplay() {
 bool run_deployed_item_lifecycle_folds_into_the_replica() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::ClientRuntime client("PlacedDeviceFoldJoiner", [] { return uint64_t(0); });
+	test_titles::jo_folds(client);
 	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, kSelf, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -586,6 +589,7 @@ bool run_empty_slot_sweep_retires_the_row() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kGhost = 0x0003;
 	inmatch::ClientRuntime client("SweepJoiner", [] { return uint64_t(0); });
+	test_titles::jo_folds(client);
 	// The 0x0F fold reads its protocol (ProtocolInMatch::s2c_0f).
 	client.set_protocol(title_protocol("jo"));
 	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
@@ -657,6 +661,7 @@ bool run_entity_death_notify_reaches_the_sim() {
 	// fold only works if the load fold accepted the full retail pool range.
 	constexpr uint16_t kBarrel = 0x2000u | 1130u;
 	inmatch::ClientRuntime client("DeathJoiner", [] { return uint64_t(0); });
+	test_titles::jo_folds(client);
 	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, kSelf, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -737,6 +742,7 @@ bool run_player_sync_removal_keeps_the_entity() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kPeer = 0x0004;
 	inmatch::ClientRuntime client("RemovalJoiner", [] { return uint64_t(0); });
+	test_titles::jo_folds(client);
 	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, kSelf, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -793,6 +799,7 @@ inmatch::NapiNPConnection make_in_match_conn(uint32_t id, int type, ns::ISession
 //  conn+0x160 -> +0xC0 tests); Server_PlayerAdd @0x51CD51 (the +0xC0 bind)]
 bool run_host_answers_entity_query_only_after_player_add() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
 	w::PlayerSpawn spawn;
@@ -802,6 +809,7 @@ bool run_host_answers_entity_query_only_after_player_add() {
 
 	ns::UdpSessionTransport udp_requester(ns::UdpSessionTransport::Role::Host);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -816,7 +824,7 @@ bool run_host_answers_entity_query_only_after_player_add() {
 	const auto answers = [&](uint32_t tick) {
 		int n = 0;
 		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
-					inmatch::GameConfig{}, roster[0], request, tick, roster, &world))
+					test_titles::jo_config_of(inmatch::GameConfig{}), roster[0], request, tick, roster, &world))
 			if (m.tag == 0x18) ++n;
 		return n;
 	};
@@ -830,6 +838,7 @@ bool run_host_answers_entity_query_only_after_player_add() {
 
 bool run_host_answers_the_sweep_request() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
 	// The player row's items.def ordinal, which the sweep's empty test reads.
@@ -846,6 +855,7 @@ bool run_host_answers_the_sweep_request() {
 	ns::LoopbackChannel loop;
 	ns::UdpSessionTransport udp_requester(ns::UdpSessionTransport::Role::Host);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -864,7 +874,7 @@ bool run_host_answers_the_sweep_request() {
 	// is EMPTY. (An empty 0x5D is still the witnessed answer.)
 	{
 		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, roster[1], request, 100, roster, &world, inputs);
+				test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], request, 100, roster, &world, inputs);
 		int sweeps = 0;
 		for (const ProtocolMessage &m : replies) {
 			if (m.tag != 0x5D) continue;
@@ -889,7 +899,7 @@ bool run_host_answers_the_sweep_request() {
 	{
 		std::vector<uint16_t> listed;
 		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
-					inmatch::GameConfig{}, roster[1], request, 100, roster, &world, inputs)) {
+					test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], request, 100, roster, &world, inputs)) {
 			if (m.tag != 0x5D) continue;
 			DestroyEntityList decoded;
 			if (!expect(decode_destroy_entity_list(
@@ -910,7 +920,7 @@ bool run_host_answers_the_sweep_request() {
 	world.registry.despawn(b);
 	{
 		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, roster[1], request, 101, roster, &world, inputs);
+				test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], request, 101, roster, &world, inputs);
 		std::vector<uint16_t> listed;
 		for (const ProtocolMessage &m : replies) {
 			if (m.tag != 0x5D) continue;
@@ -934,7 +944,7 @@ bool run_host_answers_the_sweep_request() {
 	{
 		std::vector<uint16_t> listed;
 		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
-					inmatch::GameConfig{}, roster[1], request, 101, roster, &world, inputs)) {
+					test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], request, 101, roster, &world, inputs)) {
 			if (m.tag != 0x5D) continue;
 			DestroyEntityList decoded;
 			if (!expect(decode_destroy_entity_list(
@@ -971,7 +981,7 @@ bool run_host_answers_the_sweep_request() {
 		const auto sweeps = [&](const inmatch::ServerDispatchInputs &in) {
 			int n = 0;
 			for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
-						inmatch::GameConfig{}, roster[1], request, 101, roster, &world, in))
+						test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], request, 101, roster, &world, in))
 				if (m.tag == 0x5D) ++n;
 			return n;
 		};
@@ -996,7 +1006,7 @@ bool run_host_answers_the_sweep_request() {
 	// Round over -> the handler is skipped entirely.
 	world.process_round_end(0);
 	const std::vector<ProtocolMessage> after_round = inmatch::dispatch_session_replies(
-			inmatch::GameConfig{}, roster[1], request, 102, roster, &world, inputs);
+			test_titles::jo_config_of(inmatch::GameConfig{}), roster[1], request, 102, roster, &world, inputs);
 	for (const ProtocolMessage &m : after_round)
 		if (!expect(m.tag != 0x5D, "sweep-host: no sweep once the round has ended"))
 			return false;
@@ -1010,6 +1020,7 @@ bool run_host_answers_the_sweep_request() {
 bool run_in_match_session_loss() {
 	uint64_t now_ms = 1000;
 	inmatch::ClientRuntime client("TimeoutJoiner", [&now_ms] { return now_ms; });
+	test_titles::jo_folds(client);
 	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, 0x0005, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -1130,6 +1141,7 @@ bool run_in_match_reap_waits_for_the_send_boundary() {
 	for (const bool rescued : {false, true}) {
 		uint64_t now_ms = 1000;
 		inmatch::ClientRuntime client("GatedReapJoiner", [&now_ms] { return now_ms; });
+		test_titles::jo_folds(client);
 		client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 		                    1, 0, 0x0005, w::kPlayerInfantryTypeId);
 		SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -1166,6 +1178,7 @@ bool run_in_match_reap_waits_for_the_send_boundary() {
 bool run_host_client_never_reports_loss() {
 	ns::LoopbackChannel loop;
 	inmatch::ClientRuntime host_view(loop);
+	test_titles::jo_folds(host_view);
 	(void)host_view.Client_ProcessNetworkFrame(1);
 	return expect(!host_view.session_lost() && host_view.session_loss_reason().empty(),
 			"loss: the host-as-client role never reports a session loss");

@@ -39,6 +39,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -61,7 +62,9 @@ constexpr uint32_t kSeed = 654321u;
 // A session create on a context with a World (the stream's draws), its network type given.
 struct Created {
 	std::unique_ptr<world::World> world = std::make_unique<world::World>(); // heap: 1 MB stack
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 };
 
 std::unique_ptr<Created> create(inmatch::ConnectionMode mode, inmatch::SocketMode socket,
@@ -72,6 +75,7 @@ std::unique_ptr<Created> create(inmatch::ConnectionMode mode, inmatch::SocketMod
 	inmatch::set_connection_mode(*c->ctx, mode);
 	inmatch::set_transport_mode(*c->ctx, socket);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.server_name = "Magic";
 	settings.max_players = 8;
 	inmatch::SessionStartup startup;
@@ -205,9 +209,12 @@ struct RecordingSocket final : opennova::IDatagramSocket {
 // The session owner's receive sends the answer to the address the packet named.
 void test_the_owner_sends_the_answer_to_the_named_address() {
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	auto owner = std::make_unique<inmatch::HostOwner>();
+	test_titles::jo_config(owner->ctx.config);
 	owner->ctx.world = world.get();
 	inmatch::HostConfig cfg;
+	test_titles::jo_config(cfg.config);
 	cfg.protocol = &kJo;
 	cfg.socket_mode = inmatch::SocketMode::NovaWorldSocket;
 	cfg.network_type = inmatch::NetworkType::NovaWorld;

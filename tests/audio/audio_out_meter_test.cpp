@@ -13,6 +13,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using test_expect::expect;
@@ -90,6 +91,7 @@ void device_time() {
 
 void readers() {
     world::World w;
+    test_titles::jo_world(w);
     const world::EntityHandle speaker = world::EntityHandle::make(0, 3);
     const world::EntityHandle other = world::EntityHandle::make(0, 4);
     world::ScriptVoiceChannel::State state;

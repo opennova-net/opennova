@@ -82,8 +82,9 @@ struct RoleView {
 	// The session's frame-rate window (Session::frame_rate_stats), the frame-rate overlay's
 	// four words.
 	world::TickAccumulator::FrameRateStats frame_rate;
-	// The title the session runs as: its HUD's own elements (Title::hud_exp_points). Null draws
-	// none of them.
+	// The title the session runs as: its HUD's own elements (Title::hud_exp_points), its DEATH
+	// screen's. The embedder sets it (Simulation::role_view, the session's title); a feed that
+	// reads it with none aborts, named (require_title): no feed runs a default title's instead.
 	const Title *title = nullptr;
 	// The joiner's seat occupancy (its decoded riders, JoinerRole); null on every other role.
 	const world::VehicleOccupancySource *occupancy = nullptr;
@@ -440,10 +441,10 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 //  @0x551b96..0x551c86 (dfx2.exe)]
 // DFX2-41: the DEATH screen's team-list players for THIS client, a title with
 // Title::death_screen_team_lists alone (false for any other, or without a kernel and a replica
-// runtime): per Tab-board row the entity world::deploy_team_lists names (the roster slot the
-// row names, in a session, while it drives a body; else the one the walk held, the local
-// player at first), its team byte as this client holds it, whether it is the local player and
-// its name as the HUD names an entity.
+// runtime; a view with no title aborts, named): per Tab-board row the entity
+// world::deploy_team_lists names (the roster slot the row names, in a session, while it drives a
+// body; else the one the walk held, the local player at first), its team byte as this client
+// holds it, whether it is the local player and its name as the HUD names an entity.
 // [orig: DeathScreen_UpdateTeamLists @0x55040d..0x5505c3 (dfx2.exe)]
 bool deploy_team_list_players(const RoleView &view, std::vector<world::DeployTeamListPlayer> &out);
 
@@ -488,9 +489,9 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 
 // Whether the DEATH screen's shroud shows this main frame (world/
 // deploy_screen_feed.h death_shroud_revealed): the role's deploy-overlay
-// latch, or more than the session title's reveal ticks (Jointops.exe's 240
-// without one) since the local player view's death stamp. False without a
-// kernel.
+// latch, or more than the session title's reveal ticks since the local player
+// view's death stamp. False without a kernel; a view with a kernel and no title
+// aborts, named (require_title).
 // [orig: DeathScreen_UpdateShroudReveal @0x554737..0x554752 —
 //  g_DeployScreenActive, g_CurrentTick - g_CameraLerpStartTick]
 bool death_shroud_revealed(const RoleView &view);

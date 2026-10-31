@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -78,7 +79,9 @@ inmatch::TickInput keys(bool forward = false, bool back = false) {
 int main() {
 	std::map<std::string, std::string> files;
 	ms::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	inmatch::HostRole role;
+	test_titles::jo_controls(role);
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
 	kernel.open_document(two_entity_mission(), "synth", source_over(&files));
@@ -227,6 +230,7 @@ int main() {
 	// --- the replica track legs ---------------------------------------------
 	{
 		w::World poi_world;
+		test_titles::jo_world(poi_world);
 		poi_world.registry.configure_pool(1, 4);
 		w::Entity flag;
 		flag.has_item_def = true;

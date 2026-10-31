@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -59,6 +60,7 @@ WireSliceRow skipped_row(uint16_t handle, uint32_t lifetime) {
 
 struct Rig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &world = *wp;
     CollisionWorld collision;
     Rig() {

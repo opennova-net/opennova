@@ -22,6 +22,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/weapon_table.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -37,6 +38,7 @@ namespace {
 // def whose six error rows are distinct.
 struct Rig {
 	World w;
+	bool w_jo = test_titles::jo_world(w);
 	EntityHandle local;
 	LocalPlayerWeapon weapon;
 	WeaponInventory inventory;

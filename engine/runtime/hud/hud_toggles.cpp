@@ -632,7 +632,11 @@ HudBriefingWindow hud_briefing_window(const HudToggleState &s, bool in_session, 
 	return sp_how_to ? HudBriefingWindow::HowTo : HudBriefingWindow::Briefing;
 }
 
-void hud_toggles_tip_events(HudToggleState &s, const uint8_t *events, size_t count) {
+void hud_toggles_tip_events(HudToggleState &s, const uint8_t *events, size_t count,
+		const Title &title) {
+	// dfx2.exe's every producer calls an empty CTipSystem_HandleEvent [orig: nullsub_11
+	//  @0x5B5BA0 (dfx2.exe)].
+	if (!title.hud_tips) return;
 	for (size_t i = 0; i < count; ++i) tip_handle_event(s.tips, events[i]);
 }
 

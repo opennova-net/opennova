@@ -134,7 +134,8 @@ void fill_stat_results(menu::MenuRuntime &menu, int table,
 // raised off the authority alone [orig: NapiNPClientMsg_GameReset @0x422650 (@0x422698)
 // (dfx2.exe)], so the authority's DONE stays hidden and its press arm is never reached:
 // `joiner_runtime` is the joiner's runtime, null on any other role (no press runs). Each returns
-// whether it acted; a menu with no STAT DONE, or a null title, does nothing.
+// whether it acted; a menu with no STAT DONE does nothing, and a null title aborts, named
+// (require_title: the role's view's title, RoleView::title).
 bool stat_screen_hide_done(menu::MenuRuntime &menu, const Title *title);
 bool stat_screen_show_done(menu::MenuRuntime &menu, const Title *title, bool round_reset_hold);
 bool stat_screen_done_pressed(const Title *title, ClientRuntime *joiner_runtime);

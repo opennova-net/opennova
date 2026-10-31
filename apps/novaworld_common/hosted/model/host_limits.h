@@ -28,7 +28,7 @@ struct HostLimits {
 };
 
 // The limits of title `title`: the host screen's ranges with the title's
-// MAX_PLAYERS cap; an unknown code's, the default title's.
+// MAX_PLAYERS cap. A code no installed title has aborts, named (require_title_code).
 HostLimits host_limits_for_title(std::string_view title);
 
 } // namespace opennova::novaworld_server::hosted

@@ -19,6 +19,7 @@
 #include <runtime/inmatch/udp_session_transport.h>
 #include <runtime/mission/event_runtime.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using world::World;
@@ -60,6 +61,7 @@ static bms::Action action(bms::ActionType type, int32_t p1, int32_t p2 = 0) {
 //  @0x5ba3ca; NEW_GOAL @0x4546e7..0x45470c]
 static void test_objective_notification() {
     auto box = std::make_unique<World>();
+    test_titles::jo_world(*box);
     World &w = *box;
     w.cached.humans = 1;
     configure_pools(w);
@@ -125,6 +127,7 @@ static void test_objective_notification() {
 //  GameMsg_AddChatLineAndRelay @0x5ba170 — @0x5ba19f/@0x5ba1a8]
 static void test_subgoal_announcements_relay_their_keys() {
     auto box = std::make_unique<World>();
+    test_titles::jo_world(*box);
     World &w = *box;
     w.cached.humans = 1;
     configure_pools(w);
@@ -178,12 +181,15 @@ static void test_subgoal_announcements_relay_their_keys() {
 //  NapiNPServer_SendFiltered @0x4C87E0 — the 0x90 host exclusion @0x4c88f6]
 static void test_host_fan_sends_the_relays_in_order() {
     auto box = std::make_unique<World>();
+    test_titles::jo_world(*box);
     World &w = *box;
     w.registry.configure_pool(0, 16);
     w.match.configure({});
     nm::NapiNPServerCtx ctx;
+    test_titles::jo_config(ctx.config);
     nm::set_connection_mode(ctx, nm::ConnectionMode::HostOnly);
     nm::GameConfig config;
+    test_titles::jo_config(config);
     config.max_players = 4;
     nm::SessionStartup startup;
     startup.protocol = title_protocol("jo");

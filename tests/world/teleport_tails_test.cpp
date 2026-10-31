@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -42,6 +43,7 @@ bool expect(bool cond, const char *msg) {
 // pool 2. Heap-held (the 1 MB test-main stack under MSVC).
 struct Rig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<w::CollisionWorld> collision = std::make_unique<w::CollisionWorld>();
 	w::EntityHandle marker;
 

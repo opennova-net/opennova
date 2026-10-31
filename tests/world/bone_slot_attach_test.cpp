@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -36,6 +37,7 @@ Seat seat_row(SeatType type, uint8_t bone, uint8_t retail_slot, const char *name
 // (row 5, untyped); rows 2 is off the table, typed ctrlx.
 struct Rig {
 	std::unique_ptr<World> wp = std::make_unique<World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	World &w = *wp;
 	EntityHandle veh_h, player_h;
 	Rig() {

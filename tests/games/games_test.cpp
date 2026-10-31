@@ -16,10 +16,14 @@
 #include <games/novalogic_2009/generation.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/protocol/protocol.h>
+#include <runtime/inmatch/host_settings.h> // server_settings_title (DFX2-10's host words)
+#include <runtime/world/match.h> // MatchRules (the unset holder)
 #include <runtime/world/title_rules.h>
 
 #include <algorithm>
+#include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <iterator>
 #include <string>
 #include <tuple>
@@ -67,6 +71,10 @@ void retail_protocols_complete() {
 	// DFX2-22: each title's mission catalog order.
 	CHECK(games::jo_title().mission_list_order == MissionListOrder::FileName &&
 			games::dfx2_title().mission_list_order == MissionListOrder::Title);
+	// DFX2-12's mission-start half: dfx2.exe's start fixes the side block's class, Jointops.exe's
+	// keeps the profile's (the 0x2F byte is the protocol's c2s_2f.loadout_class_fixed).
+	CHECK(!games::jo_title().session_loadout_class_fixed &&
+			games::dfx2_title().session_loadout_class_fixed);
 	for (const Protocol *protocol : { jo, dfx2 }) {
 		CHECK(protocol != nullptr);
 		if (protocol == nullptr)
@@ -96,7 +104,7 @@ auto title_fields_past_identity(const Title &t) {
 			hud_objective_done_fill, hud_drops_armory_prompt, hud_end_game_footer_corners,
 			death_screen_loadout, hud_fonts, mission_list_order, profile_magic, profile_first_name,
 			profile_word_1396, max_players_switch, profile_single_player_kit, profile_class_kits,
-			map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
+			session_loadout_class_fixed, map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
 			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
 			death_respawn_penalty_line, hud_map_cycle_skips_window, map_zoom_max_q16,
 			hud_kill_list_no_class, hud_scope_no_magnification, hud_crosshair_fixed,
@@ -106,10 +114,11 @@ auto title_fields_past_identity(const Title &t) {
 			nvg_gain_rect, inset_reticle_quad, frame_fx_work_side, low_health_screen_effect,
 			map_capture_rings_under_layers, death_map_zone_markers, loading_screen, controls,
 			hud_sp_how_to, stat_screen_done, menu_font_scale, host_vehicle_missions,
-			host_switch_starts_off, armory_lists_none_row, death_map_no_names,
+			host_switch_starts_off, host_armory_word, armory_lists_none_row, death_map_no_names,
 			player_avatar_by_viewer_side, hud_game_info_board, hud_vehicle_panel_riders,
 			epilog_debriefing_screens, player_info_combo_names, player_info_combo_spins,
-			player_info_preview_hover] = t;
+			player_info_preview_hover, spinmap_spawn_zoom_q16, hud_tips,
+			end_round_team_fallbacks] = t;
 	(void)code;
 	(void)display_name;
 	(void)title_text;
@@ -121,8 +130,8 @@ auto title_fields_past_identity(const Title &t) {
 			hud_waypoint_active_tint, hud_objective_done_fill, hud_drops_armory_prompt,
 			hud_end_game_footer_corners, death_screen_loadout, hud_fonts, mission_list_order,
 			profile_magic, profile_first_name, profile_word_1396, max_players_switch,
-			profile_single_player_kit, profile_class_kits, map_view_zoom_max,
-			death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
+			profile_single_player_kit, profile_class_kits, session_loadout_class_fixed,
+			map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
 			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
 			death_respawn_penalty_line, hud_map_cycle_skips_window, map_zoom_max_q16,
 			hud_kill_list_no_class, hud_scope_no_magnification, hud_crosshair_fixed,
@@ -133,10 +142,11 @@ auto title_fields_past_identity(const Title &t) {
 			nvg_gain_rect.y0, nvg_gain_rect.x1, nvg_gain_rect.y1, inset_reticle_quad,
 			frame_fx_work_side, low_health_screen_effect, map_capture_rings_under_layers,
 			death_map_zone_markers, loading_screen, controls, hud_sp_how_to, stat_screen_done,
-			menu_font_scale, host_vehicle_missions, host_switch_starts_off, armory_lists_none_row,
-			death_map_no_names, player_avatar_by_viewer_side, hud_game_info_board,
-			hud_vehicle_panel_riders, epilog_debriefing_screens, player_info_combo_names,
-			player_info_combo_spins, player_info_preview_hover);
+			menu_font_scale, host_vehicle_missions, host_switch_starts_off, host_armory_word,
+			armory_lists_none_row, death_map_no_names, player_avatar_by_viewer_side,
+			hud_game_info_board, hud_vehicle_panel_riders, epilog_debriefing_screens,
+			player_info_combo_names, player_info_combo_spins, player_info_preview_hover,
+			spinmap_spawn_zoom_q16, hud_tips, end_round_team_fallbacks);
 }
 
 // Each of two titles' fields past the identity equal, a failure naming the field by its index in
@@ -216,7 +226,8 @@ void unwitnessed_titles_refused() {
 }
 
 // Every installed title runs installed rules: JO's for jo and for the titles that run JO's (the
-// same object), DFX2's its own; an empty or unknown code runs the default title's.
+// same object), DFX2's its own. An empty or unknown code runs none: it aborts, named (ctest
+// games_unknown_title_rules).
 void every_title_runs_rules() {
 	const world::TitleRules &jo = world::title_rules("jo");
 	CHECK(&jo == &games::jo_rules());
@@ -225,7 +236,6 @@ void every_title_runs_rules() {
 	for (const char *code : { "acidgambit", "dfx", "bhd" })
 		CHECK(&world::title_rules(code) == &jo);
 	CHECK(&games::acidgambit_rules() == &jo);
-	CHECK(&world::title_rules("") == &jo && &world::title_rules("nosuchgame") == &jo);
 }
 
 // JO's rules are the defaults (Jointops.exe's, the baseline the ports were witnessed on); DFX2's
@@ -251,6 +261,9 @@ void retail_rules_values() {
 			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
 	CHECK(!jo.parachute_opens_on_jump && !jo.airborne_steer_glide &&
 			!jo.tracked_impact_speed_xz_first);
+	CHECK(jo.round_init_look_yaw);
+	CHECK(!jo.spawn_reset_stores_def_health);
+	CHECK(jo.scope_zero_seed == world::ScopeZeroSeed::DefaultStep);
 
 	const world::TitleRules &dfx2 = world::title_rules("dfx2");
 	CHECK(dfx2.waypoint_completion == world::WaypointCompletion::CoopCheckpoint); // DFX2-9
@@ -279,6 +292,13 @@ void retail_rules_values() {
 	size_t kit = 0;
 	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
 	CHECK(kit == 8 && std::string(dfx2.spawn_kit[2]) == "WPN_MK23");
+	// The page is dfx2.exe's one table (0x832368), which the rules' spawn and the Title's fresh
+	// profile each point at, neither reading the other's row (DFX2-29, DFX2-33).
+	CHECK(dfx2.spawn_kit == games::dfx2_single_player_kit() &&
+			games::dfx2_title().profile_single_player_kit == games::dfx2_single_player_kit());
+	CHECK(!dfx2.round_init_look_yaw); // DFX2-123
+	CHECK(dfx2.spawn_reset_stores_def_health); // DFX2-30
+	CHECK(dfx2.scope_zero_seed == world::ScopeZeroSeed::Rangefinder); // DFX2-120
 }
 
 // The Title's knobs read on the local player's input alone (docs/titles/dfx2-vs-jo-re.md §8, the
@@ -299,6 +319,19 @@ void retail_local_input_title_values() {
 	CHECK(std::string(dfx2.friendly_tag_toast_literals[1]) == "Friendly Tags: On" &&
 			std::string(dfx2.friendly_tag_toast_literals[2]) == "Friendly Tags: Smart");
 	CHECK(dfx2.friendly_tags_skip_mode_1_on_death_screen);
+}
+
+// The Title's HUD rows of DFX2-121 and after (docs/titles/dfx2-vs-jo-re.md §8):
+// JO's the defaults, DFX2's dfx2.exe's, OP: Acid Gambit's JO's (acidgambit_speaks_jo).
+void retail_gap_title_values() {
+	const Title &jo = games::jo_title();
+	const Title &dfx2 = games::dfx2_title();
+	CHECK(jo.spinmap_spawn_zoom_q16 == 0 && dfx2.spinmap_spawn_zoom_q16 == 0x40000); // DFX2-121
+	CHECK(jo.hud_tips && !dfx2.hud_tips); // DFX2-122
+	CHECK(std::string(jo.end_round_team_fallbacks[0]) == "!Joint Ops Team" && // DFX2-124
+			std::string(jo.end_round_team_fallbacks[1]) == "!Rebel Team" &&
+			std::string(dfx2.end_round_team_fallbacks[0]) == "!Blue Team" &&
+			std::string(dfx2.end_round_team_fallbacks[1]) == "!Red Team");
 }
 
 // A protocol's in-match sheet: every knob of its ProtocolInMatch, and its CD key (Protocol::cd_key,
@@ -389,7 +422,10 @@ std::string joiner_rules_row(const world::TitleRules &r) {
 			" tracked_impact_speed_xz_first=" + std::to_string(r.tracked_impact_speed_xz_first) +
 			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit) +
 			" script_voice_volume=" + std::to_string(r.script_voice_volume) +
-			" trail_surface_alternate=" + std::to_string(r.trail_surface_alternate);
+			" trail_surface_alternate=" + std::to_string(r.trail_surface_alternate) +
+			" scope_zero_seed=" + std::to_string(static_cast<int>(r.scope_zero_seed)) +
+			" spawn_reset_stores_def_health=" + std::to_string(r.spawn_reset_stores_def_health) +
+			" round_init_look_yaw=" + std::to_string(r.round_init_look_yaw);
 }
 
 // The bump-rule sheets (ADR 0076 decision 6), one per protocol: what its joiner reads or writes as
@@ -450,7 +486,10 @@ void bump_rule_sheet_per_protocol() {
 			"narrow_still_player_radius=0 emplaced_solo_holds_fire=0 "
 			"part_spin=186413/163110/139809/186413/46603 parachute_opens_on_jump=0 "
 			"airborne_steer_glide=0 tracked_impact_speed_xz_first=0 "
-			"spawn_kit=jo_single_player_page script_voice_volume=210 trail_surface_alternate=0";
+			"spawn_kit=jo_single_player_page script_voice_volume=210 trail_surface_alternate=0 "
+			"scope_zero_seed=0 "
+			"spawn_reset_stores_def_health=0 "
+			"round_init_look_yaw=1";
 	const std::string dfx2 =
 			"S 0x0A: s2c_0a.objective_checkpoint=1 slot_state.join_state_fixed=1\n"
 			"S 0x0F: s2c_0f.spawn_zone_flag_always=1 s2c_0f.deploy_screen_always=1\n"
@@ -474,7 +513,10 @@ void bump_rule_sheet_per_protocol() {
 			"airborne_steer_glide=1 tracked_impact_speed_xz_first=1 "
 			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
 			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE script_voice_volume=240 "
-			"trail_surface_alternate=1";
+			"trail_surface_alternate=1 "
+			"scope_zero_seed=1 "
+			"spawn_reset_stores_def_health=1 "
+			"round_init_look_yaw=0";
 	CHECK(sheet("jo") == jo);
 	CHECK(sheet("dfx2") == dfx2);
 	// Two protocols have an in-match part: JO's, which OP: Acid Gambit speaks (the one object, at
@@ -495,21 +537,23 @@ void bump_rule_sheet_per_protocol() {
 		CHECK(sheet(code) == "no in-match protocol");
 }
 
-// DFX2-10's mission word sits on two axes: the protocol's (the S2C 0x66 group's armory-only word,
-// the mission's the other) and the game.cfg defaults' (Config_SetDefaults fills every weapon with
-// the mission's word, keyed by the title's config table, as formats/gamecfg cannot read a
-// protocol). Each title's config table fills its protocol's mission word, so the two never part.
+// DFX2-10's host-screen words are the Title's (Title::host_armory_word, its MISSION the other of
+// 2 and 3), and the game.cfg defaults fill every weapon with the executable's MISSION word, keyed
+// by the title's config table, as formats/gamecfg cannot read a Title. Each title's config table
+// fills its own host screen's MISSION word, so the two never part. (The word S2C 0x66 carries is
+// the protocol's, another axis: no title's protocol is read here.)
 // [orig: Config_SetDefaults @0x54D030 - memset32(3, 0xFF) @0x54D410]
 // [orig: Config_SetDefaults @0x54a2c0 - memset32(dword_254F25C, 2, 0xFF) (dfx2.exe)]
-void config_table_fills_the_protocols_mission_word() {
+void config_table_fills_the_titles_mission_word() {
 	for (size_t i = 0; i < title_count(); ++i) {
-		const Title *title = title_at(i);
-		const Protocol *protocol = title != nullptr ? title_protocol(title->code) : nullptr;
-		if (protocol == nullptr || !protocol->in_match.has_value())
-			continue;
-		const gamecfg::GameCfg cfg = gamecfg::defaults({}, 0, 0, title->config_table);
-		CHECK(cfg.weapon_availability[0] == protocol->in_match->s2c_66.mission_availability());
+		const Title &title = *title_at(i);
+		const gamecfg::GameCfg cfg = gamecfg::defaults({}, 0, 0, title.config_table);
+		CHECK(cfg.weapon_availability[0] == inmatch::server_settings_title(title).mission_word);
 	}
+	// Jointops.exe's ARMORY 2 and MISSION 3, dfx2.exe's 3 and 2; OP: Acid Gambit's are JO's.
+	CHECK(games::jo_title().host_armory_word == 2 && games::dfx2_title().host_armory_word == 3);
+	CHECK(inmatch::server_settings_title(games::jo_title()).mission_word == 3);
+	CHECK(inmatch::server_settings_title(games::dfx2_title()).mission_word == 2);
 }
 
 // A version line's title parts (title_versions): the title's name where the line names no game,
@@ -539,7 +583,31 @@ void title_parts_of_the_version_line() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	// ctest games_unknown_title_rules: the rules of a code no installed title has abort, naming the
+	// code (world::title_rules), where the default title's once stood in. The abort's handler exits
+	// clean, so ctest reads the message (PASS_REGULAR_EXPRESSION).
+	if (argc > 1 && std::string(argv[1]) == "--unknown-rules") {
+#if defined(_MSC_VER)
+		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
+		std::signal(SIGABRT, [](int) { std::_Exit(0); });
+		(void)world::title_rules("nosuchgame");
+		std::fputs("world::title_rules read a code no title has\n", stderr);
+		return 1;
+	}
+	// ctest games_unset_title_rules: a holder no fixture named rules for reads none: the suite
+	// installs no default (tests/common/install_games.cpp), so its first read aborts, naming it.
+	if (argc > 1 && std::string(argv[1]) == "--unset-rules") {
+#if defined(_MSC_VER)
+		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
+		std::signal(SIGABRT, [](int) { std::_Exit(0); });
+		const world::MatchRules unnamed;
+		(void)unnamed.title();
+		std::fputs("MatchRules read rules no fixture named\n", stderr);
+		return 1;
+	}
 	every_title_resolves();
 	retail_protocols_complete();
 	acidgambit_speaks_jo();
@@ -547,8 +615,9 @@ int main() {
 	every_title_runs_rules();
 	retail_rules_values();
 	retail_local_input_title_values();
+	retail_gap_title_values();
 	bump_rule_sheet_per_protocol();
-	config_table_fills_the_protocols_mission_word();
+	config_table_fills_the_titles_mission_word();
 	title_parts_of_the_version_line();
 	if (g_failures == 0) {
 		std::printf("games: all checks passed\n");

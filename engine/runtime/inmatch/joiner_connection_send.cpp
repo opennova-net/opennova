@@ -4,6 +4,7 @@
 // the loadout / deployment-pick / uplink producers that frame through it. Split
 // out of joiner_connection.cpp; the class header is the shared declaration.
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/loadout_submit.h> // loadout_fixed_class (the fresh page's class)
 
 #include <net/npwire/lan_discovery.h> // kLanAnnounceIntervalSeconds
 
@@ -436,13 +437,18 @@ std::optional<ProtocolMessage> JoinerConnection::take_world_stream_request() {
 	return make_protocol_message(0x0A, {});
 }
 
-uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {
-	if (!protocol_in_match(protocol_).c2s_2f.loadout_class_fixed) return profile_class;
+bms::MissionType JoinerConnection::header_mission_type() const {
 	constexpr std::size_t kMissionTypeOffset = offsetof(opennova::bms::Header, mission_type);
 	static_assert(kMissionTypeOffset == 0x22A, "the BMS header's mission type byte");
-	const bool gunner_mission = mission_header_bytes_.size() > kMissionTypeOffset &&
-			mission_header_bytes_[kMissionTypeOffset] == 2;
-	return gunner_mission ? uint8_t{7} : uint8_t{8};
+	return mission_header_bytes_.size() > kMissionTypeOffset
+			? static_cast<bms::MissionType>(mission_header_bytes_[kMissionTypeOffset])
+			: bms::MissionType{};
+}
+
+uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {
+	if (!protocol_in_match(protocol_).c2s_2f.loadout_class_fixed) return profile_class;
+	return header_mission_type() == bms::MissionType::CombatVehicleMission ? uint8_t{7}
+			: uint8_t{8};
 }
 
 LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
@@ -454,10 +460,10 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 	// [orig: Game_StartMission @0x525767-0x525836 (join) and NapiNPClientMsg_TeamAssign
 	//  @0x431a35..0x431a9a (the S2C 0x50 reselect)]
 	if (!loadout_kit_set_) {
-		// A protocol that fixes the class picks that class's page, as its mission start wrote
-		// it into the side block (loadout_wire_class gives 0 for the profile's own).
-		LoadoutSubmit submit =
-				fresh_profile_loadout_submit(fresh_weapons_, weapons_, team, loadout_wire_class(0));
+		// A title whose mission start fixes the class picks that class's page, as that start
+		// wrote it into the side block (loadout_fixed_class gives 0 for the profile's own).
+		LoadoutSubmit submit = fresh_profile_loadout_submit(fresh_weapons_, weapons_, team,
+				loadout_fixed_class(title_, header_mission_type()));
 		submit.player_class = loadout_wire_class(submit.player_class);
 		return submit;
 	}

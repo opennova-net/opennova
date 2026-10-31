@@ -18,6 +18,7 @@
 #include <optional>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -33,6 +34,7 @@ using test_expect::expect;
 
 struct View {
 	ns::ClientReplicaPipeline view;
+	bool view_jo = test_titles::jo_folds(view);
 	View(const std::vector<uint16_t> &pool1, const std::vector<uint16_t> &pool0) {
 		view.set_remote_motion_mode(true);
 		view.set_self_body_split(true);

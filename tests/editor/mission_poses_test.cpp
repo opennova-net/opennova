@@ -52,6 +52,7 @@
 #include "editor/mission_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
@@ -186,6 +187,7 @@ struct DirRigFiles : opennova::anim::RigFiles {
 // init over its own clip registry.
 struct WorldPeople {
 	world::World world;
+	bool world_jo = test_titles::jo_world(world);
 	opennova::anim::AdmRootMotion motion;
 	std::vector<world::EntityHandle> handles;
 	WorldPeople() {

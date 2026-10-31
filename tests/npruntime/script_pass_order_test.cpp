@@ -35,6 +35,7 @@
 
 #include "conn_fixture.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -66,8 +67,10 @@ w::EntityHandle match_player(w::World &world, uint8_t slot, uint8_t team, const 
 // script owns the round end).
 struct Session {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	ns::LoopbackChannel wire;
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	w::EntityHandle player;
 
 	Session() {
@@ -75,6 +78,7 @@ struct Session {
 		world->registry.configure_pool(1, 4);
 		world->rules.mp_session = true;
 		w::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = game_type::kCoop;
 		world->match.configure(rules);
 		player = match_player(*world, 4, 2, "Red");

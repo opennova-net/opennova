@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -134,6 +135,7 @@ void seed_row(ns::ClientReplicaPipeline &view) {
 // the roll (48 queues behind flags[41]&4) instead of coalescing to 48.
 void test_tapped_roll_locks_and_queues() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	seed_row(view);
@@ -171,6 +173,7 @@ void test_tapped_roll_locks_and_queues() {
 // retarget lands the tick after (retail's read-then-write order).
 void test_pending_promotes_at_clip_end() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -201,6 +204,7 @@ void test_pending_promotes_at_clip_end() {
 // run2crouch first and defers the crouch walk [orig: @0x40b662..0x40b737].
 void test_gait_transition_insert() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -232,6 +236,7 @@ void test_gait_transition_insert() {
 // nothing (the next record does).
 void test_dead_park_and_respawn_edges() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	seed_row(view);
@@ -270,6 +275,7 @@ void test_dead_park_and_respawn_edges() {
 //  @0x4C10F1..0x4C10FB in one receive]
 void test_dead_records_queue_behind_the_0x13() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	seed_row(view);
@@ -331,6 +337,7 @@ void test_defless_carrier_drops_the_dead_record() {
 	for (const Form &f : forms) {
 		for (const uint8_t bone : {uint8_t{0}, uint8_t{3}}) {
 			ns::ClientReplicaPipeline view;
+			test_titles::jo_folds(view);
 			view.set_protocol(title_protocol("jo"));
 			view.set_item_class_resolver(&classify);
 			seed_row(view);
@@ -369,6 +376,7 @@ void test_slot_restart_drops_a_queued_dead_record() {
 	const uint8_t dead = static_cast<uint8_t>(opennova::world::kEntityFlagDead);
 	for (const bool same_slot : {true, false}) {
 		ns::ClientReplicaPipeline view;
+		test_titles::jo_folds(view);
 		view.set_protocol(title_protocol("jo"));
 		view.set_item_class_resolver(&classify);
 		seed_row(view);
@@ -400,6 +408,7 @@ void test_record_flags_land_on_the_mirror() {
 	constexpr uint32_t kMounted = opennova::world::kEntityFlagMounted;
 	{
 		ns::ClientReplicaPipeline view;
+		test_titles::jo_folds(view);
 		view.set_protocol(title_protocol("jo"));
 		view.set_item_class_resolver(&classify);
 		seed_row(view);
@@ -416,6 +425,7 @@ void test_record_flags_land_on_the_mirror() {
 	}
 	{
 		ns::ClientReplicaPipeline view;
+		test_titles::jo_folds(view);
 		view.set_protocol(title_protocol("jo"));
 		view.set_item_class_resolver(&classify);
 		seed_row(view);
@@ -438,6 +448,7 @@ void test_record_flags_land_on_the_mirror() {
 //  AnimMap_UpdateDualChannels @0x40b8c0]
 void test_row_weapon_channel_plays_an_emote_then_returns() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -505,6 +516,7 @@ struct CapsuleSource final : public opennova::world::IRootMotionSource {
 
 void test_remote_eye_restamps_from_the_capsule() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -588,6 +600,7 @@ void test_remote_eye_restamps_from_the_capsule() {
 //  chase @0x4B6FC1..0x4B6FF4; the eye @0x4B699F..0x4B6BAB ahead of it]
 void test_remote_body_conform_chases_the_slope() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -638,6 +651,7 @@ void test_remote_body_conform_chases_the_slope() {
 
 	// A standing, live body does not conform: both words decay a sixteenth a tick.
 	ns::ClientReplicaPipeline standing;
+	test_titles::jo_folds(standing);
 	standing.set_protocol(title_protocol("jo"));
 	standing.set_item_class_resolver(&classify);
 	standing.set_remote_motion_mode(true);
@@ -677,6 +691,7 @@ void test_remote_body_conform_chases_the_slope() {
 //  @0x4B7DD6]
 void test_remote_lean_ramp_gates() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	struct Case {
 		uint16_t handle;
 		EntityClass cls;
@@ -722,6 +737,7 @@ void test_remote_lean_ramp_gates() {
 	static constexpr uint16_t kCarrier = 0x1010;
 	static constexpr uint16_t kCarrierType = 0x0400;
 	ns::ClientReplicaPipeline seated;
+	test_titles::jo_folds(seated);
 	seated.set_remote_motion_mode(true);
 	seated.set_replica_seat_type_resolver([](uint16_t carrier_type, uint8_t bone) -> uint8_t {
 		if (carrier_type != kCarrierType) return 0;
@@ -779,6 +795,7 @@ void test_seated_row_eye_reads_its_channel_capsule() {
 	static constexpr int32_t kSeatPitch = 0x02000000;
 	static constexpr int32_t kSeatRoll = -0x01000000;
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
 	CapsuleSource src;
@@ -854,6 +871,7 @@ void test_seated_row_scrubs_its_body_words() {
 	static constexpr uint16_t kCarrier = 0x1010;
 	static constexpr uint16_t kCarrierType = 0x0400;
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
 	view.state().upsert(kCarrier).type_id = kCarrierType;
@@ -913,6 +931,7 @@ struct RingBodySource final : public opennova::world::IRootMotionSource {
 
 void test_row_channels_serve_the_shared_variant_rings() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -967,6 +986,7 @@ void test_row_channels_serve_the_shared_variant_rings() {
 //  @0x40B94E]
 void test_rows_serve_the_rings_in_slot_order() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -1025,6 +1045,7 @@ void test_rows_serve_the_rings_in_slot_order() {
 //  @0x40B8C0, the secondary @0x40B908 before the primary @0x40B94E]
 void test_own_body_serves_the_rings_at_its_slot() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -1099,6 +1120,7 @@ void test_own_body_serves_the_rings_at_its_slot() {
 //  roll @0x4B5CFF..0x4B5D67]
 void test_parked_row_keeps_its_body_legs_until_its_visit() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
@@ -1194,6 +1216,7 @@ void test_parked_row_keeps_its_body_legs_until_its_visit() {
 //  the aim store @0x4B6D44]
 void test_dead_row_in_the_air_tumbles() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);
 	BodySource src;
@@ -1226,6 +1249,7 @@ void test_dead_row_in_the_air_tumbles() {
 //  @0x4B76F1..0x4B78A8 ahead of the velocity @0x4B78A8; the starved return @0x4B4669..0x4B4670]
 void test_remote_body_sound_block_runs_per_tick() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);

@@ -445,12 +445,16 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// or not the listener ever opens [orig: CAdminServer_Construct @0x402C10,
 	// fopen("admin_log.txt", "w") @0x402C84].
 	(void)files_.write(inmatch::kAdminLogFileName, std::string_view(), /*append=*/false);
-	// The log switches arm at the process start, as retail's command-line
-	// parse arms them (inmatch/server_log_devices.h).
-	{
-		// The title the launch runs as heads it (the default title's for an unknown code).
-		log_devices_.arm(options_.log_switches, inmatch::connect_log_header(game_code_));
+	// The launch's title first: a /game no title has, or a foreign folder, is refused here,
+	// named, before anything is read or written in its name.
+	if (!resolve_title(error)) {
+		stop();
+		return false;
 	}
+	// The log switches arm at the process start, as retail's command-line
+	// parse arms them (inmatch/server_log_devices.h); the title the launch
+	// runs as heads the connect log.
+	log_devices_.arm(options_.log_switches, inmatch::connect_log_header(game_code_));
 	// Retail's boot order: game.cfg at Game_Run's start, the subsystems (the
 	// mount, weapon.def and game.cfg again), then the dead /HOST path (the host
 	// file, the lock, the save, the network type, the socket, on NovaWorld the
@@ -462,8 +466,7 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// a NovaWorld host hosts on its session before either does
 	// [orig: @0x4A66A5..0x4A674F; the live NovaWorld host, D-NET-221,
 	//  UI_DispatchScreenEvent @0x54F2CA..0x54F379].
-	if (!resolve_title(error) || !read_boot_config(error) || !mount(error) ||
-			!read_config_over_weapons(error)) {
+	if (!read_boot_config(error) || !mount(error) || !read_config_over_weapons(error)) {
 		stop();
 		return false;
 	}
@@ -848,7 +851,9 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// keeps them, and the socket with them.
 	if (!next_mission) {
 		role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
-		// The game's binding catalog, whose rows the dispatcher's head and the console's walks read.
+		// The game's title (the frame's role view, inmatch::Session::frame_role_view) and its binding
+		// catalog, whose rows the dispatcher's head and the console's walks read.
+		role_->set_title(*title_by_code(game_code_));
 		role_->set_controls(controls::title_catalog(*title_by_code(game_code_)));
 		role_->set_socket(&demux_->game());
 		role_->set_rotation(&rotation_);

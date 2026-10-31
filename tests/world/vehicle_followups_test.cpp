@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace {
@@ -28,6 +29,7 @@ int failures = 0;
 
 struct Rig {
     std::unique_ptr<World> owner = std::make_unique<World>();
+    bool owner_jo = test_titles::jo_world(*owner);
     World &world = *owner;
     std::vector<uint16_t> heights = std::vector<uint16_t>(64 * 64, 0);
     std::vector<int> sectors = std::vector<int>(256, 1);
@@ -1225,6 +1227,7 @@ void every_solve_head_releases_smoke_and_reads_the_entry_pose() {
 // (@0x57C011..0x57C01E)].
 void water_flag_reads_the_zero_word_raw() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     Entity hull;
     hull.flags = 0;
     VehicleTraits t;

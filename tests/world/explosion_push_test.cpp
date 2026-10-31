@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -68,6 +69,7 @@ int32_t push(int32_t table_q22) {
 
 struct Peer {
     std::unique_ptr<World> heap = std::make_unique<World>();
+    bool heap_jo = test_titles::jo_world(*heap);
     World &w = *heap;
     FlatField flat;
     EntityHandle body;

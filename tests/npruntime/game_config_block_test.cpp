@@ -20,6 +20,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -302,6 +303,7 @@ int main() {
 	{
 		gamecfg::GameCfg block = gamecfg::defaults();
 		GameConfig config;
+		test_titles::jo_config(config);
 		config.server_name = "Renamed";
 		config.custom_text = "Hello";
 		config.multiplayer_reset = 1;
@@ -347,6 +349,7 @@ int main() {
 	{
 		gamecfg::GameCfg block = gamecfg::defaults();
 		NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		set_connection_mode(ctx, ConnectionMode::HostClient);
 		ctx.is_in_session = 1;
 		const ServerCommandOutcome name = run_host_server_command(&ctx, nullptr,

@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -70,6 +71,7 @@ int32_t damage(FixedVec3 v, const AmmoTableEntry &a, int32_t section, const Enti
 
 int main() {
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->rules.mp_session = true;          // the host, the round's authority
 	world->rules.projectile_authority = true;
 	auto person = std::make_unique<Entity>();

@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -72,6 +73,7 @@ CollisionModel quad_model(
 
 struct Rig {
 	std::unique_ptr<World> owner = std::make_unique<World>();
+	bool owner_jo = test_titles::jo_world(*owner);
 	World &world = *owner;
 	CollisionWorld collision;
 	Rig() {
@@ -250,6 +252,7 @@ void test_the_deployable_spawn() {
 	std::strcpy(rows[1].ai_function, "gnrc");
 	opennova::def::DefItemsFile items{ rows.data(), rows.size() };
 	auto kernel = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	kernel->set_items_table(&items);
 	for (int pool = 0; pool < 3; ++pool)
 		kernel->world.registry.configure_pool(pool, 8);
@@ -303,6 +306,7 @@ void test_the_powerup_walk() {
 void test_the_replica_keeps_a_cached_link() {
 	namespace rp = opennova::replication;
 	rp::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	opennova::StaticEntityRecord drum;
 	drum.item_type_id = 4301;
 	opennova::StaticEntityBatch statics;
@@ -323,6 +327,7 @@ void test_the_replica_keeps_a_cached_link() {
 	batch.records = { truck, crate, rider };
 	pipeline.apply(0x0D, opennova::encode_pool_spawn_batch(batch));
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 8);
 	world->registry.configure_pool(2, 8);
 	rp::ClientWorldMaterializer materializer;
@@ -358,6 +363,7 @@ void test_the_replica_keeps_a_cached_link() {
 void test_the_record_target_is_stored_once() {
 	namespace rp = opennova::replication;
 	rp::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	opennova::PoolSpawnRecord truck;
 	truck.slot_id = 0x1000;
 	truck.item_type_id = 1294;
@@ -381,6 +387,7 @@ void test_the_record_target_is_stored_once() {
 	batch.records = { truck, crate, rider, early, past_pools, past_slots };
 	pipeline.apply(0x0D, opennova::encode_pool_spawn_batch(batch));
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 16);
 	rp::ClientWorldMaterializer materializer;
 	materializer.sync(pipeline.state(), *world);

@@ -25,6 +25,7 @@
 #include <vector>
 #include "../common/replica_twin.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -82,7 +83,9 @@ std::vector<PlayerExtendedUplink> uplinks_since(const KeepingSocket &socket, std
 // The kernel lives on the heap: a World-carrying frame is megabytes.
 struct Harness {
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	inmatch::JoinerRole role;
+	bool role_jo = test_titles::jo_joiner(role);
 	KeepingSocket socket;
 	inmatch::TickInput input;
 	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();

@@ -24,6 +24,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -40,6 +41,7 @@ namespace {
 // updater ticks over; pool 1 holds the dynamic items the aim ray can hit.
 struct LocalWorld {
     World w;
+    bool w_jo = test_titles::jo_world(w);
     AiSystem &ai = w.ai;
     EntityHandle local;
 

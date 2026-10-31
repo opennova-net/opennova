@@ -18,6 +18,7 @@
 #include <memory>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace w = opennova::world;
 namespace im = opennova::inmatch;
@@ -106,6 +107,7 @@ void dump_gates(const char *what, opennova::mission::MissionKernel &kernel,
 
 void test_the_walk() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 16);
 	kernel.world.registry.configure_pool(1, 16);
@@ -165,6 +167,7 @@ void test_the_walk() {
 
 	// The decoded rows.
 	im::ClientRuntime runtime("OcclusionCollect");
+	test_titles::jo_folds(runtime);
 	opennova::replication::ClientState &state = runtime.state();
 	auto add = [&](uint16_t handle, uint16_t type_id, opennova::EntityClass cls, int32_t x)
 			-> opennova::replication::ClientEntityState & {
@@ -247,6 +250,7 @@ void test_the_walk() {
 //  @ 0x5c8590 / @ 0x5c8599, their Foliage_UpdateModelTiles calls @ 0x5c7edb..0x5c7f11]
 void test_the_mirror_walk() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 16);
 	kernel.world.registry.configure_pool(1, 16);
@@ -258,6 +262,7 @@ void test_the_mirror_walk() {
 	unstamped.valid = true;
 	kernel.occlusion.assign_render_model(car.handle, unstamped);
 	im::ClientRuntime runtime("OcclusionCollectMirror");
+	test_titles::jo_folds(runtime);
 	opennova::replication::ClientEntityState &bare = runtime.state().upsert(0x1003);
 	bare.type_id = 0x1234;
 	bare.cls = opennova::EntityClass::NoNetworkCallback;
@@ -304,6 +309,7 @@ void test_the_mirror_walk() {
 // @ 0x5c8ea9 / @ 0x5c8fd6, PRNG_Next16_C @ 0x6131b0]
 void test_the_walk_order() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 16);
 	kernel.world.registry.configure_pool(1, 16);
@@ -329,6 +335,7 @@ void test_the_walk_order() {
 	const char *const names[5] = {"decoration", "person", "spawned", "local", "vehicle"};
 
 	im::ClientRuntime runtime("OcclusionCollectOrder");
+	test_titles::jo_folds(runtime);
 	opennova::replication::ClientEntityState &twin_row = runtime.state().upsert(spawned.handle.packed);
 	twin_row.type_id = 0x0055;
 	twin_row.cls = opennova::EntityClass::Infantry;
@@ -442,6 +449,7 @@ void test_the_statics_bound() {
 	// A full pool: the buildings, then two decorations, the last the uncounted row.
 	{
 		auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+		test_titles::jo_world(kernel_heap->world);
 		opennova::mission::MissionKernel &kernel = *kernel_heap;
 		kernel.world.registry.configure_pool(2, kCapacity);
 		expect(w::static_prox_count_bound(kernel.world.registry.pool_capacity(2)) ==
@@ -465,6 +473,7 @@ void test_the_statics_bound() {
 	// A row with no item type is never listed, whatever room the table has.
 	{
 		auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+		test_titles::jo_world(kernel_heap->world);
 		opennova::mission::MissionKernel &kernel = *kernel_heap;
 		kernel.world.registry.configure_pool(2, kCapacity);
 		w::Entity &unlisted = row(kernel, 2, 0, w::EntityKind::Item, 400, 20.0f, 0.0f);
@@ -489,6 +498,7 @@ void test_the_statics_bound() {
 //  @ 0x5c6fd1..0x5c7112, the latch @ 0x5c7125..0x5c7162]
 void test_a_decoration_right_of_the_axis_is_collected() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(2, 16);
 	opennova::renderer::ObjectProjectionSphere unstamped;
@@ -527,6 +537,7 @@ void test_a_decoration_right_of_the_axis_is_collected() {
 //  `(PRNG_Next16_C() & 7) + 16` @ 0x5c7162 / @ 0x5c8ea9 / @ 0x5c8fd6]
 void test_the_fog_box() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 16);
 	kernel.world.registry.configure_pool(1, 16);
@@ -628,6 +639,7 @@ void test_the_fog_box() {
 // branch @ 0x5c8de6..0x5c8de9; the re-arm `(PRNG_Next16_C() & 7) + 16` @ 0x5c8ea9]
 void test_the_person_model_gate() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 16);
 	kernel.world.registry.configure_pool(1, 16);
@@ -637,6 +649,7 @@ void test_the_person_model_gate() {
 	modelled.occlusion_latch = 0;
 	modelless.occlusion_latch = 0;
 	im::ClientRuntime runtime("OcclusionCollectModelGate");
+	test_titles::jo_folds(runtime);
 	opennova::replication::ClientEntityState &bare = runtime.state().upsert(0x0009);
 	bare.type_id = 0x1234;
 	bare.cls = opennova::EntityClass::Infantry;
@@ -679,6 +692,7 @@ void test_the_person_model_gate() {
 //  `(PRNG_Next16_C() & 7) + 16` @ 0x5c8fd6]
 void test_the_building_type_skip() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 16);
 	kernel.world.registry.configure_pool(1, 16);
@@ -732,6 +746,7 @@ void test_the_building_type_skip() {
 //  @0x5C7B60 (@0x5C7D13), over the collect's admitted list]
 void test_the_draw_runs_the_husk_leg() {
 	auto kernel_heap = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel_heap->world);
 	opennova::mission::MissionKernel &kernel = *kernel_heap;
 	kernel.world.registry.configure_pool(0, 16);
 	const w::OcclusionFrameCamera cam = camera_down_x();

@@ -15,6 +15,7 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -46,8 +47,10 @@ world::EntityHandle player(world::World &world, uint8_t slot, uint8_t team, uint
 
 void test_roster_and_facts() {
 	world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = 0x10000u;
 	world.match.configure(rules);
 	world.preround_delay_seconds = 12;
@@ -61,6 +64,7 @@ void test_roster_and_facts() {
 	replication::LoopbackChannel joe_wire;
 	replication::LoopbackChannel loading_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_mp_session_peer = 1;
 	ctx.config.max_players = 4;
@@ -164,13 +168,16 @@ void test_roster_and_facts() {
 //  @0x50A2D0 (`+4 && !+5` @0x50B148)]
 void test_dedicated_host_slot_zero() {
 	world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = 0x10000u;
 	world.match.configure(rules);
 	const world::EntityHandle joe = player(world, 1, 2, 5, 100, "Joe");
 	replication::LoopbackChannel joe_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_mp_session_peer = 0;
 	ctx.config.max_players = 4;
@@ -202,6 +209,7 @@ void test_dedicated_host_slot_zero() {
 // @0x4c94f0].
 void test_total_logins() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	replication::LoopbackChannel local;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Lan, 0, &local);
@@ -211,6 +219,7 @@ void test_total_logins() {
 			inmatch::SocketMode::Lan, 0, &local);
 	CHECK(ctx.total_logins == 1);
 	inmatch::NapiNPServerCtx dedicated;
+	test_titles::jo_config(dedicated.config);
 	inmatch::test::bring_up_host(dedicated, inmatch::ConnectionMode::HostOnly,
 			inmatch::SocketMode::Lan);
 	CHECK(dedicated.total_logins == 0);

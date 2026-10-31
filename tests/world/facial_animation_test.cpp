@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -36,6 +37,7 @@ struct Motion : IRootMotionSource {
 struct Fixture {
 	ResourceIndex index;
 	World world;
+	bool world_jo = test_titles::jo_world(world);
 	def::DefItemDef definition{};
 	def::DefItemsFile definitions{};
 	Motion motion;

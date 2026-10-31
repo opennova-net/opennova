@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <memory>
 #include <utility>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -101,6 +102,7 @@ CollisionModel ramp_model() {
 
 struct Rig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &w = *wp;
     std::unique_ptr<CollisionWorld> cwp = std::make_unique<CollisionWorld>();
     CollisionWorld &cw = *cwp;

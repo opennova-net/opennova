@@ -9,6 +9,7 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 namespace {
 namespace w = opennova::world;
@@ -37,6 +38,7 @@ w::WeatherSeed seed_800() {
 
 void test_seed_installs_the_snapshot_and_zeroes_the_transients() {
 	w::World world;
+	test_titles::jo_world(world);
 	auto &ws = world.weather;
 	ws.command_quake(3);
 	ws.command_flash();
@@ -239,6 +241,7 @@ void test_entity_update_falls_the_drops_on_gameplay_ticks_only() {
 	// [orig: Precipitation_FallTick @ 0x5de8f0 from Entity_UpdateAllEntities
 	//  @ 0x4c2214 — behind the entity update's frame gate, on every peer]
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	w::Entity soldier;
 	soldier.kind = w::EntityKind::Organic;
@@ -355,6 +358,7 @@ void test_sun_fade_extreme_argument_keeps_the_spring_defined() {
 
 void test_quake_displaces_pool_entities_and_arms_the_local_shake() {
 	w::World world;
+	test_titles::jo_world(world);
 	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);

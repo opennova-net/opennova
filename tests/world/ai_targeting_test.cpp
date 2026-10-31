@@ -15,6 +15,7 @@
 #include <runtime/world/match.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -30,6 +31,7 @@ namespace {
 // arcs, 1000 u engage ranges and a nonzero engage fire delay.
 struct Scanner {
     std::unique_ptr<World> w = std::make_unique<World>();
+    bool w_jo = test_titles::jo_world(*w);
     int index = -1;
 
     AiEntity &e() { return *w->ai.at(index); }
@@ -114,6 +116,7 @@ static void test_engage_jitter_keys_on_the_target_brain() {
 //  Weapon_SpawnProjectileBurstWithSpread @0x4EBE61..0x4EBE66]
 static void test_rounds_mark_their_shooter() {
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
@@ -189,9 +192,11 @@ static void test_scripted_berserk_reaches_the_readers() {
     }
     {
         auto owned = std::make_unique<World>();
+        test_titles::jo_world(*owned);
         World &w = *owned;
         w.registry.configure_pool(0, 4);
         MatchRules rules;
+        test_titles::jo_match(rules);
         rules.game_type = opennova::game_type::kTeamDeathmatch;
         w.match.configure(rules);
         const auto spawn_player = [&w](uint8_t slot) {

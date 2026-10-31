@@ -1143,7 +1143,7 @@ private:
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
 	const Protocol *protocol_ = nullptr; // set_protocol
-	const world::TitleRules *rules_ = world::unset_title_rules(); // set_rules
+	const world::TitleRules *rules_ = nullptr; // set_rules
 	bool game_type_known_ = false;
 	bool mp_session_ = false;
 	bool authority_recipient_ = false;

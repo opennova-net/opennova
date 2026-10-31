@@ -231,7 +231,11 @@ void mount_queue_switch_out(World &world, LocalPlayerWeapon &w, PlayerViewState 
 	if (target != nullptr) {
 		if ((target->flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0) {
 			if (view != nullptr) view->scope_settled = true;
-			w.aim_range_q16 = target->action_fsm.scope_zero.default_metres;
+			// The rangefinder word, the title's (DFX2-120): the def's +0xA0, or dfx2.exe's -1
+			// [orig: @0x4DFB3B..0x4DFB44] [orig: Player_MountWeaponSlot @0x4DCAE0 - @0x4DCBDB
+			//  (dfx2.exe)].
+			w.aim_range_q16 = weapon_scope_mount_rangefinder(target->action_fsm.scope_zero,
+					world.rules.title().scope_zero_seed);
 		} else if (!same_category) {
 			if (view != nullptr) view->scope_settled = false;
 			world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
@@ -779,13 +783,16 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
 		w.slot.scope_zoom = weapon_slot_initial_zoom(static_cast<int32_t>(data.scope_max_mag),
 				data.scope_initial_mag, data.scope_min_mag,
 				local_slot_zoom_sniper_lock(world, data.hud_category));
-        w.slot.scope_zero = weapon_scope_zero_initial(w.def.scope_zero);
-        if ((flags & 3) != 0)
-            w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, w.slot.scope_zero);
-        // The zero-yaw term (MountSlot+8) from the seeded step: outside the
-        // flags & 3 gate, and never negated at the install [orig:
-        // WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b].
-        w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, w.slot.scope_zero);
+        // The zero words WeaponSlot_InitFromDef seeds, by the title (DFX2-120): the step, its
+        // elevation pitch under flags & 3, and the zero-yaw term (MountSlot+8) from the
+        // default step outside that gate, never negated at the install [orig:
+        // WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b] [orig: WeaponSlot_InitFromDef @0x53C0C0
+        // (@0x53C1E8..0x53C1F9) (dfx2.exe)].
+        const ScopeZeroSlotSeed zero = weapon_scope_zero_slot_seed(w.def.scope_zero,
+                flags, data.flags2, world.rules.title().scope_zero_seed);
+        w.slot.scope_zero = zero.step;
+        w.slot.zero_pitch = zero.pitch;
+        w.slot.zero_yaw = zero.yaw;
 		// The mount reads the def's own slot of the slot table, at its combo (rank +
 		// 65 * category): clip = the slot's loaded rounds, reserve = the def's
 		// ammo-class pool, the scope words the slot's. Retail mounts nothing but a
@@ -807,10 +814,12 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
 			const bool landed = own != nullptr && own->adm_index == installed;
 			if (landed) {
 				w.slot.clip = weapon_inventory_loaded_rounds(world.tables.weapons, *inventory, combo);
+                // The slot's own zero words, as its init or the zero adjust left them (the
+                // personal slot IS the table's entry in retail).
                 w.slot.scope_zero = own->scope_zero;
                 w.slot.scope_zoom = own->scope_zoom;
-                w.slot.zero_pitch = weapon_scope_zero_pitch(w.def.scope_zero, own->scope_zero);
-                w.slot.zero_yaw = weapon_scope_zero_yaw(w.def.scope_zero, own->scope_zero);
+                w.slot.zero_pitch = own->zero_pitch;
+                w.slot.zero_yaw = own->zero_yaw;
 			} else {
 				w.slot.clip = 0;
 			}
@@ -887,9 +896,12 @@ void mount_install(World &world, LocalPlayerWeapon &w, const WeaponInstallData &
     if (view_writes) {
         if (category_changed && (data.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0)
             world.weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
-        // [orig: dword_B76808 = Def+0xA0 @0x4DFB3B..0x4DFB44]
+        // The title's rangefinder word (DFX2-120) [orig: dword_B76808 = Def+0xA0
+        //  @0x4DFB3B..0x4DFB44] [orig: Player_MountWeaponSlot @0x4DCAE0 - -1 @0x4DCBDB
+        //  (dfx2.exe)]
         if ((data.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0)
-            w.aim_range_q16 = data.scope_zero.default_metres;
+            w.aim_range_q16 = weapon_scope_mount_rangefinder(data.scope_zero,
+                    world.rules.title().scope_zero_seed);
         player_view_weapon_mount(view, data.flags, category_changed);
     }
 	w.def_name = data.name;

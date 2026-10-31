@@ -17,6 +17,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -50,6 +51,7 @@ struct FlatField {
 
 struct Rig {
     std::unique_ptr<World> owner = std::make_unique<World>();
+    bool owner_jo = test_titles::jo_world(*owner);
     World &w = *owner;
     FlatField flat;
     EntityHandle source;

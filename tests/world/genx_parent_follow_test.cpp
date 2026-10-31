@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "item_pool_step.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -94,6 +95,7 @@ int main() {
     CHECK(def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItemsDef),
                                  sizeof(kItemsDef) - 1, &file) == 0);
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     World &w = *heap;
     for (int pool = 0; pool <= 3; ++pool) w.registry.configure_pool(pool, 8);
     w.weather.tod_fixed24 = uint32_t(12 * 65536) << 8;

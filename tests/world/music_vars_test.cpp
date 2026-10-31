@@ -14,6 +14,7 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -25,6 +26,7 @@ static int failures = 0;
 
 int main() {
 	World w;
+	test_titles::jo_world(w);
 	// No local player: the shared health pair reads 0 / 100, both vars pump zero.
 	CHECK(local_player_health(w) == 0);
 	CHECK(local_player_max_health(w) == 100);

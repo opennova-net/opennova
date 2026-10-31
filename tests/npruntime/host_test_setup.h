@@ -20,6 +20,7 @@
 #include <net/protocol/protocol.h>
 
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace opennova::inmatch::test {
 
@@ -61,6 +62,7 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
                           uint32_t host_key = 0,
                           replication::ISessionTransport *local_client = nullptr) {
 	GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 2;
 	bring_up_host(ctx, mode, socket, host_key, local_client, config);
 }

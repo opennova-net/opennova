@@ -148,7 +148,7 @@ void HudFrameCompiler::element_vehicle_panel(const HudFrameState &state, float w
 		//  <i>(Driver)<-i>" @0x5A4727, "%s  <i>(%s)<-i>" @0x5A479F / @0x5A4831, "%s
 		//  <i>(Gunner)<-i>" @0x5A47B7 / @0x5A4849; HUD_DrawTextLeft_HalfBright(bold, x, y, text,
 		//  g_HudposTagcolorGood, 1) @0x5A474C, @0x5A47DE, @0x5A4871 (dfx2.exe)].
-		if (state.title != nullptr && state.title->hud_vehicle_panel_riders) {
+		if (require_title(state.title, "hud::element_vehicle_panel").hud_vehicle_panel_riders) {
 			const float x = sx(static_cast<float>(base_x), w);
 			float y = sy(static_cast<float>(base_y + vp.silhouette_h), h);
 			const float step = static_cast<float>(static_cast<int>(bf.char_height('W', bscale)));

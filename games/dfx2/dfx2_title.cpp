@@ -335,10 +335,13 @@ Title make() {
 	//  MaxPlayers stores its atol alone [orig: ServerConfig_ApplyHostSetting @0x4a6060 -
 	//  @0x4a6289..0x4a6296 (dfx2.exe)].
 	t.max_players_switch = false;
-	// DFX2-29: a fresh profile's kit pages (above); the single-player page is the rules' spawn kit
-	// too (DFX2-33, dfx2_rules.cpp).
+	// DFX2-29: a fresh profile's kit pages (above); the single-player page's table is the rules'
+	// spawn kit's too (DFX2-33, dfx2_single_player_kit).
 	t.profile_single_player_kit = kSinglePlayerKit;
 	t.profile_class_kits = kProfileClassKits;
+	// DFX2-12: the mission start's fixed class in the side block, 8 or 7 in a mission of type 2
+	// [orig: Game_StartMission @0x521530 - @0x52299E..0x5229BD (dfx2.exe)].
+	t.session_loadout_class_fixed = true;
 	// DFX2-58: the map views' ceiling 6.0 (flt_7CC0C8): the CMAP window's [orig:
 	// CMapWindow_HandleEvent @0x546a60 - @0x5454e6, @0x546fcc (dfx2.exe)] and the DEATH map
 	// pane's [orig: sub_550690 @0x550922 / @0x550967 (the reset @0x550974);
@@ -467,6 +470,12 @@ Title make() {
 	//  (dfx2.exe)].
 	t.host_vehicle_missions = true;
 	t.host_switch_starts_off = true;
+	// DFX2-10: the host screen's ARMORY is word 3 and its MISSION 2 [orig:
+	//  HostDialog_PopulateWeaponRestrictionList @0x5547b0 - the switch @0x554805 (-1 and 2 MISSION,
+	//  3 ARMORY); @0x5558a0 - the step past 2 @0x55590F; @0x5562c0 - WPN_ARMORY's 3 @0x5563DA,
+	//  WPN_MISSION's 2 @0x5563F8 (dfx2.exe)], the twins of Jointops.exe's @0x556600, @0x5576c0 and
+	//  @0x5580f0.
+	t.host_armory_word = 3;
 	// DFX2-73: the three category lists carry no NONE row [orig: UI_PopulateThreeCategoryLists
 	//  @0x565d10 - the three ListWidget_SortRows @0x565e33..0x565e4d go straight to the ammo
 	//  populate @0x565e55; no TextResource_GetStringWithFallback("Menu", "NONE") (dfx2.exe)], the
@@ -505,6 +514,19 @@ Title make() {
 	//  PlayerInfo_UpdatePlayerPreviewAnimation @0x55bed0 - @0x55bf03..0x55bf05, the target
 	//  @0x55bf0a, the spin @0x55bf9c (dfx2.exe)].
 	t.player_info_preview_hover = false;
+	// DFX2-121: the corner radar's spawn zoom is the constant 4.0 [orig: Player_InitPlayer
+	//  @0x4DE6F0 - `mov dword_B6FA3C, 40000h` @0x4DE847, the twin of Jointops.exe's mission-scaled
+	//  g_SpinmapZoom store @0x4E1763 (dfx2.exe)].
+	t.spinmap_spawn_zoom_q16 = 0x40000;
+	// DFX2-122: no tip: every producer calls the empty handler and the init is empty [orig:
+	//  nullsub_11 @0x5B5BA0 (`retn 4`), from Player_ToggleWeaponScope @0x4DC2E8 and
+	//  Entity_ProcessVehicleAttach @0x435A37 among the rest; nullsub_36 @0x5B5AA0 from
+	//  Render_InitMissionTextures @0x5856F0; CTipSystem_ShowTip @0x5B5B30 no caller (dfx2.exe)].
+	t.hud_tips = false;
+	// DFX2-124: the end-round score lines' team fallbacks [orig: HUD_DrawEndRoundStatsOverlay
+	//  @0x5B6C20 - "!Blue Team" (0x7DA364) @0x5B7372, "!Red Team" (0x7DA34C) @0x5B73B5, the twin of
+	//  Jointops.exe's @0x5B7CD0 (dfx2.exe)].
+	t.end_round_team_fallbacks = { "!Blue Team", "!Red Team" };
 	return t;
 }
 
@@ -513,6 +535,10 @@ Title make() {
 const Title &dfx2_title() {
 	static const Title title = make();
 	return title;
+}
+
+const char *const *dfx2_single_player_kit() {
+	return kSinglePlayerKit;
 }
 
 } // namespace opennova::games

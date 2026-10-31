@@ -19,6 +19,7 @@
 #include <runtime/world/world.h>
 
 #include "death_clip_source.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::crt;
@@ -39,6 +40,7 @@ int failures = 0;
 // MSVC's Debug stack frame.
 struct HeapWorldFixture {
     std::unique_ptr<World> world_owner = std::make_unique<World>();
+    bool world_owner_jo = test_titles::jo_world(*world_owner);
     World &world = *world_owner;
 };
 
@@ -212,6 +214,7 @@ FlightResult fly_one_tick(FixedVec3 velocity, uint32_t flags = 0,
                           int32_t drag_fp16 = 0, int32_t min_stable_velocity = 0,
                           int32_t origin_z = 10 * 65536, int32_t water_z = 0) {
     World world;
+    test_titles::jo_world(world);
     world.env.water_z = water_z;
     AmmoTableEntry ammo;
     ammo.name = "FLIGHT";
@@ -560,6 +563,7 @@ void test_nodie_and_nontransparent_damage_gates() {
 
 void test_posed_head_zone_multiplier() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     Entity shooter;
     shooter.kind = EntityKind::Organic;
@@ -1092,6 +1096,7 @@ void test_visual_only_rounds_have_no_gameplay_consequences() {
 
 void test_visual_person_proxy_keeps_wire_identity_out_of_authority() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
 
     // Occupy local slot zero so valid wire H=0 and local L=1 are distinct.
@@ -1255,6 +1260,7 @@ CollisionModel knife_person_face_model(uint8_t material) {
 
 void test_knife_instant_kill_zone_raycast() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
 
@@ -1431,6 +1437,7 @@ void test_knife_instant_kill_zone_raycast() {
 // not serve projectile collision on a visual client.
 void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
     world.rules.mp_session = true;
@@ -1544,6 +1551,7 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
 // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
 void test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.rules.mp_session = true;
     world.rules.projectile_authority = false;
@@ -1610,6 +1618,7 @@ void test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises() {
 // stops the round.
 void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.rules.mp_session = true;
     world.rules.projectile_authority = false;
@@ -1660,6 +1669,7 @@ void test_visual_dynamic_proxy_excludes_shooter_self_slot() {
 // owner (+0x170) @0x44454E..0x444554]
 void test_visual_throwable_motor_sweeps_wire_proxies() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
     world.rules.mp_session = true;
@@ -1747,6 +1757,7 @@ void test_visual_throwable_motor_sweeps_wire_proxies() {
 // remote-player proxy: torso stand-in at the decoded position, consequence-free.
 void test_visual_infantry_proxy_joins_person_walk() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.rules.mp_session = true;
     world.rules.projectile_authority = false;
@@ -1800,6 +1811,7 @@ void test_visual_infantry_proxy_joins_person_walk() {
 void test_person_walk_orders_local_player_by_its_server_handle() {
     const auto run_case = [](uint16_t local_wire_h) {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 8);
         world.rules.mp_session = true;
         world.rules.projectile_authority = false;
@@ -2597,6 +2609,7 @@ void test_terrain_impact_samples_charmap_surface() {
     };
     for (const Variant &v : variants) {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 4);
         Entity s;
         s.kind = EntityKind::Organic;
@@ -2662,6 +2675,7 @@ void test_terrain_impact_samples_charmap_surface() {
 void test_terrain_impact_emits_permanent_scorch() {
     crt_srand(1);
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     Entity shooter;
     shooter.kind = EntityKind::Organic;
@@ -2729,6 +2743,7 @@ void test_terrain_impact_emits_permanent_scorch() {
 //  @0x4E9D29, Z = g_EnvWaterHeightFixed @0x4E9D24]
 void test_water_impact_splash_is_pushed_along_the_ray() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     AmmoTableEntry ammo;
     ammo.name = "SPLASH";
@@ -3130,6 +3145,7 @@ void test_entity_dud_naming_the_first_def_is_a_miss() {
 
 void test_terrain_stop_records_the_round() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     Entity shooter;
     shooter.kind = EntityKind::Organic;
@@ -3181,6 +3197,7 @@ void test_terrain_stop_records_the_round() {
 //  the remap lives in Weapon_RaycastAndSpawnImpact case 3 @0x4e8880..0x4e8888]
 void test_bullet_building_material_is_plain_plus_four() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(2, 4);
 

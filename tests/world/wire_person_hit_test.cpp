@@ -21,6 +21,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/wire_person_hit.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -44,6 +45,7 @@ constexpr int32_t kQ = 65536;
 // round sim's wire_person_body seam loads and stores, as the joiner role's.
 struct Joiner {
     std::unique_ptr<World> owner = std::make_unique<World>();
+    bool owner_jo = test_titles::jo_world(*owner);
     World &world = *owner;
     CollisionWorld collision;
     EntityHandle local;

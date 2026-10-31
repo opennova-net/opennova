@@ -12,6 +12,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/protocol/protocol.h> // title_protocol (the folds read their protocol)
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -39,6 +40,7 @@ int main() {
 	// Heap-allocated: ClientState is far too large for the 1 MB Windows test
 	// stack (the same trap #515 fixed in ai_test).
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*view_owned);
 	ClientReplicaPipeline &view = *view_owned;
 	// The session's protocol, which the 0x25 fold reads (ProtocolInMatch::s2c_25).
 	view.set_protocol(opennova::title_protocol("jo"));
@@ -101,6 +103,7 @@ int main() {
 	CHECK(view.drain_game_texts().empty());
 	// The listen host's own loopback posts them too (no authority gate).
 	auto host_owned = std::make_unique<ClientReplicaPipeline>();
+	test_titles::jo_folds(*host_owned);
 	host_owned->set_authority_recipient(true);
 	host_owned->apply(s2c::FORMATTED_GAME_TEXT, {2, 'R', 0, 1});
 	CHECK(host_owned->drain_game_texts().size() == 1);
@@ -135,6 +138,7 @@ int main() {
 	// slot never gates [orig: Chat_DispatchToChannel @0x42b91e..0x42b943].
 	{
 		auto gate_owned = std::make_unique<ClientReplicaPipeline>();
+		test_titles::jo_folds(*gate_owned);
 		ClientReplicaPipeline &g = *gate_owned;
 		g.state().roster[4].bound = true;
 		g.state().roster[4].radio_mute_flags = 2;
@@ -161,6 +165,7 @@ int main() {
 	// Chat_DispatchToChannel @0x42b910].
 	{
 		auto order_owned = std::make_unique<ClientReplicaPipeline>();
+		test_titles::jo_folds(*order_owned);
 		ClientReplicaPipeline &o = *order_owned;
 		const std::vector<uint8_t> kill = {1, 2, 3, 0xFF, 0, 0, 0, 0};
 		o.apply(s2c::GAME_EVENT, kill);

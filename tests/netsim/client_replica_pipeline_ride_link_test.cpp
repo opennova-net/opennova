@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstdio>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -48,6 +49,7 @@ ns::ClientEntityState &person(ns::ClientReplicaPipeline &view, uint16_t handle, 
 
 bool run_the_link_holds_and_spends() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_remote_motion_mode(true);
 	Ground hull;
 	Ground deck;
@@ -91,6 +93,7 @@ bool run_the_link_holds_and_spends() {
 
 bool run_the_grounds_ground_and_self_exclusions() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_remote_motion_mode(true);
 	Ground hull;
 	Ground deck;
@@ -117,6 +120,7 @@ bool run_the_grounds_ground_and_self_exclusions() {
 	            "the ground's ground's occupant links when the ground's does not")) return false;
 	// The client's own row runs the World's link, not this one.
 	ns::ClientReplicaPipeline own;
+	test_titles::jo_folds(own);
 	own.set_remote_motion_mode(true);
 	own.set_ground_occupant_provider([&](uint16_t ground, uint16_t &occupant, uint16_t &next) {
 		occupant = kDriver;

@@ -28,6 +28,7 @@
 #include "common/file_io.h"
 #include "common/temp_dir.h"
 #include "common/test_paths.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::def;
@@ -65,6 +66,7 @@ static int colt_sights_through_the_mount() {
 	}
 	const mission::BootFileSource files = mission::boot_files_from_index(index);
 	mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	CHECK(kernel.load_weapon_table(files, nullptr));
 	const DefWeaponDef *colt = nullptr;
 	const DefWeaponDef *m4 = nullptr;
@@ -315,6 +317,7 @@ int main() {
 		CHECK(inmatch::resolve_loadout_submit_combo(slots_table, &inventory, 1, 900) == 900);
 
 		world::World submit_world;
+		test_titles::jo_world(submit_world);
 		submit_world.tables.weapons = slots_table;
 		playersav::Record profile;
 		world::LocalPlayerLoadout loadout;

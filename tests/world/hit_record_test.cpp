@@ -20,6 +20,7 @@
 #include <runtime/world/infantry.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -33,6 +34,7 @@ namespace {
 
 struct KillRig {
     std::unique_ptr<World> w = std::make_unique<World>();
+    bool w_jo = test_titles::jo_world(*w);
     EntityHandle shooter;
     EntityHandle npc;
 

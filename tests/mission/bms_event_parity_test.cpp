@@ -10,6 +10,7 @@
 
 #include <runtime/mission/event_runtime.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using world::World;
@@ -51,6 +52,7 @@ static bms::Trigger single_trigger(bms::SingleTriggerType sub, int32_t ssn, int3
 //  removed row @0x43ea69]
 static void test_single_alive_reads_the_bms_ref_rows() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     world::Entity live{};
@@ -113,6 +115,7 @@ static void test_single_alive_reads_the_bms_ref_rows() {
 //  @0x453a64]
 static void test_01tr_event34_chain_fires_when_the_placed_item_dies() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     world::Entity item{};
@@ -199,6 +202,7 @@ static bms::Action action(bms::ActionType type, int32_t sub, int32_t p1, int32_t
 //  @0x43cf2c, the pool-2 aiRuntime gate @0x43cf64, pools 0/1 @0x43cf97/@0x43cfcd]
 static void test_change_group_ai_fans_pools_2_0_1() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     const world::EntityHandle brained2 = spawn_row(w, 2, 301, 6);
@@ -242,6 +246,7 @@ static void test_change_group_ai_fans_pools_2_0_1() {
 //  @0x50a2ac, Entity_Destroy @0x50a2c4]
 static void test_vaporize_notifies_and_destroys() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     // Our local player row carries net_id 0; SSN 0 must not reach it.
@@ -314,6 +319,7 @@ static void test_vaporize_notifies_and_destroys() {
 //  @0x43d0a8..0x43d0b5, Y @0x43d0b7..0x43d0c4]
 static void test_area_ai_reads_the_resolved_record() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     world::Aabb zone{};
@@ -373,6 +379,7 @@ static void test_area_ai_reads_the_resolved_record() {
 //  +0x18 x_max, +0x1C y_max @0x45318D..0x4531AB]
 static void test_area_ai_copies_the_record_words() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     // The record's words in Area's order: x_min, x_max, y_min, y_max.
@@ -402,6 +409,7 @@ static void test_area_ai_copies_the_record_words() {
 //  pools 0/1/2 @0x43df20/@0x43df41/@0x43df69]
 static void test_group_zero_and_single_ai_guards() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     const world::EntityHandle ungrouped = spawn_row(w, 0, 601, 0, 1);
@@ -446,6 +454,7 @@ static void test_group_zero_and_single_ai_guards() {
 // @0x4543b1/@0x4543eb; case 14 shl @0x454508]
 static void test_misvar_wraps_and_subgoal_shift_masks() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     mission::BmsEventSystem sys;
@@ -468,6 +477,7 @@ static void test_misvar_wraps_and_subgoal_shift_masks() {
 // @0x45444a, @0x454450]
 static void test_play_wav_list_gate() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     mission::BmsEventSystem sys;
@@ -492,6 +502,7 @@ static void test_play_wav_list_gate() {
 // @0x4535a0 — @0x4535cd, @0x4535c2, @0x4535b6..0x4535bc, @0x4535b4]
 static void test_special_subtypes() {
     World w;
+    test_titles::jo_world(w);
     w.cached.humans = 1;
     configure_pools(w);
     mission::BmsEventSystem sys;

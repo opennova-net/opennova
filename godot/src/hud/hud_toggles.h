@@ -196,10 +196,11 @@ public:
 	bool is_server_status_view() const;
 	bool is_server_status_score_list_open() const;
 	bool is_quit_dialog_open() const;
-	// The tip (engine hud/tip_system.h): the drained producer events, the
-	// HUD clock's main frames of countdown, the SP restart's full reset, the
-	// two options and the showing tip for the draw.
-	void apply_tip_events(const PackedByteArray &p_events);
+	// The tip (engine hud/tip_system.h): the drained producer events under the
+	// session title of `p_sim` (Title::hud_tips), the HUD clock's main frames of
+	// countdown, the SP restart's full reset, the two options and the showing tip for
+	// the draw.
+	void apply_tip_events(const PackedByteArray &p_events, const Ref<Simulation> &p_sim);
 	void advance_tip_frames(int p_frames);
 	void restart_round();
 	void set_tip_options(bool p_keyboard_tips, bool p_gameplay_tips);

@@ -41,6 +41,7 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_server.h> // AdminSession
 #include <runtime/inmatch/admin_console.h>
+#include <runtime/inmatch/client_runtime.h> // the own client's death-screen latch
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -61,6 +62,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -100,7 +102,9 @@ const std::string kServerRemoved = "0.0.0.0:0 : SERVER PLAYER REMOVED \"Host\"."
 // dedicated host with the remote alone. Heap-held: the World.
 struct ListenHost {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	MemoryFiles files;
 	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
 	ns::LoopbackChannel own_loop;
@@ -496,8 +500,62 @@ void test_admin_goto_over_a_menu_screen_drops_the_queued_action() {
 
 } // namespace
 
+// A menu screen's confirmation (the death screen's YES, the in-game CONFIRM_YES) and the admin's
+// GOTO close the in-game screens ahead of action 3, which drops the DEATH screen's open latch
+// with no close leg, so the triggers' clear runs no title's close call; the input pass's own
+// action 3 (the HUD quit dialog's yes, a console code 3) closes none.
+// [orig: Game_CloseInGameScreens @0x54B940 - the zero @0x54B954; DeathScreen_OnConfirmYes
+//  @0x55353A, UI_IngameConfirmExitCommand @0x55546A, CAdminServer_HandleGotoCommand @0x404A4E,
+//  each ahead of its action 3; Input_HandleActionBinding case 3 @0x49AF42 closes none]
+void test_a_screens_confirmation_drops_the_death_menu_latch() {
+	using inmatch::ExitSite;
+	for (const ExitSite site : {ExitSite::MenuScreen, ExitSite::Admin,
+				ExitSite::AdminOverMenuScreen, ExitSite::Input}) {
+		ns::LoopbackChannel loop;
+		auto own = std::make_unique<inmatch::ClientRuntime>(loop);
+		test_titles::jo_folds(*own);
+		ns::ClientState &state = own->state();
+		CHECK(state.take_death_menu_open(/*triggered=*/true, /*menu_open=*/false));
+		inmatch::RemoteAdminBinding binding;
+		binding.client = own.get();
+		inmatch::input_action_exit(binding, site);
+		const bool dropped = site != ExitSite::Input;
+		CHECK(state.death_menu_open_latch == !dropped);
+		// The triggers' clear runs the close leg over a latch left up alone.
+		(void)state.take_death_menu_open(/*triggered=*/false, /*menu_open=*/false);
+		CHECK(state.take_death_menu_close() == !dropped);
+	}
+}
+
+// The in-game RESTART, and dfx2.exe's DEATH-screen RESTART_LEVEL that runs it, close the in-game
+// screens ahead of exit reason 4: out of a session the DEATH screen's open latch drops with no
+// close leg (the screen's picks are dropped); in a session the command does nothing.
+// [orig: UI_IngameRestartCommand @0x555410 - is_in_session @0x555410, Game_CloseInGameScreens
+//  @0x555419, g_MissionExitReason = 4 @0x555437]
+// [orig: DeathScreen_OnRestartLevel @0x550BF0 - Game_CloseInGameScreens @0x550C20 (dfx2.exe)]
+void test_the_restart_drops_the_death_menu_latch() {
+	for (const bool session : {false, true}) {
+		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
+		world->rules.mp_session = session;
+		ns::LoopbackChannel loop;
+		auto own = std::make_unique<inmatch::ClientRuntime>(loop);
+		test_titles::jo_folds(*own);
+		ns::ClientState &state = own->state();
+		CHECK(state.take_death_menu_open(/*triggered=*/true, /*menu_open=*/false));
+		CHECK(inmatch::ingame_restart(*world, own.get()) == !session);
+		CHECK(state.death_menu_open_latch == session);
+		CHECK((world->mission_exit_reason == w::kWorldMissionExitRestart) == !session);
+		// The triggers' clear runs the close leg over the latch a session's command left alone.
+		(void)state.take_death_menu_open(/*triggered=*/false, /*menu_open=*/false);
+		CHECK(state.take_death_menu_close() == session);
+	}
+}
+
 int main() {
 	test_admin_exit_removes_the_host_player_at_the_next_receive_pump();
+	test_a_screens_confirmation_drops_the_death_menu_latch();
+	test_the_restart_drops_the_death_menu_latch();
 	test_admin_exit_runs_the_own_client_callback();
 	test_input_exit_holds_the_twin();
 	test_input_exit_leaves_at_the_teardown_pump();

@@ -77,6 +77,7 @@
 #include "conn_fixture.h"
 #include "host_test_setup.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -202,11 +203,13 @@ bool check_spawn_protection_seeded_at_creation() {
 	//  @0x51A882]
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.is_in_session = 1;
 		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config.max_players = 4;
 		w::World world;
+		test_titles::jo_world(world);
 		world.rules.mp_session = true;
 		world.registry.configure_pool(0, 8);
 		world.registry.configure_pool(3, 8);
@@ -239,11 +242,14 @@ bool check_spawn_protection_seeded_at_creation() {
 	// The listen host's own player takes the same 620 at its join, its own C2S 0x0B's.
 	{
 		w::World world;
+		test_titles::jo_world(world);
 		world.registry.configure_pool(0, 8);
 		world.registry.configure_pool(3, 8);
 		ns::LoopbackChannel loopback;
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 4;
 		settings.start_delay = 7;
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
@@ -272,15 +278,18 @@ bool check_spawn_protection_seeded_at_creation() {
 
 bool check_spawn_protection_countdown_and_gates() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.network_quality_broadcast_countdown = 100;
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = ctx.config.game_type;
 	world.match.configure(rules);
 	ctx.world = &world;
@@ -331,6 +340,7 @@ bool check_spawn_protection_countdown_and_gates() {
 
 bool check_spawn_protection_cleared_by_validated_fire() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
@@ -347,7 +357,7 @@ bool check_spawn_protection_cleared_by_validated_fire() {
 	auto dispatch_fire = [&](const std::vector<uint8_t> &body) {
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(c2s::FIRED_ROUND, body));
-		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
+		(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn, msgs, 100, roster, &world);
 	};
 	// A spoofed shooter is rejected before the clear.
 	dispatch_fire(fire_body(conn, other.packed, 5, client_tick));
@@ -382,6 +392,7 @@ bool check_spawn_protection_cleared_by_validated_fire() {
 
 bool check_deploy_seeds_protection_and_armory_state() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(3, 8);
@@ -397,6 +408,7 @@ bool check_deploy_seeds_protection_and_armory_state() {
 	conn.link.preround_loadout_latch = false;
 	conn.link.death_cause_revivable = true;
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	world.preround_delay_seconds = 4;
 	const std::vector<ProtocolMessage> replies =
 			inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF, nullptr,
@@ -430,6 +442,7 @@ bool check_deploy_seeds_protection_and_armory_state() {
 // ItemList_FindIndexByTypeId @0x49E131]
 bool check_humans_count_the_visible_players() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	auto spawn = [&](bool def, uint32_t flags) {
 		w::Entity e;
@@ -446,6 +459,7 @@ bool check_humans_count_the_visible_players() {
 	spawn(false, w::kEntityFlagPlayer);
 	spawn(true, w::kEntityFlagPlayer | w::kEntityFlagDead);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	inmatch::Server_TickUpdate(ctx);
@@ -473,6 +487,7 @@ bool check_humans_count_the_visible_players() {
 //  follows the Server_TickUpdate call @0x5266B6]
 bool check_recount_precedes_the_entity_update() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.tables.ammo.entries.resize(2);
 	w::AmmoTableEntry &rifle = world.tables.ammo.entries[1];
@@ -511,6 +526,7 @@ bool check_recount_precedes_the_entity_update() {
 	const w::EntityHandle victim = spawn_member(5.0f, 0x21);
 	spawn_member(-200.0f, 0x22);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	inmatch::Server_TickUpdate(ctx); // the first periodic second
@@ -542,6 +558,7 @@ bool check_recount_precedes_the_entity_update() {
 //  precedes the Server_TickUpdate call @0x5266B6 (its receive pump @0x51D895)]
 bool check_server_tick_leaves_the_pending_sounds() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 2);
 	world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
 	// 330 units away: (62 * 330 / 330) >> 2 = 15 ticks.
@@ -549,6 +566,7 @@ bool check_server_tick_leaves_the_pending_sounds() {
 	if (!expect(world.out.fire_sounds.pending_count() == 1, "the far report waits in a slot"))
 		return false;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	inmatch::Server_TickUpdate(ctx);
@@ -566,10 +584,12 @@ bool check_server_tick_leaves_the_pending_sounds() {
 
 bool check_flag_refresh_round_robin() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 8);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kCaptureTheFlag;
 	world.match.configure(rules);
 	const w::EntityHandle player = w::spawn_remote_player(world, player_spawn(10, 20, 2));
@@ -593,6 +613,7 @@ bool check_flag_refresh_round_robin() {
 	const w::EntityHandle flag_b = spawn_flag(4093, 200.0f);
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -657,10 +678,12 @@ bool check_flag_refresh_round_robin() {
 bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 		bool expect_kill, bool uplinked = false) {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type_value;
 	world.match.configure(rules);
 	const w::Vec3 carrier_position{30.0f, 40.0f, 2.0f};
@@ -683,6 +706,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 	world.registry.get(carrier)->mounted_child = flag;
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -755,6 +779,93 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 			"the carrier dies through the ordinary death transaction");
 }
 
+// A bay capture's records: the 0x13 feed at the carried flag's words, then in
+// CTF the flag's 0x12 removal and no 0x2F; in any other type the drop's 0x2F at
+// the carrier (Z + 0x4000, no parent, the carried bit clear) and the
+// definition-pose sync's 0x2F at home, in that order, and no 0x2F of the
+// capture's own.
+// [orig: Server_ProcessScoringAndBroadcast @0x5169C0 - the 0x13 @0x516A37, the
+//  CTF test @0x516A3C, Server_RemoveEntityAndNotify @0x516A49,
+//  Entity_DropCarriedObject @0x516A55 (its 0x2F @0x439F34),
+//  Entity_SyncPositionFromDefinition @0x516A5B (its 0x2F @0x43AB40)]
+bool check_flag_capture_fans_its_feed_then_the_drop_and_the_sync(uint32_t game_type_value) {
+	const bool ctf = game_type_value == game_type::kCaptureTheFlag;
+	w::World world;
+	test_titles::jo_world(world);
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	test_titles::jo_match(rules);
+	rules.game_type = game_type_value;
+	world.match.configure(rules);
+	const w::Vec3 carrier_position{30.0f, 40.0f, 2.0f};
+	const w::EntityHandle carrier = w::spawn_remote_player(world,
+			player_spawn(carrier_position.x, carrier_position.y, carrier_position.z));
+	world.match.upsert_player({carrier, 3, "Carrier"});
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4095;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position = {5.0f, 6.0f, 2.0f};
+	flag_seed.position = carrier_position;
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	world.registry.get(carrier)->mounted_child = flag;
+
+	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
+	ctx.config.game_type = game_type_value;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+
+	tick_to_periodic_second(ctx);
+	drain(remote);
+	const w::FixedVec3 at_capture = world.registry.get(carrier)->position.q16();
+	world.match.record_flag_capture(world, carrier, flag);
+	inmatch::Server_TickUpdate(ctx); // not a periodic second: no refresh joins them
+	const std::vector<ns::Datagram> sent = drain(remote);
+	int feed_at = -1;
+	int remove_at = -1;
+	int first_state_at = -1;
+	for (size_t i = 0; i < sent.size(); ++i) {
+		const ns::Datagram &d = sent[i];
+		if (d.tag == s2c::GAME_EVENT && d.body == std::vector<uint8_t>{0x13,
+				static_cast<uint8_t>(carrier.slot()), 0xFF, 0xFF, 30, 0, 40, 0})
+			feed_at = static_cast<int>(i);
+		if (d.tag == s2c::ENTITY_REMOVE && remove_at < 0) remove_at = static_cast<int>(i);
+		if (d.tag == s2c::OBJECTIVE_ENTITY_STATE && first_state_at < 0)
+			first_state_at = static_cast<int>(i);
+	}
+	const std::vector<ObjectiveEntityState> states = objective_states(sent);
+	if (ctf) {
+		return expect(feed_at >= 0 && remove_at > feed_at && states.empty() &&
+						world.registry.get(flag) == nullptr &&
+						!world.registry.get(carrier)->mounted_child.valid(),
+				"a CTF capture fans its 0x13 then the flag's 0x12, never a 0x2F");
+	}
+	if (!expect(feed_at >= 0 && first_state_at > feed_at && remove_at < 0,
+			"the capture's 0x13 leads its 0x2F records and no 0x12 follows"))
+		return false;
+	return expect(states.size() == 2 &&
+					states[0].entity_handle == flag.packed && states[0].attach_handle == 0xFFFF &&
+					(states[0].flags_byte & w::kEntityFlagCarried) == 0 &&
+					states[0].pos_x == at_capture.x && states[0].pos_y == at_capture.y &&
+					states[0].pos_z == at_capture.z + 0x4000 &&
+					states[1].entity_handle == flag.packed && states[1].attach_handle == 0xFFFF &&
+					states[1].pos_x == 5 * 65536 && states[1].pos_y == 6 * 65536 &&
+					states[1].pos_z == 2 * 65536 &&
+					!world.registry.get(carrier)->mounted_child.valid(),
+			"a non-CTF capture fans the drop's 0x2F at the carrier, then the sync's at home");
+}
+
 // The flag reset's death is the player body's edge on its Health -1, raised in
 // the same frame's entity update, after the tick's send pump and ahead of the
 // next receive pump (D-NET-550; the edge's own since D-AI-9's org2 half, its
@@ -770,11 +881,13 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 //  NapiNPServerMsg_DeathTimeoutReset -- +360 @0x51057B, +364 @0x510587]
 bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool uplinked) {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.rules.logic_authority = true;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kCaptureTheFlag;
 	world.match.configure(rules);
 	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
@@ -793,6 +906,7 @@ bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool up
 	world.registry.get(carrier)->mounted_child = flag;
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -848,11 +962,13 @@ bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool up
 //  reads +0x178 @0x516F47, the scoring @0x516FB0]
 bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.rules.logic_authority = true;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kCaptureTheFlag;
 	world.match.configure(rules);
 	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
@@ -884,6 +1000,7 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 	body->spawn_phase = 64;
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -912,11 +1029,13 @@ bool check_flag_reset_credits_a_staged_attacker(bool staged) {
 // NapiNPServerMsg_0x04D_ChangeTeam -- Flags |= 2 @0x519061 / @0x5190CF]
 bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.rules.logic_authority = true;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kCaptureTheFlag;
 	world.match.configure(rules);
 	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
@@ -936,6 +1055,7 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 	world.cached.client_preround_timer = 2; // the own client's copy holds the update
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -992,9 +1112,11 @@ bool check_flag_reset_waiting_edge_skips_a_dead_body() {
 
 bool check_team_downed_resend() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamDeathmatch;
 	world.match.configure(rules);
 	const w::EntityHandle victim = w::spawn_remote_player(world, player_spawn(0, 0, 0, 1));
@@ -1005,6 +1127,7 @@ bool check_team_downed_resend() {
 	world.match.upsert_player({teammate, 3, "Mate"});
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1127,6 +1250,7 @@ bool check_team_downed_resend() {
 	// Non-team game types never run the producer.
 	roster[0].link.death_cause_revivable = true;
 	w::MatchRules solo;
+	test_titles::jo_match(solo);
 	solo.game_type = game_type::kDeathmatch;
 	world.match.configure(solo);
 	for (int i = 0; i < 62; ++i) inmatch::Server_TickUpdate(ctx);
@@ -1152,9 +1276,11 @@ std::vector<uint8_t> death_feed_types(ns::UdpSessionTransport &wire) {
 // first, and only the bit the 0x1E family reports is cleared on the body.
 bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamDeathmatch;
 	world.match.configure(rules);
 	const w::EntityHandle head = w::spawn_remote_player(world, player_spawn(0, 0, 0, 1));
@@ -1167,6 +1293,7 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 	world.match.upsert_player({killer, 4, "Killer"});
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1243,15 +1370,18 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 // skipped [orig: Server_ConvertPlayerToSpectator @0x519E76; Match::finish].
 bool check_spectator_latch_mirrors_onto_the_roster_row() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamDeathmatch;
 	world.match.configure(rules);
 	const w::EntityHandle player = w::spawn_remote_player(world, player_spawn(0, 0, 0, 1));
 	world.match.upsert_player({player, 1, "Watcher"});
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -1277,6 +1407,7 @@ bool check_spectator_latch_mirrors_onto_the_roster_row() {
 
 bool check_armory_reuse_cooldown() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 4);
 	const w::EntityHandle player = w::spawn_remote_player(world, player_spawn(0, 0, 0));
@@ -1285,6 +1416,7 @@ bool check_armory_reuse_cooldown() {
 	inmatch::NapiNPConnection &conn = roster.front();
 	w::Entity *entity = world.registry.get(player);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kTeamDeathmatch;
 
 	LoadoutSubmit request;
@@ -1324,6 +1456,7 @@ bool check_armory_reuse_cooldown() {
 	// The 1 Hz decrement rides tick_respawn_holds.
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
@@ -1424,13 +1557,16 @@ bool check_armory_reuse_cooldown() {
 bool check_model_page_cursor_wraps_at_the_list_count() {
 	const auto cursors = [](uint32_t list_count, int quartets, int32_t allow_custom_skins) {
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 4;
 		config.allow_custom_skins = allow_custom_skins;
 		inmatch::create_session(ctx, config, jo_startup(), nullptr);
 		auto heap = std::make_unique<w::World>();
+		test_titles::jo_world(*heap);
 		w::World &world = *heap;
 		world.rules.mp_session = true;
 		world.registry.configure_pool(0, 8);
@@ -1477,12 +1613,15 @@ bool check_model_page_cursor_wraps_at_the_list_count() {
 //  @0x5189CE ahead of the live age @0x5189DA and the punts @0x5189EF..0x518A3A]
 bool check_quartet_skips_a_spectator_slot() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
@@ -1528,14 +1667,17 @@ bool check_quartet_skips_a_spectator_slot() {
 //  CNapiNPConnection_QueueMessage @0x628640, the `desc_sent` drop @0x62864D]
 bool check_silence_punt_falls_through_to_the_countdown() {
 	const auto ctx_owner = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx_owner->config);
 	inmatch::NapiNPServerCtx &ctx = *ctx_owner;
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	ctx.loaded_model_list_count = 305;
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
@@ -1624,12 +1766,15 @@ bool check_silence_punt_falls_through_to_the_countdown() {
 //  @0x508613..0x508626 and byte @0x50863E; PRNG_Next16 @0x6130A0]
 bool check_integrity_family_draws_once_per_send() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
@@ -1718,12 +1863,15 @@ bool check_integrity_family_draws_once_per_send() {
 //  @0x51E3EC]
 bool check_entity_state_fan_runs_out_of_session() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
@@ -1767,18 +1915,22 @@ bool check_entity_state_fan_runs_out_of_session() {
 //  state 6 @0x51A712]
 bool check_a_loading_joiner_takes_no_proximity_or_census_place() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.game_type = game_type::kTeamDeathmatch;
 	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamDeathmatch;
 	world.match.configure(rules);
 	ctx.world = &world;
@@ -1845,13 +1997,16 @@ bool check_a_loading_joiner_takes_no_proximity_or_census_place() {
 //  Server_PlayerAdd @0x51D25C; Server_DrawStatusScreen @0x50A565]
 bool check_slot_team_readers_ignore_a_body_team_write() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.game_type = game_type::kTeamDeathmatch;
 	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
@@ -1906,12 +2061,15 @@ bool check_slot_team_readers_ignore_a_body_team_write() {
 bool check_host_quality_samples_ahead_of_the_receive_pump() {
 	const auto sample = [](uint32_t ring_before, bool pump_writes) {
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 4;
 		inmatch::create_session(ctx, config, jo_startup(), nullptr);
 		auto heap = std::make_unique<w::World>();
+		test_titles::jo_world(*heap);
 		w::World &world = *heap;
 		world.rules.mp_session = true;
 		world.registry.configure_pool(0, 8);
@@ -1954,13 +2112,16 @@ bool check_host_quality_samples_ahead_of_the_receive_pump() {
 //  @0x511645, the stores @0x511656..0x511676]
 bool check_designator_round_marks_and_notifies_the_team() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.game_type = game_type::kTeamDeathmatch;
 	inmatch::create_session(ctx, config, jo_startup(), nullptr);
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.rules.mp_session = true;
 	world.rules.projectile_authority = true;
@@ -2036,17 +2197,20 @@ bool check_designator_round_marks_and_notifies_the_team() {
 //  hold @0x51E089, userParam 1 @0x51E0C4]
 bool check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.rules.mp_session = true;
 	ctx.world = &world;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = ctx.config.game_type;
 	world.match.configure(rules);
 	w::Entity zone;
@@ -2123,6 +2287,7 @@ bool check_zone_timer_every_pass_and_wave_status_by_the_dead_bit() {
 
 bool check_priority_target_sweep() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	world.registry.configure_pool(2, 4);
@@ -2148,6 +2313,7 @@ bool check_priority_target_sweep() {
 		}
 	};
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	inmatch::Server_TickUpdate(ctx);
@@ -2172,6 +2338,7 @@ bool check_priority_target_sweep() {
 
 bool check_kit_weight_recompute() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
@@ -2184,12 +2351,14 @@ bool check_kit_weight_recompute() {
 		return false;
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = ctx.config.game_type;
 	world.match.configure(rules);
 	ns::LoopbackChannel host_wire;
@@ -2294,6 +2463,7 @@ bool check_kit_weight_recompute() {
 //  @0x501546 with the slot's entity; Entity_GetScoreValueBySlotType @0x540707..0x540774]
 bool check_kit_weight_reads_the_seat() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
@@ -2335,17 +2505,20 @@ bool check_kit_weight_reads_the_seat() {
 //  @0x515CBD..0x515D83]
 bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
 	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(3, 0, 0));
 	if (!expect(remote.valid(), "the deploy fixture spawned a remote player")) return false;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = ctx.config.game_type;
 	world.match.configure(rules);
 	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
@@ -2426,16 +2599,19 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 //  the entry walk alone; WeaponSlots_SeedAmmoPoolsFromDefs @0x54169C..0x5416A5]
 bool check_deploy_rebuilds_an_unsubmitted_slot_empty() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
 	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(3, 0, 0));
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = ctx.config.game_type;
 	world.match.configure(rules);
 	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
@@ -2464,6 +2640,7 @@ bool check_deploy_rebuilds_an_unsubmitted_slot_empty() {
 //  clear WeaponSlotTable_LoadAllFromDefs @0x541503), the counts @0x5156C1..0x5156EA]
 bool check_deploy_rebuilds_the_listen_hosts_local_table() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
@@ -2474,11 +2651,13 @@ bool check_deploy_rebuilds_the_listen_hosts_local_table() {
 			"the deploy fixture spawned the listen host"))
 		return false;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = ctx.config.game_type;
 	world.match.configure(rules);
 	auto &roster = ctx.np_protocol.connection_list;
@@ -2509,6 +2688,7 @@ bool check_deploy_rebuilds_the_listen_hosts_local_table() {
 // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515608 / @0x5156AF]
 bool check_deploy_pools_follow_the_buffered_name() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
@@ -2540,6 +2720,7 @@ bool check_deploy_pools_follow_the_buffered_name() {
 //  +88664 / +89176); Server_InitAllPlayerEntitiesForRound @0x516BF3..0x516C20]
 bool check_round_init_rebuilds_the_kept_kit() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
@@ -2553,7 +2734,7 @@ bool check_round_init_rebuilds_the_kept_kit() {
 	request.weapon_slot_index = 3 * 65 + 2;
 	request.entries.push_back(LoadoutSubmitEntry{5, 1, 0xFF, 0xFF});
 	conn.link.preround_loadout_latch = true;
-	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+	(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn,
 			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
 			100, roster, &world);
 	if (!expect(conn.reply.ammo_pools[0] == 0 && slots_of(world, conn)[3 * 65 + 2].clip == 30,
@@ -2589,11 +2770,13 @@ bool check_round_init_rebuilds_the_kept_kit() {
 //  @0x51CD06; Weapon_CalcImpactDamage @0x4ECA11..0x4ECA24]
 bool check_loadout_damage_class_bytes() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.config.max_players = 4;
 	ctx.config.armory_reuse_time = 0; // back-to-back accepts
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(3, 8);
@@ -2781,6 +2964,7 @@ void install_sub_variant_armory(w::World &world) {
 //  @0x5156EF..0x515752; Server_SendWeaponSlotListToPlayer @0x5027B3..0x50284E]
 bool check_loadout_sub_variant_rows() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
@@ -2788,11 +2972,13 @@ bool check_loadout_sub_variant_rows() {
 	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(3, 0, 0));
 	if (!expect(remote.valid(), "the sub-variant fixture spawned a remote player")) return false;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.config.game_type = game_type::kTeamDeathmatch;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = ctx.config.game_type;
 	world.match.configure(rules);
 	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
@@ -2922,6 +3108,7 @@ bool check_loadout_sub_variant_rows() {
 //  the grant's fill @0x515DBF]
 bool check_sub_variant_fire_after_the_grant() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_sub_variant_armory(world);
@@ -2937,12 +3124,12 @@ bool check_sub_variant_fire_after_the_grant() {
 	request.weapon_slot_index = 3 * 65;
 	request.entries.push_back(LoadoutSubmitEntry{1, 0xFF, 0xFF, 0});
 	conn.link.preround_loadout_latch = true; // the post-join submit bypasses the window
-	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+	(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn,
 			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
 			100, roster, &world);
 	uint32_t client_tick = conn.tick_seed;
 	auto fire = [&](uint8_t adm) {
-		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+		(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn,
 				{make_protocol_message(c2s::FIRED_ROUND,
 						fire_body(conn, shooter.packed, adm, client_tick))},
 				100, roster, &world);
@@ -2971,6 +3158,7 @@ bool check_sub_variant_fire_after_the_grant() {
 
 bool check_try_queue_evicts_on_failed_pick() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 4);
 	auto make_player = [&](uint8_t team) {
@@ -3038,6 +3226,7 @@ bool check_try_queue_evicts_on_failed_pick() {
 // from it.
 struct PickServer {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	inmatch::ServerDispatchInputs inputs;
 	PickServer() {
 		ctx.np_protocol.identity = title_protocol("jo");
@@ -3047,6 +3236,7 @@ struct PickServer {
 
 bool check_respawn_pick_admission() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(2, 4);
 	world.registry.configure_pool(3, 4);
@@ -3064,6 +3254,7 @@ bool check_respawn_pick_admission() {
 		return false;
 
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kConquerAndControl;
 	std::vector<inmatch::NapiNPConnection> roster(1);
 	auto &conn = roster.front();
@@ -3115,6 +3306,7 @@ bool check_respawn_pick_admission() {
 		return false;
 	// Pool 0 index 0 empty: the resolver finds nothing and the pick is still rejected.
 	w::World empty_world;
+	test_titles::jo_world(empty_world);
 	empty_world.registry.configure_pool(0, 4);
 	w::Entity later = player_seed;
 	empty_world.registry.spawn(0, later);
@@ -3140,6 +3332,7 @@ bool check_respawn_pick_admission() {
 //  @0x519c5a, @0x519c97]
 bool check_revived_pick_takes_no_target() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(2, 4);
 	w::Entity player_seed;
@@ -3161,6 +3354,7 @@ bool check_revived_pick_takes_no_target() {
 	world.zones.spawn_waves.build_from_mission(world, 5, 5); // the zone's wave row
 
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kObjectiveCoop; // the auto pick takes the unnumbered zone
 	config.default_spawn_requires_no_team_zone = 1;
 	std::vector<inmatch::NapiNPConnection> roster(1);
@@ -3252,6 +3446,7 @@ bool check_revived_pick_takes_no_target() {
 //  @0x519D8F]
 bool check_spectator_pick_legs() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(2, 4);
 	w::Entity player_seed;
@@ -3274,6 +3469,7 @@ bool check_spectator_pick_legs() {
 	world.zones.spawn_waves.build_from_mission(world, 5, 5); // the zone's wave row
 
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kObjectiveCoop;
 	config.default_spawn_requires_no_team_zone = 1;
 	std::vector<inmatch::NapiNPConnection> roster(1);
@@ -3363,6 +3559,7 @@ bool check_spectator_pick_legs() {
 //  zone team @0x519D4A; Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
 bool check_split_slot_team_pick_legs() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(2, 4);
 	w::Entity player_seed;
@@ -3387,6 +3584,7 @@ bool check_split_slot_team_pick_legs() {
 	const w::EntityHandle other = make_zone(2, 0, 70.0f);
 	const w::EntityHandle numbered = make_zone(1, 3, 90.0f);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kObjectiveCoop; // the auto pick takes the unnumbered zone
 	std::vector<inmatch::NapiNPConnection> roster(1);
 	auto &conn = roster.front();
@@ -3449,6 +3647,7 @@ bool check_split_slot_team_pick_legs() {
 //  NetPacket_WriteSpawnWaveStatus @0x5074CF, the row filter @0x507539]
 bool check_split_slot_team_wave_rows() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(2, 4);
 	w::Entity player_seed;
@@ -3471,6 +3670,7 @@ bool check_split_slot_team_wave_rows() {
 	const w::EntityHandle red = make_zone(2);
 	world.zones.spawn_waves.build_from_mission(world, 5, 5);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kTeamDeathmatch;
 	std::vector<inmatch::NapiNPConnection> roster(1);
 	auto &conn = roster.front();
@@ -3524,6 +3724,7 @@ bool check_split_slot_team_wave_rows() {
 //  the team markers @0x50D266]
 bool check_split_slot_team_default_spawn_pose() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(3, 4);
 	for (const int32_t item_id : {6096, 6097}) { // team 1's start marker, team 2's
@@ -3542,6 +3743,7 @@ bool check_split_slot_team_default_spawn_pose() {
 	player_seed.health_max = 100;
 	const w::EntityHandle player = world.registry.spawn(0, player_seed);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kTeamDeathmatch;
 	std::vector<inmatch::NapiNPConnection> roster(1);
 	auto &conn = roster.front();
@@ -3563,6 +3765,7 @@ bool check_split_slot_team_default_spawn_pose() {
 
 bool check_shared_loaded_ammo_fire_and_reload() {
     w::World world;
+    test_titles::jo_world(world);
     world.rules.mp_session = true;
     world.registry.configure_pool(0, 8);
     install_rifle_armory(world);
@@ -3584,7 +3787,7 @@ bool check_shared_loaded_ammo_fire_and_reload() {
     }
     uint32_t client_tick = conn.tick_seed;
     auto fire = [&](uint8_t adm) {
-        (void)inmatch::dispatch_session_replies(inmatch::GameConfig{},conn,
+        (void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}),conn,
             {make_protocol_message(c2s::FIRED_ROUND,fire_body(conn,shooter.packed,adm,client_tick))},100,roster,&world);
     };
     fire(5); fire(6); fire(5);
@@ -3592,7 +3795,7 @@ bool check_shared_loaded_ammo_fire_and_reload() {
             "two weapon selections consume one shared clip; the third fire is empty")) return false;
     WeaponReload reload;
     reload.entity_handle=shooter.packed; reload.reload_param=3*65+3;
-    (void)inmatch::dispatch_session_replies(inmatch::GameConfig{},conn,
+    (void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}),conn,
         {make_protocol_message(c2s::WEAPON_RELOAD_REQUEST,encode_weapon_reload(reload))},100,roster,&world);
     if (!expect(conn.reply.shared_clips[1]==5 && conn.reply.ammo_pools[0]==0,
             "reload fills the shared clip from its reserve pool")) return false;
@@ -3608,10 +3811,12 @@ bool check_shared_loaded_ammo_fire_and_reload() {
 //  event-1 call @0x50C727]
 bool check_validated_fire_scores_one_shot() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type::kTeamDeathmatch;
 	rules.score_values.emplace();
 	(*rules.score_values)[0] = 3; // FIRE
@@ -3628,7 +3833,7 @@ bool check_validated_fire_scores_one_shot() {
 	auto dispatch_fire = [&](std::vector<uint8_t> body) {
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(c2s::FIRED_ROUND, std::move(body)));
-		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
+		(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn, msgs, 100, roster, &world);
 	};
 	const w::MatchPlayer *row = world.match.player(shooter);
 	dispatch_fire(fire_body(conn, other.packed, 5, client_tick)); // spoofed: rejected
@@ -3658,6 +3863,7 @@ bool check_validated_fire_scores_one_shot() {
 //  Server_ClientFiredRound @0x50c1d4..0x50c28d]
 bool check_host_tracks_the_remote_equipped_slot() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	install_rifle_armory(world);
@@ -3687,7 +3893,7 @@ bool check_host_tracks_the_remote_equipped_slot() {
 		request.entries.push_back(LoadoutSubmitEntry{4, 1, 0xFF, 0xFF});
 		conn.link.armory_reuse_seconds = 0;
 		conn.link.preround_loadout_latch = true; // the post-join submit bypasses the window
-		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+		(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn,
 				{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
 				100, roster, &world);
 	};
@@ -3707,7 +3913,7 @@ bool check_host_tracks_the_remote_equipped_slot() {
 	// the fire takes the personal slot and re-points to it.
 	world.registry.get(shooter)->equipped_slot.kind = Ref::kMount;
 	world.registry.get(shooter)->equipped_slot.mount = shooter;
-	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,
+	(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn,
 			{make_protocol_message(c2s::FIRED_ROUND, fire_body(conn, shooter.packed, 5, client_tick))},
 			100, roster, &world);
 	return expect(world.out.rounds.count == 1 && equipped().kind == Ref::kPersonal &&
@@ -3725,15 +3931,17 @@ bool check_host_tracks_the_remote_equipped_slot() {
 //  Game_ProcessMainFrame calls @0x52674B after Server_TickUpdate @0x51D7E0 (called @0x5266B6)]
 bool check_guidance_leads_the_next_frame() {
     inmatch::NapiNPServerCtx ctx;
+    test_titles::jo_config(ctx.config);
     inmatch::set_connection_mode(ctx,inmatch::ConnectionMode::HostOnly);
     ctx.is_in_session=1;
     ctx.np_protocol.identity=title_protocol("jo");
     ctx.network_quality_broadcast_countdown=100;
     ctx.config.game_type=game_type::kTeamDeathmatch;
     w::World world;
+    test_titles::jo_world(world);
     world.rules.mp_session=true;
     world.registry.configure_pool(0,8);
-    w::MatchRules rules; rules.game_type=ctx.config.game_type; world.match.configure(rules);
+    w::MatchRules rules; test_titles::jo_match(rules); rules.game_type=ctx.config.game_type; world.match.configure(rules);
     ctx.world=&world;
     const auto player=w::spawn_remote_player(world,player_spawn(0,0,0));
     ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
@@ -3784,6 +3992,9 @@ int main() {
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kTeamDeathmatch, false) && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true,
 			/*uplinked=*/true) && ok;
+	ok = check_flag_capture_fans_its_feed_then_the_drop_and_the_sync(game_type::kFlagBall) && ok;
+	ok = check_flag_capture_fans_its_feed_then_the_drop_and_the_sync(game_type::kCaptureTheFlag) &&
+			ok;
 	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::TEAM_CHANGE_REQUEST, false) && ok;
 	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::DEATH_TIMEOUT_RESET, false) && ok;
 	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::TEAM_CHANGE_REQUEST, true) && ok;

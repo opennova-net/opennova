@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -126,6 +127,7 @@ int deploy_protection() {
 int no_revive_heal_or_downed_resend() {
 	for (const Title *title : {kJo, kDfx2}) {
 		auto storage = std::make_unique<world::World>();
+		test_titles::jo_world(*storage);
 		world::World &w = *storage;
 		w.rules.title_rules = rules_of(title);
 		w.registry.configure_pool(0, 4);
@@ -141,6 +143,7 @@ int no_revive_heal_or_downed_resend() {
 		const world::EntityHandle healer = w.registry.spawn(0, body);
 		w.round_sim.medic_interactions.push_back(world::MedicInteraction{victim, healer, false});
 		NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
 		Server_RouteMedicInteractions(ctx, w);
@@ -165,6 +168,7 @@ int no_revive_heal_or_downed_resend() {
 int no_revive_window_at_death() {
 	for (const Title *title : {kJo, kDfx2}) {
 		auto storage = std::make_unique<world::World>();
+		test_titles::jo_world(*storage);
 		world::World &w = *storage;
 		w.rules.title_rules = rules_of(title);
 		w.rules.mp_session = true;
@@ -190,6 +194,7 @@ int no_revive_window_at_death() {
 		w.match.upsert_player({killer, 2, "Killer"});
 		replication::LoopbackChannel victim_wire, medic_wire, killer_wire;
 		NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.world = &w;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;

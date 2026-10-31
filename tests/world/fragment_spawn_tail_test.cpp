@@ -25,6 +25,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -96,6 +97,7 @@ w::Entity palm_fragment_seed() {
 // tables take it at the next tick, and the slice at the 17th tick after the last build.
 bool run_the_piece_factory_publishes_no_table() {
 	auto kernel = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	opennova::def::DefItemsFile items{};
 	if (!expect(boot_piece_kernel(*kernel, items), "factory: the piece kernel boots")) return false;
 	w::World &world = kernel->world;
@@ -154,6 +156,7 @@ struct MarkingSpawner : w::IItemPieceSpawner {
 
 struct EventRig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<w::CollisionWorld> collision = std::make_unique<w::CollisionWorld>();
 	MarkingSpawner spawner{*world};
 

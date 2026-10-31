@@ -38,6 +38,7 @@
 #include <optional>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -121,6 +122,7 @@ std::vector<uint8_t> frame(nw::EntityClass rider_class, bool seated = true) {
 struct Rig {
 	BodySource src;
 	std::unique_ptr<ns::ClientReplicaPipeline> view = std::make_unique<ns::ClientReplicaPipeline>();
+	bool view_jo = test_titles::jo_folds(*view);
 	std::vector<ns::ClientReplicaPipeline::ReplicaContactQuery> queries;
 	bool indoors = false;
 

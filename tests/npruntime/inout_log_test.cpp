@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <map>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -48,6 +49,7 @@ constexpr const char *kStamp = "2026-10-20 11:02:03: ";
 
 struct Host {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	MemoryFiles files;
 	inmatch::NapiLog inout{files, inmatch::kInoutLogFileName};
 	explicit Host(bool inout_switch) {

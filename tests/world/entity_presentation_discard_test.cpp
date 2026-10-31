@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 namespace w = opennova::world;
@@ -65,6 +66,7 @@ void fill(w::World &world) {
 
 void test_the_passes_queues_drop_and_the_rest_stay() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	fill(*world);
 	CHECK(world->round_sim.fired.size() == 1);
 	CHECK(world->out.fire_sounds.pending_count() == 1);
@@ -93,6 +95,7 @@ void test_the_passes_queues_drop_and_the_rest_stay() {
 // The fire ring is presentation alone: dropping it leaves the fire the wire sends.
 void test_the_wire_half_stays() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->out.entity_events.emplace_back(w::EntityRemoveEvent{});
 	world->out.hud_relays.emplace_back();
 	w::discard_entity_presentation(*world);
@@ -116,6 +119,7 @@ void test_the_dedicated_host_alone_presents_no_entity() {
 	for (const im::RoleKind kind : {im::RoleKind::SinglePlayer, im::RoleKind::ListenHost,
 				 im::RoleKind::Joiner, im::RoleKind::DedicatedHost}) {
 		KindRole role(kind);
+		test_titles::jo_controls(role);
 		const auto session = std::make_unique<im::Session>(role);
 		CHECK(session->presents_entities() == (kind != im::RoleKind::DedicatedHost));
 	}

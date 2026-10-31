@@ -159,18 +159,19 @@ bool VehicleSystem::init_weapon_slot_from_entity_def(Entity &entity) {
     const WeaponTableEntry *weapon = world.tables.weapons.by_index(adm);
     if (weapon == nullptr) return false;
     entity.primary_weapon_slot_adm = adm;
-    // Scope zero seed and elevation under flags & 3 [orig:
+    // Scope zero seed and elevation under flags & 3, by the title (DFX2-120) [orig:
     //  WeaponSlot_InitFromDef @0x53EE70 (the call @0x54670A): +0x60 = def+0xA0 / def+0x9C
     //  @0x53EEB2..0x53EECB; +0x04 = def[+0x3B0 + 4*step] under def+8 & 3
     //  @0x53EEDA..0x53EEEC; +0x08 = atan2(def+0x8C, step * def+0x9C << 16
     //  floored at 100 m) outside that gate, never negated here
-    //  @0x53EF4F..0x53EF8B].
-    entity.primary_weapon_slot.scope_zero = weapon_scope_zero_initial(weapon->action_fsm.scope_zero);
-    if ((weapon->flags & 3) != 0)
-        entity.primary_weapon_slot.zero_pitch = weapon_scope_zero_pitch(
-            weapon->action_fsm.scope_zero, entity.primary_weapon_slot.scope_zero);
-    entity.primary_weapon_slot.zero_yaw = weapon_scope_zero_yaw(
-        weapon->action_fsm.scope_zero, entity.primary_weapon_slot.scope_zero);
+    //  @0x53EF4F..0x53EF8B] [orig: WeaponSlot_InitFromEntityDef @0x543930 (the call @0x54397A)
+    //  -> WeaponSlot_InitFromDef @0x53C0C0, +4 = 0 and +0x60 = -1 or 0 @0x53C1E8..0x53C1F9
+    //  (dfx2.exe)].
+    const ScopeZeroSlotSeed zero = weapon_scope_zero_slot_seed(weapon->action_fsm.scope_zero,
+        weapon->flags, weapon->flags2, world.rules.title().scope_zero_seed);
+    entity.primary_weapon_slot.scope_zero = zero.step;
+    entity.primary_weapon_slot.zero_pitch = zero.pitch;
+    entity.primary_weapon_slot.zero_yaw = zero.yaw;
     // The zoom seed (MountSlot+0xC). The emplacement's own slot has no
     // owner entity, so the class-6 sniper lock never applies here: a
     // tank cannon starts at its floor, a JOTAC roof sight at 1x

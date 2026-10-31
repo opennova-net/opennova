@@ -14,6 +14,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -30,6 +31,7 @@ int failures = 0;
 
 struct Rig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     EntityHandle shooter;
 
     Rig() {
@@ -562,6 +564,7 @@ void test_delayed_interface_shares_slots_and_suppresses_repeats() {
 
 void test_flag_sound_variants() {
     World world;
+    test_titles::jo_world(world);
     opennova::lwf::File bank;
     for (const char *name : {"FLAG_DO_P", "FLAG_DO_OT", "FLAG_DO_T", "FLAG_WIN_P",
             "FLAG_WIN_T", "FLAG_VXDO_P", "FLAG_VXDO_T", "FLAG_VXDO_OT",

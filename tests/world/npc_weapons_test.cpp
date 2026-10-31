@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -45,6 +46,7 @@ struct Points final : IPoseProvider {
 
 struct Fixture {
     std::unique_ptr<World> heap = std::make_unique<World>();
+    bool heap_jo = test_titles::jo_world(*heap);
     World &world = *heap;
     Points points;
     EntityHandle shooter, target;

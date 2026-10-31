@@ -19,6 +19,7 @@
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -167,7 +168,7 @@ void test_display_expand_and_fill() {
                 wrap.index_of("WPN_SUB1") == 1);
         WeaponInventory winv;
         winv.reset(wrap);
-        const auto wfill = weapon_inventory_load_from_display(wrap, wrapped, winv, 8, false);
+        const auto wfill = weapon_inventory_load_from_display(wrap, wrapped, winv, 8, false, ScopeZeroSeed::DefaultStep);
         CHECK(winv.slot(0)->adm_index == -1);
         CHECK(winv.slot(3 * 65 + 1)->adm_index == 1);
         CHECK(wfill.warnings.size() == 1);
@@ -175,7 +176,7 @@ void test_display_expand_and_fill() {
 
     WeaponInventory inv;
     inv.reset(f.t);
-    auto fill = weapon_inventory_load_from_display(f.t, display, inv, 8, false);
+    auto fill = weapon_inventory_load_from_display(f.t, display, inv, 8, false, ScopeZeroSeed::DefaultStep);
     CHECK(fill.warnings.empty());
     CHECK(inv.slot(1 * 65 + 0)->adm_index == f.knife);
     CHECK(inv.slot(3 * 65 + 0)->adm_index == f.m4);
@@ -190,11 +191,11 @@ void test_display_expand_and_fill() {
     WeaponInventory inv2;
     inv2.reset(t2);
     auto fill2 = weapon_inventory_load_from_display(
-            t2, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv2, 8, false);
+            t2, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv2, 8, false, ScopeZeroSeed::DefaultStep);
     CHECK(fill2.warnings.size() == 1);
     CHECK(inv2.slot(3 * 65 + 0)->adm_index == f.m4);
     // Unresolved display names warn [orig: "couldn't find wpn index"].
-    auto fill3 = weapon_inventory_load_from_display(f.t, {"WPN_GHOST"}, inv2, 8, false);
+    auto fill3 = weapon_inventory_load_from_display(f.t, {"WPN_GHOST"}, inv2, 8, false, ScopeZeroSeed::DefaultStep);
     CHECK(fill3.warnings.size() == 1);
 }
 
@@ -203,7 +204,7 @@ void test_pools_and_recalc() {
     WeaponInventory inv;
     inv.reset(f.t);
     weapon_inventory_load_from_display(
-            f.t, {"WPN_KNIFE", "WPN_M4AUTO", "WPN_GRENADEFB", "WPN_PISTOL"}, inv, 8, false);
+            f.t, {"WPN_KNIFE", "WPN_M4AUTO", "WPN_GRENADEFB", "WPN_PISTOL"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
 
     // Rifleman: plain startrounds seed [orig: pools[class] = def+0x5C @ 0x5416b9].
     weapon_inventory_seed_pools(f.t, inv, 8);
@@ -245,7 +246,7 @@ void test_select() {
     WeaponInventory inv;
     inv.reset(f.t);
     weapon_inventory_load_from_display(
-            f.t, {"WPN_KNIFE", "WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PARACHUTE"}, inv, 8, false);
+            f.t, {"WPN_KNIFE", "WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PARACHUTE"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
 
     // Category-level select: combo 195 stages the first populated normal slot of
     // category 3 [orig: the group scan @ 0x4dd749].
@@ -286,7 +287,7 @@ void test_switch_walks() {
     weapon_inventory_load_from_display(
             f.t,
             {"WPN_KNIFE", "WPN_PISTOL", "WPN_M4AUTO", "WPN_AK47AUTO", "WPN_GRENADEFB"},
-            inv, 8, false);
+            inv, 8, false, ScopeZeroSeed::DefaultStep);
     weapon_inventory_seed_pools(f.t, inv, 8);
     weapon_inventory_recalc_clips(f.t, inv);
     inv.equipped_combo = 195; // the M4
@@ -349,14 +350,14 @@ void test_switch_walks() {
     gates.seat_blocked = false;
 
     // NoSelect never mounts via the manual walk [orig: the flags2&1 term].
-    weapon_inventory_load_from_display(f.t, {"WPN_PARACHUTE"}, inv, 8, false);
+    weapon_inventory_load_from_display(f.t, {"WPN_PARACHUTE"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
     r = weapon_switch_to_handle(f.t, inv, 10 * 65, gates);
     CHECK(r.kind == WeaponSwitchOutcome::kDeny);
 
     // No equipped slot: the select fallback stages one first [orig: @ 0x4e0223].
     WeaponInventory inv2;
     inv2.reset(f.t);
-    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv2, 8, false);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv2, 8, false, ScopeZeroSeed::DefaultStep);
     weapon_inventory_seed_pools(f.t, inv2, 8);
     weapon_inventory_recalc_clips(f.t, inv2);
     inv2.equipped_combo = -1;
@@ -375,11 +376,12 @@ void test_committed_switch_only_draws_after_holstering() {
     for (const bool same_category : {true, false}) {
         Fixture f;
         World world;
+        test_titles::jo_world(world);
         world.tables.weapons = f.t;
         WeaponInventory inv;
         inv.reset(f.t);
         weapon_inventory_load_from_display(f.t,
-                {"WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PISTOL"}, inv, 8, false);
+                {"WPN_M4AUTO", "WPN_AK47AUTO", "WPN_PISTOL"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
         weapon_inventory_seed_pools(f.t, inv, 8);
         weapon_inventory_recalc_clips(f.t, inv);
         inv.equipped_combo = 3 * 65;
@@ -442,12 +444,13 @@ void test_to_special_hold_swap() {
     f.t.entries[static_cast<size_t>(point_aim)].flags = weapon_flag::kQuickSwitch;
     (void)mag;
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons = f.t;
     WeaponInventory inv;
     inv.reset(f.t);
     inv.quick_switch_stash = 7; // a stale stash the fill clears
     weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_MAG58", "WPN_MAG58_POINTAIM"},
-                                       inv, 8, false);
+                                       inv, 8, false, ScopeZeroSeed::DefaultStep);
     const int32_t m4_combo = 3 * 65;
     const int32_t target = 4 * 65 + 1;
     CHECK(inv.quick_switch_combo == target);
@@ -455,7 +458,7 @@ void test_to_special_hold_swap() {
     {
         WeaponInventory plain;
         plain.reset(f.t);
-        weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_MAG58"}, plain, 8, false);
+        weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_MAG58"}, plain, 8, false, ScopeZeroSeed::DefaultStep);
         CHECK(plain.quick_switch_combo == -1);
     }
     weapon_inventory_seed_pools(f.t, inv, 8);
@@ -535,6 +538,7 @@ void test_to_special_queue_defers() {
     const int point_aim = add_entry(f.t, "WPN_MAG58_POINTAIM", 4, 1, 100, 400, "AMMO_762", 1, 1);
     f.t.entries[static_cast<size_t>(point_aim)].flags = weapon_flag::kQuickSwitch;
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons = f.t;
     world.registry.configure_pool(0, 1);
     Entity seed;
@@ -544,7 +548,7 @@ void test_to_special_queue_defers() {
     LocalPlayer lp(world);
     lp.inventory.reset(f.t);
     weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_MAG58_POINTAIM"}, lp.inventory,
-                                       8, false);
+                                       8, false, ScopeZeroSeed::DefaultStep);
     lp.inventory_valid = true;
     lp.inventory.equipped_combo = 3 * 65;
     WeaponInstallData data;
@@ -568,7 +572,7 @@ void test_cycle() {
     WeaponInventory inv;
     inv.reset(f.t);
     weapon_inventory_load_from_display(
-            f.t, {"WPN_KNIFE", "WPN_PISTOL", "WPN_M4AUTO", "WPN_AK47AUTO"}, inv, 8, false);
+            f.t, {"WPN_KNIFE", "WPN_PISTOL", "WPN_M4AUTO", "WPN_AK47AUTO"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
     weapon_inventory_seed_pools(f.t, inv, 8);
     weapon_inventory_recalc_clips(f.t, inv);
     inv.equipped_combo = 130; // the pistol
@@ -594,7 +598,7 @@ void test_cycle() {
     CHECK(weapon_cycle_slot(f.t, inv, 0, gates).kind == WeaponSwitchOutcome::kNone);
     WeaponInventory lone;
     lone.reset(f.t);
-    weapon_inventory_load_from_display(f.t, {"WPN_PISTOL"}, lone, 8, false);
+    weapon_inventory_load_from_display(f.t, {"WPN_PISTOL"}, lone, 8, false, ScopeZeroSeed::DefaultStep);
     weapon_inventory_seed_pools(f.t, lone, 8);
     weapon_inventory_recalc_clips(f.t, lone);
     lone.equipped_combo = 130;
@@ -656,7 +660,7 @@ static int test_knife_is_selectable() {
 	Fixture f;
 	WeaponInventory inv;
 	inv.reset(f.t);
-	weapon_inventory_load_from_display(f.t, {"WPN_KNIFE", "WPN_M4AUTO"}, inv, 8, false);
+	weapon_inventory_load_from_display(f.t, {"WPN_KNIFE", "WPN_M4AUTO"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
 	weapon_inventory_seed_pools(f.t, inv, 8);
 	weapon_inventory_recalc_clips(f.t, inv);
 	inv.equipped_combo = 3 * 65; // holding the rifle
@@ -677,6 +681,7 @@ static int test_knife_is_selectable() {
 static int test_local_held_weapon_visible() {
 	Fixture f;
 	World world;
+	test_titles::jo_world(world);
 	world.tables.weapons = f.t;
 	// The m4 row draws in first person.
 	world.tables.weapons.entries[static_cast<size_t>(f.m4)]
@@ -686,7 +691,7 @@ static int test_local_held_weapon_visible() {
 	weapon.active = true;
 	WeaponInventory inv;
 	inv.reset(world.tables.weapons);
-	weapon_inventory_load_from_display(world.tables.weapons, {"WPN_M4AUTO"}, inv, 8, false);
+	weapon_inventory_load_from_display(world.tables.weapons, {"WPN_M4AUTO"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
 	weapon_inventory_seed_pools(world.tables.weapons, inv, 8);
 	weapon_inventory_recalc_clips(world.tables.weapons, inv);
 	inv.equipped_combo = 3 * 65;
@@ -747,7 +752,7 @@ void test_two_weapons_share_loaded_ammo() {
     b.ammo_class = a.ammo_class;
     WeaponInventory inv;
     inv.reset(f.t);
-    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv, 8, false);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_AK47AUTO"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
     weapon_pool_set(f.t, inv, a.ammo_class_id, 100);
     weapon_inventory_recalc_clips(f.t, inv);
     CHECK(weapon_pool_get(inv, a.ammo_class_id) == 70);
@@ -784,7 +789,7 @@ void test_fill_seeds_the_slot_zoom() {
                                           "WPN_AK47AUTO"};
     WeaponInventory inv;
     inv.reset(f.t);
-    weapon_inventory_load_from_display(f.t, kit, inv, 8, false);
+    weapon_inventory_load_from_display(f.t, kit, inv, 8, false, ScopeZeroSeed::DefaultStep);
     CHECK(inv.slot(3 * 65 + 0)->scope_zoom == 2);
     CHECK(inv.slot(3 * 65 + 1)->scope_zoom == 4);
     CHECK(inv.slot(2 * 65 + 0)->scope_zoom == 2);
@@ -792,12 +797,12 @@ void test_fill_seeds_the_slot_zoom() {
     // A class-6 owner on the Primary (category 3) defs floors them at the max;
     // the permission lifts it, and the lock never touches another category.
     inv.reset(f.t);
-    weapon_inventory_load_from_display(f.t, kit, inv, 6, false);
+    weapon_inventory_load_from_display(f.t, kit, inv, 6, false, ScopeZeroSeed::DefaultStep);
     CHECK(inv.slot(3 * 65 + 0)->scope_zoom == 10);
     CHECK(inv.slot(3 * 65 + 1)->scope_zoom == 12);
     CHECK(inv.slot(2 * 65 + 0)->scope_zoom == 2);
     inv.reset(f.t);
-    weapon_inventory_load_from_display(f.t, kit, inv, 6, true);
+    weapon_inventory_load_from_display(f.t, kit, inv, 6, true, ScopeZeroSeed::DefaultStep);
     CHECK(inv.slot(3 * 65 + 0)->scope_zoom == 2);
     CHECK(inv.slot(3 * 65 + 1)->scope_zoom == 4);
     CHECK(weapon_slot_zoom_sniper_lock(6, 3, false));
@@ -806,6 +811,57 @@ void test_fill_seeds_the_slot_zoom() {
     CHECK(weapon_slot_initial_zoom(7, 0, 2, false) == 2);  // revx02 cannon 'SCOPE_MAX_MAG 7'
     CHECK(weapon_slot_initial_zoom(12, 0, 1, false) == 1); // revx02 RCWS 'MAX 12 / MIN 1'
     CHECK(weapon_slot_initial_zoom(8, 8, 2, false) == 8);  // WPN_EMP50BD '8 8'
+}
+
+// DFX2-120: a slot's init seeds its zero words by the title. Jointops.exe's: the def's default
+// step (+0xA0 / +0x9C) and its elevation pitch under Flags & 3; dfx2.exe's: the same computed,
+// then the step -1 (the rangefinder's automatic zero, which the fire's step reads), or 0 for a
+// NoAutoZero def, and the pitch 0; the yaw stays the default step's in both. A ForceScoped
+// mount's rangefinder word is the def's +0xA0, or dfx2.exe's -1.
+// [orig: WeaponSlot_InitFromDef @0x53EE70 (@0x53EEB2..0x53EEEC, @0x53EF4F..0x53EF8B);
+//  Weapon_GetScopeZoomLevel @0x422FC0; Player_MountWeaponSlot @0x4DFA40 (@0x4DFB3B..0x4DFB44)]
+// [orig: WeaponSlot_InitFromDef @0x53C0C0 (@0x53C1E8..0x53C1F9); Weapon_GetScopeZoomLevel
+//  @0x422E20; Player_MountWeaponSlot @0x4DCAE0 (@0x4DCBDB) (dfx2.exe)]
+void test_slot_init_seeds_the_titles_zero() {
+    Fixture f;
+    WeaponTableEntry &m4 = f.t.entries[static_cast<size_t>(f.m4)];
+    m4.flags = static_cast<int32_t>(opennova::def::DEF_WEAPON_FLAG_SCOPED); // Flags & 3
+    WeaponScopeZero &zero = m4.action_fsm.scope_zero;
+    zero.max_steps = 10;
+    zero.step_metres = 25;
+    zero.default_metres = 200; // step 8, past the yaw's 100 m floor
+    zero.paralax_distance_q16 = 0x8000;
+    zero.elevation[8] = 0x1234;
+    const int32_t yaw = weapon_scope_zero_yaw(zero, 8);
+    CHECK(yaw != 0 && yaw != weapon_scope_zero_yaw(zero, -1));
+    const ScopeZeroSeed jo = title_rules("jo").scope_zero_seed;
+    const ScopeZeroSeed dfx2 = title_rules("dfx2").scope_zero_seed;
+    const int16_t adm = static_cast<int16_t>(f.m4);
+    WeaponInventorySlot slot;
+    weapon_slot_init_from_def(m4, adm, slot, 8, false, jo);
+    CHECK(slot.scope_zero == 8 && slot.zero_pitch == 0x1234 && slot.zero_yaw == yaw);
+    weapon_slot_init_from_def(m4, adm, slot, 8, false, dfx2);
+    CHECK(slot.scope_zero == -1 && slot.zero_pitch == 0 && slot.zero_yaw == yaw);
+    // The fill seeds the same.
+    WeaponInventory inv;
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv, 8, false, dfx2);
+    CHECK(inv.slot(3 * 65 + 0)->scope_zero == -1 && inv.slot(3 * 65 + 0)->zero_pitch == 0);
+    inv.reset(f.t);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv, 8, false, jo);
+    CHECK(inv.slot(3 * 65 + 0)->scope_zero == 8 && inv.slot(3 * 65 + 0)->zero_pitch == 0x1234);
+    // NoAutoZero holds dfx2.exe's step at 0; Jointops.exe never reads the flag here.
+    m4.flags2 |= static_cast<int32_t>(opennova::def::DEF_WEAPON_FLAG2_NOAUTOZERO);
+    weapon_slot_init_from_def(m4, adm, slot, 8, false, dfx2);
+    CHECK(slot.scope_zero == 0 && slot.zero_pitch == 0 && slot.zero_yaw == yaw);
+    weapon_slot_init_from_def(m4, adm, slot, 8, false, jo);
+    CHECK(slot.scope_zero == 8 && slot.zero_pitch == 0x1234);
+    // The fire's step: the -1 zero rounds the rangefinder's 300 m to the 25 m step (12); a
+    // manual zero reports 0.
+    CHECK(weapon_scope_zoom_step(zero, m4.flags, -1, 300 << 16, true, 12) == 12);
+    CHECK(weapon_scope_zoom_step(zero, m4.flags, 8, 300 << 16, true, 12) == 0);
+    CHECK(weapon_scope_mount_rangefinder(zero, jo) == 200);
+    CHECK(weapon_scope_mount_rangefinder(zero, dfx2) == -1);
 }
 
 // The HUDLS slot bar's category scan [orig: HUD_DrawWeaponSlotBar
@@ -937,10 +993,11 @@ void test_pump_reads_the_bucket_through_the_seat() {
     auto &m4 = f.t.entries[f.m4];
     m4.ammo_bucket = 1;
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons = f.t;
     WeaponInventory inv;
     inv.reset(f.t);
-    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv, 8, false);
+    weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
     inv.equipped_combo = 3 * 65;
     inv.shared_clips[1] = 12;
     inv.pools[static_cast<size_t>(m4.ammo_class_id)] = 90;
@@ -990,7 +1047,7 @@ void test_reload_takes_the_seat() {
     WeaponInventory inv;
     inv.reset(f.t);
     weapon_inventory_load_from_display(f.t, {"WPN_M4AUTO", "WPN_KNIFE", "WPN_AK47AUTO"}, inv, 8,
-            false);
+            false, ScopeZeroSeed::DefaultStep);
     const int32_t m4_combo = 3 * 65;
     const size_t m4_pool = static_cast<size_t>(m4.ammo_class_id);
     inv.shared_clips[1] = 5;
@@ -1062,6 +1119,7 @@ void test_mount_slot_reload() {
 void test_an_accept_reset_keeps_the_current_slot() {
     Fixture f;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->tables.weapons = f.t;
     auto local = std::make_unique<LocalPlayer>(*world);
     WeaponInventory &inv = local->inventory;
@@ -1100,6 +1158,7 @@ void test_an_accept_reset_keeps_the_current_slot() {
 void test_the_current_slot_word() {
     Fixture f;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->tables.weapons = f.t;
     world->registry.configure_pool(0, 1);
     Entity seed;
@@ -1191,6 +1250,7 @@ void test_a_missed_select_sends_195_raw() {
     Fixture f;
     for (WeaponTableEntry &e : f.t.entries) e.teamfilter = 3;
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->tables.weapons = f.t;
     world->rules.mp_session = true;
     world->registry.configure_pool(0, 1);
@@ -1256,6 +1316,7 @@ int main() {
     test_total_clips_seat_legs();
     test_slot_bar_scan();
     test_fill_seeds_the_slot_zoom();
+    test_slot_init_seeds_the_titles_zero();
     test_two_weapons_share_loaded_ammo();
     test_knife_is_selectable();
     test_local_held_weapon_visible();

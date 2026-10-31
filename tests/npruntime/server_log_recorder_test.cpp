@@ -24,6 +24,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -142,6 +143,7 @@ world::EntityHandle add_player(world::World &world, uint32_t dcb, uint8_t team, 
 
 void test_recorder_session() {
 	world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true; // a session (the single player's leg is below)
 	world.registry.configure_pool(0, 8);
 	const world::EntityHandle alice = add_player(world, 3, 1, "Alice", 70.0f, 25.0f, 56.25f, 0);
@@ -156,6 +158,7 @@ void test_recorder_session() {
 	replication::LoopbackChannel wire_a;
 	replication::LoopbackChannel wire_b;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	inmatch::NapiNPConnection a = conn_fixture::make_conn(3, 1, &wire_a,

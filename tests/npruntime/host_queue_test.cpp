@@ -49,6 +49,7 @@
 #include <utility>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -90,6 +91,7 @@ const char kClientScrk[] = "CLIENTQUEUESCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0
 // Heap-held: a HostOwner and a World overflow the 1 MB test-main stack under MSVC.
 struct QueueFixture {
 	std::unique_ptr<inmatch::HostOwner> owner = std::make_unique<inmatch::HostOwner>();
+	bool owner_jo = test_titles::jo_config(owner->ctx.config);
 	std::unique_ptr<opennova::world::World> world;
 	CaptureDatagramSocket socket;
 	uint32_t next_c2s_seq = 1;
@@ -98,6 +100,7 @@ struct QueueFixture {
 		inmatch::set_connection_mode(owner->ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(owner->ctx, inmatch::SocketMode::Lan);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 8;
 		inmatch::SessionStartup startup;
 		startup.protocol = &kJo;
@@ -105,6 +108,7 @@ struct QueueFixture {
 		inmatch::create_session(owner->ctx, config, startup, nullptr);
 		if (with_world) {
 			world = std::make_unique<opennova::world::World>();
+			test_titles::jo_world(*world);
 			world->registry.configure_pool(0, 8);
 			owner->ctx.world = world.get();
 		}
@@ -274,6 +278,7 @@ bool run_the_walk_leads_the_receive_pump() {
 	world.rules.mp_session = true;
 	f.owner->ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = opennova::game_type::kAdvanceAndSecure;
 	world.match.configure(rules);
 	const uint8_t teams[3] = {1, 1, 2}; // an A&S chain: zones 1 and 2 blue, 3 red

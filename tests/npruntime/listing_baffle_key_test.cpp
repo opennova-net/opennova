@@ -32,6 +32,7 @@
 #include <memory>
 #include <string>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -47,11 +48,14 @@ const Protocol &kJo = *title_protocol("jo");
 // the stream after them, the listing's columns and Host-list vars, then the server tick's refresh.
 void check_round_init_draws_the_listing_keys(uint32_t start_tick, uint32_t seed) {
 	auto world = std::make_unique<world::World>(); // heap: the 1 MB test stack
+	test_titles::jo_world(*world);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = world.get();
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.server_name = "Baffle";
 	settings.max_players = 8;
 	inmatch::SessionStartup startup;
@@ -128,7 +132,9 @@ void check_round_init_draws_the_listing_keys(uint32_t start_tick, uint32_t seed)
 // @0x51D93D) ahead of Lobby_UpdateServerInfo's gates @0x4FE8D8..0x4FE8FA]
 void check_lan_refresh_spends_its_draw() {
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = world.get();
 	world->crt_rand.seed(77u);
 	io::CrtRand stream = world->crt_rand;

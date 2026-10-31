@@ -51,6 +51,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -201,9 +202,11 @@ void test_print_rule() {
 // A client-less host context with two in-match players on loopback wires.
 struct ConsoleRig {
 	world::World world;
+	bool world_jo = test_titles::jo_world(world);
 	replication::LoopbackChannel wire_a;
 	replication::LoopbackChannel wire_b;
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	world::EntityHandle alice;
 
 	ConsoleRig() {
@@ -457,6 +460,7 @@ void test_serve_session_capture() {
 	net::ScopedSocket joiner_sock(net::udp_bind(0, &joiner_port));
 	CHECK(joiner_sock.is_valid());
 	inmatch::ClientRuntime client("LogJoiner");
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());

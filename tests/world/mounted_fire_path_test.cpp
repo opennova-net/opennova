@@ -25,6 +25,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -80,6 +81,7 @@ w::Entity carrier(uint32_t attrib, w::SeatType seat_type, const char *seat_name)
 //  WeaponAction_Fire @0x542B10 (@0x542C1C..0x542C2F)]
 void test_a_seat_switch_onto_a_gun_fires_the_gun(w::SeatType gun_seat, bool route_store) {
 	auto wp = std::make_unique<w::World>();
+	test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);

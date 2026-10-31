@@ -251,6 +251,7 @@ void test_armory_loadout_state() {
 	record.blue.pages[3].entries = {entry("WPN_KNIFE", -1, -1, -1), entry("WPN_MIKE", 2, -1, 1),
 			entry("WPN_SMOKE", 1, -1, -1)};
 	ArmoryLoadout state;
+	state.title = title_by_code("jo");
 	CHECK(state.buffers.stage_on_show(record, 1, {}));
 	state.populate(menu, weapons.file, 1, 8, {}, "NONE", text);
 	CHECK(state.slot_rows[0] == (LoadoutSlotRows{-1, 1, 2, 0}));
@@ -314,6 +315,7 @@ void test_grenade_positions_by_title() {
 	record.blue.pages[3].entries = { entry("WPN_KNIFE", -1, -1, -1), entry("WPN_MIKE", 2, -1, 1),
 		entry("WPN_SMOKE", 1, -1, -1), entry("WPN_FLASH", 2, -1, -1) };
 	ArmoryLoadout jo;
+	jo.title = title_by_code("jo");
 	CHECK(jo.buffers.stage_on_show(record, 1, {}));
 	jo.populate(menu, weapons.file, 1, 8, {}, "NONE", text);
 	// The walk's SMOKE and FLASH, FRAG's fill over the first.

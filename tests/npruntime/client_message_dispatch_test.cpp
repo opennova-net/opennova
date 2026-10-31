@@ -16,6 +16,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -26,6 +27,7 @@ namespace {
 
 struct FramedClient {
     inmatch::ClientRuntime client{"ControlJoiner"};
+    bool client_jo = test_titles::jo_folds(client);
     SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
     uint64_t now = 1;
     FramedClient() {
@@ -101,6 +103,7 @@ bool ceasefire_and_chat_reach_client_in_wire_order() {
 bool full_entity_repair_replaces_the_native_lifetime() {
     FramedClient wire;
     world::World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 64);
     replication::ClientWorldMaterializer materializer;
     FullEntitySpawnRecord spawn;
@@ -157,6 +160,7 @@ bool full_entity_repair_replaces_the_native_lifetime() {
 bool repair_after_empty_slot_has_a_new_generation() {
     FramedClient wire;
     world::World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 64);
     replication::ClientWorldMaterializer materializer;
     FullEntitySpawnRecord spawn;
@@ -188,7 +192,9 @@ bool repair_after_empty_slot_has_a_new_generation() {
 bool listen_client_sound_gates_and_consumption() {
     replication::LoopbackChannel loop;
     inmatch::ClientRuntime client(loop);
+    test_titles::jo_folds(client);
     world::World world;
+    test_titles::jo_world(world);
     PlaySoundCommand command;
     command.sound_name = "MP_COMMAND1";
     auto send = [&] {

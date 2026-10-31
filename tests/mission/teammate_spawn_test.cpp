@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -38,6 +39,7 @@ void test_helicopter_ammo_seed_needs_a_resolved_byte() {
     std::strcpy(rows[0].ai_function, "CHel");
     def::DefItemsFile items{rows.data(), rows.size()};
     auto kernel = std::make_unique<mission::MissionKernel>();
+    test_titles::jo_world(kernel->world);
     kernel->set_items_table(&items);
     kernel->world.registry.configure_pool(0, 8);
     kernel->world.registry.configure_pool(1, 8);
@@ -78,6 +80,7 @@ void test_flyover_helicopter_keeps_its_spawn_heading() {
     std::strcpy(rows[0].ai_function, "CHel");
     def::DefItemsFile items{rows.data(), rows.size()};
     auto kernel = std::make_unique<mission::MissionKernel>();
+    test_titles::jo_world(kernel->world);
     kernel->set_items_table(&items);
     kernel->world.registry.configure_pool(0, 8);
     kernel->world.registry.configure_pool(1, 8);
@@ -123,6 +126,7 @@ void test_teammate_helicopter_spawns_no_addeweap_children() {
     rows[1].hp = 10;
     def::DefItemsFile items{rows.data(), rows.size()};
     auto kernel = std::make_unique<mission::MissionKernel>();
+    test_titles::jo_world(kernel->world);
     kernel->set_items_table(&items);
     kernel->world.registry.configure_pool(0, 8);
     kernel->world.registry.configure_pool(1, 8);

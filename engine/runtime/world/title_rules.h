@@ -38,6 +38,7 @@
 #include <string_view>
 
 #include <runtime/world/impact_damage.h> // hit_zone_damage_multiplier (Jointops.exe's table)
+#include <runtime/world/weapon_scope_zero.h> // ScopeZeroSeed (DFX2-120)
 
 namespace opennova::world {
 
@@ -364,6 +365,40 @@ struct TitleRules {
 	//  `cmp ax, 3` @0x458AAE taking +0x300 @0x458AB3, the test @0x458AD2, the store
 	//  @0x458DB9 / @0x458DD2 (dfx2.exe)]
 	bool trail_surface_alternate = false;
+
+	// --- DFX2-120: the weapon slot's sight zero. -------------------------------------------------
+	// joiner-side: every slot init (the loadout fills, a pickup's grant, an emplacement's own slot)
+	// seeds the zero words by it (world::weapon_scope_zero_slot_seed), and a ForceScoped mount
+	// stores the rangefinder word by it (world::weapon_scope_mount_rangefinder). A joiner fills its
+	// own slots, and the local shooter's zero step rides its fire (the round's subtype), so a
+	// joiner's rounds climb as its title zeroes them.
+	// [orig: WeaponSlot_InitFromDef @0x53EE70; Player_MountWeaponSlot @0x4DFA40 (@0x4DFB3B..
+	//  0x4DFB44)] [orig: WeaponSlot_InitFromDef @0x53C0C0 (@0x53C1E8..0x53C1F9);
+	//  Player_MountWeaponSlot @0x4DCAE0 (@0x4DCBDB) (dfx2.exe)]
+	ScopeZeroSeed scope_zero_seed = ScopeZeroSeed::DefaultStep;
+
+	// --- DFX2-30: the spawn reset's health. ------------------------------------------------------
+	// joiner-side: every reset (the deploy's, the teleports', an NPC respawn's and the joiner's own
+	// respawn arm, world::entity_reset_to_spawn_state) raises the health to the difficulty ceiling
+	// under Jointops.exe and stores the def's word (+0x17C) under dfx2.exe, after its deploy's own
+	// raise to the ceiling. The two differ out of a session for the local player at a difficulty
+	// of -1 or 1, and for a body above its maximum.
+	// [orig: Entity_ResetToSpawnState @0x4B9610 - Entity_RaiseHealthToMax @0x4B97BC;
+	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0 (@0x43B8C6..0x43B8E9)] [orig:
+	//  Entity_ResetToSpawnState @0x4B96F0 - @0x4B989B..0x4B98A2; Server_DeployPlayer @0x514990 -
+	//  Entity_RaiseHealthToMax @0x514A70 (dfx2.exe)]
+	bool spawn_reset_stores_def_health = false;
+
+	// --- DFX2-123: the round init's look yaw. ----------------------------------------------------
+	// joiner-side: the round init (world::LocalPlayer::reset_for_new_round, from the listen host's
+	// deploy and the joiner's own respawn arm) stores the local player's look yaw
+	// (g_LocalPlayerLookYaw) from its placed Yaw word under Jointops.exe; dfx2.exe's stores none.
+	// Both store it in the scored placement (Entity_FindBestSpawnPoint, world::spawn_select) and
+	// the joiner's arm ahead of the round init, so it shows on the host's deploys that skip the
+	// scored placement: a picked zone, a co-op start marker, the co-op checkpoint.
+	// [orig: Game_InitNewRound @0x422740 - `mov g_LocalPlayerLookYaw, edx` @0x4227E3] [orig:
+	//  Game_InitNewRound @0x422590 (no store) (dfx2.exe)]
+	bool round_init_look_yaw = true;
 };
 
 // One registry row: a title's code and the rules it runs.
@@ -377,22 +412,17 @@ struct TitleRulesRow {
 // reaches it calls games::install_rules() at its start (games/games.h, opennova_games_rules).
 void install_title_rules(const TitleRulesRow *rows, size_t count);
 
-// The rules title `title_code` runs, compared case-insensitively: the default title's
-// (base/title/title.h default_title) for an empty or unknown code. (A session's protocol has no
-// such default: protocol_in_match aborts for a session with none.)
+// The rules title `title_code` runs, compared case-insensitively. An empty code or one no installed
+// title has aborts, naming the code: no default title's rules stand in (as a session's protocol
+// has no default: protocol_in_match aborts for a session with none). The editor's previews run
+// a project's target game, past their NoProject stop.
 const TitleRules &title_rules(std::string_view title_code);
 
-// The rules a holder (SessionRules, MatchRules, WaypointCycleContext, inmatch::GameConfig) starts
-// with, before the embedder or the session sets its title's: null in every program, so a read
-// before that aborts (require_title_rules) and no title's rules are ever run by default. The test
-// suite's registration point alone installs one (tests/common/install_games.cpp: Joint Operations',
-// which every fixture ran before titles had rules), so a fixture that builds a World with no
-// session keeps its expectations.
-void install_unset_title_rules(const TitleRules *rules);
-const TitleRules *unset_title_rules();
-
-// The rules a holder runs: the pointer the embedder or the session set from title_rules. A read
-// while it is unset aborts, naming `holder`.
+// The rules a holder runs (SessionRules, MatchRules, WaypointCycleContext, inmatch::GameConfig, a
+// joiner role and its replica folds): the pointer the embedder or the session set from title_rules,
+// null until then in every program and every test (a fixture names its title's,
+// tests/common/title_fixture.h), so no title's rules ever run by default. A read while it is unset
+// aborts, naming `holder`.
 [[noreturn]] void title_rules_unset(const char *holder);
 inline const TitleRules &require_title_rules(const TitleRules *rules, const char *holder) {
 	if (rules == nullptr) title_rules_unset(holder);

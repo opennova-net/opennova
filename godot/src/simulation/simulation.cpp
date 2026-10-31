@@ -455,7 +455,7 @@ void Simulation::apply_character_traits_to_world() {
 	// The session title's avatar pick, whose sex the profile sounds take (engine
 	// inmatch::install_viewer_side_pick, DFX2-53).
 	opennova::inmatch::install_viewer_side_pick(kernel_->world.tables.character_traits,
-			&session_title(net_, assets_.root),
+			session_title(net_, assets_.root),
 			assets_.character_registry_mounted ? &assets_.character_registry : nullptr);
 }
 
@@ -506,10 +506,12 @@ TypedArray<SoundEmitterRow> Simulation::drain_sound_emitters() {
 void Simulation::finish_kernel_boot() {
 	world_installed_ = true;
 	apply_host_session_mission_header(kernel_->mission);
-	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
-	// (witness at hud::HudMapControl::set_mission_map_zoom — the
-	// Player_InitPlayer derivation off the BMS header float).
-	kernel_->local.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom);
+	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults, the
+	// title's constant spin reset over it (witness at
+	// hud::HudMapControl::set_mission_map_zoom — the Player_InitPlayer derivation off
+	// the BMS header float; Title::spinmap_spawn_zoom_q16).
+	kernel_->local.hud_map_control.set_mission_map_zoom(
+			kernel_->mission.header.map_zoom, game_title());
 	if (!kernel_->wac_loaded && assets_.wac_program && assets_.wac_program->is_ok())
 		kernel_->wac.set_program(assets_.wac_program->native_program(), kernel_->world);
 }

@@ -8,15 +8,20 @@
 #include <runtime/inmatch/host_settings.h>
 #include "common/test_expect.h"
 #include <formats/mnu/mnu.h>
+#include <net/protocol/protocol.h> // the protocol's 0x66 word, another axis
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_state_frame.h>
 #include <runtime/menu/menu_text_tables.h>
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::inmatch;
 namespace gamecfg = opennova::gamecfg;
@@ -56,6 +61,29 @@ int title_caps() {
     config.max_players = 251;
     config.dedicated_server = true;
     TEST_EXPECT(config.player_slot_limit() == 252);
+    return 0;
+}
+
+// A config no session titled has run no session apply: its limit is the round init's, the cap
+// plus the dedicated slot held to 1..251, both executables' constant, with no title ceiling.
+// [orig: Server_InitNewRoundState @0x51C8E0 - @0x51C948..0x51C96B, the store @0x51C976]
+// [orig: Server_InitNewRoundState @0x519910 - @0x519978..0x51999B, the store @0x5199A6
+//  (dfx2.exe)]
+int untitled_round_init_limit() {
+    const auto limit = [](uint32_t max_players, bool dedicated) {
+        GameConfig config;
+        test_titles::jo_config(config);
+        config.max_players = max_players;
+        config.dedicated_server = dedicated;
+        return config.player_slot_limit();
+    };
+    TEST_EXPECT(limit(0, false) == 1 && limit(0, true) == 1);
+    TEST_EXPECT(limit(1, false) == 1 && limit(4, true) == 5);
+    // Past JO's 65 ceiling: the round init applies none of a title's.
+    TEST_EXPECT(limit(100, false) == 100 && limit(100, true) == 101);
+    TEST_EXPECT(limit(250, true) == 251 && limit(251, true) == 251 && limit(300, false) == 251);
+    // The sum is a signed int: a cap past INT_MAX reads negative and holds at 1.
+    TEST_EXPECT(limit(0x80000000u, false) == 1);
     return 0;
 }
 
@@ -393,13 +421,81 @@ int restriction_lists() {
                 nw_screen.table_cell_text(nw_classes, 0, 1) == "Mission");
     return 0;
 }
+
+// The host screen's ARMORY / MISSION words are its Title's (Title::host_armory_word, DFX2-10), not
+// the protocol's: a title on Jointops.exe's screen, speaking JO's protocol (whose S2C 0x66
+// armory-only word is 2), with dfx2.exe's word 3 names 3 ARMORY and 2 MISSION, its press steps past
+// 2 to 0 and its radios write 3 and 2; the schema's words follow. The two axes fork independently.
+// [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 - the switch @0x556655]
+// [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0 - the switch @0x554805 (dfx2.exe)]
+int host_words_are_the_titles() {
+    opennova::Title title = kJo;
+    title.host_armory_word = 3;
+    TEST_EXPECT(opennova::protocol_in_match(opennova::title_protocol(title.code))
+                        .s2c_66.armory_only_availability == 2);
+    const gamecfg::ServerSettingsTitle words = server_settings_title(title);
+    TEST_EXPECT(words.armory_word == 3 && words.mission_word == 2);
+    const gamecfg::ServerSettingsTitle jo = server_settings_title(kJo);
+    TEST_EXPECT(jo.armory_word == 2 && jo.mission_word == 3);
+
+    mnu::Document doc = host_dialog_document();
+    mnu::Window list_window = control("WEAPON_LIST", mnu::WindowType::Table);
+    list_window.table_data.column.has_count = true;
+    list_window.table_data.column.count = 2;
+    doc.screens[0].roots[0].children.push_back(list_window);
+    opennova::menu::MenuRuntime screen;
+    TEST_EXPECT(screen.open_document(&doc, std::string(), std::string(title.host_screen)));
+    const int list = screen.find_screen_control(std::string(title.host_screen), "WEAPON_LIST");
+    TEST_EXPECT(list >= 0);
+    const opennova::hud::GameTextLookup gametext = [](const char*, const char*, const char* fallback) {
+        return std::string(fallback);
+    };
+    const opennova::hud::GameTextLookup menu_ui = [](const char* section, const char* key,
+                                                      const char* fallback) {
+        if (std::string(section) != "Menu") return std::string(fallback);
+        return std::string(key) == "ARMORY" ? std::string("Armory")
+               : std::string(key) == "MISSION" ? std::string("Mission")
+                                               : std::string(fallback);
+    };
+    const gamecfg::WeaponRoster weapons = {{"None", 0, ""}, {"WPN_M16", 1, ""}, {"WPN_X", 1, ""}};
+    gamecfg::GameCfg cfg = gamecfg::defaults();
+    cfg.weapon_availability[1] = 3;
+    cfg.weapon_availability[2] = 2;
+    populate_host_weapon_list(screen, cfg, title, weapons, gametext, menu_ui);
+    TEST_EXPECT(screen.table_row_count(list) == 2);
+    TEST_EXPECT(screen.table_cell_text(list, 0, 1) == "Armory" &&
+                screen.table_cell_text(list, 1, 1) == "Mission");
+    opennova::menu::HostDialog dialog;
+    for (const int32_t stepped : {0, 1, 2, 0})
+        TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, title, "WEAPON_LIST", 1, 1, menu_ui) &&
+                    cfg.weapon_availability[2] == stepped);
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, title, weapons, "WPN_ARMORY", menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 3 && screen.table_cell_text(list, 0, 1) == "Armory");
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, title, weapons, "WPN_MISSION", menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 2 && screen.table_cell_text(list, 0, 1) == "Mission");
+    return 0;
+}
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // ctest npruntime_host_settings_unknown_title: a code no installed title has aborts, named
+    // (require_title_code), where the default title's words once stood in. The abort's handler
+    // exits clean, so ctest reads the message (PASS_REGULAR_EXPRESSION).
+    if (argc > 1 && std::string(argv[1]) == "--unknown-title") {
+#if defined(_MSC_VER)
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
+        std::signal(SIGABRT, [](int) { std::_Exit(0); });
+        (void)server_settings_title("nosuchgame");
+        std::fputs("server_settings_title read a code no title has\n", stderr);
+        return 1;
+    }
     if (title_caps() != 0) return 1;
+    if (untitled_round_init_limit() != 0) return 1;
     if (untouched_dialog() != 0) return 1;
     if (max_players_recommendation() != 0) return 1;
     if (restriction_lists() != 0) return 1;
+    if (host_words_are_the_titles() != 0) return 1;
     gamecfg::GameCfg cfg;
     const auto read = [&](const char* name, const char* value) {
         return apply_host_dialog_control(cfg, kJo, name, value);

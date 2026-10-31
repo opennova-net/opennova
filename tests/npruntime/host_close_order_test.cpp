@@ -57,6 +57,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -102,7 +103,9 @@ struct CaptureSocket final : IDatagramSocket {
 struct ListenHost {
 	std::map<std::string, std::string> files;
 	std::unique_ptr<ms::MissionKernel> kernel = std::make_unique<ms::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	std::unique_ptr<inmatch::HostRole> role = std::make_unique<inmatch::HostRole>();
+	bool role_jo = test_titles::jo_controls(*role);
 	std::unique_ptr<inmatch::ClientProcessState> process =
 			std::make_unique<inmatch::ClientProcessState>();
 	CaptureSocket socket;
@@ -126,6 +129,7 @@ struct ListenHost {
 				static_cast<bms::AttribFlags>(kernel->mission.header.attrib_flags)));
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "close";
 			cfg.config.max_players = 4;
@@ -640,6 +644,7 @@ void test_the_remapped_exit_reads_the_own_client_record() {
 	if (live) CHECK(inmatch::disconnect_reason_key(&*live).section == nullptr);
 
 	inmatch::HostRole dedicated; // no own client
+	test_titles::jo_controls(dedicated);
 	CHECK(!dedicated.own_client_error_record());
 	CHECK(inmatch::disconnect_reason_key(nullptr).key == "ERR1");
 }

@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace inmatch = opennova::inmatch;
 namespace w = opennova::world;
@@ -36,7 +37,9 @@ namespace {
 
 struct Rig {
     std::unique_ptr<w::World> world = std::make_unique<w::World>();
+    bool world_jo = test_titles::jo_world(*world);
     inmatch::NapiNPServerCtx ctx;
+    bool ctx_jo = test_titles::jo_config(ctx.config);
     w::EntityHandle body;
 
     Rig() {

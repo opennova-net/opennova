@@ -27,6 +27,7 @@
 #include <memory>
 #include <vector>
 #include <utility>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::io::bam_add;
@@ -45,6 +46,7 @@ constexpr int32_t kGunHeading = 0x40000000;
 
 struct Rig {
     std::unique_ptr<World> wp = std::make_unique<World>();
+    bool wp_jo = test_titles::jo_world(*wp);
     World &w = *wp;
     EntityHandle gun_h, gunner_h;
     AiEntity *body = nullptr;
@@ -977,6 +979,7 @@ void test_carrier_destruction_resets_child_words() {
 //  @0x494669..0x494673]
 void test_vehicle_death_releases_or_destroys_the_eweap_group() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 12);
     auto spawn = [&](uint8_t type, uint32_t attrib, uint8_t ref, bool member) {
@@ -1067,6 +1070,7 @@ void configure_heat_gun(WeaponTableEntry &e) {
 //  Entity_ComputeUserpointWorldTransform @0x545C60 (the gate @0x545D06..0x545D68)]
 void test_unoccupied_hot_gun_drives_its_overheat_emitter() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
@@ -1156,6 +1160,7 @@ void test_unoccupied_hot_gun_drives_its_overheat_emitter() {
 //  @0x54119E..0x5411B2)]
 void test_overheat_emitter_anchor_by_walked_body() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 4);
     w.tables.weapons.entries.resize(2);
@@ -1235,6 +1240,7 @@ void test_dfx2_planar_rate() {
 //  Entity_CountOccupiedSeats @0x434E70 (dfx2.exe)]
 void test_dfx2_rate_pick_and_seat_count() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 4);
     Entity carrier_seed;
@@ -1295,6 +1301,7 @@ void test_dfx2_counter_rotation() {
 //  @0x440DAE..0x440DDB, @0x440F87, @0x440F94]
 void test_dfx2_counter_rotation_gate() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 4);
     Entity carrier_seed;
@@ -1492,6 +1499,7 @@ void test_gunner_takes_the_child_frame_in_its_own_update() {
 //  @0x4410EA..0x4411BC]
 void test_only_the_ewep_update_composes_a_child() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &w = *wp;
     w.registry.configure_pool(1, 8);
     Entity carrier_seed;
@@ -1552,6 +1560,7 @@ void test_replica_gun_window_reads_the_composed_frame() {
     using opennova::replication::ClientEntityState;
     for (const bool composed : {false, true}) {
         auto wp = std::make_unique<World>();
+        test_titles::jo_world(*wp);
         World &w = *wp;
         w.registry.configure_pool(1, 4);
         Entity twin_seed;
@@ -1615,6 +1624,7 @@ void test_replica_fallback_window_reads_the_twins_slot_def() {
     using opennova::replication::ClientEntityState;
     for (const bool bound : {false, true}) {
         auto wp = std::make_unique<World>();
+        test_titles::jo_world(*wp);
         World &w = *wp;
         w.registry.configure_pool(1, 4);
         w.tables.weapons.entries.resize(1);

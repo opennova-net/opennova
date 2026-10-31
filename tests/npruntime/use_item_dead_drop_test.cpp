@@ -19,6 +19,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -37,6 +38,7 @@ int failures = 0;
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<w::LocalPlayer> local = std::make_unique<w::LocalPlayer>(world);
 	w::EntityHandle player;
@@ -96,8 +98,10 @@ void test_a_dedicated_host_in_session_drops_every_press() {
 //  Input_TryTriggerMouseAxisBinding @0x499130 (the look queues through the head)]
 struct RoleRig {
 	std::unique_ptr<ms::MissionKernel> kernel_storage = std::make_unique<ms::MissionKernel>();
+	bool kernel_storage_jo = test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	std::unique_ptr<inmatch::HostRole> role_storage = std::make_unique<inmatch::HostRole>();
+	bool role_storage_jo = test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	RoleRig(bool session_peer) {
 		role.bind(kernel);

@@ -22,19 +22,24 @@
 
 namespace opennova::inmatch {
 
+struct NapiNPConnection;
+
 // The side selector: the host's S2C 0x04 tail byte is retail's g_LocalTeam
 // (teams 1/3 read the BLUE block, 2/4 the RED one [orig: @0x525788]). Before
 // that latch lands (assigned_team == 0) fall back to the local entity's own
 // team when L already exists.
 uint8_t loadout_side_team(const world::World &world, uint8_t assigned_team);
 
-// The class a protocol that fixes the loadout class (ProtocolInMatch::c2s_2f.loadout_class_fixed)
-// gives a mission of `mission_type`: 7 (gunner) in a mission of type 2, else 8 (rifleman); 0 for
-// a protocol that keeps the profile's own.
+// The class a title whose mission start fixes the loadout class (Title::session_loadout_class_fixed)
+// writes into the side block for a mission of `mission_type`: 7 (gunner) in a mission of type 2,
+// else 8 (rifleman); 0 for a title that keeps the profile's own, and with no title (a fresh
+// record with no page, whose class picks nothing). The mission start's write, not the wire's:
+// the C2S 0x2F's class byte is its protocol's (ProtocolInMatch::c2s_2f.loadout_class_fixed),
+// which the sender derives from the same header byte.
 // [orig: Game_StartMission @0x52299e..0x5229af (dfx2.exe): `movzx eax, byte_A6FB3A; sub eax, 2`,
 //  then `mov byte [esi], 8` / `mov byte [esi], 7`; NetPacket_SendLoadoutSubmit @0x42ec15..0x42ec26
-//  (dfx2.exe), the same byte]
-uint8_t loadout_fixed_class(const Protocol *protocol, bms::MissionType mission_type);
+//  (dfx2.exe), the sender's read of the byte]
+uint8_t loadout_fixed_class(const Title *title, bms::MissionType mission_type);
 
 // The Game_StartMission copy: in a live session the assigned side's profile
 // page becomes the spawn buffer [orig: @0x525813
@@ -54,14 +59,14 @@ uint8_t loadout_fixed_class(const Protocol *protocol, bms::MissionType mission_t
 // selector is the S2C 0x04 tail byte [orig: g_LocalTeam @0x425499];
 // anything-not-1-or-3 selects the RED block @0x525798, so seeding at team 0
 // would commit the wrong side's page and then have to flip it).
-// A protocol that fixes the class first writes it into the side block the team names
+// A title that fixes the class first writes it into the side block the team names
 // (loadout_fixed_class: dfx2.exe's 8, or 7 in a mission of type 2), then picks that class's page,
 // so every later read of the block (a self S2C 0x50's re-copy of the same side, the 0x2F's
 // side kits) reads the class the mission start wrote; the other side's block keeps its own.
 // [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe) - the class store into the side block
 //  @0x5229aa / @0x5229af, the page switch over it @0x5229b2..0x5229bd, the copy @0x522a04]
 bool seed_session_kit_from_profile(world::World &world, playersav::Record &profile,
-		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
+		const Title &title, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side);
 
 // The single player's fill of the spawn buffer (g_SpawnLoadoutBuffer) at its mission start and
@@ -94,7 +99,7 @@ bool seed_single_player_kit_from_profile(world::World &world,
 // [orig: Game_StartMission @0x524360 - the side pick @0x525798, Buffer_CopyUntilDoubleNull
 //  (the call @0x525818)]
 bool reseed_session_kit_on_side_change(world::World &world, playersav::Record &profile,
-		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
+		const Title &title, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side);
 
 // A self S2C 0x50's local arm: the page of the side `team` names (teams 1 and 3 the blue
@@ -131,9 +136,9 @@ struct SessionWeaponProfile {
 	// joiner) copies its side's page (seed_session_kit_from_profile), single player its
 	// page arm over the record once one is installed (seed_single_player_kit_from_profile).
 	// Returns true when it wrote (the caller rebuilds the slot pool).
-	// `protocol` and `mission_type` are the session's (the class a protocol fixes,
+	// `title` and `mission_type` are the session's (the class a title's mission start fixes,
 	// seed_session_kit_from_profile); the single-player arm reads neither.
-	bool seed_kit(world::World &world, bool session_peer, const Protocol *protocol,
+	bool seed_kit(world::World &world, bool session_peer, const Title &title,
 			bms::MissionType mission_type, uint8_t assigned_team,
 			world::LocalPlayerLoadout &loadout);
 };
@@ -174,6 +179,22 @@ world::LoadoutApplySelect grant_apply_select(const Protocol *protocol);
 //  @0x4B1100..0x4B1116]
 void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &list);
 
+// A listen host's own client's S2C 0x5A apply past its name-list rebuild: with a local body,
+// the grant apply over the list's rows (world::local_loadout_apply_own_grant: the class, the
+// local table rebuilt from the rows, which on the authority is the slot's own, their counts,
+// the weight), whose select is the weapon the session's protocol picks out of the list
+// (grant_apply_select: JO's the held weapon, DFX2's the list's last primary row, DFX2-35) with
+// the EquippedSlot's mount. The authority runs it as a joiner does; only the spawn-buffer copy
+// and the side class store skip there.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - `cmp is_authority` @0x4293D1 /
+//  @0x429402 (the two skips), the rebuild @0x4294E3..0x4296AE, the select @0x4296B4..0x4296E3,
+//  Player_MountWeaponSlot @0x4296F4]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 - the skips @0x42B218 / @0x42B24F,
+//  the last primary row @0x42B0AB..0x42B0BD, the rebuild @0x42B322..0x42B4E9, its select
+//  @0x42B4F3..0x42B51A, Player_MountWeaponSlot @0x42B52C (dfx2.exe)]
+void apply_own_weapon_loadout(world::World &world, const WeaponLoadout &list,
+		const Protocol *protocol);
+
 // NetPacket_SendLoadoutSubmit does not blindly serialize the requested combo.
 // Once the local slot table exists it keeps a side-legal slot, otherwise walks
 // that combo's 65-rank category for the first populated side-legal slot. A
@@ -211,6 +232,22 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 		const Protocol *protocol,
 		const std::vector<world::WeaponKitEntry> &kit, uint8_t armory_class, bool authority,
 		bms::MissionType mission_type);
+
+// The armory ACCEPT out of a session, the DEATH screen's close-leg apply alike (both are one
+// apply): WeaponLoadout_ApplyFromBuffer's offline leg. The local apply
+// (world::local_loadout_apply_accept), then the selection copied into the loadout buffer of
+// the slot holding the local player, `own_slot` (local_player_slot), which every later deploy
+// rebuilds the kit from (PlayerSlot_InitWeaponsFromLoadout), so a respawn keeps the accepted
+// kit. No slot (no session context) copies nothing. False, writing nothing, when the apply
+// refuses. [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - the slot Entity_ValidatePtr
+//  (g_LocalPlayerEntity) @0x565DAF, the copy into slot+0x170C8 @0x565DE4, the display lists
+//  built from it; Server_DeployPlayer @0x517740 -> PlayerSlot_InitWeaponsFromLoadout
+//  @0x5178E1] [orig: WeaponLoadout_ApplyFromBuffer @0x564C30 - Entity_ValidatePtr @0x564D14,
+//  the copy @0x564D44, AvatarDef_BuildDisplayList(slot+78464, slot+94408) @0x564FBD;
+//  Server_DeployPlayer @0x514990 -> PlayerSlot_InitWeaponsFromLoadout @0x514B22 (dfx2.exe)]
+bool armory_accept_offline(world::World &world, world::LocalPlayer &local,
+		NapiNPConnection *own_slot, const std::vector<world::WeaponKitEntry> &kit,
+		int32_t player_class);
 
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,

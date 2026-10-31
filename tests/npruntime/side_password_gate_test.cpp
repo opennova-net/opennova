@@ -36,6 +36,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -50,7 +51,9 @@ constexpr uint32_t kTeamChoose = inmatch::GameConfig::kMpAttribTeamChoose;
 // mp-attribute word carries TeamChoose or not.
 std::unique_ptr<inmatch::NapiNPServerCtx> host(uint32_t type, bool team_choose) {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.game_type = type;
 	config.mp_attributes = team_choose ? (config.mp_attributes | kTeamChoose)

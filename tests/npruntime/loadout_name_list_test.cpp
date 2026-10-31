@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "host_test_setup.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -57,8 +58,10 @@ constexpr uint8_t kAk = 2;
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	std::unique_ptr<inmatch::ClientProcessState> process =
 			std::make_unique<inmatch::ClientProcessState>();
 	replication::LoopbackChannel loop;
@@ -78,6 +81,7 @@ struct Rig {
 		// The role's binding of the process's list (HostRole::apply_rule_words).
 		world.loadout_weapon_names = &process->loadout_weapon_names;
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 4;
 		settings.game_type = 0x10000u;
 		inmatch::test::bring_up_host(*ctx, mode, inmatch::SocketMode::Socketless, 0,
@@ -132,6 +136,7 @@ void test_a_dedicated_host_keeps_the_initializers_first_weapon() {
 void test_a_listen_hosts_own_list_names_every_body_after_its_fold() {
 	Rig r(inmatch::ConnectionMode::HostClient);
 	auto own_client = std::make_unique<inmatch::ClientRuntime>(r.loop);
+	test_titles::jo_folds(*own_client);
 	CHECK(inmatch::Server_ProcessPendingPlayerSpawns(*r.ctx, r.world) >= 1);
 	inmatch::test::round_init_own_body(*r.ctx); // the mission start's round init (D-NET-1233)
 	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb)) == kM4);
@@ -149,9 +154,15 @@ void test_a_listen_hosts_own_list_names_every_body_after_its_fold() {
 	// The same tick's spawn pump: the list is the previous one.
 	CHECK(!r.process->loadout_weapon_names.set);
 	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb + 1)) == kM4);
-	// The own client's fold, ahead of the next tick.
+	// The own client's deploy pick raises its deploy hold, as input case 12 does on every role
+	// [orig: Input_HandleActionBinding case 12 - g_ClientDeployHold = 1 @0x49B067].
+	CHECK(own_client->queue_deployment_pick(0xFFFF));
+	CHECK(!own_client->gameplay_gate_open());
+	// The own client's fold, ahead of the next tick; its 0x5A apply clears the hold, as every
+	// valid list's does, the authority's own included [orig: @0x429713].
 	(void)own_client->Client_ProcessNetworkFrame(0);
 	own_client->apply_received_effects(r.world);
+	CHECK(own_client->gameplay_gate_open());
 	const w::LoadoutWeaponNameList &names = r.process->loadout_weapon_names;
 	CHECK(names.set && names.entries.size() == 2);
 	if (names.entries.size() == 2)
@@ -313,7 +324,7 @@ void test_the_session_weapon_profile_clamps_and_routes_its_seed() {
 	Rig r(inmatch::ConnectionMode::HostOnly);
 	r.world.rules.mp_session = false;
 	w::LocalPlayerLoadout loadout;
-	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, nullptr,
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, *opennova::title_by_code("jo"),
 			opennova::bms::MissionType::NormalMission, 0, loadout));
 	const std::vector<w::WeaponKitEntry> page = w::weapon_kit_default(r.world.rules.title());
 	CHECK(loadout.spawn_kit().size() == page.size());
@@ -327,28 +338,36 @@ void test_the_session_weapon_profile_clamps_and_routes_its_seed() {
 	CHECK(profile.record.single_player.entries.size() == 1);
 	CHECK(profile.record.side(playersav::SideId::Blue).player_class == 9);
 	CHECK(profile.record.side(playersav::SideId::Red).player_class == 5);
-	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, nullptr,
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/false, *opennova::title_by_code("jo"),
 			opennova::bms::MissionType::NormalMission, 0, loadout));
 	CHECK(loadout.spawn_kit().size() == 1 && loadout.spawn_kit()[0].name == "WPN_AK47AUTO");
 	// A session peer copies its side's page: team 1 the blue block's, at its clamped class
 	// 9 (the fifth page), and the cursor names the side.
 	profile.record.blue.pages[4].entries = {playersav::KitEntry{"WPN_M4AUTO", 3, -1, -1}};
 	w::LocalPlayerLoadout session;
-	CHECK(profile.seed_kit(r.world, /*session_peer=*/true, opennova::title_protocol("jo"),
+	CHECK(profile.seed_kit(r.world, /*session_peer=*/true, *opennova::title_by_code("jo"),
 			opennova::bms::MissionType::CombatVehicleMission, 1, session));
 	CHECK(session.spawn_kit().size() == 1 && session.spawn_kit()[0].name == "WPN_M4AUTO");
 	CHECK(profile.seeded_side == static_cast<int>(playersav::SideId::Blue));
 	CHECK(profile.record.blue.player_class == 9); // JO keeps the profile's class
 }
 
-// A protocol that fixes the loadout class (DFX2-12, ProtocolInMatch::c2s_2f): its mission start
-// writes 8, or 7 in a mission of type 2, into the side block the team names, then copies that
-// class's page; the other side's block keeps its own class.
+// A title whose mission start fixes the loadout class (DFX2-12, Title::session_loadout_class_fixed,
+// the mission start's half; the 0x2F byte is the protocol's): its mission start writes 8, or 7 in
+// a mission of type 2, into the side block the team names, then copies that class's page; the
+// other side's block keeps its own class. Jointops.exe's start reads the block's class and
+// writes none [orig: Game_StartMission @0x524360 - @0x5257C6].
 // [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe) - `movzx eax, byte_A6FB3A; sub eax, 2`,
 //  `mov byte [esi], 8` / `mov byte [esi], 7`, the page switch over the byte; the copy @0x522a04]
-void test_a_fixed_class_protocol_writes_its_class_before_the_page() {
+void test_a_fixed_class_title_writes_its_class_before_the_page() {
 	Rig r(inmatch::ConnectionMode::HostOnly);
-	const opennova::Protocol *dfx2 = opennova::title_protocol("dfx2");
+	const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
+	CHECK(dfx2.session_loadout_class_fixed && !opennova::title_by_code("jo")->session_loadout_class_fixed);
+	CHECK(inmatch::loadout_fixed_class(&dfx2, opennova::bms::MissionType::CombatVehicleMission) == 7);
+	CHECK(inmatch::loadout_fixed_class(&dfx2, opennova::bms::MissionType::NormalMission) == 8);
+	CHECK(inmatch::loadout_fixed_class(opennova::title_by_code("jo"),
+			opennova::bms::MissionType::CombatVehicleMission) == 0);
+	CHECK(inmatch::loadout_fixed_class(nullptr, opennova::bms::MissionType::NormalMission) == 0);
 	playersav::Record record;
 	record.blue.player_class = 9;
 	record.red.player_class = 5;
@@ -393,7 +412,7 @@ int main() {
 	test_the_single_players_page_fills_the_spawn_buffer();
 	test_an_out_of_session_accept_writes_the_list();
 	test_the_session_weapon_profile_clamps_and_routes_its_seed();
-	test_a_fixed_class_protocol_writes_its_class_before_the_page();
+	test_a_fixed_class_title_writes_its_class_before_the_page();
 	test_the_grant_apply_select_is_the_protocols();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -70,8 +71,10 @@ void make_weapon(w::WeaponTableEntry &def, const char *name, int32_t category, i
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	std::vector<inmatch::NapiNPConnection> roster;
 	w::EntityHandle player;
 
@@ -107,7 +110,7 @@ struct Rig {
 		req.terminated = true;
 		inmatch::ServerDispatchInputs inputs;
 		inputs.server_ctx = ctx.get();
-		replies = inmatch::dispatch_session_replies(inmatch::GameConfig{}, roster[0],
+		replies = inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), roster[0],
 				{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(req))}, 100,
 				roster, &world, inputs);
 	}
@@ -214,6 +217,7 @@ bool tail_bodies(inmatch::NapiNPServerCtx &ctx, w::World &world, std::vector<uin
 void test_the_first_mission_builds_the_table() {
 	for (const bool session : {true, false}) {
 		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
 		w::WeaponTable &table = world->tables.weapons;
 		table.ammo_class_names = {"CLASS_556MM"};
 		table.ammo_class_caps = {1000};
@@ -235,11 +239,13 @@ void test_the_first_mission_builds_the_table() {
 				{"WPN_RIFLE", 0},    // banned by the mission, but the cfg word is not 3
 		};
 		auto owner = std::make_unique<inmatch::HostOwner>();
+		test_titles::jo_config(owner->ctx.config);
 		replication::LoopbackChannel loop;
 		owner->host_loopback = &loop;
 		owner->ctx.world = world.get();
 		owner->ctx.mission = mission.get();
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = opennova::title_protocol("jo");
 		cfg.config.server_name = "availability";
 		cfg.config.max_players = 4;

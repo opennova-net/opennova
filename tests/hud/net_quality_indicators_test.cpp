@@ -11,6 +11,11 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include <base/title/title.h>
+
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
 
 using namespace opennova::hud;
 
@@ -187,6 +192,7 @@ std::vector<HudQuad> icon_quads(const HudDrawList &list) {
 
 HudFrameState live_state() {
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.net_quality.in_session = true;
 	state.net_quality.novaworld_icon = true;
 	NetQualityIndicators &q = state.net_quality.indicators;

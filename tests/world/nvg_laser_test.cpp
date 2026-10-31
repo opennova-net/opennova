@@ -10,6 +10,7 @@
 #include <runtime/world/nvg_laser.h>
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -130,6 +131,7 @@ CollisionModel wall_model(double half_extent) {
 // @ 0x5c6218].
 void test_clip_distance() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	w.registry.configure_pool(0, 4);
 	w.registry.configure_pool(1, 8);

@@ -6,9 +6,16 @@
 
 #include "common/test_font.h"
 
+#include <csignal>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <vector>
+
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
 
 using namespace opennova::hud;
 using opennova::fnt::fnt_font_t;
@@ -65,7 +72,7 @@ void test_the_lone_gunner_panel_is_dfx2s() {
 
 // DFX2-91: while the local player is a lone gunner, the titleless stdbox (320, 500)..(704, 600)
 // and the two-line string centred on design (512, 528) in the large slot, palette entry 4
-// (0xFFF0F000) half-bright; nothing under JO's title, a null title, or with no lone gunner.
+// (0xFFF0F000) half-bright; nothing under JO's title or with no lone gunner.
 // [orig: sub_5B8050 @0x5B8050 (dfx2.exe) - HUD_DrawLabelBox @0x5B8074,
 //  HUD_DrawTextCenteredScaled @0x5B8090]
 void test_the_lone_gunner_panel(const fnt_font_t *font) {
@@ -102,12 +109,10 @@ void test_the_lone_gunner_panel(const fnt_font_t *font) {
 	state.lone_gunner = true;
 	state.title = &title("jo");
 	CHECK(!element_span(compiler.compile(state, 1024, 768), HudElement::LoneGunnerPanel).found);
-	state.title = nullptr;
-	CHECK(!element_span(compiler.compile(state, 1024, 768), HudElement::LoneGunnerPanel).found);
 }
 
 // DFX2-92: with the waypoint active, dfx2.exe's step sets the colour to g_HUDColors.active halved
-// alpha and all and the band to 2 whatever the height; Jointops.exe's (and a null title's) picks
+// alpha and all and the band to 2 whatever the height; Jointops.exe's picks
 // by the height against the local player's, +-2.0 apart: below blue band 1, above orange band 0,
 // level green band 2. Both keep the words while no waypoint is active.
 // [orig: HUD_UpdateWaypointAltitudeColor @0x590970] [orig: sub_58EDF0 @0x58EDF0 (dfx2.exe)]
@@ -117,6 +122,7 @@ void test_the_waypoint_tint(const fnt_font_t *font) {
 	CHECK(!title("acidgambit").hud_waypoint_active_tint);
 	HudLayout layout;
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
 	state.waypoint.present = true;
 	state.waypoint.world_z = 10 * 65536;
@@ -132,8 +138,6 @@ void test_the_waypoint_tint(const fnt_font_t *font) {
 	CHECK(w.waypoint_altitude_color == 0x7F7F7F7Fu && w.waypoint_altitude_band == 2);
 	w = words(&title("jo"));
 	CHECK(w.waypoint_altitude_color == 0xFF7F5000u && w.waypoint_altitude_band == 0);
-	w = words(nullptr);
-	CHECK(w.waypoint_altitude_color == 0xFF7F5000u && w.waypoint_altitude_band == 0);
 	state.waypoint.world_z = -10 * 65536;
 	w = words(&title("jo"));
 	CHECK(w.waypoint_altitude_color == 0xFF20407Fu && w.waypoint_altitude_band == 1);
@@ -147,7 +151,7 @@ void test_the_waypoint_tint(const fnt_font_t *font) {
 
 // DFX2-93: a done objective under dfx2.exe's title is a green square cleared inside its box, the
 // corners (x + 2, y + 2)..(x + 15, y + 15) through the integer design scaling and opaque; under
-// Jointops.exe's (and a null title) a red X of six lines. The box x is 15 + 24, the first row's y
+// Jointops.exe's a red X of six lines. The box x is 15 + 24, the first row's y
 // 240 + 24 [orig: sub_5B9890 @0x5B9AFC..0x5B9B12; Render_FillViewportRect @0x5D38C0 (dfx2.exe)]
 // [orig: HUD_DrawWinConditions @0x5BABA4..0x5BAC5B].
 void test_the_objective_done_mark(const fnt_font_t *font) {
@@ -159,6 +163,7 @@ void test_the_objective_done_mark(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.objectives_header = "HDR";
 	state.objectives.push_back({"AB", true});
 	const auto marks = [&](const opennova::Title *t, float w, float h, std::vector<HudQuad> &fills,
@@ -189,8 +194,6 @@ void test_the_objective_done_mark(const fnt_font_t *font) {
 			fills[0].x1 == 108.0f && fills[0].y1 == 558.0f);
 	marks(&title("jo"), 1024.0f, 768.0f, fills, red);
 	CHECK(fills.empty() && red == 6);
-	marks(nullptr, 1024.0f, 768.0f, fills, red);
-	CHECK(fills.empty() && red == 6);
 	// An open row draws neither.
 	state.objectives[0].done = false;
 	marks(&title("dfx2"), 1024.0f, 768.0f, fills, red);
@@ -211,6 +214,7 @@ void test_the_armory_line(const fnt_font_t *font) {
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	for (int service = 1; service <= 4; ++service) {
 		HudFrameState state;
+		state.title = &kJoTitle;
 		state.combat.service_prompt = service;
 		state.combat.service_text = "Gear";
 		const auto line = [&](const char *code) {
@@ -235,7 +239,25 @@ void test_the_end_game_footer_is_dfx2s() {
 	CHECK(!title("acidgambit").hud_end_game_footer_corners);
 }
 
-int main() {
+int main(int argc, char **argv) {
+	// ctest hud_title_draws_untitled: a frame that names no title aborts at the first element that
+	// reads it, naming the element (require_title), where Jointops.exe's variants once drew. The
+	// abort's handler exits clean, so ctest reads the message (PASS_REGULAR_EXPRESSION).
+	if (argc > 1 && std::string(argv[1]) == "--untitled") {
+#if defined(_MSC_VER)
+		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT); // no debug dialog, no report
+#endif
+		std::signal(SIGABRT, [](int) { std::_Exit(0); });
+		fnt_font_t font = test_font::uniform_test_font();
+		HudFrameCompiler compiler;
+		compiler.configure(HudLayout{}, &font);
+		compiler.configure_label_fonts(&font, &font, &font, 1.0f, 1.0f);
+		HudFrameState untitled;
+		untitled.lone_gunner = true;
+		compiler.compile(untitled, 1024, 768);
+		std::fputs("the HUD compiled a frame with no title\n", stderr);
+		return 1;
+	}
 	test_the_lone_gunner_panel_is_dfx2s();
 	test_the_end_game_footer_is_dfx2s();
 	fnt_font_t font = test_font::uniform_test_font();

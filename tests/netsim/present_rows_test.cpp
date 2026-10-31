@@ -30,6 +30,7 @@
 #include <memory>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace w = opennova::world;
 namespace im = opennova::inmatch;
@@ -40,6 +41,15 @@ namespace {
 int &failures = test_expect::failures;
 
 using test_expect::expect;
+
+// The rows' context as a session's embedder hands it, under Joint Operations' title where a case
+// names none other: a player row reads the title (require_title), so every context names one.
+im::PresentRowsContext rows_of(opennova::mission::MissionKernel &kernel, im::ClientRuntime *runtime,
+		bool joiner, const im::NapiNPServerCtx *server = nullptr) {
+	im::PresentRowsContext context{kernel, runtime, joiner, server};
+	context.title = opennova::title_by_code("jo");
+	return context;
+}
 
 const float *row_at(const std::vector<float> &rows, size_t i) {
 	return rows.data() + i * w::PF_STRIDE;
@@ -80,10 +90,11 @@ w::Entity *spawn_pool_row(opennova::mission::MissionKernel &kernel, int pool, in
 // dead->alive respawn revision, in registry order.
 bool test_world_rows_carry_the_authoritative_record() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 64);
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "the bare registry spawns a pool-1 row")) return false;
-	const im::PresentRowsContext context{kernel, nullptr, false};
+	const im::PresentRowsContext context = rows_of(kernel, nullptr, false);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
@@ -180,8 +191,11 @@ nw::OrganicSpawnRecord organic_record(uint16_t slot, uint16_t type_id) {
 bool test_full_spawn_parachute_state_reaches_player_and_infantry_rows() {
 	for (const bool player : {false, true}) {
 		opennova::mission::MissionKernel kernel;
+		test_titles::jo_world(kernel.world);
 		im::ClientRuntime runtime("ParachuteProjection");
+		test_titles::jo_folds(runtime);
 		opennova::replication::ClientReplicaPipeline pipeline;
+		test_titles::jo_folds(pipeline);
 		nw::FullEntitySpawnRecord record;
 		record.slot_id = 0x0010u;
 		record.item_type = 3;
@@ -194,7 +208,7 @@ bool test_full_spawn_parachute_state_reaches_player_and_infantry_rows() {
 		if (!expect(runtime.state().entities[0].cls ==
 				(player ? nw::EntityClass::Player : nw::EntityClass::Infantry),
 				"full-slot flags distinguish players from NPC infantry")) return false;
-		const im::PresentRowsContext context{kernel, &runtime, true};
+		const im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 		std::vector<float> rows;
 		im::DoorPhaseTable doors;
 		im::PoolPresentLifecycleMap lifecycle;
@@ -219,8 +233,11 @@ bool test_full_spawn_parachute_state_reaches_player_and_infantry_rows() {
 //  collector's bit0 skip Terrain_CollectVisibleEntitiesForTerrain @0x5C8CF4]
 bool test_organic_spawn_lands_the_flags_word() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	im::ClientRuntime runtime("OrganicFlags");
+	test_titles::jo_folds(runtime);
 	opennova::replication::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	nw::OrganicSpawnBatch batch;
 	nw::OrganicSpawnRecord undeployed = organic_record(0x0010u, 0x1410u);
 	undeployed.minimap_flags = 0x0101u;
@@ -239,7 +256,7 @@ bool test_organic_spawn_lands_the_flags_word() {
 					row->rm_entity_flags == 0x0101u && row->spawn_anim_slot == 4 &&
 					!row->net_has_compact,
 			"the 0x0C Flags word lands and the slot starts a fresh lifetime");
-	const im::PresentRowsContext context{kernel, &runtime, true};
+	const im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
 	im::PoolPresentLifecycleMap lifecycle;
@@ -263,19 +280,22 @@ bool test_organic_spawn_lands_the_flags_word() {
 
 bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	im::ClientRuntime runtime("PresentRows");
+	test_titles::jo_folds(runtime);
 	nw::OrganicSpawnBatch batch;
 	batch.records.push_back(organic_record(0x0010u, 0x1410u));
 	batch.records.push_back(organic_record(0x0011u, 0x1411u));
 	batch.entity_count = 2;
 	runtime.state() = opennova::replication::ClientState{};
 	opennova::replication::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
 	runtime.state() = pipeline.state();
 	if (!expect(runtime.state().entities.size() == 2, "the fixture decoded two organics")) return false;
 	runtime.state().entities[1].anim_state_pulse = 1; // a live transition pulse
 
-	const im::PresentRowsContext context{kernel, &runtime, true};
+	const im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
 	im::PoolPresentLifecycleMap lifecycle;
@@ -432,6 +452,7 @@ bool test_seated_replica_row_presents_its_channel() {
 
 bool test_vehicle_suspension_reaches_present_rows() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 16);
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "vehicle row exists"))
@@ -446,7 +467,7 @@ bool test_vehicle_suspension_reaches_present_rows() {
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	if (!expect(rows.size() == w::PF_STRIDE, "one vehicle presentation row"))
 		return false;
 	const int expected[] = { 100, 200, 300, 600, 1000, 500 };
@@ -459,7 +480,7 @@ bool test_vehicle_suspension_reaches_present_rows() {
 	kernel.world.vehicles.traits.set(1291, traits);
 	e->veh.track_phase[0] = -65536;
 	e->veh.track_phase[1] = 0x12340000;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	ok = expect((static_cast<int>(rows[w::PF_VEHICLE_CTRL_MASK]) & w::VC_TRACKS) != 0 &&
 						 (static_cast<int>(rows[w::PF_VEHICLE_CTRL_MASK]) & w::VC_TIRES) == 0,
 				 "tank render selects tracks without ground suspension ownership") &&
@@ -478,6 +499,7 @@ bool test_vehicle_suspension_reaches_present_rows() {
 // camera arm is the 1.6 cm the driver's eye sat off its cockpit.
 bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 16);
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "vehicle row exists"))
@@ -491,7 +513,7 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	bool ok = expect(rows[w::PF_PITCH_DEG] == 2.999267578125f &&
 					rows[w::PF_ROLL_DEG] == -1.99951171875f,
 			"an unseeded row publishes its Pitch / Roll words' degrees");
@@ -502,7 +524,7 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 	e->veh.air_roll_bam = static_cast<int32_t>(-1.51 * bam_per_degree);
 	e->pitch_bam = w::spawn_angle_bam(2);
 	e->roll_bam = w::spawn_angle_bam(-2);
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	ok = expect(std::abs(rows[w::PF_PITCH_DEG] - 2.49f) < 1e-4f &&
 					 std::abs(rows[w::PF_ROLL_DEG] + 1.51f) < 1e-4f,
 				 "a motor-seeded row publishes the BAM attitude") &&
@@ -518,6 +540,7 @@ bool test_vehicle_rows_publish_the_motor_attitude_unrounded() {
 // frame. The authored integer mirrors intentionally differ from that frame.
 bool test_attached_rows_retain_subdegree_frame() {
     opennova::mission::MissionKernel kernel;
+    test_titles::jo_world(kernel.world);
     kernel.world.registry.configure_pool(1, 4);
     kernel.world.registry.configure_pool(2, 4);
     w::Entity *parent = spawn_pool_row(kernel, 1, 0, 1291);
@@ -545,9 +568,10 @@ bool test_attached_rows_retain_subdegree_frame() {
         }
         return expect(false, "attached gun is presented");
     };
-    im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+    im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
     bool ok = check_gun();
     im::ClientRuntime runtime("AttachedRows");
+    test_titles::jo_folds(runtime);
     opennova::replication::ClientEntityState decoded;
     decoded.handle = gun->handle.packed;
     decoded.type_id = 1871;
@@ -560,13 +584,14 @@ bool test_attached_rows_retain_subdegree_frame() {
     runtime.state().upsert(decoded.handle) = decoded;
     // The listen host enriches its client-backed rows from the authoritative
     // pool. Joiners use decoded carriers/model assets, never this authority row.
-    im::build_client_replica_present_rows({kernel, &runtime, false}, lifecycle, rows, doors);
+    im::build_client_replica_present_rows(rows_of(kernel, &runtime, false), lifecycle, rows, doors);
     ok = check_gun() && ok;
     return ok;
 }
 
 bool test_door_phases_reach_present_rows() {
     opennova::mission::MissionKernel kernel;
+    test_titles::jo_world(kernel.world);
     kernel.world.registry.configure_pool(2, 1);
     w::Entity *e = spawn_pool_row(kernel, 2, 0, 1998);
     if (!expect(e != nullptr, "door row spawns")) return false;
@@ -578,13 +603,13 @@ bool test_door_phases_reach_present_rows() {
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	if (!expect(rows.size() == w::PF_STRIDE, "one door row")) return false;
 	bool ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 1 &&
 					 doors == im::DoorPhaseTable{ 0, 1, 65536 },
 			"open phase 65536 rides the door side table exactly (row 0, one phase)");
 	e->door_motion = false;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	ok = expect(row_at(rows, 0)[w::PF_DOOR_COUNT] == 0 && doors.empty(),
 				 "a missing door movement callback releases phase ownership") &&
 			ok;
@@ -597,8 +622,10 @@ bool test_door_phases_reach_present_rows() {
 // collector builds (D-DOOR-4).
 bool test_joiner_door_phases_reach_present_rows() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(2, 2);
 	im::ClientRuntime runtime("DoorRows");
+	test_titles::jo_folds(runtime);
 	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1998);
 	if (!expect(e != nullptr, "joiner door row spawns")) return false;
 	e->door_motion = e->door_event = true;
@@ -612,7 +639,7 @@ bool test_joiner_door_phases_reach_present_rows() {
 	decoded.type_id = 1998;
 	decoded.cls = opennova::EntityClass::NoNetworkCallback;
 	runtime.state().upsert(decoded.handle) = decoded;
-	const im::PresentRowsContext context{ kernel, &runtime, true };
+	const im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
@@ -650,8 +677,10 @@ bool test_joiner_door_phases_reach_present_rows() {
 //  @0x489FA0]
 bool test_joiner_vehicle_motion_controls_reach_present_rows() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 2);
 	im::ClientRuntime runtime("TankRows");
+	test_titles::jo_folds(runtime);
 	w::Entity *e = spawn_pool_row(kernel, 1, 0, 1296);
 	if (!expect(e != nullptr, "joiner tank row spawns")) return false;
 	w::VehicleTraits traits;
@@ -665,7 +694,7 @@ bool test_joiner_vehicle_motion_controls_reach_present_rows() {
 	decoded.type_id = 1296;
 	decoded.cls = opennova::EntityClass::Vehicle;
 	runtime.state().upsert(decoded.handle) = decoded;
-	const im::PresentRowsContext context{ kernel, &runtime, true };
+	const im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
@@ -687,8 +716,10 @@ bool test_joiner_vehicle_motion_controls_reach_present_rows() {
 //  @0x4E2247; NapiNPClientMsg_EntityDeath @0x42EBDF]
 bool test_joiner_bldg_section_offset_reaches_present_rows() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(2, 2);
 	im::ClientRuntime runtime("BldgRows");
+	test_titles::jo_folds(runtime);
 	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1115);
 	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
 	e->kind = w::EntityKind::Building;
@@ -710,10 +741,10 @@ bool test_joiner_bldg_section_offset_reaches_present_rows() {
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
-	im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	bool ok = expect(rows.size() == w::PF_STRIDE && row_at(rows, 0)[w::PF_POS_Y] == 3.0f,
 			"the host's bldg row draws its section-1 offset");
-	const im::PresentRowsContext context{kernel, &runtime, true};
+	const im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	im::PoolPresentLifecycleMap joiner_lifecycle;
 	im::build_client_replica_present_rows(context, joiner_lifecycle, rows, doors);
 	if (!expect(rows.size() == w::PF_STRIDE, "one joiner bldg row")) return false;
@@ -734,8 +765,10 @@ bool test_joiner_bldg_section_offset_reaches_present_rows() {
 // [orig: BoneCallback_bldg_World @0x4E21A0 - the byte @0x4E2214]
 bool test_joiner_bldg_offset_reads_the_owned_lifetime() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(2, 2);
 	im::ClientRuntime runtime("BldgReuse");
+	test_titles::jo_folds(runtime);
 	w::ItemDeathTraits traits;
 	traits.model_section_origins_q16 = {{{0, 0, 0}}, {{0, 0, 8 * 65536}}};
 	kernel.world.tables.item_death_traits.set(1115, traits);
@@ -757,7 +790,7 @@ bool test_joiner_bldg_offset_reads_the_owned_lifetime() {
 		return false;
 	mine->bldg_section_pivot = true;
 	mine->death_anim_state = 0x0100;
-	im::PresentRowsContext context{kernel, &runtime, true};
+	im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	context.materializer = &materializer;
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
@@ -790,8 +823,10 @@ bool test_joiner_bldg_offset_reads_the_owned_lifetime() {
 // that lifetime ends lends the retained row none of them.
 bool test_joiner_native_reads_take_the_owned_lifetime() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 2);
 	im::ClientRuntime runtime("NativeReuse");
+	test_titles::jo_folds(runtime);
 	w::VehicleTraits traits;
 	traits.family = w::VehicleFamily::Tank;
 	traits.render_family = w::VehicleRenderFamily::Tank;
@@ -817,7 +852,7 @@ bool test_joiner_native_reads_take_the_owned_lifetime() {
 	mine->destroy_phases_q16[2] = 0x8000;
 	mine->spawn_origin = (1u << 24) | 3u;
 	mine->bms_id = 77;
-	im::PresentRowsContext context{kernel, &runtime, true};
+	im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	context.materializer = &materializer;
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
@@ -861,8 +896,10 @@ bool test_joiner_native_reads_take_the_owned_lifetime() {
 // [orig: HUD_CacheWeaponSlotInfo @0x440930]
 bool test_emplaced_channels_take_the_owned_lifetime() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 2);
 	im::ClientRuntime runtime("EmplacedReuse");
+	test_titles::jo_folds(runtime);
 	opennova::replication::ClientEntityState decoded;
 	decoded.handle = w::EntityHandle::make(1, 0).packed;
 	decoded.type_id = 1881;
@@ -905,8 +942,10 @@ bool test_emplaced_channels_take_the_owned_lifetime() {
 //  entity matrix]
 bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(2, 2);
 	im::ClientRuntime runtime("BldgHeading");
+	test_titles::jo_folds(runtime);
 	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1116);
 	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
 	e->position = {10.0f, 20.0f, 11.0f};
@@ -926,7 +965,7 @@ bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
 	decoded.heading_bam = w::bam_heading_from_mission_yaw_deg(90.45);
 	e->heading = decoded.heading_bam; // the materialized row's Yaw word
 	runtime.state().upsert(decoded.handle) = decoded;
-	const im::PresentRowsContext context{kernel, &runtime, true};
+	const im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
@@ -945,8 +984,10 @@ bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
 
 bool test_joiner_palm_source_and_local_fragment() {
     opennova::mission::MissionKernel kernel;
+    test_titles::jo_world(kernel.world);
     kernel.world.registry.configure_pool(2, 4);
     im::ClientRuntime runtime("PalmRows");
+    test_titles::jo_folds(runtime);
     auto *source = spawn_pool_row(kernel, 2, 0, 812);
     source->kind = w::EntityKind::Building;
     source->palm_sections = true; source->palm_state = 2; source->section_mask = 0;
@@ -967,7 +1008,7 @@ bool test_joiner_palm_source_and_local_fragment() {
     w::ItemDeathTraits traits;
     traits.model_pivots_q16 = {{{0, 0, 2*65536}}, {{0, 0, 4*65536}}};
     kernel.world.tables.item_death_traits.set(900, traits);
-    im::PresentRowsContext context{kernel, &runtime, true};
+    im::PresentRowsContext context = rows_of(kernel, &runtime, true);
     im::PoolPresentLifecycleMap lifecycle;
     std::vector<float> rows; im::DoorPhaseTable doors;
     im::build_client_replica_present_rows(context, lifecycle, rows, doors);
@@ -1018,8 +1059,10 @@ bool test_joiner_palm_source_and_local_fragment() {
 //  @0x440F70..0x440F8A; BoneCallback_tank_PublishControls @0x449ECF..0x449EE2]
 bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 4);
 	im::ClientRuntime runtime("TankRows");
+	test_titles::jo_folds(runtime);
 	w::Entity *hull = spawn_pool_row(kernel, 1, 0, 700);
 	w::Entity *turret = spawn_pool_row(kernel, 1, 1, 701);
 	if (!expect(hull != nullptr && turret != nullptr, "tank rows spawn")) return false;
@@ -1063,7 +1106,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	turret_row.emplaced_gun_yaw_word = 0x1234;
 	runtime.state().upsert(turret_row.handle) = turret_row;
 	tick_replica_guns(runtime.state(), kernel.seat_specs, kernel.world, nullptr);
-	const im::PresentRowsContext context{ kernel, &runtime, true };
+	const im::PresentRowsContext context = rows_of(kernel, &runtime, true);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
@@ -1082,8 +1125,10 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 			"the hull keeps the last published word, like the brain") && ok;
 
 	opennova::mission::MissionKernel plain;
+	test_titles::jo_world(plain.world);
 	plain.world.registry.configure_pool(1, 4);
 	im::ClientRuntime plain_runtime("PlainRows");
+	test_titles::jo_folds(plain_runtime);
 	w::Entity *plain_hull = spawn_pool_row(plain, 1, 0, 700);
 	w::Entity *plain_child = spawn_pool_row(plain, 1, 1, 701);
 	plain_child->primary_weapon = "WPN_TURRET";
@@ -1099,7 +1144,7 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	plain_runtime.state().upsert(hull_row.handle) = hull_row;
 	plain_runtime.state().upsert(turret_row.handle) = turret_row;
 	tick_replica_guns(plain_runtime.state(), plain.seat_specs, plain.world, nullptr);
-	const im::PresentRowsContext plain_context{ plain, &plain_runtime, true };
+	const im::PresentRowsContext plain_context = rows_of(plain, &plain_runtime, true);
 	im::PoolPresentLifecycleMap plain_lifecycle;
 	im::build_client_replica_present_rows(plain_context, plain_lifecycle, rows, doors);
 	// The hull still publishes its own motion controls (the joiner twin's
@@ -1118,8 +1163,10 @@ bool test_joiner_hull_gun_words_follow_the_turret_child() {
 //  @0x440F04..0x441020, the window leg reads and clamps them after it @0x4411F0..0x44123C]
 bool test_joiner_hull_takes_the_turret_words_ahead_of_the_window() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 4);
 	im::ClientRuntime runtime("TankWindowRows");
+	test_titles::jo_folds(runtime);
 	w::Entity *hull = spawn_pool_row(kernel, 1, 0, 700);
 	w::Entity *turret = spawn_pool_row(kernel, 1, 1, 701);
 	if (!expect(hull != nullptr && turret != nullptr, "tank rows spawn")) return false;
@@ -1191,6 +1238,7 @@ bool test_joiner_hull_takes_the_turret_words_ahead_of_the_window() {
 
 bool test_death_ctrl_register_reaches_present_rows() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(0, 4);
 	kernel.world.registry.configure_pool(1, 4);
 	w::Entity *body = spawn_pool_row(kernel, 0, 1, 1337);
@@ -1207,20 +1255,20 @@ bool test_death_ctrl_register_reaches_present_rows() {
 				return row_at(rows, i)[w::PF_DEATH_CTRL];
 		return -1.0f;
 	};
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	if (!expect(rows.size() == 2 * w::PF_STRIDE, "one row per live pool slot")) return false;
 	bool ok = expect(death_of(1337) == 65535.0f, "a live body reads 0xFFFF");
 	ok = expect(death_of(1291) == 65535.0f, "a vehicle row reads the live value") && ok;
 	body->flags |= w::kEntityFlagDead;
 	body->corpse_timer = 300;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	ok = expect(death_of(1337) == 65535.0f, "a corpse still above 248 reads 0xFFFF") && ok;
 	body->corpse_timer = 100;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	ok = expect(static_cast<int>(death_of(1337)) == (38 << 16) / 186,
 			"a corpse at timer 100 reads (38 << 16) / 186") && ok;
 	body->corpse_timer = 10;
-	im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	ok = expect(death_of(1337) == 0.0f, "the last 62 ticks hold 0") && ok;
 	return ok;
 }
@@ -1230,6 +1278,7 @@ bool test_death_ctrl_register_reaches_present_rows() {
 // [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
 bool test_rows_carry_the_primary_ring_entries() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(0, 32);
 	w::Entity *body = spawn_pool_row(kernel, 0, 0x10, 1337);
 	if (!expect(body != nullptr, "the organic row spawns")) return false;
@@ -1240,10 +1289,12 @@ bool test_rows_carry_the_primary_ring_entries() {
 	ae->inf.begin_body_transition(w::anim_state::kAttack, -1, 1);
 
 	im::ClientRuntime runtime("PrimaryRingRows");
+	test_titles::jo_folds(runtime);
 	nw::OrganicSpawnBatch batch;
 	batch.records.push_back(organic_record(0x0010u, 0x1410u));
 	batch.entity_count = 1;
 	opennova::replication::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
 	runtime.state() = pipeline.state();
 
@@ -1253,8 +1304,8 @@ bool test_rows_carry_the_primary_ring_entries() {
 	std::vector<float> host_rows;
 	im::DoorPhaseTable doors;
 	const auto build = [&] {
-		im::build_world_present_rows({ kernel, nullptr, false }, lifecycle, rows, doors);
-		im::build_client_replica_present_rows({ kernel, &runtime, false }, host_lifecycle,
+		im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
+		im::build_client_replica_present_rows(rows_of(kernel, &runtime, false), host_lifecycle,
 				host_rows, doors);
 		return expect(rows.size() == w::PF_STRIDE && host_rows.size() == w::PF_STRIDE,
 				"one placed row and one host-loopback row");
@@ -1295,6 +1346,7 @@ int anim_state_with_aim_bit(bool set) {
 //  @0x4e3b4f..0x4e3b9d, @0x4e3bec..0x4e3c04, @0x4e3da6..0x4e3dc6]
 bool test_rows_publish_the_person_overlays() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(0, 32);
 	kernel.world.registry.configure_pool(1, 32);
 	w::Entity *body = spawn_pool_row(kernel, 0, 0x10, 1337);
@@ -1315,7 +1367,7 @@ bool test_rows_publish_the_person_overlays() {
 	im::PoolPresentLifecycleMap lifecycle;
 	im::DoorPhaseTable doors;
 	const auto body_row = [&]() -> const float * {
-		im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+		im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 		for (size_t i = 0; i * w::PF_STRIDE < rows.size(); ++i)
 			if (static_cast<int>(row_at(rows, i)[w::PF_WIRE_HANDLE]) == body_handle.packed)
 				return row_at(rows, i);
@@ -1387,16 +1439,17 @@ bool test_rows_publish_the_person_overlays() {
 //  Entity_AttachCarriedObject @0x43c14a]
 bool test_world_rows_hide_the_carried_object() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 32);
 	w::Entity *flag = spawn_pool_row(kernel, 1, 0x05, 4093);
 	if (!expect(flag != nullptr, "the flag spawns")) return false;
 	std::vector<float> rows;
 	im::PoolPresentLifecycleMap lifecycle;
 	im::DoorPhaseTable doors;
-	im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	bool ok = expect(row_at(rows, 0)[w::PF_HIDDEN] == 0.0f, "a free flag is drawn");
 	flag->flags |= w::kEntityFlagCarried;
-	im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 	ok = expect(row_at(rows, 0)[w::PF_HIDDEN] == 1.0f,
 			"a carried flag leaves the collector") && ok;
 	return ok;
@@ -1407,11 +1460,14 @@ bool test_world_rows_hide_the_carried_object() {
 // [orig: NapiNPClientMsg_0x02F @0x430E10; BoneCallback_org0_World @0x4e3940]
 bool test_replica_rows_publish_the_person_overlays() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	im::ClientRuntime runtime("PersonOverlayRows");
+	test_titles::jo_folds(runtime);
 	nw::OrganicSpawnBatch batch;
 	batch.records.push_back(organic_record(0x0010u, 0x1410u));
 	batch.entity_count = 1;
 	opennova::replication::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
 	runtime.state() = pipeline.state();
 	if (!expect(runtime.state().entities.size() == 1, "the organic decoded")) return false;
@@ -1439,7 +1495,7 @@ bool test_replica_rows_publish_the_person_overlays() {
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
 	im::PoolPresentLifecycleMap lifecycle;
-	im::build_client_replica_present_rows({kernel, &runtime, true}, lifecycle, rows, doors);
+	im::build_client_replica_present_rows(rows_of(kernel, &runtime, true), lifecycle, rows, doors);
 	if (!expect(rows.size() == 3 * w::PF_STRIDE, "one row per decoded replica")) return false;
 	const float *r = row_at(rows, 0);
 	ok = expect(r[w::PF_NVG_WORN] == 1.0f, "the wire flags byte draws the goggles") && ok;
@@ -1452,6 +1508,7 @@ bool test_replica_rows_publish_the_person_overlays() {
 // The local avatar reads the same overlays from its own body.
 bool test_local_player_person_overlays() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(0, 32);
 	w::PersonOverlays out;
 	bool ok = expect(!im::local_player_person_overlays({kernel, nullptr, false}, out),
@@ -1476,6 +1533,7 @@ bool test_local_player_person_overlays() {
 // @0x5d6ce7..0x5d6d31; the vehicle 0x400 @0x40e208..0x40e20a].
 bool test_rows_carry_the_slot_march_start() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(1, 64);
 	w::Entity *e = spawn_pool_row(kernel, 1, 3, 1291);
 	if (!expect(e != nullptr, "the bare registry spawns a pool-1 row")) return false;
@@ -1484,7 +1542,7 @@ bool test_rows_carry_the_slot_march_start() {
 	e->roll_bam = 0;
 	e->item_type = 3;
 	e->bbox_center = {1.0f, 2.0f, 1.5f};
-	const im::PresentRowsContext context{kernel, nullptr, false};
+	const im::PresentRowsContext context = rows_of(kernel, nullptr, false);
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
@@ -1538,6 +1596,7 @@ bool test_rows_carry_the_slot_march_start() {
 // [orig: Entity_CanFireWeapon @0x4dcb5f..0x4dcbc6]
 bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(0, 32);
 	w::WeaponTable &table = kernel.world.tables.weapons;
 	table.entries.resize(6);
@@ -1558,6 +1617,7 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	const w::EntityHandle body_handle = body->handle;
 
 	im::NapiNPServerCtx server;
+	test_titles::jo_config(server.config);
 	server.np_protocol.connection_list.emplace_back();
 	im::NapiNPConnection &conn = server.np_protocol.connection_list.back();
 	conn.link.owned_entity = body_handle;
@@ -1571,7 +1631,7 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 	im::PoolPresentLifecycleMap lifecycle;
 	im::DoorPhaseTable doors;
 	const auto held = [&](const im::NapiNPServerCtx *ctx) {
-		im::build_world_present_rows({kernel, nullptr, false, ctx}, lifecycle, rows, doors);
+		im::build_world_present_rows(rows_of(kernel, nullptr, false, ctx), lifecycle, rows, doors);
 		return static_cast<int>(row_at(rows, 0)[w::PF_HELD_WEAPON_ADM]);
 	};
 	bool ok = expect(held(nullptr) == 5, "no host record: the remote leg draws the echo");
@@ -1602,6 +1662,7 @@ bool test_host_rows_apply_the_remote_held_weapon_ammo_leg() {
 //  @0x4dcb1e, @0x4dcb3c..0x4dcb57; BoneCallback_org0_World @0x4e3c97]
 bool test_host_rows_draw_the_mounted_rider_weapon() {
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(0, 32);
 	kernel.world.registry.configure_pool(1, 32);
 	w::Entity *vehicle = spawn_pool_row(kernel, 1, 0x02, 1291);
@@ -1629,7 +1690,7 @@ bool test_host_rows_draw_the_mounted_rider_weapon() {
 		return -1;
 	};
 	const auto held = [&]() {
-		im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+		im::build_world_present_rows(rows_of(kernel, nullptr, false), lifecycle, rows, doors);
 		return held_in(rider_handle.packed);
 	};
 	bool ok = expect(held() == 5, "a seat-1 rider draws the byte copied from its parent");
@@ -1646,21 +1707,23 @@ bool test_host_rows_draw_the_mounted_rider_weapon() {
 	// The listen host's client-backed collector publishes the same byte from
 	// the authoritative record; a joiner's decoded NPC row publishes none.
 	im::ClientRuntime runtime("MountedRiderRows");
+	test_titles::jo_folds(runtime);
 	nw::OrganicSpawnBatch batch;
 	batch.records.push_back(organic_record(rider_handle.packed, 0x1410u));
 	batch.entity_count = 1;
 	opennova::replication::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
 	runtime.state() = pipeline.state();
 	if (!expect(runtime.state().entities.size() == 1, "the rider's organic record decoded"))
 		return false;
-	im::build_client_replica_present_rows({kernel, &runtime, false}, lifecycle, rows, doors);
+	im::build_client_replica_present_rows(rows_of(kernel, &runtime, false), lifecycle, rows, doors);
 	ok = expect(held_in(rider_handle.packed) == 5,
 			"the host's client-backed rows publish the rider's byte too") && ok;
 	runtime.state().entities[0].cls = nw::EntityClass::Infantry;
 	runtime.state().entities[0].equipped_adm_index = 5;
 	im::PoolPresentLifecycleMap joiner_lifecycle;
-	im::build_client_replica_present_rows({kernel, &runtime, true}, joiner_lifecycle, rows, doors);
+	im::build_client_replica_present_rows(rows_of(kernel, &runtime, true), joiner_lifecycle, rows, doors);
 	ok = expect(held_in(rider_handle.packed) == 0,
 			"a joiner's decoded NPC row never draws a held weapon") && ok;
 
@@ -1685,6 +1748,7 @@ bool test_host_rows_draw_the_mounted_rider_weapon() {
 //  (the test @0x492C8D)]
 bool test_rotor_hides_reach_world_and_joiner_rows() {
 	auto kernel = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	kernel->world.registry.configure_pool(1, 4);
 	w::Entity *helo = spawn_pool_row(*kernel, 1, 0, 1292);
 	w::Entity *crate = spawn_pool_row(*kernel, 1, 1, 1293);
@@ -1704,19 +1768,20 @@ bool test_rotor_hides_reach_world_and_joiner_rows() {
 	im::PoolPresentLifecycleMap lifecycle;
 	std::vector<float> rows;
 	im::DoorPhaseTable doors;
-	im::build_world_present_rows({*kernel, nullptr, false}, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(*kernel, nullptr, false), lifecycle, rows, doors);
 	const float *row = row_for(rows, helo);
 	if (!expect(row != nullptr, "the world helicopter row")) return false;
 	bool ok = expect(row[w::PF_SECTION_MASK_VALID] == 1.0f && lo(row) == 0x0A,
 			"a spun-up rotor hides the world row's sections 1 and 3");
 	helo->veh.part_spin.speed = 0;
 	helo->flags |= w::kEntityFlagInAir;
-	im::build_world_present_rows({*kernel, nullptr, false}, lifecycle, rows, doors);
+	im::build_world_present_rows(rows_of(*kernel, nullptr, false), lifecycle, rows, doors);
 	row = row_for(rows, helo);
 	ok = expect(row != nullptr && lo(row) == 0x74,
 			"a stopped rotor in the air hides the world row's sections 2, 4, 5 and 6") && ok;
 
 	im::ClientRuntime runtime("RotorRows");
+	test_titles::jo_folds(runtime);
 	for (const w::Entity *e : {helo, crate}) {
 		opennova::replication::ClientEntityState decoded;
 		decoded.handle = e->handle.packed;
@@ -1731,7 +1796,7 @@ bool test_rotor_hides_reach_world_and_joiner_rows() {
 	crate->engine_flags |= w::kEntityFlagHusk;
 	crate->spawned_piece_mask = 1u << 8;
 	im::PoolPresentLifecycleMap joiner_lifecycle;
-	im::build_client_replica_present_rows({*kernel, &runtime, true}, joiner_lifecycle, rows, doors);
+	im::build_client_replica_present_rows(rows_of(*kernel, &runtime, true), joiner_lifecycle, rows, doors);
 	row = row_for(rows, helo);
 	ok = expect(row != nullptr && row[w::PF_SECTION_MASK_VALID] == 1.0f && lo(row) == 0x10A,
 			"a joiner's helicopter row hides its flown-off section 8 and its rotor sections 1 and 3") &&
@@ -1763,6 +1828,7 @@ bool test_player_rows_carry_the_drawn_character() {
 		return -1;
 	};
 	opennova::mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.registry.configure_pool(0, 8);
 	const auto player = [&](int slot, uint8_t team) {
 		w::Entity *e = spawn_pool_row(kernel, 0, slot, nw::kPlayerPersonTypeId);
@@ -1786,6 +1852,7 @@ bool test_player_rows_carry_the_drawn_character() {
 				"the host's player rows carry the drawn character") && ok;
 	}
 	im::ClientRuntime runtime("DrawnCharacter");
+	test_titles::jo_folds(runtime);
 	for (const uint16_t handle : {uint16_t{0x0011}, uint16_t{0x0012}}) {
 		opennova::replication::ClientEntityState &es = runtime.state().upsert(handle);
 		es.cls = nw::EntityClass::Player;

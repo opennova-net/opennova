@@ -64,6 +64,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -102,6 +103,7 @@ inmatch::OrphanedPlayerRow orphan_of(const inmatch::NapiNPConnection &c) {
 
 void test_the_imbalance_counts_an_orphaned_row() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.config.game_type = kTeamGame;
 	ctx.np_protocol.connection_list.push_back(row(1, 1, 0));
 	CHECK(inmatch::Server_CalcTeamImbalance(ctx) == 1);
@@ -118,6 +120,7 @@ void test_the_imbalance_counts_an_orphaned_row() {
 // would share one key; walking the connections alone, slot 4 would move instead of the orphan.
 void test_auto_balance_moves_an_orphaned_row_by_its_own_add_stamp() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.config.game_type = kTeamGame;
 	ctx.config.auto_balance_min_difference = 1;
 	ctx.np_protocol.host_run_duration_ms = 1000;
@@ -141,6 +144,7 @@ void test_auto_balance_moves_an_orphaned_row_by_its_own_add_stamp() {
 // slot 2 would move).
 void test_auto_balance_keys_every_row_by_its_add_stamp() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.config.game_type = kTeamGame;
 	ctx.np_protocol.host_run_duration_ms = 1000;
 	inmatch::NapiNPConnection first = row(1, 1, 800);
@@ -158,6 +162,7 @@ void test_auto_balance_keys_every_row_by_its_add_stamp() {
 // live orphaned row with no byte swaps its own team; one with no body is skipped.
 void test_the_swap_arm_swaps_an_orphaned_row() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::NapiNPConnection converted = row(2, 0, 0);
 	converted.spectator_restore_team = 2;
 	converted.link.owned_entity = w::EntityHandle{0x0058};
@@ -181,9 +186,11 @@ void test_the_swap_arm_swaps_an_orphaned_row() {
 // recipient, the fresh row of its own net player included.
 void test_an_orphaned_spectator_rows_body_is_hidden() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 8);
 	world->rules.mp_session = true;
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	ctx->world = world.get();
 	ctx->is_authority = 1;
 	ctx->is_in_session = 1;
@@ -216,6 +223,7 @@ void test_an_orphaned_spectator_rows_body_is_hidden() {
 // re-stamp keeps it bound, and another connection that takes the row's old id never does.
 void test_the_net_player_is_bound_by_identity() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::NapiNPConnection player = row(3, 1, 0);
 	player.connection_id = 7;
 	player.net_player_serial = ++ctx.last_net_player_serial;
@@ -241,7 +249,9 @@ void test_the_net_player_is_bound_by_identity() {
 // orphaned its earlier row (slot 2, in the match, a body of its own).
 struct OrphanRig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_jo = test_titles::jo_config(ctx->config);
 	ns::UdpSessionTransport transport{ns::UdpSessionTransport::Role::Host};
 	w::EntityHandle own_body;
 	w::EntityHandle orphan_body;
@@ -384,6 +394,7 @@ void test_the_periodic_walk_takes_an_orphaned_row() {
 void test_the_downed_resend_takes_an_orphaned_row() {
 	OrphanRig r;
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = kTeamGame;
 	r.world->match.configure(rules);
 	if (w::Entity *body = r.world->registry.get(r.orphan_body)) {

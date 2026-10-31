@@ -1,6 +1,8 @@
 #include <runtime/inmatch/loadout_submit.h>
 
+#include <base/title/title.h> // DFX2-12, the mission start's fixed class
 #include <net/protocol/protocol.h> // DFX2-12, the sender's fixed class
+#include <runtime/inmatch/server_loadout_grant.h> // PlayerSlot_SeedOwnLoadoutBuffer
 #include <runtime/world/weapon_table.h>
 
 #include <vector>
@@ -38,13 +40,13 @@ uint8_t loadout_side_team(const world::World &world, uint8_t assigned_team) {
 	return local != nullptr ? local->team : 0;
 }
 
-uint8_t loadout_fixed_class(const Protocol *protocol, bms::MissionType mission_type) {
-	if (!protocol_in_match(protocol).c2s_2f.loadout_class_fixed) return 0;
+uint8_t loadout_fixed_class(const Title *title, bms::MissionType mission_type) {
+	if (title == nullptr || !title->session_loadout_class_fixed) return 0;
 	return mission_type == bms::MissionType::CombatVehicleMission ? uint8_t{7} : uint8_t{8};
 }
 
 bool seed_session_kit_from_profile(world::World &world, playersav::Record &profile,
-		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
+		const Title &title, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
 	if (world.tables.weapons.empty()) return false;
 	// A session PEER copies its side's page; a dedicated host is no peer and copies nothing,
@@ -62,9 +64,9 @@ bool seed_session_kit_from_profile(world::World &world, playersav::Record &profi
 	// re-seeds the moment the latch (or a later 0x50 reassignment) changes the side.
 	if (team == 0) return false;
 	playersav::Side &side = profile.side(playersav::side_for_team(team));
-	// A protocol that fixes the class writes it into the block first, and the page follows it
+	// A title that fixes the class writes it into the block first, and the page follows it
 	// [orig: Game_StartMission @0x52299e..0x5229bd (dfx2.exe)].
-	if (const uint8_t fixed = loadout_fixed_class(protocol, mission_type); fixed != 0)
+	if (const uint8_t fixed = loadout_fixed_class(&title, mission_type); fixed != 0)
 		side.player_class = fixed;
 	uint8_t player_class = side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
@@ -105,14 +107,14 @@ bool seed_single_player_kit_from_profile(world::World &world,
 }
 
 bool reseed_session_kit_on_side_change(world::World &world, playersav::Record &profile,
-		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
+		const Title &title, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout, int &seeded_side) {
 	const uint8_t team = loadout_side_team(world, assigned_team);
 	if (team == 0) return false;
 	if (static_cast<int>(playersav::side_for_team(team)) == seeded_side)
 		return false;
 	return seed_session_kit_from_profile(
-			world, profile, protocol, mission_type, assigned_team, loadout, seeded_side);
+			world, profile, title, mission_type, assigned_team, loadout, seeded_side);
 }
 
 void SessionWeaponProfile::use(const playersav::Record &current) {
@@ -124,12 +126,12 @@ void SessionWeaponProfile::use(const playersav::Record &current) {
 }
 
 bool SessionWeaponProfile::seed_kit(world::World &world, bool session_peer,
-		const Protocol *protocol, bms::MissionType mission_type, uint8_t assigned_team,
+		const Title &title, bms::MissionType mission_type, uint8_t assigned_team,
 		world::LocalPlayerLoadout &loadout) {
 	if (!session_peer)
 		return seed_single_player_kit_from_profile(world, loaded ? &record : nullptr, loadout);
 	return seed_session_kit_from_profile(
-			world, record, protocol, mission_type, assigned_team, loadout, seeded_side);
+			world, record, title, mission_type, assigned_team, loadout, seeded_side);
 }
 
 bool reseed_session_kit_on_team_assign(const playersav::Record &profile, uint8_t team,
@@ -225,6 +227,25 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 				static_cast<uint8_t>(entry.flags)});
 	}
 	return submit;
+}
+
+bool armory_accept_offline(world::World &world, world::LocalPlayer &local,
+		NapiNPConnection *own_slot, const std::vector<world::WeaponKitEntry> &kit,
+		int32_t player_class) {
+	// The local apply: the local table rebuilt from the selection, its counts, the select
+	// of the held weapon and its mount [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 -
+	//  @0x565DA1..0x566297].
+	if (!world::local_loadout_apply_accept(world, local.loadout, local.weapon, local.inventory,
+				local.inventory_valid, kit, player_class, /*validate_banned=*/true,
+				world::LoadoutApplySelect::HeldWeapon))
+		return false;
+	// The slot holding the local player keeps the applied kit in its loadout buffer, the one
+	// every deploy rebuilds from: the kit the local table was just built from, so a respawn
+	// rebuilds the same [orig: the copy into slot+0x170C8 @0x565DE4, the display lists built
+	//  from it; PlayerSlot_InitWeaponsFromLoadout @0x515550 reads it]
+	// [orig: @0x564D44, @0x564FBD (dfx2.exe)].
+	if (own_slot != nullptr) PlayerSlot_SeedOwnLoadoutBuffer(*own_slot, world);
+	return true;
 }
 
 void build_joiner_loadout_kit(const world::World &world,
@@ -332,6 +353,19 @@ void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &li
 	world::LoadoutWeaponNameList &names = *world.loadout_weapon_names;
 	kit_from_authoritative_grant(world.tables.weapons, list, names.entries);
 	names.set = true;
+}
+
+void apply_own_weapon_loadout(world::World &world, const WeaponLoadout &list,
+		const Protocol *protocol) {
+	// [orig: the `if (g_LocalPlayerEntity)` ahead of both @0x4293F0 / @0x42B232 (dfx2.exe);
+	//  the declaration carries the legs]
+	world::LocalPlayer *local = world.local_player_state;
+	if (local == nullptr || world.registry.get(world.cached.local_player) == nullptr) return;
+	std::vector<world::WeaponKitEntry> kit;
+	kit_from_authoritative_grant(world.tables.weapons, list, kit);
+	(void)world::local_loadout_apply_own_grant(world, local->loadout, local->weapon,
+			local->inventory, local->inventory_valid, kit, list.avatar_class,
+			grant_apply_select(protocol));
 }
 
 } // namespace opennova::inmatch

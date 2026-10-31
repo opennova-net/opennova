@@ -721,6 +721,10 @@ add_test(NAME wav_source COMMAND wav_source_test)
 add_executable(inmatch_session_test frame/inmatch_session_test.cpp)
 target_link_libraries(inmatch_session_test PRIVATE opennova_runtime)
 add_test(NAME inmatch_session COMMAND inmatch_session_test)
+# A role no embedder named a binding catalog for aborts at its first read (Role::controls).
+add_test(NAME inmatch_session_no_controls COMMAND inmatch_session_test --no-controls)
+set_tests_properties(inmatch_session_no_controls PROPERTIES PASS_REGULAR_EXPRESSION
+    "Role::controls: no binding catalog: ")
 
 # The main loop's clock both hosts drive (inmatch/main_loop_clock.h): the elapsed time, the
 # frame lock's stamp handoff, the render re-base, a load inside a frame never banked.
@@ -2054,6 +2058,10 @@ if(MSVC)
     target_link_options(role_feeds_test PRIVATE "/STACK:4194304")
 endif()
 add_test(NAME role_feeds COMMAND role_feeds_test)
+# A feed reading a view with no title aborts, named (base/title/title.h require_title).
+add_test(NAME role_feeds_untitled COMMAND role_feeds_test --untitled-shroud)
+set_tests_properties(role_feeds_untitled PROPERTIES PASS_REGULAR_EXPRESSION
+    "death_shroud_revealed: no title: ")
 
 # The server config flag word a joiner reads and the join entry's step
 # (inmatch/server_flags.h): the BuildFlags literals, the undiscovered word,
@@ -2134,6 +2142,10 @@ add_executable(hud_title_draws_test hud/hud_title_draws_test.cpp)
 target_link_libraries(hud_title_draws_test PRIVATE opennova_runtime)
 target_include_directories(hud_title_draws_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_title_draws COMMAND hud_title_draws_test)
+# A frame that names no title aborts, named, at its first reader (base/title/title.h require_title).
+add_test(NAME hud_title_draws_untitled COMMAND hud_title_draws_test --untitled)
+set_tests_properties(hud_title_draws_untitled PROPERTIES PASS_REGULAR_EXPRESSION
+    "hud::[a-z_]+: no title: ")
 
 # The spinmap's bit-10 legs: the dmgslice marks and the threat ring.
 add_executable(hud_minimap_radar_test hud/hud_minimap_radar_test.cpp)
@@ -3899,6 +3911,14 @@ add_executable(games_test games/games_test.cpp)
 target_link_libraries(games_test PRIVATE opennova_games_rules)
 target_include_directories(games_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME games COMMAND games_test)
+# The rules of a code no installed title has abort, named (world::title_rules: no default title's).
+add_test(NAME games_unknown_title_rules COMMAND games_test --unknown-rules)
+set_tests_properties(games_unknown_title_rules PROPERTIES PASS_REGULAR_EXPRESSION
+    "world::title_rules: no title rules are installed under the code \"nosuchgame\"")
+# A rules holder no fixture named aborts at its first read: the suite installs no default title's.
+add_test(NAME games_unset_title_rules COMMAND games_test --unset-rules)
+set_tests_properties(games_unset_title_rules PROPERTIES PASS_REGULAR_EXPRESSION
+    "MatchRules: no title rules: ")
 
 add_executable(session_protocol_test novaworld/session_protocol_test.cpp)
 target_link_libraries(session_protocol_test PRIVATE opennova_net)
@@ -4293,6 +4313,10 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# The settings schema of a code no installed title has aborts, named (require_title_code).
+add_test(NAME npruntime_host_settings_unknown_title COMMAND npruntime_host_settings_test --unknown-title)
+set_tests_properties(npruntime_host_settings_unknown_title PROPERTIES PASS_REGULAR_EXPRESSION
+    "server_settings_title: no title is installed under the code \"nosuchgame\"")
 # The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7): the cfg table's
 # title, dfx2.exe's caps, score table seeds, linger, deploy protection and its want of a revive.
 add_executable(npruntime_title_host_rules_test npruntime/title_host_rules_test.cpp)

@@ -20,6 +20,7 @@
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -76,6 +77,7 @@ static std::string token_for(ParamType type) {
 
 struct Fixture {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     Motion motion;
     // The compiler's name catalog (MissionKernel::script_effect_catalog): the

@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -80,6 +81,7 @@ bool registry_lifetime_rejects_handle_reuse() {
 
 bool malformed_load_indices_do_not_alias_low_slots() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 
 	nw::PoolSpawnRecord pool1;
 	pool1.slot_id = 0x1000;
@@ -148,6 +150,7 @@ bool malformed_load_indices_do_not_alias_low_slots() {
 
 bool external_same_type_reuse_is_never_mutated_or_retired() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	nw::PoolSpawnRecord row;
 	row.slot_id = 0x1002;
 	row.item_type_id = 5008;
@@ -157,6 +160,7 @@ bool external_same_type_reuse_is_never_mutated_or_retired() {
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 	ns::ClientWorldMaterializer materializer;
 	const w::EntityHandle handle{row.slot_id};
@@ -219,6 +223,7 @@ bool external_same_type_reuse_is_never_mutated_or_retired() {
 
 bool preoccupied_exact_slot_requires_a_fresh_wire_generation() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	nw::PoolSpawnRecord row;
 	row.slot_id = 0x1004;
 	row.item_type_id = 5008;
@@ -228,6 +233,7 @@ bool preoccupied_exact_slot_requires_a_fresh_wire_generation() {
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 	const w::EntityHandle handle{row.slot_id};
 	w::Entity foreign;
@@ -273,6 +279,7 @@ bool preoccupied_exact_slot_requires_a_fresh_wire_generation() {
 
 bool wire_target_authors_ground_separately_from_parent() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	// The gun is an addeweap (no network callback) child.
 	pipeline.set_item_class_resolver(
 			[](uint16_t type) -> ns::ClientReplicaPipeline::ItemClassResolution {
@@ -303,6 +310,7 @@ bool wire_target_authors_ground_separately_from_parent() {
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 	ns::ClientWorldMaterializer materializer;
 	const ns::ClientWorldSyncResult first =
@@ -357,6 +365,7 @@ bool wire_target_authors_ground_separately_from_parent() {
 //  NetPacket_SerializeEntityPoolToPacket_0 +0x170 @0x503BC9]
 bool pool0_parent_never_aliases_the_native_body() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	static constexpr uint16_t kVehicleType = 5011;
 	pipeline.set_item_class_resolver(
 			[](uint16_t type) -> ns::ClientReplicaPipeline::ItemClassResolution {
@@ -377,6 +386,7 @@ bool pool0_parent_never_aliases_the_native_body() {
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 	w::Entity body;
@@ -396,6 +406,7 @@ bool pool0_parent_never_aliases_the_native_body() {
 
 bool deployed_item_spawn_update_and_remove_materialize() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	constexpr uint16_t viewer_handle = 0x0001;
 	constexpr uint16_t owner_handle = 0x0002;
 	ns::ClientEntityState &viewer = pipeline.state().upsert(viewer_handle);
@@ -453,6 +464,7 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 		return false;
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 16);
 	ns::ClientWorldMaterializer materializer;
 	const ns::ClientWorldSyncResult first =
@@ -619,8 +631,10 @@ bool deployed_item_copies_its_last_matching_round() {
 	constexpr uint16_t kFriendly = 0x0362;
 	constexpr uint16_t kEnemy = 0x0363;
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 16);
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	ns::ClientEntityState &viewer = pipeline.state().upsert(viewer_handle);
 	viewer.team = 2;
 	viewer.team_known = true;
@@ -736,6 +750,7 @@ bool deployed_item_copies_its_last_matching_round() {
 
 bool decoded_world_stream_materializes_exact_rows() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 
 	nw::StaticEntityRecord static_row;
 	static_row.item_type_id = 0x0600;
@@ -813,6 +828,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 	pipeline.apply(0x20, nw::encode_pool3_sync_batch(markers));
 
 	w::World world;
+	test_titles::jo_world(world);
 	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
 		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 	ns::ClientWorldMaterializer materializer;
@@ -1029,6 +1045,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 //  @0x433487; EntityPool_Allocate @0x442168 — pool-2 capacity 1200 @0x4421a2]
 bool pool2_tail_beyond_1024_materializes() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 
 	nw::StaticEntityBatch tail;
 	tail.start_index = 1150;
@@ -1051,6 +1068,7 @@ bool pool2_tail_beyond_1024_materializes() {
 	}
 
 	w::World world;
+	test_titles::jo_world(world);
 	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
 		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 	ns::ClientWorldMaterializer materializer;
@@ -1072,6 +1090,7 @@ bool pool2_tail_beyond_1024_materializes() {
 //  @0x43ea38..0x43ea59, memset of the one row @0x43ea70]
 bool entity_remove_detaches_children_in_place() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	nw::PoolSpawnRecord parent;
 	parent.slot_id = 0x1002;
 	parent.item_type_id = 5008;
@@ -1139,6 +1158,7 @@ bool entity_remove_takes_the_eweap_refnum_group() {
 	nw::EntityRemove removal;
 
 	ns::ClientReplicaPipeline bare;
+	test_titles::jo_folds(bare);
 	bare.apply(0x0D, nw::encode_pool_spawn_batch(batch));
 	removal.entity_handle = 0x1002;
 	bare.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
@@ -1148,6 +1168,7 @@ bool entity_remove_takes_the_eweap_refnum_group() {
 		return false;
 
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	pipeline.set_item_catalog(catalog);
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
 	const ns::ClientState &s = pipeline.state();
@@ -1190,8 +1211,10 @@ bool materialized_rows_join_their_refnum_group() {
 	batch.records = {record(0x1002, 5010, 9), record(0x1003, 5011, 9),
 			record(0x1004, 5013, 9), record(0x1005, 5011, 0), record(0x1006, 5014, 9)};
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
 	auto world_heap = std::make_unique<w::World>();
+	test_titles::jo_world(*world_heap);
 	w::World &world = *world_heap;
 	world.registry.configure_pool(1, 16);
 	ns::ClientWorldMaterializer materializer;
@@ -1241,6 +1264,7 @@ bool materialized_rows_join_their_refnum_group() {
 // Entity_AttachCarriedObject @0x43C130]
 bool objective_state_attaches_and_detaches_flag() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	nw::PoolSpawnRecord flag;
 	flag.slot_id = 0x1007;
 	flag.item_type_id = 4093;
@@ -1249,6 +1273,7 @@ bool objective_state_attaches_and_detaches_flag() {
 	pipeline.apply(nw::s2c::POOL_SPAWN, nw::encode_pool_spawn_batch(batch));
 
 	w::World world;
+	test_titles::jo_world(world);
 	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
 		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 	// The client's own player: wire handle 0x0002, its native row at slot 4.
@@ -1321,6 +1346,7 @@ bool objective_state_attaches_and_detaches_flag() {
 //  client's own entity]
 bool objective_drop_off_the_local_player_reads_its_own_pose() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	nw::PoolSpawnRecord flag;
 	flag.slot_id = 0x1007;
 	flag.item_type_id = 4091;
@@ -1337,6 +1363,7 @@ bool objective_drop_off_the_local_player_reads_its_own_pose() {
 	echo.heading_bam = 0x10000000;
 
 	w::World world;
+	test_titles::jo_world(world);
 	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
 		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 	w::Entity local_seed;
@@ -1385,6 +1412,7 @@ bool objective_drop_off_the_local_player_reads_its_own_pose() {
 bool carrier_destroy_drops_the_flag() {
 	for (int path = 0; path < 3; ++path) {
 		ns::ClientReplicaPipeline pipeline;
+		test_titles::jo_folds(pipeline);
 		nw::PoolSpawnRecord flag;
 		flag.slot_id = 0x1007;
 		flag.item_type_id = 4093;
@@ -1401,6 +1429,7 @@ bool carrier_destroy_drops_the_flag() {
 		carrier.pitch_bam = 0x10000000;
 
 		w::World world;
+		test_titles::jo_world(world);
 		for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
 			world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 		ns::ClientWorldMaterializer materializer;
@@ -1458,6 +1487,7 @@ bool carrier_destroy_drops_the_flag() {
 //  @0x439DF0; the pose stores @0x430F68..0x430F74]
 bool objective_state_drop_runs_on_the_client() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 	nw::PoolSpawnRecord flag;
 	flag.slot_id = 0x1007;
 	flag.item_type_id = 4091;
@@ -1473,6 +1503,7 @@ bool objective_state_drop_runs_on_the_client() {
 	carrier_row.pitch_bam = 0x10000000;
 
 	w::World world;
+	test_titles::jo_world(world);
 	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
 		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 	ns::ClientWorldMaterializer materializer;
@@ -1561,6 +1592,7 @@ bool objective_state_drop_runs_on_the_client() {
 // back off the Flags dword exactly [orig: Entity_SpawnFromBMSRecord @0x40ed14].
 bool streamed_rows_take_a_placed_identity_at_the_fence() {
 	ns::ClientReplicaPipeline pipeline;
+	test_titles::jo_folds(pipeline);
 
 	nw::StaticEntityRecord static_row;
 	static_row.item_type_id = 0x0600;
@@ -1600,6 +1632,7 @@ bool streamed_rows_take_a_placed_identity_at_the_fence() {
 	pipeline.apply(0x20, nw::encode_pool3_sync_batch(markers));
 
 	w::World world;
+	test_titles::jo_world(world);
 	for (int pool = 0; pool < w::kEntityPoolCount; ++pool)
 		world.registry.configure_pool(pool, w::kRetailPoolCapacity[pool]);
 	ns::ClientWorldMaterializer materializer;

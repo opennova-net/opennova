@@ -35,6 +35,7 @@ protected:
 	static void _bind_methods();
 
 public:
+	ArmoryLoadout();
 	void stage(const Ref<PlayerProfiles> &p_profiles, int p_entity_team,
 			const TypedArray<WeaponKitEntry> &p_spawn);
 	bool stage_on_show(const Ref<PlayerProfiles> &p_profiles, int p_entity_team,
@@ -58,7 +59,7 @@ public:
 			const Ref<WeaponDatabase> &p_weapons, int p_entity_team, int p_selected_class);
 	TypedArray<WeaponKitEntry> get_page(int p_player_class) const;
 	// The title a session over `p_root` runs as, whose serializer the ACCEPT and the class flip
-	// run (engine menu::ArmoryLoadout::title).
+	// run (engine menu::ArmoryLoadout::title); the launch's until a screen names its root.
 	void set_title_root(const Ref<ResourceRoot> &p_root);
 	// That title's death_screen_loadout (DFX2-41): its DEATH screen picks the loadout.
 	bool death_screen_loadout() const;

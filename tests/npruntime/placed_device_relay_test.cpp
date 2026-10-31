@@ -32,6 +32,7 @@
 #include <variant>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -109,6 +110,7 @@ std::vector<const ns::Datagram *> tagged(
 
 bool run_placed_device_spawn_and_remove_fanout() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
 	w::AiSystem &ai = world.ai;
@@ -159,6 +161,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	ns::UdpSessionTransport remote_observer(ns::UdpSessionTransport::Role::Host);
 	ns::UdpSessionTransport pending_peer(ns::UdpSessionTransport::Role::Host);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -355,6 +358,7 @@ std::vector<uint16_t> queued_removals(const w::World &world) {
 //  call @0x43E8B8; Entity_DropCarriedObject — the 0x2F's call @0x439F34]
 bool run_owner_devices_live_until_the_deploy() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(1, 16);
@@ -371,6 +375,7 @@ bool run_owner_devices_live_until_the_deploy() {
 	inmatch::NapiNPConnection conn =
 			make_conn(3, 1, nullptr, ns::TransportMode::Client, owner, true);
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	const Protocol *const jo = title_protocol("jo");
 
 	w::Entity *body = world.registry.get(owner);
@@ -418,6 +423,7 @@ bool run_owner_devices_live_until_the_deploy() {
 	// its call: an in-match observer hears the leaver's body, then the device, then the
 	// slot's removal record, and no 0x5D; nothing is left for the entity fan.
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;

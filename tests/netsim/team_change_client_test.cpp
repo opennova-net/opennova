@@ -7,6 +7,7 @@
 // [orig: DeathScreen_UpdateUI @0x553150; DeathScreen_OnSwapTeams @0x5535B0;
 //  NetPacket_SendPingRequest @0x42DD90; MapOverlay_UpdateTimers @0x5BFCE0]
 #include <runtime/inmatch/client_runtime.h>
+#include <base/title/title.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_replica_pipeline.h>
@@ -19,6 +20,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::inmatch;
@@ -76,7 +78,9 @@ void test_show_rule() {
 // A joiner reads the rules word its S2C 0x08 carried.
 void test_joiner_feed_reads_the_session_rules() {
 	ClientRuntime runtime("TeamButtons");
+	test_titles::jo_folds(runtime);
 	mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.world.rules.mp_session = true;
 	kernel.world.registry.configure_pool(0, 8);
 	world::Entity seed;
@@ -88,6 +92,7 @@ void test_joiner_feed_reads_the_session_rules() {
 	joiner.runtime = &runtime;
 	joiner.joiner = true;
 	joiner.staged_mp_attributes = 0x4u; // the joiner's own word is not read
+	joiner.title = opennova::title_by_code("jo"); // the DEATH screen's feed reads its title
 	runtime.view().apply(s2c::SESSION_CONFIG, session_config(0x10000u, 0x0u));
 	CHECK(runtime.state().session_rules_flags == 0u);
 	CHECK(!deploy_screen_status(joiner, world::SpawnZoneRegistry(), "M",
@@ -104,6 +109,7 @@ void test_joiner_sends_the_request() {
 	const std::string client_scrk = "CLIENT-TEAM-REQ-SCRK";
 	const std::string server_scrk = "SERVER-TEAM-REQ-SCRK";
 	ClientRuntime client("TeamRequest");
+	test_titles::jo_folds(client);
 	CHECK(!client.queue_team_change_request()); // no session yet
 	client.seed_session(0x4D4D0001u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, world::kPlayerInfantryTypeId);

@@ -41,6 +41,7 @@
 #include <optional>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -93,6 +94,7 @@ w::Entity vehicle_seed(uint16_t item_id, w::Vec3 pos, int16_t yaw) {
 // the vertical velocity compressed into the live tail's first word.
 bool run_fan_carrier_and_vertical_velocity() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 16);
 	const w::EntityHandle host_h =
@@ -198,6 +200,7 @@ bool run_fan_carrier_and_vertical_velocity() {
 //  Entity_DispatchDeathCallback `or [edi+24h],edx` @0x493F63]
 bool run_fan_full_precision_heading_and_wreck_pose() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 16);
 	const w::EntityHandle host_h =
@@ -308,6 +311,7 @@ nw::FrameUpdateRecord vehicle_record(uint16_t handle, uint16_t parent, int32_t l
 // vertical velocity lands under the wire-flag bit-0x02 gate.
 bool run_pipeline_parented_form() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	view.set_item_class_resolver([](uint16_t type) -> ns::ClientReplicaPipeline::ItemClassResolution {

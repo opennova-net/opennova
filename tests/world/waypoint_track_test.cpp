@@ -7,6 +7,7 @@
 
 #include <runtime/world/waypoint_track.h>
 #include <runtime/world/entity_registry.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -37,6 +38,7 @@ static void advance(WaypointTrack &t, int32_t x, int32_t y, uint32_t won = 0,
 
 static WaypointCycleContext in_session(bool session) {
     WaypointCycleContext ctx;
+    test_titles::jo_match(ctx);
     ctx.in_session = session;
     return ctx;
 }
@@ -332,6 +334,7 @@ int main() {
         };
         const auto ctx = [&reg](uint32_t game_type) {
             WaypointCycleContext c;
+            test_titles::jo_match(c);
             c.registry = &reg;
             c.game_type = game_type;
             return c;
@@ -533,6 +536,7 @@ int main() {
 
         // The walk skips an entry whose entity is gone [orig: @0x4dc267].
         WaypointCycleContext ctx;
+        test_titles::jo_match(ctx);
         ctx.registry = &registry;
         t.current = 0;
         registry.despawn(EntityHandle::make(2, 2)); // index 1
@@ -563,6 +567,7 @@ int main() {
         t.build_map_poi_list(registry);
         CHECK(t.entries.size() == 3);
         WaypointCycleContext ctx;
+        test_titles::jo_match(ctx);
         ctx.registry = &registry;
         ctx.game_type = 0x10002;
         t.current = 2;

@@ -12,6 +12,7 @@
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 namespace fs = std::filesystem;
 using namespace opennova::wac;
@@ -71,6 +72,7 @@ static void run_help(World &world) {
 int main() {
     TemporaryWorkingDirectory cwd;
     const auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &world = *storage;
     run_help(world);
     const std::string text = read("help.wac");

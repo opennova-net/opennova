@@ -247,6 +247,11 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 
 hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view) {
 	hud::EndRoundOverlayInput in;
+	// The team score lines' fallbacks, the session title's (Title::end_round_team_fallbacks).
+	const Title &title = require_title(view.title, "end_round_overlay_input");
+	for (size_t i = 0; i < 2; ++i)
+		if (const char *fallback = title.end_round_team_fallbacks[i])
+			in.team_fallbacks[i] = fallback;
 	if (const world::MatchResult *board = serve_only_round_board(view)) {
 		// The board build's globals: a row's name is copied into its 32-byte entry, its primary
 		// score kept whole (the host's words are 32-bit, the 0x1D's i16 only on the wire); a
@@ -348,12 +353,13 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// The EXPPOINTS element's words (DFX2-36): the 0x81 score and its fanfare arms, the tracker's
 	// valid word and its two values [orig: dword_A7BA40 / dword_A7BA4C / dword_A7BA54 /
 	//  dword_A7BA58, read by HUD_DrawExpPoints @0x59B998 / @0x59BA38..0x59BA48 (dfx2.exe)].
-	out.exp_points.element = view.title != nullptr && view.title->hud_exp_points;
-	out.title = view.title;
+	const Title &title = require_title(view.title, "hud_role_facts");
+	out.exp_points.element = title.hud_exp_points;
+	out.title = &title;
 	out.lone_gunner = view.kernel != nullptr && world::local_rides_solo_turret(view.kernel->world);
 	// The Inset's reticle (DFX2-45).
-	out.inset_reticle_quad = view.title != nullptr && view.title->inset_reticle_quad;
-	if (view.title != nullptr && view.title->hud_vehicle_panel_riders)
+	out.inset_reticle_quad = title.inset_reticle_quad;
+	if (title.hud_vehicle_panel_riders)
 		fill_vehicle_panel_riders(view, out.vehicle_riders); // DFX2-82
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
@@ -779,7 +785,8 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 			}
 		}
 	}
-	instructions.penalty_line = view.title != nullptr && view.title->death_respawn_penalty_line;
+	const Title &title = require_title(view.title, "deploy_screen_status");
+	instructions.penalty_line = title.death_respawn_penalty_line;
 	instructions.penalty_seconds = penalty;
 	v.instructions = world::build_deploy_instructions(instructions, gametext);
 	// [orig: `!g_DeployScreenActive && !dead` -> return @0x5538d1] [orig: @0x552041 (dfx2.exe)]
@@ -818,7 +825,7 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 			world::deploy_loadout_shown(buttons.team, buttons.permanent_death, buttons.dead);
 	v.restart_level = world::deploy_restart_level_allowed(
 			buttons.game_type, buttons.in_session, buttons.dead);
-	v.shroud_main = view.title != nullptr && view.title->death_shroud_main;
+	v.shroud_main = title.death_shroud_main;
 	return v;
 }
 
@@ -1108,8 +1115,8 @@ bool death_shroud_revealed(const RoleView &view) {
 	const uint32_t now = view.kernel->world.logic_tick;
 	const int32_t since_death =
 			static_cast<int32_t>(now - view.kernel->local.view.death_cam.start_tick);
-	const int32_t reveal_ticks = view.title != nullptr ? view.title->death_shroud_reveal_ticks
-			: Title().death_shroud_reveal_ticks;
+	const int32_t reveal_ticks =
+			require_title(view.title, "death_shroud_revealed").death_shroud_reveal_ticks;
 	return world::death_shroud_revealed(deploy_active, since_death, reveal_ticks);
 }
 
@@ -1319,7 +1326,8 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 
 bool deploy_team_list_players(const RoleView &view, std::vector<world::DeployTeamListPlayer> &out) {
 	out.clear();
-	if (view.title == nullptr || !view.title->death_screen_team_lists) return false;
+	if (!require_title(view.title, "deploy_team_list_players").death_screen_team_lists)
+		return false;
 	if (view.kernel == nullptr || view.runtime == nullptr) return false;
 	const ClientRuntime &runtime = *view.runtime;
 	const world::World &w = view.kernel->world;
@@ -1746,8 +1754,9 @@ world::DeployActivation deploy_activation(const RoleView &view, const hud::GameT
 	world::DeployActivation out;
 	out.permanent_dead = view.runtime != nullptr && view.runtime->state().permanent_death &&
 			local_player_dead(view);
-	out.table = view.title != nullptr && view.title->death_screen_loadout;
-	out.game_type_line = view.title != nullptr && view.title->death_screen_game_type_line;
+	const Title &title = require_title(view.title, "deploy_activation");
+	out.table = title.death_screen_loadout;
+	out.game_type_line = title.death_screen_game_type_line;
 	const uint32_t type = view.runtime != nullptr ? view.runtime->game_type() : 0u;
 	// [orig: HUD_GetGameTypeOverlayLabel @0x5b75d0 (dfx2.exe); its twin @0x5b8680]
 	out.game_type_label = hud::game_text(gametext, hud::kGameTextOverlays,

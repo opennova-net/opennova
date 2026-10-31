@@ -16,6 +16,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::ragdoll;
@@ -563,6 +564,7 @@ void test_corpse_rules() {
 			"another clip or another corpse seeds otherwise");
 
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	// A map without water carries the word 0, retail's float plane alike (no dry
 	// sentinel): hips above it start, hips below it keep the float.
 	expect(corpse_ragdoll_may_start(*world, 0.5f) && !corpse_ragdoll_may_start(*world, -1000.0f),
@@ -626,6 +628,7 @@ void test_ragdoll_leaves_the_simulation_alone() {
 		return true;
 	};
 	world::World a;
+	test_titles::jo_world(a);
 	const uint32_t a16 = a.prng16_state, a16b = a.prng16_b_state, a16c = a.prng16_c_state;
 	const uint32_t adestr = a.destruction_rng.state, crt = crt::crt_rand_state();
 	std::vector<anim::PoseBone> pose_a, pose_b;
@@ -634,6 +637,7 @@ void test_ragdoll_leaves_the_simulation_alone() {
 					a.destruction_rng.state == adestr && crt::crt_rand_state() == crt,
 			"the ragdoll draws no World or CRT random number");
 	world::World b;
+	test_titles::jo_world(b);
 	b.next_prng16();
 	b.next_prng16_b();
 	b.next_prng16_c();

@@ -17,6 +17,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -33,6 +34,7 @@ int failures = 0;
 
 struct Rig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     EntityHandle shooter;
 
     Rig() {

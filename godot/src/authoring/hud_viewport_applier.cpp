@@ -160,14 +160,14 @@ void HudViewportApplier::rebuild(const opennova::editor::ViewportModel &model, c
 		const opennova::editor::PreviewClock &) {
 	clear();
 	HudOverlay *hud = overlay();
-	if (!hud || !view.findings.assets) return;
+	// No project, no preview: nothing is mounted or drawn (the model stops at HudViewStatus::NoProject,
+	// "No project is open.").
+	if (!hud || !view.project.open || !view.findings.assets) return;
 	// The project's files, the open documents standing in for theirs, each read noted with its stamp,
 	// mounted as the project's target game: the HUD's label fonts and its variants are that title's
 	// (ResourceRoot::session_title), as the game's are its launch title's.
 	stamped_ = std::make_shared<opennova::StampedFiles>(view.findings.assets);
-	root_->mount_files(stamped_, view.project.document
-					? opennova::to_gd(view.project.document->target_game)
-					: String());
+	root_->mount_files(stamped_, opennova::to_gd(view.project.document->target_game));
 	Ref<HudPos> layout;
 	layout.instantiate();
 	if (layout->load_from_resource_root(root_, String(opennova::editor::basename_of(model.path()).c_str())) != OK) return;

@@ -10,6 +10,7 @@
 
 #include <cstdio>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -51,6 +52,7 @@ bool tag_radio_request(World &w, EntityHandle local, EntityHandle tagged) {
 
 void test_tag_fold() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 32);
     const EntityHandle local = spawn_organic(w, true, 0);
@@ -105,6 +107,7 @@ void test_tag_fold() {
 // [orig: HUD_DrawEntityLabel `Flags & 2` @0x5a3c1c..0x5a3c27]
 void test_dead_latch_is_the_flags_bit() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);
     const EntityHandle local = spawn_organic(w, true, 0);
     const EntityHandle tagged = spawn_organic(w, false, 0);
@@ -147,6 +150,7 @@ void test_viewer_gate() {
 
 void test_neutral_organics_do_not_get_friendly_labels() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);
     const EntityHandle local = spawn_organic(w, true, 0);
     const EntityHandle neutral = spawn_organic(w, false, 0);

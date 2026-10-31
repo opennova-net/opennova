@@ -68,6 +68,7 @@
 
 #include "conn_fixture.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::def;
 
@@ -152,7 +153,7 @@ void dispatch_fire(inmatch::NapiNPConnection &conn, std::vector<inmatch::NapiNPC
                    w::World &world, const std::vector<uint8_t> &body) {
 	std::vector<ProtocolMessage> msgs;
 	msgs.push_back(make_protocol_message(0x06, body));
-	inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn, msgs, 100, roster, &world);
+	inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn, msgs, 100, roster, &world);
 }
 
 // Drain ALL staged S2C datagrams (0x0A noise included) once; pick tags from the result.
@@ -195,6 +196,7 @@ Drained drain_all(ns::LoopbackChannel &t) {
 // AI_TransitionToDeath_GroundVehicle @0x467B58; Entity_RespawnVehicle @0x45FF40]
 bool test_respawned_vehicle_takes_projectile_damage() {
 	auto world_owner = std::make_unique<w::World>();
+	test_titles::jo_world(*world_owner);
 	w::World &world = *world_owner;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
@@ -248,6 +250,7 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 	ammo.flags = w::kAmmoFlagNoGravity;
 	world.tables.ammo.entries.push_back(ammo);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -295,6 +298,7 @@ bool test_respawned_vehicle_takes_projectile_damage() {
 
 bool run_death_feed_classifier_matrix() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
 	world.rules.mp_session = true;
@@ -335,6 +339,7 @@ bool run_death_feed_classifier_matrix() {
 	ns::LoopbackChannel host;
 	ns::UdpSessionTransport victim_wire(ns::UdpSessionTransport::Role::Host);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -699,6 +704,7 @@ bool test_retail_random_spread_vectors() {
 // deaths: a restored world holds no transaction its pre-restore tick admitted.
 bool test_reset_drops_the_pending_medic_interactions() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.round_sim.medic_interactions.push_back(w::MedicInteraction{});
 	world.round_sim.deaths.push_back(w::RoundDeath{});
 	world.round_sim.reset();
@@ -708,6 +714,7 @@ bool test_reset_drops_the_pending_medic_interactions() {
 
 bool test_spawn_spread_then_recoil() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.rules.mpattrib = 0x4204u; // the out-of-session rules word: spread on
 	w::AiSystem &ai = world.ai;
@@ -846,6 +853,7 @@ bool test_spawn_spread_then_recoil() {
 //  @0x4EC442, the zero offsets @0x4EC42B..0x4EC43D]
 bool test_spawn_spread_reads_the_rules_word() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	w::PlayerSpawn seed;
 	seed.net_id = 43;
@@ -909,6 +917,7 @@ bool test_spawn_spread_reads_the_rules_word() {
 // ahead of the recoil adds @0x4EC334 / @0x4EC85F], so it never kicks.
 bool test_unauthored_recoil_kicks_a_flying_round_only() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	w::PlayerSpawn seed;
 	seed.net_id = 42;
@@ -993,6 +1002,7 @@ bool test_unauthored_recoil_kicks_a_flying_round_only() {
 // @0x4EC2EC; the recoil add reads the row @0x4EC85B]
 bool test_stance_row_forced_standing_mask() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	w::PlayerSpawn seed;
 	seed.net_id = 44;
@@ -1057,6 +1067,7 @@ bool test_stance_row_forced_standing_mask() {
 // 0x4EC458 -> +0xD0 @0x4EC493, else +0xCC @0x4EC46E]
 bool test_spread_limit_keys_on_the_raw_prone_bit() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	w::PlayerSpawn seed;
 	seed.net_id = 45;
@@ -1136,6 +1147,7 @@ bool test_spread_limit_keys_on_the_raw_prone_bit() {
 // @0x4EC3F1..0x4EC3F8 skips the adds @0x4EC3FA..0x4EC40E]
 bool test_spread_adds_ride_the_person_def() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.rules.mpattrib = 0x4204u; // the out-of-session rules word: spread on
 	w::PlayerSpawn seed;
@@ -1198,6 +1210,7 @@ bool test_spread_adds_ride_the_person_def() {
 
 struct DismembermentRig {
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	w::AiSystem &ai = world.ai;
 	w::CollisionWorld collision;
 	w::EntityHandle shooter;
@@ -1326,6 +1339,7 @@ bool test_spawn_aimed_row_and_zero_elevation() {
 		return false;
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.rules.mpattrib = 0x4204u; // the out-of-session rules word: spread on
 	w::PlayerSpawn seed;
@@ -1733,6 +1747,7 @@ bool test_an_incendiary_hit_burns_the_body() {
 //  word @0x50BDAE..0x50BDBC]
 bool test_round_ids_share_the_pool_counter() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.tables.ammo.entries.resize(4);
 	w::AmmoTableEntry &bullet = world.tables.ammo.entries[0];
 	bullet.valid = true;
@@ -1786,6 +1801,7 @@ bool test_round_ids_share_the_pool_counter() {
 	// The words a retail joiner at roster slot 1 put on the wire for its first three
 	// shots (the 2026-07-26 capture: 0x0201 / 0x0202 / 0x0203).
 	w::World joiner;
+	test_titles::jo_world(joiner);
 	joiner.tables.ammo.entries.push_back(world.tables.ammo.entries[0]);
 	joiner.round_sim.local_slot_id = 1;
 	for (uint16_t n = 1; n <= 3; ++n) {
@@ -1810,6 +1826,7 @@ bool test_round_ids_share_the_pool_counter() {
 //  Projectile_InitDragTable @0x4E78D0 (no cursor store)]
 bool test_round_pool_allocates_after_its_cursor() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->tables.ammo.entries.resize(2);
 	w::AmmoTableEntry &bullet = world->tables.ammo.entries[0];
 	bullet.valid = true;
@@ -1859,6 +1876,7 @@ bool test_round_pool_allocates_after_its_cursor() {
 //  stores @0x4EC5DD..0x4EC60D]
 bool test_every_allocated_round_flies() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	std::vector<w::AmmoTableEntry> &rows = world->tables.ammo.entries;
 	rows.resize(4);
 	w::AmmoTableEntry &still = rows[0];
@@ -1905,6 +1923,7 @@ bool test_every_allocated_round_flies() {
 //  @0x50BD91..0x50BDBC; RoundData_AddRound @0x4FDCF5].
 bool test_ammo_arm_word_follows_the_slot() {
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	world.tables.ammo.entries.resize(1);
@@ -1955,6 +1974,7 @@ int main() {
 	if (!test_an_incendiary_hit_burns_the_body()) return 1;
 	if (!run_death_feed_classifier_matrix()) return 1;
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 4); // the deathmatch start markers (section 4)
 	w::AiSystem &ai = world.ai;
@@ -2088,11 +2108,14 @@ int main() {
 	ns::UdpSessionTransport client_b_in(ns::UdpSessionTransport::Role::Client);
 	ns::UdpSessionTransport client_c_in(ns::UdpSessionTransport::Role::Client);
 	ns::ClientReplicaPipeline client_b_view;
+	test_titles::jo_folds(client_b_view);
 	ns::ClientReplicaPipeline client_c_view;
+	test_titles::jo_folds(client_c_view);
 	client_b_view.set_protocol(title_protocol("jo"));
 	client_c_view.set_protocol(title_protocol("jo"));
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -2887,7 +2910,7 @@ int main() {
 		std::vector<ProtocolMessage> msgs;
 		msgs.push_back(make_protocol_message(0x0E, {0xFF, 0xFF})); // param-0 pick (base deploy)
 		std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, conn, msgs, 100, roster, &world, deploy_inputs);
+				test_titles::jo_config_of(inmatch::GameConfig{}), conn, msgs, 100, roster, &world, deploy_inputs);
 
 		bool saw_5a = false, saw_61 = false;
 		for (const ProtocolMessage &m : replies) {
@@ -2935,7 +2958,7 @@ int main() {
 		// An alive DEPLOYED player's 0x0E is a no-op (the dead-or-pending gate @0x519cc7):
 		// no bundle, no reposition.
 		std::vector<ProtocolMessage> again = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, conn, msgs, 101, roster, &world);
+				test_titles::jo_config_of(inmatch::GameConfig{}), conn, msgs, 101, roster, &world);
 		for (const ProtocolMessage &m : again)
 			if (!expect(m.tag != 0x5A && m.tag != 0x61,
 			            "alive deployed 0x0E draws no release bundle"))
@@ -2951,7 +2974,7 @@ int main() {
 		je = world.registry.get(jb);
 		je->position = {40.0f, 40.0f, 0.0f};
 		const std::vector<ProtocolMessage> out_of_session = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, conn, msgs, 102, roster, &world, deploy_inputs);
+				test_titles::jo_config_of(inmatch::GameConfig{}), conn, msgs, 102, roster, &world, deploy_inputs);
 		world.rules.mp_session = true;
 		bool seeded = false, loadout = false;
 		for (const ProtocolMessage &m : out_of_session) {

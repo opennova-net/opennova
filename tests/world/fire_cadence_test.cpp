@@ -20,6 +20,7 @@
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -160,6 +161,7 @@ void test_mode_word() {
 // and a six-tick hold appends one round, a seven-tick hold two.
 struct Rig {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     LocalPlayer local{world};
     WeaponInventory inv;
@@ -221,7 +223,7 @@ struct Rig {
         b.inf.is_local_player = true;
 
         inv.reset(t);
-        weapon_inventory_load_from_display(t, {"WPN_M4AUTO"}, inv, 8, false);
+        weapon_inventory_load_from_display(t, {"WPN_M4AUTO"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
         inv.equipped_combo = 3 * 65;
         if (bucket) inv.shared_clips[1] = 30;
         else inv.slot(3 * 65)->clip = 30;

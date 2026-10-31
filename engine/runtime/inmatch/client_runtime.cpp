@@ -727,9 +727,15 @@ bool ClientRuntime::queue_deployment_pick(uint16_t wire_value) {
 	// same [i16] pick on its local connection, and its server dispatches it
 	// like a joiner's. [orig: Input_HandleActionBinding @0x49AD40, case 12
 	// @0x49B0C5..0x49B17B -> CNapiNetwork_QueueReliableMessage(0x0E) @0x49b17b]
+	// The case raises the deploy hold on every role, the listen host's own client's too, which
+	// its deploy's Game_InitNewRound and its next 0x5A clear [orig: g_ClientDeployHold = 1
+	//  @0x49B067; Game_InitNewRound @0x4227CE; NapiNPClientMsg_HandleWeaponLoadoutSync
+	//  @0x429713].
 	if (queue_host_message(c2s::RESPAWN_REQUEST,
-			{static_cast<uint8_t>(wire_value & 0xFFu), static_cast<uint8_t>(wire_value >> 8)}))
+			{static_cast<uint8_t>(wire_value & 0xFFu), static_cast<uint8_t>(wire_value >> 8)})) {
+		deployed_ = false;
 		return true;
+	}
 	if (role_ != Role::Joiner || !in_game_loop()) return false;
 	// Initial admission may finish while the authority still holds the
 	// deploy-map overlay. Its selection sends the same request as a death
@@ -750,7 +756,10 @@ bool ClientRuntime::queue_spectator_convert() {
 	//  CNapiNetwork_QueueReliableMessage(0x51, 1, 0) @0x49B0B9; handled by
 	//  Server_ProcessClientRequestSpectatorRespawn @0x51C840]
 	const std::vector<uint8_t> body = {0xFF, 0xFF};
-	if (queue_host_message(c2s::SPECTATOR_RESPAWN, body)) return true;
+	if (queue_host_message(c2s::SPECTATOR_RESPAWN, body)) {
+		deployed_ = false;
+		return true;
+	}
 	if (role_ != Role::Joiner || !in_game_loop()) return false;
 	send_queue_.push_back(make_protocol_message(c2s::SPECTATOR_RESPAWN, body));
 	deployed_ = false;

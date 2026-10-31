@@ -20,6 +20,10 @@
 #include <string>
 #include <vector>
 
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
+
 using namespace opennova::hud;
 using opennova::fnt::FNT_MAX_PAGES;
 using opennova::fnt::fnt_font_t;
@@ -57,6 +61,7 @@ void test_game_info(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.session.game_type = 0x10001u;
 	state.session.time_limit_minutes = 20;
 	state.session.teams[1].score1 = 100;
@@ -144,6 +149,7 @@ void test_clock(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.session.text.timer = "T";
 	state.session.text.players = "P";
 	state.session.text.players_remaining = "PR";
@@ -275,8 +281,8 @@ void test_game_info_board(const fnt_font_t *font) {
 		const std::vector<GameFontQuad> g = bold();
 		CHECK(g.size() == 4 + 6 && g[4].y_top - g[0].y_top == 16.0f);
 	}
-	// A null title keeps Jointops.exe's overlay: no TDM lines, no mission line.
-	state.title = nullptr;
+	// Jointops.exe's overlay: no TDM lines, no mission line.
+	state.title = jo;
 	s.game_type = 0x10000u;
 	CHECK(bold().empty());
 }
@@ -331,6 +337,7 @@ void test_vehicle_panel_riders(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.mount_slot = 1; // a passenger: the panel's stance arm
 	state.vehicle_panel.shown = true;
 	state.vehicle_panel.silhouette_valid = true;
@@ -388,6 +395,7 @@ void test_team_id_line(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	// The CLOCK slot's player count would draw at the unauthored (0, 0)
 	// record in a session too — this test isolates the TEAMID line.
 	state.declutter_visible[kDeclutterClock] = false;
@@ -458,6 +466,7 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.health_fraction = 1.0f;
 	const auto fill_width = [&]() -> float {
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
@@ -490,6 +499,7 @@ void test_health_bar_fill_rounds(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.health_fraction = 0.503f;
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 	bool seen = false;
@@ -525,6 +535,7 @@ void test_health_bar_stance_colours(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	const auto fill_colour = [&](float fraction) -> uint32_t {
 		state.health_fraction = fraction;
 		for (const HudQuad &q : compiler.compile(state, 1024.0f, 768.0f).quads)
@@ -559,6 +570,7 @@ void test_slot_bar(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	for (const int c : {6, 9, 0}) {
 		HudSlotBarSlot &s = state.slot_bar[static_cast<size_t>(c)];
 		s.present = true;
@@ -621,6 +633,7 @@ void test_objectives_panel(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.objectives_header = "HDR";
 	state.objectives.push_back({"AB", false});
 	state.objectives.push_back({"CD", true});
@@ -677,6 +690,7 @@ void test_no_hud(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.objectives.push_back({"AB", false});
 	state.message_log_shown = true;
 	const size_t with_hud = compiler.compile(state, 1024.0f, 768.0f).elements_drawn;
@@ -710,6 +724,7 @@ void test_flash_key(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.weapon.active = true;
 	state.weapon.capacity = 30;
 	state.weapon.clip = 3;
@@ -765,6 +780,7 @@ void test_overlay_panel_menus(const fnt_font_t *font) {
 		return out;
 	};
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.emotes_menu.shown = true;
 	for (size_t i = 0; i < 10; ++i) state.emotes_menu.texts[i] = "e";
 	{
@@ -841,6 +857,7 @@ void test_squad_orders(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
 	state.squad_orders[1] = "GO";
 	{
@@ -887,6 +904,7 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	compiler.configure_label_fonts(font, font, font, 1.25f, 1.6f);
 	const float w = 1280.0f, h = 720.0f;
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.main_frame = 100;
 	compiler.push_chat_line("AB", 0xFFFFFFFFu, 100);
 	compiler.push_chat_line("CD", 0xFFFFFFFFu, 100);
@@ -914,6 +932,7 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	}
 	// The power-throw label: bold slot, the outline in the per-frame colour.
 	HudFrameState power;
+	power.title = &kJoTitle;
 	// Far past the feed lines above: their life runs on the main frame clock
 	// (g_MainFrameCounter), so they have expired and only the label is bold.
 	power.main_frame = 100000;

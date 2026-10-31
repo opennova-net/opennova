@@ -40,6 +40,7 @@
 #include <runtime/world/world.h>
 #include <runtime/world/angle.h>
 #include "common/mission_set.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::threedi;
 
@@ -147,6 +148,7 @@ int main() {
 	}
 
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 8);
 

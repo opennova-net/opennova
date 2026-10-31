@@ -17,6 +17,7 @@
 #include <runtime/world/world.h>
 
 #include "../world/channel_clip_source.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using world::AiBrain;
@@ -119,6 +120,7 @@ struct ClipSource : IRootMotionSource {
 
 static void test_mount_config_lifecycle() {
     auto world_fixture = std::make_unique<World>();
+    test_titles::jo_world(*world_fixture);
     World &w = *world_fixture;
     w.registry.configure_pool(0, 16);
     w.registry.configure_pool(1, 16);
@@ -187,6 +189,7 @@ static void test_mount_config_lifecycle() {
 
 static void test_wire_mount_config_lifecycle() {
     auto world_fixture = std::make_unique<World>();
+    test_titles::jo_world(*world_fixture);
     World &w = *world_fixture;
     w.registry.configure_pool(0, 16);
     w.registry.configure_pool(1, 16);
@@ -212,6 +215,7 @@ static void test_wire_attach_rejects_unknown_model_bone() {
     // unrecognized/out-of-range row; it never substitutes another free seat.
     // [orig: Entity_GetBoneSlotType @0x434ED0; reject @0x435B14]
     auto world_fixture = std::make_unique<World>();
+    test_titles::jo_world(*world_fixture);
     World &w = *world_fixture;
     w.registry.configure_pool(0, 16);
     w.registry.configure_pool(1, 16);
@@ -231,6 +235,7 @@ static void test_target_loss_clears_zero_net_id_occupant() {
     // pool handles. Auto-dismount must clear the exact mounted occupant, not resolve
     // the first zero-id player through the script-facing SSN table.
     auto world_fixture = std::make_unique<World>();
+    test_titles::jo_world(*world_fixture);
     World &w = *world_fixture;
     w.registry.configure_pool(0, 16);
     w.registry.configure_pool(1, 16);
@@ -288,6 +293,7 @@ int main() {
     // ---- mount sets both sides + poses onto the seat ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16); // organics
         w.registry.configure_pool(1, 16); // items
@@ -333,6 +339,7 @@ int main() {
         const SeatType control_types[] = {SeatType::Controller, SeatType::Driver};
         for (SeatType control_type : control_types) {
             auto world_fixture = std::make_unique<World>();
+            test_titles::jo_world(*world_fixture);
             World &w = *world_fixture;
             w.registry.configure_pool(0, 16);
             w.registry.configure_pool(1, 16);
@@ -370,6 +377,7 @@ int main() {
     // claimant-only stop leg].
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -404,6 +412,7 @@ int main() {
     // The accepted wire attach/detach path publishes the same controlling-seat edges.
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -436,6 +445,7 @@ int main() {
     // @0x494714]
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -477,6 +487,7 @@ int main() {
     // A passenger is occupancy, not vehicle control; mount, dismount, and restore stay silent.
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -495,6 +506,7 @@ int main() {
     // target identity still has to publish the matching stop edge.
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -518,6 +530,7 @@ int main() {
     // ---- edges: full seat, already-mounted, seatless target ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -541,6 +554,7 @@ int main() {
     // ---- mounted seat local rotates in the same frame as placed vehicle models ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -571,6 +585,7 @@ int main() {
     // ---- AI tick seat-follow: occupant tracks the seat, never path-follows ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -616,6 +631,7 @@ int main() {
     // ---- mounted pose selection follows seat context, not just "is mounted" ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -660,6 +676,7 @@ int main() {
         const int32_t kLookHeading = world::bam_heading_from_mission_yaw_deg(80.0);
 
         auto wp = std::make_unique<World>();
+        test_titles::jo_world(*wp);
         World &w = *wp;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -722,6 +739,7 @@ int main() {
         constexpr int32_t kLookPitch = 12345678;
 
         auto wp = std::make_unique<World>();
+        test_titles::jo_world(*wp);
         World &w = *wp;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -779,6 +797,7 @@ int main() {
     // ---- non-gunner seats carry a local facing offset, not just vehicle yaw ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -819,6 +838,7 @@ int main() {
 	// ---- unmounted stance stays under normal infantry logic, not mount pose logic ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         const EntityHandle sh = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
@@ -839,6 +859,7 @@ int main() {
     //  WacScript_TryMountEntityToVehicle @0x4F70F0] ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -886,6 +907,7 @@ int main() {
     // ---- snapshot/restore rewinds the mount (seats ride the registry value-copy) ----
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
@@ -906,6 +928,7 @@ int main() {
     // embedders can rebuild effects that were cleared with the transient EffectLog.
     {
         auto world_fixture = std::make_unique<World>();
+        test_titles::jo_world(*world_fixture);
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);

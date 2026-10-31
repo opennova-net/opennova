@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -73,6 +74,7 @@ void test_def_keys_parse_raw() {
 
 std::unique_ptr<World> make_world(bool authority) {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     w->registry.configure_pool(0, 4);
     w->registry.configure_pool(1, 4);
     w->rules.logic_authority = authority;

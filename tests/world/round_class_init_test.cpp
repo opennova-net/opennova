@@ -16,6 +16,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -37,6 +38,7 @@ constexpr int kItemRocket = 3200;
 // One init per class row, over a slot as the allocation zeroed it.
 void test_only_the_spin_rows_spin() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     struct Case { ThrowClass think; int32_t spin; };
     const Case cases[] = {
         {ThrowClass::kNade, kOneDegree},    // @0x4435A0
@@ -102,6 +104,7 @@ struct FlatField {
 // round fired the same way takes the step.
 void test_a_rokt_round_flies_without_gravity() {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     World &w = *world;
     FlatField flat;
     w.tables.terrain = &flat.field;

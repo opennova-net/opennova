@@ -226,13 +226,15 @@ std::vector<EndRoundLine> end_round_overlay_lines(const EndRoundOverlayInput &in
 	y += 32;
 	if ((in.game_type & 0x20000u) == 0) {
 		if (team_mode) {
+			// Each team's key with the title's fallback (DFX2-124) [orig: @0x5b8422 / @0x5b8465]
+			// [orig: @0x5B7372 / @0x5B73B5 (dfx2.exe)].
 			EndRoundLine blue = literal_line("%s : %ld", y);
-			blue.args.push_back(key_arg("STROVER_BLUETEAM", "!Joint Ops Team"));
+			blue.args.push_back(key_arg("STROVER_BLUETEAM", in.team_fallbacks[0].c_str()));
 			blue.args.push_back(number_arg(in.team_scores[0]));
 			out.push_back(blue);
 			y += 40;
 			EndRoundLine red = literal_line("%s : %ld", y);
-			red.args.push_back(key_arg("STROVER_REDTEAM", "!Rebel Team"));
+			red.args.push_back(key_arg("STROVER_REDTEAM", in.team_fallbacks[1].c_str()));
 			red.args.push_back(number_arg(in.team_scores[1]));
 			out.push_back(red);
 			y += 40;

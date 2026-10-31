@@ -36,6 +36,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -333,12 +334,14 @@ void consumers_refuse_without_identity() {
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(make_protocol_client_hello(jo, 1)));
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Lan);
 		inmatch::SessionStartup startup;
 		startup.protocol = &jo;
 		startup.host_key = 0x5EED;
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 2;
 		inmatch::create_session(ctx, config, startup, nullptr);
 		CHECK(ctx.np_protocol.identity == &jo);

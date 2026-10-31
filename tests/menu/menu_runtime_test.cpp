@@ -1517,6 +1517,7 @@ void test_shell_flow() {
 	MenuRuntime menu;
 	menu.open_document(&doc, "sp.mnu", "");
 	MenuFlow flow;
+	flow.set_title(*title_by_code("jo"));
 	flow.set_mission_controls({"ia_list", "CA_MISSION_LIST"}, {"BRIEFING"}, {"ACCEPT"});
 	const int list = menu.widget_id("IA_LIST"), accept = menu.widget_id("ACCEPT");
 	const std::vector<MissionChoice> choices = {
@@ -1601,7 +1602,7 @@ void test_campaign_tabs() {
 	MenuFlow flow;
 	Title dfx2;
 	dfx2.sp_campaign_tabs = true;
-	flow.set_title(&dfx2);
+	flow.set_title(dfx2);
 	flow.set_mission_controls({"IA_LIST", "CA_MISSION_LIST"}, {"BRIEFING"}, {"ACCEPT"});
 	flow.set_campaign_source(def, &text, progress);
 	const std::vector<MissionChoice> rows = {
@@ -1670,6 +1671,7 @@ void test_campaign_tabs() {
 
 	// Jointops.exe's screen: no tabs, every waypoint-family mission in IA_LIST, BRIEFING its pane.
 	MenuFlow jo;
+	jo.set_title(*title_by_code("jo"));
 	jo.set_mission_controls({"IA_LIST", "CA_MISSION_LIST"}, {"BRIEFING"}, {"ACCEPT"});
 	jo.seed_missions(menu, ia, rows);
 	CHECK(menu.item_count(ia) == 5);

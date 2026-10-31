@@ -37,6 +37,7 @@
 #include <unordered_map>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -119,6 +120,7 @@ int32_t expected_coord(int32_t anchor, int32_t world_fixed) {
 bool run_items_table_sizes_mixed_frame() {
 	const int32_t ax = 300 << 16, ay = -40 << 16, az = 7 << 16;
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_item_class_resolver(&items_table_classify);
 	// The spawn stream's rows (a compact never creates one); the no-callback
@@ -192,6 +194,7 @@ bool run_guided_record_is_header_only() {
 		return false;
 
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_item_class_resolver(&items_table_classify);
 	{
@@ -212,6 +215,7 @@ bool run_guided_record_is_header_only() {
 bool run_default_view_fails_closed_on_unknown_codec() {
 	const int32_t ax = 300 << 16, ay = -40 << 16, az = 7 << 16;
 	ns::ClientReplicaPipeline view; // no catalog: the first non-built-in type is unresolved
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(0x0A, build_mixed_frame(ax, ay, az));
 
@@ -224,6 +228,7 @@ bool run_default_view_fails_closed_on_unknown_codec() {
 bool run_items_table_outranks_pool_blanket() {
 	const int32_t ax = 100 << 16, ay = 0, az = -5 << 16;
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_item_class_resolver(&items_table_classify);
 	view.state().upsert(kVehicleHandle).type_id = kVehicleType; // the spawn stream's row
@@ -286,6 +291,7 @@ bool run_catalog_presence_outranks_learned_pool_class() {
 	constexpr uint16_t ambiguous_handle = 0x1004;
 	constexpr uint16_t fallback_handle = 0x1005;
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_item_class_resolver([ambiguous_type](uint16_t type_id)
 				-> ns::ClientReplicaPipeline::ItemClassResolution {
@@ -339,6 +345,7 @@ bool run_catalog_presence_outranks_learned_pool_class() {
 
 bool run_recipient_health_requires_a_decoded_tail() {
 	ns::ClientReplicaPipeline view([](uint16_t) { return nw::EntityClass::Unknown; });
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 
 	// Establish a known valid sample first.
@@ -383,6 +390,7 @@ bool run_recipient_health_requires_a_decoded_tail() {
 
 bool run_objectives_require_a_complete_phase3_block() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	// Replay/bare-view folds learn the off-wire width hint from either session
 	// message before the first objective frame.
@@ -470,6 +478,7 @@ bool run_mounted_ammo_requires_a_complete_phase8_record() {
 	}
 
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.apply(nw::s2c::PER_FRAME_UPDATE, full);
 	const ns::ClientMountedAmmoState &established = view.state().mounted_ammo;

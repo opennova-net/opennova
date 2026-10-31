@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace t = opennova::terrain;
@@ -60,6 +61,7 @@ VehicleTraits chinook() {
 
 struct Rig {
 	std::unique_ptr<World> owner = std::make_unique<World>();
+	bool owner_jo = test_titles::jo_world(*owner);
 	World &world = *owner;
 	std::vector<uint16_t> heights = std::vector<uint16_t>(1024 * 1024, uint16_t(42 * 256));
 	std::vector<int> sectors = std::vector<int>(256, 1);

@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include "../common/title_fixture.h"
 using namespace opennova::world;
 using namespace opennova::def;
 static int failures = 0;
@@ -24,6 +25,7 @@ namespace {
 constexpr int32_t degree = 11930464;
 struct Rig {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     LocalPlayer local{world};
     EntityHandle shooter;
@@ -354,6 +356,7 @@ void commander_line_starts_at_the_gun_launch_point() {
 // [orig: Userpoint_ComputeWorldTransform @0x56C52A..0x56C604]
 void pose_provider_turns_the_euler_by_the_point_direction() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &world = *storage;
     world.registry.configure_pool(1, 2);
     Entity seed;
@@ -389,6 +392,7 @@ void pose_provider_maps_the_userpoint_part_as_retail() {
     CHECK(opennova::threedi::threedi_3di3_read(path.c_str(), &model) == 0);
     if (model.lods == nullptr || model.lod_count == 0) return;
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &world = *storage;
     world.registry.configure_pool(1, 2);
     Entity seed;
@@ -492,6 +496,7 @@ void authority_local_fire_scores_one_shot() {
     for (const bool authority : {true, false}) {
         Rig r;
         MatchRules rules;
+        test_titles::jo_match(rules);
         rules.game_type = 0x10000u; // TDM
         rules.score_values.emplace();
         (*rules.score_values)[0] = 2; // FIRE

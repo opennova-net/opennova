@@ -21,6 +21,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/weapon_table_build.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -84,7 +85,8 @@ constexpr const char *kWeaponDef =
 		"\t\tdelayend 2\r\n"
 		"\tend\r\n"
 		"end\r\n"
-		// A ForceScoped def of its own category (4), whose mount writes the scope words.
+		// A ForceScoped def of its own category (4), whose mount writes the scope words, with a
+		// zero table (default 200 m on a 25 m step) and a parallax height.
 		"weapon \"WPN_FORCED\"\r\n"
 		"\tcategory 4\r\n"
 		"\trank 0\r\n"
@@ -92,18 +94,24 @@ constexpr const char *kWeaponDef =
 		"\tstartrounds 20\r\n"
 		"\tammoclass CLASS_762MM 1\r\n"
 		"\tflags ForceScoped\r\n"
+		"\tscope_max_zero 10 25 200\r\n"
+		"\tscope_paralax_distance 0.5\r\n"
 		"end\r\n";
 
 // One local player on the parsed table, its kit rebuilt with the spawn select, the parse
-// bound as the world's (MissionTables::weapon_defs) unless `bind_defs` is false.
+// bound as the world's (MissionTables::weapon_defs) unless `bind_defs` is false, the world
+// running `rules` when given.
 struct Rig {
 	std::unique_ptr<World> owned_world = std::make_unique<World>();
+	bool owned_world_jo = test_titles::jo_world(*owned_world);
 	World &world = *owned_world;
 	std::unique_ptr<LocalPlayer> owned_local;
 	DefWeaponsFile defs{};
 	bool parsed = false;
 
-	Rig(std::vector<WeaponKitEntry> kit, bool bind_defs = true) {
+	Rig(std::vector<WeaponKitEntry> kit, bool bind_defs = true,
+			const TitleRules *rules = nullptr) {
+		if (rules != nullptr) world.rules.title_rules = rules;
 		const std::string text(kWeaponDef);
 		parsed = def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text.data()),
 				text.size(), &defs) == 0;
@@ -309,6 +317,38 @@ void test_the_spawn_sync_mounts_without_view_words() {
 	}
 }
 
+// DFX2-120: a mount takes the slot's zero words as the fill's init left them, the title's
+// seed: Jointops.exe's default step (200 / 25 = 8), dfx2.exe's -1; the yaw the default step's in
+// both, not the -1 step's 100 m floor. A ForceScoped mount stores the rangefinder word: the
+// def's +0xA0, or dfx2.exe's -1.
+// [orig: WeaponSlot_InitFromDef @0x53EE70; Player_MountWeaponSlot @0x4DFA40 (@0x4DFB3B..
+//  0x4DFB44)] [orig: WeaponSlot_InitFromDef @0x53C0C0 (@0x53C1E8..0x53C1F9);
+//  Player_MountWeaponSlot @0x4DCAE0 (@0x4DCBDB) (dfx2.exe)]
+void test_the_mount_takes_the_titles_zero() {
+	for (const char *code : {"jo", "dfx2"}) {
+		const bool dfx2 = std::string(code) == "dfx2";
+		const auto rig = std::make_unique<Rig>(std::vector<WeaponKitEntry>{
+				WeaponKitEntry{"WPN_RIFLE", -1, -1, -1}, WeaponKitEntry{"WPN_FORCED", -1, -1, -1}},
+				true, &title_rules(code));
+		LocalPlayerWeapon &w = rig->weapon();
+		const WeaponScopeZero &zero =
+				rig->world.tables.weapons.entries[rig->adm("WPN_FORCED")].action_fsm.scope_zero;
+		CHECK(zero.step_metres == 25 && zero.default_metres == 200);
+		const WeaponInventorySlot *own =
+				rig->local().inventory.slot(4 * weapon_combo::kRanksPerCategory);
+		CHECK(own != nullptr && own->adm_index == rig->adm("WPN_FORCED"));
+		if (own != nullptr) CHECK(own->scope_zero == (dfx2 ? -1 : 8));
+		w.aim_range_q16 = 7;
+		CHECK(local_weapon_install_by_name(rig->world, w, "WPN_FORCED", false, false,
+				&rig->local().inventory, rig->local().view));
+		CHECK(w.aim_range_q16 == (dfx2 ? -1 : 200));
+		CHECK(w.slot.scope_zero == (dfx2 ? -1 : 8));
+		CHECK(w.slot.zero_pitch == 0); // no Flags & 3
+		CHECK(w.slot.zero_yaw == weapon_scope_zero_yaw(zero, 8) &&
+				w.slot.zero_yaw != weapon_scope_zero_yaw(zero, -1));
+	}
+}
+
 } // namespace
 
 int main() {
@@ -317,6 +357,7 @@ int main() {
 	test_the_borrow_and_its_detach_mount_their_defs();
 	test_no_parse_leaves_the_mount_to_the_presenter();
 	test_the_spawn_sync_mounts_without_view_words();
+	test_the_mount_takes_the_titles_zero();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

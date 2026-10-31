@@ -10,6 +10,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h> // Entity
+#include <runtime/world/local_player.h> // the local look yaw the placement stores
 #include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
 #include <runtime/world/vehicle_motor.h> // entity_transform_local_to_world
 #include <base/gameprofile/game_type.h>
@@ -192,7 +193,16 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
     }
     // [orig: Entity_FindBestSpawnPoint's CPairList_ShellSortByValue call @0x50CEC1]
     shell_sort_by_value(rows, [](const ScoredMarker &m) { return m.score; });
-    return rows.front().pose;
+    // The placement of the local player stores its look yaw (g_LocalPlayerLookYaw), the Yaw
+    // word it placed; Jointops.exe's round init stores the same word again, dfx2.exe's none
+    // (TitleRules::round_init_look_yaw, DFX2-123), so under dfx2.exe this is the deploy's one.
+    // [orig: Entity_FindBestSpawnPoint @0x50CCC0 - `cmp g_LocalPlayerEntity, eax` @0x50CF45, the
+    //  store @0x50CF4D] [orig: Entity_FindBestSpawnPoint - @0x50A08D (dfx2.exe)]
+    const SpawnPointResult &best = rows.front().pose;
+    if (spawning_player.valid() && spawning_player == world.cached.local_player &&
+            world.local_player_state != nullptr)
+        world.local_player_state->input.look_heading = best.heading_bam;
+    return best;
 }
 
 // The picked-zone placement [orig: Server_ResolveSpawnTargetHandle @0x4FE110 and

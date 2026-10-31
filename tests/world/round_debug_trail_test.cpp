@@ -14,6 +14,7 @@
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -33,6 +34,7 @@ int main() {
     if (failures != 0) return 1;
 
     World w;
+    test_titles::jo_world(w);
     w.tables.ammo = build_ammo_table(ammo);
     def_free_ammo(&ammo);
     w.registry.configure_pool(0, 8);

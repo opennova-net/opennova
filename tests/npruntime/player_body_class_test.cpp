@@ -46,6 +46,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -115,6 +116,7 @@ constexpr uint8_t kEquipped = 3;
 
 struct Rig {
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<w::LocalPlayer> local;
 	def::DefItemsFile items{};
 	uint16_t next_net_id = 0xFF00;
@@ -1098,6 +1100,7 @@ void test_the_update_follows_the_rows_move_function() {
 	}
 	// A World with no items rows.
 	std::unique_ptr<w::World> bare = std::make_unique<w::World>();
+	test_titles::jo_world(*bare);
 	w::AiEntity e{};
 	w::Entity person{};
 	CHECK(w::body_move_row(*bare, e, &person) == w::PhysicsClass::Org1);

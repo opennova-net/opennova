@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -80,6 +81,7 @@ std::vector<uint8_t> fire_body(uint16_t shooter) {
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	std::vector<inmatch::NapiNPConnection> roster;
 	w::EntityHandle shooter;
@@ -126,7 +128,7 @@ struct Rig {
 	w::Entity &entity() { return *world.registry.get(shooter); }
 	w::PersonalWeaponSlot &row() { return entity().weapon_slots[kCombo]; }
 	void dispatch(uint8_t tag, const std::vector<uint8_t> &body) {
-		(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn(),
+		(void)inmatch::dispatch_session_replies(test_titles::jo_config_of(inmatch::GameConfig{}), conn(),
 				{make_protocol_message(tag, body)}, 100, roster, &world);
 	}
 	// One frame's walk, with the session's tables behind the seam (HostRole's).

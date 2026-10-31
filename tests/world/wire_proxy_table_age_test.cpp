@@ -19,6 +19,7 @@
 #include <runtime/world/geom.h> // to_fixed
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -43,6 +44,7 @@ constexpr int32_t kQ = 65536;
 // along +x at the torso stand-in's centre height.
 struct Joiner {
     std::unique_ptr<World> owner = std::make_unique<World>();
+    bool owner_jo = test_titles::jo_world(*owner);
     World &world = *owner;
     CollisionWorld collision;
     EntityHandle local;

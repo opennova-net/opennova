@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cmath>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -138,6 +139,7 @@ void test_wheel_phase() {
 // and a player organic to mount into it.
 struct Rig {
 	World w;
+	bool w_jo = test_titles::jo_world(w);
 	EntityHandle veh_h, drv_h;
 	Rig() {
 		w.registry.configure_pool(0, 16);
@@ -246,6 +248,7 @@ void test_non_player_control_rolls_once_per_unoccupied_tick() {
 	CHECK(r.veh().veh.part_spin.rate == 0 && r.veh().veh.part_spin.speed == 0,
 			"and never spins it");
 	World probe;
+	test_titles::jo_world(probe);
 	probe.prng16_state = r.w.prng16_state;
 	const int kTicks = 17;
 	for (int i = 0; i < kTicks; ++i) r.w.vehicles.part_anim_tick(r.veh(), t);
@@ -629,6 +632,7 @@ void test_tank_fourteen_tire_projection() {
 
 void test_rotor_wash_particles_and_lifetime() {
 	World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 4);
 	Entity seed;
 	seed.kind = EntityKind::Item;
@@ -784,6 +788,7 @@ void test_rotor_wash_particles_and_lifetime() {
 
 void test_helicopter_sound_curves_and_decay() {
 	World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 2);
 	Entity seed;
 	seed.health = seed.health_max = 1000;

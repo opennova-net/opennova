@@ -47,6 +47,7 @@
 #include <vector>
 #include "../common/test_expect.h"
 #include "joiner_receive.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -74,6 +75,7 @@ void prime_steady_host_quality(opennova::inmatch::NapiNPServerCtx &ctx) {
 
 bool check_scoreboard_message_is_transient() {
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	const opennova::ProtocolMessage message =
 			opennova::inmatch::build_player_list_message(config, {}, nullptr);
 	return expect(message.tag == opennova::s2c::PLAYER_LIST && !message.reliable,
@@ -82,6 +84,7 @@ bool check_scoreboard_message_is_transient() {
 
 bool check_scoreboard_projects_every_retail_mode_shape() {
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 16);
 
@@ -123,10 +126,12 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 	objective(7003, 2, opennova::world::kItemAttribObjectiveTarget);
 
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.num_teams = 4;
 	auto board = [&](uint32_t game_type, uint8_t blue_proximity_mask = 0) {
 		config.game_type = game_type;
 		opennova::world::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = game_type;
 		rules.team_count = config.num_teams;
 		world.match.configure(rules);
@@ -228,6 +233,7 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 //  @0x51685E]
 bool check_host_scoreboard_status_and_counts() {
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::PlayerList empty;
 	{
 		const opennova::ProtocolMessage message =
@@ -240,6 +246,7 @@ bool check_host_scoreboard_status_and_counts() {
 			return false;
 	}
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	auto spawn_player = [&](uint8_t team) {
 		opennova::world::Entity entity;
@@ -327,8 +334,10 @@ bool check_host_scoreboard_status_and_counts() {
 //  Entity_SetTeamByNetId @0x43C680]
 bool check_scoreboard_row_team_is_the_slot_team() {
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = opennova::game_type::kTeamDeathmatch;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	auto spawn_player = [&](uint8_t team) {
 		opennova::world::Entity entity;
@@ -372,9 +381,11 @@ bool check_scoreboard_row_team_is_the_slot_team() {
 //  `mov dl, [eax+1A0h]` @0x5108D0; Entity_SetTeamByNetId @0x43C680]
 bool check_player_sync_and_0x75_carry_the_slot_team() {
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = opennova::game_type::kTeamDeathmatch;
 	config.max_players = 2; // the 0x22 pull answers slots inside the table only
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	auto spawn_player = [&](uint8_t team) {
 		opennova::world::Entity entity;
@@ -491,6 +502,7 @@ bool check_connection_mode_table() {
 	};
 	for (const Row &r : rows) {
 		NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		opennova::inmatch::set_connection_mode(ctx, r.mode);
 		if (!expect(ctx.connection_mode == r.mode, "connection_mode stored")) return false;
 		if (!expect(ctx.is_authority == r.is_host, "is_authority = is_host bit")) return false;
@@ -504,6 +516,7 @@ bool check_connection_mode_table() {
 // socket_state == Socketless (no UDP socket opened).
 bool check_single_player_signature() {
 	NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
 	if (!expect(ctx.is_authority == 1 && ctx.is_mp_session_peer == 1, "SP is host + client"))
@@ -523,6 +536,7 @@ bool check_single_player_signature() {
 // NapiNPServer_GetSendHoldoffTicks @0x4c4ab0; round-start budget @0x51ca7c]
 bool check_retail_rate_defaults() {
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	if (!expect(config.entity_send_budget == 600,
 	            "retail 0x0A soft budget defaults to 600 bytes")) return false;
 	if (!expect(config.effective_send_holdoff_ticks() == 1,
@@ -550,6 +564,7 @@ bool check_retail_rate_defaults() {
 	config.send_holdoff_ticks.reset();
 
 	NapiNPServerCtx lan_ctx;
+	test_titles::jo_config(lan_ctx.config);
 	opennova::inmatch::set_connection_mode(lan_ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(lan_ctx, SocketMode::Lan);
 	config.session_channel = opennova::inmatch::GameSessionChannel::Automatic;
@@ -561,10 +576,11 @@ bool check_retail_rate_defaults() {
 	            "session creation resolves automatic socketed cadence once")) return false;
 
 	NapiNPServerCtx sp_ctx;
+	test_titles::jo_config(sp_ctx.config);
 	opennova::inmatch::set_connection_mode(sp_ctx, ConnectionMode::HostClient);
 	opennova::inmatch::set_transport_mode(sp_ctx, SocketMode::Socketless);
 	opennova::inmatch::create_session(
-			sp_ctx, opennova::inmatch::GameConfig{},
+			sp_ctx, test_titles::jo_config_of(opennova::inmatch::GameConfig{}),
 			jo_startup(), nullptr);
 	if (!expect(sp_ctx.config.send_holdoff_ticks.has_value() &&
 	                    *sp_ctx.config.send_holdoff_ticks == 1,
@@ -575,7 +591,9 @@ bool check_retail_rate_defaults() {
 	// BANDWIDTH override because the selector is a retail-style process global.
 	opennova::replication::set_entity_send_budget(1600);
 	opennova::inmatch::HostOwner default_owner;
+	test_titles::jo_config(default_owner.ctx.config);
 	opennova::inmatch::HostConfig default_host;
+	test_titles::jo_config(default_host.config);
 	default_host.protocol = &kJo;
 	default_host.socket_mode = SocketMode::Socketless;
 	opennova::inmatch::start_host_session(default_owner, default_host);
@@ -583,7 +601,9 @@ bool check_retail_rate_defaults() {
 	            "new host session restores the 600-byte round default")) return false;
 
 	opennova::inmatch::HostOwner override_owner;
+	test_titles::jo_config(override_owner.ctx.config);
 	opennova::inmatch::HostConfig override_host;
+	test_titles::jo_config(override_host.config);
 	override_host.protocol = &kJo;
 	override_host.socket_mode = SocketMode::Socketless;
 	override_host.config.entity_send_budget = 777;
@@ -602,9 +622,11 @@ bool check_retail_rate_defaults() {
 // Only the later C2S 0x02 admission/dictation boundary arms that period.
 bool check_pre_dictation_holdoff_keeps_initial_settings_open() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	config.send_holdoff_ticks = 4;
 	opennova::inmatch::SessionStartup startup;
@@ -696,10 +718,12 @@ bool check_pre_dictation_holdoff_keeps_initial_settings_open() {
 bool check_create_session_brings_up_host() {
 	opennova::replication::LoopbackChannel local_client;
 	NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
 
 	opennova::inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.server_name = "SINGLEPLAYERGAME"; // §5.0 default
 	settings.max_players = 1;
 
@@ -752,9 +776,11 @@ bool check_create_session_brings_up_host() {
 bool check_create_session_mpreset_exit() {
 	opennova::replication::LoopbackChannel local_client;
 	NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
 	opennova::inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.server_name = "RESET";
 	settings.max_players = 4;
 	opennova::inmatch::SessionStartup startup;
@@ -800,8 +826,10 @@ bool check_create_session_mpreset_exit() {
 	// player, no burst.
 	opennova::replication::LoopbackChannel host_loop;
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	owner.host_loopback = &host_loop;
 	opennova::inmatch::HostConfig host;
+	test_titles::jo_config(host.config);
 	host.protocol = &kJo;
 	host.socket_mode = SocketMode::Socketless;
 	host.serve_and_play = true;
@@ -816,6 +844,7 @@ bool check_create_session_mpreset_exit() {
 		return false;
 	host.config.multiplayer_reset = 0;
 	opennova::inmatch::HostOwner clear_owner;
+	test_titles::jo_config(clear_owner.ctx.config);
 	clear_owner.host_loopback = &host_loop;
 	return expect(opennova::inmatch::start_host_session(clear_owner, host) ==
 	                      opennova::inmatch::CreateSessionResult::Created &&
@@ -838,10 +867,12 @@ bool check_create_session_replaces_connection_role_set() {
 	opennova::replication::LoopbackChannel first_local;
 	opennova::replication::LoopbackChannel replacement_local;
 	NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
 
 	opennova::inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
 	startup.protocol = &kJo;
@@ -888,8 +919,10 @@ bool check_create_session_replaces_connection_role_set() {
 bool check_listen_host_installs_local_character_profile() {
 	opennova::replication::LoopbackChannel local_client;
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	owner.host_loopback = &local_client;
 	opennova::inmatch::HostConfig config;
+	test_titles::jo_config(config.config);
 	config.protocol = &kJo;
 	config.socket_mode = SocketMode::Socketless;
 	config.serve_and_play = true;
@@ -927,9 +960,11 @@ bool check_listen_host_installs_local_character_profile() {
 // A dedicated host (mode 1) starts the server but registers no local client connection.
 bool check_dedicated_host_has_no_local_client() {
 	NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.max_players = 16;
 	ctx.server_text.host_name = "Host";
 	opennova::inmatch::create_session(ctx, settings, jo_startup(), nullptr);
@@ -952,8 +987,10 @@ bool check_dedicated_host_has_no_local_client() {
 bool check_production_serve_mode_has_no_phantom_and_mints_startup() {
 	opennova::replication::LoopbackChannel unused_local_view;
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	owner.host_loopback = &unused_local_view;
 	opennova::inmatch::HostConfig config;
+	test_titles::jo_config(config.config);
 	config.protocol = &kJo;
 	config.socket_mode = SocketMode::Lan;
 	config.config.max_players = 16;
@@ -990,9 +1027,11 @@ bool check_production_serve_mode_has_no_phantom_and_mints_startup() {
 // framing each UdpSessionTransport record separately doubles sequence/UDP traffic.
 bool check_host_pump_batches_one_send_boundary() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
 	startup.protocol = &kJo;
@@ -1089,9 +1128,11 @@ bool check_host_pump_batches_one_send_boundary() {
 // inside tick_connections reverses that order and consumes a second UDP packet.
 bool check_initial_stream_batches_with_reactive_reply() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	config.send_holdoff_ticks = 1;
 	opennova::inmatch::SessionStartup startup;
@@ -1100,6 +1141,7 @@ bool check_initial_stream_batches_with_reactive_reply() {
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	opennova::world::Entity player;
 	player.kind = opennova::world::EntityKind::Organic;
@@ -1166,9 +1208,11 @@ bool check_initial_stream_batches_with_reactive_reply() {
 
 bool check_host_frame_failure_preserves_owner_queue() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::inmatch::create_session(
 			owner.ctx, config, jo_startup(), nullptr);
 
@@ -1220,9 +1264,11 @@ bool check_host_frame_failure_preserves_owner_queue() {
 //  NapiNPProtocol_Pump @0x62a6fd -> Destroy @0x62a793]
 bool check_requeued_fragment_run_overflows_per_node() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::inmatch::create_session(
 			owner.ctx, config, jo_startup(), nullptr);
 
@@ -1339,9 +1385,11 @@ bool check_requeued_fragment_run_overflows_per_node() {
 // loss. [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0]
 bool check_host_idle_send_interval_keepalive() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::inmatch::create_session(
 			owner.ctx, config, jo_startup(), nullptr);
 
@@ -1431,9 +1479,11 @@ bool check_host_idle_send_interval_keepalive() {
 //  BuildOutgoingPackets stamps +0x640 @0x628605]
 bool check_host_send_interval_legs_run_every_tick() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::inmatch::create_session(
 			owner.ctx, config, jo_startup(), nullptr);
 
@@ -1505,9 +1555,11 @@ bool check_host_send_interval_legs_run_every_tick() {
 // order, for the next build. [orig: BuildOutgoingPackets @0x62844e, @0x62860b..0x628619]
 bool check_host_builds_at_most_field_14_packets() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::inmatch::create_session(
 			owner.ctx, config, jo_startup(), nullptr);
 
@@ -1556,9 +1608,11 @@ bool check_host_builds_at_most_field_14_packets() {
 
 bool check_host_admits_exact_retail_message_prefix() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::inmatch::create_session(
 			owner.ctx, config, jo_startup(), nullptr);
 
@@ -1632,6 +1686,7 @@ bool check_host_admits_exact_retail_message_prefix() {
 		return false;
 
 	opennova::inmatch::HostOwner transient_owner;
+	test_titles::jo_config(transient_owner.ctx.config);
 	opennova::inmatch::set_connection_mode(
 			transient_owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(transient_owner.ctx, SocketMode::Lan);
@@ -1702,9 +1757,11 @@ bool check_host_admits_exact_retail_message_prefix() {
 // setting must still fit one 1300-byte session packet after its LEN16 envelope.
 bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	config.entity_send_budget = 1600;
 	opennova::inmatch::SessionStartup startup;
@@ -1713,6 +1770,7 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 2);
 	world.registry.configure_pool(1, 80);
 	opennova::world::Entity recipient;
@@ -1842,9 +1900,11 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 // would incorrectly release both on the same boundary.
 bool check_host_s2c_holdoff_is_per_connection() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
 	startup.protocol = &kJo;
@@ -1852,6 +1912,7 @@ bool check_host_s2c_holdoff_is_per_connection() {
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	owner.ctx.world = &world;
@@ -1916,9 +1977,11 @@ bool check_host_s2c_holdoff_is_per_connection() {
 // fallback while proving that it still obeys the remote send boundary.
 bool check_initial_stream_obeys_connection_holdoff() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	config.send_holdoff_ticks = 3;
 	opennova::inmatch::SessionStartup startup;
@@ -1927,6 +1990,7 @@ bool check_initial_stream_obeys_connection_holdoff() {
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
 	opennova::world::Entity player;
@@ -2024,9 +2088,11 @@ bool check_script_change_reaches_the_same_frame() {
 	};
 	opennova::replication::LoopbackChannel loopback;
 	NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::inmatch::create_session(
 			ctx, config, jo_startup(), &loopback);
 	if (!expect(ctx.np_protocol.connection_list.size() == 1,
@@ -2035,6 +2101,7 @@ bool check_script_change_reaches_the_same_frame() {
 	ctx.np_protocol.connection_list.front().phase = opennova::inmatch::ConnectionPhase::InMatch;
 	ctx.np_protocol.connection_list.front().burst.spawned = true;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 2);
 	opennova::world::Entity recipient;
 	recipient.kind = opennova::world::EntityKind::Organic;
@@ -2071,9 +2138,11 @@ bool check_script_change_reaches_the_same_frame() {
 bool check_host_loopback_does_not_inherit_udp_envelope() {
 	opennova::replication::LoopbackChannel loopback;
 	NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	opennova::inmatch::create_session(
 			ctx, config, jo_startup(), &loopback);
 	if (!expect(ctx.np_protocol.connection_list.size() == 1,
@@ -2083,6 +2152,7 @@ bool check_host_loopback_does_not_inherit_udp_envelope() {
 	ctx.np_protocol.connection_list.front().burst.spawned = true;
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 2);
 	world.registry.configure_pool(1, 80);
 	opennova::world::Entity recipient;
@@ -2130,9 +2200,11 @@ bool check_host_loopback_does_not_inherit_udp_envelope() {
 // must recover the complete ordered destroy list.
 bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
 	startup.protocol = &kJo;
@@ -2158,6 +2230,7 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	opennova::inmatch::arm_s2c_send_holdoff(remote, 0);
 
 	opennova::world::World sparse_world;
+	test_titles::jo_world(sparse_world);
 	sparse_world.registry.configure_pool(0, 1024);
 	opennova::world::Entity seed;
 	seed.item_type_index = 1; // a typed row: the sweep lists only index-0 rows
@@ -2293,9 +2366,11 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 //  -> Create @0x62838f; NapiNPProtocol_Pump @0x62a6fd -> Destroy @0x62a793]
 bool check_fragment_group_overflows_per_node() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	opennova::inmatch::SessionStartup startup;
 	startup.protocol = &kJo;
@@ -2397,9 +2472,11 @@ bool check_fragment_group_overflows_per_node() {
 // delete the replacement connection created earlier in the same handle_server_datagram call.
 bool check_host_pump_reconnect_keeps_fresh_connection() {
 	opennova::inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
 	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 8;
 	// This case isolates same-pump replacement ordering; keep its historical
 	// per-tick boundary explicit now that a LAN session defaults to period 12.
@@ -2410,6 +2487,7 @@ bool check_host_pump_reconnect_keeps_fresh_connection() {
 	opennova::inmatch::create_session(owner.ctx, config, startup, nullptr);
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	opennova::world::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
 	opennova::world::Entity old_player;
@@ -2534,15 +2612,18 @@ bool check_host_pump_reconnect_keeps_fresh_connection() {
 
 bool check_global_scoreboard_integrity_phase() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(
 			ctx, opennova::inmatch::ConnectionMode::HostOnly);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	config.player_name = "PhaseHost";
 	opennova::inmatch::create_session(
 			ctx, config, jo_startup(), nullptr);
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
@@ -2689,14 +2770,17 @@ bool check_global_scoreboard_integrity_phase() {
 
 bool check_scoreboard_active_slot_filter_is_distinct() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(
 			ctx, opennova::inmatch::ConnectionMode::HostOnly);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	opennova::inmatch::create_session(
 			ctx, config, jo_startup(), nullptr);
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	opennova::world::AiSystem &ai = world.ai;
@@ -2776,14 +2860,17 @@ bool check_scoreboard_active_slot_filter_is_distinct() {
 //        CPlayerStats_GetFieldPlusOne(player+0x48, 0x1C) @0x508749]
 bool check_requester_score_delta_refresh() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(
 			ctx, opennova::inmatch::ConnectionMode::HostOnly);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = opennova::game_type::kDeathmatch;
 	opennova::inmatch::create_session(
 			ctx, config, jo_startup(), nullptr);
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 4);
 	opennova::world::Entity player_entity;
@@ -2793,6 +2880,7 @@ bool check_requester_score_delta_refresh() {
 	const opennova::world::EntityHandle player =
 			world.registry.spawn(0, player_entity);
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = config.game_type;
 	world.match.configure(rules);
 	world.match.upsert_player({player, 0, "Points", {}});
@@ -2879,11 +2967,13 @@ bool check_requester_score_delta_refresh() {
 bool check_listen_host_own_slot_takes_no_quartet_or_family() {
 	opennova::replication::LoopbackChannel loopback;
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(
 			ctx, opennova::inmatch::ConnectionMode::HostClient);
 	opennova::inmatch::set_transport_mode(
 			ctx, opennova::inmatch::SocketMode::Socketless);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.max_players = 4;
 	opennova::inmatch::create_session(
 			ctx, config, jo_startup(), &loopback);
@@ -2893,6 +2983,7 @@ bool check_listen_host_own_slot_takes_no_quartet_or_family() {
 		return false;
 
 	auto heap = std::make_unique<opennova::world::World>();
+	test_titles::jo_world(*heap);
 	opennova::world::World &world = *heap;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
@@ -3004,12 +3095,14 @@ bool check_listen_host_own_slot_takes_no_quartet_or_family() {
 // Server_UpdateAllActivePlayerSlots @0x518820]
 bool check_spawned_peer_gets_periodic_retail_maintenance() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
 	ctx.connection_mode = opennova::inmatch::ConnectionMode::HostClient;
 	ctx.loaded_model_list_count = 100;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.prng16_state = 1;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 64);
@@ -3493,6 +3586,7 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 // @0x4FE175..0x4FE187]
 bool check_spawn_wave_queue_and_release_wire() {
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
 	world.registry.configure_pool(3, 8);
@@ -3526,6 +3620,7 @@ bool check_spawn_wave_queue_and_release_wire() {
 	world.zones.spawn_waves.build_from_mission(world, 0, 2);
 
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
@@ -3533,6 +3628,7 @@ bool check_spawn_wave_queue_and_release_wire() {
 	ctx.world = &world;
 	ctx.config.game_type = opennova::game_type::kTeamDeathmatch;
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = ctx.config.game_type;
 	world.match.configure(rules);
 	opennova::replication::UdpSessionTransport first_transport(
@@ -3660,6 +3756,7 @@ bool check_spawn_wave_queue_and_release_wire() {
 //  Entity_HasAliveEntityOfTeam @0x4FC7B0]
 bool check_default_spawn_requires_no_team_zone() {
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(2, 4);
 	world.registry.configure_pool(3, 4);
@@ -3692,6 +3789,7 @@ bool check_default_spawn_requires_no_team_zone() {
 			world.registry.spawn(2, zone_seed);
 
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = opennova::game_type::kTeamDeathmatch;
 	config.default_spawn_requires_no_team_zone = 1;
 	std::vector<opennova::inmatch::NapiNPConnection> roster(1);
@@ -3718,6 +3816,7 @@ bool check_default_spawn_requires_no_team_zone() {
 	};
 	// The deploy reads the session's protocol from the server context.
 	opennova::inmatch::NapiNPServerCtx server;
+	test_titles::jo_config(server.config);
 	server.np_protocol.identity = &kJo;
 	opennova::inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &server;
@@ -3786,6 +3885,7 @@ bool check_default_spawn_requires_no_team_zone() {
 //  Entity_FindBestSeatSlot @0x4351F0]
 bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true; // a joiner's 0x0E; its deploy's 0x5A rides the session
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
@@ -3840,6 +3940,7 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 			world.registry.spawn(0, player_seed);
 
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = opennova::game_type::kTeamDeathmatch;
 	std::vector<opennova::inmatch::NapiNPConnection> roster(1);
 	auto &conn = roster.front();
@@ -3856,6 +3957,7 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 			 static_cast<uint8_t>(vehicle.packed >> 8)})};
 	// The deploy reads the session's protocol from the server context.
 	opennova::inmatch::NapiNPServerCtx server;
+	test_titles::jo_config(server.config);
 	server.np_protocol.identity = &kJo;
 	opennova::inmatch::ServerDispatchInputs inputs;
 	inputs.server_ctx = &server;
@@ -3931,6 +4033,7 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 bool check_dead_vehicle_root_is_no_mobile_spawn() {
 	namespace w = opennova::world;
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
@@ -3991,6 +4094,7 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 	player_seed.position = {-10.0f, -20.0f, 0.0f};
 	const w::EntityHandle player = world.registry.spawn(0, player_seed);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = opennova::game_type::kTeamDeathmatch;
 	std::vector<opennova::inmatch::NapiNPConnection> roster(1);
 	auto &conn = roster.front();
@@ -4036,6 +4140,7 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 bool check_refused_mobile_spawn_deploy_clears_hold() {
 	namespace w = opennova::world;
 	w::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
@@ -4067,6 +4172,7 @@ bool check_refused_mobile_spawn_deploy_clears_hold() {
 	world.match.upsert_player({player, 1, "Held", {}});
 	world.match.set_player_respawn_pending(player, true);
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = opennova::game_type::kTeamDeathmatch;
 	std::vector<opennova::inmatch::NapiNPConnection> roster(1);
 	auto &conn = roster.front();
@@ -4129,6 +4235,7 @@ bool check_refused_mobile_spawn_deploy_clears_hold() {
 // -> SessionStatus_SerializeToBuffer @0x5310C0]
 bool check_session_status_reply_matches_retail_writer() {
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.server_name = "Untitled ";
 	config.mission_name = "Training: Grenade Launcher";
 	config.game_type = 0x10020u;
@@ -4147,6 +4254,7 @@ bool check_session_status_reply_matches_retail_writer() {
 	// conditions ahead of the 0 terminator [orig: Server_BuildStatusReport
 	// @0x530cb0..0x530ce1].
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.script.subgoals.win_text_ids[1] = 3;
 	world.script.subgoals.win_text_ids[2] = 4;
 
@@ -4203,6 +4311,7 @@ bool check_session_status_reply_matches_retail_writer() {
 
 bool check_objective_mode_session_status_options() {
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 16);
 	auto objective = [&](int item_id, uint8_t team, uint32_t attrib = 0) {
 		opennova::world::Entity entity;
@@ -4217,8 +4326,10 @@ bool check_objective_mode_session_status_options() {
 	objective(4091, 1);
 
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = opennova::game_type::kCaptureTheFlag;
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = config.game_type;
 	world.match.configure(rules);
 	opennova::SessionStatusBlock decoded;
@@ -4270,6 +4381,7 @@ bool check_objective_mode_session_status_options() {
 
 bool check_score_ini_drives_session_status_values() {
 	opennova::inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = 0x10020u;
 	const std::string score_ini =
 			"VERSION 40\n"
@@ -4291,6 +4403,7 @@ bool check_score_ini_drives_session_status_values() {
 		return false;
 	{
 		opennova::inmatch::GameConfig reversed;
+		test_titles::jo_config(reversed);
 		reversed.game_type = 0x10020u;
 		if (!expect(opennova::inmatch::load_session_score_config(reversed,
 		                    "VERSION 40\nEXP_FANFARE 20 5\nGAMETYPE \"COOP\"\n") &&
@@ -4325,6 +4438,7 @@ bool check_score_ini_drives_session_status_values() {
 		return false;
 
 	opennova::inmatch::GameConfig flag_me;
+	test_titles::jo_config(flag_me);
 	flag_me.game_type = opennova::game_type::kFlagMe;
 	if (!expect(!opennova::inmatch::load_session_score_config(flag_me, score_ini) &&
 	                    !flag_me.session_status_stat_values.has_value() &&
@@ -4338,12 +4452,14 @@ bool check_score_ini_drives_session_status_values() {
 	{
 		const std::string tdm_only = "VERSION 40\r\nEXP_FANFARE 5 10\r\nGAMETYPE \"TDM\"\r\n";
 		opennova::inmatch::GameConfig ctf;
+		test_titles::jo_config(ctf);
 		ctf.game_type = opennova::game_type::kCaptureTheFlag;
 		if (!expect(!opennova::inmatch::load_session_score_config(ctf, tdm_only) &&
 		                    ctf.exp_fanfare == 0x0A05u && !ctf.session_status_stat_values.has_value(),
 		            "a VERSION 40 file's fanfare stands without a block for the session's row"))
 			return false;
 		opennova::inmatch::GameConfig flag;
+		test_titles::jo_config(flag);
 		flag.game_type = opennova::game_type::kFlagMe;
 		if (!expect(!opennova::inmatch::load_session_score_config(flag, tdm_only) &&
 		                    flag.exp_fanfare == 0x0A05u,
@@ -4356,6 +4472,7 @@ bool check_score_ini_drives_session_status_values() {
 	// @0x52D110].
 	{
 		opennova::inmatch::GameConfig coop;
+		test_titles::jo_config(coop);
 		coop.game_type = 0x10020u;
 		if (!expect(opennova::inmatch::load_session_score_config(coop,
 		                    "VERSION 40\rGAMETYPE \"COOP\"\rFIELD \"NUMENEMYKILLS\" x\rVAR \"FIRE\" 7\r") &&
@@ -4370,6 +4487,7 @@ bool check_score_ini_drives_session_status_values() {
 	// Two blocks of one row: every block's VARs overlay in file order, and the FIELD
 	// list is the last block's that names one [orig: @0x52DBC3, @0x52DC50].
 	opennova::inmatch::GameConfig twice;
+	test_titles::jo_config(twice);
 	twice.game_type = 0x10020u;
 	return expect(opennova::inmatch::load_session_score_config(twice,
 	                      "VERSION 40\nGAMETYPE \"COOP\"\nFIELD \"NUMDEATHS\" 1\nVAR \"FIRE\" 3\n"
@@ -4392,11 +4510,13 @@ bool check_score_ini_drives_session_status_values() {
 // @0x518D70; NetPacket writers @0x506AD0/@0x506D00/@0x506DE0]
 bool check_timed_capture_host_wire_transaction() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	opennova::world::CollisionWorld collision;
 	opennova::world::AiSystem &ai = world.ai;
 	world.rules.mp_session = true;
@@ -4407,6 +4527,7 @@ bool check_timed_capture_host_wire_transaction() {
 	world.registry.configure_pool(1, 8);
 
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = opennova::game_type::kAdvanceAndSecure;
 	rules.capture_duration_seconds = 3;
 	world.match.configure(rules);
@@ -4635,11 +4756,13 @@ bool check_timed_capture_host_wire_transaction() {
 //  banner @0x50F919..0x50F991]
 bool check_numbered_flip_pair_and_banner_wire() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	opennova::world::CollisionWorld collision;
 	opennova::world::AiSystem &ai = world.ai;
 	world.rules.mp_session = true;
@@ -4650,6 +4773,7 @@ bool check_numbered_flip_pair_and_banner_wire() {
 	world.registry.configure_pool(1, 8);
 
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = opennova::game_type::kAdvanceAndSecure;
 	world.match.configure(rules);
 
@@ -4808,16 +4932,19 @@ bool check_numbered_flip_pair_and_banner_wire() {
 bool check_capture_pass_runs_in_every_mode_and_after_the_round() {
 	auto run = [](uint32_t game_type, bool ended) {
 		opennova::inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
 		ctx.np_protocol.identity = &kJo;
 		ctx.config.game_type = game_type;
 		opennova::world::World world;
+		test_titles::jo_world(world);
 		world.rules.mp_session = true;
 		ctx.world = &world;
 		world.registry.configure_pool(0, 4);
 		world.registry.configure_pool(1, 4);
 		opennova::world::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = game_type;
 		world.match.configure(rules);
 		opennova::world::Entity zone;
@@ -4875,11 +5002,13 @@ bool check_capture_pass_runs_in_every_mode_and_after_the_round() {
 //  Server_UpdateCaptureZoneProximity @0x5087A2]
 bool check_roster_mirrors_the_undeployed_bit() {
 	NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
 	ctx.config.max_players = 4;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
@@ -4959,7 +5088,9 @@ bool check_roster_mirrors_the_undeployed_bit() {
 // the frontier-hint and refused-touch fixtures.
 struct FrontierHintFixture {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	opennova::world::World world;
+	bool world_jo = test_titles::jo_world(world);
 	opennova::replication::UdpSessionTransport transport{
 			opennova::replication::UdpSessionTransport::Role::Host};
 	opennova::world::EntityHandle player;
@@ -4974,6 +5105,7 @@ struct FrontierHintFixture {
 		world.registry.configure_pool(0, 4);
 		world.registry.configure_pool(1, 8);
 		opennova::world::MatchRules rules;
+		test_titles::jo_match(rules);
 		rules.game_type = opennova::game_type::kAdvanceAndSecure;
 		world.match.configure(rules);
 		if (with_chain) {
@@ -5156,9 +5288,11 @@ bool check_refused_touch_arms_the_nag() {
 // sweep repeats after 128 phases (~28.9 s at 62 Hz).
 bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	ctx.world = &world;
 	world.registry.configure_pool(1, 256);
@@ -5310,17 +5444,20 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 //  @0x51834f..0x518398; ZoneSlotChain_IsZoneCapturableByTeam @0x4A2450]
 bool check_minimap_overlay_zone_capture_bits() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	ctx.world = &world;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 8);
 	world.registry.configure_pool(2, 4);
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = opennova::game_type::kAdvanceAndSecure;
 	world.match.configure(rules);
 
@@ -5404,17 +5541,20 @@ bool check_minimap_overlay_zone_capture_bits() {
 //  @0x5184DE..0x5184E3; Entity_SetTeamByNetId @0x43C680]
 bool check_minimap_overlay_reads_the_slot_team() {
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.np_protocol.identity = &kJo;
 	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	world.rules.mp_session = true;
 	ctx.world = &world;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 8);
 	world.registry.configure_pool(2, 4);
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = opennova::game_type::kAdvanceAndSecure;
 	world.match.configure(rules);
 
@@ -5502,7 +5642,9 @@ bool check_minimap_overlay_reads_the_slot_team() {
 // and `buildings` pool-2 Buildings for the initial scan.
 struct FlagOverlayScene {
 	opennova::world::World world;
+	bool world_jo = test_titles::jo_world(world);
 	opennova::inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	opennova::replication::UdpSessionTransport a_transport{
 			opennova::replication::UdpSessionTransport::Role::Host};
 	opennova::replication::UdpSessionTransport b_transport{
@@ -5523,6 +5665,7 @@ bool build_flag_overlay_scene(FlagOverlayScene &s, uint32_t game_type, int build
 	s.world.registry.configure_pool(1, 256);
 	s.world.registry.configure_pool(2, 20);
 	world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = game_type;
 	rules.max_score = max_score; // FlagBall's limit scan has no zero guard: 0 ends the round
 	s.world.match.configure(rules);
@@ -5561,7 +5704,7 @@ bool build_flag_overlay_scene(FlagOverlayScene &s, uint32_t game_type, int build
 	};
 	s.carried = flag(4095, 0);
 	s.loose = flag(4091, 128);
-	// The pickup's three writes (Match::record_flag_pickup) [orig:
+	// The pickup's three writes (Match::attach_carried_object) [orig:
 	// Entity_AttachCarriedObject @0x43C144 / @0x43C14A / @0x43C14F].
 	world::Entity *carried = s.world.registry.get(s.carried);
 	if (!expect(s.carried.slot() == 0 && s.loose.slot() == 128 && carried != nullptr,
@@ -5830,14 +5973,17 @@ bool check_preround_delay_phase_boundary() {
 	};
 
 	opennova::world::World world;
+	test_titles::jo_world(world);
 	CountingSystem counter;
 	world.add_system(&counter);
 	opennova::world::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = opennova::game_type::kDeathmatch;
 	rules.game_time_minutes = 1;
 	world.match.configure(rules);
 	const int32_t initial_round_ticks = world.match.remaining_ticks();
 	opennova::inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.world = &world;
@@ -5877,10 +6023,12 @@ bool check_preround_delay_phase_boundary() {
 bool check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() {
 	using namespace opennova;
 	world::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	world::PlayerSpawn spawn;
 	const auto player = world::spawn_remote_player(world, spawn);
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1; ctx.is_in_session = 1; ctx.world = &world;
 	ctx.np_protocol.identity = &kJo;
 	replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);

@@ -29,11 +29,11 @@ HostLimits host_limits_for_title(std::string_view title) {
 	// Operations' 64, Delta Force Xtreme 2's 100 (the cap word dword_835F0C, which the host
 	// settings' read, slider map and fill take [orig: ReadSettings @0x553dd0, the slider map
 	// @0x5540b0, PopulateHostSettings @0x5544cd (dfx2.exe)]; a hosted server is a dedicated
-	// host). An unknown title code is the default title's.
-	const Title *named = title_by_code(title);
-	const Title &resolved = named != nullptr ? *named : default_title();
+	// host). A code no installed title has aborts, named: a game product's title is one
+	// (product creation's valid_title).
 	HostLimits limits = kHostScreenLimits;
-	limits.max_players.max = resolved.max_players_host_screen;
+	limits.max_players.max =
+			require_title_code(title, "host_limits_for_title").max_players_host_screen;
 	return limits;
 }
 

@@ -1,7 +1,6 @@
 #include <runtime/world/title_rules.h>
 
 #include <base/io/strutil.h>
-#include <base/title/title.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -16,20 +15,7 @@ std::vector<TitleRulesRow> &registry() {
 	return rows;
 }
 
-const TitleRules *&unset_slot() {
-	static const TitleRules *rules = nullptr;
-	return rules;
-}
-
 } // namespace
-
-void install_unset_title_rules(const TitleRules *rules) {
-	unset_slot() = rules;
-}
-
-const TitleRules *unset_title_rules() {
-	return unset_slot();
-}
 
 void install_title_rules(const TitleRulesRow *rows, size_t count) {
 	registry().assign(rows, rows + count);
@@ -41,12 +27,14 @@ const TitleRules &title_rules(std::string_view title_code) {
 		std::fputs("no title rules installed: the program must call games::install_rules()\n", stderr);
 		std::abort();
 	}
-	const std::string_view fallback = default_title().code;
-	for (const std::string_view code : { title_code, fallback })
-		for (const TitleRulesRow &row : rows)
-			if (strutil::iequals(row.title_code, code))
-				return *row.rules;
-	std::fputs("the default title has no rules: games::install_rules() registers every title's\n", stderr);
+	for (const TitleRulesRow &row : rows)
+		if (strutil::iequals(row.title_code, title_code))
+			return *row.rules;
+	// No default title's rules stand in for a code no title has, an empty one included: the caller
+	// names its session's title (ADR 0076, 2026-10-30).
+	std::fputs("world::title_rules: no title rules are installed under the code \"", stderr);
+	std::fwrite(title_code.data(), 1, title_code.size(), stderr);
+	std::fputs("\": games::install_rules() registers every title's\n", stderr);
 	std::abort();
 }
 

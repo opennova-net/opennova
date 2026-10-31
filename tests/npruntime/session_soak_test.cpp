@@ -52,6 +52,7 @@
 #include <utility>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -233,6 +234,7 @@ bool run_soak(const SoakCase &soak) {
 	// ---- host: a minimal World (one 6002 start marker, plus the case's extra markers) + an
 	// in-memory mission ----
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 16);
 	// The trait sweep's player row: a typed body is no empty slot (D-NET-486).
 	world.tables.player.item_type_index = 1;
@@ -260,9 +262,11 @@ bool run_soak(const SoakCase &soak) {
 	mission.header.magic[3] = static_cast<char>(bms::kMinVersion);
 
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	owner.ctx.world = &world;
 	owner.ctx.mission = &mission;
 	inmatch::HostConfig host_cfg;
+	test_titles::jo_config(host_cfg.config);
 	host_cfg.protocol = &kJo;
 	host_cfg.config.server_name = "OpenNova Soak";
 	host_cfg.config.max_players = 16;
@@ -293,6 +297,7 @@ bool run_soak(const SoakCase &soak) {
 		j.sock = std::make_unique<ImpairedDatagramSocket>(std::move(end), c2s, clock);
 		const std::string name = "SoakJoiner" + std::to_string(i);
 		j.client = std::make_unique<inmatch::ClientRuntime>(name, clock);
+		test_titles::jo_folds(*j.client);
 		j.client->set_protocol(&kJo);
 		j.up.carrier_handle = 0xFFFF;
 		j.up.pos_x = w::to_fixed(52.0 + i);

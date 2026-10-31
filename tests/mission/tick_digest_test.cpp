@@ -49,6 +49,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace ms = opennova::mission;
@@ -254,6 +255,7 @@ bool synthetic_chain(int ticks, uint64_t &out, std::string &error) {
 	}
 	const assets::AssetStore store(&index);
 	ms::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.set_assets(&store);
 	bms::File mission = synthetic_mission();
 	for (bms::Entity &person : mission.organics) person.type_id = kPeopleTypeId;

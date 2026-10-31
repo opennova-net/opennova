@@ -111,7 +111,8 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 	io::JsonValue patch = io::JsonValue::make_object();
 	try {
 		gamecfg::WeaponRoster weapons;
-		std::string title; // the server's game's title (a settings edit's table)
+		// The server's game's title (a settings edit's table), "" once its row is gone.
+		std::string title;
 		{
 			auto lease = pool_.acquire();
 			before = find_server(*lease, server_id);
@@ -135,6 +136,11 @@ void ConsoleDrain::execute(int64_t id, int64_t server_id, int64_t server_generat
 				// A stored configuration that does not read is never edited from the defaults.
 				result.outcome = AdminCommandOutcome::Refused;
 				result.replies = { "ERROR - The saved configuration does not read." };
+			} else if (!options.settings_patch.empty() && title.empty()) {
+				// A server whose game's row is gone (deleted, its product_id NULL) has no title
+				// to plan the edit by (the supervisor fails its start: "its game is gone").
+				result.outcome = AdminCommandOutcome::Refused;
+				result.replies = { "ERROR - This server's game is gone." };
 			} else if (options.expected_revision &&
 					*options.expected_revision != before->settings_revision) {
 				result.outcome = AdminCommandOutcome::Refused;

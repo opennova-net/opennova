@@ -25,6 +25,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -116,6 +117,7 @@ void test_wac_layers_execute_in_retail_order() {
 	root.write("sample.wac", "if never then set(v1,3) endif\n");
 
 	w::World world;
+	test_titles::jo_world(world);
     // A mission only advances while a human is in the world - retail holds the
     // WAC tick on `g_WacVarHumans || !g_WacVarTicks` (World::script_may_advance).
 	world.cached.humans = 1;
@@ -156,6 +158,7 @@ void test_retail_two_word_else_if_chain_nests() {
 			"\t\tset(v2,9)\n"
 			"endif\n");
 	w::World world;
+	test_titles::jo_world(world);
 	world.cached.humans = 1;
 	wc::WacSystem wac;
 	CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world) ==
@@ -199,6 +202,7 @@ void test_gloop_operand_ors_the_load_time_dword() {
 			"gloop v5 inc(v2) end\n"
 			"gloop g_redai inc(v3) end\n");
 	w::World world;
+	test_titles::jo_world(world);
 	world.script.wac_values.accuracy_spread = 3;
 	world.script.vars.set_mission(5, 2);
 	wc::WacSystem wac;
@@ -223,6 +227,7 @@ void test_run_files_share_order_symbols_and_diagnostics() {
     root.write("server.wac", "store(v1)\n");
     root.write("sample.wac", "if eq(shared,11) then inc(v2) endif\n");
     w::World world;
+    test_titles::jo_world(world);
     wc::WacSystem wac;
     CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world) == wc::WacLayeredLoadStatus::kLoaded);
     world.add_system(&wac);
@@ -286,6 +291,7 @@ void test_parenthesised_gloop_is_the_unknown_group_leg() {
 	TempResourceRoot root;
 	root.write("sample.wac", "gloop(G_ai) inc(v1) end\ninc(v2)\n");
 	w::World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(0, 4);
 	wc::WacSystem wac;
 	CHECK(wc::wac_layered_load(wac, root.files(), "sample", &world) ==

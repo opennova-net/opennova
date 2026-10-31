@@ -12,6 +12,7 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -29,6 +30,7 @@ int failures = 0;
 
 struct Rig {
 	std::unique_ptr<World> storage = std::make_unique<World>();
+	bool storage_jo = test_titles::jo_world(*storage);
 	World &world = *storage;
 	LocalPlayer local{world};
 	EntityHandle shooter;

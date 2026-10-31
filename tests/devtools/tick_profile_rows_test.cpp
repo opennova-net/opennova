@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using devtools::RowKind;
@@ -88,6 +89,7 @@ void test_local_role_ticks_fit_the_row_tree() {
 	std::map<std::string, std::string> files;
 	files["synth.wac"] = "if elapse(1) then set(v1,1) endif\nif elapse(2) then inc(v1) endif\n";
 	mission::MissionKernel kernel;
+	test_titles::jo_world(kernel.world);
 	kernel.open_document(test_mission::synthetic_mission(), "synth",
 			test_boot::source_over(&files));
 	std::string error;
@@ -99,6 +101,7 @@ void test_local_role_ticks_fit_the_row_tree() {
 	CHECK(kernel.world.profile == &kernel.profile, "the world laps onto the kernel's profile");
 	kernel.profile.set_active(true);
 	inmatch::LocalRole role;
+	test_titles::jo_controls(role);
 	role.bind(kernel);
 
 	const Slot kExpected[] = {
@@ -128,6 +131,7 @@ struct BodyRig {
 	test_world::ChannelClipSource channel_only;
 	devtools::TickProfile profile;
 	std::unique_ptr<world::World> w = std::make_unique<world::World>();
+	bool w_jo = test_titles::jo_world(*w);
 	world::EntityHandle body;
 
 	explicit BodyRig(bool player) {

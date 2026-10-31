@@ -173,6 +173,9 @@ Title make() {
 	//  PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0 - CWnd_IsMouseOver @0x55dc1f, the walk
 	//  ending past PLAYER_PREVIEW @0x55dc36].
 	t.player_info_preview_hover = true;
+	// DFX2-124: the end-round score lines' team fallbacks [orig: HUD_DrawEndRoundStatsOverlay
+	//  @0x5B7CD0 - "!Joint Ops Team" (0x7D4CB8) @0x5B8422, "!Rebel Team" (0x7D4C98) @0x5B8465].
+	t.end_round_team_fallbacks = { "!Joint Ops Team", "!Rebel Team" };
 	return t;
 }
 

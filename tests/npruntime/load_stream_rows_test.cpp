@@ -35,6 +35,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -60,6 +61,7 @@ int organic_net_id_is_its_15c_word() {
 	m.organics.push_back(record(bms::ItemType::Organic, 0x0816, 10 << 16, 20 << 16, 0));
 	m.organics[0].id = 31; // the SSN (+0x7C)
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	opennova::mission::promote_mission(m, *world, {});
 	const w::EntityHandle ai = world->registry.find_by_net_id(31);
 	if (!expect(ai.valid(), "the organic promotes")) return 1;
@@ -85,6 +87,7 @@ int organic_net_id_is_its_15c_word() {
 
 int streams_pass_over_rows_without_a_type_index_def_or_slot() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 8);
 	world->registry.configure_pool(1, 8);
 	const auto row = [](int32_t type_index, bool def, uint8_t item_type) {
@@ -158,6 +161,7 @@ int pool3_record_streams_its_source_fields() {
 	marker(2044, 63);                                // the second location: index 1
 	m.markers[marker(6001, 64)].next_ssn = 0x100;    // +672 nonzero, its low byte 0
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	opennova::mission::promote_mission(m, *world, {});
 	world->registry.for_each_in_pool(3, [&](const w::Entity &e) {
 		w::Entity &row = *world->registry.get(e.handle);
@@ -211,6 +215,7 @@ int location_names_take_every_pool_in_load_order() {
 		m.markers.push_back(mk);
 	}
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	opennova::mission::promote_mission(m, *world, {});
 	const w::Entity *first = world->registry.get(world->registry.find_by_net_id(71));
 	const w::Entity *m0 = world->registry.get(world->registry.find_by_net_id(72));
@@ -230,6 +235,7 @@ int location_names_take_every_pool_in_load_order() {
 		++text.table.sections.back().string_count;
 	}
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::install_mission_location_names(ctx, *world, m, text);
 	if (!expect(ctx.mission_location_names.size() == 3 &&
 	                    ctx.mission_location_names[0] == "Place 5" &&

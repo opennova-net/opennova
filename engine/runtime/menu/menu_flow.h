@@ -45,9 +45,10 @@ public:
 		selected_campaign_ = {};
 	}
 
-	// The executable whose single-player screen this is (null: Jointops.exe's):
-	// Title::sp_campaign_tabs selects dfx2.exe's campaign and instant-action tabs.
-	void set_title(const Title *title) { title_ = title; }
+	// The executable whose single-player screen this is: Title::sp_campaign_tabs selects dfx2.exe's
+	// campaign and instant-action tabs. The embedder sets it before an SP list or a tab is read
+	// (campaign_tabs reads it through require_title: a flow with none aborts, named).
+	void set_title(const Title &title) { title_ = &title; }
 	// The campaign reader's inputs (DFX2-60): campaign.def's bytes (empty: the mount has none),
 	// the menu text table (g_TextMenuUi, Game.bin, not menutxt.bin; borrowed, null none) and the
 	// current profile's completion bytes. Read at each populate.

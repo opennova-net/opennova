@@ -13,6 +13,7 @@
 #include <memory>
 #include <set>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace io = opennova::io;
@@ -39,6 +40,7 @@ struct Clips : IRootMotionSource {
 
 struct Fixture {
     std::unique_ptr<World> storage = std::make_unique<World>();
+    bool storage_jo = test_titles::jo_world(*storage);
     World &world = *storage;
     Clips clips;
     EntityHandle observer;

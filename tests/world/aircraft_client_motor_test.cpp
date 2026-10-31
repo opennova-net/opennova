@@ -20,6 +20,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -33,6 +34,7 @@ bool expect(bool cond, const char *msg) {
 
 struct Rig {
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	w::EntityHandle heli;
 	w::VehicleTraits traits;
 };

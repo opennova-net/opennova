@@ -21,6 +21,11 @@
 
 #include "common/test_paths.h"
 #include "common/test_font.h"
+#include <base/title/title.h>
+
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
 
 using namespace opennova::def;
 using namespace opennova::hud;
@@ -296,6 +301,7 @@ static void network_indicator() {
 // An armed soldier on foot: the state the gated elements would all draw for.
 static HudFrameState armed_soldier() {
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 10;
 	state.health_fraction = 0.5f;
 	state.weapon.active = true;

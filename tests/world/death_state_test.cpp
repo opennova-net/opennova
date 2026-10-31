@@ -13,6 +13,7 @@
 #include <runtime/world/world.h>
 
 #include "death_clip_source.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -60,6 +61,7 @@ void test_death_ctrl_register_formula() {
 //  @0x407b5e / @0x407c71]
 void test_player_body_class_think_clears_and_rearms() {
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	Entity seed;
 	seed.kind = EntityKind::Organic;
@@ -89,6 +91,7 @@ void test_player_body_class_think_clears_and_rearms() {
 // @0x4b4bc9..0x4b4be9]
 void test_player_body_think_cadence() {
 	auto world_owner = std::make_unique<World>();
+	test_titles::jo_world(*world_owner);
 	World &world = *world_owner;
 	world.registry.configure_pool(0, 4);
 	world.tables.player.has_item_def = true;
@@ -153,6 +156,7 @@ void test_player_body_think_cadence() {
 // An NPC organic never runs the plyr cadence: its helper phase stays put.
 void test_npc_body_keeps_its_spawn_phase() {
 	auto world_owner = std::make_unique<World>();
+	test_titles::jo_world(*world_owner);
 	World &world = *world_owner;
 	world.registry.configure_pool(0, 4);
 	DeathClipSource clips;
@@ -182,6 +186,7 @@ void test_npc_body_keeps_its_spawn_phase() {
 void test_death_edge_fallback_clears_the_attacker() {
 	{
 		auto world_owner = std::make_unique<World>();
+		test_titles::jo_world(*world_owner);
 		World &world = *world_owner;
 		world.registry.configure_pool(0, 4);
 		DeathClipSource clips;
@@ -206,6 +211,7 @@ void test_death_edge_fallback_clears_the_attacker() {
 	}
 	{
 		auto world_owner = std::make_unique<World>();
+		test_titles::jo_world(*world_owner);
 		World &world = *world_owner;
 		world.registry.configure_pool(0, 4);
 		DeathClipSource clips;
@@ -241,6 +247,7 @@ void test_death_edge_fallback_clears_the_attacker() {
 //  Entity_UpdateInfantryPlayerBody @0x4B40E0 - the edge's +0x2C0 read @0x4B4C72..0x4B4CA3]
 void test_dead_record_byte_is_the_played_clip() {
 	auto world_owner = std::make_unique<World>();
+	test_titles::jo_world(*world_owner);
 	World &world = *world_owner;
 	world.registry.configure_pool(0, 4);
 	world.tables.player.has_item_def = true;

@@ -48,6 +48,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -176,6 +177,7 @@ void test_consoles() {
 	expect_eq(c.one("GOTO MENUSTATE"), "<2 replies>", "GOTO MENUSTATE in the menus: the error and the cycle tail");
 
 	auto host_ptr = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(host_ptr->config);
 	inmatch::NapiNPServerCtx &host = *host_ptr;
 	host.config.server_name = "Hosted";
 	host.config.voting_min_players = 9;
@@ -303,8 +305,10 @@ void test_joiner_console() {
 	const std::string server_scrk = "SERVER-ADMIN-JOINER-SCRK";
 	uint64_t now = 7000;
 	auto joiner = std::make_unique<inmatch::JoinerRole>();
+	test_titles::jo_joiner(*joiner);
 	joiner->set_rules(opennova::world::title_rules("jo"));
 	joiner->runtime = std::make_unique<inmatch::ClientRuntime>("AdminJoiner", [&now] { return now; });
+	test_titles::jo_folds(*joiner->runtime);
 	inmatch::ClientRuntime &client = *joiner->runtime;
 	CaptureSocket socket;
 	joiner->set_socket(&socket, PeerAddr{0x0100007Fu, 32123});
@@ -337,6 +341,7 @@ void test_joiner_console() {
 	};
 	// The joiner's world: its clock at 15:00, as the S2C 0x0A left it.
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	world->weather.tod_fixed24 = 0x0F000000u;
 	world->rules.mpattrib = 0x200; // the joined mission's S2C 0x64 word: NoFriendlyFire
 	inmatch::RemoteAdminBinding joined;
@@ -513,6 +518,7 @@ void test_session_destroy_routes() {
 	// A joiner in a Team Deathmatch session, then its exit's route into the menus.
 	auto menus_after = [&](int32_t reason) {
 		inmatch::ClientRuntime client("RouteJoiner", [&now] { return now; });
+		test_titles::jo_folds(client);
 		client.seed_session(0x41444D4Eu, 1u, "CLIENT-ROUTE-SCRK", "SERVER-ROUTE-SCRK", 1, 0, 0x0002,
 		                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
 		                    /*replay_mode=*/false);
@@ -637,10 +643,12 @@ void test_joiner_cycle() {
 	seams.config_title = opennova::title_by_code("jo");
 	uint64_t now = 1000;
 	inmatch::ClientRuntime client("CycleJoiner", [&now] { return now; });
+	test_titles::jo_folds(client);
 	client.seed_session(0x41444D4Eu, 1u, "CLIENT-CYCLE-SCRK", "SERVER-CYCLE-SCRK", 1, 0, 0x0002,
 	                    world::kPlayerInfantryTypeId, game_type::kTeamDeathmatch, 0x00100000u,
 	                    /*replay_mode=*/false);
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	auto local = std::make_unique<world::LocalPlayer>(*world);
 	world->local_player_state = local.get();
 	raise_view_words(*local);
@@ -702,10 +710,12 @@ void test_joiner_cycle_zones() {
 	seams.config_title = opennova::title_by_code("jo");
 	uint64_t now = 1000;
 	inmatch::ClientRuntime client("ZoneJoiner", [&now] { return now; });
+	test_titles::jo_folds(client);
 	client.seed_session(0x41444D4Eu, 1u, "CLIENT-ZONE-SCRK", "SERVER-ZONE-SCRK", 1, 0, 0x0002,
 	                    world::kPlayerInfantryTypeId, game_type::kAdvanceAndSecure, 0x00100000u,
 	                    /*replay_mode=*/false);
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	world::Entity zone;
 	zone.kind = world::EntityKind::Item;
@@ -741,12 +751,14 @@ void test_joiner_cycle_zones() {
 void test_authority_round_end_view() {
 	for (const bool session : {false, true}) {
 		auto world = std::make_unique<world::World>();
+		test_titles::jo_world(*world);
 		world->registry.configure_pool(0, 8);
 		world->rules.mp_session = session;
 		auto local = std::make_unique<world::LocalPlayer>(*world);
 		world->local_player_state = local.get();
 		raise_view_words(*local);
 		auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+		test_titles::jo_config(ctx->config);
 		ctx->world = world.get();
 		ctx->is_authority = 1;
 		ctx->is_in_session = 1;
@@ -779,8 +791,10 @@ void test_listen_host_and_single_player() {
 
 	replication::LoopbackChannel host_loop;
 	inmatch::ClientRuntime own(host_loop);
+	test_titles::jo_folds(own);
 	own.view().set_mp_session(true);
 	inmatch::NapiNPServerCtx host;
+	test_titles::jo_config(host.config);
 	host.is_authority = 1;
 	host.is_mp_session_peer = 1;
 	host.is_in_session = 1;
@@ -800,6 +814,7 @@ void test_listen_host_and_single_player() {
 	expect(saw_line, "a listen host's CMD leaves its own client over the loopback as C2S 0x04");
 
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	inmatch::RemoteAdminBinding single;
 	single.world = world.get();
 	single.session = 4;
@@ -823,9 +838,11 @@ void test_listen_host_and_single_player() {
 void test_single_player_cycle() {
 	for (const bool session : {false, true}) {
 		auto world = std::make_unique<world::World>();
+		test_titles::jo_world(*world);
 		world->registry.configure_pool(0, 8);
 		world->rules.mp_session = session;
 		auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+		test_titles::jo_config(ctx->config);
 		ctx->world = world.get();
 		ctx->is_authority = 1;
 		ctx->is_in_session = 1;
@@ -891,7 +908,9 @@ void test_exit_frame_words() {
 	seams.config_block = &block;
 	seams.config_title = opennova::title_by_code("jo");
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	auto host = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(host->config);
 	host->world = world.get();
 	host->is_authority = 1;
 	host->is_in_session = 1;
@@ -939,7 +958,9 @@ void test_exit_frame_words() {
 	// A session whose first frame is its last (a NovaWorld session ended during its load): no
 	// pump bound its console, the menus' is still bound; its exit frame binds and reads it.
 	auto world2 = std::make_unique<world::World>();
+	test_titles::jo_world(*world2);
 	auto host2 = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(host2->config);
 	host2->world = world2.get();
 	host2->is_authority = 1;
 	host2->is_in_session = 1;
@@ -983,8 +1004,10 @@ void test_joiner_set_holds() {
 	const std::string client_scrk = "CLIENT-ADMIN-SET-SCRK";
 	const std::string server_scrk = "SERVER-ADMIN-SET-SCRK";
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	kernel->world.registry.configure_pool(0, 16);
 	auto role = std::make_unique<inmatch::JoinerRole>();
+	test_titles::jo_joiner(*role);
 	role->set_rules(opennova::world::title_rules("jo"));
 	role->bind(*kernel);
 	CaptureSocket socket;
@@ -1100,10 +1123,13 @@ void test_joiner_set_holds() {
 //  [esi+53Ch]` @0x62065C]
 void test_host_uptime_reads_the_process_clock() {
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	auto owner = std::make_unique<inmatch::HostOwner>();
+	test_titles::jo_config(owner->ctx.config);
 	owner->ctx.world = world.get();
 	uint32_t clock = 7000;
 	inmatch::HostConfig cfg;
+	test_titles::jo_config(cfg.config);
 	cfg.protocol = &kJo;
 	cfg.config.server_name = "Clocked";
 	cfg.config.max_players = 8;

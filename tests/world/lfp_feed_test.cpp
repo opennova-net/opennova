@@ -7,6 +7,7 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -37,6 +38,7 @@ EntityHandle spawn_zone(World &w, uint8_t zone_no, uint8_t team, Vec3 pos,
 
 int main() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 16);
     w.registry.configure_pool(1, 16);
     w.registry.configure_pool(2, 16);

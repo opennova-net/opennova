@@ -30,6 +30,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -74,6 +75,7 @@ ns::ClientEntityState &staged(ns::ClientReplicaPipeline &view, uint16_t handle, 
 // The walk's dispatch by the bound move row.
 void test_the_walk_runs_the_bound_move_row() {
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_remote_motion_mode(true);
 	view.set_item_catalog(person_catalog());
 	std::vector<uint16_t> ewep_calls;
@@ -101,6 +103,7 @@ void test_the_walk_runs_the_bound_move_row() {
 			"the ground's request, then the body's");
 	// Without a catalog entry the row keeps its class's chase.
 	ns::ClientReplicaPipeline bare;
+	test_titles::jo_folds(bare);
 	bare.set_remote_motion_mode(true);
 	bare.set_person_ewep_mover([&](ns::ClientEntityState &) { return false; });
 	staged(bare, 0x0025, kEwepType);
@@ -118,6 +121,7 @@ void test_the_walk_runs_the_bound_move_row() {
 //  @0x4B5CAB..0x4B5CE7, the site selector @0x4B637C..0x4B638F, the ramp @0x4B7DBF]
 void test_the_split_walk_runs_no_body_legs_over_an_item_row() {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*view);
 	view->set_remote_motion_mode(true);
 	view->set_self_body_split(true);
 	view->set_pool1_interleave(true);
@@ -169,6 +173,7 @@ void test_the_split_walk_runs_no_body_legs_over_an_item_row() {
 //  @0x4B5CAB..0x4B5CE7, the ramp @0x4B7DBF]
 void test_the_unsplit_walk_runs_no_body_legs_over_an_item_row() {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*view);
 	view->set_item_catalog(person_catalog());
 	const auto body = [&](uint16_t handle, uint16_t type) {
 		ns::ClientEntityState &row = staged(*view, handle, type);
@@ -200,6 +205,7 @@ void test_the_unsplit_walk_runs_no_body_legs_over_an_item_row() {
 //  @0x4B581B; Entity_UpdateInfantryAI @0x4B9910 - @0x4BE7FD..0x4BE84B, PRNG_Next16 @0x4BE82D]
 void test_the_recoil_draws_nothing_for_an_item_row() {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*view);
 	view->set_item_catalog(person_catalog());
 	staged(*view, 0x0021, kEwepType).recoil_pitch = 0x40000;
 	staged(*view, 0x0023, kOrg2Type).recoil_pitch = 0x40000;
@@ -236,6 +242,7 @@ void test_the_recoil_draws_nothing_for_an_item_row() {
 //  @0x628640 (no dedupe); Entity_UpdateTransformAndTurret @0x440CA0 - @0x440DAB, @0x440E29]
 void test_every_repair_request_is_queued() {
 	auto view = std::make_unique<ns::ClientReplicaPipeline>();
+	test_titles::jo_folds(*view);
 	view->set_remote_motion_mode(true);
 	view->set_self_body_split(true);
 	view->set_pool1_interleave(true);
@@ -255,6 +262,7 @@ void test_every_repair_request_is_queued() {
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	ns::ClientState state;
 	w::EntityHandle ground;
@@ -385,6 +393,7 @@ nw::FrameUpdate player_frame(uint16_t handle, int32_t x, uint8_t state_flags) {
 // Position and +0x2D4 the Yaw; a live record before it leaves both at the spawn's clear.
 void test_the_respawn_edge_runs_the_reset() {
 	ns::ClientReplicaPipeline view([](uint16_t) { return EntityClass::Player; });
+	test_titles::jo_folds(view);
 	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	const uint16_t handle = 0x0033;

@@ -232,6 +232,17 @@ struct Title {
 	// fresh record init_defaults gives no page.
 	const char *const *profile_single_player_kit = nullptr;
 	const char *const *const *profile_class_kits = nullptr;
+	// DFX2-12, the mission start's half: a session peer's mission start writes a fixed class into
+	// the profile's side block the team names ahead of its page pick, 8 (rifleman), or 7 (gunner)
+	// in a mission of type 2 (the BMS header's +0x22A), so the kit, a self S2C 0x50's re-copy of
+	// that side and a fresh profile's C2S 0x2F read that class's page
+	// (inmatch::loadout_fixed_class). False (Jointops.exe): the block keeps the profile's own
+	// class. The 0x2F's class byte is the wire's (ProtocolInMatch::c2s_2f.loadout_class_fixed).
+	// [orig: Game_StartMission @0x524360 - the side block @0x525793..0x5257C0, its class read
+	//  @0x5257C6 with no store] [orig: Game_StartMission @0x521530 - the mission type
+	//  @0x52299E, the stores @0x5229AA / @0x5229AF, the page switch @0x5229B2..0x5229BD
+	//  (dfx2.exe)]
+	bool session_loadout_class_fixed = false;
 	// DFX2-58: the map views' zoom ceiling, the CMAP window's (its right drag and its ZOOMIN /
 	// ZOOMOUT step clamp to it) and the DEATH screen's map pane's (the show's fit, the right drag
 	// and the wheel clamp to it, and a fit landing on it resets the pan, the target and the zoom
@@ -459,6 +470,17 @@ struct Title {
 	// option) 0. False (Jointops.exe): 1 for a team, non-objective mission [orig:
 	// HostDialog_AddRemoveSelectedMissions @0x557c10 (@0x557e72..0x557e94)].
 	bool host_switch_starts_off = false;
+	// DFX2-10: the weapon availability word the host screen's WEAPON_LIST names ARMORY (its cells,
+	// a press's step and the WPN_ARMORY radio; inmatch::server_settings_title); the other of 2 and
+	// 3 is its MISSION (as -1 is), the WPN_MISSION radio's word and the last a press steps to
+	// before NEVER. Jointops.exe's 2, MISSION 3; dfx2.exe's 3, MISSION 2, so a dfx2.exe press never
+	// reaches its ARMORY. On the Title, not the Protocol: the executable's own screen. The word
+	// S2C 0x66 carries, the host's grant and the joiner's fold test is the protocol's
+	// (ProtocolInMatch::s2c_66). [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 - the
+	// switch @0x556655 (-1 and 3 MISSION, 2 ARMORY); HostDialog_WeaponRestrictionCycleHandler
+	// @0x5576c0 - the step past 3 @0x55772F; UI_RegisterHostSettingsCallbacks @0x5580f0 -
+	// WPN_ARMORY's 2 @0x55820A, WPN_MISSION's 3 @0x558228]
+	int32_t host_armory_word = 2;
 	// DFX2-73: the WEAPON screen's three category lists (PRIMARY / SECONDARY / ACCESSORY, and the
 	// DEATH screen's under death_screen_loadout) open with the "Menu" / "NONE" row
 	// (menu::ArmoryLoadout::populate). Jointops.exe's do [orig: UI_PopulateThreeCategoryLists
@@ -533,6 +555,34 @@ struct Title {
 	// player_info_preview_yaw_step): true, the pointer over PLAYER_PREVIEW zooms and sways it;
 	// false, never hovered, so it spins at rest and never zooms (jo_title.cpp, dfx2_title.cpp).
 	bool player_info_preview_hover = true;
+
+	// DFX2-121: the corner radar's spawn zoom (Q16) Player_InitPlayer stores
+	// (hud::HudMapControl::set_mission_map_zoom): 0, Jointops.exe's 65536 x the mission's map_zoom
+	// factor X = clamp(1 - map_zoom, 0.0625, 1.0); dfx2.exe stores 0x40000 whatever the mission.
+	// The big map's 524288 x X is the same in both. On the Title: the executable's own HUD.
+	// [orig: Player_InitPlayer @0x4E15F0 - @0x4E1741..0x4E1763] [orig: Player_InitPlayer
+	//  @0x4DE6F0 - the big map @0x4DE832..0x4DE842, `mov dword_B6FA3C, 40000h` @0x4DE847
+	//  (dfx2.exe)]
+	int32_t spinmap_spawn_zoom_q16 = 0;
+	// DFX2-122: the tip system ("MrClippy") hears its producers' events
+	// (hud::hud_toggles_tip_events): the boarding, NVG, binocular, scope and designator tips and
+	// the spectator-begin tip. dfx2.exe's CTipSystem_HandleEvent and CTipSystem_Init are empty
+	// (its CTipSystem_ShowTip has no caller), so no tip ever shows, the once-counters never count
+	// and Esc never closes one; false. On the Title: the executable's own HUD.
+	// [orig: CTipSystem_HandleEvent @0x5B6AD0; CTipSystem_Init @0x5B6970] [orig: nullsub_11
+	//  @0x5B5BA0 (`retn 4`) at every producer's call, nullsub_36 @0x5B5AA0 from
+	//  Render_InitMissionTextures @0x5856F0 (dfx2.exe)]
+	bool hud_tips = true;
+	// DFX2-124: the end-round overlay's two team score lines' gametext fallbacks, the blue team's
+	// (STROVER_BLUETEAM) then the red team's (STROVER_REDTEAM), each "!"-led, the line's when the
+	// Overlays key is missing or empty (hud::EndRoundOverlayInput::team_fallbacks): Jointops.exe's
+	// "!Joint Ops Team" / "!Rebel Team", dfx2.exe's "!Blue Team" / "!Red Team". Null where no
+	// binary of the title was read for them: the key alone. The DEATH screen's "you have joined
+	// the %s" line keeps Jointops.exe's pair in both executables (world::deploy_screen_feed).
+	// [orig: HUD_DrawEndRoundStatsOverlay @0x5B7CD0 - @0x5B8422 (0x7D4CB8), @0x5B8465 (0x7D4C98)]
+	// [orig: HUD_DrawEndRoundStatsOverlay @0x5B6C20 - @0x5B7372 (0x7DA364), @0x5B73B5 (0x7DA34C);
+	//  the death screen's twin @0x551E10 - @0x5525B9 (0x7D3D3C), @0x5525CA (0x7D3D1C) (dfx2.exe)]
+	std::array<const char *, 2> end_round_team_fallbacks{};
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title
@@ -552,5 +602,23 @@ const Title *title_at(size_t index);
 // The title whose command_file is `command_file` (compared case-insensitively, as the updater
 // opens the file); null for none.
 const Title *title_by_command_file(std::string_view command_file);
+
+// The title a reader runs as: the one its embedder or its session set (a role's view, a host's
+// screen, a launch's code). A read with none, or by a code no installed title has, aborts naming
+// `reader` and the invariant: no reader runs another title's values, a default's or Jointops.exe's,
+// in place of its own (the protocol's twin is protocol_in_match's abort).
+[[noreturn]] void title_missing(const char *reader);
+[[noreturn]] void title_code_unknown(const char *reader, std::string_view code);
+inline const Title &require_title(const Title *title, const char *reader) {
+	if (title == nullptr)
+		title_missing(reader);
+	return *title;
+}
+inline const Title &require_title_code(std::string_view code, const char *reader) {
+	const Title *title = title_by_code(code);
+	if (title == nullptr)
+		title_code_unknown(reader, code);
+	return *title;
+}
 
 } // namespace opennova

@@ -348,10 +348,11 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     return cmds.group_in_area(t.param1, t.param2);
                 case bms::GroupTriggerType::GroupHoldingGroup:
                     // Any pool-0 member of group p1 carrying an object of
-                    // group p2 via the mounted_child link. Match owns the
-                    // live flag writers; generic carryables retain their
-                    // vehicle-attachment owner (§3b item 4).
-                    // [orig: @0x453778 -> TriggerGroup_AnyMemberHoldingItemGroup]
+                    // group p2 via the mounted_child link, which Match's
+                    // movement-touch handler writes for a Takeable def and
+                    // for the flags alike (§3b item 4).
+                    // [orig: @0x453778 -> TriggerGroup_AnyMemberHoldingItemGroup;
+                    //  Entity_ProcessWaypointInteraction @0x4AD878 / @0x4AD944]
                     return cmds.group_holding_group(t.param1, t.param2);
                 default:
                     return false;

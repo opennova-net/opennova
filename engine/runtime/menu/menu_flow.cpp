@@ -46,7 +46,7 @@ void set_text(MenuRuntime &menu, const std::string &name, const std::string &tex
 } // namespace
 
 bool MenuFlow::campaign_tabs() const {
-	return title_ != nullptr && title_->sp_campaign_tabs;
+	return require_title(title_, "MenuFlow::campaign_tabs").sp_campaign_tabs;
 }
 
 void MenuFlow::set_campaign_source(std::string def_text, const rtxt::File *menu_text,

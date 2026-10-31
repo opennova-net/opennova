@@ -194,9 +194,10 @@ void build_minimap_overlays(const MinimapOverlayInputs &in, hud::HudMinimapOverl
     out = hud::HudMinimapOverlays{};
     out.game_type = in.game_type;
     // The title's map legs (DFX2-49).
-    out.capture_rings_under_layers = in.title != nullptr && in.title->map_capture_rings_under_layers;
-    out.death_map_zone_markers = in.title != nullptr && in.title->death_map_zone_markers;
-    out.death_map_no_names = in.title != nullptr && in.title->death_map_no_names;
+    const Title& title = require_title(in.title, "build_minimap_overlays");
+    out.capture_rings_under_layers = title.map_capture_rings_under_layers;
+    out.death_map_zone_markers = title.death_map_zone_markers;
+    out.death_map_no_names = title.death_map_no_names;
     world::World *w = in.world;
     const world::Entity *local = w != nullptr ? w->registry.get(w->cached.local_player) : nullptr;
     const replication::ClientState *cs = in.client;

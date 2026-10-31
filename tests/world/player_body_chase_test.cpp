@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace rep = opennova::replication;
@@ -40,6 +41,7 @@ test_world::ChannelClipSource channel_only;
 // motion), so the chase is the only thing that moves it on a terrain-less rig.
 struct Rig {
     std::unique_ptr<World> world = std::make_unique<World>();
+    bool world_jo = test_titles::jo_world(*world);
     EntityHandle body;
     uint32_t tick = 1;
 

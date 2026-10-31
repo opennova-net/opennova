@@ -619,8 +619,8 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// [orig: HUD_RenderAllOverlays - the call @0x5A72CF; sub_58EDF0 @0x58EDF0 -
 	//  g_WaypointActiveByte @0x58EDF0, `sar eax, 1; and eax, 7F7F7F7Fh` @0x58EDFE..0x58EE00, the
 	//  stores @0x58EE05 / @0x58EE0A (dfx2.exe)].
-	if (record_map_.waypoint_present && state.title != nullptr &&
-			state.title->hud_waypoint_active_tint) {
+	if (record_map_.waypoint_present &&
+			require_title(state.title, "hud::compile_overlay_pass").hud_waypoint_active_tint) {
 		waypoint_altitude_color_ = (hud_colors_active_ >> 1) & 0x7F7F7F7Fu;
 		waypoint_altitude_band_ = 2;
 	} else if (record_map_.waypoint_present) {
@@ -882,7 +882,8 @@ void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w
     // (Title::hud_scope_no_magnification, DFX2-86) [orig: Player_IsEquippedWeaponScoped
     // @0x59e97c, hud_scope_mag @0x59e9ac] [orig: HUD_DrawScopeOverlayDetails @0x59cee0 - @0x59d428
     //  (dfx2.exe)].
-    const bool magnification = state.title == nullptr || !state.title->hud_scope_no_magnification;
+    const bool magnification =
+            !require_title(state.title, "hud::element_scope_details").hud_scope_no_magnification;
     if (scope.scoped && magnification)
         draw(hud_sprintf(scope.magnification_format, scope.magnification), layout_.scope_mag, color);
     ++draw_list_.elements_drawn;
@@ -989,7 +990,8 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	input.farp_y = record_map_.farp_y;
 	input.hudpos_text_color = layout_.hud_text;
 	input.overlays = &state.map_overlays;
-	input.bank_names = state.title == nullptr || !state.title->hud_map_no_bank_names; // DFX2-81
+	input.bank_names = // DFX2-81
+			!require_title(state.title, "hud::element_spinmap").hud_map_no_bank_names;
 	input.map_coords_x = layout_.map_coords_x;
 	input.map_coords_y = layout_.map_coords_y;
 	input.map_coords_off = layout_.map_coords_off;
@@ -1098,7 +1100,8 @@ void map_window_input(const HudFrameState &state, const HudItemFlash &item_flash
 	// FARP target (the record's, set by the caller) and colours.
 	input.item_flash = item_flash.timers();
 	input.overlays = &state.map_overlays;
-	input.bank_names = state.title == nullptr || !state.title->hud_map_no_bank_names; // DFX2-81
+	input.bank_names = // DFX2-81
+			!require_title(state.title, "hud::map_window_input").hud_map_no_bank_names;
 }
 
 } // namespace
@@ -1341,7 +1344,7 @@ void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 	// fade's alpha @0x5a1b43 (dfx2.exe); HUD_ClassifyHealthBand @0x59a160 (dfx2.exe), > 0xC000
 	// good, > 0x6FFF middle].
 	uint32_t tint = layout_.stance_tint;
-	if (state.title != nullptr && state.title->hud_stance_health_tint) {
+	if (require_title(state.title, "hud::element_stance").hud_stance_health_tint) {
 		const int band = health_color_band_fp16(hud_info_health_ratio_fp16(state));
 		tint = band == 0 ? layout_.stance_good
 				: band == 1 ? layout_.stance_middle
@@ -1523,7 +1526,8 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 	// DFX2-84): its arms' offset is the projection times 0.0, and no Controller / Driver seat
 	// swaps in the driver record [orig: HUD_DrawCrosshair @0x590a80 - `fmul flt_7C2244` (0.0)
 	// @0x590f7f, the arms @0x590fb0..0x591032 (dfx2.exe)].
-	const bool fixed = state.title != nullptr && state.title->hud_crosshair_fixed;
+	const bool fixed =
+			require_title(state.title, "hud::element_crosshair").hud_crosshair_fixed;
 	const bool driver = state.combat.driver_crosshair && !fixed;
 	if (!(driver ? layout_.combat.driver_crosshair.valid
 										: layout_.crosshair_texture_valid)) {

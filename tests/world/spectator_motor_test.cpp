@@ -15,6 +15,7 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 namespace w = opennova::world;
 
@@ -38,6 +39,7 @@ w::PlayerSpawn spawn_at(float x, float y, float z, uint16_t net_id) {
 
 struct Rig {
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	w::EntityHandle local;
 	w::EntityHandle remote;
 	Rig() {

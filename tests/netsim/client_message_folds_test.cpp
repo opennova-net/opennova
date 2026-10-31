@@ -28,6 +28,7 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -67,6 +68,7 @@ std::vector<uint8_t> player_spawn(uint16_t handle, uint8_t team, uint16_t net_id
 //  @0x431b91]
 void test_team_assign_rebinds_player_identity() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::ENTITY_SPAWN_BATCH, player_spawn(0x0005, 1, 0x0401, 2));
 	const ClientEntityState *row = view.state().find(0x0005);
 	CHECK(row != nullptr && row->cls == EntityClass::Player && row->net_id == 0x0401);
@@ -110,6 +112,7 @@ void test_team_assign_rebinds_player_identity() {
 	// and the refresh still land [orig: `cmp g_NapiNPCtx.is_authority` @0x4319E1,
 	// the store @0x4319EE].
 	ClientReplicaPipeline authority;
+	test_titles::jo_folds(authority);
 	authority.set_authority_recipient(true);
 	authority.apply(s2c::ENTITY_SPAWN_BATCH, player_spawn(0x0005, 1, 0x0401, 2));
 	assign.entity_handle = 0x0005;
@@ -130,6 +133,7 @@ void test_team_assign_rebinds_player_identity() {
 //  the pool-capacity gate @0x4319a4..0x4319b3, team @0x4319ee]
 void test_team_assign_gates_as_retail() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	const uint64_t before = view.state().revision;
 	view.apply(s2c::TEAM_ASSIGN, std::vector<uint8_t>{0x00, 0x01, 0x02});
 	CHECK(view.state().find(0x0100) == nullptr);
@@ -148,6 +152,7 @@ void test_team_assign_gates_as_retail() {
 //  animSlot @0x431cff]
 void test_team_change_confirm_folds_the_entry() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::ENTITY_SPAWN_BATCH, player_spawn(0x0006, 1, 0x0401, 2));
 	TeamAssign entry;
 	entry.entity_handle = 0x0006;
@@ -163,6 +168,7 @@ void test_team_change_confirm_folds_the_entry() {
 
 	// The authority's own view keeps its team; the identity pair still lands.
 	ClientReplicaPipeline authority;
+	test_titles::jo_folds(authority);
 	authority.set_authority_recipient(true);
 	authority.apply(s2c::ENTITY_SPAWN_BATCH, player_spawn(0x0006, 1, 0x0401, 2));
 	authority.apply(s2c::TEAM_CHANGE_CONFIRM, encode_team_change_confirm(0, entry));
@@ -186,6 +192,7 @@ void test_team_change_confirm_walks_the_list() {
 	const std::string client_scrk = "CLIENT-TEAM-WALK-SCRK";
 	const std::string server_scrk = "SERVER-TEAM-WALK-SCRK";
 	inmatch::ClientRuntime client("TeamWalkRuntime");
+	test_titles::jo_folds(client);
 	client.seed_session(0x51290001u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, world::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
@@ -233,6 +240,7 @@ struct FramedJoiner {
 	const std::string client_scrk = "CLIENT-LANE-D-SCRK";
 	const std::string server_scrk = "SERVER-LANE-D-SCRK";
 	inmatch::ClientRuntime client{"LaneDRuntime"};
+	bool client_jo = test_titles::jo_folds(client);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
 	uint32_t frame = 1;
 	FramedJoiner() {
@@ -276,6 +284,7 @@ std::vector<uint8_t> le32(uint32_t v) {
 //  Entity_KillBySlotId(slot, 0, 1) @0x4318b5]
 void test_batch_kill_page_kills_silently() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	BatchKillBatch page;
 	page.count = 0x1007;
 	page.slots = {0x1003, 0x2005};
@@ -342,6 +351,7 @@ std::vector<int32_t> flash_timers(ClientReplicaPipeline &view) {
 //  @0x429f2e]
 void test_text_command_setflash_and_tokenizer() {
 	ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.apply(s2c::TEXT_COMMAND, text_body("SETFLASH1 16")); // the host's Lightning verb
 	view.apply(s2c::TEXT_COMMAND, text_body("setflash1"));
 	view.apply(s2c::TEXT_COMMAND, text_body("\"SETFLASH1\" \"5\""));
@@ -368,7 +378,9 @@ void test_text_command_setflash_and_tokenizer() {
 
 	// The effect pass stores the timer on the world's weather.
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	inmatch::ClientRuntime runtime("LaneDFlash");
+	test_titles::jo_folds(runtime);
 	runtime.view().apply(s2c::TEXT_COMMAND, text_body("SETFLASH1 9"));
 	runtime.apply_received_effects(*world);
 	CHECK(world->weather.core.lightning.timer_a == 9);
@@ -395,10 +407,12 @@ world::EntityHandle spawn_door(world::World &w) {
 //  @0x4312d4..0x4312f8, the store @0x431307, phases @0x431316 / @0x43131f]
 void test_door_row_update_lands_on_the_record() {
 	auto w = std::make_unique<world::World>();
+	test_titles::jo_world(*w);
 	w->registry.configure_pool(2, 8);
 	const world::EntityHandle h = spawn_door(*w);
 	const world::Entity &door = *w->registry.get(h);
 	inmatch::ClientRuntime runtime("LaneDDoors");
+	test_titles::jo_folds(runtime);
 	const auto deliver = [&](int16_t state, uint8_t number) {
 		DoorSlotAction action;
 		action.entity_handle = h.packed;

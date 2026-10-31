@@ -38,6 +38,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -100,7 +101,9 @@ struct Items {
 // offers groups 0, 1, 2 and 3. Both on the heap (a World is megabytes).
 struct Rig {
 	std::unique_ptr<inmatch::ClientRuntime> rt = std::make_unique<inmatch::ClientRuntime>("Driver");
+	bool rt_jo = test_titles::jo_folds(*rt);
 	std::unique_ptr<w::World> world = std::make_unique<w::World>();
+	bool world_jo = test_titles::jo_world(*world);
 	Items items;
 	w::EntityHandle bay;
 	uint32_t now = 1;

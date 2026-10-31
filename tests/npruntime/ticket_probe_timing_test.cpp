@@ -22,6 +22,7 @@
 
 #include <cstdio>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -54,6 +55,7 @@ std::vector<uint8_t> probe_body(uint32_t tick_ms, uint32_t session_id) {
 
 int main() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
 	ctx.transport_mode = inmatch::NetworkType::NovaWorld;

@@ -21,6 +21,10 @@
 #include <string>
 #include <vector>
 
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
+
 using namespace opennova::hud;
 using opennova::fnt::FNT_MAX_PAGES;
 using opennova::fnt::fnt_font_t;
@@ -218,6 +222,7 @@ void test_page_compile(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	ServerStatusPageState page = listen_page(8);
 	page.game_type = 0x10000u;
 	page.round_wins_team1 = 2;
@@ -340,6 +345,7 @@ void test_dedicated_host_twin(const fnt_font_t *font) {
 		return ok;
 	};
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.round_over = true;
 	state.end_round.shown = true;
 	state.end_round.lines = {{"D", 300}, {"S", 414}};
@@ -470,7 +476,6 @@ void test_console_line_tags(const fnt_font_t *font) {
 		return row != nullptr ? row->count : size_t(0);
 	};
 	CHECK(glyphs_at_608(jo) == 6);
-	CHECK(glyphs_at_608(nullptr) == 6);
 	CHECK(glyphs_at_608(dfx2) == 2);
 }
 

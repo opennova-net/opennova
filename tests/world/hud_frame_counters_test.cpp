@@ -6,6 +6,7 @@
 #include <runtime/world/world.h>
 
 #include <cstdio>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -37,6 +38,7 @@ void test_step_gates() {
 
 void test_world_steps_once_per_tick() {
     World world;
+    test_titles::jo_world(world);
     for (int i = 0; i < 5; ++i) world.run_logic_tick();
     check(world.hud_frames.main_frame == 5 && world.hud_frames.session_frame == 5 &&
                     world.hud_frames.hud_frame == 5,

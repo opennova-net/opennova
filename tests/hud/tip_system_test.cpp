@@ -10,6 +10,7 @@
 //  KeyBinding_GetDisplayStringByActionName @0x5b6a00; Input_HandleActionBinding
 //  case 18 @0x49b34d; Entity_ProcessVehicleAttach @0x435bfd..0x435cc0;
 //  Entity_DetachFromVehicle @0x4356b0]
+#include <base/title/title.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/hud/hud_frame.h>
@@ -27,6 +28,12 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <base/title/title.h>
+#include "../common/title_fixture.h"
+
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
 
 using namespace opennova;
 using namespace opennova::hud;
@@ -226,8 +233,18 @@ void test_escape_tip_leg() {
 	CHECK(hud_toggles_escape(s, in) == (kEscapeOpenMenu | kOverlayWindowsCleared));
 	// The drain and the frames.
 	const uint8_t events[] = {kTipEventNvgOn, kTipEventBinocularsOn};
-	hud_toggles_tip_events(s, events, 2);
+	hud_toggles_tip_events(s, events, 2, *title_by_code("jo"));
 	CHECK(s.tips.tip == kTipBinocRange && s.tips.nvg_count == 1);
+	// DFX2-122: dfx2.exe's handler is empty: the drain shows nothing and counts nothing, so the
+	// spectator-begin tip never shows either [orig: nullsub_11 @0x5B5BA0 (dfx2.exe)].
+	{
+		HudToggleState dfx2;
+		const uint8_t dfx2_events[] = {kTipEventNvgOn, kTipEventBoardHelo, kTipEventSpectatorBegin};
+		hud_toggles_tip_events(dfx2, dfx2_events, 3, *title_by_code("dfx2"));
+		CHECK(dfx2.tips.tip == kTipNone && dfx2.tips.countdown == 0 && dfx2.tips.nvg_count == 0);
+		CHECK(!tip_is_showing(dfx2.tips));
+		CHECK(hud_toggles_escape(dfx2, in) == (kEscapeOpenMenu | kOverlayWindowsCleared));
+	}
 	hud_toggles_tip_frames(s, 40);
 	CHECK(s.tips.countdown == 1200);
 	hud_toggles_tip_frames(s, 1000000);
@@ -264,6 +281,7 @@ void test_draw(const fnt::fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.tip = kTipNvg;
 	state.tip_countdown = 0;
 	state.tip_header = "KT";
@@ -378,6 +396,7 @@ world::Entity make_vehicle(int32_t item_id, int32_t unit_type, world::SeatType s
 void test_world_boarding() {
 	using world::SeatType;
 	auto fixture = std::make_unique<world::World>();
+	test_titles::jo_world(*fixture);
 	world::World &w = *fixture;
 	w.registry.configure_pool(0, 16);
 	w.registry.configure_pool(1, 16);

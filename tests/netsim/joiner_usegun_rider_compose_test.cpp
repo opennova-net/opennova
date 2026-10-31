@@ -46,6 +46,7 @@
 #include <vector>
 #include "../common/replica_twin.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
 
@@ -139,7 +140,9 @@ std::string moving_eweap_anchor(const threedi::Threedi3di3 &model, const assets:
 // The joiner frame over a kernel on the heap (a World-carrying frame is megabytes).
 struct Harness {
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	inmatch::JoinerRole role;
+	bool role_jo = test_titles::jo_joiner(role);
 	SilentSocket socket;
 	inmatch::TickInput input;
 

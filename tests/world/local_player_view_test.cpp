@@ -37,6 +37,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
 #include <runtime/world/weapon_scope_zero.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -52,6 +53,7 @@ namespace {
 // A world with one live local organic, the shape the view cluster ticks over.
 struct LocalWorld {
     World w;
+    bool w_jo = test_titles::jo_world(w);
     AiSystem &ai = w.ai;
     EntityHandle local;
 
@@ -785,6 +787,7 @@ void test_nvg_toggle_plays_its_interface_sets() {
     }
     // No local player: the toggle is refused and plays nothing.
     World bare;
+    test_titles::jo_world(bare);
     LocalPlayerWeapon none;
     PlayerViewState idle;
     CHECK(!local_player_nvg_toggle(bare, none, idle));
@@ -1074,6 +1077,7 @@ void test_vehicle_seats_clear_the_nvg_restore_latch() {
 //  @0x43564e..0x435658; Player_MountWeaponSlot @0x4dfa4d..0x4dfa74, @0x4dfb75]
 void test_detach_mount_latch_target() {
     World world;
+    test_titles::jo_world(world);
     world.tables.weapons.entries.resize(3);
     const int32_t categories[3] = {0, 3, 11};
     for (int i = 1; i <= 2; ++i) {
@@ -1778,6 +1782,7 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
 
 void test_tick_without_a_player_resolves_first_person() {
     World w;
+    test_titles::jo_world(w);
     PlayerViewState v;
     v.tp_anchor_valid = true;
     v.mount.control_seat = true;
@@ -2742,6 +2747,7 @@ void test_use_item_vehicle_loadout_zone_gates() {
     lw.w.registry.get(ground)->team = 0;
     CHECK(local_player_vehicle_zone_team_matches(lw.w));
     World empty;
+    test_titles::jo_world(empty);
     CHECK(!local_player_in_vehicle_loadout_zone(empty));
     CHECK(!local_player_vehicle_zone_team_matches(empty));
 }
@@ -2757,6 +2763,7 @@ void test_use_item_armory_zone_gate() {
     lw.entity().mounted = true; // a seated player takes the toggle latch instead
     CHECK(!local_player_in_armory_zone(lw.w));
     World empty;
+    test_titles::jo_world(empty);
     CHECK(!local_player_in_armory_zone(empty));
 }
 
@@ -2792,6 +2799,7 @@ void test_use_item_arm_order() {
     lw.entity().mounted = true;
     CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kMountChain);
     World empty;
+    test_titles::jo_world(empty);
     CHECK(local_player_use_item_arm(empty, s) == UseItemArm::kMountChain);
 }
 
@@ -2807,6 +2815,7 @@ void test_loadout_class_pick_and_resident_kit() {
     CHECK(local_loadout_set_player_class(lw.w, loadout, 9));
     CHECK(lw.entity().player_class == 9 && loadout.pending_player_class == -1);
     World no_player;
+    test_titles::jo_world(no_player);
     CHECK(local_loadout_set_player_class(no_player, loadout, 6));
     CHECK(loadout.pending_player_class == 6);
 
@@ -3288,6 +3297,7 @@ void test_scope_zero_request_keys_on_the_rule_bit_and_clicks() {
     local.weapon.slot.scope_zero = 1;
     local.weapon.slot.zero_pitch = 500;
     MatchRules team;
+    test_titles::jo_match(team);
     team.game_type = 0x10000u; // a team game admits nothing by itself
     lw.w.match.configure(team);
     lw.w.rules.mp_session = true; // in a session
@@ -3314,10 +3324,61 @@ void test_scope_zero_request_keys_on_the_rule_bit_and_clicks() {
     CHECK(local.weapon.slot.zero_yaw == 13669483);
 }
 
+// A press the clamp holds still writes the words again: no click and a false
+// return, but the step's elevation pitch re-derived (the look pitch moved by the
+// difference) and the zero-yaw term recomputed with the adjust's sign, so a fresh
+// slot's install yaw (never negated) turns negative at its cap. The personal slot's
+// table entry takes the same words. A def with no zero table writes nothing.
+// [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 -- the click's skip @0x4dbd47 ->
+//  @0x4dbd58, +0x60 @0x4dbd5d, +4 @0x4dbd70, the look pitch @0x4dbd7c..0x4dbd8b, +8
+//  @0x4dbdd5, the sign test @0x4dbdd8, the negate @0x4dbddf..0x4dbde3; the zero-table gate
+//  @0x4dbcef..0x4dbcf7]
+//  [orig: Player_AdjustWeaponZoomLevel @0x4D8D70 (dfx2.exe)]
+void test_scope_zero_request_at_the_cap_writes_the_words() {
+    LocalWorld lw;
+    LocalPlayer local(lw.w);
+    local.weapon.active = true;
+    local.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_FORCESCOPED);
+    WeaponScopeZero &zero = local.weapon.def.scope_zero;
+    zero.max_steps = 3;
+    zero.step_metres = 100;
+    zero.paralax_distance_q16 = -(2 << 16);
+    zero.elevation[3] = 700;
+    // A fresh slot at its cap: the install's yaw (its own sign, never negated) and a pitch the
+    // elevation entry does not hold.
+    local.weapon.slot.scope_zero = 3;
+    local.weapon.slot.zero_pitch = 200;
+    local.weapon.slot.zero_yaw = weapon_scope_zero_yaw(zero, 3);
+    CHECK(local.weapon.slot.zero_yaw < 0);
+    local.inventory_valid = true;
+    local.inventory.slots[0].adm_index = 1;
+    local.inventory.equipped_combo = 0;
+    lw.w.rules.mp_session = false;
+    CHECK(!local.request_scope_zero(1)); // the cap holds the step
+    CHECK(local.weapon.slot.scope_zero == 3);
+    CHECK(lw.w.out.script_sounds.empty()); // no click without a change
+    CHECK(local.weapon.slot.zero_pitch == 700);
+    CHECK(local.input.look_pitch == 500);
+    CHECK(local.weapon.slot.zero_yaw == -weapon_scope_zero_yaw(zero, 3));
+    CHECK(local.inventory.slots[0].scope_zero == 3 && local.inventory.slots[0].zero_pitch == 700 &&
+            local.inventory.slots[0].zero_yaw == local.weapon.slot.zero_yaw);
+    // No zero table: nothing written.
+    zero.max_steps = 0;
+    local.weapon.slot.zero_pitch = 200;
+    local.weapon.slot.zero_yaw = 9;
+    CHECK(!local.request_scope_zero(1));
+    CHECK(local.weapon.slot.zero_pitch == 200 && local.weapon.slot.zero_yaw == 9 &&
+            local.input.look_pitch == 500);
+}
+
 // The slot install seeds the zero-yaw term (MountSlot+8) from the seeded step,
 // outside the flags & 3 elevation gate and with the parallax sign kept
-// [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]; an inventory-restored
-// step recomputes it the same way.
+// [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]. An inventory-backed install
+// takes the slot's three zero words as they stand: the personal slot is the table's
+// entry, which the init or the zero adjust wrote, and the mount writes none of them
+// (its only slot store is the zoom's +0xC) [orig: Player_MountWeaponSlot @0x4DFA40 -
+// +0xC @0x4DFB0A / @0x4DFB13] [orig: Player_MountWeaponSlot @0x4DCAE0 - +0xC
+// @0x4DCBAA / @0x4DCBB3 (dfx2.exe)].
 void test_scope_zero_install_seeds_the_yaw_term() {
     LocalWorld lw;
     WeaponTableEntry row;
@@ -3340,13 +3401,27 @@ void test_scope_zero_install_seeds_the_yaw_term() {
     WeaponInventory inv;
     inv.reset(lw.w.tables.weapons);
     inv.equipped_combo = 3 * 65;
-    inv.slot(inv.equipped_combo)->adm_index =
-        static_cast<int16_t>(lw.w.tables.weapons.entries.size() - 1);
-    inv.slot(inv.equipped_combo)->scope_zero = -1;
+    const int16_t adm = static_cast<int16_t>(lw.w.tables.weapons.entries.size() - 1);
+    // dfx2.exe's init: the step -1 (the rangefinder's zero), the yaw the default step's
+    // (DFX2-120) [orig: WeaponSlot_InitFromDef @0x53C0C0 (@0x53C1E0..0x53C1F9) (dfx2.exe)].
+    weapon_slot_init_from_def(lw.w.tables.weapons.entries.back(), adm,
+        *inv.slot(inv.equipped_combo), 8, false, title_rules("dfx2").scope_zero_seed);
     LocalPlayerWeapon restored;
     local_weapon_install(lw.w, restored, data, false, false, &inv, view);
     CHECK(restored.slot.scope_zero == -1);
-    CHECK(restored.slot.zero_yaw == -13669483); // the 100 m floor, sign kept
+    CHECK(restored.slot.zero_pitch == 0);
+    CHECK(restored.slot.zero_yaw == -4557034); // the default step's, not the -1 step's floor
+    // The words as the zero adjust leaves them at step -1: the 100 m floor's yaw, negated
+    // for the negative parallax [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 - +8 @0x4dbdd5,
+    // the negate @0x4dbddf..0x4dbde3]; the mount keeps that sign.
+    WeaponInventorySlot &adjusted = *inv.slot(inv.equipped_combo);
+    adjusted.scope_zero = -1;
+    adjusted.zero_pitch = 0;
+    adjusted.zero_yaw = 13669483;
+    LocalPlayerWeapon readjusted;
+    local_weapon_install(lw.w, readjusted, data, false, false, &inv, view);
+    CHECK(readjusted.slot.scope_zero == -1);
+    CHECK(readjusted.slot.zero_yaw == 13669483);
 }
 
 // The zero-yaw term [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]: atan2
@@ -4386,6 +4461,7 @@ int main() {
         CHECK(weapon_scope_zero_adjust(zero, 2, -1, false, false) == 2);
     }
     test_scope_zero_request_keys_on_the_rule_bit_and_clicks();
+    test_scope_zero_request_at_the_cap_writes_the_words();
     test_scope_zero_install_seeds_the_yaw_term();
     test_scope_zero_yaw_term();
     test_scope_zero_bake_max_range();

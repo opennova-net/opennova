@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <utility>
 
@@ -182,6 +183,13 @@ bool Role::request_medic() {
 	return true;
 }
 
+void Role::controls_missing() {
+	std::fputs("Role::controls: no binding catalog: the embedder names its session title's "
+			"(controls::title_catalog) before an input frame reads it\n",
+			stderr);
+	std::abort();
+}
+
 bool Role::action_head_admits(int32_t code) {
 	mission::MissionKernel &kernel = *kernel_;
 	ClientRuntime *runtime = client_runtime();
@@ -204,7 +212,7 @@ bool Role::action_head_admits(int32_t code) {
 	// is); a code no row carries reads the zero record (D-NET-710, V-L2-s8).
 	// [orig: Input_HandleActionBinding @0x49AD40 - dword_8159AC[code * 0x6C] @0x49AD8D;
 	//  KeyBinding_SortBySequentialId @0x498260]
-	const controls::ActionDef *row = controls_->for_code(code);
+	const controls::ActionDef *row = controls().for_code(code);
 	const uint32_t flags = row != nullptr ? row->flags : 0u;
 	// a6: on the authority the constant 2 on a dedicated host in a session, else the dead
 	// bit (LocalPlayer::action_dispatch_drops, D-NET-433); a joiner's replica dead bit.
@@ -1373,6 +1381,7 @@ RoleView Session::frame_role_view() const {
 	view.kernel = role_ != nullptr ? role_->kernel() : nullptr;
 	view.runtime = role_ != nullptr ? role_->client_runtime() : nullptr;
 	view.joiner = kind_ == RoleKind::Joiner;
+	view.title = role_ != nullptr ? role_->title() : nullptr;
 	return view;
 }
 

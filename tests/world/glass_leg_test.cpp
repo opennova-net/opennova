@@ -29,6 +29,7 @@
 #include <runtime/world/collision.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -46,6 +47,7 @@ constexpr int32_t kPlainItem = 4243;
 
 struct Rig {
 	std::unique_ptr<World> world = std::make_unique<World>();
+	bool world_jo = test_titles::jo_world(*world);
 	EntityHandle building;
 	EntityHandle plain;
 	ProjectileHit hit;
@@ -129,6 +131,7 @@ void test_the_table_and_the_rolls() {
 	}
 	// An unlisted name passes with no draw.
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	const uint32_t s0 = world->prng16_state;
 	CHECK(effect_roll_surface_probability(*world, "Effect_NotATableRow", false), "unlisted passes");
 	CHECK(effect_roll_surface_probability(*world, "", false), "empty passes");

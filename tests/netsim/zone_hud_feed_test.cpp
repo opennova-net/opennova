@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -111,7 +112,9 @@ void regular_slot_cases() {
 void radio_zone_slot_cases() {
 	replication::LoopbackChannel loop;
 	auto runtime = std::make_unique<inmatch::ClientRuntime>(loop);
+	test_titles::jo_folds(*runtime);
 	auto game = std::make_unique<world::World>();
+	test_titles::jo_world(*game);
 	game->registry.configure_pool(0, 4);
 	game->registry.configure_pool(2, 4);
 	world::Entity zone;
@@ -154,7 +157,9 @@ void radio_zone_slot_cases() {
 void panel_row_cases() {
 	replication::LoopbackChannel loop;
 	auto runtime = std::make_unique<inmatch::ClientRuntime>(loop);
+	test_titles::jo_folds(*runtime);
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	world::World &w = kernel->world;
 	w.registry.configure_pool(0, 4);
 	w.registry.configure_pool(2, 4);
@@ -213,7 +218,9 @@ void panel_row_cases() {
 void takeover_feed_cases() {
 	replication::LoopbackChannel loop;
 	auto runtime = std::make_unique<inmatch::ClientRuntime>(loop);
+	test_titles::jo_folds(*runtime);
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	world::World &w = kernel->world;
 	w.registry.configure_pool(0, 4);
 	w.registry.configure_pool(2, 4);

@@ -23,6 +23,10 @@
 #include <string>
 #include <vector>
 
+// The title a case's HUD draws as where it names none other: Joint Operations'. Every read of
+// the frame's title goes through require_title, so every frame names one.
+static const opennova::Title &kJoTitle = *opennova::title_by_code("jo");
+
 using namespace opennova::fnt;
 
 using opennova::hud::GameFont;
@@ -302,6 +306,7 @@ void test_declutter_element_gates(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 10;
 	state.health_fraction = 0.5f;
 	state.weapon.active = true;
@@ -441,6 +446,7 @@ void test_compiler_health_and_order(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 100;
 	state.health_fraction = 0.5f;
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
@@ -477,6 +483,7 @@ void test_compiler_crosshair(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.weapon.active = true;
 	state.aimed_shot_available = false;
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
@@ -504,6 +511,7 @@ void test_compiler_crosshair_user_options(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.weapon.active = true;
 	state.hud_spread_fp16 = 0x400000; // a visibly nonzero spread input
 	state.fov_deg = 80.0f;
@@ -596,6 +604,7 @@ void test_compiler_crosshair_projected_anchor(const fnt_font_t *font) {
 	layout.crosshair_spread_enabled = false;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.weapon.active = true;
 	state.aim_valid = true;
 	state.aim_screen_x = 801.0f;
@@ -633,6 +642,7 @@ void test_compiler_hud_color_schemes(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	opennova::hud::HudFriendlyTag tag;
 	tag.screen_x = 200.0f;
 	tag.screen_y = 100.0f;
@@ -777,12 +787,24 @@ void test_spinmap_projection_zoom_and_clip() {
 	// by the independently scaled rect HEIGHT (281 px at 1920x1080), not its
 	// 375 px width.
 	opennova::hud::HudMapControl control;
-	control.set_mission_map_zoom(0.61f);
+	control.set_mission_map_zoom(0.61f, *opennova::title_by_code("jo"));
 	CHECK(control.spawn_zoom_q16 == 25559 && control.zoom_q16 == 25559,
 			"00TRa map_zoom initializes the retail complementary Q16 zoom");
 	CHECK(control.spawn_big_zoom_q16 == 204472 &&
 			control.big_zoom_q16 == 204472,
 			"the big-map spawn zoom uses the same complementary factor");
+	// DFX2-121: dfx2.exe's spin reset is its constant 0x40000 whatever the mission; its big map
+	// takes the mission's factor as Jointops.exe's [orig: Player_InitPlayer @0x4DE6F0 -
+	//  @0x4DE832..0x4DE847 (dfx2.exe)].
+	opennova::hud::HudMapControl dfx2_control;
+	dfx2_control.set_mission_map_zoom(0.61f, *opennova::title_by_code("dfx2"));
+	CHECK(dfx2_control.spawn_zoom_q16 == 0x40000 && dfx2_control.zoom_q16 == 0x40000,
+			"the DFX2 radar spawns at its constant zoom");
+	CHECK(dfx2_control.spawn_big_zoom_q16 == 204472 && dfx2_control.big_zoom_q16 == 204472,
+			"the DFX2 big map keeps the mission's factor");
+	dfx2_control.zoom_q16 = 0x20000;
+	dfx2_control.reset_spawn();
+	CHECK(dfx2_control.zoom_q16 == 0x40000, "a DFX2 respawn returns the radar to it");
 
 	HudMinimapInput widescreen;
 	widescreen.rect_x1 = 840.0f;
@@ -874,6 +896,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	layout.hud_text = 0xFF6080FFu;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.minimap.terrain.present = true;
 	state.minimap.terrain.sector_count = 16;
 	state.minimap.terrain.sector_rows = 16;
@@ -1277,6 +1300,7 @@ void test_friendly_tag_spectated_legs(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 2.0f);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	opennova::hud::HudFriendlyTag tag;
 	tag.screen_x = 200.0f;
 	tag.screen_y = 100.0f;
@@ -1339,6 +1363,7 @@ void test_friendly_tag_death_screen_team_colours(const fnt_font_t *font) {
 	layout.tag_redteam = 0xFFFF4040u;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	opennova::hud::HudFriendlyTag tag;
 	tag.screen_x = 200.0f;
 	tag.screen_y = 100.0f;
@@ -1371,6 +1396,7 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	opennova::hud::HudFriendlyTag tag;
 	tag.screen_x = 200.0f;
 	tag.screen_y = 100.0f;
@@ -1677,6 +1703,7 @@ void test_compiler_label_fonts(const fnt_font_t *font) {
 	compiler.configure_label_fonts(font, font, font, 2.0f, 2.0f);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	opennova::hud::HudFriendlyTag tag;
 	tag.screen_x = 200.0f;
 	tag.screen_y = 100.0f;
@@ -1743,6 +1770,7 @@ void test_compiler_hud_font_falls_back_to_bold(const fnt_font_t *font) {
 	// The ammo count draws through the HUD slot [orig: &dword_2723C74
 	// @0x593aab] ("1/2", three glyphs).
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.weapon.active = true;
 	state.weapon.clip = 1;
 	state.weapon.reserve = 2;
@@ -1780,6 +1808,7 @@ void test_compiler_waypoint_uses_bold_slot(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.5f, 1.5f);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.waypoint.present = true;
 	state.waypoint.name = "Alpha";
 	state.waypoint.distance_m = 120;
@@ -1816,6 +1845,7 @@ void test_compiler_waypoint_lays_out_in_screen_pixels(const fnt_font_t *font) {
 	int name_w = 0, name_h = 0;
 	measure.measure("Alpha", scale, scale, &name_w, &name_h);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.waypoint.present = true;
 	state.waypoint.name = "Alpha";
 	state.waypoint.distance_m = 120;
@@ -1861,6 +1891,7 @@ void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
 		compiler.configure(layout, font);
 		compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 		HudFrameState state;
+		state.title = &kJoTitle;
 		state.waypoint.present = true;
 		state.waypoint.name = "Alpha";
 		state.waypoint.distance_m = 120;
@@ -1884,6 +1915,7 @@ void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
 		compiler.configure(layout, font);
 		compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 		HudFrameState state;
+		state.title = &kJoTitle;
 		state.lfp_panel.shown = true;
 		state.lfp_panel.local_team = 1;
 		opennova::hud::HudLfpZone z;
@@ -1912,6 +1944,7 @@ void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
 		HudFrameCompiler compiler;
 		compiler.configure(HudLayout{}, font);
 		HudFrameState state;
+		state.title = &kJoTitle;
 		state.scoreboard.shown = true;
 		state.scoreboard.title = "Players";
 		state.scoreboard.server_name = "Srv";
@@ -1951,6 +1984,7 @@ void test_compiler_end_round_box_fills_with_one_quad(const fnt_font_t *font) {
 	layout.box_tex_h = 128;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 100;
 	state.end_round.shown = true;
 	state.end_round.top = 100;
@@ -2001,6 +2035,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 100;
 	state.scoreboard.shown = true;
 
@@ -2224,6 +2259,7 @@ void test_compiler_scoreboard_rows(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 100;
 	state.scoreboard.shown = true;
 	state.scoreboard.game_type = 0x10000; // TDM — team columns
@@ -2288,6 +2324,7 @@ void test_compiler_scoreboard_paging(const fnt_font_t *font) {
 	layout.net_icon_texture_valid = true;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.scoreboard.shown = true;
 	state.scoreboard.game_type = 0; // non-team: no team-score block
 	for (int i = 0; i < 40; ++i) {
@@ -2343,6 +2380,7 @@ void test_compiler_chat_input(const fnt_font_t *font) {
 	HudLayout layout;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	const size_t base = compiler.compile(state, 1024.0f, 768.0f).glyphs.size();
 	state.chat_input.shown = true;
 	state.chat_input.prompt = "Talk:";
@@ -2407,6 +2445,7 @@ void test_sights_card_element(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.weapon.sights_card_up = true;
 	state.sight_slide_multiplier = 3;
 	const auto sight_quads = [](const HudDrawList &list) {
@@ -2470,6 +2509,7 @@ void test_vehicle_panel_element(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 10;
 	// Hidden by default: a player on foot must draw no panel at all.
 	{
@@ -2615,6 +2655,7 @@ void test_message_log_element(const fnt_font_t *font) {
 	compiler.push_chat_line("alpha: hi", 0xFF80A0FFu, 0);
 	compiler.push_feed_line("alpha killed beta", 0xFFAFAFAFu, 0);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.main_frame = 5000; // both lines are long expired on the feed
 	state.hud_detail_level = 0;
 
@@ -2681,6 +2722,7 @@ void test_message_log_element(const fnt_font_t *font) {
 		tagged.push_chat_line("a<ch>b", 0xFF80A0FFu, 0);
 		tagged.push_feed_line("c<ch>d", 0xFFAFAFAFu, 0);
 		HudFrameState s;
+		s.title = &kJoTitle;
 		s.message_log_shown = true;
 		s.title = title;
 		// The window's rows only (the feed draws the same lines up top): the CHAT column left of
@@ -2715,6 +2757,7 @@ void test_message_clock_restart_clears(const fnt_font_t *font) {
 	compiler.push_chat_line("a", 0xFF102030u, 1000); // expires at 1930
 	compiler.push_message("b", 1000);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.main_frame = 1001;
 	CHECK(!compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "the held lines draw");
 	compiler.clear_message_rings();
@@ -2784,6 +2827,7 @@ void test_chat_feed_loop(const fnt_font_t *font) {
 
 	compiler.push_chat_line("a", 0xFF102030u, 0);   // expires at 930
 	HudFrameState state;
+	state.title = &kJoTitle;
 	// Fresh: 930 frames left -> alpha clamps to 255.
 	state.main_frame = 0;
 	{
@@ -2833,6 +2877,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 
 	HudFrameState state;
+	state.title = &kJoTitle;
 	auto &lp = state.lfp_panel;
 	lp.shown = true;
 	lp.local_team = 1;
@@ -2971,6 +3016,7 @@ void test_spinmap_medic_marker(const fnt_font_t *font) {
 	layout.spinmap_rect = {810.0f, 552.0f, 210.0f, 210.0f, true};
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	opennova::hud::HudMinimapMarker plain;
 	plain.icon = 3;
 	plain.x = 8 << 16;
@@ -3145,6 +3191,7 @@ void test_kill_announcement(const fnt_font_t *font) {
     compiler.configure(HudLayout{}, font);
     compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
     HudFrameState state;
+    state.title = &kJoTitle;
     state.hud_detail_level = 3;
     state.kill_announcement.record("abc", 100);
     state.ticks = 286;
@@ -3170,6 +3217,7 @@ void test_scope_details(const fnt_font_t *font) {
     HudFrameCompiler compiler;
     compiler.configure(layout, font);
     HudFrameState state;
+    state.title = &kJoTitle;
     state.declutter_visible.fill(false);
     auto &scope = state.scope;
     scope.active = true; scope.scoped = true; scope.rangefinder = true; scope.zeroable = true;
@@ -3229,6 +3277,7 @@ void test_optical_distance_long_format(const fnt_font_t *font) {
         return result;
     };
     HudFrameState state;
+    state.title = &kJoTitle;
     state.scope.active = true;
     state.scope.rangefinder = true;
     state.scope.range_format = "Distance: %ldm";
@@ -3277,6 +3326,7 @@ void test_launcher_reload_keeps_ammo_flash(const fnt_font_t *font) {
     HudFrameCompiler compiler;
     compiler.configure(layout, font);
     HudFrameState state;
+    state.title = &kJoTitle;
     state.weapon.active = true;
     state.weapon.capacity = 1;
     state.weapon.clip = 0;
@@ -3312,6 +3362,7 @@ void test_stance_obeys_weapon_group_declutter(const fnt_font_t *font) {
     HudFrameCompiler compiler;
     compiler.configure(layout, font);
     HudFrameState state;
+    state.title = &kJoTitle;
     state.ticks = 100;
     CHECK(!compiler.compile(state, 1024, 768).quads.empty(), "on-foot stance draws when WPNGRP is visible");
     state.declutter_visible[kDeclutterWpnGrp] = false;
@@ -3350,6 +3401,7 @@ void test_bordered_image_sites(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 100;
 	state.stance = 2;
 	{
@@ -3460,6 +3512,7 @@ void test_death_arm_skips_the_dispatcher(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.ticks = 100;
 	state.stance = 2;
 	auto count = [&](int32_t texture_from, int32_t texture_to) {
@@ -3507,6 +3560,7 @@ void test_compiler_breath_bar(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.breath_time = 20; // the drown limit: 80 samples
 	state.breath_label = "Breath";
 	const uint32_t bold_page = static_cast<uint32_t>(kHudFontSlotLabelBold) * FNT_MAX_PAGES;
@@ -3631,6 +3685,7 @@ void test_compiler_frame_rate_overlay(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
 	state.frame_rate = overlay;
 	const uint32_t bold_page = static_cast<uint32_t>(kHudFontSlotLabelBold) * FNT_MAX_PAGES;
@@ -3686,6 +3741,7 @@ void test_compiler_connect_status_and_start_timer(const fnt_font_t *font) {
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.hud_color_index = 0; // white: the twin's seed 0xFFFFFFFF
 	const auto page_glyphs = [&](const HudDrawList &list, int slot) {
 		const uint32_t page = static_cast<uint32_t>(slot) * FNT_MAX_PAGES;
@@ -3741,6 +3797,7 @@ void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	compiler.configure(layout, font);
 	HudFrameState state;
+	state.title = &kJoTitle;
 	state.weapon.active = true;
 	state.weapon.display_name = "Launcher";
 	state.weapon.capacity = state.weapon.clip = 1;

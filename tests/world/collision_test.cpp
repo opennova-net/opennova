@@ -31,6 +31,7 @@
 #include <runtime/world/iris_march.h>
 #include <runtime/world/vehicle_collision_damage.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -183,6 +184,7 @@ CollisionModel axis_triangle_model(int normal_axis) {
 
 struct Rig {
     World world;
+    bool world_jo = test_titles::jo_world(world);
     CollisionWorld cw;
     Field field{0}; // ground plane at 0
     EntityHandle building;
@@ -864,6 +866,7 @@ void test_clip_segment_uses_nearest_candidate_and_indoors_terrain_gate() {
 // ---------------------------------------------------------------------------
 void test_candidate_sun_segment_includes_pool1_dynamics() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
     CollisionWorld collision;
@@ -902,6 +905,7 @@ void test_candidate_sun_segment_includes_pool1_dynamics() {
 // ---------------------------------------------------------------------------
 void test_pool1_source_slice_uses_itemdef_gate_not_vehicle_traits() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 8);
     world.registry.configure_pool(2, 4);
     CollisionWorld collision;
@@ -951,6 +955,7 @@ void test_pool1_source_slice_uses_itemdef_gate_not_vehicle_traits() {
 //  @0x4B8EF9..0x4B8F00]
 void test_pool0_source_slice_gate_is_the_type_index() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(2, 4);
     CollisionWorld collision;
@@ -988,6 +993,7 @@ void test_pool0_source_slice_gate_is_the_type_index() {
 //  the spawn memset @0x40EA27]
 void test_skipped_row_keeps_its_slice_into_the_refilled_arena() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 8);
     world.registry.configure_pool(2, 4);
     CollisionWorld collision;
@@ -1047,6 +1053,7 @@ void test_skipped_row_keeps_its_slice_into_the_refilled_arena() {
 // adds nothing. [orig: @0x4B8F02..0x4B8F0B; @0x4B9149..0x4B9152]
 void test_candidate_range_reads_the_raw_bound_radius() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(2, 4);
     CollisionWorld collision;
@@ -1092,6 +1099,7 @@ void test_candidate_range_reads_the_raw_bound_radius() {
 //  Entity_BuildProximityListsFromPools call @0x460133]
 void test_vehicle_respawn_rebuilds_the_candidate_slices() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 8);
     world.registry.configure_pool(2, 4);
     CollisionWorld collision;
@@ -1127,6 +1135,7 @@ void test_vehicle_respawn_rebuilds_the_candidate_slices() {
     // never built (headless) keeps its registry fallbacks through it, and builds
     // no slice epoch.
     auto headless = std::make_unique<World>();
+    test_titles::jo_world(*headless);
     headless->registry.configure_pool(1, 8);
     auto never_built = std::make_unique<CollisionWorld>();
     headless->ai.collision = never_built.get();
@@ -1464,6 +1473,7 @@ void test_corpse_expiry_keeps_contacts_and_slice_phase() {
 // ---------------------------------------------------------------------------
 void test_mounted_resolver_keeps_touch_without_parent_pushout() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
 
@@ -2087,6 +2097,7 @@ void test_slice_cadence_and_invuln() {
     // collision tables at all.
     {
         World empty_world;
+        test_titles::jo_world(empty_world);
         CollisionWorld empty_cw;
         CHECK(!empty_cw.tick_tables_ready());
         empty_cw.build_tick_tables(empty_world);
@@ -2097,6 +2108,7 @@ void test_slice_cadence_and_invuln() {
     // BSS-zero counter means mission starts run 16 sliceless ticks. [orig:
     // dword_B57C84 vs 0x10 @ 0x4c240f, zeroed inside 0x4b8eb0]
     World world;
+    test_titles::jo_world(world);
     CollisionWorld cw;
     Field field{0};
     cw.terrain = &field.field;
@@ -2148,6 +2160,7 @@ void test_slice_cadence_and_invuln() {
     //  Entity_BuildProximityListsFromPools]
     {
         World refresh_world;
+        test_titles::jo_world(refresh_world);
         CollisionWorld refresh_cw;
         refresh_world.registry.configure_pool(0, 4);
         refresh_world.registry.configure_pool(2, 4);
@@ -2199,6 +2212,7 @@ void test_slice_cadence_and_invuln() {
     //  @0x4F7F3E; the tick's Entity_BuildProximityLists_Pool01 @0x4C240A alone]
     {
         World static_world;
+        test_titles::jo_world(static_world);
         CollisionWorld static_cw;
         static_world.registry.configure_pool(2, 4);
         Entity crate_seed;
@@ -2265,6 +2279,7 @@ void test_slice_cadence_and_invuln() {
 //  pool 0 @0x4B93D8..0x4B93E9]
 void test_pool01_tables_list_by_the_def_gate() {
     World world;
+    test_titles::jo_world(world);
     CollisionWorld cw;
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
@@ -2318,6 +2333,7 @@ void test_proximity_tables_use_host_bound_radius() {
     // organic source, retail's +4u source range admits each 8u hull; deriving
     // the table radius from the 1u intact shell would drop both candidates.
     World world;
+    test_titles::jo_world(world);
     CollisionWorld cw;
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
@@ -2410,6 +2426,7 @@ void test_proximity_tables_use_host_bound_radius() {
 // ---------------------------------------------------------------------------
 void test_pool1_item_is_one_collision_candidate() {
     World world;
+    test_titles::jo_world(world);
     CollisionWorld cw;
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
@@ -3315,6 +3332,7 @@ void test_raycast_clear_table_readiness() {
     // A headless/never-built world keeps the compatibility registry walk.
     {
         World world;
+        test_titles::jo_world(world);
         CollisionWorld cw;
         CHECK(spawn_blocker(world, cw, 2, EntityKind::Building).valid());
         CHECK(!cw.tick_tables_ready());
@@ -3327,6 +3345,7 @@ void test_raycast_clear_table_readiness() {
     // pool 1 @0x539A40..0x539A5A].
     for (const int pool : {2, 1}) {
         World world;
+        test_titles::jo_world(world);
         CollisionWorld cw;
         world.registry.configure_pool(pool, 4);
         cw.build_tick_tables(world);
@@ -3339,6 +3358,7 @@ void test_raycast_clear_table_readiness() {
 
 void test_cached_raycast_spatial_candidates() {
     World world;
+    test_titles::jo_world(world);
     CollisionWorld cw;
     world.registry.configure_pool(2, 96);
     const int32_t model_id = cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
@@ -3385,6 +3405,7 @@ void test_cached_raycast_spatial_candidates() {
 
 void test_cached_raycast_sparse_extent_uses_exact_hash_fallback() {
     World world;
+    test_titles::jo_world(world);
     CollisionWorld cw;
     world.registry.configure_pool(2, 4);
     const int32_t model_id = cw.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
@@ -3417,6 +3438,7 @@ void test_cached_raycast_sparse_extent_uses_exact_hash_fallback() {
 
 void test_raycast_uses_stamped_bound_for_live_section_pose() {
     World world;
+    test_titles::jo_world(world);
     CollisionWorld cw;
     world.registry.configure_pool(2, 4);
 
@@ -3445,6 +3467,7 @@ void test_raycast_uses_stamped_bound_for_live_section_pose() {
     // stores floor((2 * local diagonal + the retail pad) / 1u): five units for
     // this 0.5 x 0.5 x 2 local box, not the ten-unit double-scaled result.
     World scaled_world;
+    test_titles::jo_world(scaled_world);
     CollisionWorld scaled_cw;
     scaled_world.registry.configure_pool(2, 4);
     Entity scaled_seed;
@@ -3725,6 +3748,7 @@ void test_door_mask_store_clears_a_stale_mask() {
 	CHECK(door.door_touch_mask == 1u);
 
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	world->registry.configure_pool(2, 4);
 	auto collision = std::make_unique<CollisionWorld>();
@@ -3790,6 +3814,7 @@ void test_door_mask_reset_reads_the_def_type() {
 
 void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 4);
     world.registry.configure_pool(2, 8);
     CollisionWorld collision;
@@ -3850,6 +3875,7 @@ void test_vehicle_hull_prefilters_stale_candidates_before_section_matrices() {
 // A terrain-only solve or the old horizontal-only sphere loses this support.
 void test_vehicle_probes_support_model_decks_and_grade_slopes() {
 	World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 4);
 	world.registry.configure_pool(2, 4);
 	CollisionWorld collision;
@@ -3910,6 +3936,7 @@ void test_vehicle_probes_support_model_decks_and_grade_slopes() {
 // "jumping all around". An unrelated overlapping gun must still push.
 void test_vehicle_hull_skips_mounted_child_ground_chain() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 8);
     CollisionWorld collision;
 
@@ -4105,6 +4132,7 @@ void test_person_section_raycast_uses_posed_bone_matrix() {
 
 void test_f3_debug_prefilters_before_building_section_matrices() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(2, 4);
 
@@ -4167,6 +4195,7 @@ void test_f3_debug_prefilters_before_building_section_matrices() {
 
 void test_iris_static_rays_prefilter_before_section_matrices() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(2, 64);
     CollisionWorld collision;
@@ -4222,6 +4251,7 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
 
 void test_sound_los_prefilters_candidates_before_section_matrices() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 16);
     world.registry.configure_pool(2, 32);
@@ -4287,6 +4317,7 @@ void test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink() {
     // [orig: Physics_RaycastAgainstEntityPool @ 0x538720, flag branch @ 0x538bd8-0x538e1b]
     for (int flagged = 0; flagged <= 1; ++flagged) {
         World world;
+        test_titles::jo_world(world);
         world.registry.configure_pool(0, 4);
         world.registry.configure_pool(1, 16);
         world.registry.configure_pool(2, 8);
@@ -4326,6 +4357,7 @@ void test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink() {
 
 void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -4377,6 +4409,7 @@ void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
 
 void test_projectile_person_broad_gate_skips_far_provider() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
 
     Entity owner_seed;
@@ -4423,6 +4456,7 @@ void test_projectile_person_broad_gate_skips_far_provider() {
 
 void test_projectile_trace_view_cache_is_tick_scoped() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
 
     Entity victim_seed;
@@ -4489,6 +4523,7 @@ void test_projectile_trace_view_cache_is_tick_scoped() {
 
 void test_projectile_trace_cache_revalidates_reused_registry_slot() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
 
     Entity owner_seed;
@@ -4555,6 +4590,7 @@ void test_projectile_trace_cache_revalidates_reused_registry_slot() {
 
 void test_projectile_trace_cache_observes_published_pose_same_tick() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
 
     Entity owner_seed;
@@ -4615,6 +4651,7 @@ void test_projectile_trace_cache_observes_published_pose_same_tick() {
 
 void test_projectile_trace_cache_observes_husk_assignment_same_tick() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
 
     Entity owner_seed;
@@ -4662,6 +4699,7 @@ void test_projectile_trace_cache_observes_husk_assignment_same_tick() {
 
 void test_reused_registry_slot_rejects_old_collision_identity() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 2);
     Entity seed;
     seed.kind = EntityKind::Organic;
@@ -4728,6 +4766,7 @@ void test_reused_registry_slot_rejects_old_collision_identity() {
 // row, and a restore whose registry matches the last prune's serial and live count.
 void test_binding_prune_follows_every_occupancy_change() {
     auto wp = std::make_unique<World>();
+    test_titles::jo_world(*wp);
     World &world = *wp;
     world.registry.configure_pool(0, 4);
     Entity seed;
@@ -5154,6 +5193,7 @@ void test_projectile_static_slot_signed_coordinates() {
 
 void test_projectile_trace_profile_is_opt_in_and_parity_neutral() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
     world.registry.configure_pool(2, 8);
@@ -5255,6 +5295,7 @@ void test_projectile_trace_profile_is_opt_in_and_parity_neutral() {
 
 void test_ray_debug_capture_is_opt_in_with_scoped_categories() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
     world.registry.configure_pool(2, 8);
@@ -5393,6 +5434,7 @@ void test_ray_debug_capture_is_opt_in_with_scoped_categories() {
 
 void test_contact_debug_capture_is_opt_in() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
     world.registry.configure_pool(2, 8);
@@ -5493,6 +5535,7 @@ void test_projectile_dynamic_fallback_encloses_scaled_diagonal() {
     model.faces[0].max[1] = model.faces[0].max[2] = fx(2.0);
 
     World world;
+    test_titles::jo_world(world);
     CollisionWorld cw;
     world.registry.configure_pool(1, 4);
     Entity dynamic;
@@ -5518,6 +5561,7 @@ void test_projectile_dynamic_fallback_encloses_scaled_diagonal() {
 // statics before pool 1 dynamics, before the later organic list.
 void test_round_equal_distance_uses_retail_pool_order() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
     world.registry.configure_pool(2, 4);
@@ -5570,6 +5614,7 @@ void test_round_equal_distance_uses_retail_pool_order() {
 // item behind it becomes the winner.
 void test_round_item_skip_mask() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(1, 4);
 
     Entity skipped_seed;
@@ -5613,6 +5658,7 @@ void test_round_item_skip_mask() {
 // exclusion's refNum [orig: @ 0x4e4d40].
 void test_refnum_group_immunity() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
 
@@ -5690,6 +5736,7 @@ void test_refnum_group_immunity() {
 // organic still stops the round and protects a vulnerable target behind it.
 void test_round_indestructible_organic_still_collides() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
 
     Entity front_seed;
@@ -5730,6 +5777,7 @@ void test_round_indestructible_organic_still_collides() {
 
 void test_round_person_sections_drive_hit_and_death_animation() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
 
     Entity victim_seed;
@@ -5966,6 +6014,7 @@ void test_projectile_polygon_raycast() {
 // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
 void test_late_pool1_item_resolves_cfac_or_raises() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 2);
     world.registry.configure_pool(1, 2);
 
@@ -6069,6 +6118,7 @@ void test_late_pool1_item_resolves_cfac_or_raises() {
 
 void test_projectile_trace_authority_radius_and_damage_gates() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     Entity owner;
     owner.kind = EntityKind::Organic;
@@ -6125,6 +6175,7 @@ void test_projectile_trace_authority_radius_and_damage_gates() {
 
 void test_published_person_bone_pose() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     Entity owner;
     owner.kind = EntityKind::Organic;
@@ -6172,6 +6223,7 @@ void test_published_person_bone_pose() {
 // (the F3 big off-body organic sphere).
 void test_person_mesh_row_keeps_authored_zero_sphere() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     Entity owner;
     owner.kind = EntityKind::Organic;
@@ -6313,6 +6365,7 @@ void test_projectile_trace_world_ordering() {
     // Terrain is seeded first; a strictly nearer entity replaces it, while a
     // farther entity cannot replace the refined ground crossing.
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     Field flat(0);
     CollisionWorld cw;
@@ -6348,6 +6401,7 @@ void test_projectile_trace_world_ordering() {
     // The person proximity routine returns on its first qualifying table slot,
     // even when a later person would be geometrically nearer.
     World people;
+    test_titles::jo_world(people);
     people.registry.configure_pool(0, 8);
     Entity owner;
     owner.kind = EntityKind::Organic;
@@ -6369,6 +6423,7 @@ void test_projectile_trace_world_ordering() {
     // Water is pass 4's hit class but pass two in arbitration, and endpoints on
     // the plane are deliberately not crossings.
     World water;
+    test_titles::jo_world(water);
     water.env.water_z = fx(2.0);
     CollisionWorld water_collision;
     ProjectileTrace wet;
@@ -6387,6 +6442,7 @@ void test_projectile_trace_world_ordering() {
 // [orig: Projectile_RaycastProximitySlots(2/1) @0x444619..0x444667]
 void test_projectile_trace_domain_switches_preserve_farther_pool_hit() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
 
@@ -6443,6 +6499,7 @@ void test_projectile_trace_domain_switches_preserve_farther_pool_hit() {
 
 void test_idle_round_tick_clears_stale_terrain() {
     World world;
+    test_titles::jo_world(world);
     CollisionWorld collision;
     Field old_field(0);
     world.collision = &collision;
@@ -6463,6 +6520,7 @@ void test_idle_round_tick_clears_stale_terrain() {
 //  Physics_RaycastFindCollisionEntity @ 0x539a70 — the +0x1BC slice walk]
 void test_entity_sun_visibility_rays_and_eligibility() {
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 8);
     world.registry.configure_pool(1, 8);
     world.registry.configure_pool(2, 8);
@@ -6609,6 +6667,7 @@ void test_entity_sun_visibility_rays_and_eligibility() {
 void test_cached_los_excludes_the_endpoint_carrier() {
     static Field flat(0);
     World world;
+    test_titles::jo_world(world);
     world.registry.configure_pool(0, 4);
     world.registry.configure_pool(1, 4);
 
@@ -6743,6 +6802,7 @@ void test_fixed_matrix_euler_round_trip() {
 // hull's organic-impact sound at the victim.
 struct RunOverRig {
 	World world;
+	bool world_jo = test_titles::jo_world(world);
 	CollisionWorld cw;
 	Field field{0};
 	EntityHandle driver;
@@ -6891,6 +6951,7 @@ void test_run_over_spares_a_protected_player() {
 // @0x53BFE0; EntityDef_InitAllCallbacks @0x4A5AF5..0x4A5B03]
 void test_palm_sector_collision_is_the_fragments() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     World &w = *heap;
     w.registry.configure_pool(2, 4);
     CollisionWorld cw;

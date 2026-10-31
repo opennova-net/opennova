@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -58,6 +59,7 @@ struct Ramp {
 int32_t run_pass(detail::ProbeForcePass pass, detail::PlatProbeForce (&forces)[5]) {
 	Ramp ramp;
 	auto world = std::make_unique<World>();
+	test_titles::jo_world(*world);
 	world->tables.terrain = &ramp.field;
 	Entity hull;
 	int32_t probes[5][3];

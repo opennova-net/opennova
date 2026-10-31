@@ -26,6 +26,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace std::chrono_literals;
@@ -78,6 +79,7 @@ int main() {
 	if (net::startup() != 0) return 1;
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	gamecfg::GameCfg block;
 	std::atomic<int> saves{0};

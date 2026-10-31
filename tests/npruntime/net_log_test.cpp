@@ -23,6 +23,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -87,6 +88,7 @@ void test_net_log() {
 
 struct Host {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	MemoryFiles files;
 	inmatch::NapiLog log{files, inmatch::kNetLogFileName};
 	Host() {
@@ -179,6 +181,7 @@ void test_console_line_message() {
 
 void test_usage_text() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 8);
 	world->registry.configure_pool(1, 8);
 	world->registry.configure_pool(3, 8);

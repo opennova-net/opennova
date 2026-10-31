@@ -226,7 +226,8 @@ bool DefinitionWeapon::refresh(const SessionView &view, const std::string &catal
 	// The range: the project's weapon table and ammo, the shots in the view the picture shows.
 	WeaponRangeSetup setup;
 	setup.files = files;
-	setup.game = view.project.document ? view.project.document->target_game : std::string();
+	// The open project's target game: the viewport runs this past its NoProject stop.
+	setup.game = view.project.document->target_game;
 	setup.catalog = io::utf8_file_name(catalog);
 	setup.weapon = record_;
 	setup.view = first ? WeaponShotView::Own : options.shooter;
@@ -271,7 +272,8 @@ bool DefinitionWeapon::refresh_ammo(const SessionView &view, const std::string &
 		planned_runs_ = UINT64_MAX;
 	WeaponRangeSetup setup;
 	setup.files = view.findings.assets;
-	setup.game = view.project.document ? view.project.document->target_game : std::string();
+	// The open project's target game: the viewport runs this past its NoProject stop.
+	setup.game = view.project.document->target_game;
 	// A soldier's shots (DI-24's range): weapon.def and ammo.def as the load reads them, each by its name.
 	setup.catalog = "weapon.def";
 	setup.ammo = ammo;

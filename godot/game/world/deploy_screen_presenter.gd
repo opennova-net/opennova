@@ -9,9 +9,9 @@ extends Node
 ## world/deploy_screen_feed.h death_shroud_revealed / deploy_refresh_due).
 ## SPAWNPOINTS_LIST carries the Default Spawn row
 ## plus one lettered row per team-owned SECURED zone. Selection always queues a
-## spawn request. Initial selection closes the dialog immediately; death re-picks
-## remain available until the server releases its pending hold because invalid
-## or contested picks can be silently dropped.
+## spawn request and closes nothing: the screen stays up until its triggers fall
+## (the host's deploy), so a pick the server drops silently (an invalid or
+## contested one) leaves it to pick again.
 ## [orig: death.mnu <NAME>DEATH</NAME>; DeathScreen_UpdateShroudReveal @0x554730 (shroud reveal:
 ##  immediate on g_DeployScreenActive, 240 ticks after death; content refresh
 ##  every 16 ticks); UI_UpdateDeathScreenContent @0x5536a0 (list populate:
@@ -258,14 +258,6 @@ func open() -> bool:
 	return true
 
 
-# A selection under the initial overlay closes the screen at once; a death
-# re-pick (a joiner's owed pick, or a dead local player) keeps it until the
-# host releases the hold, because an invalid or contested pick is dropped
-# silently and the list's rows are the screen's.
-func _initial_overlay(sim: Simulation) -> bool:
-	return not bool(sim.is_join_deploy_pick_pending()) and not bool(sim.is_local_player_dead())
-
-
 func close() -> void:
 	set_process(false)
 	var map_window := get_map_window()
@@ -304,15 +296,15 @@ func view_sim() -> Simulation:
 
 
 ## The queued pick's dispatch (case 12), the screen open or not: like a list
-## select, the initial overlay closes on the send and a death re-pick keeps the
-## screen until the host releases the hold.
+## select it sends the pick and closes nothing, the initial overlay's and a death
+## re-pick's alike; the screen stays up until its triggers fall (the host's
+## deploy clears them), so a pick the host drops silently leaves it to pick again
+## (engine ClientState::death_menu_open_latch carries the witness).
 func send_pick(param: int) -> void:
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
 		return
-	var initial_overlay := _initial_overlay(sim)
-	if sim.send_deployment_pick(param) and initial_overlay:
-		close()
+	sim.send_deployment_pick(param)
 
 
 func teardown() -> void:
@@ -407,11 +399,9 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 	var param := _spawn_rows[index].param
 	if param == -1:
 		return
-	var initial_overlay := _initial_overlay(sim)
-	if sim.send_deployment_pick(param) and initial_overlay:
-		# Input case 12 resets the dialogs and queues the request even for an
-		# alive player. Runtime holds gameplay until the host releases the pick.
-		close()
+	# Input case 12 queues the request even for an alive player and closes no
+	# screen (send_pick); runtime holds gameplay until the host releases the pick.
+	sim.send_deployment_pick(param)
 
 
 # The spawn table's cell event, for a title whose DEATH screen picks the loadout: a press on a

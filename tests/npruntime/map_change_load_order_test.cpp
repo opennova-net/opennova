@@ -71,6 +71,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -185,6 +186,7 @@ struct DedicatedHost {
 			catalog_row("MAPB.BMS", bms::AttribFlags::TeamDeathmatch)};
 	inmatch::HostRotation rotation;
 	inmatch::HostRole role{inmatch::RoleKind::DedicatedHost};
+	bool role_jo = test_titles::jo_controls(role);
 	inmatch::Session session{role};
 	inmatch::HostBoot boot;
 	std::unique_ptr<mission::MissionKernel> kernel;
@@ -200,6 +202,7 @@ struct DedicatedHost {
 	// The rotation's current map's session config.
 	inmatch::HostConfig current_host_cfg() const {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "Load Order";
 		cfg.config.game_type = rotation.list.map_game_type;
@@ -214,6 +217,7 @@ struct DedicatedHost {
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
+		test_titles::jo_config(r.host_cfg.config);
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::TeamDeathmatch;
 		std::snprintf(r.mission.header.mission_name, sizeof(r.mission.header.mission_name), "%s",
@@ -236,6 +240,7 @@ struct DedicatedHost {
 		r.boot_options.team_count = 2;
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			auto fresh = std::make_unique<mission::MissionKernel>();
+			test_titles::jo_world(fresh->world);
 			if (kernel) fresh->carry_across_load_from(*kernel);
 			kernel = std::move(fresh);
 			return *kernel;
@@ -385,6 +390,7 @@ struct ListenHost {
 			catalog_row("ADMAP.BMS", bms::AttribFlags::AttackAndDefend)};
 	inmatch::HostRotation rotation;
 	inmatch::HostRole role{inmatch::RoleKind::ListenHost};
+	bool role_jo = test_titles::jo_controls(role);
 	inmatch::Session session{role};
 	inmatch::HostBoot boot;
 	std::unique_ptr<mission::MissionKernel> kernel;
@@ -417,6 +423,7 @@ struct ListenHost {
 
 	bool boot_map(bool next_mission) {
 		inmatch::HostBootRequest r;
+		test_titles::jo_config(r.host_cfg.config);
 		r.host_cfg.protocol = &kJo;
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::AttackAndDefend;
@@ -444,6 +451,7 @@ struct ListenHost {
 		r.boot_options.team_count = 2;
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			auto fresh = std::make_unique<mission::MissionKernel>();
+			test_titles::jo_world(fresh->world);
 			if (kernel) fresh->carry_across_load_from(*kernel);
 			kernel = std::move(fresh);
 			return *kernel;

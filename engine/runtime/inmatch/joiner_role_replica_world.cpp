@@ -911,8 +911,7 @@ void JoinerRole::apply_authoritative_health() {
 // drops what L carries and attaches the named one. The attach hides the
 // object, links both ways, clears its scars and, for the three flags, puts
 // back the def's own update; its pickup event is the authority's alone, and
-// its non-flag sound reads dword_24E098C, which nothing writes (its one xref is
-// that read @0x43C174).
+// any other def plays the SPGOAL_PU set at the carrier, L.
 // [orig: NapiNPClientMsg_0x00A @0x4305F2..0x43069A - the resolve
 //  @0x4305F6..0x430644, the fresh-pickup lookup @0x430646..0x430667
 //  (SpawnPoint_FindNearestEnemyCapturePoint @0x4DD180), the compare
@@ -921,7 +920,9 @@ void JoinerRole::apply_authoritative_health() {
 //  +0x268 @0x43C144, Flags |= 1 @0x43C14A, +0x170 @0x43C14F,
 //  Scar_ClearEntriesByEntity @0x43C155, the flag ids @0x43C15A..0x43C172, the
 //  update @0x43C191; Server_BroadcastFlagPickupEvent @0x517460 gated on
-//  is_authority @0x517467)]
+//  is_authority @0x517467; the non-flag Sound_PlayAtPosition(dword_24E098C,
+//  &carrier->Position) @0x43C174..0x43C17E, registry row 58 "SPGOAL_PU"
+//  @0x82FDB8 resolved by DialogSystem_Init @0x5276C0)]
 void JoinerRole::apply_local_carried_object(world::World &world, world::Entity &local) {
 	ClientRuntime &rt = *runtime;
 	const uint16_t packed = rt.state().local_carried_handle;
@@ -950,6 +951,8 @@ void JoinerRole::apply_local_carried_object(world::World &world, world::Entity &
 	world.out.scars.clear_entity(carried->handle);
 	if (carried->item_id == 4091 || carried->item_id == 4093 || carried->item_id == 4095)
 		carried->drop_motion = world::def_update_drop_motion(*carried);
+	else
+		world.out.fire_sounds.play_immediate("SPGOAL_PU", local.position, 0);
 }
 
 // The S2C 0x0F world-state landing on L, once per decoded 0x0F. Retail writes

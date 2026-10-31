@@ -31,6 +31,7 @@
 #include <runtime/world/model_geometry.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -117,6 +118,7 @@ int main() {
     OcclusionWorld occlusion;
     mission::CollisionResolveState state;
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(2, 8);
     const auto spawn = [&](int32_t item_id) {
         Entity e;

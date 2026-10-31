@@ -15,6 +15,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -231,6 +232,7 @@ static int test_draw_values() {
 // [orig: Player_OnDamageReceived @0x4DD880]
 static int test_player_on_damage_received() {
     auto heap = std::make_unique<World>();
+    test_titles::jo_world(*heap);
     World &world = *heap;
     const int32_t at[3] = {0, 0, 0};
     const RadarSource none;

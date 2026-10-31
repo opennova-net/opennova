@@ -213,6 +213,16 @@ enum class ExitSite : uint8_t {
 //  @0x555460 - Game_CloseInGameScreens @0x55546A, Input_HandleActionBinding(3) @0x555479;
 //  the quit dialog's yes in Input_HandleSpecialKeys @0x49C5C0]
 void input_action_exit(const RemoteAdminBinding &binding, ExitSite site);
+// The in-game RESTART's engine leg, which dfx2.exe's DEATH-screen RESTART_LEVEL runs too: out of
+// a session the in-game screens close (the own client's DEATH latch drops with no close leg, so
+// the screen's picks are dropped: replication::ClientState::close_in_game_screens), then exit
+// reason 4 (World::ingame_restart_command); in a session nothing, false. `client` is the
+// process's own client (null: none).
+// [orig: UI_IngameRestartCommand @0x555410 - is_in_session @0x555410, Game_CloseInGameScreens
+//  @0x555419, g_MissionExitReason = 4 @0x555437]
+// [orig: DeathScreen_OnRestartLevel @0x550BF0 - Game_CloseInGameScreens @0x550C20,
+//  g_MissionExitReason = 4 @0x550C35 (dfx2.exe)]
+bool ingame_restart(world::World &world, ClientRuntime *client);
 
 // The admin server's command half for a process whose sessions come and go, as retail's
 // dispatcher runs over the process's globals whatever the scene: the console over the binding's

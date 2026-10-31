@@ -79,17 +79,19 @@ void route_script_remote_commands(NapiNPServerCtx &ctx, world::World &world) {
 }
 
 // Drain the match domain's objective transitions through retail's two wire
-// lanes. Pickup/drop/save/return and non-CTF capture publish the complete 19-B
-// flag state (0x2F). A CTF capture retires the captured flag with 0x12 instead.
-// Pickup/save/capture/timeout-return also precede that state mutation with the
-// corresponding 8-B 0x1E event record.
+// lanes. Pickup/drop/save/return publish the complete 19-B flag state (0x2F).
+// A capture publishes none of its own: CTF's retires the captured flag with
+// 0x12, and any other type's drop and definition-pose sync follow it as their
+// own 0x2F records. Pickup/save/capture/timeout-return also precede that state
+// mutation with the corresponding 8-B 0x1E event record.
 // The event and 0x2F state use active-player mask 0x80 (host included); CTF's
 // following 0x12 removal uses 0x90 (host excluded).
 // [orig: Entity_AttachCarriedObject @0x43C130 -> Server_BroadcastFlagPickupEvent @0x517460
 // (pickup event 0x14) -> Server_SendDestructibleDeathPacket @0x50D900;
 // Server_BroadcastFlagSaveEvent @0x517A90 (save event 0x15 then 0x2F);
-// Server_ProcessScoringAndBroadcast @0x5169C0 (capture event 0x13 then CTF
-// remove / other-mode reset); Entity_UpdateIdleCheck @0x408430 ->
+// Server_ProcessScoringAndBroadcast @0x5169C0 (capture event 0x13 @0x516A37, then
+// the CTF remove @0x516A49 or the drop @0x516A55 and the sync @0x516A5B);
+// Entity_UpdateIdleCheck @0x408430 ->
 // Server_BroadcastOverlayDeathEvent @0x50F5A0 (return 0x23/0x24/0x25 then 0x2F);
 // Server_RemoveEntityAndNotify @0x50A270]
 void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
@@ -137,8 +139,9 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 					static_cast<uint32_t>(feed_position.y.q16) >> 16));
 		}
 
+		const bool capture = event.kind == world::MatchGameplayEventKind::FlagCapture;
 		std::vector<uint8_t> state_body;
-		if (!event.remove_objective) {
+		if (!capture) {
 			ObjectiveEntityState state;
 			state.entity_handle = event.objective.packed;
 			state.flags_byte = event.objective_flags;
@@ -156,8 +159,10 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 			if (!active_player_recipient(conn)) continue;
 			if (!feed.empty())
 				conn.link.transport->host_send(s2c::GAME_EVENT, feed);
-			if (event.remove_objective) {
-				if (conn.link.mode == replication::TransportMode::Loopback) continue;
+			if (capture) {
+				if (!event.remove_objective ||
+						conn.link.mode == replication::TransportMode::Loopback)
+					continue;
 				EntityRemove removal;
 				removal.entity_handle = event.objective.packed;
 				conn.link.transport->host_send(

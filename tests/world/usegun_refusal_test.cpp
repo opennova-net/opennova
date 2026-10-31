@@ -24,6 +24,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -60,6 +61,7 @@ void bake(w::WeaponTableEntry &def) {
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	w::EntityHandle gun_h, claimant_h, requester_h;
 

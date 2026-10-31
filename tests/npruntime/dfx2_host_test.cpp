@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 // DFX2's CD-key chains, its protocol's (Protocol::cd_key, games/dfx2/dfx2_protocol.cpp).
 static const opennova::cdkey::KeyChains &dfx2_chains() {
@@ -72,8 +73,10 @@ const Protocol *dfx2() { return title_protocol("dfx2"); }
 // player joined through the round init and the pending spawns, the 0x0F of its burst decoded.
 struct JoinedHost {
 	w::World world;
+	bool world_jo = test_titles::jo_world(world);
 	replication::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	WorldStateLoad state;
 	bool decoded = false;
 };
@@ -135,6 +138,7 @@ void world_state_flags_and_join_state() {
 void admin_weapon_armory() {
 	for (const Protocol *protocol : {jo(), dfx2()}) {
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.np_protocol.identity = protocol;
 		inmatch::AdminConsole console(ctx, inmatch::AdminConsole::Seams{});
@@ -189,6 +193,7 @@ void lan_cd_key_check() {
 	const std::string key = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-0001");
 	const std::string other_key = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-0002");
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.transport_mode = inmatch::NetworkType::Lan;
@@ -217,7 +222,9 @@ void lan_cd_key_check() {
 void host_start_installs_cd_keys() {
 	const std::string key = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-0003");
 	inmatch::HostOwner owner;
+	test_titles::jo_config(owner.ctx.config);
 	inmatch::HostConfig host;
+	test_titles::jo_config(host.config);
 	host.protocol = dfx2();
 	host.socket_mode = inmatch::SocketMode::Socketless;
 	host.host_cd_keys.cdkiid = key;
@@ -246,6 +253,7 @@ void chat_squad_tag() {
 
 void rules_word() {
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.mp_attributes = 0x3A06u;
 	const auto word = [&config](const Protocol *protocol) {
 		const inmatch::MissionMetadataBlob blob =

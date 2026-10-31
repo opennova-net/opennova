@@ -43,7 +43,7 @@ void HudFrameCompiler::element_quit_dialog(const HudFrameState &state, float w, 
 }
 
 void HudFrameCompiler::element_server_console_lines(const ServerStatusPageState &page,
-		const Title *title, float w, float h) {
+		const Title &title, float w, float h) {
 	// The four newest raw lines, oldest at the top, from y 608 in steps of 24
 	// at x 10: a peer's SYSTEM ring with the inline tags on, a dedicated
 	// host's CHAT ring with them off. An empty slot leaves its row blank; a
@@ -58,7 +58,7 @@ void HudFrameCompiler::element_server_console_lines(const ServerStatusPageState 
 	// @0x5b9036 (dfx2.exe)].
 	const bool mp_session_peer = page.mp_session_peer;
 	const uint32_t flags =
-			mp_session_peer || (title != nullptr && title->hud_message_tags) ? 0u : kFontTagsDisabled;
+			mp_session_peer || title.hud_message_tags ? 0u : kFontTagsDisabled;
 	if (!mp_session_peer && !page.console_rows.empty()) {
 		// A host with no client of its own: the feed carries its CHAT ring's
 		// rows (inmatch/server_console.h), oldest first.
@@ -163,7 +163,8 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	emit_text_at_virtual_pos(bold, bs, ".", tick_x, 736, w, h, kPageWhite, 0);
 	status_ticker_ = (status_ticker_ + 1) & 0x1F;
 
-	element_server_console_lines(page, state.title, w, h);
+	element_server_console_lines(
+			page, require_title(state.title, "hud::compile_server_status_page"), w, h);
 	// The windows draw in the page's order, each box over what came before
 	// it (an order break per window: the renderer groups by kind only
 	// within a run).

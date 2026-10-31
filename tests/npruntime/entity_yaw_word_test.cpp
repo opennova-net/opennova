@@ -42,6 +42,7 @@
 #include <memory>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -87,6 +88,7 @@ int placed_rows_carry_the_word() {
 	m.markers.push_back(record(bms::ItemType::Marker, 6001, 51, 80));
 
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	opennova::mission::promote_mission(m, *world, {});
 	const w::EntityHandle organic = world->registry.find_by_net_id(31);
 	const w::EntityHandle item100 = world->registry.find_by_net_id(21);
@@ -165,6 +167,7 @@ int placed_rows_carry_the_word() {
 // half (0xF8E4; the rebuild sent 0xF8E3).
 int placement_streams_the_word() {
 	auto world_storage = std::make_unique<w::World>();
+	test_titles::jo_world(*world_storage);
 	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
@@ -181,6 +184,7 @@ int placement_streams_the_word() {
 
 	ns::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                             inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;
@@ -218,6 +222,7 @@ int placement_streams_the_word() {
 // check for every stamped carrier.
 int fire_origin_reads_the_carrier_words() {
 	auto world_storage = std::make_unique<w::World>();
+	test_titles::jo_world(*world_storage);
 	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 4);
 	world.registry.configure_pool(1, 4);
@@ -270,6 +275,7 @@ int placed_rows_carry_the_pitch_roll_words() {
 	hut.roll = 100;
 	m.buildings.push_back(hut);
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	opennova::mission::promote_mission(m, *world, {});
 	const w::EntityHandle item_h = world->registry.find_by_net_id(21);
 	const w::EntityHandle hut_h = world->registry.find_by_net_id(41);

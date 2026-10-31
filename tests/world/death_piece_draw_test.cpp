@@ -14,6 +14,7 @@
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 namespace r = opennova::renderer;
@@ -176,6 +177,7 @@ OcclusionFrameCamera camera_at(float x, float y, float z, float fog) {
 // piece model radius [orig: DeathPiece_CollectVisible @ 0x57b5a1..0x57b627].
 void test_collect_gates() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	ItemDeathTraits traits;
 	traits.piece_model = three_section_model();
@@ -223,6 +225,7 @@ void test_collect_gates() {
 // (1.0) leaves at level 1, and detail 0 (0.34) drops under 60 px to level 2.
 void test_collect_object_detail() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	ItemDeathTraits traits;
 	traits.piece_model = three_section_model();

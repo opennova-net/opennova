@@ -31,6 +31,7 @@
 #include <string>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -133,6 +134,7 @@ int main() {
 			"roll_left is a hold-class (locking) state");
 
 	ns::ClientReplicaPipeline view;
+	test_titles::jo_folds(view);
 	view.set_protocol(title_protocol("jo"));
 	view.set_item_class_resolver(&classify);
 	view.set_remote_motion_mode(true);

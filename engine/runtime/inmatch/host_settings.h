@@ -88,8 +88,9 @@ int32_t map_slider_index_to_max_players(int32_t slider_index, int32_t host_scree
 // [orig: HostDialog_ReadSettings @0x555940] [orig: HostDialog_ReadSettings @0x553af0 (dfx2.exe)]
 void read_host_screen(const menu::MenuRuntime& screen, gamecfg::GameCfg& cfg, const Title& title);
 // What the settings schema takes of `title` (gamecfg::ServerSettingsTitle): its cfg table, its
-// host screen's MAX_PLAYERS cap and the availability words of the protocol it speaks. A title code
-// the registry lacks reads as the default title's.
+// host screen's MAX_PLAYERS cap and its host screen's availability words (Title::host_armory_word,
+// DFX2-10). A title code the registry lacks aborts, named (require_title_code): no default title
+// stands in for it.
 gamecfg::ServerSettingsTitle server_settings_title(const Title& title);
 gamecfg::ServerSettingsTitle server_settings_title(std::string_view title_code);
 // The screen's restriction lists from the block, as the dialog's init fills them after its

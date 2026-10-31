@@ -21,6 +21,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using opennova::terrain::TerrainHeightField;
@@ -99,6 +100,7 @@ const char kProfiles[] =
 struct Rig {
     Field field;
     World world;
+    bool world_jo = test_titles::jo_world(world);
     AiSystem &ai = world.ai;
     TestSource src;
     AiEntity *e = nullptr;

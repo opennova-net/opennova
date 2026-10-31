@@ -181,32 +181,56 @@ void LocalPlayer::release_use_item_key(bool system_key_up) {
 // [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 -- the CanFire, equipped-slot
 //  and zero-table gates @0x4dbcc3..0x4dbcf7, then the clamp (the -1 floor
 //  outside a session, `cmp g_NapiNPCtx.is_in_session` @0x4dbd0c), the click,
-//  the pitch delta and the yaw term]
+//  the pitch delta and the yaw term] [orig: Player_AdjustWeaponZoomLevel @0x4D8D70,
+//  the same code (dfx2.exe)]
 bool LocalPlayer::request_scope_zero(int delta) {
     if (!weapon.active || !local_player_can_fire()) return false;
+    // A def with no zero table writes nothing [orig: `mov eax, [ecx+84h]; test eax, eax; jz`
+    //  @0x4dbcef..0x4dbcf7].
+    if (weapon.def.scope_zero.max_steps == 0) return false;
     WeaponSlotState &slot = *active_local_weapon_slot(world_, weapon);
     const int16_t next = weapon_scope_zero_adjust(weapon.def.scope_zero, slot.scope_zero,
         delta, world_.rules.mp_session, world_.rules.auto_scope_zero);
-    if (next == slot.scope_zero) return false;
+    const bool changed = next != slot.scope_zero;
     // A changed zero clicks the GF_SCOPE_ZERO interface set (player_present.h
     // carries the witnesses); the shell plays Interface script sounds 2D
-    // [orig: @0x4dbd47..0x4dbd50 -> Sound_PlayInterfaceTriggerSet @0x527be0].
-    ScriptSoundEvent click;
-    click.name = kScopeZeroSoundset;
-    click.kind = ScriptSoundEvent::Kind::Interface;
-    world_.out.script_sounds.push_back(std::move(click));
-    slot.scope_zero = next;
-    if (!weapon.usegun_slot_active && inventory_valid) {
-        if (WeaponInventorySlot *entry = inventory.slot(inventory.equipped_combo)) entry->scope_zero = next;
+    // [orig: the compare @0x4dbd41..0x4dbd47, @0x4dbd49..0x4dbd50 ->
+    //  Sound_PlayInterfaceTriggerSet @0x527be0].
+    if (changed) {
+        ScriptSoundEvent click;
+        click.name = kScopeZeroSoundset;
+        click.kind = ScriptSoundEvent::Kind::Interface;
+        world_.out.script_sounds.push_back(std::move(click));
     }
+    // The words are rewritten whether or not the clamp moved the step: the step, its
+    // elevation pitch (0 below step 0) with the look pitch moved by any difference, and the
+    // zero-yaw partner, so a press the cap or the floor holds still re-derives the pitch and
+    // gives the yaw the adjust's sign [orig: +0x60 @0x4dbd5d, +4 @0x4dbd70 / 0 @0x4dbd75, the
+    //  look pitch @0x4dbd7c..0x4dbd8b, past the click's skip @0x4dbd47 -> @0x4dbd58]
+    //  [orig: @0x4D8E0D..0x4D8E3B (dfx2.exe)].
+    slot.scope_zero = next;
     const int32_t offset = weapon_scope_zero_pitch(weapon.def.scope_zero, next);
     input.look_pitch = io::bam_add(input.look_pitch, io::bam_sub(offset, slot.zero_pitch));
     slot.zero_pitch = offset;
-    // The zero-yaw partner (MountSlot+8), negated here for a negative parallax
-    // [orig: @0x4dbd91..0x4dbde3 -- the negate @0x4dbddf..0x4dbde3].
-    slot.zero_yaw = weapon_scope_zero_yaw(weapon.def.scope_zero, next);
-    if (weapon.def.scope_zero.paralax_distance_q16 < 0) slot.zero_yaw = -slot.zero_yaw;
-    return true;
+    // The zero-yaw partner (MountSlot+8) with a parallax key, negated here for a negative
+    // parallax; with none the word stands (the init's 0) [orig: the +0x8C test
+    //  @0x4dbd91..0x4dbd9d, the store @0x4dbdd5, the sign test @0x4dbdd8, the negate
+    //  @0x4dbddf..0x4dbde3]
+    //  [orig: @0x4D8E41..0x4D8E93 (dfx2.exe)].
+    if (weapon.def.scope_zero.paralax_distance_q16 != 0) {
+        slot.zero_yaw = weapon_scope_zero_yaw(weapon.def.scope_zero, next);
+        if (weapon.def.scope_zero.paralax_distance_q16 < 0) slot.zero_yaw = -slot.zero_yaw;
+    }
+    // The personal slot is the table's entry, so its three words stay as the adjust leaves
+    // them for the next mount.
+    if (!weapon.usegun_slot_active && inventory_valid) {
+        if (WeaponInventorySlot *entry = inventory.slot(inventory.equipped_combo)) {
+            entry->scope_zero = next;
+            entry->zero_pitch = slot.zero_pitch;
+            entry->zero_yaw = slot.zero_yaw;
+        }
+    }
+    return changed;
 }
 
 void LocalPlayer::set_view_keys(bool free_look, bool up, bool down, bool left, bool right) {
@@ -1117,11 +1141,16 @@ void LocalPlayer::reset_for_new_round() {
     world_.script.waypoints.reset_selection(world_.registry, *local,
             world_.waypoint_context().game_type);
     // The look yaw takes the player's +0x10 word, the heading the deploy just
-    // placed, never its whole-degree mirror (D-NET-376)
-    // [orig: Game_InitNewRound @0x4227DA..0x4227E3].
-    const w::AiEntity *motor = player_ai();
-    input.look_heading = motor != nullptr ? motor->heading
-                                          : local->heading;
+    // placed, never its whole-degree mirror (D-NET-376); dfx2.exe's round init stores
+    // none, so a deploy its scored placement skips (a picked zone, a co-op marker, the
+    // checkpoint) keeps the look the player had (TitleRules::round_init_look_yaw, DFX2-123)
+    // [orig: Game_InitNewRound @0x4227DA..0x4227E3] [orig: Game_InitNewRound @0x422590 -
+    //  no store, the round init ends @0x42262A (dfx2.exe)].
+    if (world_.rules.title().round_init_look_yaw) {
+        const w::AiEntity *motor = player_ai();
+        input.look_heading = motor != nullptr ? motor->heading
+                                              : local->heading;
+    }
     // The HUD buffers belong to the presenting device; one ordered effect
     // carries the reset without discarding unrelated mission events.
     Effect reset;

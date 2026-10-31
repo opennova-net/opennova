@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -41,6 +42,7 @@ inmatch::NapiNPConnection remote(uint16_t port, uint8_t slot, inmatch::Connectio
 // A remote's teardown with its player added: the leg once, with its slot; one never added: none.
 void test_a_remote_teardown_runs_the_leg() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	ctx->is_authority = 1;
 	std::vector<int> removed;
 	const std::function<void(int)> leg = [&removed](int player_number) {
@@ -60,6 +62,7 @@ void test_a_remote_teardown_runs_the_leg() {
 // whose removal runs the leg for the own slot.
 void test_the_own_leave_runs_the_leg() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	ctx->is_authority = 1;
 	std::vector<int> removed;
 	const std::function<void(int)> leg = [&removed](int player_number) {
@@ -82,6 +85,7 @@ void test_the_own_leave_runs_the_leg() {
 // the process's function is unset.
 void test_no_session_held() {
 	auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx->config);
 	ctx->is_authority = 1;
 	ctx->np_protocol.connection_list.push_back(remote(4004, 2, inmatch::ConnectionPhase::InMatch));
 	CHECK(inmatch::destroy_connection(*ctx, PeerAddr{0x0100007Fu, 4004}, nullptr));

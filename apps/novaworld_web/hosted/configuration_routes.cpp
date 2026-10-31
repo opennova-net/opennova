@@ -9,21 +9,24 @@
 
 namespace opennova::novaworld_server::hosted {
 namespace {
-// A running server keeps its pinned catalog even after a newer release is published.
-OfferedProduct pinned_product(db::Database &db, const HostedServer &server) {
+// A running server keeps its pinned catalog even after a newer release is published. None once
+// its game's row is gone (a game is deleted once its servers stop, leaving their product_id NULL,
+// read as 0): no title reads its settings (the supervisor fails its start, data_of).
+std::optional<OfferedProduct> pinned_product(db::Database &db, const HostedServer &server) {
+	const auto product = find_product(db, server.settings.product_id);
+	if (!product)
+		return std::nullopt;
 	OfferedProduct p;
 	p.id = server.settings.product_id;
-	if (const auto product = find_product(db, p.id)) {
-		p.title = product->title;
-		p.lobby = product->lobby;
-		p.display_name = product->display_name;
-		const auto tree_id = server.base_tree_id ? server.base_tree_id : product->current_tree_id;
-		if (tree_id)
-			if (const auto tree = find_tree(db, *tree_id)) {
-				p.missions = tree->missions;
-				p.weapons = tree->weapons;
-			}
-	}
+	p.title = product->title;
+	p.lobby = product->lobby;
+	p.display_name = product->display_name;
+	const auto tree_id = server.base_tree_id ? server.base_tree_id : product->current_tree_id;
+	if (tree_id)
+		if (const auto tree = find_tree(db, *tree_id)) {
+			p.missions = tree->missions;
+			p.weapons = tree->weapons;
+		}
 	if (server.settings.expansion_id) {
 		OfferedExpansion e;
 		e.id = *server.settings.expansion_id;
@@ -39,6 +42,12 @@ OfferedProduct pinned_product(db::Database &db, const HostedServer &server) {
 		p.expansions.push_back(std::move(e));
 	}
 	return p;
+}
+
+// The refusal for a server whose game's row is gone (pinned_product): 409, as the supervisor's
+// "its game is gone" fails its start.
+crow::response game_gone() {
+	return json_error(409, "game_gone", "This server's game is gone.");
 }
 
 // `next_launch_only`: a settings edit no admin line applies, saved for the next launch.
@@ -85,7 +94,10 @@ crow::response command_reply(
 // server boots, restarts or has no link (the panel shows the saved settings; the live
 // GAMESETTINGS reply it once fetched was never shown, and carried the passwords).
 crow::response ConsoleRoutes::settings(db::Database &db, const HostedServer &server) {
-	const OfferedProduct product = pinned_product(db, server);
+	const auto pinned = pinned_product(db, server);
+	if (!pinned)
+		return game_gone();
+	const OfferedProduct &product = *pinned;
 	crow::json::wvalue out;
 	out["server_id"] = server.id;
 	out["saved"] = to_crow(settings_document(server.settings));
@@ -140,8 +152,11 @@ crow::response ConsoleRoutes::settings_edit(const Caller &c, const crow::request
 		std::string field;
 		if (!read_settings_document(*patch, desired, field, error))
 			return field_error(400, "invalid_field", field.c_str(), error);
+		const auto pinned = pinned_product(*lease, *server);
+		if (!pinned)
+			return game_gone();
+		const OfferedProduct &product = *pinned;
 		// Check edited fields independently of a previously cleared live rotation.
-		const auto product = pinned_product(*lease, *server);
 		if (desired.missions.empty() && !product.missions.empty())
 			desired.missions.push_back(product.missions.front().file);
 		if (const auto why = check_settings(desired, { product }))
@@ -191,7 +206,8 @@ crow::response ConsoleRoutes::settings_edit(const Caller &c, const crow::request
 
 void ConsoleRoutes::register_configuration(WebApp &app) {
 	// GET .../settings: the owner's server (404 for another account's) or any for an admin,
-	// in any state; an owner's read draws one token from the account's read bucket.
+	// in any state (409 game_gone once its game's row is gone); an owner's read draws one token
+	// from the account's read bucket.
 	CROW_ROUTE(app, "/api/me/servers/<uint>/settings")
 			.methods("GET"_method)([this](const crow::request &req, uint64_t id) -> crow::response {
 				auto access = access_.require_user(req);

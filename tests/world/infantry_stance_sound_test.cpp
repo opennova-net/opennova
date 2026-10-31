@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -13,6 +14,7 @@ using namespace opennova;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n",__LINE__,#c);return 1;} } while(0)
 int main() {
     auto world = std::make_unique<world::World>();
+    test_titles::jo_world(*world);
     uint8_t previous = 0;
     const int32_t pos[3] = {1,2,3};
     const auto emit = [&](uint8_t bits,uint32_t flags=0,bool parent=false) {
@@ -28,7 +30,9 @@ int main() {
     CHECK(world->out.slot_sounds.back().source_handle==7 && world->out.slot_sounds.back().pos[2]==3);
 
     auto kernel = std::make_unique<mission::MissionKernel>();
+    test_titles::jo_world(kernel->world);
     inmatch::JoinerRole role;
+    test_titles::jo_joiner(role);
     role.set_rules(opennova::world::title_rules("jo"));
     role.set_protocol(&kJo);
     role.bind(*kernel);

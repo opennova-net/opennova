@@ -179,6 +179,23 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
                                 int32_t player_class, bool validate_banned,
                                 LoadoutApplySelect select);
 
+// The authority's own S2C 0x5A apply (a listen host's own client's,
+// inmatch::apply_own_weapon_loadout): local_loadout_apply_accept's grant apply over the list's
+// rows, its class stamped, the local table (on the authority its slot's) rebuilt from the rows,
+// their counts applied, the weight, then the select of the weapon `select` names and the
+// EquippedSlot's mount; the rows do not become the spawn buffer, whose copy the authority
+// skips (the list send copied the slot's buffer into it). No name list (the 0x5A's own
+// rebuild is inmatch::apply_weapon_loadout_name_list's), no damage-class bytes.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the class @0x4293FC, the skips
+//  @0x4293D1 / @0x429402, the rebuild @0x4294E3..0x4296AE, the select and mount
+//  @0x4296B4..0x4296F4, the weight @0x4296FE]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 - @0x42B218, @0x42B23C, @0x42B24F,
+//  the rebuild @0x42B322..0x42B4E9, the select and mount @0x42B4F3..0x42B52C (dfx2.exe)]
+bool local_loadout_apply_own_grant(World &world, LocalPlayerLoadout &loadout,
+                                   LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                                   bool &inventory_valid, const std::vector<WeaponKitEntry> &kit,
+                                   int32_t player_class, LoadoutApplySelect select);
+
 // The armory PLAYER_CLASS spin catalog: the five soldier classes in the
 // authored spin order, each pairing its wire class value with the "Menu"
 // section GameText label key. [orig: UI_InitWeaponClassSelection @0x567250 —

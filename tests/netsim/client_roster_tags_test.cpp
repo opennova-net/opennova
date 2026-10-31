@@ -14,6 +14,7 @@
 #include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -157,6 +158,7 @@ void test_radio_request_fold() {
 	CHECK(gather(nullptr)); // no twins: the latch alone
 
 	world::World w;
+	test_titles::jo_world(w);
 	w.registry.configure_pool(1, 4);
 	world::Entity vehicle;
 	vehicle.kind = world::EntityKind::Item;

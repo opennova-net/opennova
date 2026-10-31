@@ -40,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -93,6 +94,7 @@ struct Host {
 	std::vector<mission_catalog::Row> catalog{catalog_row("MAPA.BMS"), catalog_row("MAPB.BMS")};
 	inmatch::HostRotation rotation;
 	inmatch::HostRole role{inmatch::RoleKind::DedicatedHost};
+	bool role_jo = test_titles::jo_controls(role);
 	inmatch::Session session{role};
 	inmatch::HostBoot boot;
 	std::unique_ptr<mission::MissionKernel> kernel;
@@ -121,6 +123,7 @@ struct Host {
 	bool boot_current(bool next_mission) {
 		const std::string map_file = rotation.list.map_file;
 		inmatch::HostBootRequest r;
+		test_titles::jo_config(r.host_cfg.config);
 		r.host_cfg.protocol = &kJo;
 		r.mission = team_mission(map_file == "MAPA.BMS" ? "Map A" : "Map B");
 		r.mission_basename = mission::mission_base_name(map_file);
@@ -151,6 +154,7 @@ struct Host {
 		};
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			auto fresh = std::make_unique<mission::MissionKernel>();
+			test_titles::jo_world(fresh->world);
 			if (kernel) fresh->carry_across_load_from(*kernel);
 			kernel = std::move(fresh);
 			return *kernel;
@@ -230,6 +234,7 @@ struct PlayHost {
 	std::vector<mission_catalog::Row> catalog;
 	inmatch::HostRotation rotation;
 	inmatch::HostRole role{inmatch::RoleKind::ListenHost};
+	bool role_jo = test_titles::jo_controls(role);
 	inmatch::Session session{role};
 	inmatch::HostBoot boot;
 	std::unique_ptr<mission::MissionKernel> kernel;
@@ -268,6 +273,7 @@ struct PlayHost {
 
 	bool boot_map(bool next_mission) {
 		inmatch::HostBootRequest r;
+		test_titles::jo_config(r.host_cfg.config);
 		r.host_cfg.protocol = &kJo;
 		r.mission = test_mission::two_entity_mission();
 		r.mission.header.attrib_flags = bms::AttribFlags::AttackAndDefend;
@@ -295,6 +301,7 @@ struct PlayHost {
 		r.boot_options.team_count = 2;
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			auto fresh = std::make_unique<mission::MissionKernel>();
+			test_titles::jo_world(fresh->world);
 			if (kernel) fresh->carry_across_load_from(*kernel);
 			kernel = std::move(fresh);
 			return *kernel;
@@ -555,6 +562,7 @@ void test_round_end_abandons_a_joiners_mission_start() {
 	uint32_t tick = 1;
 	auto client_storage = std::make_unique<inmatch::ClientRuntime>(
 			"AbandonJoiner", [&tick] { return uint64_t{tick} * 16u; });
+	test_titles::jo_folds(*client_storage);
 	inmatch::ClientRuntime &client = *client_storage;
 	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
@@ -696,6 +704,7 @@ int main() {
 	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
 	uint32_t tick = 1;
 	inmatch::ClientRuntime client("RotationJoiner", [&tick] { return uint64_t{tick} * 16u; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), host_ep, d.data(), d.size());

@@ -23,6 +23,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -69,6 +70,7 @@ struct Harness {
 	std::array<def::DefItemDef, 6> rows{};
 	def::DefItemsFile items{rows.data(), rows.size()};
 	std::unique_ptr<mission::MissionKernel> kernel = std::make_unique<mission::MissionKernel>();
+	bool kernel_jo = test_titles::jo_world(kernel->world);
 	Assets &assets;
 
 	explicit Harness(Assets &source) : assets(source) {
@@ -160,6 +162,7 @@ struct Harness {
 		const w::Vec3 before = kernel->local.player_position();
 		kernel->local.input.forward = true;
 		inmatch::LocalRole role;
+		test_titles::jo_controls(role);
 		role.bind(*kernel);
 		for (int i = 0; i < 40; ++i) role.run_tick(inmatch::TickInput{});
 		kernel->local.input.forward = false;
@@ -267,6 +270,7 @@ void no_clips_then_rearm(Assets &assets) {
 	const w::Vec3 before = h.kernel->local.player_position();
 	h.kernel->local.input.forward = true;
 	inmatch::LocalRole role;
+	test_titles::jo_controls(role);
 	role.bind(*h.kernel);
 	for (int i = 0; i < 10; ++i) role.run_tick(inmatch::TickInput{});
 	CHECK(h.kernel->local.player_position().x == before.x);
@@ -314,6 +318,7 @@ void joiner_resolves_empty_registry(Assets &assets) {
 	h.boot(false, false);
 	QuietSocket socket;
 	inmatch::JoinerRole role;
+	test_titles::jo_joiner(role);
 	role.set_rules(opennova::world::title_rules("jo"));
 	role.set_protocol(&kJo);
 	role.bind(*h.kernel);

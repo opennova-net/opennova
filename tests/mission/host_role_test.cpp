@@ -49,6 +49,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -104,8 +105,10 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 	for (const inmatch::SocketMode mode :
 			{inmatch::SocketMode::Socketless, inmatch::SocketMode::Lan}) {
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -115,6 +118,7 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 		options.mp_session = mode != inmatch::SocketMode::Socketless;
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config = inmatch::singleplayer_game_config(*opennova::title_by_code("jo"), options.game_type, nullptr);
 			cfg.config.allow_sniper_scope_zoom = true;
@@ -158,8 +162,10 @@ void check_shell_single_player_rules_word(std::map<std::string, std::string> &fi
 // Its own frame, the kernel and role on the heap: main is near the stack limit.
 void check_own_world_state_location_names(std::map<std::string, std::string> &files) {
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	ms::MissionKernel &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	inmatch::HostRole &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -185,6 +191,7 @@ void check_own_world_state_location_names(std::map<std::string, std::string> &fi
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "location_names";
 		cfg.config.max_players = 4;
@@ -231,8 +238,10 @@ void check_own_world_state_location_names(std::map<std::string, std::string> &fi
 void check_listen_host_deploy_convert(std::map<std::string, std::string> &files) {
 	for (const int spectators : {2, 0}) {
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		auto &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -242,6 +251,7 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "deploy_convert";
 			cfg.config.max_players = 4;
@@ -303,8 +313,10 @@ void check_listen_host_own_deploy_reads_its_protocol(std::map<std::string, std::
 		const Protocol *protocol = title_protocol(code);
 		const bool is_dfx2 = std::string(code) == "dfx2";
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		auto &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -314,6 +326,7 @@ void check_listen_host_own_deploy_reads_its_protocol(std::map<std::string, std::
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = protocol;
 			cfg.config.server_name = "own_deploy";
 			cfg.config.max_players = 4;
@@ -359,8 +372,10 @@ void check_listen_host_own_deploy_reads_its_protocol(std::map<std::string, std::
 //  NapiNPClientMsg_0x00A @0x430064]
 void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::string> &files) {
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	auto &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	auto &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -370,6 +385,7 @@ void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::s
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "head_preround";
 		cfg.config.max_players = 4;
@@ -416,8 +432,10 @@ void check_head_preround_reads_the_own_clients_copy(std::map<std::string, std::s
 void check_listen_host_console_punts_only_through_server(
 		std::map<std::string, std::string> &files, const char *line, bool punts) {
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	auto &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>();
+	test_titles::jo_controls(*role_storage);
 	auto &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -427,6 +445,7 @@ void check_listen_host_console_punts_only_through_server(
 	options.game_type = mission_game_type(kernel.mission);
 	options.bringup_net_session = [&] {
 		inmatch::HostConfig cfg;
+		test_titles::jo_config(cfg.config);
 		cfg.protocol = &kJo;
 		cfg.config.server_name = "console_punt";
 		cfg.config.max_players = 4;
@@ -491,9 +510,11 @@ void check_listen_host_console_punts_only_through_server(
 void check_single_player_console_line_rides_the_loopback(
 		std::map<std::string, std::string> &files) {
 	auto kernel_storage = std::make_unique<ms::MissionKernel>();
+	test_titles::jo_world(kernel_storage->world);
 	auto &kernel = *kernel_storage;
 	auto role_storage = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::SinglePlayer,
 			nullptr);
+	test_titles::jo_controls(*role_storage);
 	auto &role = *role_storage;
 	role.bind(kernel);
 	inmatch::ListenHostState &host = role.state;
@@ -581,8 +602,10 @@ void check_single_player_console_line_rides_the_loopback(
 void check_server_rows_reach_their_arms(std::map<std::string, std::string> &files) {
 	{
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		auto &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -592,6 +615,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "server_rows";
 			cfg.config.max_players = 4;
@@ -722,7 +746,9 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 	{
 		inmatch::ClientProcessState process;
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -733,6 +759,7 @@ void check_server_rows_reach_their_arms(std::map<std::string, std::string> &file
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "server_rows_dedicated";
 			cfg.config.max_players = 4;
@@ -800,7 +827,9 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 	{
 		// Heap-held: a second kernel in this frame overflows the 1 MB test-main stack.
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -812,6 +841,7 @@ void check_quality_report_runs_on(std::map<std::string, std::string> &files) {
 		inmatch::ClientProcessState process;
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "quality_report_runs_on";
 			cfg.config.max_players = 4;
@@ -857,7 +887,9 @@ void check_serve_only_net_quality_indicators(std::map<std::string, std::string> 
 	for (const bool novaworld : {true, false}) {
 		inmatch::ClientProcessState process;
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -868,6 +900,7 @@ void check_serve_only_net_quality_indicators(std::map<std::string, std::string> 
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_indicators";
 			cfg.config.max_players = 4;
@@ -906,6 +939,7 @@ void check_serve_only_net_quality_indicators(std::map<std::string, std::string> 
 		inmatch::RoleView view;
 		view.kernel = &kernel;
 		view.host = &ctx;
+		view.title = opennova::title_by_code("jo");
 		const inmatch::HudRoleFacts facts = inmatch::hud_role_facts(view);
 		CHECK(facts.net_quality.in_session && facts.net_quality.novaworld_icon == novaworld);
 		CHECK(facts.net_quality.indicators.level == 3 &&
@@ -932,7 +966,9 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 	inmatch::ClientProcessState process;
 	{
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -943,6 +979,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_quality";
 			cfg.config.max_players = 4;
@@ -964,7 +1001,9 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 	}
 	{
 		const auto kernel_owner = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_owner->world);
 		const auto role_owner = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_owner);
 		ms::MissionKernel &kernel = *kernel_owner;
 		inmatch::HostRole &role = *role_owner;
 		role.bind(kernel);
@@ -975,6 +1014,7 @@ void check_serve_only_steps_quality_count(std::map<std::string, std::string> &fi
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "serve_only_then_listen";
 			cfg.config.max_players = 4;
@@ -1047,8 +1087,10 @@ int main() {
 	// --- the SP listen bring-up and the per-tick frame ----------------------
 	{
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1216,8 +1258,10 @@ int main() {
 	// NapiNPServerMsg_HandleWeaponToggle @ 0x511A70]
 	{
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		auto &role = *role_storage;
 		role.bind(kernel);
 		kernel.open_document(two_entity_mission(), "tank_slots", source_over(&files));
@@ -1322,8 +1366,10 @@ int main() {
 	// --- the dedicated (HostOnly) bring-up -----------------------------------
 	{
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1334,6 +1380,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "listen_host_test";
 			cfg.config.max_players = 4;
@@ -1406,8 +1453,10 @@ int main() {
     // even when the host never presents an intervening dead frame.
     {
         auto kernel_storage = std::make_unique<ms::MissionKernel>();
+        test_titles::jo_world(kernel_storage->world);
         ms::MissionKernel &kernel = *kernel_storage;
         auto role_storage = std::make_unique<inmatch::HostRole>();
+        test_titles::jo_controls(*role_storage);
         inmatch::HostRole &role = *role_storage;
         role.bind(kernel);
         kernel.open_document(two_entity_mission(), "respawn", source_over(&files));
@@ -1493,9 +1542,12 @@ int main() {
 	//  WeaponAction_ProcessAllEntities @0x5426A6..0x5426C9]
 	for (const int frame_kind : {0, 1, 2}) {
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		auto &kernel = *kernel_storage;
 		auto host_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*host_storage);
 		auto local_storage = std::make_unique<inmatch::LocalRole>();
+		test_titles::jo_controls(*local_storage);
 		inmatch::Role &role = frame_kind == 2
 				? static_cast<inmatch::Role &>(*local_storage)
 				: static_cast<inmatch::Role &>(*host_storage);
@@ -1510,6 +1562,7 @@ int main() {
 			options.mp_session = true;
 			options.bringup_net_session = [&] {
 				inmatch::HostConfig cfg;
+				test_titles::jo_config(cfg.config);
 				cfg.protocol = &kJo;
 				cfg.config.server_name = "gunner_walk";
 				cfg.config.max_players = 4;
@@ -1595,8 +1648,10 @@ int main() {
 	//  @0x4FC760; Server_SendRandomSeedToPlayer @0x5101A0]
 	{
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1606,6 +1661,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "fire_gate";
 			cfg.config.max_players = 4;
@@ -1674,8 +1730,10 @@ int main() {
 	//  @0x510540]
 	for (const bool mp : {true, false}) {
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1689,6 +1747,7 @@ int main() {
 				return;
 			}
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "respawn_key";
 			cfg.config.max_players = 4;
@@ -1746,8 +1805,10 @@ int main() {
 	//  NapiNPServerMsg_HandleStanceChange @0x501c60, latches @0x501d1b / @0x501d2d]
 	{
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1867,8 +1928,10 @@ int main() {
 	//  Render_ProcessMainSceneFrame @0x5CAC81]
 	for (const bool mp_session : {true, false}) {
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -1895,6 +1958,7 @@ int main() {
 				return;
 			}
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "deploy_hold";
 			cfg.config.max_players = 4;
@@ -2010,8 +2074,10 @@ int main() {
 	//  NapiNPClientMsg_0x00A @0x431993 (dfx2.exe)]
 	{
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -2061,8 +2127,10 @@ int main() {
 	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0]
 	for (const bool objective : {true, false}) {
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		bms::File mission = two_entity_mission();
@@ -2103,8 +2171,10 @@ int main() {
 	for (const int32_t profile_word : {-1, 1}) {
 		for (const bool restart : {false, true}) {
 			auto kernel_storage = std::make_unique<ms::MissionKernel>();
+			test_titles::jo_world(kernel_storage->world);
 			ms::MissionKernel &kernel = *kernel_storage;
 			auto role_storage = std::make_unique<inmatch::HostRole>();
+			test_titles::jo_controls(*role_storage);
 			inmatch::HostRole &role = *role_storage;
 			role.bind(kernel);
 			bms::File mission = two_entity_mission();
@@ -2144,8 +2214,10 @@ int main() {
 	for (const int32_t profile_word : {0, 1}) {
 		for (const bool restart : {false, true}) {
 			auto kernel_storage = std::make_unique<ms::MissionKernel>();
+			test_titles::jo_world(kernel_storage->world);
 			ms::MissionKernel &kernel = *kernel_storage;
 			auto role_storage = std::make_unique<inmatch::HostRole>();
+			test_titles::jo_controls(*role_storage);
 			inmatch::HostRole &role = *role_storage;
 			role.bind(kernel);
 			bms::File mission = two_entity_mission();
@@ -2192,8 +2264,10 @@ int main() {
 	//  @0x51DEC6..0x51DF10]
 	{
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		test_titles::jo_world(kernel_storage->world);
 		ms::MissionKernel &kernel = *kernel_storage;
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.bind(kernel);
 		inmatch::ListenHostState &host = role.state;
@@ -2203,6 +2277,7 @@ int main() {
 		options.game_type = mission_game_type(kernel.mission);
 		options.bringup_net_session = [&] {
 			inmatch::HostConfig cfg;
+			test_titles::jo_config(cfg.config);
 			cfg.protocol = &kJo;
 			cfg.config.server_name = "quality_report";
 			cfg.config.max_players = 4;
@@ -2260,6 +2335,7 @@ int main() {
 	//  @0x51D7EA..0x51D7FB].
 	{
 		auto role_storage = std::make_unique<inmatch::HostRole>();
+		test_titles::jo_controls(*role_storage);
 		inmatch::HostRole &role = *role_storage;
 		role.observe_cpu_share(37);
 		CHECK(role.state.host_owner.ctx.stats_cpu_percent == 37);

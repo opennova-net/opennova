@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -96,6 +97,7 @@ std::vector<const ProtocolMessage *> tagged(const std::vector<ProtocolMessage> &
 // automatic revive window open.
 void test_pump_handlers_read_the_destroyed_rows() {
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	w::World &world = kernel->world;
 	configure_pools(world);
 	const w::EntityHandle a = w::spawn_remote_player(world, player_spawn(0xFFF1, 1));
@@ -120,6 +122,7 @@ void test_pump_handlers_read_the_destroyed_rows() {
 	roster[1].link.auto_medic_enabled = true;
 	roster[1].link.downed_revive_seconds = 9;
 	inmatch::GameConfig config;
+	test_titles::jo_config(config);
 	config.game_type = game_type::kDeathmatch;
 	config.max_players = 4;
 
@@ -173,6 +176,7 @@ void test_pump_handlers_read_the_destroyed_rows() {
 void test_destroy_drops_carried_flag() {
 	for (const bool in_session : {true, false}) {
 		auto kernel = std::make_unique<mission::MissionKernel>();
+		test_titles::jo_world(kernel->world);
 		w::World &world = kernel->world;
 		configure_pools(world);
 		world.rules.mp_session = in_session;
@@ -183,6 +187,7 @@ void test_destroy_drops_carried_flag() {
 		const w::EntityPosition carrier_pos = world.registry.get(carrier)->position;
 		(void)world.match.drain_gameplay_events();
 		auto ctx = std::make_unique<inmatch::NapiNPServerCtx>();
+		test_titles::jo_config(ctx->config);
 		ctx->is_authority = 1;
 		ctx->is_in_session = 1;
 		ctx->world = &world;
@@ -219,7 +224,9 @@ void test_destroy_drops_carried_flag() {
 // queue and leaves the later 0x25 on the transport.
 void test_map_change_destroys_before_its_pump() {
 	auto role = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
+	test_titles::jo_controls(*role);
 	auto kernel = std::make_unique<mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	w::World &world = kernel->world;
 	configure_pools(world);
 	role->bind(*kernel);

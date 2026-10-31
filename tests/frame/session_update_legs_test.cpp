@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <string>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -29,6 +30,7 @@ int failures = 0;
 // A host role that writes its ticks into the shared log and can end the session.
 struct LoggingRole final : Role {
 	mission::MissionKernel kernel;
+	bool kernel_jo = test_titles::jo_world(kernel.world);
 	std::string *log = nullptr;
 	int lose_at_tick = 0; // the tick that reports the session lost (0: none)
 	int ticks = 0;
@@ -56,6 +58,7 @@ void install(Session &session, std::string &log) {
 void each_update_runs_head_tick_tail() {
 	std::string log;
 	LoggingRole role;
+	test_titles::jo_controls(role);
 	role.log = &log;
 	Session session(role);
 	install(session, log);
@@ -73,6 +76,7 @@ void a_frame_with_no_update_runs_no_leg() {
 	// A fresh bank's 1 ms with nothing more banked drains no quantum: no update, no leg.
 	std::string log;
 	LoggingRole role;
+	test_titles::jo_controls(role);
 	role.log = &log;
 	Session session(role);
 	install(session, log);
@@ -88,6 +92,7 @@ void a_frame_with_no_update_runs_no_leg() {
 void an_update_that_ends_the_session_runs_no_tail() {
 	std::string log;
 	LoggingRole role;
+	test_titles::jo_controls(role);
 	role.log = &log;
 	role.lose_at_tick = 2;
 	Session session(role);
@@ -104,6 +109,7 @@ void an_update_that_ends_the_session_runs_no_tail() {
 void the_transport_step_runs_no_leg() {
 	std::string log;
 	LoggingRole role;
+	test_titles::jo_controls(role);
 	role.log = &log;
 	role.role_kind = RoleKind::SinglePlayer;
 	Session session(role);

@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -85,6 +86,7 @@ bool chat_reply(const std::vector<ProtocolMessage> &replies, ChatBroadcast &out)
 // high-water raises it, signed; a short body reads 0; the disarm clears it and stops the store.
 void test_keepalive_high_water() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.np_protocol.connection_list.push_back(slot(1, "Alpha", "", nullptr));
 	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
@@ -111,6 +113,7 @@ void test_keepalive_high_water() {
 // name and tag; nothing past the last node or from an empty registry (a LAN host's).
 void test_squad_registry_walk() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.np_protocol.connection_list.push_back(slot(1, "Alpha", "", nullptr));
 	expect(dispatch(ctx, 0, c2s::GAME_START_ACK, u32_body(0)).empty(),
@@ -139,6 +142,7 @@ void test_squad_registry_walk() {
 // banned slot.
 void test_ban_punt_command() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.config.max_players = 8;

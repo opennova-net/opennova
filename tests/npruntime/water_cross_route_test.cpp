@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -100,6 +101,7 @@ void test_set_binding() {
 // plane with no entity, and nothing goes on the wire (D-SND-36).
 void test_single_player_hears_its_own_crossings() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	world.rules.logic_authority = true;
@@ -109,6 +111,7 @@ void test_single_player_hears_its_own_crossings() {
 	const w::EntityHandle local = spawn_player(world, 100);
 	ns::LoopbackChannel local_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 0;
@@ -147,6 +150,7 @@ void test_single_player_hears_its_own_crossings() {
 // too (D-NET-637), and the host's own player hears it through the loopback.
 void test_listen_host_fans_to_every_in_match_player() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	world.rules.logic_authority = true;
@@ -158,6 +162,7 @@ void test_listen_host_fans_to_every_in_match_player() {
 	const w::EntityHandle local = spawn_player(world, 100);
 	ns::LoopbackChannel alive_wire, dead_wire, local_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	auto &connections = ctx.np_protocol.connection_list;
@@ -193,6 +198,7 @@ void test_listen_host_fans_to_every_in_match_player() {
 //  warnings @0x50D842..0x50D878, the surfacing @0x50D882..0x50D8CB]
 void test_breath_composites_reach_a_dead_listener() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	world.rules.logic_authority = true;
@@ -207,6 +213,7 @@ void test_breath_composites_reach_a_dead_listener() {
 	world.registry.get(dead)->flags |= w::kEntityFlagDead;
 	ns::LoopbackChannel diver_wire, dead_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	auto &connections = ctx.np_protocol.connection_list;
@@ -244,6 +251,7 @@ void test_breath_composites_reach_a_dead_listener() {
 //  Server_SendOverlayActionToAlive's null test @0x50A1B4..0x50A1B6]
 void test_unresolved_crossing_sends_nothing() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	world.rules.logic_authority = true;
@@ -254,6 +262,7 @@ void test_unresolved_crossing_sends_nothing() {
 	const w::EntityHandle local = spawn_player(world, 100);
 	ns::LoopbackChannel remote_wire, local_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	auto &connections = ctx.np_protocol.connection_list;
@@ -294,6 +303,7 @@ void test_unresolved_crossing_sends_nothing() {
 //  SoundProfile_FindByEntityAndType @0x5281D6; the null test @0x50A1B4]
 void test_breath_composite_gates() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	world.rules.logic_authority = true;
@@ -306,6 +316,7 @@ void test_breath_composite_gates() {
 	const w::EntityHandle listener = spawn_player(world, 100);
 	ns::LoopbackChannel diver_wire, listener_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	auto &connections = ctx.np_protocol.connection_list;

@@ -11,6 +11,7 @@
 
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -27,6 +28,7 @@ int failures = 0;
 
 struct Fixture {
 	World world;
+	bool world_jo = test_titles::jo_world(world);
 	LocalPlayerWeapon weapon;
 	PlayerViewState view;
 	EntityHandle player;

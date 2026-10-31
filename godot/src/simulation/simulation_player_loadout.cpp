@@ -12,6 +12,8 @@
 
 #include <runtime/inmatch/client_runtime.h> // ClientRuntime::queue_loadout_submit
 #include <runtime/inmatch/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
+#include <runtime/inmatch/napi_np_server_ctx.h> // the slot list the offline ACCEPT's slot walk reads
+#include <runtime/inmatch/server_loadout_grant.h> // local_player_slot
 
 #include <runtime/mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
 #include <runtime/profile/profile_controls.h> // the session copy's input words
@@ -274,9 +276,25 @@ bool Simulation::apply_local_player_loadout_rows(
 		push_joiner_loadout_kit();
 		return runtime_->queue_loadout_submit(submit);
 	}
+	// The ACCEPT out of a session (the DEATH screen's close-leg apply too): the local apply,
+	// then the selection into the loadout buffer of the slot holding the local player, which
+	// the next deploy rebuilds the kit from (engine inmatch::armory_accept_offline carries the
+	// witness).
+	if (p_submit_joiner_request) {
+		opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+		opennova::inmatch::NapiNPConnection *own_slot = ctx != nullptr
+				? opennova::inmatch::local_player_slot(ctx->np_protocol.connection_list, kernel_->world)
+				: nullptr;
+		if (!opennova::inmatch::armory_accept_offline(kernel_->world, kernel_->local, own_slot,
+					p_kit, p_player_class))
+			return false;
+		push_joiner_loadout_kit();
+		return true;
+	}
+	// A joiner's S2C 0x5A grant apply, with its protocol's select.
 	if (!opennova::world::local_loadout_apply_accept(kernel_->world, kernel_->local.loadout,
 				kernel_->local.weapon, kernel_->local.inventory, kernel_->local.inventory_valid, p_kit,
-				p_player_class, /*validate_banned=*/p_submit_joiner_request, p_select))
+				p_player_class, /*validate_banned=*/false, p_select))
 		return false;
 	// Always re-arm the 0x2F seam after a rebuild settles the equipped combo —
 	// the S2C 0x5A grant apply (p_submit=false) refreshes only the live
@@ -314,11 +332,11 @@ bool Simulation::seed_session_kit_from_profile() {
 	if (!kernel_) return false;
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
-	// The session's protocol and mission type: a protocol that fixes the loadout class writes
-	// it into the profile's side block ahead of the page pick (engine
+	// The session's title and mission type: a title whose mission start fixes the loadout class
+	// writes it into the profile's side block ahead of the page pick (engine
 	// seed_session_kit_from_profile).
 	return player_.weapon.seed_kit(kernel_->world, is_host_listening() || is_joiner(),
-			session_protocol(net_, assets_.root), kernel_->mission.header.mission_type, assigned,
+			session_title(net_, assets_.root), kernel_->mission.header.mission_type, assigned,
 			kernel_->local.loadout);
 }
 
@@ -347,7 +365,7 @@ bool Simulation::reseed_session_kit_on_side_change() {
 	const uint8_t assigned =
 			(is_joiner() && runtime_) ? runtime_->assigned_team() : 0;
 	if (!opennova::inmatch::reseed_session_kit_on_side_change(kernel_->world,
-			player_.weapon.record, session_protocol(net_, assets_.root),
+			player_.weapon.record, session_title(net_, assets_.root),
 			kernel_->mission.header.mission_type, assigned, kernel_->local.loadout,
 			player_.weapon.seeded_side))
 		return false;

@@ -27,6 +27,7 @@
 #include <memory>
 #include <vector>
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -55,6 +56,7 @@ std::vector<DoorSlotAction> take_doors(ns::LoopbackChannel &channel) {
 
 void test_host_reports_door_commands_and_completions() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
@@ -67,6 +69,7 @@ void test_host_reports_door_commands_and_completions() {
 	const w::EntityHandle local = world.registry.spawn(0, person);
 	ns::LoopbackChannel remote_wire, local_wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	ctx.np_protocol.identity = title_protocol("jo");
@@ -125,6 +128,7 @@ void test_host_reports_door_commands_and_completions() {
 // A single-player world reports nothing: the authority has no session.
 void test_single_player_reports_nothing() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(2, 8);
 	world.rules.logic_authority = true;
@@ -162,6 +166,7 @@ w::EntityHandle spawn_door(w::World &world, int count) {
 // [orig: NapiNPServerMsg_HandleDoorSlotRequest @0x514B20]
 void test_host_answers_door_requests() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
@@ -173,6 +178,7 @@ void test_host_answers_door_requests() {
 	const w::EntityHandle player = world.registry.spawn(0, person);
 	ns::LoopbackChannel wire;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
 	ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(1, 1, &wire,
@@ -223,6 +229,7 @@ void test_host_answers_door_requests() {
 //  NetPacket_SendDoorSlotRequest @0x42D0C0]
 void test_client_command_raises_requests() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(2, 8);
 	world.rules.logic_authority = false;
@@ -245,6 +252,7 @@ void test_joiner_sends_the_request() {
 	const std::string client_scrk = "CLIENT-DOOR-REQ-SCRK";
 	const std::string server_scrk = "SERVER-DOOR-REQ-SCRK";
 	inmatch::ClientRuntime client("DoorRequest");
+	test_titles::jo_folds(client);
 	client.seed_session(0x1A1A0001u, 1u, client_scrk, server_scrk,
 			1, 0, 0x0002, w::kPlayerInfantryTypeId);
 	CHECK(client.queue_door_request(0x2003, 1, 2));
@@ -274,6 +282,7 @@ void test_joiner_sends_the_request() {
 // [orig: NetPacket_SerializePool2StaticToBuffer @0x504432..0x5044B3]
 void test_static_batch_carries_door_sections() {
 	auto heap = std::make_unique<w::World>();
+	test_titles::jo_world(*heap);
 	w::World &world = *heap;
 	world.registry.configure_pool(2, 8);
 	w::Entity e;
@@ -332,6 +341,7 @@ void test_joiner_doors_open_from_the_record() {
 	const auto wire_class = [](int) -> uint8_t { return 0; };
 	for (const bool authority : {false, true}) {
 		auto heap = std::make_unique<w::World>();
+		test_titles::jo_world(*heap);
 		w::World &world = *heap;
 		world.registry.configure_pool(2, 8);
 		world.rules.logic_authority = authority;

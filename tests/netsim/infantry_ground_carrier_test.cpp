@@ -29,6 +29,7 @@
 #include <memory>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -50,6 +51,7 @@ constexpr uint16_t kVehicleType = 0x1004;
 bool emit_soldier_record(bool stand_on_hull, nw::FrameUpdateRecord &out,
                          uint16_t &hull_handle) {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 8);
 	world->registry.configure_pool(1, 8);
 

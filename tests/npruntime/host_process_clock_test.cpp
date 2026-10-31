@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "conn_fixture.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -54,7 +55,9 @@ void expect(bool cond, const char *what) {
 // its World on an injected clock.
 struct ClockHost {
 	std::unique_ptr<inmatch::NapiNPServerCtx> ctx_owner = std::make_unique<inmatch::NapiNPServerCtx>();
+	bool ctx_owner_jo = test_titles::jo_config(ctx_owner->config);
 	std::unique_ptr<w::World> world_owner = std::make_unique<w::World>();
+	bool world_owner_jo = test_titles::jo_world(*world_owner);
 	std::unique_ptr<ns::UdpSessionTransport> transport =
 			std::make_unique<ns::UdpSessionTransport>(ns::UdpSessionTransport::Role::Host);
 	inmatch::NapiNPServerCtx &ctx = *ctx_owner;
@@ -65,6 +68,7 @@ struct ClockHost {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		inmatch::set_transport_mode(ctx, inmatch::SocketMode::Socketless);
 		inmatch::GameConfig config;
+		test_titles::jo_config(config);
 		config.max_players = 4;
 		inmatch::SessionStartup startup;
 		startup.protocol = title_protocol("jo");
@@ -303,7 +307,9 @@ void test_ticket_wait_reads_the_process_clock() {
 //  @0x51E109, the punt @0x51E13D]
 void test_deploy_idle_reads_the_process_clock() {
 	auto ctx_owner = std::make_unique<inmatch::NapiNPServerCtx>();
+	test_titles::jo_config(ctx_owner->config);
 	auto world_owner = std::make_unique<w::World>();
+	test_titles::jo_world(*world_owner);
 	inmatch::NapiNPServerCtx &ctx = *ctx_owner;
 	w::World &world = *world_owner;
 	uint32_t clock = 70000;

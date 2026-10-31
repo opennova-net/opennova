@@ -35,6 +35,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
@@ -304,6 +305,7 @@ int main() {
 	// pace, D-NET-500) release as they would in real time, whatever the machine's speed.
 	uint32_t tick = 1;
 	inmatch::ClientRuntime client("ServeJoiner", [&tick] { return uint64_t{tick} * 16u; });
+	test_titles::jo_folds(client);
 	client.set_protocol(&kJo);
 	auto ship = [&](const std::vector<uint8_t> &d) {
 		if (!d.empty()) net::udp_send_to(joiner_sock.get(), server_ep, d.data(), d.size());

@@ -22,6 +22,7 @@
 #include <runtime/world/world.h>
 
 #include "item_pool_step.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::crt;
@@ -250,6 +251,7 @@ CollisionModel section_debris_model() {
 // The AoE damage applicator gates [orig: Entity_ApplyWeaponDamage @0x4e6820].
 void test_explosion_damage_gates() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 8);
@@ -348,6 +350,7 @@ void test_explosion_sweep_runs_on_words() {
     const int32_t y0 = 0x7123;
     auto struck = [&](int pool, int32_t offset, int32_t bound) {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         seed_ammo(w);
         w.registry.configure_pool(0, 4);
@@ -396,6 +399,7 @@ void test_explosion_sweep_runs_on_words() {
 // D-PTL-26). [orig: Projectile_ProcessExplosionQueue @0x4EB1DA..0x4EB292]
 void test_blast_victim_hit_emitter_and_kz_sound() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.tables.ammo.entries[1].secondary_effect = "Effect_Burn";
@@ -477,6 +481,7 @@ void test_blast_victim_hit_emitter_and_kz_sound() {
 // [orig: Entity_ApplyWeaponDamage @0x4E682E..0x4E6860]
 void test_multiplayer_destroy_buildings_rule() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(2, 2);
@@ -523,6 +528,7 @@ void test_multiplayer_destroy_buildings_rule() {
 // every collision-wired movable item shields itself from blast damage.
 void test_explosion_los_excludes_victim_hull() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -561,6 +567,7 @@ void test_explosion_los_excludes_victim_hull() {
 //  pool 0's `cmp ebp, 4; jz` @0x4EB13D..0x4EB140]
 void test_pool1_los_runs_for_every_type() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -610,6 +617,7 @@ void test_pool1_los_runs_for_every_type() {
 // Z [0.25, 0.5]: the 0.35 ray blocks, while an incorrect +0.25 lift would miss.
 void test_organic_blast_los_is_unlifted() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
@@ -658,6 +666,7 @@ void test_explosion_cone_wrap() {
     auto health_after = [five_deg](double direction_deg, double target_deg,
                                    int32_t half_bam = 0) {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         seed_ammo(w);
         w.registry.configure_pool(1, 4);
@@ -709,6 +718,7 @@ void test_explosion_cone_wrap() {
 // @0x4FD300].
 void test_explosion_resolves_attacker_chain_for_events() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(0, 8);
@@ -786,6 +796,7 @@ void test_explosion_resolves_attacker_chain_for_events() {
 // Entity_ProcessDestructibleDeath @0x43fbc0 + Entity_InitDeathSounds @0x4939b0].
 void test_destructible_death_chain() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
@@ -874,6 +885,7 @@ void test_destructible_death_chain() {
 // [orig: Entity_SpawnSectionDebris @0x43f580]
 void test_section_debris_samples_collision_faces() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(1, 4);
 
@@ -951,6 +963,7 @@ void test_section_debris_samples_collision_faces() {
 //  jnz` @0x5CF04D..0x5CF054 to the next point @0x5CF180); the table @0x841980]
 void test_a_blast_at_a_window_changes_nothing() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(2, 4);
@@ -993,6 +1006,7 @@ void test_a_blast_at_a_window_changes_nothing() {
 //  WeaponEffect_QueueExplosion @0x4E8330 stores the float as given @0x4e839d]
 void test_death_blast_radius_falls_back_to_the_bound_word() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1038,6 +1052,7 @@ void test_death_blast_radius_falls_back_to_the_bound_word() {
 void test_a_peer_death_chain_queues_no_kz_blast() {
     for (const bool authority : {false, true}) {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         seed_ammo(w);
         w.rules.mp_session = true;
@@ -1070,6 +1085,7 @@ void test_a_peer_death_chain_queues_no_kz_blast() {
 //  walk @0x4eb349..0x4eb36c, the Flags 1 / indestructible skip @0x4eb3cb]
 void test_mitem_blast_spares_indestructible_items() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1102,6 +1118,7 @@ void test_mitem_blast_spares_indestructible_items() {
 //  the ground contact @0x494113]
 void test_routed_wreck_lands_on_a_posed_model() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1149,6 +1166,7 @@ void test_routed_wreck_lands_on_a_posed_model() {
 
 void test_synthetic_husk_events_preserve_distinct_handles() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(1, 4);
 
@@ -1196,6 +1214,7 @@ void test_synthetic_husk_events_preserve_distinct_handles() {
 // the expected result order- and sign-sensitive: (x,y,z) -> (z,-y,x).
 void test_kz_point_full_euler() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1233,6 +1252,7 @@ void test_kz_point_full_euler() {
 // rotations map (x,y,z) -> (z,-y,x), making both axis order and signs visible.
 void test_bridge_dead_points_emit_water_shocks() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(1, 8);
     w.env.water_z = fixed16(3.25);
@@ -1317,6 +1337,7 @@ void test_bridge_dead_points_emit_water_shocks() {
 // @0x492dd0].
 void test_death_pieces() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1392,6 +1413,7 @@ void test_death_piece_ring_generation() {
 void test_death_pieces_water_word_edge() {
     auto pieces_at = [](int32_t water, int32_t top) {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         seed_ammo(w);
         w.registry.configure_pool(1, 4);
@@ -1419,6 +1441,7 @@ void test_death_pieces_water_word_edge() {
 // min, integrated 1:1 per tick as degrees [orig: @0x57b940 / @0x492db9].
 void test_death_piece_launch_and_spin() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1474,6 +1497,7 @@ void test_death_piece_launch_and_spin() {
 void test_ai_wreck_pieces_follow_its_travel() {
     auto wreck = [](bool brained) {
         auto w = std::make_unique<World>();
+        test_titles::jo_world(*w);
         seed_ammo(*w);
         w->registry.configure_pool(1, 4);
         ItemDeathTraits t = barrel_traits();
@@ -1521,6 +1545,7 @@ void test_ai_wreck_pieces_follow_its_travel() {
 void test_death_piece_rng_is_world_local() {
     auto make_world = [] {
         auto world = std::make_unique<World>();
+        test_titles::jo_world(*world);
         seed_ammo(*world);
         world->registry.configure_pool(1, 4);
         Entity seed;
@@ -1560,6 +1585,7 @@ void test_death_piece_rng_is_world_local() {
 //  PRNG_Next16 @0x49384F]
 void test_death_piece_draws_take_retails_streams() {
     auto w = std::make_unique<World>();
+    test_titles::jo_world(*w);
     seed_ammo(*w);
     w->registry.configure_pool(1, 4);
     Entity seed;
@@ -1573,6 +1599,7 @@ void test_death_piece_draws_take_retails_streams() {
     t.husk_sub_part_types[3] = 1; // WHEEL, probability 0.5
     w->tables.item_death_traits.set(700, t);
     auto ref = std::make_unique<World>();
+    test_titles::jo_world(*ref);
     const uint32_t blast_stream = w->destruction_rng.state;
     // The expected draws: sections 1 and 2 (CHUNK_M) always, 3 (WHEEL) on its roll.
     const bool wheel = ref->next_prng16_c() <= 0x8000u;
@@ -1593,6 +1620,7 @@ void test_death_piece_draws_take_retails_streams() {
     // [orig: `fcompp; test ah,5; jnp` @0x493663..0x493677]. State 0x10200F7F's next
     // draw is 0x8000.
     auto edge = std::make_unique<World>();
+    test_titles::jo_world(*edge);
     seed_ammo(*edge);
     edge->registry.configure_pool(1, 4);
     const EntityHandle edge_h = edge->registry.spawn(1, seed);
@@ -1611,6 +1639,7 @@ void test_death_piece_draws_take_retails_streams() {
 // (z,-y,x), witnessing both signs and multiplication order.
 void test_death_piece_section_center() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1652,6 +1681,7 @@ void test_death_piece_section_center() {
 //  @0x493889..0x4938b0 (the mask)]
 void test_death_piece_render_contract() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1725,6 +1755,7 @@ void test_death_piece_words() {
     flat.dim = kDim;
     flat.layout.sector_grid = sector_grid.data();
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     DeathPiece &p = w.death_pieces.alloc();
     p.active = true;
@@ -1754,6 +1785,7 @@ void test_death_piece_words() {
 // / the water leg @0x492e1b-0x492ebe].
 void test_death_piece_water() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     DeathPiece &p = w.death_pieces.alloc();
     p.active = true;
@@ -1790,6 +1822,7 @@ void test_death_piece_ground_scorch_routing() {
     flat.layout.origin_x = 0;
     flat.layout.origin_y = 0;
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.logic_tick = 91;
     crt_srand(1);
@@ -1842,6 +1875,7 @@ void test_death_piece_ground_scorch_routing() {
 // The bullet armor gates [orig: Projectile_ProcessDamageOnTarget @0x4e7fb0].
 void test_bullet_gates() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(1, 4);
     Entity seed;
@@ -1869,6 +1903,7 @@ void test_bullet_gates() {
 // [orig: Entity_UpdateFallingDeathPhysics @0x493f70 @0x4941be].
 void test_dead_item_settle() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -1906,6 +1941,7 @@ void test_dead_item_settle() {
 void test_falling_and_static_wrecks_stamp_their_pose_first() {
     for (const DeathMotionMode mode : {DeathMotionMode::Falling, DeathMotionMode::Static}) {
         auto w_heap = std::make_unique<World>();
+        test_titles::jo_world(*w_heap);
         World &w = *w_heap;
         w.registry.configure_pool(1, 4);
         Entity seed;
@@ -1948,6 +1984,7 @@ void test_falling_and_static_wrecks_stamp_their_pose_first() {
 // Routed Falling and building Static callbacks do not consult this bit.
 void test_generic_staticdeath_freezes() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(1, 4);
     ItemDeathTraits traits = barrel_traits();
@@ -2001,6 +2038,7 @@ struct FlatField {
 void test_specialized_piece_physics_callback() {
     FlatField flat(0);
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 8);
@@ -2131,6 +2169,7 @@ void test_specialized_piece_physics_callback() {
     // equal-pitch settle branch the callback transitions directly and does not
     // call Entity_UpdateDeadWreckEffects at all.
     auto ordered_heap = std::make_unique<World>();
+    test_titles::jo_world(*ordered_heap);
     World &ordered = *ordered_heap;
     ordered.registry.configure_pool(1, 4);
     ItemDeathTraits burning = barrel_traits();
@@ -2169,6 +2208,7 @@ void test_specialized_piece_physics_callback() {
     // halves signed XY, floors only an overly-negative Z rate at -2048, and
     // emits the resolved global medium splash plus the helo-water fallback.
     auto wet_heap = std::make_unique<World>();
+    test_titles::jo_world(*wet_heap);
     World &wet = *wet_heap;
     wet.registry.configure_pool(1, 4);
     ItemDeathTraits wet_traits = traits;
@@ -2221,6 +2261,7 @@ void test_specialized_piece_physics_callback() {
             ramp.heightmap[static_cast<size_t>(z) * FlatField::kDim + x] =
                     static_cast<uint16_t>(x * 8);
     auto client_heap = std::make_unique<World>();
+    test_titles::jo_world(*client_heap);
     World &client = *client_heap;
     seed_ammo(client);
     client.rules.logic_authority = false;
@@ -2253,6 +2294,7 @@ void test_specialized_piece_physics_callback() {
     // pick keeps ecx = 0 @ 0x4b0c0e..0x4b0c20]. With the graphic floor at
     // -2.0 the old read would have landed this piece 1.875 u above ground.
     auto bare_heap = std::make_unique<World>();
+    test_titles::jo_world(*bare_heap);
     World &bare = *bare_heap;
     seed_ammo(bare);
     bare.registry.configure_pool(1, 4);
@@ -2296,6 +2338,7 @@ void test_specialized_piece_physics_callback() {
     ItemDeathTraits authored = traits;
     authored.sound_profile = "Piece";
     auto land_heap = std::make_unique<World>();
+    test_titles::jo_world(*land_heap);
     World &land = *land_heap;
     seed_ammo(land);
     land.registry.configure_pool(1, 4);
@@ -2325,6 +2368,7 @@ void test_specialized_piece_physics_callback() {
     CHECK(authored_landings == 1);
 
     auto splash_heap = std::make_unique<World>();
+    test_titles::jo_world(*splash_heap);
     World &splash = *splash_heap;
     splash.registry.configure_pool(1, 4);
     CHECK(splash.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
@@ -2359,6 +2403,7 @@ void test_specialized_piece_physics_callback() {
 void test_dead_item_landing_split() {
     FlatField flat(0x4000);
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 8);
@@ -2467,6 +2512,7 @@ void test_dead_item_landing_split() {
 void test_static_dead_item_settle() {
     FlatField flat(0);
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 32);
@@ -2586,6 +2632,7 @@ void test_static_dead_item_settle() {
 void test_dead_item_water_splash() {
     FlatField flat(0x4000);
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -2666,6 +2713,7 @@ void test_dead_item_water_splash() {
 // flag. Only the no-row/default path applies Flags & ~0x20006 | 6.
 void test_death_dispatch_flag_routing() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(1, 4);
     auto dispatch = [&](int32_t item_id, int32_t unit_type, bool husk) {
@@ -2702,6 +2750,7 @@ void test_death_dispatch_flag_routing() {
 // unitType-2 (helicopter-row) non-decoration still POPS; a decoration DROPS.
 void test_death_kick_field() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 8);
@@ -2753,6 +2802,7 @@ void test_death_kick_field() {
 // Entity_HandleDestructibleDeathEvent @0x440210].
 void test_round_destroys_item() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     // A rifle-ish ballistic entry for the fired round.
@@ -2824,6 +2874,7 @@ void test_round_destroys_item() {
 // [orig: Entity_ProcessBuildingDeath @0x49442c].
 void test_building_death_requires_loaded_husk_model() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.registry.configure_pool(2, 2);
 
@@ -2869,6 +2920,7 @@ void test_building_death_requires_loaded_husk_model() {
 // the land row's arg Entity_UpdateFallingDeathPhysics @0x493F70, table @0x815410]
 void test_vehicle_death_pieces_require_loaded_husk_model() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(1, 4);
@@ -2918,6 +2970,7 @@ void test_vehicle_death_pieces_require_loaded_husk_model() {
 //  @0x4E8330 (@0x4E8333..0x4E8339); WeaponEffect_PushExplosionQueueEntry @0x4E83C0]
 void test_net_kill_runs_client_side_death_chain() {
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
@@ -2962,6 +3015,7 @@ void test_net_kill_runs_client_side_death_chain() {
     // Control: a plain non-authority world OUTSIDE an MP session (tests,
     // pre-join states) keeps the authority-only drain.
     auto sp_heap = std::make_unique<World>();
+    test_titles::jo_world(*sp_heap);
     World &sp = *sp_heap;
     seed_ammo(sp);
     sp.registry.configure_pool(2, 8);
@@ -2979,6 +3033,7 @@ void test_net_kill_runs_client_side_death_chain() {
 // Four retained effect handles follow independent points on the selected husk.
 void test_death_effect_banks_and_water_crossings() {
 	auto heap = std::make_unique<World>();
+	test_titles::jo_world(*heap);
 	World &w = *heap;
 	Entity e;
 	e.position = { 10, 20, 1 };
@@ -3047,6 +3102,7 @@ void test_death_effect_banks_and_water_crossings() {
 void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
     FlatField flat(0x4000);
     auto w_heap = std::make_unique<World>();
+    test_titles::jo_world(*w_heap);
     World &w = *w_heap;
     w.out.fire_sounds.set_listener(Vec3{8.0f, 8.0f, 0.0f}); // < 30 u: immediate
     w.registry.configure_pool(1, 4);
@@ -3081,6 +3137,7 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
 
     // A fire-less wreck never crackles over the same span.
     auto w2_heap = std::make_unique<World>();
+    test_titles::jo_world(*w2_heap);
     World &w2 = *w2_heap;
     w2.out.fire_sounds.set_listener(Vec3{8.0f, 8.0f, 0.0f});
     w2.registry.configure_pool(1, 4);
@@ -3101,6 +3158,7 @@ void test_wreck_fire_crackle_rolls_on_the_engine_prng() {
     // Underwater: the draw is consumed BEFORE the water gate — the stream
     // advances, the crackle never fires [orig: the && order @ 0x4932bf].
     auto w3_heap = std::make_unique<World>();
+    test_titles::jo_world(*w3_heap);
     World &w3 = *w3_heap;
     w3.out.fire_sounds.set_listener(Vec3{8.0f, 8.0f, 0.0f});
     w3.registry.configure_pool(1, 4);
@@ -3133,6 +3191,7 @@ void test_death_piece_trail_effect_rows() {
 // [orig: Entity_ProcessFallingDeathPhysics @0x461D30]
 void test_generic_wreck_zero_velocity_and_inverted_rest() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 4);
 	FlatField flat(0x4000);
@@ -3174,6 +3233,7 @@ void test_generic_wreck_zero_velocity_and_inverted_rest() {
 void test_routed_wreck_rests_by_its_up_row() {
 	for (const bool inverted : { false, true }) {
 		auto storage = std::make_unique<World>();
+		test_titles::jo_world(*storage);
 		World &w = *storage;
 		seed_ammo(w);
 		w.registry.configure_pool(1, 4);
@@ -3209,6 +3269,7 @@ void test_routed_wreck_rests_by_its_up_row() {
 // State-23 boundary and full live-state restoration through the public system.
 static void test_vehicle_respawn_lifecycle() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 2);
 	w.registry.configure_pool(2, 2);
@@ -3343,6 +3404,7 @@ static void test_vehicle_respawn_lifecycle() {
 //  AI_TransitionToDeath_GroundVehicle @0x467B6E..0x467BBB (the kill walk)]
 static void test_vehicle_death_kills_authored_children() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 8);
 	Entity seed;
@@ -3381,6 +3443,7 @@ static void test_vehicle_death_kills_authored_children() {
 // Exercise the public motor -> AI event -> aircraft death -> respawn path.
 static void test_aircraft_death_lifecycle() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 4);
 	w.env.water_z = INT32_MIN;
@@ -3456,6 +3519,7 @@ static void test_aircraft_death_lifecycle() {
 // death traits (Entity_SpawnDeathPieces returns at its husk gate).
 static void test_aircraft_death_spin_rates_roll_in_retail_order() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 4);
 	w.env.water_z = INT32_MIN;
@@ -3482,6 +3546,7 @@ static void test_aircraft_death_spin_rates_roll_in_retail_order() {
 //  tick,1Fh` @0x51D8C4, the Spawn_AssignOverlaySpawnPoints call @0x51D8D2]
 static void test_spawn_markers_ride_the_script_admission() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 8);
 	w.registry.configure_pool(2, 4);
@@ -3547,6 +3612,7 @@ static void test_spawn_markers_ride_the_script_admission() {
 // [orig: Spawn_BuildMarkerBudgetList @0x529B40 -- the attrib2&4 / zone-0 skip]
 static void test_spawn_markers_skip_unnumbered_zones() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 8);
 	w.registry.configure_pool(2, 4);
@@ -3578,6 +3644,7 @@ static void test_spawn_markers_skip_unnumbered_zones() {
 // Occupied best markers defer instead of falling back to a lower priority marker.
 static void test_vehicle_spawn_marker_selection() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 8);
 	w.registry.configure_pool(2, 4);
@@ -3671,6 +3738,7 @@ static void test_vehicle_spawn_marker_selection() {
 static void test_a_grouped_wreck_respawns_on_its_marker() {
 	for (const int32_t listed : { 1291, 101291 }) {
 		auto storage = std::make_unique<World>();
+		test_titles::jo_world(*storage);
 		World &w = *storage;
 		w.registry.configure_pool(1, 8);
 		w.registry.configure_pool(2, 4);
@@ -3738,6 +3806,7 @@ static void test_a_grouped_wreck_respawns_on_its_marker() {
 
 static void test_aircraft_landing_and_navigation_states() {
 	auto storage = std::make_unique<World>();
+	test_titles::jo_world(*storage);
 	World &w = *storage;
 	w.registry.configure_pool(1, 2);
 	FlatField flat(0);
@@ -3848,6 +3917,7 @@ int count_active_pieces(const World &w) {
 // the tail @0x408044/@0x40806b]
 void test_gnrl_death_is_husk_sound_and_one_effect() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(1, 8);
@@ -3900,6 +3970,7 @@ void test_gnrl_death_is_husk_sound_and_one_effect() {
 // [orig: @0x407fff..0x408074]
 void test_gnrl_client_kill_leg() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(1, 8);
@@ -3934,6 +4005,7 @@ void test_gnrl_client_kill_leg() {
 //  Flags&2 leg @0x407072..0x4070a6; Entity_UpdatePool1Slot @0x4b8e1b gate]
 void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(2, 8);
@@ -3993,6 +4065,7 @@ void test_gnrc_death_lands_husk_on_pool2_cohort() {
 // inert.
 void test_gnrc_client_kill_runs_death_transforms_at_once() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(2, 8);
@@ -4028,6 +4101,7 @@ void test_gnrc_client_kill_runs_death_transforms_at_once() {
 //  Entity_SpawnDeathPieces @0x493811]
 void test_gnrc_silent_kill_flags() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(2, 8);
@@ -4072,6 +4146,7 @@ void test_gnrc_silent_kill_flags() {
 //  @0x440c23..0x440c87]
 void test_ewep_death_dismounts_gunner_before_husk() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(0, 4);
@@ -4136,6 +4211,7 @@ void test_ewep_death_dismounts_gunner_before_husk() {
 // phase 4 alone. [orig: @0x440b6c..0x440ba7]
 void test_ewep_client_kill_keeps_gunner_mounted() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(0, 4);
@@ -4179,6 +4255,7 @@ void test_ewep_client_kill_keeps_gunner_mounted() {
 // takes damage but never dies. [orig: 0x406FF0 — +0x2AC = 0x1000000, ret]
 void test_null_class_never_dies() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(2, 8);
@@ -4210,6 +4287,7 @@ void test_null_class_never_dies() {
 //  @0x4399c0 (@0x4399e3 effect, @0x439a06 queue push)]
 void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.tables.ammo.entries.resize(5);
@@ -4276,6 +4354,7 @@ void test_gnl2_death_detonates_after_pool_countdown(int pool, uint32_t expiry) {
 // keeps the tree body: the section-debris death with the kz chain.
 void test_unwitnessed_class_keeps_tree_body() {
 	auto w_heap = std::make_unique<World>();
+	test_titles::jo_world(*w_heap);
 	World &w = *w_heap;
 	seed_ammo(w);
 	w.registry.configure_pool(1, 8);
@@ -4297,6 +4376,7 @@ void test_unwitnessed_class_keeps_tree_body() {
 // [orig: Projectile_ProcessExplosionQueue @0x4eb0e2..0x4eb136]
 int mounted_blast_health(SeatType seat_type, int seat_index, bool gun_on_vehicle) {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     World &w = *world;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 4);
@@ -4354,6 +4434,7 @@ void test_mounted_blast_protection_follows_seat_type() {
 
 void test_blast_breaks_flagged_sections_at_transformed_box_centers() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(2, 4);
@@ -4418,6 +4499,7 @@ void run_blast(World &w, const ExplosionEntry &e) {
 //  @0x435970]
 void test_blast_on_a_crewed_vehicle_scales_by_occupants() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
@@ -4458,6 +4540,7 @@ void test_blast_on_a_crewed_vehicle_scales_by_occupants() {
 //  (dfx2.exe), the test and the call gone after @0x4e3b07]
 void test_dfx2_blast_on_a_crewed_vehicle_keeps_the_whole_damage() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     w.rules.title_rules = &opennova::world::title_rules("dfx2");
     seed_ammo(w);
@@ -4503,6 +4586,7 @@ void test_dfx2_blast_on_a_crewed_vehicle_keeps_the_whole_damage() {
 //  @0x4EB2FA..0x4EB300]
 void test_blast_respects_the_damage_disabled_word() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
@@ -4549,6 +4633,7 @@ void test_blast_respects_the_damage_disabled_word() {
 //  @0x4E6F18]
 void test_zero_damage_blast_still_runs_the_item_leg() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(0, 2);
@@ -4607,6 +4692,7 @@ void test_zero_damage_blast_still_runs_the_item_leg() {
 void test_zero_damage_person_blast_still_draws_the_cause_roll() {
     const auto rng_after = [](bool armored) {
         auto storage = std::make_unique<World>();
+        test_titles::jo_world(*storage);
         World &w = *storage;
         seed_ammo(w);
         w.registry.configure_pool(0, 2);
@@ -4645,6 +4731,7 @@ void test_zero_damage_person_blast_still_draws_the_cause_roll() {
 //  @0x4E6A07..0x4E6A2E, `add ecx, 1FFFFFFFh; shr ecx, 1Eh` @0x4E6A58..0x4E6A5E]
 void test_person_blast_quadrant_faces_the_blast() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(0, 2);
@@ -4675,6 +4762,7 @@ void test_person_blast_quadrant_faces_the_blast() {
 //  AmmoDef_GetKzDamageIfAuthority call @0x4EB2A0)]
 void test_zero_damage_kill_zone_still_burns() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.tables.ammo.entries[1].kz_damage = 0;
@@ -4708,6 +4796,7 @@ void test_zero_damage_kill_zone_still_burns() {
 //  +0x178 fallback @0x4EB593..0x4EB5A4]
 void test_team_immunity_compares_the_blast_source() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
@@ -4762,6 +4851,7 @@ void test_team_immunity_compares_the_blast_source() {
 void test_session_team_immunity_skips_inside_the_sweep() {
     for (const bool session : {false, true}) {
         auto storage = std::make_unique<World>();
+        test_titles::jo_world(*storage);
         World &w = *storage;
         seed_ammo(w);
         w.rules.mp_session = session;
@@ -4827,6 +4917,7 @@ void test_session_team_immunity_skips_inside_the_sweep() {
 //  falloff @0x4E6943..0x4E699C]
 void test_pool2_measures_the_model_box() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(2, 4);
@@ -4862,6 +4953,7 @@ void test_pool2_measures_the_model_box() {
 void test_slash_reaches_only_the_slot_target() {
     for (const bool targeted : {true, false}) {
         auto storage = std::make_unique<World>();
+        test_titles::jo_world(*storage);
         World &w = *storage;
         seed_ammo(w);
         w.tables.ammo.entries[1].kztype = ammo_kz::kSlash;
@@ -4902,6 +4994,7 @@ void test_slash_reaches_only_the_slot_target() {
 // @0x4eb45b -> Projectile_DamagePairEligible @0x4E74F0]
 void test_blast_friendly_fire_gate() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
@@ -4951,6 +5044,7 @@ void test_blast_friendly_fire_gate() {
 //  @0x4E6F13..0x4E6F59]
 void test_dead_unattributed_source_credits_no_one() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(0, 4);
@@ -5009,6 +5103,7 @@ void test_dead_unattributed_source_credits_no_one() {
 //  Entity_ApplyWeaponDamage @0x4E683A..0x4E684A]
 void test_session_peer_without_authority_applies_no_blast() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     seed_ammo(w);
     w.registry.configure_pool(0, 2);
@@ -5055,6 +5150,7 @@ void test_session_peer_without_authority_applies_no_blast() {
 void test_player_blast_and_knife_run_the_waypoint_tail() {
     for (const bool knife : {false, true}) {
         auto storage = std::make_unique<World>();
+        test_titles::jo_world(*storage);
         World &w = *storage;
         seed_ammo(w);
         AmmoTableEntry cut;
@@ -5118,6 +5214,7 @@ void test_player_blast_and_knife_run_the_waypoint_tail() {
 void test_npc_blast_and_knife_rearm_the_organic_think() {
     for (const bool knife : {false, true}) {
         auto storage = std::make_unique<World>();
+        test_titles::jo_world(*storage);
         World &w = *storage;
         seed_ammo(w);
         AmmoTableEntry cut;
@@ -5169,6 +5266,7 @@ void test_brain_row_items_without_a_brain_run_nothing() {
         CHECK(item_death_class_from_tag(tag) == ItemDeathClass::kBrainMachine);
         for (const int phase : {0, 1, 2, 4}) {
             auto storage = std::make_unique<World>();
+            test_titles::jo_world(*storage);
             World &w = *storage;
             w.rules.mp_session = true;
             w.rules.logic_authority = true;
@@ -5206,6 +5304,7 @@ void test_a_landmine_items_damage_runs_its_think() {
     CHECK(item_death_class_from_tag("lndm") == ItemDeathClass::kLandmine);
     for (const bool spent : {false, true}) {
         auto storage = std::make_unique<World>();
+        test_titles::jo_world(*storage);
         World &w = *storage;
         w.rules.logic_authority = true;
         w.registry.configure_pool(0, 2);
@@ -5257,6 +5356,7 @@ void test_a_landmine_items_damage_runs_its_think() {
 //  @0x4E6773); Score_TallyKillByOthers @0x4FD300]
 void test_knife_kill_zone() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     w.registry.configure_pool(0, 4);
     w.registry.configure_pool(1, 2);
@@ -5336,6 +5436,7 @@ void test_knife_kill_zone() {
 void test_knife_cone_session_and_zero_half_angle() {
     auto victim_health = [](bool session, int32_t half_bam, Vec3 at) {
         auto storage = std::make_unique<World>();
+        test_titles::jo_world(*storage);
         World &w = *storage;
         w.rules.mp_session = session;
         w.registry.configure_pool(0, 4);
@@ -5394,6 +5495,7 @@ void test_knife_cone_session_and_zero_half_angle() {
 //  dead arm @0x4E67C2..0x4E67D8, live arm @0x4E67E3..0x4E6805]
 void test_medic_kill_zone_queues_both_arms() {
     auto storage = std::make_unique<World>();
+    test_titles::jo_world(*storage);
     World &w = *storage;
     w.registry.configure_pool(0, 8);
     w.tables.ammo.entries.resize(2);

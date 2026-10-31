@@ -30,6 +30,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -168,6 +169,7 @@ void test_the_mission_start_list() {
 	}
 
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	for (int pool = 0; pool < 3; ++pool) world->registry.configure_pool(pool, 8);
 	world::Entity seed;
 	seed.item_id = 6001;
@@ -358,6 +360,7 @@ void test_the_joiner_pool0() {
 	charattr.table.rows[3 - 1].jungle_cammo = 5103;
 
 	auto world = std::make_unique<world::World>();
+	test_titles::jo_world(*world);
 	for (int pool = 0; pool < 3; ++pool) world->registry.configure_pool(pool, 8);
 	world::Entity seed;
 	seed.item_id = 6001;
@@ -454,6 +457,7 @@ void test_the_hosts_player_bodies_add_no_node() {
 	}
 	const auto build = [&](bool bodies) {
 		auto world = std::make_unique<world::World>();
+		test_titles::jo_world(*world);
 		for (int pool = 0; pool < 3; ++pool) world->registry.configure_pool(pool, 8);
 		world::Entity seed;
 		seed.item_id = 6005;

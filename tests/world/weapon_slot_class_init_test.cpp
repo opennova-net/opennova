@@ -29,6 +29,7 @@
 #include <string>
 
 #include "common/boot_file_source.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -75,6 +76,7 @@ void add_weapon(w::World &world, uint8_t adm, const char *name, int16_t clip, in
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 
 	Rig() {
@@ -259,6 +261,7 @@ void test_the_carrier_death_refills_the_spawn_bound_child() {
 // [orig: Game_StartMission - Entity_InitAllFromModels @0x52567F, after the weapon.def load]
 void test_the_armory_load_binds_the_promoted_guns() {
 	auto kernel = std::make_unique<opennova::mission::MissionKernel>();
+	test_titles::jo_world(kernel->world);
 	w::World &world = kernel->world;
 	world.registry.configure_pool(1, 4);
 	class_rows(world);

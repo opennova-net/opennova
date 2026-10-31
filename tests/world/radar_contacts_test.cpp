@@ -22,6 +22,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -165,6 +166,7 @@ void test_damage_kind() {
 
 struct Rig {
 	std::unique_ptr<World> world = std::make_unique<World>();
+	bool world_jo = test_titles::jo_world(*world);
 	std::unique_ptr<LocalPlayer> local;
 	EntityHandle self;
 	EntityHandle enemy;
@@ -265,6 +267,7 @@ void test_tracer_whiz() {
 	// A teammate in a team game adds no blip.
 	world.registry.get(rig.enemy)->team = 1;
 	MatchRules team;
+	test_titles::jo_match(team);
 	team.game_type = 0x10000u;
 	world.match.configure(team);
 	LiveRound friendly;
@@ -443,6 +446,7 @@ void test_wire_shooter_and_target() {
 	// A teammate proxy in a team game adds nothing.
 	remote.team = 1;
 	MatchRules team;
+	test_titles::jo_match(team);
 	team.game_type = 0x10000u;
 	world.match.configure(team);
 	LiveRound mate;

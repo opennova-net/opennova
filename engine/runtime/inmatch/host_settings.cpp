@@ -2,7 +2,6 @@
 
 #include <base/io/crt_ftol.h>
 #include <formats/mnu/mnu.h>
-#include <net/protocol/protocol.h> // the availability words (DFX2-10)
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/hud/hud_game_text.h> // hud_sprintf (the CRT sprintf over a localized format)
@@ -318,19 +317,19 @@ constexpr size_t kClassWordCount = gamecfg::kClassAvailabilityCount;
 } // namespace
 
 gamecfg::ServerSettingsTitle server_settings_title(const Title& title) {
-    // The host screen's cap (DFX2-8) and the words of the protocol the title speaks (DFX2-10).
-    const ProtocolInMatch& in_match = protocol_in_match(title_protocol(title.code));
+    // The host screen's cap (DFX2-8) and its availability words (DFX2-10), the title's own: its
+    // ARMORY word and the other of 2 and 3, its MISSION (Title::host_armory_word carries the
+    // witness).
     gamecfg::ServerSettingsTitle out;
     out.table = title.config_table;
     out.max_players = title_player_caps(title).host_screen;
-    out.armory_word = in_match.s2c_66.armory_only_availability;
-    out.mission_word = in_match.s2c_66.mission_availability();
+    out.armory_word = title.host_armory_word;
+    out.mission_word = title.host_armory_word == 2 ? 3 : 2;
     return out;
 }
 
 gamecfg::ServerSettingsTitle server_settings_title(std::string_view title_code) {
-    const Title* title = title_by_code(title_code);
-    return server_settings_title(title != nullptr ? *title : default_title());
+    return server_settings_title(require_title_code(title_code, "server_settings_title"));
 }
 
 void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg, const Title& title,
@@ -535,9 +534,23 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play,
 
 uint32_t GameConfig::player_slot_limit() const {
     // A config no session titled (the host-equivalent defaults a joiner's or the single player's
-    // admission reads) has no title ceiling to apply: its cap plus the dedicated slot.
-    if (title == nullptr)
-        return static_cast<uint32_t>(max_players) + (dedicated_server ? 1u : 0u);
+    // admission reads, a pre-session server command's) has run no session apply, so no title
+    // ceiling: the round init's limit, its cap plus the dedicated slot held to 1..251 (both
+    // executables' one constant), which the session apply's own store replaces.
+    // [orig: Server_InitNewRoundState @0x51C8E0 - the sum @0x51C948..0x51C955 (a signed int),
+    //  `cmp eax, 1; jge` @0x51C958, `cmp eax, 0FBh; jle` @0x51C964, the store @0x51C976]
+    // [orig: Server_InitNewRoundState @0x519910 - @0x519978..0x51999B, the store @0x5199A6
+    //  (dfx2.exe)]
+    if (title == nullptr) {
+        constexpr int32_t kRoundInitSlotLimitMax = 0xFB;
+        int32_t total = static_cast<int32_t>(
+                static_cast<uint32_t>(max_players) + (dedicated_server ? 1u : 0u));
+        if (total < 1)
+            total = 1;
+        else if (total > kRoundInitSlotLimitMax)
+            total = kRoundInitSlotLimitMax;
+        return static_cast<uint32_t>(total);
+    }
     return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server,
                                   network_connect_type, *title);
 }

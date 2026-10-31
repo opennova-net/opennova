@@ -34,6 +34,7 @@
 #include <memory>
 #include <set>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 namespace inmatch = opennova::inmatch;
@@ -73,6 +74,7 @@ const w::Entity *pool0_player(const w::World &world, uint32_t want_dcb) {
 // which it does not reliably do (STATUS_STACK_OVERFLOW in main's prologue).
 int main() {
 	auto world_heap = std::make_unique<w::World>();
+	test_titles::jo_world(*world_heap);
 	w::World &world = *world_heap;
 	w::AiSystem &ai = world.ai;
 	// items.def's Player row: each body's ItemTypeIndex and def, which the 0x0C needs
@@ -85,7 +87,9 @@ int main() {
 	// Stand up the listen host with its own loopback (P0->P1->P2), then wire the authoritative World.
 	ns::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig listen_settings;
+	test_titles::jo_config(listen_settings);
 	listen_settings.max_players = 8;
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
 	                        /*host_key=*/0, &loopback, listen_settings);
@@ -253,13 +257,16 @@ int main() {
 	// ownerConnectionId (dcb), the faithful identity. (The old high-band net-id allocator is gone.)
 	{
 		auto many_heap = std::make_unique<w::World>();
+		test_titles::jo_world(*many_heap);
 		w::World &many_world = *many_heap;
 		w::AiSystem &many_ai = many_world.ai;
 		make_world(many_world);
 		many_world.registry.configure_pool(0, 32);
 
 		inmatch::NapiNPServerCtx many_ctx;
+		test_titles::jo_config(many_ctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 32;
 		inmatch::test::bring_up_host(many_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 		                        /*host_key=*/0, nullptr, settings);
@@ -301,12 +308,15 @@ int main() {
 	//  active and local from Server_InitNewRoundState @0x51c99a..0x51ca3c]
 	{
 		auto slot_heap = std::make_unique<w::World>();
+		test_titles::jo_world(*slot_heap);
 		w::World &slot_world = *slot_heap;
 		w::AiSystem &slot_ai = slot_world.ai;
 		make_world(slot_world);
 
 		inmatch::NapiNPServerCtx slot_ctx;
+		test_titles::jo_config(slot_ctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 8;
 		inmatch::test::bring_up_host(slot_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 		                        /*host_key=*/0, nullptr, settings);
@@ -397,6 +407,7 @@ int main() {
 		};
 
 		inmatch::GameConfig solo;
+		test_titles::jo_config(solo);
 		solo.game_type = opennova::game_type::kDeathmatch;
 		if (!expect(reserve_sequence(solo, {0xFF, 0xFF, 0xFF}) ==
 					std::vector<uint8_t>({1, 1, 1}),
@@ -407,6 +418,7 @@ int main() {
 				"Flag Me is solo CTF and keeps every player on team 1")) return 1;
 
 		inmatch::GameConfig chosen;
+		test_titles::jo_config(chosen);
 		chosen.game_type = opennova::game_type::kAttackDefend;
 		chosen.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
 		if (!expect(reserve_sequence(chosen, {1, 0, 0xFF}) ==
@@ -448,6 +460,7 @@ int main() {
 		// all four advertised columns. Preserve that defect for compatibility.
 		// [orig: @0x4FE62C..0x4FE723]
 		inmatch::GameConfig four;
+		test_titles::jo_config(four);
 		four.game_type = opennova::game_type::kTeamDeathmatch;
 		four.num_teams = 4;
 		four.mp_attributes = 0;
@@ -483,6 +496,7 @@ int main() {
 		// [orig: Server_PlayerAdd @0x51CC6C, @0x51CC76..0x51CC91 -> @0x51CF24]
 		{
 			inmatch::GameConfig tdm_locked;
+			test_titles::jo_config(tdm_locked);
 			tdm_locked.game_type = opennova::game_type::kTeamDeathmatch;
 			tdm_locked.num_teams = 4;
 			tdm_locked.mp_attributes = inmatch::GameConfig::kMpAttribTeamChoose;
@@ -533,6 +547,7 @@ int main() {
 		//  the spectator's team 0 @0x4FE368]
 		{
 			inmatch::GameConfig tdm;
+			test_titles::jo_config(tdm);
 			tdm.game_type = opennova::game_type::kTeamDeathmatch;
 			std::vector<inmatch::NapiNPConnection> rows(4);
 			for (std::size_t i = 0; i < 3; ++i) {
@@ -559,6 +574,7 @@ int main() {
 		// [orig: Server_BuildPlayerInfoAndAdd @0x51D686 -> Server_AssignPlayerTeam @0x4FE43F]
 		{
 			inmatch::GameConfig prefix;
+			test_titles::jo_config(prefix);
 			prefix.game_type = opennova::game_type::kAttackDefend;
 			prefix.mission_side_a_password = "abcdefghijklmnop"; // 16 chars and its NUL
 			std::vector<inmatch::NapiNPConnection> roster(1);
@@ -584,13 +600,16 @@ int main() {
 	// entity+0x374 / entity+0x15C raw [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0].
 	{
 		auto cw_heap = std::make_unique<w::World>();
+		test_titles::jo_world(*cw_heap);
 		w::World &cw = *cw_heap;
 		w::AiSystem &cai = cw.ai;
 		make_world(cw);
 
 		ns::LoopbackChannel cloop;
 		inmatch::NapiNPServerCtx cctx;
+		test_titles::jo_config(cctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 8;
 		settings.game_type = 0x10010; // golden ASH_I5A session gameType (bit 0x10000 = team-based)
 		inmatch::test::bring_up_host(cctx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
@@ -755,11 +774,14 @@ int main() {
 	//  @0x51CBC0 - the local branch @0x51CC24..0x51CC60, the checks @0x51CF87 / @0x51CFB9]
 	{
 		auto ew_heap = std::make_unique<w::World>();
+		test_titles::jo_world(*ew_heap);
 		w::World &ew = *ew_heap;
 		make_world(ew);
 		ns::LoopbackChannel eloop;
 		inmatch::NapiNPServerCtx ectx;
+		test_titles::jo_config(ectx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 8;
 		settings.game_type = 0x10010;
 		inmatch::test::bring_up_host(ectx, inmatch::ConnectionMode::HostClient, inmatch::SocketMode::Socketless,
@@ -802,6 +824,7 @@ int main() {
 	{
 		auto sp_spawn_position = [](uint32_t game_type, w::Vec3 &out) {
 			auto sp_world = std::make_unique<w::World>();
+			test_titles::jo_world(*sp_world);
 			sp_world->registry.configure_pool(0, 16);
 			sp_world->registry.configure_pool(3, 16);
 			w::Entity start;
@@ -813,7 +836,9 @@ int main() {
 
 			ns::LoopbackChannel sp_loop;
 			inmatch::NapiNPServerCtx sp_ctx;
+			test_titles::jo_config(sp_ctx.config);
 			inmatch::GameConfig sp_settings;
+			test_titles::jo_config(sp_settings);
 			sp_settings.server_name = "SINGLEPLAYERGAME";
 			sp_settings.max_players = 1;
 			sp_settings.game_type = game_type;
@@ -847,6 +872,7 @@ int main() {
 	// Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
 	{
 		auto cp01_world = std::make_unique<w::World>();
+		test_titles::jo_world(*cp01_world);
 		cp01_world->registry.configure_pool(0, 16);
 		cp01_world->registry.configure_pool(3, 16);
 		w::Entity start;
@@ -858,7 +884,9 @@ int main() {
 
 		ns::LoopbackChannel cp01_loop;
 		inmatch::NapiNPServerCtx cp01_ctx;
+		test_titles::jo_config(cp01_ctx.config);
 		inmatch::GameConfig cp01_settings;
+		test_titles::jo_config(cp01_settings);
 		cp01_settings.server_name = "SINGLEPLAYERGAME";
 		cp01_settings.max_players = 1;
 		cp01_settings.game_type = 0x30020u; // CP01's word, read from retail's process
@@ -918,11 +946,14 @@ int main() {
 	// [orig: Server_PositionPlayerForSpawn — no arm stores +0x10 before @0x50D57A]
 	{
 		auto bare_world = std::make_unique<w::World>();
+		test_titles::jo_world(*bare_world);
 		bare_world->registry.configure_pool(0, 16);
 		bare_world->registry.configure_pool(3, 16);
 		ns::LoopbackChannel bare_loop;
 		inmatch::NapiNPServerCtx bare_ctx;
+		test_titles::jo_config(bare_ctx.config);
 		inmatch::GameConfig bare_settings;
+		test_titles::jo_config(bare_settings);
 		bare_settings.server_name = "SINGLEPLAYERGAME";
 		bare_settings.max_players = 1;
 		bare_settings.game_type = 0x30020u;
@@ -1066,6 +1097,7 @@ int main() {
 	//  @0x50D17C..0x50D1C6; the latch is slot+100567 from Server_PlayerAdd @0x51CD83]
 	{
 		auto team_world = std::make_unique<w::World>();
+		test_titles::jo_world(*team_world);
 		team_world->registry.configure_pool(0, 16);
 		team_world->registry.configure_pool(3, 16);
 		auto add_marker = [&](int32_t item_id, float x) {
@@ -1079,7 +1111,9 @@ int main() {
 		add_marker(6097, 20.0f);
 
 		inmatch::NapiNPServerCtx team_ctx;
+		test_titles::jo_config(team_ctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 8;
 		settings.game_type = opennova::game_type::kTeamDeathmatch;
 		inmatch::test::bring_up_host(team_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
@@ -1118,6 +1152,7 @@ int main() {
 	//  consumer Entity_UpdateInfantryPlayerBody @0x4B424A..0x4B4272]
 	{
 		auto coop_world = std::make_unique<w::World>();
+		test_titles::jo_world(*coop_world);
 		coop_world->registry.configure_pool(0, 16);
 		coop_world->registry.configure_pool(1, 4);
 		coop_world->registry.configure_pool(3, 16);
@@ -1137,7 +1172,9 @@ int main() {
 		coop_world->registry.spawn(3, start);
 
 		inmatch::NapiNPServerCtx coop_ctx;
+		test_titles::jo_config(coop_ctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 8;
 		settings.game_type = opennova::game_type::for_mission_mode(0); // stock Co-op 0x10020
 		inmatch::test::bring_up_host(coop_ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
@@ -1172,6 +1209,7 @@ int main() {
 	//  @0x4C8E89..0x4C8F74, nag @0x4C8F7A..0x4C8FD1]
 	{
 		auto bal_world = std::make_unique<w::World>();
+		test_titles::jo_world(*bal_world);
 		make_world(*bal_world);
 		for (const int32_t item_id : {6096, 6097}) {
 			w::Entity start;
@@ -1180,7 +1218,9 @@ int main() {
 			bal_world->registry.spawn(3, start);
 		}
 		inmatch::NapiNPServerCtx bal_ctx;
+		test_titles::jo_config(bal_ctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 8;
 		settings.game_type = opennova::game_type::kTeamDeathmatch;
 		// A locked side B arms BuildFlags 0x10; unpassworded joiners are
@@ -1235,6 +1275,7 @@ int main() {
 	//  `push 1` @0x4C8F17]
 	{
 		auto rot_world = std::make_unique<w::World>();
+		test_titles::jo_world(*rot_world);
 		make_world(*rot_world);
 		for (const int32_t item_id : {6096, 6097}) {
 			w::Entity start;
@@ -1243,7 +1284,9 @@ int main() {
 			rot_world->registry.spawn(3, start);
 		}
 		inmatch::NapiNPServerCtx rot_ctx;
+		test_titles::jo_config(rot_ctx.config);
 		inmatch::GameConfig settings;
+		test_titles::jo_config(settings);
 		settings.max_players = 8;
 		settings.game_type = opennova::game_type::kTeamDeathmatch;
 		settings.side_b_password = "bravo";
@@ -1288,6 +1331,7 @@ int main() {
 	//  call @0x4B98EB, the Entity_BuildProximityList call @0x4B98F1]
 	{
 		auto slice_world = std::make_unique<w::World>();
+		test_titles::jo_world(*slice_world);
 		make_world(*slice_world); // the 6002 start at (123, 456, 7)
 		slice_world->registry.configure_pool(2, 4);
 		w::CollisionWorld collision;
@@ -1304,7 +1348,9 @@ int main() {
 		collision.build_initial_tables(*slice_world);
 		ns::LoopbackChannel slice_loop;
 		inmatch::NapiNPServerCtx slice_ctx;
+		test_titles::jo_config(slice_ctx.config);
 		inmatch::GameConfig slice_settings;
+		test_titles::jo_config(slice_settings);
 		slice_settings.max_players = 8;
 		inmatch::test::bring_up_host(slice_ctx, inmatch::ConnectionMode::HostClient,
 		                        inmatch::SocketMode::Socketless, /*host_key=*/0, &slice_loop,

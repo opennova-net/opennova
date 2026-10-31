@@ -59,6 +59,7 @@
 #include <variant>
 #include <vector>
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -162,6 +163,7 @@ int promotion_and_streams_keep_the_words() {
 	m.markers[0].id = 51;
 
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	opennova::mission::promote_mission(m, *world, {});
 	const w::EntityHandle organic = world->registry.find_by_net_id(31);
 	const w::EntityHandle item = world->registry.find_by_net_id(21);
@@ -244,6 +246,7 @@ int promotion_and_streams_keep_the_words() {
 // streams them.
 int placement_and_world_state_load_keep_the_words() {
 	auto world_storage = std::make_unique<w::World>();
+	test_titles::jo_world(*world_storage);
 	w::World &world = *world_storage;
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(3, 16);
@@ -258,6 +261,7 @@ int placement_and_world_state_load_keep_the_words() {
 
 	ns::LoopbackChannel loopback;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 	                             inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
 	ctx.world = &world;
@@ -295,6 +299,7 @@ int placement_and_world_state_load_keep_the_words() {
 //  the AI reads entity+4/+8/+0xC through the entity it belongs to]
 int ai_slot_reads_its_entity_words() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	w::Entity seed;
 	seed.position.set_q16({kAshJoinerX, kTdhHostY, kFarZ});
@@ -327,6 +332,7 @@ int ai_slot_reads_its_entity_words() {
 //  _ftol2_sse @0x5139B7, `cmp eax, [edi]` @0x5139BC, `cmp eax, ebx` @0x5139C0]
 int nearest_location_takes_the_word_distances() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(3, 8);
 	const int32_t x0 = kFarZ; // 21000 units with low bits: the float view's ulp is 128 words
 	const auto location = [&](int32_t x, int32_t index, float bound) {
@@ -358,6 +364,7 @@ int nearest_location_takes_the_word_distances() {
 //  @0x50D098..0x50D0CD]
 int zone_placement_keeps_the_words() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	world->registry.configure_pool(2, 4);
 	world->registry.configure_pool(3, 8);
@@ -399,6 +406,7 @@ int scatter_walk_takes_the_word_length() {
 	            "the float views sit exactly on the radius"))
 		return 1;
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	world->registry.configure_pool(2, 4);
 	world->registry.configure_pool(3, 8);
@@ -429,6 +437,7 @@ int scatter_walk_takes_the_word_length() {
 //  `add eax, 10000h` @0x40720D]
 int gnl2_blast_point_is_the_raised_z_word() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	world->rules.logic_authority = true;
 	world->rules.mp_session = true;
@@ -477,6 +486,7 @@ int gnl2_blast_point_is_the_raised_z_word() {
 //  `push 0` @0x407D04]
 int barrel_blast_takes_the_yaw_word() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	world->rules.logic_authority = true;
 	world->rules.mp_session = true;
@@ -509,6 +519,7 @@ int barrel_blast_takes_the_yaw_word() {
 //  `add [esi+8], eax` @0x4942EA, `add [esi+0Ch], eax` @0x4942F9]
 int static_wreck_slides_on_the_words() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(1, 4);
 	w::Entity seed;
 	seed.kind = w::EntityKind::Item;
@@ -536,10 +547,12 @@ int static_wreck_slides_on_the_words() {
 //  @0x43A9B0 - the snap @0x43AA7D..0x43AA96]
 int flag_state_streams_the_words() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->rules.mp_session = true;
 	world->registry.configure_pool(0, 4);
 	world->registry.configure_pool(1, 4);
 	w::MatchRules rules;
+	test_titles::jo_match(rules);
 	rules.game_type = opennova::game_type::kCaptureTheFlag;
 	world->match.configure(rules);
 	w::PlayerSpawn spawn;
@@ -560,6 +573,7 @@ int flag_state_streams_the_words() {
 	world->registry.get(carrier)->mounted_child = flag;
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = world.get();
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
@@ -597,6 +611,7 @@ int flag_state_streams_the_words() {
 //  commit @0x4EAA3F..0x4EAA45, `vz -= 167` @0x4EAA5A]
 int round_flies_on_the_words() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	w::AmmoTableEntry ammo;
 	ammo.valid = true;
 	ammo.velocity = 620;
@@ -641,6 +656,7 @@ int round_flies_on_the_words() {
 //  NapiNPClientMsg_0x00C @0x42E730 - @0x42E991, @0x42E9EB, @0x42EA20, @0x42EA35]
 int organic_record_streams_the_mount() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	world->registry.configure_pool(1, 4);
 	w::Entity vehicle;
@@ -699,6 +715,7 @@ int organic_record_streams_the_mount() {
 //  Math_FixedPointTransformPoint22 @0x4b0d42]
 int seat_pose_is_words() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	world->registry.configure_pool(1, 4);
 	w::Entity vehicle;
@@ -761,6 +778,7 @@ int ground_sampler_takes_the_words() {
 	// [orig: Waypoint_CreateForPlayer @0x4DFCB0 - Terrain_SampleHeightBilinear @0x4dfd21]
 	{
 		auto world = std::make_unique<w::World>();
+		test_titles::jo_world(*world);
 		world->registry.configure_pool(w::kUserWaypointPool, 4);
 		world->tables.terrain = &field;
 		std::string line;
@@ -792,6 +810,7 @@ int ground_sampler_takes_the_words() {
 // @0x448AE4 / @0x448ADC, stored @0x448AE7 / @0x448AEF / @0x448AF7]
 int placed_device_spawn_streams_the_words() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->rules.mp_session = true;
 	world->registry.configure_pool(0, 4);
 	w::PlayerSpawn spawn;
@@ -806,6 +825,7 @@ int placed_device_spawn_streams_the_words() {
 	world->out.entity_events.push_back(event);
 
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	ctx.world = world.get();
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;

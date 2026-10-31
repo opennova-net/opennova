@@ -281,6 +281,9 @@ inline constexpr uint32_t kItemAttribPlayerControl = 0x40u;
 // (the board point's Z reads its brain word instead, infantry_board.cpp)
 // [orig: HUD_CacheEntityDisplayInfo @0x4A3E18..0x4A3E38].
 inline constexpr uint32_t kItemAttribFastRope = 0x1000u;
+// Takeable: a Player's movement touch carries the object off, ahead of the flag/bay id switch
+// (Match::update_flag_objectives) [orig: Entity_ProcessWaypointInteraction @0x4AD86D].
+inline constexpr uint32_t kItemAttribTakeable = 0x2000u;
 inline constexpr uint32_t kItemAttribObjectiveTarget = 0x8000u;
 inline constexpr uint32_t kItemAttribLandable = 0x200u;
 inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;
@@ -1484,13 +1487,15 @@ struct Entity {
     // Carried-object link (entity+0x268 mountedChild): the object this entity
     // is CARRYING (a picked-up flag/carryable), distinct from the seat-mount
     // family above. Read by the GroupHoldingGroup/SingleHoldingGroup trigger
-    // conditions against the held object's command group. Every witnessed
-    // producer is the CTF/carryable pickup-drop-capture family or the savegame
-    // restore (bms-event-runtime-re §3b item 4). Match owns the live flag
-    // producer; the conditions and savegame consumer share this same link.
-    // [orig: set
-    // Entity_AttachCarriedObject @0x43c130; cleared Entity_DropCarriedObject
-    // @0x439df0, the capture-zone clear @0x4ada07, Entity_Destroy @0x43ea03]
+    // conditions against the held object's command group. Its live producer is
+    // Match's movement-touch handler: the Takeable carry of any def and the
+    // flag pickup, then the drop, save and capture; the joiner's 0x0A tail
+    // fold mirrors it, and the savegame restore is the remaining writer
+    // (bms-event-runtime-re §3b item 4). [orig: set
+    // Entity_AttachCarriedObject @0x43c130 (callers
+    // Entity_ProcessWaypointInteraction @0x4ad878 / @0x4ad944); cleared
+    // Entity_DropCarriedObject @0x439df0, the capture-zone clear @0x4ada07,
+    // Entity_Destroy @0x43ea03]
     EntityHandle mounted_child;         // kInvalid = carrying nothing
     // The +0x1C4 update callback a drop installs on the carried object and
     // the landing's successor (Match::update_dropped_object), or a genx def's

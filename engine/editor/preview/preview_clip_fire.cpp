@@ -150,7 +150,8 @@ void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const
 	if (has_clip_ && fire_bits && reads_ && person) {
 		WeaponRangeSetup setup;
 		setup.files = view.findings.assets;
-		setup.game = view.project.document ? view.project.document->target_game : std::string();
+		// The open project's target game: the viewport runs this past its NoProject stop.
+		setup.game = view.project.document->target_game;
 		setup.catalog = "weapon.def";
 		setup.view = WeaponShotView::Soldier;
 		setup.enemy = options.enemy;

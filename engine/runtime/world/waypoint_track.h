@@ -37,7 +37,7 @@ struct WaypointCycleContext {
     bool in_session = false;
     // The rules of the title the walks run as (World::rules.title_rules); title() aborts while
     // it is unset.
-    const TitleRules *title_rules = unset_title_rules();
+    const TitleRules *title_rules = nullptr;
     const TitleRules &title() const {
         return require_title_rules(title_rules, "WaypointCycleContext");
     }

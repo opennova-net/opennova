@@ -20,6 +20,7 @@
 #include <memory>
 #include <variant>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 
@@ -38,10 +39,12 @@ namespace gt = opennova::game_type;
 
 std::unique_ptr<World> make_world(uint32_t game_type, int32_t duration = 15) {
     auto world = std::make_unique<World>();
+    test_titles::jo_world(*world);
     world->registry.configure_pool(0, 16);
     world->registry.configure_pool(1, 16);
     world->registry.configure_pool(2, 16);
     MatchRules rules;
+    test_titles::jo_match(rules);
     rules.game_type = game_type;
     rules.capture_duration_seconds = duration;
     world->match.configure(rules);

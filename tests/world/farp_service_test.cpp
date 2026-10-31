@@ -17,6 +17,7 @@
 
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -47,6 +48,7 @@ void add_weapon(w::World &world, uint8_t adm, int16_t clip, int16_t start, int32
 
 struct Rig {
 	std::unique_ptr<w::World> wp = std::make_unique<w::World>();
+	bool wp_jo = test_titles::jo_world(*wp);
 	w::World &world = *wp;
 	w::EntityHandle farp, vehicle;
 

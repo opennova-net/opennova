@@ -824,8 +824,9 @@ void HostRole::send_own_mission_status() {
 	// (after Player_InitPlayer) with g_CurrentWeaponSlot, the current slot word (195 unless
 	// a later store moved it) resolved against the local table; all three leave in the 0x0B's pump, in queue
 	// order (D-NET-695). The page copy into the spawn buffer is the shell's
-	// (seed_session_kit_from_profile). A title whose submit ignores the class sends 8,
-	// or 7 for a mission of type 2 (DFX2-12). The session test is retail's is_in_session
+	// (seed_session_kit_from_profile). A protocol whose submit ignores the class sends 8,
+	// or 7 for a mission of type 2, and a title whose mission start fixes the class picks a
+	// fresh record's page by it (DFX2-12). The session test is retail's is_in_session
 	// fact, the rules' mp_session (a socket session; the socketless single player is out
 	// of one, as SinglePlayer_StartMission's network type 0 leaves it clear): our
 	// context's is_in_session word is set for every session create, the single player's
@@ -853,7 +854,8 @@ void HostRole::send_own_mission_status() {
 			LoadoutSubmit submit = kit != nullptr
 					? profile_loadout_submit(*kit, team, false)
 					: fresh_profile_loadout_submit(fresh, &weapons, team,
-							  loadout_fixed_class(protocol, kernel.mission.header.mission_type));
+							  loadout_fixed_class(state.host_owner.ctx.config.title,
+									  kernel.mission.header.mission_type));
 			if (alternate && kernel.local.inventory_valid)
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
 						weapons, &kernel.local.inventory, team,

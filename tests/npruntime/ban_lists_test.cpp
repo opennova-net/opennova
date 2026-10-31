@@ -30,6 +30,7 @@
 #include <iterator>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace fs = std::filesystem;
@@ -77,6 +78,7 @@ inmatch::NapiNPConnection slot(uint8_t number, const std::string &name, const st
 void test_files_and_console() {
 	TempDir dir;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.config.max_players = 8;
@@ -208,6 +210,7 @@ uint32_t join_punt_code(inmatch::NapiNPServerCtx &ctx, inmatch::NapiNPConnection
 
 void test_join_refusals() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.transport_mode = inmatch::NetworkType::NovaWorld;
@@ -287,6 +290,7 @@ void test_duplicate_pcid_refusal_and_kick() {
 	};
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		session(ctx, 1);
 		replication::UdpSessionTransport joiner(replication::UdpSessionTransport::Role::Host);
 		expect(session_join_punt_code(ctx, 3, joiner, join_with_pcid_cookie("p-dup-0001")) == 30,
@@ -325,6 +329,7 @@ void test_duplicate_pcid_refusal_and_kick() {
 	}
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		session(ctx, 0);
 		replication::UdpSessionTransport joiner(replication::UdpSessionTransport::Role::Host);
 		expect(session_join_punt_code(ctx, 3, joiner, join_with_pcid_cookie("P-DUP-0001")) == 0 &&
@@ -333,6 +338,7 @@ void test_duplicate_pcid_refusal_and_kick() {
 	}
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		session(ctx, 1);
 		ctx.np_protocol.connection_list[3].account.pcid = "P-DUP-0001";
 		replication::UdpSessionTransport joiner(replication::UdpSessionTransport::Role::Host);
@@ -342,6 +348,7 @@ void test_duplicate_pcid_refusal_and_kick() {
 	}
 	{
 		inmatch::NapiNPServerCtx ctx;
+		test_titles::jo_config(ctx.config);
 		session(ctx, 1);
 		replication::UdpSessionTransport joiner(replication::UdpSessionTransport::Role::Host);
 		expect(session_join_punt_code(ctx, 3, joiner, join_with_pcid_cookie("P-UNIQUE-01")) == 0,
@@ -360,6 +367,7 @@ void test_duplicate_pcid_refusal_and_kick() {
 //  KeyValueBuffer_FindValue @0x4C2A30 (Napi_StrCaseEqual @0x4C2A99)]
 void test_cookie_refusals() {
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 	ctx.is_in_session = 1;
 	ctx.transport_mode = inmatch::NetworkType::NovaWorld;

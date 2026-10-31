@@ -44,6 +44,7 @@
 
 #include "host_test_setup.h"
 #include "../common/test_expect.h"
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 namespace w = opennova::world;
@@ -67,6 +68,7 @@ struct JoinResult {
 
 JoinResult join_after_moving(bool mp_session) {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 16);
 	world->registry.configure_pool(3, 16);
 	world->rules.mp_session = mp_session;
@@ -77,7 +79,9 @@ JoinResult join_after_moving(bool mp_session) {
 	world->registry.spawn(3, start);
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.server_name = "DM";
 	settings.max_players = 2;
 	settings.game_type = 0;
@@ -125,12 +129,15 @@ public:
 
 void test_the_own_add_files_no_profile_row() {
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 16);
 	world->registry.configure_pool(3, 16);
 	world->rules.mp_session = true;
 	ns::LoopbackChannel loop;
 	inmatch::NapiNPServerCtx ctx;
+	test_titles::jo_config(ctx.config);
 	inmatch::GameConfig settings;
+	test_titles::jo_config(settings);
 	settings.server_name = "DM";
 	settings.max_players = 2;
 	settings.game_type = 0;

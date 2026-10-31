@@ -30,6 +30,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova::world;
 using namespace opennova::def;
@@ -114,6 +115,7 @@ CollisionModel vehicle_sound_test_wall() {
 
 struct Rig {
     World w;
+    bool w_jo = test_titles::jo_world(w);
     EntityHandle veh_h, drv_h;
     // `settled`: the buggy as its contact solve has left it standing (the contact
     // byte +0x2F2 set); false is the spawn's 0, a fresh vehicle ahead of its first
@@ -629,6 +631,7 @@ void test_physics_selector_gate() {
 void test_zero_player_speed_turns_at_min_rate() {
 	for (const VehicleFamily family : { VehicleFamily::Ground, VehicleFamily::Bike }) {
 		auto world = std::make_unique<World>();
+		test_titles::jo_world(*world);
 		world->registry.configure_pool(1, 4);
 		VehicleTraits t;
 		t.physics = 1;
@@ -669,6 +672,7 @@ void test_zero_player_speed_turns_at_min_rate() {
 //   out.fx -= 89066, out.fy -= 0, out.fz -= 0.
 void test_plat_terrain_probe_grazing_uses_wrapped_product() {
 	World world;
+	test_titles::jo_world(world);
 	std::vector<uint16_t> heightmap(64 * 64);
 	for (int z = 0; z < 64; ++z)
 		for (int x = 0; x < 64; ++x)
@@ -720,6 +724,7 @@ void test_plat_terrain_probe_grazing_uses_wrapped_product() {
 
 void test_simple_motors_and_contact() {
 	World world;
+	test_titles::jo_world(world);
 	world.registry.configure_pool(1, 8);
 	// Each hull carries the class init's brain: a brainless selector-zero hull's
 	// mover stops at its head (D-NET-433).
@@ -1448,6 +1453,7 @@ void test_vehicle_sound_extreme_ints_are_saturating() {
 //  kong line 94590]
 static void test_helo_waits_for_its_boarders() {
     World w;
+    test_titles::jo_world(w);
     w.registry.configure_pool(0, 8);
     w.registry.configure_pool(1, 4);
     AiSystem &ai = w.ai;

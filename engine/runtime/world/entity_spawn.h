@@ -25,8 +25,16 @@ int32_t max_health_with_difficulty(const World &world, const Entity &e);
 // player-table hp), the entity's definition taken as present.
 int32_t max_health_with_difficulty(const World &world, const Entity &e, int32_t hp);
 
+// The reset's two health words: the def's maximum (itemDef+0x17C, the word dfx2.exe's
+// reset stores) and the difficulty ceiling (max_health_with_difficulty, the word
+// Jointops.exe's raises to); TitleRules::spawn_reset_stores_def_health picks (DFX2-30).
+struct SpawnHealth {
+    int32_t def_max = 0;
+    int32_t ceiling = 0;
+};
+
 // [orig: Entity_ResetToSpawnState @0x4B9610] The reset: the spawn backup, the
-// gate and dead bits and the health raise; on a body, the motor reset and the
+// gate and dead bits and the health raise (dfx2.exe's store); on a body, the motor reset and the
 // spawn-pose leg (the state request, the twelve dual updates, the resolve and its
 // lift, the spawn effect) when its dead bit is clear; the corpse effect's
 // release; and the slice build and the body's list. Its callers: the NPC
@@ -34,9 +42,9 @@ int32_t max_health_with_difficulty(const World &world, const Entity &e, int32_t 
 // which clears the dead bit first) and the joiner's record respawn arm
 // (JoinerRole::land_local_respawn_arm, on a still-dead L).
 void entity_reset_to_spawn_state(World &world, Entity &e);
-// The same with the health raise's ceiling given; the form above takes
+// The same with the health words given; the form above takes the entity's def hp and
 // max_health_with_difficulty's (the deploy names its player row's hp).
-void entity_reset_to_spawn_state(World &world, Entity &e, int32_t health_ceiling);
+void entity_reset_to_spawn_state(World &world, Entity &e, const SpawnHealth &health);
 
 // Fresh NPC initialization after its ADM, definition and collision bindings.
 // [orig: Entity_InitOrganicAI @0x4BFCC0; warmup @0x4B8B20]

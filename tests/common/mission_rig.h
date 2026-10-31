@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include "title_fixture.h"
 
 namespace opennova::testrig {
 
@@ -70,7 +71,9 @@ public:
 	// The two roles a rig can run its ticks through (ADR 0043 d3); `host`
 	// aliases the host role's session state for the tests that read it.
 	inmatch::LocalRole local_role;
+	bool local_role_jo = test_titles::jo_controls(local_role);
 	inmatch::HostRole host_role;
+	bool host_role_jo = test_titles::jo_controls(host_role);
 	inmatch::ListenHostState &host = host_role.state;
 	inmatch::Role &role() { return listen_server ? static_cast<inmatch::Role &>(host_role) : local_role; }
 };

@@ -34,6 +34,7 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/world.h>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 using namespace opennova::world;
@@ -136,6 +137,7 @@ struct Rig {
     OcclusionWorld occlusion;
     mission::CollisionResolveState state;
     World w;
+    bool w_jo = test_titles::jo_world(w);
     EntityHandle building;
 
     Rig(const TempRoot &root, const Items &items, int32_t item_id) {
@@ -460,6 +462,7 @@ static void test_class_init_seeds_the_brain_floors() {
     OcclusionWorld occlusion;
     mission::CollisionResolveState state;
     auto owned = std::make_unique<World>();
+    test_titles::jo_world(*owned);
     World &w = *owned;
     w.registry.configure_pool(1, 4);
     Entity e;

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "../common/title_fixture.h"
 
 namespace {
 
@@ -73,6 +74,7 @@ int main() {
 	// detach, whose claimant leg takes the 0x20 arm for a carrier without PlayerControl
 	// (V-L5-s5 0a) [orig: Entity_DetachFromVehicle @0x4355F0 - @0x435765..0x435772].
 	auto world = std::make_unique<w::World>();
+	test_titles::jo_world(*world);
 	world->registry.configure_pool(0, 4);
 	world->registry.configure_pool(1, 4);
 	w::Entity gun_seed = item(w::kItemAttribEweap);

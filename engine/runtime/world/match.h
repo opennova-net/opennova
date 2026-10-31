@@ -34,7 +34,7 @@ struct MatchRules {
     // The rules of the session's title (title_rules.h): the built-in score table an absent
     // score_values selects (default_match_score_values) and the scoring knobs of DFX2-15. Unset
     // until the session sets it (inmatch configure_session_world); title() aborts while it is.
-    const TitleRules *title_rules = unset_title_rules();
+    const TitleRules *title_rules = nullptr;
     const TitleRules &title() const { return require_title_rules(title_rules, "MatchRules"); }
     uint32_t game_type = 0;
     uint32_t game_time_minutes =
@@ -339,7 +339,9 @@ enum class MatchGameplayEventKind : uint8_t {
 
 // A semantic objective transition plus the exact entity-state snapshot the
 // wire layer needs after the transition. Captured CTF flags can be gone
-// from the registry by the time the binding drains this record.
+// from the registry by the time the binding drains this record. A FlagCapture
+// record is the capture's 0x13 feed (and CTF's removal) alone: a non-CTF
+// capture's drop and definition-pose sync raise their own FlagDrop records.
 struct MatchGameplayEvent {
     MatchGameplayEventKind kind = MatchGameplayEventKind::FlagPickup;
     EntityHandle actor;
@@ -394,9 +396,12 @@ class Match {
     void drop_carried_object(World &world, EntityHandle player);
     // Re-sync a flag to its authored pose without a feed event or scoring: a
     // flag already AT that pose is left alone (no send); one displaced under
-    // 2 u keeps its position but re-publishes its 0x2F state; one displaced
-    // further snaps home, drops its ground link, and publishes. Returns true
-    // only for the snap. The 1 Hz carry-limit break is its caller here.
+    // 2 u keeps its position but rebuilds its proximity list and re-publishes
+    // its 0x2F state; one displaced further snaps home, takes the entity a
+    // downward ray meets as its ground, rebuilds its proximity list and
+    // publishes. Returns true only for the snap. Its callers: the 1 Hz
+    // carry-limit break, the own-flag arms, a non-CTF capture and the timeout
+    // return.
     // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 — equality return
     //  @0x43a9f8, near path @0x43aa3b..0x43aa7c, snap + ground raycast +
     //  send @0x43aa7d..0x43ab40]
@@ -611,10 +616,15 @@ class Match {
                     uint32_t cause_flags, bool victim_carried_flag);
     void ensure_objective_census(const World &world);
     CarryObjectiveState *carry_state(World &world, EntityHandle objective);
+    // [orig: Entity_AttachCarriedObject @0x43C130]: a Takeable carry, or a
+    // flag pickup's attach.
+    void attach_carried_object(World &world, Entity &carrier, Entity &carried);
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);
-    void record_flag_save(World &world, EntityHandle player, EntityHandle flag);
-    void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
-                          EntityHandle actor = EntityHandle{});
+    void record_flag_save(World &world, EntityHandle player, EntityHandle flag,
+                          const EntityPosition &touched_at);
+    // [orig: Server_BroadcastOverlayDeathEvent @0x50F5A0]: the timeout
+    // return's 0x1E event and 0x2F, after its definition-pose sync.
+    void record_flag_return(World &world, EntityHandle flag);
     void update_objective_proximity(const World &world);
     // Per slot team: the non-spectator players whose dead bit is clear and
     // whose last proximity mask holds bit 0 (the 4095 objective, a team-0 hill

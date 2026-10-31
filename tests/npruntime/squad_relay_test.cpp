@@ -26,6 +26,7 @@
 #include <iterator>
 #include <memory>
 #include <vector>
+#include "../common/title_fixture.h"
 
 using namespace opennova;
 
@@ -44,8 +45,10 @@ int failures = 0;
 // driving pool-0 entity slot + 4.
 struct Host {
 	inmatch::NapiNPServerCtx ctx;
+	bool ctx_jo = test_titles::jo_config(ctx.config);
 	std::deque<replication::LoopbackChannel> wires;
 	world::World world;
+	bool world_jo = test_titles::jo_world(world);
 
 	Host() {
 		ctx.is_authority = 1;
