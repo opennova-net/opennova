@@ -611,6 +611,9 @@ class Match {
                     uint32_t cause_flags, bool victim_carried_flag);
     void ensure_objective_census(const World &world);
     CarryObjectiveState *carry_state(World &world, EntityHandle objective);
+    // [orig: Entity_AttachCarriedObject @0x43C130]: a Takeable carry, or a
+    // flag pickup's attach.
+    void attach_carried_object(World &world, Entity &carrier, Entity &carried);
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);
     void record_flag_save(World &world, EntityHandle player, EntityHandle flag);
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,

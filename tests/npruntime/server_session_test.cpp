@@ -5561,7 +5561,7 @@ bool build_flag_overlay_scene(FlagOverlayScene &s, uint32_t game_type, int build
 	};
 	s.carried = flag(4095, 0);
 	s.loose = flag(4091, 128);
-	// The pickup's three writes (Match::record_flag_pickup) [orig:
+	// The pickup's three writes (Match::attach_carried_object) [orig:
 	// Entity_AttachCarriedObject @0x43C144 / @0x43C14A / @0x43C14F].
 	world::Entity *carried = s.world.registry.get(s.carried);
 	if (!expect(s.carried.slot() == 0 && s.loose.slot() == 128 && carried != nullptr,

@@ -582,20 +582,44 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     MatchPlayer *scorer = player(player_handle);
     Entity *carrier = world.registry.get(player_handle);
     Entity *flag = world.registry.get(flag_handle);
-    CarryObjectiveState *state = carry_state(world, flag_handle);
-    if (scorer == nullptr || carrier == nullptr || flag == nullptr || state == nullptr ||
+    if (scorer == nullptr || carrier == nullptr || flag == nullptr ||
         carrier->mounted_child.valid() || flag->primary_occupant.valid())
         return;
-
-    carrier->mounted_child = flag_handle;
-    flag->primary_occupant = player_handle;
-    flag->flags |= kEntityFlagCarried;
-    // The attach puts back the def's own update callback, ending a drop's
-    // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
-    flag->drop_motion = def_update_drop_motion(*flag);
-    state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
+    // The attach, then the pickup's scorer event 10.
+    // [orig: Entity_ProcessWaypointInteraction - Entity_TryAttachCarriedObject
+    //  @0x4AD944, Server_DispatchScoringEvent @0x4AD94B (@0x50C910:
+    //  GameEvent_ProcessScoring event 10 @0x50C938)]
+    attach_carried_object(world, *carrier, *flag);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
+}
+
+// The carry attach of any def: the link both ways, the carried (hidden) bit and
+// the object's scars cleared. The three flags then put back the def's own
+// update and raise the pickup feed with the return window; any other def's
+// sound reads dword_24E098C, which nothing writes (its one xref is that read),
+// so that carry is silent and sends nothing (the carrier's 0x0A tail carries
+// the link).
+// [orig: Entity_AttachCarriedObject @0x43C130 - the def @0x43C135, +0x268
+//  @0x43C144, Flags |= 1 @0x43C14A, +0x170 @0x43C14F,
+//  Scar_ClearEntriesByEntity @0x43C155, the flag ids @0x43C15A..0x43C172, the
+//  non-flag Sound_PlayAtPosition(dword_24E098C) @0x43C174..0x43C17E;
+//  Entity_AttachCarriedObject @0x43BF30, the sound @0x43BF74..0x43BF7E
+//  (dfx2.exe)]
+void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried) {
+    if (!carried.has_item_def)
+        return;
+    carrier.mounted_child = carried.handle;
+    carried.flags |= kEntityFlagCarried;
+    carried.primary_occupant = carrier.handle;
+    world.out.scars.clear_entity(carried.handle);
+    if (!is_flag(carried.item_id))
+        return;
+    // The attach puts back the def's own update callback, ending a drop's
+    // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
+    carried.drop_motion = def_update_drop_motion(carried);
+    if (CarryObjectiveState *state = carry_state(world, carried.handle))
+        state->return_ticks = static_cast<int32_t>(rules_.flag_return_ticks);
     // The 0x14 feed carries the flag's own words, read before the carry moves it: the
     // attach hands the sender the carrier and the flag, and the sender takes the x/y of
     // the second. [orig: Entity_AttachCarriedObject — push esi (the flag, its +0x1C4
@@ -603,15 +627,15 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     //  Server_BroadcastFlagPickupEvent @0x517460 — the flag's +4 / +8 @0x517481..0x517488, the
     //  carrier's pool index @0x517490]
     gameplay_events_.push_back({MatchGameplayEventKind::FlagPickup,
-                                player_handle,
-                                flag_handle,
-                                flag->position,
-                                flag->position,
-                                static_cast<uint8_t>(flag->flags),
-                                player_handle,
-                                flag->ground_target,
+                                carrier.handle,
+                                carried.handle,
+                                carried.position,
+                                carried.position,
+                                static_cast<uint8_t>(carried.flags),
+                                carrier.handle,
+                                carried.ground_target,
                                 false,
-                                static_cast<uint16_t>(flag->item_id)});
+                                static_cast<uint16_t>(carried.item_id)});
 }
 
 void Match::return_flag_home(World &world, EntityHandle flag_handle,
@@ -1775,10 +1799,39 @@ void Match::update_flag_objectives(World &world) {
         const bool move_callback = target != nullptr && target->has_item_def &&
             (target->item_attrib & kItemAttribMoveCallback) != 0 &&
             (target->item_attrib & kItemAttribPowerup) == 0;
-        if (match_player == nullptr || carrier == nullptr || !move_callback ||
-            (carrier->flags & (kEntityFlagDead | kEntityFlagPlayer)) !=
-                kEntityFlagPlayer ||
+        // The handler's head: the moving order, a target, a live toucher (the
+        // authority test is the caller's, World::update_all_entities).
+        // [orig: Entity_ProcessWaypointInteraction @0x4AD820 - MoveOrder & 8
+        //  @0x4AD834, the target @0x4AD846, Flags & 2 @0x4AD853; the same at
+        //  @0x4AD894..0x4AD8B5 (dfx2.exe)]
+        if (carrier == nullptr || !move_callback ||
+            (carrier->flags & kEntityFlagDead) != 0 ||
             (carrier->net_move_input & Entity::kMoveOrderMoving) == 0)
+            continue;
+        const bool player_class = (carrier->flags & kEntityFlagPlayer) != 0;
+
+        // A Takeable def, touched by a Player with empty hands, is carried off
+        // ahead of the id switch, whatever its id: the attach alone, so no
+        // pickup score, no 0x14 feed for a non-flag def and no sound. The
+        // attach's own gate refuses an object someone already carries; its
+        // out-of-session-or-authority test always passes here.
+        // [orig: Entity_ProcessWaypointInteraction - Flags & 0x100 @0x4AD85B,
+        //  mountedChild @0x4AD862, def+0x54 & 0x2000 @0x4AD86D,
+        //  Entity_TryAttachCarriedObject @0x4AD878 and the return @0x4AD883;
+        //  Entity_TryAttachCarriedObject @0x43C1F0 - the def @0x43C1F4, the
+        //  session/authority @0x43C1FA..0x43C20A, +0x170 @0x43C20C, the attach
+        //  @0x43C219; the same at @0x4AD8BB..0x4AD8D8 -> @0x43BFF0 (dfx2.exe)]
+        if (player_class && !carrier->mounted_child.valid() &&
+            (target->item_attrib & kItemAttribTakeable) != 0) {
+            if (!target->primary_occupant.valid())
+                attach_carried_object(world, *carrier, *target);
+            continue;
+        }
+        // Every arm of the id switch tests the Player bit first (the masked
+        // Flags in eax: 4093 @0x4AD8A1, 4091 @0x4AD8E9, 4095 @0x4AD92E); the
+        // flag and bay arms here score a Player's slot.
+        // [orig: Entity_ProcessWaypointInteraction - the switch @0x4AD89A]
+        if (match_player == nullptr || !player_class)
             continue;
 
         // Preserve resolver/candidate order. If one movement pass touches a

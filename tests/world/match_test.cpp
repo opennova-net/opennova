@@ -1284,6 +1284,169 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
     CHECK(carrier_entity->mounted_child == inert);
 }
 
+// A Takeable def (DFX2's "DF1 takeable notebook", `attrib: notarget takeable
+// Movecb`, is the Night Trap objective) touched by a moving Player with empty
+// hands is carried off ahead of the flag/bay id switch, whatever its id and
+// with no game-type gate: the link both ways, the carried bit, the scars
+// cleared, and nothing else (no pickup score, no feed, no sound), so the
+// mission's GroupHoldingGroup reads it at once.
+// [orig: Entity_ProcessWaypointInteraction @0x4AD85B..0x4AD883 ->
+//  Entity_TryAttachCarriedObject @0x43C1F0 -> Entity_AttachCarriedObject
+//  @0x43C130; @0x4AD8BB..0x4AD8D8 -> @0x43BFF0 -> @0x43BF30 (dfx2.exe);
+//  TriggerGroup_AnyMemberHoldingItemGroup @0x43c870]
+struct TakeableRig {
+    static constexpr int32_t kTakeableId = 9001; // an authored non-flag def
+    std::unique_ptr<World> world = std::make_unique<World>();
+    WaypointContactHarness contacts{*world};
+    EntityHandle carrier;
+    EntityHandle object;
+
+    explicit TakeableRig(int32_t object_id = kTakeableId) {
+        world->registry.configure_pool(0, 4);
+        world->registry.configure_pool(1, 4);
+        MatchRules flag_ball;
+        flag_ball.game_type = gt::kFlagBall;
+        flag_ball.score_values.emplace();
+        (*flag_ball.score_values)[11] = 7; // FLAGPICKUP: a pickup score would show
+        world->match.configure(flag_ball);
+        carrier = player(*world, 0, 1, "Carrier");
+        Entity *c = world->registry.get(carrier);
+        c->group_id = 1;
+        c->net_move_input = Entity::kMoveOrderMoving;
+        object = objective(*world, object_id, 0, {0.0f, 0.0f, 0.0f},
+                           kItemAttribMoveCallback | kItemAttribTakeable);
+        world->registry.get(object)->group_id = 4;
+        contacts.bind(object);
+    }
+    Entity &carrier_entity() { return *world->registry.get(carrier); }
+    Entity &object_entity() { return *world->registry.get(object); }
+    void touch_and_run() {
+        contacts.touch(*world, carrier, object);
+        run_match_frame(*world);
+    }
+};
+
+void test_takeable_contact_carries_any_def() {
+    {
+        TakeableRig rig;
+        World &world = *rig.world;
+        const uint64_t lease = rig.object_entity().registry_spawn_id;
+        CHECK(world.out.scars.ring_for(rig.object, lease) != nullptr);
+        CHECK(!world.commands.group_holding_group(1, 4));
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        CHECK(rig.object_entity().primary_occupant == rig.carrier);
+        CHECK((rig.object_entity().flags & kEntityFlagCarried) != 0);
+        CHECK(world.out.scars.find(rig.object) == nullptr);
+        CHECK(world.match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 0);
+        CHECK(world.match.player(rig.carrier)->stats[MatchStats::kPoints] == 0);
+        CHECK(world.match.drain_gameplay_events().empty());
+        // E10's GroupHoldingGroup(1, 4) reads the live link.
+        CHECK(world.commands.group_holding_group(1, 4));
+        CHECK(!world.commands.group_holding_group(1, 3));
+
+        // The death drop lets it go as retail's drop does any carried object:
+        // the link and the carried bit cleared, the 0x2F lane raised.
+        // [orig: Entity_DropCarriedObject @0x439df0 - the clears
+        //  @0x439e01..0x439e17, Server_SendDestructibleDeathPacket @0x439f34]
+        world.match.record_death(world, rig.carrier);
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+        CHECK((rig.object_entity().flags & kEntityFlagCarried) == 0);
+        CHECK(!world.commands.group_holding_group(1, 4));
+        const std::vector<MatchGameplayEvent> drop = world.match.drain_gameplay_events();
+        CHECK(drop.size() == 1 && drop[0].kind == MatchGameplayEventKind::FlagDrop &&
+              drop[0].objective == rig.object);
+    }
+    {
+        // A Player body with no match row carries too: the branch has no slot test.
+        TakeableRig rig;
+        rig.world->match.remove_player(*rig.world, rig.carrier);
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+    }
+    {
+        // Not moving: the handler's MoveOrder & 8 head. [orig: @0x4AD834]
+        TakeableRig rig;
+        rig.carrier_entity().net_move_input = 0;
+        rig.touch_and_run();
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+    }
+    {
+        // A dead toucher. [orig: Flags & 2 @0x4AD853]
+        TakeableRig rig;
+        rig.carrier_entity().flags |= kEntityFlagDead;
+        rig.touch_and_run();
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+    }
+    {
+        // No Player bit. [orig: Flags & 0x100 @0x4AD85B]
+        TakeableRig rig;
+        rig.carrier_entity().flags &= ~kEntityFlagPlayer;
+        rig.touch_and_run();
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(!rig.object_entity().primary_occupant.valid());
+    }
+    {
+        // Hands full: the branch needs an empty +0x268, and the id switch
+        // has no arm for the def. [orig: @0x4AD862; the switch @0x4AD89A]
+        TakeableRig rig;
+        const EntityHandle held = objective(*rig.world, TakeableRig::kTakeableId, 0,
+                                            {40.0f, 0.0f, 0.0f});
+        rig.carrier_entity().mounted_child = held;
+        rig.world->registry.get(held)->primary_occupant = rig.carrier;
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == held);
+        CHECK(!rig.object_entity().primary_occupant.valid());
+        CHECK((rig.object_entity().flags & kEntityFlagCarried) == 0);
+    }
+    {
+        // Someone already carries it: the attach's +0x170 test refuses, and
+        // the branch returns all the same. [orig: @0x43C20C; the return @0x4AD883]
+        TakeableRig rig;
+        const EntityHandle other = player(*rig.world, 1, 1, "Other");
+        rig.object_entity().primary_occupant = other;
+        rig.touch_and_run();
+        CHECK(!rig.carrier_entity().mounted_child.valid());
+        CHECK(rig.object_entity().primary_occupant == other);
+    }
+    for (const bool authority : {false, true}) {
+        // Off the authority the handler returns at its head. [orig: @0x4AD823]
+        TakeableRig rig;
+        rig.contacts.touch(*rig.world, rig.carrier, rig.object);
+        TickContext ctx;
+        ctx.world = rig.world.get();
+        ctx.logic_tick = rig.world->logic_tick;
+        ctx.is_authority = authority;
+        rig.world->update_all_entities(ctx);
+        CHECK((rig.carrier_entity().mounted_child == rig.object) == authority);
+    }
+    {
+        // A flag row that also carries Takeable takes this branch first: the
+        // attach with its own flag leg (the 0x14 feed), but no scorer event 10.
+        // [orig: Entity_AttachCarriedObject's flag ids @0x43C15A..0x43C197;
+        //  Server_DispatchScoringEvent only in the switch arm @0x4AD94B]
+        TakeableRig rig(4095);
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 0);
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kPoints] == 0);
+        const std::vector<MatchGameplayEvent> events = rig.world->match.drain_gameplay_events();
+        CHECK(events.size() == 1 && events[0].kind == MatchGameplayEventKind::FlagPickup);
+    }
+    {
+        // The same 4095 row without Takeable keeps the switch's scored pickup.
+        TakeableRig rig(4095);
+        rig.object_entity().item_attrib = kItemAttribMoveCallback;
+        rig.touch_and_run();
+        CHECK(rig.carrier_entity().mounted_child == rig.object);
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 1);
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kPoints] == 7);
+    }
+}
+
 // The entity update's own tail consumes the flag and bay touches its bodies'
 // movement resolves recorded, so the pickup lands in the frame that touched,
 // ahead of the next server tick. The handler returns at once off the
@@ -1848,6 +2011,7 @@ int main() {
     test_target_destroyed_shares_through_both_occupant_links();
     test_flag_me_keeps_retails_unreachable_score_arm();
     test_flag_contact_requires_the_retail_move_callback_gate();
+    test_takeable_contact_carries_any_def();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();
