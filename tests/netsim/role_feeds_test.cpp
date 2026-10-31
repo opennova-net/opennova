@@ -1172,6 +1172,18 @@ int main() {
 		CHECK(rows.size() == 3 && rows[2].wave_countdown == 42 && rows[2].occupants.size() == 2);
 		CHECK(rows.size() == 3 && rows[2].occupants.size() == 2 && rows[2].occupants[0].name == "Ace" &&
 				rows[2].occupants[1].name == "Bravo" && !rows[2].occupants[0].self);
+		// A bound roster slot with no name yet: the member's replica row names it (the entity's
+		// own Name, which the 0x0C name writes) [orig: UI_UpdateDeathScreenContent
+		// @0x553d5a..0x553d7f].
+		cs.roster[0].name.clear();
+		replication::ClientEntityState ace_row;
+		ace_row.handle = 3;
+		ace_row.display_name = "Ace's body";
+		cs.entities.push_back(ace_row);
+		CHECK(deploy_zone_rows(jv, reg, rows) && rows.size() == 3 && rows[2].occupants.size() == 2 &&
+				rows[2].occupants[0].name == "Ace's body" && rows[2].occupants[1].name == "Bravo");
+		cs.roster[0].name = "Ace";
+		cs.entities.pop_back();
 		// No bank slots, no rows (nothing is listed before the first 0x40 lands).
 		const replication::ClientMinimapState banks = cs.minimap;
 		cs.minimap = replication::ClientMinimapState();

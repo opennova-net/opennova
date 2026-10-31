@@ -1149,13 +1149,16 @@ bool joiner_in_match_ready(const RoleView &view, bool auto_deploy) {
 namespace {
 
 // A 0x6E wave member's name as the death screens read it, the member entity's Name (+0xF4):
-// the roster slot driving that pool-0 slot (the player entity's name IS the roster name), else
-// the replica row's [orig: UI_UpdateDeathScreenContent @0x553d5a..0x553d7f; sub_551450
-// @0x551be8 / @0x551bfd (dfx2.exe)].
+// the roster slot driving that pool-0 slot (the player entity's name IS the roster name) when
+// it holds one, else the replica row's, which a joiner's 0x0C name writes [orig:
+// UI_UpdateDeathScreenContent @0x553d5a..0x553d7f; the 0x0C name @0x42e867..0x42e8ea]
+// [orig: sub_551450 @0x551be8 / @0x551bfd (dfx2.exe)].
 std::string wave_member_name(const replication::ClientState &cs, uint16_t member) {
 	const world::EntityHandle mh{ member };
 	for (const replication::ClientRosterSlot &slot : cs.roster) {
-		if (slot.bound && slot.entity_slot == mh.slot() && mh.pool() == 0) return slot.name;
+		if (!slot.bound || slot.entity_slot != mh.slot() || mh.pool() != 0) continue;
+		if (!slot.name.empty()) return slot.name;
+		break;
 	}
 	if (const replication::ClientEntityState *row_state = cs.find(member))
 		return row_state->display_name;
