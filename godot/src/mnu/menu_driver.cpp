@@ -757,6 +757,13 @@ bool MenuDriver::fill_deploy_spawn_table(const Ref<Simulation> &p_sim, Object *p
 			opennova::world::build_deploy_table_rows(team, zones));
 }
 
+Vector2i MenuDriver::deploy_table_click(int p_id, int p_row, int p_state,
+		bool p_double_click) const {
+	const opennova::world::DeployTableClick click =
+			opennova::world::deploy_table_click(runtime_, p_id, p_row, p_state, p_double_click);
+	return Vector2i(click.pan_zone_index, click.pick_value);
+}
+
 // ---- activation / actions --------------------------------------------------------
 
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
@@ -1243,6 +1250,8 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::set_deploy_list_items);
 	ClassDB::bind_method(D_METHOD("fill_deploy_spawn_table", "sim", "hud", "gametext"),
 			&MenuDriver::fill_deploy_spawn_table);
+	ClassDB::bind_method(D_METHOD("deploy_table_click", "id", "row", "state", "double_click"),
+			&MenuDriver::deploy_table_click);
 	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),
 			&MenuDriver::table_cell_value);
 	ClassDB::bind_method(D_METHOD("table_selected_rows", "id"), &MenuDriver::table_selected_rows);

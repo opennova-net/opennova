@@ -303,6 +303,7 @@ void DeathMapView::fit(const DeathMapFitInput &in) {
 			view.pan_y = 0;
 			target_x = 0;
 			target_y = 0;
+			zoom_ease = false;
 		}
 	};
 	if (!in.shroud_present) {
@@ -360,6 +361,16 @@ void DeathMapView::ease_frame() {
 	//  (target - pan) >> 3 on both axes]
 	view.pan_x = io::bam_add(view.pan_x, io::bam_sub(target_x, view.pan_x) >> 3);
 	view.pan_y = io::bam_add(view.pan_y, io::bam_sub(target_y, view.pan_y) >> 3);
+	// [orig: `if (dword_25A3988)`, `flt_25A39B8 > 0.80000001` -> x 0.95999998
+	//  @0x5547b9..0x5547d8]
+	if (zoom_ease && view.zoom > 0.8f)
+		view.zoom = pc24(static_cast<double>(view.zoom) * static_cast<double>(0.96f));
+}
+
+void DeathMapView::table_pan(int32_t dx, int32_t dy) {
+	target_x = dx;
+	target_y = dy;
+	zoom_ease = true;
 }
 
 DeathMapFrame DeathMapView::render(const MapViewRect &rect, int32_t scaled_800,
@@ -400,8 +411,10 @@ bool DeathMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t b
 		view.right_drag = false; // [orig: @0x55457e]
 		return false;
 	case MapViewEvent::kWheel:
-		// [orig: DeathScreen_ZoomStep(event, 0, g_MouseState.wheelRemainder) @0x5545c6]
+		// [orig: DeathScreen_ZoomStep(event, 0, g_MouseState.wheelRemainder) @0x5545c6,
+		//  dword_25A3988 = 0 @0x5545ce]
 		view.zoom_step(wheel > 0 ? 1 : (wheel < 0 ? -1 : 0));
+		zoom_ease = false;
 		return false;
 	case MapViewEvent::kMove:
 		if (view.left_drag && (buttons & kMapViewButtonLeft) != 0) {
@@ -414,7 +427,9 @@ bool DeathMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t b
 			target_x = io::bam_add(target_x, dx);
 			target_y = io::bam_add(target_y, dy);
 		} else if (view.right_drag && (buttons & kMapViewButtonRight) != 0) {
+			// [orig: dword_25A3988 = 0 on every arm of the clamp @0x5544cb / @0x5544f6]
 			view.drag_zoom(x, y);
+			zoom_ease = false;
 		} else {
 			view.left_drag = false; // [orig: @0x554510..0x554517]
 			view.right_drag = false;

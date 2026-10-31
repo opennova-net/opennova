@@ -38,6 +38,8 @@ extends Node
 const MENU_FILE := "death.mnu"
 const MENU_SCREEN := "DEATH"
 const SPAWN_LIST := "SPAWNPOINTS_LIST"
+# The table a title whose DEATH screen picks the loadout lists its spawn points in.
+const SPAWN_TABLE := "SPAWNPOINTS_TABLE"
 # The custom-draw MAP window and the shroud window whose authored size the
 # show-time zoom fit reads (hud/hud_map_view.h DeathMapView::fit).
 const MAP_WIDGET := "MAP"
@@ -390,6 +392,21 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 		close()
 
 
+# The spawn table's cell event, for a title whose DEATH screen picks the loadout: a press on a
+# zone's row pans the map to it, a double click sends that row's pick (engine
+# world::deploy_table_click carries the witness).
+func _on_table_cell_clicked(id: int, widget_name: String, row: int, _column: int, state: int,
+		_cell_value: int, double_click: bool) -> void:
+	if widget_name.nocasecmp_to(SPAWN_TABLE) != 0 or _driver == null or not _picks_loadout():
+		return
+	var click := _driver.deploy_table_click(id, row, state, double_click)
+	var map_window := get_map_window()
+	if click.x >= 0 and map_window != null:
+		map_window.pan_to_spawn_zone(click.x)
+	if click.y != -1:
+		send_pick(click.y)
+
+
 func _populate_spawn_list(sim: Simulation) -> void:
 	if _driver == null:
 		return
@@ -567,7 +584,8 @@ func _ensure_menu() -> bool:
 			func(driver: MenuDriver) -> void:
 				_register_text_tables(root)
 				driver.widget_value_changed.connect(_on_widget_value_changed)
-				driver.widget_activated.connect(_on_widget_activated))
+				driver.widget_activated.connect(_on_widget_activated)
+				driver.table_cell_clicked.connect(_on_table_cell_clicked))
 	if surface == null:
 		return false
 	_frame = surface.frame

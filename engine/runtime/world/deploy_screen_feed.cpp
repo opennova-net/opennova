@@ -5,6 +5,8 @@
 #include <runtime/hud/hud_vehicle_panel.h>
 #include <runtime/menu/list_sort.h>
 #include <runtime/menu/menu_runtime.h>
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -433,6 +435,31 @@ bool fill_deploy_spawn_table(menu::MenuRuntime &menu, const std::vector<DeployTa
 	if (scroll_top >= 0 && scroll_top < menu.table_row_count(table))
 		menu.set_scroll_row(table, scroll_top);
 	if (selected_row >= 0) menu.table_set_row_selected(table, selected_row, true);
+	return true;
+}
+
+DeployTableClick deploy_table_click(const menu::MenuRuntime &menu, int table, int row,
+		int32_t row_state, bool double_click) {
+	DeployTableClick click;
+	if (row_state == menu::kTableRowLocked) return click;
+	const std::optional<int32_t> value = menu.table_cell_record(table, row, 1);
+	if (!value.has_value()) return click;
+	if (!double_click) {
+		if (*value - 1 >= 0) click.pan_zone_index = *value - 1;
+	} else if (*value != -1) {
+		click.pick_value = *value;
+	}
+	return click;
+}
+
+bool deploy_table_pan_target(const World &world, const SpawnZoneRegistry &zones, int index,
+		int32_t &dx, int32_t &dy) {
+	if (index < 0 || index >= static_cast<int>(zones.entries.size())) return false;
+	const Entity *zone = world.registry.get(zones.entries[static_cast<size_t>(index)]);
+	const Entity *local = world.registry.get(world.cached.local_player);
+	if (zone == nullptr || local == nullptr) return false;
+	dx = io::bam_sub(zone->position.x.q16, local->position.x.q16);
+	dy = io::bam_sub(zone->position.y.q16, local->position.y.q16);
 	return true;
 }
 

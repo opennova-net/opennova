@@ -11,6 +11,7 @@
 #include <base/io/tick_rate.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/world.h>
 
 using namespace godot;
@@ -272,6 +273,18 @@ void MapViewWindow::hover_test_(const Vector2i &p_design_point) {
 	for (size_t i = 0; i < anchors.size(); ++i) table.entries[i].hover = hover[i];
 }
 
+bool MapViewWindow::pan_to_spawn_zone(int p_index) {
+	Simulation *sim = sim_();
+	if (view_kind_ != VIEW_DEATH || sim == nullptr || !sim->kernel_) return false;
+	int32_t dx = 0, dy = 0;
+	if (!opennova::world::deploy_table_pan_target(sim->kernel_->world,
+				sim->deploy_zone_registry(), p_index, dx, dy))
+		return false;
+	state_->death.table_pan(dx, dy);
+	queue_redraw();
+	return true;
+}
+
 void MapViewWindow::advance_frame() {
 	if (view_kind_ == VIEW_DEATH) state_->death.ease_frame();
 	queue_redraw();
@@ -432,6 +445,7 @@ void MapViewWindow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("push_map_event", "event", "position", "buttons", "wheel"),
 			&MapViewWindow::push_map_event);
 	ClassDB::bind_method(D_METHOD("advance_frame"), &MapViewWindow::advance_frame);
+	ClassDB::bind_method(D_METHOD("pan_to_spawn_zone", "index"), &MapViewWindow::pan_to_spawn_zone);
 	ClassDB::bind_method(D_METHOD("store_waypoint_click", "design_point"),
 			&MapViewWindow::store_waypoint_click);
 	ClassDB::bind_method(D_METHOD("confirm_waypoint", "name"), &MapViewWindow::confirm_waypoint);

@@ -629,7 +629,39 @@ void test_command_waypoints() {
 
 } // namespace
 
+// The zoom ease: the SPAWNPOINTS_TABLE press sets the pan target and the ease's word, under
+// which a zoom above 0.8 takes x0.96 a frame; the right drag, the wheel and a fit landing on the
+// ceiling clear the word.
+// [orig: DeathScreen_UpdateShroudReveal @0x5547b9..0x5547d8; CMap_OverlayInputHandler
+//  @0x5544cb / @0x5545ce; DeathScreen_UpdateUI @0x55340c] [orig: sub_550CF0 @0x550e9f..0x550eb1;
+//  sub_552770 @0x552820..0x552845 (dfx2.exe)]
+void test_death_zoom_ease() {
+    DeathMapView v;
+    v.on_load();
+    v.ease_frame();
+    CHECK(v.view.zoom == 4.0f && !v.zoom_ease); // no word, no ease
+    v.table_pan(8 * kWu, -16 * kWu);
+    CHECK(v.zoom_ease && v.target_x == 8 * kWu && v.target_y == -16 * kWu);
+    v.ease_frame();
+    CHECK(v.view.zoom == static_cast<float>(4.0 * static_cast<double>(0.96f)));
+    CHECK(v.view.pan_x == (8 * kWu >> 3) && v.view.pan_y == (-16 * kWu >> 3));
+    for (int i = 0; i < 200; ++i) v.ease_frame();
+    CHECK(v.view.zoom <= 0.8f && v.view.zoom > 0.8f * 0.96f);
+    v.on_event(MapViewEvent::kWheel, 0, 0, 0, 1);
+    CHECK(!v.zoom_ease);
+    v.table_pan(0, 0);
+    v.render(death_rect(), 800, 0, 0);
+    v.on_event(MapViewEvent::kRightDown, 100, 100, 0, 0);
+    v.on_event(MapViewEvent::kMove, 101, 100, kMapViewButtonRight, 0);
+    CHECK(!v.zoom_ease);
+    v.table_pan(0, 0);
+    v.view.zoom = 10.0f;
+    v.fit(DeathMapFitInput{});
+    CHECK(!v.zoom_ease);
+}
+
 int main() {
+    test_death_zoom_ease();
     test_integer_pow();
     test_design_to_device();
     test_death_load();

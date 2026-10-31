@@ -140,13 +140,20 @@ struct DeathMapFitInput {
 
 // The DEATH map's state machine (the 0x25A39xx globals).
 // [orig: flt_25A39B8 zoom; dword_25A39B0/B4 pan; dword_25A3990/398C the pan
-//  target; byte_25A39A4/A5 the drag latches; dword_25A39A8/AC the last mouse
-//  point; dword_25A3998/399C the window size; flt_25A3994 the pixel ratio;
-//  dword_25A39BC the init latch]
+//  target; dword_25A3988 the zoom ease; byte_25A39A4/A5 the drag latches;
+//  dword_25A39A8/AC the last mouse point; dword_25A3998/399C the window size;
+//  flt_25A3994 the pixel ratio; dword_25A39BC the init latch. dfx2.exe's
+//  twins: flt_25A1F68, dword_25A1F60/64, dword_25A1F40/3C, dword_25A1F38,
+//  byte_25A1F54/55, dword_25A1F58/5C, dword_25A1F48/4C, flt_25A1F44,
+//  dword_25A1F6C (dfx2.exe)]
 struct DeathMapView {
 	MapViewPan view;
 	int32_t target_x = 0;
 	int32_t target_y = 0;
+	// The zoom ease's word: the SPAWNPOINTS_TABLE press sets it (table_pan); the right drag,
+	// the wheel and a fit that lands on the ceiling clear it. Jointops.exe's has no setter:
+	// its DEATH screen registers no table handler, so its ease never runs.
+	bool zoom_ease = false;
 	bool initialized = false;
 
 	// The screen's load event: once per load, the first-ever load seeds zoom
@@ -168,13 +175,17 @@ struct DeathMapView {
 	//  @0x54efd8]
 	void fit(const DeathMapFitInput &in);
 	// The per-main-frame ease: the pan moves one eighth of the way to the
-	// target (arithmetic shift) every frame the menu scene runs. The zoom
-	// ease beside it keys on dword_25A3988, which every writer sets to 0 —
-	// dead code, not ported.
+	// target (arithmetic shift) every frame the menu scene runs; while the
+	// zoom ease's word is set, a zoom above 0.8 takes x0.96 a frame.
 	// [orig: DeathScreen_UpdateShroudReveal @0x554730 — @0x554784..0x5547b4,
-	//  the dead zoom ease @0x5547ad..0x5547d8; per frame from
-	//  UI_ProcessMenuScreenFrame @0x54e67c]
+	//  the zoom ease @0x5547ad..0x5547d8; per frame from
+	//  UI_ProcessMenuScreenFrame @0x54e67c] [orig: sub_552770
+	//  @0x5527eb..0x552845, flt_7C5DCC 0.8, flt_7D3EF0 0.96 (dfx2.exe)]
 	void ease_frame();
+	// The SPAWNPOINTS_TABLE press on a zone's row: the pan target is the zone less the local
+	// player (world::deploy_table_pan_target) and the zoom ease's word is set.
+	// [orig: sub_550CF0 @0x550e9f..0x550eb1 (dfx2.exe)]
+	void table_pan(int32_t dx, int32_t dy);
 	// Event 1: stamp the window and hand back the view the pass draws.
 	// [orig: CMap_OverlayInputHandler @0x554332..0x5543b7]
 	DeathMapFrame render(const MapViewRect &rect, int32_t scaled_800, int32_t player_x,

@@ -323,6 +323,30 @@ std::vector<DeployTableRow> build_deploy_table_rows(
 //  CTableWnd_SetRowSelected @0x551d53 (dfx2.exe)]
 bool fill_deploy_spawn_table(menu::MenuRuntime &menu, const std::vector<DeployTableRow> &rows);
 
+class World;
+struct SpawnZoneRegistry;
+// The table's cell event (0x8000001) on a data row whose state is not 1 (locked), by its press
+// form, both reading column 1's cell record: a press (0x1000002) whose value less one is 0 or
+// more pans the map to that SpawnZoneList index; a double click's second press (0x1000004)
+// whose value is not -1 queues that value as the deploy pick (input 12). -1: none. A row with
+// no column-1 record (a table of one column) does nothing.
+// [orig: sub_550CF0 @0x550cf0 - the event @0x550d1a, the forms @0x550e44..0x550e52, the state
+//  test @0x550e5d, CTableWnd_GetCellRecord @0x550e73 / @0x550ec8, the pan arm
+//  @0x550e7d..0x550e91, Input_QueueEvent(12, value) @0x550ee2 (dfx2.exe)]
+struct DeployTableClick {
+	int pan_zone_index = -1;
+	int32_t pick_value = -1;
+};
+DeployTableClick deploy_table_click(const menu::MenuRuntime &menu, int table, int row,
+		int32_t row_state, bool double_click);
+// The map's pan target for a SpawnZoneList index: the zone entity's position less the local
+// player's, x and y (16.16). False past the list, for a zone the world no longer holds, or with
+// no local player.
+// [orig: sub_550CF0 - SpawnZoneList_GetByIndex @0x550e87 (index < g_SpawnZoneCount
+//  @0x43b73a), the deltas @0x550e93..0x550eb1 (dfx2.exe)]
+bool deploy_table_pan_target(const World &world, const SpawnZoneRegistry &zones, int index,
+		int32_t &dx, int32_t &dy);
+
 // Both instruction widgets and the permanent-death status pair. A secured
 // spawn leaves the first widget's prior text intact and hides the second;
 // the later RESPawn1 assignment overwrites the intermediate RESPawn2 text.

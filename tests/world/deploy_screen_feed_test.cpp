@@ -500,6 +500,23 @@ void test_spawn_table_fill() {
 	// A scroll top past the new count is not put back (the clear left 0).
 	rt.set_scroll_row(table, 9);
 	CHECK(fill_deploy_spawn_table(rt, rows) && rt.scroll_row(table) == 0);
+	// The cell event: a press on a zone's row pans to its index, on the Default row nothing; a
+	// double click picks the row's column-1 value, 0 for the Default row; a locked row does
+	// nothing, nor a row with no column-1 record.
+	// [orig: sub_550CF0 @0x550cf0 - @0x550e5d..0x550ee2 (dfx2.exe)]
+	CHECK(fill_deploy_spawn_table(rt, rows));
+	DeployTableClick click = deploy_table_click(rt, table, 2, menu::kTableRowDefault, false);
+	CHECK(click.pan_zone_index == 2 && click.pick_value == -1);
+	click = deploy_table_click(rt, table, 0, menu::kTableRowSelected, false);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
+	click = deploy_table_click(rt, table, 0, menu::kTableRowSelected, true);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == 0);
+	click = deploy_table_click(rt, table, 1, menu::kTableRowDefault, true);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == 1);
+	click = deploy_table_click(rt, table, 1, menu::kTableRowLocked, true);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
+	click = deploy_table_click(rt, table, 9, menu::kTableRowDefault, true);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
 	mnu::Document none = death_document();
 	none.screens[0].roots[0].children.erase(none.screens[0].roots[0].children.begin());
 	menu::MenuRuntime other;
@@ -507,10 +524,32 @@ void test_spawn_table_fill() {
 	CHECK(!fill_deploy_spawn_table(other, rows));
 }
 
+// The press's pan target: the zone entity's position less the local player's, x and y; none
+// past the list or without the local player [orig: sub_550CF0 @0x550e87..0x550eb1 (dfx2.exe)].
+void test_spawn_table_pan_target() {
+	World w;
+	w.registry.configure_pool(0, 2);
+	w.registry.configure_pool(2, 2);
+	Entity zone;
+	zone.position.x.q16 = 50 << 16;
+	zone.position.y.q16 = 70 << 16;
+	SpawnZoneRegistry reg;
+	reg.entries.push_back(w.registry.spawn(2, zone));
+	int32_t dx = 0, dy = 0;
+	CHECK(!deploy_table_pan_target(w, reg, 0, dx, dy)); // no local player
+	Entity body;
+	body.position.x.q16 = 10 << 16;
+	body.position.y.q16 = 90 << 16;
+	w.cached.local_player = w.registry.spawn(0, body);
+	CHECK(deploy_table_pan_target(w, reg, 0, dx, dy) && dx == (40 << 16) && dy == -(20 << 16));
+	CHECK(!deploy_table_pan_target(w, reg, 1, dx, dy) && !deploy_table_pan_target(w, reg, -1, dx, dy));
+}
+
 int main() {
 	test_loadout_picker_gate();
 	test_spawn_table_rows();
 	test_spawn_table_fill();
+	test_spawn_table_pan_target();
 	test_list_items_are_the_page_bytes();
 	test_rows_are_the_page_bytes_past_z();
 	test_shroud_reveal_and_refresh();
