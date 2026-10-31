@@ -372,6 +372,9 @@ constexpr RequestField kFields[] = {
 			"A server-generated encoded lobby file to include in this build or export." },
 	{ F::VersionFile, "version_file", J::String,
 			"A server-generated version.txt to include in this expansion's build or export." },
+	{ F::Release, "release", J::Boolean,
+			"An export a release packs (the service's release build): a file it ships under a name the stock "
+			"updater's command file cannot carry refuses it (build.update_name), which any other build packs." },
 	{ F::Lobby, "lobby", J::String,
 			"An existing compatible NovaWorld lobby for a new game, by slug." },
 	{ F::NewLobbyName, "new_lobby_name", J::String,

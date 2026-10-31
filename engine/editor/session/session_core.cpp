@@ -1581,7 +1581,7 @@ OperationOutcome SessionCore::absorb_base_export(BaseExportOperation &exported) 
 	hold_for_base();
 	const BuildAfterBase &after = exported.after();
 	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true,
-				after.gate_tag_file, after.version_file);
+				after.gate_tag_file, after.version_file, after.release);
 	// A game you own's expansion made as its base was exported goes on to import its own files (the export done
 	// or failed: they come from the game install).
 	start_stock_import();
@@ -1740,7 +1740,7 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
                               const ExportIntent &exported, bool panel, bool base_checked,
-		const std::string &gate_tag_file, const std::string &version_file) {
+		const std::string &gate_tag_file, const std::string &version_file, bool release) {
 	if (intent.wanted && play().refused(intent)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
 	// The lobby file the build ships found again as it starts: the cache as it is now on disk.
@@ -1750,6 +1750,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		target.gate_tag_file = gate_tag_file;
 	if (!version_file.empty())
 		target.version_file = version_file;
+	// A release's export (the service's build worker): a name its command file cannot carry refuses it.
+	target.release = release;
 	if (!view_.project.document->novaworld.empty() && target.gate_tag_file.empty()) {
 		novaworld().refresh_lobby();
 		refuse_now(CoreFinding::BuildRead,
@@ -1769,6 +1771,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		after.panel = panel;
 		after.gate_tag_file = gate_tag_file;
 		after.version_file = version_file;
+		after.release = release;
 		if (check_base_export(after)) {
 			outcome_.operation = operations_.status().id;
 			build_reports_ = panel;

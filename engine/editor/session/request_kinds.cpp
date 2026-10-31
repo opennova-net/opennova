@@ -118,7 +118,7 @@ void serve_play(SessionCore &core, const EditorRequest &request) {
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "export it"))
 		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir }, true, false, request.gate_tag_file,
-		                 request.version_file);
+		                 request.version_file, request.release);
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
@@ -679,8 +679,9 @@ constexpr RequestKindRow kRows[] = {
 			"stamp of its files the build was planned on (sources). The "
 			"folder is replaced only when missing, empty or an export of this project (export.folder). "
 			"An operation (the outcome names it); a build running already serves it and exports once it "
-			"lands. rehash: every file read again.")
-			.takes(request_params({}, { F::ExportDir, F::Rehash, F::GateTagFile, F::VersionFile }))
+			"lands. rehash: every file read again. release: the export a release packs, refused for a file whose "
+			"name its command file cannot carry (build.update_name).")
+			.takes(request_params({}, { F::ExportDir, F::Rehash, F::GateTagFile, F::VersionFile, F::Release }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Export", "Save all and export")
 			.acts_on_saved()

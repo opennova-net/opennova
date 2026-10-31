@@ -396,8 +396,10 @@ bool Build::export_to(
 						  gate_tag_file },
 					"the export of " + what + "'s base", why))
 		return false;
+	// The export the package is built from (--release): a file it ships under a name the stock updater's
+	// command file cannot carry refuses it here (build.update_name), named, before the package is built.
 	std::vector<std::string> argv = { tools_.project_tool, "export", laid.dir, "--out", out,
-		"--gate-tag-file", gate_tag_file };
+		"--gate-tag-file", gate_tag_file, "--release" };
 	if (!version_file.empty())
 		argv.insert(argv.end(), { "--version-file", version_file });
 	return tool(argv, "the export of " + what, why);

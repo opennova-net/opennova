@@ -360,6 +360,7 @@ struct EditorRequest {
 	std::string export_dir;
 	std::string gate_tag_file; // already encoded, supplied by the service's build worker
 	std::string version_file;  // an expansion's version.txt, supplied by the service's build worker
+	bool release = false;      // an export a release packs (the service's build worker): BuildTarget::release
 	std::string lobby;
 	std::string new_lobby_name;
 	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).
@@ -519,7 +520,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.cancel == b.cancel && a.terrain_view == b.terrain_view && a.server == b.server &&
 			a.username == b.username && a.password == b.password && a.project_key == b.project_key &&
 			a.message == b.message && a.resolution == b.resolution && a.version == b.version &&
-			a.revision == b.revision && a.visibility == b.visibility && a.base_key == b.base_key;
+			a.revision == b.revision && a.visibility == b.visibility && a.base_key == b.base_key &&
+			a.release == b.release;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

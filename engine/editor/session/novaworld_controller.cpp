@@ -22,6 +22,7 @@
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/session/base_setup.h>
 #include <editor/session/disk_watch.h>
 #include <editor/session/editor_preferences.h>
@@ -924,6 +925,23 @@ void NovaWorldController::release(const EditorRequest &request) {
 	if (release_.started()) {
 		refuse("A release is being asked for already.");
 		return;
+	}
+	// The release's build would be refused for a file it ships under a name its command file cannot carry
+	// (build.update_name, the service's export --release): said here, by the same rule, before the service is
+	// asked, of the project as it stands (the revision the service builds is the one pushed).
+	if (const ProjectView &project = core_.view().project; project.open && project.scan) {
+		const std::vector<Diagnostic> unshippable =
+				release_name_findings(*project.scan, project.document->expansion.name);
+		if (!unshippable.empty()) {
+			std::string names;
+			for (size_t i = 0; i < unshippable.size() && i < 3; ++i)
+				names += (i ? ", " : "") + unshippable[i].asset;
+			if (unshippable.size() > 3)
+				names += " and " + std::to_string(unshippable.size() - 3) + " more";
+			refuse("A release cannot ship " + names + ": " + unshippable.front().message +
+					" Problems lists each (build.update_name).");
+			return;
+		}
 	}
 	release_server_ = account_.server;
 	release_key_ = view.key;

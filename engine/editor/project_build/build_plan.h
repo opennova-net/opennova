@@ -61,6 +61,11 @@ struct BuildTarget {
 	// An expansion's version.txt the service generated (its release's line, the CRC a joiner must
 	// match): cached like gt.ssc, never part of the source scan; "" none. A base game has none.
 	std::string version_file;
+	// The build a release packs (the service's release build, `opennova-project export --release`): every file
+	// it ships rides the stock updater's command file, so a name that file cannot carry refuses it
+	// (build.update_name, an error). Any other build (Play, Build, Export) packs such a file, the game reading it
+	// by any name, the finding a note.
+	bool release = false;
 	bool is_expansion() const { return !expansion.empty(); }
 };
 
@@ -119,13 +124,18 @@ std::vector<Diagnostic> plan_blockers(const ProjectPaths &paths, const AssetScan
 // The plan's own findings over the scan alone, which plan_build adds to the gate it reads (each one the gate
 // holds already it leaves): an archive the project holds (refused), a player's own file (left out), a
 // NovaWorld screen of a name no archive holds (left out: the game never reads it), a name no archive can
-// store (refused), a name a release's command file cannot carry (refused, build.update_name: the stock
-// updater's row rule, update::command_name_refusal). The Problems rows hold them in the gate
-// (project/project_findings.h), so a build
+// store (refused), a file it ships under a name a release's command file cannot carry (build.update_name:
+// the stock updater's row rule, update::command_name_refusal; a note here, an error only in a release's
+// build, BuildTarget::release). The Problems rows hold them in the gate (project/project_findings.h), so a build
 // is refused only for rows Problems shows and marks, before any build.
 // `expansion` the project's own (its name, "" for a standalone project): where it builds a file, so which
 // names an archive must store (ADR 0046 S16).
 std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::string &expansion = std::string());
+// The files a release of the project (as the expansion `expansion`, "" for the standalone game) would ship
+// under a name its command file cannot carry, each build.update_name as a release's build refuses it (an
+// error): what Build > Release... refuses before it asks the service, by the rule the service's release build
+// (BuildTarget::release) and opennova-update-tool's writer refuse it by.
+std::vector<Diagnostic> release_name_findings(const AssetScan &scan, const std::string &expansion = std::string());
 // Where a build of the project (as the expansion `expansion`, "" for the standalone game) puts a file, in a
 // sentence, from the decision the plan makes: its own finding on the file (plan_file_finding: an archive it
 // refuses, a player's file it leaves out, a name no archive stores), else its placement (the archive it
