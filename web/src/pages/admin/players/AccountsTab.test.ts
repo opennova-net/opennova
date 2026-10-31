@@ -2,6 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountsTab from './AccountsTab.vue';
 import { fetchOnline } from '../../../api/online';
+import type { SessionUser } from '../../../api/session';
+import { refreshSession } from '../../../composables/useSession';
 import { createUserAdmin, listUsers, registerUser } from '../../../api/users';
 import { userEntry } from '../../../test/adminFixtures';
 import { onlinePlayer, onlineResponse } from '../../../test/onlineFixtures';
@@ -10,6 +12,15 @@ import type { UserEntitlementSummary } from '../../../types/users';
 
 vi.mock('../../../api/users', () => ({ listUsers: vi.fn(), createUserAdmin: vi.fn(), registerUser: vi.fn() }));
 vi.mock('../../../api/online', () => ({ fetchOnline: vi.fn() }));
+
+// The session /api/me answers: biggy, who sees billing, on an account the
+// list does not hold, unless a test says.
+const BIGGY: SessionUser = { id: 900, username: 'biggy', role: 'admin' };
+const session = vi.hoisted(() => ({ user: null as SessionUser | null }));
+vi.mock('../../../api/session', async (original) => ({
+  ...(await original<typeof import('../../../api/session')>()),
+  me: vi.fn(async () => ({ ok: true, value: session.user })),
+}));
 
 const list = vi.mocked(listUsers);
 const online = vi.mocked(fetchOnline);
@@ -63,8 +74,10 @@ function shownNames(wrapper: Awaited<ReturnType<typeof mountTab>>['wrapper']) {
 }
 
 describe('AccountsTab', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    session.user = BIGGY;
+    await refreshSession();
     list.mockResolvedValue({ ok: true, value: USERS });
     online.mockResolvedValue({ ok: true, value: onlineResponse([onlinePlayer('Alpha Dog', { account: { id: 1, username: 'alpha', nwhandle: 'Alpha Dog' } })]) });
   });
@@ -115,6 +128,16 @@ describe('AccountsTab', () => {
 
     expect(delta.get('.user-tier').text()).toBe('1 dedicated');
     expect(wrapper.text()).not.toContain('—');
+  });
+
+  it('shows another admin no Subscription column', async () => {
+    session.user = { id: 901, username: 'ghost', role: 'admin' };
+    await refreshSession();
+    const { wrapper } = await mountTab();
+    expect(wrapper.findAll('thead th').map((th) => th.text())).toEqual(['Account', 'Role', 'Support tier', 'Servers', 'Last seen', 'Online', 'Status']);
+    const charlie = wrapper.findAll('tr.user-row')[2];
+    expect(charlie.findAll('td')).toHaveLength(6);
+    expect(charlie.text()).not.toContain('Payment past due');
   });
 
   it('filters by search, role and status in the URL query, and restores them from it', async () => {

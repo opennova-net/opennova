@@ -101,7 +101,7 @@
       </section>
 
       <section class="space-y-3" aria-labelledby="player-billing">
-        <h2 id="player-billing" class="section-heading">Billing</h2>
+        <h2 id="player-billing" class="section-heading">{{ showBilling ? 'Billing' : 'Hosting' }}</h2>
         <dl class="player-billing grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Hosting</dt>
           <dd>{{ entitlementLabel(detail.entitlement) }}</dd>
@@ -111,21 +111,23 @@
           <dd :class="detail.entitlement.can_start ? '' : 'text-warn'" :title="detail.entitlement.can_start ? undefined : 'No entitlement, or a payment past due'">
             {{ detail.entitlement.can_start ? 'May start' : 'Cannot start' }}
           </dd>
-          <dt class="text-ink-muted">Stripe customer</dt>
-          <dd>
-            <template v-if="detail.billing.stripe_customer_id">
-              <a
-                :href="stripeDashboardUrl('customers', detail.billing.stripe_customer_id, detail.billing.livemode)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="entity-link font-mono"
-              >{{ detail.billing.stripe_customer_id }}</a>
-              <span v-if="!detail.billing.livemode" class="ml-2 text-xs text-ink-muted">test mode</span>
-            </template>
-            <span v-else class="text-ink-muted">None</span>
-          </dd>
+          <template v-if="showBilling">
+            <dt class="text-ink-muted">Stripe customer</dt>
+            <dd>
+              <template v-if="detail.billing.stripe_customer_id">
+                <a
+                  :href="stripeDashboardUrl('customers', detail.billing.stripe_customer_id, detail.billing.livemode)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="entity-link font-mono"
+                >{{ detail.billing.stripe_customer_id }}</a>
+                <span v-if="!detail.billing.livemode" class="ml-2 text-xs text-ink-muted">test mode</span>
+              </template>
+              <span v-else class="text-ink-muted">None</span>
+            </dd>
+          </template>
         </dl>
-        <div v-if="detail.billing.subscriptions.length" class="table-wrap">
+        <div v-if="showBilling && detail.billing.subscriptions.length" class="table-wrap">
           <table class="data-table">
             <caption class="sr-only">Subscriptions</caption>
             <thead>
@@ -197,7 +199,7 @@
       <section class="space-y-3" aria-labelledby="player-addresses">
         <div class="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="player-addresses" class="section-heading">Static addresses</h2>
-          <RouterLink to="/admin/billing/addresses" class="link text-sm">Manage addresses</RouterLink>
+          <RouterLink v-if="showBilling" to="/admin/billing/addresses" class="link text-sm">Manage addresses</RouterLink>
         </div>
         <div class="table-wrap">
           <table class="data-table">
@@ -346,7 +348,9 @@
 // CD keys and static addresses, each linked; Settings: its profile, role,
 // hosting grant (a cut below what it runs is confirmed first), a comp static
 // address, and its deletion. The header says whether it is online now, and
-// where it plays.
+// where it plays. Its Stripe customer and subscriptions, and the link to the
+// static addresses' page, show only to the admin who sees billing
+// (utils/billingAccess.ts); any other sees its hosting alone.
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import HistoryToggle from '../../../components/HistoryToggle.vue';
@@ -383,6 +387,7 @@ import {
   serverPlacesLabel,
   soldCapacityText,
 } from '../../../utils/adminView';
+import { seesBilling } from '../../../utils/billingAccess';
 import { subscriptionItemLabel, subscriptionStatusLabel } from '../../../utils/billingView';
 import { formatDate } from '../../../utils/format';
 import { gameName, titleName } from '../../../utils/games';
@@ -396,6 +401,7 @@ const PRODUCT_KINDS: Record<ProductKind, string> = { game: 'Game', expansion: 'E
 const route = useRoute();
 const router = useRouter();
 const { user: sessionUser, refresh: refreshSession } = useSession();
+const showBilling = computed(() => seesBilling(sessionUser.value));
 
 const tab = computed(() => (route.query.tab === 'settings' ? 'settings' : 'overview'));
 const tabs = computed<Tab[]>(() => [
