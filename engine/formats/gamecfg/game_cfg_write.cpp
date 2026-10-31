@@ -189,6 +189,11 @@ std::string write(const GameCfg &cfg, const WeaponRoster &weapons) {
 	emit(out, "rotor_volume         = %i\n", cfg.rotor_volume);
 	emit(out, "audio_channels       = %i\n", cfg.audio_channels);
 	emit(out, "audio_rate           = %i\n", cfg.audio_rate);
+	// dfx2.exe's save writes the slot-machine word after the rate, where Jointops.exe's writes
+	// none (both loads read it) (DFX2-101) [orig: Game_SaveConfig @0x549710 - the line
+	// @0x5499e3..0x5499f0, its format @0x7d27fc (dfx2.exe)].
+	if (cfg.table == ConfigTable::Dfx2)
+		emit(out, "enable_slotmachine   = %i\n", cfg.enable_slotmachine);
 	emit(out, "NoBlood              = %i\n", cfg.no_blood);
 	emit(out, "NoCasings            = %i\n", cfg.no_casings);
 	emit(out, "NoSmoke              = %i\n", cfg.no_smoke);

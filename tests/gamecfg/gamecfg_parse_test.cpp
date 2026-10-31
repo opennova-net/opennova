@@ -488,6 +488,28 @@ int dfx2_set_defaults_words() {
 	return 0;
 }
 
+// dfx2.exe's save writes enable_slotmachine after audio_rate, Jointops.exe's never (DFX2-101); the
+// word reads back under either table [orig: Game_SaveConfig @0x54C490 - audio_rate then NoBlood
+// @0x54C75E..0x54C770] [orig: Game_SaveConfig @0x549710 - @0x5499de, @0x5499f0, @0x549a05
+// (dfx2.exe)].
+int dfx2_save_writes_slotmachine() {
+	GameCfg dfx2 = defaults({}, 0, 0, ConfigTable::Dfx2);
+	dfx2.enable_slotmachine = 0;
+	const std::string text = write(dfx2, {});
+	const size_t rate = text.find("audio_rate           = 44100\n");
+	const size_t slot = text.find("enable_slotmachine   = 0\n");
+	const size_t blood = text.find("NoBlood              = ");
+	TEST_EXPECT(rate != std::string::npos && slot != std::string::npos && blood != std::string::npos);
+	TEST_EXPECT(rate < slot && slot < blood);
+	TEST_EXPECT(text.find("enable_slotmachine", slot + 1) == std::string::npos);
+	TEST_EXPECT(write(defaults(), {}).find("enable_slotmachine") == std::string::npos);
+	LoadOptions dfx2_options;
+	dfx2_options.table = ConfigTable::Dfx2;
+	TEST_EXPECT(load_text(text, dfx2_options).cfg.enable_slotmachine == 0);
+	TEST_EXPECT(load_text(with_version("enable_slotmachine = 1\r\n")).cfg.enable_slotmachine == 1);
+	return 0;
+}
+
 } // namespace
 
 // The settings schema's availability names over the host screen's words: a weapon's MISSION word
@@ -600,6 +622,7 @@ int main() {
 	if (dfx2_table_row() != 0) return 1;
 	if (dfx2_player_cap_defaults() != 0) return 1;
 	if (dfx2_set_defaults_words() != 0) return 1;
+	if (dfx2_save_writes_slotmachine() != 0) return 1;
 	if (comments_and_quoting() != 0) return 1;
 	if (value_is_token_two() != 0) return 1;
 	if (unknown_and_dead_keys() != 0) return 1;
